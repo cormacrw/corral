@@ -1,0 +1,5 @@
+{
+  "name": "@corral/core",
+  "private": true,
+  "type": "module"
+}

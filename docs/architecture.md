@@ -24,6 +24,7 @@ Three processes, all started together by `turbo dev`:
 - Nuxt `routeRules` proxy `/api/**` to `apps/server` (no CORS).
 - Live updates arrive over SSE from the server.
 - Types come from the Hono typed client (`hc`) and `packages/contracts`.
+- Theme: `app/app.config.ts` (colors) and `app/assets/css/main.css` (tokens, fonts). After `pnpm install`, `.nuxt/ui/<component>.ts` contains the exact Tailwind classes for every Nuxt UI component, slot and variant. Use these as the reference when designing or matching components.
 
 ### `apps/server`: control plane
 

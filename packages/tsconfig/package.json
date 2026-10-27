@@ -1,0 +1,5 @@
+{
+  "name": "@corral/tsconfig",
+  "private": true,
+  "type": "module"
+}

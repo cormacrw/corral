@@ -1,0 +1,5 @@
+{
+  "name": "@corral/runner",
+  "private": true,
+  "type": "module"
+}

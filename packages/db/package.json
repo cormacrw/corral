@@ -1,0 +1,5 @@
+{
+  "name": "@corral/db",
+  "private": true,
+  "type": "module"
+}
