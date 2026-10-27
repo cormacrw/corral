@@ -239,7 +239,7 @@ Agents must read pinned comments before implementing or revising a task.
 
 ### 5.1 Statuses
 
-> **Superseded by D10:** statuses are Draft, Ready, In progress, Agent review, Human review, Merged, Blocked, Failed. No Testing, no Cancelled. §5.1 and §5.2 below are kept for history; the transitions in [decisions.md](decisions.md#d10--task-statuses-and-transitions) are binding.
+> **Superseded by D10:** statuses are Backlog, Ready, In progress, Agent review, Human review, Merged, Blocked, Failed. No Testing, no Cancelled. §5.1 and §5.2 below are kept for history; the transitions in [decisions.md](decisions.md#d10--task-statuses-and-transitions) are binding.
 
 | Status | Meaning |
 |---|---|
@@ -379,6 +379,7 @@ Acceptance criteria:
 Requirements:
 
 - Kanban board grouped by status.
+  > **D10:** Backlog tasks are not on the board; they have their own Backlog view in the main navigation.
 - Filtering by epic, status, priority, and agent.
 - Task cards display priority, dependency state, lock status, active agent identity, and PR status.
 - Task detail shows description, acceptance criteria, comments, dependencies, evidence, PR, reviews, and run history.
@@ -655,6 +656,8 @@ Required views:
 - Merge eligibility.
 
 **Human queue**
+> **Superseded by D11:** this is the **Inbox**: developer and reviewer items only. PM questions and plan approvals stay in Plan.
+
 - Tasks requiring human review.
 - Blocked tasks.
 - PM questions and unresolved decisions.
@@ -671,6 +674,7 @@ Requirements:
 - Finished runs open read-only.
 - The UI explains why work is waiting or blocked.
 - Notifications alert the human to Blocked tasks and pending decisions.
+  > **D11:** no separate notifications feed. The Inbox covers Blocked tasks and reviews; the Plan nav item shows an unread dot for PM messages.
 - Every manual override is recorded in the audit history.
 
 ## 8. Technical architecture
@@ -934,6 +938,7 @@ The PM conversation is the home screen. The board and operational views are seco
 
 **Board**
 - Kanban by status.
+  > **D10:** approved work only. Backlog tasks live in a separate Backlog view.
 - Epic and priority filters.
 - Lock and agent indicators.
 - Dependency and PR status.
@@ -959,6 +964,8 @@ The PM conversation is the home screen. The board and operational views are seco
 - Merge eligibility and waiting reasons.
 
 **Human queue**
+> **Superseded by D11:** the **Inbox**. Plan approvals and PM questions live in Plan, not here.
+
 - Tasks awaiting approval.
 - Blocked tasks.
 - PM questions.

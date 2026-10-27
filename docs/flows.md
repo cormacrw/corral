@@ -23,7 +23,7 @@ web            server                          runner                     claude
  │◀── SSE ───────│                                │                           │
  │               │◀──── MCP: propose_plan(...) ───│◀──────────────────────────│
  │               │ validate (core): DAG, criteria,│                           │
- │               │ sizes → save plan v1 (Draft)   │                           │
+ │               │ sizes → save plan v1 (Backlog) │                           │
  │◀── SSE: plan cards                             │                           │
 ```
 
@@ -32,7 +32,7 @@ web            server                          runner                     claude
 | Tool | Purpose |
 |---|---|
 | `list_tasks`, `get_task`, `get_run_outcomes` | Live board state, so answers reflect current state, not only chat history (PRD §7.2) |
-| `ask_question` | A structured question, shown in chat and in the Human queue |
+| `ask_question` | A structured question, shown in the Plan conversation only, never in the Inbox (D11) |
 | `propose_plan` | Create or revise a draft plan: epics, tasks, acceptance criteria, dependencies, priority, task type, human-review flag |
 | `flag_stale_docs` | Create a documentation task (PRD §7.10) |
 
@@ -42,7 +42,7 @@ The PM has **no** tools to approve, merge, edit docs or change status. This is e
 
 - **Direct edits:** the human edits a task card inline. The change is saved through the API and recorded in the audit log with the human as actor.
 - **Edits through chat:** e.g. "split task 3, drop the dark-mode bit". The PM calls `propose_plan` again, producing plan v2, and the UI shows the differences from v1.
-- **Approval:** the **Approve plan** button calls an endpoint that only accepts a human actor. Each task moves Draft → Ready. Tasks with unmerged dependencies are still Ready; their cards show "waiting on #N".
+- **Approval:** the **Approve plan** button calls an endpoint that only accepts a human actor. Each task moves Backlog → Ready, which takes it out of the Backlog view and onto the board. Tasks with unmerged dependencies are still Ready; their cards show "waiting on #N".
 
 ### Sessions and cost
 
@@ -129,7 +129,7 @@ A pure function in `packages/core`, run against live GitHub data:
 
 Then:
 
-- **Flagged for human review:** → **Human review**. It appears in the Human queue as each criterion next to its evidence. Human approves → step 9, or requests changes → In progress.
+- **Flagged for human review:** → **Human review**. It appears in the Inbox (D11) as each criterion next to its evidence, with approve and request-changes actions. Human approves → step 9, or requests changes → In progress.
 - **Not flagged:** → step 9.
 
 ### Step 9 — Merge (server)
