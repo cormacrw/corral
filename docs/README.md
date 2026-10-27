@@ -1,0 +1,27 @@
+# Corral docs
+
+Reference material for agents building Corral. Read this file first.
+
+## Files
+
+| File | What it is | Binding? |
+|---|---|---|
+| [decisions.md](decisions.md) | Decisions made after the PRD was written. These override the PRD. | **Yes** |
+| [architecture.md](architecture.md) | Processes, repo layout, stack, runner implementation rules, resource estimates (D7). | **Yes** |
+| [flows.md](flows.md) | Walkthroughs: talking to the PM, a task from Ready to Merged, failure handling. | **Yes** |
+| [prd.md](prd.md) | The MVP Product Requirements Document (v1.0, 2026-10-26). | **Yes**, except where `decisions.md` overrides it |
+| [agent-runtime-and-auth.md](agent-runtime-and-auth.md) | How Corral runs the AI agent, the auth/terms background, and the rules that keep the runtime swappable. | **Yes** (its rules follow from D2) |
+| [stale-runners-and-fencing.md](stale-runners-and-fencing.md) | Plain explanation of the stale-runner problem and how leases, fencing tokens and scoped GitHub tokens solve it. | Background. Its POC suggestions are advisory, like `open-recommendations.md` (R10) |
+| [open-recommendations.md](open-recommendations.md) | Review feedback on the PRD that hasn't been accepted or rejected yet, including known inconsistencies. | **No.** Raise these with Cormac before acting on them |
+
+## Precedence
+
+1. `decisions.md`
+2. `architecture.md`, `flows.md`, `prd.md` and `agent-runtime-and-auth.md`
+3. `open-recommendations.md` (advisory only)
+
+If two binding documents conflict and the precedence order doesn't settle it, stop and ask. Don't pick one yourself.
+
+## Current phase
+
+We are building a **local-only proof of concept** for a single user (Cormac), running agents on his personal Claude subscription. See D1 and D2 in `decisions.md`. Hosted, multi-user and sellable concerns are deferred, but the architecture must not make them hard to add later.
