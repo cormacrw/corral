@@ -18,6 +18,7 @@ pnpm test
 
 ```sh
 curl "$(jq -r .serverUrl .corral/dev.json)/api/health"
+kill "$(jq -r .pid .corral/dev.json)"   # stops this instance's web, server and runner
 ```
 
 Settings come from environment variables; see [.env.example](.env.example).
