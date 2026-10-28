@@ -213,3 +213,33 @@ Nothing from the PM goes in the Inbox. PM questions (`ask_question`), proposed p
 There is no separate notifications feed or bell. System events (usage limits, runner disconnects) are shown on Runs and in the runner status, not in the Inbox. OS or desktop notifications can be added later and would point into the Inbox or Plan.
 
 **Why:** Copying PM questions into a queue duplicates a conversation the human is already reading. Keeping the Inbox to agent work that's waiting on the human makes its count mean one thing: how many agents are stuck on you.
+
+---
+
+## D13 — One Corral, many projects; agents and planning are global
+
+**Status:** Accepted
+
+**Decision:** One Corral instance manages **several projects**. Each project is still one Git repository (PRD §4.1). Everything is either **global** or **belongs to one project**:
+
+| Global | Per project |
+|---|---|
+| Plan (PM sessions), Inbox, agents, the runner, user settings | Overview, Board, Backlog, project settings (name, thumbnail, repo, default branch, merge method, required checks, task ID prefix, pause, limits) |
+
+- **Agents are global.** Juno (PM), Atlas (developer) and Vera (reviewer) are set up once, in Settings, and serve every project. Concurrency applies across all projects, not per project. Role instructions stay in each repo (`.corral/agents/<role>.md` on the default branch), so the same agent can follow different project rules.
+- **Plan sessions belong to one project.** The project is picked in the composer and locked once the session has messages. Juno works in that project's read-only checkout (D9).
+- **The Inbox is global**, and every item carries its project (D11). The same goes for runs on the agent pages.
+- **Task IDs are `PREFIX-NUMBER`**, e.g. `COR-29`. Each project has a 2–5 letter prefix that is unique across projects, and numbers count up per project. PRs keep `#41` and runs keep `#128`.
+- **Pause is per project.** Pausing stops new runs for that project only.
+
+**Why:** A personal software factory (D12) runs more than one codebase. Planning, review and agent capacity are shared across all of them, while task state belongs to one repo.
+
+**Consequences for the build:**
+
+- Every task, plan, epic, run, Inbox item and PM session has a `projectId`. Board, Backlog and their queries are always scoped to one project.
+- The scheduler checks group capacity across all projects and skips tasks in paused projects.
+- Task numbers come from a per-project counter. The prefix lives on the project and is unique.
+- The repository ownership lock (PRD §7.1) is per repository, so two projects can't point at the same repo.
+- Still open: whether changing a prefix renames existing task IDs. See `design/project-settings.md`.
+
+The UI specs are in [design/](design/README.md).

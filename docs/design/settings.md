@@ -1,0 +1,42 @@
+# Settings
+
+**Canvas frames:** `App shell · Settings`, `Settings (component)`
+**Route:** `/settings/:section` (`profile`, `agents`, `runner`, `appearance`)
+**Scope:** global. These settings apply to every project. Per-project settings are in [project-settings.md](project-settings.md).
+
+**Status: stub.** The structure is set. Most controls don't save yet in the design.
+
+## Layout
+
+- **Section menu** (left, 200–240px): "Settings" as the title, then a vertical `UNavigationMenu` (Profile, Agents, Runner, Appearance), and the note "Settings here apply to every project. Each project has its own settings in the sidebar." The active item uses `bg-elevated` with `text-primary`.
+- **Content** (up to 880px): one bordered card per section. Rows use the same two-column pattern as project settings. Below about 800px the menu stacks on top.
+
+## Sections
+
+### Profile
+
+- **Your name** (`UInput`): "How agents address you, and the author on approvals."
+- **Avatar:** a preview and **Upload image**.
+
+### Agents
+
+- **Header:** "Agents" with "Shared by every project. Each runs through your local CLI login; Corral never sees your credentials." (D1–D2), and **Add agent**.
+- **One row per agent:** the avatar, the name, a role badge, "Claude Code · concurrency 1 · `.corral/agents/<role>.md`", and **Edit**.
+- **Edit screen** (to design): name, role, runtime (`USelectMenu`, offering only the detected CLIs), concurrency, instructions file, and the caps that apply per role.
+
+### Runner
+
+- **Status row:** a status dot, "Online · {runner name}", "Runs agents for every project · last heartbeat a few seconds ago", and **Reconnect**.
+- **Data directory:** where the runner keeps clones, worktrees and its spool. It's read-only here: it comes from the runner's configuration and is a Docker volume (D12), never a hard-coded `~/.corral`.
+- **Logins:** whether `claude` and `gh` are signed in inside the runner container, with the `docker exec -it` command to sign in. Corral shows the state only and never reads the credentials (D2).
+
+### Appearance
+
+- **Colour mode:** a segmented control (System / Light / Dark), which maps to `useColorMode()`.
+- **Primary colour and font:** "Coming soon". For now they're set in `app.config.ts` and `main.css`.
+
+## Open questions
+
+- Should agent instructions be edited in the app, or only as files in the repo's `.corral/`?
+- Does adding a second developer agent need its own name, or is it "Atlas" with concurrency 2?
+- Usage limits are handled under D3, so where should the current limit window be shown: here, in the runner card, or on the agent pages?
