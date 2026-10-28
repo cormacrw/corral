@@ -9,5 +9,11 @@ export default tseslint.config(
   { ignores: ['**/node_modules/**', '**/dist/**', '**/.turbo/**', 'apps/web/**'] },
   js.configs.recommended,
   tseslint.configs.recommended,
-  stylistic.configs.customize({ commaDangle: 'never', braceStyle: '1tbs' })
+  stylistic.configs.customize({ commaDangle: 'never', braceStyle: '1tbs' }),
+  {
+    rules: {
+      // Keep `type X =` on its own line above a multi-line union
+      '@stylistic/operator-linebreak': ['error', 'before', { overrides: { '=': 'after' } }]
+    }
+  }
 )
