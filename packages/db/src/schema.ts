@@ -112,6 +112,8 @@ export const tasks = pgTable('tasks', {
   branch: text(),
   prNumber: integer(),
   prUrl: text(),
+  // The commit the developer last submitted; reviews and approvals are tied to it
+  headSha: text(),
 
   // Fencing token: goes up by one on every claim and never goes down, so a
   // stale runner's writes can be rejected (stale-runners-and-fencing.md)
@@ -195,6 +197,10 @@ export const runs = pgTable('runs', {
   outcome: runOutcome(),
   // The lease epoch this run was given; writes carrying another epoch are stale
   leaseEpoch: integer(),
+  // The agent CLI's own session, so PM turns can resume it (D9)
+  agentSessionId: text(),
+  // The commit a developer run pushed, or a reviewer run reviewed
+  headSha: text(),
   summary: text(),
   error: text(),
   // Known reset time when the outcome is rate_limited (D3)
@@ -224,3 +230,25 @@ export const auditLog = pgTable('audit_log', {
   detail: jsonb().notNull().default({}),
   createdAt: createdAt()
 }, t => [index().on(t.taskId), index().on(t.projectId, t.createdAt)])
+
+export const evidenceKind = pgEnum('evidence_kind', ['screenshot', 'video', 'test_output', 'log', 'request', 'text', 'other'])
+
+// Proof for acceptance criteria (PRD §7.7). The file is an immutable blob;
+// this row says what it proves. `round` is the task's review round when it
+// was attached, so each revision needs its own evidence.
+export const evidence = pgTable('evidence', {
+  id: uuid().primaryKey().defaultRandom(),
+  taskId: uuid().notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  // Null for evidence about the task as a whole (e.g. a full test run)
+  criterionId: uuid().references(() => acceptanceCriteria.id, { onDelete: 'set null' }),
+  runId: uuid().notNull().references(() => runs.id, { onDelete: 'cascade' }),
+  round: integer().notNull(),
+  kind: evidenceKind().notNull(),
+  note: text().notNull().default(''),
+  // sha256 in the blob store (D8)
+  blob: text().notNull(),
+  fileName: text().notNull(),
+  contentType: text().notNull(),
+  size: integer().notNull(),
+  createdAt: createdAt()
+}, t => [index().on(t.taskId, t.round)])

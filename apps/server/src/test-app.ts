@@ -2,16 +2,29 @@ import type { CreateProjectInput, CreateTaskInput, Project, ServerEvent, Task } 
 import type { Actor } from '@corral/core'
 import type { Database, DatabaseHandle } from '@corral/db'
 import { createTestDatabase } from '@corral/db/testing'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { createApp } from './app.ts'
+import { MemoryBlobStore } from './blob-store.ts'
+import { ensureAgents, ensureOwner } from './bootstrap.ts'
 import { EventBus } from './events.ts'
-import { ensureOwner } from './owner.ts'
-import { RunnerHub } from './runner-hub.ts'
+import { FakeGitHub } from './fake-github.ts'
+import { startServer, type RunningServer } from './server.ts'
+import { createServices, type Services } from './services.ts'
 
 // A server app on a throwaway database, for tests
-export interface TestApp {
+export interface TestApp extends Services {
   db: Database
   actor: Actor
   events: ServerEvent[]
+  bus: EventBus
+  github: FakeGitHub
+  blobs: MemoryBlobStore
+  // The test clock: tests move it to expire leases
+  clock: { now: Date }
+  // Set when the test asked for a listening server (runner WebSocket tests)
+  server: RunningServer | null
   request(method: string, path: string, body?: unknown): Promise<Response>
   createProject(overrides?: Partial<CreateProjectInput>): Promise<Project>
   createTask(slug: string, input?: Partial<CreateTaskInput>): Promise<Task>
@@ -20,7 +33,7 @@ export interface TestApp {
 
 let counter = 0
 
-export async function createTestApp(driver: 'pglite' | 'postgres'): Promise<TestApp> {
+export async function createTestApp(driver: 'pglite' | 'postgres', options: { listen?: boolean } = {}): Promise<TestApp> {
   const handle: DatabaseHandle | null = driver === 'pglite'
     ? await createTestDatabase('pglite')
     : await createTestDatabase('postgres')
@@ -30,8 +43,15 @@ export async function createTestApp(driver: 'pglite' | 'postgres'): Promise<Test
   const events: ServerEvent[] = []
   bus.subscribe(event => events.push(event))
   const actor = await ensureOwner(handle.db)
-  const runner = new RunnerHub(bus)
-  const app = createApp({ db: handle.db, events: bus, actor, runner })
+  await ensureAgents(handle.db)
+  const spoolDir = await mkdtemp(join(tmpdir(), 'corral-spool-'))
+  const github = new FakeGitHub()
+  const blobs = new MemoryBlobStore()
+  const clock = { now: new Date() }
+  const services = createServices({ db: handle.db, events: bus, spoolDir, blobs, github, publicUrl: 'http://corral.test', now: () => clock.now })
+  const deps = { db: handle.db, events: bus, actor, ...services }
+  const app = createApp(deps)
+  const server = options.listen ? await startServer(deps, { host: '127.0.0.1', port: 0 }) : null
 
   const request = async (method: string, path: string, body?: unknown) => app.request(path, {
     method,
@@ -39,9 +59,15 @@ export async function createTestApp(driver: 'pglite' | 'postgres'): Promise<Test
   })
 
   return {
+    ...services,
     db: handle.db,
     actor,
     events,
+    bus,
+    github,
+    blobs,
+    clock,
+    server,
     request,
     async createProject(overrides = {}) {
       counter++
@@ -67,6 +93,11 @@ export async function createTestApp(driver: 'pglite' | 'postgres'): Promise<Test
       if (res.status !== 201) throw new Error(`createTask: ${res.status} ${await res.text()}`)
       return res.json() as Promise<Task>
     },
-    close: () => handle.close()
+    async close() {
+      services.orchestrator.stop()
+      await server?.close()
+      await handle.close()
+      await rm(spoolDir, { recursive: true, force: true })
+    }
   }
 }

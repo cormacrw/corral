@@ -9,7 +9,8 @@ describe('loadConfig', () => {
       dataDir: join(homedir(), '.corral', 'server'),
       host: '127.0.0.1',
       port: 4100,
-      databaseUrl: undefined
+      databaseUrl: undefined,
+      publicUrl: 'http://localhost:3000'
     })
   })
 
@@ -18,12 +19,14 @@ describe('loadConfig', () => {
       CORRAL_SERVER_DATA_DIR: '/data/server',
       CORRAL_SERVER_HOST: '0.0.0.0',
       CORRAL_SERVER_PORT: '8080',
-      CORRAL_DATABASE_URL: 'postgres://corral@postgres/corral'
+      CORRAL_DATABASE_URL: 'postgres://corral@postgres/corral',
+      CORRAL_PUBLIC_URL: 'https://corral.example.com/'
     })).toEqual({
       dataDir: '/data/server',
       host: '0.0.0.0',
       port: 8080,
-      databaseUrl: 'postgres://corral@postgres/corral'
+      databaseUrl: 'postgres://corral@postgres/corral',
+      publicUrl: 'https://corral.example.com'
     })
   })
 

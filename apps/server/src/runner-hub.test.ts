@@ -1,31 +1,24 @@
 import type { RunnerMessage, ServerMessage } from '@corral/contracts'
-import { createTestDatabase } from '@corral/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import WebSocket from 'ws'
-import { EventBus } from './events.ts'
-import { ensureOwner } from './owner.ts'
-import { RunnerHub } from './runner-hub.ts'
-import { startServer, type RunningServer } from './server.ts'
+import type { RunnerHub } from './runner-hub.ts'
+import type { RunningServer } from './server.ts'
+import { createTestApp, type TestApp } from './test-app.ts'
 
 // A fake runner over a real WebSocket against a real server
 describe('runner connection', () => {
+  let t: TestApp
   let server: RunningServer
   let hub: RunnerHub
-  let close: () => Promise<void>
 
   beforeAll(async () => {
-    const handle = await createTestDatabase('pglite')
-    const events = new EventBus()
-    hub = new RunnerHub(events)
-    server = await startServer({ db: handle.db, events, actor: await ensureOwner(handle.db), runner: hub }, { host: '127.0.0.1', port: 0 })
-    close = async () => {
-      await server.close()
-      await handle.close()
-    }
+    t = await createTestApp('pglite', { listen: true })
+    server = t.server!
+    hub = t.runner
   })
 
   afterAll(async () => {
-    await close?.()
+    await t?.close()
   })
 
   async function connectRunner(onJob: (message: Extract<ServerMessage, { type: 'job.request' }>) => RunnerMessage) {

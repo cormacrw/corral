@@ -39,7 +39,12 @@ export function startServer(deps: AppDeps, options: { host: string, port: number
     const server: ServerType = serve({ fetch: root.fetch, hostname: options.host, port: options.port }, (info: AddressInfo) => {
       resolve({
         url: `http://${info.address.includes(':') ? `[${info.address}]` : info.address}:${info.port}`,
-        close: () => new Promise(done => server.close(() => done()))
+        // close() alone waits for the runner's WebSocket, which never ends on
+        // its own, so open connections are dropped too (Docker stop, dev restarts)
+        close: () => new Promise((done) => {
+          server.close(() => done())
+          if ('closeAllConnections' in server) (server as { closeAllConnections(): void }).closeAllConnections()
+        })
       })
     })
     injectWebSocket(server)

@@ -20,6 +20,7 @@ type TaskRow = typeof tasks.$inferSelect
 type ProjectRow = typeof projects.$inferSelect
 
 export type TaskView = 'board' | 'backlog' | 'all'
+export type { ProjectRow, TaskRow }
 
 export function toTaskState(row: TaskRow): TaskState {
   return {
@@ -169,37 +170,55 @@ export async function createTask(db: Executor, project: ProjectRow, rawInput: Cr
 // whole check-and-write, and core decides whether the transition is allowed.
 export async function transitionTask(db: Executor, taskId: string, input: HumanTransitionInput, actor: Actor): Promise<void> {
   await db.transaction(async (tx) => {
-    const [found] = await tx.select({ task: tasks, project: projects })
-      .from(tasks)
-      .innerJoin(projects, eq(projects.id, tasks.projectId))
-      .where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt)))
-      .for('update', { of: tasks })
-    if (!found) throw notFound()
-    const { task, project } = found
-
-    const event = await humanEvent(tx, task, input)
-    const result = transition(toTaskState(task), event, actor, {
-      reviewRoundCap: project.reviewRoundCap,
-      failedRunCap: project.failedRunCap
-    })
-    if (!result.ok) throw new ApiFailure(409, { code: 'transition_rejected', reason: result.error })
-
-    const next = result.task
-    await tx.update(tasks).set({
-      status: next.status,
-      reviewRounds: next.reviewRounds,
-      failedRuns: next.failedRuns,
-      statusReason: next.reason,
-      updatedAt: new Date()
-    }).where(eq(tasks.id, taskId))
-    await tx.insert(auditLog).values({
-      projectId: project.id,
-      taskId,
-      actor,
-      action: 'task.transition',
-      detail: { event: input, from: task.status, to: next.status satisfies TaskStatus }
-    })
+    const { task, project } = await lockTask(tx, taskId)
+    await applyTransition(tx, task, project, await humanEvent(tx, task, input), actor, { event: input })
   })
+}
+
+// Locks a task row for a check-and-write inside a transaction
+export async function lockTask(tx: Executor, taskId: string): Promise<{ task: TaskRow, project: ProjectRow }> {
+  const [found] = await tx.select({ task: tasks, project: projects })
+    .from(tasks)
+    .innerJoin(projects, eq(projects.id, tasks.projectId))
+    .where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt)))
+    .for('update', { of: tasks })
+  if (!found) throw notFound()
+  return found
+}
+
+// Runs an event through core and writes the result with an audit entry.
+// Every status change in Corral goes through here (D10). Throws an
+// ApiFailure when core rejects it.
+export async function applyTransition(
+  tx: Executor,
+  task: TaskRow,
+  project: ProjectRow,
+  event: TaskEvent,
+  actor: Actor,
+  detail: Record<string, unknown> = { event: event.type }
+): Promise<TaskState> {
+  const result = transition(toTaskState(task), event, actor, {
+    reviewRoundCap: project.reviewRoundCap,
+    failedRunCap: project.failedRunCap
+  })
+  if (!result.ok) throw new ApiFailure(409, { code: 'transition_rejected', reason: result.error })
+
+  const next = result.task
+  await tx.update(tasks).set({
+    status: next.status,
+    reviewRounds: next.reviewRounds,
+    failedRuns: next.failedRuns,
+    statusReason: next.reason,
+    updatedAt: new Date()
+  }).where(eq(tasks.id, task.id))
+  await tx.insert(auditLog).values({
+    projectId: project.id,
+    taskId: task.id,
+    actor,
+    action: 'task.transition',
+    detail: { ...detail, from: task.status, to: next.status satisfies TaskStatus }
+  })
+  return next
 }
 
 // Adds the facts core needs to the human's request

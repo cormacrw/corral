@@ -1,10 +1,11 @@
 import { databaseLocation, openDatabase } from '@corral/db'
+import { join } from 'node:path'
 import { formatDuration, printReady, redactUrl, shortenHome } from './banner.ts'
+import { ensureAgents, ensureOwner } from './bootstrap.ts'
 import { loadConfig } from './config.ts'
 import { EventBus } from './events.ts'
-import { ensureOwner } from './owner.ts'
-import { RunnerHub } from './runner-hub.ts'
 import { startServer } from './server.ts'
+import { createServices } from './services.ts'
 
 const config = loadConfig()
 
@@ -12,12 +13,20 @@ const config = loadConfig()
 const location = databaseLocation(config.databaseUrl, config.dataDir)
 const database = await openDatabase(location)
 const events = new EventBus()
-const runner = new RunnerHub(events)
+await ensureAgents(database.db)
+const services = createServices({
+  db: database.db,
+  events,
+  spoolDir: join(config.dataDir, 'spool'),
+  blobDir: join(config.dataDir, 'blobs'),
+  publicUrl: config.publicUrl
+})
 
 const server = await startServer(
-  { db: database.db, events, actor: await ensureOwner(database.db), runner },
+  { db: database.db, events, actor: await ensureOwner(database.db), ...services },
   { host: config.host, port: config.port }
 )
+services.orchestrator.start()
 printReady(`Corral API ready in ${formatDuration(process.uptime() * 1000)}`, {
   API: `${server.url}/api`,
   Runner: `${server.url.replace(/^http/, 'ws')}/runner`,
@@ -30,6 +39,7 @@ printReady(`Corral API ready in ${formatDuration(process.uptime() * 1000)}`, {
 // finish, then close the database so PGlite flushes to disk
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
+    services.orchestrator.stop()
     void server.close().finally(() => database.close().finally(() => process.exit(0)))
   })
 }

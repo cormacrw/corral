@@ -10,6 +10,8 @@ export interface ServerConfig {
   port: number
   // Set for Postgres (deployed instance, CI); unset uses PGlite in dataDir (D14)
   databaseUrl: string | undefined
+  // Where people open Corral, for links in PR bodies (the web origin)
+  publicUrl: string
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
@@ -17,7 +19,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     dataDir: resolve(env.CORRAL_SERVER_DATA_DIR || join(homedir(), '.corral', 'server')),
     host: env.CORRAL_SERVER_HOST || '127.0.0.1',
     port: parsePort(env.CORRAL_SERVER_PORT, 4100),
-    databaseUrl: env.CORRAL_DATABASE_URL || undefined
+    databaseUrl: env.CORRAL_DATABASE_URL || undefined,
+    publicUrl: (env.CORRAL_PUBLIC_URL || 'http://localhost:3000').replace(/\/+$/, '')
   }
 }
 

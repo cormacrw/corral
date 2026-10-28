@@ -68,7 +68,7 @@ describe.each([
       select table_name from information_schema.tables
       where table_schema = 'public' order by table_name`) as unknown as { rows: { table_name: string }[] }
     expect(result.rows.map(r => r.table_name)).toEqual([
-      'acceptance_criteria', 'agents', 'audit_log', 'comments', 'epics',
+      'acceptance_criteria', 'agents', 'audit_log', 'comments', 'epics', 'evidence',
       'projects', 'runs', 'task_dependencies', 'tasks', 'users'
     ])
   })

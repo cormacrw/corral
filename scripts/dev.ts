@@ -22,6 +22,8 @@ const env = {
   CORRAL_SERVER_PORT: String(serverPort),
   CORRAL_SERVER_URL: serverUrl,
   CORRAL_WEB_PORT: String(webPort),
+  // Links in PR bodies point at the web app (D8: PRs link to Corral's evidence page)
+  CORRAL_PUBLIC_URL: process.env.CORRAL_PUBLIC_URL || `http://localhost:${webPort}`,
   CORRAL_SERVER_DATA_DIR: process.env.CORRAL_SERVER_DATA_DIR || join(instanceDir, 'server'),
   CORRAL_RUNNER_DATA_DIR: process.env.CORRAL_RUNNER_DATA_DIR || join(instanceDir, 'runner')
 }

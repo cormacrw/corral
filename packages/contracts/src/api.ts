@@ -7,6 +7,8 @@ import {
   TASK_TYPES,
   type AgentRole,
   type MergeMethod,
+  type RunOutcome,
+  type RunState,
   type TaskPriority,
   type TaskStatus,
   type TaskType,
@@ -175,3 +177,61 @@ export interface CliStatus {
   version: string | null
   signedIn: boolean
 }
+
+// ── Agents and runs ─────────────────────────────────────────────────────────
+
+export interface Agent {
+  id: string
+  name: string
+  role: AgentRole
+  runtime: string
+  concurrency: number
+  paused: boolean
+  // Set while waiting out a usage limit (D3)
+  pausedUntil: string | null
+  // Runs holding a lease right now
+  activeRuns: number
+}
+
+export interface Run {
+  id: string
+  // Shown as #128
+  number: number
+  agentId: string
+  agentName: string
+  role: AgentRole
+  projectId: string
+  taskId: string | null
+  taskRef: string | null
+  taskTitle: string | null
+  state: RunState
+  outcome: RunOutcome | null
+  summary: string | null
+  error: string | null
+  headSha: string | null
+  inputTokens: number | null
+  outputTokens: number | null
+  rateLimitResetAt: string | null
+  queuedAt: string
+  startedAt: string | null
+  endedAt: string | null
+}
+
+export interface Evidence {
+  id: string
+  taskId: string
+  criterionId: string | null
+  runId: string
+  round: number
+  kind: EvidenceKind
+  note: string
+  fileName: string
+  contentType: string
+  size: number
+  // Served by the server (D8: web never touches storage)
+  url: string
+  createdAt: string
+}
+
+export const EVIDENCE_KINDS = ['screenshot', 'video', 'test_output', 'log', 'request', 'text', 'other'] as const
+export type EvidenceKind = typeof EVIDENCE_KINDS[number]

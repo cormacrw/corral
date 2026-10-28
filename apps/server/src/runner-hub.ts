@@ -77,11 +77,12 @@ export class RunnerHub {
           const now = new Date().toISOString()
           this.#setStatus({ online: true, runnerId: message.runnerId, name: message.name, connectedAt: now, lastHeartbeatAt: now })
           this.send({ type: 'welcome', runnerId: message.runnerId })
-          await this.#handlers?.onConnected(message.activeRuns)
+          await this.#handlers?.onConnected(message.activeRuns).catch(error => console.error('Runner reconciliation failed', error))
           return
         }
         if (!hello || this.#socket !== socket) return
-        await this.#handle(message)
+        // One bad message must not take the connection or the process down
+        await this.#handle(message).catch(error => console.error(`Runner message ${message.type} failed`, error))
       },
       onClose: async () => {
         if (this.#socket !== socket) return
