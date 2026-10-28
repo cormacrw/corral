@@ -18,6 +18,11 @@ export default defineNuxtConfig({
     '/api/**': { proxy: `${process.env.CORRAL_SERVER_URL || 'http://127.0.0.1:4100'}/api/**` }
   },
 
+  // Set by scripts/dev.ts so several checkouts can run at once
+  devServer: {
+    port: Number(process.env.CORRAL_WEB_PORT) || 3000
+  },
+
   compatibilityDate: '2026-06-30',
 
   eslint: {
