@@ -10,7 +10,7 @@ Each decision has an ID so code comments, commits and PRs can refer to it (e.g. 
 
 **Status:** Accepted
 
-**Decision:** The proof of concept runs entirely on the user's machine: web UI, control plane, database, scheduler and runner. There's no hosted control plane, runner pairing over the internet, or multi-tenant auth in the POC.
+**Decision:** The proof of concept runs entirely on the user's machine: web UI, control plane, database, scheduler and runner. That machine starts as the laptop and becomes the user's home server, as Docker containers (D12). There's no hosted control plane, runner pairing over the internet, or multi-tenant auth in the POC.
 
 **Why:** For a single user, a hosted control plane adds authentication, runner pairing, revocable credentials, outbound tunnels, hosted Postgres/S3 and multi-tenant security without proving the core loop. Hosting still matters for **remote access and teamwork**, so it's the next step after the MVP, not a dropped goal.
 
@@ -87,7 +87,7 @@ See R4 in [open-recommendations.md](open-recommendations.md) on whether lint alo
 
 **Status:** Accepted
 
-**Decision:** Corral is a Turborepo + pnpm monorepo with three apps: `web` (Nuxt + Nuxt UI, UI only), `server` (Hono control plane, sole owner of the database, scheduler and orchestrator, single instance) and `runner` (Node/TS local daemon that dials out to the server over WebSocket and spawns agents). Shared code lives in `packages/contracts`, `packages/core` (pure domain logic) and `packages/db`. The database is PGlite + Drizzle, moving to Postgres when hosted.
+**Decision:** Corral is a Turborepo + pnpm monorepo with three apps: `web` (Nuxt + Nuxt UI, UI only), `server` (Hono control plane, sole owner of the database, scheduler and orchestrator, single instance) and `runner` (Node/TS local daemon that dials out to the server over WebSocket and spawns agents). Shared code lives in `packages/contracts`, `packages/core` (pure domain logic) and `packages/db`. The database is PGlite + Drizzle, moving to Postgres when hosted. *(Amended by D14: the deployed instance uses Postgres now; PGlite stays for development and tests.)*
 
 **Why:** The runner is the piece that stays on the user's machine once the server is hosted, so it's separate even locally. The control plane's long-running loops shouldn't live in the request-driven web layer. TypeScript throughout lets every app share one contract package; the runner is I/O-bound, so TypeScript costs nothing in performance.
 
@@ -216,6 +216,30 @@ There is no separate notifications feed or bell. System events (usage limits, ru
 
 ---
 
+## D12 — Corral is deployed as Docker containers on the user's own server
+
+**Status:** Accepted
+
+**Decision:** Development and the first runs of the POC happen on the laptop with `turbo dev`. The deployment target is Docker containers on the user's home server, run with Docker Compose: one container each for `web`, `server` and `runner`, on a private Docker network. This is still a **single-user, self-hosted** deployment. The multi-user hosting that D1 defers (runner pairing, hosted user auth, revocable runner credentials) is a separate later step.
+
+- **Exposure:** only `web` is reachable from outside, through the existing Cloudflare Tunnel, with **Cloudflare Access** in front of it as the login. Corral has no login of its own in this phase. The server API and the runner WebSocket stay on the Docker network and are never published.
+- **Runner container:** contains `git`, `gh`, the `claude` CLI, a headless Chromium for D4 evidence, and the toolchains the target projects need. Agents run inside it, so the runner container (not the laptop) is "the user's machine" for D2.
+- **Credentials (D2 still holds):** The user logs in to `claude` and `gh` inside the runner container (`docker exec -it`), and their config directories live on volumes. Corral never reads, stores or relays them. Don't pass model-provider tokens through Compose files, `.env` files or Corral config.
+- **State:** the server's data directory (blobs), the Postgres data directory (D14) and the runner's data directory (clone, worktrees, spool) are Docker volumes. Backing up the server and Postgres volumes backs up all of Corral's state.
+- **No Docker socket** is mounted into any container. Running each task in its own container is a later `RunnerProvider`, not part of this decision.
+
+**Why:** Corral is meant to be a personal software factory running on always-on hardware the user already operates (Docker, Cloudflare Tunnels), not on a laptop. Containers also limit what an agent can reach to the runner container instead of the user's whole account.
+
+**Consequences for the build:**
+
+- Nothing may only work on macOS. The runner must run on Linux (no keychain, `open` or BSD-only tool flags).
+- Data directories, the server URL, bind address and port come from configuration (env vars), not hard-coded paths such as `~/.corral` or `localhost`.
+- SSE and WebSocket connections send heartbeats, because Cloudflare drops proxied connections that are idle for about 100 seconds.
+- `web` builds to static files (`ssr: false`). One origin serves them and proxies `/api/**` to `server` inside the Docker network, so the browser and Cloudflare Access see a single hostname.
+- Each app gets a Dockerfile, and the repo gets a `docker-compose.yml`. These can wait until the core loop works locally, but the code must not assume it runs outside a container.
+
+---
+
 ## D13 — One Corral, many projects; agents and planning are global
 
 **Status:** Accepted
@@ -243,3 +267,32 @@ There is no separate notifications feed or bell. System events (usage limits, ru
 - Still open: whether changing a prefix renames existing task IDs. See `design/project-settings.md`.
 
 The UI specs are in [design/](design/README.md).
+
+---
+
+## D14 — Postgres in Docker for the deployed instance; PGlite for development and tests
+
+**Status:** Accepted. Amends D7 ("PGlite + Drizzle, moving to Postgres when hosted") and the State bullet of D12.
+
+**Decision:** `packages/db` has one Drizzle schema (Postgres dialect) and two drivers, chosen by configuration:
+
+| Where | Database | How it's chosen |
+|---|---|---|
+| Deployed instance on the home server (D12) | **Postgres**, its own container in the Compose stack, data on its own volume | `CORRAL_DATABASE_URL` is set |
+| `pnpm dev`, one per checkout or worktree | **PGlite**, in that checkout's `.corral/server/pgdata/` | `CORRAL_DATABASE_URL` is unset |
+| Unit tests | **PGlite**, in memory, one database per test file | Test helper |
+| CI database tests | **Postgres**, a service container in GitHub Actions | `CORRAL_DATABASE_URL` is set |
+
+- The server is still the only process that opens the database (D8), whichever driver is used.
+- Migrations are the same files for both drivers and run when the server starts.
+- **Anything that depends on concurrency is proven against Postgres, not PGlite.** PGlite has a single connection, so every transaction runs one after another. The concurrent-claim test (PRD Phase 1 exit criterion) passes on PGlite whether or not the claim is safe; it only means something in CI against Postgres. Such tests are skipped when `CORRAL_DATABASE_URL` is unset, and CI must set it.
+- Only Postgres features that PGlite also supports may be used, so both drivers stay interchangeable. CI running the database tests on Postgres catches differences.
+- The Postgres password for the deployed instance is a Corral setting in the Compose `.env` file. It isn't a model-provider credential, so D2 doesn't apply to it.
+
+**Why:** PGlite suits development: no setup, an isolated database per worktree, and it runs inside the runner container, where agents have no Docker socket (D12) and so can't start a Postgres container. But the deployed instance holds real state on always-on hardware, where Postgres's long record on crash safety and backups (`pg_dump`, point-in-time recovery) matters, and a single-connection database can't prove that atomic claims are safe. Postgres in the Compose stack costs one service on a server that already runs Docker, and it's what hosting needs anyway (D1), so moving to hosting is no longer a database migration.
+
+**Consequences for the build:**
+
+- Backups of the deployed instance cover two volumes: Postgres (`pg_dump`) and the server's blob folder.
+- The deployed `server` container no longer holds `pgdata/`; its volume holds only `blobs/`.
+- The Compose stack has four services: `web`, `server`, `runner` and `postgres`. `postgres` is on the private Docker network only, like `server`.

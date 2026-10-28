@@ -25,4 +25,4 @@ If two binding documents conflict and the precedence order doesn't settle it, st
 
 ## Current phase
 
-We are building a **local-only proof of concept** for a single user (Cormac), running agents on his personal Claude subscription. See D1 and D2 in `decisions.md`. Hosted, multi-user and sellable concerns are deferred, but the architecture must not make them hard to add later.
+We are building a **local-only proof of concept** for a single user (Cormac), running agents on a personal Claude subscription. See D1 and D2 in `decisions.md`. It's developed on the laptop and deployed as Docker containers on the user's home server, behind a Cloudflare Tunnel and Cloudflare Access (D12). Hosted, multi-user and sellable concerns are deferred, but the architecture must not make them hard to add later.

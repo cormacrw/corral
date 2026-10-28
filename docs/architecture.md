@@ -1,10 +1,10 @@
 # Architecture
 
-How the Corral POC is structured. Implements D7 in [decisions.md](decisions.md), and builds on D1 (local-only POC, hosting next) and D2 (the user's own `claude` CLI).
+How the Corral POC is structured. Implements D7 in [decisions.md](decisions.md), and builds on D1 (local-only POC, hosting next), D2 (the user's own `claude` CLI) and D12 (deployed as Docker containers on the user's server).
 
 ## Processes
 
-Three processes, all started together by `turbo dev`:
+Three processes. In development they're all started together by `turbo dev`; when deployed, each runs in its own container (see [Deployment](#deployment-d12)).
 
 ```
 ┌─────────────┐  HTTP + SSE   ┌──────────────────────┐  WebSocket (runner dials out)  ┌──────────────────────┐
@@ -14,7 +14,7 @@ Three processes, all started together by `turbo dev`:
                               │ locks · orchestrator │                                 │ spawns `claude` ·    │
                               │ · GitHub · DB        │                                 │ agent tool proxy     │
                               └──────────────────────┘                                 └──────────────────────┘
-                               moves to hosting later                                   always on the user's machine
+                               moves to hosting later                                   always on hardware the user controls
 ```
 
 ### `apps/web`: Nuxt + Nuxt UI
@@ -34,11 +34,11 @@ Three processes, all started together by `turbo dev`:
 - **Exactly one instance.** The scheduler and orchestrator are long-running loops inside this process. That's the reason it isn't folded into Nuxt's Nitro server: the web layer should be free to scale or redeploy on its own.
 - Serves the HTTP API (for web), SSE (to web), and the runner WebSocket endpoint.
 
-### `apps/runner`: local daemon
+### `apps/runner`: runner daemon
 
 - Node/TypeScript.
 - The only process that touches the filesystem, git and the agent CLI.
-- **Connects outbound** to the server over WebSocket, even on localhost, exactly as it will when the server is hosted behind NAT. Moving to hosting should be a URL and auth change only (D1).
+- **Connects outbound** to the server over WebSocket, whether on localhost, over the Docker network (D12), or to a hosted server behind NAT. Moving between these should be a URL and auth change only (D1).
 - Creates worktrees, spawns agents through `AgentRuntime` adapters (Claude Code first), streams events, sends heartbeats, reports outcomes.
 - **Per-run MCP server for agent tools.** Each spawned agent gets an MCP server from the runner, exposing tools such as reading the task, posting a comment, attaching evidence and reporting an outcome. The runner forwards each call to the server with that run's lease/fencing token attached. Agents never hold server credentials, every call is fenced automatically, and the tools are the same whatever agent CLI is used. See [stale-runners-and-fencing.md](stale-runners-and-fencing.md).
 - **Setup jobs, not only agent runs.** The server can send the runner short jobs that return data and touch nothing. The first is `list_repos`: it runs `gh` inside the runner and returns the repositories its GitHub login can see, so the UI can offer a picker when adding a project. It returns `nameWithOwner`, `description`, `isPrivate`, `updatedAt`, `defaultBranchRef` and `viewerPermission`, using `gh api --paginate "/user/repos?affiliation=owner,collaborator,organization_member&sort=updated&per_page=100"` (or `gh repo list <owner> --json …`). The GitHub token never leaves the runner (as with `claude` under D2). The server caches the result for a few minutes. Repos where `viewerPermission` is below WRITE, and repos already used by a project (D13), are shown but can't be picked. If `gh` isn't signed in, the job returns that state, and the UI shows the `docker exec` login step (D12). A pasted GitHub URL is checked with the same job.
@@ -67,7 +67,7 @@ packages/
 | Monorepo | Turborepo + pnpm workspaces | |
 | Frontend | Nuxt + Nuxt UI | |
 | Server framework | Hono on Node | WebSocket + SSE helpers; typed client for Nuxt |
-| Database | PGlite (embedded Postgres) + Drizzle → Postgres when hosted | Drizzle schemas are tied to one SQL dialect; using Postgres from day one avoids a schema rewrite. Supports atomic `UPDATE … WHERE status = 'ready' RETURNING` claims. PGlite is single-connection and in-process, which is why only the server opens it. |
+| Database | Drizzle (Postgres dialect). Postgres in Docker when deployed; PGlite (embedded Postgres) in development and tests (D14) | One schema, two drivers, picked by `CORRAL_DATABASE_URL`. Supports atomic `UPDATE … WHERE status = 'ready' RETURNING` claims. PGlite is single-connection, so concurrency is only proven against Postgres in CI. Only the server opens the database, whichever driver. |
 | Runner | Node/TypeScript | Resolves PRD §8.2 "Rust or Node". Shares `contracts`. |
 | Evidence / blobs | Local filesystem behind a `BlobStore` interface → S3-compatible later | |
 | GitHub | Server uses the GitHub API (open PR, CI status, merge); runner does `git push` | Merge gates stay server-side. POC auth: the user's `gh` token. Later: GitHub App, plus per-run scoped tokens (R10). |
@@ -78,7 +78,7 @@ Each kind of data has exactly one source of truth.
 
 | Store | What lives there | web | server | runner | agent (`claude`) |
 |---|---|---|---|---|---|
-| **Database** (PGlite → Postgres) | Projects, epics, tasks, criteria, dependencies, status, leases (with fencing epoch), runs, comments, reviews, evidence *records*, PM conversation, plans, settings, audit log | — | **R/W** (sole opener) | — | — |
+| **Database** (Postgres deployed, PGlite in dev; D14) | Projects, epics, tasks, criteria, dependencies, status, leases (with fencing epoch), runs, comments, reviews, evidence *records*, PM conversation, plans, settings, audit log | — | **R/W** (sole opener) | — | — |
 | **Blob store** (local folder → S3) | Screenshots, videos, test/CI logs, run transcripts. Immutable, content-addressed (sha256). | — | **R/W** (stores uploads, serves files) | — | — |
 | **Target repo: default branch** (GitHub) | Merged code, `CORRAL.md`, wiki, agent role instructions. Canonical docs = default branch. | — | — | **R** (`git fetch`) | **R**, PM only, through a read-only checkout (D9) |
 | **Target repo: task branches** (GitHub) | Work in progress per task | — | **R** (diffs for PR/gate checks) | **R/W** (`git push`, only to the branch it holds a lease for) | — |
@@ -92,14 +92,16 @@ Each kind of data has exactly one source of truth.
 - **agents** reach Corral only through per-run MCP tools, which the runner forwards with the run's lease token.
 - **The runner pushes, not the agent.** The agent commits in its worktree; the runner pushes when the agent reports `pr_opened` / `pr_updated` (or through an MCP `push` tool), keeping the push path fenced.
 - **Before merging,** the server re-checks GitHub directly. It never relies only on its cached copy of PR/CI state.
-- **No credentials in any Corral store.** Claude's login stays in Claude's own config; the GitHub token stays with `gh` in the keychain (D2).
+- **No credentials in any Corral store.** Claude's login stays in Claude's own config; the GitHub token stays in `gh`'s own config (the keychain on macOS, a volume in the runner container) (D2, D12).
 
 ### Layout on disk (POC)
+
+The root is configurable (env vars). `pnpm dev` puts it in the checkout's own `.corral/` folder, so several checkouts (e.g. agents in separate worktrees) can run at once without sharing a database; it picks free ports too and writes them to `.corral/dev.json`. An app started on its own without those env vars falls back to `~/.corral/`. In the containers, `server/` and `runner/` are separate volumes, each mounted only into its own container (D12).
 
 ```
 ~/.corral/
   server/
-    pgdata/                     PGlite data
+    pgdata/                     PGlite data (dev only; deployed uses Postgres, D14)
     blobs/sha256/ab/cd…         content-addressed files
   runner/
     config.json                 server URL, runner ID
@@ -108,7 +110,7 @@ Each kind of data has exactly one source of truth.
     spool/<runId>.jsonl         transcript being written, uploaded at run end
 ```
 
-Backing up `~/.corral/server/` backs up all of Corral's state.
+Backing up `server/` backs up all of a dev instance's state. For the deployed instance, back up the Postgres database (`pg_dump`) and the server volume (blobs) (D14).
 
 ### Flows
 
@@ -119,11 +121,54 @@ Backing up `~/.corral/server/` backs up all of Corral's state.
 
 ### Moving to hosting
 
-`pg_dump`/restore the database into Postgres, copy `blobs/` to S3 under the same keys, point the runner at the new server URL. No schema, blob-key or contract changes.
+Point `CORRAL_DATABASE_URL` at the hosted Postgres (`pg_dump`/restore from the home-server Postgres, D14), copy `blobs/` to S3 under the same keys, point the runner at the new server URL. No schema, blob-key or contract changes.
 
 ### Known POC limitation
 
-The agent runs as the user's OS user, so it *could* run `git push` / `gh` with the user's own GitHub login and bypass the runner. In the POC only the agent's instructions prevent this. Partial mitigation: spawn agents with no `GH_TOKEN` in their environment and a git config whose push URL fails. Real enforcement comes with hosting: per-run, branch-scoped tokens (R10).
+The agent runs as the same OS user as the runner, so it *could* run `git push` / `gh` with the user's own GitHub login and bypass the runner. In Docker (D12) the reach is limited to the runner container, but within it the problem is the same. In the POC only the agent's instructions prevent this. Partial mitigation: spawn agents with no `GH_TOKEN` in their environment and a git config whose push URL fails. Real enforcement comes with hosting: per-run, branch-scoped tokens (R10).
+
+## Deployment (D12)
+
+Develop and first run on the laptop with `turbo dev`. Deploy as Docker containers with Docker Compose on the user's home server.
+
+```
+Internet ──▶ Cloudflare Tunnel ──▶ Cloudflare Access (login)
+                                          │
+                     ┌────────────────────┼──── private Docker network ─────────────────────┐
+                     │                    ▼                                                 │
+                     │   ┌─────────────────────────┐  /api/** + SSE  ┌──────────────────┐   │
+                     │   │ web: static Nuxt build  │ ──────────────▶ │      server      │   │
+                     │   └─────────────────────────┘                 │  volume: server/ │   │
+                     │   ┌─────────────────────────┐       SQL       │                  │   │
+                     │   │ postgres (D14)          │ ◀────────────── │                  │   │
+                     │   │ volume: postgres data   │                 └────────▲─────────┘   │
+                     │   └─────────────────────────┘                          │ WebSocket   │
+                     │                                               ┌────────┴─────────┐   │
+                     │                                               │      runner      │   │
+                     │                                               │ claude, gh, git, │   │
+                     │                                               │ chromium, tools  │   │
+                     │                                               │ volumes: runner/,│   │
+                     │                                               │ claude + gh conf │   │
+                     │                                               └──────────────────┘   │
+                     └──────────────────────────────────────────────────────────────────────┘
+```
+
+| Container | Contents | Volumes | Exposed |
+|---|---|---|---|
+| `web` | Static Nuxt build and a server that proxies `/api/**` to `server` | — | Through the tunnel only, behind Cloudflare Access |
+| `server` | Hono control plane | `server/` data dir (blobs) | No. Docker network only |
+| `postgres` | Postgres (D14) | Postgres data dir | No. Docker network only |
+| `runner` | Runner daemon, `claude`, `gh`, `git`, headless Chromium, target-project toolchains (Node/pnpm etc.) | `runner/` data dir, `claude` config, `gh` config | No. Dials out to `server` |
+
+Rules:
+
+- **Only `web` is exposed.** The server API and runner WebSocket are never published to the host or the tunnel.
+- **Credentials are set up by the user, by hand.** After the first `docker compose up`, the user runs `docker exec -it <runner> claude` and `gh auth login` once. Both configs persist on volumes. No model-provider token goes in a Compose file, `.env` file or Corral config (D2).
+- **Linux, not just macOS.** The runner image is Linux. No keychain, `open` or BSD-only flags anywhere in runner code.
+- **Everything environment-specific is config:** data dirs, server URL, bind address, ports.
+- **Heartbeats on long-lived connections.** Cloudflare drops proxied connections idle for about 100 seconds, so SSE streams send a heartbeat comment well inside that, and the runner WebSocket pings regardless.
+- **No Docker socket in any container.** Agents have broad permissions inside the runner; they must not be able to start containers on the host. One container per task is a later `RunnerProvider`.
+- **Resources:** the [estimates below](#resource-expectations) apply to the home server. The runner container should get a memory limit sized for the configured concurrency.
 
 ## Runner implementation rules
 
@@ -142,8 +187,8 @@ Rough estimates, to be checked against real measurements once built.
 
 | Process | Dev (`turbo dev`) | Built |
 |---|---|---|
-| web | 300–600 MB | ~0 extra (static files served by server) |
-| server (incl. PGlite) | 150–300 MB | 150–250 MB |
+| web | 300–600 MB | ~20–50 MB (static files + `/api` proxy) |
+| server (incl. PGlite in dev) | 150–300 MB | 150–250 MB, plus Postgres ~50–150 MB |
 | runner | 80–150 MB | 50–100 MB |
 | Turbo daemon / watchers | 50–100 MB | — |
 | **Idle total** | **~0.6–1.1 GB** | **~250–400 MB** |

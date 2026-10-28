@@ -5,11 +5,11 @@ How Corral runs the AI agent, why it's set up this way, and the rules that keep 
 ## The model
 
 ```
-Corral (control plane + runner)  ──starts──▶  `claude` CLI installed on the user's machine
+Corral (control plane + runner)  ──starts──▶  `claude` CLI installed where the runner runs
                                                (logged in by the user, with their own account)
 ```
 
-- The user installs Claude Code and logs in **themselves**.
+- The user installs Claude Code and logs in **themselves**: on the laptop in development, or with `docker exec -it` in the runner container once deployed (D12). In the container, the CLI's config lives on a volume that only the CLI reads.
 - Corral's runner starts the CLI headless (e.g. `claude -p ... --output-format json` / `stream-json`) inside the task's worktree.
 - Corral has no "Sign in with Claude" step and never handles Anthropic tokens or API keys.
 
