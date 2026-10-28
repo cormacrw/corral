@@ -16,5 +16,9 @@
     "eslint": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
+  },
+  "dependencies": {
+    "@corral/core": "workspace:*",
+    "zod": "^4.6.7"
   }
 }

@@ -11,6 +11,9 @@ export const RUN_STATES = [
 ] as const
 export type RunState = typeof RUN_STATES[number]
 
+// Runs in these states count against their agent's concurrency
+export const ACTIVE_RUN_STATES = ['queued', 'starting', 'running', 'waiting_for_input', 'stopping'] as const satisfies readonly RunState[]
+
 // How a run ended, as reported by the agent and validated by the server.
 // `rate_limited` is not a failure (D3).
 export const RUN_OUTCOMES = [

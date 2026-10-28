@@ -1,4 +1,4 @@
 {
   "extends": "@corral/tsconfig/base.json",
-  "include": ["src"]
+  "include": ["src", "vitest.config.ts"]
 }

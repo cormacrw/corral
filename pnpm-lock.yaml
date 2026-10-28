@@ -223,15 +223,30 @@ importers:
 
   apps/server:
     dependencies:
+      '@corral/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@corral/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@corral/db':
         specifier: workspace:*
         version: link:../../packages/db
       '@hono/node-server':
         specifier: ^2.1.5
         version: 2.1.5(hono@4.13.14)
+      '@hono/zod-validator':
+        specifier: ^0.9.1
+        version: 0.9.1(hono@4.13.14)(zod@4.6.7)
+      drizzle-orm:
+        specifier: ^0.45.4
+        version: 0.45.4(@electric-sql/pglite@0.5.12)(@types/pg@8.23.1)(pg@8.23.1)
       hono:
         specifier: ^4.13.14
         version: 4.13.14
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
     devDependencies:
       '@corral/tsconfig':
         specifier: workspace:*
@@ -284,6 +299,13 @@ importers:
         version: 3.3.13(typescript@6.0.3)
 
   packages/contracts:
+    dependencies:
+      '@corral/core':
+        specifier: workspace:*
+        version: link:../core
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
     devDependencies:
       '@corral/tsconfig':
         specifier: workspace:*
@@ -346,6 +368,9 @@ importers:
       drizzle-kit:
         specifier: ^0.31.11
         version: 0.31.11
+      embedded-postgres:
+        specifier: 17.9.0-beta.17
+        version: 17.9.0-beta.17
       eslint:
         specifier: 'catalog:'
         version: 10.13.0(jiti@2.7.0)(supports-color@10.2.2)
@@ -555,6 +580,54 @@ packages:
 
   '@electric-sql/pglite@0.5.12':
     resolution: {integrity: sha512-IiAxv1ld1V9QP0AWsflliDqrGRo+20O+yXOr2fjk6YzBHsCvTPclwQhCB1uZ7eHtPrxUrSllNzWgqy/Ot76PEw==}
+
+  '@embedded-postgres/darwin-arm64@17.9.0-beta.17':
+    resolution: {integrity: sha512-Plsp3Tulr4HV8BFM+rPvAJ08Lo4Zytt1UA4CcgYIBPvdZY/Kn22G+RcmgZ2vKS6YBU8AspKh6cuaTv/PYxYw+A==}
+    engines: {node: '>=16'}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@embedded-postgres/darwin-x64@17.9.0-beta.17':
+    resolution: {integrity: sha512-M8+NTrnM1+IawnmhEGWCNFBXCC1k+lJPXvljUmZvWakmluVy8w1xEm1G5ARRvNvR2D0zfaZYJJfTz7zSNGpSYw==}
+    engines: {node: '>=16'}
+    cpu: [x64]
+    os: [darwin]
+
+  '@embedded-postgres/linux-arm64@17.9.0-beta.17':
+    resolution: {integrity: sha512-rUIX6X3BZeUl99vQUZUkymbUqQWXtcGaLlCaW81xiesAd94MaF74slkz+hWrs9oPF8T60STPm/qJ8DYabSSR8w==}
+    engines: {node: '>=16'}
+    cpu: [arm64]
+    os: [linux]
+
+  '@embedded-postgres/linux-arm@17.9.0-beta.17':
+    resolution: {integrity: sha512-ac9gW0f+FPfbc095V63Q/QQtJLj5WDv0QOBi2ALhmDJ7VsgvrUlgEDipWszscl9uVLE6jRc+cwAr8+1mhKfIgA==}
+    engines: {node: '>=16'}
+    cpu: [arm]
+    os: [linux]
+
+  '@embedded-postgres/linux-ia32@17.9.0-beta.17':
+    resolution: {integrity: sha512-2f+uqneRaT+kd4I57EsEfoGhOHrFHefyRpKyIdyLfhypnjCgXBVn4b6+Lj5MIaKRRiPLUAiacXRAun5QvNnAtw==}
+    engines: {node: '>=16'}
+    cpu: [ia32]
+    os: [linux]
+
+  '@embedded-postgres/linux-ppc64@17.9.0-beta.17':
+    resolution: {integrity: sha512-ZsDTOVoGngMcTp4vKCwe9IcbUhDLmuFZm7Bo2f38cyMg8rBw+JLBRXD/jHavH+6Jp/XSzHTB5nxXOLXRq9D26g==}
+    engines: {node: '>=16'}
+    cpu: [ppc64]
+    os: [linux]
+
+  '@embedded-postgres/linux-x64@17.9.0-beta.17':
+    resolution: {integrity: sha512-RNVlYUDROBfSPJM9kGwurr56tJ+xA58mMsZmUJWcURqPBCifyvBJuOEeIbhXatpPeqvG3Qo886l2wsYr2qK+Mw==}
+    engines: {node: '>=16'}
+    cpu: [x64]
+    os: [linux]
+
+  '@embedded-postgres/windows-x64@17.9.0-beta.17':
+    resolution: {integrity: sha512-JmxIOn9mR19Ml3zqMzG0UCiJ9grEnVpINPo+/Tufkw4Hrhp5RHSHjxP7Vy2JRSA0OrX6ICEMUJZmdu0Th0xixQ==}
+    engines: {node: '>=16'}
+    cpu: [x64]
+    os: [win32]
 
   '@emnapi/core@1.10.0':
     resolution: {integrity: sha512-yq6OkJ4p82CAfPl0u9mQebQHKPJkY7WrIuk205cTYnYe+k2Z8YBh11FrbRG/H6ihirqcacOgl2BIO8oyMQLeXw==}
@@ -1263,6 +1336,12 @@ packages:
     engines: {node: '>=20'}
     peerDependencies:
       hono: ^4 || ^5.0.0-0
+
+  '@hono/zod-validator@0.9.1':
+    resolution: {integrity: sha512-iiv6w0qrIc0arfvCtUqBWsvl4fXjzaTcQcCJTTtCnkawF9HHGE+KjEl0ox3gQJ6rKZEgE3mLExlQCF72M+mNuw==}
+    peerDependencies:
+      hono: '>=4.11.2'
+      zod: ^3.25.0 || ^4.0.0
 
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
@@ -2940,6 +3019,10 @@ packages:
     resolution: {integrity: sha512-KzvoxDfXNz2Gm8KYLh47K3qcY3Zza3WKOuh2xoqa7LBu6MDKWAZLovJtU9DuAd/Er+rhQHCRn619lHS5U+qmhw==}
     engines: {node: ^22.18.0 || >=24.11.0}
 
+  async-exit-hook@2.0.1:
+    resolution: {integrity: sha512-NW2cX8m1Q7KPA7a5M2ULQeZ2wR5qI5PAbw5L0UOMxdioVk9PMZ0h1TmyZEkPYrCvYjDlFICusOu1dlEKAAeXBw==}
+    engines: {node: '>=0.12.0'}
+
   async-sema@3.1.1:
     resolution: {integrity: sha512-tLRNUXati5MFePdAk8dw7Qt7DpxPB60ofAgn8WRhW6a2rcimZnYBP9oxHiv0OHy+Wz7kPMG+t4LGdt31+4EmGg==}
 
@@ -3445,6 +3528,10 @@ packages:
 
   electron-to-chromium@1.5.464:
     resolution: {integrity: sha512-nRa65aFge40viPAKxMKULIY8tcXKwKboJWNn4RoKwyWXJ6SP7BnrDGKUTzc64818jIciH0PK7LSF8QzZes19GA==}
+
+  embedded-postgres@17.9.0-beta.17:
+    resolution: {integrity: sha512-49btyIKmUBQpeerDQJXkmYWhtBKnQXnfRQtNTxnePNsK3H4EoS40faenQ5NbgBpnyYpaeGuDgPyGay8xznuEww==}
+    engines: {node: '>=16'}
 
   embla-carousel-auto-height@8.6.0:
     resolution: {integrity: sha512-/HrJQOEM6aol/oF33gd2QlINcXy3e19fJWvHDuHWp2bpyTa+2dm9tVVJak30m2Qy6QyQ6Fc8DkImtv7pxWOJUQ==}
@@ -6301,6 +6388,30 @@ snapshots:
 
   '@electric-sql/pglite@0.5.12': {}
 
+  '@embedded-postgres/darwin-arm64@17.9.0-beta.17':
+    optional: true
+
+  '@embedded-postgres/darwin-x64@17.9.0-beta.17':
+    optional: true
+
+  '@embedded-postgres/linux-arm64@17.9.0-beta.17':
+    optional: true
+
+  '@embedded-postgres/linux-arm@17.9.0-beta.17':
+    optional: true
+
+  '@embedded-postgres/linux-ia32@17.9.0-beta.17':
+    optional: true
+
+  '@embedded-postgres/linux-ppc64@17.9.0-beta.17':
+    optional: true
+
+  '@embedded-postgres/linux-x64@17.9.0-beta.17':
+    optional: true
+
+  '@embedded-postgres/windows-x64@17.9.0-beta.17':
+    optional: true
+
   '@emnapi/core@1.10.0':
     dependencies:
       '@emnapi/wasi-threads': 1.2.1
@@ -6721,6 +6832,11 @@ snapshots:
   '@hono/node-server@2.1.5(hono@4.13.14)':
     dependencies:
       hono: 4.13.14
+
+  '@hono/zod-validator@0.9.1(hono@4.13.14)(zod@4.6.7)':
+    dependencies:
+      hono: 4.13.14
+      zod: 4.6.7
 
   '@humanfs/core@0.19.2':
     dependencies:
@@ -8790,6 +8906,8 @@ snapshots:
       '@babel/types': 8.0.8
       ast-kit: 3.0.0
 
+  async-exit-hook@2.0.1: {}
+
   async-sema@3.1.1: {}
 
   async@3.2.6: {}
@@ -9124,6 +9242,22 @@ snapshots:
   ee-first@1.1.1: {}
 
   electron-to-chromium@1.5.464: {}
+
+  embedded-postgres@17.9.0-beta.17:
+    dependencies:
+      async-exit-hook: 2.0.1
+      pg: 8.23.1
+    optionalDependencies:
+      '@embedded-postgres/darwin-arm64': 17.9.0-beta.17
+      '@embedded-postgres/darwin-x64': 17.9.0-beta.17
+      '@embedded-postgres/linux-arm': 17.9.0-beta.17
+      '@embedded-postgres/linux-arm64': 17.9.0-beta.17
+      '@embedded-postgres/linux-ia32': 17.9.0-beta.17
+      '@embedded-postgres/linux-ppc64': 17.9.0-beta.17
+      '@embedded-postgres/linux-x64': 17.9.0-beta.17
+      '@embedded-postgres/windows-x64': 17.9.0-beta.17
+    transitivePeerDependencies:
+      - pg-native
 
   embla-carousel-auto-height@8.6.0(embla-carousel@8.6.0):
     dependencies:

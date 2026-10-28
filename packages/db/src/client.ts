@@ -17,6 +17,9 @@ export type DatabaseLocation =
 
 // Both drivers share this type, so nothing above packages/db knows which is in use
 export type Database = PgDatabase<PgQueryResultHKT, typeof schema>
+export type Transaction = Parameters<Parameters<Database['transaction']>[0]>[0]
+// Anything queries can run on: the database or an open transaction
+export type Executor = Database | Transaction
 
 export interface DatabaseHandle {
   db: Database

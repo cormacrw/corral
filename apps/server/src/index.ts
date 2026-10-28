@@ -3,14 +3,17 @@ import { serve } from '@hono/node-server'
 import { createApp } from './app.ts'
 import { formatDuration, printReady, redactUrl, shortenHome } from './banner.ts'
 import { loadConfig } from './config.ts'
+import { EventBus } from './events.ts'
+import { ensureOwner } from './owner.ts'
 
 const config = loadConfig()
 
 // Opening the database applies pending migrations (D14)
 const location = databaseLocation(config.databaseUrl, config.dataDir)
 const database = await openDatabase(location)
+const app = createApp({ db: database.db, events: new EventBus(), actor: await ensureOwner(database.db) })
 
-const server = serve({ fetch: createApp().fetch, hostname: config.host, port: config.port }, (info) => {
+const server = serve({ fetch: app.fetch, hostname: config.host, port: config.port }, (info) => {
   printReady(`Corral API ready in ${formatDuration(process.uptime() * 1000)}`, {
     API: `http://${info.address}:${info.port}/api`,
     Database: location.driver === 'postgres'

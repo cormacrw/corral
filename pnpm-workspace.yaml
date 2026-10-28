@@ -9,6 +9,10 @@ catalog:
   vitest: ^5.0.5
 
 allowBuilds:
+  # Only re-creates symlinks inside the package (Postgres's shared libraries)
+  '@embedded-postgres/darwin-arm64': true
+  '@embedded-postgres/linux-arm64': true
+  '@embedded-postgres/linux-x64': true
   '@parcel/watcher': false
   '@tailwindcss/oxide': false
   esbuild: false

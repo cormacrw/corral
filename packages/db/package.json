@@ -4,7 +4,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./testing": "./src/testing.ts"
+    "./testing": "./src/testing.ts",
+    "./test-setup": "./src/test-setup.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate",
@@ -23,6 +24,7 @@
     "@types/node": "catalog:",
     "@types/pg": "^8.23.1",
     "drizzle-kit": "^0.31.11",
+    "embedded-postgres": "17.9.0-beta.17",
     "eslint": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
