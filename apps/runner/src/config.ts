@@ -1,4 +1,4 @@
-import { homedir } from 'node:os'
+import { homedir, hostname } from 'node:os'
 import { join, resolve } from 'node:path'
 
 // Everything environment-specific comes from env vars (D12). The defaults are
@@ -8,12 +8,18 @@ export interface RunnerConfig {
   dataDir: string
   // The runner always dials out to the server (D1)
   serverUrl: URL
+  // Shown in the UI, e.g. "home-server"
+  name: string
+  // The agent CLI binary comes from configuration (agent-runtime-and-auth.md rule 4)
+  claudeBin: string
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): RunnerConfig {
   return {
     dataDir: resolve(env.CORRAL_RUNNER_DATA_DIR || join(homedir(), '.corral', 'runner')),
-    serverUrl: parseUrl(env.CORRAL_SERVER_URL || 'http://127.0.0.1:4100')
+    serverUrl: parseUrl(env.CORRAL_SERVER_URL || 'http://127.0.0.1:4100'),
+    name: env.CORRAL_RUNNER_NAME || hostname(),
+    claudeBin: env.CORRAL_CLAUDE_BIN || 'claude'
   }
 }
 

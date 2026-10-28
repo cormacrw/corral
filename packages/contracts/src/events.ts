@@ -1,4 +1,5 @@
 import type { Project, Task } from './api.ts'
+import type { RunnerStatus } from './runner.ts'
 
 // Live updates the server streams to web over SSE (GET /api/events).
 // The event name is `type`; the data is the whole event as JSON.
@@ -6,6 +7,7 @@ export type ServerEvent =
   | { type: 'project.created', project: Project }
   | { type: 'task.created', task: Task }
   | { type: 'task.updated', task: Task }
+  | { type: 'runner.status', status: RunnerStatus }
 
 export type ServerEventType = ServerEvent['type']
 

@@ -57,6 +57,14 @@ See [stale-runners-and-fencing.md](stale-runners-and-fencing.md). Suggestion: le
 
 ---
 
+### R15 — The server's GitHub calls go through the runner's `gh` (raised while building, 2026-10-27)
+
+**Conflict:** the Stack table in `architecture.md` says the server uses the GitHub API with "the user's `gh` token", but the setup-jobs text in the same file and D12 keep the GitHub token inside the runner container. In Docker the server has no `gh` login to use.
+
+**What was built:** the server still decides every GitHub action (open and update PRs, read CI, update branch, merge) and stays the only process that talks to the PR/CI API in the D8 sense, but it sends each REST call to the runner as a `github` setup job, which runs `gh api`. The token never leaves the runner. Cost: GitHub actions need the runner online, which planning and runs already do.
+
+**Alternatives:** give the server its own token through an env var (a second credential to manage), or a GitHub App at hosting time (R10). If this is accepted, fold it into D8 or a new decision and fix the Stack table.
+
 ## Phasing and metrics
 
 ### R12 — Build a walking skeleton first

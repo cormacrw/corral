@@ -5,6 +5,7 @@ import { createTestDatabase } from '@corral/db/testing'
 import { createApp } from './app.ts'
 import { EventBus } from './events.ts'
 import { ensureOwner } from './owner.ts'
+import { RunnerHub } from './runner-hub.ts'
 
 // A server app on a throwaway database, for tests
 export interface TestApp {
@@ -29,7 +30,8 @@ export async function createTestApp(driver: 'pglite' | 'postgres'): Promise<Test
   const events: ServerEvent[] = []
   bus.subscribe(event => events.push(event))
   const actor = await ensureOwner(handle.db)
-  const app = createApp({ db: handle.db, events: bus, actor })
+  const runner = new RunnerHub(bus)
+  const app = createApp({ db: handle.db, events: bus, actor, runner })
 
   const request = async (method: string, path: string, body?: unknown) => app.request(path, {
     method,

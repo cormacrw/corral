@@ -1,4 +1,5 @@
 import {
+  checkRepoInput,
   createProjectInput,
   createTaskInput,
   humanTransitionInput,
@@ -16,6 +17,8 @@ import type { ZodType } from 'zod'
 import { ApiFailure, fromDatabaseError } from './errors.ts'
 import type { EventBus } from './events.ts'
 import { createProject, findProjectBySlug, listProjects, toProject } from './projects.ts'
+import type { RunnerHub } from './runner-hub.ts'
+import { checkRepository, detectClis, RepoCatalog } from './setup.ts'
 import { createTask, findTaskId, listTasks, loadTask, transitionTask } from './tasks.ts'
 
 export interface AppDeps {
@@ -23,6 +26,7 @@ export interface AppDeps {
   events: EventBus
   // Who web requests act as (see owner.ts)
   actor: Actor
+  runner: RunnerHub
 }
 
 // Validation failures get the same error shape as every other API error
@@ -40,7 +44,9 @@ const taskNumber = (value: string) => {
   return number
 }
 
-export function createApp({ db, events, actor }: AppDeps) {
+export function createApp({ db, events, actor, runner }: AppDeps) {
+  const repos = new RepoCatalog(db, runner)
+
   return new Hono()
     .basePath('/api')
     .onError((error, c) => {
@@ -51,6 +57,15 @@ export function createApp({ db, events, actor }: AppDeps) {
     })
 
     .get('/health', c => c.json({ ok: true }))
+
+    .get('/runner', c => c.json(runner.status()))
+
+    .get('/setup/repos', async c => c.json(await repos.list(c.req.query('refresh') === '1')))
+
+    .post('/setup/check-repo', validate('json', checkRepoInput), async c =>
+      c.json(await checkRepository(db, runner, c.req.valid('json').repository)))
+
+    .get('/setup/clis', async c => c.json(await detectClis(runner)))
 
     .get('/projects', async c => c.json(await listProjects(db)))
 
