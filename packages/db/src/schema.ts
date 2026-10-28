@@ -46,6 +46,9 @@ const actor = (name: string) => jsonb(name).$type<Actor>().notNull()
 export const users = pgTable('users', {
   id: uuid().primaryKey().defaultRandom(),
   name: text().notNull(),
+  // Profile picture: a blob hash and its image type, or none
+  avatarBlob: text(),
+  avatarContentType: text(),
   createdAt: createdAt()
 })
 
@@ -188,6 +191,9 @@ export const agents = pgTable('agents', {
   paused: boolean().notNull().default(false),
   // Set when a usage limit is hit; the group resumes after it (D3)
   pausedUntil: timestamp({ withTimezone: true }),
+  // Profile picture: a blob hash and its image type, or none
+  avatarBlob: text(),
+  avatarContentType: text(),
   createdAt: createdAt(),
   updatedAt: updatedAt()
 }, t => [check('agents_concurrency_positive', sql`${t.concurrency} > 0`)])

@@ -23,7 +23,7 @@ web            server                          runner                     claude
  │◀── SSE ───────│                                │                           │
  │               │◀──── MCP: propose_plan(...) ───│◀──────────────────────────│
  │               │ validate (core): DAG, criteria,│                           │
- │               │ sizes → save plan v1 (Backlog) │                           │
+ │               │ sizes → save plan v1 (Drafts)  │                           │
  │◀── SSE: plan cards                             │                           │
 ```
 
@@ -34,20 +34,22 @@ web            server                          runner                     claude
 | `list_tasks`, `get_task`, `get_run_outcomes` | Live board state, so answers reflect current state, not only chat history (PRD §7.2) |
 | `ask_question` | A structured question, shown in the Plan conversation only, never in the Inbox (D11) |
 | `propose_plan` | Create or revise a draft plan: epics, tasks, acceptance criteria, dependencies, priority, task type, human-review flag |
+| `approve_plan` | Approve the current plan (to the board or the Backlog) when the human asks in chat. Recorded as the human's approval; refused unless the human has written since the plan was proposed |
 | `flag_stale_docs` | Create a documentation task (PRD §7.10) |
 
-The PM has **no** tools to approve, merge, edit docs or change status. This is enforced by which tools it's given, not by its instructions.
+The PM has **no** tools to merge, edit docs or change status. This is enforced by which tools it's given, not by its instructions.
 
 ### Editing and approving a plan
 
 - **Direct edits:** the human edits a task card inline. The change is saved through the API and recorded in the audit log with the human as actor.
 - **Edits through chat:** e.g. "split task 3, drop the dark-mode bit". The PM calls `propose_plan` again, producing plan v2, and the UI shows the differences from v1.
-- **Approval:** the **Approve plan** button calls an endpoint that only accepts a human actor. Each task moves Backlog → Ready, which takes it out of the Backlog view and onto the board. Tasks with unmerged dependencies are still Ready; their cards show "waiting on #N".
+- **Drafts:** the plan's tasks are created as **Drafts**. They appear only in the plan card and its flyout, never on the board or in the Backlog, and a revision can still change or remove them.
+- **Approval:** two buttons call an endpoint that only accepts a human actor. **Add to board** moves each Draft → Ready, onto the board; tasks with unmerged dependencies are still Ready and their cards show "waiting on #N". **Add to backlog** moves each Draft → Backlog, to be scheduled later or refined further. The flyout offers the same two choices for a single task.
 
 ### Sessions and cost
 
 - The `claude` session ID is stored with the conversation in the database. If the session is lost (e.g. the runner's disk was wiped), the next turn starts a fresh session seeded with a summary built from the database messages. The database is the source of truth; `~/.claude` is only a cache.
-- A PM turn runs only when the human sends a message, plus one delivery summary when an **epic** finishes (not once per merge).
+- A PM turn runs only when the human sends a message. Nothing goes back to the PM when tasks or epics merge.
 
 ---
 
@@ -110,12 +112,18 @@ Run: Starting → Running. A heartbeat every 2 minutes renews the lease, and eve
 - The next developer run works in the **same worktree and branch**, reports `pr_updated`, and the flow returns to step 5.
 - If this would be round 6 (past the cap of 5): **→ Blocked**, and the human is notified.
 
-### Step 7b — Approved: wait for CI and the base branch
+### Step 7b — Approved
 
-The task stays in Agent review (shown as "approved, waiting on CI"). Waiting is a webhook or a cheap polling check, never an agent.
+- **Flagged for human review:** → **Human review**. It appears in the Inbox (D11) as a short note with each criterion next to its evidence, and approve and request-changes actions. Human approves → **Ready to merge** (the Inbox item resolves at once), or requests changes → In progress.
+- **Not flagged:** → **Ready to merge**.
+
+### Step 7c — Ready to merge: wait for CI and the base branch
+
+The task waits in Ready to merge. Waiting is a webhook or a cheap polling check, never an agent.
 
 - **CI fails:** → In progress with the logs attached.
-- **The base branch has moved:** the server calls GitHub's "update branch" API (no local git needed). A conflict → In progress for the developer. Whether approval survives a clean update is still open (R7).
+- **The base branch has moved:** the server calls GitHub's "update branch" API (no local git needed). A conflict → In progress for the developer. A clean update keeps the approval (R7 default).
+- **Any other new commit:** → Agent review for a fresh review.
 
 ### Step 8 — Final gate check
 
@@ -127,10 +135,7 @@ A pure function in `packages/core`, run against live GitHub data:
 - The task isn't Blocked or Failed.
 - The PR is mergeable.
 
-Then:
-
-- **Flagged for human review:** → **Human review**. It appears in the Inbox (D11) as each criterion next to its evidence, with approve and request-changes actions. Human approves → step 9, or requests changes → In progress.
-- **Not flagged:** → step 9.
+When every gate passes → step 9.
 
 ### Step 9 — Merge (server)
 
@@ -142,7 +147,6 @@ Then:
 
 - The runner removes the worktrees. If one somehow has uncommitted changes, it's kept and flagged.
 - Tasks that depended on this one become eligible; the scheduler checks again.
-- If this was the epic's last task, a PM turn writes the delivery summary.
 
 ---
 

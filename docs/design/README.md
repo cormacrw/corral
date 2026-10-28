@@ -13,6 +13,7 @@ These specs describe the UI only. Behaviour rules come from [decisions.md](../de
 | Plan | [plan.md](plan.md) | `/plan`, `/plan/:sessionId` | Global, picks a project |
 | Inbox | [inbox.md](inbox.md) | `/inbox`, `/inbox/:itemId` | Global, items tagged by project |
 | Task flyout and task page | [task.md](task.md) | `?task=COR-29`, `/tasks/COR-29` | Shared everywhere |
+| Epic flyout and epic page | [epic.md](epic.md) | `?epic=<id>`, `/epics/<id>` | Shared everywhere |
 | Project overview | [project-overview.md](project-overview.md) | `/projects/:slug` | Per project |
 | Board | [board.md](board.md) | `/projects/:slug/board` | Per project |
 | Backlog | [backlog.md](backlog.md) | `/projects/:slug/backlog` | Per project |
@@ -50,6 +51,7 @@ Tasks are shown as `PREFIX-NUMBER`, e.g. `COR-29`. Each project sets its own pre
 | Ready | info |
 | In progress, Agent review | primary |
 | Human review | warning |
+| Ready to merge | success |
 | Blocked, Failed | error |
 | Merged | success |
 

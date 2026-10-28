@@ -3,7 +3,7 @@ import type { Plan } from '@corral/contracts'
 
 // A plan version inside Juno's message (design/plan.md)
 const props = defineProps<{ plan: Plan, previous: Plan | null, busy: boolean }>()
-const emit = defineEmits<{ approve: [], open: [ref: string] }>()
+const emit = defineEmits<{ approve: [to: 'ready' | 'backlog'], open: [ref: string] }>()
 const flyout = useTaskFlyout()
 const showDiff = ref(false)
 
@@ -11,6 +11,9 @@ const changeColor = { added: 'success', changed: 'warning', unchanged: 'neutral'
 const criteria = computed(() => props.plan.tasks.filter(t => t.change !== 'removed').reduce((n, t) => n + t.criteriaCount, 0))
 const taskCount = computed(() => props.plan.tasks.filter(t => t.change !== 'removed').length)
 const changed = computed(() => props.plan.tasks.filter(t => t.change !== 'unchanged'))
+// Where an approved plan's tasks went: the board, the Backlog, or some of each
+const kept = computed(() => props.plan.tasks.filter(t => t.change !== 'removed' && t.status))
+const toBacklog = computed(() => kept.value.length > 0 && kept.value.every(t => t.status === 'backlog'))
 </script>
 
 <template>
@@ -19,7 +22,13 @@ const changed = computed(() => props.plan.tasks.filter(t => t.change !== 'unchan
     class="overflow-hidden rounded-lg border border-default"
   >
     <header class="flex flex-wrap items-center gap-2 bg-muted px-3 py-2 text-sm">
-      <span class="font-medium">Plan v{{ props.plan.version }} · {{ props.plan.title }}</span>
+      <span class="font-medium">Plan v{{ props.plan.version }} · <button
+        v-if="props.plan.epicId"
+        type="button"
+        class="hover:text-primary hover:underline"
+        :aria-label="`Open epic ${props.plan.title}`"
+        @click="flyout.openEpic(props.plan.epicId)"
+      >{{ props.plan.title }}</button><template v-else>{{ props.plan.title }}</template></span>
       <UBadge
         :label="props.plan.status === 'approved' ? 'Approved' : props.plan.status === 'superseded' ? 'Superseded' : 'Waiting for approval'"
         :color="props.plan.status === 'approved' ? 'success' : props.plan.status === 'superseded' ? 'neutral' : 'primary'"
@@ -61,9 +70,18 @@ const changed = computed(() => props.plan.tasks.filter(t => t.change !== 'unchan
     <footer class="flex flex-wrap items-center gap-2 border-t border-default px-3 py-2 text-sm">
       <template v-if="props.plan.status === 'proposed'">
         <UButton
-          label="Approve plan"
+          label="Add to board"
+          icon="i-lucide-kanban"
           :loading="props.busy"
-          @click="emit('approve')"
+          @click="emit('approve', 'ready')"
+        />
+        <UButton
+          label="Add to backlog"
+          icon="i-lucide-list"
+          variant="outline"
+          color="neutral"
+          :disabled="props.busy"
+          @click="emit('approve', 'backlog')"
         />
         <UButton
           v-if="props.previous"
@@ -73,12 +91,12 @@ const changed = computed(() => props.plan.tasks.filter(t => t.change !== 'unchan
           :aria-pressed="showDiff"
           @click="showDiff = !showDiff"
         />
-        <span class="text-xs text-muted">Approving moves these tasks from Backlog to Ready.</span>
+        <span class="text-xs text-muted">Drafts until you choose. The board schedules them now; the Backlog keeps them for later or for refining.</span>
       </template>
       <span
         v-else-if="props.plan.status === 'approved'"
         class="text-success"
-      >✓ Approved. {{ taskCount }} tasks moved to Ready and onto the board.</span>
+      >✓ {{ taskCount }} tasks added to the {{ toBacklog ? 'Backlog' : 'board' }}.</span>
       <span
         v-else
         class="text-muted"

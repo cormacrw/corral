@@ -303,13 +303,13 @@ describe('orchestrator', () => {
     await pause(project)
   })
 
-  it('records an approval and leaves the task in Agent review for the merge gates', async () => {
+  it('records an approval and moves an unflagged task to Ready to merge', async () => {
     const { project, task, review } = await underReview()
     const result = await runner.call(review.runId, review.leaseEpoch, 'report_outcome', {
       outcome: 'approved', summary: 'All good', criteria: [{ criterionId: task.acceptanceCriteria[0]!.id, met: true, note: 'Seen in shot.png' }]
     })
     expect(result).toMatchObject({ ok: true })
-    expect(await taskRow(task.id)).toMatchObject({ status: 'agent_review', reviewRounds: 0, leaseRunId: null })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge', reviewRounds: 0, leaseRunId: null })
     const updated = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}`).then(r => r.json()) as Task
     expect(updated.acceptanceCriteria[0]!.met).toBe(true)
     // The commit has its verdict, so the reviewer isn't started again

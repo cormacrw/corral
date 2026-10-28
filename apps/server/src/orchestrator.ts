@@ -3,7 +3,7 @@ import {
   ACTIVE_RUN_STATES,
   transition,
   taskRef,
-  richTextToPlainText,
+  richTextToMarkdown,
   type Actor,
   type RunOutcome,
   type RunState
@@ -102,7 +102,6 @@ export class Orchestrator implements RunnerHandlers {
       events: deps.events,
       github: deps.github,
       runner: deps.runner,
-      onEpicFinished: epicId => this.plans?.deliverySummary(epicId) ?? Promise.resolve(),
       ...(deps.now && { now: deps.now })
     })
   }
@@ -573,7 +572,7 @@ export class Orchestrator implements RunnerHandlers {
     const allowed: Record<string, readonly string[]> = {
       developer: ['get_task', 'add_comment', 'attach_evidence', 'report_outcome'],
       reviewer: ['get_task', 'add_comment', 'get_evidence', 'report_outcome'],
-      pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'ask_question', 'propose_plan', 'flag_stale_docs']
+      pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
     }
     if (!allowed[role]?.includes(tool)) throw new ToolError(`The ${role} can’t use ${tool}`)
     if (role === 'pm') {
@@ -611,7 +610,7 @@ export class Orchestrator implements RunnerHandlers {
       ref: taskRef(ctx.project.prefix, task.number),
       title: task.title,
       status: task.status,
-      description: richTextToPlainText(task.description),
+      description: richTextToMarkdown(task.description),
       branch: task.branch,
       reviewRound: task.reviewRounds,
       criteria: criteria.map(c => ({ id: c.id, text: c.text })),
@@ -704,8 +703,8 @@ export class Orchestrator implements RunnerHandlers {
 
   // flows.md steps 6–7: record the verdict for this commit. Changes
   // requested goes through core (round cap → Blocked) and the feedback is
-  // posted as a comment; an approval leaves the task in Agent review for the
-  // merge orchestrator's CI and gate checks.
+  // posted as a comment; an approval moves the task to Human review or
+  // Ready to merge, where the merge orchestrator takes over.
   async #review(ctx: RunContext, report: OutcomeReport, verdict: 'approved' | 'changes_requested') {
     const { db } = this.#d
     const task = ctx.task!
@@ -721,7 +720,10 @@ export class Orchestrator implements RunnerHandlers {
       throw new ToolError('Not recorded. An approval needs every criterion met; otherwise report changes_requested.')
     }
     const kept = criteria.map(c => verdicts.find(v => v.criterionId === c.id)!).map(v => ({ criterionId: v.criterionId, met: v.met, note: v.note ?? '' }))
-    const feedback = feedbackComment(report.summary, kept, criteria)
+    // An approval is a short note; the per-criterion notes are kept on the
+    // review and shown next to the evidence. Changes requested spells out
+    // every criterion for the developer.
+    const feedback = verdict === 'approved' ? `Approved: all ${kept.length} criteria met. ${report.summary.trim()}`.trim() : feedbackComment(report.summary, kept, criteria)
 
     await db.transaction(async (tx) => {
       const locked = await lockTask(tx, task.id)
@@ -735,16 +737,16 @@ export class Orchestrator implements RunnerHandlers {
         projectId: ctx.project.id, taskId: task.id, actor: this.#actor(ctx), action: 'review.recorded',
         detail: { runId: ctx.run.id, verdict, headSha, round: locked.task.reviewRounds, met: kept.filter(v => v.met).length, of: kept.length }
       })
-      if (verdict === 'changes_requested') {
-        await applyTransition(tx, locked.task, locked.project, { type: 'changes_requested' }, server, { event: 'changes_requested', runId: ctx.run.id, headSha })
-      }
+      // Changes requested → the developer; approved → Human review when
+      // flagged, otherwise Ready to merge (D10)
+      await applyTransition(tx, locked.task, locked.project, { type: verdict === 'approved' ? 'review_approved' : 'changes_requested' }, server, { event: verdict === 'approved' ? 'review_approved' : 'changes_requested', runId: ctx.run.id, headSha })
       await this.#endRunIn(tx, ctx, { state: 'completed', outcome: verdict, summary: report.summary, headSha })
     })
     this.#finished(ctx, `Review recorded: ${verdict}`)
     return {
       ok: true,
       message: verdict === 'approved'
-        ? 'Approval recorded. Corral checks CI and the merge gates next. You can stop now.'
+        ? 'Approval recorded. Corral handles human review, CI and the merge from here. You can stop now.'
         : 'Changes requested; your feedback was sent to the developer. You can stop now.'
     }
   }
@@ -811,18 +813,27 @@ export class Orchestrator implements RunnerHandlers {
 
   #prBody(ref: string, title: string, summary: string, criteria: { id: string, text: string }[], attached: { criterionId: string | null }[]): string {
     const link = `${this.#d.publicUrl}/tasks/${ref}`
+    // Table cells can't hold newlines or bare pipes
+    const cell = (text: string) => text.replace(/\s*\n\s*/g, ' ').replaceAll('|', '\\|')
     return [
-      summary,
+      '## Summary',
       '',
-      `**Corral task:** [${ref} ${title}](${link})`,
+      summary.trim(),
       '',
-      '### Acceptance criteria',
+      '## Acceptance criteria',
+      '',
+      '| Criterion | Evidence |',
+      '| --- | --- |',
       ...criteria.map((c) => {
         const n = attached.filter(e => e.criterionId === c.id).length
-        return `- ${c.text} (${n} evidence item${n === 1 ? '' : 's'})`
+        return `| ${cell(c.text)} | ${n} item${n === 1 ? '' : 's'} |`
       }),
       '',
-      `Evidence: [open in Corral](${link}?evidence=1)`
+      `Screenshots, logs and the reviewer's verdicts are on the [evidence page](${link}?evidence=1).`,
+      '',
+      '---',
+      '',
+      `Corral task [${ref}: ${cell(title)}](${link})`
     ].join('\n')
   }
 

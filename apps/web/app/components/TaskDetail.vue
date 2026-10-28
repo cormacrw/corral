@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { AuditEntry, Comment, Evidence, Review, Task } from '@corral/contracts'
+import type { EditorToolbarItem } from '@nuxt/ui'
 import type { TaskPriority, TaskStatus } from '@corral/core'
 import { availableEvents } from '@corral/core'
 import { api, ApiError } from '~/composables/useApi'
@@ -11,6 +12,7 @@ const props = defineProps<{ taskRef: string, mode: 'flyout' | 'page' }>()
 const emit = defineEmits<{ close: [] }>()
 
 const live = useLive()
+const flyout = useTaskFlyout()
 const toast = useToast()
 const task = ref<Task | null>(null)
 const comments = ref<Comment[]>([])
@@ -25,12 +27,14 @@ const editingDescription = ref(false)
 // The editor's JSON document; its inner shape is the editor's business
 const descriptionDraft = ref<{ type: 'doc', content?: never[] }>({ type: 'doc', content: [] })
 const newCriterion = ref('')
-const tab = ref<'activity' | 'evidence' | 'history'>('activity')
+// PR bodies link to ?evidence=1
+const tab = ref<'activity' | 'evidence' | 'history'>(useRoute().query.evidence ? 'evidence' : 'activity')
 const confirmDelete = ref(false)
 let savedTimer: ReturnType<typeof setTimeout> | null = null
 
 const project = computed(() => live.state.value.projects.find(p => p.id === task.value?.projectId) ?? null)
 const number = computed(() => task.value?.number ?? 0)
+const epic = computed(() => task.value?.epicId ? live.state.value.epics[task.value.projectId]?.find(e => e.id === task.value!.epicId) ?? null : null)
 const slug = computed(() => project.value?.slug ?? '')
 
 async function load() {
@@ -165,12 +169,61 @@ async function removeDependency(ref: string) {
 const dependencyTask = (ref: string) => (project.value ? live.state.value.tasks[project.value.id] ?? [] : []).find(t => t.ref === ref)
 
 function startEditDescription() {
-  descriptionDraft.value = (task.value?.description ?? { type: 'doc', content: [] }) as { type: 'doc' }
+  descriptionDraft.value = structuredClone(toRaw(task.value?.description ?? { type: 'doc', content: [] })) as { type: 'doc' }
   editingDescription.value = true
 }
+function onDescriptionClick(event: MouseEvent) {
+  // Following a link or selecting text to copy shouldn't open the editor
+  if ((event.target as HTMLElement).closest('a')) return
+  if (window.getSelection()?.toString()) return
+  startEditDescription()
+}
+// The editor's defaults suit a full page; a task's description sits in a
+// narrow column at body text size
+const descriptionUi = {
+  base: 'text-sm sm:px-0 *:my-2 [&_p]:leading-6 [&_h1]:text-lg [&_h2]:text-base [&_h3]:text-sm [&_h2>code]:text-sm [&_h3>code]:text-sm [&_li]:my-0.5 [&_pre]:px-3 [&_pre]:py-2 [&_pre]:text-xs/5 [&_code]:text-xs'
+}
+const toolbarItems: EditorToolbarItem[][] = [
+  [
+    { 'kind': 'mark', 'mark': 'bold', 'icon': 'i-lucide-bold', 'aria-label': 'Bold' },
+    { 'kind': 'mark', 'mark': 'italic', 'icon': 'i-lucide-italic', 'aria-label': 'Italic' },
+    { 'kind': 'mark', 'mark': 'code', 'icon': 'i-lucide-code', 'aria-label': 'Inline code' }
+  ],
+  [
+    { 'kind': 'heading', 'level': 2, 'icon': 'i-lucide-heading-2', 'aria-label': 'Heading' },
+    { 'kind': 'bulletList', 'icon': 'i-lucide-list', 'aria-label': 'Bulleted list' },
+    { 'kind': 'orderedList', 'icon': 'i-lucide-list-ordered', 'aria-label': 'Numbered list' },
+    { 'kind': 'codeBlock', 'icon': 'i-lucide-square-code', 'aria-label': 'Code block' },
+    { 'kind': 'link', 'icon': 'i-lucide-link', 'aria-label': 'Link' }
+  ]
+] as const
 async function saveDescription() {
-  await patch({ description: descriptionDraft.value as { type: 'doc' } | null })
+  // Enter at the end leaves empty paragraphs behind
+  const content = [...(descriptionDraft.value.content ?? [])] as { type: string, content?: unknown[] }[]
+  while (content.length > 0 && content.at(-1)!.type === 'paragraph' && !content.at(-1)!.content?.length) content.pop()
+  await patch({ description: { ...descriptionDraft.value, content } as { type: 'doc' } })
   editingDescription.value = false
+}
+
+// A Draft from a plan: the task itself, without the work around it, and a
+// choice of where it goes
+const isDraft = computed(() => task.value?.status === 'draft')
+// Merged is final (D10): the task reads as it shipped; only comments change
+const readonly = computed(() => task.value?.status === 'merged')
+const placing = ref(false)
+async function place(type: 'approve' | 'accept') {
+  if (!task.value) return
+  placing.value = true
+  try {
+    task.value = await api.tasks.transition(slug.value, number.value, { type })
+    toast.add({ title: `${task.value.ref} added to the ${type === 'approve' ? 'board' : 'Backlog'}`, color: 'success' })
+  } catch (e) {
+    if (e instanceof ApiError && e.body?.code === 'transition_rejected' && e.body.reason.code === 'not_ready') {
+      toast.add({ title: 'Not ready yet', description: `Needs: ${e.body.reason.problems.map(p => p.replaceAll('_', ' ')).join(', ')}`, color: 'warning' })
+    } else fail(e)
+  } finally {
+    placing.value = false
+  }
 }
 
 const agentHolds = computed(() => task.value && ['in_progress', 'blocked', 'agent_review', 'human_review'].includes(task.value.status))
@@ -202,7 +255,7 @@ async function remove() {
 
 function authorLabel(actor: Comment['author']): string {
   if (actor.kind === 'human') return 'You'
-  if (actor.kind === 'agent') return actor.role === 'pm' ? 'Juno' : actor.role === 'developer' ? (developer.value?.name ?? 'Developer') : (reviewer.value?.name ?? 'Reviewer')
+  if (actor.kind === 'agent') return actor.role === 'pm' ? (live.state.value.agents.find(a => a.role === 'pm')?.name ?? 'PM') : actor.role === 'developer' ? (developer.value?.name ?? 'Developer') : (reviewer.value?.name ?? 'Reviewer')
   return 'Corral'
 }
 function historyText(entry: AuditEntry): string {
@@ -218,7 +271,7 @@ function historyText(entry: AuditEntry): string {
     case 'branch.update_requested': return 'asked GitHub to update the branch from the base'
     case 'branch.head_moved': return `branch moved to ${String(d.to).slice(0, 10)}${d.approvalKept ? ' (approval kept)' : ''}`
     case 'worktrees.cleaned': return 'worktrees removed on the runner'
-    case 'task.human_approved': return 'approved and merged'
+    case 'task.human_approved': return 'approved the merge'
     case 'task.deleted': return 'deleted the task'
     case 'run.stopped': return 'stopped the run'
     default: return entry.action
@@ -231,7 +284,47 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
   <div class="flex h-full min-h-0 flex-col">
     <header class="flex h-14 shrink-0 items-center gap-2 border-b border-default px-4">
       <template v-if="props.mode === 'flyout'">
-        <span class="text-sm text-muted">{{ props.taskRef }}</span>
+        <UButton
+          v-if="flyout.canGoBack.value"
+          icon="i-lucide-arrow-left"
+          variant="ghost"
+          color="neutral"
+          size="sm"
+          aria-label="Back"
+          class="-ms-2"
+          @click="flyout.back()"
+        />
+        <nav
+          aria-label="Breadcrumb"
+          class="flex min-w-0 items-center gap-1 text-sm text-muted"
+        >
+          <template v-if="epic">
+            <button
+              type="button"
+              class="max-w-48 truncate hover:text-highlighted hover:underline"
+              :title="epic.title"
+              @click="flyout.openEpic(epic.id)"
+            >
+              {{ epic.title }}
+            </button>
+            <UIcon
+              name="i-lucide-chevron-right"
+              class="size-4 shrink-0"
+              aria-hidden="true"
+            />
+          </template>
+          <span
+            class="shrink-0"
+            aria-current="page"
+          >{{ props.taskRef }}</span>
+        </nav>
+        <UBadge
+          v-if="isDraft"
+          label="Draft"
+          color="neutral"
+          variant="subtle"
+          size="sm"
+        />
         <span
           v-if="saved"
           class="text-xs text-success"
@@ -264,7 +357,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
         </div>
       </template>
       <template v-else>
-        <UBreadcrumb :items="[{ label: 'Board', to: project ? `/projects/${project.slug}/board` : '/' }, { label: props.taskRef }]" />
+        <UBreadcrumb :items="[{ label: 'Board', to: project ? `/projects/${project.slug}/board` : '/' }, ...(epic ? [{ label: epic.title, to: `/epics/${epic.id}` }] : []), { label: props.taskRef }]" />
         <span
           v-if="saved"
           class="ms-2 text-xs text-success"
@@ -295,16 +388,57 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
       :class="['min-h-0 flex-1 overflow-y-auto', props.mode === 'page' ? 'mx-auto grid w-full max-w-[1200px] gap-8 p-6 max-[900px]:grid-cols-1 min-[900px]:grid-cols-[1fr_260px]' : 'p-4']"
     >
       <div class="flex min-w-0 flex-col gap-5">
+        <h2
+          v-if="readonly"
+          class="px-1 py-0.5 text-lg font-semibold text-highlighted"
+        >
+          {{ task.title }}
+        </h2>
         <input
+          v-else
           :value="task.title"
           class="w-full rounded-md bg-transparent px-1 py-0.5 text-lg font-semibold text-highlighted hover:bg-elevated focus:ring-2 focus:ring-primary focus:outline-none"
           aria-label="Title"
           @change="patch({ title: ($event.target as HTMLInputElement).value })"
         >
 
+        <p
+          v-if="readonly"
+          class="flex items-center gap-1.5 text-xs text-muted"
+        >
+          <UIcon
+            name="i-lucide-lock"
+            class="size-3.5"
+          />
+          Merged, so read-only. You can still comment.
+        </p>
+
+        <div
+          v-if="isDraft"
+          class="flex flex-wrap items-center gap-2 rounded-lg border border-default bg-muted px-3 py-2 text-sm"
+        >
+          <span class="me-auto text-muted">Proposed in a plan. Only you can see it until you choose.</span>
+          <UButton
+            label="Add to board"
+            icon="i-lucide-kanban"
+            size="sm"
+            :loading="placing"
+            @click="place('approve')"
+          />
+          <UButton
+            label="Add to backlog"
+            icon="i-lucide-list"
+            size="sm"
+            variant="outline"
+            color="neutral"
+            :disabled="placing"
+            @click="place('accept')"
+          />
+        </div>
+
         <dl
           v-if="props.mode === 'flyout'"
-          class="grid grid-cols-[104px_1fr] items-center gap-x-3 gap-y-2 text-sm"
+          class="grid grid-cols-[112px_1fr] gap-x-4 gap-y-1 text-sm"
         >
           <TaskProperties
             :task="task"
@@ -315,6 +449,8 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
             :type-options="typeOptions"
             :developer="developer"
             :reviewer="reviewer"
+            :draft="isDraft"
+            :readonly="readonly"
             @status="changeStatus"
             @patch="patch"
           />
@@ -344,6 +480,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
                 size="xs"
               />
               <UButton
+                v-if="!readonly"
                 icon="i-lucide-x"
                 size="xs"
                 variant="ghost"
@@ -361,46 +498,39 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
             Nothing
           </p>
           <USelectMenu
+            v-if="!readonly"
             :items="dependencyChoices"
             value-key="value"
             placeholder="Add dependency"
             icon="i-lucide-plus"
             variant="ghost"
             size="sm"
-            class="mt-1"
+            class="mt-1 -ms-2.5"
             :search-input="{ placeholder: 'Search tasks' }"
             @update:model-value="addDependency($event as number | null)"
           />
         </section>
 
         <section>
-          <div class="mb-1 flex items-center justify-between">
-            <h3 class="text-xs font-medium text-muted">
-              Description
-            </h3>
-            <UButton
-              v-if="!editingDescription"
-              label="Edit"
-              size="xs"
-              variant="ghost"
-              color="neutral"
-              @click="startEditDescription"
-            />
-          </div>
+          <h3 class="mb-1 text-xs font-medium text-muted">
+            Description
+          </h3>
           <template v-if="editingDescription">
             <UEditor
+              v-slot="{ editor }"
               v-model="descriptionDraft"
               content-type="json"
+              autofocus="end"
               class="rounded-md ring-2 ring-primary"
+              :ui="{ ...descriptionUi, base: `${descriptionUi.base} min-h-24 px-3 py-2 sm:px-3` }"
               placeholder="Describe the task…"
+              @keydown.esc="editingDescription = false"
             >
-              <template #default="{ editor }">
-                <UEditorToolbar
-                  :editor="editor"
-                  :items="[[{ kind: 'mark', type: 'bold' }, { kind: 'mark', type: 'italic' }, { kind: 'mark', type: 'code' }], [{ kind: 'heading', level: 2 }, { kind: 'bulletList' }, { kind: 'orderedList' }, { kind: 'codeBlock' }, { kind: 'link' }]]"
-                  class="border-b border-default"
-                />
-              </template>
+              <UEditorToolbar
+                :editor="editor"
+                :items="toolbarItems"
+                class="border-b border-default px-1 py-1"
+              />
             </UEditor>
             <div class="mt-2 flex justify-end gap-2">
               <UButton
@@ -417,14 +547,24 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
               />
             </div>
           </template>
-          <UEditor
+          <!-- Click anywhere on the description to edit it; links still open -->
+          <div
             v-else
-            :model-value="(task.description ?? { type: 'doc', content: [] }) as never"
-            content-type="json"
-            :editable="false"
-            placeholder="No description"
-            class="text-sm"
-          />
+            :role="readonly ? undefined : 'button'"
+            :tabindex="readonly ? undefined : 0"
+            :aria-label="readonly ? undefined : 'Edit description'"
+            :class="['-mx-2 rounded-md px-2 py-1', !readonly && 'cursor-text hover:bg-elevated focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none']"
+            @click="!readonly && onDescriptionClick($event)"
+            @keydown.enter.self.prevent="!readonly && startEditDescription()"
+          >
+            <UEditor
+              :model-value="(task.description ?? { type: 'doc', content: [] }) as never"
+              content-type="json"
+              :editable="false"
+              placeholder="Add a description…"
+              :ui="{ base: `${descriptionUi.base} [&>p:last-child:not(:first-child):has(>br:only-child)]:hidden` }"
+            />
+          </div>
           <p
             v-if="agentHolds && task.lease"
             class="mt-1 text-xs text-muted"
@@ -450,13 +590,20 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
                 :class="['mt-1 size-4 shrink-0', criterion.met ? 'text-success' : criterion.met === false ? 'text-error' : 'text-dimmed']"
                 :aria-label="criterion.met ? 'Met' : criterion.met === false ? 'Not met' : 'Open'"
               />
+              <MarkdownText
+                v-if="readonly"
+                :text="criterion.text"
+                class="min-w-0 flex-1 px-1"
+              />
               <input
+                v-else
                 :value="criterion.text"
                 class="min-w-0 flex-1 rounded bg-transparent px-1 hover:bg-elevated focus:ring-2 focus:ring-primary focus:outline-none"
                 :aria-label="`Criterion: ${criterion.text}`"
                 @change="saveCriterion(criterion.id, ($event.target as HTMLInputElement).value)"
               >
               <UButton
+                v-if="!readonly"
                 icon="i-lucide-x"
                 size="xs"
                 variant="ghost"
@@ -467,6 +614,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
             </li>
           </ul>
           <form
+            v-if="!readonly"
             class="mt-2 flex gap-2"
             @submit.prevent="addCriterion"
           >
@@ -490,7 +638,10 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
           </p>
         </section>
 
-        <section class="flex min-h-0 flex-col">
+        <section
+          v-if="!isDraft"
+          class="flex min-h-0 flex-col"
+        >
           <UTabs
             v-model="tab"
             :items="[{ label: 'Activity', value: 'activity' }, { label: `Evidence (${evidence.length})`, value: 'evidence' }, { label: 'History', value: 'history' }]"
@@ -507,8 +658,8 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
               :key="comment.id"
               class="flex gap-2"
             >
-              <UAvatar
-                :text="authorLabel(comment.author).slice(0, 2).toUpperCase()"
+              <AgentAvatar
+                :name="authorLabel(comment.author)"
                 size="xs"
               />
               <div class="min-w-0 flex-1 rounded-lg bg-elevated px-3 py-2 text-sm">
@@ -522,9 +673,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
                     variant="subtle"
                   />
                 </div>
-                <p class="whitespace-pre-wrap">
-                  {{ comment.body }}
-                </p>
+                <MarkdownText :text="comment.body" />
               </div>
             </div>
             <p
@@ -587,7 +736,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
           <UModal
             v-model:open="confirmDelete"
             :title="`Delete ${task.ref}?`"
-            :description="task.status === 'backlog' ? 'Backlog tasks are deleted outright.' : 'Stops any run, closes the PR and deletes the branch when safe. The task and its history are kept but hidden. Dependents become Blocked.'"
+            :description="task.status === 'backlog' || task.status === 'draft' ? `${STATUS[task.status].label} tasks are deleted outright.` : 'Stops any run, closes the PR and deletes the branch when safe. The task and its history are kept but hidden. Dependents become Blocked.'"
           >
             <template #footer>
               <UButton
@@ -619,6 +768,8 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
           :type-options="typeOptions"
           :developer="developer"
           :reviewer="reviewer"
+          :draft="isDraft"
+          :readonly="readonly"
           stacked
           @status="changeStatus"
           @patch="patch"

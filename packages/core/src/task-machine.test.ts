@@ -29,14 +29,18 @@ const content = { title: 'Add login', description: 'Email + password', acceptanc
 // One valid example of every event, with facts that pass its guard
 const validEvents: Record<TaskEventType, TaskEvent> = {
   approve: { type: 'approve', content },
+  accept: { type: 'accept' },
   send_back: { type: 'send_back' },
   claim: { type: 'claim', dependencyStatuses: ['merged'] },
   submit: { type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true },
   changes_requested: { type: 'changes_requested' },
+  review_approved: { type: 'review_approved' },
+  human_approve: { type: 'human_approve' },
   ci_failed: { type: 'ci_failed' },
   base_conflict: { type: 'base_conflict' },
-  gates_passed: { type: 'gates_passed', gates: passingGates },
-  merged: { type: 'merged', gates: passingGates, humanApprovedBy: 'u1' },
+  head_moved: { type: 'head_moved' },
+  merged: { type: 'merged', gates: passingGates },
+  merged_outside: { type: 'merged_outside' },
   human_request_changes: { type: 'human_request_changes' },
   block: { type: 'block', reason: 'Requirements contradict each other' },
   fail: { type: 'fail', reason: 'Repository not accessible' },
@@ -47,26 +51,28 @@ const validEvents: Record<TaskEventType, TaskEvent> = {
 // The D10 transition table, written out independently of TRANSITION_RULES:
 // event → [allowed from-statuses, actor that may trigger it]
 const d10: Record<TaskEventType, [TaskStatus[], Actor]> = {
-  approve: [['backlog'], human],
+  approve: [['draft', 'backlog'], human],
+  accept: [['draft'], human],
   send_back: [['ready'], human],
   claim: [['ready'], scheduler],
   submit: [['in_progress'], server],
   changes_requested: [['agent_review'], server],
-  ci_failed: [['agent_review'], server],
-  base_conflict: [['agent_review'], server],
-  gates_passed: [['agent_review'], server],
-  merged: [['agent_review', 'human_review'], server],
-  human_request_changes: [['human_review'], human],
-  block: [['ready', 'in_progress', 'agent_review', 'human_review'], server],
-  fail: [['in_progress', 'agent_review'], server],
+  review_approved: [['agent_review'], server],
+  human_approve: [['human_review'], human],
+  ci_failed: [['ready_to_merge'], server],
+  base_conflict: [['ready_to_merge'], server],
+  head_moved: [['ready_to_merge'], server],
+  merged: [['ready_to_merge'], server],
+  merged_outside: [['agent_review', 'human_review', 'ready_to_merge'], server],
+  human_request_changes: [['human_review', 'ready_to_merge'], human],
+  block: [['ready', 'in_progress', 'agent_review', 'human_review', 'ready_to_merge'], server],
+  fail: [['in_progress', 'agent_review', 'ready_to_merge'], server],
   run_failed: [['in_progress', 'agent_review'], server],
   resolve: [['blocked', 'failed'], human]
 }
 
 // Table rows whose guard needs more than the default state
-const stateFor: Partial<Record<TaskEventType, Partial<TaskState>>> = {
-  gates_passed: { humanReview: true }
-}
+const stateFor: Partial<Record<TaskEventType, Partial<TaskState>>> = {}
 
 function task(status: TaskStatus, overrides: Partial<TaskState> = {}): TaskState {
   // Flagged tasks are the only ones that may reach Human review
@@ -121,6 +127,11 @@ describe('createTask', () => {
     expect(expectOk(createTask(pm, true))).toEqual(task('backlog', { humanReview: true }))
   })
 
+  it('starts the PM\'s plan tasks as Drafts, and only the PM\'s', () => {
+    expect(expectOk(createTask(pm, false, true)).status).toBe('draft')
+    expect(expectOk(createTask(human, false, true)).status).toBe('backlog')
+  })
+
   it('rejects anyone else', () => {
     expect(createTask(developer, false).ok).toBe(false)
     expect(createTask(server, false).ok).toBe(false)
@@ -131,6 +142,13 @@ describe('approve', () => {
   it('requires the Definition of Ready', () => {
     const result = transition(task('backlog'), { type: 'approve', content: { ...content, acceptanceCriteria: [] } }, human)
     expect(result).toEqual({ ok: false, error: { code: 'not_ready', problems: ['missing_acceptance_criteria'] } })
+  })
+})
+
+describe('drafts', () => {
+  it('go to the board on approval, or to the Backlog on accept', () => {
+    expect(expectOk(transition(task('draft'), validEvents.approve, human)).status).toBe('ready')
+    expect(expectOk(transition(task('draft'), validEvents.accept, human)).status).toBe('backlog')
   })
 })
 
@@ -173,7 +191,7 @@ describe('review rounds', () => {
   })
 
   it('does not count CI failures or human change requests as review rounds', () => {
-    expect(expectOk(transition(task('agent_review'), validEvents.ci_failed, server)).reviewRounds).toBe(0)
+    expect(expectOk(transition(task('ready_to_merge'), validEvents.ci_failed, server)).reviewRounds).toBe(0)
     expect(expectOk(transition(task('human_review'), validEvents.human_request_changes, human)).reviewRounds).toBe(0)
   })
 })
@@ -190,42 +208,35 @@ describe('failed runs', () => {
   })
 })
 
-describe('human review and merging', () => {
-  it('sends flagged tasks to Human review once gates pass', () => {
-    const flagged = task('agent_review', { humanReview: true })
-    expect(expectOk(transition(flagged, validEvents.gates_passed, server)).status).toBe('human_review')
+describe('approval and merging', () => {
+  it('sends a flagged task to Human review when the reviewer approves', () => {
+    expect(expectOk(transition(task('agent_review', { humanReview: true }), validEvents.review_approved, server)).status).toBe('human_review')
   })
 
-  it('does not send unflagged tasks to Human review', () => {
-    expect(transition(task('agent_review'), validEvents.gates_passed, server))
-      .toEqual({ ok: false, error: { code: 'not_flagged_for_human_review' } })
+  it('sends an unflagged task straight to Ready to merge', () => {
+    expect(expectOk(transition(task('agent_review'), validEvents.review_approved, server)).status).toBe('ready_to_merge')
   })
 
-  it('never auto-merges a flagged task', () => {
-    const flagged = task('agent_review', { humanReview: true })
-    expect(transition(flagged, validEvents.merged, server))
-      .toEqual({ ok: false, error: { code: 'human_review_required' } })
+  it('moves a human-approved task to Ready to merge', () => {
+    expect(expectOk(transition(task('human_review'), validEvents.human_approve, human)).status).toBe('ready_to_merge')
   })
 
-  it('merges an unflagged task straight from Agent review', () => {
-    const event: TaskEvent = { type: 'merged', gates: passingGates, humanApprovedBy: null }
-    expect(expectOk(transition(task('agent_review'), event, server)).status).toBe('merged')
+  it('sends a task back for a fresh review when a new commit lands', () => {
+    expect(expectOk(transition(task('ready_to_merge'), validEvents.head_moved, server)).status).toBe('agent_review')
   })
 
-  it('needs a human approval to merge from Human review', () => {
-    const event: TaskEvent = { type: 'merged', gates: passingGates, humanApprovedBy: null }
-    expect(transition(task('human_review'), event, server))
-      .toEqual({ ok: false, error: { code: 'human_approval_missing' } })
+  it('lets the human pull a task back from Ready to merge', () => {
+    expect(expectOk(transition(task('ready_to_merge'), validEvents.human_request_changes, human)).status).toBe('in_progress')
   })
 
   it('lists every failed gate', () => {
-    const event: TaskEvent = {
-      type: 'merged',
-      gates: { ...passingGates, requiredChecksPassed: false, mergeable: false },
-      humanApprovedBy: null
-    }
-    expect(transition(task('agent_review'), event, server))
+    const event: TaskEvent = { type: 'merged', gates: { ...passingGates, requiredChecksPassed: false, mergeable: false } }
+    expect(transition(task('ready_to_merge'), event, server))
       .toEqual({ ok: false, error: { code: 'gates_failed', gates: ['requiredChecksPassed', 'mergeable'] } })
+  })
+
+  it('records a merge done outside Corral from any review status', () => {
+    expect(expectOk(transition(task('agent_review', { humanReview: true }), validEvents.merged_outside, server)).status).toBe('merged')
   })
 })
 
@@ -258,7 +269,8 @@ describe('resolve', () => {
 describe('availableEvents', () => {
   it('offers the human what D10 lets them do', () => {
     expect(availableEvents(task('backlog'), human)).toEqual(['approve'])
-    expect(availableEvents(task('human_review'), human)).toEqual(['human_request_changes'])
+    expect(availableEvents(task('draft'), human)).toEqual(['approve', 'accept'])
+    expect(availableEvents(task('human_review'), human)).toEqual(['human_approve', 'human_request_changes'])
     expect(availableEvents(task('blocked'), human)).toEqual(['resolve'])
   })
 

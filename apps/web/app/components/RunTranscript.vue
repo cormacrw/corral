@@ -84,13 +84,12 @@ watch(() => props.events.length, async () => {
           <span class="max-w-[80%] truncate">{{ entry.text }}</span>
           <span class="h-px flex-1 bg-border" />
         </div>
-        <p
+        <MarkdownText
           v-else-if="entry.type === 'message'"
           :key="`m${entry.key}`"
-          class="text-sm whitespace-pre-wrap text-highlighted"
-        >
-          {{ entry.text }}
-        </p>
+          :text="entry.text ?? ''"
+          class="text-sm text-highlighted"
+        />
         <div
           v-else
           :key="`t${entry.key}`"

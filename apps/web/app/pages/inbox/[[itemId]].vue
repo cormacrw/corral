@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import type { Inbox, InboxActionInput, InboxItem, Task } from '@corral/contracts'
+import type { Evidence, Inbox, InboxActionInput, InboxItem, Review, Task } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { timeAgo } from '~/utils/labels'
+import { markdownToPlainText } from '~/utils/markdown'
 
 // The Inbox (design/inbox.md, D11): list, selected item, action tray, task flyout
 const route = useRoute()
@@ -21,6 +22,8 @@ const text = ref('')
 const busy = ref(false)
 const actionError = ref<string | null>(null)
 const task = ref<Task | null>(null)
+const evidence = ref<Evidence[]>([])
+const reviews = ref<Review[]>([])
 const showTask = ref(true)
 
 async function load() {
@@ -50,15 +53,29 @@ watch(selected, async (item) => {
   action.value = null
   text.value = ''
   actionError.value = null
+  // Nothing selected (e.g. the last item was just resolved): nothing to show beside it
+  if (!item) flyout.close()
   task.value = item ? await api.tasks.byRef(item.taskRef).catch(() => null) : null
-  if (item && showTask.value) flyout.open(item.taskRef)
+  // A human review carries its evidence in the message (design/inbox.md)
+  const slug = live.state.value.projects.find(p => p.id === task.value?.projectId)?.slug
+  if (item?.type === 'human_review' && task.value && slug) {
+    ;[evidence.value, reviews.value] = await Promise.all([
+      api.tasks.evidence(slug, task.value.number).catch(() => []),
+      api.tasks.reviews(slug, task.value.number).catch(() => [])
+    ])
+  } else {
+    evidence.value = []
+    reviews.value = []
+  }
+  // Following the selection, not a click of its own: no extra history entry
+  if (item && showTask.value) flyout.open(item.taskRef, { replace: true })
 }, { immediate: true })
 function select(item: InboxItem) {
   void router.push(`/inbox/${item.id}`)
 }
 function toggleTask() {
   showTask.value = !showTask.value
-  if (showTask.value && selected.value) flyout.open(selected.value.taskRef)
+  if (showTask.value && selected.value) flyout.open(selected.value.taskRef, { replace: true })
   else flyout.close()
 }
 
@@ -104,9 +121,17 @@ async function submit(message: string) {
       await api.inbox.act(selected.value.taskId, input)
       toast.add({ title: 'Done', description: submitLabel.value, color: 'success' })
     }
+    const actedOn = selected.value
+    const position = items.value.findIndex(i => i.id === actedOn.id)
     text.value = ''
     action.value = null
     await load()
+    // Resolved: move on to the next item that needs you, or to the empty
+    // state when that was the last one
+    if (!inbox.value?.needsYou.some(i => i.id === actedOn.id)) {
+      const next = inbox.value?.needsYou[Math.min(Math.max(position, 0), (inbox.value?.needsYou.length ?? 1) - 1)]
+      void router.replace(next ? `/inbox/${next.id}` : '/inbox')
+    }
   } catch (e) {
     actionError.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -126,13 +151,8 @@ const typeBadge = (type: InboxItem['type']) => ({
   <UDashboardPanel :ui="{ body: 'p-0' }">
     <div class="flex h-full min-h-0 max-md:flex-col">
       <div class="flex w-[380px] shrink-0 flex-col border-e border-default max-md:max-h-[360px] max-md:w-full max-md:border-e-0 max-md:border-b">
-        <div class="flex flex-col gap-2 border-b border-default p-3">
-          <UInput
-            v-model="search"
-            placeholder="Search"
-            icon="i-lucide-search"
-            size="sm"
-          />
+        <!-- The tabs row lines up with the item and flyout headers (56px) -->
+        <div class="flex h-14 shrink-0 items-center border-b border-default px-3">
           <UTabs
             v-model="tab"
             :items="[
@@ -142,6 +162,16 @@ const typeBadge = (type: InboxItem['type']) => ({
             ]"
             size="xs"
             :content="false"
+            class="w-full"
+          />
+        </div>
+        <div class="border-b border-default p-3">
+          <UInput
+            v-model="search"
+            placeholder="Search"
+            icon="i-lucide-search"
+            size="sm"
+            class="w-full"
           />
         </div>
         <UAlert
@@ -185,7 +215,7 @@ const typeBadge = (type: InboxItem['type']) => ({
                   <span class="ms-auto">{{ timeAgo(item.at) }}</span>
                 </span>
                 <span class="block truncate text-sm font-medium">{{ item.subject }}</span>
-                <span class="line-clamp-2 text-xs text-muted">{{ item.preview }}</span>
+                <span class="line-clamp-2 text-xs text-muted">{{ markdownToPlainText(item.preview) }}</span>
                 <span class="mt-1 flex items-center gap-2">
                   <UBadge
                     :label="typeBadge(item.type).label"
@@ -214,16 +244,16 @@ const typeBadge = (type: InboxItem['type']) => ({
 
       <div class="flex min-w-0 flex-1 flex-col">
         <template v-if="selected">
-          <header class="flex items-start gap-3 border-b border-default p-4">
+          <header class="flex h-14 shrink-0 items-center gap-3 border-b border-default px-4">
             <AgentAvatar
               :name="selected.sender.name"
-              size="md"
+              size="sm"
             />
             <div class="min-w-0 flex-1">
-              <h1 class="truncate font-medium">
+              <h1 class="truncate text-sm font-medium">
                 {{ selected.subject }}
               </h1>
-              <div class="flex flex-wrap items-center gap-2 text-xs text-muted">
+              <div class="flex items-center gap-2 overflow-hidden text-xs whitespace-nowrap text-muted">
                 <UBadge
                   :label="typeBadge(selected.type).label"
                   :color="typeBadge(selected.type).color"
@@ -260,9 +290,10 @@ const typeBadge = (type: InboxItem['type']) => ({
                 title="Already resolved"
                 description="This task changed status elsewhere."
               />
-              <p class="text-sm whitespace-pre-wrap">
-                {{ selected.body }}
-              </p>
+              <MarkdownText
+                :text="selected.body"
+                class="text-sm"
+              />
               <a
                 v-if="selected.prUrl"
                 :href="selected.prUrl"
@@ -285,13 +316,10 @@ const typeBadge = (type: InboxItem['type']) => ({
                   />
                 </div>
                 <EvidenceList
-                  :evidence="[]"
+                  :evidence="evidence"
                   :criteria="task.acceptanceCriteria"
-                  :reviews="task.latestReview ? [task.latestReview] : []"
+                  :reviews="reviews.length > 0 ? reviews : task.latestReview ? [task.latestReview] : []"
                 />
-                <p class="text-xs text-muted">
-                  Open Task details for the evidence files.
-                </p>
               </template>
               <NuxtLink
                 v-if="selected.type === 'activity'"
@@ -351,9 +379,17 @@ const typeBadge = (type: InboxItem['type']) => ({
         </template>
         <div
           v-else
-          class="flex flex-1 items-center justify-center p-6 text-sm text-muted"
+          class="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center text-sm text-muted"
         >
-          Pick an item.
+          <template v-if="inbox && inbox.needsYou.length === 0">
+            <UIcon
+              name="i-lucide-circle-check"
+              class="size-8 text-success"
+            />
+            <span class="font-medium text-default">All clear</span>
+            <span>Nothing needs you right now.</span>
+          </template>
+          <span v-else>Pick an item.</span>
         </div>
       </div>
       <TaskFlyout />

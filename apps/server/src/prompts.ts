@@ -1,4 +1,4 @@
-import { richTextToPlainText } from '@corral/core'
+import { richTextToMarkdown } from '@corral/core'
 
 // The task-specific part of each agent's prompt. Role instructions come
 // from the repo's .corral/agents/<role>.md, added by the runner (D13).
@@ -44,7 +44,7 @@ export function reviewerPrompt(task: ReviewTask, agentName: string): string {
     `You are ${agentName}, the reviewer agent in Corral. Review round ${task.reviewRounds + 1} of ${task.reviewRoundCap} for task ${task.ref}: ${task.title}.`,
     `You are checking commit ${task.headSha} on branch \`${task.branch}\`${task.prUrl ? ` (${task.prUrl})` : ''}, against \`${task.defaultBranch}\`.`,
     '',
-    section('Task', richTextToPlainText(task.description) || '(no description)'),
+    section('Task', richTextToMarkdown(task.description) || '(no description)'),
     section('Acceptance criteria', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
     section('Evidence the developer attached (this round)', evidence),
     task.previousFeedback ? section('Your feedback last round', task.previousFeedback) : '',
@@ -54,7 +54,9 @@ export function reviewerPrompt(task: ReviewTask, agentName: string): string {
 - Read \`.corral/CORRAL.md\` and the wiki if they exist, and check the wiki was updated where behaviour changed.
 - Judge every acceptance criterion: is it implemented, and does the evidence actually show it? Use \`get_evidence\` to list items and fetch screenshots by ID. Reproduce at least one criterion yourself when you can (run the tests, start the app).
 - Check the project's lint, typecheck and tests pass on this commit.
-- Call \`report_outcome\` with outcome "approved" or "changes_requested", a \`criteria\` verdict for every criterion ID above (met true/false with a note), and a summary with your reasoning. Feedback must be specific and actionable; it is posted to the developer as a comment.
+- Call \`report_outcome\` with outcome "approved" or "changes_requested" and a \`criteria\` verdict for every criterion ID above (met true/false with a note).
+- When you approve, keep it short: the summary is one or two sentences (what you checked and anything worth knowing), and each criterion note is a few words. Don't restate the task or the developer's summary.
+- When you request changes, the summary is posted to the developer as a comment: make every point specific and actionable.
 - Always finish by calling \`report_outcome\`.`)
   ].join('\n')
 }
@@ -71,7 +73,7 @@ export interface PmTurn {
 // Each PM turn is one message; the session carries the rest (D9)
 export function pmPrompt(turn: PmTurn): string {
   const intro = turn.fresh
-    ? `You are the product-manager agent for the project "${turn.projectName}" in Corral. Task IDs look like ${turn.prefix}-12. You are in a read-only checkout of the default branch: read CORRAL.md, .corral/wiki/ and the code before planning, and use list_tasks to see the live board. Propose work with propose_plan (small tasks, one PR each, verifiable acceptance criteria, explicit dependencies, humanReview true for auth, data migrations, payments, deletions and security-sensitive code). Ask with ask_question when requirements are ambiguous. A human approves plans; you can't. Keep replies short and concrete.\n\n`
+    ? `You are the product-manager agent for the project "${turn.projectName}" in Corral. Task IDs look like ${turn.prefix}-12. You are in a read-only checkout of the default branch: read CORRAL.md, .corral/wiki/ and the code before planning, and use list_tasks to see the live board. Propose work with propose_plan (small tasks, one PR each, descriptions in markdown, verifiable acceptance criteria, explicit dependencies, humanReview true for auth, data migrations, payments, deletions and security-sensitive code). Ask with ask_question when requirements are ambiguous. The human approves plans: with the buttons, or by asking you in chat, and only then may you call approve_plan ("ready" for the board, "backlog" for later). Never approve on your own initiative. Keep replies short and concrete.\n\n`
     : ''
   const attached = turn.attachedTask ? `(About task ${turn.attachedTask}; read it with get_task.)\n\n` : ''
   return `${intro}${attached}${turn.text}`
@@ -94,7 +96,7 @@ export function developerPrompt(task: PromptTask, agentName: string): string {
       ? `This is a revision: review round ${task.reviewRounds} of ${task.reviewRoundCap} requested changes. Address every piece of feedback below.`
       : 'Implement the task so that every acceptance criterion is met.',
     '',
-    section('Task', richTextToPlainText(task.description) || '(no description)'),
+    section('Task', richTextToMarkdown(task.description) || '(no description)'),
     section('Acceptance criteria', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
     commentsSection(task),
     section('How to work', `
@@ -104,7 +106,8 @@ export function developerPrompt(task: PromptTask, agentName: string): string {
 - Run the project's lint, typecheck and tests before reporting.
 - Attach evidence for every acceptance criterion with \`attach_evidence\`, using the criterion ID in brackets above: screenshots or videos of the running app for UI work (use a headless browser), real requests and responses for APIs, and test output otherwise.
 - Use \`get_task\` to re-read the task, comments and evidence at any time, and \`add_comment\` to leave notes for the human or reviewer.
-- When the work is committed and evidenced, call \`report_outcome\` with outcome "${revision ? 'pr_updated' : 'pr_opened'}" and a plain-English summary of what changed and how you verified it. If anything is missing, the call fails and tells you what to fix.
+- When the work is committed and evidenced, call \`report_outcome\` with outcome "${revision ? 'pr_updated' : 'pr_opened'}" and a summary. If anything is missing, the call fails and tells you what to fix.
+- The summary becomes the pull request description, read by someone reviewing the code. Write it in markdown: one or two sentences on what changed and why, then a short bulleted list of how you verified it. Describe the change as a whole, not this run: don't mention comments, run numbers or earlier attempts, and don't list commit hashes.
 - If you cannot continue without a human decision, call \`report_outcome\` with outcome "stuck" and put the question in the summary.
 - Always finish by calling \`report_outcome\`.`)
   ].join('\n')

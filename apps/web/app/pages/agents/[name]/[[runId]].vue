@@ -194,7 +194,7 @@ const projectName = (run: Run) => live.state.value.projects.find(p => p.id === r
                 type="button"
                 :aria-current="selected?.id === run.id ? 'true' : undefined"
                 :class="['flex w-full flex-col gap-0.5 border-b border-default px-3 py-2 text-start text-sm', selected?.id === run.id && 'bg-elevated', isLive(run) && 'border-s-2 border-s-primary']"
-                @click="router.push(`/agents/${name}/runs/${run.id}`)"
+                @click="router.push(`/agents/${name}/${run.id}`)"
               >
                 <span class="flex items-center gap-2">
                   <span class="font-mono text-xs text-muted">{{ run.taskRef ?? 'Plan' }}</span>
@@ -221,16 +221,18 @@ const projectName = (run: Run) => live.state.value.projects.find(p => p.id === r
 
         <div class="flex min-w-0 flex-1 flex-col">
           <template v-if="selected">
-            <header class="flex flex-wrap items-center gap-2 border-b border-default px-4 py-2 text-sm">
-              <span class="font-medium">{{ selected.taskRef ?? 'Plan' }} {{ selected.taskTitle ?? '' }}</span>
+            <!-- One line at the flyout header's height; long titles truncate -->
+            <header class="flex h-14 shrink-0 items-center gap-2 border-b border-default px-4 text-sm">
+              <span class="min-w-0 truncate font-medium">{{ selected.taskRef ?? 'Plan' }} {{ selected.taskTitle ?? '' }}</span>
               <UBadge
+                class="shrink-0"
                 :label="runBadge(selected).label"
                 :color="runBadge(selected).color"
                 variant="subtle"
                 size="xs"
               />
-              <span class="text-xs text-muted">Run #{{ selected.number }} · {{ duration(selected.startedAt, selected.endedAt, now) }} · {{ tokens((selected.inputTokens ?? 0) + (selected.outputTokens ?? 0)) }} tokens</span>
-              <div class="ms-auto flex gap-2">
+              <span class="min-w-0 truncate text-xs text-muted">Run #{{ selected.number }} · {{ duration(selected.startedAt, selected.endedAt, now) }} · {{ tokens((selected.inputTokens ?? 0) + (selected.outputTokens ?? 0)) }} tokens</span>
+              <div class="ms-auto flex shrink-0 gap-2">
                 <UButton
                   v-if="selected.taskRef"
                   label="Open task"

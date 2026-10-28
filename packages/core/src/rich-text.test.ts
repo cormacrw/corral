@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { richTextToPlainText } from './rich-text.ts'
+import { markdownToRichText, richTextToMarkdown, richTextToPlainText, upgradePlainMarkdown } from './rich-text.ts'
 
 describe('richTextToPlainText', () => {
   it('joins text nodes in document order', () => {
@@ -16,5 +16,45 @@ describe('richTextToPlainText', () => {
   it('returns an empty string for an empty or missing document', () => {
     expect(richTextToPlainText({ type: 'doc', content: [{ type: 'paragraph' }] })).toBe('')
     expect(richTextToPlainText(null)).toBe('')
+  })
+})
+
+describe('markdownToRichText', () => {
+  it('turns headings, marks, lists and code into editor nodes', () => {
+    const doc = markdownToRichText('## Goal\n\nAdd a **shared** header from `app.vue` & [docs](https://x.dev).\n\n- Home\n- Hello\n\n1. one\n\n```ts\nconst a = 1 < 2\n```')
+    expect(doc.content.map(n => n.type)).toEqual(['heading', 'paragraph', 'bulletList', 'orderedList', 'codeBlock'])
+    expect(doc.content[0]).toEqual({ type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Goal' }] })
+    expect(doc.content[1]!.content).toEqual([
+      { type: 'text', text: 'Add a ' },
+      { type: 'text', text: 'shared', marks: [{ type: 'bold' }] },
+      { type: 'text', text: ' header from ' },
+      { type: 'text', text: 'app.vue', marks: [{ type: 'code' }] },
+      { type: 'text', text: ' & ' },
+      { type: 'text', text: 'docs', marks: [{ type: 'link', attrs: { href: 'https://x.dev' } }] },
+      { type: 'text', text: '.' }
+    ])
+    expect(doc.content[2]!.content![1]).toEqual({ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hello' }] }] })
+    expect(doc.content[4]).toEqual({ type: 'codeBlock', attrs: { language: 'ts' }, content: [{ type: 'text', text: 'const a = 1 < 2' }] })
+  })
+
+  it('round-trips through richTextToMarkdown', () => {
+    const markdown = '## Goal\n\nAdd a **shared** header.\n\n- Home\n- Hello\n\n```ts\nconst a = 1\n```'
+    expect(richTextToMarkdown(markdownToRichText(markdown))).toBe(markdown)
+  })
+})
+
+describe('upgradePlainMarkdown', () => {
+  const plain = (...lines: string[]) => ({ type: 'doc', content: lines.map(text => ({ type: 'paragraph', content: [{ type: 'text', text }] })) })
+
+  it('re-reads markdown stored as one plain paragraph per line', () => {
+    expect(upgradePlainMarkdown(plain('## Goal', '- one', '- two'))).toEqual(markdownToRichText('## Goal\n- one\n- two'))
+  })
+
+  it('leaves prose and formatted documents alone', () => {
+    const prose = plain('Just a sentence.')
+    expect(upgradePlainMarkdown(prose)).toBe(prose)
+    const formatted = markdownToRichText('## Already **rich**')
+    expect(upgradePlainMarkdown(formatted)).toBe(formatted)
+    expect(upgradePlainMarkdown(null)).toBe(null)
   })
 })

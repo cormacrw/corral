@@ -1,11 +1,14 @@
 import {
   addCommentInput,
+  AVATAR_MAX_BYTES,
+  approvePlanInput,
   checkRepoInput,
   createProjectInput,
   createTaskInput,
   humanTransitionInput,
   inboxActionInput,
   patchAgentInput,
+  patchEpicInput,
   patchProjectInput,
   patchTaskInput,
   planMessageInput,
@@ -19,10 +22,13 @@ import {
 import type { Actor } from '@corral/core'
 import { schema, type Database } from '@corral/db'
 import { zValidator } from '@hono/zod-validator'
-import { Hono, type ValidationTargets } from 'hono'
+import { Hono, type Context, type ValidationTargets } from 'hono'
+import { bodyLimit } from 'hono/body-limit'
 import { streamSSE } from 'hono/streaming'
 import type { ZodType } from 'zod'
 import { ApiFailure, fromDatabaseError } from './errors.ts'
+import { checkAvatar, getProfile, readAvatar, setAgentAvatar, setUserAvatar } from './avatars.ts'
+import { getEpic, listEpics, patchEpic } from './epics.ts'
 import type { EventBus } from './events.ts'
 import { loadInbox } from './inbox.ts'
 import { createProject, findProjectBySlug, listProjects, patchProject, toProject } from './projects.ts'
@@ -114,6 +120,26 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     return task
   }
 
+  // The single human (D1 POC); hosting will take this from the session
+  const ownerId = () => {
+    if (actor.kind !== 'human') throw new ApiFailure(404, { code: 'not_found' })
+    return actor.userId
+  }
+  const publishAgent = async (id: string) => {
+    const agent = (await listAgents(db)).find(a => a.id === id)!
+    events.publish({ type: 'agent.updated', agent })
+    return agent
+  }
+  // The URL changes with the picture, so a served one never changes
+  const serveAvatar = (c: Context, avatar: { data: Uint8Array, type: string } | null) => {
+    if (!avatar) throw new ApiFailure(404, { code: 'not_found' })
+    return c.body(new Uint8Array(avatar.data), 200, { 'content-type': avatar.type, 'cache-control': 'private, max-age=31536000, immutable' })
+  }
+  const avatarBodyLimit = bodyLimit({
+    maxSize: AVATAR_MAX_BYTES,
+    onError: c => c.json<ApiErrorBody>({ error: { code: 'invalid_input', issues: [{ path: ['avatar'], message: 'The image is over 2 MB' }] } }, 413)
+  })
+
   return new Hono()
     .basePath('/api')
     .onError((error, c) => {
@@ -152,6 +178,19 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     })
 
     .get('/tasks/:ref', async c => c.json(await loadTask(db, (await findByRef(c.req.param('ref'))).taskId)))
+
+    .get('/projects/:slug/epics', async (c) => {
+      const project = await findProjectBySlug(db, c.req.param('slug'))
+      return c.json(await listEpics(db, project))
+    })
+
+    .get('/epics/:id', async c => c.json(await getEpic(db, c.req.param('id'))))
+
+    .patch('/epics/:id', validate('json', patchEpicInput), async (c) => {
+      const epic = await patchEpic(db, c.req.param('id'), c.req.valid('json'), actor)
+      events.publish({ type: 'epic.updated', epic })
+      return c.json(epic)
+    })
 
     .get('/projects/:slug/tasks', validate('query', taskListQuery), async (c) => {
       const project = await findProjectBySlug(db, c.req.param('slug'))
@@ -256,6 +295,32 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       return c.json(agent)
     })
 
+    // Profile pictures: the raw image as the body, with its content type
+    .put('/agents/:id/avatar', avatarBodyLimit, async (c) => {
+      const data = new Uint8Array(await c.req.arrayBuffer())
+      await setAgentAvatar(db, blobs, c.req.param('id'), { data, type: checkAvatar(data, c.req.header('content-type')) })
+      return c.json(await publishAgent(c.req.param('id')))
+    })
+    .delete('/agents/:id/avatar', async (c) => {
+      await setAgentAvatar(db, blobs, c.req.param('id'), null)
+      return c.json(await publishAgent(c.req.param('id')))
+    })
+    .get('/agents/:id/avatar', async c => serveAvatar(c, await readAvatar(db, blobs, { agentId: c.req.param('id') })))
+
+    .get('/me', async c => c.json(await getProfile(db, ownerId())))
+    .put('/me/avatar', avatarBodyLimit, async (c) => {
+      const data = new Uint8Array(await c.req.arrayBuffer())
+      const profile = await setUserAvatar(db, blobs, ownerId(), { data, type: checkAvatar(data, c.req.header('content-type')) })
+      events.publish({ type: 'profile.updated', profile })
+      return c.json(profile)
+    })
+    .delete('/me/avatar', async (c) => {
+      const profile = await setUserAvatar(db, blobs, ownerId(), null)
+      events.publish({ type: 'profile.updated', profile })
+      return c.json(profile)
+    })
+    .get('/me/avatar', async c => serveAvatar(c, await readAvatar(db, blobs, { userId: ownerId() })))
+
     // Plan (D9): sessions, turns and approval
     .get('/plan/sessions', async c => c.json(await plans.listSessions()))
 
@@ -274,7 +339,10 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     .post('/plan/sessions/:id/read', async c => c.json(await plans.markRead(c.req.param('id'))))
 
     .post('/plan/plans/:id/approve', async (c) => {
-      const plan = await plans.approve(c.req.param('id'), actor)
+      // The body is optional; no body means the board
+      const parsed = approvePlanInput.safeParse(await c.req.json().catch(() => ({})))
+      if (!parsed.success) throw new ApiFailure(400, { code: 'invalid_input', issues: parsed.error.issues.map(i => ({ path: i.path.map(String), message: i.message })) })
+      const plan = await plans.approve(c.req.param('id'), actor, parsed.data.to)
       orchestrator.poke()
       return c.json(plan)
     })

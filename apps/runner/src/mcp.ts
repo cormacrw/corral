@@ -91,6 +91,10 @@ const toolDefinitions = {
       })).min(1)
     }
   },
+  approve_plan: {
+    description: 'Approve the current plan on the human\'s behalf, only when their latest message explicitly asks you to (e.g. "looks good, add it to the board"). Never approve on your own initiative. "ready" adds the tasks to the board; "backlog" keeps them for later.',
+    input: { to: z.enum(['ready', 'backlog']).describe('ready = add to the board; backlog = add to the Backlog') }
+  },
   flag_stale_docs: {
     description: 'Create a documentation task when the wiki or CORRAL.md no longer matches the code.',
     input: { title: z.string().min(1), description: z.string().min(1) }
@@ -100,7 +104,7 @@ const toolDefinitions = {
 export const ROLE_TOOLS: Record<AgentRole, AgentTool[]> = {
   developer: ['get_task', 'add_comment', 'attach_evidence', 'report_outcome'],
   reviewer: ['get_task', 'add_comment', 'get_evidence', 'report_outcome'],
-  pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'ask_question', 'propose_plan', 'flag_stale_docs']
+  pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
 }
 
 interface Route {

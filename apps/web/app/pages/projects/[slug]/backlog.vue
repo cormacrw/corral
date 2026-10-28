@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Task } from '@corral/contracts'
 import { api } from '~/composables/useApi'
-import { PRIORITY, timeAgo } from '~/utils/labels'
+import { epicTitle, PRIORITY, timeAgo } from '~/utils/labels'
 
 // Backlog (design/backlog.md): proposed tasks grouped by epic
 const route = useRoute()
@@ -32,7 +32,7 @@ const groups = computed(() => {
   const ids = [...new Set(all.value.map(t => t.epicId ?? 'none'))]
   return ids.map((id, i) => ({
     id,
-    title: id === 'none' ? 'No epic' : `Epic ${i + 1}`,
+    title: id === 'none' ? 'No epic' : epicTitle(live.state.value.epics[project.value?.id ?? ''], id, i),
     rows: backlog.value.filter(t => (t.epicId ?? 'none') === id),
     merged: all.value.filter(t => (t.epicId ?? 'none') === id && t.status === 'merged').length,
     total: all.value.filter(t => (t.epicId ?? 'none') === id).length
@@ -58,7 +58,7 @@ async function newTask() {
   <UDashboardPanel :ui="{ body: 'p-0' }">
     <div class="flex h-full min-h-0">
       <div class="flex min-w-0 flex-1 flex-col">
-        <div class="flex flex-wrap items-center gap-2 border-b border-default px-4 py-2">
+        <div class="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b border-default px-4 py-2">
           <UInput
             v-model="search"
             placeholder="Search Backlog"
@@ -134,6 +134,16 @@ async function newTask() {
                 color="neutral"
               />
               <span class="text-xs text-muted">{{ group.merged }} of {{ group.total }} merged</span>
+              <UButton
+                v-if="group.id !== 'none'"
+                label="Epic details"
+                icon="i-lucide-network"
+                variant="link"
+                color="neutral"
+                size="xs"
+                :aria-pressed="flyout.epic.value === group.id"
+                @click="flyout.toggleEpic(group.id)"
+              />
               <UButton
                 :to="`/plan?project=${project?.id}`"
                 label="Plan with Juno"

@@ -1,0 +1,319 @@
+<script setup lang="ts">
+import type { EpicDetail, PatchEpicInput } from '@corral/contracts'
+import type { TaskStatus } from '@corral/core'
+import { api, ApiError } from '~/composables/useApi'
+import { PRIORITY, STATUS } from '~/utils/labels'
+
+// An epic: its title, description and progress, and the dependency tree of
+// its tasks. Docked in the flyout, or as a page with room for a big tree.
+const props = defineProps<{ epicId: string, mode: 'flyout' | 'page' }>()
+const emit = defineEmits<{ close: [] }>()
+
+const live = useLive()
+const flyout = useTaskFlyout()
+const toast = useToast()
+const epic = ref<EpicDetail | null>(null)
+const error = ref<string | null>(null)
+const saved = ref(false)
+const editingDescription = ref(false)
+const descriptionDraft = ref('')
+const tab = useLocalStorage<'tasks' | 'graph'>('corral.epic.tab', 'tasks')
+let savedTimer: ReturnType<typeof setTimeout> | null = null
+
+const project = computed(() => live.state.value.projects.find(p => p.id === epic.value?.projectId) ?? null)
+
+async function load() {
+  error.value = null
+  try {
+    epic.value = await api.epics.get(props.epicId)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  }
+}
+watch(() => props.epicId, () => {
+  epic.value = null
+  editingDescription.value = false
+  void load()
+}, { immediate: true })
+// The tree follows its tasks live
+onMounted(() => {
+  const stop = live.subscribe((event) => {
+    if (!epic.value) return
+    if (event.type === 'epic.updated' && event.epic.id === epic.value.id) epic.value = { ...epic.value, ...event.epic }
+    if ((event.type === 'task.updated' || event.type === 'task.created') && (event.task.epicId === epic.value.id || epic.value.tasks.some(t => t.id === event.task.id))) void load()
+    if (event.type === 'task.deleted' && epic.value.tasks.some(t => t.id === event.taskId)) void load()
+  })
+  onBeforeUnmount(stop)
+})
+
+async function patch(input: PatchEpicInput) {
+  if (!epic.value) return
+  try {
+    const updated = await api.epics.patch(epic.value.id, input)
+    epic.value = { ...epic.value, ...updated }
+    saved.value = true
+    if (savedTimer) clearTimeout(savedTimer)
+    savedTimer = setTimeout(() => {
+      saved.value = false
+    }, 1800)
+  } catch (e) {
+    toast.add({ title: 'Not saved', description: e instanceof ApiError ? e.message : String(e), color: 'error' })
+  }
+}
+
+function startEditDescription(event?: MouseEvent) {
+  // Following a link or selecting text shouldn't open the editor
+  if (event && ((event.target as HTMLElement).closest('a') || window.getSelection()?.toString())) return
+  descriptionDraft.value = epic.value?.description ?? ''
+  editingDescription.value = true
+}
+async function saveDescription() {
+  await patch({ description: descriptionDraft.value.trim() })
+  editingDescription.value = false
+}
+
+// Progress counts tasks on the board or in the Backlog; Drafts aren't yet
+const placed = computed(() => epic.value?.tasks.filter(t => t.status !== 'draft') ?? [])
+const merged = computed(() => placed.value.filter(t => t.status === 'merged').length)
+const drafts = computed(() => (epic.value?.tasks.length ?? 0) - placed.value.length)
+const byStatus = computed(() => {
+  const counts = new Map<TaskStatus, number>()
+  for (const t of epic.value?.tasks ?? []) counts.set(t.status, (counts.get(t.status) ?? 0) + 1)
+  return (Object.keys(STATUS) as TaskStatus[]).filter(s => counts.has(s)).map(s => ({ status: s, count: counts.get(s)! }))
+})
+
+const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/${props.epicId}`)
+</script>
+
+<template>
+  <div class="flex h-full min-h-0 flex-col">
+    <header class="flex h-14 shrink-0 items-center gap-2 border-b border-default px-4">
+      <template v-if="props.mode === 'flyout'">
+        <UButton
+          v-if="flyout.canGoBack.value"
+          icon="i-lucide-arrow-left"
+          variant="ghost"
+          color="neutral"
+          size="sm"
+          aria-label="Back"
+          class="-ms-2"
+          @click="flyout.back()"
+        />
+        <UBadge
+          label="Epic"
+          color="neutral"
+          variant="subtle"
+          size="sm"
+        />
+        <span class="truncate text-sm text-muted">{{ project?.name }}</span>
+        <span
+          v-if="saved"
+          class="text-xs text-success"
+        >✓ Saved</span>
+        <div class="ms-auto flex items-center gap-1">
+          <UButton
+            icon="i-lucide-link"
+            variant="ghost"
+            color="neutral"
+            size="sm"
+            aria-label="Copy link"
+            @click="copyLink"
+          />
+          <UButton
+            :to="`/epics/${props.epicId}`"
+            icon="i-lucide-maximize-2"
+            variant="ghost"
+            color="neutral"
+            size="sm"
+            aria-label="Open full page"
+          />
+          <UButton
+            icon="i-lucide-x"
+            variant="ghost"
+            color="neutral"
+            size="sm"
+            aria-label="Close"
+            @click="emit('close')"
+          />
+        </div>
+      </template>
+      <template v-else>
+        <UBreadcrumb :items="[{ label: project?.name ?? 'Project', to: project ? `/projects/${project.slug}` : '/' }, { label: epic?.title ?? 'Epic' }]" />
+        <span
+          v-if="saved"
+          class="ms-2 text-xs text-success"
+        >✓ Saved</span>
+      </template>
+    </header>
+
+    <UAlert
+      v-if="error"
+      color="error"
+      variant="subtle"
+      :title="error"
+      class="m-4"
+      :actions="[{ label: 'Retry', onClick: load }]"
+    />
+    <div
+      v-else-if="!epic"
+      class="flex flex-col gap-3 p-4"
+    >
+      <USkeleton class="h-6 w-2/3" />
+      <USkeleton class="h-16 w-full" />
+      <USkeleton class="h-64 w-full" />
+    </div>
+
+    <div
+      v-else
+      :class="['flex min-h-0 flex-1', props.mode === 'page' ? 'max-[900px]:flex-col' : 'flex-col overflow-y-auto']"
+    >
+      <div :class="['flex flex-col gap-5 p-4', props.mode === 'page' && 'w-[360px] shrink-0 overflow-y-auto border-e border-default max-[900px]:w-full max-[900px]:border-e-0']">
+        <input
+          :value="epic.title"
+          class="w-full rounded-md bg-transparent px-1 py-0.5 text-lg font-semibold text-highlighted hover:bg-elevated focus:ring-2 focus:ring-primary focus:outline-none"
+          aria-label="Epic title"
+          @change="patch({ title: ($event.target as HTMLInputElement).value })"
+        >
+
+        <section>
+          <h3 class="mb-1 text-xs font-medium text-muted">
+            Description
+          </h3>
+          <template v-if="editingDescription">
+            <UTextarea
+              v-model="descriptionDraft"
+              autoresize
+              autofocus
+              :rows="5"
+              placeholder="What this epic is for, in markdown"
+              class="w-full"
+              @keydown.esc="editingDescription = false"
+            />
+            <div class="mt-2 flex justify-end gap-2">
+              <UButton
+                label="Cancel"
+                variant="outline"
+                color="neutral"
+                size="sm"
+                @click="editingDescription = false"
+              />
+              <UButton
+                label="Save"
+                size="sm"
+                @click="saveDescription"
+              />
+            </div>
+          </template>
+          <div
+            v-else
+            role="button"
+            tabindex="0"
+            aria-label="Edit description"
+            class="-mx-2 cursor-text rounded-md px-2 py-1 text-sm hover:bg-elevated focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
+            @click="startEditDescription($event)"
+            @keydown.enter.self.prevent="startEditDescription()"
+          >
+            <MarkdownText
+              v-if="epic.description"
+              :text="epic.description"
+            />
+            <span
+              v-else
+              class="text-dimmed"
+            >Add a description…</span>
+          </div>
+        </section>
+
+        <section>
+          <div class="mb-1 flex items-center justify-between text-xs text-muted">
+            <span class="font-medium">Progress</span>
+            <span>{{ merged }} of {{ placed.length }} merged<span v-if="drafts"> · {{ drafts }} draft{{ drafts === 1 ? '' : 's' }}</span></span>
+          </div>
+          <div
+            role="progressbar"
+            :aria-label="`${merged} of ${placed.length} tasks merged`"
+            :aria-valuenow="merged"
+            aria-valuemin="0"
+            :aria-valuemax="placed.length"
+            class="flex h-1.5 overflow-hidden rounded-full bg-accented"
+          >
+            <span
+              class="bg-success"
+              :style="{ width: placed.length ? `${(merged / placed.length) * 100}%` : '0' }"
+            />
+          </div>
+          <div class="mt-2 flex flex-wrap gap-1">
+            <StatusBadge
+              v-for="s in byStatus"
+              :key="s.status"
+              :status="s.status"
+              :label="`${STATUS[s.status].label} ${s.count}`"
+              size="xs"
+            />
+          </div>
+        </section>
+      </div>
+
+      <section :class="['flex min-h-0 min-w-0 flex-col', props.mode === 'page' ? 'flex-1 max-[900px]:h-[560px]' : 'px-4 pb-4']">
+        <UTabs
+          v-model="tab"
+          :items="[{ label: `Tasks (${epic.tasks.length})`, value: 'tasks', icon: 'i-lucide-list' }, { label: 'Graph', value: 'graph', icon: 'i-lucide-network' }]"
+          variant="link"
+          size="sm"
+          :content="false"
+          :class="props.mode === 'page' && 'px-4 pt-2'"
+        />
+        <p
+          v-if="epic.tasks.length === 0"
+          class="p-6 text-center text-sm text-muted"
+        >
+          No tasks in this epic yet.
+        </p>
+        <ul
+          v-else-if="tab === 'tasks'"
+          :class="['min-h-0 overflow-y-auto', props.mode === 'page' ? 'flex-1 px-4 py-2' : 'mt-2']"
+        >
+          <li
+            v-for="task in epic.tasks"
+            :key="task.id"
+          >
+            <button
+              type="button"
+              :aria-pressed="flyout.ref.value === task.ref"
+              :class="['flex w-full items-center gap-2 rounded-md px-2 py-2 text-start text-sm hover:bg-elevated', flyout.ref.value === task.ref && 'bg-elevated']"
+              @click="flyout.open(task.ref)"
+            >
+              <span class="w-14 shrink-0 font-mono text-xs text-muted">{{ task.ref }}</span>
+              <span class="min-w-0 flex-1 truncate">{{ task.title }}</span>
+              <span
+                v-if="task.dependsOn.length"
+                class="hidden shrink-0 text-xs text-muted sm:inline"
+              >after {{ task.dependsOn.join(', ') }}</span>
+              <span
+                v-if="task.priority === 'urgent' || task.priority === 'high'"
+                :class="['shrink-0 text-xs', task.priority === 'urgent' ? 'text-error' : 'text-warning']"
+              >{{ PRIORITY[task.priority].label }}</span>
+              <StatusBadge
+                :status="task.status"
+                size="xs"
+              />
+            </button>
+          </li>
+        </ul>
+        <div
+          v-else
+          :aria-label="`Dependency graph of ${epic.title}`"
+          :class="props.mode === 'page' ? 'min-h-0 flex-1' : 'mt-2 h-[420px] overflow-hidden rounded-lg border border-default'"
+        >
+          <EpicGraph
+            :tasks="epic.tasks"
+            :selected="flyout.ref.value"
+            :minimap="props.mode === 'page'"
+            :direction="props.mode === 'page' ? 'right' : 'down'"
+            @open="flyout.open($event)"
+          />
+        </div>
+      </section>
+    </div>
+  </div>
+</template>

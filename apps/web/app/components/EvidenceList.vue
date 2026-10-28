@@ -12,6 +12,23 @@ const byCriterion = (id: string | null) => props.evidence.filter(e => e.criterio
 const note = (id: string) => latest.value?.criteria.find(c => c.criterionId === id)?.note ?? ''
 const isImage = (e: Evidence) => e.contentType.startsWith('image/')
 const isVideo = (e: Evidence) => e.contentType.startsWith('video/')
+// Logs, test output and requests: shown as text in the app's theme, not in
+// an iframe where the browser picks its own colours
+const isText = (e: Evidence) => e.contentType.startsWith('text/') || /json|xml|yaml/.test(e.contentType)
+const text = ref<string | null>(null)
+const textError = ref<string | null>(null)
+watch(open, async (item) => {
+  text.value = null
+  textError.value = null
+  if (!item || !isText(item)) return
+  try {
+    const res = await fetch(item.url)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    if (open.value?.id === item.id) text.value = await res.text()
+  } catch (e) {
+    if (open.value?.id === item.id) textError.value = `Couldn't load the file: ${e instanceof Error ? e.message : String(e)}`
+  }
+})
 </script>
 
 <template>
@@ -27,15 +44,15 @@ const isVideo = (e: Evidence) => e.contentType.startsWith('video/')
           :class="['mt-0.5 size-4 shrink-0', criterion.met ? 'text-success' : criterion.met === false ? 'text-error' : 'text-dimmed']"
         />
         <div class="min-w-0 flex-1">
-          <p class="font-medium">
-            {{ criterion.text }}
-          </p>
-          <p
+          <MarkdownText
+            :text="criterion.text"
+            class="font-medium"
+          />
+          <MarkdownText
             v-if="note(criterion.id)"
+            :text="note(criterion.id)"
             class="text-xs text-muted"
-          >
-            {{ note(criterion.id) }}
-          </p>
+          />
         </div>
       </div>
       <div
@@ -123,11 +140,27 @@ const isVideo = (e: Evidence) => e.contentType.startsWith('video/')
           controls
           class="max-h-[70vh] w-full"
         />
+        <template v-else-if="open && isText(open)">
+          <UAlert
+            v-if="textError"
+            color="error"
+            variant="subtle"
+            :title="textError"
+          />
+          <USkeleton
+            v-else-if="text === null"
+            class="h-40 w-full"
+          />
+          <pre
+            v-else
+            class="max-h-[60vh] overflow-auto rounded-md border border-default bg-muted p-3 font-mono text-xs/5 whitespace-pre-wrap text-default"
+          >{{ text }}</pre>
+        </template>
         <iframe
           v-else-if="open"
           :src="open.url"
           :title="open.fileName"
-          class="h-[60vh] w-full rounded-md border border-default bg-white"
+          class="h-[60vh] w-full rounded-md border border-default"
         />
       </template>
     </UModal>

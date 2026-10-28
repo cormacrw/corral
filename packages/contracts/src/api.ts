@@ -69,6 +69,32 @@ export interface Project {
   updatedAt: string
 }
 
+// ── Epics ───────────────────────────────────────────────────────────────────
+
+// A group of tasks, usually one approved plan. The description is markdown.
+export interface Epic {
+  id: string
+  projectId: string
+  title: string
+  description: string
+  // Tasks outside Draft, and how many of them are merged
+  taskCount: number
+  mergedCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+// The epic with every task in it, Drafts included, for the dependency canvas
+export interface EpicDetail extends Epic {
+  tasks: Task[]
+}
+
+export const patchEpicInput = z.object({
+  title: z.string().trim().min(1).optional(),
+  description: z.string().optional()
+})
+export type PatchEpicInput = z.infer<typeof patchEpicInput>
+
 // ── Tasks ───────────────────────────────────────────────────────────────────
 
 // A ProseMirror/TipTap document from the editor; its inner shape is the editor's business
@@ -136,6 +162,7 @@ export const taskListQuery = z.object({
 // triggered by the server or scheduler.
 export const humanTransitionInput = z.discriminatedUnion('type', [
   z.object({ type: z.literal('approve') }),
+  z.object({ type: z.literal('accept') }),
   z.object({ type: z.literal('send_back') }),
   z.object({ type: z.literal('human_request_changes') }),
   z.object({ type: z.literal('resolve'), to: z.enum(['backlog', 'ready', 'in_progress']) })
@@ -254,6 +281,12 @@ export const planMessageInput = z.object({
   taskRef: z.string().trim().optional()
 }).refine(input => input.text.length > 0 || input.taskRef, { message: 'Write a message or attach a task' })
 export type PlanMessageInput = z.infer<typeof planMessageInput>
+
+// The plan's Drafts go to the board (Ready) or to the Backlog
+export const approvePlanInput = z.object({
+  to: z.enum(['ready', 'backlog']).default('ready')
+})
+export type ApprovePlanInput = z.input<typeof approvePlanInput>
 
 // ── Inbox (D11, design/inbox.md) ───────────────────────────────────────────
 
@@ -382,7 +415,20 @@ export interface Agent {
   pausedUntil: string | null
   // Runs holding a lease right now
   activeRuns: number
+  // The profile picture, or null for initials
+  avatarUrl: string | null
 }
+
+// The human using Corral. The name shown in the app still comes from the
+// browser (design/settings.md); the picture is kept on the server.
+export interface Profile {
+  id: string
+  avatarUrl: string | null
+}
+
+// Profile pictures: small square images, resized in the browser before upload
+export const AVATAR_CONTENT_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const
+export const AVATAR_MAX_BYTES = 2 * 1024 * 1024
 
 export interface Run {
   id: string

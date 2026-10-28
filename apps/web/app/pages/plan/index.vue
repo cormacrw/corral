@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { api } from '~/composables/useApi'
 import { initials, projectColor, timeAgo } from '~/utils/labels'
+import { markdownToPlainText } from '~/utils/markdown'
 
 // Plan, new session (design/plan.md)
 const live = useLive()
+// The PM by its current name and picture
+const pm = computed(() => live.state.value.agents.find(a => a.role === 'pm') ?? null)
 const router = useRouter()
 const route = useRoute()
 const toast = useToast()
@@ -45,12 +48,15 @@ async function start(message: string) {
     <div class="flex h-full flex-col items-center justify-center p-6">
       <div class="flex w-full max-w-[720px] flex-col gap-6">
         <div class="flex flex-col items-center gap-2 text-center">
-          <span class="flex size-12 items-center justify-center rounded-full bg-primary/15 text-lg font-semibold text-primary">J</span>
+          <AgentAvatar
+            :name="pm?.name ?? 'PM'"
+            size="3xl"
+          />
           <h1 class="text-2xl font-semibold">
             What should we plan?
           </h1>
           <p class="text-sm text-muted">
-            Juno reads {{ project?.name ?? 'the project' }}'s code, wiki and board before answering. Nothing reaches the board until you approve it.
+            {{ pm?.name ?? 'The PM' }} reads {{ project?.name ?? 'the project' }}'s code, wiki and board before answering. Nothing reaches the board until you approve it.
           </p>
         </div>
 
@@ -105,6 +111,7 @@ async function start(message: string) {
               variant="ghost"
               :search-input="false"
               aria-label="Project"
+              :ui="{ content: 'w-80 max-w-[calc(100vw-2rem)]', base: 'max-w-56' }"
               @update:model-value="projectId = $event as string"
             >
               <template #leading>
@@ -124,6 +131,7 @@ async function start(message: string) {
               placeholder="Refine a task"
               :search-input="{ placeholder: 'Search Backlog' }"
               aria-label="Refine a task"
+              :ui="{ content: 'w-80 max-w-[calc(100vw-2rem)]', base: 'max-w-56' }"
               @update:model-value="taskRef = ($event as string | null)"
             />
             <USelectMenu
@@ -135,6 +143,7 @@ async function start(message: string) {
               placeholder="Resume"
               :search-input="{ placeholder: 'Search sessions' }"
               aria-label="Resume a session"
+              :ui="{ content: 'w-80 max-w-[calc(100vw-2rem)]', base: 'max-w-56' }"
               @update:model-value="$router.push(`/plan/${$event}`)"
             />
           </template>
@@ -192,7 +201,7 @@ async function start(message: string) {
                     />
                   </span>
                   <span class="block truncate text-xs text-muted">
-                    {{ live.state.value.projects.find(p => p.id === session.projectId)?.name }} · {{ session.preview }}
+                    {{ live.state.value.projects.find(p => p.id === session.projectId)?.name }} · {{ markdownToPlainText(session.preview) }}
                   </span>
                 </span>
                 <span class="text-xs text-dimmed">{{ timeAgo(session.updatedAt) }}</span>

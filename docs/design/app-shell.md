@@ -16,7 +16,7 @@ There is no top header on desktop; every page owns the full height. Below 1024px
 1. **Brand:** the Corral logo (28px `primary` square with the fence icon) and "Corral". There is no project picker.
 2. **Search:** an outline button showing "Search…" and the `⌘` `K` keys (`UKbd`). Opens the command palette (`UCommandPalette`).
 3. **Global nav** (`UNavigationMenu`, vertical):
-   - **Plan:** chat icon, with an unread dot when Juno has posted something you haven't seen (an epic delivery summary, D9/D11).
+   - **Plan:** chat icon, with an unread dot when Juno has posted something you haven't seen (D9/D11).
    - **Inbox:** inbox icon and a count badge (solid primary) of open "Needs you" items across all projects.
 4. **Projects:**
    - Section header "Projects" with a **+** ghost icon button, "Add project", which opens the add-project flow (repo picker, as in onboarding step 2).

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { AuditEntry, Inbox, Run, Task } from '@corral/contracts'
 import { api } from '~/composables/useApi'
-import { duration, initials, projectColor, STATUS, timeAgo } from '~/utils/labels'
+import { duration, epicTitle, initials, projectColor, STATUS, timeAgo } from '~/utils/labels'
 
 // Project overview (design/project-overview.md)
 const route = useRoute()
@@ -55,7 +55,7 @@ const epics = computed(() => {
   const groups = new Map<string, { id: string, title: string, merged: number, total: number }>()
   for (const task of tasks.value) {
     const id = task.epicId ?? 'none'
-    const group = groups.get(id) ?? { id, title: id === 'none' ? 'No epic' : `Epic ${groups.size + 1}`, merged: 0, total: 0 }
+    const group = groups.get(id) ?? { id, title: id === 'none' ? 'No epic' : epicTitle(live.state.value.epics[project.value?.id ?? ''], id, groups.size), merged: 0, total: 0 }
     group.total++
     if (task.status === 'merged') group.merged++
     groups.set(id, group)
@@ -63,7 +63,7 @@ const epics = computed(() => {
   return [...groups.values()]
 })
 const taskOf = (run: Run) => tasks.value.find(t => t.id === run.taskId)
-const actorName = (entry: AuditEntry) => entry.actor.kind === 'human' ? 'You' : entry.actor.kind === 'agent' ? (entry.actor.role === 'pm' ? 'Juno' : entry.actor.role === 'developer' ? developer.value?.name ?? 'Developer' : reviewer.value?.name ?? 'Reviewer') : 'Corral'
+const actorName = (entry: AuditEntry) => entry.actor.kind === 'human' ? 'You' : entry.actor.kind === 'agent' ? (entry.actor.role === 'pm' ? live.state.value.agents.find(a => a.role === 'pm')?.name ?? 'PM' : entry.actor.role === 'developer' ? developer.value?.name ?? 'Developer' : reviewer.value?.name ?? 'Reviewer') : 'Corral'
 const taskRefOf = (entry: AuditEntry) => tasks.value.find(t => t.id === entry.taskId)?.ref ?? ''
 const activityText = (entry: AuditEntry) => {
   const d = entry.detail
@@ -231,7 +231,7 @@ const activityText = (entry: AuditEntry) => {
               <NuxtLink
                 v-for="run in runs"
                 :key="run.id"
-                :to="`/agents/${run.agentName.toLowerCase()}/runs/${run.id}`"
+                :to="`/agents/${run.agentName.toLowerCase()}/${run.id}`"
                 class="flex items-center gap-3 rounded-lg border border-primary/40 p-3 outline-primary hover:bg-elevated motion-safe:animate-pulse"
               >
                 <AgentAvatar
@@ -277,7 +277,12 @@ const activityText = (entry: AuditEntry) => {
                 :key="epic.id"
               >
                 <div class="flex justify-between text-sm">
-                  <span>{{ epic.title }}</span>
+                  <NuxtLink
+                    v-if="epic.id !== 'none'"
+                    :to="`/epics/${epic.id}`"
+                    class="hover:text-primary hover:underline"
+                  >{{ epic.title }}</NuxtLink>
+                  <span v-else>{{ epic.title }}</span>
                   <span class="text-muted">{{ epic.merged }} of {{ epic.total }} merged</span>
                 </div>
                 <div

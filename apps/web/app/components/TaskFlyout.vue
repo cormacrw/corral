@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// The docked flyout wrapper: resizable 360–960px, remembered width
+// The docked flyout wrapper: resizable 360–960px, remembered width. Shows a
+// task or an epic.
 const flyout = useTaskFlyout()
 const width = useLocalStorage('corral.flyout.width', 420)
 const dragging = ref(false)
@@ -27,9 +28,9 @@ function onKey(event: KeyboardEvent) {
 
 <template>
   <aside
-    v-if="flyout.ref.value"
+    v-if="flyout.ref.value || flyout.epic.value"
     role="complementary"
-    :aria-label="`Task ${flyout.ref.value}`"
+    :aria-label="flyout.ref.value ? `Task ${flyout.ref.value}` : 'Epic'"
     class="relative flex h-full shrink-0 flex-col border-s border-default bg-default max-[1100px]:w-full max-[1100px]:border-s-0 max-[1100px]:border-t"
     :style="{ width: `${width}px` }"
   >
@@ -47,7 +48,14 @@ function onKey(event: KeyboardEvent) {
       @keydown="onKey"
     />
     <TaskDetail
+      v-if="flyout.ref.value"
       :task-ref="flyout.ref.value"
+      mode="flyout"
+      @close="flyout.close()"
+    />
+    <EpicDetail
+      v-else-if="flyout.epic.value"
+      :epic-id="flyout.epic.value"
       mode="flyout"
       @close="flyout.close()"
     />

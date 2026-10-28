@@ -1,11 +1,10 @@
-import { failedMergeGates, transition, type Actor, type MergeGateFacts, type TaskState } from '@corral/core'
+import { failedMergeGates, type Actor, type MergeGateFacts } from '@corral/core'
 import { schema, type Database } from '@corral/db'
-import { and, asc, desc, eq, isNull, ne } from 'drizzle-orm'
-import { ApiFailure } from './errors.ts'
+import { and, asc, desc, eq, isNull } from 'drizzle-orm'
 import type { EventBus } from './events.ts'
-import { GitHubError, type CheckResult, type GitHubClient, type PullRequest } from './github.ts'
+import type { CheckResult, GitHubClient, PullRequest } from './github.ts'
 import type { RunnerHub } from './runner-hub.ts'
-import { applyTransition, loadTask, lockTask, toTaskState, type ProjectRow, type TaskRow } from './tasks.ts'
+import { applyTransition, loadTask, lockTask, type ProjectRow, type TaskRow } from './tasks.ts'
 
 const { acceptanceCriteria, auditLog, comments, evidence, reviews, tasks } = schema
 
@@ -20,8 +19,6 @@ export interface MergeDeps {
   events: EventBus
   github: GitHubClient
   runner: RunnerHub
-  // flows.md step 10: the PM writes a delivery summary when an epic's last task merges
-  onEpicFinished?: (epicId: string) => Promise<void>
   now?: () => Date
 }
 
@@ -35,13 +32,15 @@ export interface GateReport {
   approvalRunId: string | null
 }
 
-// flows.md steps 7b–10: after the reviewer approves, wait for CI and the
-// base branch, run the gates against live GitHub data, then merge or hand
-// the task to the human. Never an agent, and never a merge without GitHub
-// confirming it.
+// flows.md steps 7b–10: a task in Ready to merge (approved by the reviewer,
+// and by the human when flagged) waits for CI and the base branch, the gates
+// run against live GitHub data, then Corral merges. Never an agent, and
+// never Merged without GitHub confirming it.
 export class MergeOrchestrator {
   #d: MergeDeps
   #attempts = new Map<string, number>()
+  // Tasks being advanced right now: a tick and a human approval can overlap
+  #busy = new Set<string>()
   // Set by the Orchestrator while the kill switch is on
   stopped = false
 
@@ -53,22 +52,44 @@ export class MergeOrchestrator {
     return this.#d.now?.() ?? new Date()
   }
 
-  // One pass over every approved task waiting in Agent review
+  // One pass over every task in Ready to merge
   async tick(): Promise<void> {
     if (this.stopped || !this.#d.runner.online) return
+    await this.#promoteApproved()
     const waiting = await this.#d.db.select({ task: tasks, project: schema.projects }).from(tasks)
       .innerJoin(schema.projects, eq(schema.projects.id, tasks.projectId))
-      .where(and(eq(tasks.status, 'agent_review'), isNull(tasks.leaseRunId), isNull(tasks.deletedAt), eq(tasks.paused, false), eq(schema.projects.paused, false)))
+      .where(and(eq(tasks.status, 'ready_to_merge'), isNull(tasks.leaseRunId), isNull(tasks.deletedAt), eq(tasks.paused, false), eq(schema.projects.paused, false)))
       .orderBy(asc(tasks.updatedAt))
     for (const { task, project } of waiting) {
       if (!task.prNumber || !task.headSha) continue
-      const approval = await this.#approvalFor(task)
-      if (!approval) continue
-      await this.#advance(task, project).catch(error => console.error(`Merge check for task ${task.id} failed`, error))
+      await this.#advanceOnce(task, project)
     }
   }
 
-  async #approvalFor(task: TaskRow) {
+  // Approvals recorded before Ready to merge existed left the task in Agent
+  // review; move them on as the reviewer's approval does now
+  async #promoteApproved(): Promise<void> {
+    const waiting = await this.#d.db.select({ id: tasks.id, headSha: tasks.headSha }).from(tasks)
+      .where(and(eq(tasks.status, 'agent_review'), isNull(tasks.leaseRunId), isNull(tasks.deletedAt)))
+    for (const task of waiting) {
+      if (!task.headSha || !(await this.#approvalFor(task))) continue
+      await this.#transition(task.id, { type: 'review_approved' }, { event: 'review_approved', headSha: task.headSha })
+    }
+  }
+
+  async #advanceOnce(task: TaskRow, project: ProjectRow): Promise<void> {
+    if (this.#busy.has(task.id)) return
+    this.#busy.add(task.id)
+    try {
+      await this.#advance(task, project)
+    } catch (error) {
+      console.error(`Merge check for task ${task.id} failed`, error)
+    } finally {
+      this.#busy.delete(task.id)
+    }
+  }
+
+  async #approvalFor(task: { id: string, headSha: string | null }) {
     const [row] = await this.#d.db.select().from(reviews)
       .where(and(eq(reviews.taskId, task.id), eq(reviews.headSha, task.headSha!), eq(reviews.verdict, 'approved')))
       .orderBy(desc(reviews.createdAt)).limit(1)
@@ -103,19 +124,13 @@ export class MergeOrchestrator {
     }
   }
 
-  // With no required checks configured, every task needs a human
-  // (design/project-settings.md: "With no checks, every task needs human review")
-  #needsHuman(task: TaskRow, project: ProjectRow): boolean {
-    return task.humanReview || project.requiredChecks.length === 0
-  }
-
   async #advance(task: TaskRow, project: ProjectRow): Promise<void> {
     const { db, github } = this.#d
     const pr = await github.getPullRequest(project.repository, task.prNumber!)
 
     if (pr.merged) {
       // Merged outside Corral (or an earlier ambiguous merge did go through)
-      await this.#recordMerged(task.id, pr, null)
+      await this.#recordMerged(task.id, pr, true)
       return
     }
     if (pr.state === 'closed') {
@@ -162,31 +177,21 @@ export class MergeOrchestrator {
 
     const report = await this.gates(task, project)
     if (failedMergeGates(report.facts).length > 0) return // not yet; the next tick looks again
-
-    if (this.#needsHuman(task, project)) {
-      await db.transaction(async (tx) => {
-        const locked = await lockTask(tx, task.id)
-        if (locked.task.status !== 'agent_review' || locked.task.leaseRunId) return
-        // The gate check sees the task as flagged even when the flag comes from the project
-        const flagged = { ...locked.task, humanReview: true }
-        await applyTransition(tx, flagged, locked.project, { type: 'gates_passed', gates: report.facts }, server, { event: 'gates_passed', pr: pr.number, headSha: pr.headSha })
-        await tx.update(tasks).set({ gateChecks: report.requiredPassing }).where(eq(tasks.id, task.id))
-      })
-      await this.#publish(task.id)
-      return
-    }
-    await this.merge(task.id, project, report, null)
+    await db.update(tasks).set({ gateChecks: report.requiredPassing }).where(eq(tasks.id, task.id))
+    await this.merge(task.id, project, report)
   }
 
   // The branch head changed under us: a mechanical base update keeps the
-  // approval (R7 default); any other commit needs a fresh review
+  // approval (R7 default); any other commit goes back for a fresh review
   async #headMoved(task: TaskRow, pr: PullRequest): Promise<void> {
     const { db } = this.#d
     await db.transaction(async (tx) => {
+      const locked = await lockTask(tx, task.id)
       const [approval] = await tx.select().from(reviews)
         .where(and(eq(reviews.taskId, task.id), eq(reviews.headSha, task.headSha!), eq(reviews.verdict, 'approved')))
         .orderBy(desc(reviews.createdAt)).limit(1)
-      if (task.branchUpdateRequested && approval) {
+      const kept = Boolean(task.branchUpdateRequested && approval)
+      if (kept && approval) {
         await tx.insert(reviews).values({
           taskId: task.id,
           runId: approval.runId,
@@ -201,16 +206,16 @@ export class MergeOrchestrator {
       await tx.update(tasks).set({ headSha: pr.headSha, branchUpdateRequested: false, updatedAt: this.#now() }).where(eq(tasks.id, task.id))
       await tx.insert(auditLog).values({
         projectId: task.projectId, taskId: task.id, actor: server, action: 'branch.head_moved',
-        detail: { from: task.headSha, to: pr.headSha, approvalKept: Boolean(task.branchUpdateRequested && approval) }
+        detail: { from: task.headSha, to: pr.headSha, approvalKept: kept }
       })
+      if (!kept) await applyTransition(tx, locked.task, locked.project, { type: 'head_moved' }, server, { event: 'head_moved', headSha: pr.headSha })
     })
     await this.#publish(task.id)
   }
 
-  // flows.md step 9. `humanApprovedBy` is the human's ID when leaving Human
-  // review. Re-reads the PR when GitHub's answer is ambiguous, and never
-  // marks Merged without seeing it merged.
-  async merge(taskId: string, project: ProjectRow, report: GateReport, humanApprovedBy: string | null): Promise<void> {
+  // flows.md step 9. Re-reads the PR when GitHub's answer is ambiguous, and
+  // never marks Merged without seeing it merged.
+  async merge(taskId: string, project: ProjectRow, report: GateReport): Promise<void> {
     const { github } = this.#d
     const attempt = (this.#attempts.get(taskId) ?? 0) + 1
     this.#attempts.set(taskId, attempt)
@@ -221,7 +226,7 @@ export class MergeOrchestrator {
       // Ambiguous (timeout, 5xx): look before deciding anything
       const again = await github.getPullRequest(project.repository, report.pr.number).catch(() => null)
       if (again?.merged) {
-        await this.#recordMerged(taskId, again, humanApprovedBy)
+        await this.#recordMerged(taskId, again, false)
         return
       }
       if (attempt >= MAX_MERGE_ATTEMPTS) {
@@ -233,7 +238,7 @@ export class MergeOrchestrator {
     if (result.merged) {
       const merged = await github.getPullRequest(project.repository, report.pr.number)
       if (!merged.merged) return // GitHub said merged but doesn't show it yet; next tick re-reads
-      await this.#recordMerged(taskId, { ...merged, mergeCommitSha: result.sha ?? merged.mergeCommitSha }, humanApprovedBy)
+      await this.#recordMerged(taskId, { ...merged, mergeCommitSha: result.sha ?? merged.mergeCommitSha }, false)
       return
     }
     // A plain refusal (405/409): the head moved or a check turned red. The
@@ -245,18 +250,23 @@ export class MergeOrchestrator {
     }
   }
 
-  async #recordMerged(taskId: string, pr: PullRequest, humanApprovedBy: string | null): Promise<void> {
+  // `outside`: GitHub shows the PR merged but Corral may not have merged it
+  async #recordMerged(taskId: string, pr: PullRequest, outside: boolean): Promise<void> {
     const { db } = this.#d
     let merged = false
     await db.transaction(async (tx) => {
       const { task, project } = await lockTask(tx, taskId)
       if (task.status === 'merged') return
-      // Core re-checks the gates; GitHub has already confirmed the merge, so
-      // the facts describe the merged commit
-      const report = await this.gates(task, project)
-      const facts: MergeGateFacts = { ...report.facts, mergeable: true, approvalIsForHeadCommit: report.facts.approvalIsForHeadCommit || task.status === 'human_review' }
-      const flagged = task.status === 'agent_review' ? { ...task, humanReview: false } : task
-      await applyTransition(tx, flagged, project, { type: 'merged', gates: facts, humanApprovedBy }, server, { event: 'merged', pr: pr.number, mergeCommitSha: pr.mergeCommitSha, humanApprovedBy })
+      const detail = { pr: pr.number, mergeCommitSha: pr.mergeCommitSha }
+      if (outside || task.status !== 'ready_to_merge') {
+        await applyTransition(tx, task, project, { type: 'merged_outside' }, server, { event: 'merged', ...detail, outside: true })
+      } else {
+        // Core re-checks the gates; GitHub has already confirmed the merge,
+        // so the facts describe the merged commit
+        const report = await this.gates(task, project)
+        const facts: MergeGateFacts = { ...report.facts, mergeable: true }
+        await applyTransition(tx, task, project, { type: 'merged', gates: facts }, server, { event: 'merged', ...detail })
+      }
       await tx.update(tasks).set({ mergeCommitSha: pr.mergeCommitSha, mergedAt: this.#now(), updatedAt: this.#now() }).where(eq(tasks.id, taskId))
       merged = true
     })
@@ -264,17 +274,6 @@ export class MergeOrchestrator {
     if (!merged) return
     await this.#publish(taskId)
     await this.cleanup(taskId)
-    await this.#checkEpic(taskId)
-  }
-
-  async #checkEpic(taskId: string): Promise<void> {
-    const { db } = this.#d
-    const [row] = await db.select({ epicId: tasks.epicId }).from(tasks).where(eq(tasks.id, taskId))
-    if (!row?.epicId) return
-    const open = await db.select({ id: tasks.id }).from(tasks)
-      .where(and(eq(tasks.epicId, row.epicId), isNull(tasks.deletedAt), ne(tasks.status, 'merged')))
-    if (open.length > 0) return
-    await this.#d.onEpicFinished?.(row.epicId).catch(error => console.error('Delivery summary failed', error))
   }
 
   // flows.md step 10: the runner removes the worktrees, keeping any with
@@ -295,38 +294,19 @@ export class MergeOrchestrator {
     }
   }
 
-  // Human review → Merged (design/inbox.md "Approve and merge"): the gates
-  // are re-checked against live GitHub data first
+  // Human review → Ready to merge (design/inbox.md "Approve and merge").
+  // The human's part ends here; CI, the gates and the merge follow in the
+  // background, and any failure sends the task back like any other.
   async humanApprove(taskId: string, actor: Actor): Promise<void> {
-    if (actor.kind !== 'human') throw new ApiFailure(409, { code: 'transition_rejected', reason: { code: 'actor_not_allowed', actor: null, event: 'merged' } })
-    const [row] = await this.#d.db.select({ task: tasks, project: schema.projects }).from(tasks)
-      .innerJoin(schema.projects, eq(schema.projects.id, tasks.projectId)).where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt)))
-    if (!row) throw new ApiFailure(404, { code: 'not_found' })
-    const { task, project } = row
-    if (task.status !== 'human_review' || !task.prNumber) {
-      throw new ApiFailure(409, { code: 'transition_rejected', reason: { code: 'invalid_transition', status: task.status, event: 'merged' } })
-    }
-    let report: GateReport
-    try {
-      report = await this.gates(task, project)
-    } catch (error) {
-      if (error instanceof GitHubError) throw new ApiFailure(409, { code: 'conflict', constraint: `github: ${error.message}` })
-      throw error
-    }
-    if (report.pr.merged) {
-      await this.#recordMerged(taskId, report.pr, actor.userId)
-      return
-    }
-    // The same check core runs, so the human gets the reason up front
-    const state: TaskState = toTaskState(task)
-    const check = transition(state, { type: 'merged', gates: report.facts, humanApprovedBy: actor.userId }, server)
-    if (!check.ok) throw new ApiFailure(409, { code: 'transition_rejected', reason: check.error })
-    await this.#d.db.insert(auditLog).values({ projectId: project.id, taskId, actor, action: 'task.human_approved', detail: { pr: report.pr.number, headSha: report.pr.headSha } })
-    await this.merge(taskId, project, report, actor.userId)
-    const [after] = await this.#d.db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, taskId))
-    if (after?.status !== 'merged') {
-      throw new ApiFailure(409, { code: 'conflict', constraint: 'merge_not_confirmed' })
-    }
+    const { db } = this.#d
+    await db.transaction(async (tx) => {
+      const { task, project } = await lockTask(tx, taskId)
+      await applyTransition(tx, task, project, { type: 'human_approve' }, actor, { event: 'human_approve', headSha: task.headSha })
+    })
+    await this.#publish(taskId)
+    const [row] = await db.select({ task: tasks, project: schema.projects }).from(tasks)
+      .innerJoin(schema.projects, eq(schema.projects.id, tasks.projectId)).where(eq(tasks.id, taskId))
+    if (row && !this.stopped && row.task.prNumber && row.task.headSha) void this.#advanceOnce(row.task, row.project)
   }
 
   async #transition(taskId: string, event: Parameters<typeof applyTransition>[3], detail: Record<string, unknown>, comment?: string): Promise<void> {

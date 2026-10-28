@@ -1,6 +1,6 @@
-import type { Plan, PlanSession, PlanSessionDetail, RunJob, Task } from '@corral/contracts'
+import type { Epic, EpicDetail, Plan, PlanSession, PlanSessionDetail, RunJob, Task } from '@corral/contracts'
 import { schema } from '@corral/db'
-import { eq, ne } from 'drizzle-orm'
+import { desc, eq, ne } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner, sleep } from './test-runner.ts'
@@ -85,12 +85,14 @@ describe('plan sessions', () => {
     expect(detail.status).toBe('needs_approval')
     expect(detail.plans).toHaveLength(1)
     const v1 = detail.plans[0]!
-    expect(v1).toMatchObject({ version: 1, status: 'proposed', title: 'Login', tasks: [{ title: 'Login form', change: 'added', status: 'backlog', criteriaCount: 1 }, { title: 'Session cookie', dependsOn: [`${project.prefix}-1`] }] })
+    expect(v1).toMatchObject({ version: 1, status: 'proposed', title: 'Login', tasks: [{ title: 'Login form', change: 'added', status: 'draft', criteriaCount: 1 }, { title: 'Session cookie', dependsOn: [`${project.prefix}-1`] }] })
     expect(detail.messages.at(-1)).toMatchObject({ role: 'pm', planId: v1.id })
     const [epic] = await t.db.select().from(epics).where(eq(epics.id, v1.epicId!))
     expect(epic?.title).toBe('Login')
     const rows = await t.db.select().from(tasks).where(eq(tasks.projectId, project.id))
-    expect(rows.map(r => [r.status, r.humanReview, r.epicId])).toEqual([['backlog', false, epic!.id], ['backlog', true, epic!.id]])
+    expect(rows.map(r => [r.status, r.humanReview, r.epicId])).toEqual([['draft', false, epic!.id], ['draft', true, epic!.id]])
+    // Drafts are seen only in the plan, not on the board or in the Backlog
+    expect(await t.request('GET', `/api/projects/${project.slug}/tasks?view=all`).then(r => r.json())).toEqual([])
 
     await endTurn(job, 'I proposed two tasks. Shall I go ahead?')
     const ended = await session(created.id)
@@ -113,11 +115,11 @@ describe('plan sessions', () => {
     expect(revised.plans.map(p => [p.version, p.status])).toEqual([[1, 'superseded'], [2, 'proposed']])
     const latest = revised.plans[1]!
     expect(latest.tasks.map(x => [x.key, x.change, x.title])).toEqual([['t1', 'changed', 'Login form'], ['t3', 'added', 'Logout'], ['t2', 'removed', 't2']])
-    const live = await t.request('GET', `/api/projects/${project.slug}/tasks?view=all`).then(r => r.json()) as Task[]
-    expect(live.map(x => [x.title, x.status, x.acceptanceCriteria.length])).toEqual([['Login form', 'backlog', 2], ['Logout', 'backlog', 1]])
+    const drafts = await Promise.all(latest.tasks.filter(x => x.ref).map(x => t.request('GET', `/api/tasks/${x.ref}`).then(r => r.json()) as Promise<Task>))
+    expect(drafts.map(x => [x.title, x.status, x.acceptanceCriteria.length])).toEqual([['Login form', 'draft', 2], ['Logout', 'draft', 1]])
     await endTurn(second, 'Updated.')
 
-    // Only a human approves; then every Backlog task is Ready
+    // Only a human approves; Add to board makes every Draft Ready
     const approved = await t.request('POST', `/api/plan/plans/${latest.id}/approve`)
     expect(approved.status).toBe(200)
     expect(await approved.json() as Plan).toMatchObject({ status: 'approved', tasks: [{ status: 'ready' }, { status: 'ready' }, { change: 'removed', status: null }] })
@@ -126,6 +128,64 @@ describe('plan sessions', () => {
     const list = await t.request('GET', '/api/plan/sessions').then(r => r.json()) as PlanSession[]
     expect(list.find(s => s.id === created.id)).toMatchObject({ status: 'none', unread: false })
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+  })
+
+  it('shows an epic with its tasks, Drafts included, and saves edits to it', async () => {
+    const project = await t.createProject()
+    await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+    const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan export' }).then(r => r.json()) as PlanSessionDetail
+    const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
+    expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ title: 'CSV export' }, { key: 't2', title: 'Export button', dependsOn: ['t1'] }]))).toMatchObject({ ok: true })
+    await endTurn(job, 'Proposed.')
+    const [proposed] = (await session(created.id)).plans
+
+    const epics = await t.request('GET', `/api/projects/${project.slug}/epics`).then(r => r.json()) as Epic[]
+    expect(epics).toEqual([expect.objectContaining({ id: proposed!.epicId, title: 'Login', taskCount: 0, mergedCount: 0 })])
+    const detail = await t.request('GET', `/api/epics/${proposed!.epicId}`).then(r => r.json()) as EpicDetail
+    expect(detail.tasks.map(x => [x.title, x.status, x.dependsOn])).toEqual([['CSV export', 'draft', []], ['Export button', 'draft', [`${project.prefix}-1`]]])
+
+    const patched = await t.request('PATCH', `/api/epics/${proposed!.epicId}`, { title: 'Exports', description: '## Why\n\nPeople want their data.' })
+    expect(await patched.json()).toMatchObject({ title: 'Exports', description: '## Why\n\nPeople want their data.' })
+    expect(t.events.some(e => e.type === 'epic.updated' && e.epic.title === 'Exports')).toBe(true)
+    expect((await t.request('GET', '/api/epics/not-an-id')).status).toBe(404)
+  })
+
+  it('lets the PM approve a plan when the human asks in chat, recorded as the human\'s approval', async () => {
+    const project = await t.createProject()
+    await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+    const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan dark mode' }).then(r => r.json()) as PlanSessionDetail
+    const first = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
+    expect(await runner.call(first.runId, first.leaseEpoch, 'propose_plan', plan([{ title: 'Theme toggle' }]))).toMatchObject({ ok: true })
+    // Not in the turn that proposed it: the human hasn't seen the plan yet
+    expect(await runner.call(first.runId, first.leaseEpoch, 'approve_plan', { to: 'ready' })).toMatchObject({ ok: false, error: expect.stringContaining('hasn\'t replied') })
+    await endTurn(first, 'Proposed.')
+
+    await t.request('POST', `/api/plan/sessions/${created.id}/messages`, { text: 'Looks good, add it to the backlog' })
+    const second = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id && m.job.runId !== first.runId)).job
+    expect(await runner.call(second.runId, second.leaseEpoch, 'approve_plan', { to: 'backlog' })).toMatchObject({ ok: true })
+    const [approvedPlan] = (await session(created.id)).plans
+    expect(approvedPlan).toMatchObject({ status: 'approved', tasks: [{ status: 'backlog' }] })
+    const [audit] = await t.db.select().from(schema.auditLog).where(eq(schema.auditLog.action, 'plan.approved')).orderBy(desc(schema.auditLog.id)).limit(1)
+    expect(audit).toMatchObject({ actor: t.actor, detail: { to: 'backlog', viaPmRun: second.runId } })
+    // Once approved there's nothing left to approve
+    expect(await runner.call(second.runId, second.leaseEpoch, 'approve_plan', { to: 'ready' })).toMatchObject({ ok: false, error: expect.stringContaining('no plan waiting') })
+    await endTurn(second, 'Added.')
+  })
+
+  it('adds a plan\'s Drafts to the Backlog instead of the board', async () => {
+    const project = await t.createProject()
+    await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+    const res = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan search' })
+    const created = await res.json() as PlanSessionDetail
+    const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
+    expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ title: 'Search box' }]))).toMatchObject({ ok: true })
+    await endTurn(job, 'Proposed.')
+    const [proposed] = (await session(created.id)).plans
+    const approved = await t.request('POST', `/api/plan/plans/${proposed!.id}/approve`, { to: 'backlog' })
+    expect(approved.status).toBe(200)
+    expect(await approved.json() as Plan).toMatchObject({ status: 'approved', tasks: [{ status: 'backlog' }] })
+    const backlog = await t.request('GET', `/api/projects/${project.slug}/tasks?view=backlog`).then(r => r.json()) as Task[]
+    expect(backlog.map(x => x.title)).toEqual(['Search box'])
   })
 
   it('refuses a second turn while one is running, and reports a turn that crashed', async () => {
@@ -140,7 +200,7 @@ describe('plan sessions', () => {
     expect(detail.activeRunId).toBeNull()
   })
 
-  it('writes a delivery summary when the last task of an epic merges, and marks the session unread', async () => {
+  it('leaves the plan session alone when the last task of an epic merges', async () => {
     const project = await t.createProject()
     await t.request('PATCH', `/api/projects/${project.slug}`, { requiredChecks: ['lint'] })
     const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Ship it' }).then(r => r.json()) as PlanSessionDetail
@@ -164,12 +224,10 @@ describe('plan sessions', () => {
     await t.orchestrator.merges.tick()
     expect((await t.request('GET', `/api/tasks/${dev.taskRef}`).then(r => r.json()) as Task).status).toBe('merged')
 
-    const summary = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id && m.job.runId !== job.runId)).job
-    expect(summary.prompt).toContain('delivery summary')
-    expect((await session(created.id)).unread).toBe(true)
-    await endTurn(summary, 'Login shipped: one task merged.')
-    expect((await session(created.id)).messages.at(-1)?.text).toBe('Login shipped: one task merged.')
-    expect((await t.request('POST', `/api/plan/sessions/${created.id}/read`).then(r => r.json()) as PlanSession).unread).toBe(false)
+    // Merged work isn't handed back to the PM: no turn, nothing unread
+    await sleep(100)
+    expect(runner.received.filter(m => m.type === 'run.assign' && m.job.role === 'pm' && m.job.projectId === project.id && m.job.runId !== job.runId)).toHaveLength(0)
+    expect((await session(created.id)).unread).toBe(false)
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
   })
 })

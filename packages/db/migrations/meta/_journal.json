@@ -36,6 +36,27 @@
       "when": 1793155317634,
       "tag": "0004_plans",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793161448820,
+      "tag": "0005_ready_to_merge",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793213857270,
+      "tag": "0006_draft_tasks",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793218179323,
+      "tag": "0007_avatars",
+      "breakpoints": true
     }
   ]
 }

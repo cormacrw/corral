@@ -24,6 +24,45 @@ describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
     expect(await res.json()).toEqual({ ok: true })
   })
 
+  describe('profile pictures', () => {
+    // A 1×1 PNG
+    const png = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64'))
+
+    it('stores, serves and removes the human\'s picture', async () => {
+      expect(await t.request('GET', '/api/me').then(r => r.json())).toMatchObject({ avatarUrl: null })
+      const saved = await t.request('PUT', '/api/me/avatar', new Blob([png], { type: 'image/png' }))
+      expect(saved.status).toBe(200)
+      const { avatarUrl } = await saved.json() as { avatarUrl: string }
+      expect(avatarUrl).toMatch(/^\/api\/me\/avatar\?v=[0-9a-f]{12}$/)
+      const served = await t.request('GET', avatarUrl)
+      expect(served.headers.get('content-type')).toBe('image/png')
+      expect(new Uint8Array(await served.arrayBuffer())).toEqual(png)
+      expect(t.events.some(e => e.type === 'profile.updated' && e.profile.avatarUrl === avatarUrl)).toBe(true)
+      expect(await t.request('DELETE', '/api/me/avatar').then(r => r.json())).toMatchObject({ avatarUrl: null })
+      expect((await t.request('GET', '/api/me/avatar')).status).toBe(404)
+    })
+
+    it('stores an agent\'s picture and shows it on the agent', async () => {
+      const [agent] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'reviewer'))
+      const saved = await t.request('PUT', `/api/agents/${agent!.id}/avatar`, new Blob([png], { type: 'image/png' }))
+      expect(await saved.json()).toMatchObject({ id: agent!.id, avatarUrl: expect.stringMatching(new RegExp(`^/api/agents/${agent!.id}/avatar\\?v=`)) })
+      const listed = await t.request('GET', '/api/agents').then(r => r.json()) as { id: string, avatarUrl: string | null }[]
+      expect(listed.find(a => a.id === agent!.id)?.avatarUrl).toBeTruthy()
+      expect(t.events.some(e => e.type === 'agent.updated' && e.agent.id === agent!.id && e.agent.avatarUrl !== null)).toBe(true)
+      expect((await t.request('PUT', '/api/agents/not-an-id/avatar', new Blob([png], { type: 'image/png' }))).status).toBe(404)
+    })
+
+    it('rejects files that aren\'t the image they claim to be', async () => {
+      const text = await t.request('PUT', '/api/me/avatar', new Blob(['hello'], { type: 'text/plain' }))
+      expect(text.status).toBe(400)
+      const fake = await t.request('PUT', '/api/me/avatar', new Blob(['<svg/>'], { type: 'image/png' }))
+      expect(fake.status).toBe(400)
+      expect(await fake.json()).toMatchObject({ error: { code: 'invalid_input', issues: [{ message: 'The file isn\'t a PNG image' }] } })
+      const huge = await t.request('PUT', '/api/me/avatar', new Blob([new Uint8Array(3 * 1024 * 1024)], { type: 'image/png' }))
+      expect(huge.status).toBe(413)
+    })
+  })
+
   describe('projects', () => {
     it('creates a project with a slug from its name', async () => {
       const project = await t.createProject({ name: 'Corral Web', prefix: 'CW' })

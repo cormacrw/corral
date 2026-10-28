@@ -1,8 +1,9 @@
 import type { Plan, PlanMessage, PlanSession, PlanSessionDetail, RunJob } from '@corral/contracts'
-import { checkPlan, diffPlans, richTextToPlainText, taskRef, type Actor, type ProposedPlan, type ProposedTask } from '@corral/core'
+import { checkPlan, diffPlans, markdownToRichText, richTextToMarkdown, taskRef, type Actor, type ProposedPlan, type ProposedTask } from '@corral/core'
 import { schema, type Database } from '@corral/db'
-import { and, asc, desc, eq, inArray, isNull, ne } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
+import { listEpics } from './epics.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
 import { pmFallbackPrompt, pmPrompt } from './prompts.ts'
@@ -116,23 +117,6 @@ export class PlanService {
     return toMessage(message!)
   }
 
-  // flows.md §1: one PM turn the human didn't start, when an epic finishes
-  async deliverySummary(epicId: string): Promise<void> {
-    const { db } = this.#d
-    const [plan] = await db.select().from(plans).where(eq(plans.epicId, epicId)).orderBy(desc(plans.version)).limit(1)
-    if (!plan) return
-    const session = await this.#session(plan.sessionId)
-    const [project] = await db.select().from(projects).where(eq(projects.id, session.projectId))
-    const [epic] = await db.select().from(epics).where(eq(epics.id, epicId))
-    if (!project || !epic || !this.#d.runner.online) return
-    const text = `Every task in the epic "${epic.title}" has merged. Write a short delivery summary for the human: what shipped, how it was verified, anything that was deferred or deserves follow-up (use get_run_outcomes and get_task). Don't propose a new plan unless something is clearly unfinished.`
-    await db.update(planSessions).set({ unread: true, updatedAt: new Date() }).where(eq(planSessions.id, session.id))
-    await this.#turn(session, project, {
-      prompt: pmPrompt({ text, attachedTask: null, projectName: project.name, prefix: project.prefix, fresh: session.agentSessionId === null }),
-      fallbackPrompt: pmFallbackPrompt({ text, attachedTask: null, projectName: project.name, prefix: project.prefix, history: await this.#history(session.id) })
-    })
-  }
-
   async #turn(session: SessionRow, project: ProjectRow, prompts: { prompt: string, fallbackPrompt: string }): Promise<void> {
     const runId = await this.#d.startRun(session, {
       role: 'pm',
@@ -210,7 +194,7 @@ export class PlanService {
         const notes = await db.select().from(schema.comments).where(eq(schema.comments.taskId, task.id)).orderBy(asc(schema.comments.createdAt))
         return {
           ...task,
-          description: richTextToPlainText(task.description),
+          description: richTextToMarkdown(task.description),
           comments: notes.map(c => ({ author: c.author.kind, body: c.body, pinned: c.pinned, at: c.createdAt.toISOString() }))
         }
       }
@@ -236,12 +220,30 @@ export class PlanService {
       case 'propose_plan':
         return this.#propose(session, project, runId, proposedPlan.parse(input), actor)
 
+      // The human's approval, given in chat and carried out by the PM. It's
+      // recorded as the human's, via this run, and only counts if they wrote
+      // after the plan was proposed: the PM can't approve a plan unseen.
+      case 'approve_plan': {
+        const { to } = z.object({ to: z.enum(['ready', 'backlog']) }).parse(input)
+        const [latest] = await db.select().from(plans).where(eq(plans.sessionId, sessionId)).orderBy(desc(plans.version)).limit(1)
+        if (!latest || latest.status !== 'proposed') throw new ToolError('There is no plan waiting for approval in this conversation.')
+        const [said] = await db.select({ actor: auditLog.actor, createdAt: auditLog.createdAt }).from(auditLog)
+          .where(and(eq(auditLog.action, 'plan.message'), sql`${auditLog.detail}->>'sessionId' = ${sessionId}`))
+          .orderBy(desc(auditLog.createdAt)).limit(1)
+        if (!said || said.actor.kind !== 'human' || said.createdAt < latest.createdAt) {
+          throw new ToolError('Not approved. The human hasn\'t replied since this plan was proposed; only approve when their latest message asks you to.')
+        }
+        const approved = await this.approve(latest.id, said.actor, to, { runId })
+        const count = approved.tasks.filter(t => t.change !== 'removed').length
+        return { ok: true, message: `Plan v${approved.version} approved for the human: ${count} task${count === 1 ? '' : 's'} added to the ${to === 'ready' ? 'board' : 'Backlog'}. Tell them it's done.` }
+      }
+
       case 'flag_stale_docs': {
         const { title, description } = z.object({ title: z.string().trim().min(1), description: z.string().trim().min(1) }).parse(input)
         const taskId = await createTask(db, project, {
           title,
           type: 'infrastructure',
-          description: richText(description),
+          description: markdownToRichText(description),
           acceptanceCriteria: ['The documentation matches the code it describes']
         }, actor)
         const task = await loadTask(db, taskId)
@@ -252,8 +254,9 @@ export class PlanService {
     throw new ToolError(`Unknown tool ${tool}`)
   }
 
-  // Validates with core and saves a plan version. Tasks are created in
-  // Backlog (D10); a revision updates, adds or deletes them by key.
+  // Validates with core and saves a plan version. Tasks are created as
+  // Drafts, seen only in the plan (D10); a revision updates, adds or deletes
+  // the ones still in Draft by key.
   async #propose(session: SessionRow, project: ProjectRow, runId: string, proposed: ProposedPlan, actor: Actor) {
     const { db } = this.#d
     const problems = checkPlan(proposed)
@@ -290,7 +293,7 @@ export class PlanService {
         const current = existing.get(task.key)
         const input = {
           title: task.title,
-          description: richText(task.description),
+          description: markdownToRichText(task.description),
           type: task.type,
           priority: task.priority,
           humanReview: task.humanReview,
@@ -298,7 +301,7 @@ export class PlanService {
         }
         if (current) {
           const [row] = await tx.select().from(tasks).where(and(eq(tasks.id, current), isNull(tasks.deletedAt)))
-          if (row && row.status === 'backlog') {
+          if (row && row.status === 'draft') {
             const criteria = await tx.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, current)).orderBy(asc(acceptanceCriteria.position))
             await patchTask(tx, project, current, {
               ...input,
@@ -309,12 +312,12 @@ export class PlanService {
             continue
           }
           if (row) {
-            // Already approved and in flight: the plan can't change it
+            // Already on the board or in the Backlog: the plan can't change it
             ids.set(task.key, current)
             continue
           }
         }
-        ids.set(task.key, await createTask(tx, project, { ...input, epicId }, actor))
+        ids.set(task.key, await createTask(tx, project, { ...input, epicId }, actor, { draft: true }))
       }
       const numbers = new Map<string, number>()
       for (const [key, id] of ids) {
@@ -323,14 +326,14 @@ export class PlanService {
       }
       for (const task of proposed.tasks) {
         const [row] = await tx.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, ids.get(task.key)!))
-        if (row?.status !== 'backlog') continue
+        if (row?.status !== 'draft') continue
         await patchTask(tx, project, ids.get(task.key)!, { dependsOn: task.dependsOn.map(k => numbers.get(k)!), epicId }, actor)
       }
-      // Removed Backlog tasks are deleted outright (D10)
+      // Removed Drafts are deleted outright (D10)
       for (const [key, taskId] of existing) {
         if (ids.has(key)) continue
         const [row] = await tx.select({ status: tasks.status }).from(tasks).where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt)))
-        if (row?.status === 'backlog') await deleteTaskRows(tx, taskId, actor, 'Removed from the plan')
+        if (row?.status === 'draft') await deleteTaskRows(tx, taskId, actor, 'Removed from the plan')
       }
       await tx.insert(planTasks).values([
         ...proposed.tasks.map((task, position) => ({ planId, key: task.key, taskId: ids.get(task.key)!, change: changes.get(task.key) ?? 'added', position })),
@@ -343,6 +346,8 @@ export class PlanService {
 
     const full = await this.toPlan(plan)
     this.#d.events.publish({ type: 'plan.updated', plan: full })
+    const epic = (await listEpics(db, project)).find(e => e.id === plan.epicId)
+    if (epic) this.#d.events.publish({ type: 'epic.updated', epic })
     const [message] = await db.select().from(planMessages).where(eq(planMessages.planId, plan.id))
     if (message) this.#d.events.publish({ type: 'plan.message', message: toMessage(message) })
     for (const t of full.tasks) {
@@ -351,8 +356,10 @@ export class PlanService {
     return { ok: true, planId: plan.id, version: plan.version, tasks: full.tasks.map(t => ({ key: t.key, ref: t.ref, change: t.change })), message: 'The plan is saved and shown to the human for approval. Tell them what you proposed and why.' }
   }
 
-  // Approve plan (design/plan.md): human only; every Backlog task → Ready
-  async approve(planId: string, actor: Actor): Promise<Plan> {
+  // Approve plan (design/plan.md): human only. Its Drafts go to the board
+  // (Ready) or to the Backlog for later or for refining.
+  // `via` is the PM run that carried out the human's say-so in chat
+  async approve(planId: string, actor: Actor, to: 'ready' | 'backlog' = 'ready', via: { runId: string } | null = null): Promise<Plan> {
     if (actor.kind !== 'human') throw new ApiFailure(409, { code: 'transition_rejected', reason: { code: 'actor_not_allowed', actor: null, event: 'approve' } })
     const { db } = this.#d
     const [plan] = await db.select().from(plans).where(eq(plans.id, planId))
@@ -362,10 +369,12 @@ export class PlanService {
     for (const item of items) {
       if (!item.taskId) continue
       const [row] = await db.select({ status: tasks.status }).from(tasks).where(and(eq(tasks.id, item.taskId), isNull(tasks.deletedAt)))
-      if (row?.status === 'backlog') await transitionTask(db, item.taskId, { type: 'approve' }, actor)
+      if (row?.status === 'draft') await transitionTask(db, item.taskId, { type: to === 'ready' ? 'approve' : 'accept' }, actor)
+      // Plans proposed before Drafts existed put their tasks in Backlog
+      else if (row?.status === 'backlog' && to === 'ready') await transitionTask(db, item.taskId, { type: 'approve' }, actor)
     }
     await db.update(plans).set({ status: 'approved', approvedBy: actor, approvedAt: new Date() }).where(eq(plans.id, planId))
-    await db.insert(auditLog).values({ projectId: plan.projectId, actor, action: 'plan.approved', detail: { planId, version: plan.version } })
+    await db.insert(auditLog).values({ projectId: plan.projectId, actor, action: 'plan.approved', detail: { planId, version: plan.version, to, ...(via && { viaPmRun: via.runId }) } })
     const full = await this.toPlan((await db.select().from(plans).where(eq(plans.id, planId)))[0]!)
     this.#d.events.publish({ type: 'plan.updated', plan: full })
     for (const t of full.tasks) {
@@ -423,7 +432,7 @@ export class PlanService {
       result.push({
         key: item.key,
         title: task.title,
-        description: richTextToPlainText(task.description),
+        description: richTextToMarkdown(task.description),
         type: task.type,
         priority: task.priority,
         humanReview: task.humanReview,
@@ -495,12 +504,4 @@ function toMessage(row: typeof planMessages.$inferSelect): PlanMessage {
 function titleFrom(text: string): string {
   const line = text.split('\n')[0]!.trim()
   return line.length > 60 ? `${line.slice(0, 57)}…` : line || 'New session'
-}
-
-// Plain text from the PM becomes a one-paragraph-per-line document
-function richText(text: string) {
-  return {
-    type: 'doc' as const,
-    content: text.split(/\n{2,}|\n/).filter(Boolean).map(paragraph => ({ type: 'paragraph', content: [{ type: 'text', text: paragraph }] }))
-  }
 }

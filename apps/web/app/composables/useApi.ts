@@ -6,18 +6,22 @@ import type {
   Comment,
   CreateProjectInput,
   CreateTaskInput,
+  Epic,
+  EpicDetail,
   Evidence,
   GlobalStatus,
   HumanTransitionInput,
   Inbox,
   InboxActionInput,
   PatchAgentInput,
+  PatchEpicInput,
   PatchProjectInput,
   PatchTaskInput,
   Plan,
   PlanMessage,
   PlanSession,
   PlanSessionDetail,
+  Profile,
   Project,
   RepoCheck,
   RepoList,
@@ -41,10 +45,11 @@ export class ApiError extends Error {
 }
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  // A Blob (an image upload) goes as is, with its own type; anything else is JSON
   const res = await fetch(`/api${path}`, {
     method,
-    headers: body === undefined ? {} : { 'content-type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body)
+    headers: body === undefined ? {} : { 'content-type': body instanceof Blob ? body.type : 'application/json' },
+    body: body === undefined ? undefined : body instanceof Blob ? body : JSON.stringify(body)
   })
   if (res.status === 204) return undefined as T
   const text = await res.text()
@@ -66,7 +71,11 @@ export function describe(status: number, error: ApiErrorBody['error'] | null): s
   switch (error.code) {
     case 'not_found': return 'Not found'
     case 'runner_offline': return 'The runner is offline'
-    case 'invalid_input': return 'Some of the input is invalid'
+    case 'invalid_input': {
+      // The first issue says what to fix, e.g. "The image is over 2 MB"
+      const first = Array.isArray(error.issues) ? (error.issues[0] as { message?: unknown } | undefined)?.message : undefined
+      return typeof first === 'string' ? first : 'Some of the input is invalid'
+    }
     case 'conflict': return error.constraint ? `Conflict: ${error.constraint.replaceAll('_', ' ')}` : 'Conflict'
     case 'transition_rejected': return `Not allowed: ${JSON.stringify(error.reason)}`
     case 'invalid_dependencies': return `Invalid dependencies: ${JSON.stringify(error.problems)}`
@@ -113,7 +122,14 @@ export const api = {
 
   agents: {
     list: () => call<Agent[]>('GET', '/agents'),
-    patch: (id: string, input: PatchAgentInput) => call<Agent>('PATCH', `/agents/${id}`, input)
+    patch: (id: string, input: PatchAgentInput) => call<Agent>('PATCH', `/agents/${id}`, input),
+    setAvatar: (id: string, image: Blob) => call<Agent>('PUT', `/agents/${id}/avatar`, image),
+    clearAvatar: (id: string) => call<Agent>('DELETE', `/agents/${id}/avatar`)
+  },
+  me: {
+    get: () => call<Profile>('GET', '/me'),
+    setAvatar: (image: Blob) => call<Profile>('PUT', '/me/avatar', image),
+    clearAvatar: () => call<Profile>('DELETE', '/me/avatar')
   },
 
   runs: {
@@ -135,12 +151,17 @@ export const api = {
     act: (taskId: string, input: InboxActionInput) => call<{ task: Task | null }>('POST', `/inbox/${taskId}/actions`, input)
   },
 
+  epics: {
+    list: (slug: string) => call<Epic[]>('GET', `/projects/${slug}/epics`),
+    get: (id: string) => call<EpicDetail>('GET', `/epics/${id}`),
+    patch: (id: string, input: PatchEpicInput) => call<Epic>('PATCH', `/epics/${id}`, input)
+  },
   plan: {
     sessions: () => call<PlanSession[]>('GET', '/plan/sessions'),
     session: (id: string) => call<PlanSessionDetail>('GET', `/plan/sessions/${id}`),
     start: (projectId: string, text: string, taskRef?: string) => call<PlanSessionDetail>('POST', '/plan/sessions', { projectId, text, ...(taskRef && { taskRef }) }),
     message: (id: string, text: string, taskRef?: string) => call<PlanMessage>('POST', `/plan/sessions/${id}/messages`, { text, ...(taskRef && { taskRef }) }),
     read: (id: string) => call<PlanSession>('POST', `/plan/sessions/${id}/read`),
-    approve: (planId: string) => call<Plan>('POST', `/plan/plans/${planId}/approve`)
+    approve: (planId: string, to: 'ready' | 'backlog') => call<Plan>('POST', `/plan/plans/${planId}/approve`, { to })
   }
 }

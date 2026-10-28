@@ -16,13 +16,17 @@
 ### Profile
 
 - **Your name** (`UInput`): "How agents address you, and the author on approvals."
-- **Avatar:** a preview and **Upload image**.
+- **Picture:** a preview, **Upload picture** (**Change picture** once set) and **Remove**. Shown on your comments, approvals and in the sidebar footer.
 
 ### Agents
 
 - **Header:** "Agents" with "Shared by every project. Each runs through your local CLI login; Corral never sees your credentials." (D1–D2), and **Add agent**.
-- **One row per agent:** the avatar, the name, a role badge, "Claude Code · concurrency 1 · `.corral/agents/<role>.md`", and **Edit**.
+- **One row per agent:** the name, a role badge, "Claude Code · concurrency 1 · `.corral/agents/<role>.md`", the agent's picture with **Upload picture** / **Remove**, and its name, concurrency and paused controls.
 - **Edit screen** (to design): name, role, runtime (`USelectMenu`, offering only the detected CLIs), concurrency, instructions file, and the caps that apply per role.
+
+### Profile pictures
+
+Pictures are optional; without one, an avatar shows initials. The browser crops the image to a centred square and scales it to 256px (WebP, or PNG where WebP can't be encoded) before uploading, so files stay small. The server accepts PNG, JPEG, WebP or GIF up to 2 MB, checks that the bytes match the declared type, and keeps the file in the blob store. Picture URLs carry part of the file's hash, so a new picture gets a new URL and an old one can be cached forever. Every avatar for that person or agent (sidebar, board cards, Inbox, comments, task properties) updates live.
 
 ### Runner
 

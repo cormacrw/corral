@@ -8,6 +8,7 @@ import {
   richTextToPlainText,
   taskRef,
   transition,
+  upgradePlainMarkdown,
   type Actor,
   type TaskEvent,
   type TaskState,
@@ -74,7 +75,7 @@ function toTask(
     ref: taskRef(project.prefix, row.number),
     number: row.number,
     title: row.title,
-    description: row.description,
+    description: upgradePlainMarkdown(row.description),
     status: row.status,
     priority: row.priority,
     type: row.type,
@@ -125,16 +126,19 @@ export async function listTasks(db: Executor, project: ProjectRow, view: TaskVie
     .where(and(
       eq(tasks.projectId, project.id),
       isNull(tasks.deletedAt),
+      // Drafts are seen only in the plan that proposed them
+      ne(tasks.status, 'draft'),
       view === 'board' ? ne(tasks.status, 'backlog') : view === 'backlog' ? eq(tasks.status, 'backlog') : undefined
     ))
     .orderBy(asc(tasks.number))
   return toTasks(db, project, rows)
 }
 
-// New tasks start in Backlog (D10). Returns the new task's ID.
-export async function createTask(db: Executor, project: ProjectRow, rawInput: CreateTaskInput, actor: Actor): Promise<string> {
+// New tasks start in Backlog, or as Drafts for the PM's plans (D10).
+// Returns the new task's ID.
+export async function createTask(db: Executor, project: ProjectRow, rawInput: CreateTaskInput, actor: Actor, options: { draft?: boolean } = {}): Promise<string> {
   const input = createTaskInput.parse(rawInput)
-  const created = createTaskState(actor, input.humanReview ?? project.humanReviewDefault)
+  const created = createTaskState(actor, input.humanReview ?? project.humanReviewDefault, options.draft)
   if (!created.ok) throw new ApiFailure(409, { code: 'transition_rejected', reason: created.error })
 
   return db.transaction(async (tx) => {
@@ -253,6 +257,8 @@ export async function applyTransition(
 export async function patchTask(db: Executor, project: ProjectRow, taskId: string, input: PatchTaskInput, actor: Actor): Promise<void> {
   await db.transaction(async (tx) => {
     const { task } = await lockTask(tx, taskId)
+    // Merged is final (D10): the record stays as it shipped; comments still work
+    if (task.status === 'merged') throw new ApiFailure(409, { code: 'conflict', constraint: 'task_merged' })
     const { acceptanceCriteria: criteriaInput, dependsOn, ...fields } = input
     if (fields.epicId) {
       const [epic] = await tx.select({ id: epics.id }).from(epics).where(and(eq(epics.id, fields.epicId), eq(epics.projectId, project.id)))

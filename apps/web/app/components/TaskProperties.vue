@@ -15,7 +15,15 @@ const props = withDefaults(defineProps<{
   developer: Agent | undefined
   reviewer: Agent | undefined
   stacked?: boolean
-}>(), { stacked: false })
+  // A Draft has no status, branch, PR or review yet
+  draft?: boolean
+  // A merged task's properties are shown, not edited
+  readonly?: boolean
+}>(), { stacked: false, draft: false, readonly: false })
+const DRAFT_HIDDEN = ['status', 'branch', 'pr', 'round']
+const live = useLive()
+const flyout = useTaskFlyout()
+const epic = computed(() => props.task.epicId ? live.state.value.epics[props.task.projectId]?.find(e => e.id === props.task.epicId) ?? null : null)
 const emit = defineEmits<{ status: [value: string], patch: [input: PatchTaskInput] }>()
 
 const dotClass = (status: TaskStatus) => ({
@@ -27,6 +35,7 @@ const dotClass = (status: TaskStatus) => ({
   <template
     v-for="row in [
       { key: 'project', label: 'Project' },
+      { key: 'epic', label: 'Epic' },
       { key: 'status', label: 'Status' },
       { key: 'priority', label: 'Priority' },
       { key: 'type', label: 'Type' },
@@ -36,14 +45,35 @@ const dotClass = (status: TaskStatus) => ({
       { key: 'branch', label: 'Branch' },
       { key: 'pr', label: 'Pull request' },
       { key: 'round', label: 'Review round' }
-    ]"
+    ].filter(r => !props.draft || !DRAFT_HIDDEN.includes(r.key))"
     :key="row.key"
   >
-    <dt :class="['text-muted', props.stacked && 'mt-2 text-xs']">
+    <dt :class="['text-muted', props.stacked ? 'mt-2 text-xs' : 'flex min-h-8 items-center']">
       {{ row.label }}
     </dt>
-    <dd class="min-w-0">
+    <dd :class="['min-w-0', !props.stacked && 'flex min-h-8 items-center']">
       <span v-if="row.key === 'project'">{{ props.project?.name ?? '' }}</span>
+
+      <template v-else-if="row.key === 'epic'">
+        <!-- The task page has no flyout, so the epic opens as a page there -->
+        <NuxtLink
+          v-if="props.task.epicId && props.stacked"
+          :to="`/epics/${props.task.epicId}`"
+          class="block truncate text-primary hover:underline"
+        >{{ epic?.title ?? 'Epic' }}</NuxtLink>
+        <button
+          v-else-if="props.task.epicId"
+          type="button"
+          class="truncate text-start text-primary hover:underline"
+          @click="flyout.openEpic(props.task.epicId)"
+        >
+          {{ epic?.title ?? 'Epic' }}
+        </button>
+        <span
+          v-else
+          class="text-muted"
+        >None</span>
+      </template>
 
       <UTooltip
         v-else-if="row.key === 'status'"
@@ -58,7 +88,8 @@ const dotClass = (status: TaskStatus) => ({
           variant="ghost"
           size="sm"
           :search-input="false"
-          class="w-full"
+          class="-ms-2.5 w-[calc(100%+0.625rem)]"
+          :ui="{ base: 'md:text-sm' }"
           @update:model-value="emit('status', $event as string)"
         >
           <template #leading="{ modelValue }">
@@ -76,6 +107,10 @@ const dotClass = (status: TaskStatus) => ({
         </USelectMenu>
       </UTooltip>
 
+      <span v-else-if="props.readonly && row.key === 'priority'">{{ props.priorityOptions.find(o => o.value === props.task.priority)?.label }}</span>
+      <span v-else-if="props.readonly && row.key === 'type'">{{ props.typeOptions.find(o => o.value === props.task.type)?.label }}</span>
+      <span v-else-if="props.readonly && row.key === 'humanReview'">{{ props.task.humanReview ? 'Yes' : 'No' }}</span>
+
       <USelectMenu
         v-else-if="row.key === 'priority'"
         :model-value="props.task.priority"
@@ -84,7 +119,8 @@ const dotClass = (status: TaskStatus) => ({
         variant="ghost"
         size="sm"
         :search-input="false"
-        class="w-full"
+        class="-ms-2.5 w-[calc(100%+0.625rem)]"
+        :ui="{ base: 'md:text-sm' }"
         @update:model-value="emit('patch', { priority: $event as Task['priority'] })"
       />
 
@@ -96,7 +132,8 @@ const dotClass = (status: TaskStatus) => ({
         variant="ghost"
         size="sm"
         :search-input="false"
-        class="w-full"
+        class="-ms-2.5 w-[calc(100%+0.625rem)]"
+        :ui="{ base: 'md:text-sm' }"
         @update:model-value="emit('patch', { type: $event as Task['type'] })"
       />
 

@@ -3,6 +3,7 @@ import { ACTIVE_RUN_STATES, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, count, desc, eq, inArray, type SQL } from 'drizzle-orm'
 import { notFound } from './errors.ts'
+import { avatarUrl } from './avatars.ts'
 
 const { agents, auditLog, evidence, projects, reviews, runs, tasks } = schema
 
@@ -73,7 +74,10 @@ export async function getRun(db: Executor, runId: string): Promise<Run> {
 }
 
 export async function listAgents(db: Executor): Promise<Agent[]> {
-  const rows = await db.select().from(agents).orderBy(agents.createdAt)
+  // PM, developer, reviewer, then by age: the default agents share one
+  // creation time, so that alone would let them shuffle
+  const order = { pm: 0, developer: 1, reviewer: 2 } as const
+  const rows = (await db.select().from(agents).orderBy(agents.createdAt, agents.name)).sort((a, b) => order[a.role] - order[b.role])
   const active = await db.select({ agentId: runs.agentId, n: count() }).from(runs)
     .where(inArray(runs.state, [...ACTIVE_RUN_STATES]))
     .groupBy(runs.agentId)
@@ -85,7 +89,8 @@ export async function listAgents(db: Executor): Promise<Agent[]> {
     concurrency: a.concurrency,
     paused: a.paused,
     pausedUntil: a.pausedUntil?.toISOString() ?? null,
-    activeRuns: active.find(x => x.agentId === a.id)?.n ?? 0
+    activeRuns: active.find(x => x.agentId === a.id)?.n ?? 0,
+    avatarUrl: avatarUrl(`agents/${a.id}`, a.avatarBlob)
   }))
 }
 

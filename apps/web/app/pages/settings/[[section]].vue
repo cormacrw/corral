@@ -34,6 +34,13 @@ async function patchAgent(agent: Agent, input: Parameters<typeof api.agents.patc
     toast.add({ title: 'Not saved', description: e instanceof Error ? e.message : String(e), color: 'error' })
   }
 }
+async function saveMyAvatar(image: Blob | null) {
+  live.state.value.profile = image ? await api.me.setAvatar(image) : await api.me.clearAvatar()
+}
+async function saveAgentAvatar(agent: Agent, image: Blob | null) {
+  const updated = image ? await api.agents.setAvatar(agent.id, image) : await api.agents.clearAvatar(agent.id)
+  live.state.value.agents = live.state.value.agents.map(a => a.id === updated.id ? updated : a)
+}
 async function stopAll() {
   try {
     await api.stopAll()
@@ -79,6 +86,20 @@ const items = [
               Profile
             </h2>
           </template>
+          <div class="mb-5 grid gap-2 sm:grid-cols-[1fr_320px]">
+            <div>
+              <span class="font-medium">Picture</span>
+              <p class="text-xs text-muted">
+                Shown on your comments, approvals and in the sidebar. Cropped to a square.
+              </p>
+            </div>
+            <AvatarUpload
+              name="You"
+              :avatar-url="live.state.value.profile?.avatarUrl ?? null"
+              :save="(image: Blob) => saveMyAvatar(image)"
+              :remove="() => saveMyAvatar(null)"
+            />
+          </div>
           <div class="grid gap-2 sm:grid-cols-[1fr_320px]">
             <div>
               <label
@@ -114,11 +135,7 @@ const items = [
                 :key="agent.id"
                 class="flex flex-wrap items-center gap-3 py-3"
               >
-                <AgentAvatar
-                  :name="agent.name"
-                  :working="agent.activeRuns > 0"
-                />
-                <div class="min-w-0 flex-1">
+                <div class="min-w-0 flex-1 basis-56">
                   <div class="flex items-center gap-2">
                     <span class="font-medium">{{ agent.name }}</span>
                     <UBadge
@@ -131,6 +148,14 @@ const items = [
                   <p class="text-xs text-muted">
                     Claude · concurrency {{ agent.concurrency }} · <span class="font-mono">.corral/agents/{{ agent.role }}.md</span>
                   </p>
+                  <AvatarUpload
+                    :name="agent.name"
+                    :avatar-url="agent.avatarUrl"
+                    size="lg"
+                    class="mt-2"
+                    :save="(image: Blob) => saveAgentAvatar(agent, image)"
+                    :remove="() => saveAgentAvatar(agent, null)"
+                  />
                 </div>
                 <UFormField
                   label="Name"

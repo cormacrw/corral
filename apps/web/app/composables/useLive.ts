@@ -1,4 +1,4 @@
-import type { Agent, GlobalStatus, PlanSession, Project, RunEvent, RunnerStatus, ServerEvent, Task } from '@corral/contracts'
+import type { Agent, Epic, GlobalStatus, PlanSession, Profile, Project, RunEvent, RunnerStatus, ServerEvent, Task } from '@corral/contracts'
 import { api } from './useApi'
 
 // Everything the shell and pages show live. Loaded once, then kept current
@@ -11,7 +11,11 @@ export interface LiveState {
   projects: Project[]
   // Tasks by project ID, every status, filled in as pages ask for them
   tasks: Record<string, Task[]>
+  // Epics by project ID, loaded with the project's tasks
+  epics: Record<string, Epic[]>
   agents: Agent[]
+  // The human's profile (their picture)
+  profile: Profile | null
   runner: RunnerStatus | null
   status: GlobalStatus
   inboxCount: number
@@ -34,7 +38,9 @@ export function useLive() {
     connection: 'connecting',
     projects: [],
     tasks: {},
+    epics: {},
     agents: [],
+    profile: null,
     runner: null,
     status: { stopped: false },
     inboxCount: 0,
@@ -44,9 +50,10 @@ export function useLive() {
 
   async function load(): Promise<void> {
     try {
-      const [projects, agents, runner, status, inbox, planSessions] = await Promise.all([
-        api.projects.list(), api.agents.list(), api.runner(), api.status(), api.inbox.get(), api.plan.sessions()
+      const [projects, agents, runner, status, inbox, planSessions, profile] = await Promise.all([
+        api.projects.list(), api.agents.list(), api.runner(), api.status(), api.inbox.get(), api.plan.sessions(), api.me.get()
       ])
+      state.value.profile = profile
       state.value.projects = projects
       state.value.agents = agents
       state.value.runner = runner
@@ -61,16 +68,20 @@ export function useLive() {
   }
 
   async function loadTasks(project: Project): Promise<Task[]> {
-    const tasks = await api.tasks.list(project.slug, 'all')
+    const [tasks, epics] = await Promise.all([api.tasks.list(project.slug, 'all'), api.epics.list(project.slug)])
     state.value.tasks[project.id] = tasks
+    state.value.epics[project.id] = epics
     return tasks
   }
 
+  // Drafts live only in their plan, not in the project's task list
   function upsertTask(task: Task): void {
     const list = state.value.tasks[task.projectId]
     if (!list) return
     const index = list.findIndex(t => t.id === task.id)
-    if (index >= 0) list.splice(index, 1, task)
+    if (task.status === 'draft') {
+      if (index >= 0) list.splice(index, 1)
+    } else if (index >= 0) list.splice(index, 1, task)
     else list.push(task)
   }
 
@@ -87,6 +98,17 @@ export function useLive() {
       case 'task.updated':
         upsertTask(event.task)
         break
+      case 'profile.updated':
+        s.profile = event.profile
+        break
+      case 'epic.updated': {
+        const list = s.epics[event.epic.projectId]
+        if (!list) break
+        const index = list.findIndex(e => e.id === event.epic.id)
+        if (index >= 0) list.splice(index, 1, event.epic)
+        else list.push(event.epic)
+        break
+      }
       case 'task.deleted': {
         const list = s.tasks[event.projectId]
         if (list) s.tasks[event.projectId] = list.filter(t => t.id !== event.taskId)
@@ -134,7 +156,7 @@ export function useLive() {
     source = new EventSource('/api/events')
     const types: ServerEvent['type'][] = [
       'project.created', 'project.updated', 'task.created', 'task.updated', 'task.deleted', 'runner.status', 'run.updated',
-      'run.events', 'agent.updated', 'global.status', 'plan.session', 'plan.message', 'plan.updated', 'comment.created'
+      'run.events', 'agent.updated', 'global.status', 'plan.session', 'plan.message', 'plan.updated', 'epic.updated', 'profile.updated', 'comment.created'
     ]
     for (const type of types) {
       source.addEventListener(type, (message) => {

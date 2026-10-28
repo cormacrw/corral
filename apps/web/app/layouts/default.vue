@@ -81,14 +81,15 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
 </script>
 
 <template>
-  <div class="min-h-svh bg-default text-default">
+  <div class="flex h-svh flex-col bg-default text-default">
     <UAlert
       v-if="state.status.stopped"
       color="error"
       variant="solid"
       icon="i-lucide-octagon-x"
       title="Corral is stopped. No runs will start until you resume."
-      :ui="{ root: 'rounded-none' }"
+      :ui="{ root: 'shrink-0 rounded-none py-2' }"
+      orientation="horizontal"
       :actions="[{ label: 'Resume everything', color: 'neutral', variant: 'solid', onClick: resumeAll }]"
     />
     <UAlert
@@ -97,7 +98,8 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
       variant="solid"
       icon="i-lucide-pause"
       :title="`${currentProject.name} is paused. No new runs will start; work already running will finish.`"
-      :ui="{ root: 'rounded-none' }"
+      :ui="{ root: 'shrink-0 rounded-none py-2' }"
+      orientation="horizontal"
       :actions="[{ label: 'Resume', color: 'neutral', variant: 'solid', onClick: () => resume(currentProject!) }]"
     />
     <UAlert
@@ -106,7 +108,8 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
       variant="subtle"
       icon="i-lucide-server-off"
       title="The runner is offline. Plan and live runs are unavailable until it reconnects."
-      :ui="{ root: 'rounded-none' }"
+      :ui="{ root: 'shrink-0 rounded-none py-2' }"
+      orientation="horizontal"
     />
     <UAlert
       v-else-if="state.connection === 'reconnecting'"
@@ -114,7 +117,8 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
       variant="subtle"
       icon="i-lucide-refresh-cw"
       title="Reconnecting to Corral…"
-      :ui="{ root: 'rounded-none' }"
+      :ui="{ root: 'shrink-0 rounded-none py-2' }"
+      orientation="horizontal"
     />
 
     <UDashboardGroup>
@@ -216,7 +220,7 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
                     :to="`/projects/${project.slug}`"
                     variant="ghost"
                     color="neutral"
-                    :class="['flex-1 justify-start', currentSlug === project.slug && 'text-highlighted']"
+                    :class="[collapsed ? 'p-1.5' : 'flex-1 justify-start', currentSlug === project.slug && 'text-highlighted']"
                   >
                     <span
                       class="flex size-5 shrink-0 items-center justify-center rounded text-[10px] font-semibold text-white"
@@ -295,12 +299,13 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
                 :to="`/agents/${agent.name.toLowerCase()}`"
                 variant="ghost"
                 :color="isActive(`/agents/${agent.name.toLowerCase()}`) ? 'primary' : 'neutral'"
-                :class="['w-full justify-start', isActive(`/agents/${agent.name.toLowerCase()}`) && 'bg-elevated']"
+                :class="[collapsed ? 'p-1.5' : 'w-full justify-start', isActive(`/agents/${agent.name.toLowerCase()}`) && 'bg-elevated']"
               >
+                <!-- Nav icon size, so rows stay one height and fit when collapsed -->
                 <AgentAvatar
                   :name="agent.name"
                   :working="isWorking(agent)"
-                  size="xs"
+                  size="2xs"
                 />
                 <span
                   v-if="!collapsed"
@@ -328,10 +333,16 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
 
         <template #footer="{ collapsed }">
           <div :class="['flex items-center gap-2 rounded-md bg-elevated p-2 text-xs', collapsed && 'justify-center']">
-            <UIcon
-              name="i-lucide-server"
-              class="size-4 shrink-0 text-muted"
-            />
+            <span class="relative inline-flex shrink-0">
+              <UIcon
+                name="i-lucide-server"
+                class="size-4 text-muted"
+              />
+              <span
+                :class="['absolute -end-0.5 -top-0.5 size-2 rounded-full ring-2 ring-(--ui-bg-elevated)', runnerColor === 'success' ? 'bg-success' : runnerColor === 'warning' ? 'bg-warning' : 'bg-error']"
+                aria-hidden="true"
+              />
+            </span>
             <div
               v-if="!collapsed"
               class="min-w-0 flex-1"
@@ -343,14 +354,10 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
                 {{ state.runner?.name ?? 'not connected' }} · Claude
               </div>
             </div>
-            <span
-              :class="['size-2 shrink-0 rounded-full', runnerColor === 'success' ? 'bg-success' : runnerColor === 'warning' ? 'bg-warning' : 'bg-error']"
-              aria-hidden="true"
-            />
           </div>
           <div :class="['flex items-center gap-2', collapsed && 'flex-col']">
-            <UAvatar
-              :text="initials('You')"
+            <AgentAvatar
+              name="You"
               size="sm"
             />
             <span

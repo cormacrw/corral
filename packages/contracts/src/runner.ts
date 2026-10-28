@@ -96,6 +96,7 @@ export type AgentTool =
   | 'get_run_outcomes'
   | 'ask_question'
   | 'propose_plan'
+  | 'approve_plan'
   | 'flag_stale_docs'
 
 export interface OutcomeReport {

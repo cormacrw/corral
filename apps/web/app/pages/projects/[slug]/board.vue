@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Task } from '@corral/contracts'
 import type { TaskStatus } from '@corral/core'
-import { PRIORITY, STATUS, taskNote } from '~/utils/labels'
+import { epicTitle, PRIORITY, STATUS, taskNote } from '~/utils/labels'
 
 // The board (design/board.md): approved work by status, no drag and drop
 const route = useRoute()
@@ -36,20 +36,21 @@ const columns: { label: string, statuses: TaskStatus[], hint: string }[] = [
   { label: 'In progress', statuses: ['in_progress'], hint: 'Developer' },
   { label: 'Agent review', statuses: ['agent_review'], hint: 'Reviewer' },
   { label: 'Human review', statuses: ['human_review'], hint: 'You' },
+  { label: 'Ready to merge', statuses: ['ready_to_merge'], hint: 'Corral' },
   { label: 'Blocked & failed', statuses: ['blocked', 'failed'], hint: 'You' },
   { label: 'Merged', statuses: ['merged'], hint: '' }
 ]
 const DOT = { neutral: 'bg-neutral-400', info: 'bg-info', primary: 'bg-primary', warning: 'bg-warning', error: 'bg-error', success: 'bg-success', secondary: 'bg-secondary' } as const
 const inColumn = (statuses: TaskStatus[]) => visible.value.filter(t => statuses.includes(t.status))
 const agentFor = (task: Task) => task.lease ? live.state.value.agents.find(a => a.role === task.lease!.role) : null
-const epicLabel = (id: string) => `Epic ${epics.value.indexOf(id) + 1}`
+const epicLabel = (id: string) => epicTitle(live.state.value.epics[project.value?.id ?? ''], id, epics.value.indexOf(id))
 </script>
 
 <template>
   <UDashboardPanel :ui="{ body: 'p-0' }">
     <div class="flex h-full min-h-0">
       <div class="flex min-w-0 flex-1 flex-col">
-        <div class="flex flex-wrap items-center gap-2 border-b border-default px-4 py-2">
+        <div class="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b border-default px-4 py-2">
           <UInput
             v-model="search"
             placeholder="Search tasks"
@@ -83,6 +84,16 @@ const epicLabel = (id: string) => `Epic ${epics.value.indexOf(id) + 1}`
               @click="epic = id"
             />
           </div>
+          <UButton
+            v-if="epic"
+            label="Epic details"
+            icon="i-lucide-network"
+            size="xs"
+            variant="outline"
+            color="neutral"
+            :aria-pressed="flyout.epic.value === epic"
+            @click="flyout.toggleEpic(epic)"
+          />
           <span class="ms-auto text-sm text-muted">{{ visible.length }} tasks</span>
         </div>
 
@@ -108,15 +119,15 @@ const epicLabel = (id: string) => `Epic ${epics.value.indexOf(id) + 1}`
           role="region"
           aria-label="Board columns"
           tabindex="0"
-          class="flex min-h-0 flex-1 gap-3 overflow-x-auto p-4"
+          class="flex min-h-0 flex-1 items-start gap-3 overflow-x-auto p-4"
         >
           <section
             v-for="column in columns"
             :key="column.label"
             :aria-label="`${column.label}, ${inColumn(column.statuses).length}`"
-            class="flex w-[272px] shrink-0 flex-col rounded-lg border border-default bg-muted"
+            class="flex max-h-full w-[272px] shrink-0 flex-col rounded-lg border border-default bg-muted"
           >
-            <header class="flex items-center gap-2 px-3 py-2 text-sm">
+            <header class="flex shrink-0 items-center gap-2 px-3 py-2.5 text-sm">
               <span
                 :class="['size-2 rounded-full', DOT[STATUS[column.statuses[0]!].color]]"
                 aria-hidden="true"
@@ -130,16 +141,16 @@ const epicLabel = (id: string) => `Epic ${epics.value.indexOf(id) + 1}`
               />
               <span class="ms-auto text-xs text-muted">{{ column.hint }}</span>
             </header>
-            <div class="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
+            <div class="flex min-h-0 flex-col gap-2 overflow-y-auto px-2 pt-0.5 pb-2">
               <button
                 v-for="task in inColumn(column.statuses)"
                 :key="task.id"
                 type="button"
                 :aria-pressed="flyout.ref.value === task.ref"
                 :class="[
-                  'flex flex-col gap-1 rounded-md border border-default bg-default p-2.5 text-start text-sm',
+                  'flex shrink-0 flex-col gap-1.5 rounded-md border border-default bg-default px-3 py-2.5 text-start text-sm hover:border-accented',
                   task.lease && 'border-primary/60 motion-safe:animate-pulse motion-reduce:border-primary',
-                  flyout.ref.value === task.ref && 'outline-2 outline-primary'
+                  flyout.ref.value === task.ref && 'border-primary ring-1 ring-primary'
                 ]"
                 @click="flyout.toggle(task.ref)"
               >
@@ -180,7 +191,7 @@ const epicLabel = (id: string) => `Epic ${epics.value.indexOf(id) + 1}`
               </button>
               <p
                 v-if="inColumn(column.statuses).length === 0"
-                class="px-1 py-3 text-xs text-dimmed"
+                class="px-1 pt-1 pb-2 text-xs text-dimmed"
               >
                 Nothing here
               </p>

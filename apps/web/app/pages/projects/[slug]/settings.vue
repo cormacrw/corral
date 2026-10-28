@@ -210,7 +210,7 @@ const customCheck = ref('')
             <div>
               <span class="font-medium">Required checks</span>
               <p class="text-xs text-muted">
-                GitHub check names that must pass. With no checks, every task needs human review.
+                GitHub check names that must pass. With no checks, unflagged tasks merge on the reviewer's approval alone.
               </p>
             </div>
             <div class="flex flex-wrap gap-1.5">

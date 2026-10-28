@@ -22,6 +22,7 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
      | In progress | In progress | Developer |
      | Agent review | Agent review | Reviewer |
      | Human review | Human review | You |
+     | Ready to merge | Ready to merge | Corral |
      | Blocked & failed | Blocked, Failed | You |
      | Merged | Merged | — |
 

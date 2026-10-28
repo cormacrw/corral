@@ -8,7 +8,7 @@
 | `flyout` | Docked on the right of Inbox, Plan, Board, Backlog and Agent pages | Stacked, one column, resizable 360–960px (default 420px) |
 | `page` | `/tasks/:ref`, e.g. `/tasks/COR-29` | Split: content on the left, a 260px properties rail on the right, centred up to 1200px |
 
-The flyout opens with `?task=COR-29` on the current page's URL, so it survives reloads and links can be shared. Pages decide what opens it (a row click, a card click, a chip link). Clicking the same row again closes it.
+The flyout opens with `?task=COR-29` on the current page's URL, so it survives reloads and links can be shared. Pages decide what opens it (a row click, a card click, a chip link). Clicking the same row again closes it. Opening a task or epic adds a browser history entry, so Back returns to whatever the flyout showed before (an epic, after opening one of its tasks). The Inbox, which opens the selected item's task by itself, replaces the entry instead. Closing the flyout doesn't add one.
 
 ## Purpose
 
@@ -18,8 +18,8 @@ Read and edit any task from wherever you are, without losing your place. It's th
 
 ### Header (56px, bottom border)
 
-- **Flyout:** the task ref (`text-muted`) on the left, then a "✓ Saved" note for 1.8s after any edit. On the right: copy link, open full page, close.
-- **Page:** a breadcrumb (`Board › COR-29`) with no close or open-full-page buttons.
+- **Flyout:** a back arrow when this task was opened from another flyout item (an epic's task list or graph, or another task), then a breadcrumb (`text-muted`) on the left: the task's epic, which opens the epic in the flyout, › the task ref, then a "✓ Saved" note for 1.8s after any edit. On the right: copy link, open full page, close.
+- **Page:** a breadcrumb (`Board › {epic} › COR-29`, the epic linking to its page) with no close or open-full-page buttons.
 - **No status badge in the header.** Status lives in the properties.
 
 ### Body, in order (stacked; split mode moves the properties to the rail)
@@ -86,3 +86,7 @@ Read and edit any task from wherever you are, without losing your place. It's th
 
 - Should "Open full page" replace the current page or open a new tab?
 - Should humans be able to reorder acceptance criteria?
+
+## Merged tasks
+
+Merged is final (D10). The task reads as it shipped: title, properties, dependencies, description and criteria are shown but not editable (a lock note says "Merged, so read-only. You can still comment."), and the server rejects edits with `409 task_merged`. Comments still work.

@@ -66,10 +66,10 @@ Open gaps to consider are in [open-recommendations.md](open-recommendations.md) 
 
 **Decision:** Tasks can be flagged as requiring human review.
 
-- **Flagged:** after agent gates pass, the task waits in *Human review* until the human approves or requests changes.
-- **Not flagged:** once the reviewer approves and required checks pass, the orchestrator merges it straight away.
+- **Flagged:** when the reviewer approves, the task waits in *Human review* until the human approves or requests changes.
+- **Not flagged:** the reviewer's approval moves it straight to *Ready to merge*.
 
-All other merge gates in PRD §7.9 still apply in both cases.
+Only the flag sends a task to a human. A project with no required checks doesn't force human review: its unflagged tasks merge on the reviewer's approval alone (amended 2026-10-28; previously every task in such a project needed a human). Either way the task then sits in *Ready to merge* until it's merged, and all other merge gates in PRD §7.9 still apply.
 
 ---
 
@@ -116,11 +116,11 @@ Full table, disk layout, flows and the known POC push limitation are in [archite
 
 **Status:** Accepted
 
-**Decision:** Each PM chat turn is a runner job with role `pm`. The runner fetches the repo, updates a **read-only checkout of the default branch**, and runs `claude -p --resume <sessionId>` there. The PM gets its context from local files (code, `CORRAL.md`, wiki) and live board state through MCP tools (`list_tasks`, `get_task`, `get_run_outcomes`, `ask_question`, `propose_plan`, `flag_stale_docs`). It has **no** tools to approve, merge, edit docs or change task status.
+**Decision:** Each PM chat turn is a runner job with role `pm`. The runner fetches the repo, updates a **read-only checkout of the default branch**, and runs `claude -p --resume <sessionId>` there. The PM gets its context from local files (code, `CORRAL.md`, wiki) and live board state through MCP tools (`list_tasks`, `get_task`, `get_run_outcomes`, `ask_question`, `propose_plan`, `approve_plan`, `flag_stale_docs`). It has **no** tools to merge, edit docs or change task status, and it approves plans only on the human's say-so (below).
 
 - The server stores the conversation and the `claude` session ID in the database. If the session is lost, the next turn starts fresh, seeded with a summary built from the database messages.
-- `propose_plan` results are validated by `core` (dependencies form a DAG, every task has acceptance criteria) and saved as versioned draft plans. Only a human actor can approve one.
-- A PM turn runs only when the user sends a message, plus one delivery summary when an epic finishes.
+- `propose_plan` results are validated by `core` (dependencies form a DAG, every task has acceptance criteria) and saved as versioned draft plans. Only the human approves one: with the plan card's buttons, or by asking Juno in chat ("looks good, add it to the board"), which then calls `approve_plan`. That approval is recorded as the human's, with the PM run that carried it out, and the server only accepts it when the human has written since the plan was proposed, so Juno can't approve a plan the human hasn't seen (amended 2026-10-28).
+- A PM turn runs only when the user sends a message. There's no delivery-summary turn when an epic finishes: merged work isn't handed back to the PM (amended 2026-10-28).
 
 **Why:** D2 means the model is only reachable through the user's local CLI, so the server can't run the PM. Running it on the runner also gives it direct, fast access to the code and wiki.
 
@@ -136,11 +136,13 @@ Full table, disk layout, flows and the known POC push limitation are in [archite
 
 | Status | Meaning |
 |---|---|
-| **Backlog** | Proposed (by the PM or the human) and not yet approved, or sent back for rethinking. Replaces "Needs refinement" (and the earlier name "Draft"). Never scheduled. **Not shown on the board** (see below). |
+| **Draft** | Proposed by the PM in a plan and not yet confirmed. Seen only in that plan, never on the board or in the Backlog. The PM's revisions can change or remove it (added 2026-10-28). |
+| **Backlog** | Created by the human, or a Draft the human kept for later or for refining, or sent back for rethinking. Replaces "Needs refinement" (and the earlier name "Draft"). Never scheduled. **Not shown on the board** (see below). |
 | **Ready** | Approved and fully specified. **Can still have unmerged dependencies.** The scheduler only starts it once all dependencies are Merged; until then the card shows "waiting on #12". |
 | **In progress** | The developer's turn. |
-| **Agent review** | The reviewer's turn, then CI and merge gates. Replaces "In review". |
-| **Human review** | Agent gates passed; the task is flagged for human review and waiting on the human. |
+| **Agent review** | The reviewer's turn. Replaces "In review". |
+| **Human review** | The reviewer approved; the task is flagged for human review and waiting on the human. |
+| **Ready to merge** | Approved by the reviewer, and by the human when flagged. Corral waits for CI and the base branch, re-checks the gates and merges. Nobody's turn but Corral's (added 2026-10-28). |
 | **Merged** | PR merged. Final and immutable; follow-up work is a new task. This is what "Done" means everywhere in the PRD. |
 | **Blocked** | An agent needs a **human decision**. |
 | **Failed** | **The system broke** and can't continue on its own. |
@@ -149,7 +151,7 @@ There is no Testing status (add it when a tester agent exists), and no Cancelled
 
 ### Backlog vs the board
 
-Backlog tasks have their own **Backlog** view with its own place in the main navigation. The board shows only approved work: Ready, In progress, Agent review, Human review, Merged, Blocked and Failed. Approving a task (Backlog → Ready) moves it onto the board; sending it back (Ready → Backlog) takes it off.
+Backlog tasks have their own **Backlog** view with its own place in the main navigation. The board shows only approved work: Ready, In progress, Agent review, Human review, Ready to merge, Merged, Blocked and Failed. Approving a task (Backlog → Ready) moves it onto the board; sending it back (Ready → Backlog) takes it off.
 
 ### Status = whose turn; lease = whether someone is working
 
@@ -162,18 +164,24 @@ A status says whose turn it is. Whether a run is actually active is shown by the
 
 | From | To | Trigger | Actor |
 |---|---|---|---|
-| (new) | Backlog | PM `propose_plan`, or the human creates a task | PM / human |
-| Backlog | Ready | Plan or task approved; title, description and verifiable acceptance criteria present | **Human only** |
+| (new) | Draft | PM `propose_plan` | PM |
+| (new) | Backlog | The human creates a task, or the PM creates a documentation task | Human / PM |
+| Draft | Backlog | Human adds the plan (or one task) to the Backlog | **Human only** |
+| Draft, Backlog | Ready | Plan or task added to the board; title, description and verifiable acceptance criteria present | **Human only** |
 | Ready | Backlog | Sent back for rethinking | Human |
 | Ready | In progress | Scheduler claims it; all dependencies Merged | Scheduler |
 | In progress | Agent review | Valid `pr_opened` / `pr_updated` outcome (branch pushed at the expected commit, evidence for every criterion) | Server |
-| Agent review | In progress | Reviewer requests changes; CI fails; base-branch conflict | Server |
-| Agent review | Human review | Reviewer approved, all gates pass, task flagged for human review | Server |
-| Agent review | Merged | Reviewer approved, all gates pass, not flagged, merge confirmed by GitHub | Server |
-| Human review | Merged | Human approves, gates re-checked, merge confirmed by GitHub | Human → server |
-| Human review | In progress | Human requests changes | Human |
-| Ready, In progress, Agent review, Human review | Blocked | See causes below | Server |
-| In progress, Agent review | Failed | See causes below | Server |
+| Agent review | In progress | Reviewer requests changes | Server |
+| Agent review | Human review | Reviewer approved; task flagged for human review | Server |
+| Agent review | Ready to merge | Reviewer approved; not flagged | Server |
+| Human review | Ready to merge | Human approves | Human |
+| Human review, Ready to merge | In progress | Human requests changes | Human |
+| Ready to merge | In progress | CI fails; base-branch conflict | Server |
+| Ready to merge | Agent review | A new commit other than a clean base-branch update; it needs a fresh review | Server |
+| Ready to merge | Merged | All gates pass against live GitHub data; merge confirmed by GitHub | Server |
+| Agent review, Human review, Ready to merge | Merged | GitHub shows the PR merged outside Corral | Server |
+| Ready, In progress, Agent review, Human review, Ready to merge | Blocked | See causes below | Server |
+| In progress, Agent review, Ready to merge | Failed | See causes below | Server |
 | Blocked, Failed | Backlog, Ready or In progress | Human resolves it (In progress keeps the branch and PR) | **Human only** |
 
 All transitions go through `packages/core` and are enforced by the server. Anything not in this table is rejected.
@@ -192,8 +200,8 @@ Both appear in the Inbox (D11) with their reason. When a human resolves a Failed
 
 ### Deleting (instead of Cancelled)
 
-- **Backlog:** deleted outright.
-- **Ready, In progress, Agent review, Human review, Blocked, Failed:** stop any active run, close the PR, delete the Corral branch when safe (never discarding uncommitted work), then **soft-delete**. The task is hidden from the board, but it and its audit history are kept.
+- **Draft, Backlog:** deleted outright. A Draft the PM drops from a revised plan is deleted the same way.
+- **Ready, In progress, Agent review, Human review, Ready to merge, Blocked, Failed:** stop any active run, close the PR, delete the Corral branch when safe (never discarding uncommitted work), then **soft-delete**. The task is hidden from the board, but it and its audit history are kept.
 - **Merged:** can't be deleted.
 - **Dependents:** deleting a task that others depend on moves those dependents to Blocked with the reason "dependency deleted", unless the human removes the dependency first.
 
@@ -208,7 +216,7 @@ Both appear in the Inbox (D11) with their reason. When a human resolves a Failed
 - **Needs you:** tasks in **Human review**, **Blocked** tasks (including an agent asking a question, which reports `stuck` and blocks the task with the question as its reason) and **Failed** tasks. Each item can be resolved from the Inbox itself, following the D10 transitions. An item stays until it's resolved; reading it doesn't clear it.
 - **Activity:** informational events from those runs (PR opened, changes requested, approved and merged). Nothing to act on.
 
-Nothing from the PM goes in the Inbox. PM questions (`ask_question`), proposed plans and plan approval live in the **Plan** conversation. A PM turn only runs when the human sends a message (D9), so the human is already there. The one PM turn the human didn't start, the epic delivery summary, shows as an unread dot on the Plan nav item. `flag_stale_docs` creates a task in Backlog.
+Nothing from the PM goes in the Inbox. PM questions (`ask_question`), proposed plans and plan approval live in the **Plan** conversation. A PM turn only runs when the human sends a message (D9), so the human is already there. `flag_stale_docs` creates a task in Backlog.
 
 There is no separate notifications feed or bell. System events (usage limits, runner disconnects) are shown on Runs and in the runner status, not in the Inbox. OS or desktop notifications can be added later and would point into the Inbox or Plan.
 

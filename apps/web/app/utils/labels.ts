@@ -5,11 +5,13 @@ type Color = 'primary' | 'secondary' | 'success' | 'info' | 'warning' | 'error' 
 
 // Status colours from design/README.md (D10). Always shown with the label.
 export const STATUS: Record<TaskStatus, { label: string, color: Color }> = {
+  draft: { label: 'Draft', color: 'neutral' },
   backlog: { label: 'Backlog', color: 'neutral' },
   ready: { label: 'Ready', color: 'info' },
   in_progress: { label: 'In progress', color: 'primary' },
   agent_review: { label: 'Agent review', color: 'primary' },
   human_review: { label: 'Human review', color: 'warning' },
+  ready_to_merge: { label: 'Ready to merge', color: 'success' },
   merged: { label: 'Merged', color: 'success' },
   blocked: { label: 'Blocked', color: 'error' },
   failed: { label: 'Failed', color: 'error' }
@@ -97,6 +99,11 @@ export function isWorking(agent: Agent): boolean {
 }
 
 // The note under a board card (design/board.md)
+// An epic's name for display; numbered when it isn't loaded yet
+export function epicTitle(epics: { id: string, title: string }[] | undefined, id: string, fallbackIndex: number): string {
+  return epics?.find(e => e.id === id)?.title ?? `Epic ${fallbackIndex + 1}`
+}
+
 export function taskNote(task: Task, all: Task[], reviewRoundCap: number): { text: string, color: Color } | null {
   if (task.status === 'ready' && task.dependsOn.length > 0) {
     const waiting = task.dependsOn.filter(ref => all.find(t => t.ref === ref)?.status !== 'merged')
@@ -104,6 +111,7 @@ export function taskNote(task: Task, all: Task[], reviewRoundCap: number): { tex
   }
   if (task.status === 'blocked' || task.status === 'failed') return { text: task.statusReason ?? STATUS[task.status].label, color: 'error' }
   if (task.status === 'human_review') return { text: 'Waiting for you', color: 'warning' }
+  if (task.status === 'ready_to_merge') return { text: 'Merges when checks pass', color: 'neutral' }
   if (task.reviewRounds > 0 && (task.status === 'in_progress' || task.status === 'agent_review')) {
     return { text: `Review round ${task.reviewRounds} of ${reviewRoundCap}`, color: 'neutral' }
   }

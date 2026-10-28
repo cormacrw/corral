@@ -6,6 +6,8 @@ import { projectColor } from '~/utils/labels'
 // A Plan conversation (design/plan.md)
 const route = useRoute()
 const live = useLive()
+// The PM by its current name and picture
+const pm = computed(() => live.state.value.agents.find(a => a.role === 'pm') ?? null)
 const flyout = useTaskFlyout()
 const toast = useToast()
 const id = computed(() => String(route.params.sessionId))
@@ -64,10 +66,10 @@ async function send(message: string) {
     busy.value = false
   }
 }
-async function approve(plan: Plan) {
+async function approve(plan: Plan, to: 'ready' | 'backlog') {
   approving.value = plan.id
   try {
-    await api.plan.approve(plan.id)
+    await api.plan.approve(plan.id, to)
   } catch (e) {
     toast.add({ title: 'Could not approve', description: e instanceof Error ? e.message : String(e), color: 'error' })
   } finally {
@@ -85,7 +87,7 @@ watch(() => session.value?.messages.length, async () => {
   <UDashboardPanel :ui="{ body: 'p-0' }">
     <div class="flex h-full min-h-0">
       <div class="flex min-w-0 flex-1 flex-col">
-        <header class="flex h-12 shrink-0 items-center gap-2 border-b border-default px-4 text-sm">
+        <header class="flex h-14 shrink-0 items-center gap-2 border-b border-default px-4 text-sm">
           <span
             v-if="project"
             class="size-2.5 rounded-full"
@@ -141,9 +143,12 @@ watch(() => session.value?.messages.length, async () => {
                 v-else
                 class="flex max-w-full min-w-0 gap-2"
               >
-                <span class="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">J</span>
+                <AgentAvatar
+                  :name="pm?.name ?? 'PM'"
+                  size="sm"
+                />
                 <div class="flex min-w-0 flex-col gap-2">
-                  <span class="text-xs text-muted">Juno · PM</span>
+                  <span class="text-xs text-muted">{{ pm?.name ?? 'PM' }} · PM</span>
                   <UAlert
                     v-if="message.kind === 'error'"
                     color="error"
@@ -151,21 +156,22 @@ watch(() => session.value?.messages.length, async () => {
                     :title="message.text"
                     :actions="[{ label: 'Retry', onClick: () => send('Please continue.') }]"
                   />
-                  <p
+                  <div
                     v-else
-                    :class="['text-sm whitespace-pre-wrap', message.kind === 'question' && 'rounded-md border border-info/40 bg-info/5 px-3 py-2']"
+                    :class="['text-sm', message.kind === 'question' && 'rounded-md border border-info/40 bg-info/5 px-3 py-2']"
                   >
                     <span
                       v-if="message.kind === 'question'"
-                      class="me-1 text-xs font-medium text-info"
-                    >Question</span>{{ message.text }}
-                  </p>
+                      class="mb-1 block text-xs font-medium text-info"
+                    >Question</span>
+                    <MarkdownText :text="message.text" />
+                  </div>
                   <PlanCard
                     v-if="planOf(message)"
                     :plan="planOf(message)!"
                     :previous="previousOf(planOf(message)!)"
                     :busy="approving === planOf(message)!.id"
-                    @approve="approve(planOf(message)!)"
+                    @approve="approve(planOf(message)!, $event)"
                     @open="flyout.toggle($event)"
                   />
                 </div>
@@ -196,7 +202,7 @@ watch(() => session.value?.messages.length, async () => {
             />
             <PromptComposer
               v-model="text"
-              placeholder="Reply to Juno…"
+              :placeholder="`Reply to ${pm?.name ?? 'the PM'}…`"
               :disabled="runnerOffline || Boolean(session?.activeRunId)"
               :busy="busy"
               :allow-empty="taskRef !== null"
@@ -234,6 +240,7 @@ watch(() => session.value?.messages.length, async () => {
                   placeholder="Refine a task"
                   :search-input="{ placeholder: 'Search Backlog' }"
                   aria-label="Refine a task"
+                  :ui="{ content: 'w-80 max-w-[calc(100vw-2rem)]', base: 'max-w-56' }"
                   @update:model-value="taskRef = ($event as string | null)"
                 />
               </template>

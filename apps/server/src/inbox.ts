@@ -4,9 +4,9 @@ import { schema, type Executor } from '@corral/db'
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { actorLabel } from './orchestrator.ts'
 
-const { agents, auditLog, projects, runs, tasks } = schema
+const { agents, auditLog, projects, reviews, runs, tasks } = schema
 
-const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'changes_requested', 'merged', 'ci_failed', 'base_conflict', 'gates_passed']
+const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'changes_requested', 'merged', 'ci_failed', 'base_conflict', 'head_moved']
 
 // The Inbox (D11, design/inbox.md): what developer and reviewer runs need
 // from the human, plus what they did. Nothing from the PM. Items are derived
@@ -21,7 +21,7 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
   const entries = await db.select({ entry: auditLog, task: tasks, project: projects }).from(auditLog)
     .innerJoin(tasks, eq(tasks.id, auditLog.taskId))
     .innerJoin(projects, eq(projects.id, tasks.projectId))
-    .where(inArray(auditLog.action, ['task.transition', 'review.recorded', 'task.deleted', 'task.human_approved']))
+    .where(inArray(auditLog.action, ['task.transition', 'review.recorded', 'task.deleted']))
     .orderBy(desc(auditLog.createdAt), desc(auditLog.id))
     .limit(limit * 3)
 
@@ -31,7 +31,7 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     const detail = entry.detail as Record<string, unknown>
     const event = typeof detail.event === 'string' ? detail.event : typeof detail.event === 'object' && detail.event ? String((detail.event as { type?: string }).type) : null
     const base = { id: String(entry.id), project: projectTag(project), taskId: task.id, taskRef: taskRef(project.prefix, task.number), subject: task.title, prUrl: task.prUrl, at: entry.createdAt.toISOString() }
-    if (entry.actor.kind === 'human' && (entry.action === 'task.deleted' || entry.action === 'task.human_approved' || ['resolve', 'human_request_changes', 'send_back'].includes(event ?? ''))) {
+    if (entry.actor.kind === 'human' && (entry.action === 'task.deleted' || ['resolve', 'human_approve', 'human_request_changes', 'send_back'].includes(event ?? ''))) {
       const resolution = resolutionText(entry.action, event, detail)
       resolved.push({ ...base, type: 'activity', preview: resolution, body: resolution, sender: { name: 'You', role: 'system' }, resolution })
     } else if (entry.action === 'review.recorded' || (entry.action === 'task.transition' && ACTIVITY_EVENTS.includes(event ?? ''))) {
@@ -60,8 +60,10 @@ async function needsYouItem(db: Executor, task: typeof tasks.$inferSelect, proje
         })
     : []
   const type: InboxItemType = task.status === 'human_review' ? 'human_review' : task.status === 'failed' ? 'failed' : stuck ? 'question' : 'blocked'
+  // A human review gets a short note, not the reviewer's full write-up: the
+  // criteria and evidence sit right under it (design/inbox.md)
   const body = task.status === 'human_review'
-    ? (last?.run.summary ?? 'Approved by the reviewer and all gates passed. Review the criteria and evidence, then approve or request changes.')
+    ? await humanReviewNote(db, task)
     : (task.statusReason ?? '')
   return {
     id: task.id,
@@ -77,6 +79,14 @@ async function needsYouItem(db: Executor, task: typeof tasks.$inferSelect, proje
     prUrl: task.prUrl,
     resolution: null
   }
+}
+
+async function humanReviewNote(db: Executor, task: typeof tasks.$inferSelect): Promise<string> {
+  const [review] = await db.select({ criteria: reviews.criteria }).from(reviews)
+    .where(and(eq(reviews.taskId, task.id), eq(reviews.verdict, 'approved')))
+    .orderBy(desc(reviews.createdAt)).limit(1)
+  const met = review ? `, all ${review.criteria.length} criteria met` : ''
+  return `Approved${met}. This task is marked for human review, so it needs your OK before it merges.`
 }
 
 function projectTag(project: typeof projects.$inferSelect) {
@@ -100,14 +110,14 @@ function activityText(action: string, event: string | null, detail: Record<strin
     case 'merged': return `Merged ${pr}`
     case 'ci_failed': return `CI failed on ${pr}; back to the developer`
     case 'base_conflict': return `${pr} conflicts with the base branch; back to the developer`
-    case 'gates_passed': return `${pr} passed every gate and is waiting for you`
+    case 'head_moved': return `New commits on ${pr}; back to the reviewer`
     default: return event ?? action
   }
 }
 
 function resolutionText(action: string, event: string | null, detail: Record<string, unknown>): string {
   if (action === 'task.deleted') return 'You deleted the task'
-  if (action === 'task.human_approved') return 'You approved and merged'
+  if (event === 'human_approve') return 'You approved the merge'
   if (event === 'human_request_changes') return 'You requested changes'
   if (event === 'send_back') return 'You sent the task back to Backlog'
   if (event === 'resolve') {

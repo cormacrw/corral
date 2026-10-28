@@ -31,8 +31,10 @@ export const DEFAULT_LIMITS: TaskLimits = { reviewRoundCap: 5, failedRunCap: 3 }
 // Each event carries the facts its guard needs, so this module stays pure.
 // The server gathers them from the database and GitHub.
 export type TaskEvent =
-  // Backlog → Ready: plan or task approved
+  // Draft or Backlog → Ready: plan or task approved onto the board
   | { type: 'approve', content: TaskContent }
+  // Draft → Backlog: the human keeps a proposed task for later or for refining
+  | { type: 'accept' }
   // Ready → Backlog: sent back for rethinking
   | { type: 'send_back' }
   // Ready → In progress: the scheduler claims it
@@ -41,14 +43,20 @@ export type TaskEvent =
   | { type: 'submit', branchAtExpectedCommit: boolean, evidenceComplete: boolean }
   // Agent review → In progress, or Blocked once the review-round cap is reached
   | { type: 'changes_requested' }
+  // Agent review → Human review for a flagged task, otherwise Ready to merge
+  | { type: 'review_approved' }
+  // Human review → Ready to merge
+  | { type: 'human_approve' }
+  // Ready to merge → In progress: CI failed or the branch conflicts with the base
   | { type: 'ci_failed' }
   | { type: 'base_conflict' }
-  // Agent review → Human review: reviewer approved and gates pass on a flagged task
-  | { type: 'gates_passed', gates: MergeGateFacts }
-  // Agent review or Human review → Merged: GitHub confirmed the merge.
-  // `humanApprovedBy` is required when leaving Human review.
-  | { type: 'merged', gates: MergeGateFacts, humanApprovedBy: string | null }
-  // Human review → In progress
+  // Ready to merge → Agent review: a new commit (not a base update) needs a fresh review
+  | { type: 'head_moved' }
+  // Ready to merge → Merged: Corral merged and GitHub confirmed it
+  | { type: 'merged', gates: MergeGateFacts }
+  // → Merged: GitHub shows the PR merged outside Corral. A fact, not a request.
+  | { type: 'merged_outside' }
+  // Human review or Ready to merge → In progress
   | { type: 'human_request_changes' }
   | { type: 'block', reason: string }
   | { type: 'fail', reason: string }
@@ -65,18 +73,22 @@ interface Rule {
 }
 
 export const TRANSITION_RULES: Readonly<Record<TaskEventType, Rule>> = {
-  approve: { from: ['backlog'], actors: ['human'] },
+  approve: { from: ['draft', 'backlog'], actors: ['human'] },
+  accept: { from: ['draft'], actors: ['human'] },
   send_back: { from: ['ready'], actors: ['human'] },
   claim: { from: ['ready'], actors: ['scheduler'] },
   submit: { from: ['in_progress'], actors: ['server'] },
   changes_requested: { from: ['agent_review'], actors: ['server'] },
-  ci_failed: { from: ['agent_review'], actors: ['server'] },
-  base_conflict: { from: ['agent_review'], actors: ['server'] },
-  gates_passed: { from: ['agent_review'], actors: ['server'] },
-  merged: { from: ['agent_review', 'human_review'], actors: ['server'] },
-  human_request_changes: { from: ['human_review'], actors: ['human'] },
-  block: { from: ['ready', 'in_progress', 'agent_review', 'human_review'], actors: ['server'] },
-  fail: { from: ['in_progress', 'agent_review'], actors: ['server'] },
+  review_approved: { from: ['agent_review'], actors: ['server'] },
+  human_approve: { from: ['human_review'], actors: ['human'] },
+  ci_failed: { from: ['ready_to_merge'], actors: ['server'] },
+  base_conflict: { from: ['ready_to_merge'], actors: ['server'] },
+  head_moved: { from: ['ready_to_merge'], actors: ['server'] },
+  merged: { from: ['ready_to_merge'], actors: ['server'] },
+  merged_outside: { from: ['agent_review', 'human_review', 'ready_to_merge'], actors: ['server'] },
+  human_request_changes: { from: ['human_review', 'ready_to_merge'], actors: ['human'] },
+  block: { from: ['ready', 'in_progress', 'agent_review', 'human_review', 'ready_to_merge'], actors: ['server'] },
+  fail: { from: ['in_progress', 'agent_review', 'ready_to_merge'], actors: ['server'] },
   run_failed: { from: ['in_progress', 'agent_review'], actors: ['server'] },
   resolve: { from: ['blocked', 'failed'], actors: ['human'] }
 }
@@ -88,22 +100,21 @@ export type TransitionError =
   | { code: 'dependencies_not_merged' }
   | { code: 'invalid_outcome', problems: ('branch_not_at_expected_commit' | 'evidence_incomplete')[] }
   | { code: 'gates_failed', gates: MergeGate[] }
-  | { code: 'not_flagged_for_human_review' }
-  | { code: 'human_review_required' }
-  | { code: 'human_approval_missing' }
   | { code: 'reason_required' }
 
 export type TransitionResult =
   | { ok: true, task: TaskState }
   | { ok: false, error: TransitionError }
 
-// New tasks start in Backlog, proposed by the PM or created by the human
-export function createTask(actor: Actor, humanReview: boolean): TransitionResult {
+// The human's tasks start in Backlog. The PM's plan tasks start as Drafts,
+// seen only in the plan until the human sends them to the board or the
+// Backlog; its other tasks (documentation fixes) start in Backlog.
+export function createTask(actor: Actor, humanReview: boolean, draft = false): TransitionResult {
   const type = actorType(actor)
   if (type !== 'human' && type !== 'pm') {
     return fail({ code: 'actor_not_allowed', actor: type, event: 'approve' })
   }
-  return ok({ status: 'backlog', humanReview, reviewRounds: 0, failedRuns: 0, reason: null })
+  return ok({ status: draft && type === 'pm' ? 'draft' : 'backlog', humanReview, reviewRounds: 0, failedRuns: 0, reason: null })
 }
 
 export function transition(
@@ -129,6 +140,7 @@ export function transition(
     }
 
     case 'send_back':
+    case 'accept':
       return ok({ ...task, status: 'backlog' })
 
     case 'claim':
@@ -160,24 +172,24 @@ export function transition(
     case 'human_request_changes':
       return ok({ ...task, status: 'in_progress' })
 
-    case 'gates_passed': {
-      if (!task.humanReview) return fail({ code: 'not_flagged_for_human_review' })
-      const gates = failedMergeGates(event.gates)
-      if (gates.length > 0) return fail({ code: 'gates_failed', gates })
-      return ok({ ...task, status: 'human_review' })
-    }
+    // D5: only the task's own flag sends it to a human
+    case 'review_approved':
+      return ok({ ...task, status: task.humanReview ? 'human_review' : 'ready_to_merge' })
+
+    case 'human_approve':
+      return ok({ ...task, status: 'ready_to_merge' })
+
+    case 'head_moved':
+      return ok({ ...task, status: 'agent_review' })
 
     case 'merged': {
-      if (task.status === 'agent_review' && task.humanReview) {
-        return fail({ code: 'human_review_required' })
-      }
-      if (task.status === 'human_review' && !event.humanApprovedBy) {
-        return fail({ code: 'human_approval_missing' })
-      }
       const gates = failedMergeGates(event.gates)
       if (gates.length > 0) return fail({ code: 'gates_failed', gates })
       return ok({ ...task, status: 'merged' })
     }
+
+    case 'merged_outside':
+      return ok({ ...task, status: 'merged', reason: null })
 
     case 'block':
     case 'fail': {

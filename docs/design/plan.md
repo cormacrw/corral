@@ -35,17 +35,17 @@ Everything is centred vertically and horizontally, in a column up to 720px wide:
   - **Plan card** (inside Juno's message):
     - **Header** (`bg-muted`): "Plan v2 · {epic}", a badge ("Waiting for approval" in `primary`, or "Approved" in `success`), and "4 tasks · 8 criteria".
     - **One row per task:** a change badge (Added `success`, Changed `warning`, Unchanged neutral, Removed `error`), the title, and "N criteria · after {dependency}". Rows are buttons that open the task flyout; the open row stays highlighted. Removed rows are struck through and can't be opened.
-    - **Footer:** **Approve plan** (solid primary), **Changes from v1** (outline), and "Approving moves these tasks from Backlog to Ready."
-    - After approval the footer reads "✓ Approved. 4 tasks moved to Ready and onto the board."
+    - **Footer:** **Add to board** (solid primary), **Add to backlog** (outline), **Changes from v1** (outline), and "Drafts until you choose. The board schedules them now; the Backlog keeps them for later or for refining."
+    - Afterwards the footer reads "✓ 4 tasks added to the board." (or "…to the Backlog").
 - **Composer:** pinned to the bottom of the conversation, with a top divider. Same tools as above; the popovers open upwards.
 
 ### Task flyout
 
-Docked on the right (see [task.md](task.md)); the conversation narrows to make room. It opens from plan-card rows and from the attached-task chip. Proposed tasks show status Backlog, no agents assigned, and comments are saved as notes.
+Docked on the right (see [task.md](task.md)); the conversation narrows to make room. It opens from plan-card rows and from the attached-task chip. A proposed task is a **Draft**: the flyout shows a "Draft" badge and a reduced view: title, the editable properties (project, priority, type, developer, reviewer, human review), dependencies, description and acceptance criteria, with **Add to board** and **Add to backlog** for that task alone. Status, branch, pull request, review round and the Activity / Evidence / History tabs are hidden, since none of them exist yet.
 
 ## Rules
 
-- Only a human can approve a plan. The approve endpoint rejects any other actor (flows.md).
+- Only a human can approve a plan: with the buttons, or by telling Juno to in chat, which Juno carries out with `approve_plan` (D9). The approve endpoint rejects any other actor, and Juno's tool is refused unless the human has written since the plan was proposed.
 - Editing a plan through chat creates a new plan version (v2, v3…), and the card shows what changed.
 - Editing a task directly in the flyout saves it to the task and logs you as the author. It doesn't create a plan version (flows.md).
 - PM questions appear here as Juno messages, never in the Inbox (D11).

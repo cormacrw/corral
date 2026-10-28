@@ -1,4 +1,4 @@
-import type { Agent, Comment, GlobalStatus, Plan, PlanMessage, PlanSession, Project, Run, Task } from './api.ts'
+import type { Agent, Comment, Epic, GlobalStatus, Plan, PlanMessage, PlanSession, Profile, Project, Run, Task } from './api.ts'
 import type { RunEvent, RunnerStatus } from './runner.ts'
 
 // Live updates the server streams to web over SSE (GET /api/events).
@@ -19,6 +19,8 @@ export type ServerEvent =
   | { type: 'plan.session', session: PlanSession }
   | { type: 'plan.message', message: PlanMessage }
   | { type: 'plan.updated', plan: Plan }
+  | { type: 'epic.updated', epic: Epic }
+  | { type: 'profile.updated', profile: Profile }
 
 export type ServerEventType = ServerEvent['type']
 

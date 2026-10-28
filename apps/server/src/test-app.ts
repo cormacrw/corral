@@ -25,6 +25,7 @@ export interface TestApp extends Services {
   clock: { now: Date }
   // Set when the test asked for a listening server (runner WebSocket tests)
   server: RunningServer | null
+  // JSON by default; a Blob is sent as is, with its type (file uploads)
   request(method: string, path: string, body?: unknown): Promise<Response>
   createProject(overrides?: Partial<CreateProjectInput>): Promise<Project>
   createTask(slug: string, input?: Partial<CreateTaskInput>): Promise<Task>
@@ -56,7 +57,9 @@ export async function createTestApp(driver: 'pglite' | 'postgres', options: { li
 
   const request = async (method: string, path: string, body?: unknown) => app.request(path, {
     method,
-    ...(body !== undefined && { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } })
+    ...(body instanceof Blob
+      ? { body: new Uint8Array(await body.arrayBuffer()), headers: { 'content-type': body.type } }
+      : body !== undefined && { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } })
   })
 
   return {

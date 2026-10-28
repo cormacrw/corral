@@ -29,7 +29,7 @@ The page scrolls, in a column up to 880px wide.
 | Repository | A `bg-muted` panel with the branch icon, `github.com/owner/name` in mono, "Cloned on the runner · fetched 2 minutes ago", and **Change** | **Change** opens the same repo picker as onboarding, inline below the panel, and its label becomes **Done**. The current repo is selected. Repos used by other projects show "Used by {project}" and are disabled; read-only repos are disabled too. Picking a different repo shows a `warning` note: "Saving stops running work on this project, reruns the setup checks against {repo}, and keeps existing tasks. Open PRs on the old repository are left as they are." It only takes effect on Save |
 | Default branch | `USelectMenu` | "Agents branch from here and merge back into it." |
 | Merge method | `USelectMenu`: Squash and merge, Merge commit, Rebase and merge | |
-| Required checks | Toggle chips (`aria-pressed`): Lint, Typecheck, Tests, Build | "With no checks, every task needs human review." |
+| Required checks | Toggle chips (`aria-pressed`): Lint, Typecheck, Tests, Build | "With no checks, unflagged tasks merge on the reviewer's approval alone." |
 
 ### Automation
 
