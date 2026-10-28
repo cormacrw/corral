@@ -3,6 +3,7 @@ import { checkPlan, diffPlans, type ProposedTask } from './plan.ts'
 
 const task = (key: string, overrides: Partial<ProposedTask> = {}): ProposedTask => ({
   key,
+  epic: 'e1',
   title: `Task ${key}`,
   description: 'Do the thing',
   type: 'backend',
@@ -12,20 +13,22 @@ const task = (key: string, overrides: Partial<ProposedTask> = {}): ProposedTask 
   dependsOn: [],
   ...overrides
 })
+const epics = [{ key: 'e1', title: 'Login', summary: '' }]
 
 describe('checkPlan', () => {
   it('accepts a DAG where every task has criteria', () => {
-    expect(checkPlan({ title: 'Login', summary: '', tasks: [task('a'), task('b', { dependsOn: ['a'] })] })).toEqual([])
+    expect(checkPlan({ title: 'Login', summary: '', epics, tasks: [task('a'), task('b', { dependsOn: ['a'] })] })).toEqual([])
   })
 
   it('rejects an empty plan', () => {
-    expect(checkPlan({ title: 'x', summary: '', tasks: [] })).toEqual([{ code: 'no_tasks' }])
+    expect(checkPlan({ title: 'x', summary: '', epics, tasks: [] })).toEqual([{ code: 'no_tasks' }])
   })
 
   it('reports every problem at once', () => {
     const problems = checkPlan({
       title: 'x',
       summary: '',
+      epics,
       tasks: [
         task('a', { acceptanceCriteria: [], dependsOn: ['b'] }),
         task('b', { title: ' ', dependsOn: ['a'] }),
@@ -43,6 +46,21 @@ describe('checkPlan', () => {
       { code: 'dependency', problem: { code: 'cycle', path: ['a', 'b', 'a'] } }
     ]))
   })
+
+  it('checks that epics are distinct, named, used, and the ones tasks name', () => {
+    const problems = checkPlan({
+      title: 'x',
+      summary: '',
+      epics: [{ key: 'e1', title: 'Login', summary: '' }, { key: 'e1', title: ' ', summary: '' }, { key: 'e2', title: 'Billing', summary: '' }],
+      tasks: [task('a'), task('b', { epic: 'e9' })]
+    })
+    expect(problems).toEqual([
+      { code: 'duplicate_epic_key', key: 'e1' },
+      { code: 'missing_epic_title', key: 'e1' },
+      { code: 'empty_epic', key: 'e2' },
+      { code: 'unknown_epic', key: 'b', epic: 'e9' }
+    ])
+  })
 })
 
 describe('diffPlans', () => {
@@ -55,5 +73,9 @@ describe('diffPlans', () => {
       { key: 'd', change: 'added' },
       { key: 'c', change: 'removed' }
     ])
+  })
+
+  it('counts a move to another epic as a change', () => {
+    expect(diffPlans([task('a')], [task('a', { epic: 'e2' })])).toEqual([{ key: 'a', change: 'changed' }])
   })
 })

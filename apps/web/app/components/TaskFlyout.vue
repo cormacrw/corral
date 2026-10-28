@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The docked flyout wrapper: resizable 360–960px, remembered width. Shows a
-// task or an epic.
+// task, an epic, or what the page puts in its slot for ?plan.
 const flyout = useTaskFlyout()
 const width = useLocalStorage('corral.flyout.width', 420)
 const dragging = ref(false)
@@ -28,9 +28,9 @@ function onKey(event: KeyboardEvent) {
 
 <template>
   <aside
-    v-if="flyout.ref.value || flyout.epic.value"
+    v-if="flyout.ref.value || flyout.epic.value || (flyout.plan.value && $slots.plan)"
     role="complementary"
-    :aria-label="flyout.ref.value ? `Task ${flyout.ref.value}` : 'Epic'"
+    :aria-label="flyout.ref.value ? `Task ${flyout.ref.value}` : flyout.epic.value ? 'Epic' : 'Plan'"
     class="relative flex h-full shrink-0 flex-col border-s border-default bg-default max-[1100px]:w-full max-[1100px]:border-s-0 max-[1100px]:border-t"
     :style="{ width: `${width}px` }"
   >
@@ -58,6 +58,10 @@ function onKey(event: KeyboardEvent) {
       :epic-id="flyout.epic.value"
       mode="flyout"
       @close="flyout.close()"
+    />
+    <slot
+      v-else
+      name="plan"
     />
   </aside>
 </template>

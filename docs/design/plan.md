@@ -1,6 +1,6 @@
 # Plan
 
-**Canvas frames:** `App shell · Plan`, `Plan (component)`
+**Canvas frames:** `App shell · Plan`, `Plan (component)` (the canvas still shows the plan as a card in the log; this spec moves it to the flyout)
 **Route:** `/plan` (new session) and `/plan/:sessionId`
 **Scope:** global. Each session belongs to one project.
 
@@ -32,21 +32,31 @@ Everything is centred vertically and horizontally, in a column up to 720px wide:
 - **Message log** (`UChatMessages`, `role="log"`), centred and up to 768px wide:
   - **Your messages:** right-aligned, in a `bg-elevated` bubble.
   - **Juno's messages:** left-aligned with the avatar and "Juno · PM". While Juno is working, a thinking line reads "Reading the code, wiki and board…".
-  - **Plan card** (inside Juno's message):
-    - **Header** (`bg-muted`): "Plan v2 · {epic}", a badge ("Waiting for approval" in `primary`, or "Approved" in `success`), and "4 tasks · 8 criteria".
-    - **One row per task:** a change badge (Added `success`, Changed `warning`, Unchanged neutral, Removed `error`), the title, and "N criteria · after {dependency}". Rows are buttons that open the task flyout; the open row stays highlighted. Removed rows are struck through and can't be opened.
-    - **Footer:** **Add to board** (solid primary), **Add to backlog** (outline), **Changes from v1** (outline), and "Drafts until you choose. The board schedules them now; the Backlog keeps them for later or for refining."
-    - Afterwards the footer reads "✓ 4 tasks added to the board." (or "…to the Backlog").
+  - **Plan link** (inside Juno's message, when the message proposed or revised a plan): a compact bordered button, "Plan v2 · {epic}" and "Open plan" (or "Now v3" on an older version's message). It toggles the plan flyout. The plan itself is never drawn in the log, so revisions don't stack up cards.
 - **Composer:** pinned to the bottom of the conversation, with a top divider. Same tools as above; the popovers open upwards.
+
+### Plan flyout
+
+Docked on the right (`?plan`), the same flyout as tasks and epics; the conversation narrows to make room. It always shows the session's **latest** plan version, so each revision updates it in place. It opens by itself when a new version arrives waiting for approval, unless a task or epic is already open.
+
+- **Header:** a "Plan v2" badge, a status badge ("Waiting for approval" in `primary`, or "Approved" in `success`), and Close.
+- **Title:** the plan title and "2 epics · 4 tasks · 8 criteria" (the epic count only when there's more than one).
+- **One section per epic**, in the order Juno gave them: the epic title (opens the epic), "N tasks · N criteria", and **List** / **Graph** tabs, remembered per epic.
+  - **List:** one row per task: the ref and title, and "N criteria · after {dependency}". Rows open the task in the flyout, with a back arrow to the plan.
+  - **Graph:** the epic's dependency tree, top to bottom, as on the epic flyout ([epic.md](epic.md)). A dependency in another epic shows as a dashed placeholder. Clicking a node opens the task.
+  - A Draft moved to another epic by hand is listed last, under **Other tasks**.
+  - Removed tasks aren't listed, and what changed lives under Changes from v1.
+- **Changes from v1** (collapsed): the added and changed tasks with a change badge (Added `success`, Changed `warning`), and "N tasks from v1 removed." Removed Drafts are deleted (D10), so only their count remains.
+- **Footer** (pinned): **Add to board** (solid primary), **Add to backlog** (outline), and "Drafts until you choose. The board schedules them now; the Backlog keeps them for later or for refining." Afterwards it reads "✓ 4 tasks added to the board." (or "…to the Backlog").
 
 ### Task flyout
 
-Docked on the right (see [task.md](task.md)); the conversation narrows to make room. It opens from plan-card rows and from the attached-task chip. A proposed task is a **Draft**: the flyout shows a "Draft" badge and a reduced view: title, the editable properties (project, priority, type, developer, reviewer, human review), dependencies, description and acceptance criteria, with **Add to board** and **Add to backlog** for that task alone. Status, branch, pull request, review round and the Activity / Evidence / History tabs are hidden, since none of them exist yet.
+Docked on the right (see [task.md](task.md)). It opens from plan-flyout rows and from the attached-task chip. A proposed task is a **Draft**: the flyout shows a "Draft" badge and a reduced view: title, the editable properties (project, priority, type, developer, reviewer, human review), dependencies, description and acceptance criteria. There's no per-task Add to board / Add to backlog: Drafts are placed only with the whole plan, from the plan flyout. Status, branch, pull request, review round and the Activity / Evidence / History tabs are hidden, since none of them exist yet.
 
 ## Rules
 
 - Only a human can approve a plan: with the buttons, or by telling Juno to in chat, which Juno carries out with `approve_plan` (D9). The approve endpoint rejects any other actor, and Juno's tool is refused unless the human has written since the plan was proposed.
-- Editing a plan through chat creates a new plan version (v2, v3…), and the card shows what changed.
+- Editing a plan through chat creates a new plan version (v2, v3…), which replaces the one in the plan flyout and shows what changed.
 - Editing a task directly in the flyout saves it to the task and logs you as the author. It doesn't create a plan version (flows.md).
 - PM questions appear here as Juno messages, never in the Inbox (D11).
 
@@ -54,9 +64,9 @@ Docked on the right (see [task.md](task.md)); the conversation narrows to make r
 
 - **Sessions:** id, project, title, preview, updated time, unread, status (needs approval / question / none), messages.
 - **Messages:** role, text, and an optional attached plan id.
-- **Plans:** version, status, tasks (ref, title, change type, criteria count, dependencies).
+- **Plans:** version, status, epics (key, id, title), tasks (ref, title, epic, change type, criteria count, dependencies).
 - **Backlog search:** filtered to the session's project.
-- **Streaming:** SSE for tokens and plan cards.
+- **Streaming:** SSE for tokens and plan versions.
 
 ## States
 
@@ -68,7 +78,7 @@ Docked on the right (see [task.md](task.md)); the conversation narrows to make r
 
 - Popovers are listboxes with search inputs that have labels, and Escape closes them.
 - The log is `aria-live="polite"`.
-- The plan card is a `section` with an accessible name.
+- The plan flyout is a `section` with an accessible name.
 
 ## Open questions
 

@@ -35,7 +35,7 @@ Branding (same docs page): the product UI must not call agents "Claude Code" or 
 
 These keep the POC simple while making a later move (API keys, Bedrock/Vertex, a different agent CLI, cloud containers) a matter of writing a new adapter.
 
-1. **Credentials never enter Corral.** No model-provider credential is stored in Corral's database, config, logs, prompts or worktrees. The CLI reads its own auth from the user's environment.
+1. **Credentials never enter Corral.** No model-provider credential is stored in Corral's database, config, logs, prompts or worktrees. The CLI reads its own auth from the user's environment. The one exception is the Jev key, which the server holds as an environment variable to route tasks (D15).
 2. **Auth lives inside the `AgentRuntime` adapter.** The task model, scheduler, job spec (`RunJob`) and control-plane API must never mention subscriptions, API keys, or Claude specifically. A job names a role and a task, never an auth method.
 3. **Keep `AgentRuntime` separate from `RunnerProvider`** (PRD §8.4). The runtime is *what* agent runs; the provider is *where* it runs (local worktree now, container later).
 4. **Model, CLI binary and flags come from configuration, not code.** Per agent group (PRD §4.4: "Model and runtime configuration").

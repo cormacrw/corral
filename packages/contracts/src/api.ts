@@ -250,10 +250,13 @@ export interface Plan {
   summary: string
   status: 'proposed' | 'approved' | 'superseded'
   approvedAt: string | null
+  // In the order the PM gave them; epicId above is the first
+  epics: { key: string, id: string, title: string }[]
   tasks: {
     key: string
     change: PlanChange
     taskId: string | null
+    epicId: string | null
     ref: string | null
     title: string
     status: TaskStatus | null

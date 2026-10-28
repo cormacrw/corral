@@ -75,12 +75,18 @@ const toolDefinitions = {
     input: { question: z.string().min(1) }
   },
   propose_plan: {
-    description: 'Propose a plan: epics and tasks with acceptance criteria and dependencies. Corral validates it and shows it to the human for approval.',
+    description: 'Propose a plan: epics and tasks with acceptance criteria and dependencies. Corral validates it and shows it to the human for approval. Give `epics` when the work splits into separate features, and put each task in one with `epic`; leave it out for a single epic named after the plan. A revision keeps the epic and task keys it reuses.',
     input: {
       title: z.string().min(1),
       summary: z.string().default(''),
+      epics: z.array(z.object({
+        key: z.string().describe('A short handle used by a task\'s epic, e.g. e1'),
+        title: z.string().min(1),
+        summary: z.string().default('')
+      })).optional(),
       tasks: z.array(z.object({
         key: z.string().describe('A short handle used by dependsOn, e.g. t1'),
+        epic: z.string().optional().describe('The key of its epic; needed when there are several'),
         title: z.string().min(1),
         description: z.string().min(1),
         type: z.enum(['frontend', 'backend', 'full_stack', 'infrastructure']),

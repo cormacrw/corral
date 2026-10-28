@@ -57,6 +57,13 @@
       "when": 1793218179323,
       "tag": "0007_avatars",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793222583124,
+      "tag": "0008_purple_wrecking_crew",
+      "breakpoints": true
     }
   ]
 }

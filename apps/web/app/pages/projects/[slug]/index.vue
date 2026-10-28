@@ -228,25 +228,29 @@ const activityText = (entry: AuditEntry) => {
               v-if="runs.length > 0"
               class="flex flex-col gap-2"
             >
-              <NuxtLink
+              <BorderGlow
                 v-for="run in runs"
                 :key="run.id"
-                :to="`/agents/${run.agentName.toLowerCase()}/${run.id}`"
-                class="flex items-center gap-3 rounded-lg border border-primary/40 p-3 outline-primary hover:bg-elevated motion-safe:animate-pulse"
+                :border-radius="8"
               >
-                <AgentAvatar
-                  :name="run.agentName"
-                  working
-                />
-                <div class="min-w-0">
-                  <p class="truncate text-sm">
-                    {{ run.agentName }} is {{ run.role === 'reviewer' ? 'reviewing' : run.role === 'pm' ? 'planning' : 'building' }} {{ run.taskRef ?? '' }} {{ taskOf(run)?.title ?? '' }}
-                  </p>
-                  <p class="text-xs text-muted">
-                    Run #{{ run.number }} · {{ duration(run.startedAt ?? run.queuedAt, null) }} · {{ run.state.replace('_', ' ') }}
-                  </p>
-                </div>
-              </NuxtLink>
+                <NuxtLink
+                  :to="`/agents/${run.agentName.toLowerCase()}/${run.id}`"
+                  class="flex items-center gap-3 rounded-lg border border-primary/40 p-3 outline-primary hover:bg-elevated"
+                >
+                  <AgentAvatar
+                    :name="run.agentName"
+                    working
+                  />
+                  <div class="min-w-0">
+                    <p class="truncate text-sm">
+                      {{ run.agentName }} is {{ run.role === 'reviewer' ? 'reviewing' : run.role === 'pm' ? 'planning' : 'building' }} {{ run.taskRef ?? '' }} {{ taskOf(run)?.title ?? '' }}
+                    </p>
+                    <p class="text-xs text-muted">
+                      Run #{{ run.number }} · {{ duration(run.startedAt ?? run.queuedAt, null) }} · {{ run.state.replace('_', ' ') }}
+                    </p>
+                  </div>
+                </NuxtLink>
+              </BorderGlow>
             </div>
             <p
               v-else

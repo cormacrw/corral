@@ -50,7 +50,13 @@ onMounted(() => {
 })
 
 const planOf = (message: PlanMessage): Plan | null => session.value?.plans.find(p => p.id === message.planId) ?? null
-const previousOf = (plan: Plan): Plan | null => session.value?.plans.find(p => p.version === plan.version - 1) ?? null
+// The flyout always shows the newest version; the chat only links to it
+const latest = computed(() => session.value?.plans.reduce<Plan | null>((a, p) => !a || p.version > a.version ? p : a, null) ?? null)
+const previous = computed(() => latest.value ? session.value?.plans.find(p => p.version === latest.value!.version - 1) ?? null : null)
+// A plan waiting on you opens on arrival, unless a task or epic is already open
+watch(() => latest.value?.id, (planId) => {
+  if (planId && latest.value?.status === 'proposed' && !flyout.ref.value && !flyout.epic.value && !flyout.plan.value) flyout.openPlan({ replace: true })
+})
 const backlog = computed(() => project.value ? (live.state.value.tasks[project.value.id] ?? []).filter(t => t.status === 'backlog') : [])
 
 async function send(message: string) {
@@ -166,14 +172,21 @@ watch(() => session.value?.messages.length, async () => {
                     >Question</span>
                     <MarkdownText :text="message.text" />
                   </div>
-                  <PlanCard
+                  <button
                     v-if="planOf(message)"
-                    :plan="planOf(message)!"
-                    :previous="previousOf(planOf(message)!)"
-                    :busy="approving === planOf(message)!.id"
-                    @approve="approve(planOf(message)!, $event)"
-                    @open="flyout.toggle($event)"
-                  />
+                    type="button"
+                    :class="['flex items-center gap-2 self-start rounded-md border border-default px-3 py-2 text-start text-sm hover:bg-elevated', flyout.plan.value && 'bg-elevated']"
+                    @click="flyout.plan.value ? flyout.close() : flyout.openPlan()"
+                  >
+                    <UIcon
+                      name="i-lucide-list-checks"
+                      class="size-4 shrink-0 text-muted"
+                    />
+                    <span class="min-w-0 truncate">
+                      <span class="font-medium">Plan v{{ planOf(message)!.version }}</span> · {{ planOf(message)!.title }}
+                    </span>
+                    <span class="shrink-0 text-xs text-muted">{{ planOf(message)!.id === latest?.id ? 'Open plan' : `Now v${latest?.version}` }}</span>
+                  </button>
                 </div>
               </div>
             </div>
@@ -248,7 +261,20 @@ watch(() => session.value?.messages.length, async () => {
           </div>
         </div>
       </div>
-      <TaskFlyout />
+      <TaskFlyout>
+        <template
+          v-if="latest"
+          #plan
+        >
+          <PlanDetail
+            :plan="latest"
+            :previous="previous"
+            :busy="approving === latest.id"
+            @approve="approve(latest, $event)"
+            @close="flyout.close()"
+          />
+        </template>
+      </TaskFlyout>
     </div>
   </UDashboardPanel>
 </template>

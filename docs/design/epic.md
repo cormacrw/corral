@@ -1,6 +1,6 @@
 # Epic flyout and epic page
 
-An epic groups the tasks of one plan (D9). It has a title, a markdown description and a canvas showing its tasks as a dependency tree. Like a task, it opens in two modes: docked in the flyout (`?epic=<id>` on the current page) or as a page (`/epics/<id>`). The flyout shows one thing at a time, so opening an epic replaces an open task and the other way round.
+An epic groups related tasks of a plan (D9); one plan can propose several epics. It has a title, a markdown description and a canvas showing its tasks as a dependency tree. Like a task, it opens in two modes: docked in the flyout (`?epic=<id>` on the current page) or as a page (`/epics/<id>`). The flyout shows one thing at a time, so opening an epic replaces an open task and the other way round.
 
 ## Where it opens
 
@@ -8,7 +8,7 @@ An epic groups the tasks of one plan (D9). It has a title, a markdown descriptio
 - **Backlog:** **Epic details** in each epic's group header.
 - **Project overview:** each epic's name in the Epics list links to the epic page.
 - **Task:** the **Epic** property links to the task's epic (flyout in the task flyout, page on the task page).
-- **Plan:** the epic title in a plan card's header.
+- **Plan:** each epic's title in the plan flyout.
 
 Epic names replace the old "Epic 1", "Epic 2" labels everywhere.
 

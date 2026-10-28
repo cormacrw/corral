@@ -142,53 +142,58 @@ const epicLabel = (id: string) => epicTitle(live.state.value.epics[project.value
               <span class="ms-auto text-xs text-muted">{{ column.hint }}</span>
             </header>
             <div class="flex min-h-0 flex-col gap-2 overflow-y-auto px-2 pt-0.5 pb-2">
-              <button
+              <BorderGlow
                 v-for="task in inColumn(column.statuses)"
                 :key="task.id"
-                type="button"
-                :aria-pressed="flyout.ref.value === task.ref"
-                :class="[
-                  'flex shrink-0 flex-col gap-1.5 rounded-md border border-default bg-default px-3 py-2.5 text-start text-sm hover:border-accented',
-                  task.lease && 'border-primary/60 motion-safe:animate-pulse motion-reduce:border-primary',
-                  flyout.ref.value === task.ref && 'border-primary ring-1 ring-primary'
-                ]"
-                @click="flyout.toggle(task.ref)"
+                :active="Boolean(task.lease)"
+                class="shrink-0"
               >
-                <span class="flex items-center gap-2 text-xs">
-                  <span class="font-mono text-muted">{{ task.ref }}</span>
-                  <span :class="task.priority === 'urgent' ? 'text-error' : task.priority === 'high' ? 'text-warning' : 'text-muted'">{{ PRIORITY[task.priority].label }}</span>
-                  <a
-                    v-if="task.prUrl"
-                    :href="task.prUrl"
-                    target="_blank"
-                    rel="noopener"
-                    class="ms-auto flex items-center gap-0.5 text-muted hover:text-primary"
-                    @click.stop
-                  ><UIcon
-                    name="i-lucide-git-pull-request"
-                    class="size-3"
-                  />#{{ task.prNumber }}</a>
-                </span>
-                <span class="font-medium text-highlighted">{{ task.title }}</span>
-                <span
-                  v-if="taskNote(task, all, project?.reviewRoundCap ?? 5)"
-                  :class="['text-xs', taskNote(task, all, project?.reviewRoundCap ?? 5)!.color === 'error' ? 'text-error' : taskNote(task, all, project?.reviewRoundCap ?? 5)!.color === 'warning' ? 'text-warning' : 'text-muted']"
-                >{{ taskNote(task, all, project?.reviewRoundCap ?? 5)!.text }}</span>
-                <span class="flex items-center gap-2 text-xs text-muted">
-                  <span v-if="task.epicId">{{ epicLabel(task.epicId) }}</span>
-                  <span
-                    v-if="agentFor(task)"
-                    class="ms-auto flex items-center gap-1"
-                  >
-                    <AgentAvatar
-                      :name="agentFor(task)!.name"
-                      working
-                      size="xs"
-                    />
-                    {{ agentFor(task)!.name }}
+                <button
+                  type="button"
+                  :aria-pressed="flyout.ref.value === task.ref"
+                  :class="[
+                    'flex shrink-0 flex-col gap-1.5 rounded-md border border-default bg-default px-3 py-2.5 text-start text-sm hover:border-accented',
+                    task.lease && 'border-primary/60',
+                    flyout.ref.value === task.ref && 'border-primary ring-1 ring-primary'
+                  ]"
+                  @click="flyout.toggle(task.ref)"
+                >
+                  <span class="flex items-center gap-2 text-xs">
+                    <span class="font-mono text-muted">{{ task.ref }}</span>
+                    <span :class="task.priority === 'urgent' ? 'text-error' : task.priority === 'high' ? 'text-warning' : 'text-muted'">{{ PRIORITY[task.priority].label }}</span>
+                    <a
+                      v-if="task.prUrl"
+                      :href="task.prUrl"
+                      target="_blank"
+                      rel="noopener"
+                      class="ms-auto flex items-center gap-0.5 text-muted hover:text-primary"
+                      @click.stop
+                    ><UIcon
+                      name="i-lucide-git-pull-request"
+                      class="size-3"
+                    />#{{ task.prNumber }}</a>
                   </span>
-                </span>
-              </button>
+                  <span class="font-medium text-highlighted">{{ task.title }}</span>
+                  <span
+                    v-if="taskNote(task, all, project?.reviewRoundCap ?? 5)"
+                    :class="['text-xs', taskNote(task, all, project?.reviewRoundCap ?? 5)!.color === 'error' ? 'text-error' : taskNote(task, all, project?.reviewRoundCap ?? 5)!.color === 'warning' ? 'text-warning' : 'text-muted']"
+                  >{{ taskNote(task, all, project?.reviewRoundCap ?? 5)!.text }}</span>
+                  <span class="flex items-center gap-2 text-xs text-muted">
+                    <span v-if="task.epicId">{{ epicLabel(task.epicId) }}</span>
+                    <span
+                      v-if="agentFor(task)"
+                      class="ms-auto flex items-center gap-1"
+                    >
+                      <AgentAvatar
+                        :name="agentFor(task)!.name"
+                        working
+                        size="xs"
+                      />
+                      {{ agentFor(task)!.name }}
+                    </span>
+                  </span>
+                </button>
+              </BorderGlow>
               <p
                 v-if="inColumn(column.statuses).length === 0"
                 class="px-1 pt-1 pb-2 text-xs text-dimmed"

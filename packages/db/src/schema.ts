@@ -290,6 +290,16 @@ export const planTasks = pgTable('plan_tasks', {
   position: integer().notNull()
 }, t => [primaryKey({ columns: [t.planId, t.key] })])
 
+// The epics of a plan version, by the PM's key, so a revision keeps each
+// epic it still names (a plan can span several; plans.epicId is the first)
+export const planEpics = pgTable('plan_epics', {
+  planId: uuid().notNull().references(() => plans.id, { onDelete: 'cascade' }),
+  // Null once the epic has been deleted
+  epicId: uuid().references(() => epics.id, { onDelete: 'set null' }),
+  key: text().notNull(),
+  position: integer().notNull()
+}, t => [primaryKey({ columns: [t.planId, t.key] })])
+
 // Instance-wide switches, e.g. the kill switch (PRD §7.11 control panel)
 export const settings = pgTable('settings', {
   key: text().primaryKey(),

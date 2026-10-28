@@ -3,4 +3,18 @@
 
 @theme static {
   --font-sans: 'Outfit', sans-serif;
+
+  /* Sweeps BorderGlow's cone round the card */
+  --animate-glow-spin: glow-spin 4s linear infinite;
+  @keyframes glow-spin {
+    from { --glow-angle: 0deg; }
+    to { --glow-angle: 360deg; }
+  }
+}
+
+/* Registered so the angle interpolates instead of jumping */
+@property --glow-angle {
+  syntax: '<angle>';
+  inherits: true;
+  initial-value: 0deg;
 }

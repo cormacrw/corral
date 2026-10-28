@@ -43,8 +43,9 @@ The PM has **no** tools to merge, edit docs or change status. This is enforced b
 
 - **Direct edits:** the human edits a task card inline. The change is saved through the API and recorded in the audit log with the human as actor.
 - **Edits through chat:** e.g. "split task 3, drop the dark-mode bit". The PM calls `propose_plan` again, producing plan v2, and the UI shows the differences from v1.
-- **Drafts:** the plan's tasks are created as **Drafts**. They appear only in the plan card and its flyout, never on the board or in the Backlog, and a revision can still change or remove them.
-- **Approval:** two buttons call an endpoint that only accepts a human actor. **Add to board** moves each Draft → Ready, onto the board; tasks with unmerged dependencies are still Ready and their cards show "waiting on #N". **Add to backlog** moves each Draft → Backlog, to be scheduled later or refined further. The flyout offers the same two choices for a single task.
+- **Epics:** a plan can span several epics, one per separate feature. Each task names its epic, and a revision keeps every epic it still names (by key); an epic it drops is deleted once it has no tasks left.
+- **Drafts:** the plan's tasks are created as **Drafts**. They appear only in the plan flyout, never on the board or in the Backlog, and a revision can still change or remove them.
+- **Approval:** two buttons call an endpoint that only accepts a human actor. **Add to board** moves each Draft → Ready, onto the board; tasks with unmerged dependencies are still Ready and their cards show "waiting on #N". **Add to backlog** moves each Draft → Backlog, to be scheduled later or refined further. A single Draft can't be placed on its own; the task flyout offers no buttons for it.
 
 ### Sessions and cost
 

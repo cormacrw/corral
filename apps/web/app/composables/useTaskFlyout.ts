@@ -1,5 +1,6 @@
 // The docked flyout opens with ?task=COR-29 or ?epic=<id> on the current
 // page (design/task.md), so it survives reloads and links can be shared.
+// On a Plan session, a bare ?plan shows the session's latest plan.
 // It shows one thing at a time: opening a task closes an epic and back.
 //
 // Opening adds a browser history entry, so Back returns to what was open
@@ -16,6 +17,7 @@ export function useTaskFlyout() {
   const router = useRouter()
   const ref = computed(() => typeof route.query.task === 'string' ? route.query.task : null)
   const epic = computed(() => typeof route.query.epic === 'string' ? route.query.epic : null)
+  const plan = computed(() => 'plan' in route.query)
   // history.state isn't reactive; reading the route makes this recompute
   const canGoBack = computed(() => {
     void route.fullPath
@@ -24,20 +26,24 @@ export function useTaskFlyout() {
 
   function go(query: typeof route.query, options: OpenOptions) {
     // Only an entry that replaced one flyout item with another has a flyout to go back to
-    const flyoutBack = Boolean(ref.value || epic.value)
+    const flyoutBack = Boolean(ref.value || epic.value || plan.value)
     if (options.replace) void router.replace({ query, state: { flyoutBack: canGoBack.value } })
     else void router.push({ query, state: { flyoutBack } })
   }
   function open(taskRef: string, options: OpenOptions = {}) {
-    const { epic: _epic, ...rest } = route.query
+    const { epic: _epic, plan: _plan, ...rest } = route.query
     go({ ...rest, task: taskRef }, options)
   }
   function openEpic(epicId: string, options: OpenOptions = {}) {
-    const { task: _task, ...rest } = route.query
+    const { task: _task, plan: _plan, ...rest } = route.query
     go({ ...rest, epic: epicId }, options)
   }
-  function close() {
+  function openPlan(options: OpenOptions = {}) {
     const { task: _task, epic: _epic, ...rest } = route.query
+    go({ ...rest, plan: null }, options)
+  }
+  function close() {
+    const { task: _task, epic: _epic, plan: _plan, ...rest } = route.query
     void router.replace({ query: rest })
   }
   function back() {
@@ -52,5 +58,5 @@ export function useTaskFlyout() {
     if (epic.value === epicId) close()
     else openEpic(epicId)
   }
-  return { ref, epic, canGoBack, open, openEpic, close, back, toggle, toggleEpic }
+  return { ref, epic, plan, canGoBack, open, openEpic, openPlan, close, back, toggle, toggleEpic }
 }

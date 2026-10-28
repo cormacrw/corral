@@ -205,18 +205,18 @@ async function saveDescription() {
   editingDescription.value = false
 }
 
-// A Draft from a plan: the task itself, without the work around it, and a
-// choice of where it goes
+// A Draft from a plan: the task itself, without the work around it. It's
+// placed only with the whole plan, from the plan flyout
 const isDraft = computed(() => task.value?.status === 'draft')
 // Merged is final (D10): the task reads as it shipped; only comments change
 const readonly = computed(() => task.value?.status === 'merged')
 const placing = ref(false)
-async function place(type: 'approve' | 'accept') {
+async function place() {
   if (!task.value) return
   placing.value = true
   try {
-    task.value = await api.tasks.transition(slug.value, number.value, { type })
-    toast.add({ title: `${task.value.ref} added to the ${type === 'approve' ? 'board' : 'Backlog'}`, color: 'success' })
+    task.value = await api.tasks.transition(slug.value, number.value, { type: 'approve' })
+    toast.add({ title: `${task.value.ref} added to the board`, color: 'success' })
   } catch (e) {
     if (e instanceof ApiError && e.body?.code === 'transition_rejected' && e.body.reason.code === 'not_ready') {
       toast.add({ title: 'Not ready yet', description: `Needs: ${e.body.reason.problems.map(p => p.replaceAll('_', ' ')).join(', ')}`, color: 'warning' })
@@ -417,23 +417,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
           v-if="isDraft"
           class="flex flex-wrap items-center gap-2 rounded-lg border border-default bg-muted px-3 py-2 text-sm"
         >
-          <span class="me-auto text-muted">Proposed in a plan. Only you can see it until you choose.</span>
-          <UButton
-            label="Add to board"
-            icon="i-lucide-kanban"
-            size="sm"
-            :loading="placing"
-            @click="place('approve')"
-          />
-          <UButton
-            label="Add to backlog"
-            icon="i-lucide-list"
-            size="sm"
-            variant="outline"
-            color="neutral"
-            :disabled="placing"
-            @click="place('accept')"
-          />
+          <span class="text-muted">Proposed in a plan. Only you can see it until you add the plan to the board or the Backlog.</span>
         </div>
         <div
           v-else-if="task.status === 'backlog'"
@@ -445,7 +429,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
             icon="i-lucide-kanban"
             size="sm"
             :loading="placing"
-            @click="place('approve')"
+            @click="place()"
           />
         </div>
 

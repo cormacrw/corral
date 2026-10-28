@@ -31,6 +31,8 @@ Each decision has an ID so code comments, commits and PRs can refer to it (e.g. 
 
 **Why:** It's the simplest setup for one user, and it avoids Corral "offering" a Claude login. Background and terms are in [agent-runtime-and-auth.md](agent-runtime-and-auth.md).
 
+**Amended by D15:** the server holds one key, for Jev, TypeSafe AI's decision model, which picks the agent, model and thinking level for each task. It's an environment variable on the server container and is never stored. The coding agents are unaffected.
+
 **This may change.** If Corral is packaged and sold, we'll likely need user-supplied API keys, Bedrock/Vertex, or explicit approval from Anthropic. The rules in `agent-runtime-and-auth.md` exist so that switch means writing a new adapter, not a rewrite.
 
 ---
@@ -119,7 +121,7 @@ Full table, disk layout, flows and the known POC push limitation are in [archite
 **Decision:** Each PM chat turn is a runner job with role `pm`. The runner fetches the repo, updates a **read-only checkout of the default branch**, and runs `claude -p --resume <sessionId>` there. The PM gets its context from local files (code, `CORRAL.md`, wiki) and live board state through MCP tools (`list_tasks`, `get_task`, `get_run_outcomes`, `ask_question`, `propose_plan`, `approve_plan`, `flag_stale_docs`). It has **no** tools to merge, edit docs or change task status, and it approves plans only on the human's say-so (below).
 
 - The server stores the conversation and the `claude` session ID in the database. If the session is lost, the next turn starts fresh, seeded with a summary built from the database messages.
-- `propose_plan` results are validated by `core` (dependencies form a DAG, every task has acceptance criteria) and saved as versioned draft plans. Only the human approves one: with the plan card's buttons, or by asking Juno in chat ("looks good, add it to the board"), which then calls `approve_plan`. That approval is recorded as the human's, with the PM run that carried it out, and the server only accepts it when the human has written since the plan was proposed, so Juno can't approve a plan the human hasn't seen (amended 2026-10-28).
+- `propose_plan` results are validated by `core` (dependencies form a DAG, every task has acceptance criteria) and saved as versioned draft plans. Only the human approves one: with the plan flyout's buttons, or by asking Juno in chat ("looks good, add it to the board"), which then calls `approve_plan`. That approval is recorded as the human's, with the PM run that carried it out, and the server only accepts it when the human has written since the plan was proposed, so Juno can't approve a plan the human hasn't seen (amended 2026-10-28).
 - A PM turn runs only when the user sends a message. There's no delivery-summary turn when an epic finishes: merged work isn't handed back to the PM (amended 2026-10-28).
 
 **Why:** D2 means the model is only reachable through the user's local CLI, so the server can't run the PM. Running it on the runner also gives it direct, fast access to the code and wiki.
@@ -304,3 +306,42 @@ The UI specs are in [design/](design/README.md).
 - Backups of the deployed instance cover two volumes: Postgres (`pg_dump`) and the server's blob folder.
 - The deployed `server` container no longer holds `pgdata/`; its volume holds only `blobs/`.
 - The Compose stack has four services: `web`, `server`, `runner` and `postgres`. `postgres` is on the private Docker network only, like `server`.
+
+---
+
+## D15 — Jev routes each task to an agent, model and thinking level
+
+**Status:** Accepted 2026-10-28. **Not started:** comes after the Codex and Muse support and the work that has to come first. Amends D2 and rule 1 of [agent-runtime-and-auth.md](agent-runtime-and-auth.md) (see below).
+
+**Decision:** Each agent has exactly one provider: Atlas is always Claude Code, and Codex and Muse get developers (and reviewers) of their own. When there is more than one agent for a role, **Jev**, TypeSafe AI's decision model, picks which agent takes a task, and the model and thinking level within that agent's provider.
+
+- **Called directly:** the server calls TypeSafe's API itself, not through Cloudflare, Vercel AI Gateway or OpenRouter. The endpoint, model id (e.g. `jev-latest`) and key are configuration, so switching provider later needs no code change.
+- **Where:** one chooser module on the server that the orchestrator calls. Neither the runner nor the PM calls Jev.
+- **When:**
+  - The task becomes Ready: Jev picks the developer agent, plus its model and thinking level.
+  - The task enters Agent review: Jev picks the reviewer agent, plus its model and thinking level.
+  - A retry or a new review round: Jev picks the model and thinking level again, but the agent stays the same, so the developer keeps its session and branch context.
+- **Input:** the task (type, priority, description, acceptance criteria, human-review flag, review rounds, failed runs, how earlier runs ended), the diff size and the developer agent for reviews, and a menu of options. Jev's answers can only be options from that menu.
+- **Corral's own rules, not Jev's:** the menu only lists agents of the right role that aren't paused or rate-limited (D3), each with the models and thinking levels configured for it (rule 4).
+- **Fallback:** a short timeout (about 2 s). On a timeout, an error or low confidence, the agent's configured default is used, so a Jev outage never blocks a run.
+- **Recorded and overridable:**
+  - The choice fills the task's Developer and Reviewer.
+  - A human can override either, and a human choice is never replaced.
+  - Each run records its model, thinking level, Jev's reason and probabilities, and whether the fallback was used.
+- **Scheduling:** a free agent only claims tasks assigned to it, or unassigned tasks when routing is off. If the assigned agent stays paused, the chooser can re-route the task.
+
+**D2 amendment:**
+- The Jev key is a `TYPESAFE_API_KEY` environment variable on the server container.
+- It's never stored in the database and never appears in logs, prompts, worktrees or the UI.
+- It's the only model-provider credential Corral holds. The coding agents still use their own CLI logins.
+
+**Why:**
+- The choice is a fixed menu in and a typed answer out, which is what Jev is built for.
+- It costs about $0.042 per million input tokens with output free (early-access pricing, which may change). That's under $0.001 per task, so price doesn't decide the provider. Going direct is the simplest route: one account and one key, and new Jev versions arrive there first.
+- One provider per agent keeps usage-limit pausing per agent, as D3 already works.
+
+**Consequences for the build:**
+- The runner reports the providers, models and thinking levels it has.
+- `RunJob` gains neutral `runtime` and `effort` fields, alongside `model`.
+- Build the chooser with the agent's configured default first, and add Jev behind the same interface. The runs recorded with the default give a baseline to judge Jev against.
+
