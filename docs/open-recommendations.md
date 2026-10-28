@@ -34,6 +34,8 @@ PRD §7.6 lets the reviewer rebase and resolve trivial conflicts. That gives it 
 
 PRD §7.6 says new commits invalidate approvals "when required by the configured review policy," but doesn't set a default. That decides what happens with serialized merges: after task A merges, does task B need a rebase, a CI re-run and a fresh review? Pick a default (suggestion: a clean mechanical rebase keeps approval but re-runs CI; any non-rebase commit needs a fresh review).
 
+**What was built (2026-10-28):** the suggested default. When the base branch has moved, the merge orchestrator asks GitHub to update the branch and remembers that it did; the new head inherits the approval (recorded as a system-authored review row) and CI runs again on it. A head that changes for any other reason drops the approval and the reviewer is scheduled again. Change `MergeOrchestrator` in `apps/server/src/merge.ts` if you want a different policy.
+
 ### R8 — Wiki files will become conflict hotspots
 
 If every PR updates shared pages like `architecture.md`, parallel tasks will conflict there constantly. Consider small per-area pages, or doc updates that only append.

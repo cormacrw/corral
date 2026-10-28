@@ -26,6 +26,7 @@ const server = await startServer(
   { db: database.db, events, actor: await ensureOwner(database.db), ...services },
   { host: config.host, port: config.port }
 )
+await services.orchestrator.init()
 services.orchestrator.start()
 printReady(`Corral API ready in ${formatDuration(process.uptime() * 1000)}`, {
   API: `${server.url}/api`,

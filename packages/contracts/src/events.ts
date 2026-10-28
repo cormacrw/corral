@@ -1,4 +1,4 @@
-import type { Agent, Project, Run, Task } from './api.ts'
+import type { Agent, Comment, GlobalStatus, Project, Run, Task } from './api.ts'
 import type { RunEvent, RunnerStatus } from './runner.ts'
 
 // Live updates the server streams to web over SSE (GET /api/events).
@@ -12,6 +12,10 @@ export type ServerEvent =
   // Live transcript lines for the agent page
   | { type: 'run.events', runId: string, events: RunEvent[] }
   | { type: 'agent.updated', agent: Agent }
+  | { type: 'task.deleted', taskId: string, projectId: string }
+  | { type: 'comment.created', comment: Comment }
+  | { type: 'project.updated', project: Project }
+  | { type: 'global.status', status: GlobalStatus }
 
 export type ServerEventType = ServerEvent['type']
 

@@ -1,7 +1,10 @@
-import type { CreateTaskInput, HumanTransitionInput, Task } from '@corral/contracts'
+import type { AuditEntry, Comment, CreateTaskInput, HumanTransitionInput, PatchTaskInput, Task } from '@corral/contracts'
 import { createTaskInput } from '@corral/contracts'
 import {
+  checkDependencies,
   createTask as createTaskState,
+  DEPENDENCY_DELETED_REASON,
+  deletionFor,
   richTextToPlainText,
   taskRef,
   transition,
@@ -15,7 +18,7 @@ import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { ApiFailure, notFound } from './errors.ts'
 import { toReview } from './runs.ts'
 
-const { acceptanceCriteria, auditLog, epics, projects, reviews, taskDependencies, tasks } = schema
+const { acceptanceCriteria, auditLog, comments, epics, projects, reviews, taskDependencies, tasks } = schema
 
 type TaskRow = typeof tasks.$inferSelect
 type ProjectRow = typeof projects.$inferSelect
@@ -93,6 +96,9 @@ function toTask(
       : null,
     headSha: row.headSha,
     latestReview: latest ? toReview(latest) : null,
+    mergeCommitSha: row.mergeCommitSha,
+    mergedAt: row.mergedAt?.toISOString() ?? null,
+    gateChecks: row.gateChecks,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString()
   }
@@ -240,6 +246,109 @@ export async function applyTransition(
     detail: { ...detail, from: task.status, to: next.status satisfies TaskStatus }
   })
   return next
+}
+
+// design/task.md: a PATCH per field. Criteria keep their IDs (and so their
+// evidence and verdicts) when passed back with the same ID.
+export async function patchTask(db: Executor, project: ProjectRow, taskId: string, input: PatchTaskInput, actor: Actor): Promise<void> {
+  await db.transaction(async (tx) => {
+    const { task } = await lockTask(tx, taskId)
+    const { acceptanceCriteria: criteriaInput, dependsOn, ...fields } = input
+    if (fields.epicId) {
+      const [epic] = await tx.select({ id: epics.id }).from(epics).where(and(eq(epics.id, fields.epicId), eq(epics.projectId, project.id)))
+      if (!epic) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['epicId'], message: 'Unknown epic' }] })
+    }
+    if (Object.keys(fields).length > 0) {
+      await tx.update(tasks).set({ ...fields, updatedAt: new Date() }).where(eq(tasks.id, taskId))
+    }
+    if (criteriaInput) {
+      const existing = await tx.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, taskId))
+      const keep = new Set(criteriaInput.map(c => c.id).filter((id): id is string => Boolean(id)))
+      const gone = existing.filter(c => !keep.has(c.id)).map(c => c.id)
+      if (gone.length > 0) await tx.delete(acceptanceCriteria).where(inArray(acceptanceCriteria.id, gone))
+      for (const [position, criterion] of criteriaInput.entries()) {
+        if (criterion.id && existing.some(c => c.id === criterion.id)) {
+          await tx.update(acceptanceCriteria).set({ position, text: criterion.text, updatedAt: new Date() }).where(eq(acceptanceCriteria.id, criterion.id))
+        } else {
+          await tx.insert(acceptanceCriteria).values({ taskId, position, text: criterion.text })
+        }
+      }
+    }
+    if (dependsOn) await setDependencies(tx, project, task, dependsOn)
+    await tx.insert(auditLog).values({ projectId: project.id, taskId, actor, action: 'task.updated', detail: { changed: Object.keys(input) } })
+  })
+}
+
+// Replaces a task's dependencies, keeping the graph a DAG (core)
+async function setDependencies(tx: Executor, project: ProjectRow, task: TaskRow, numbers: number[]): Promise<void> {
+  const wanted = [...new Set(numbers)]
+  const found = wanted.length === 0
+    ? []
+    : await tx.select({ id: tasks.id, number: tasks.number }).from(tasks)
+        .where(and(eq(tasks.projectId, project.id), inArray(tasks.number, wanted), isNull(tasks.deletedAt)))
+  const unknown = wanted.filter(n => !found.some(d => d.number === n))
+  if (unknown.length > 0) {
+    throw new ApiFailure(400, { code: 'invalid_dependencies', problems: unknown.map(n => ({ code: 'unknown_dependency', dependsOn: taskRef(project.prefix, n) })) })
+  }
+  // The whole project graph with this task's new edges, checked by core
+  const edges = await tx.select({ taskId: taskDependencies.taskId, dependsOnId: taskDependencies.dependsOnId }).from(taskDependencies)
+    .innerJoin(tasks, eq(tasks.id, taskDependencies.taskId)).where(eq(tasks.projectId, project.id))
+  const ids = await tx.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.projectId, project.id), isNull(tasks.deletedAt)))
+  const graph = new Map<string, string[]>(ids.map(t => [t.id, []]))
+  for (const edge of edges) {
+    if (edge.taskId !== task.id) graph.get(edge.taskId)?.push(edge.dependsOnId)
+  }
+  graph.set(task.id, found.map(d => d.id))
+  const problems = checkDependencies(graph)
+  if (problems.length > 0) throw new ApiFailure(400, { code: 'invalid_dependencies', problems })
+  await tx.delete(taskDependencies).where(eq(taskDependencies.taskId, task.id))
+  if (found.length > 0) await tx.insert(taskDependencies).values(found.map(d => ({ taskId: task.id, dependsOnId: d.id })))
+}
+
+export async function addComment(db: Executor, taskId: string, input: { body: string, pinned: boolean }, author: Actor): Promise<Comment> {
+  const [row] = await db.insert(comments).values({ taskId, author, body: input.body, pinned: input.pinned }).returning()
+  return toComment(row!)
+}
+
+function toComment(row: typeof comments.$inferSelect): Comment {
+  return { id: row.id, taskId: row.taskId, author: row.author, body: row.body, pinned: row.pinned, createdAt: row.createdAt.toISOString() }
+}
+
+export async function listComments(db: Executor, taskId: string): Promise<Comment[]> {
+  const rows = await db.select().from(comments).where(eq(comments.taskId, taskId)).orderBy(asc(comments.createdAt))
+  return rows.map(toComment)
+}
+
+export function toAuditEntry(row: typeof auditLog.$inferSelect): AuditEntry {
+  return { id: row.id, projectId: row.projectId, taskId: row.taskId, actor: row.actor, action: row.action, detail: row.detail as Record<string, unknown>, createdAt: row.createdAt.toISOString() }
+}
+
+// PRD §14: every claim, transition, review and merge decision, readable per task
+export async function listHistory(db: Executor, taskId: string): Promise<AuditEntry[]> {
+  const rows = await db.select().from(auditLog).where(eq(auditLog.taskId, taskId)).orderBy(asc(auditLog.createdAt), asc(auditLog.id))
+  return rows.map(toAuditEntry)
+}
+
+// D10 "Deleting": Backlog tasks go outright; the rest are hidden but kept
+// with their history. Dependents move to Blocked unless the dependency was
+// removed first. The caller has already stopped the run and closed the PR.
+export async function deleteTaskRows(db: Executor, taskId: string, actor: Actor, reason: string | null): Promise<void> {
+  await db.transaction(async (tx) => {
+    const { task, project } = await lockTask(tx, taskId)
+    const mode = deletionFor(task.status)
+    if (mode === 'not_allowed') throw new ApiFailure(409, { code: 'conflict', constraint: 'merged_tasks_are_immutable' })
+    const dependents = await tx.select({ task: tasks }).from(taskDependencies)
+      .innerJoin(tasks, eq(tasks.id, taskDependencies.taskId))
+      .where(and(eq(taskDependencies.dependsOnId, taskId), isNull(tasks.deletedAt)))
+    for (const { task: dependent } of dependents) {
+      const check = transition(toTaskState(dependent), { type: 'block', reason: DEPENDENCY_DELETED_REASON }, { kind: 'system', component: 'server' })
+      if (!check.ok) continue // e.g. Backlog: nothing to block yet
+      await applyTransition(tx, dependent, project, { type: 'block', reason: DEPENDENCY_DELETED_REASON }, { kind: 'system', component: 'server' }, { event: 'dependency_deleted', dependency: taskRef(project.prefix, task.number) })
+    }
+    await tx.insert(auditLog).values({ projectId: project.id, taskId, actor, action: 'task.deleted', detail: { mode, number: task.number, title: task.title, reason } })
+    if (mode === 'hard') await tx.delete(tasks).where(eq(tasks.id, taskId))
+    else await tx.update(tasks).set({ deletedAt: new Date(), updatedAt: new Date() }).where(eq(tasks.id, taskId))
+  })
 }
 
 // Adds the facts core needs to the human's request

@@ -9,7 +9,7 @@ import {
   type RunState
 } from '@corral/core'
 import { schema, type Database, type Executor } from '@corral/db'
-import { and, asc, desc, eq, inArray, isNotNull, lt, ne } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne } from 'drizzle-orm'
 import { z } from 'zod'
 import type { BlobStore } from './blob-store.ts'
 import { claimNextTask, type Claim } from './claim.ts'
@@ -19,11 +19,12 @@ import type { GitHubClient } from './github.ts'
 import { slugify } from './projects.ts'
 import { developerPrompt, reviewerPrompt } from './prompts.ts'
 import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
+import { MergeOrchestrator } from './merge.ts'
 import { getRun, listAgents, listEvidence } from './runs.ts'
-import { applyTransition, loadTask, lockTask, toTaskState, type ProjectRow, type TaskRow } from './tasks.ts'
+import { applyTransition, deleteTaskRows, loadTask, lockTask, toTaskState, type ProjectRow, type TaskRow } from './tasks.ts'
 import type { Transcripts } from './transcripts.ts'
 
-const { acceptanceCriteria, agents, auditLog, comments, evidence, projects, reviews, runs, tasks } = schema
+const { acceptanceCriteria, agents, auditLog, comments, evidence, projects, reviews, runs, settings, tasks } = schema
 
 const server: Actor = { kind: 'system', component: 'server' }
 
@@ -87,9 +88,50 @@ export class Orchestrator implements RunnerHandlers {
   #timer: NodeJS.Timeout | null = null
   #scheduling: Promise<void> | null = null
   #again = false
+  #stopped = false
+  readonly merges: MergeOrchestrator
 
   constructor(deps: OrchestratorDeps) {
     this.#d = deps
+    this.merges = new MergeOrchestrator({ db: deps.db, events: deps.events, github: deps.github, runner: deps.runner, ...(deps.now && { now: deps.now }) })
+  }
+
+  // Reads the kill switch; called once at startup
+  async init(): Promise<void> {
+    const [row] = await this.#d.db.select().from(settings).where(eq(settings.key, 'stopped'))
+    this.#stopped = row?.value === true
+    this.merges.stopped = this.#stopped
+  }
+
+  get stopped(): boolean {
+    return this.#stopped
+  }
+
+  // The kill switch (PRD §7.11): nothing new starts, and every live run is
+  // stopped. Resuming lets the scheduler carry on; stopped runs retry.
+  async stopAll(actor: Actor): Promise<void> {
+    await this.#setStopped(true, actor)
+    const live = await this.#d.db.select({ id: runs.id }).from(runs).where(inArray(runs.state, [...ACTIVE_RUN_STATES]))
+    for (const { id } of live) {
+      const ctx = await this.#load(id)
+      if (!ctx) continue
+      this.#d.runner.send({ type: 'run.stop', runId: id, reason: 'Corral was stopped' })
+      await this.#endRun(ctx, { state: 'interrupted', error: 'Stopped: Corral was stopped' })
+      await this.#publish(ctx)
+    }
+  }
+
+  async resumeAll(actor: Actor): Promise<void> {
+    await this.#setStopped(false, actor)
+    this.poke()
+  }
+
+  async #setStopped(stopped: boolean, actor: Actor): Promise<void> {
+    this.#stopped = stopped
+    this.merges.stopped = stopped
+    await this.#d.db.insert(settings).values({ key: 'stopped', value: stopped }).onConflictDoUpdate({ target: settings.key, set: { value: stopped, updatedAt: this.#now() } })
+    await this.#d.db.insert(auditLog).values({ actor, action: stopped ? 'corral.stopped' : 'corral.resumed', detail: {} })
+    this.#d.events.publish({ type: 'global.status', status: { stopped } })
   }
 
   #now(): Date {
@@ -107,6 +149,7 @@ export class Orchestrator implements RunnerHandlers {
 
   async tick(): Promise<void> {
     await this.sweepLeases()
+    await this.merges.tick().catch(error => console.error('Merge pass failed', error))
     await this.schedule()
   }
 
@@ -133,7 +176,7 @@ export class Orchestrator implements RunnerHandlers {
 
   async #schedulePass(): Promise<void> {
     const { db, runner } = this.#d
-    if (!runner.online) return
+    if (!runner.online || this.#stopped) return
     // PM turns aren't scheduled; they run when the human writes (D9)
     const workers = await db.select().from(agents).where(ne(agents.role, 'pm')).orderBy(asc(agents.createdAt))
     for (const agent of workers) {
@@ -402,6 +445,41 @@ export class Orchestrator implements RunnerHandlers {
       await tx.insert(auditLog).values({ projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor, action: 'run.stopped', detail: { runId } })
     })
     await this.#publish(ctx)
+  }
+
+  // D10 "Deleting": stop the run, close the PR, delete the branch when safe,
+  // then hide the task. Backlog tasks are simply removed.
+  async deleteTask(taskId: string, actor: Actor, reason: string | null): Promise<void> {
+    const { db, github, runner } = this.#d
+    const [row] = await db.select({ task: tasks, project: projects }).from(tasks)
+      .innerJoin(projects, eq(projects.id, tasks.projectId)).where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt)))
+    if (!row) throw new ApiFailure(404, { code: 'not_found' })
+    const { task, project } = row
+    if (task.status === 'merged') throw new ApiFailure(409, { code: 'conflict', constraint: 'merged_tasks_are_immutable' })
+
+    if (task.leaseRunId) {
+      const ctx = await this.#load(task.leaseRunId)
+      if (ctx) {
+        runner.send({ type: 'run.stop', runId: ctx.run.id, reason: 'The task was deleted' })
+        await this.#endRun(ctx, { state: 'interrupted', error: 'The task was deleted' })
+        this.#d.events.publish({ type: 'run.updated', run: await getRun(db, ctx.run.id) })
+      }
+    }
+    if (task.prNumber) {
+      // The PR keeps the pushed commits reachable, so the branch can go
+      await github.closePullRequest(project.repository, task.prNumber).catch(error => console.error(`Closing PR #${task.prNumber} failed`, error))
+      if (task.branch) await github.deleteBranch(project.repository, task.branch).catch(error => console.error(`Deleting ${task.branch} failed`, error))
+    }
+    await deleteTaskRows(db, taskId, actor, reason)
+    // Worktrees with uncommitted work are kept (PRD §7.4)
+    if (task.status !== 'backlog') void this.merges.cleanup(taskId)
+    const dependents = await db.select({ id: tasks.id }).from(schema.taskDependencies)
+      .innerJoin(tasks, eq(tasks.id, schema.taskDependencies.taskId)).where(eq(schema.taskDependencies.dependsOnId, taskId))
+    for (const { id } of dependents) {
+      const dependent = await loadTask(db, id).catch(() => null)
+      if (dependent) this.#d.events.publish({ type: 'task.updated', task: dependent })
+    }
+    this.#d.events.publish({ type: 'task.deleted', taskId, projectId: project.id })
   }
 
   // ── Agent tools ────────────────────────────────────────────────────────────

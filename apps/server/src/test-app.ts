@@ -49,6 +49,7 @@ export async function createTestApp(driver: 'pglite' | 'postgres', options: { li
   const blobs = new MemoryBlobStore()
   const clock = { now: new Date() }
   const services = createServices({ db: handle.db, events: bus, spoolDir, blobs, github, publicUrl: 'http://corral.test', now: () => clock.now })
+  await services.orchestrator.init()
   const deps = { db: handle.db, events: bus, actor, ...services }
   const app = createApp(deps)
   const server = options.listen ? await startServer(deps, { host: '127.0.0.1', port: 0 }) : null

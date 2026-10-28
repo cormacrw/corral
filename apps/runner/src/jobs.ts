@@ -1,7 +1,8 @@
 import type { RepoSummary, SetupJob, SetupJobResult } from '@corral/contracts'
 import type { RunnerConfig } from './config.ts'
 import { exec } from './exec.ts'
-import { syncRepository } from './repos.ts'
+import { barePath, syncRepository } from './repos.ts'
+import { removeWorktree, worktreePath } from './workspace.ts'
 
 // Setup jobs from the server (architecture.md, "Setup jobs, not only agent
 // runs"). Tokens stay in `gh`'s and `claude`'s own config; these only report
@@ -42,6 +43,19 @@ export async function runSetupJob(config: RunnerConfig, job: SetupJob): Promise<
 
     case 'github':
       return githubRequest(job.method, job.path, job.body)
+
+    case 'cleanup_worktrees': {
+      // Keeps any worktree with uncommitted changes (PRD §7.4)
+      const removed: string[] = []
+      const kept: string[] = []
+      const bare = barePath(config.dataDir, job.repository)
+      for (const role of ['developer', 'reviewer'] as const) {
+        const path = worktreePath(config.dataDir, job.taskId, role)
+        // Review checkouts are read-only by contract, so leftover changes there are discarded
+        ;(await removeWorktree(bare, path, role === 'reviewer') ? removed : kept).push(path)
+      }
+      return { kind: 'cleanup_worktrees', removed, kept }
+    }
   }
 }
 

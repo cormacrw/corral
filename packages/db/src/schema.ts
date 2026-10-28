@@ -114,6 +114,14 @@ export const tasks = pgTable('tasks', {
   prUrl: text(),
   // The commit the developer last submitted; reviews and approvals are tied to it
   headSha: text(),
+  // Set after asking GitHub to merge the base branch in, so the next head
+  // keeps its approval (R7: a clean mechanical update keeps approval)
+  branchUpdateRequested: boolean().notNull().default(false),
+  // Required checks seen passing when the task reached Human review (design/inbox.md)
+  gateChecks: jsonb().$type<{ name: string, url: string | null }[]>(),
+  // Recorded when GitHub confirmed the merge (PRD §7.9)
+  mergeCommitSha: text(),
+  mergedAt: timestamp({ withTimezone: true }),
 
   // Fencing token: goes up by one on every claim and never goes down, so a
   // stale runner's writes can be rejected (stale-runners-and-fencing.md)
@@ -217,6 +225,13 @@ export const runs = pgTable('runs', {
   index().on(t.agentId, t.state),
   check('runs_task_unless_pm', sql`${t.taskId} is not null or ${t.role} = 'pm'`)
 ])
+
+// Instance-wide switches, e.g. the kill switch (PRD §7.11 control panel)
+export const settings = pgTable('settings', {
+  key: text().primaryKey(),
+  value: jsonb().notNull(),
+  updatedAt: updatedAt()
+})
 
 // Append-only record of who did what (D1). Every status change writes one.
 export const auditLog = pgTable('audit_log', {

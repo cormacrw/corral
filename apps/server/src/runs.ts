@@ -1,10 +1,10 @@
-import type { Agent, Evidence, Review, Run } from '@corral/contracts'
-import { ACTIVE_RUN_STATES, taskRef } from '@corral/core'
+import type { Agent, Evidence, PatchAgentInput, Review, Run } from '@corral/contracts'
+import { ACTIVE_RUN_STATES, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, count, desc, eq, inArray, type SQL } from 'drizzle-orm'
 import { notFound } from './errors.ts'
 
-const { agents, evidence, projects, reviews, runs, tasks } = schema
+const { agents, auditLog, evidence, projects, reviews, runs, tasks } = schema
 
 const runColumns = {
   run: runs,
@@ -104,6 +104,14 @@ export function toEvidence(row: typeof evidence.$inferSelect): Evidence {
     url: `/api/evidence/${row.id}/file`,
     createdAt: row.createdAt.toISOString()
   }
+}
+
+// Agent pause and concurrency (PRD §7.11 control panel, design/settings.md)
+export async function patchAgent(db: Executor, agentId: string, input: PatchAgentInput, actor: Actor): Promise<Agent> {
+  const [row] = await db.update(agents).set({ ...input, updatedAt: new Date() }).where(eq(agents.id, agentId)).returning()
+  if (!row) throw notFound()
+  await db.insert(auditLog).values({ actor, action: input.paused !== undefined ? (input.paused ? 'agent.paused' : 'agent.resumed') : 'agent.updated', detail: { agentId, changed: Object.keys(input) } })
+  return (await listAgents(db)).find(a => a.id === agentId)!
 }
 
 export function toReview(row: typeof reviews.$inferSelect): Review {

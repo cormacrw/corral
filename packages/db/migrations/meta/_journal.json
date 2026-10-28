@@ -22,6 +22,13 @@
       "when": 1793154303181,
       "tag": "0002_reviews",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793154602810,
+      "tag": "0003_merge_and_settings",
+      "breakpoints": true
     }
   ]
 }

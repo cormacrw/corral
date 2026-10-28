@@ -35,11 +35,28 @@ export const createProjectInput = z.object({
 })
 export type CreateProjectInput = z.infer<typeof createProjectInput>
 
+// design/project-settings.md: one PATCH on Save; pause is its own switch
+export const patchProjectInput = z.object({
+  name: z.string().trim().min(1).optional(),
+  prefix: z.string().regex(PROJECT_PREFIX_PATTERN, 'Use 2–5 letters, A–Z').optional(),
+  thumbnailColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(),
+  defaultBranch: z.string().trim().min(1).optional(),
+  mergeMethod: z.enum(MERGE_METHODS).optional(),
+  requiredChecks: z.array(z.string().trim().min(1)).optional(),
+  paused: z.boolean().optional(),
+  humanReviewDefault: z.boolean().optional(),
+  reviewRoundCap: z.number().int().positive().optional(),
+  failedRunCap: z.number().int().positive().optional()
+})
+export type PatchProjectInput = z.infer<typeof patchProjectInput>
+
 export interface Project {
   id: string
   name: string
   slug: string
   prefix: string
+  thumbnailColor: string | null
+  nextTaskNumber: number
   repository: string
   defaultBranch: string
   mergeMethod: MergeMethod
@@ -70,6 +87,45 @@ export const createTaskInput = z.object({
   dependsOn: z.array(z.number().int().positive()).default([])
 })
 export type CreateTaskInput = z.input<typeof createTaskInput>
+
+// design/task.md: a PATCH per field, saved as you go
+export const patchTaskInput = z.object({
+  title: z.string().trim().min(1).optional(),
+  description: richTextDocument.nullable().optional(),
+  priority: z.enum(TASK_PRIORITIES).optional(),
+  type: z.enum(TASK_TYPES).optional(),
+  epicId: z.uuid().nullable().optional(),
+  humanReview: z.boolean().optional(),
+  // Replaces the list; existing criteria keep their IDs when their text is unchanged
+  acceptanceCriteria: z.array(z.object({ id: z.uuid().optional(), text: z.string().trim().min(1) })).optional(),
+  // Task numbers in the same project; replaces the list
+  dependsOn: z.array(z.number().int().positive()).optional()
+})
+export type PatchTaskInput = z.infer<typeof patchTaskInput>
+
+export const addCommentInput = z.object({
+  body: z.string().trim().min(1),
+  pinned: z.boolean().default(false)
+})
+
+export interface Comment {
+  id: string
+  taskId: string
+  author: Actor
+  body: string
+  pinned: boolean
+  createdAt: string
+}
+
+export interface AuditEntry {
+  id: number
+  projectId: string | null
+  taskId: string | null
+  actor: Actor
+  action: string
+  detail: Record<string, unknown>
+  createdAt: string
+}
 
 export const taskListQuery = z.object({
   // Board shows everything but Backlog; the Backlog view shows only Backlog (D10)
@@ -120,9 +176,68 @@ export interface Task {
   // The commit last submitted for review
   headSha: string | null
   latestReview: Review | null
+  mergeCommitSha: string | null
+  mergedAt: string | null
+  // Required checks seen passing when the task reached Human review
+  gateChecks: { name: string, url: string | null }[] | null
   createdAt: string
   updatedAt: string
 }
+
+// ── Inbox (D11, design/inbox.md) ───────────────────────────────────────────
+
+export type InboxItemType = 'human_review' | 'question' | 'blocked' | 'failed' | 'activity'
+
+export interface InboxItem {
+  // The task ID for Needs-you items; the audit entry for Activity and Resolved
+  id: string
+  type: InboxItemType
+  project: { id: string, slug: string, name: string, thumbnailColor: string | null }
+  taskId: string
+  taskRef: string
+  subject: string
+  preview: string
+  body: string
+  sender: { name: string, role: AgentRole | 'system' }
+  at: string
+  prUrl: string | null
+  // Set on Resolved items: what the human did
+  resolution: string | null
+}
+
+export interface Inbox {
+  needsYou: InboxItem[]
+  activity: InboxItem[]
+  resolved: InboxItem[]
+}
+
+// What the human can do from an item's tray (design/inbox.md, D10)
+export const inboxActionInput = z.discriminatedUnion('action', [
+  // Blocked: answer the question or clarify, and continue In progress
+  z.object({ action: z.literal('clarify'), text: z.string().trim().min(1) }),
+  z.object({ action: z.literal('send_back') }),
+  // Failed or Blocked: resolve to a status (D10)
+  z.object({ action: z.literal('resolve'), to: z.enum(['backlog', 'ready', 'in_progress']), text: z.string().trim().optional() }),
+  // Human review
+  z.object({ action: z.literal('approve') }),
+  z.object({ action: z.literal('request_changes'), text: z.string().trim().min(1) }),
+  z.object({ action: z.literal('delete'), text: z.string().trim().optional() })
+])
+export type InboxActionInput = z.infer<typeof inboxActionInput>
+
+// ── Control panel (PRD §7.11) ────────────────────────────────────────────────
+
+export interface GlobalStatus {
+  // The kill switch: no runs start and running ones are stopped
+  stopped: boolean
+}
+
+export const patchAgentInput = z.object({
+  name: z.string().trim().min(1).optional(),
+  concurrency: z.number().int().positive().optional(),
+  paused: z.boolean().optional()
+})
+export type PatchAgentInput = z.infer<typeof patchAgentInput>
 
 // ── Errors ──────────────────────────────────────────────────────────────────
 

@@ -29,6 +29,9 @@ export type SetupJob =
   // The server's GitHub API calls, made with the runner's `gh` login so the
   // token never leaves the runner (see open-recommendations.md R15)
   | { kind: 'github', method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown }
+  // After a merge or deletion: remove the task's worktrees unless they hold
+  // uncommitted work (flows.md step 10, PRD §7.4)
+  | { kind: 'cleanup_worktrees', repository: string, taskId: string }
 
 export type SetupJobResult =
   | { kind: 'list_repos', signedIn: false }
@@ -36,6 +39,7 @@ export type SetupJobResult =
   | { kind: 'check_repo', signedIn: boolean, found: boolean, canPush: boolean, defaultBranch: string | null, cloned: boolean, error: string | null }
   | { kind: 'detect_clis', clis: { id: 'claude', version: string | null, signedIn: boolean }[] }
   | { kind: 'github', status: number, body: unknown }
+  | { kind: 'cleanup_worktrees', removed: string[], kept: string[] }
 
 // ── Runs ─────────────────────────────────────────────────────────────────────
 
