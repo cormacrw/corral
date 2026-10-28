@@ -231,6 +231,26 @@ export const auditLog = pgTable('audit_log', {
   createdAt: createdAt()
 }, t => [index().on(t.taskId), index().on(t.projectId, t.createdAt)])
 
+export const reviewVerdict = pgEnum('review_verdict', ['approved', 'changes_requested'])
+
+// One reviewer verdict per round and commit (flows.md step 6). The per
+// criterion verdicts are what the UI shows as "met" (design/task.md).
+export const reviews = pgTable('reviews', {
+  id: uuid().primaryKey().defaultRandom(),
+  taskId: uuid().notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  runId: uuid().notNull().references(() => runs.id, { onDelete: 'cascade' }),
+  // The task's review round when the verdict was given
+  round: integer().notNull(),
+  // The commit reviewed; an approval only counts for this commit (merge gate)
+  headSha: text().notNull(),
+  verdict: reviewVerdict().notNull(),
+  summary: text().notNull(),
+  criteria: jsonb().$type<{ criterionId: string, met: boolean, note: string }[]>().notNull().default([]),
+  // Who gave the verdict: the reviewer agent, or a human in Human review
+  author: actor('author'),
+  createdAt: createdAt()
+}, t => [index().on(t.taskId, t.headSha)])
+
 export const evidenceKind = pgEnum('evidence_kind', ['screenshot', 'video', 'test_output', 'log', 'request', 'text', 'other'])
 
 // Proof for acceptance criteria (PRD §7.7). The file is an immutable blob;

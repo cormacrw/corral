@@ -9,7 +9,7 @@ import {
   type RunState
 } from '@corral/core'
 import { schema, type Database, type Executor } from '@corral/db'
-import { and, asc, eq, inArray, isNotNull, lt } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNotNull, lt, ne } from 'drizzle-orm'
 import { z } from 'zod'
 import type { BlobStore } from './blob-store.ts'
 import { claimNextTask, type Claim } from './claim.ts'
@@ -17,13 +17,13 @@ import { ApiFailure } from './errors.ts'
 import type { EventBus } from './events.ts'
 import type { GitHubClient } from './github.ts'
 import { slugify } from './projects.ts'
-import { developerPrompt } from './prompts.ts'
+import { developerPrompt, reviewerPrompt } from './prompts.ts'
 import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
 import { getRun, listAgents, listEvidence } from './runs.ts'
 import { applyTransition, loadTask, lockTask, toTaskState, type ProjectRow, type TaskRow } from './tasks.ts'
 import type { Transcripts } from './transcripts.ts'
 
-const { acceptanceCriteria, agents, auditLog, comments, evidence, projects, runs, tasks } = schema
+const { acceptanceCriteria, agents, auditLog, comments, evidence, projects, reviews, runs, tasks } = schema
 
 const server: Actor = { kind: 'system', component: 'server' }
 
@@ -60,6 +60,10 @@ const reportSchema = z.object({
   criteria: z.array(z.object({ criterionId: z.string(), met: z.boolean(), note: z.string().default('') })).optional(),
   headSha: z.string().optional()
 })
+
+const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp)$/
+// Text evidence is returned inline up to this size
+const MAX_INLINE_TEXT = 64 * 1024
 
 const evidenceSchema = z.object({
   criterionId: z.string().uuid().nullable().default(null),
@@ -130,8 +134,9 @@ export class Orchestrator implements RunnerHandlers {
   async #schedulePass(): Promise<void> {
     const { db, runner } = this.#d
     if (!runner.online) return
-    const developers = await db.select().from(agents).where(eq(agents.role, 'developer')).orderBy(asc(agents.createdAt))
-    for (const agent of developers) {
+    // PM turns aren't scheduled; they run when the human writes (D9)
+    const workers = await db.select().from(agents).where(ne(agents.role, 'pm')).orderBy(asc(agents.createdAt))
+    for (const agent of workers) {
       for (let claim = await claimNextTask(db, agent.id, this.#now()); claim; claim = await claimNextTask(db, agent.id, this.#now())) {
         await this.#assign(claim)
       }
@@ -141,7 +146,7 @@ export class Orchestrator implements RunnerHandlers {
   async #assign(claim: Claim): Promise<void> {
     const ctx = await this.#load(claim.runId)
     if (!ctx?.task) return
-    const job = await this.#developerJob(ctx)
+    const job = ctx.run.role === 'reviewer' ? await this.#reviewerJob(ctx) : await this.#developerJob(ctx)
     if (!this.#d.runner.send({ type: 'run.assign', job })) {
       await this.#endRun(ctx, { state: 'interrupted', error: 'The runner went offline before the run started' })
     }
@@ -183,6 +188,47 @@ export class Orchestrator implements RunnerHandlers {
         reviewRoundCap: ctx.project.reviewRoundCap,
         criteria: criteria.map(c => ({ id: c.id, text: c.text })),
         comments: notes
+      }, ctx.agent.name)
+    }
+  }
+
+  // flows.md step 6: the reviewer checks out the submitted commit
+  async #reviewerJob(ctx: RunContext): Promise<RunJob> {
+    const { db } = this.#d
+    const task = ctx.task!
+    const ref = taskRef(ctx.project.prefix, task.number)
+    const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
+    const items = (await listEvidence(db, task.id)).filter(e => e.round === task.reviewRounds)
+    const [previous] = await db.select().from(reviews).where(eq(reviews.taskId, task.id)).orderBy(desc(reviews.createdAt)).limit(1)
+    return {
+      runId: ctx.run.id,
+      runNumber: ctx.run.number,
+      leaseEpoch: ctx.run.leaseEpoch!,
+      role: 'reviewer',
+      projectId: ctx.project.id,
+      repository: ctx.project.repository,
+      defaultBranch: ctx.project.defaultBranch,
+      taskId: task.id,
+      taskRef: ref,
+      branch: task.branch,
+      headSha: task.headSha,
+      agentSessionId: null,
+      model: null,
+      timeoutSeconds: RUN_TIMEOUT_SECONDS,
+      prompt: reviewerPrompt({
+        ref,
+        title: task.title,
+        description: task.description,
+        branch: task.branch!,
+        defaultBranch: ctx.project.defaultBranch,
+        reviewRounds: task.reviewRounds,
+        reviewRoundCap: ctx.project.reviewRoundCap,
+        criteria: criteria.map(c => ({ id: c.id, text: c.text })),
+        comments: await this.#comments(task.id),
+        headSha: task.headSha!,
+        prUrl: task.prUrl,
+        evidence: items.map(e => ({ id: e.id, criterionId: e.criterionId, kind: e.kind, note: e.note, fileName: e.fileName })),
+        previousFeedback: previous ? feedbackComment(previous.summary, previous.criteria, criteria) : null
       }, ctx.agent.name)
     }
   }
@@ -392,6 +438,8 @@ export class Orchestrator implements RunnerHandlers {
       }
       case 'attach_evidence':
         return this.#attachEvidence(ctx, evidenceSchema.parse(input))
+      case 'get_evidence':
+        return this.#getEvidence(ctx, z.object({ evidenceId: z.string().optional() }).parse(input))
       case 'report_outcome':
         return this.#reportOutcome(ctx, reportSchema.parse(input) as OutcomeReport & { outcome: string })
     }
@@ -444,7 +492,46 @@ export class Orchestrator implements RunnerHandlers {
     return { id: row!.id, sha256: blob }
   }
 
+  // Evidence for the reviewer: a listing, or one item with its content.
+  // Images come back as MCP image content so the reviewer can look at them.
+  async #getEvidence(ctx: RunContext, input: { evidenceId?: string | undefined }) {
+    const task = ctx.task!
+    const items = await listEvidence(this.#d.db, task.id)
+    if (!input.evidenceId) {
+      return {
+        round: task.reviewRounds,
+        evidence: items.map(e => ({ id: e.id, criterionId: e.criterionId, kind: e.kind, note: e.note, fileName: e.fileName, contentType: e.contentType, size: e.size, round: e.round }))
+      }
+    }
+    const item = items.find(e => e.id === input.evidenceId)
+    if (!item) throw new ToolError(`${input.evidenceId} isn't evidence on this task`)
+    const [row] = await this.#d.db.select({ blob: evidence.blob }).from(evidence).where(eq(evidence.id, item.id))
+    const data = row ? await this.#d.blobs.get(row.blob) : null
+    if (!data) throw new ToolError('The file for this evidence is missing')
+    const meta = { id: item.id, criterionId: item.criterionId, kind: item.kind, note: item.note, fileName: item.fileName, contentType: item.contentType, size: item.size }
+    if (IMAGE_TYPES.test(item.contentType)) {
+      return { ...meta, images: [{ mimeType: item.contentType, dataBase64: Buffer.from(data).toString('base64') }] }
+    }
+    if (item.contentType.startsWith('text/') || item.contentType === 'application/json') {
+      const text = new TextDecoder().decode(data.subarray(0, MAX_INLINE_TEXT))
+      return { ...meta, text: data.length > MAX_INLINE_TEXT ? `${text}\n… (${data.length - MAX_INLINE_TEXT} more bytes)` : text }
+    }
+    return { ...meta, note: `${item.note} (binary ${item.contentType}; view it in Corral at ${this.#d.publicUrl}${item.url})`.trim() }
+  }
+
   async #reportOutcome(ctx: RunContext, report: OutcomeReport & { outcome: string }): Promise<unknown> {
+    if (ctx.run.role === 'reviewer') {
+      switch (report.outcome) {
+        case 'approved':
+        case 'changes_requested':
+          return this.#review(ctx, report, report.outcome)
+        case 'failed':
+          await this.#failRun(ctx, report.summary)
+          this.#finished(ctx, 'Reported failed')
+          return { ok: true, message: 'Recorded. You can stop now.' }
+      }
+      throw new ToolError('A reviewer reports approved, changes_requested or failed')
+    }
     if (ctx.run.role === 'developer') {
       switch (report.outcome) {
         case 'pr_opened':
@@ -460,6 +547,53 @@ export class Orchestrator implements RunnerHandlers {
       throw new ToolError('A developer reports pr_opened, pr_updated, stuck or failed')
     }
     throw new ToolError(`Outcomes for ${ctx.run.role} runs aren't supported yet`)
+  }
+
+  // flows.md steps 6–7: record the verdict for this commit. Changes
+  // requested goes through core (round cap → Blocked) and the feedback is
+  // posted as a comment; an approval leaves the task in Agent review for the
+  // merge orchestrator's CI and gate checks.
+  async #review(ctx: RunContext, report: OutcomeReport, verdict: 'approved' | 'changes_requested') {
+    const { db } = this.#d
+    const task = ctx.task!
+    const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
+    const verdicts = report.criteria ?? []
+    const missing = criteria.filter(c => !verdicts.some(v => v.criterionId === c.id))
+    if (missing.length > 0) {
+      throw new ToolError(`Not recorded. Give a verdict for every criterion; missing: ${missing.map(c => `[${c.id}] ${c.text}`).join('; ')}.`)
+    }
+    const unknown = verdicts.filter(v => !criteria.some(c => c.id === v.criterionId))
+    if (unknown.length > 0) throw new ToolError(`Not recorded. Unknown criterion IDs: ${unknown.map(v => v.criterionId).join(', ')}.`)
+    if (verdict === 'approved' && verdicts.some(v => !v.met)) {
+      throw new ToolError('Not recorded. An approval needs every criterion met; otherwise report changes_requested.')
+    }
+    const kept = criteria.map(c => verdicts.find(v => v.criterionId === c.id)!).map(v => ({ criterionId: v.criterionId, met: v.met, note: v.note ?? '' }))
+    const feedback = feedbackComment(report.summary, kept, criteria)
+
+    await db.transaction(async (tx) => {
+      const locked = await lockTask(tx, task.id)
+      if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease. Stop working.')
+      const headSha = locked.task.headSha!
+      await tx.insert(reviews).values({
+        taskId: task.id, runId: ctx.run.id, round: locked.task.reviewRounds, headSha, verdict, summary: report.summary, criteria: kept, author: this.#actor(ctx)
+      })
+      await tx.insert(comments).values({ taskId: task.id, author: this.#actor(ctx), body: feedback })
+      await tx.insert(auditLog).values({
+        projectId: ctx.project.id, taskId: task.id, actor: this.#actor(ctx), action: 'review.recorded',
+        detail: { runId: ctx.run.id, verdict, headSha, round: locked.task.reviewRounds, met: kept.filter(v => v.met).length, of: kept.length }
+      })
+      if (verdict === 'changes_requested') {
+        await applyTransition(tx, locked.task, locked.project, { type: 'changes_requested' }, server, { event: 'changes_requested', runId: ctx.run.id, headSha })
+      }
+      await this.#endRunIn(tx, ctx, { state: 'completed', outcome: verdict, summary: report.summary, headSha })
+    })
+    this.#finished(ctx, `Review recorded: ${verdict}`)
+    return {
+      ok: true,
+      message: verdict === 'approved'
+        ? 'Approval recorded. Corral checks CI and the merge gates next. You can stop now.'
+        : 'Changes requested; your feedback was sent to the developer. You can stop now.'
+    }
   }
 
   // Asks a human: the task becomes Blocked with the question as its reason (D11)
@@ -576,6 +710,15 @@ export class Orchestrator implements RunnerHandlers {
     const task = ctx.task ? await loadTask(db, ctx.task.id).catch(() => null) : null
     if (task) events.publish({ type: 'task.updated', task })
   }
+}
+
+// The review as a comment the developer reads next round
+export function feedbackComment(summary: string, verdicts: { criterionId: string, met: boolean, note: string }[], criteria: { id: string, text: string }[]): string {
+  const lines = verdicts.map((v) => {
+    const text = criteria.find(c => c.id === v.criterionId)?.text ?? v.criterionId
+    return `- ${v.met ? '✅' : '❌'} ${text}${v.note ? ` — ${v.note}` : ''}`
+  })
+  return [summary.trim(), '', ...lines].join('\n').trim()
 }
 
 export function actorLabel(actor: Actor): string {

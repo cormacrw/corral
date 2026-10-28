@@ -1,10 +1,10 @@
-import type { Agent, Evidence, Run } from '@corral/contracts'
+import type { Agent, Evidence, Review, Run } from '@corral/contracts'
 import { ACTIVE_RUN_STATES, taskRef } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, count, desc, eq, inArray, type SQL } from 'drizzle-orm'
 import { notFound } from './errors.ts'
 
-const { agents, evidence, projects, runs, tasks } = schema
+const { agents, evidence, projects, reviews, runs, tasks } = schema
 
 const runColumns = {
   run: runs,
@@ -104,6 +104,26 @@ export function toEvidence(row: typeof evidence.$inferSelect): Evidence {
     url: `/api/evidence/${row.id}/file`,
     createdAt: row.createdAt.toISOString()
   }
+}
+
+export function toReview(row: typeof reviews.$inferSelect): Review {
+  return {
+    id: row.id,
+    taskId: row.taskId,
+    runId: row.runId,
+    round: row.round,
+    headSha: row.headSha,
+    verdict: row.verdict,
+    summary: row.summary,
+    criteria: row.criteria,
+    author: row.author,
+    createdAt: row.createdAt.toISOString()
+  }
+}
+
+export async function listReviews(db: Executor, taskId: string): Promise<Review[]> {
+  const rows = await db.select().from(reviews).where(eq(reviews.taskId, taskId)).orderBy(desc(reviews.createdAt))
+  return rows.map(toReview)
 }
 
 export async function listEvidence(db: Executor, taskId: string): Promise<Evidence[]> {

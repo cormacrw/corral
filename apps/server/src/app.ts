@@ -21,7 +21,7 @@ import { createProject, findProjectBySlug, listProjects, toProject } from './pro
 import type { BlobStore } from './blob-store.ts'
 import type { Orchestrator } from './orchestrator.ts'
 import type { RunnerHub } from './runner-hub.ts'
-import { getRun, listAgents, listEvidence, listRuns } from './runs.ts'
+import { getRun, listAgents, listEvidence, listReviews, listRuns } from './runs.ts'
 import type { Transcripts } from './transcripts.ts'
 import { checkRepository, detectClis, RepoCatalog } from './setup.ts'
 import { createTask, findTaskId, listTasks, loadTask, transitionTask } from './tasks.ts'
@@ -117,6 +117,11 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     .get('/projects/:slug/tasks/:number/evidence', async (c) => {
       const project = await findProjectBySlug(db, c.req.param('slug'))
       return c.json(await listEvidence(db, await findTaskId(db, project.id, taskNumber(c.req.param('number')))))
+    })
+
+    .get('/projects/:slug/tasks/:number/reviews', async (c) => {
+      const project = await findProjectBySlug(db, c.req.param('slug'))
+      return c.json(await listReviews(db, await findTaskId(db, project.id, taskNumber(c.req.param('number')))))
     })
 
     .get('/evidence/:id/file', async (c) => {

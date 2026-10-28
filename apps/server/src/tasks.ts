@@ -11,10 +11,11 @@ import {
   type TaskStatus
 } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, asc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { ApiFailure, notFound } from './errors.ts'
+import { toReview } from './runs.ts'
 
-const { acceptanceCriteria, auditLog, epics, projects, taskDependencies, tasks } = schema
+const { acceptanceCriteria, auditLog, epics, projects, reviews, taskDependencies, tasks } = schema
 
 type TaskRow = typeof tasks.$inferSelect
 type ProjectRow = typeof projects.$inferSelect
@@ -45,8 +46,26 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
     .innerJoin(tasks, eq(tasks.id, taskDependencies.dependsOnId))
     .where(inArray(taskDependencies.taskId, ids))
     .orderBy(asc(tasks.number))
+  // Newest first, so the first row per task is its latest review
+  const reviewRows = await db.select().from(reviews).where(inArray(reviews.taskId, ids)).orderBy(desc(reviews.createdAt))
 
-  return rows.map(row => ({
+  return rows.map((row) => {
+    const latest = reviewRows.find(r => r.taskId === row.id) ?? null
+    // A verdict only describes the commit it was given for
+    const current = latest && latest.headSha === row.headSha ? latest : null
+    return toTask(project, row, criteria, dependencies, latest, current)
+  })
+}
+
+function toTask(
+  project: ProjectRow,
+  row: TaskRow,
+  criteria: (typeof acceptanceCriteria.$inferSelect)[],
+  dependencies: { taskId: string, number: number }[],
+  latest: typeof reviews.$inferSelect | null,
+  current: typeof reviews.$inferSelect | null
+): Task {
+  return {
     id: row.id,
     projectId: row.projectId,
     ref: taskRef(project.prefix, row.number),
@@ -67,14 +86,16 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
     prUrl: row.prUrl,
     acceptanceCriteria: criteria
       .filter(c => c.taskId === row.id)
-      .map(c => ({ id: c.id, position: c.position, text: c.text })),
+      .map(c => ({ id: c.id, position: c.position, text: c.text, met: current?.criteria.find(v => v.criterionId === c.id)?.met ?? null })),
     dependsOn: dependencies.filter(d => d.taskId === row.id).map(d => taskRef(project.prefix, d.number)),
     lease: row.leaseRunId && row.leaseRole && row.leaseExpiresAt
       ? { runId: row.leaseRunId, role: row.leaseRole, expiresAt: row.leaseExpiresAt.toISOString() }
       : null,
+    headSha: row.headSha,
+    latestReview: latest ? toReview(latest) : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString()
-  }))
+  }
 }
 
 export async function loadTask(db: Executor, taskId: string): Promise<Task> {

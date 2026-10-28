@@ -1,6 +1,6 @@
 import type { AgentTool, Project, RunnerMessage, ServerMessage, Task } from '@corral/contracts'
 import { schema } from '@corral/db'
-import { eq } from 'drizzle-orm'
+import { eq, ne } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import WebSocket from 'ws'
 import { createTestApp, type TestApp } from './test-app.ts'
@@ -75,7 +75,7 @@ describe('orchestrator', () => {
   beforeAll(async () => {
     t = await createTestApp('postgres', { listen: true })
     // Each test leaves its run live, so the one developer must have room for all of them
-    await t.db.update(agents).set({ concurrency: 50 }).where(eq(agents.role, 'developer'))
+    await t.db.update(agents).set({ concurrency: 50 }).where(ne(agents.role, 'pm'))
     runner = await FakeRunner.connect(t.server!.url)
   })
 
@@ -274,6 +274,107 @@ describe('orchestrator', () => {
     const again = await runner.next('run.assign', m => m.job.taskId === task.id)
     expect(again.job.leaseEpoch).toBe(job.leaseEpoch + 1)
     expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', leaseRunId: again.job.runId, failedRuns: 0 })
+    await pause(project)
+  })
+
+  // A developer submission accepted by the server: the task is in Agent review
+  async function submitted(input: Parameters<TestApp['createTask']>[1] = {}) {
+    const { project, task, job } = await assigned(input)
+    const full = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}`).then(r => r.json()) as Task
+    t.github.setBranch(project.repository, job.branch!, 'abc123')
+    for (const criterion of full.acceptanceCriteria) {
+      await runner.call(job.runId, job.leaseEpoch, 'attach_evidence', {
+        criterionId: criterion.id, kind: 'screenshot', note: 'the page', fileName: 'shot.png', contentType: 'image/png', dataBase64: Buffer.from('png-bytes').toString('base64')
+      })
+    }
+    const result = await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', summary: 'Implemented', headSha: 'abc123' })
+    expect(result).toMatchObject({ ok: true })
+    await runner.next('run.stop', m => m.runId === job.runId)
+    return { project, task: full, developer: job }
+  }
+
+  // ...and the reviewer run the scheduler starts for it
+  async function underReview(input: Parameters<TestApp['createTask']>[1] = {}) {
+    const state = await submitted(input)
+    await t.orchestrator.schedule()
+    const review = (await runner.next('run.assign', m => m.job.taskId === state.task.id && m.job.role === 'reviewer')).job
+    return { ...state, review }
+  }
+
+  it('claims an Agent review task for the reviewer at the submitted commit', async () => {
+    const { project, task, review } = await underReview()
+    expect(review).toMatchObject({ role: 'reviewer', headSha: 'abc123', branch: task.branch, leaseEpoch: 2 })
+    expect(review.prompt).toContain('commit abc123')
+    expect(review.prompt).toContain('shot.png')
+    expect(await taskRow(task.id)).toMatchObject({ status: 'agent_review', leaseRole: 'reviewer', leaseRunId: review.runId })
+
+    const list = await runner.call(review.runId, review.leaseEpoch, 'get_evidence', {})
+    expect(list).toMatchObject({ ok: true, result: { round: 0, evidence: [{ kind: 'screenshot', fileName: 'shot.png' }] } })
+    const id = (list as { result: { evidence: { id: string }[] } }).result.evidence[0]!.id
+    const item = await runner.call(review.runId, review.leaseEpoch, 'get_evidence', { evidenceId: id })
+    expect(item).toMatchObject({ ok: true, result: { id, images: [{ mimeType: 'image/png', dataBase64: Buffer.from('png-bytes').toString('base64') }] } })
+    await pause(project)
+  })
+
+  it('rejects verdicts that skip a criterion or approve with one unmet', async () => {
+    const { project, task, review } = await underReview()
+    const criterion = task.acceptanceCriteria[0]!
+    const none = await runner.call(review.runId, review.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Looks good' })
+    expect(none).toMatchObject({ ok: false, error: expect.stringContaining(criterion.text) })
+    const unmet = await runner.call(review.runId, review.leaseEpoch, 'report_outcome', {
+      outcome: 'approved', summary: 'Looks good', criteria: [{ criterionId: criterion.id, met: false, note: 'nope' }]
+    })
+    expect(unmet).toMatchObject({ ok: false, error: expect.stringContaining('every criterion met') })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'agent_review', leaseRunId: review.runId })
+    await pause(project)
+  })
+
+  it('posts changes requested as feedback and sends the task back to the developer', async () => {
+    const { project, task, review } = await underReview()
+    const criterion = task.acceptanceCriteria[0]!
+    const result = await runner.call(review.runId, review.leaseEpoch, 'report_outcome', {
+      outcome: 'changes_requested', summary: 'The error message is missing', criteria: [{ criterionId: criterion.id, met: false, note: 'No message shown' }]
+    })
+    expect(result).toMatchObject({ ok: true })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', reviewRounds: 1, leaseRunId: null })
+    expect(await runRow(review.runId)).toMatchObject({ state: 'completed', outcome: 'changes_requested', headSha: 'abc123' })
+    await runner.next('run.stop', m => m.runId === review.runId)
+
+    const reviews = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/reviews`).then(r => r.json()) as { verdict: string, round: number, headSha: string }[]
+    expect(reviews).toMatchObject([{ verdict: 'changes_requested', round: 0, headSha: 'abc123' }])
+    const updated = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}`).then(r => r.json()) as Task
+    expect(updated.acceptanceCriteria[0]!.met).toBe(false)
+    expect(updated.latestReview?.verdict).toBe('changes_requested')
+
+    // The next developer run sees the feedback and is asked for pr_updated
+    const next = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
+    expect(next.prompt).toContain('No message shown')
+    expect(next.prompt).toContain('"pr_updated"')
+    await pause(project)
+  })
+
+  it('blocks the task when changes are requested at the review-round cap', async () => {
+    const { project, task, review } = await underReview()
+    await t.db.update(tasks).set({ reviewRounds: 4 }).where(eq(tasks.id, task.id))
+    await runner.call(review.runId, review.leaseEpoch, 'report_outcome', {
+      outcome: 'changes_requested', summary: 'Still wrong', criteria: [{ criterionId: task.acceptanceCriteria[0]!.id, met: false, note: '' }]
+    })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'blocked', reviewRounds: 5, statusReason: 'Review-round cap reached (5)' })
+    await pause(project)
+  })
+
+  it('records an approval and leaves the task in Agent review for the merge gates', async () => {
+    const { project, task, review } = await underReview()
+    const result = await runner.call(review.runId, review.leaseEpoch, 'report_outcome', {
+      outcome: 'approved', summary: 'All good', criteria: [{ criterionId: task.acceptanceCriteria[0]!.id, met: true, note: 'Seen in shot.png' }]
+    })
+    expect(result).toMatchObject({ ok: true })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'agent_review', reviewRounds: 0, leaseRunId: null })
+    const updated = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}`).then(r => r.json()) as Task
+    expect(updated.acceptanceCriteria[0]!.met).toBe(true)
+    // The commit has its verdict, so the reviewer isn't started again
+    await t.orchestrator.schedule()
+    expect(runner.received.filter(m => m.type === 'run.assign' && m.job.taskId === task.id)).toHaveLength(0)
     await pause(project)
   })
 

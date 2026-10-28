@@ -1,10 +1,10 @@
 import { ACTIVE_RUN_STATES, LEASE_DURATION_MS, transition, type Actor, type TaskStatus } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, asc, count, eq, inArray, isNull, ne, notExists, sql } from 'drizzle-orm'
+import { and, asc, count, eq, inArray, isNotNull, isNull, ne, notExists, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { toTaskState } from './tasks.ts'
 
-const { agents, auditLog, projects, runs, taskDependencies, tasks } = schema
+const { agents, auditLog, projects, reviews, runs, taskDependencies, tasks } = schema
 
 const scheduler: Actor = { kind: 'system', component: 'scheduler' }
 
@@ -18,21 +18,22 @@ export interface Claim {
   status: TaskStatus
 }
 
-// Atomically gives a developer agent the next task to work on, or null if
-// there's nothing eligible or the agent is at capacity (flows.md step 2).
+// Atomically gives an agent the next task to work on, or null if there's
+// nothing eligible or the agent is at capacity (flows.md step 2).
 //
 // Developer runs pick up Ready tasks (→ In progress) and In progress tasks
-// with no lease, e.g. after changes were requested (D10). Two claims can't take
-// the same task: the candidate row is locked with SKIP LOCKED, so a parallel
-// claim moves on to the next task instead of waiting for this one. Locking
-// the agent row first means its concurrency limit can't be overshot either.
-// This is only meaningful on Postgres; PGlite runs one transaction at a time (D14).
+// with no lease, e.g. after changes were requested (D10). Reviewer runs pick
+// up Agent review tasks whose current commit has no verdict yet (flows.md
+// step 6). Two claims can't take the same task: the candidate row is locked
+// with SKIP LOCKED, so a parallel claim moves on to the next task instead of
+// waiting for this one. Locking the agent row first means its concurrency
+// limit can't be overshot either. This is only meaningful on Postgres; PGlite
+// runs one transaction at a time (D14).
 export async function claimNextTask(db: Executor, agentId: string, now = new Date()): Promise<Claim | null> {
   return db.transaction(async (tx) => {
     const [agent] = await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')
     if (!agent) throw new Error(`Unknown agent ${agentId}`)
-    // Reviewer claims need review verdicts per commit, which arrive with the reviewer
-    if (agent.role !== 'developer') throw new Error(`claimNextTask only handles developer agents, not ${agent.role}`)
+    if (agent.role === 'pm') throw new Error('PM turns are not claimed; they run when the human sends a message (D9)')
     if (agent.paused || (agent.pausedUntil && agent.pausedUntil > now)) return null
 
     const [active] = await tx.select({ n: count() }).from(runs)
@@ -40,19 +41,30 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
     if (active!.n >= agent.concurrency) return null
 
     const dependency = alias(tasks, 'dependency')
+    const eligible = agent.role === 'developer'
+      ? and(
+          inArray(tasks.status, ['ready', 'in_progress']),
+          // Every dependency Merged (D10: Ready tasks wait on them)
+          notExists(tx.select({ one: sql`1` }).from(taskDependencies)
+            .innerJoin(dependency, eq(dependency.id, taskDependencies.dependsOnId))
+            .where(and(eq(taskDependencies.taskId, tasks.id), ne(dependency.status, 'merged'))))
+        )
+      : and(
+          eq(tasks.status, 'agent_review'),
+          isNotNull(tasks.headSha),
+          // No verdict yet for the commit under review
+          notExists(tx.select({ one: sql`1` }).from(reviews)
+            .where(and(eq(reviews.taskId, tasks.id), eq(reviews.headSha, tasks.headSha))))
+        )
     const [candidate] = await tx.select({ task: tasks })
       .from(tasks)
       .innerJoin(projects, eq(projects.id, tasks.projectId))
       .where(and(
-        inArray(tasks.status, ['ready', 'in_progress']),
+        eligible,
         isNull(tasks.leaseRunId),
         isNull(tasks.deletedAt),
         eq(tasks.paused, false),
-        eq(projects.paused, false),
-        // Every dependency Merged (D10: Ready tasks wait on them)
-        notExists(tx.select({ one: sql`1` }).from(taskDependencies)
-          .innerJoin(dependency, eq(dependency.id, taskDependencies.dependsOnId))
-          .where(and(eq(taskDependencies.taskId, tasks.id), ne(dependency.status, 'merged'))))
+        eq(projects.paused, false)
       ))
       // Enum order: urgent first
       .orderBy(asc(tasks.priority), asc(tasks.createdAt))
@@ -62,7 +74,7 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
     const task = candidate.task
 
     // Ready → In progress goes through core like every status change; an
-    // In progress task keeps its status and just gets a lease
+    // In progress or Agent review task keeps its status and just gets a lease
     let status = task.status
     if (task.status === 'ready') {
       // The query only returns tasks whose dependencies are all Merged
@@ -77,7 +89,7 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
       agentId,
       projectId: task.projectId,
       taskId: task.id,
-      role: 'developer',
+      role: agent.role,
       leaseEpoch,
       queuedAt: now
     }).returning()
@@ -86,7 +98,7 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
       status,
       leaseEpoch,
       leaseRunId: run!.id,
-      leaseRole: 'developer',
+      leaseRole: agent.role,
       leaseAcquiredAt: now,
       leaseHeartbeatAt: now,
       leaseExpiresAt,

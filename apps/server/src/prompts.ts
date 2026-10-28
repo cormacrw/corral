@@ -29,6 +29,36 @@ function commentsSection(task: PromptTask): string {
   ].join('\n')
 }
 
+export interface ReviewTask extends PromptTask {
+  headSha: string
+  prUrl: string | null
+  evidence: { id: string, criterionId: string | null, kind: string, note: string, fileName: string }[]
+  previousFeedback: string | null
+}
+
+export function reviewerPrompt(task: ReviewTask, agentName: string): string {
+  const evidence = task.evidence.length > 0
+    ? task.evidence.map(e => `- ${e.id}: ${e.kind} "${e.fileName}" for ${e.criterionId ? `[${e.criterionId}]` : 'the task as a whole'}${e.note ? ` — ${e.note}` : ''}`).join('\n')
+    : '(none attached)'
+  return [
+    `You are ${agentName}, the reviewer agent in Corral. Review round ${task.reviewRounds + 1} of ${task.reviewRoundCap} for task ${task.ref}: ${task.title}.`,
+    `You are checking commit ${task.headSha} on branch \`${task.branch}\`${task.prUrl ? ` (${task.prUrl})` : ''}, against \`${task.defaultBranch}\`.`,
+    '',
+    section('Task', richTextToPlainText(task.description) || '(no description)'),
+    section('Acceptance criteria', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
+    section('Evidence the developer attached (this round)', evidence),
+    task.previousFeedback ? section('Your feedback last round', task.previousFeedback) : '',
+    commentsSection(task),
+    section('How to review', `
+- You are in a read-only checkout of the commit under review. Do not edit, commit or push. Run \`git diff ${task.defaultBranch}...HEAD\` or \`git log\` to see the change; \`origin/${task.defaultBranch}\` is available locally.
+- Read \`.corral/CORRAL.md\` and the wiki if they exist, and check the wiki was updated where behaviour changed.
+- Judge every acceptance criterion: is it implemented, and does the evidence actually show it? Use \`get_evidence\` to list items and fetch screenshots by ID. Reproduce at least one criterion yourself when you can (run the tests, start the app).
+- Check the project's lint, typecheck and tests pass on this commit.
+- Call \`report_outcome\` with outcome "approved" or "changes_requested", a \`criteria\` verdict for every criterion ID above (met true/false with a note), and a summary with your reasoning. Feedback must be specific and actionable; it is posted to the developer as a comment.
+- Always finish by calling \`report_outcome\`.`)
+  ].join('\n')
+}
+
 export function developerPrompt(task: PromptTask, agentName: string): string {
   const revision = task.reviewRounds > 0
   return [

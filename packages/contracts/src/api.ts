@@ -5,6 +5,7 @@ import {
   TASK_PRIORITIES,
   TASK_STATUSES,
   TASK_TYPES,
+  type Actor,
   type AgentRole,
   type MergeMethod,
   type RunOutcome,
@@ -111,10 +112,14 @@ export interface Task {
   branch: string | null
   prNumber: number | null
   prUrl: string | null
-  acceptanceCriteria: { id: string, position: number, text: string }[]
+  // `met` comes from the latest review of the current commit (design/task.md)
+  acceptanceCriteria: { id: string, position: number, text: string, met: boolean | null }[]
   // Refs of the tasks this one waits on
   dependsOn: string[]
   lease: Lease | null
+  // The commit last submitted for review
+  headSha: string | null
+  latestReview: Review | null
   createdAt: string
   updatedAt: string
 }
@@ -230,6 +235,21 @@ export interface Evidence {
   size: number
   // Served by the server (D8: web never touches storage)
   url: string
+  createdAt: string
+}
+
+export type ReviewVerdict = 'approved' | 'changes_requested'
+
+export interface Review {
+  id: string
+  taskId: string
+  runId: string
+  round: number
+  headSha: string
+  verdict: ReviewVerdict
+  summary: string
+  criteria: { criterionId: string, met: boolean, note: string }[]
+  author: Actor
   createdAt: string
 }
 
