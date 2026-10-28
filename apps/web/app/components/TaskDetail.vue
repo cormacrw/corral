@@ -435,6 +435,19 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
             @click="place('accept')"
           />
         </div>
+        <div
+          v-else-if="task.status === 'backlog'"
+          class="flex flex-wrap items-center gap-2 rounded-lg border border-default bg-muted px-3 py-2 text-sm"
+        >
+          <span class="me-auto text-muted">In the Backlog, so never scheduled until you move it.</span>
+          <UButton
+            label="Move to board"
+            icon="i-lucide-kanban"
+            size="sm"
+            :loading="placing"
+            @click="place('approve')"
+          />
+        </div>
 
         <dl
           v-if="props.mode === 'flyout'"

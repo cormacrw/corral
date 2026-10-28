@@ -41,7 +41,7 @@ See what an agent is doing right now, attach to its live run, and look back at p
    - **Log** (`role="log"`, `aria-live="polite"`), up to 880px wide. Each entry is one of:
      - a **system divider**, e.g. "Run started in worktree …"
      - an **agent message** (highlighted text)
-     - a **tool call card**: a `bg-muted` header with the tool name pill (Read, Edit, Write, Bash, Browser, `attach_evidence`, `get_task`…) and the target in mono, plus `+42 −0` for edits; an optional output block in mono
+     - a **step group**: consecutive tool calls collapse into one row, a chevron and a plain-English summary ("Read 2 files, ran a command, attached evidence") with a pill: "{n} steps" (neutral), "Running" (`primary`, spinner) or "{n} failed" (`error`). Groups start closed and open on their own when a step failed. Open, each step is one line under a hairline: a verb ("Read", "Edited", "Ran", "Looked up the task"), the target (worktree-relative paths and commands in mono, notes in plain text) and `+42 −0` for edits. A step opens to its output's last 12 lines ("All {n} lines" shows the rest) and a "Raw input" link for the JSON; failed steps start open. CLI bookkeeping (`ToolSearch`) isn't shown.
      - **your mid-run message**: a right-aligned bubble labelled "You, mid-run"
      - an **outcome card**, tinted with the outcome colour, e.g. "Stuck. Asked you a question. The task is Blocked until you answer in the Inbox."
      - a **"{Agent} is working…"** line with a ping dot while the run is live

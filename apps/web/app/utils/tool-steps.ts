@@ -1,0 +1,181 @@
+import type { RunEvent } from '@corral/contracts'
+
+// Turns a run's events into the transcript's entries (design/agent.md):
+// consecutive tool calls collapse into one group of plain-English steps
+
+type Kind = 'read' | 'edit' | 'command' | 'search' | 'fetch' | 'phrase' | 'other'
+
+// The CLI's own bookkeeping, not work the agent did
+const HIDDEN_TOOLS = new Set(['ToolSearch'])
+
+export interface ToolStep {
+  key: number
+  kind: Kind
+  verb: string
+  target: string
+  // File the step touched, so a group counts each file once
+  file?: string
+  added?: number
+  removed?: number
+  input: unknown
+  output?: string
+  isError: boolean
+  done: boolean
+}
+
+export type TranscriptEntry
+  = | { key: number, type: 'system', text: string }
+    | { key: number, type: 'message', text: string }
+    | { key: number, type: 'steps', steps: ToolStep[] }
+
+export function transcriptEntries(events: RunEvent[]): TranscriptEntry[] {
+  const list: TranscriptEntry[] = []
+  const byId = new Map<string, ToolStep>()
+  events.forEach((event, i) => {
+    switch (event.type) {
+      case 'system':
+        list.push({ key: i, type: 'system', text: event.text })
+        break
+      case 'message':
+        list.push({ key: i, type: 'message', text: event.text })
+        break
+      case 'tool_call': {
+        if (HIDDEN_TOOLS.has(event.tool)) break
+        const step: ToolStep = { key: i, ...describe(event.tool, event.input), input: event.input, isError: false, done: false }
+        const last = list.at(-1)
+        if (last?.type === 'steps') last.steps.push(step)
+        else list.push({ key: i, type: 'steps', steps: [step] })
+        byId.set(event.id, step)
+        break
+      }
+      case 'tool_result': {
+        const step = byId.get(event.id)
+        if (step) {
+          step.output = event.output
+          step.isError = event.isError
+          step.done = true
+        }
+        break
+      }
+      default:
+        break
+    }
+  })
+  return list
+}
+
+// "Read 2 files, ran a command, attached evidence"
+export function summarizeSteps(steps: ToolStep[]): string {
+  const parts = new Map<string, string>()
+  const files = (kind: Kind) => new Set(steps.filter(s => s.kind === kind).map(s => s.file ?? s.target)).size
+  const count = (kind: Kind) => steps.filter(s => s.kind === kind).length
+  for (const step of steps) {
+    const id = step.kind === 'phrase' ? `phrase:${step.verb}` : step.kind
+    if (parts.has(id)) continue
+    switch (step.kind) {
+      case 'read':
+        parts.set(id, `read ${plural(files('read'), 'file')}`)
+        break
+      case 'edit':
+        parts.set(id, `edited ${plural(files('edit'), 'file')}`)
+        break
+      case 'command':
+        parts.set(id, count('command') === 1 ? 'ran a command' : `ran ${count('command')} commands`)
+        break
+      case 'search':
+        parts.set(id, count('search') === 1 ? 'searched once' : `searched ${count('search')} times`)
+        break
+      case 'fetch':
+        parts.set(id, count('fetch') === 1 ? 'fetched a page' : `fetched ${count('fetch')} pages`)
+        break
+      case 'phrase':
+        parts.set(id, lowerFirst(step.verb))
+        break
+      default:
+        parts.set(id, count('other') === 1 ? 'used a tool' : `used ${count('other')} tools`)
+    }
+  }
+  const text = [...parts.values()].join(', ')
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+function describe(rawTool: string, input: unknown): Pick<ToolStep, 'kind' | 'verb' | 'target' | 'file' | 'added' | 'removed'> {
+  const o = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
+  const str = (key: string) => (typeof o[key] === 'string' ? o[key] : '')
+  const tool = rawTool.replace(/^mcp__corral__/, '')
+  switch (tool) {
+    case 'Read':
+      return { kind: 'read', verb: 'Read', target: relative(str('file_path')), file: str('file_path') }
+    case 'Edit':
+      return { kind: 'edit', verb: 'Edited', target: relative(str('file_path')), file: str('file_path'), added: lines(str('new_string')), removed: lines(str('old_string')) }
+    case 'MultiEdit': {
+      const edits = (Array.isArray(o.edits) ? o.edits : []) as Record<string, unknown>[]
+      const sum = (key: string) => edits.reduce((n, e) => n + lines(typeof e[key] === 'string' ? e[key] : ''), 0)
+      return { kind: 'edit', verb: 'Edited', target: relative(str('file_path')), file: str('file_path'), added: sum('new_string'), removed: sum('old_string') }
+    }
+    case 'Write':
+      return { kind: 'edit', verb: 'Wrote', target: relative(str('file_path')), file: str('file_path'), added: lines(str('content')), removed: 0 }
+    case 'NotebookEdit':
+      return { kind: 'edit', verb: 'Edited', target: relative(str('notebook_path')), file: str('notebook_path') }
+    case 'Bash':
+      return { kind: 'command', verb: 'Ran', target: str('command').split('\n')[0] ?? '' }
+    case 'Grep':
+    case 'Glob':
+      return { kind: 'search', verb: 'Searched', target: str('pattern') }
+    case 'WebSearch':
+      return { kind: 'search', verb: 'Searched the web', target: str('query') }
+    case 'WebFetch':
+      return { kind: 'fetch', verb: 'Fetched', target: str('url') }
+    case 'TodoWrite':
+      return { kind: 'phrase', verb: 'Updated its to-do list', target: '' }
+    case 'Task':
+    case 'Agent':
+      return { kind: 'phrase', verb: 'Delegated to a subagent', target: str('description') }
+    case 'get_task':
+      return { kind: 'phrase', verb: 'Looked up the task', target: '' }
+    case 'add_comment':
+      return { kind: 'phrase', verb: 'Left a comment', target: firstLine(str('body')) }
+    case 'attach_evidence':
+      return { kind: 'phrase', verb: 'Attached evidence', target: str('note') || relative(str('path')) }
+    case 'get_evidence':
+      return { kind: 'phrase', verb: 'Checked the evidence', target: str('evidenceId') }
+    case 'report_outcome':
+      return { kind: 'phrase', verb: 'Reported the outcome', target: str('outcome') }
+    case 'list_tasks':
+      return { kind: 'phrase', verb: 'Listed the tasks', target: '' }
+    case 'get_run_outcomes':
+      return { kind: 'phrase', verb: 'Checked past runs', target: str('taskRef') }
+    case 'ask_question':
+      return { kind: 'phrase', verb: 'Asked a question', target: firstLine(str('question')) }
+    case 'propose_plan':
+      return { kind: 'phrase', verb: 'Proposed a plan', target: str('title') }
+    case 'approve_plan':
+      return { kind: 'phrase', verb: 'Approved the plan', target: str('to') }
+    case 'flag_stale_docs':
+      return { kind: 'phrase', verb: 'Flagged stale docs', target: str('title') }
+    default:
+      return { kind: 'other', verb: tool.replace(/^mcp__[^_]+__/, ''), target: firstLine(str('file_path') || str('path') || str('query') || str('url')) }
+  }
+}
+
+// Paths inside a run's worktree (<data>/worktrees/<id>/…) read from the repo
+// root, and ones in its scratch folder (<data>/scratch/<id>/…) from scratch/
+function relative(path: string): string {
+  return path.replace(/^.*\/worktrees\/[^/]+\//, '').replace(/^.*\/scratch\/[^/]+\//, 'scratch/')
+}
+
+function lines(text: string): number {
+  return text ? text.split('\n').length : 0
+}
+
+function firstLine(text: string): string {
+  return text.split('\n')[0] ?? ''
+}
+
+function lowerFirst(text: string): string {
+  return text.charAt(0).toLowerCase() + text.slice(1)
+}
+
+function plural(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? '' : 's'}`
+}

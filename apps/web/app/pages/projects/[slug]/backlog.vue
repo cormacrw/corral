@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Task } from '@corral/contracts'
-import { api } from '~/composables/useApi'
+import { api, ApiError } from '~/composables/useApi'
 import { epicTitle, PRIORITY, timeAgo } from '~/utils/labels'
 
 // Backlog (design/backlog.md): proposed tasks grouped by epic
@@ -41,6 +41,37 @@ const groups = computed(() => {
 const inPlan = computed(() => new Map(live.state.value.planSessions.filter(s => s.status === 'needs_approval').map(s => [s.projectId, s])))
 const setAll = (value: boolean) => {
   collapsed.value = Object.fromEntries(groups.value.map(g => [g.id, value]))
+}
+
+// Backlog → Ready (D10): one task from its row, or every Backlog task in an
+// epic at once. Tasks missing what Ready needs stay put and are listed.
+const moving = ref(new Set<string>())
+async function moveToBoard(tasks: Task[]) {
+  const moved: string[] = []
+  const notReady: string[] = []
+  for (const task of tasks) moving.value.add(task.id)
+  for (const task of tasks) {
+    try {
+      await api.tasks.transition(slug.value, task.number, { type: 'approve' })
+      moved.push(task.ref)
+    } catch (e) {
+      if (e instanceof ApiError && e.body?.code === 'transition_rejected' && e.body.reason.code === 'not_ready') {
+        notReady.push(`${task.ref} needs ${e.body.reason.problems.map(p => p.replaceAll('_', ' ')).join(', ')}`)
+      } else {
+        toast.add({ title: `Could not move ${task.ref}`, description: e instanceof Error ? e.message : String(e), color: 'error' })
+      }
+    } finally {
+      moving.value.delete(task.id)
+    }
+  }
+  if (moved.length > 0) toast.add({ title: moved.length === 1 ? `${moved[0]} moved to the board` : `${moved.length} tasks moved to the board`, color: 'success' })
+  if (notReady.length > 0) toast.add({ title: notReady.length === 1 ? 'Not ready yet' : `${notReady.length} tasks not ready yet`, description: notReady.join('; '), color: 'warning' })
+}
+const confirmEpic = ref<{ title: string, tasks: Task[] } | null>(null)
+function moveEpic(group: { id: string, title: string }) {
+  const tasks = all.value.filter(t => t.status === 'backlog' && (t.epicId ?? 'none') === group.id)
+  if (tasks.length === 1) void moveToBoard(tasks)
+  else confirmEpic.value = { title: group.title, tasks }
 }
 
 async function newTask() {
@@ -151,16 +182,25 @@ async function newTask() {
                 size="xs"
                 class="ms-auto"
               />
+              <UButton
+                :label="group.rows.length === 1 ? 'Move to board' : 'Move all to board'"
+                icon="i-lucide-kanban"
+                variant="outline"
+                color="neutral"
+                size="xs"
+                :loading="group.rows.some(t => moving.has(t.id))"
+                @click="moveEpic(group)"
+              />
             </header>
             <ul v-if="!collapsed[group.id]">
               <li
                 v-for="task in group.rows"
                 :key="task.id"
-                class="border-t border-default"
+                :class="['group flex items-center border-t border-default pe-2 hover:bg-elevated', flyout.ref.value === task.ref && 'bg-elevated']"
               >
                 <button
                   type="button"
-                  :class="['flex w-full items-center gap-3 px-3 py-2 text-start text-sm hover:bg-elevated', flyout.ref.value === task.ref && 'bg-elevated']"
+                  class="flex min-w-0 flex-1 items-center gap-3 px-3 py-2 text-start text-sm"
                   :aria-pressed="flyout.ref.value === task.ref"
                   @click="flyout.toggle(task.ref)"
                 >
@@ -180,6 +220,17 @@ async function newTask() {
                   <span :class="['w-16 text-xs', task.priority === 'urgent' ? 'text-error' : task.priority === 'high' ? 'text-warning' : 'text-muted']">{{ PRIORITY[task.priority].label }}</span>
                   <span class="hidden w-16 text-end text-xs text-dimmed md:inline">{{ timeAgo(task.createdAt) }}</span>
                 </button>
+                <UButton
+                  label="Move to board"
+                  icon="i-lucide-kanban"
+                  variant="ghost"
+                  color="neutral"
+                  size="xs"
+                  :loading="moving.has(task.id)"
+                  :aria-label="`Move ${task.ref} to board`"
+                  class="shrink-0 md:opacity-0 md:group-focus-within:opacity-100 md:group-hover:opacity-100"
+                  @click="moveToBoard([task])"
+                />
               </li>
             </ul>
           </section>
@@ -193,5 +244,25 @@ async function newTask() {
       </div>
       <TaskFlyout />
     </div>
+    <UModal
+      :open="Boolean(confirmEpic)"
+      :title="`Move ${confirmEpic?.tasks.length} tasks to the board?`"
+      :description="`Every Backlog task in ${confirmEpic?.title} becomes Ready, and agents start on them in dependency order. Tasks missing a description or acceptance criteria stay in the Backlog.`"
+      @update:open="confirmEpic = $event ? confirmEpic : null"
+    >
+      <template #footer>
+        <UButton
+          label="Cancel"
+          variant="outline"
+          color="neutral"
+          @click="confirmEpic = null"
+        />
+        <UButton
+          label="Move to board"
+          icon="i-lucide-kanban"
+          @click="moveToBoard(confirmEpic!.tasks); confirmEpic = null"
+        />
+      </template>
+    </UModal>
   </UDashboardPanel>
 </template>

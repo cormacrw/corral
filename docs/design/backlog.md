@@ -21,14 +21,16 @@ The page spans the full content width.
      - a count pill
      - progress, e.g. "2 of 6 merged", counting the epic's tasks in every status
      - **Plan with Juno** on the right, which opens Plan with this project and epic
+     - **Move all to board** (outline, kanban icon; "Move to board" when the epic has one Backlog task), which asks to confirm and then moves every Backlog task in the epic to Ready
    - **Rows**, each a full-width button with a top divider:
      - the ref (40px column)
      - the title, plus an **In plan v2** badge (`primary` subtle) when the task belongs to a plan waiting for approval
      - the criteria count, e.g. "3 criteria" or "No criteria"
      - the priority (Urgent `error`, High `warning`, others muted)
      - the age
+     - **Move to board** (ghost, kanban icon), shown on hover or focus from 768px up and always below that
    - The selected row uses `bg-elevated`.
-3. **Task flyout:** docked on the right. The flyout shows status Backlog, with Ready as the only other status option.
+3. **Task flyout:** docked on the right. A Backlog task shows a banner above its properties, "In the Backlog, so never scheduled until you move it.", with **Move to board** (solid primary). The Status menu also offers Ready as the only other option.
 
 ## Interactions
 
@@ -39,7 +41,7 @@ The page spans the full content width.
 
 ## Rules
 
-- Backlog → Ready is a human action. It needs a title, a description and verifiable acceptance criteria (D10). If any are missing, the Status menu in the flyout shows what's needed.
+- Backlog → Ready is a human action. It needs a title, a description and verifiable acceptance criteria (D10). If any are missing, the task stays in the Backlog and a warning toast says what each one needs. Moving an epic moves the tasks that are ready and lists the rest.
 - Deleting a Backlog task deletes it outright (D10).
 
 ## Data
