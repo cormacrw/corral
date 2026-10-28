@@ -26,7 +26,7 @@ The page scrolls, in a column up to 880px wide.
 
 | Setting | Control | Notes |
 |---|---|---|
-| Repository | A `bg-muted` panel with the branch icon, the GitHub remote in mono, and **Change** | "The runner keeps its own clone; your working copy is never touched." The canvas also shows a local path, which should go (D12) |
+| Repository | A `bg-muted` panel with the branch icon, `github.com/owner/name` in mono, "Cloned on the runner · fetched 2 minutes ago", and **Change** | **Change** opens the same repo picker as onboarding, inline below the panel, and its label becomes **Done**. The current repo is selected. Repos used by other projects show "Used by {project}" and are disabled; read-only repos are disabled too. Picking a different repo shows a `warning` note: "Saving stops running work on this project, reruns the setup checks against {repo}, and keeps existing tasks. Open PRs on the old repository are left as they are." It only takes effect on Save |
 | Default branch | `USelectMenu` | "Agents branch from here and merge back into it." |
 | Merge method | `USelectMenu`: Squash and merge, Merge commit, Rebase and merge | |
 | Required checks | Toggle chips (`aria-pressed`): Lint, Typecheck, Tests, Build | "With no checks, every task needs human review." |
@@ -53,7 +53,7 @@ A card with an `error`-tinted border.
 
 ## States
 
-- **Changing the repository:** reruns the setup checks from onboarding step 2 in a modal.
+- **Changing the repository:** on Save, stops runs on this project and reruns the setup checks from onboarding step 2. If a check fails, the old repository stays and the error is shown in the row.
 - **Prefix already used by another project:** shows an inline error.
 
 ## Accessibility

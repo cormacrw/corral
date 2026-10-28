@@ -9,7 +9,7 @@ Take a new user from nothing to a working first project in four steps. Setup che
 
 ## Layout
 
-- **Top bar** (64px, bottom border): Corral logo and name on the left, a "Runs locally" neutral badge on the right.
+- **Top bar** (64px, bottom border): Corral logo and name on the left, a "Self-hosted" neutral badge on the right.
 - **Content column:** centred, `max-w-3xl`, 48px top padding.
   1. **Stepper** (`UStepper`, horizontal): You → Repository → Agents → Names. Completed steps show a check and can be clicked to go back. The current step's indicator is filled `primary`. Future steps use `bg-elevated` with `text-muted`. Step descriptions hide below 640px.
   2. **Heading:** `text-2xl` semibold, with a one-line `text-muted` description under it.
@@ -26,17 +26,24 @@ Take a new user from nothing to a working first project in four steps. Setup che
 
 ### 2. Choose a repository
 
-- **Repository:** a GitHub repository (`owner/name`), picked from the repos the runner's `gh` login can see, with search. Helper text: "The runner clones it; nothing on your own machine is touched."
-  > **Canvas is out of date here.** It shows a local folder path with Browse…. Under D12 the runner lives in a container on the home server, so a browser folder path means nothing to it.
-- **Detected repo panel** (`bg-muted`): repo name, remote URL in mono, and a "Repository found" success badge. Below that, two selects (`USelectMenu`):
-  - **Default branch:** `main`, `develop`, …
+- **Repository picker:** a GitHub repository chosen from the list the runner returns (`list_repos`; see architecture.md). Nothing is typed as a path; under D12 the runner lives in a container, so a browser folder path means nothing to it.
+  - **Label row:** "Repository *" with "Repositories the runner's GitHub login can see, most recently updated first", and a **Refresh** ghost button (the list is cached on the server for a few minutes).
+  - **Search:** a field at the top of a bordered list, with the placeholder "Search N repositories".
+  - **Rows** (`role="option"`): a lock icon (private) or book icon (public); `owner/` muted and `name` bold; a Private/Public badge; the description; and, on the right, "Updated 2h ago" and the default branch in mono. The selected row has a `primary` tint, a `primary` ring and a trailing check.
+  - **Rows you can't pick** are shown at 60% opacity, disabled, with the reason under the description:
+    - read-only access: "Read-only access: agents couldn't push branches or open PRs"
+    - already used by another project (D13): "Used by {project}"
+  - **Fallback:** a "Can't find it? Paste a GitHub URL" link reveals a URL input and **Check access**, for repos the list doesn't show (for example an org that hasn't granted the `gh` app access).
+- **After a repo is picked**, two selects (`USelectMenu`):
+  - **Default branch:** prefilled from GitHub's `defaultBranchRef`. "From GitHub. Agents branch from it and merge back into it."
   - **Merge method:** Squash and merge, Merge commit, or Rebase and merge.
-- **Setup checks:** a list, each item with an icon, title and detail.
-  - ✓ Git repository
-  - ✓ GitHub access (gh CLI signed in)
-  - ✓ Not claimed by another Corral instance
+- **Setup checks for {owner/name}:** a list, each item with an icon, title and detail.
+  - ✓ Runner can push: the login has write, maintain or admin access
+  - ✓ Not used by another project, and not claimed by another Corral instance
+  - ✓ Cloned on the runner: the default branch is fetched into the runner's data volume
   - ℹ No `.corral/` yet: it will be added on finish, and existing files are left alone
-- **Continue:** disabled until every check passes. Warnings and info items don't block.
+- **Runner not signed in to GitHub:** the picker is replaced by a `warning` `UAlert`, "The runner isn't signed in to GitHub", with the command `docker exec -it corral-runner gh auth login` in a code block and **Check again**. Corral never sees the token. The canvas `github` tweak shows this state.
+- **Continue:** disabled until a repo is picked and every check passes. Info items don't block.
 
 ### 3. Confirm agent CLIs
 
@@ -62,7 +69,7 @@ Take a new user from nothing to a working first project in four steps. Setup che
 ## Data
 
 - **Writes:** user profile (name); first project (name taken from the repo, GitHub remote, default branch, merge method, task prefix); agents (name, role, runtime).
-- **Server calls:** list repos visible to the runner's `gh`, then setup checks; a scan of the **runner container** for supported CLIs, which also checks whether `claude` is signed in, without reading credentials (D2, D12). If it isn't signed in, show the `docker exec -it … claude` login step.
+- **Server calls:** `list_repos` on the runner (cached), then setup checks for the chosen repo; a scan of the **runner container** for supported CLIs, which also checks whether `claude` is signed in, without reading credentials (D2, D12). If it isn't signed in, show the `docker exec -it … claude` login step.
 
 ## States
 
