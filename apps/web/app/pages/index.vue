@@ -1,7 +1,11 @@
+<script setup lang="ts">
+// The global middleware sends this to onboarding or the first project
+</script>
+
 <template>
-  <UContainer class="py-16">
-    <h1 class="text-2xl font-semibold">
-      Corral
-    </h1>
-  </UContainer>
+  <UDashboardPanel>
+    <div class="p-6">
+      <USkeleton class="h-6 w-48" />
+    </div>
+  </UDashboardPanel>
 </template>

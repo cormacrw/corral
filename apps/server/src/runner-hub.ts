@@ -38,6 +38,10 @@ export class RunnerHub {
   #pending = new Map<string, { resolve: (r: SetupJobResult) => void, reject: (e: Error) => void, timer: NodeJS.Timeout }>()
   #handlers: RunnerHandlers | null = null
   #events: EventBus
+  // Run messages are handled in order per run, so the last events batch is
+  // on disk before run.ended reads the transcript. Tool calls and job
+  // results stay unqueued: a tool call may wait on a job over this socket.
+  #queues = new Map<string, Promise<void>>()
 
   constructor(events: EventBus) {
     this.#events = events
@@ -98,6 +102,12 @@ export class RunnerHub {
     }
   }
 
+  // Server shutdown: the runner reconnects on its own with backoff
+  disconnect(): void {
+    this.#socket?.close(1001, 'Server shutting down')
+    this.#socket = null
+  }
+
   send(message: ServerMessage): boolean {
     if (!this.#socket) return false
     this.#socket.send(JSON.stringify(message))
@@ -136,9 +146,14 @@ export class RunnerHub {
       }
       case 'run.started':
       case 'run.events':
-      case 'run.ended':
-        await this.#handlers?.onRunMessage(message)
+      case 'run.ended': {
+        const previous = this.#queues.get(message.runId) ?? Promise.resolve()
+        const next = previous.then(() => this.#handlers?.onRunMessage(message)).catch(error => console.error(`Runner message ${message.type} failed`, error))
+        this.#queues.set(message.runId, next)
+        await next
+        if (message.type === 'run.ended') this.#queues.delete(message.runId)
         return
+      }
       case 'tool.call': {
         if (!this.#handlers) return
         try {

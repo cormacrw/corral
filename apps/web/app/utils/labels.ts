@@ -1,0 +1,111 @@
+import type { Agent, Project, Run, Task } from '@corral/contracts'
+import type { AgentRole, RunOutcome, RunState, TaskPriority, TaskStatus } from '@corral/core'
+
+type Color = 'primary' | 'secondary' | 'success' | 'info' | 'warning' | 'error' | 'neutral'
+
+// Status colours from design/README.md (D10). Always shown with the label.
+export const STATUS: Record<TaskStatus, { label: string, color: Color }> = {
+  backlog: { label: 'Backlog', color: 'neutral' },
+  ready: { label: 'Ready', color: 'info' },
+  in_progress: { label: 'In progress', color: 'primary' },
+  agent_review: { label: 'Agent review', color: 'primary' },
+  human_review: { label: 'Human review', color: 'warning' },
+  merged: { label: 'Merged', color: 'success' },
+  blocked: { label: 'Blocked', color: 'error' },
+  failed: { label: 'Failed', color: 'error' }
+}
+
+export const PRIORITY: Record<TaskPriority, { label: string, color: Color }> = {
+  urgent: { label: 'Urgent', color: 'error' },
+  high: { label: 'High', color: 'warning' },
+  medium: { label: 'Medium', color: 'neutral' },
+  low: { label: 'Low', color: 'neutral' }
+}
+
+export const ROLE: Record<AgentRole, string> = { pm: 'PM', developer: 'Developer', reviewer: 'Reviewer' }
+
+export const TASK_TYPE: Record<Task['type'], string> = {
+  frontend: 'Frontend', backend: 'Backend', full_stack: 'Full stack', infrastructure: 'Infrastructure'
+}
+
+// design/agent.md outcome badges
+export function runBadge(run: Pick<Run, 'state' | 'outcome' | 'role'>): { label: string, color: Color } {
+  if (['queued', 'starting', 'running', 'waiting_for_input', 'stopping'].includes(run.state)) return { label: 'Live', color: 'primary' }
+  const outcome = run.outcome as RunOutcome | null
+  switch (outcome) {
+    case 'pr_opened': return { label: 'PR opened', color: 'primary' }
+    case 'pr_updated': return { label: 'PR updated', color: 'primary' }
+    case 'approved': return { label: 'Approved', color: 'success' }
+    case 'changes_requested': return { label: 'Changes requested', color: 'warning' }
+    case 'stuck': return { label: 'Stuck', color: 'error' }
+    case 'failed': return { label: 'Failed', color: 'error' }
+    case 'rate_limited': return { label: 'Rate limited', color: 'neutral' }
+    default: break
+  }
+  const state = run.state as RunState
+  if (state === 'interrupted') return { label: 'Interrupted', color: 'neutral' }
+  if (state === 'failed') return { label: 'Failed', color: 'error' }
+  return { label: run.role === 'pm' ? 'Answered' : 'Completed', color: 'success' }
+}
+
+export function initials(name: string): string {
+  return name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]!.toUpperCase()).join('')
+}
+
+const palette = ['#0d9488', '#2563eb', '#7c3aed', '#db2777', '#ea580c', '#16a34a', '#ca8a04', '#64748b']
+export const THUMBNAIL_COLORS = palette
+
+export function projectColor(project: Pick<Project, 'thumbnailColor' | 'name'>): string {
+  if (project.thumbnailColor) return project.thumbnailColor
+  let hash = 0
+  for (const char of project.name) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
+  return palette[hash % palette.length]!
+}
+
+export function timeAgo(iso: string | null | undefined, now = Date.now()): string {
+  if (!iso) return ''
+  const seconds = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000))
+  if (seconds < 60) return 'just now'
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.round(hours / 24)
+  if (days < 7) return `${days}d ago`
+  return new Date(iso).toLocaleDateString()
+}
+
+export function duration(startIso: string | null, endIso: string | null, now = Date.now()): string {
+  if (!startIso) return '—'
+  const ms = (endIso ? new Date(endIso).getTime() : now) - new Date(startIso).getTime()
+  const minutes = Math.floor(ms / 60_000)
+  const seconds = Math.floor((ms % 60_000) / 1000)
+  if (minutes >= 60) return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
+}
+
+export function tokens(n: number | null): string {
+  if (n === null) return '—'
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1000) return `${Math.round(n / 1000)}k`
+  return String(n)
+}
+
+// Working comes from the lease, not the status (D10)
+export function isWorking(agent: Agent): boolean {
+  return agent.activeRuns > 0
+}
+
+// The note under a board card (design/board.md)
+export function taskNote(task: Task, all: Task[], reviewRoundCap: number): { text: string, color: Color } | null {
+  if (task.status === 'ready' && task.dependsOn.length > 0) {
+    const waiting = task.dependsOn.filter(ref => all.find(t => t.ref === ref)?.status !== 'merged')
+    if (waiting.length > 0) return { text: `Waiting on ${waiting.join(', ')}`, color: 'neutral' }
+  }
+  if (task.status === 'blocked' || task.status === 'failed') return { text: task.statusReason ?? STATUS[task.status].label, color: 'error' }
+  if (task.status === 'human_review') return { text: 'Waiting for you', color: 'warning' }
+  if (task.reviewRounds > 0 && (task.status === 'in_progress' || task.status === 'agent_review')) {
+    return { text: `Review round ${task.reviewRounds} of ${reviewRoundCap}`, color: 'neutral' }
+  }
+  return null
+}

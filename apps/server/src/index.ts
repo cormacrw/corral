@@ -42,5 +42,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
     services.orchestrator.stop()
     void server.close().finally(() => database.close().finally(() => process.exit(0)))
+    // Never hang a stop: if something above doesn't finish, exit anyway
+    setTimeout(() => process.exit(0), 5000).unref()
   })
 }
