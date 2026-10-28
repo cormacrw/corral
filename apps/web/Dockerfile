@@ -10,7 +10,8 @@ RUN npm install -g pnpm@12.15.0
 
 WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
-COPY packages/tsconfig/package.json packages/tsconfig/
+# All of it, not just package.json: Vite reads base.json when bundling core and contracts
+COPY packages/tsconfig packages/tsconfig
 COPY packages/core/package.json packages/core/
 COPY packages/contracts/package.json packages/contracts/
 COPY apps/web/package.json apps/web/
