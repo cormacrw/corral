@@ -6,6 +6,23 @@ jobs:
   ci:
     runs-on: ubuntu-latest
 
+    # Database tests run on PGlite and, through CORRAL_DATABASE_URL, on real
+    # Postgres. Concurrency is only proven here (D14).
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: corral
+          POSTGRES_PASSWORD: corral
+          POSTGRES_DB: corral
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U corral"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -28,5 +45,13 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
+      - name: Migrations match the schema
+        run: |
+          pnpm --filter @corral/db generate
+          git diff --exit-code --stat -- packages/db/migrations
+          test -z "$(git status --porcelain -- packages/db/migrations)"
+
       - name: Test
         run: pnpm run test
+        env:
+          CORRAL_DATABASE_URL: postgres://corral:corral@localhost:5432/corral

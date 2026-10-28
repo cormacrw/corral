@@ -3,16 +3,26 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
   },
   "scripts": {
+    "generate": "drizzle-kit generate",
     "lint": "eslint .",
     "typecheck": "tsc",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@corral/core": "workspace:*",
+    "@electric-sql/pglite": "^0.5.12",
+    "drizzle-orm": "^0.45.4",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
     "@corral/tsconfig": "workspace:*",
     "@types/node": "catalog:",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.11",
     "eslint": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

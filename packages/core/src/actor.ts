@@ -5,7 +5,8 @@ export type Actor =
   | { kind: 'agent', role: AgentRole, runId: string }
   | { kind: 'system', component: SystemComponent }
 
-export type AgentRole = 'pm' | 'developer' | 'reviewer'
+export const AGENT_ROLES = ['pm', 'developer', 'reviewer'] as const
+export type AgentRole = typeof AGENT_ROLES[number]
 
 // Both live in apps/server; they're told apart so the audit log shows which loop acted
 export type SystemComponent = 'scheduler' | 'server'
