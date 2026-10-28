@@ -29,6 +29,13 @@
       "when": 1793154602810,
       "tag": "0003_merge_and_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793155317634,
+      "tag": "0004_plans",
+      "breakpoints": true
     }
   ]
 }

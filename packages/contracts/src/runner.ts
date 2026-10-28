@@ -62,6 +62,9 @@ export interface RunJob {
   // PM turns resume this agent session when the runner still has it
   agentSessionId: string | null
   prompt: string
+  // Used instead of `prompt` when the session can't be resumed (D9: the
+  // database is the source of truth; this carries a summary of it)
+  fallbackPrompt: string | null
   model: string | null
   timeoutSeconds: number
 }

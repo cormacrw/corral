@@ -207,6 +207,8 @@ export const runs = pgTable('runs', {
   leaseEpoch: integer(),
   // The agent CLI's own session, so PM turns can resume it (D9)
   agentSessionId: text(),
+  // PM turns belong to a plan session instead of a task
+  planSessionId: uuid().references((): AnyPgColumn => planSessions.id, { onDelete: 'set null' }),
   // The commit a developer run pushed, or a reviewer run reviewed
   headSha: text(),
   summary: text(),
@@ -225,6 +227,62 @@ export const runs = pgTable('runs', {
   index().on(t.agentId, t.state),
   check('runs_task_unless_pm', sql`${t.taskId} is not null or ${t.role} = 'pm'`)
 ])
+
+export const planStatus = pgEnum('plan_status', ['proposed', 'approved', 'superseded'])
+export const planChange = pgEnum('plan_change', ['added', 'changed', 'unchanged', 'removed'])
+
+// A conversation with the PM (D9, design/plan.md). Belongs to one project.
+// The agent CLI's session ID is only a cache: the messages here are the
+// source of truth, and a lost session is reseeded from them.
+export const planSessions = pgTable('plan_sessions', {
+  id: uuid().primaryKey().defaultRandom(),
+  projectId: uuid().notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  title: text().notNull(),
+  agentSessionId: text(),
+  // The one PM turn the human didn't start: the epic delivery summary (D11)
+  unread: boolean().notNull().default(false),
+  createdBy: actor('created_by'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt()
+}, t => [index().on(t.projectId, t.updatedAt)])
+
+export const planMessages = pgTable('plan_messages', {
+  id: uuid().primaryKey().defaultRandom(),
+  sessionId: uuid().notNull().references(() => planSessions.id, { onDelete: 'cascade' }),
+  // 'human' or 'pm'; questions are PM messages flagged as such
+  role: text().notNull(),
+  kind: text().notNull().default('message'),
+  text: text().notNull(),
+  planId: uuid().references((): AnyPgColumn => plans.id, { onDelete: 'set null' }),
+  runId: uuid().references(() => runs.id, { onDelete: 'set null' }),
+  createdAt: createdAt()
+}, t => [index().on(t.sessionId, t.createdAt)])
+
+// A versioned plan from propose_plan; its tasks live in Backlog until a
+// human approves the plan (D9, D10)
+export const plans = pgTable('plans', {
+  id: uuid().primaryKey().defaultRandom(),
+  sessionId: uuid().notNull().references(() => planSessions.id, { onDelete: 'cascade' }),
+  projectId: uuid().notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  epicId: uuid().references(() => epics.id, { onDelete: 'set null' }),
+  version: integer().notNull(),
+  title: text().notNull(),
+  summary: text().notNull().default(''),
+  status: planStatus().notNull().default('proposed'),
+  approvedBy: jsonb('approved_by').$type<Actor>(),
+  approvedAt: timestamp({ withTimezone: true }),
+  createdAt: createdAt()
+}, t => [unique('plans_session_version_unique').on(t.sessionId, t.version)])
+
+export const planTasks = pgTable('plan_tasks', {
+  planId: uuid().notNull().references(() => plans.id, { onDelete: 'cascade' }),
+  // Null once a removed task has been deleted
+  taskId: uuid().references(() => tasks.id, { onDelete: 'set null' }),
+  // The PM's handle inside the plan
+  key: text().notNull(),
+  change: planChange().notNull(),
+  position: integer().notNull()
+}, t => [primaryKey({ columns: [t.planId, t.key] })])
 
 // Instance-wide switches, e.g. the kill switch (PRD §7.11 control panel)
 export const settings = pgTable('settings', {

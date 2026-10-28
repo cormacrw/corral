@@ -8,7 +8,9 @@ import {
   patchAgentInput,
   patchProjectInput,
   patchTaskInput,
+  planMessageInput,
   SSE_HEARTBEAT_MS,
+  startPlanSessionInput,
   taskListQuery,
   type ApiErrorBody,
   type InboxActionInput,
@@ -26,6 +28,7 @@ import { loadInbox } from './inbox.ts'
 import { createProject, findProjectBySlug, listProjects, patchProject, toProject } from './projects.ts'
 import type { BlobStore } from './blob-store.ts'
 import type { Orchestrator } from './orchestrator.ts'
+import type { PlanService } from './plan.ts'
 import type { RunnerHub } from './runner-hub.ts'
 import { getRun, listAgents, listEvidence, listReviews, listRuns, patchAgent } from './runs.ts'
 import type { Transcripts } from './transcripts.ts'
@@ -42,6 +45,7 @@ export interface AppDeps {
   orchestrator: Orchestrator
   blobs: BlobStore
   transcripts: Transcripts
+  plans: PlanService
 }
 
 // Validation failures get the same error shape as every other API error
@@ -59,7 +63,7 @@ const taskNumber = (value: string) => {
   return number
 }
 
-export function createApp({ db, events, actor, runner, orchestrator, blobs, transcripts }: AppDeps) {
+export function createApp({ db, events, actor, runner, orchestrator, blobs, transcripts, plans }: AppDeps) {
   const repos = new RepoCatalog(db, runner)
 
   const publishTask = async (taskId: string) => {
@@ -250,6 +254,29 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       events.publish({ type: 'agent.updated', agent })
       orchestrator.poke()
       return c.json(agent)
+    })
+
+    // Plan (D9): sessions, turns and approval
+    .get('/plan/sessions', async c => c.json(await plans.listSessions()))
+
+    .post('/plan/sessions', validate('json', startPlanSessionInput), async (c) => {
+      const input = c.req.valid('json')
+      return c.json(await plans.start(input.projectId, { text: input.text, taskRef: input.taskRef }, actor), 201)
+    })
+
+    .get('/plan/sessions/:id', async c => c.json(await plans.getSession(c.req.param('id'))))
+
+    .post('/plan/sessions/:id/messages', validate('json', planMessageInput), async (c) => {
+      const input = c.req.valid('json')
+      return c.json(await plans.message(c.req.param('id'), { text: input.text, taskRef: input.taskRef }, actor), 201)
+    })
+
+    .post('/plan/sessions/:id/read', async c => c.json(await plans.markRead(c.req.param('id'))))
+
+    .post('/plan/plans/:id/approve', async (c) => {
+      const plan = await plans.approve(c.req.param('id'), actor)
+      orchestrator.poke()
+      return c.json(plan)
     })
 
     .get('/inbox', async c => c.json(await loadInbox(db)))

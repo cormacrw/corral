@@ -50,6 +50,9 @@ interface ActiveRun {
   stopping: StopReason | null
   rateLimit: { resetsAt: string | null } | null
   resumed: boolean
+  // The init line arrived, so the CLI really started (a failed --resume never gets there)
+  sawInit: boolean
+  resumeFailed: boolean
   ended: boolean
   events: RunEvent[]
   flushTimer: NodeJS.Timeout | null
@@ -111,6 +114,8 @@ export class RunManager {
       stopping: null,
       rateLimit: null,
       resumed: false,
+      sawInit: false,
+      resumeFailed: false,
       ended: false,
       events: [],
       flushTimer: null,
@@ -187,6 +192,14 @@ export class RunManager {
 
     await this.#spawn(run, { prompt: job.prompt, systemPrompt, mcpConfigPath, resume: job.agentSessionId })
 
+    // D9: a lost agent session isn't fatal; the server's prompt carries the record
+    if (job.agentSessionId && job.fallbackPrompt && !run.sawInit && !run.stopping && !run.ended) {
+      this.#note(run, 'The previous agent session could not be resumed; starting a fresh one from the saved conversation')
+      run.sessionId = null
+      run.rateLimit = null
+      await this.#spawn(run, { prompt: job.fallbackPrompt, systemPrompt, mcpConfigPath, resume: null })
+    }
+
     // PRD §8.6: an agent that exits without an outcome gets one chance to report
     if (this.#needsAnotherTurn(run)) {
       run.resumed = true
@@ -230,7 +243,10 @@ export class RunManager {
 
   #onLine(run: ActiveRun, raw: string, parsed: ParsedLine): void {
     if (raw) run.spool?.write(raw + '\n')
-    if (parsed.sessionId && !run.sessionId) run.sessionId = parsed.sessionId
+    if (parsed.sessionId) {
+      run.sawInit = true
+      run.sessionId = parsed.sessionId
+    }
     if (parsed.sessionId && !run.started) this.#started(run)
     if (parsed.rateLimit) run.rateLimit = parsed.rateLimit
     this.#queue(run, parsed.events)

@@ -20,11 +20,13 @@ import { slugify } from './projects.ts'
 import { developerPrompt, reviewerPrompt } from './prompts.ts'
 import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
 import { MergeOrchestrator } from './merge.ts'
+import type { PlanService } from './plan.ts'
 import { getRun, listAgents, listEvidence } from './runs.ts'
 import { applyTransition, deleteTaskRows, loadTask, lockTask, toTaskState, type ProjectRow, type TaskRow } from './tasks.ts'
 import type { Transcripts } from './transcripts.ts'
 
 const { acceptanceCriteria, agents, auditLog, comments, evidence, projects, reviews, runs, settings, tasks } = schema
+type PlanSessionRow = typeof schema.planSessions.$inferSelect
 
 const server: Actor = { kind: 'system', component: 'server' }
 
@@ -90,10 +92,39 @@ export class Orchestrator implements RunnerHandlers {
   #again = false
   #stopped = false
   readonly merges: MergeOrchestrator
+  // Set once the plan service exists (it needs the orchestrator to start runs)
+  plans: PlanService | null = null
 
   constructor(deps: OrchestratorDeps) {
     this.#d = deps
-    this.merges = new MergeOrchestrator({ db: deps.db, events: deps.events, github: deps.github, runner: deps.runner, ...(deps.now && { now: deps.now }) })
+    this.merges = new MergeOrchestrator({
+      db: deps.db,
+      events: deps.events,
+      github: deps.github,
+      runner: deps.runner,
+      onEpicFinished: epicId => this.plans?.deliverySummary(epicId) ?? Promise.resolve(),
+      ...(deps.now && { now: deps.now })
+    })
+  }
+
+  // A PM turn (D9): a run with no task and no lease, fenced by its own epoch
+  async startPmRun(session: PlanSessionRow, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'>): Promise<string> {
+    const { db, runner } = this.#d
+    if (this.#stopped) throw new ApiFailure(409, { code: 'conflict', constraint: 'corral_stopped' })
+    const [juno] = await db.select().from(agents).where(eq(agents.role, 'pm')).orderBy(asc(agents.createdAt)).limit(1)
+    if (!juno) throw new ApiFailure(409, { code: 'conflict', constraint: 'no_pm_agent' })
+    if (juno.paused || (juno.pausedUntil && juno.pausedUntil > this.#now())) throw new ApiFailure(409, { code: 'conflict', constraint: 'pm_paused' })
+    const [run] = await db.insert(runs).values({
+      agentId: juno.id, projectId: job.projectId, taskId: null, role: 'pm', leaseEpoch: 1, planSessionId: session.id, queuedAt: this.#now()
+    }).returning()
+    const ctx = await this.#load(run!.id)
+    if (!ctx) throw new Error('PM run vanished')
+    if (!runner.send({ type: 'run.assign', job: { ...job, runId: run!.id, runNumber: run!.number, leaseEpoch: 1 } })) {
+      await this.#endRun(ctx, { state: 'interrupted', error: 'The runner went offline before the turn started' })
+      throw new ApiFailure(503, { code: 'runner_offline' })
+    }
+    await this.#publish(ctx)
+    return run!.id
   }
 
   // Reads the kill switch; called once at startup
@@ -219,6 +250,7 @@ export class Orchestrator implements RunnerHandlers {
       branch: task.branch,
       headSha: task.headSha,
       agentSessionId: null,
+      fallbackPrompt: null,
       model: null,
       timeoutSeconds: RUN_TIMEOUT_SECONDS,
       prompt: developerPrompt({
@@ -256,6 +288,7 @@ export class Orchestrator implements RunnerHandlers {
       branch: task.branch,
       headSha: task.headSha,
       agentSessionId: null,
+      fallbackPrompt: null,
       model: null,
       timeoutSeconds: RUN_TIMEOUT_SECONDS,
       prompt: reviewerPrompt({
@@ -359,6 +392,7 @@ export class Orchestrator implements RunnerHandlers {
       if (!ctx) return
       await db.update(runs).set({ state: 'running', startedAt: this.#now(), agentSessionId: message.agentSessionId })
         .where(eq(runs.id, ctx.run.id))
+      if (ctx.run.role === 'pm' && ctx.run.planSessionId) await this.plans?.onRunStarted(ctx.run.planSessionId, message.agentSessionId)
       await this.#publish(ctx)
       return
     }
@@ -366,13 +400,50 @@ export class Orchestrator implements RunnerHandlers {
     // run.ended
     const ctx = await this.#load(message.runId)
     if (!ctx) return
-    if ((ACTIVE_RUN_STATES as readonly RunState[]).includes(ctx.run.state) && ctx.run.leaseEpoch === message.leaseEpoch) {
-      await this.#runExited(ctx, message.exit)
-    }
+    const live = (ACTIVE_RUN_STATES as readonly RunState[]).includes(ctx.run.state) && ctx.run.leaseEpoch === message.leaseEpoch
+    if (live && ctx.run.role === 'pm') await this.#pmExited(ctx, message.exit)
+    else if (live) await this.#runExited(ctx, message.exit)
     const blob = await transcripts.finish(ctx.run.id)
     if (blob) await db.update(runs).set({ transcriptBlob: blob }).where(eq(runs.id, ctx.run.id))
     await this.#publish(ctx)
     this.poke()
+  }
+
+  // A PM turn has no outcome to report: its reply is the last thing it said
+  async #pmExited(ctx: RunContext, exit: RunExit): Promise<void> {
+    const events = await this.#d.transcripts.read(ctx.run.id, null)
+    const reply = events.filter((e): e is Extract<RunEvent, { type: 'message' }> => e.type === 'message').at(-1)?.text ?? null
+    let error: string | null = null
+    switch (exit.kind) {
+      case 'rate_limited': {
+        const resetsAt = exit.resetsAt ? new Date(exit.resetsAt) : new Date(this.#now().getTime() + RATE_LIMIT_BACKOFF_MS)
+        await this.#endRun(ctx, { state: 'completed', outcome: 'rate_limited', rateLimitResetAt: resetsAt, summary: 'Hit a usage limit' })
+        await this.#d.db.update(agents).set({ pausedUntil: resetsAt }).where(eq(agents.id, ctx.agent.id))
+        error = `Juno hit a usage limit; try again after ${resetsAt.toISOString()}`
+        break
+      }
+      case 'exited':
+        if (exit.code === 0 || reply) {
+          await this.#endRun(ctx, { state: 'completed', summary: reply })
+        } else {
+          error = `The PM exited with code ${exit.code}`
+          await this.#endRun(ctx, { state: 'failed', outcome: 'failed', error })
+        }
+        break
+      case 'stopped':
+        await this.#endRun(ctx, { state: 'interrupted', error: 'Stopped' })
+        error = 'The turn was stopped'
+        break
+      case 'timed_out':
+        await this.#endRun(ctx, { state: 'failed', outcome: 'failed', error: 'The turn hit its time limit' })
+        error = 'The turn hit its time limit'
+        break
+      case 'error':
+        await this.#endRun(ctx, { state: 'failed', outcome: 'failed', error: exit.message })
+        error = exit.message
+        break
+    }
+    if (ctx.run.planSessionId) await this.plans?.onRunEnded(ctx.run.planSessionId, ctx.run.id, reply, error)
   }
 
   // The agent process ended without its outcome having been accepted
@@ -502,9 +573,13 @@ export class Orchestrator implements RunnerHandlers {
     const allowed: Record<string, readonly string[]> = {
       developer: ['get_task', 'add_comment', 'attach_evidence', 'report_outcome'],
       reviewer: ['get_task', 'add_comment', 'get_evidence', 'report_outcome'],
-      pm: []
+      pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'ask_question', 'propose_plan', 'flag_stale_docs']
     }
-    if (!allowed[role]?.includes(tool)) throw new ToolError(`The ${role} can't use ${tool}`)
+    if (!allowed[role]?.includes(tool)) throw new ToolError(`The ${role} can’t use ${tool}`)
+    if (role === 'pm') {
+      if (!this.plans || !ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
+      return this.plans.tool(ctx.run.planSessionId, ctx.run.id, tool, input, this.#actor(ctx))
+    }
 
     switch (tool) {
       case 'get_task':

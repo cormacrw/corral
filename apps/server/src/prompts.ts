@@ -59,6 +59,33 @@ export function reviewerPrompt(task: ReviewTask, agentName: string): string {
   ].join('\n')
 }
 
+export interface PmTurn {
+  text: string
+  attachedTask: string | null
+  projectName: string
+  prefix: string
+  // First turn of a session: say what the PM is for
+  fresh: boolean
+}
+
+// Each PM turn is one message; the session carries the rest (D9)
+export function pmPrompt(turn: PmTurn): string {
+  const intro = turn.fresh
+    ? `You are the product-manager agent for the project "${turn.projectName}" in Corral. Task IDs look like ${turn.prefix}-12. You are in a read-only checkout of the default branch: read CORRAL.md, .corral/wiki/ and the code before planning, and use list_tasks to see the live board. Propose work with propose_plan (small tasks, one PR each, verifiable acceptance criteria, explicit dependencies, humanReview true for auth, data migrations, payments, deletions and security-sensitive code). Ask with ask_question when requirements are ambiguous. A human approves plans; you can't. Keep replies short and concrete.\n\n`
+    : ''
+  const attached = turn.attachedTask ? `(About task ${turn.attachedTask}; read it with get_task.)\n\n` : ''
+  return `${intro}${attached}${turn.text}`
+}
+
+// The session was lost: the database is the record, so the turn carries it
+export function pmFallbackPrompt(turn: Omit<PmTurn, 'fresh'> & { history: { role: string, text: string }[] }): string {
+  const earlier = turn.history.slice(0, -1)
+  const history = earlier.length > 0
+    ? section('Conversation so far (your previous session was lost; this is the record)', earlier.map(m => `**${m.role}:** ${m.text}`).join('\n\n'))
+    : ''
+  return `${pmPrompt({ ...turn, fresh: true })}\n\n${history}`.trim()
+}
+
 export function developerPrompt(task: PromptTask, agentName: string): string {
   const revision = task.reviewRounds > 0
   return [

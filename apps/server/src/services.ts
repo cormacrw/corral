@@ -5,6 +5,7 @@ import { LocalBlobStore, type BlobStore } from './blob-store.ts'
 import type { EventBus } from './events.ts'
 import { RunnerGitHub, type GitHubClient } from './github.ts'
 import { Orchestrator } from './orchestrator.ts'
+import { PlanService } from './plan.ts'
 import { RunnerHub } from './runner-hub.ts'
 import { Transcripts } from './transcripts.ts'
 
@@ -22,7 +23,7 @@ export interface ServiceOptions {
   now?: () => Date
 }
 
-export type Services = Omit<AppDeps, 'db' | 'events' | 'actor'> & { github: GitHubClient }
+export type Services = Omit<AppDeps, 'db' | 'events' | 'actor'> & { github: GitHubClient, plans: PlanService }
 
 // Wires the server's long-lived pieces together, the same way for the real
 // server and for tests, so the two never drift apart
@@ -43,5 +44,7 @@ export function createServices(options: ServiceOptions): Services {
     ...(options.now && { now: options.now })
   })
   runner.setHandlers(orchestrator)
-  return { runner, orchestrator, blobs, transcripts, github }
+  const plans = new PlanService({ db, events, runner, startRun: (session, job) => orchestrator.startPmRun(session, job) })
+  orchestrator.plans = plans
+  return { runner, orchestrator, blobs, transcripts, github, plans }
 }

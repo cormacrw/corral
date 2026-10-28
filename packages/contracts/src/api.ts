@@ -184,6 +184,77 @@ export interface Task {
   updatedAt: string
 }
 
+// ── Plan (D9, design/plan.md) ─────────────────────────────────────────────
+
+export interface PlanSession {
+  id: string
+  projectId: string
+  title: string
+  preview: string
+  unread: boolean
+  // What the human has to do here, if anything
+  status: 'needs_approval' | 'question' | 'none'
+  // Set while a PM turn is running
+  activeRunId: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PlanMessage {
+  id: string
+  sessionId: string
+  role: 'human' | 'pm'
+  kind: 'message' | 'question' | 'error'
+  text: string
+  planId: string | null
+  runId: string | null
+  createdAt: string
+}
+
+export type PlanChange = 'added' | 'changed' | 'unchanged' | 'removed'
+
+export interface Plan {
+  id: string
+  sessionId: string
+  projectId: string
+  epicId: string | null
+  version: number
+  title: string
+  summary: string
+  status: 'proposed' | 'approved' | 'superseded'
+  approvedAt: string | null
+  tasks: {
+    key: string
+    change: PlanChange
+    taskId: string | null
+    ref: string | null
+    title: string
+    status: TaskStatus | null
+    criteriaCount: number
+    dependsOn: string[]
+  }[]
+  createdAt: string
+}
+
+export interface PlanSessionDetail extends PlanSession {
+  messages: PlanMessage[]
+  plans: Plan[]
+}
+
+export const startPlanSessionInput = z.object({
+  projectId: z.uuid(),
+  text: z.string().trim().default(''),
+  // "Refine a task": a Backlog task ref attached to the message
+  taskRef: z.string().trim().optional()
+}).refine(input => input.text.length > 0 || input.taskRef, { message: 'Write a message or attach a task' })
+export type StartPlanSessionInput = z.infer<typeof startPlanSessionInput>
+
+export const planMessageInput = z.object({
+  text: z.string().trim().default(''),
+  taskRef: z.string().trim().optional()
+}).refine(input => input.text.length > 0 || input.taskRef, { message: 'Write a message or attach a task' })
+export type PlanMessageInput = z.infer<typeof planMessageInput>
+
 // ── Inbox (D11, design/inbox.md) ───────────────────────────────────────────
 
 export type InboxItemType = 'human_review' | 'question' | 'blocked' | 'failed' | 'activity'

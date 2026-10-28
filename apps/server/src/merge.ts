@@ -1,6 +1,6 @@
 import { failedMergeGates, transition, type Actor, type MergeGateFacts, type TaskState } from '@corral/core'
 import { schema, type Database } from '@corral/db'
-import { and, asc, desc, eq, isNull } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull, ne } from 'drizzle-orm'
 import { ApiFailure } from './errors.ts'
 import type { EventBus } from './events.ts'
 import { GitHubError, type CheckResult, type GitHubClient, type PullRequest } from './github.ts'
@@ -20,6 +20,8 @@ export interface MergeDeps {
   events: EventBus
   github: GitHubClient
   runner: RunnerHub
+  // flows.md step 10: the PM writes a delivery summary when an epic's last task merges
+  onEpicFinished?: (epicId: string) => Promise<void>
   now?: () => Date
 }
 
@@ -262,6 +264,17 @@ export class MergeOrchestrator {
     if (!merged) return
     await this.#publish(taskId)
     await this.cleanup(taskId)
+    await this.#checkEpic(taskId)
+  }
+
+  async #checkEpic(taskId: string): Promise<void> {
+    const { db } = this.#d
+    const [row] = await db.select({ epicId: tasks.epicId }).from(tasks).where(eq(tasks.id, taskId))
+    if (!row?.epicId) return
+    const open = await db.select({ id: tasks.id }).from(tasks)
+      .where(and(eq(tasks.epicId, row.epicId), isNull(tasks.deletedAt), ne(tasks.status, 'merged')))
+    if (open.length > 0) return
+    await this.#d.onEpicFinished?.(row.epicId).catch(error => console.error('Delivery summary failed', error))
   }
 
   // flows.md step 10: the runner removes the worktrees, keeping any with
