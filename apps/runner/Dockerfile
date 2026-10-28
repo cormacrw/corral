@@ -5,7 +5,8 @@
 FROM node:26-bookworm
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
-RUN corepack enable
+# Same version as "packageManager" in package.json
+RUN npm install -g pnpm@12.15.0
 
 # Tools agents and the runner need. Chromium comes from Debian so it runs
 # on arm64 and x64 alike.
