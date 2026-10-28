@@ -67,6 +67,18 @@ See [stale-runners-and-fencing.md](stale-runners-and-fencing.md). Suggestion: le
 
 **Alternatives:** give the server its own token through an env var (a second credential to manage), or a GitHub App at hosting time (R10). If this is accepted, fold it into D8 or a new decision and fix the Stack table.
 
+### R16 — Web talks to the server through typed fetch wrappers, not the Hono client (raised while building, 2026-10-28)
+
+`architecture.md` says web's types come from the Hono typed client (`hc`). Building `hc<AppType>` would make the Nuxt typecheck compile `apps/server`'s source (Drizzle, Node types) inside the browser project. The web app instead has one `api` object (`apps/web/app/composables/useApi.ts`) whose inputs and outputs are typed from `packages/contracts`, which already is the boundary between apps. Protocol changes are still type errors in web, because the contracts change. Accept this, or switch to `hc` once the server exposes a type-only entry point.
+
+### R17 — A deleted task's branch is only removed when a PR had been opened (raised while building, 2026-10-28)
+
+D10 says to delete the Corral branch "when safe". The server closes the PR and deletes the branch on GitHub only when a PR exists, because the closed PR keeps the pushed commits reachable. A branch pushed without a PR (which the current flow never does) is left alone. The runner keeps any worktree with uncommitted changes and says so in a comment.
+
+### R18 — Mid-run messages, runner pairing and `.corral/` initialisation are deferred (2026-10-28)
+
+Not built in the MVP: sending a message to an agent mid-run (the agent page says so; comments reach the agent on its next run), runner pairing and auth (D1 defers them), and writing `.corral/` into a target repository during setup (agents read `.corral/agents/<role>.md` when it exists and fall back to built-in instructions). Human change requests don't count toward the review-round cap, and agents run with `--permission-mode bypassPermissions`, which is safe inside the runner container but has wide reach on a laptop.
+
 ## Phasing and metrics
 
 ### R12 — Build a walking skeleton first

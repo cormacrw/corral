@@ -1,0 +1,12 @@
+node_modules
+**/node_modules
+**/.nuxt
+**/.output
+**/.turbo
+.corral
+.git
+.env
+.env.*
+!.env.example
+docs
+*.log

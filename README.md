@@ -27,3 +27,22 @@ Settings come from environment variables; see [.env.example](.env.example).
 
 - relative imports use the `.ts` extension (`import { loadConfig } from './config.ts'`)
 - only erasable TypeScript is allowed: no `enum`, `namespace` or constructor parameter properties (`erasableSyntaxOnly` enforces this)
+
+## Deployment (Docker)
+
+Corral runs as four containers on your own server (`docs/decisions.md` D12, D14): `web`, `server`, `runner` and `postgres`, on a private Docker network. Only `web` is published; point your Cloudflare Tunnel at it and put Cloudflare Access in front.
+
+```sh
+cp .env.docker.example .env        # set POSTGRES_PASSWORD and CORRAL_PUBLIC_URL
+docker compose up -d --build
+docker exec -it corral-runner claude            # sign in to Claude once
+docker exec -it corral-runner gh auth login     # sign in to GitHub once
+```
+
+Both logins live on volumes that only the runner container mounts. Corral never reads, stores or relays them (D2).
+
+- **State:** `server-data` (evidence and transcripts) and `postgres-data` hold everything worth backing up (`pg_dump` plus the blob folder). `runner-data` is a cache of clones, worktrees and spools.
+- **Config:** everything environment-specific is an environment variable; see `docker-compose.yml` and `.env.example`.
+- **Agents** run inside the runner container, which has `git`, `gh`, `claude`, a headless Chromium and Node/pnpm. Give it a memory limit sized for the concurrency you configure (`CORRAL_RUNNER_MEMORY`).
+
+Stopping the stack sends `SIGTERM`: the runner gives agents a few seconds, reports their runs as interrupted, and the server closes its connections.

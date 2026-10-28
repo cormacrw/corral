@@ -1,0 +1,88 @@
+# Corral on the home server (D12, D14): web, server, runner and postgres on a
+# private network. Only web is published, for the Cloudflare Tunnel; the
+# server API, the runner WebSocket and Postgres stay inside the network.
+# No Docker socket is mounted anywhere.
+#
+# First start:
+#   cp .env.docker.example .env
+#   docker compose up -d --build
+#   docker exec -it corral-runner claude          # sign in to Claude, once
+#   docker exec -it corral-runner gh auth login   # sign in to GitHub, once
+# Both logins persist on volumes. Corral never reads them (D2).
+
+name: corral
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        CORRAL_SERVER_URL: http://server:4100
+    container_name: corral-web
+    depends_on:
+      - server
+    ports:
+      # Point the Cloudflare Tunnel at this port; put Cloudflare Access in front
+      - "${CORRAL_WEB_PORT:-3000}:3000"
+    restart: unless-stopped
+
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    container_name: corral-server
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      CORRAL_DATABASE_URL: postgres://corral:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/corral
+      # Where people open Corral; PR bodies link here
+      CORRAL_PUBLIC_URL: ${CORRAL_PUBLIC_URL:-http://localhost:3000}
+    volumes:
+      - server-data:/data/server
+    restart: unless-stopped
+
+  runner:
+    build:
+      context: .
+      dockerfile: apps/runner/Dockerfile
+    container_name: corral-runner
+    depends_on:
+      - server
+    environment:
+      CORRAL_SERVER_URL: http://server:4100
+      CORRAL_RUNNER_NAME: ${CORRAL_RUNNER_NAME:-home-server}
+    volumes:
+      - runner-data:/data/runner
+      - claude-config:/home/runner/.claude
+      - gh-config:/home/runner/.config/gh
+    # Sized for the configured concurrency (architecture.md, resource expectations)
+    mem_limit: ${CORRAL_RUNNER_MEMORY:-6g}
+    # Headless Chromium needs more shared memory than Docker's default
+    shm_size: 1g
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17
+    container_name: corral-postgres
+    environment:
+      POSTGRES_USER: corral
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: corral
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U corral"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  # Back up server-data (blobs) and postgres-data; the rest is a cache
+  server-data:
+  postgres-data:
+  runner-data:
+  claude-config:
+  gh-config:
