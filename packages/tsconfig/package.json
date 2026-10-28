@@ -1,5 +1,6 @@
 {
   "name": "@corral/tsconfig",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "files": ["base.json"]
 }

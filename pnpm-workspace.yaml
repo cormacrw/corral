@@ -2,6 +2,12 @@ packages:
   - apps/*
   - packages/*
 
+catalog:
+  '@types/node': ^26.6.5
+  eslint: ^10.13.0
+  typescript: ^6.0.3
+  vitest: ^5.0.5
+
 allowBuilds:
   '@parcel/watcher': false
   '@tailwindcss/oxide': false

@@ -1,0 +1,4 @@
+{
+  "extends": "@corral/tsconfig/base.json",
+  "include": ["src"]
+}
