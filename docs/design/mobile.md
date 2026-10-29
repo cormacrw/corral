@@ -54,6 +54,18 @@ Built from the **Agents**, **Agent · Atlas** and **Agent · live run** frames. 
 - **Agent** (`/agents/:name`): the header gets a back arrow to Agents and an **Agent settings** button in place of Settings. The avatar, name and status, the role's stat tiles (they scroll sideways), the facts line, the **Current run** card and **Previous runs**. Each run opens its transcript. Mobile doesn't auto-select a run here, unlike the web.
 - **Run** (`/agents/:name/:runId`): full screen, without the shell's header or tab bar. Its own header has a back arrow to the agent, "{Agent} · Run #n", the task, **Open task** (goes to the task page), the outcome badge, elapsed time and tokens, and **Stop run** while live. The body is `RunTranscript`, thinking included, streamed while live. The footer is the same note as the web's (mid-run messages aren't supported yet), padded for the home indicator.
 
+## Install
+
+Built from the **Install Corral** frame. Corral is an installable PWA, served by the same app at the same URLs.
+
+- **Manifest** (`public/manifest.webmanifest`): name and short name "Corral", 192 and 512 px icons plus a maskable 512, `display: standalone`, white theme and background, `start_url` and `scope` of `/`. Every path is relative to the origin, because Corral runs behind whatever hostname the Cloudflare Tunnel gives it (D12). The manifest link, `theme-color` (light and dark) and the iOS tags (`apple-mobile-web-app-capable`, `apple-touch-icon`) are in `nuxt.config.ts`'s `app.head`, so they're in the static shell before any script runs.
+- **Service worker** (`public/sw.js`, registered by `plugins/pwa.client.ts` in production builds only): caches the built app shell only. Pages are network first, falling back to the cached shell; content-hashed `/_nuxt/` files are cache first; the icons and manifest are network first. It never handles `/api/**` (the `/api/events` stream included), server-sent events, WebSocket upgrades, writes or other origins, and never caches a redirect (a Cloudflare Access sign-in) or an error. `utils/service-worker.test.ts` runs it against those requests.
+- **Install screen** (`InstallSheet.vue`): a bottom sheet on mobile, a modal on the web, opened from **Settings → App → Install Corral**. `useInstall()` decides what it offers (`utils/install.ts`):
+  - Chrome and Android: when `beforeinstallprompt` has fired, **Install app** shows the browser's prompt. The plugin catches the event early and suppresses Chrome's own mini-bar.
+  - iOS (iPadOS included), which has no prompt: the three Add to Home Screen steps.
+  - Already running standalone, or a browser that can't install: no Settings entry, and the sheet closes.
+- Launched from the home screen, `(display-mode: standalone)` matches, so `useDevice()` picks the mobile layout whatever the window size.
+
 ## Pages without a mobile screen yet
 
 They render inside the mobile layout as they are, and reflow as well as they can: panels stack or scroll sideways. Each later task replaces one group with its mobile screen.
@@ -72,4 +84,3 @@ Frames in the export, grouped by the task that will build them:
 | Settings | Settings, Settings · Runner |
 | Search | Search |
 | Onboarding | Setup · Your name, Setup · Repository, Setup · Agent CLIs, Setup · Name agents |
-| Install | Install Corral (the PWA manifest and install prompt) |
