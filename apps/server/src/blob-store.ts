@@ -44,6 +44,11 @@ export class LocalBlobStore implements BlobStore {
 export class MemoryBlobStore implements BlobStore {
   #blobs = new Map<string, Uint8Array>()
 
+  // How many distinct blobs are stored, for tests
+  get size(): number {
+    return this.#blobs.size
+  }
+
   async put(data: Uint8Array): Promise<string> {
     const hash = createHash('sha256').update(data).digest('hex')
     this.#blobs.set(hash, data)
