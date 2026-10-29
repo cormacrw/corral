@@ -89,7 +89,7 @@ export async function createTestApp(driver: 'pglite' | 'postgres', options: { li
     async createTask(slug, input = {}) {
       const res = await request('POST', `/api/projects/${slug}/tasks`, {
         title: 'Add login',
-        type: 'backend',
+        type: 'task',
         description: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Email and password' }] }] },
         acceptanceCriteria: ['Shows an error on a bad password'],
         ...input

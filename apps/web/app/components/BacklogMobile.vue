@@ -152,6 +152,7 @@ const collapsed = defineModel<Record<string, boolean>>('collapsed', { required: 
                   color="primary"
                 />
                 <span :class="task.priority === 'urgent' ? 'text-error' : task.priority === 'high' ? 'text-warning' : 'text-muted'">{{ PRIORITY[task.priority].label }}</span>
+                <TaskTypeBadge :type="task.type" />
               </span>
             </NuxtLink>
             <UButton

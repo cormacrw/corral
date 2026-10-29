@@ -150,7 +150,7 @@ Fields:
 - Priority
 - Epic ID
 - Dependencies
-- Task type: frontend, backend, full-stack, or infrastructure/refactor
+- Task type: Task, Bug or Spike (D19)
 - Human review flag
 - Lock and active run reference
 - Branch name
@@ -480,12 +480,14 @@ Acceptance criteria:
 
 Evidence is a mandatory deliverable.
 
-| Task type | Required evidence |
+**Overridden by D19:** evidence follows each acceptance criterion, not the task type. The kinds below are guidance for choosing it.
+
+| Kind of change | Evidence |
 |---|---|
-| Frontend | Screenshots of relevant acceptance criteria, viewport details, test results |
-| Backend | Real example requests and responses for changed endpoints, relevant error cases, test results |
-| Full-stack | Applicable frontend and backend evidence |
-| Infrastructure/refactor | Test and CI results, relevant before/after metrics, risk notes |
+| Visible (UI) | Screenshots of relevant acceptance criteria, viewport details, test results |
+| API | Real example requests and responses for changed endpoints, relevant error cases, test results |
+| Both | Applicable UI and API evidence |
+| Internal (infrastructure, refactor) | Test and CI results, relevant before/after metrics, risk notes |
 
 Each review packet contains:
 

@@ -48,7 +48,7 @@ describe.each([
       projectId,
       number,
       title: `Task ${number}`,
-      type: 'backend',
+      type: 'task',
       createdBy: human
     }).returning()
     return task!

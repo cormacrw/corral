@@ -1,5 +1,5 @@
 import { askQuestionInput, type AgentRuntime, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type RunJob } from '@corral/contracts'
-import { checkPlan, diffPlans, markdownToRichText, REVISABLE_STATUSES, richTextToMarkdown, taskRef, type Actor, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
+import { checkPlan, diffPlans, markdownToRichText, REVISABLE_STATUSES, richTextToMarkdown, TASK_TYPES, taskRef, type Actor, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
@@ -24,7 +24,7 @@ const proposedTask = z.object({
   epic: z.string().trim().optional(),
   title: z.string().trim().min(1),
   description: z.string().trim(),
-  type: z.enum(['frontend', 'backend', 'full_stack', 'infrastructure']),
+  type: z.enum(TASK_TYPES),
   priority: z.enum(['urgent', 'high', 'medium', 'low']).default('medium'),
   humanReview: z.boolean().default(false),
   acceptanceCriteria: z.array(z.string().trim()).default([]),
@@ -298,7 +298,7 @@ export class PlanService {
         const { title, description } = z.object({ title: z.string().trim().min(1), description: z.string().trim().min(1) }).parse(input)
         const taskId = await createTask(db, project, {
           title,
-          type: 'infrastructure',
+          type: 'task',
           description: markdownToRichText(description),
           acceptanceCriteria: ['The documentation matches the code it describes']
         }, actor)

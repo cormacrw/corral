@@ -24,14 +24,14 @@ describe('plan sessions', () => {
     await t?.close()
   })
 
-  const plan = (tasksIn: Partial<{ key: string, ref: string, title: string, description: string, acceptanceCriteria: string[], dependsOn: string[], humanReview: boolean }>[]) => ({
+  const plan = (tasksIn: Partial<{ key: string, ref: string, title: string, type: string, description: string, acceptanceCriteria: string[], dependsOn: string[], humanReview: boolean }>[]) => ({
     title: 'Login',
     summary: 'Email and password login',
     tasks: tasksIn.map((task, i) => ({
       key: `t${i + 1}`,
       title: `Task ${i + 1}`,
       description: 'Build it',
-      type: 'backend',
+      type: 'task',
       acceptanceCriteria: ['It works'],
       dependsOn: [],
       ...task
@@ -404,9 +404,9 @@ describe('plan sessions', () => {
       ...plan([]),
       epics: [{ key: 'e1', title: 'Login' }, { key: 'e2', title: 'Payments' }],
       tasks: [
-        { key: 't1', epic: 'e2', title: 'Login form', description: 'Build it', type: 'backend', acceptanceCriteria: ['It works'] },
-        { key: 't2', epic: 'e2', title: 'Invoices', description: 'Build it', type: 'backend', acceptanceCriteria: ['It works'], dependsOn: ['t1'] },
-        { key: 't4', epic: 'e1', title: 'Logout', description: 'Build it', type: 'backend', acceptanceCriteria: ['It works'] }
+        { key: 't1', epic: 'e2', title: 'Login form', description: 'Build it', type: 'task', acceptanceCriteria: ['It works'] },
+        { key: 't2', epic: 'e2', title: 'Invoices', description: 'Build it', type: 'task', acceptanceCriteria: ['It works'], dependsOn: ['t1'] },
+        { key: 't4', epic: 'e1', title: 'Logout', description: 'Build it', type: 'task', acceptanceCriteria: ['It works'] }
       ]
     })
     expect(v2).toMatchObject({ ok: true, result: { tasks: [{ key: 't1', change: 'changed' }, { key: 't2', change: 'unchanged' }, { key: 't4', change: 'added' }, { key: 't3', change: 'removed' }] } })
@@ -426,8 +426,8 @@ describe('plan sessions', () => {
       ...plan([]),
       epics: [{ key: 'e1', title: 'Login' }],
       tasks: [
-        { key: 't1', epic: 'e1', title: 'Login form', description: 'Build it', type: 'backend', acceptanceCriteria: ['It works'] },
-        { key: 't2', title: 'Fix typo', description: 'Fix it', type: 'frontend', acceptanceCriteria: ['It is spelt right'] }
+        { key: 't1', epic: 'e1', title: 'Login form', description: 'Build it', type: 'task', acceptanceCriteria: ['It works'] },
+        { key: 't2', title: 'Fix typo', description: 'Fix it', type: 'bug', acceptanceCriteria: ['It is spelt right'] }
       ]
     })
     expect(proposed).toMatchObject({ ok: true })
@@ -439,6 +439,32 @@ describe('plan sessions', () => {
     expect(rows.map(r => [r.title, r.epicId])).toEqual([['Login form', v1!.epics[0]!.id], ['Fix typo', null]])
     expect(await t.db.select().from(epics).where(eq(epics.projectId, project.id))).toHaveLength(1)
     await endTurn(job, 'Proposed.')
+  })
+
+  it('accepts task, bug and spike in propose_plan and rejects the old area types (D19)', async () => {
+    const project = await t.createProject()
+    await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+    await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan login' })
+    const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
+    for (const type of ['frontend', 'backend', 'full_stack', 'infrastructure']) {
+      expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ type }]))).toMatchObject({ ok: false })
+    }
+    expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ type: 'task' }, { type: 'bug' }, { type: 'spike' }]))).toMatchObject({ ok: true })
+    const rows = await t.db.select().from(tasks).where(eq(tasks.projectId, project.id)).orderBy(tasks.number)
+    expect(rows.map(r => r.type)).toEqual(['task', 'bug', 'spike'])
+    await endTurn(job, 'Proposed.')
+  })
+
+  it('creates flag_stale_docs tasks with type task', async () => {
+    const project = await t.createProject()
+    await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+    await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'The wiki is out of date' })
+    const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
+    const flagged = await runner.call(job.runId, job.leaseEpoch, 'flag_stale_docs', { title: 'Update the wiki', description: 'The runner page is stale' })
+    expect(flagged).toMatchObject({ ok: true })
+    const rows = await t.db.select().from(tasks).where(eq(tasks.projectId, project.id))
+    expect(rows.map(r => [r.title, r.type])).toEqual([['Update the wiki', 'task']])
+    await endTurn(job, 'Flagged.')
   })
 
   it('takes a Backlog task out of its epic when a revision by ref leaves out epic', async () => {

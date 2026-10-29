@@ -52,7 +52,13 @@ export function inboxTypeBadge(type: InboxItem['type']): { label: string, color:
 }
 
 export const TASK_TYPE: Record<Task['type'], string> = {
-  frontend: 'Frontend', backend: 'Backend', full_stack: 'Full stack', infrastructure: 'Infrastructure'
+  task: 'Task', bug: 'Bug', spike: 'Spike'
+}
+// The badge on Board and Backlog cards (D19). Plain tasks get none.
+export function taskTypeBadge(type: Task['type']): { label: string, color: Color, icon: string } | null {
+  if (type === 'bug') return { label: TASK_TYPE.bug, color: 'error', icon: 'i-lucide-bug' }
+  if (type === 'spike') return { label: TASK_TYPE.spike, color: 'info', icon: 'i-lucide-flask-conical' }
+  return null
 }
 
 // A run that hasn't finished yet

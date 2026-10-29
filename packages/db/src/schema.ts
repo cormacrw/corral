@@ -6,7 +6,8 @@ import {
   TASK_PRIORITIES,
   TASK_STATUSES,
   TASK_TYPES,
-  type Actor
+  type Actor,
+  type TaskType
 } from '@corral/core'
 import { sql } from 'drizzle-orm'
 import {
@@ -308,7 +309,7 @@ export interface PlanRevision {
   title: string
   // Markdown, as the PM wrote it
   description: string
-  type: 'frontend' | 'backend' | 'full_stack' | 'infrastructure'
+  type: TaskType
   priority: 'urgent' | 'high' | 'medium' | 'low'
   humanReview: boolean
   acceptanceCriteria: string[]

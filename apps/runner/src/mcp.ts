@@ -1,5 +1,5 @@
 import { askQuestionInput, EVIDENCE_KINDS, type AgentTool } from '@corral/contracts'
-import type { AgentRole } from '@corral/core'
+import { TASK_TYPES, type AgentRole } from '@corral/core'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
@@ -99,7 +99,7 @@ const toolDefinitions = {
         epic: z.string().optional().describe('The key of its epic in `epics`; leave it out for a task with no epic'),
         title: z.string().min(1),
         description: z.string().min(1),
-        type: z.enum(['frontend', 'backend', 'full_stack', 'infrastructure']),
+        type: z.enum(TASK_TYPES),
         priority: z.enum(['urgent', 'high', 'medium', 'low']).default('medium'),
         humanReview: z.boolean().default(false),
         acceptanceCriteria: z.array(z.string().min(1)).min(1),

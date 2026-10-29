@@ -26,6 +26,7 @@ describe('pmPrompt', () => {
     const intro = pmPrompt({ ...turn, fresh: true })
     expect(intro).toContain('Task IDs look like TA-12')
     expect(intro).toContain('list_tasks shows it live')
+    expect(intro).toContain('`bug` for a fix to wrong behaviour, `spike` for an investigation whose deliverable is written findings, and `task` for everything else')
     expect(intro).toContain('Propose work with propose_plan (group a multi-task feature into an epic and leave a lone small fix without one, small tasks, one PR each, descriptions in markdown, verifiable acceptance criteria, explicit dependencies')
     expect(intro).toContain('To refine an existing Backlog task, read it with get_task and include it in the plan with its `ref`')
     expect(intro).toContain('humanReview true for auth, data migrations, payments, deletions and security-sensitive code')

@@ -27,7 +27,7 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
      | Merged | Merged | Last 3 days |
 
    - **Cards:** buttons with a `bg-default` background, a 1px border and `rounded-md`.
-     - **Line 1:** the ref, the priority (Urgent in `error`, High in `warning`, others muted) and the PR number with an icon.
+     - **Line 1:** the ref, the priority (Urgent in `error`, High in `warning`, others muted), a type badge for Bug (`error`, bug icon) and Spike (`info`, flask icon) but not Task (D19), and the PR number with an icon.
      - **Line 2:** the title (medium, highlighted).
      - **Optional note:** "Waiting on COR-31", "Review round 1 of 5", "Waiting for you", or "Review-round limit reached" (in `error` for blocked).
      - **Line 3:** the epic tag, plus the agent avatar on the right when assigned. While the agent is working, the avatar has a status dot and the agent's name is shown.
@@ -51,7 +51,7 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
 
 ## Data
 
-- **Tasks** (status other than Backlog, and merged within the last 3 days): ref, title, status, priority, epic, PR, review round, assigned agent, working (lease), note.
+- **Tasks** (status other than Backlog, and merged within the last 3 days): ref, title, type, status, priority, epic, PR, review round, assigned agent, working (lease), note.
 - **Epics** for the filter.
 - Live updates over SSE. Cards move between columns without a reload.
 

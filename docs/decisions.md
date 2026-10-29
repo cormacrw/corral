@@ -58,7 +58,9 @@ Each decision has an ID so code comments, commits and PRs can refer to it (e.g. 
 
 **Status:** Accepted
 
-**Decision:** For tasks where it applies (frontend and full-stack especially), the developer agent runs the app locally, captures **screenshots and/or videos** with an agent browser, and attaches them to the PR or evidence packet against the acceptance criteria. The evidence types per task type in PRD §7.7 still apply.
+**Decision:** For tasks where it applies (anything with a visible change), the developer agent runs the app locally, captures **screenshots and/or videos** with an agent browser, and attaches them to the PR or evidence packet against the acceptance criteria.
+
+**Amended by D19:** evidence is chosen per acceptance criterion, not by task type. PRD §7.7's evidence kinds remain the guidance.
 
 Open gaps to consider are in [open-recommendations.md](open-recommendations.md) (R3).
 
@@ -327,7 +329,7 @@ The UI specs are in [design/](design/README.md).
   - The task becomes Ready: Jev picks the developer agent, plus its model and thinking level.
   - The task enters Agent review: Jev picks the reviewer agent, plus its model and thinking level.
   - A retry or a new review round: Jev picks the model and thinking level again, but the agent stays the same, so the developer keeps its session and branch context.
-- **Input:** the task (type, priority, description, acceptance criteria, human-review flag, review rounds, failed runs, how earlier runs ended), the diff size and the developer agent for reviews, and a menu of options. Jev's answers can only be options from that menu.
+- **Input:** the task (type, which is `task`, `bug` or `spike` per D19; priority, description, acceptance criteria, human-review flag, review rounds, failed runs, how earlier runs ended), the diff size and the developer agent for reviews, and a menu of options. Jev's answers can only be options from that menu.
 - **Corral's own rules, not Jev's:** the menu only lists agents of the right role that aren't paused or rate-limited (D3), each with the models and thinking levels configured for it (rule 4).
 - **Fallback:** a short timeout (about 2 s). On a timeout, an error or low confidence, the agent's configured default is used, so a Jev outage never blocks a run.
 - **Recorded and overridable:**
@@ -414,3 +416,29 @@ The UI specs are in [design/](design/README.md).
 **Consequences for the build:**
 - The runner detects which CLIs are installed and signed in, and reports them (D15). The UI only offers detected runtimes.
 - A PM session stores its runtime next to its agent session ID. A turn on a session whose runtime isn't available fails clearly instead of starting a fresh session on the other vendor.
+
+---
+
+## D19 — Task types are Task, Bug and Spike
+
+**Status:** Accepted 2026-10-29. Replaces the task types in PRD §4.3 and overrides the evidence-by-type table in PRD §7.7. (Numbered D19 because D18 was already taken by Codex.)
+
+**Decision:** A task's type says what kind of work it is, not which part of the stack it touches. There are three:
+
+| Type | What it is | Deliverable |
+|---|---|---|
+| **Task** (`task`) | Normal PR work: features, chores, refactors, docs | A PR |
+| **Bug** (`bug`) | A fix for wrong behaviour | A PR that fixes it |
+| **Spike** (`spike`) | An investigation | Written findings |
+
+- **Evidence comes from the acceptance criteria**, not the type. The kinds in PRD §7.7 are guidance for picking it: screenshots or video for anything visible, real requests and responses for API changes, and test and CI results, metrics and risk notes otherwise. A task often needs more than one kind.
+- **The PM picks the type** in `propose_plan`: `bug` for fixes, `spike` for investigations, `task` for everything else. `flag_stale_docs` creates a `task`.
+- **Spike gets no special run behaviour yet.** It runs like any other task; how its findings are delivered is future work.
+- **D15 (Jev)** still gets the task's `type` in its input, with these values.
+- **Existing tasks** of the old types (frontend, backend, full-stack, infrastructure) all became `task` in migration `0015_task_bug_spike`.
+
+**Why:** Most changes cross the frontend/backend line, so the old types were usually a guess and didn't change how the task ran. Whether something is a fix or an investigation is what a reader of the board wants to see.
+
+**Consequences for the build:**
+- `TASK_TYPES` in `packages/core` is the single list; the database enum, API contracts, plan schema and the runner's `propose_plan` schema are built from it.
+- Board and Backlog cards show a badge for Bug and Spike only; Task cards show none.

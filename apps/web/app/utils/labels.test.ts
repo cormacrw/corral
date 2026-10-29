@@ -1,6 +1,6 @@
 import type { TaskStatus } from '@corral/core'
 import { describe, expect, it } from 'vitest'
-import { cliLoginCommand, detectedRuntimes, runtimeLabel, runTokens, taskCounts } from './labels.ts'
+import { cliLoginCommand, detectedRuntimes, runtimeLabel, runTokens, taskCounts, taskTypeBadge } from './labels.ts'
 
 const tasks = (...statuses: TaskStatus[]) => statuses.map(status => ({ status }))
 
@@ -51,5 +51,13 @@ describe('runtimes', () => {
   it('signs Codex in with device auth', () => {
     expect(cliLoginCommand('codex')).toBe('docker exec -it corral-runner codex login --device-auth')
     expect(cliLoginCommand('claude')).toBe('docker exec -it corral-runner claude')
+  })
+})
+
+describe('taskTypeBadge', () => {
+  it('badges bugs and spikes, not plain tasks (D19)', () => {
+    expect(taskTypeBadge('task')).toBeNull()
+    expect(taskTypeBadge('bug')).toMatchObject({ label: 'Bug', color: 'error' })
+    expect(taskTypeBadge('spike')).toMatchObject({ label: 'Spike', color: 'info' })
   })
 })

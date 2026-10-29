@@ -176,6 +176,7 @@ const epicLabel = (id: string) => epicTitle(live.state.value.epics[project.value
                   <span class="flex items-center gap-2 text-xs">
                     <span class="font-mono text-muted">{{ task.ref }}</span>
                     <span :class="task.priority === 'urgent' ? 'text-error' : task.priority === 'high' ? 'text-warning' : 'text-muted'">{{ PRIORITY[task.priority].label }}</span>
+                    <TaskTypeBadge :type="task.type" />
                     <a
                       v-if="task.prUrl"
                       :href="task.prUrl"

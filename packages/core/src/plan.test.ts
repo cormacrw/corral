@@ -6,7 +6,7 @@ const task = (key: string, overrides: Partial<ProposedTask> = {}): ProposedTask 
   epic: 'e1',
   title: `Task ${key}`,
   description: 'Do the thing',
-  type: 'backend',
+  type: 'task',
   priority: 'medium',
   humanReview: false,
   acceptanceCriteria: ['It works'],
