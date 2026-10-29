@@ -1,11 +1,16 @@
 import { PGlite } from '@electric-sql/pglite'
 import { sql } from 'drizzle-orm'
+import { drizzle as drizzlePg } from 'drizzle-orm/node-postgres'
+import { migrate as migratePg } from 'drizzle-orm/node-postgres/migrator'
 import { drizzle } from 'drizzle-orm/pglite'
 import { migrate } from 'drizzle-orm/pglite/migrator'
+import { randomUUID } from 'node:crypto'
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import pg from 'pg'
 import { afterEach, describe, expect, it } from 'vitest'
+import { postgresAvailable } from './testing.ts'
 
 const migrationsFolder = join(import.meta.dirname, '..', 'migrations')
 
@@ -127,14 +132,18 @@ describe('migrations', () => {
     expect(sessions.rows).toEqual([{ title: 'S', unread: true, closed_at: null }])
   }, 60_000)
 
-  it('0024 makes evidence files optional for notes, keeping existing evidence (D21)', async () => {
+  // On both drivers: Postgres can't use an enum value in the transaction
+  // that adds it, so the check compares the kind as text
+  it.each([
+    { driver: 'pglite' as const, enabled: true },
+    { driver: 'postgres' as const, enabled: postgresAvailable }
+  ])('0024 makes evidence files optional for notes, keeping existing evidence, on $driver (D21)', async ({ driver, enabled }) => {
+    if (!enabled) return
     const before = await migrationsBefore('0024_evidence_note')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
-    const client = new PGlite()
-    cleanup.push(() => client.close())
-    const db = drizzle(client, { casing: 'snake_case' })
-    await migrate(db, { migrationsFolder: before })
+    const { db, migrate } = await open(driver)
 
+    await migrate(before)
     const actor = sql`'{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb`
     await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('P', 'p', 'PA', 'o/r', 'main')`)
     await db.execute(sql`insert into tasks (project_id, number, title, type, created_by) select id, 1, 'T', 'task', ${actor} from projects`)
@@ -143,7 +152,7 @@ describe('migrations', () => {
     await db.execute(sql`insert into evidence (task_id, run_id, round, kind, note, blob, file_name, content_type, size)
       select t.id, r.id, 0, 'screenshot', 'Login page', 'abc123', 'login.png', 'image/png', 42 from tasks t, runs r`)
 
-    await migrate(db, { migrationsFolder })
+    await migrate(migrationsFolder)
 
     // Existing evidence keeps its file
     const existing = await db.execute(sql`select kind::text as kind, note, blob, file_name, content_type, size from evidence`)
@@ -156,4 +165,30 @@ describe('migrations', () => {
     const notes = await db.execute(sql`select note, blob, file_name, content_type from evidence where kind = 'note'`)
     expect(notes.rows).toEqual([{ note: 'No visible change', blob: null, file_name: null, content_type: null }])
   }, 60_000)
+
+  // An empty database to migrate step by step: PGlite in memory, or a
+  // throwaway database on the test Postgres server
+  async function open(driver: 'pglite' | 'postgres') {
+    if (driver === 'pglite') {
+      const client = new PGlite()
+      cleanup.push(() => client.close())
+      const db = drizzle(client, { casing: 'snake_case' })
+      return { db, migrate: (folder: string) => migrate(db, { migrationsFolder: folder }) }
+    }
+    const adminUrl = process.env.CORRAL_DATABASE_URL!
+    const name = `corral_migration_${randomUUID().replaceAll('-', '')}`
+    const admin = new pg.Client({ connectionString: adminUrl })
+    await admin.connect()
+    await admin.query(`create database ${name}`)
+    cleanup.push(async () => {
+      await admin.query(`drop database if exists ${name} with (force)`)
+      await admin.end()
+    })
+    const url = new URL(adminUrl)
+    url.pathname = `/${name}`
+    const pool = new pg.Pool({ connectionString: url.href })
+    cleanup.unshift(() => pool.end())
+    const db = drizzlePg(pool, { casing: 'snake_case' })
+    return { db, migrate: (folder: string) => migratePg(db, { migrationsFolder: folder }) }
+  }
 })
