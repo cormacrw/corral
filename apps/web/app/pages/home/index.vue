@@ -4,7 +4,7 @@ import { api } from '~/composables/useApi'
 import { dashboardCounts, elapsed, IN_PROGRESS_STAGES } from '~/utils/dashboard'
 import { initials, isWorking, projectColor, ROLE, STATUS } from '~/utils/labels'
 
-// Home, the global dashboard (design/home.md). Counts come from the live
+// Home, the global dashboard (design/mobile.md). Counts come from the live
 // task lists the shell loads; the active runs come from /api/runs and are
 // refetched whenever a run changes.
 const live = useLive()
@@ -105,16 +105,18 @@ const byProject = computed(() => state.value.projects.map((project) => {
           aria-hidden="true"
         />
         Runner {{ state.runner?.online ? 'online' : 'offline' }} ·
-        <USelect
-          v-model="projectId"
-          :items="projectItems"
-          variant="none"
-          size="sm"
-          class="w-auto p-0"
-          :ui="{ base: 'p-0 pe-6 text-muted', trailing: 'pe-0' }"
-          aria-label="Project"
-          data-testid="home-project"
-        />
+        <UDropdownMenu :items="projectItems.map(item => ({ label: item.label, onSelect: () => { projectId = item.value } }))">
+          <UButton
+            :label="projectItems.find(item => item.value === projectId)?.label ?? 'All projects'"
+            trailing-icon="i-lucide-chevron-down"
+            variant="link"
+            color="neutral"
+            size="sm"
+            class="p-0 text-sm text-muted"
+            aria-label="Project"
+            data-testid="home-project"
+          />
+        </UDropdownMenu>
         · Today
       </div>
 
@@ -281,7 +283,7 @@ const byProject = computed(() => state.value.projects.map((project) => {
           aria-label="Tasks by project"
         >
           <div
-            class="grid grid-cols-[1fr_4rem_5rem_4rem] gap-2 border-b border-default px-3 py-2 text-xs text-muted"
+            class="grid grid-cols-[minmax(0,1fr)_2.75rem_4.5rem_3.25rem] gap-2 border-b border-default px-3 py-2 text-xs text-muted"
             role="row"
           >
             <span role="columnheader">Project</span>
@@ -302,7 +304,7 @@ const byProject = computed(() => state.value.projects.map((project) => {
             v-for="row in byProject"
             :key="row.project.id"
             :to="`/projects/${row.project.slug}`"
-            class="grid grid-cols-[1fr_4rem_5rem_4rem] items-center gap-2 border-b border-default px-3 py-2.5 last:border-b-0"
+            class="grid grid-cols-[minmax(0,1fr)_2.75rem_4.5rem_3.25rem] items-center gap-2 border-b border-default px-3 py-2.5 last:border-b-0"
             role="row"
             :data-testid="`home-project-${row.project.slug}`"
           >

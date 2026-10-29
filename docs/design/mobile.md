@@ -44,7 +44,17 @@ From top to bottom:
 - The header and tab bar pad themselves with `env(safe-area-inset-*)`, and the viewport uses `viewport-fit=cover`, so nothing sits under a notch or the home indicator.
 - The runner status and Inbox count come from the app's one live connection (`useLive()`), so they update without a reload.
 
-`/home`, `/projects` and `/agents` are placeholders for now (a short summary, the project list and the agent list), so every tab has a target. On the web they render in the normal shell.
+`/projects` and `/agents` are placeholders for now (the project list and the agent list), so every tab has a target. On the web they render in the normal shell.
+
+## Home
+
+`/home` is the global dashboard, counted from the live task lists so it matches each project's Board and updates without a reload:
+
+- **Runner status** and a project filter (**All projects** or one project) · **Today**. The header hides its own runner status on Home.
+- **Tiles:** **To do** (Ready), **In progress** (In progress, Agent review, Human review and Ready to merge) and **Merged today** (merged since local midnight) with how many were first-pass (no changes requested).
+- **In progress by stage:** a bar and counts per stage, and a link to the Inbox with the blocked (Blocked and Failed) and waiting-for-your-review (Human review) counts.
+- **Agents:** each agent with Working, Idle or Paused; working agents first, with each active run's task, project, status, run number (PR number for reviews) and elapsed time. Active runs come from `GET /api/runs?active=1`, refetched on `run.updated`. Tapping an agent opens its agent page.
+- **By project:** To do, In progress and Merged today per project, with a Paused badge. Tapping a row opens the project's overview.
 
 ## Pages without a mobile screen yet
 
@@ -56,7 +66,6 @@ Frames in the export, grouped by the task that will build them:
 
 | Task | Frames |
 |---|---|
-| Home | Home |
 | Inbox | Inbox, Inbox · Human review, Inbox · Question, Inbox · Blocked |
 | Plan | Plan · New session, Plan · Conversation, Plan · Plan v2, Plan · Runner offline |
 | Projects | Projects, Project overview, Project settings (Board and Backlog are built, see [board.md](board.md) and [backlog.md](backlog.md)) |

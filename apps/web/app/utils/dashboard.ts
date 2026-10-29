@@ -1,7 +1,7 @@
 import type { Task } from '@corral/contracts'
 import type { TaskStatus } from '@corral/core'
 
-// The Home dashboard's numbers (design/home.md), all counted from the live
+// The Home dashboard's numbers (design/mobile.md), all counted from the live
 // task lists so they match the Board's columns for the same project.
 
 // In progress is every approved, unmerged status an agent or the human is
