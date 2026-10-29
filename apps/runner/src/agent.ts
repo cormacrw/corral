@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import type { GitAuthor } from './config.ts'
 import { StreamJsonParser, type ParsedLine } from './stream-json.ts'
 
 // The Claude Code AgentRuntime adapter (agent-runtime-and-auth.md). Auth is
@@ -16,6 +17,7 @@ export interface AgentOptions {
   mcpConfigPath: string
   model: string | null
   resumeSessionId: string | null
+  gitAuthor: GitAuthor | null
   onLine(raw: string, parsed: ParsedLine): void
 }
 
@@ -53,7 +55,9 @@ export function agentArgs(options: Pick<AgentOptions, 'prompt' | 'systemPrompt' 
 // fails, so only the runner pushes (architecture.md, known POC limitation).
 // No CORRAL_* settings either: an agent working on Corral itself that starts
 // a runner would otherwise join this runner's server and share its data dir.
-export function agentEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+// The configured git identity goes in as GIT_AUTHOR_*/GIT_COMMITTER_*, which
+// git prefers over any user.name/user.email the agent writes to its config.
+export function agentEnv(base: NodeJS.ProcessEnv = process.env, gitAuthor: GitAuthor | null = null): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base }
   for (const key of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT']) delete env[key]
   for (const key of Object.keys(env)) {
@@ -63,6 +67,10 @@ export function agentEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessE
   env.GIT_CONFIG_KEY_0 = 'remote.origin.pushurl'
   env.GIT_CONFIG_VALUE_0 = 'no-push://corral-pushes-for-you'
   env.GIT_TERMINAL_PROMPT = '0'
+  if (gitAuthor) {
+    env.GIT_AUTHOR_NAME = env.GIT_COMMITTER_NAME = gitAuthor.name
+    env.GIT_AUTHOR_EMAIL = env.GIT_COMMITTER_EMAIL = gitAuthor.email
+  }
   return env
 }
 
@@ -70,7 +78,7 @@ export function spawnAgent(options: AgentOptions): AgentProcess {
   const parser = new StreamJsonParser()
   const child = spawn(options.claudeBin, agentArgs(options), {
     cwd: options.cwd,
-    env: agentEnv(),
+    env: agentEnv(process.env, options.gitAuthor),
     // Its own process group, so the whole tree can be killed at once
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe']

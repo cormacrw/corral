@@ -14,3 +14,9 @@ describe('pm role defaults', () => {
     expect(pm).not.toContain('Read CORRAL.md, the wiki')
   })
 })
+
+describe('developer role defaults', () => {
+  it('leaves the git identity to the runner', () => {
+    expect(DEFAULT_ROLE_INSTRUCTIONS.developer).toContain('Don\'t set or change the git identity')
+  })
+})

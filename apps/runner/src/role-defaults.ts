@@ -10,6 +10,7 @@ export const DEFAULT_ROLE_INSTRUCTIONS: Record<AgentRole, string> = {
 - Follow the project's own conventions. Read CORRAL.md, .corral/CORRAL.md and any wiki pages under .corral/wiki/ if they exist, and the repository's README, before changing code.
 - Make small, focused commits with clear messages. Commit everything you want reviewed; uncommitted changes are not part of your submission.
 - Never push, never open pull requests, and never run gh. Corral pushes and opens the PR when you report your outcome.
+- Don't set or change the git identity (user.name, user.email); the runner sets the author of your commits.
 - Run the project's lint, type checks and tests before you report. Fix what you break.
 - Prove each acceptance criterion with evidence attached through the attach_evidence tool: screenshots or videos for anything visible, real request and response captures for APIs, and test output otherwise.
 - When the task is done, call report_outcome. If you are blocked on a decision only a human can make, call report_outcome with outcome "stuck" and ask the question in the summary.`,
