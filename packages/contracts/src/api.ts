@@ -148,6 +148,23 @@ export interface Comment {
   createdAt: string
 }
 
+// A human's message to a live developer or reviewer run
+// (POST /projects/:slug/runs/:runId/messages). Attachments are IDs of images
+// uploaded to the project; they're referenced at the end of the text.
+export const runMessageInput = z.object({
+  text: z.string().trim().min(1).max(20_000),
+  attachments: z.array(z.uuid()).max(10).default([])
+})
+export type RunMessageInput = z.infer<typeof runMessageInput>
+
+// 202 from POST /projects/:slug/runs/:runId/messages: the message went to the
+// runner and is kept as the comment. The runner may still turn it down
+// (run.message.rejected), which shows in the run's transcript.
+export interface RunMessageAccepted {
+  runId: string
+  comment: Comment
+}
+
 export interface AuditEntry {
   id: number
   projectId: string | null
@@ -399,6 +416,8 @@ export type ApiError =
   | { code: 'invalid_dependencies', problems: unknown }
   | { code: 'runner_offline' }
   | { code: 'corral_updating' }
+  // A message for a run that can't take one, with a reason a person can read
+  | { code: 'run_not_live', reason: string }
 
 export interface ApiErrorBody {
   error: ApiError

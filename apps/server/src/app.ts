@@ -16,6 +16,7 @@ import {
   patchProjectInput,
   patchTaskInput,
   planMessageInput,
+  runMessageInput,
   SSE_HEARTBEAT_MS,
   startPlanSessionInput,
   taskListQuery,
@@ -453,6 +454,13 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     .post('/runs/:id/stop', async (c) => {
       await orchestrator.stopRun(c.req.param('id'), actor)
       return c.json(await getRun(db, c.req.param('id')))
+    })
+
+    // A human's message to a live developer or reviewer run, kept as their
+    // comment on the task. 409 run_not_live when no runner holds the run.
+    .post('/projects/:slug/runs/:runId/messages', validate('json', runMessageInput), async (c) => {
+      const project = await findProjectBySlug(db, c.req.param('slug'))
+      return c.json(await orchestrator.messageRun(project.id, c.req.param('runId'), c.req.valid('json'), actor), 202)
     })
 
     .get('/events', c => streamSSE(c, async (stream) => {
