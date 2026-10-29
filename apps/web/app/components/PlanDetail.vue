@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Plan, Task } from '@corral/contracts'
 import { api } from '~/composables/useApi'
-import { PLAN_STATUS, PRIORITY } from '~/utils/labels'
+import { EPIC_REVIEW_MODE, PLAN_STATUS, PRIORITY } from '~/utils/labels'
 
 // The session's latest plan, docked in the flyout (design/plan.md). Each
 // revision replaces it here rather than adding another card to the chat.
@@ -26,7 +26,7 @@ const toBacklog = computed(() => kept.value.length > 0 && kept.value.every(t => 
 // listed last, under Other tasks (just Tasks when the plan has no epics).
 const groups = computed(() => {
   const planned = new Set(props.plan.epics.map(e => e.id))
-  const other = { key: '', id: '', title: props.plan.epics.length > 0 ? 'Other tasks' : 'Tasks', dependsOn: [] }
+  const other = { key: '', id: '', title: props.plan.epics.length > 0 ? 'Other tasks' : 'Tasks', dependsOn: [], reviewMode: null }
   return [...props.plan.epics, other].map((epic) => {
     const own = tasks.value.filter(t => epic.id ? t.epicId === epic.id : !t.epicId || !planned.has(t.epicId))
     return { ...epic, tasks: own }
@@ -140,7 +140,9 @@ watch(() => props.plan.id, () => {
               After: {{ group.dependsOn.map(e => e.title).join(', ') }}
             </p>
             <p class="text-xs text-muted">
-              {{ group.tasks.length }} tasks
+              {{ group.tasks.length }} tasks<template v-if="group.reviewMode">
+                · <span :title="EPIC_REVIEW_MODE[group.reviewMode].description">Review: {{ EPIC_REVIEW_MODE[group.reviewMode].label }}</span>
+              </template>
             </p>
           </div>
           <UTabs

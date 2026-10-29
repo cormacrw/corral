@@ -1,5 +1,6 @@
 import { checkEpicDependencies, type EpicDependencyProblem, type EpicDependencyTask } from './epic-dependencies.ts'
 import { checkDependencies, type DependencyProblem } from './dependencies.ts'
+import type { EpicReviewMode } from './project.ts'
 import type { TaskStatus } from './status.ts'
 import type { TaskPriority, TaskType } from './task.ts'
 
@@ -11,6 +12,9 @@ export interface ProposedEpic {
   title: string
   summary: string
   dependsOn?: string[] | undefined
+  // How its tasks reach the target branch (D23); the project's default
+  // when left out
+  reviewMode?: EpicReviewMode | undefined
 }
 
 export interface ProposedTask {

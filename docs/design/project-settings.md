@@ -28,6 +28,7 @@ The page scrolls, in a column up to 880px wide.
 |---|---|---|
 | Repository | A `bg-muted` panel with the branch icon, `github.com/owner/name` in mono, "Cloned on the runner · fetched 2 minutes ago", and **Change** | **Change** opens the same repo picker as onboarding, inline below the panel, and its label becomes **Done**. The current repo is selected. Repos used by other projects show "Used by {project}" and are disabled; read-only repos are disabled too. Picking a different repo shows a `warning` note: "Saving stops running work on this project, reruns the setup checks against {repo}, and keeps existing tasks. Open PRs on the old repository are left as they are." It only takes effect on Save |
 | Default branch | `USelectMenu` | "Agents branch from here and merge back into it." |
+| Epic review mode | `USelectMenu`: Epic PR, Each task, Direct | "For new epics a plan doesn't set a mode for", followed by the chosen mode's description. The default for each new epic's review mode (D23); existing epics keep theirs |
 | Merge method | `USelectMenu`: Squash and merge, Merge commit, Rebase and merge | |
 | Required checks | Toggle chips (`aria-pressed`): Lint, Typecheck, Tests, Build | "With no checks, unflagged tasks merge on the reviewer's approval alone." |
 
@@ -48,7 +49,7 @@ A card with an `error`-tinted border.
 
 ## Data
 
-- **Project:** name, thumbnail (colour or image), prefix, GitHub remote, default branch, merge method, required checks, paused, human-review default, review-round cap, failed-run cap.
+- **Project:** name, thumbnail (colour or image), prefix, GitHub remote, default branch, default epic review mode, merge method, required checks, paused, human-review default, review-round cap, failed-run cap.
 - **Writes:** a single `PATCH` on Save. Pause is its own call.
 - **Remove:** `DELETE /api/projects/:slug` with `{ "confirm": "<project name>" }`; anything else is a 400. The server pauses the project, stops its queued and running runs and releases their leases, then deletes the project with its tasks, epics, plans, plan sessions and runs in one transaction. It makes no GitHub call. Clients get a `project.deleted` event. The runner is asked to remove each worked task's worktrees (keeping any with uncommitted changes); it has no hook yet for removing the repository's clone, so that stays on disk.
 

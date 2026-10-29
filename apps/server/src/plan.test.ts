@@ -449,6 +449,40 @@ describe('plan sessions', () => {
     await endTurn(job, 'Proposed.')
   })
 
+  it('stores each epic\'s review mode from the plan or the project\'s default, and rejects an unknown one (D23)', async () => {
+    const project = await t.createProject()
+    expect(project.epicReviewModeDefault).toBe('epic')
+    await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+    const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan login' }).then(r => r.json()) as PlanSessionDetail
+    const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
+    const propose = (epicsIn: object[]) => runner.call(job.runId, job.leaseEpoch, 'propose_plan', {
+      ...plan([]),
+      epics: epicsIn,
+      tasks: epicsIn.map((_, i) => ({ key: `t${i + 1}`, epic: `e${i + 1}`, title: `Task ${i + 1}`, description: 'Build it', type: 'task', acceptanceCriteria: ['It works'] }))
+    })
+
+    const bad = await propose([{ key: 'e1', title: 'Login', reviewMode: 'later' }])
+    expect(bad).toMatchObject({ ok: false, error: expect.stringContaining('reviewMode must be one of epic, each_task, direct') })
+    expect(await t.db.select().from(epics).where(eq(epics.projectId, project.id))).toEqual([])
+
+    expect(await propose([{ key: 'e1', title: 'Login' }, { key: 'e2', title: 'Logout', reviewMode: 'each_task' }])).toMatchObject({ ok: true })
+    const [v1] = (await session(created.id)).plans
+    expect(v1!.epics.map(e => [e.title, e.reviewMode])).toEqual([['Login', 'epic'], ['Logout', 'each_task']])
+
+    // The next new epic takes the changed default; a revision that leaves
+    // the mode out keeps each existing epic's
+    expect((await t.request('PATCH', `/api/projects/${project.slug}`, { epicReviewModeDefault: 'direct' })).status).toBe(200)
+    expect(await propose([{ key: 'e1', title: 'Login' }, { key: 'e2', title: 'Logout' }, { key: 'e3', title: 'Reset' }])).toMatchObject({ ok: true })
+    const v2 = (await session(created.id)).plans[1]!
+    expect(v2.epics.map(e => [e.title, e.reviewMode])).toEqual([['Login', 'epic'], ['Logout', 'each_task'], ['Reset', 'direct']])
+
+    const approved = await t.request('POST', `/api/plan/plans/${v2.id}/approve`, { to: 'backlog' })
+    expect(approved.status).toBe(200)
+    const epic = await t.request('GET', `/api/epics/${v2.epics[1]!.id}`).then(r => r.json()) as EpicDetail
+    expect(epic).toMatchObject({ reviewMode: 'each_task', branch: null, prNumber: null, prHeadSha: null, reviewState: null })
+    await endTurn(job, 'Proposed.')
+  })
+
   it('accepts task, bug, spike and design in propose_plan and rejects the old area types (D19, D20)', async () => {
     const project = await t.createProject()
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
@@ -640,7 +674,7 @@ describe('plan sessions', () => {
     })
     expect(v2).toMatchObject({ ok: true, result: { tasks: [{ key: 't1', change: 'unchanged' }, { key: 't2', change: 'unchanged' }] } })
     const second = (await session(created.id)).plans[1]!
-    expect(second.epics).toEqual([{ key: 'e1', id: epic.id, title: 'Sign in', dependsOn: [] }])
+    expect(second.epics).toEqual([{ key: 'e1', id: epic.id, title: 'Sign in', reviewMode: 'epic', dependsOn: [] }])
     expect(second.tasks.map(x => x.epicId)).toEqual([epic.id, epic.id])
     await endTurn(job, 'Proposed.')
   })

@@ -1,5 +1,5 @@
 import { askQuestionInput, type AgentRuntime, type DraftSession, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type RunJob } from '@corral/contracts'
-import { checkPlan, checkPlanEpicDependencies, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, REVISABLE_STATUSES, requiresHumanReview, richTextToMarkdown, TASK_TYPES, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
+import { checkPlan, EPIC_REVIEW_MODES, checkPlanEpicDependencies, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, REVISABLE_STATUSES, requiresHumanReview, richTextToMarkdown, TASK_TYPES, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
@@ -52,7 +52,9 @@ const proposedPlan = z.object({
     key: z.string().trim().min(1),
     title: z.string().trim(),
     summary: z.string().trim().default(''),
-    dependsOn: z.array(z.string().trim()).optional()
+    dependsOn: z.array(z.string().trim()).optional(),
+    // The project's default when left out (D23)
+    reviewMode: z.enum(EPIC_REVIEW_MODES, { error: `reviewMode must be one of ${EPIC_REVIEW_MODES.join(', ')}` }).optional()
   })).default([]),
   tasks: z.array(proposedTask)
 }).transform((plan): ProposedPlan => {
@@ -371,8 +373,8 @@ export class PlanService {
         const epicRows = await db.select().from(epics).where(eq(epics.projectId, project.id))
         const epicDeps = await db.select().from(epicDependencies).innerJoin(epics, eq(epics.id, epicDependencies.epicId)).where(eq(epics.projectId, project.id))
         return {
-          project: { name: project.name, prefix: project.prefix, defaultBranch: project.defaultBranch },
-          epics: epicRows.map(e => ({ id: e.id, title: e.title, dependsOn: epicDeps.filter(d => d.epic_dependencies.epicId === e.id).map(d => d.epic_dependencies.dependsOnEpicId) })),
+          project: { name: project.name, prefix: project.prefix, defaultBranch: project.defaultBranch, epicReviewModeDefault: project.epicReviewModeDefault },
+          epics: epicRows.map(e => ({ id: e.id, title: e.title, reviewMode: e.reviewMode, dependsOn: epicDeps.filter(d => d.epic_dependencies.epicId === e.id).map(d => d.epic_dependencies.dependsOnEpicId) })),
           tasks: rows.map(t => ({
             ref: taskRef(project.prefix, t.number),
             title: t.title,
@@ -424,8 +426,11 @@ export class PlanService {
         return { ok: true, message: 'The question is shown to the human. Finish your turn; their answer arrives as the next message.' }
       }
 
-      case 'propose_plan':
-        return this.#propose(session, project, runId, proposedPlan.parse(input), actor)
+      case 'propose_plan': {
+        const parsed = proposedPlan.safeParse(input)
+        if (!parsed.success) throw new ToolError(`The plan was not saved: ${z.prettifyError(parsed.error)}`)
+        return this.#propose(session, project, runId, parsed.data, actor)
+      }
 
       // The human's approval, given in chat and carried out by the PM. It's
       // recorded as the human's, via this run, and only counts if they wrote
@@ -499,11 +504,14 @@ export class PlanService {
       const epicIds = new Map<string, string>()
       for (const epic of proposed.epics) {
         const current = renamed ? [...previousEpics.values()][0] : previousEpics.get(epic.key)
+        // A revision that leaves the mode out keeps the epic's; a new epic
+        // without one takes the project's default (D23)
         if (current) {
-          await tx.update(epics).set({ title: epic.title, description: epic.summary, updatedAt: new Date() }).where(eq(epics.id, current))
+          await tx.update(epics).set({ title: epic.title, description: epic.summary, ...(epic.reviewMode && { reviewMode: epic.reviewMode }), updatedAt: new Date() }).where(eq(epics.id, current))
           epicIds.set(epic.key, current)
         } else {
-          const [row] = await tx.insert(epics).values({ projectId: project.id, title: epic.title, description: epic.summary, createdBy: actor }).returning()
+          const reviewMode = epic.reviewMode ?? project.epicReviewModeDefault
+          const [row] = await tx.insert(epics).values({ projectId: project.id, title: epic.title, description: epic.summary, reviewMode, createdBy: actor }).returning()
           epicIds.set(epic.key, row!.id)
         }
       }
@@ -748,7 +756,7 @@ export class PlanService {
           .innerJoin(tasks, eq(tasks.id, taskDependencies.dependsOnId)).where(inArray(taskDependencies.taskId, ids))
       : []
     const keyed = await this.#epicsOf(row)
-    const epicRows = keyed.size > 0 ? await db.select({ id: epics.id, title: epics.title }).from(epics).where(inArray(epics.id, [...keyed.values()])) : []
+    const epicRows = keyed.size > 0 ? await db.select({ id: epics.id, title: epics.title, reviewMode: epics.reviewMode }).from(epics).where(inArray(epics.id, [...keyed.values()])) : []
     const snapshots = await db.select().from(planEpics).where(eq(planEpics.planId, row.id))
     const allEpics = await db.select({ id: epics.id, title: epics.title }).from(epics).where(eq(epics.projectId, row.projectId))
     const dependenciesOf = (key: string) => (snapshots.find(e => e.key === key)?.dependsOn ?? []).map((dep) => {
@@ -765,7 +773,7 @@ export class PlanService {
       summary: row.summary,
       status: row.status,
       approvedAt: row.approvedAt?.toISOString() ?? null,
-      epics: [...keyed].flatMap(([key, id]) => epicRows.filter(e => e.id === id).map(e => ({ key, id, title: e.title, dependsOn: dependenciesOf(key) }))),
+      epics: [...keyed].flatMap(([key, id]) => epicRows.filter(e => e.id === id).map(e => ({ key, id, title: e.title, reviewMode: e.reviewMode, dependsOn: dependenciesOf(key) }))),
       // A revised task shows the plan's staged edits, not what it has now
       tasks: items.map(({ item, task }) => ({
         key: item.key,

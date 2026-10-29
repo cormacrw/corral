@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { PatchProjectInput, Project } from '@corral/contracts'
 import { api, ApiError } from '~/composables/useApi'
-import { initials, THUMBNAIL_COLORS } from '~/utils/labels'
+import { EPIC_REVIEW_MODE, initials, THUMBNAIL_COLORS } from '~/utils/labels'
 
 // Project settings (design/project-settings.md): one PATCH on Save; pause is its own switch.
 // On mobile the sections stack under the mobile header, which holds Save (design/mobile.md).
@@ -14,10 +14,10 @@ const project = computed(() => live.state.value.projects.find(p => p.slug === sl
 useSeoMeta({ title: () => `Settings · ${project.value?.name ?? ''} · Corral` })
 
 const form = reactive<Required<Omit<PatchProjectInput, 'paused'>>>({
-  name: '', prefix: '', thumbnailColor: null, defaultBranch: 'main', mergeMethod: 'squash', requiredChecks: [], humanReviewDefault: false, reviewRoundCap: 5, failedRunCap: 3
+  name: '', prefix: '', thumbnailColor: null, defaultBranch: 'main', mergeMethod: 'squash', requiredChecks: [], humanReviewDefault: false, epicReviewModeDefault: 'epic', reviewRoundCap: 5, failedRunCap: 3
 })
 function fill(p: Project) {
-  Object.assign(form, { name: p.name, prefix: p.prefix, thumbnailColor: p.thumbnailColor, defaultBranch: p.defaultBranch, mergeMethod: p.mergeMethod, requiredChecks: [...p.requiredChecks], humanReviewDefault: p.humanReviewDefault, reviewRoundCap: p.reviewRoundCap, failedRunCap: p.failedRunCap })
+  Object.assign(form, { name: p.name, prefix: p.prefix, thumbnailColor: p.thumbnailColor, defaultBranch: p.defaultBranch, mergeMethod: p.mergeMethod, requiredChecks: [...p.requiredChecks], humanReviewDefault: p.humanReviewDefault, epicReviewModeDefault: p.epicReviewModeDefault, reviewRoundCap: p.reviewRoundCap, failedRunCap: p.failedRunCap })
 }
 watch(project, (p) => {
   if (p) fill(p)
@@ -27,9 +27,10 @@ const prefixValid = computed(() => /^[A-Z]{2,5}$/.test(form.prefix))
 const dirty = computed(() => project.value
   ? JSON.stringify(form) !== JSON.stringify({
     name: project.value.name, prefix: project.value.prefix, thumbnailColor: project.value.thumbnailColor, defaultBranch: project.value.defaultBranch, mergeMethod: project.value.mergeMethod,
-    requiredChecks: project.value.requiredChecks, humanReviewDefault: project.value.humanReviewDefault, reviewRoundCap: project.value.reviewRoundCap, failedRunCap: project.value.failedRunCap
+    requiredChecks: project.value.requiredChecks, humanReviewDefault: project.value.humanReviewDefault, epicReviewModeDefault: project.value.epicReviewModeDefault, reviewRoundCap: project.value.reviewRoundCap, failedRunCap: project.value.failedRunCap
   })
   : false)
+const epicReviewModes = Object.entries(EPIC_REVIEW_MODE).map(([value, mode]) => ({ value, label: mode.label, description: mode.description }))
 const saving = ref(false)
 const saved = ref(false)
 const prefixError = ref('')
@@ -246,6 +247,24 @@ async function remove() {
             <UInput
               id="branch"
               v-model="form.defaultBranch"
+            />
+          </div>
+          <div class="grid gap-2 sm:grid-cols-[1fr_320px]">
+            <div>
+              <label
+                for="epic-review-mode"
+                class="font-medium"
+              >Epic review mode</label>
+              <p class="text-xs text-muted">
+                For new epics a plan doesn't set a mode for. {{ EPIC_REVIEW_MODE[form.epicReviewModeDefault].description }}.
+              </p>
+            </div>
+            <USelectMenu
+              id="epic-review-mode"
+              v-model="form.epicReviewModeDefault"
+              :items="epicReviewModes"
+              value-key="value"
+              :search-input="false"
             />
           </div>
           <div class="grid gap-2 sm:grid-cols-[1fr_320px]">

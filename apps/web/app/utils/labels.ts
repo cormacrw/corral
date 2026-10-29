@@ -1,5 +1,5 @@
 import { AGENT_RUNTIMES, type Agent, type AgentRuntime, type CliStatus, type InboxItem, type PlanStatus, type Project, type Run, type Task } from '@corral/contracts'
-import type { AgentRole, DesignVersionStatus, RunOutcome, RunState, TaskPriority, TaskStatus } from '@corral/core'
+import type { AgentRole, DesignVersionStatus, EpicReviewMode, RunOutcome, RunState, TaskPriority, TaskStatus } from '@corral/core'
 
 export type Color = 'primary' | 'secondary' | 'success' | 'info' | 'warning' | 'error' | 'neutral'
 
@@ -31,6 +31,13 @@ export const PLAN_STATUS: Record<PlanStatus, { label: string, color: Color }> = 
   approved: { label: 'Approved', color: 'success' },
   superseded: { label: 'Superseded', color: 'neutral' },
   discarded: { label: 'Discarded', color: 'neutral' }
+}
+
+// An epic's review mode (D23)
+export const EPIC_REVIEW_MODE: Record<EpicReviewMode, { label: string, description: string }> = {
+  epic: { label: 'Epic PR', description: 'Tasks merge into an epic branch on approval; you review the epic PR' },
+  each_task: { label: 'Each task', description: 'You review every task, then the epic PR' },
+  direct: { label: 'Direct', description: 'Each task merges straight into the target branch' }
 }
 
 export const PRIORITY: Record<TaskPriority, { label: string, color: Color }> = {
