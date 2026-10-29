@@ -74,6 +74,19 @@ describe('orchestrator', () => {
     await pause(project)
   })
 
+  it('lets the developer read an attachment from its own project, but not another project\'s', async () => {
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
+    const upload = (slug: string) => t.request('POST', `/api/projects/${slug}/attachments`, new Blob([png], { type: 'image/png' })).then(r => r.json()) as Promise<{ id: string }>
+    const { project, job } = await assigned()
+    const own = await upload(project.slug)
+    const foreign = await upload((await t.createProject()).slug)
+    expect(await runner.call(job.runId, job.leaseEpoch, 'get_attachment', { attachmentId: own.id }))
+      .toMatchObject({ ok: true, result: { id: own.id, fileName: 'image.png', mimeType: 'image/png', images: [{ mimeType: 'image/png', dataBase64: png.toString('base64') }] } })
+    expect(await runner.call(job.runId, job.leaseEpoch, 'get_attachment', { attachmentId: foreign.id }))
+      .toMatchObject({ ok: false, error: `${foreign.id} isn't an attachment in this project` })
+    await pause(project)
+  })
+
   it('renews the lease from heartbeats and marks the run running on run.started', async () => {
     const { project, task, job } = await assigned()
     const before = (await taskRow(task.id)).leaseExpiresAt!

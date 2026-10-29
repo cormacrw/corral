@@ -3,6 +3,7 @@ import { schema } from '@corral/db'
 import { asc, eq } from 'drizzle-orm'
 import { randomBytes } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { readProjectAttachment } from './attachments.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 
 describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
@@ -138,6 +139,18 @@ describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
       expect(rows[0]!.createdBy).toEqual(t.actor)
       expect(t.blobs.size).toBe(blobsBefore + 1)
       expect(await t.blobs.get(rows[0]!.blob)).toEqual(image)
+    })
+
+    it('reads an attachment for the agents only within its own project', async () => {
+      const project = await t.createProject()
+      const other = await t.createProject()
+      const own = await upload(project.slug, png, 'image/png', '?name=login.png').then(r => r.json()) as Attachment
+      const foreign = await upload(other.slug, png, 'image/png').then(r => r.json()) as Attachment
+      expect(await readProjectAttachment(t.db, t.blobs, project.id, own.id)).toEqual({ id: own.id, fileName: 'login.png', mimeType: 'image/png', byteSize: png.byteLength, data: png })
+      expect(await readProjectAttachment(t.db, t.blobs, project.id, own.id.toUpperCase())).toMatchObject({ id: own.id })
+      expect(await readProjectAttachment(t.db, t.blobs, project.id, foreign.id)).toBeNull()
+      expect(await readProjectAttachment(t.db, t.blobs, project.id, '00000000-0000-4000-8000-000000000000')).toBeNull()
+      expect(await readProjectAttachment(t.db, t.blobs, project.id, 'not-an-id')).toBeNull()
     })
 
     it('returns 404 for unknown projects and attachments', async () => {

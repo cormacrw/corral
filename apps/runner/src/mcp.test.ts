@@ -11,11 +11,20 @@ describe('ToolServer', () => {
   beforeAll(() => tools.start())
   afterAll(() => tools.close())
 
+  // A 1×1 PNG, as the server returns it for a valid attachment id
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+  const attachmentId = '0b7c2a8e-6f1d-4c3a-9e5b-2d4f6a8c0e1f'
+
   async function connect(role: AgentRole) {
     const calls: { tool: AgentTool, input: Record<string, unknown> }[] = []
     const secret = `test-${role}`
     tools.register(secret, role, async (tool, input) => {
       calls.push({ tool, input })
+      if (tool === 'get_attachment') {
+        return input.attachmentId === attachmentId
+          ? { ok: true, result: { id: attachmentId, fileName: 'login.png', mimeType: 'image/png', byteSize: 70, images: [{ mimeType: 'image/png', dataBase64: png }] } }
+          : { ok: false, error: `${String(input.attachmentId)} isn't an attachment in this project` }
+      }
       return { ok: true, result: { ref: input.taskRef ?? 'own task' } }
     })
     const client = new Client({ name: 'test', version: '1' })
@@ -61,6 +70,26 @@ describe('ToolServer', () => {
     expect(getTask.inputSchema.required ?? []).toEqual([])
     await client.callTool({ name: 'get_task', arguments: {} })
     expect(calls).toEqual([{ tool: 'get_task', input: {} }])
+    await client.close()
+  })
+
+  it.each(['pm', 'developer', 'reviewer'] as const)('gives the %s get_attachment, returning the image with its file name and mime type', async (role) => {
+    const { client, calls } = await connect(role)
+    const tool = (await client.listTools()).tools.find(t => t.name === 'get_attachment')!
+    expect(tool.inputSchema).toMatchObject({ properties: { attachmentId: { type: 'string' } }, required: ['attachmentId'] })
+
+    const result = await client.callTool({ name: 'get_attachment', arguments: { attachmentId } })
+    expect(calls).toEqual([{ tool: 'get_attachment', input: { attachmentId } }])
+    expect(result.isError).toBeFalsy()
+    expect(result.content).toEqual([
+      { type: 'text', text: JSON.stringify({ id: attachmentId, fileName: 'login.png', mimeType: 'image/png', byteSize: 70 }, null, 2) },
+      { type: 'image', data: png, mimeType: 'image/png' }
+    ])
+
+    // An id the server refuses (unknown, or another project's) is a tool error with no image
+    const refused = await client.callTool({ name: 'get_attachment', arguments: { attachmentId: '00000000-0000-4000-8000-000000000000' } })
+    expect(refused.isError).toBe(true)
+    expect(refused.content).toEqual([{ type: 'text', text: '00000000-0000-4000-8000-000000000000 isn\'t an attachment in this project' }])
     await client.close()
   })
 })

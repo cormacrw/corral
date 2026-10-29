@@ -1,7 +1,7 @@
 import { ATTACHMENT_MAX_BYTES, type Attachment, type AttachmentContentType } from '@corral/contracts'
 import { attachmentUrl, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import type { BlobStore } from './blob-store.ts'
 import { ApiFailure } from './errors.ts'
 import { declaredImageType, hasImageSignature } from './images.ts'
@@ -55,4 +55,15 @@ export async function readAttachment(db: Executor, blobs: BlobStore, id: string)
   if (!row || !declaredImageType(row.type)) return null
   const data = await blobs.get(row.blob)
   return data ? { data, type: row.type } : null
+}
+
+// An attachment with its bytes, only if it belongs to the project: for the
+// agents' get_attachment tool, which must not read across projects
+export async function readProjectAttachment(db: Executor, blobs: BlobStore, projectId: string, id: string): Promise<{ id: string, fileName: string, mimeType: AttachmentContentType, byteSize: number, data: Uint8Array } | null> {
+  if (!UUID.test(id)) return null
+  const [row] = await db.select().from(attachments).where(and(eq(attachments.id, id), eq(attachments.projectId, projectId)))
+  const mimeType = row ? declaredImageType(row.mimeType) : null
+  if (!row || !mimeType) return null
+  const data = await blobs.get(row.blob)
+  return data ? { id: row.id, fileName: row.fileName, mimeType, byteSize: row.byteSize, data } : null
 }

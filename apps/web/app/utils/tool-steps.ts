@@ -151,6 +151,8 @@ function describe(rawTool: string, input: unknown): Pick<ToolStep, 'kind' | 'ver
       return { kind: 'phrase', verb: 'Attached evidence', target: str('note') || relative(str('path')) }
     case 'get_evidence':
       return { kind: 'phrase', verb: 'Checked the evidence', target: str('evidenceId') }
+    case 'get_attachment':
+      return { kind: 'phrase', verb: 'Looked at an attachment', target: str('attachmentId') }
     case 'report_outcome':
       return { kind: 'phrase', verb: 'Reported the outcome', target: str('outcome') }
     case 'list_tasks':
