@@ -5,8 +5,9 @@ import { api, ApiError } from '~/composables/useApi'
 import { PRIORITY, STATUS } from '~/utils/labels'
 
 // An epic: its title, description and progress, and the dependency tree of
-// its tasks. Docked in the flyout, or as a page with room for a big tree.
-const props = defineProps<{ epicId: string, mode: 'flyout' | 'page' }>()
+// its tasks. Docked in the flyout, as a page with room for a big tree, or
+// as the mobile screen, where tasks open as pages (design/mobile.md).
+const props = defineProps<{ epicId: string, mode: 'flyout' | 'page' | 'mobile' }>()
 const emit = defineEmits<{ close: [] }>()
 
 const live = useLive()
@@ -82,6 +83,8 @@ const byStatus = computed(() => {
   return (Object.keys(STATUS) as TaskStatus[]).filter(s => counts.has(s)).map(s => ({ status: s, count: counts.get(s)! }))
 })
 
+// Mobile has no flyout, so a task opens as its own page
+const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/${ref}`) : flyout.open(ref)
 const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/${props.epicId}`)
 </script>
 
@@ -136,6 +139,41 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
             @click="emit('close')"
           />
         </div>
+      </template>
+      <template v-else-if="props.mode === 'mobile'">
+        <UButton
+          icon="i-lucide-arrow-left"
+          variant="ghost"
+          color="neutral"
+          aria-label="Back"
+          class="-ms-2"
+          @click="emit('close')"
+        />
+        <div class="min-w-0 flex-1 leading-tight">
+          <div class="flex items-center gap-1.5 text-xs text-muted">
+            <UBadge
+              label="Epic"
+              color="neutral"
+              variant="subtle"
+              size="sm"
+            />
+            <span class="truncate">{{ project?.name }}</span>
+          </div>
+          <h1 class="flex items-center gap-2 truncate text-base font-semibold text-highlighted">
+            {{ epic?.title ?? 'Epic' }}
+            <span
+              v-if="saved"
+              class="text-xs font-normal text-success"
+            >✓ Saved</span>
+          </h1>
+        </div>
+        <UButton
+          icon="i-lucide-link"
+          variant="ghost"
+          color="neutral"
+          aria-label="Copy link"
+          @click="copyLink"
+        />
       </template>
       <template v-else>
         <UBreadcrumb :items="[{ label: project?.name ?? 'Project', to: project ? `/projects/${project.slug}` : '/' }, { label: epic?.title ?? 'Epic' }]" />
@@ -258,9 +296,10 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
         <UTabs
           v-model="tab"
           :items="[{ label: `Tasks (${epic.tasks.length})`, value: 'tasks', icon: 'i-lucide-list' }, { label: 'Graph', value: 'graph', icon: 'i-lucide-network' }]"
-          variant="link"
-          size="sm"
+          :variant="props.mode === 'mobile' ? 'pill' : 'link'"
+          :size="props.mode === 'mobile' ? 'md' : 'sm'"
           :content="false"
+          :ui="props.mode === 'mobile' ? { indicator: 'bg-default shadow-xs', trigger: 'data-[state=active]:text-highlighted' } : undefined"
           :class="props.mode === 'page' && 'px-4 pt-2'"
         />
         <p
@@ -280,8 +319,8 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
             <button
               type="button"
               :aria-pressed="flyout.ref.value === task.ref"
-              :class="['flex w-full items-center gap-2 rounded-md px-2 py-2 text-start text-sm hover:bg-elevated', flyout.ref.value === task.ref && 'bg-elevated']"
-              @click="flyout.open(task.ref)"
+              :class="['flex w-full items-center gap-2 rounded-md px-2 text-start text-sm hover:bg-elevated', props.mode === 'mobile' ? 'min-h-11 py-2.5' : 'py-2', flyout.ref.value === task.ref && 'bg-elevated']"
+              @click="openTask(task.ref)"
             >
               <span class="w-14 shrink-0 font-mono text-xs text-muted">{{ task.ref }}</span>
               <span class="min-w-0 flex-1 truncate">{{ task.title }}</span>
@@ -310,7 +349,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
             :selected="flyout.ref.value"
             :minimap="props.mode === 'page'"
             :direction="props.mode === 'page' ? 'right' : 'down'"
-            @open="flyout.open($event)"
+            @open="openTask($event)"
           />
         </div>
       </section>

@@ -1,12 +1,13 @@
 # Task flyout and task page
 
 **Canvas frames:** `Task flyout · docked, stacked`, `Task page · split`
-**Component:** one `TaskDetail` component with two modes.
+**Component:** one `TaskDetail` component with three modes.
 
 | Mode | Where | Layout |
 |---|---|---|
 | `flyout` | Docked on the right of Inbox, Plan, Board, Backlog and Agent pages | Stacked, one column, resizable 360–960px (default 420px) |
 | `page` | `/tasks/:ref`, e.g. `/tasks/COR-29` | Split: content on the left, a 260px properties rail on the right, centred up to 1200px |
+| `mobile` | `/tasks/:ref` under the mobile layout | A full page with Details and Criteria and activity tabs, see [mobile.md](mobile.md#task-and-epic) |
 
 The flyout opens with `?task=COR-29` on the current page's URL, so it survives reloads and links can be shared. Pages decide what opens it (a row click, a card click, a chip link). Clicking the same row again closes it. Opening a task or epic adds a browser history entry, so Back returns to whatever the flyout showed before (an epic, after opening one of its tasks). The Inbox, which opens the selected item's task by itself, replaces the entry instead. Closing the flyout doesn't add one.
 

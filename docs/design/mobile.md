@@ -54,6 +54,14 @@ Built from the **Agents**, **Agent · Atlas** and **Agent · live run** frames. 
 - **Agent** (`/agents/:name`): the header gets a back arrow to Agents and an **Agent settings** button in place of Settings. The avatar, name and status, the role's stat tiles (they scroll sideways), the facts line, the **Current run** card and **Previous runs**. Each run opens its transcript. Mobile doesn't auto-select a run here, unlike the web.
 - **Run** (`/agents/:name/:runId`): full screen, without the shell's header or tab bar. Its own header has a back arrow to the agent, "{Agent} · Run #n", the task, **Open task** (goes to the task page), the outcome badge, elapsed time and tokens, and **Stop run** while live. The body is `RunTranscript`, thinking included, streamed while live. The footer is the same note as the web's (mid-run messages aren't supported yet), padded for the home indicator.
 
+## Task and epic
+
+- **Task** (`/tasks/<ref>`, frames *Task · details* and *Task · criteria and activity*): `TaskDetail` in `mobile` mode, a full page with no shell header or tab bar. Its header has a back arrow, the epic (linking to it) over the ref, copy link, and a **⋯** menu with **Delete task**. Under the title, a "{agent} is working · Watch" strip while an agent holds the task, then two tabs:
+  - **Details:** the property rows (label and value, divided), Depends on, and the description.
+  - **Criteria and activity:** acceptance criteria, then Activity, Evidence and History with the composer. `?evidence=1` opens this tab on Evidence.
+- **Epic** (`/epics/<id>`, frame *Epic*): `EpicDetail` in `mobile` mode with its own header (back, an Epic badge and the project over the title, copy link) and the tab bar. The body is stacked like the flyout, with Tasks and Graph as a segmented control. Tapping a task, in the list or the graph, opens its page.
+- **No flyout on mobile:** `useTaskFlyout().open()` and `openEpic()` go to `/tasks/<ref>` and `/epics/<id>` instead, so every place that opens a task (Board, Backlog, Plan, Agents) gets the page. Opening with `replace` (a page following its selection, like the Inbox) still sets the query.
+
 ## Projects
 
 Built from the frames **Projects**, **Project overview** and **Project settings**. The behaviour is [project-overview.md](project-overview.md) and [project-settings.md](project-settings.md).
@@ -81,7 +89,6 @@ Frames in the export, grouped by the task that will build them:
 | Task | Frames |
 |---|---|
 | Home | Home |
-| Task and epic | Task COR-35, Task COR-35 · Activity, Epic · Billing |
 | Settings | Settings, Settings · Runner |
 | Search | Search |
 | Onboarding | Setup · Your name, Setup · Repository, Setup · Agent CLIs, Setup · Name agents |
