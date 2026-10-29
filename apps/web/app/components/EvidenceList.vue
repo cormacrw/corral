@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type { Evidence, Review, Task } from '@corral/contracts'
+import { computed, ref, watch } from 'vue'
+import EvidenceGroup from './EvidenceGroup.vue'
 import { timeAgo } from '~/utils/labels'
 
 // Criteria next to their evidence (PRD §7.7, design/inbox.md), with the
@@ -8,9 +10,6 @@ const props = defineProps<{ evidence: Evidence[], criteria: Task['acceptanceCrit
 const open = ref<Evidence | null>(null)
 
 const latest = computed(() => props.reviews[0] ?? null)
-// Notes have no file (D21): their text is shown in place
-const byCriterion = (id: string | null) => props.evidence.filter(e => e.criterionId === id && e.url !== null)
-const notesFor = (id: string | null) => props.evidence.filter(e => e.criterionId === id && e.url === null)
 const note = (id: string) => latest.value?.criteria.find(c => c.criterionId === id)?.note ?? ''
 const isImage = (e: Evidence) => !!e.contentType?.startsWith('image/')
 const isVideo = (e: Evidence) => !!e.contentType?.startsWith('video/')
@@ -57,80 +56,22 @@ watch(open, async (item) => {
           />
         </div>
       </div>
-      <div
-        v-if="byCriterion(criterion.id).length > 0"
-        class="mt-2 flex flex-wrap gap-2"
-      >
-        <button
-          v-for="item in byCriterion(criterion.id)"
-          :key="item.id"
-          type="button"
-          class="flex max-w-56 items-center gap-2 rounded-md border border-default p-1.5 text-start text-xs hover:bg-elevated"
-          @click="open = item"
-        >
-          <img
-            v-if="isImage(item)"
-            :src="item.url ?? undefined"
-            :alt="item.note || item.fileName || undefined"
-            class="size-12 shrink-0 rounded object-cover"
-          >
-          <UIcon
-            v-else
-            :name="isVideo(item) ? 'i-lucide-video' : 'i-lucide-file-text'"
-            class="size-6 shrink-0 text-muted"
-          />
-          <span class="min-w-0">
-            <span class="block truncate font-medium">{{ item.fileName }}</span>
-            <span class="block truncate text-muted">{{ item.kind.replace('_', ' ') }} · round {{ item.round + 1 }}</span>
-          </span>
-        </button>
-      </div>
-      <p
-        v-else-if="notesFor(criterion.id).length === 0"
-        class="mt-2 text-xs text-dimmed"
-      >
-        No evidence attached.
-      </p>
-      <div
-        v-for="item in notesFor(criterion.id)"
-        :key="item.id"
-        class="mt-2 rounded-md border border-default bg-muted p-2 text-xs"
-      >
-        <p class="mb-1 text-muted">
-          Note · round {{ item.round + 1 }}
-        </p>
-        <MarkdownText :text="item.note" />
-      </div>
+      <EvidenceGroup
+        :evidence="props.evidence.filter(e => e.criterionId === criterion.id)"
+        @open="open = $event"
+      />
     </div>
     <div
-      v-if="byCriterion(null).length > 0 || notesFor(null).length > 0"
+      v-if="props.evidence.some(e => e.criterionId === null)"
       class="rounded-lg border border-default p-3"
     >
       <p class="mb-2 text-sm font-medium">
         Task as a whole
       </p>
-      <div
-        v-for="item in notesFor(null)"
-        :key="item.id"
-        class="mb-2 rounded-md border border-default bg-muted p-2 text-xs"
-      >
-        <MarkdownText :text="item.note" />
-      </div>
-      <div class="flex flex-wrap gap-2">
-        <button
-          v-for="item in byCriterion(null)"
-          :key="item.id"
-          type="button"
-          class="flex items-center gap-2 rounded-md border border-default p-1.5 text-xs hover:bg-elevated"
-          @click="open = item"
-        >
-          <UIcon
-            name="i-lucide-file-text"
-            class="size-5 text-muted"
-          />
-          {{ item.fileName }}
-        </button>
-      </div>
+      <EvidenceGroup
+        :evidence="props.evidence.filter(e => e.criterionId === null)"
+        @open="open = $event"
+      />
     </div>
     <p
       v-if="props.criteria.length === 0 && props.evidence.length === 0"
