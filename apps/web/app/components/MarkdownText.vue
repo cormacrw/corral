@@ -2,13 +2,15 @@
 import type { Token, Tokens } from 'marked'
 import { attachmentIdFromSrc, attachmentUrl } from '@corral/core'
 import { marked } from 'marked'
-import type { VNode } from 'vue'
+import { h, ref, type VNode } from 'vue'
 
 // Agents write markdown (PM replies, transcripts, comments, summaries).
 // Rendered from marked's tokens into Vue nodes rather than v-html, so agent
 // output can never inject markup. Images show only when they're attachments
 // (![name](attachment:<id>)), as thumbnails that open full size.
-// `breaks` keeps single newlines, for text a person typed into a composer
+// `breaks` keeps single newlines, for text a person typed into a composer.
+// Long paths, URLs and inline code wrap anywhere, so they never widen the
+// thread on a phone; code blocks and tables scroll in their own box instead.
 const props = defineProps<{ text: string, breaks?: boolean }>()
 const lightbox = ref<{ src: string, alt: string } | null>(null)
 
@@ -30,7 +32,7 @@ function blocks(tokens: Token[]): VNode[] {
       case 'text':
         return [h('p', token.tokens ? inline(token.tokens) : (token as Tokens.Text).text)]
       case 'code':
-        return [h('pre', { class: 'overflow-x-auto rounded-md border border-muted bg-muted px-3 py-2 font-mono text-xs/5 whitespace-pre' }, h('code', (token as Tokens.Code).text))]
+        return [h('pre', { class: 'overflow-x-auto rounded-md border border-muted bg-muted px-3 py-2 font-mono text-xs/5 wrap-normal whitespace-pre' }, h('code', (token as Tokens.Code).text))]
       case 'blockquote':
         return [h('blockquote', { class: 'flex flex-col gap-2 border-s-4 border-accented ps-3 text-muted' }, blocks(token.tokens ?? []))]
       case 'list': {
@@ -42,7 +44,7 @@ function blocks(tokens: Token[]): VNode[] {
       }
       case 'table': {
         const table = token as Tokens.Table
-        const cell = (c: Tokens.TableCell, header: boolean) => h(header ? 'th' : 'td', { class: ['border border-accented px-2 py-1 text-start', header && 'bg-accented/50 font-medium'] }, inline(c.tokens))
+        const cell = (c: Tokens.TableCell, header: boolean) => h(header ? 'th' : 'td', { class: ['min-w-24 border border-accented px-2 py-1 text-start wrap-anywhere', header && 'bg-accented/50 font-medium'] }, inline(c.tokens))
         return [h('div', { class: 'overflow-x-auto' }, h('table', { class: 'border-collapse text-xs' }, [
           h('thead', h('tr', table.header.map(c => cell(c, true)))),
           h('tbody', table.rows.map(row => h('tr', row.map(c => cell(c, false)))))
@@ -67,7 +69,7 @@ function inline(tokens: Token[]): (VNode | string)[] {
       case 'strong': return h('strong', { class: 'font-semibold text-highlighted' }, inline(token.tokens ?? []))
       case 'em': return h('em', inline(token.tokens ?? []))
       case 'del': return h('s', inline(token.tokens ?? []))
-      case 'codespan': return h('code', { class: 'rounded border border-muted bg-muted px-1 py-px font-mono text-xs' }, unescapeHtml((token as Tokens.Codespan).text))
+      case 'codespan': return h('code', { class: 'rounded border border-muted bg-muted px-1 py-px font-mono text-xs wrap-anywhere' }, unescapeHtml((token as Tokens.Codespan).text))
       case 'br': return h('br')
       case 'link': {
         const href = (token as Tokens.Link).href
@@ -96,11 +98,12 @@ function unescapeHtml(text: string): string {
   return text.replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&quot;', '"').replaceAll('&#39;', '\'').replaceAll('&amp;', '&')
 }
 
-const Rendered = () => blocks(marked.lexer(props.text, { breaks: props.breaks }))
+// Options passed to the lexer replace marked's defaults, which turns off GFM tables
+const Rendered = () => blocks(marked.lexer(props.text, { ...marked.defaults, breaks: props.breaks }))
 </script>
 
 <template>
-  <div class="flex min-w-0 flex-col gap-2 wrap-break-word">
+  <div class="flex min-w-0 flex-col gap-2 wrap-anywhere">
     <Rendered />
     <UModal
       :open="lightbox !== null"

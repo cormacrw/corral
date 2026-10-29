@@ -240,7 +240,7 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
             >
               <div
                 v-if="message.role === 'human'"
-                class="max-w-[85%] rounded-lg bg-elevated px-3 py-2 text-sm"
+                class="max-w-[85%] min-w-0 rounded-lg bg-elevated px-3 py-2 text-sm"
               >
                 <MarkdownText
                   :text="message.text"
@@ -291,7 +291,7 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
                   <button
                     v-if="planOf(message)"
                     type="button"
-                    :class="['flex items-center gap-2 self-start rounded-md border border-default px-3 py-2 text-start text-sm hover:bg-elevated', flyout.plan.value && 'bg-elevated']"
+                    :class="['flex max-w-full items-center gap-2 self-start rounded-md border border-default px-3 py-2 text-start text-sm hover:bg-elevated', flyout.plan.value && 'bg-elevated']"
                     @click="flyout.plan.value ? flyout.close() : flyout.openPlan()"
                   >
                     <UIcon

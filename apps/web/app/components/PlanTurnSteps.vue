@@ -37,7 +37,7 @@ async function toggle() {
 </script>
 
 <template>
-  <div class="flex flex-col gap-2">
+  <div class="flex min-w-0 flex-col gap-2">
     <button
       type="button"
       class="flex items-center gap-1.5 self-start rounded-md py-0.5 ps-1 pe-2 text-xs text-muted hover:bg-elevated"
@@ -57,7 +57,7 @@ async function toggle() {
     </button>
     <div
       v-if="open && (events || error)"
-      class="ms-2.5 border-s border-default ps-3.5"
+      class="ms-2.5 min-w-0 border-s border-default ps-3.5"
     >
       <UAlert
         v-if="error"
