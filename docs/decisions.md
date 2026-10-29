@@ -123,6 +123,7 @@ Full table, disk layout, flows and the known POC push limitation are in [archite
 - The server stores the conversation and the `claude` session ID in the database. If the session is lost, the next turn starts fresh, seeded with a summary built from the database messages.
 - `propose_plan` results are validated by `core` (dependencies form a DAG, every task has acceptance criteria) and saved as versioned draft plans. Only the human approves one: with the plan flyout's buttons, or by asking Juno in chat ("looks good, add it to the board"), which then calls `approve_plan`. That approval is recorded as the human's, with the PM run that carried it out, and the server only accepts it when the human has written since the plan was proposed, so Juno can't approve a plan the human hasn't seen (amended 2026-10-28).
 - A PM turn runs only when the user sends a message. There's no delivery-summary turn when an epic finishes: merged work isn't handed back to the PM (amended 2026-10-28).
+- **Per session (amended 2026-10-29):** each Plan session has its own read-only checkout, at a path that stays put between turns so `--resume` finds the session, and runs one turn at a time. A second message to a session whose turn is still active is refused (409 `pm_turn_in_progress`); other sessions, in the same project or another, aren't blocked by it. PM turns still count against Juno's concurrency, which is global across projects (D13): a turn over the limit waits as `queued`, keeping its job in the database so it survives a restart, and starts when a slot frees.
 
 **Why:** D2 means the model is only reachable through the user's local CLI, so the server can't run the PM. Running it on the runner also gives it direct, fast access to the code and wiki.
 
@@ -261,7 +262,7 @@ There is no separate notifications feed or bell. System events (usage limits, ru
 | Plan (PM sessions), Inbox, agents, the runner, user settings | Overview, Board, Backlog, project settings (name, thumbnail, repo, default branch, merge method, required checks, task ID prefix, pause, limits) |
 
 - **Agents are global.** Juno (PM), Atlas (developer) and Vera (reviewer) are set up once, in Settings, and serve every project. Concurrency applies across all projects, not per project. Role instructions stay in each repo (`.corral/agents/<role>.md` on the default branch), so the same agent can follow different project rules.
-- **Plan sessions belong to one project.** The project is picked in the composer and locked once the session has messages. Juno works in that project's read-only checkout (D9).
+- **Plan sessions belong to one project.** The project is picked in the composer and locked once the session has messages. Juno works in a read-only checkout of that project, one per session (D9).
 - **The Inbox is global**, and every item carries its project (D11). The same goes for runs on the agent pages.
 - **Task IDs are `PREFIX-NUMBER`**, e.g. `COR-29`. Each project has a 2–5 letter prefix that is unique across projects, and numbers count up per project. PRs keep `#41` and runs keep `#128`.
 - **Pause is per project.** Pausing stops new runs for that project only.

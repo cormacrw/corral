@@ -215,6 +215,9 @@ export const runs = pgTable('runs', {
   agentSessionId: text(),
   // PM turns belong to a plan session instead of a task
   planSessionId: uuid().references((): AnyPgColumn => planSessions.id, { onDelete: 'set null' }),
+  // A PM turn waiting for one of Juno's slots keeps its job here until it's
+  // sent to the runner (D13), so it survives a restart
+  pmJob: jsonb(),
   // The commit a developer run pushed, or a reviewer run reviewed
   headSha: text(),
   summary: text(),
