@@ -30,7 +30,7 @@ These specs describe the UI only. Behaviour rules come from [decisions.md](../de
 - **Global:** Plan, Inbox, Agents, Settings. They work across every project and always show which project a thing belongs to.
 - **Per project:** Overview, Board, Backlog, Pull requests, Settings. Reached from the project's entry in the sidebar.
 - **Agents are global.** Juno (PM), Atlas (developer) and Vera (reviewer) serve every project. They are configured in Settings, not per project.
-- **Planning happens in Plan only.** The PM never creates Inbox items (D11).
+- **Planning happens in Plan.** The PM never creates Inbox items of its own; open Plan sessions appear in the Inbox as Plan threads, where questions can be answered and plans approved too (D11, amended).
 
 Multiple projects, global agents and per-project task prefixes are decided in **D13**.
 
@@ -69,7 +69,7 @@ A status is always shown with its label. Colour is never the only signal.
 - **Task flyout.** One component, docked on the right of Inbox, Plan, Board, Backlog, Pull requests and Agent pages. See [task.md](task.md).
 - **Resizable panes.** Splits that hold lists can be resized with a 1px divider. The divider turns `primary` on hover, focus and drag, and moves 16px per arrow-key press. Use `UDashboardPanel` with `resizable`.
 - **Working indicator.** Anything an agent is actively running on (it holds a lease) gets the pulse: the outline breathes in `primary` and the avatar's status dot pings. Respect `prefers-reduced-motion` with a static `primary` outline and no ping. "Working" comes from the lease, not the status (D10).
-- **Unread dot.** An 8px `primary` dot. It's used on Inbox rows and Recent Plan sessions. Side nav Plan threads use the attention indicators described in [Plan](plan.md#side-nav-threads).
+- **Unread dot.** An 8px `primary` dot. It's used on Inbox rows. Side nav Plan threads use the attention indicators described in [Plan](plan.md#side-nav-threads).
 
 ### States every page must handle
 

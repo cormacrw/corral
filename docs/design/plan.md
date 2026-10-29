@@ -6,7 +6,7 @@
 
 ## Purpose
 
-The main place to work with Juno, the PM. Planning, refining Backlog tasks, answering PM questions and approving plans all happen here, and only here (D9, D11). Opening the page fresh should feel like starting a conversation: the composer is front and centre.
+The main place to work with Juno, the PM. Planning, refining Backlog tasks, answering PM questions and approving plans all happen here (D9). Open sessions also appear in the Inbox as Plan threads, where questions can be answered and plans approved too (D11, amended 2026-10-29; see [inbox.md](inbox.md#plan-threads)). Opening the page fresh should feel like starting a conversation: the composer is front and centre.
 
 ## Views
 
@@ -14,12 +14,12 @@ The main place to work with Juno, the PM. Planning, refining Backlog tasks, answ
 
 Open sessions appear as indented sub-items under **Plan** in the left sidebar, in opening order. Both Plan pages use this navigation without a tab strip.
 
-- **Opening:** starting a session or opening one from Resume or Recent adds it at the end, including a closed session. Sending a message adds the session back too. Clicking a thread switches conversations without a full reload; the current session is highlighted.
-- **Each thread:** the project dot and truncated title, with the full title on hover. Hover or keyboard focus reveals an **×**, which removes only the nav entry. The session remains in Resume and Recent, and closing the current entry leaves its page open.
+- **Opening:** starting a session or opening one from Resume, Drafts or the Inbox adds it at the end, including a closed session. Sending a message adds the session back too. Clicking a thread switches conversations without a full reload; the current session is highlighted.
+- **Each thread:** the project dot and truncated title, with the full title on hover. Hover or keyboard focus reveals an **×**, which removes only the nav entry. The session remains in Resume (and in the Inbox while it's open), and closing the current entry leaves its page open.
 - **Needs attention:** a plan waiting for approval, a question, or an unseen finished Juno reply makes the title bold. The right indicator is a `primary` dot for **Needs approval**, an `info` dot for **Question**, otherwise a neutral dot for **Unread reply**, in that priority order. Its tooltip names the reason. While Juno is working (`activeRunId`), a spinner replaces the dot.
 - **Plan badge:** the number of open threads needing attention, including the current session's approval or question. It remains visible when the sidebar is collapsed; the thread list scrolls separately so the badge stays visible.
 - **Read state:** a turn finishing in the session being viewed is marked read immediately. That session never displays an unread reply indicator; questions and approvals still need attention.
-- **Live:** `plan.session` events update statuses and the badge without polling. A session becoming `closed` after its plan is added to the board or Backlog leaves the nav immediately, while its conversation stays open if being viewed.
+- **Live:** `plan.session` events update statuses and the badge without polling, here and in the Inbox. A session becoming `closed` after its plan is added to the board or Backlog leaves the nav immediately, while its conversation stays open if being viewed.
 - **Persistence:** open threads and their order use localStorage (`corral.plan.tabs`, retained for compatibility). Sessions that no longer exist, and closed sessions not being reopened, are dropped on load.
 
 ### New session (default when you open Plan)
@@ -39,7 +39,6 @@ Everything is centred vertically and horizontally, in a column up to 720px wide:
    - Default: "Plan a new feature", "Break an epic into tasks", "What's blocking progress?"
    - With a task attached: "Tighten the acceptance criteria", "Split it into smaller tasks", "Check its dependencies"
 4. **Drafts:** shown only when the project has Drafts (`GET /projects/:slug/drafts`), in the same bordered list style. Drafts are grouped by the Plan session they belong to: a header row with the session title, "Needs approval" in `primary` while its plan waits, and the time, then one row per draft with its ref, type icon, title and priority. The header opens the session; a draft opens the session with that task in the flyout (`/plan/:id?task=COR-13`), or the task sheet on phones, where every row is full width and at least 48px tall. `plan.drafts` keeps it current, so approving a plan to the board or the Backlog takes its drafts out straight away. A Draft's task detail banner has an **Open plan session** link back to its session.
-5. **Recent sessions:** a bordered list of the last 4 sessions. Each row has an unread dot, the title, a status badge where there's something to do ("Needs approval" in `primary`, "Question" in `info`), the project dot and name, a one-line preview and the time. Clicking a row opens the session.
 
 ### Conversation
 
@@ -89,7 +88,7 @@ On the mobile layout ([mobile.md](mobile.md)) the same two routes keep their beh
 - Only a human can approve a plan: with the buttons, or by telling Juno to in chat, which Juno carries out with `approve_plan` (D9). The approve endpoint rejects any other actor, and Juno's tool is refused unless the human has written since the plan was proposed.
 - Editing a plan through chat creates a new plan version (v2, v3…), which replaces the one in the plan flyout and shows what changed.
 - Editing a task directly in the flyout saves it to the task and logs you as the author. It doesn't create a plan version (flows.md).
-- PM questions appear here as Juno messages, never in the Inbox (D11).
+- PM questions appear here as Juno messages. The Inbox shows the same session as a Plan thread, not a copy, so answering in either place answers it in both (D11).
 
 ## Data
 
@@ -103,7 +102,6 @@ On the mobile layout ([mobile.md](mobile.md)) the same two routes keep their beh
 
 - **Runner offline:** the composer is disabled, with "Plan needs the runner. It's offline." and Reconnect (D9).
 - **Juno errors mid-turn:** an inline `UAlert` in the log with Retry.
-- **No sessions yet:** the Recent list is hidden.
 - **No drafts:** the Drafts section is hidden.
 
 ## Accessibility

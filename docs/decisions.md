@@ -225,7 +225,7 @@ Both appear in the Inbox (D11) with their reason. When a human resolves a Failed
 
 ## D11 — The Inbox holds developer and reviewer items only; the PM stays in Plan
 
-**Status:** Accepted. Replaces the PRD's "Human queue" (§7.11, §12.2) and its separate notifications.
+**Status:** Accepted. Replaces the PRD's "Human queue" (§7.11, §12.2) and its separate notifications. Amended 2026-10-29 (COR-103): open Plan sessions now appear in the Inbox too (see the amendment below).
 
 **Decision:** The PRD's Human queue is called the **Inbox**. It only holds items raised by developer and reviewer runs, which happen in the background while the human is elsewhere:
 
@@ -234,11 +234,21 @@ Both appear in the Inbox (D11) with their reason. When a human resolves a Failed
 
 A design in Human review is a Needs-you item like any other (D20).
 
-Nothing from the PM goes in the Inbox. PM questions (`ask_question`), proposed plans and plan approval live in the **Plan** conversation. A PM turn only runs when the human sends a message or approves a design (D9, D20), so the human is already there. `flag_stale_docs` creates a task in Backlog.
+Nothing from the PM goes in the Inbox. *(Amended 2026-10-29, see below: open Plan sessions do.)* PM questions (`ask_question`), proposed plans and plan approval live in the **Plan** conversation. A PM turn only runs when the human sends a message or approves a design (D9, D20), so the human is already there. `flag_stale_docs` creates a task in Backlog.
 
 There is no separate notifications feed or bell. System events (usage limits, runner disconnects) are shown on Runs and in the runner status, not in the Inbox. OS or desktop notifications can be added later and would point into the Inbox or Plan.
 
 **Why:** Copying PM questions into a queue duplicates a conversation the human is already reading. Keeping the Inbox to agent work that's waiting on the human makes its count mean one thing: how many agents are stuck on you.
+
+**Amended 2026-10-29 (COR-103): open Plan sessions appear in the Inbox.** Each open Plan session is a **Plan thread** item in the Inbox, alongside the developer and reviewer items above.
+
+- **Open and closed:** a session is open until its plan is approved, to the board or the Backlog, which marks it `closed` (COR-38). It opens again when the human sends it a message. Only open sessions are Inbox items; a closed one leaves the Inbox and isn't listed under Resolved.
+- **Needs you:** every open session is under **Needs you**. Sessions that need something from the human come first: a plan **needing approval**, a **question** from Juno, or an **unread reply** (a finished Juno turn the human hasn't seen). The other open sessions are sorted below those. Within each group the newest activity comes first.
+- **Count:** the Needs you count (the Inbox badge and tab) only counts the sessions in the first group: needing approval, a question or an unread reply. A session that's merely open doesn't add to it.
+- **Where to act:** PM questions and plan approval can be handled from the Inbox *or* from Plan. Both use the same endpoints and the same rules (D9: only the human approves a plan), so answering or approving in one place updates the other live (`plan.session` events). Replying from the Inbox sends a message to the session and starts a PM turn, exactly as sending it in Plan does.
+- **Unchanged:** `ask_question`, `propose_plan` and `approve_plan` still belong to the Plan session; the Inbox shows the same conversation rather than a copy. System events stay out of the Inbox, and Activity still only holds developer and reviewer events.
+
+**Why the amendment:** with several Plan sessions open across projects, the Inbox was the one place that didn't show what Juno was waiting on, and the human had to check Plan separately. Showing the open sessions themselves (not copies of their questions) keeps one conversation per session while making the Inbox the single list of everything waiting on the human. Plan's own Recent sessions list is dropped, because the Inbox and the side nav threads cover it.
 
 ---
 
