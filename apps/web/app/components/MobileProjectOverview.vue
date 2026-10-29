@@ -90,7 +90,7 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
         </div>
 
         <!-- Stat tiles scroll sideways rather than wrap -->
-        <div class="flex snap-x scroll-px-4 gap-2 overflow-x-auto overscroll-contain px-4">
+        <div class="flex snap-x scroll-px-4 gap-2 overflow-x-auto overscroll-x-contain px-4">
           <dl
             v-for="tile in [
               { label: 'Ready', color: STATUS.ready.color, value: count('ready'), sub: waitingOnDependency ? `${waitingOnDependency} waiting on a dependency` : 'scheduled next' },

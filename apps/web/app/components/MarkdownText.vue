@@ -32,7 +32,7 @@ function blocks(tokens: Token[]): VNode[] {
       case 'text':
         return [h('p', token.tokens ? inline(token.tokens) : (token as Tokens.Text).text)]
       case 'code':
-        return [h('pre', { class: 'overflow-x-auto overscroll-contain rounded-md border border-muted bg-muted px-3 py-2 font-mono text-xs/5 wrap-normal whitespace-pre' }, h('code', (token as Tokens.Code).text))]
+        return [h('pre', { class: 'overflow-x-auto overscroll-x-contain rounded-md border border-muted bg-muted px-3 py-2 font-mono text-xs/5 wrap-normal whitespace-pre' }, h('code', (token as Tokens.Code).text))]
       case 'blockquote':
         return [h('blockquote', { class: 'flex flex-col gap-2 border-s-4 border-accented ps-3 text-muted' }, blocks(token.tokens ?? []))]
       case 'list': {
@@ -45,7 +45,7 @@ function blocks(tokens: Token[]): VNode[] {
       case 'table': {
         const table = token as Tokens.Table
         const cell = (c: Tokens.TableCell, header: boolean) => h(header ? 'th' : 'td', { class: ['min-w-24 border border-accented px-2 py-1 text-start wrap-anywhere', header && 'bg-accented/50 font-medium'] }, inline(c.tokens))
-        return [h('div', { class: 'overflow-x-auto overscroll-contain' }, h('table', { class: 'border-collapse text-xs' }, [
+        return [h('div', { class: 'overflow-x-auto overscroll-x-contain' }, h('table', { class: 'border-collapse text-xs' }, [
           h('thead', h('tr', table.header.map(c => cell(c, true)))),
           h('tbody', table.rows.map(row => h('tr', row.map(c => cell(c, false)))))
         ]))]

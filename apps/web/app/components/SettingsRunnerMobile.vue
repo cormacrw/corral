@@ -149,7 +149,7 @@ async function copy(command: string) {
         :key="command"
         class="flex items-center gap-2 rounded-lg bg-elevated/50 py-2 ps-3 pe-1"
       >
-        <code class="min-w-0 flex-1 overflow-x-auto overscroll-contain font-mono text-xs whitespace-nowrap">{{ command }}</code>
+        <code class="min-w-0 flex-1 overflow-x-auto overscroll-x-contain font-mono text-xs whitespace-nowrap">{{ command }}</code>
         <UButton
           icon="i-lucide-copy"
           variant="ghost"

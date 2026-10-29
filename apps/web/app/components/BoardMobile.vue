@@ -111,7 +111,7 @@ const note = (task: Task) => taskNote(task, props.all, props.reviewRoundCap)
       <div
         role="tablist"
         aria-label="Board columns"
-        class="flex gap-2 overflow-x-auto overscroll-contain px-4 pb-3 [scrollbar-width:none]"
+        class="flex gap-2 overflow-x-auto overscroll-x-contain px-4 pb-3 [scrollbar-width:none]"
         @keydown="onTabKey"
       >
         <button

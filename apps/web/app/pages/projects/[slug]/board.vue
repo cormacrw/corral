@@ -139,7 +139,7 @@ const epicOptions = computed(() => epics.value.map(id => ({ id, label: epicLabel
           role="region"
           aria-label="Board columns"
           tabindex="0"
-          class="flex min-h-0 flex-1 items-start gap-3 overflow-x-auto overscroll-contain p-4"
+          class="flex min-h-0 flex-1 items-start gap-3 overflow-x-auto overscroll-x-contain p-4"
         >
           <section
             v-for="column in columns"

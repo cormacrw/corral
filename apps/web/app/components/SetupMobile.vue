@@ -131,7 +131,7 @@ function back() {
             <p class="mb-2">
               Sign in inside the runner, then check again. Corral never sees the token.
             </p>
-            <pre class="overflow-x-auto overscroll-contain rounded bg-elevated p-2 font-mono text-xs">docker exec -it corral-runner gh auth login</pre>
+            <pre class="overflow-x-auto overscroll-x-contain rounded bg-elevated p-2 font-mono text-xs">docker exec -it corral-runner gh auth login</pre>
             <UButton
               label="Check again"
               size="sm"
