@@ -1,6 +1,6 @@
 # Architecture
 
-How the Corral POC is structured. Implements D7 in [decisions.md](decisions.md), and builds on D1 (local-only POC, hosting next), D2 (the user's own `claude` CLI) and D12 (deployed as Docker containers on the user's server).
+How the Corral POC is structured. Implements D7 in [decisions.md](decisions.md), and builds on D1 (local-only POC, hosting next), D2 and D18 (the user's own `claude` and `codex` CLIs) and D12 (deployed as Docker containers on the user's server).
 
 ## Processes
 
@@ -11,7 +11,7 @@ Three processes. In development they're all started together by `turbo dev`; whe
 │  apps/web   │ ────────────▶ │     apps/server      │ ◀────────────────────────────── │     apps/runner      │
 │ Nuxt + UI   │               │    control plane     │                                 │    local daemon      │
 └─────────────┘               │ API · scheduler ·    │                                 │ worktrees · git ·    │
-                              │ locks · orchestrator │                                 │ spawns `claude` ·    │
+                              │ locks · orchestrator │                                 │ spawns agent CLIs ·  │
                               │ · GitHub · DB        │                                 │ agent tool proxy     │
                               └──────────────────────┘                                 └──────────────────────┘
                                moves to hosting later                                   always on hardware the user controls
@@ -37,11 +37,11 @@ Three processes. In development they're all started together by `turbo dev`; whe
 ### `apps/runner`: runner daemon
 
 - Node/TypeScript.
-- The only process that touches the filesystem, git and the agent CLI.
+- The only process that touches the filesystem, git and the agent CLIs.
 - **Connects outbound** to the server over WebSocket, whether on localhost, over the Docker network (D12), or to a hosted server behind NAT. Moving between these should be a URL and auth change only (D1).
-- Creates worktrees, spawns agents through `AgentRuntime` adapters picked by the job's `runtime` id (`apps/runner/src/agent-runtime.ts`; only `claude-code` so far, and an unknown id ends the run with an `error` exit), streams events, sends heartbeats, reports outcomes.
+- Creates worktrees, spawns agents through `AgentRuntime` adapters picked by the job's `runtime` id (`apps/runner/src/agent-runtime.ts`; Claude Code `claude` and Codex `codex`, D18, see [agent-runtime-and-auth.md](agent-runtime-and-auth.md); only `claude-code` is built so far, and an unknown id ends the run with an `error` exit), streams events, sends heartbeats, reports outcomes.
 - **Per-run MCP server for agent tools.** Each spawned agent gets an MCP server from the runner, exposing tools such as reading the task, posting a comment, attaching evidence and reporting an outcome. The runner forwards each call to the server with that run's lease/fencing token attached. Agents never hold server credentials, every call is fenced automatically, and the tools are the same whatever agent CLI is used. See [stale-runners-and-fencing.md](stale-runners-and-fencing.md).
-- **Warm PM sessions (D9).** Developer and reviewer runs get a fresh `claude` process each. A PM turn's process stays alive after its run ends, keyed by Plan session, so the session's next message skips CLI startup: the runner sends it over stdin to the same process, whose `result` line ends that turn's run. It's reused only when it's idle and alive with the same agent session ID and model; otherwise it's killed and the turn cold-starts with `--resume`. The process group is killed after `CORRAL_PM_WARM_SECONDS` idle (default 300, `0` for one process per turn), on stop or timeout of its turn, and on runner shutdown. The server sees only runs, so an idle process holds no concurrency slot.
+- **Warm PM sessions (D9).** Developer and reviewer runs get a fresh agent CLI process each. A PM turn's process stays alive after its run ends, keyed by Plan session, so the session's next message skips CLI startup: the runner sends it over stdin to the same process, whose `result` line ends that turn's run. It's reused only when it's idle and alive with the same agent session ID and model; otherwise it's killed and the turn cold-starts with `--resume`. The process group is killed after `CORRAL_PM_WARM_SECONDS` idle (default 300, `0` for one process per turn), on stop or timeout of its turn, and on runner shutdown. The server sees only runs, so an idle process holds no concurrency slot.
 - **Setup jobs, not only agent runs.** The server can send the runner short jobs that return data and touch nothing. The first is `list_repos`: it runs `gh` inside the runner and returns the repositories its GitHub login can see, so the UI can offer a picker when adding a project. It returns `nameWithOwner`, `description`, `isPrivate`, `updatedAt`, `defaultBranchRef` and `viewerPermission`, using `gh api --paginate "/user/repos?affiliation=owner,collaborator,organization_member&sort=updated&per_page=100"` (or `gh repo list <owner> --json …`). The GitHub token never leaves the runner (as with `claude` under D2). The server caches the result for a few minutes. Repos where `viewerPermission` is below WRITE, and repos already used by a project (D13), are shown but can't be picked. If `gh` isn't signed in, the job returns that state, and the UI shows the `docker exec` login step (D12). A pasted GitHub URL is checked with the same job.
 
 ## Repo layout (Turborepo + pnpm workspaces)
@@ -50,7 +50,7 @@ Three processes. In development they're all started together by `turbo dev`; whe
 apps/
   web/         Nuxt + Nuxt UI
   server/      Hono API, scheduler, orchestrator, GitHub client, SSE, runner WS
-  runner/      daemon: worktrees, AgentRuntime adapters (claude), per-run MCP
+  runner/      daemon: worktrees, AgentRuntime adapters (claude, codex), per-run MCP
 packages/
   contracts/   zod schemas + types: HTTP API, runner protocol, RunJob, outcomes, events
   core/        pure domain logic: task state machine, transitions, merge gates
@@ -77,7 +77,7 @@ packages/
 
 Each kind of data has exactly one source of truth.
 
-| Store | What lives there | web | server | runner | agent (`claude`) |
+| Store | What lives there | web | server | runner | agent (`claude` / `codex`) |
 |---|---|---|---|---|---|
 | **Database** (Postgres deployed, PGlite in dev; D14) | Projects, epics, tasks, criteria, dependencies, status, leases (with fencing epoch), runs, comments, reviews, evidence *records*, PM conversation, plans, settings, audit log | — | **R/W** (sole opener) | — | — |
 | **Blob store** (local folder → S3) | Screenshots, videos, test/CI logs, run transcripts. Immutable, content-addressed (sha256). | — | **R/W** (stores uploads, serves files) | — | — |
@@ -93,7 +93,7 @@ Each kind of data has exactly one source of truth.
 - **agents** reach Corral only through per-run MCP tools, which the runner forwards with the run's lease token.
 - **The runner pushes, not the agent.** The agent commits in its worktree; the runner pushes when the agent reports `pr_opened` / `pr_updated` (or through an MCP `push` tool), keeping the push path fenced.
 - **Before merging,** the server re-checks GitHub directly. It never relies only on its cached copy of PR/CI state.
-- **No credentials in any Corral store.** Claude's login stays in Claude's own config; the GitHub token stays in `gh`'s own config (the keychain on macOS, a volume in the runner container) (D2, D12).
+- **No credentials in any Corral store.** Each agent CLI's login stays in its own config (`claude`'s and `codex`'s); the GitHub token stays in `gh`'s own config (the keychain on macOS, a volume in the runner container) (D2, D12).
 
 ### Layout on disk (POC)
 
@@ -111,7 +111,7 @@ The root is configurable (env vars). `pnpm dev` puts it in the checkout's own `.
     worktrees/<taskId>/         one per task, removed after merge
     worktrees/pm-<projectId>-<planSessionId>/
                                 read-only default-branch checkout, one per Plan
-                                session; stable so `claude --resume` finds it
+                                session; stable so the agent CLI can resume
     scratch/<runId>/            evidence and other agent scratch output
     scratch/pm-<projectId>-<planSessionId>/
                                 the same, one per Plan session when PM
@@ -154,10 +154,10 @@ Internet ──▶ Cloudflare Tunnel ──▶ Cloudflare Access (login)
                      │   └─────────────────────────┘                          │ WebSocket   │
                      │                                               ┌────────┴─────────┐   │
                      │                                               │      runner      │   │
-                     │                                               │ claude, gh, git, │   │
-                     │                                               │ chromium, tools  │   │
+                     │                                               │ claude, codex,   │   │
+                     │                                               │ gh, git, chromium│   │
                      │                                               │ volumes: runner/,│   │
-                     │                                               │ claude + gh conf │   │
+                     │                                               │ agent + gh confs │   │
                      │                                               └──────────────────┘   │
                      └──────────────────────────────────────────────────────────────────────┘
 ```
@@ -167,12 +167,12 @@ Internet ──▶ Cloudflare Tunnel ──▶ Cloudflare Access (login)
 | `web` | Static Nuxt build and a server that proxies `/api/**` to `server` | — | Through the tunnel only, behind Cloudflare Access |
 | `server` | Hono control plane | `server/` data dir (blobs) | No. Docker network only |
 | `postgres` | Postgres (D14) | Postgres data dir | No. Docker network only |
-| `runner` | Runner daemon, `claude`, `gh`, `git`, headless Chromium, target-project toolchains (Node/pnpm etc.) | `runner/` data dir, `claude` config, `gh` config | No. Dials out to `server` |
+| `runner` | Runner daemon, `claude`, `codex`, `gh`, `git`, headless Chromium, target-project toolchains (Node/pnpm etc.) | `runner/` data dir, `claude` config, `codex` config, `gh` config | No. Dials out to `server` |
 
 Rules:
 
 - **Only `web` is exposed.** The server API and runner WebSocket are never published to the host or the tunnel.
-- **Credentials are set up by the user, by hand.** After the first `docker compose up`, the user runs `docker exec -it <runner> claude` and `gh auth login` once. Both configs persist on volumes. No model-provider token goes in a Compose file, `.env` file or Corral config (D2).
+- **Credentials are set up by the user, by hand.** After the first `docker compose up`, the user runs `docker exec -it <runner> claude`, `docker exec -it <runner> codex login --device-auth` and `gh auth login` once. The configs persist on volumes. No model-provider token goes in a Compose file, `.env` file or Corral config (D2).
 - **Linux, not just macOS.** The runner image is Linux. No keychain, `open` or BSD-only flags anywhere in runner code.
 - **Everything environment-specific is config:** data dirs, server URL, bind address, ports.
 - **Heartbeats on long-lived connections.** Cloudflare drops proxied connections idle for about 100 seconds, so SSE streams send a heartbeat comment well inside that, and the runner WebSocket pings regardless.
@@ -206,7 +206,7 @@ Rough estimates, to be checked against real measurements once built.
 
 | Run | Estimate |
 |---|---|
-| Developer (`claude` + target dev server + headless browser + test spikes) | ~1–3 GB |
+| Developer (agent CLI + target dev server + headless browser + test spikes) | ~1–3 GB |
 | Reviewer | ~0.3–1.5 GB |
 
 At the PRD defaults (1 developer + 1 reviewer): **~2–5 GB peak**. Comfortable on 16 GB; tight on 8 GB above concurrency 1.
