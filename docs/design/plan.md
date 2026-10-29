@@ -77,6 +77,8 @@ On the mobile layout ([mobile.md](mobile.md)) the same two routes keep their beh
 - **Session switcher:** the tab strip becomes a history button in the header. It opens a bottom sheet with **New session**, the open sessions (status badges, unread dot, spinner while Juno works, and × to close one, same rules as the tabs) and the other sessions under **Resume**.
 - **New session:** the column starts at the top and scrolls. The Resume picker moves to the switcher.
 - **Conversation:** full height, without the tab bar. The header shows a back button to `/plan`, the project dot and name above the session title, the switcher and **+** (new session).
+- **Questions:** the open question's answers are stacked, full-width buttons at least 44px tall: Accept recommendation, each option, Other… (focuses the composer, which opens the keyboard) and Stop and propose the plan. Older and answered questions keep the web's compact row, disabled, with the answer marked. When Juno's next question arrives, the log scrolls to the top of it.
+- **Grill me** comes first in both composers' toolbars, so it's in reach without scrolling the toolbar sideways.
 - **Plan sheet:** `?plan` opens the plan in a bottom sheet instead of the flyout, with the approve buttons side by side. A task or epic opened from it opens in a taller sheet over it, whose back arrow returns to the plan. Swiping a sheet down closes it.
 - **Runner offline:** an error alert, "Plan needs the runner. It's offline.", says the sessions and drafts are safe and has **Reconnect** (which re-reads the runner's status). The composer is disabled with "Juno is unavailable while the runner is offline".
 

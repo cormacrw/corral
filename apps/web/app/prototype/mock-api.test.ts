@@ -1,7 +1,8 @@
 import type { EpicDetail, Inbox, PlanSessionDetail, Project, Task } from '@corral/contracts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '~/composables/useApi'
-import { mockCall } from './mock-api'
+import { STOP_ASKING } from '~/utils/plan-questions'
+import { mockCall, onMockEvent, pmReply } from './mock-api'
 
 describe('prototype mock API', () => {
   it('answers everything the shell loads at startup', async () => {
@@ -49,5 +50,20 @@ describe('prototype mock API', () => {
   it('is a 404 for anything it does not handle, as on the server', async () => {
     await expect(mockCall('GET', '/projects/nope')).rejects.toBeInstanceOf(ApiError)
     await expect(mockCall('DELETE', '/agents/a-dev')).rejects.toMatchObject({ status: 404, body: { code: 'not_found' } })
+  })
+
+  it('answers a Plan reply with the next question, then the plan on Stop', async () => {
+    const events: string[] = []
+    const stop = onMockEvent(e => events.push(e.type === 'plan.message' ? `${e.message.role}:${e.message.kind}` : e.type))
+    vi.useFakeTimers()
+    await mockCall('POST', '/plan/sessions/s-2/messages', { text: 'Web Push' })
+    vi.runAllTimers()
+    vi.useRealTimers()
+    pmReply('s-2', STOP_ASKING)
+    stop()
+    expect(events).toEqual(['human:message', 'pm:question', 'plan.session', 'plan.updated', 'pm:message', 'plan.session'])
+    const detail = await mockCall<PlanSessionDetail>('GET', '/plan/sessions/s-2')
+    expect(detail.plans.at(-1)?.status).toBe('proposed')
+    expect(detail.status).toBe('needs_approval')
   })
 })
