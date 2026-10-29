@@ -56,8 +56,14 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
 
 ## Responsive
 
-- Columns scroll sideways at every width.
-- On phones, consider one column at a time with swipe. Not designed yet.
+- On the web layout, columns scroll sideways at every width.
+- On the mobile layout (D17, `components/BoardMobile.vue`), the Board shows **one column at a time**, from the `Board · one column at a time` frame:
+  - an **Epic** select ("All epics" or one epic) and "N tasks"; the header's search button shows the search input
+  - a row of pill tabs (`role="tablist"`), one per column, each with its status dot, name and count. The open tab is `primary` subtle and scrolls into view. Left and right arrow keys move between tabs
+  - the open column: its name, "Whose turn: {hint}", and its cards, full width. "Nothing here" when empty
+  - **swiping** left or right on the column moves to the next or previous column (at least 50px sideways, and more sideways than vertical)
+  - the open column is kept in `?column=` (`ready`, `in_progress`, `agent_review`, `human_review`, `ready_to_merge`, `blocked`, `merged`), so Back from a task returns to it. It defaults to Ready
+  - tapping a card opens the task's page, `/tasks/<ref>`, instead of the flyout. The PR number is shown but isn't a link
 
 ## Accessibility
 

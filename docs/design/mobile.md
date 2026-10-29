@@ -28,7 +28,7 @@ Pages and components use `useDevice().isMobile` to choose a mobile component. Do
 
 From top to bottom:
 
-- **Header:** the page title, the runner's live status (a dot and "Runner online" / "Runner offline", coloured like the sidebar footer), and a Settings button. Later screens can give themselves a richer header (the frames show search on some).
+- **Header:** the page title (on a project's Board, Backlog and Settings, the project name above it and a back button to the project's overview), the runner's live status (a dot and "Runner online" / "Runner offline", coloured like the sidebar footer), and a Settings button. Pages add their own header buttons by teleporting into `#mobile-header-actions` (`<Teleport defer to="#mobile-header-actions">`), next to Settings: the Board's search, the Backlog's New task.
 - **Banners:** the same shell banners as the web layout (stopped, updating, project paused, runner offline, reconnecting), from `ShellBanners.vue`.
 - **Page:** fills the space between, and scrolls.
 - **Tab bar:** five tabs, each an icon over a label. The active tab is `primary`.
@@ -59,7 +59,7 @@ Frames in the export, grouped by the task that will build them:
 | Home | Home |
 | Inbox | Inbox, Inbox · Human review, Inbox · Question, Inbox · Blocked |
 | Plan | Plan · New session, Plan · Conversation, Plan · Plan v2, Plan · Runner offline |
-| Projects | Projects, Project overview, Board, Backlog, Project settings |
+| Projects | Projects, Project overview, Project settings (Board and Backlog are built, see [board.md](board.md) and [backlog.md](backlog.md)) |
 | Task and epic | Task COR-35, Task COR-35 · Activity, Epic · Billing |
 | Agents | Agents, Agent · Atlas, Run #128 |
 | Settings | Settings, Settings · Runner |
