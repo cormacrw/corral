@@ -39,9 +39,9 @@ const fullScreen = computed(() => parts.value[0] === 'agents' && parts.value.len
 // is a full page with no tab bar (design/mobile.md)
 const ownHeader = computed(() => isActive('/tasks', '/epics'))
 
-// A project's own pages (Board, Backlog, Settings) name the project above
+// A project's own pages (Board, Backlog, Pull requests, Settings) name the project above
 // the page and go back to its overview
-const PROJECT_PAGES: Record<string, string> = { board: 'Board', backlog: 'Backlog', settings: 'Settings' }
+const PROJECT_PAGES: Record<string, string> = { 'board': 'Board', 'backlog': 'Backlog', 'pull-requests': 'Pull requests', 'settings': 'Settings' }
 const projectPage = computed(() => {
   const [section, slug, page] = parts.value
   if (section !== 'projects' || !slug || !page || !PROJECT_PAGES[page]) return null

@@ -12,6 +12,7 @@ import type {
   PlanSession,
   Profile,
   Project,
+  PullRequestStatus,
   RepoList,
   Review,
   Run,
@@ -167,6 +168,8 @@ export const tasks: Task[] = [
     epicId: 'e-design',
     dependsOn: ['COR-2'],
     branch: 'corral/cor-3-static-prototype',
+    prNumber: 66,
+    prUrl: 'https://github.com/cormacrw/corral/pull/66',
     lease: { runId: 'r-1', role: 'developer', expiresAt: ago(-10) },
     acceptanceCriteria: criteria('`pnpm prototype` outputs index.html with fixture data', 'Works from a sub-path with no API', 'CLAUDE.md documents it')
   }),
@@ -258,6 +261,46 @@ export const history: Record<string, AuditEntry[]> = {
 export const evidence: Record<string, Evidence[]> = {}
 
 export const reviews: Record<string, Review[]> = {}
+
+// Open PRs and their merge gates (GET /projects/:slug/pull-requests), one
+// for each state the Pull requests page shows
+function pullRequest(ref: string, fields: Partial<PullRequestStatus> & Pick<PullRequestStatus, 'merge'>): PullRequestStatus {
+  const t = at(ref)
+  const project = projects.find(p => p.id === t.projectId)!
+  return {
+    taskRef: t.ref,
+    taskTitle: t.title,
+    taskStatus: t.status,
+    pr: { number: t.prNumber!, url: t.prUrl!, state: 'open', headSha: '5b030d7e1c' },
+    review: { verdict: 'approved', headSha: '5b030d7e1c', forHeadCommit: true, createdAt: ago(40) },
+    ci: { status: 'passing', checks: project.requiredChecks.map(name => ({ name, conclusion: 'success', url: null })) },
+    branch: { name: t.branch, mergeable: true, mergeableState: 'clean', upToDate: true, rebase: 'not_needed' },
+    evidenceComplete: true,
+    humanReviewOutstanding: false,
+    ...fields
+  }
+}
+const eligible = { eligible: true, failingGate: null, failedGates: [] }
+
+export const pullRequests: PullRequestStatus[] = [
+  // Sent back: changes requested on an older commit, a failing check and a conflict
+  pullRequest('COR-3', {
+    review: { verdict: 'changes_requested', headSha: '1a2b3c4d5e', forHeadCommit: false, createdAt: ago(90) },
+    ci: { status: 'failing', checks: [{ name: 'lint', conclusion: 'success', url: null }, { name: 'test', conclusion: 'failure', url: null }] },
+    branch: { name: 'corral/cor-3-static-prototype', mergeable: false, mergeableState: 'dirty', upToDate: true, rebase: 'conflict' },
+    evidenceComplete: false,
+    merge: { eligible: false, failingGate: 'approvalIsForHeadCommit', failedGates: ['approvalIsForHeadCommit', 'requiredChecksPassed', 'evidenceComplete', 'mergeable'] }
+  }),
+  // In review: not reviewed yet, CI still running, behind the base
+  pullRequest('COR-4', {
+    review: null,
+    ci: { status: 'pending', checks: [{ name: 'lint', conclusion: 'success', url: null }, { name: 'test', conclusion: 'pending', url: null }] },
+    branch: { name: 'design/COR-4', mergeable: true, mergeableState: 'behind', upToDate: false, rebase: 'requested' },
+    merge: { eligible: false, failingGate: 'approvalIsForHeadCommit', failedGates: ['approvalIsForHeadCommit', 'requiredChecksPassed'] }
+  }),
+  pullRequest('COR-5', { humanReviewOutstanding: true, merge: eligible }),
+  pullRequest('COR-7', { merge: eligible })
+]
 
 export const planSessions: PlanSession[] = [
   {

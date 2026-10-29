@@ -79,6 +79,10 @@ route('GET', '/projects/:slug/tasks/:number/history', ([slug, number]) => f.hist
 route('GET', '/projects/:slug/tasks/:number/evidence', ([slug, number]) => f.evidence[taskIn(slug!, number!).id] ?? [])
 route('GET', '/projects/:slug/tasks/:number/reviews', ([slug, number]) => f.reviews[taskIn(slug!, number!).id] ?? [])
 
+route('GET', '/projects/:slug/pull-requests', ([slug]) => {
+  const p = project(slug!)
+  return f.pullRequests.filter(pr => pr.taskRef.startsWith(`${p.prefix}-`))
+})
 route('GET', '/projects/:slug/epics', ([slug]) => f.epics.filter(e => e.projectId === project(slug!).id))
 route('GET', '/epics/:id', ([id]) => {
   const epic = f.epics.find(e => e.id === id) ?? notFound()

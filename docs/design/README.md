@@ -20,6 +20,7 @@ These specs describe the UI only. Behaviour rules come from [decisions.md](../de
 | Project overview | [project-overview.md](project-overview.md) | `/projects/:slug` | Per project |
 | Board | [board.md](board.md) | `/projects/:slug/board` | Per project |
 | Backlog | [backlog.md](backlog.md) | `/projects/:slug/backlog` | Per project |
+| Pull requests | [pull-requests.md](pull-requests.md) | `/projects/:slug/pull-requests` | Per project |
 | Project settings | [project-settings.md](project-settings.md) | `/projects/:slug/settings` | Per project |
 | Agent | [agent.md](agent.md) | `/agents/:name`, `/agents/:name/runs/:runId` | Global |
 | Settings | [settings.md](settings.md) | `/settings/:section` | Global |
@@ -27,7 +28,7 @@ These specs describe the UI only. Behaviour rules come from [decisions.md](../de
 ## Information architecture
 
 - **Global:** Plan, Inbox, Agents, Settings. They work across every project and always show which project a thing belongs to.
-- **Per project:** Overview, Board, Backlog, Settings. Reached from the project's entry in the sidebar.
+- **Per project:** Overview, Board, Backlog, Pull requests, Settings. Reached from the project's entry in the sidebar.
 - **Agents are global.** Juno (PM), Atlas (developer) and Vera (reviewer) serve every project. They are configured in Settings, not per project.
 - **Planning happens in Plan only.** The PM never creates Inbox items (D11).
 
@@ -65,7 +66,7 @@ A status is always shown with its label. Colour is never the only signal.
 - **Prompt composer.** Used in Plan, the Inbox tray, the task flyout and live agent runs. It is a rounded `UChatPrompt`-style box: an auto-growing textarea of 2–10 rows, then a toolbar row. The toolbar has an attach button, context-specific tools, the hint "Enter to send · Shift+Enter for new line", and a submit button. The submit is an icon button that is disabled until there's something to send. When an action is selected it becomes a labelled button, e.g. "Approve and merge ↑". Enter sends; Shift+Enter adds a new line. Images can be pasted, dropped or picked with the attach (paperclip) button. Each one uploads straight away and shows as a removable thumbnail, spinning while it uploads and marked if it fails. Send stays disabled until every upload has finished. A message can be just images. On send, `![name](attachment:<id>)` is appended for each image. Files that aren't PNG, JPEG, WebP or GIF, or are over 10 MB, are refused with an error toast.
 - **Images in text.** Markdown shows `attachment:<id>` images (and only those) as size-capped thumbnails, and clicking one opens it full size in a lightbox. This covers Plan messages, comments and inbox items.
 - **Quick actions.** Chips above the composer that set what Send does. Picking one changes the placeholder and the submit label; picking it again clears it. Destructive actions use `error`.
-- **Task flyout.** One component, docked on the right of Inbox, Plan, Board, Backlog and Agent pages. See [task.md](task.md).
+- **Task flyout.** One component, docked on the right of Inbox, Plan, Board, Backlog, Pull requests and Agent pages. See [task.md](task.md).
 - **Resizable panes.** Splits that hold lists can be resized with a 1px divider. The divider turns `primary` on hover, focus and drag, and moves 16px per arrow-key press. Use `UDashboardPanel` with `resizable`.
 - **Working indicator.** Anything an agent is actively running on (it holds a lease) gets the pulse: the outline breathes in `primary` and the avatar's status dot pings. Respect `prefers-reduced-motion` with a static `primary` outline and no ping. "Working" comes from the lease, not the status (D10).
 - **Unread dot.** An 8px `primary` dot. It's used on Inbox rows, the Plan nav item and Plan sessions.

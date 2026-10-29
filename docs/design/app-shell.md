@@ -28,6 +28,7 @@ There is no top header on desktop; every page owns the full height. Below 1024px
    - Expanded entries show sub-items, indented with a left guide line:
      - **Board** (with its task count)
      - **Backlog** (with its count)
+     - **Pull requests**
      - **Settings**
    - The expanded or collapsed state of each project is remembered per user.
 5. **Agents:** Juno · PM, Atlas · Developer and Vera · Reviewer.

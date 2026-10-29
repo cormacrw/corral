@@ -28,6 +28,7 @@ import type {
   PlanSessionDetail,
   Profile,
   Project,
+  PullRequestStatus,
   RepoCheck,
   RepoList,
   Review,
@@ -113,7 +114,9 @@ export const api = {
     get: (slug: string) => call<Project>('GET', `/projects/${slug}`),
     create: (input: CreateProjectInput) => call<Project>('POST', '/projects', input),
     patch: (slug: string, input: PatchProjectInput) => call<Project>('PATCH', `/projects/${slug}`, input),
-    remove: (slug: string, confirm: string) => call<null>('DELETE', `/projects/${slug}`, { confirm })
+    remove: (slug: string, confirm: string) => call<null>('DELETE', `/projects/${slug}`, { confirm }),
+    // Open PRs and their merge gates, read live from GitHub
+    pullRequests: (slug: string) => call<PullRequestStatus[]>('GET', `/projects/${slug}/pull-requests`)
   },
 
   tasks: {
