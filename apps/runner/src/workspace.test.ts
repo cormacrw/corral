@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -109,9 +109,20 @@ describe('readProjectBrief', () => {
     expect(brief).not.toContain('### CORRAL.md')
   })
 
-  it('returns nothing when no brief files or wiki exist', async () => {
+  it('reports missing docs, wiki and dependencies when none exist', async () => {
     await writeFile(join(worktree, 'README.md'), '# App\n')
-    expect(await readProjectBrief(worktree)).toBe('')
+    const brief = await readProjectBrief(worktree)
+    expect(brief).toContain('No project brief file')
+    expect(brief).toContain('.corral/wiki/ does not exist; dependencies (node_modules) are not installed in this worktree.')
+  })
+
+  it('reports an empty wiki and installed dependencies, including symlinked directories', async () => {
+    await mkdir(join(worktree, '.corral', 'wiki'), { recursive: true })
+    await mkdir(join(worktree, 'dependencies'))
+    await symlink(join(worktree, 'dependencies'), join(worktree, 'node_modules'), 'dir')
+    const brief = await readProjectBrief(worktree)
+    expect(brief).toContain('.corral/wiki/ exists; dependencies (node_modules) are installed in this worktree.')
+    expect(brief).not.toContain('### Wiki pages')
   })
 
   it('truncates a brief over the cap with a visible note', async () => {

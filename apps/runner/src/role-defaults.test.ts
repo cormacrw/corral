@@ -21,6 +21,12 @@ describe('pm role defaults', () => {
 })
 
 describe('developer role defaults', () => {
+  it('uses the supplied brief instead of asking agents to find brief files', () => {
+    expect(DEFAULT_ROLE_INSTRUCTIONS.developer).toContain('Use the supplied project brief')
+    expect(DEFAULT_ROLE_INSTRUCTIONS.developer).not.toContain('Read CORRAL.md')
+    expect(DEFAULT_ROLE_INSTRUCTIONS.developer).not.toContain('if they exist')
+  })
+
   it('leaves the git identity to the runner', () => {
     expect(DEFAULT_ROLE_INSTRUCTIONS.developer).toContain('Don\'t set or change the git identity')
   })

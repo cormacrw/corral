@@ -313,8 +313,7 @@ export class RunManager {
     if (!this.#keepsWarm(job)) run.unregisterTools = await this.#registerTools(mcpConfigPath, job, (tool, input) => this.#toolCall(run, tool, input))
 
     const instructions = await readRoleInstructions(worktree, job.role)
-    // Only the PM gets the brief; other roles' prompts are unchanged
-    const brief = job.role === 'pm' ? await readProjectBrief(worktree) : ''
+    const brief = await readProjectBrief(worktree)
     const design = job.designPinned ? await this.#savePinnedDesign(run) : null
     const systemPrompt = `${instructions}\n\n${brief ? `${brief}\n\n` : ''}${runnerNotes(run, job, design)}`
 
