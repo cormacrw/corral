@@ -31,3 +31,20 @@ export function todayStats(runs: Run[], tasks: Pick<Task, 'mergedAt'>[], now = D
     tokens: today.reduce((n, r) => n + (r.inputTokens ?? 0) + (r.outputTokens ?? 0), 0)
   }
 }
+
+// How much work an agent takes on at once. The PM has no concurrency, only
+// one turn per Plan session (D13), so it never shows a number.
+export const agentLimit = (agent: Pick<Agent, 'role' | 'concurrency'>): string =>
+  agent.role === 'pm' ? 'one turn per session' : `concurrency ${agent.concurrency}`
+
+const WHERE: Record<Agent['role'], string> = {
+  developer: 'one worktree per task',
+  reviewer: 'a read-only task worktree',
+  pm: 'a read-only checkout of the default branch'
+}
+
+// The facts line on the agent detail screens, web and mobile
+export function agentFacts(agent: Pick<Agent, 'role' | 'concurrency'>): string {
+  const limit = agentLimit(agent)
+  return `${limit[0]!.toUpperCase()}${limit.slice(1)} · ${WHERE[agent.role]} · .corral/agents/${agent.role}.md`
+}

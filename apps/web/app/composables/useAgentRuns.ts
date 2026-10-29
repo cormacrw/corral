@@ -1,5 +1,6 @@
 import type { Run, RunEvent } from '@corral/contracts'
 import { api } from '~/composables/useApi'
+import { agentFacts } from '~/utils/agents'
 import { isLiveRun, tokens } from '~/utils/labels'
 
 // An agent's page (design/agent.md): the agent from the route, its runs,
@@ -98,13 +99,7 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
       ]
     }
   })
-  const facts = computed(() => {
-    if (!agent.value) return ''
-    const where = agent.value.role === 'developer' ? 'one worktree per task' : agent.value.role === 'reviewer' ? 'a read-only task worktree' : 'a read-only checkout of the default branch'
-    // The PM has no concurrency, only one turn per Plan session (D13)
-    const limit = agent.value.role === 'pm' ? 'One turn per session' : `Concurrency ${agent.value.concurrency}`
-    return `${limit} · ${where} · .corral/agents/${agent.value.role}.md`
-  })
+  const facts = computed(() => agent.value ? agentFacts(agent.value) : '')
   async function stop(run: Run) {
     try {
       await api.runs.stop(run.id)
