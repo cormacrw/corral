@@ -2,7 +2,7 @@ import type { Attachment, DraftSession, Epic, EpicDetail, Plan, PlanSession, Pla
 import { richTextToMarkdown } from '@corral/core'
 import { schema } from '@corral/db'
 import { and, desc, eq, inArray, ne } from 'drizzle-orm'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner, sleep } from './test-runner.ts'
 
@@ -40,10 +40,13 @@ describe('plan sessions', () => {
 
   // The PM finishes a turn: streams a reply and exits cleanly
   async function endTurn(job: RunJob, reply: string, code = 0) {
+    const before = t.events.length
     runner.send({ type: 'run.events', runId: job.runId, leaseEpoch: job.leaseEpoch, events: [{ type: 'message', text: reply }] })
     await sleep(50)
     runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code }, headSha: null })
-    await sleep(150)
+    await vi.waitFor(() => {
+      expect(t.events.slice(before).find(e => e.type === 'plan.session' && e.session.id === job.planSessionId && e.session.activeRunId === null)).toBeDefined()
+    })
   }
 
   async function session(id: string): Promise<PlanSessionDetail> {

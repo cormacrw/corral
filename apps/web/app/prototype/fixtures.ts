@@ -349,7 +349,7 @@ export const planSessions: PlanSession[] = [
   },
   {
     id: 's-3', projectId: 'p-corral', title: 'Board polish', runtime: 'claude-code',
-    preview: 'Here is a plan with two tasks. Approve it to put them on the board.', unread: false, status: 'needs_approval', activeRunId: null,
+    preview: 'Here is a plan with two tasks. Approve it to put them on the board.', unread: false, closed: false, status: 'needs_approval', activeRunId: null,
     createdAt: ago(60 * 51), updatedAt: ago(60 * 50)
   }
 ]
