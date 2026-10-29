@@ -91,6 +91,82 @@ describe('ConcurrencyStepper', () => {
     expect(wrapper.text()).not.toContain('Saved')
   })
 
+  it.each([true, false])('serializes delayed writes and preserves newer taps (first succeeds: %s)', async (succeeds) => {
+    let finishFirst!: (response: Response) => void
+    let finishSecond!: (response: Response) => void
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((resolve) => {
+      finishFirst = resolve
+    }))
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => {
+        finishSecond = resolve
+      }))
+    const wrapper = mountStepper()
+    await plus(wrapper).trigger('click')
+    vi.advanceTimersByTime(600)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await plus(wrapper).trigger('click')
+    vi.advanceTimersByTime(600)
+    expect(number(wrapper)).toBe('4')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    finishFirst(succeeds ? ok({ concurrency: 3 }) : new Response('{}', { status: 404 }))
+    await flushPromises()
+    expect(number(wrapper)).toBe('4')
+    expect(live.state.value.agents[0]!.concurrency).toBe(4)
+    expect(wrapper.text()).not.toContain('Saved')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[1]![1].body).toBe(JSON.stringify({ concurrency: 4 }))
+    finishSecond(ok({ concurrency: 4 }))
+    await flushPromises()
+    expect(number(wrapper)).toBe('4')
+    expect(live.state.value.agents[0]!.concurrency).toBe(4)
+    expect(wrapper.text()).toContain('Saved')
+    expect(toast.add).toHaveBeenCalledTimes(succeeds ? 0 : 1)
+    wrapper.unmount()
+  })
+
+  it('rolls back to the latest confirmed write when a later write fails', async () => {
+    let finishFirst!: (response: Response) => void
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((resolve) => {
+      finishFirst = resolve
+    }))
+      .mockResolvedValueOnce(new Response('{}', { status: 404 }))
+    const wrapper = mountStepper()
+    await plus(wrapper).trigger('click')
+    vi.advanceTimersByTime(600)
+    await plus(wrapper).trigger('click')
+    finishFirst(ok({ concurrency: 3 }))
+    await flushPromises()
+    expect(number(wrapper)).toBe('4')
+    vi.advanceTimersByTime(599)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    vi.advanceTimersByTime(1)
+    await flushPromises()
+    expect(number(wrapper)).toBe('3')
+    expect(live.state.value.agents[0]!.concurrency).toBe(3)
+    expect(wrapper.text()).not.toContain('Saved')
+    expect(toast.add).toHaveBeenCalledWith({ title: 'Not saved', description: 'Request failed (404)', color: 'error' })
+    wrapper.unmount()
+  })
+
+  it('flushes newer taps on unmount after the current write finishes', async () => {
+    let finishFirst!: (response: Response) => void
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((resolve) => {
+      finishFirst = resolve
+    })).mockResolvedValueOnce(ok({ concurrency: 4 }))
+    const wrapper = mountStepper()
+    await plus(wrapper).trigger('click')
+    vi.advanceTimersByTime(600)
+    await plus(wrapper).trigger('click')
+    wrapper.unmount()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    finishFirst(ok({ concurrency: 3 }))
+    await flushPromises()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[1]![1].body).toBe(JSON.stringify({ concurrency: 4 }))
+    expect(live.state.value.agents[0]!.concurrency).toBe(4)
+    expect(toast.add).not.toHaveBeenCalled()
+  })
+
   it('shows how many runs are going under the number', () => {
     live.state.value.agents[0]!.activeRuns = 2
     expect(mountStepper().text()).toContain('2 running now')

@@ -19,6 +19,9 @@ let saved = props.agent.concurrency
 const pending = ref<number | null>(null)
 const showSaved = ref(false)
 let timer: ReturnType<typeof setTimeout> | null = null
+let inFlight = false
+let revision = 0
+let unmounted = false
 let savedTimer: ReturnType<typeof setTimeout> | null = null
 
 const value = computed(() => pending.value ?? props.agent.concurrency)
@@ -36,6 +39,7 @@ function step(by: number): void {
   const next = value.value + by
   if (next < 1) return
   if (pending.value === null) saved = props.agent.concurrency
+  revision++
   pending.value = next
   show(next)
   showSaved.value = false
@@ -46,28 +50,38 @@ function step(by: number): void {
 async function save(): Promise<void> {
   timer = null
   const concurrency = pending.value
-  if (concurrency === null) return
+  if (concurrency === null || inFlight) return
+  inFlight = true
+  const savingRevision = revision
   try {
     await api.agents.patch(props.agent.id, { concurrency })
     saved = concurrency
-    // Newer taps are already waiting for their own save
-    if (timer) return
+    // Keep newer optimistic taps visible until their own serialized write finishes.
+    if (revision !== savingRevision) return
     pending.value = null
+    show(concurrency)
+    if (unmounted) return
     showSaved.value = true
     if (savedTimer) clearTimeout(savedTimer)
     savedTimer = setTimeout(() => {
       showSaved.value = false
     }, SAVED_NOTE_MS)
   } catch (e) {
-    if (timer) clearTimeout(timer)
-    timer = null
-    pending.value = null
-    show(saved)
+    if (revision === savingRevision) {
+      pending.value = null
+      show(saved)
+    }
     toast.add({ title: 'Not saved', description: e instanceof ApiError ? e.message : String(e), color: 'error' })
+  } finally {
+    inFlight = false
+    // A debounce that expired during this request is ready now. Otherwise
+    // leave the newer taps' timer alone so they still get the full 600ms.
+    if (revision !== savingRevision && !timer) void save()
   }
 }
 
 onBeforeUnmount(() => {
+  unmounted = true
   if (savedTimer) clearTimeout(savedTimer)
   // Don't drop taps waiting to be sent
   if (timer) {
