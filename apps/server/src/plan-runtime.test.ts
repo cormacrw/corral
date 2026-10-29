@@ -36,7 +36,7 @@ describe('plan session runtime', () => {
 
   it('reads a session created without a runtime as claude-code', async () => {
     const project = await t.createProject()
-    const [row] = await t.db.insert(planSessions).values({ projectId: project.id, title: 'Old', createdBy: { type: 'system' } }).returning()
+    const [row] = await t.db.insert(planSessions).values({ projectId: project.id, title: 'Old', createdBy: t.actor }).returning()
     expect(row!.runtime).toBe('claude-code')
     expect(await t.request('GET', `/api/plan/sessions/${row!.id}`).then(r => r.json())).toMatchObject({ runtime: 'claude-code' })
   })
@@ -89,7 +89,7 @@ describe('plan session runtime', () => {
 
   it('changes the runtime of a session with no messages yet, and audits it', async () => {
     const project = await t.createProject()
-    const [row] = await t.db.insert(planSessions).values({ projectId: project.id, title: 'Empty', createdBy: { type: 'system' } }).returning()
+    const [row] = await t.db.insert(planSessions).values({ projectId: project.id, title: 'Empty', createdBy: t.actor }).returning()
     const res = await t.request('PATCH', `/api/plan/sessions/${row!.id}`, { runtime: 'codex' })
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({ runtime: 'codex' })

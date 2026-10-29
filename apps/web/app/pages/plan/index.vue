@@ -37,6 +37,7 @@ const runtimes = computed(() => {
   const found = detectedRuntimes(clis.value ?? [])
   return found.length > 0 ? found : ['claude-code' as const]
 })
+const runtimeItems = computed(() => runtimes.value.map(r => ({ label: runtimeLabel(r), value: r })))
 const lastRuntime = useLocalStorage<AgentRuntime>('corral.plan.runtime', 'claude-code')
 const runtime = computed<AgentRuntime>(() => runtimes.value.includes(lastRuntime.value) ? lastRuntime.value : runtimes.value[0]!)
 const text = ref('')
@@ -177,7 +178,7 @@ async function start(message: string): Promise<boolean> {
             </USelectMenu>
             <USelectMenu
               :model-value="runtime"
-              :items="runtimes.map(r => ({ label: runtimeLabel(r), value: r }))"
+              :items="runtimeItems"
               value-key="value"
               size="xs"
               variant="ghost"
