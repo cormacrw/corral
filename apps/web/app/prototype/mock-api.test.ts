@@ -37,6 +37,17 @@ describe('prototype mock API', () => {
 
   it('derives the inbox from tasks that need the human', async () => {
     const inbox = await mockCall<Inbox>('GET', '/inbox')
+    expect(inbox.count).toBe(inbox.needsYou.length)
+    const threads = inbox.needsYou.filter(i => i.type === 'plan_thread')
+    expect(threads.map(i => i.sessionId).sort()).toEqual(['s-1', 's-2', 's-3'])
+    expect(threads.find(i => i.sessionId === 's-2')).toMatchObject({
+      question: { text: 'Which push service should we use?', recommendation: 'Web Push', options: ['Web Push with VAPID keys', 'ntfy'] },
+      plan: null
+    })
+    expect(threads.find(i => i.sessionId === 's-1')).toMatchObject({
+      question: null, plan: { id: 'plan-1', version: 1, epicCount: 1, taskCount: 3 }
+    })
+    expect(threads.every(i => !('body' in i))).toBe(true)
     expect(inbox.needsYou.filter(i => i.type !== 'plan_thread').map(i => i.type).sort()).toEqual(['blocked', 'failed', 'human_review'])
   })
 
@@ -65,11 +76,12 @@ describe('prototype mock API', () => {
     const stop = onMockEvent(e => events.push(e.type === 'plan.message' ? `${e.message.role}:${e.message.kind}` : e.type))
     vi.useFakeTimers()
     await mockCall('POST', '/plan/sessions/s-2/messages', { text: 'Web Push' })
+    expect((await mockCall<Inbox>('GET', '/inbox')).needsYou.some(i => i.id === 's-2')).toBe(false)
     vi.runAllTimers()
     vi.useRealTimers()
     pmReply('s-2', STOP_ASKING)
     stop()
-    expect(events).toEqual(['human:message', 'pm:question', 'plan.session', 'plan.updated', 'pm:message', 'plan.session'])
+    expect(events).toEqual(['human:message', 'plan.session', 'pm:question', 'plan.session', 'plan.updated', 'pm:message', 'plan.session'])
     const detail = await mockCall<PlanSessionDetail>('GET', '/plan/sessions/s-2')
     expect(detail.plans.at(-1)?.status).toBe('proposed')
     expect(detail.status).toBe('needs_approval')
@@ -86,6 +98,7 @@ describe('prototype mock API', () => {
     const stop = onMockEvent(e => events.push(e))
     await mockCall('POST', '/plan/plans/plan-3/approve', { to: 'backlog' })
     stop()
+    expect((await mockCall<Inbox>('GET', '/inbox')).needsYou.some(i => i.id === 's-3')).toBe(false)
     const drafts = events.find(e => e.type === 'plan.drafts')
     expect(drafts?.type === 'plan.drafts' && drafts.sessions.map(s => s.sessionId)).toEqual(['s-1'])
     await expect(mockCall<Task>('GET', '/tasks/COR-16')).resolves.toMatchObject({ status: 'backlog', planSessionId: null })
