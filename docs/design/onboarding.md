@@ -3,6 +3,8 @@
 **Canvas frames:** `1 · Your name`, `2 · Choose a repo`, `3 · Detect agents`, `4 · Name agents`
 **Route:** `/setup`, one step per query (`/setup?step=repo`). Shown on first run, before the app shell exists. The shell isn't rendered here.
 
+Onboarding is done once the server has a project, on every browser and device; nothing in the browser (localStorage, cookies) decides it. With no projects, every page leads here. With one, `/` and any `/setup` visit go to the first project, except the add-project flow (`/setup?step=repo&add=1`). If the project list can't be fetched, nothing redirects (`middleware/setup.global.ts`, `utils/onboarding.ts`).
+
 ## Purpose
 
 Take a new user from nothing to a working first project in four steps. Setup checks run along the way, so the user never lands on an empty app that can't do anything (PRD §7.1: a project can't start work until setup checks pass).
