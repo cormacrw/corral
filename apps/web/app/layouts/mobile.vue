@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { ROLE } from '~/utils/labels'
-
 // The mobile shell (D17, design/mobile.md): a header with the runner's
 // status, the page, and a five-tab bar. app.vue swaps it in for the
 // default layout on mobile; the URLs are the same as on the web.
@@ -29,9 +27,22 @@ const tabs = computed(() => [
   { label: 'Agents', icon: 'i-lucide-bot', to: '/agents', active: isActive('/agents') }
 ])
 
+const parts = computed(() => route.path.split('/').filter(Boolean))
+
+// A run's transcript fills the screen with its own header and footer
+// (design/mobile.md), like a conversation
+const fullScreen = computed(() => parts.value[0] === 'agents' && parts.value.length >= 3)
+
+// A screen below a tab's top level goes back up to it, and can swap the
+// Settings button for its own action
+const back = computed(() => parts.value[0] === 'agents' && parts.value.length === 2 ? '/agents' : null)
+const action = computed(() => parts.value[0] === 'agents' && parts.value.length === 2
+  ? { to: '/settings/agents', icon: 'i-lucide-sliders-horizontal', label: 'Agent settings' }
+  : { to: '/settings/profile', icon: 'i-lucide-settings', label: 'Settings' })
+
 // The header names the page; later tasks give each screen its own header
 const title = computed(() => {
-  const [section, id] = route.path.split('/').filter(Boolean)
+  const [section, id] = parts.value
   switch (section) {
     case 'home': return 'Home'
     case 'plan': return 'Plan'
@@ -41,8 +52,8 @@ const title = computed(() => {
     case 'epics': return 'Epic'
     case 'projects': return state.value.projects.find(p => p.slug === id)?.name ?? 'Projects'
     case 'agents': {
-      const agent = state.value.agents.find(a => a.name.toLowerCase() === id)
-      return agent ? `${agent.name} · ${ROLE[agent.role]}` : 'Agents'
+      if (!id) return 'Agents'
+      return state.value.agents.find(a => a.name.toLowerCase() === id)?.name ?? 'Agent'
     }
     default: return 'Corral'
   }
@@ -51,8 +62,20 @@ const title = computed(() => {
 
 <template>
   <div class="flex h-svh flex-col bg-default text-default">
-    <header class="shrink-0 border-b border-default bg-default pt-[env(safe-area-inset-top)] ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]">
+    <header
+      v-if="!fullScreen"
+      class="shrink-0 border-b border-default bg-default pt-[env(safe-area-inset-top)] ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]"
+    >
       <div class="flex h-14 items-center gap-2 px-4">
+        <UButton
+          v-if="back"
+          :to="back"
+          icon="i-lucide-arrow-left"
+          variant="ghost"
+          color="neutral"
+          aria-label="Back"
+          class="-ms-2"
+        />
         <h1 class="min-w-0 flex-1 truncate text-xl font-semibold text-highlighted">
           {{ title }}
         </h1>
@@ -67,11 +90,11 @@ const title = computed(() => {
           Runner {{ state.runner?.online ? 'online' : 'offline' }}
         </span>
         <UButton
-          to="/settings/profile"
-          icon="i-lucide-settings"
+          :to="action.to"
+          :icon="action.icon"
           variant="ghost"
           color="neutral"
-          aria-label="Settings"
+          :aria-label="action.label"
         />
       </div>
     </header>
@@ -87,6 +110,7 @@ const title = computed(() => {
     </UDashboardGroup>
 
     <nav
+      v-if="!fullScreen"
       aria-label="Main"
       class="shrink-0 border-t border-default bg-default pb-[env(safe-area-inset-bottom)] ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]"
     >
