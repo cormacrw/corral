@@ -130,6 +130,47 @@ describe('plan sessions', () => {
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
   })
 
+  it('lets the PM read any task by ref, and names a ref that doesn\'t exist', async () => {
+    const project = await t.createProject()
+    await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+    const [epic] = await t.db.insert(epics).values({ projectId: project.id, title: 'Accounts', createdBy: t.actor }).returning()
+    const base = await t.createTask(project.slug, { title: 'User table' })
+    const task = await t.createTask(project.slug, {
+      title: 'Add login',
+      epicId: epic!.id,
+      dependsOn: [base.number],
+      description: { type: 'doc', content: [{ type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Why' }] }, { type: 'paragraph', content: [{ type: 'text', text: 'Email and password' }] }] },
+      acceptanceCriteria: ['Shows an error on a bad password', 'Remembers the session']
+    })
+    expect(task.status).toBe('backlog')
+    expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/comments`, { body: 'Use argon2' })).status).toBe(201)
+
+    await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: `Refine ${task.ref}` })
+    const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
+    const read = await runner.call(job.runId, job.leaseEpoch, 'get_task', { taskRef: task.ref })
+    expect(read).toMatchObject({
+      ok: true,
+      result: {
+        ref: task.ref,
+        title: 'Add login',
+        description: '## Why\n\nEmail and password',
+        status: 'backlog',
+        epic: { id: epic!.id, title: 'Accounts' },
+        dependsOn: [base.ref],
+        acceptanceCriteria: [
+          { id: task.acceptanceCriteria[0]!.id, text: 'Shows an error on a bad password' },
+          { id: task.acceptanceCriteria[1]!.id, text: 'Remembers the session' }
+        ],
+        comments: [{ author: 'human', body: 'Use argon2' }]
+      }
+    })
+
+    const missing = `${project.prefix}-99`
+    expect(await runner.call(job.runId, job.leaseEpoch, 'get_task', { taskRef: missing })).toMatchObject({ ok: false, error: `No task ${missing} in this project` })
+    expect(await runner.call(job.runId, job.leaseEpoch, 'get_task', { taskRef: 'XYZ-1' })).toMatchObject({ ok: false, error: expect.stringContaining('No task XYZ-1 in this project') })
+    await endTurn(job, 'Read it.')
+  })
+
   it('spans several epics, keeping each one a revision still names and deleting the one it drops', async () => {
     const project = await t.createProject()
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))

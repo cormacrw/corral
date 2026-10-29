@@ -211,9 +211,11 @@ export class PlanService {
         const { taskRef: ref } = z.object({ taskRef: z.string() }).parse(input)
         const task = await loadTask(db, await this.#taskIdByRef(project, ref))
         const notes = await db.select().from(schema.comments).where(eq(schema.comments.taskId, task.id)).orderBy(asc(schema.comments.createdAt))
+        const [epic] = task.epicId ? await db.select({ id: epics.id, title: epics.title }).from(epics).where(eq(epics.id, task.epicId)) : []
         return {
           ...task,
           description: richTextToMarkdown(task.description),
+          epic: epic ?? null,
           comments: notes.map(c => ({ author: c.author.kind, body: c.body, pinned: c.pinned, at: c.createdAt.toISOString() }))
         }
       }
@@ -503,9 +505,9 @@ export class PlanService {
 
   async #taskIdByRef(project: ProjectRow, ref: string): Promise<string> {
     const match = new RegExp(`^${project.prefix}-(\\d+)$`, 'i').exec(ref.trim())
-    if (!match) throw new ToolError(`${ref} isn't a task in ${project.name} (refs look like ${project.prefix}-12)`)
+    if (!match) throw new ToolError(`No task ${ref} in this project (refs look like ${project.prefix}-12)`)
     return findTaskId(this.#d.db, project.id, Number(match[1])).catch(() => {
-      throw new ToolError(`${ref} doesn't exist`)
+      throw new ToolError(`No task ${ref} in this project`)
     })
   }
 
