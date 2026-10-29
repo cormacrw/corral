@@ -211,7 +211,7 @@ const items = [
                     />
                   </div>
                   <p class="text-xs text-muted">
-                    <span data-testid="agent-runtime-label">{{ runtimeLabel(agent.runtime) }}</span> · concurrency {{ agent.concurrency }} · <span class="font-mono">.corral/agents/{{ agent.role }}.md</span>
+                    <span data-testid="agent-runtime-label">{{ runtimeLabel(agent.runtime) }}</span> · {{ agent.role === 'pm' ? 'one turn per session' : `concurrency ${agent.concurrency}` }} · <span class="font-mono">.corral/agents/{{ agent.role }}.md</span>
                   </p>
                   <AvatarUpload
                     :name="agent.name"
@@ -251,6 +251,7 @@ const items = [
                   />
                 </UFormField>
                 <UFormField
+                  v-if="agent.role !== 'pm'"
                   label="Concurrency"
                   size="xs"
                 >

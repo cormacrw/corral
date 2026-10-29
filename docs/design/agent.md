@@ -27,7 +27,7 @@ See what an agent is doing right now, attach to its live run, and look back at p
   | Reviewer | Reviews this week · Approved · Changes requested (avg rounds per task) · Avg review · Usage today |
   | PM | Turns this week · Plans approved · Tasks proposed · Avg turn · Usage today |
 
-- **Facts line:** group and concurrency, where it runs (one worktree per task, a read-only task worktree, or a read-only checkout of main), its instructions file (mono, e.g. `.corral/agents/developer.md`), and its caps or limits.
+- **Facts line:** group and concurrency (for the PM, "One turn per session" instead: it has no concurrency limit beyond one turn per Plan session; D13), where it runs (one worktree per task, a read-only task worktree, or a read-only checkout of main), its instructions file (mono, e.g. `.corral/agents/developer.md`), and its caps or limits.
 - Usage is in tokens, with no dollar cost on a subscription. Show it where available (agent-runtime-and-auth.md, rule 6).
 
 ### Body: two panes

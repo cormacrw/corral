@@ -101,7 +101,9 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
   const facts = computed(() => {
     if (!agent.value) return ''
     const where = agent.value.role === 'developer' ? 'one worktree per task' : agent.value.role === 'reviewer' ? 'a read-only task worktree' : 'a read-only checkout of the default branch'
-    return `Concurrency ${agent.value.concurrency} · ${where} · .corral/agents/${agent.value.role}.md`
+    // The PM has no concurrency, only one turn per Plan session (D13)
+    const limit = agent.value.role === 'pm' ? 'One turn per session' : `Concurrency ${agent.value.concurrency}`
+    return `${limit} · ${where} · .corral/agents/${agent.value.role}.md`
   })
   async function stop(run: Run) {
     try {

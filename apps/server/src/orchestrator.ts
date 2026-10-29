@@ -120,7 +120,8 @@ export class Orchestrator implements RunnerHandlers {
   }
 
   // A PM turn (D9): a run with no task and no lease, fenced by its own epoch.
-  // It waits as `queued`, holding its job, until the PM has a free slot (D13).
+  // It starts right away; it only waits as `queued`, holding its job, while
+  // the PM is paused or the runner can't take it (D13).
   async startPmRun(session: PlanSessionRow, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'>): Promise<string> {
     const { db } = this.#d
     if (this.#stopped) throw new ApiFailure(409, { code: 'conflict', constraint: 'corral_stopped' })
@@ -138,8 +139,9 @@ export class Orchestrator implements RunnerHandlers {
     return run!.id
   }
 
-  // Sends waiting PM turns to the runner, oldest first, while the PM's
-  // concurrency allows. A waiting turn is `queued` with its job still held.
+  // Sends every waiting PM turn to the runner, oldest first. The PM has no
+  // concurrency, since each session runs one turn at a time (D9, D13), so a
+  // turn only waits, `queued` with its job still held, while the PM is paused.
   async #startPmTurns(): Promise<void> {
     const { db, runner } = this.#d
     if (!runner.online || this.#stopped || this.#updating) return
@@ -148,13 +150,9 @@ export class Orchestrator implements RunnerHandlers {
       const picked: { id: string, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'> }[] = []
       for (const agent of pmAgents) {
         if (agent.paused || (agent.pausedUntil && agent.pausedUntil > this.#now())) continue
-        const active = await tx.select({ id: runs.id }).from(runs)
-          .where(and(eq(runs.agentId, agent.id), inArray(runs.state, [...ACTIVE_RUN_STATES]), isNull(runs.pmJob)))
-        const free = agent.concurrency - active.length
-        if (free <= 0) continue
         const waiting = await tx.select({ id: runs.id, job: runs.pmJob }).from(runs)
           .where(and(eq(runs.agentId, agent.id), eq(runs.state, 'queued'), isNotNull(runs.pmJob)))
-          .orderBy(asc(runs.queuedAt), asc(runs.number)).limit(free)
+          .orderBy(asc(runs.queuedAt), asc(runs.number))
         for (const w of waiting) {
           await tx.update(runs).set({ pmJob: null }).where(eq(runs.id, w.id))
           // The runtime is the session's (D18); a job queued before sessions
@@ -288,7 +286,7 @@ export class Orchestrator implements RunnerHandlers {
     const { db, runner } = this.#d
     if (!runner.online || this.#stopped || this.#updating) return
     // PM turns aren't claimed; they run when the human writes (D9), and
-    // only wait here for one of the PM's slots
+    // only wait here while the PM was paused or the runner was away
     await this.#startPmTurns()
     const workers = await db.select().from(agents).where(ne(agents.role, 'pm')).orderBy(asc(agents.createdAt))
     for (const agent of workers) {

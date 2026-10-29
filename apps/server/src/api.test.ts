@@ -339,6 +339,21 @@ describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
       expect(t.events).toMatchObject([{ type: 'agent.updated', agent: { id: created.id, runtime: 'codex' } }])
       expect((await t.request('PATCH', `/api/agents/${created.id}`, { runtime: 'gemini' })).status).toBe(400)
     })
+
+    it('refuses concurrency for the PM, leaving it unchanged, and still sets it for a developer (D13)', async () => {
+      const [pm] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'pm'))
+      const res = await t.request('PATCH', `/api/agents/${pm!.id}`, { concurrency: 3, paused: true })
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({ error: { code: 'concurrency_not_applicable' } })
+      const [after] = await t.db.select().from(schema.agents).where(eq(schema.agents.id, pm!.id))
+      expect(after).toEqual(pm)
+
+      const [developer] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'developer')).orderBy(asc(schema.agents.createdAt)).limit(1)
+      const ok = await t.request('PATCH', `/api/agents/${developer!.id}`, { concurrency: developer!.concurrency + 1 })
+      expect(ok.status).toBe(200)
+      expect(await ok.json()).toMatchObject({ id: developer!.id, concurrency: developer!.concurrency + 1 })
+      await t.db.update(schema.agents).set({ concurrency: developer!.concurrency }).where(eq(schema.agents.id, developer!.id))
+    })
   })
 
   describe('transitions', () => {
