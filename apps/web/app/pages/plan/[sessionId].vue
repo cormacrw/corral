@@ -8,6 +8,7 @@ import { withoutMessages } from '~/utils/tool-steps'
 // A Plan conversation (design/plan.md)
 const route = useRoute()
 const live = useLive()
+const threads = usePlanThreads()
 // The PM by its current name and picture
 const pm = computed(() => live.state.value.agents.find(a => a.role === 'pm') ?? null)
 const flyout = useTaskFlyout()
@@ -78,6 +79,7 @@ async function send(message: string): Promise<boolean> {
   busy.value = true
   try {
     await api.plan.message(session.value.id, message, taskRef.value ?? undefined)
+    threads.add(session.value.id)
     text.value = ''
     taskRef.value = null
     return true
@@ -177,7 +179,6 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
         aria-label="New session"
       />
     </Teleport>
-    <PlanTabs v-else />
     <div class="flex min-h-0 flex-1">
       <div class="flex min-w-0 flex-1 flex-col">
         <header

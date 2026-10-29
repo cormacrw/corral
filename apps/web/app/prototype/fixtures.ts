@@ -379,7 +379,7 @@ export const planSessions: PlanSession[] = [
   },
   {
     id: 's-4', projectId: 'p-corral', title: 'Long tokens', runtime: 'claude-code',
-    preview: 'Here is what widens the thread.', unread: false, status: 'none', activeRunId: 'r-plan-2',
+    preview: 'Here is what widens the thread.', unread: false, closed: false, status: 'none', activeRunId: 'r-plan-2',
     createdAt: ago(60 * 2), updatedAt: ago(5)
   }
 ]

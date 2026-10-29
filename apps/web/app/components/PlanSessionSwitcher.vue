@@ -2,7 +2,7 @@
 import type { PlanSession } from '@corral/contracts'
 import { projectColor, timeAgo } from '~/utils/labels'
 
-// The mobile form of PlanTabs (design/plan.md, design/mobile.md): a header
+// The mobile session switcher (design/plan.md, design/mobile.md): a header
 // button that opens a sheet of the open sessions, with their status and a
 // close button each, then every other session to resume.
 const live = useLive()
@@ -15,7 +15,7 @@ const others = computed(() => {
   return live.state.value.planSessions.filter(s => !shown.has(s.id))
 })
 const projectOf = (session: PlanSession) => live.state.value.projects.find(p => p.id === session.projectId) ?? null
-const needsYou = computed(() => sessions.value.some(s => s.id !== active.value && (s.unread || s.status !== 'none')))
+const needsYou = computed(() => sessions.value.some(s => s.unread || s.status === 'question' || s.status === 'needs_approval'))
 
 async function go(to: string) {
   open.value = false

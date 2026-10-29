@@ -10,16 +10,17 @@ The main place to work with Juno, the PM. Planning, refining Backlog tasks, answ
 
 ## Views
 
-### Tab strip
+### Side nav threads
 
-A strip of tabs runs along the top of both views, listing the sessions you have open, like browser tabs.
+Open sessions appear as indented sub-items under **Plan** in the left sidebar, in opening order. Both Plan pages use this navigation without a tab strip.
 
-- **Opening a tab:** opening or starting a session adds its tab at the end. Clicking a tab switches to that conversation without a full reload.
-- **Each tab:** the project dot and the session title (truncated, full title on hover), then its status: a spinner while Juno is working (`activeRunId`), a `primary` dot for Needs approval, an `info` dot for Question, and a small neutral dot (with a bold title) when it's unread.
-- **Closing (×):** removes only the tab. The session isn't deleted and is still in Resume and Recent. Closing the current tab moves to the tab on its right, else the one on its left, else to `/plan`.
-- **+ tab:** goes to `/plan` (new session), and is the current tab there.
-- **Live:** status comes from the session list in live state, which `plan.session` events keep current, so tabs update while another tab is open. No polling.
-- **Persistence:** the open tabs and their order are kept in localStorage (`corral.plan.tabs`), so they survive a reload. Tabs for sessions that no longer exist are dropped when the app loads.
+- **Opening:** starting a session or opening one from Resume or Recent adds it at the end, including a closed session. Sending a message adds the session back too. Clicking a thread switches conversations without a full reload; the current session is highlighted.
+- **Each thread:** the project dot and truncated title, with the full title on hover. Hover or keyboard focus reveals an **×**, which removes only the nav entry. The session remains in Resume and Recent, and closing the current entry leaves its page open.
+- **Needs attention:** a plan waiting for approval, a question, or an unseen finished Juno reply makes the title bold. The right indicator is a `primary` dot for **Needs approval**, an `info` dot for **Question**, otherwise a neutral dot for **Unread reply**, in that priority order. Its tooltip names the reason. While Juno is working (`activeRunId`), a spinner replaces the dot.
+- **Plan badge:** the number of open threads needing attention, including the current session's approval or question. It remains visible when the sidebar is collapsed; the thread list scrolls separately so the badge stays visible.
+- **Read state:** a turn finishing in the session being viewed is marked read immediately. That session never displays an unread reply indicator; questions and approvals still need attention.
+- **Live:** `plan.session` events update statuses and the badge without polling. A session becoming `closed` after its plan is added to the board or Backlog leaves the nav immediately, while its conversation stays open if being viewed.
+- **Persistence:** open threads and their order use localStorage (`corral.plan.tabs`, retained for compatibility). Sessions that no longer exist, and closed sessions not being reopened, are dropped on load.
 
 ### New session (default when you open Plan)
 
@@ -75,7 +76,7 @@ Docked on the right (see [task.md](task.md)). It opens from plan-flyout rows and
 
 On the mobile layout ([mobile.md](mobile.md)) the same two routes keep their behaviour, laid out for a phone:
 
-- **Session switcher:** the tab strip becomes a history button in the header. It opens a bottom sheet with **New session**, the open sessions (status badges, unread dot, spinner while Juno works, and × to close one, same rules as the tabs) and the other sessions under **Resume**.
+- **Session switcher:** the side nav threads become a history button in the header. It opens a bottom sheet with **New session**, the open sessions (status badges, unread dot, spinner while Juno works, and × to close one, same rules as the side nav threads) and the other sessions under **Resume**.
 - **New session:** the column starts at the top and scrolls. The Resume picker moves to the switcher.
 - **Conversation:** full height, without the tab bar. The header shows a back button to `/plan`, the project dot and name above the session title, the switcher and **+** (new session).
 - **Questions:** the open question's answers are stacked, full-width buttons at least 44px tall: Accept recommendation, each option, Other… (focuses the composer, which opens the keyboard) and Stop and propose the plan. Older and answered questions keep the web's compact row, disabled, with the answer marked. When Juno's next question arrives, the log scrolls to the top of it.
