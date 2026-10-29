@@ -49,12 +49,18 @@ describe('runner connection', () => {
       type: 'job.result',
       jobId: message.jobId,
       ok: true,
-      result: { kind: 'detect_clis', clis: [{ id: 'claude', version: '2.1.312 (Claude Code)', signedIn: true }] }
+      result: { kind: 'detect_clis', clis: [
+        { id: 'claude', version: '2.1.312 (Claude Code)', signedIn: true },
+        { id: 'codex', version: 'codex-cli 0.165.0', signedIn: false }
+      ] }
     }))
     expect(await (await fetch(`${server.url}/api/runner`)).json()).toMatchObject({ online: true, name: 'test-runner' })
 
     const clis = await (await fetch(`${server.url}/api/setup/clis`)).json()
-    expect(clis).toEqual([{ id: 'claude', name: 'Claude Code', version: '2.1.312 (Claude Code)', signedIn: true }])
+    expect(clis).toEqual([
+      { id: 'claude', name: 'Claude Code', version: '2.1.312 (Claude Code)', signedIn: true },
+      { id: 'codex', name: 'Codex CLI', version: 'codex-cli 0.165.0', signedIn: false }
+    ])
 
     socket.close()
     await new Promise(resolve => setTimeout(resolve, 100))
