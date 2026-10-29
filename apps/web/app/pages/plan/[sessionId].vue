@@ -111,7 +111,8 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
 
 <template>
   <UDashboardPanel :ui="{ body: 'p-0' }">
-    <div class="flex h-full min-h-0">
+    <PlanTabs />
+    <div class="flex min-h-0 flex-1">
       <div class="flex min-w-0 flex-1 flex-col">
         <header class="flex h-14 shrink-0 items-center gap-2 border-b border-default px-4 text-sm">
           <span

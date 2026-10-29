@@ -10,6 +10,17 @@ The main place to work with Juno, the PM. Planning, refining Backlog tasks, answ
 
 ## Views
 
+### Tab strip
+
+A strip of tabs runs along the top of both views, listing the sessions you have open, like browser tabs.
+
+- **Opening a tab:** opening or starting a session adds its tab at the end. Clicking a tab switches to that conversation without a full reload.
+- **Each tab:** the project dot and the session title (truncated, full title on hover), then its status: a spinner while Juno is working (`activeRunId`), a `primary` dot for Needs approval, an `info` dot for Question, and a small neutral dot (with a bold title) when it's unread.
+- **Closing (×):** removes only the tab. The session isn't deleted and is still in Resume and Recent. Closing the current tab moves to the tab on its right, else the one on its left, else to `/plan`.
+- **+ tab:** goes to `/plan` (new session), and is the current tab there.
+- **Live:** status comes from the session list in live state, which `plan.session` events keep current, so tabs update while another tab is open. No polling.
+- **Persistence:** the open tabs and their order are kept in localStorage (`corral.plan.tabs`), so they survive a reload. Tabs for sessions that no longer exist are dropped when the app loads.
+
 ### New session (default when you open Plan)
 
 Everything is centred vertically and horizontally, in a column up to 720px wide:
@@ -79,6 +90,7 @@ Docked on the right (see [task.md](task.md)). It opens from plan-flyout rows and
 
 ## Accessibility
 
+- The tab strip is a `tablist` ("Open sessions") with one tab stop, the current tab. Left and Right arrows (wrapping), Home and End move between tabs, including +; Enter or Space opens one, and Delete closes it. Tab moves on to the current tab's close button. Close buttons are labelled "Close {title}", and the status indicators have screen-reader text.
 - Popovers are listboxes with search inputs that have labels, and Escape closes them.
 - The log is `aria-live="polite"`.
 - The plan flyout is a `section` with an accessible name.
