@@ -45,6 +45,12 @@ Read and edit any task from wherever you are, without losing your place. It's th
    - The trigger is borderless with a chevron and gets `bg-elevated` on hover or while open.
    - The menu uses popover styling, with a trailing `primary` check on the selected item.
    - Picking an option saves immediately and shows "Saved".
+   - **Design tasks (D20)** show a **Design** section here, before Depends on (on mobile, in the Details tab):
+     - A version menu (`v3 · Approved`, `v2 · Superseded`, …), newest first, a **Desktop / Mobile** viewport toggle and a link that opens the prototype full size (`/designs/:versionId`).
+     - The prototype in `DesignPreview`'s sandboxed iframe, rendered at 1280×800 or 390×844 and scaled down to fit the column, so a desktop layout stays a desktop layout.
+     - The version's state badge, branch and commit. A superseded version says so; one sent back shows the human's feedback.
+     - When the task is in Human review and the selected version is the submitted one: **Request changes**, which opens the prompt composer (images can be attached) and sends the feedback to the developer (Human review → In progress, kept on the version), and **Approve vN**, which approves that version and supersedes the earlier ones.
+     - The version's screenshots as thumbnails that open full size, then its `design.md`.
 3. **Depends on:** a list of linked tasks (ref, title, status badge), or "Nothing", with an **Add dependency** ghost button.
 4. **Description:** rich text (`UEditor`, TipTap). Images can be pasted, dropped or added from the toolbar's Insert image button: each uploads as an attachment and is stored in the document as an image node with `src: attachment:<id>`, shown from `/api/attachments/<id>/file`. An image alone isn't a description for the Definition of Ready.
    - It's read-only until you press **Edit**.
