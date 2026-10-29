@@ -11,7 +11,7 @@ One place for everything an agent needs you to decide, from every project, with 
 Items come from two places:
 
 - **Developer and reviewer runs:** human reviews, blocked and failed tasks, questions, and Activity.
-- **Open Plan sessions** (D11, amended 2026-10-29): each open session is a **Plan thread** item, so Juno's questions, plans waiting for approval and unread replies are here too. They can be handled from the Inbox or from Plan; both act on the same session. See [Plan threads](#plan-threads).
+- **Plan sessions that need you** (D11, amended 2026-10-29): each open session with a question from Juno or a plan needing approval is a **Plan thread** item. They can be handled from the Inbox or from Plan; both act on the same session. See [Plan threads](#plan-threads).
 
 There's no separate notifications feed.
 
@@ -72,54 +72,68 @@ Docked, stacked layout, from [task.md](task.md). It's open by default and closes
 
 ## Plan threads
 
-An open Plan session (D9) shown as an Inbox item (D11). A session is open until its plan is approved, to the board or the Backlog (it's then `closed`), and opens again when you send it a message. Closed sessions leave the Inbox; they aren't listed under Resolved.
+An open Plan session (D9) that's waiting on you, shown as an Inbox item (D11). A session is open until its plan is approved, to the board or the Backlog, or you close it with **Close thread** (it's then `closed`), and opens again when you send it a message from Plan. Closed sessions leave the Inbox; they aren't listed under Resolved.
 
 ### Where they're listed
 
-- Every open session is under **Needs you**, never Activity or Resolved.
-- Sessions that need you (a plan **needing approval**, a **question** or an **unread reply**, the same reasons as the side nav threads in [plan.md](plan.md#side-nav-threads)) are listed with the task items, newest first.
-- The other open sessions are sorted below everything that needs you, newest first, under a quiet "Open in Plan" divider.
-- The **Needs you** count includes only the sessions that need you (approval, question or unread reply), matching the Plan badge.
-- `plan.session` events add, re-sort and remove threads live: a question or a new plan version moves a thread up; approving its plan, here or in Plan, removes it at once.
+- Only open sessions with a pending **question** or a plan **needing approval** are listed, under **Needs you**, never Activity or Resolved. They sit with the task items, newest first.
+- Idle sessions, and sessions whose only news is an **unread reply**, aren't Inbox items. They stay in Plan and its side nav threads ([plan.md](plan.md#side-nav-threads)). There's no "Open in Plan" divider or group.
+- The **Needs you** count includes exactly the listed threads (question or approval), plus the task items.
+- `plan.session` events add, re-sort and remove threads live: a question or a new plan version adds or moves a thread up; answering its question (until Juno asks again), approving its plan or closing it, here or in Plan, removes it at once.
 
 ### Row
 
 One button, in the same list as the other items:
 
 - the **project dot** (in place of the sender's avatar, with the project name in its tooltip and `aria-label`)
-- the **session title** (bold when it needs you), and the **time** of its last message
-- a **status badge**: "Needs approval" in `primary`, "Question" in `info`, or "Unread reply" (neutral). Open sessions with nothing to do have no badge. While Juno is working (`activeRunId`), a spinner sits next to the time.
-- a two-line **preview** of the latest message: Juno's question, the plan summary ("Plan v2 · 2 epics · 4 tasks"), or the last reply
+- the **session title** (bold), and the **time** of its last message
+- a **status badge**: "Needs approval" in `primary` or "Question" in `info`. While Juno is working (`activeRunId`), a spinner sits next to the time.
+- a two-line **preview**: Juno's question, or the plan summary ("Plan v2 · 2 epics · 4 tasks")
 
 ### Detail pane
 
-The selected message column shows the session's **conversation**, the same one as Plan's ([plan.md](plan.md#conversation)), not a copy:
+The selected message column shows only what needs you, **not the conversation**. The full conversation stays in Plan ([plan.md](plan.md#conversation)), one click away with **Open in Plan**.
 
-- **Header:** the project dot and name, the session title, the status badge, the runtime badge ("Claude" or "Codex"), and **Open in Plan**. There's no Task details toggle; a plan's tasks open in the flyout instead.
-- **Body:** the message log, scrolled to the bottom: your messages, Juno's messages with their collapsed Steps, question cards and Plan links. While Juno is working, the live turn streams in, as in Plan. A Plan link, or a task from the plan, opens in the docked flyout (the plan flyout and task flyout from [plan.md](plan.md#plan-flyout)).
-- Selecting a thread with an unread reply marks it read, as opening the session in Plan does.
+- **Header:** the project dot and name, the session title, the status badge, the runtime badge ("Claude" or "Codex"), **Open in Plan** and **Close thread**. There's no Task details toggle; a plan's tasks open in the flyout instead.
+- **Question:** Juno's question in its `info` card, with "Recommended: …" when Juno gave one, and the one-tap answers: **Accept recommendation**, one button per option, **Other…** (focuses the reply box) and **Stop and propose the plan**. Below it, a reply box ("Reply to Juno…") for a free-text answer. A tap or a sent reply sends the answer to the session and starts a PM turn, exactly as in Plan; the thread then leaves the list unless Juno asks again or proposes a plan.
+- **Plan:** the plan's title, its summary and counts ("Plan v2 · 2 epics · 4 tasks"), with **View plan**, **Approve to board**, **Approve to Backlog** and **Open in Plan**. **View plan** opens the plan flyout docked on the right ([plan.md](plan.md#plan-flyout)), and a task from it opens in the task flyout.
+- Earlier messages, Steps and the live turn's transcript aren't shown. While Juno is working, the pane shows a working line in place of the answers, and they're disabled.
 
 ### Actions
 
-In the tray, as for other items:
-
 | Action | Shown | What it does |
 |---|---|---|
-| **Reply** | Always | The composer ("Reply to Juno…") sends a message to the session and starts a PM turn, exactly as in Plan. On a question, the card's buttons (Accept recommendation, an option, Other…, Stop and propose the plan) send the answer straight away. Disabled while Juno is working. |
+| **Answer** | A question is pending | A one-tap answer, or the reply box, sends the answer to the session and starts a PM turn, as in Plan. Disabled while Juno is working. |
+| **View plan** | A plan is waiting for approval | Opens the latest plan version in the docked plan flyout. |
 | **Approve to board** | A plan is waiting for approval | Approves the latest plan version to the board (the plan flyout's **Add to board**). The session closes and leaves the Inbox. |
 | **Approve to Backlog** | A plan is waiting for approval | Approves it to the Backlog (**Add to backlog**). The session closes and leaves the Inbox. |
-| **Open in Plan** | Always | Goes to `/plan/:sessionId`, keeping the thread in the side nav. |
+| **Open in Plan** | Always | Goes to `/plan/:sessionId`, with the full conversation, keeping the thread in the side nav. |
+| **Close thread** | Always | Asks for confirmation, then closes the session (below). |
 
-- Approve to board and Approve to Backlog are quick-action chips; like the others, selecting one labels the submit button ("Approve to board ↑") and sending carries it out. Only a human can approve (D9).
+- Only a human can approve (D9).
 - After approving, the pane shows a green "Resolved" `UAlert` ("✓ 4 tasks added to the board.") and selection moves to the next item that needs you.
+
+### Close thread
+
+**Close thread** abandons a session without approving anything. It's in the thread's header here, and in the conversation header in Plan ([plan.md](plan.md#conversation)); both do the same thing.
+
+- **Confirmation:** a modal, "Close this thread?", says what will happen: "Juno's draft tasks and the unapproved plan will be discarded. You can reopen the thread later by sending it a message from Plan." The confirm button is **Close thread** in `error`; **Cancel** keeps everything as it was. When Juno is working, the text adds "Juno's current turn will be stopped."
+- **What closing does:**
+  - discards the session's **Draft** tasks (deleted, as removed Drafts are; D10) and its **unapproved plan**; Backlog tasks the plan was revising are only un-staged and stay as they were
+  - **stops a running PM turn**
+  - marks the session `closed`
+- **Afterwards:** the thread leaves the Inbox and the side nav at once (`plan.session` and `plan.drafts` events, here and in Plan), isn't listed under Resolved, and the session's drafts leave Drafts on the new-session page. Selection moves to the next item that needs you. The session stays in Plan's **Resume** list.
+- **Reopening:** sending the session a message from Plan reopens it, as after an approval. The discarded drafts and plan don't come back; Juno can propose a new plan.
+- **Fails:** an inline error in the pane; nothing is discarded.
 
 ### Mobile
 
 On the mobile layout ([mobile.md](mobile.md#inbox)), a Plan thread opens as its own screen at `/inbox/:itemId`:
 
-- **Header:** "Inbox · n of m" above the session title, a back button to the list, and **Open in Plan** in place of the Task button. The tab bar is hidden, as on any item.
-- **Body:** the conversation, full width, scrolled to the bottom. Question answers are stacked, full-width buttons at least 44px tall, as in Plan on mobile. A Plan link opens the plan in a bottom sheet; a task from it opens in a taller sheet over it.
-- **Tray:** **Approve to board** and **Approve to Backlog** side by side, full width, when a plan waits for approval, above the composer ("Reply to Juno…"). Approving moves on to the next item that needs you.
+- **Header:** "Inbox · n of m" above the session title, a back button to the list, **Open in Plan** in place of the Task button, and a **⋯** menu with **Close thread**. The tab bar is hidden, as on any item.
+- **Body:** only the question or the plan, full width, not the conversation. A question's answers are stacked, full-width buttons at least 44px tall, as in Plan on mobile, with the reply box ("Reply to Juno…") pinned below. A plan shows its title, summary and counts, with **View plan** (opens the plan in a bottom sheet; a task from it opens in a taller sheet over it) and **Approve to board** and **Approve to Backlog** side by side, full width.
+- **Close thread** confirms in a bottom sheet with the same text, then returns to `/inbox`.
+- Approving moves on to the next item that needs you; a failed approval keeps the screen and sheet open with the error.
 - **Row:** the project dot, session title, time, status badge and preview, in the same list as the other items.
 
 ## What each action does (D10)
@@ -136,7 +150,7 @@ On the mobile layout ([mobile.md](mobile.md#inbox)), a Plan thread opens as its 
 ## Data
 
 - **Items:** id, project, task ref, type (question / human review / blocked / failed / activity / plan thread), sender agent and role, time, subject, preview, body, unread, resolved outcome.
-- **Type-specific fields:** PR, checks, criteria with evidence, positions, suggested answers. A plan thread has the session id, title, status (needs approval / question / unread reply / none), `activeRunId`, preview and last-message time; its messages and plan come from the Plan session endpoints.
+- **Type-specific fields:** PR, checks, criteria with evidence, positions, suggested answers. A plan thread has the session id, title, status (needs approval / question), `activeRunId`, preview and last-message time; its question and plan come from the Plan session endpoints.
 - **Counts per filter.**
 - New items stream in over SSE; plan threads follow `plan.session` events.
 
@@ -163,4 +177,4 @@ On the mobile layout ([mobile.md](mobile.md#inbox)), a Plan thread opens as its 
 - Approve could be one click instead of select-then-send. Two steps are safer; decide after testing.
 - Should Activity items expire, or stay forever?
 
-Mobile Plan threads reuse `PlanConversation` with Plan's `PlanQuestion`, composer and `PlanDetail` bottom sheet. The Inbox header keeps Back to Inbox and Open in Plan (the session route). A waiting plan has View plan and side-by-side approval destinations above the composer; either successful approval closes the sheet and returns to `/inbox`. Failed approvals keep the conversation and sheet open.
+Mobile Plan threads reuse Plan's `PlanQuestion`, composer and `PlanDetail` bottom sheet, without `PlanConversation`. The Inbox header keeps Back to Inbox and Open in Plan (the session route). A waiting plan has View plan and side-by-side approval destinations; either successful approval closes the sheet and returns to `/inbox`. Failed approvals keep the screen and sheet open.

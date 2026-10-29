@@ -6,7 +6,7 @@
 
 ## Purpose
 
-The main place to work with Juno, the PM. Planning, refining Backlog tasks, answering PM questions and approving plans all happen here (D9). Open sessions also appear in the Inbox as Plan threads, where questions can be answered and plans approved too (D11, amended 2026-10-29; see [inbox.md](inbox.md#plan-threads)). Opening the page fresh should feel like starting a conversation: the composer is front and centre.
+The main place to work with Juno, the PM. Planning, refining Backlog tasks, answering PM questions and approving plans all happen here (D9). Open sessions with a question or a plan needing approval also appear in the Inbox as Plan threads, showing just that question or plan, where it can be answered or approved too (D11, amended 2026-10-29; see [inbox.md](inbox.md#plan-threads)). The full conversation lives only here. Opening the page fresh should feel like starting a conversation: the composer is front and centre.
 
 ## Views
 
@@ -15,11 +15,11 @@ The main place to work with Juno, the PM. Planning, refining Backlog tasks, answ
 Open sessions appear as indented sub-items under **Plan** in the left sidebar, in opening order. Both Plan pages use this navigation without a tab strip.
 
 - **Opening:** starting a session or opening one from Resume, Drafts or the Inbox adds it at the end, including a closed session. Sending a message adds the session back too. Clicking a thread switches conversations without a full reload; the current session is highlighted.
-- **Each thread:** the project dot and truncated title, with the full title on hover. Hover or keyboard focus reveals an **×**, which removes only the nav entry. The session remains in Resume (and in the Inbox while it's open), and closing the current entry leaves its page open.
-- **Needs attention:** a plan waiting for approval, a question, or an unseen finished Juno reply makes the title bold. The right indicator is a `primary` dot for **Needs approval**, an `info` dot for **Question**, otherwise a neutral dot for **Unread reply**, in that priority order. Its tooltip names the reason. While Juno is working (`activeRunId`), a spinner replaces the dot.
+- **Each thread:** the project dot and truncated title, with the full title on hover. Hover or keyboard focus reveals an **×**, which removes only the nav entry. The session remains in Resume (and in the Inbox while it has a question or a plan needing approval), and removing the current entry leaves its page open. To abandon the session itself, use **Close thread** in the conversation header.
+- **Needs attention:** a plan waiting for approval, a question, or an unseen finished Juno reply makes the title bold. Only the first two are Inbox items too; an unread reply, or an idle session, is shown only here. The right indicator is a `primary` dot for **Needs approval**, an `info` dot for **Question**, otherwise a neutral dot for **Unread reply**, in that priority order. Its tooltip names the reason. While Juno is working (`activeRunId`), a spinner replaces the dot.
 - **Plan badge:** the number of open threads needing attention, including the current session's approval or question. It remains visible when the sidebar is collapsed; the thread list scrolls separately so the badge stays visible.
 - **Read state:** a turn finishing in the session being viewed is marked read immediately. That session never displays an unread reply indicator; questions and approvals still need attention.
-- **Live:** `plan.session` events update statuses and the badge without polling, here and in the Inbox. A session becoming `closed` after its plan is added to the board or Backlog leaves the nav immediately, while its conversation stays open if being viewed.
+- **Live:** `plan.session` events update statuses and the badge without polling, here and in the Inbox. A session becoming `closed`, after its plan is added to the board or Backlog or after **Close thread**, leaves the nav immediately, while its conversation stays open if being viewed.
 - **Persistence:** open threads and their order use localStorage (`corral.plan.tabs`, retained for compatibility). Sessions that no longer exist, and closed sessions not being reopened, are dropped on load.
 
 ### New session (default when you open Plan)
@@ -42,7 +42,8 @@ Everything is centred vertically and horizontally, in a column up to 720px wide:
 
 ### Conversation
 
-- **Header** (48px): the project dot and name, the session title, a neutral badge naming the session's runtime ("Claude" or "Codex"), and a **New session** ghost button.
+- **Header** (48px): the project dot and name, the session title, a neutral badge naming the session's runtime ("Claude" or "Codex"), **Close thread** (ghost) and a **New session** ghost button.
+- **Close thread:** asks for confirmation ("Close this thread?", with **Close thread** in `error` and **Cancel**), then discards the session's Draft tasks and its unapproved plan, stops a running Juno turn and closes the session, the same action as in the Inbox ([inbox.md](inbox.md#close-thread)). The thread leaves the side nav and the Inbox at once; the conversation stays on screen, and sending a message reopens the session, without the discarded drafts and plan. It's hidden on a session that's already closed.
 - **Message log** (`UChatMessages`, `role="log"`), centred and up to 768px wide:
   - **Your messages:** right-aligned, in a `bg-elevated` bubble.
   - **Juno's messages:** left-aligned with the avatar and "Juno · PM".
@@ -55,7 +56,7 @@ Everything is centred vertically and horizontally, in a column up to 720px wide:
 
 ### Plan flyout
 
-Docked on the right (`?plan`), the same flyout as tasks and epics; the conversation narrows to make room. It always shows the session's **latest** plan version, so each revision updates it in place. On desktop it opens by itself when a new version arrives waiting for approval, unless a task or epic is already open.
+Docked on the right (`?plan`), the same flyout as tasks and epics; the conversation narrows to make room. It always shows the session's **latest** plan version, so each revision updates it in place. On desktop it opens by itself when a new version arrives waiting for approval, unless a task or epic is already open. On phones it doesn't (see [Mobile](#mobile)).
 
 - **Header:** a "Plan v2" badge, a status badge ("Waiting for approval" in `primary`, or "Approved" in `success`), and Close.
 - **Title:** the plan title and "2 epics · 4 tasks" (the epic count only when the plan has epics, "1 epic" for one).
@@ -77,10 +78,10 @@ On the mobile layout ([mobile.md](mobile.md)) the same two routes keep their beh
 
 - **Session switcher:** the side nav threads become a history button in the header. It opens a bottom sheet with **New session**, the open sessions (status badges, unread dot, spinner while Juno works, and × to close one, same rules as the side nav threads) and the other sessions under **Resume**.
 - **New session:** the column starts at the top and scrolls. The Resume picker moves to the switcher.
-- **Conversation:** full height, without the tab bar. The header shows a back button to `/plan`, the project dot and name above the session title, the switcher and **+** (new session).
+- **Conversation:** full height, without the tab bar. The header shows a back button to `/plan`, the project dot and name above the session title, the switcher, **+** (new session) and a **⋯** menu with **Close thread**, which confirms in a bottom sheet.
 - **Questions:** the open question's answers are stacked, full-width buttons at least 44px tall: Accept recommendation, each option, Other… (focuses the composer, which opens the keyboard) and Stop and propose the plan. Older and answered questions keep the web's compact row, disabled, with the answer marked. When Juno's next question arrives, the log scrolls to the top of it.
 - **Grill me** comes first in both composers' toolbars, so it's in reach without scrolling the toolbar sideways.
-- **Plan pill:** a new plan never opens automatically on mobile. While the session has a plan, a centred, rounded pill with a list icon reads “Plan vN · x tasks” (excluding removed tasks). Proposed plans use primary styling and “Needs approval”; approved plans use neutral styling. The pill sits in its own fixed row just above the composer, outside the scrolling log, so it covers neither answers nor composer. Tapping it opens the plan sheet; it hides while the plan is open and returns on close.
+- **Plan pill:** on phones a proposed plan **no longer opens on arrival**; a sheet popping up mid-reply would cover what Juno just said. Instead, while the session has a plan, a floating pill sits above the composer: centred and rounded, with a list icon, reading "Plan vN · x tasks" (excluding removed tasks). A proposed plan uses `primary` styling and "Needs approval"; an approved plan uses neutral styling. The pill sits in its own fixed row just above the composer, outside the scrolling log, so it covers neither answers nor the composer. Tapping it opens the plan sheet (`?plan`); it hides while the plan is open and returns on close.
 - **Plan sheet:** `?plan` opens the plan in a bottom sheet instead of the flyout, with the approve buttons side by side. A task or epic opened from it opens in a taller sheet over it, whose back arrow returns to the plan. Swiping a sheet down closes it. Approving from the sheet, to the board or the Backlog, closes it and goes to a new thread (`/plan`) so the next request is a tap away, with a "Plan approved" toast saying "2 tasks added to the board" (or "…to the Backlog"). If approval fails, the sheet stays open on the session with the error toast.
 - **Runner offline:** an error alert, "Plan needs the runner. It's offline.", says the sessions and drafts are safe and has **Reconnect** (which re-reads the runner's status). The composer is disabled with "Juno is unavailable while the runner is offline".
 
@@ -89,11 +90,12 @@ On the mobile layout ([mobile.md](mobile.md)) the same two routes keep their beh
 - Only a human can approve a plan: with the buttons, or by telling Juno to in chat, which Juno carries out with `approve_plan` (D9). The approve endpoint rejects any other actor, and Juno's tool is refused unless the human has written since the plan was proposed.
 - Editing a plan through chat creates a new plan version (v2, v3…), which replaces the one in the plan flyout and shows what changed.
 - Editing a task directly in the flyout saves it to the task and logs you as the author. It doesn't create a plan version (flows.md).
-- PM questions appear here as Juno messages. The Inbox shows the same session as a Plan thread, not a copy, so answering in either place answers it in both (D11).
+- PM questions appear here as Juno messages. The Inbox shows the same session's question or plan as a Plan thread, not a copy, so answering in either place answers it in both (D11).
+- Closing a thread discards its Drafts and unapproved plan and stops a running turn; only the human closes a thread, from the Inbox or here (D11).
 
 ## Data
 
-- **Sessions:** id, project, title, preview, updated time, unread (set whenever a Juno turn finishes, cleared on opening the session or sending a message), closed (set when its plan is approved, to the board or the Backlog; a new message reopens it), status (needs approval / question / none), messages.
+- **Sessions:** id, project, title, preview, updated time, unread (set whenever a Juno turn finishes, cleared on opening the session or sending a message), closed (set when its plan is approved, to the board or the Backlog, or the human closes the thread; a new message reopens it), status (needs approval / question / none), messages.
 - **Messages:** role, text, and an optional attached plan id.
 - **Plans:** version, status, epics (key, id, title), tasks (ref, title, epic, change type, priority, human review, dependencies).
 - **Backlog search:** filtered to the session's project.
