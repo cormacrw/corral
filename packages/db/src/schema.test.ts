@@ -2,7 +2,7 @@ import type { Actor } from '@corral/core'
 import { eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Database, DatabaseHandle } from './client.ts'
-import { agents, projects, runs, taskDependencies, tasks } from './schema.ts'
+import { agents, attachments, projects, runs, taskDependencies, tasks } from './schema.ts'
 import { createTestDatabase, postgresAvailable } from './testing.ts'
 
 const human: Actor = { kind: 'human', userId: '00000000-0000-4000-8000-000000000001' }
@@ -68,7 +68,7 @@ describe.each([
       select table_name from information_schema.tables
       where table_schema = 'public' order by table_name`) as unknown as { rows: { table_name: string }[] }
     expect(result.rows.map(r => r.table_name)).toEqual([
-      'acceptance_criteria', 'agents', 'audit_log', 'comments', 'epics', 'evidence', 'plan_epics', 'plan_messages', 'plan_sessions', 'plan_tasks', 'plans',
+      'acceptance_criteria', 'agents', 'attachments', 'audit_log', 'comments', 'epics', 'evidence', 'plan_epics', 'plan_messages', 'plan_sessions', 'plan_tasks', 'plans',
       'projects', 'reviews', 'runs', 'settings', 'task_dependencies', 'tasks', 'users'
     ])
   })
@@ -153,5 +153,15 @@ describe.each([
       db.insert(taskDependencies).values({ taskId: task.id, dependsOnId: task.id }),
       'task_dependencies_not_self'
     )
+  })
+
+  it.skipIf(!enabled)('removes a project\'s attachments with the project', async () => {
+    const project = await insertProject()
+    const other = await insertProject()
+    const file = { blob: 'a'.repeat(64), mimeType: 'image/png', fileName: 'shot.png', byteSize: 10, createdBy: human }
+    await db.insert(attachments).values([{ projectId: project.id, ...file }, { projectId: project.id, ...file }, { projectId: other.id, ...file }])
+    await db.delete(projects).where(eq(projects.id, project.id))
+    expect(await db.select().from(attachments).where(eq(attachments.projectId, project.id))).toEqual([])
+    expect(await db.select().from(attachments).where(eq(attachments.projectId, other.id))).toHaveLength(1)
   })
 })

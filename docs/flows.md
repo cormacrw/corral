@@ -50,10 +50,10 @@ The PM has **no** tools to merge, edit docs or change status. This is enforced b
 
 ### Sessions and cost
 
-- The `claude` session ID is stored with the conversation in the database. If the session is lost (e.g. the runner's disk was wiped), the next turn starts a fresh session seeded with a summary built from the database messages. The database is the source of truth; `~/.claude` is only a cache.
+- The agent session ID (from `claude` or `codex`; the session's runtime is locked once it has messages, D18) is stored with the conversation in the database. If the session is lost (e.g. the runner's disk was wiped), the next turn starts a fresh session seeded with a summary built from the database messages. The database is the source of truth; `~/.claude` and `~/.codex` are only caches.
 - A PM turn runs only when the human sends a message. Nothing goes back to the PM when tasks or epics merge.
-- **One checkout and one turn per session.** Each Plan session gets its own read-only checkout of the default branch, kept between turns so `claude --resume` finds the session. A session runs one turn at a time: a second message while its turn is active gets 409 `pm_turn_in_progress`, and the session's `activeRunId` is that turn. Other sessions, in the same project or another, can talk to Juno meanwhile.
-- **Warm process between turns** (D9). After a turn, its `claude` process stays alive for `CORRAL_PM_WARM_SECONDS` (default 5 minutes). A message within that time goes to the same process over stdin, after the checkout is reset to fresh code, so the reply skips CLI startup. After the timeout, or if the model or session changed, the next turn cold-starts with `--resume`.
+- **One checkout and one turn per session.** Each Plan session gets its own read-only checkout of the default branch, kept between turns so the agent CLI can resume the session. A session runs one turn at a time: a second message while its turn is active gets 409 `pm_turn_in_progress`, and the session's `activeRunId` is that turn. Other sessions, in the same project or another, can talk to Juno meanwhile.
+- **Warm process between turns** (D9). After a turn, its agent CLI process stays alive for `CORRAL_PM_WARM_SECONDS` (default 5 minutes). A message within that time goes to the same process over stdin, after the checkout is reset to fresh code, so the reply skips CLI startup. After the timeout, or if the model or session changed, the next turn cold-starts with `--resume`.
 - **Juno's concurrency still applies** (D13, global across projects). A turn over the limit is accepted and waits as `queued`; it's sent to the runner, oldest first, when another PM turn ends.
 
 ---
@@ -85,7 +85,7 @@ It creates a run (Queued) and a 15-minute lease, then sends `job.assign` (RunJob
 2. `git worktree add worktrees/<taskId> -b corral/<taskId>-<slug> origin/main` (or reuse the existing worktree on a revision)
 3. `pnpm install`
 4. Write the per-run MCP config.
-5. Spawn `claude` in its own process group, with no `GH_TOKEN` in its environment, and with `GIT_AUTHOR_*`/`GIT_COMMITTER_*` set from `CORRAL_GIT_AUTHOR_NAME`/`CORRAL_GIT_AUTHOR_EMAIL` when both are configured (the runner warns at startup when they aren't).
+5. Spawn the agent's CLI (`claude` or `codex`, D18) in its own process group, with no `GH_TOKEN` in its environment, and with `GIT_AUTHOR_*`/`GIT_COMMITTER_*` set from `CORRAL_GIT_AUTHOR_NAME`/`CORRAL_GIT_AUTHOR_EMAIL` when both are configured (the runner warns at startup when they aren't).
 
 Run: Starting → Running. A heartbeat every 2 minutes renews the lease, and every heartbeat carries the lease epoch.
 

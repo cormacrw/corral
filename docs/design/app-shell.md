@@ -38,7 +38,7 @@ There is no top header on desktop; every page owns the full height. Below 1024px
 
 ### Sidebar footer
 
-- **Runner card** (`bg-elevated`): server icon, "Runner online", "{runner name} · Claude Code" (e.g. "home-server"; the canvas says "This Mac") and a status dot (`success`, `warning` while reconnecting, `error` when offline).
+- **Runner card** (`bg-elevated`): server icon, "Runner online", "{runner name} · {signed-in runtimes}" (e.g. "home-server · Claude Code, Codex"; the canvas says "This Mac") and a status dot (`success`, `warning` while reconnecting, `error` when offline).
 - **User row:** avatar and name (not a menu), a colour-mode button (`UColorModeButton`) and a collapse button (`UDashboardSidebarCollapse`).
 
 ### Active state

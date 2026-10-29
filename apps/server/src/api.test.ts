@@ -1,6 +1,7 @@
-import type { Task } from '@corral/contracts'
+import type { Attachment, Task } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { asc, eq } from 'drizzle-orm'
+import { randomBytes } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 
@@ -80,6 +81,80 @@ describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
       expect(await fake.json()).toMatchObject({ error: { code: 'invalid_input', issues: [{ message: 'The file isn\'t a PNG image' }] } })
       const huge = await t.request('PUT', '/api/me/avatar', new Blob([new Uint8Array(3 * 1024 * 1024)], { type: 'image/png' }))
       expect(huge.status).toBe(413)
+    })
+  })
+
+  describe('attachments', () => {
+    const png = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64'))
+    const jpeg = Uint8Array.from([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0xFF, 0xD9])
+    const gif = Uint8Array.from(Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64'))
+    const webp = Uint8Array.from(Buffer.from('UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==', 'base64'))
+    const upload = (slug: string, data: string | Uint8Array<ArrayBuffer>, type: string, query = '') =>
+      t.request('POST', `/api/projects/${slug}/attachments${query}`, new Blob([data], { type }))
+
+    it('stores each image type and serves the same bytes back', async () => {
+      const project = await t.createProject()
+      for (const [type, data] of [['image/png', png], ['image/jpeg', jpeg], ['image/gif', gif], ['image/webp', webp]] as const) {
+        const res = await upload(project.slug, data, type, '?name=screens%2Fshot.img')
+        expect(res.status).toBe(201)
+        const body = await res.json() as Attachment
+        expect(body).toEqual({ id: expect.any(String), mimeType: type, fileName: 'shot.img', byteSize: data.byteLength, url: `/api/attachments/${body.id}/file` })
+        const served = await t.request('GET', body.url)
+        expect(served.status).toBe(200)
+        expect(served.headers.get('content-type')).toBe(type)
+        expect(served.headers.get('x-content-type-options')).toBe('nosniff')
+        expect(served.headers.get('cache-control')).toContain('immutable')
+        expect(new Uint8Array(await served.arrayBuffer())).toEqual(data)
+      }
+      const unnamed = await upload(project.slug, png, 'image/png; charset=binary').then(r => r.json()) as Attachment
+      expect(unnamed).toMatchObject({ fileName: 'image.png', mimeType: 'image/png' })
+    })
+
+    it('rejects SVG, non-images, mislabelled files and files over 10 MB', async () => {
+      const project = await t.createProject()
+      const svg = '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
+      for (const [data, type] of [[svg, 'image/svg+xml'], [svg, 'image/png'], ['hello', 'text/plain'], [png, 'application/octet-stream'], [jpeg, 'image/png'], [new Uint8Array(0), 'image/png']] as const) {
+        const res = await upload(project.slug, data, type)
+        expect(res.status, `${type}`).toBe(400)
+        expect(await res.json()).toMatchObject({ error: { code: 'invalid_input' } })
+      }
+      const huge = new Uint8Array(10 * 1024 * 1024 + 1)
+      huge.set(png)
+      expect((await upload(project.slug, huge, 'image/png')).status).toBe(413)
+      expect(await t.db.select().from(schema.attachments).where(eq(schema.attachments.projectId, project.id))).toEqual([])
+    })
+
+    it('stores the same bytes once but keeps a row per upload', async () => {
+      const project = await t.createProject()
+      // Bytes no other test has stored
+      const image = Uint8Array.from([...gif, ...randomBytes(8)])
+      const blobsBefore = t.blobs.size
+      const first = await upload(project.slug, image, 'image/gif', '?name=a.gif').then(r => r.json()) as Attachment
+      const second = await upload(project.slug, image, 'image/gif', '?name=b.gif').then(r => r.json()) as Attachment
+      expect(first.id).not.toBe(second.id)
+      const rows = await t.db.select().from(schema.attachments).where(eq(schema.attachments.projectId, project.id))
+      expect(rows).toHaveLength(2)
+      expect(rows[0]!.blob).toBe(rows[1]!.blob)
+      expect(rows[0]!.createdBy).toEqual(t.actor)
+      expect(t.blobs.size).toBe(blobsBefore + 1)
+      expect(await t.blobs.get(rows[0]!.blob)).toEqual(image)
+    })
+
+    it('returns 404 for unknown projects and attachments', async () => {
+      expect((await upload('no-such-project', png, 'image/png')).status).toBe(404)
+      expect((await t.request('GET', '/api/attachments/not-an-id/file')).status).toBe(404)
+      expect((await t.request('GET', '/api/attachments/00000000-0000-4000-8000-000000000000/file')).status).toBe(404)
+    })
+
+    it('removes a project\'s attachments with the project', async () => {
+      const project = await t.createProject({ name: 'Short lived' })
+      const kept = await t.createProject()
+      const doomed = await upload(project.slug, png, 'image/png').then(r => r.json()) as Attachment
+      const other = await upload(kept.slug, png, 'image/png').then(r => r.json()) as Attachment
+      expect((await t.request('DELETE', `/api/projects/${project.slug}`, { confirm: 'Short lived' })).status).toBe(204)
+      expect(await t.db.select().from(schema.attachments).where(eq(schema.attachments.projectId, project.id))).toEqual([])
+      expect((await t.request('GET', doomed.url)).status).toBe(404)
+      expect((await t.request('GET', other.url)).status).toBe(200)
     })
   })
 

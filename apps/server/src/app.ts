@@ -1,5 +1,6 @@
 import {
   addCommentInput,
+  ATTACHMENT_MAX_BYTES,
   AVATAR_MAX_BYTES,
   approvePlanInput,
   checkRepoInput,
@@ -17,6 +18,7 @@ import {
   SSE_HEARTBEAT_MS,
   startPlanSessionInput,
   taskListQuery,
+  uploadAttachmentQuery,
   type ApiErrorBody,
   type InboxActionInput,
   type ServerEvent
@@ -29,6 +31,7 @@ import { bodyLimit } from 'hono/body-limit'
 import { streamSSE } from 'hono/streaming'
 import type { ZodType } from 'zod'
 import { ApiFailure, fromDatabaseError } from './errors.ts'
+import { createAttachment, readAttachment } from './attachments.ts'
 import { checkAvatar, getProfile, patchProfile, readAvatar, setAgentAvatar, setUserAvatar } from './avatars.ts'
 import { getEpic, listEpics, patchEpic } from './epics.ts'
 import type { EventBus } from './events.ts'
@@ -140,6 +143,11 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
   const avatarBodyLimit = bodyLimit({
     maxSize: AVATAR_MAX_BYTES,
     onError: c => c.json<ApiErrorBody>({ error: { code: 'invalid_input', issues: [{ path: ['avatar'], message: 'The image is over 2 MB' }] } }, 413)
+  })
+
+  const attachmentBodyLimit = bodyLimit({
+    maxSize: ATTACHMENT_MAX_BYTES,
+    onError: c => c.json<ApiErrorBody>({ error: { code: 'invalid_input', issues: [{ path: ['file'], message: 'The image is over 10 MB' }] } }, 413)
   })
 
   return new Hono()
@@ -317,6 +325,24 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       return c.json(await publishAgent(c.req.param('id')))
     })
     .get('/agents/:id/avatar', async c => serveAvatar(c, await readAvatar(db, blobs, { agentId: c.req.param('id') })))
+
+    // Images in task text: the raw image as the body, with its content type
+    .post('/projects/:slug/attachments', attachmentBodyLimit, validate('query', uploadAttachmentQuery), async (c) => {
+      const data = new Uint8Array(await c.req.arrayBuffer())
+      const upload = { data, contentType: c.req.header('content-type'), name: c.req.valid('query').name }
+      return c.json(await createAttachment(db, blobs, c.req.param('slug'), upload, actor), 201)
+    })
+    // An attachment never changes, so it can be cached for good. nosniff
+    // keeps browsers to the stored (always raster image) type.
+    .get('/attachments/:id/file', async (c) => {
+      const file = await readAttachment(db, blobs, c.req.param('id'))
+      if (!file) throw new ApiFailure(404, { code: 'not_found' })
+      return c.body(new Uint8Array(file.data), 200, {
+        'content-type': file.type,
+        'cache-control': 'private, max-age=31536000, immutable',
+        'x-content-type-options': 'nosniff'
+      })
+    })
 
     .get('/me', async c => c.json(await getProfile(db, ownerId())))
     .patch('/me', validate('json', patchProfileInput), async (c) => {
