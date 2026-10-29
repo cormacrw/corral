@@ -15,6 +15,9 @@ import { headSha, prepareWorkspace, pushBranch, readProjectBrief, readRoleInstru
 // to the server in batches; raw lines go to the spool.
 // A PM turn is still one run, but its process can outlive the run: it stays
 // warm for the session's next message until the idle timeout (D9).
+// A Claude Code developer or reviewer run streams its input too, so a human
+// can message it mid-run (run.message); it still ends when the agent has
+// reported and finished its turn.
 
 const EVENT_BATCH_MS = 500
 const TOOL_CALL_TIMEOUT_MS = 120_000
@@ -72,6 +75,10 @@ interface ActiveRun {
   timeoutTimer: NodeJS.Timeout | null
   spool: WriteStream | null
   unregisterTools: (() => void) | null
+  // The live session taking messages; null between processes and once it closes
+  session: AgentSession | null
+  // Messages that arrived while there was no live session to take them
+  queuedMessages: string[]
 }
 
 // A PM session's agent process kept alive between turns (D9). It holds no
@@ -121,6 +128,9 @@ export class RunManager {
       case 'run.stop':
         this.stop(message.runId, 'stopped', message.reason)
         return
+      case 'run.message':
+        this.message(message.runId, message.leaseEpoch, message.text)
+        return
       case 'tool.result': {
         const pending = this.#pendingCalls.get(message.callId)
         if (!pending) return
@@ -157,7 +167,9 @@ export class RunManager {
       flushTimer: null,
       timeoutTimer: null,
       spool: null,
-      unregisterTools: null
+      unregisterTools: null,
+      session: null,
+      queuedMessages: []
     }
     this.#runs.set(job.runId, run)
     this.#start(run).catch((error: unknown) => {
@@ -185,6 +197,45 @@ export class RunManager {
       clearTimeout(soft)
       clearTimeout(hard)
     })
+  }
+
+  // A human's message for a live developer or reviewer run. A stale lease
+  // epoch is ignored (stale-runners-and-fencing.md); anything else that can't
+  // be delivered is rejected out loud, never dropped.
+  message(runId: string, leaseEpoch: number, text: string): void {
+    const run = this.#runs.get(runId)
+    if (run && run.job.leaseEpoch !== leaseEpoch) return
+    const refusal = run ? this.#messageRefusal(run) : 'The run has ended'
+    if (refusal) {
+      if (run) this.#note(run, `A message was not delivered: ${refusal}`)
+      this.#connection.send({ type: 'run.message.rejected', runId, leaseEpoch, text, error: refusal })
+      return
+    }
+    if (run!.session) this.#deliver(run!, text)
+    else run!.queuedMessages.push(text)
+  }
+
+  #messageRefusal(run: ActiveRun): string | null {
+    const { job } = run
+    if (run.ended || run.stopping) return 'The run has ended'
+    if (run.outcomeAccepted) return 'The agent has already reported its outcome'
+    if (job.role !== 'developer' && job.role !== 'reviewer') return `A ${job.role} run doesn't take messages`
+    if (!this.#takesMessages(job)) return `A ${job.runtime} run can't take input while it runs`
+    return null
+  }
+
+  #takesMessages(job: RunJob): boolean {
+    return (job.role === 'developer' || job.role === 'reviewer') && this.#runtimes.get(job.runtime)?.spawnSession !== undefined
+  }
+
+  #deliver(run: ActiveRun, text: string): void {
+    if (!run.session?.message(text)) {
+      run.queuedMessages.push(text)
+      return
+    }
+    // Shown at once, so whoever sent it sees it arrive
+    this.#queue(run, [{ type: 'message', text }])
+    this.#flush(run)
   }
 
   // Runner shutdown (PRD §9.3): stop every agent, wait for the grace period,
@@ -295,7 +346,9 @@ export class RunManager {
     if (run.stopping || run.ended) return
     const exit = this.#keepsWarm(run.job)
       ? await this.#warmTurn(run, await this.#spawnWarm(run, options), options.prompt)
-      : await this.#spawnOnce(run, options)
+      : this.#takesMessages(run.job)
+        ? await this.#spawnSession(run, options)
+        : await this.#spawnOnce(run, options)
     this.#flush(run)
     // A failed --resume waits: the fresh session that replaces it is the one
     // the server must record, or the next turn tries the dead one again
@@ -318,6 +371,38 @@ export class RunManager {
     run.process = process
     const exit = await process.exited
     run.exitCode = exit.code
+    return exit
+  }
+
+  // A developer or reviewer agent that reads its input from stdin, so
+  // messages reach it mid-run. Once it has answered everything it was sent,
+  // stdin closes and the CLI exits as -p would. The run then ends if it has
+  // reported its outcome, or resumes once to report as before.
+  async #spawnSession(run: ActiveRun, options: SpawnOptions): Promise<AgentExit> {
+    const session = run.runtime!.spawnSession!({
+      cwd: run.worktree!,
+      systemPrompt: options.systemPrompt,
+      mcpConfigPath: options.mcpConfigPath,
+      model: run.job.model,
+      resumeSessionId: options.resume,
+      gitAuthor: this.#config.gitAuthor,
+      onLine: (raw, parsed) => this.#onLine(run, raw, parsed)
+    })
+    run.process = session
+    session.send(options.prompt)
+    run.session = session
+    for (const text of run.queuedMessages.splice(0)) this.#deliver(run, text)
+
+    const result = await session.nextIdle()
+    run.session = null
+    session.close()
+    // A CLI that doesn't exit once stdin closes is stopped as usual
+    const soft = setTimeout(() => session.kill('SIGTERM'), OUTCOME_EXIT_GRACE_MS)
+    const hard = setTimeout(() => session.kill('SIGKILL'), OUTCOME_EXIT_GRACE_MS + STOP_GRACE_MS)
+    const exit = await session.exited
+    clearTimeout(soft)
+    clearTimeout(hard)
+    run.exitCode = exit.code === 0 && result?.isError ? 1 : exit.code
     return exit
   }
 
@@ -453,6 +538,10 @@ export class RunManager {
 
   #end(run: ActiveRun, exit: RunExit): void {
     if (run.ended) return
+    for (const text of run.queuedMessages.splice(0)) {
+      this.#note(run, 'A message was not delivered: The run has ended')
+      this.#connection.send({ type: 'run.message.rejected', runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, text, error: 'The run has ended' })
+    }
     run.ended = true
     if (run.timeoutTimer) clearTimeout(run.timeoutTimer)
     this.#flush(run)

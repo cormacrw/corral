@@ -6,13 +6,24 @@ import { agentArgs, spawnAgentSession, type AgentSession } from './agent.ts'
 import type { ParsedLine } from './stream-json.ts'
 
 // Stands in for `claude --input-format stream-json`: stays alive, reads one
-// user message per stdin line and answers each with a result line. A message
-// of "hang" starts a turn that never finishes.
+// user message per stdin line, replays it, and answers each with a result
+// line. A message of "hang" starts a turn that never finishes; "hold" starts
+// one that any next message joins, ending with one result for both.
 const FAKE_CLAUDE = `#!/usr/bin/env node
 const { createInterface } = require('node:readline')
 let started = false
+let holding = false
 createInterface({ input: process.stdin }).on('line', (line) => {
-  const content = JSON.parse(line).message.content
+  let content = JSON.parse(line).message.content
+  console.log(JSON.stringify({ type: 'user', isReplay: true, message: { role: 'user', content } }))
+  if (holding) {
+    holding = false
+    content = 'hold and ' + content
+  }
+  if (content === 'hold') {
+    holding = true
+    return
+  }
   if (!started) {
     started = true
     console.log(JSON.stringify({ type: 'system', subtype: 'init', session_id: 'one-session', pid: process.pid }))
@@ -31,6 +42,8 @@ describe('agentArgs', () => {
     expect(args).not.toContain('-p')
     expect(args.join(' ')).toContain('--input-format stream-json')
     expect(args.join(' ')).toContain('--output-format stream-json')
+    // So the runner knows when a mid-run message was taken in
+    expect(args).toContain('--replay-user-messages')
     // The CLI only reads stdin messages in print mode
     expect(args).toContain('--print')
   })
@@ -96,6 +109,27 @@ describe('spawnAgentSession', () => {
     await expect.poll(() => lines.filter(line => line.result).length).toBe(2)
     expect((await agent.nextResult())?.text).toMatch(/^Answered a/)
     expect((await agent.nextResult())?.text).toMatch(/^Answered b/)
+  })
+
+  it('is idle only after a result that follows every message taken in', async () => {
+    const agent = start()
+    agent.send('hold')
+    await expect.poll(() => lines.filter(line => line.replayed).length).toBe(1)
+    expect(agent.message('Use pnpm')).toBe(true)
+    // The message joined the held turn, which ends with one result
+    expect((await agent.nextIdle())?.text).toMatch(/^Answered hold and Use pnpm/)
+
+    agent.send('a')
+    expect(agent.message('b')).toBe(true)
+    // "a" ended before "b" was taken in, so only "b"'s result is idle
+    expect((await agent.nextIdle())?.text).toMatch(/^Answered b/)
+  })
+
+  it('exits once stdin closes', async () => {
+    const agent = start()
+    agent.close()
+    expect(await agent.exited).toEqual({ code: 0, signal: null })
+    expect(agent.message('too late')).toBe(false)
   })
 
   it('resolves exited and the pending turn when killed mid-turn', async () => {

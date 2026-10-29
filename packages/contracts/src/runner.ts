@@ -131,12 +131,18 @@ export type RunnerMessage =
   | { type: 'run.events', runId: string, leaseEpoch: number, events: RunEvent[] }
   | { type: 'run.ended', runId: string, leaseEpoch: number, exit: RunExit, headSha: string | null }
   | { type: 'tool.call', callId: string, runId: string, leaseEpoch: number, tool: AgentTool, input: unknown }
+  // A run.message the runner could not deliver: a Codex or PM run, or a run
+  // that has ended. Messages with a stale lease epoch get no answer (fencing).
+  | { type: 'run.message.rejected', runId: string, leaseEpoch: number, text: string, error: string }
 
 export type ServerMessage =
   | { type: 'welcome', runnerId: string }
   | { type: 'job.request', jobId: string, job: SetupJob }
   | { type: 'run.assign', job: RunJob }
   | { type: 'run.stop', runId: string, reason: string }
+  // A human's message for a live Claude Code developer or reviewer run. The
+  // runner writes it to the agent's stdin and records it as a message event.
+  | { type: 'run.message', runId: string, leaseEpoch: number, text: string }
   | { type: 'tool.result', callId: string, ok: true, result: unknown }
   | { type: 'tool.result', callId: string, ok: false, error: string }
 

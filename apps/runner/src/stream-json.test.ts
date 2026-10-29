@@ -43,6 +43,13 @@ describe('StreamJsonParser', () => {
     expect(next.events).toEqual([{ type: 'usage', inputTokens: 10, cacheReadTokens: 0, outputTokens: 2 }])
   })
 
+  it('reports a replayed user message without adding it to the transcript', () => {
+    const parser = new StreamJsonParser()
+    expect(parser.parse(line({ type: 'user', isReplay: true, message: { role: 'user', content: 'Use pnpm' } }))).toMatchObject({ events: [], replayed: 'Use pnpm' })
+    expect(parser.parse(line({ type: 'user', isReplay: true, message: { role: 'user', content: [{ type: 'text', text: 'Use pnpm' }] } }))).toMatchObject({ replayed: 'Use pnpm' })
+    expect(parser.parse(line({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] } })).replayed).toBeUndefined()
+  })
+
   it('ignores hook lines and blank lines', () => {
     const parser = new StreamJsonParser()
     expect(parser.parse(line({ type: 'system', subtype: 'hook_started', session_id: 's' })).events).toEqual([])
