@@ -61,6 +61,14 @@ function onTabKey(event: KeyboardEvent) {
   void nextTick(() => tabs.value?.[index.value]?.focus())
 }
 
+const filtersOpen = ref(false)
+const activeFilterCount = computed(() => [
+  filters.value.epics,
+  filters.value.statuses,
+  filters.value.priorities,
+  filters.value.agents
+].filter(values => values.length > 0).length)
+
 const searching = ref(Boolean(search.value))
 function toggleSearch() {
   searching.value = !searching.value
@@ -83,6 +91,25 @@ const note = (task: Task) => taskNote(task, props.all, props.reviewRoundCap)
           :aria-pressed="searching"
           @click="toggleSearch"
         />
+        <UButton
+          icon="i-lucide-list-filter"
+          square
+          variant="ghost"
+          color="neutral"
+          :aria-label="activeFilterCount ? `Filters, ${activeFilterCount} active` : 'Filters'"
+          :aria-pressed="filtersOpen"
+          :aria-expanded="filtersOpen"
+          aria-controls="mobile-board-filters"
+          class="relative"
+          @click="filtersOpen = !filtersOpen"
+        >
+          <span
+            v-if="activeFilterCount"
+            class="absolute end-0.5 top-0.5 size-2 rounded-full bg-primary"
+            aria-hidden="true"
+            data-testid="board-filter-indicator"
+          />
+        </UButton>
       </template>
     </MobilePageHeader>
 
@@ -96,6 +123,8 @@ const note = (task: Task) => taskNote(task, props.all, props.reviewRoundCap)
         class="mx-4"
       />
       <div
+        v-show="filtersOpen"
+        id="mobile-board-filters"
         class="flex flex-wrap items-center gap-2 px-4"
         data-testid="board-filters"
       >
