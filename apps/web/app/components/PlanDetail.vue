@@ -26,7 +26,7 @@ const toBacklog = computed(() => kept.value.length > 0 && kept.value.every(t => 
 // listed last, under Other tasks (just Tasks when the plan has no epics).
 const groups = computed(() => {
   const planned = new Set(props.plan.epics.map(e => e.id))
-  const other = { key: '', id: '', title: props.plan.epics.length > 0 ? 'Other tasks' : 'Tasks' }
+  const other = { key: '', id: '', title: props.plan.epics.length > 0 ? 'Other tasks' : 'Tasks', dependsOn: [] }
   return [...props.plan.epics, other].map((epic) => {
     const own = tasks.value.filter(t => epic.id ? t.epicId === epic.id : !t.epicId || !planned.has(t.epicId))
     return { ...epic, tasks: own }
@@ -133,6 +133,12 @@ watch(() => props.plan.id, () => {
                 {{ group.title }}
               </template>
             </h3>
+            <p
+              v-if="group.dependsOn?.length"
+              class="text-xs text-muted"
+            >
+              After: {{ group.dependsOn.map(e => e.title).join(', ') }}
+            </p>
             <p class="text-xs text-muted">
               {{ group.tasks.length }} tasks
             </p>

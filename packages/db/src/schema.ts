@@ -345,6 +345,7 @@ export interface PlanRevision {
 // The epics of a plan version, by the PM's key, so a revision keeps each
 // epic it still names (a plan can span several; plans.epicId is the first)
 export const planEpics = pgTable('plan_epics', {
+  dependsOn: jsonb().$type<string[]>().notNull().default([]),
   planId: uuid().notNull().references(() => plans.id, { onDelete: 'cascade' }),
   // Null once the epic has been deleted
   epicId: uuid().references(() => epics.id, { onDelete: 'set null' }),

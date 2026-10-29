@@ -182,3 +182,32 @@ describe('diffPlans', () => {
     expect(diffPlans([task('a', { epic: undefined })], [task('a', { epic: undefined })])).toEqual([{ key: 'a', change: 'unchanged' }])
   })
 })
+
+describe('plan epic dependency validation', () => {
+  const proposal = {
+    title: 'Mobile', summary: '',
+    epics: [{ key: 'e1', title: 'Mobile PWA', summary: '' }, { key: 'e2', title: 'Offline', summary: '', dependsOn: ['e1'] }],
+    tasks: [task('a'), task('b', { epic: 'e2' })]
+  }
+  it('accepts keys and reports unknown, self and cyclic epic dependencies by title', () => {
+    expect(checkPlan(proposal)).toEqual([])
+    for (const [dep, code] of [['missing', 'unknown_dependency'], ['e2', 'self_dependency']] as const) {
+      expect(checkPlan({ ...proposal, epics: [proposal.epics[0]!, { ...proposal.epics[1]!, dependsOn: [dep] }] })).toContainEqual({ code: 'epic_dependency', problem: expect.objectContaining({ code }), epics: expect.arrayContaining(['Offline']) })
+    }
+    expect(checkPlan({ ...proposal, epics: [{ ...proposal.epics[0]!, dependsOn: ['e2'] }, proposal.epics[1]!] })).toContainEqual({ code: 'epic_dependency', problem: expect.objectContaining({ code: 'cycle' }), epics: ['Mobile PWA', 'Offline', 'Mobile PWA'] })
+  })
+  it('rejects combined task/epic deadlocks with both epic titles', () => {
+    expect(checkPlan({ ...proposal, tasks: [task('a', { dependsOn: ['b'] }), task('b', { epic: 'e2' })] })).toContainEqual({ code: 'epic_task_deadlock', path: expect.any(Array), epics: expect.arrayContaining(['Mobile PWA', 'Offline']) })
+  })
+  it('includes existing project tasks and epic edges in the wait graph', () => {
+    const context = {
+      epics: new Map([['existing', [] as string[]]]), titles: new Map([['existing', 'Existing foundation']]),
+      epicIds: new Map<string, string>(), taskIds: new Map<string, string>(), refIds: new Map([['COR-1', 'existing-task']]),
+      tasks: [{ id: 'existing-task', epicId: 'existing', status: 'ready' as const, dependsOn: [] as string[] }]
+    }
+    const plan = { ...proposal, epics: [{ ...proposal.epics[0]!, dependsOn: ['existing'] }, proposal.epics[1]!] }
+    expect(checkPlan(plan, new Map(), new Map(), context)).toEqual([])
+    context.tasks[0]!.dependsOn = ['plan-task:b']
+    expect(checkPlan(plan, new Map(), new Map(), context)).toContainEqual(expect.objectContaining({ code: 'epic_task_deadlock', epics: expect.arrayContaining(['Existing foundation', 'Mobile PWA', 'Offline']) }))
+  })
+})

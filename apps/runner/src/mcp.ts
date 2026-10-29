@@ -87,7 +87,7 @@ const toolDefinitions = {
     }
   },
   list_tasks: {
-    description: 'The project’s tasks with their status, so plans reflect the live board.',
+    description: 'The project’s tasks with their status, and epics with dependsOn epic ids, so plans reflect the live board.',
     input: {}
   },
   get_run_outcomes: {
@@ -99,14 +99,15 @@ const toolDefinitions = {
     input: askQuestionInput.shape
   },
   propose_plan: {
-    description: 'Propose a plan: epics and tasks with acceptance criteria and dependencies. Corral validates it and shows it to the human for approval. Use `epics` to group the tasks of a feature, and put each of those tasks in one with `epic`. A task without `epic` gets no epic, and a plan without `epics` creates none: leave them out for a lone small fix. A revision keeps the epic and task keys it reuses. To refine an existing Backlog task, read it with get_task and include it in the plan with its `ref`: the plan then revises that task instead of creating a new one, and the edits are applied when the human approves. Pin a task that builds part of an approved design with `design`; only an approved version can be pinned.',
+    description: 'Propose a plan: epics and tasks with acceptance criteria and dependencies. Corral validates it and shows it to the human for approval. Use `epics` to group the tasks of a feature, and put each of those tasks in one with `epic`. A task without `epic` gets no epic, and a plan without `epics` creates none: leave them out for a lone small fix. A revision keeps the epic and task keys it reuses. To refine an existing Backlog task, read it with get_task and include it in the plan with its `ref`: the plan then revises that task instead of creating a new one, and the edits are applied when the human approves. Set each epic’s dependsOn to epic keys in this plan or existing epic ids from list_tasks; omit it on revision to preserve dependencies, or use [] to clear them. Pin a task that builds part of an approved design with `design`; only an approved version can be pinned.',
     input: {
       title: z.string().min(1),
       summary: z.string().default(''),
       epics: z.array(z.object({
         key: z.string().describe('A short handle used by a task\'s epic, e.g. e1'),
         title: z.string().min(1),
-        summary: z.string().default('')
+        summary: z.string().default(''),
+        dependsOn: z.array(z.string()).optional().describe('Epic keys in this plan or existing epic ids from list_tasks. Omit to keep dependencies in a revision; [] clears them. Tasks wait until prerequisite epics are done.')
       })).optional(),
       tasks: z.array(z.object({
         key: z.string().describe('A short handle used by dependsOn, e.g. t1'),

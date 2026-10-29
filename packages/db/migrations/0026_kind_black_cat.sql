@@ -1,0 +1,1 @@
+ALTER TABLE "plan_epics" ADD COLUMN "depends_on" jsonb DEFAULT '[]'::jsonb NOT NULL;

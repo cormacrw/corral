@@ -640,7 +640,7 @@ describe('plan sessions', () => {
     })
     expect(v2).toMatchObject({ ok: true, result: { tasks: [{ key: 't1', change: 'unchanged' }, { key: 't2', change: 'unchanged' }] } })
     const second = (await session(created.id)).plans[1]!
-    expect(second.epics).toEqual([{ key: 'e1', id: epic.id, title: 'Sign in' }])
+    expect(second.epics).toEqual([{ key: 'e1', id: epic.id, title: 'Sign in', dependsOn: [] }])
     expect(second.tasks.map(x => x.epicId)).toEqual([epic.id, epic.id])
     await endTurn(job, 'Proposed.')
   })

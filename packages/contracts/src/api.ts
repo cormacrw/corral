@@ -352,7 +352,7 @@ export interface Plan {
   status: PlanStatus
   approvedAt: string | null
   // In the order the PM gave them; epicId above is the first
-  epics: { key: string, id: string, title: string }[]
+  epics: { key: string, id: string, title: string, dependsOn?: { id: string, title: string }[] }[]
   tasks: {
     key: string
     change: PlanChange
