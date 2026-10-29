@@ -168,7 +168,8 @@ export class RunManager {
     await mkdir(run.scratchDir, { recursive: true })
     run.spool = createWriteStream(join(this.#config.dataDir, 'spool', `${job.runId}.jsonl`), { flags: 'a' })
 
-    this.#note(run, `Preparing a worktree for ${job.repository}${job.branch ? ` on ${job.branch}` : ''}`)
+    // A PM follow-up turn reuses its session's checkout; the note is noise there
+    if (!(job.role === 'pm' && job.agentSessionId)) this.#note(run, `Preparing a worktree for ${job.repository}${job.branch ? ` on ${job.branch}` : ''}`)
     const prepared = await prepareWorkspace(this.#config.dataDir, job)
     if (prepared.workspace === null) {
       this.#end(run, { kind: 'error', message: prepared.error })
@@ -235,6 +236,7 @@ export class RunManager {
       mcpConfigPath: options.mcpConfigPath,
       model: run.job.model,
       resumeSessionId: options.resume,
+      quietResume: run.job.role === 'pm',
       gitAuthor: this.#config.gitAuthor,
       onLine: (raw, parsed) => this.#onLine(run, raw, parsed)
     })

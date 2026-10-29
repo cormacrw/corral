@@ -12,6 +12,20 @@ describe('StreamJsonParser', () => {
     expect(parsed.events).toEqual([{ type: 'system', text: 'Session started (claude-fable-5-1)' }])
   })
 
+  it('drops the start note when the init line resumes the quiet session', () => {
+    const parser = new StreamJsonParser({ quietResumeOf: 'sess-1' })
+    const parsed = parser.parse(line({ type: 'system', subtype: 'init', session_id: 'sess-1', model: 'claude-fable-5-1' }))
+    expect(parsed.sessionId).toBe('sess-1')
+    expect(parsed.events).toEqual([])
+  })
+
+  it('keeps the start note when the init line starts a different session', () => {
+    const parser = new StreamJsonParser({ quietResumeOf: 'sess-1' })
+    const parsed = parser.parse(line({ type: 'system', subtype: 'init', session_id: 'sess-2', model: 'claude-fable-5-1' }))
+    expect(parsed.sessionId).toBe('sess-2')
+    expect(parsed.events).toEqual([{ type: 'system', text: 'Session started (claude-fable-5-1)' }])
+  })
+
   it('ignores hook lines and blank lines', () => {
     const parser = new StreamJsonParser()
     expect(parser.parse(line({ type: 'system', subtype: 'hook_started', session_id: 's' })).events).toEqual([])
