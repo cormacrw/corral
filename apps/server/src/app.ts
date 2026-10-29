@@ -41,6 +41,7 @@ import { checkAvatar, getProfile, patchProfile, readAvatar, setAgentAvatar, setU
 import { getEpic, listEpics, patchEpic } from './epics.ts'
 import type { EventBus } from './events.ts'
 import { loadInbox } from './inbox.ts'
+import { listPullRequests } from './pull-requests.ts'
 import { createProject, findProjectBySlug, listProjects, patchProject, toProject } from './projects.ts'
 import type { BlobStore } from './blob-store.ts'
 import type { Orchestrator } from './orchestrator.ts'
@@ -243,6 +244,12 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     .get('/projects/:slug/tasks', validate('query', taskListQuery), async (c) => {
       const project = await findProjectBySlug(db, c.req.param('slug'))
       return c.json(await listTasks(db, project, c.req.valid('query').view))
+    })
+
+    // Open PRs and their merge gates, live from GitHub
+    .get('/projects/:slug/pull-requests', async (c) => {
+      const project = await findProjectBySlug(db, c.req.param('slug'))
+      return c.json(await listPullRequests(db, orchestrator.merges, project))
     })
 
     .post('/projects/:slug/tasks', validate('json', createTaskInput), async (c) => {
