@@ -311,7 +311,8 @@ export const plans: Record<string, Plan[]> = {
       epics: [{ key: 'E1', id: 'e-design', title: 'Design tasks' }],
       tasks: [
         { key: 'T1', change: 'added', revises: false, taskId: null, epicId: 'e-design', ref: null, title: 'Design review screen', status: 'draft', priority: 'high', humanReview: true, dependsOn: [] },
-        { key: 'T2', change: 'added', revises: false, taskId: null, epicId: 'e-design', ref: null, title: 'Approve a design version', status: 'draft', priority: 'urgent', humanReview: false, dependsOn: ['T1'] }
+        { key: 'T2', change: 'added', revises: false, taskId: null, epicId: 'e-design', ref: null, title: 'Approve a design version', status: 'draft', priority: 'urgent', humanReview: false, dependsOn: ['T1'] },
+        { key: 'T3', change: 'added', revises: false, taskId: null, epicId: 'e-design', ref: null, title: 'Pin a design version to a task', status: 'draft', priority: 'low', humanReview: false, dependsOn: ['T2'] }
       ],
       createdAt: ago(60 * 25)
     }
