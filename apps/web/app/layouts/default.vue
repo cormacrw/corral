@@ -40,7 +40,8 @@ const searchGroups = computed(() => [{
     ...state.value.projects.flatMap(p => [
       { label: `${p.name} · Overview`, icon: 'i-lucide-layout-dashboard', to: `/projects/${p.slug}` },
       { label: `${p.name} · Board`, icon: 'i-lucide-kanban', to: `/projects/${p.slug}/board` },
-      { label: `${p.name} · Backlog`, icon: 'i-lucide-list', to: `/projects/${p.slug}/backlog` }
+      { label: `${p.name} · Backlog`, icon: 'i-lucide-list', to: `/projects/${p.slug}/backlog` },
+      { label: `${p.name} · Pull requests`, icon: 'i-lucide-git-pull-request', to: `/projects/${p.slug}/pull-requests` }
     ]),
     ...state.value.agents.map(a => ({ label: `${a.name} · ${ROLE[a.role]}`, icon: 'i-lucide-bot', to: `/agents/${a.name.toLowerCase()}` }))
   ]
@@ -203,6 +204,15 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
                   :class="['justify-start', isActive(`/projects/${project.slug}/backlog`) && 'bg-elevated']"
                 >
                   Backlog <span class="ms-auto text-xs text-muted">{{ counts(project).backlog }}</span>
+                </UButton>
+                <UButton
+                  :to="`/projects/${project.slug}/pull-requests`"
+                  variant="ghost"
+                  size="sm"
+                  :color="isActive(`/projects/${project.slug}/pull-requests`) ? 'primary' : 'neutral'"
+                  :class="['justify-start', isActive(`/projects/${project.slug}/pull-requests`) && 'bg-elevated']"
+                >
+                  Pull requests
                 </UButton>
                 <UButton
                   :to="`/projects/${project.slug}/settings`"

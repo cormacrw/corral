@@ -1,4 +1,4 @@
-import type { EpicDetail, Inbox, PlanSessionDetail, Project, Task } from '@corral/contracts'
+import type { EpicDetail, Inbox, PlanSessionDetail, Project, PullRequestStatus, Task } from '@corral/contracts'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
@@ -9,6 +9,14 @@ describe('prototype mock API', () => {
     for (const path of ['/projects', '/agents', '/runner', '/status', '/inbox', '/plan/sessions', '/me']) {
       await expect(mockCall('GET', path), path).resolves.toBeTruthy()
     }
+  })
+
+  it('serves a project\'s open PRs, with eligible and blocked ones', async () => {
+    const prs = await mockCall<PullRequestStatus[]>('GET', '/projects/corral/pull-requests')
+    expect(prs.every(pr => pr.taskRef.startsWith('COR-'))).toBe(true)
+    expect(prs.some(pr => pr.merge.eligible)).toBe(true)
+    expect(prs.some(pr => !pr.merge.eligible && pr.merge.failingGate)).toBe(true)
+    await expect(mockCall('GET', '/projects/marketing-site/pull-requests')).resolves.toEqual([])
   })
 
   it('serves a project, its tasks by view, a task and an epic', async () => {

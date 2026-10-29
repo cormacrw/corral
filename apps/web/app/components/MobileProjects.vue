@@ -106,12 +106,13 @@ const cards = computed(() => state.value.projects.map((project) => {
       </p>
       <nav
         :aria-label="`${card.project.name} pages`"
-        class="grid grid-cols-3 divide-x divide-default border-t border-default"
+        class="grid grid-cols-4 divide-x divide-default border-t border-default"
       >
         <NuxtLink
           v-for="link in [
             { label: 'Board', icon: 'i-lucide-square-kanban', to: 'board', count: card.board },
             { label: 'Backlog', icon: 'i-lucide-list', to: 'backlog', count: card.backlog },
+            { label: 'PRs', icon: 'i-lucide-git-pull-request', to: 'pull-requests', count: null },
             { label: 'Settings', icon: 'i-lucide-sliders-horizontal', to: 'settings', count: null }
           ]"
           :key="link.to"
