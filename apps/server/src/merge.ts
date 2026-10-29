@@ -14,6 +14,12 @@ const server: Actor = { kind: 'system', component: 'server' }
 // retried (D10: "GitHub merge failed and retrying isn't safe")
 const MAX_MERGE_ATTEMPTS = 3
 
+// Developers always rebase; a merge of the base would put merge commits on
+// the branch (and Corral pushes with --force-with-lease, so rebases push)
+function rebaseInstruction(defaultBranch: string): string {
+  return `Rebase onto \`origin/${defaultBranch}\`, resolve the conflicts, and report pr_updated.`
+}
+
 export interface MergeDeps {
   db: Database
   events: EventBus
@@ -164,20 +170,20 @@ export class MergeOrchestrator {
 
     if (pr.mergeable === null) return // GitHub is still computing mergeability
     if (pr.mergeableState === 'behind' && !task.branchUpdateRequested) {
-      // The base moved on: ask GitHub to merge it in, no local git needed
-      const updated = await github.updateBranch(project.repository, pr.number, pr.headSha)
+      // The base moved on: ask GitHub to rebase onto it, no local git needed
+      const updated = await github.updateBranch(project.repository, pr, pr.headSha)
       if (updated) {
         await db.update(tasks).set({ branchUpdateRequested: true }).where(eq(tasks.id, task.id))
         await db.insert(auditLog).values({ projectId: project.id, taskId: task.id, actor: server, action: 'branch.update_requested', detail: { pr: pr.number, headSha: pr.headSha } })
       } else {
         await this.#transition(task.id, { type: 'base_conflict' }, { event: 'base_conflict' },
-          `The base branch \`${project.defaultBranch}\` has moved and the update conflicts with this branch. Merge \`${project.defaultBranch}\` in, resolve the conflicts, and report pr_updated.`)
+          `The base branch \`${project.defaultBranch}\` has moved and the update conflicts with this branch. ${rebaseInstruction(project.defaultBranch)}`)
       }
       return
     }
     if (pr.mergeable === false) {
       await this.#transition(task.id, { type: 'base_conflict' }, { event: 'base_conflict', mergeableState: pr.mergeableState },
-        `GitHub reports this branch can’t be merged (${pr.mergeableState ?? 'conflict'}). Merge \`${project.defaultBranch}\` in, resolve the conflicts, and report pr_updated.`)
+        `GitHub reports this branch can’t be merged (${pr.mergeableState ?? 'conflict'}). ${rebaseInstruction(project.defaultBranch)}`)
       return
     }
 

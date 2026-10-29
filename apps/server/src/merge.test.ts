@@ -84,7 +84,7 @@ describe('merge orchestrator and human controls', () => {
     expect(t.github.calls.filter(c => c.method === 'updateBranch')).toHaveLength(1)
     expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge', branchUpdateRequested: true })
 
-    // GitHub pushed the merge commit; CI runs again on it
+    // GitHub rebased the branch, rewriting every commit, so the head is new; CI runs again on it
     t.github.setBranch(project.repository, pr.head, 'def456')
     await t.orchestrator.merges.tick()
     expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge', headSha: 'def456', branchUpdateRequested: false })
@@ -127,6 +127,28 @@ describe('merge orchestrator and human controls', () => {
     expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress' })
     const notes = await t.db.select().from(comments).where(eq(comments.taskId, task.id))
     expect(notes.at(-1)?.body).toContain('can’t be merged')
+    expect(notes.at(-1)?.body).toContain('Rebase onto `origin/main`, resolve the conflicts, and report pr_updated.')
+    expect(notes.at(-1)?.body).not.toContain('Merge')
+    await pause(project)
+  })
+
+  it('sends a branch back to the developer when the rebase onto the base conflicts', async () => {
+    const { project, task, pr } = await approved()
+    t.github.setChecks('abc123', [{ name: 'lint', conclusion: 'success', url: null }])
+    t.github.pulls.get(pr.number)!.mergeableState = 'behind'
+    t.github.updateBranchResult = false
+    try {
+      await t.orchestrator.merges.tick()
+    } finally {
+      t.github.updateBranchResult = true
+    }
+    expect(t.github.calls.filter(c => c.method === 'updateBranch' && c.args[1] === pr.number)).toHaveLength(1)
+    expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', branchUpdateRequested: false })
+    const notes = await t.db.select().from(comments).where(eq(comments.taskId, task.id))
+    expect(notes.at(-1)?.body).toBe('The base branch `main` has moved and the update conflicts with this branch. Rebase onto `origin/main`, resolve the conflicts, and report pr_updated.')
+    expect(notes.at(-1)?.body).not.toContain('Merge')
+    const history = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/history`).then(r => r.json()) as { action: string, detail: Record<string, unknown> }[]
+    expect(history.find(h => h.action === 'task.transition' && h.detail.event === 'base_conflict')).toBeDefined()
     await pause(project)
   })
 

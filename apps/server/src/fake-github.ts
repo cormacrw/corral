@@ -53,6 +53,7 @@ export class FakeGitHub implements GitHubClient {
     const number = this.#nextNumber++
     const pr = {
       number,
+      nodeId: `PR_node${number}`,
       url: `https://github.com/${repository}/pull/${number}`,
       state: 'open' as const,
       merged: false,
@@ -86,10 +87,12 @@ export class FakeGitHub implements GitHubClient {
     return this.checkResults.get(sha) ?? []
   }
 
-  async updateBranch(repository: string, number: number, expectedHeadSha: string): Promise<boolean> {
-    this.#record('updateBranch', repository, number, expectedHeadSha)
-    const pr = this.pulls.get(number)
-    if (!pr) throw new Error(`No PR #${number}`)
+  // Rebases onto the base: the head commit is rewritten, so the test pushes
+  // the new head with `setBranch` the way GitHub would
+  async updateBranch(repository: string, pull: { number: number, nodeId: string }, expectedHeadSha: string): Promise<boolean> {
+    this.#record('updateBranch', repository, pull.number, expectedHeadSha)
+    const pr = this.pulls.get(pull.number)
+    if (!pr) throw new Error(`No PR #${pull.number}`)
     if (!this.updateBranchResult) return false
     pr.mergeableState = 'clean'
     return true

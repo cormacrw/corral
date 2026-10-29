@@ -141,7 +141,7 @@ Run: Starting → Running. A heartbeat every 2 minutes renews the lease, and eve
 The task waits in Ready to merge. Waiting is a webhook or a cheap polling check, never an agent.
 
 - **CI fails:** → In progress with the logs attached.
-- **The base branch has moved:** the server calls GitHub's "update branch" API (no local git needed). A conflict → In progress for the developer. A clean update keeps the approval (R7 default).
+- **The base branch has moved:** the server asks GitHub to rebase the branch onto the base (GraphQL `updatePullRequestBranch` with `updateMethod: REBASE`, so no local git is needed and the base is never merged in). A conflict → In progress for the developer, who rebases onto `origin/<default branch>` and reports `pr_updated`. A clean rebase rewrites every commit, but it keeps the approval and CI runs again on the new head (R7 default): the server recorded that it asked for the update, so the new head counts as mechanical.
 - **Any other new commit:** → Agent review for a fresh review.
 
 ### Spikes: findings instead of a PR (D19)
