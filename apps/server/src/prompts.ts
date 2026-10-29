@@ -103,7 +103,7 @@ export function reviewerPrompt(task: ReviewTask & { underReview?: DesignUnderRev
     pinSection(task, 'reviewer'),
     section('How to review', `
 - You are in a read-only checkout of the commit under review. Do not edit, commit or push. Run \`git diff ${task.defaultBranch}...HEAD\` or \`git log\` to see the change; \`origin/${task.defaultBranch}\` is available locally.
-- Read \`.corral/CORRAL.md\` and the wiki if they exist, and check the wiki was updated where behaviour changed.
+- Use the supplied project brief and wiki file list, and check the wiki was updated where behaviour changed.
 - Judge every acceptance criterion: is it implemented, and does the evidence actually show it? Use \`get_evidence\` to list items and fetch screenshots by ID. Reproduce at least one criterion yourself when you can (run the tests, start the app).
 - Check the project's lint, typecheck and tests pass on this commit.
 - Call \`report_outcome\` with outcome "approved" or "changes_requested" and a \`criteria\` verdict for every criterion ID above (met true/false with a note).
@@ -241,7 +241,7 @@ export function developerPrompt(task: PromptTask, agentName: string): string {
     section('How to work', `
 - You are in a git worktree on branch \`${task.branch}\`, based on \`${task.defaultBranch}\`. Commit your work on this branch.
 - Do not push and do not use \`gh\`. Corral pushes the branch and opens the PR when you report your outcome.
-- Read \`.corral/CORRAL.md\` and the relevant \`.corral/wiki/\` pages first, if they exist. Update the wiki in the same branch when behaviour changes.
+- Use the supplied project brief and open relevant pages from its wiki file list when needed. Update the wiki in the same branch when behaviour changes.
 - Run the project's lint, typecheck and tests before reporting.
 - Attach evidence for every acceptance criterion with \`attach_evidence\`, using the criterion ID in brackets above: screenshots or videos of the running app for UI work (use a headless browser), real requests and responses for APIs, and test output otherwise.
 - Use \`get_task\` to re-read the task, comments and evidence at any time, and \`add_comment\` to leave notes for the human or reviewer.
@@ -268,7 +268,7 @@ function spikeDeveloperPrompt(task: PromptTask, agentName: string): string {
     attachmentsSection(task),
     section('How to work', `
 - Investigate; don't change code. You are in a checkout of \`${task.defaultBranch}\` with no branch: don't commit or push, and no PR is opened. Put experiments and notes in your scratch folder, outside the repository.
-- Read \`.corral/CORRAL.md\` and the relevant \`.corral/wiki/\` pages first, if they exist.
+- Use the supplied project brief and open relevant pages from its wiki file list when needed.
 - Back your answer with evidence: attach it for every acceptance criterion with \`attach_evidence\`, using the criterion ID in brackets above (command output, logs, measurements, screenshots, short notes with file and line references).
 - Use \`get_task\` to re-read the task, comments and evidence at any time, and \`add_comment\` to leave notes for the human or reviewer.
 - When you're done, call \`report_outcome\` with outcome "findings_reported" and your findings as the summary. If anything is missing, the call fails and tells you what to fix.
@@ -283,7 +283,7 @@ function spikeDeveloperPrompt(task: PromptTask, agentName: string): string {
 const DESIGN_HOW_TO = (task: PromptTask) => `
 - You are in a git worktree on branch \`${task.branch}\`, based on \`${task.defaultBranch}\`. Commit your work on this branch. It is pushed but never merged, and no PR is opened.
 - Do not push and do not use \`gh\`. Corral pushes the branch when you call \`submit_design\`.
-- Read \`.corral/CORRAL.md\`, \`CLAUDE.md\` and the relevant \`.corral/wiki/\` pages first, if they exist. They say how this project builds a prototype: the command that produces its static bundle and the folder it writes. If they don't say, call \`report_outcome\` with outcome "stuck" and ask how; don't guess.
+- Use the supplied project brief and relevant pages from its wiki file list. The project docs say how this project builds a prototype: the command that produces its static bundle and the folder it writes. If they don't say, call \`report_outcome\` with outcome "stuck" and ask how; don't guess.
 - Build the prototype from the project's real components and styles, so it looks like what will ship. Don't restyle or copy them into a separate mockup.
 - Use mock data only: no calls to the project's backend or any other service. The bundle must work as static files on their own, with an \`index.html\` at its root and relative paths to its assets.
 - Write \`design.md\` (in your scratch folder or the bundle) with: the screens, each with a stable id (e.g. \`login\`, \`login-error\`); their states; the interactions; the components used; the shape of the mock data; and open questions.

@@ -151,14 +151,14 @@ describe('RunManager PM turns', () => {
     expect(prompt).toMatch(/\n\n## Corral runner notes\n/)
   })
 
-  it('starts a PM run with no brief section when the repo has no brief files', async () => {
+  it('includes worktree status when the repo has no brief files', async () => {
     manager.assign(pmJob({ runId: 'r1' }))
     const messages = await finish('r1')
 
     expect(messages.find(m => m.type === 'run.ended')).toMatchObject({ exit: { kind: 'exited', code: 0 } })
     const prompt = systemPrompt((await calls())[0]!)
-    expect(prompt).not.toContain('## Project brief')
-    expect(prompt).toMatch(new RegExp(`^${escape(DEFAULT_ROLE_INSTRUCTIONS.pm)}\\n\\n## Corral runner notes\\n`))
+    expect(prompt).toContain('.corral/wiki/ does not exist; dependencies (node_modules) are not installed in this worktree.')
+    expect(prompt).toMatch(new RegExp(`^${escape(DEFAULT_ROLE_INSTRUCTIONS.pm)}\\n\\n## Project brief\\n`))
   })
 
   // D20: a build task's runs get the pinned design before the agent starts
@@ -202,8 +202,13 @@ describe('RunManager PM turns', () => {
     await exec('chmod', ['-R', 'u+w', dirname(dataDir)])
   })
 
-  it.each(['developer', 'reviewer'] as const)('leaves the %s system prompt without a brief', async (role) => {
-    const sha = await commitToOrigin({ 'CORRAL.md': '# Acme brief\n', '.corral/wiki/setup.md': 'Setup' })
+  it.each([
+    { role: 'developer', wiki: true }, { role: 'reviewer', wiki: true },
+    { role: 'developer', wiki: false }, { role: 'reviewer', wiki: false }
+  ] as const)('includes the shared brief for $role with wiki=$wiki', async ({ role, wiki }) => {
+    const files: Record<string, string> = { 'CORRAL.md': '# Acme brief\n' }
+    if (wiki) files['.corral/wiki/setup.md'] = 'Setup'
+    const sha = await commitToOrigin(files)
     if (role === 'reviewer') {
       await exec('git', ['fetch', '--quiet', 'origin'], { cwd: barePath(dataDir, TEST_REPOSITORY) })
     }
@@ -211,9 +216,11 @@ describe('RunManager PM turns', () => {
     await finish('r1')
 
     const prompt = systemPrompt((await calls())[0]!)
-    expect(prompt).toMatch(new RegExp(`^${escape(DEFAULT_ROLE_INSTRUCTIONS[role]!)}\\n\\n## Corral runner notes\\n`))
-    expect(prompt).not.toContain('Project brief')
-    expect(prompt).not.toContain('Acme brief')
+    expect(prompt).toMatch(new RegExp(`^${escape(DEFAULT_ROLE_INSTRUCTIONS[role]!)}\\n\\n## Project brief\\n`))
+    expect(prompt).toContain(wiki ? '.corral/wiki/ exists' : '.corral/wiki/ does not exist')
+    expect(prompt).toContain('### CORRAL.md\n\n# Acme brief')
+    expect(prompt).toContain('dependencies (node_modules) are not installed in this worktree.')
+    if (wiki) expect(prompt).toContain('- setup.md')
   })
 })
 

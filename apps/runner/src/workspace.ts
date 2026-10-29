@@ -96,7 +96,7 @@ export async function readRoleInstructions(worktree: string, role: AgentRole): P
   return text?.trim() || DEFAULT_ROLE_INSTRUCTIONS[role] || ''
 }
 
-// The PM's project brief, so a first turn doesn't spend model calls finding
+// Every role's project brief, so a first turn doesn't spend model calls finding
 // the top-level docs. Searched in this order; the first that exists wins.
 const BRIEF_FILES = ['CORRAL.md', join('.corral', 'CORRAL.md'), 'CLAUDE.md']
 export const MAX_BRIEF_CHARS = 20_000
@@ -110,7 +110,7 @@ async function wikiPages(worktree: string): Promise<string[]> {
     .sort()
 }
 
-// Returns '' when the worktree has none of the brief files and no wiki
+// Always includes worktree status, even when no project docs exist.
 export async function readProjectBrief(worktree: string): Promise<string> {
   let doc: { name: string, text: string } | null = null
   for (const name of BRIEF_FILES) {
@@ -121,7 +121,10 @@ export async function readProjectBrief(worktree: string): Promise<string> {
     }
   }
   const pages = await wikiPages(worktree)
-  if (!doc && pages.length === 0) return ''
+  const [hasWiki, hasDependencies] = await Promise.all([
+    stat(join(worktree, '.corral', 'wiki')).then(s => s.isDirectory(), () => false),
+    stat(join(worktree, 'node_modules')).then(s => s.isDirectory(), () => false)
+  ])
 
   const parts: string[] = []
   if (doc) parts.push(`### ${doc.name}`, '', doc.text, '')
@@ -134,7 +137,9 @@ export async function readProjectBrief(worktree: string): Promise<string> {
   return [
     '## Project brief',
     '',
-    `The runner has already read ${listed} from your checkout and included it below, so don't read ${doc ? 'that file' : 'it'} again. Open other files, including individual wiki pages, only when a request needs them.`,
+    `Worktree status: .corral/wiki/ ${hasWiki ? 'exists' : 'does not exist'}; dependencies (node_modules) are ${hasDependencies ? 'installed' : 'not installed'} in this worktree.`,
+    '',
+    listed ? `The runner has already read ${listed} from your checkout and included it below, so don't read ${doc ? 'that file' : 'it'} again. Open other files, including individual wiki pages, only when a request needs them.` : 'No project brief file (CORRAL.md, .corral/CORRAL.md or CLAUDE.md) was found.',
     '',
     body
   ].join('\n')
