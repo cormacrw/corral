@@ -1,5 +1,6 @@
-import type { Task } from '@corral/contracts'
-import type { TaskStatus } from '@corral/core'
+import type { Agent, Task } from '@corral/contracts'
+import type { AgentRole, TaskPriority, TaskStatus } from '@corral/core'
+import { TASK_PRIORITIES } from '@corral/core'
 
 // How long a merged task stays in the Board's Merged column. Older ones are
 // still on the Backlog, epic and task pages.
@@ -45,18 +46,85 @@ export function sortColumn<T extends Pick<Task, 'ref' | 'mergedAt'>>(key: string
   return [...tasks].sort((a, b) => time(b) - time(a) || a.ref.localeCompare(b.ref, undefined, { numeric: true }))
 }
 
-// Whether a task passes the Board's filters: its epic is one of the selected
-// epics (none selected means all epics), and its ref or title matches the
-// search.
-export function matchesFilter(task: Pick<Task, 'ref' | 'title' | 'epicId'>, epics: string[], search: string): boolean {
+// The Board's filters (design/board.md). Each list is a multi-select, and an
+// empty list means no filter. They combine with AND.
+export interface BoardFilters {
+  search: string
+  epics: string[]
+  // Column keys from BOARD_COLUMNS
+  statuses: string[]
+  priorities: TaskPriority[]
+  // Agent ids
+  agents: string[]
+}
+
+export const NO_FILTERS: BoardFilters = { search: '', epics: [], statuses: [], priorities: [], agents: [] }
+
+// Which role's turn it is in a column: the agent of that role is the one a
+// task there is assigned to. Tasks have no per-agent assignee, so this
+// matches the first agent of the role, as the task's properties do.
+const TURN: Partial<Record<TaskStatus, AgentRole>> = { ready: 'developer', in_progress: 'developer', agent_review: 'reviewer' }
+
+// The agents a task belongs to: the one holding its lease and the one it's
+// assigned to.
+export function taskAgentIds(task: Pick<Task, 'status' | 'lease'>, agents: Pick<Agent, 'id' | 'role'>[]): string[] {
+  const roles = [task.lease?.role, TURN[task.status]]
+  return [...new Set(roles.flatMap(role => role ? agents.filter(a => a.role === role).slice(0, 1).map(a => a.id) : []))]
+}
+
+// The column a task's status puts it in
+export function columnKey(status: TaskStatus): string | undefined {
+  return BOARD_COLUMNS.find(c => c.statuses.includes(status))?.key
+}
+
+// Whether a task passes the Board's filters: its epic, column, priority and
+// agent are among the selected ones (none selected means any), and its ref or
+// title matches the search.
+export function matchesFilter(task: Pick<Task, 'ref' | 'title' | 'epicId' | 'status' | 'priority'>, filters: BoardFilters, agentIds: string[] = []): boolean {
+  const { epics, statuses, priorities, agents, search } = filters
   if (epics.length > 0 && (!task.epicId || !epics.includes(task.epicId))) return false
+  if (statuses.length > 0 && !statuses.includes(columnKey(task.status) ?? '')) return false
+  if (priorities.length > 0 && !priorities.includes(task.priority)) return false
+  if (agents.length > 0 && !agentIds.some(id => agents.includes(id))) return false
   return !search || `${task.ref} ${task.title}`.toLowerCase().includes(search.toLowerCase())
 }
 
-// What the epic filter's trigger reads: "All epics", the one epic's name, or
+export function hasFilters(filters: BoardFilters): boolean {
+  return Boolean(filters.search) || filters.epics.length + filters.statuses.length + filters.priorities.length + filters.agents.length > 0
+}
+
+// The filters live in the URL query so a filtered Board can be reloaded and
+// shared: ?q=, and comma-separated ?epics=, ?status=, ?priority= and ?agent=.
+// (?epic= is the epic flyout's.)
+const QUERY = { epics: 'epics', statuses: 'status', priorities: 'priority', agents: 'agent' } as const
+
+type Query = Record<string, string | null | (string | null)[] | undefined>
+
+export function filtersFromQuery(query: Query): BoardFilters {
+  const first = (value: Query[string]) => (Array.isArray(value) ? value[0] : value) ?? ''
+  const list = (key: string) => first(query[key]).split(',').filter(Boolean)
+  return {
+    search: first(query.q),
+    epics: list(QUERY.epics),
+    statuses: list(QUERY.statuses).filter(key => BOARD_COLUMNS.some(c => c.key === key)),
+    priorities: list(QUERY.priorities).filter((p): p is TaskPriority => (TASK_PRIORITIES as readonly string[]).includes(p)),
+    agents: list(QUERY.agents)
+  }
+}
+
+// The query for a set of filters, keeping the other keys (such as ?column=)
+export function filtersToQuery(filters: BoardFilters, query: Query = {}): Query {
+  const next: Query = { ...query, q: filters.search || undefined }
+  for (const [field, key] of Object.entries(QUERY) as [keyof typeof QUERY, string][]) {
+    next[key] = filters[field].length > 0 ? filters[field].join(',') : undefined
+  }
+  return next
+}
+
+// What a filter's trigger reads: "All epics", the one item's name, or
 // "N epics".
-export function epicFilterLabel(epics: string[], label: (id: string) => string): string {
-  if (epics.length === 0) return 'All epics'
-  if (epics.length === 1) return label(epics[0]!)
-  return `${epics.length} epics`
+export function filterLabel(selected: string[], label: (id: string) => string, all: string, plural: string): string {
+  if (selected.length === 0) return all
+  if (selected.length === 1) return label(selected[0]!)
+  return `${selected.length} ${plural}`
 }

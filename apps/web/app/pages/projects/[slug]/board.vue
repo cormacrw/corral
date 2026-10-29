@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { Task } from '@corral/contracts'
 import type { TaskStatus } from '@corral/core'
-import { BOARD_COLUMNS, matchesFilter, onBoard, sortColumn } from '~/utils/board'
+import type { BoardFilters } from '~/utils/board'
+import { BOARD_COLUMNS, filtersFromQuery, filtersToQuery, matchesFilter, onBoard, sortColumn, taskAgentIds } from '~/utils/board'
 import { epicTitle, PRIORITY, STATUS, taskNote } from '~/utils/labels'
 
 // The board (design/board.md): approved work by status, no drag and drop
@@ -26,17 +27,42 @@ watch(project, async (p) => {
   }
 }, { immediate: true })
 
-const search = ref('')
-const selected = ref<string[]>([])
+// The filters live in the URL query, so a filtered Board reloads and shares
+const router = useRouter()
+// They're held here too: the query only updates once the navigation lands,
+// so quick changes (picking two options, typing) would otherwise build on a
+// stale query and drop one another.
+const filters = ref<BoardFilters>(filtersFromQuery(route.query))
+let writing = 0
+watch(filters, async (next) => {
+  writing++
+  try {
+    await router.replace({ query: filtersToQuery(next, route.query) })
+  } finally {
+    writing--
+  }
+})
+// Back, forward and links change the query from outside
+watch(() => route.query, (query) => {
+  const next = filtersFromQuery(query)
+  if (!writing && JSON.stringify(next) !== JSON.stringify(filters.value)) filters.value = next
+})
+const search = computed({
+  get: () => filters.value.search,
+  set: (value: string) => { filters.value = { ...filters.value, search: value } }
+})
 const epics = computed(() => [...new Set(all.value.map(t => t.epicId).filter((id): id is string => Boolean(id)))])
-const visible = computed(() => all.value.filter(t => onBoard(t) && matchesFilter(t, selected.value, search.value)))
+// Agents that work on tasks, for the Agent filter
+const taskAgents = computed(() => live.state.value.agents.filter(a => a.role !== 'pm'))
+const visible = computed(() => all.value.filter(t => onBoard(t) && matchesFilter(t, filters.value, taskAgentIds(t, live.state.value.agents))))
 // Epic details opens the epic only when exactly one is selected
-const single = computed(() => selected.value.length === 1 ? selected.value[0]! : null)
+const single = computed(() => filters.value.epics.length === 1 ? filters.value.epics[0]! : null)
 
-const columns = BOARD_COLUMNS
+// The Status filter hides the columns it doesn't select
+const columns = computed(() => filters.value.statuses.length > 0 ? BOARD_COLUMNS.filter(c => filters.value.statuses.includes(c.key)) : BOARD_COLUMNS)
 const DOT = { neutral: 'bg-neutral-400', info: 'bg-info', primary: 'bg-primary', warning: 'bg-warning', error: 'bg-error', success: 'bg-success', secondary: 'bg-secondary' } as const
 const inColumn = (column: { key: string, statuses: TaskStatus[] }) => sortColumn(column.key, visible.value.filter(t => column.statuses.includes(t.status)))
-const mobileColumns = computed(() => columns.map(c => ({ ...c, color: DOT[STATUS[c.statuses[0]!].color], tasks: inColumn(c) })))
+const mobileColumns = computed(() => columns.value.map(c => ({ ...c, color: DOT[STATUS[c.statuses[0]!].color], tasks: inColumn(c) })))
 const agentFor = (task: Task) => task.lease ? live.state.value.agents.find(a => a.role === task.lease!.role) : null
 const epicLabel = (id: string) => epicTitle(live.state.value.epics[project.value?.id ?? ''], id, epics.value.indexOf(id))
 const epicOptions = computed(() => epics.value.map(id => ({ id, label: epicLabel(id) })))
@@ -48,9 +74,10 @@ const epicOptions = computed(() => epics.value.map(id => ({ id, label: epicLabel
     <BoardMobile
       v-if="device.isMobile.value"
       v-model:search="search"
-      v-model:selected="selected"
+      v-model:filters="filters"
       :columns="mobileColumns"
       :epics="epicOptions"
+      :agents="taskAgents"
       :total="visible.length"
       :all="all"
       :review-round-cap="project?.reviewRoundCap ?? 5"
@@ -70,11 +97,12 @@ const epicOptions = computed(() => epics.value.map(id => ({ id, label: epicLabel
             size="sm"
             class="w-60"
           />
-          <EpicFilter
-            v-model="selected"
+          <BoardFilters
+            v-model="filters"
             :epics="epicOptions"
+            :agents="taskAgents"
             size="sm"
-            class="w-52"
+            item-class="w-40"
           />
           <UButton
             v-if="single"
