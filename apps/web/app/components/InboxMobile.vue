@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { Evidence, Inbox, InboxActionInput, InboxItem, Review, Task, TaskInboxItem } from '@corral/contracts'
-import { needsAttention } from '@corral/contracts'
 import { ROLE, timeAgo, type Color } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
 
@@ -316,15 +315,9 @@ const tabs = computed(() => [
       class="shrink-0"
     >
       <li
-        v-for="(item, index) in items"
+        v-for="item in items"
         :key="item.id"
       >
-        <div
-          v-if="tab === 'needsYou' && !needsAttention(item) && (index === 0 || needsAttention(items[index - 1]!))"
-          class="border-b border-default px-4 py-2 text-xs text-muted"
-        >
-          Open in Plan
-        </div>
         <NuxtLink
           :to="`/inbox/${item.id}`"
           class="flex gap-3 border-b border-default px-4 py-3 active:bg-elevated"

@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { PlanThreadItem } from '@corral/contracts'
-import { needsAttention } from '@corral/contracts'
 import { projectColor, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
 
@@ -16,7 +15,7 @@ defineProps<{ item: PlanThreadItem }>()
   />
   <span class="flex min-w-0 flex-1 flex-col gap-1">
     <span class="flex items-center gap-2">
-      <span :class="['truncate text-sm', needsAttention(item) && 'font-semibold']">{{ item.subject }}</span>
+      <span class="truncate text-sm font-semibold">{{ item.subject }}</span>
       <span
         v-if="item.unread"
         class="size-2 shrink-0 rounded-full bg-primary"

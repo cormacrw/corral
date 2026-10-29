@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { Evidence, Inbox, InboxActionInput, Review, Task, InboxItem } from '@corral/contracts'
-import { needsAttention } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
@@ -101,7 +100,7 @@ async function nextAfterApproval() {
   planApproving.value = false
   const position = approvalPosition
   await load()
-  const remaining = inbox.value?.needsYou.filter(needsAttention) ?? []
+  const remaining = inbox.value?.needsYou ?? []
   const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
   await router.replace(next ? `/inbox/${next.id}` : '/inbox')
 }
@@ -165,7 +164,7 @@ async function submit(message: string): Promise<boolean> {
     // Resolved: move on to the next item that needs you, or to the empty
     // state when that was the last one
     if (!inbox.value?.needsYou.some(i => i.id === actedOn.id)) {
-      const remaining = inbox.value?.needsYou.filter(needsAttention) ?? []
+      const remaining = inbox.value?.needsYou ?? []
       const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
       void router.replace(next ? `/inbox/${next.id}` : '/inbox')
     }
@@ -284,15 +283,9 @@ onBeforeUnmount(() => {
           class="min-h-0 flex-1 overflow-y-auto overscroll-contain"
         >
           <li
-            v-for="(item, index) in items"
+            v-for="item in items"
             :key="item.id"
           >
-            <div
-              v-if="tab === 'needsYou' && !needsAttention(item) && (index === 0 || needsAttention(items[index - 1]!))"
-              class="border-b border-default px-3 py-2 text-xs text-muted"
-            >
-              Open in Plan
-            </div>
             <button
               type="button"
               :class="['flex w-full gap-2 border-b border-default px-3 py-2 text-start', selectedId === item.id && 'bg-elevated']"
