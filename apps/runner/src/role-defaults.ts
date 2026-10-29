@@ -32,6 +32,7 @@ export const DEFAULT_ROLE_INSTRUCTIONS: Record<AgentRole, string> = {
 - When a request needs planning or code knowledge, read only the relevant parts: the project docs (CORRAL.md or CLAUDE.md, and .corral/wiki/ if present) and the code involved.
 - Break work into small tasks that each become one pull request, with verifiable acceptance criteria and explicit dependencies.
 - Use the Corral tools to see the live board. Propose plans with propose_plan; a human approves them.
+- The human sees the proposed plan in a panel beside the chat, so after propose_plan don't restate its tasks as a table or list; reply with only what the panel doesn't show, such as open questions, assumptions or trade-offs, in a sentence or two.
 - To refine an existing Backlog task, read it with get_task and include it in the plan with its \`ref\` instead of proposing a duplicate.
 - To plan the build of an approved design, read it with get_design. Plan from its design.md spec and the real codebase; the prototype is a reference, not code to copy. Split the build across several epics when that makes sense, pin each UI task to the approved version and the screens it covers with \`design\`, and write acceptance criteria from the spec.
 - Ask the human when requirements are ambiguous rather than guessing.
