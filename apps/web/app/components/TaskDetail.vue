@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AuditEntry, Comment, Evidence, Review, Task } from '@corral/contracts'
+import type { AuditEntry, Comment, Evidence, Review, Run, Task } from '@corral/contracts'
 import type { EditorToolbarItem } from '@nuxt/ui'
 import type { EditorView } from '@tiptap/pm/view'
 import type { TaskPriority, TaskStatus } from '@corral/core'
@@ -23,6 +23,8 @@ const comments = ref<Comment[]>([])
 const history = ref<AuditEntry[]>([])
 const evidence = ref<Evidence[]>([])
 const reviews = ref<Review[]>([])
+// The task's runs, so activity names the agent that acted
+const runs = ref<Run[]>([])
 const error = ref<string | null>(null)
 const loading = ref(true)
 const saved = ref(false)
@@ -60,16 +62,18 @@ async function load() {
 }
 async function loadSide() {
   if (!task.value || !project.value) return
-  const [c, h, ev, r] = await Promise.all([
+  const [c, h, ev, r, ru] = await Promise.all([
     api.tasks.comments(slug.value, number.value),
     api.tasks.history(slug.value, number.value),
     api.tasks.evidence(slug.value, number.value),
-    api.tasks.reviews(slug.value, number.value)
+    api.tasks.reviews(slug.value, number.value),
+    api.runs.list({ taskId: task.value.id })
   ])
   comments.value = c
   history.value = h
   evidence.value = ev
   reviews.value = r
+  runs.value = ru
 }
 watch(() => props.taskRef, () => {
   draft.value = ''
@@ -143,12 +147,10 @@ async function changeStatus(value: string) {
 
 const priorityOptions = (Object.keys(PRIORITY) as TaskPriority[]).map(p => ({ label: PRIORITY[p].label, value: p }))
 const typeOptions = (Object.keys(TASK_TYPE) as Task['type'][]).map(t => ({ label: TASK_TYPE[t], value: t }))
-function agentForRole(role: 'developer' | 'reviewer') {
-  const lease = task.value?.lease
-  return live.state.value.agents.find(a => lease?.role === role ? a.id === lease.agentId : a.role === role)
-}
-const developer = computed(() => agentForRole('developer'))
-const reviewer = computed(() => agentForRole('reviewer'))
+// Tasks aren't assigned ahead of time: these are the agents of the task's
+// latest runs, or null until one claims it (D15)
+const developer = computed(() => task.value?.developer ?? null)
+const reviewer = computed(() => task.value?.reviewer ?? null)
 
 const metCount = computed(() => task.value?.acceptanceCriteria.filter(c => c.met).length ?? 0)
 async function saveCriterion(id: string, text: string) {
@@ -316,7 +318,11 @@ async function remove() {
 
 function authorLabel(actor: Comment['author']): string {
   if (actor.kind === 'human') return 'You'
-  if (actor.kind === 'agent') return actor.role === 'pm' ? (live.state.value.agents.find(a => a.role === 'pm')?.name ?? 'PM') : actor.role === 'developer' ? (developer.value?.name ?? 'Developer') : (reviewer.value?.name ?? 'Reviewer')
+  if (actor.kind === 'agent') {
+    const run = runs.value.find(r => r.id === actor.runId)
+    if (run) return run.agentName
+    return actor.role === 'pm' ? (live.state.value.agents.find(a => a.role === 'pm')?.name ?? 'PM') : actor.role === 'developer' ? 'Developer' : 'Reviewer'
+  }
   return 'Corral'
 }
 function historyText(entry: AuditEntry): string {

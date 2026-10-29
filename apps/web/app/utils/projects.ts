@@ -15,8 +15,7 @@ const VERB: Record<Agent['role'], string> = { pm: 'planning', developer: 'buildi
 
 export function projectCardSummary(
   project: { paused: boolean },
-  tasks: Pick<Task, 'ref' | 'status' | 'mergedAt' | 'lease'>[],
-  agents: Pick<Agent, 'id' | 'name' | 'role'>[],
+  tasks: Pick<Task, 'ref' | 'status' | 'mergedAt' | 'lease' | 'developer' | 'reviewer'>[],
   needsYou: number,
   now = Date.now()
 ): ProjectCardSummary {
@@ -30,7 +29,8 @@ export function projectCardSummary(
   }
   if (first?.lease) {
     const role = first.lease.role
-    const agent = agents.find(a => a.id === first.lease!.agentId)?.name ?? (role === 'reviewer' ? 'Reviewer' : 'Developer')
+    // The lease is held by the task's latest run of that role
+    const agent = (role === 'reviewer' ? first.reviewer?.name : role === 'developer' ? first.developer?.name : null) ?? (role === 'reviewer' ? 'Reviewer' : 'Developer')
     const more = leased.length > 1 ? ` and ${leased.length - 1} more` : ''
     return { board, backlog, working: { agent, role }, line: `${agent} ${VERB[role]} ${first.ref}${more}` }
   }

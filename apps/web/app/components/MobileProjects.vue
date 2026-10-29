@@ -27,7 +27,7 @@ onMounted(() => {
 
 const cards = computed(() => state.value.projects.map((project) => {
   const needsYou = inbox.value?.needsYou.filter(i => i.project.id === project.id && needsAttention(i)).length ?? 0
-  return { project, loaded: Boolean(state.value.tasks[project.id]), ...projectCardSummary(project, state.value.tasks[project.id] ?? [], state.value.agents, needsYou) }
+  return { project, loaded: Boolean(state.value.tasks[project.id]), ...projectCardSummary(project, state.value.tasks[project.id] ?? [], needsYou) }
 }))
 </script>
 

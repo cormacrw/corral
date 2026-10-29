@@ -1,4 +1,4 @@
-import type { Agent, Task } from '@corral/contracts'
+import type { Task } from '@corral/contracts'
 import type { AgentRole, TaskPriority, TaskStatus } from '@corral/core'
 import { TASK_PRIORITIES } from '@corral/core'
 
@@ -60,13 +60,19 @@ export interface BoardFilters {
 
 export const NO_FILTERS: BoardFilters = { search: '', epics: [], statuses: [], priorities: [], agents: [] }
 
-// For an unleased task, guess whose turn it is from the column's role.
+// Which role's turn it is in a column. Tasks aren't assigned ahead of time
+// (D15): a task belongs to the agent of its latest run of that role, and to
+// no agent of the role before one claims it.
 const TURN: Partial<Record<TaskStatus, AgentRole>> = { ready: 'developer', in_progress: 'developer', agent_review: 'reviewer' }
 
-export function taskAgentIds(task: Pick<Task, 'status' | 'lease'>, agents: Pick<Agent, 'id' | 'role'>[]): string[] {
+// Leased tasks belong to their holder; otherwise use the latest agent of the turn's role.
+export function taskAgentIds(task: Pick<Task, 'status' | 'lease' | 'developer' | 'reviewer'>): string[] {
   if (task.lease) return [task.lease.agentId]
-  const agent = agents.find(a => a.role === TURN[task.status])
-  return agent ? [agent.id] : []
+  const roles = [TURN[task.status]]
+  return [...new Set(roles.flatMap((role) => {
+    const agent = role === 'developer' ? task.developer : role === 'reviewer' ? task.reviewer : null
+    return agent ? [agent.id] : []
+  }))]
 }
 
 // The column a task's status puts it in

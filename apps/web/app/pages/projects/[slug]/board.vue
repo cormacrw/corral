@@ -54,7 +54,7 @@ const search = computed({
 const epics = computed(() => [...new Set(all.value.map(t => t.epicId).filter((id): id is string => Boolean(id)))])
 // Agents that work on tasks, for the Agent filter
 const taskAgents = computed(() => live.state.value.agents.filter(a => a.role !== 'pm'))
-const visible = computed(() => all.value.filter(t => onBoard(t) && matchesFilter(t, filters.value, taskAgentIds(t, live.state.value.agents))))
+const visible = computed(() => all.value.filter(t => onBoard(t) && matchesFilter(t, filters.value, taskAgentIds(t))))
 // Epic details opens the epic only when exactly one is selected
 const single = computed(() => filters.value.epics.length === 1 ? filters.value.epics[0]! : null)
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Agent, PatchTaskInput, Project, Task } from '@corral/contracts'
+import type { PatchTaskInput, Project, Task, TaskAgent } from '@corral/contracts'
 import type { TaskStatus } from '@corral/core'
 import { STATUS } from '~/utils/labels'
 
@@ -12,8 +12,8 @@ const props = withDefaults(defineProps<{
   statusEditable: boolean
   priorityOptions: { label: string, value: string }[]
   typeOptions: { label: string, value: string }[]
-  developer: Agent | undefined
-  reviewer: Agent | undefined
+  developer: TaskAgent | null
+  reviewer: TaskAgent | null
   stacked?: boolean
   // A Draft has no status, branch, PR or review yet
   draft?: boolean
