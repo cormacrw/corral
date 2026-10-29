@@ -133,7 +133,7 @@ export interface DesignForAgent {
   // The screens a build task is pinned to; null when read from the design task
   pinnedScreens: string[] | null
   screenshots: { fileName: string, contentType: string, dataBase64: string }[]
-  // The static bundle, a gzipped tar of index.html and its assets
+  // The static bundle, a tar of index.html and its assets
   bundle: { dataBase64: string }
 }
 
@@ -183,5 +183,15 @@ export async function readDesign(db: Executor, blobs: BlobStore, project: { id: 
     pinnedScreens,
     screenshots: await Promise.all(row.screenshots.map(async s => ({ fileName: s.fileName, contentType: s.contentType, dataBase64: (await read(s.blob, `screenshot ${s.fileName}`)).toString('base64') }))),
     bundle: { dataBase64: (await read(row.bundleBlob, 'bundle')).toString('base64') }
+  }
+}
+
+// Whether a tar has index.html at its root (D20), so the preview can serve
+// it on its own. The bundle is untrusted, so this reads it in memory.
+export function bundleHasRootIndex(archive: Uint8Array): boolean {
+  try {
+    return unpackBundle(archive).has('index.html')
+  } catch {
+    return false
   }
 }

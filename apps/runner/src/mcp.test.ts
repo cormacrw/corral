@@ -3,7 +3,7 @@ import { TASK_TYPES, type AgentRole } from '@corral/core'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { ToolServer } from './mcp.ts'
+import { ROLE_TOOLS, toolsFor, ToolServer } from './mcp.ts'
 
 // The tools each role sees over MCP, through the SDK client the agent uses
 describe('ToolServer', () => {
@@ -135,5 +135,43 @@ describe('ToolServer', () => {
     expect(refused.isError).toBe(true)
     expect(refused.content).toEqual([{ type: 'text', text: '00000000-0000-4000-8000-000000000000 isn\'t an attachment in this project' }])
     await client.close()
+  })
+})
+
+// D20: only a design task's developer gets submit_design
+describe('toolsFor', () => {
+  it('adds submit_design for a design task\'s developer, before report_outcome', () => {
+    const tools = toolsFor({ role: 'developer', taskType: 'design' })
+    expect(tools).toContain('submit_design')
+    expect(tools.at(-1)).toBe('report_outcome')
+  })
+
+  it('leaves every other run with its role\'s tools', () => {
+    for (const taskType of ['task', 'bug', 'spike', null, undefined] as const) {
+      expect(toolsFor({ role: 'developer', taskType })).toEqual(ROLE_TOOLS.developer)
+    }
+    expect(toolsFor({ role: 'reviewer', taskType: 'design' })).toEqual(ROLE_TOOLS.reviewer)
+    expect(ROLE_TOOLS.developer).not.toContain('submit_design')
+  })
+
+  it('serves submit_design over MCP only where it was registered', async () => {
+    const server = new ToolServer()
+    await server.start()
+    try {
+      server.register('design-dev', 'developer', async () => ({ ok: true, result: {} }), toolsFor({ role: 'developer', taskType: 'design' }))
+      server.register('task-dev', 'developer', async () => ({ ok: true, result: {} }))
+      const names = async (secret: string) => {
+        const client = new Client({ name: 'test', version: '1' })
+        await client.connect(new StreamableHTTPClientTransport(new URL(server.url(secret))))
+        const listed = (await client.listTools()).tools.map(t => t.name)
+        await client.close()
+        return listed
+      }
+      expect(await names('design-dev')).toContain('submit_design')
+      expect(await names('task-dev')).not.toContain('submit_design')
+    } finally {
+      // Not awaited: the SDK client keeps its connection open a while
+      void server.close()
+    }
   })
 })

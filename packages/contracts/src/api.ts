@@ -186,7 +186,7 @@ export const humanTransitionInput = z.discriminatedUnion('type', [
   z.object({ type: z.literal('approve') }),
   z.object({ type: z.literal('accept') }),
   z.object({ type: z.literal('send_back') }),
-  z.object({ type: z.literal('human_request_changes') }),
+  z.object({ type: z.literal('human_request_changes'), feedback: z.string().trim().min(1).optional() }),
   z.object({ type: z.literal('resolve'), to: z.enum(['backlog', 'ready', 'in_progress']) })
 ])
 export type HumanTransitionInput = z.infer<typeof humanTransitionInput>

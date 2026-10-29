@@ -1,6 +1,7 @@
 import { EVIDENCE_KINDS, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type RunnerMessage } from '@corral/contracts'
 import {
   ACTIVE_RUN_STATES,
+  nextDesignVersion,
   transition,
   taskRef,
   richTextToMarkdown,
@@ -14,12 +15,12 @@ import { z } from 'zod'
 import { listTaskAttachments, readProjectAttachment } from './attachments.ts'
 import type { BlobStore } from './blob-store.ts'
 import { claimNextTask, type Claim } from './claim.ts'
-import { DesignNotFound, readDesign } from './designs.ts'
+import { bundleHasRootIndex, DesignNotFound, readDesign } from './designs.ts'
 import { ApiFailure } from './errors.ts'
 import type { EventBus } from './events.ts'
 import type { GitHubClient } from './github.ts'
 import { slugify } from './projects.ts'
-import { developerPrompt, reviewerPrompt } from './prompts.ts'
+import { designRevisionPrompt, developerPrompt, reviewerPrompt } from './prompts.ts'
 import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
 import { MergeOrchestrator } from './merge.ts'
 import type { PlanService } from './plan.ts'
@@ -27,7 +28,7 @@ import { getRun, listAgents, listEvidence } from './runs.ts'
 import { addComment, applyTransition, deleteTaskRows, loadTask, lockTask, toTaskState, type ProjectRow, type TaskRow } from './tasks.ts'
 import type { Transcripts } from './transcripts.ts'
 
-const { acceptanceCriteria, agents, attachments, auditLog, comments, evidence, projects, reviews, runs, settings, tasks } = schema
+const { acceptanceCriteria, agents, attachments, auditLog, comments, designVersions, evidence, projects, reviews, runs, settings, tasks } = schema
 type PlanSessionRow = typeof schema.planSessions.$inferSelect
 
 const server: Actor = { kind: 'system', component: 'server' }
@@ -65,6 +66,15 @@ const reportSchema = z.object({
   criteria: z.array(z.object({ criterionId: z.string(), met: z.boolean(), note: z.string().default('') })).optional(),
   headSha: z.string().optional()
 })
+
+// What the runner sends for submit_design (D20)
+const designSchema = z.object({
+  headSha: z.string().min(1),
+  spec: z.string().trim().min(1, 'design.md is empty'),
+  bundle: z.object({ dataBase64: z.string().min(1) }),
+  screenshots: z.array(z.object({ fileName: z.string().min(1), contentType: z.string().regex(/^image\//), dataBase64: z.string().min(1) })).min(1, 'Add at least one screenshot')
+})
+const MAX_DESIGN_BYTES = 25 * 1024 * 1024
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp)$/
 // Text evidence is returned inline up to this size
@@ -303,15 +313,40 @@ export class Orchestrator implements RunnerHandlers {
     const { db } = this.#d
     let task = ctx.task!
     const ref = taskRef(ctx.project.prefix, task.number)
-    // A spike delivers findings, not a PR (D19), so it never gets a branch
+    // A spike delivers findings, not a PR (D19), so it never gets a branch.
+    // A design is built on design/<ref>, pushed but never merged (D20).
     const spike = task.type === 'spike'
+    const design = task.type === 'design'
     if (!task.branch && !spike) {
-      const branch = `corral/${ref.toLowerCase()}-${slugify(task.title).slice(0, 40).replace(/-+$/, '')}`
+      const branch = design ? `design/${ref}` : `corral/${ref.toLowerCase()}-${slugify(task.title).slice(0, 40).replace(/-+$/, '')}`
       ;[task] = await db.update(tasks).set({ branch }).where(eq(tasks.id, task.id)).returning() as [TaskRow]
     }
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
     const notes = await this.#comments(task.id)
     const attached = await listTaskAttachments(db, ctx.project.id, task.description, notes)
+    const [latest] = design
+      ? await db.select({ version: designVersions.version, createdAt: designVersions.createdAt }).from(designVersions)
+          .where(eq(designVersions.taskId, task.id)).orderBy(desc(designVersions.version)).limit(1)
+      : []
+    const promptTask = {
+      ref,
+      title: task.title,
+      description: task.description,
+      branch: spike ? null : task.branch,
+      spike,
+      design: design ? { version: latest?.version ?? null } : null,
+      defaultBranch: ctx.project.defaultBranch,
+      reviewRounds: task.reviewRounds,
+      reviewRoundCap: ctx.project.reviewRoundCap,
+      criteria: criteria.map(c => ({ id: c.id, text: c.text })),
+      comments: notes,
+      attachments: attached
+    }
+    const prompt = developerPrompt(promptTask, ctx.agent.name)
+    // D20: rework on a design continues the developer's own session with the
+    // feedback given since the last version. The full prompt is the fallback
+    // when the session can't be resumed.
+    const resume = latest ? await this.#developerSession(ctx) : null
     return {
       runId: ctx.run.id,
       runNumber: ctx.run.number,
@@ -323,27 +358,24 @@ export class Orchestrator implements RunnerHandlers {
       defaultBranch: ctx.project.defaultBranch,
       taskId: task.id,
       taskRef: ref,
+      taskType: task.type,
       branch: spike ? null : task.branch,
       headSha: spike ? null : task.headSha,
       planSessionId: null,
-      agentSessionId: null,
-      fallbackPrompt: null,
+      agentSessionId: resume,
+      fallbackPrompt: resume ? prompt : null,
       model: null,
       timeoutSeconds: RUN_TIMEOUT_SECONDS,
-      prompt: developerPrompt({
-        ref,
-        title: task.title,
-        description: task.description,
-        branch: spike ? null : task.branch,
-        spike,
-        defaultBranch: ctx.project.defaultBranch,
-        reviewRounds: task.reviewRounds,
-        reviewRoundCap: ctx.project.reviewRoundCap,
-        criteria: criteria.map(c => ({ id: c.id, text: c.text })),
-        comments: notes,
-        attachments: attached
-      }, ctx.agent.name)
+      prompt: resume && latest ? designRevisionPrompt(promptTask, notes.filter(c => c.createdAt > latest.createdAt)) : prompt
     }
+  }
+
+  // The agent session of this agent's last developer run on the task, to resume
+  async #developerSession(ctx: RunContext): Promise<string | null> {
+    const [previous] = await this.#d.db.select({ agentSessionId: runs.agentSessionId }).from(runs)
+      .where(and(eq(runs.taskId, ctx.task!.id), eq(runs.role, 'developer'), eq(runs.agentId, ctx.agent.id), ne(runs.id, ctx.run.id), isNotNull(runs.agentSessionId)))
+      .orderBy(desc(runs.number)).limit(1)
+    return previous?.agentSessionId ?? null
   }
 
   // flows.md step 6: the reviewer checks out the submitted commit
@@ -363,6 +395,12 @@ export class Orchestrator implements RunnerHandlers {
       ? await db.select({ summary: runs.summary }).from(runs)
           .where(and(eq(runs.taskId, task.id), eq(runs.outcome, 'findings_reported'))).orderBy(desc(runs.number)).limit(1)
       : []
+    // A design: the reviewer checks the version submitted at this commit (D20)
+    const design = task.type === 'design'
+    const [version] = design && task.headSha
+      ? await db.select().from(designVersions)
+          .where(and(eq(designVersions.taskId, task.id), eq(designVersions.commitSha, task.headSha))).orderBy(desc(designVersions.version)).limit(1)
+      : []
     return {
       runId: ctx.run.id,
       runNumber: ctx.run.number,
@@ -374,6 +412,7 @@ export class Orchestrator implements RunnerHandlers {
       defaultBranch: ctx.project.defaultBranch,
       taskId: task.id,
       taskRef: ref,
+      taskType: task.type,
       branch: spike ? null : task.branch,
       headSha: spike ? null : task.headSha,
       planSessionId: null,
@@ -388,6 +427,8 @@ export class Orchestrator implements RunnerHandlers {
         branch: spike ? null : task.branch,
         spike,
         findings: reported?.summary ?? null,
+        design: design ? { version: version?.version ?? null } : null,
+        underReview: version ? { version: version.version, commitSha: version.commitSha, screenshots: version.screenshots.map(s => s.fileName) } : null,
         defaultBranch: ctx.project.defaultBranch,
         reviewRounds: task.reviewRounds,
         reviewRoundCap: ctx.project.reviewRoundCap,
@@ -750,8 +791,8 @@ export class Orchestrator implements RunnerHandlers {
   async #tool(ctx: RunContext, tool: string, input: unknown): Promise<unknown> {
     const role = ctx.run.role
     const allowed: Record<string, readonly string[]> = {
-      developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'report_outcome'],
-      reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'report_outcome'],
+      developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'submit_design', 'report_outcome'],
+      reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'get_design', 'report_outcome'],
       pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
     }
     if (!allowed[role]?.includes(tool)) throw new ToolError(`The ${role} can’t use ${tool}`)
@@ -779,6 +820,8 @@ export class Orchestrator implements RunnerHandlers {
         return this.#attachEvidence(ctx, evidenceSchema.parse(input))
       case 'get_evidence':
         return this.#getEvidence(ctx, z.object({ evidenceId: z.string().optional() }).parse(input))
+      case 'submit_design':
+        return this.#submitDesign(ctx, input)
       case 'report_outcome':
         return this.#reportOutcome(ctx, reportSchema.parse(input) as OutcomeReport & { outcome: string })
     }
@@ -884,14 +927,19 @@ export class Orchestrator implements RunnerHandlers {
     }
     if (ctx.run.role === 'developer') {
       const spike = ctx.task!.type === 'spike'
+      const design = ctx.task!.type === 'design'
       switch (report.outcome) {
         case 'pr_opened':
         case 'pr_updated':
           if (spike) throw new ToolError('Not submitted. A spike opens no PR: report your findings with outcome findings_reported.')
+          if (design) throw new ToolError('Not submitted. A design task opens no PR: call submit_design, then report design_submitted.')
           return this.#submit(ctx, report)
         case 'findings_reported':
-          if (!spike) throw new ToolError('Not submitted. Only a spike reports findings; this task reports pr_opened or pr_updated.')
+          if (!spike) throw new ToolError(`Not submitted. Only a spike reports findings; this task reports ${design ? 'design_submitted' : 'pr_opened or pr_updated'}.`)
           return this.#reportFindings(ctx, report)
+        case 'design_submitted':
+          if (!design) throw new ToolError(`Not submitted. Only a design task reports design_submitted; this task reports ${spike ? 'findings_reported' : 'pr_opened or pr_updated'}.`)
+          return this.#reportDesign(ctx, report)
         case 'stuck':
           return this.#stuck(ctx, report.summary)
         case 'failed':
@@ -899,7 +947,9 @@ export class Orchestrator implements RunnerHandlers {
           this.#finished(ctx, 'Reported failed')
           return { ok: true, message: 'Recorded. You can stop now.' }
       }
-      throw new ToolError(spike ? 'A spike’s developer reports findings_reported, stuck or failed' : 'A developer reports pr_opened, pr_updated, stuck or failed')
+      throw new ToolError(spike
+        ? 'A spike’s developer reports findings_reported, stuck or failed'
+        : design ? 'A design task’s developer reports design_submitted, stuck or failed' : 'A developer reports pr_opened, pr_updated, stuck or failed')
     }
     throw new ToolError(`Outcomes for ${ctx.run.role} runs aren't supported yet`)
   }
@@ -953,9 +1003,11 @@ export class Orchestrator implements RunnerHandlers {
       ok: true,
       message: verdict === 'changes_requested'
         ? 'Changes requested; your feedback was sent to the developer. You can stop now.'
-        : spike
-          ? `Approval recorded. ${task.humanReview ? 'A human reviews the findings next.' : 'The spike is finished and its findings stay on the task.'} You can stop now.`
-          : 'Approval recorded. Corral handles human review, CI and the merge from here. You can stop now.'
+        : task.type === 'design'
+          ? 'Approval recorded. The human reviews the design next. You can stop now.'
+          : spike
+            ? `Approval recorded. ${task.humanReview ? 'A human reviews the findings next.' : 'The spike is finished and its findings stay on the task.'} You can stop now.`
+            : 'Approval recorded. Corral handles human review, CI and the merge from here. You can stop now.'
     }
   }
 
@@ -1049,6 +1101,83 @@ export class Orchestrator implements RunnerHandlers {
     this.#d.events.publish({ type: 'comment.created', comment })
     this.#finished(ctx, 'Findings accepted for review')
     return { ok: true, message: 'Your findings are on the task and go to the reviewer next. You can stop now.' }
+  }
+
+  // D20: a new design version at the commit the runner just pushed. The
+  // bundle must have index.html at its root so the preview can serve it.
+  async #submitDesign(ctx: RunContext, input: unknown) {
+    const { db, github, blobs } = this.#d
+    const task = ctx.task!
+    if (task.type !== 'design') throw new ToolError('Only a design task submits a design')
+    const parsed = designSchema.safeParse(input)
+    if (!parsed.success) throw new ToolError(`Not submitted. ${parsed.error.issues.map(i => i.message).join('; ')}.`)
+    const submission = parsed.data
+    const bundle = Buffer.from(submission.bundle.dataBase64, 'base64')
+    const shots = submission.screenshots.map(s => ({ ...s, data: Buffer.from(s.dataBase64, 'base64') }))
+    if (bundle.length + shots.reduce((n, s) => n + s.data.length, 0) > MAX_DESIGN_BYTES) throw new ToolError('Not submitted. A design version is limited to 25 MB.')
+    if (!bundleHasRootIndex(bundle)) {
+      throw new ToolError('Not submitted. The bundle has no index.html at its root. Pass the folder that holds index.html and its assets, with relative paths.')
+    }
+    const head = await github.branchHead(ctx.project.repository, task.branch!)
+    if (head !== submission.headSha) throw new ToolError(`Not submitted. The branch on GitHub is at ${head ?? 'nothing'}, not your commit ${submission.headSha}. Try again.`)
+
+    const bundleBlob = await blobs.put(bundle)
+    const specBlob = await blobs.put(Buffer.from(submission.spec))
+    const screenshots: { blob: string, fileName: string, contentType: string }[] = []
+    for (const shot of shots) screenshots.push({ blob: await blobs.put(shot.data), fileName: shot.fileName, contentType: shot.contentType })
+    const version = await db.transaction(async (tx) => {
+      const locked = await lockTask(tx, task.id)
+      if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease while submitting. Stop working.')
+      const existing = await tx.select({ version: designVersions.version, status: designVersions.status }).from(designVersions).where(eq(designVersions.taskId, task.id))
+      const [row] = await tx.insert(designVersions).values({
+        taskId: task.id, version: nextDesignVersion(existing), bundleBlob, specBlob, screenshots, branch: task.branch!, commitSha: submission.headSha
+      }).returning()
+      await tx.insert(auditLog).values({
+        projectId: ctx.project.id, taskId: task.id, actor: this.#actor(ctx), action: 'design.submitted',
+        detail: { runId: ctx.run.id, version: row!.version, headSha: submission.headSha, screenshots: screenshots.length }
+      })
+      return row!
+    })
+    return {
+      ok: true,
+      version: version.version,
+      commitSha: version.commitSha,
+      message: `Design v${version.version} recorded at ${version.commitSha.slice(0, 10)}. Attach evidence for every criterion, then call report_outcome with outcome design_submitted.`
+    }
+  }
+
+  // D20: the developer's outcome on a design task. Accepted only when a
+  // version exists for the branch's current commit and every criterion has
+  // evidence. Nothing is opened on GitHub.
+  async #reportDesign(ctx: RunContext, report: OutcomeReport) {
+    const { db, github } = this.#d
+    const task = ctx.task!
+    if (!report.headSha) throw new ToolError('There is no commit to submit. Commit your work, call submit_design, then report again.')
+    const head = await github.branchHead(ctx.project.repository, task.branch!)
+    const [version] = await db.select().from(designVersions)
+      .where(and(eq(designVersions.taskId, task.id), eq(designVersions.commitSha, report.headSha))).orderBy(desc(designVersions.version)).limit(1)
+    const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
+    const attached = await db.select({ criterionId: evidence.criterionId }).from(evidence)
+      .where(and(eq(evidence.taskId, task.id), eq(evidence.round, task.reviewRounds)))
+    const missing = criteria.filter(c => !attached.some(e => e.criterionId === c.id))
+    const problems = [
+      head !== report.headSha ? `The branch on GitHub is at ${head ?? 'nothing'}, not your commit ${report.headSha}.` : '',
+      !version ? `No design version was submitted at your latest commit ${report.headSha}: call submit_design first.` : '',
+      missing.length > 0 ? `No evidence yet for: ${missing.map(c => `[${c.id}] ${c.text}`).join('; ')}.` : ''
+    ].filter(Boolean)
+    if (problems.length > 0) throw new ToolError(`Not submitted. ${problems.join(' ')} Fix this and report again.`)
+
+    await db.transaction(async (tx) => {
+      const locked = await lockTask(tx, task.id)
+      if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease while submitting. Stop working.')
+      await applyTransition(tx, locked.task, locked.project, {
+        type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true
+      }, server, { event: 'design_submitted', runId: ctx.run.id, headSha: report.headSha, version: version!.version })
+      await tx.update(tasks).set({ headSha: report.headSha }).where(eq(tasks.id, task.id))
+      await this.#endRunIn(tx, ctx, { state: 'completed', outcome: 'design_submitted', summary: report.summary, headSha: report.headSha })
+    })
+    this.#finished(ctx, `Design v${version!.version} submitted for review`)
+    return { ok: true, message: `Design v${version!.version} goes to the reviewer next, then to the human. You can stop now.` }
   }
 
   #prBody(ref: string, title: string, summary: string, criteria: { id: string, text: string }[], attached: { criterionId: string | null }[]): string {

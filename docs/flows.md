@@ -37,7 +37,7 @@ web            server                          runner                     claude
 | `propose_plan` | Create or revise a draft plan: epics, tasks, acceptance criteria, dependencies, priority, task type (`task`, `bug`, `spike` or `design`, D19, D20), human-review flag, and for build tasks the design version and screens they pin (D20) |
 | `approve_plan` | Approve the current plan (to the board or the Backlog) when the human asks in chat. Recorded as the human's approval; refused unless the human has written since the plan was proposed |
 | `flag_stale_docs` | Create a documentation task (PRD §7.10) |
-| `get_design` | A design version's `design.md` spec, screen ids, screenshots, branch and commit, and its sandboxed preview URL (D20). Takes a design task's ref (its latest version by default, or a given `version`) or a build task's ref (its pinned version and screens). The runner saves the spec and screenshots in the agent's scratch folder and extracts the bundle (a gzipped tar) there, and returns the paths. Developers and reviewers have it too |
+| `get_design` | A design version's `design.md` spec, screen ids, screenshots, branch and commit, and its sandboxed preview URL (D20). Takes a design task's ref (its latest version by default, or a given `version`) or a build task's ref (its pinned version and screens). The runner saves the spec and screenshots in the agent's scratch folder and extracts the bundle (a tar) there, and returns the paths. Developers and reviewers have it too |
 
 ### Developer and reviewer design tools (D20)
 
@@ -182,6 +182,11 @@ When every gate passes → step 9.
 ### Design tasks (D20)
 
 A design task follows steps 1–7 with these differences: the developer builds a prototype from the project's real components with mock data, produces the static bundle the way the project's `CLAUDE.md`/`CORRAL.md` says, calls `submit_design` and reports `design_submitted`. No PR is opened. After Agent review it always goes to **Human review**. Request changes → In progress, and the next submission is a new version. Approve → **Approved**: the version is approved, earlier ones are superseded, and a Plan session for the build starts. Steps 7c–10 don't apply.
+
+- **Step 3:** the branch is `design/<ref>`, and the job carries the task type so the developer's MCP server offers `submit_design`.
+- **Steps 4–5:** the developer commits the prototype, writes `design.md` and takes desktop and mobile screenshots with agent-browser, then calls `submit_design`. The runner checks the bundle folder has an `index.html` at its root (and no symlinks), packs it as a tar, pushes the branch and sends the files; the server checks the tar again, checks the branch is at the pushed commit and records the next version. `report_outcome('design_submitted')` is accepted only when a version exists at the branch's current commit and every criterion has evidence; it moves **In progress → Agent review**.
+- **Step 6:** the reviewer checks out the version's commit and reads it with `get_design`. It judges the spec and screenshots against the criteria; there is no diff.
+- **Step 7a, rework:** changes requested by the reviewer or the human mark the version *changes requested* (with the human's feedback). The next developer run **resumes the same agent session** on the same branch with the feedback given since that version; if the session can't be resumed, it starts fresh with the full prompt. Its submission is the next version.
 
 ---
 
