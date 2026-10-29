@@ -57,19 +57,35 @@ const planSession = computed(() => {
   const project = state.value.projects.find(p => p.id === session?.projectId)
   return { title: session?.title ?? 'Plan', eyebrow: project?.name ?? '', back: '/plan', backLabel: 'Back to Plan', dot: project ? projectColor(project) : null }
 })
-const subPage = computed(() => projectPage.value ?? planSession.value)
+// An Inbox item is its own screen: the task above where it sits in the
+// list, a back button to the list, and the tray at the bottom in place of
+// the tab bar
+const mobileHeader = useMobileHeader()
+const inboxItem = computed(() => {
+  const [section, id] = parts.value
+  if (section !== 'inbox' || !id) return null
+  return { title: mobileHeader.value?.title || 'Inbox', eyebrow: mobileHeader.value?.eyebrow ?? 'Inbox', back: '/inbox', backLabel: 'Back to Inbox', dot: null }
+})
+const subPage = computed(() => projectPage.value ?? planSession.value ?? inboxItem.value)
+// Screens that take the full height for their own composer
+const focused = computed(() => Boolean(planSession.value || inboxItem.value))
 
 // A screen below a tab's top level goes back up to it, and can swap the
 // Settings button for its own action
 const agentPage = computed(() => parts.value[0] === 'agents' && parts.value.length === 2)
+const overviewPage = computed(() => parts.value[0] === 'projects' && parts.value.length === 2)
 const back = computed(() => subPage.value
   ? { to: subPage.value.back, label: subPage.value.backLabel }
-  : agentPage.value ? { to: '/agents', label: 'Back' } : null)
+  : agentPage.value
+    ? { to: '/agents', label: 'Back' }
+    : overviewPage.value ? { to: '/projects', label: 'Back to Projects' } : null)
 const action = computed(() => agentPage.value
   ? { to: '/settings/agents', icon: 'i-lucide-sliders-horizontal', label: 'Agent settings' }
-  : { to: '/settings/profile', icon: 'i-lucide-settings', label: 'Settings' })
+  : overviewPage.value
+    ? { to: `/projects/${parts.value[1]}/settings`, icon: 'i-lucide-sliders-horizontal', label: 'Project settings' }
+    : { to: '/settings/profile', icon: 'i-lucide-settings', label: 'Settings' })
 
-// The header names the page; later tasks give each screen its own header
+// The header names the page
 const title = computed(() => {
   if (subPage.value) return subPage.value.title
   const [section, id] = parts.value
@@ -80,7 +96,7 @@ const title = computed(() => {
     case 'settings': return 'Settings'
     case 'tasks': return id ?? 'Task'
     case 'epics': return 'Epic'
-    case 'projects': return state.value.projects.find(p => p.slug === id)?.name ?? 'Projects'
+    case 'projects': return id ? 'Overview' : 'Projects'
     case 'agents': {
       if (!id) return 'Agents'
       return state.value.agents.find(a => a.name.toLowerCase() === id)?.name ?? 'Agent'
@@ -128,7 +144,7 @@ const title = computed(() => {
           </h1>
         </div>
         <span
-          v-if="!planSession"
+          v-if="!focused"
           class="flex shrink-0 items-center gap-1.5 text-xs text-muted"
           data-testid="runner-status"
         >
@@ -144,7 +160,7 @@ const title = computed(() => {
           class="contents"
         />
         <UButton
-          v-if="!planSession"
+          v-if="!focused"
           :to="action.to"
           :icon="action.icon"
           variant="ghost"
@@ -165,7 +181,7 @@ const title = computed(() => {
     </UDashboardGroup>
 
     <nav
-      v-if="!fullScreen && !planSession && !isActive('/tasks')"
+      v-if="!fullScreen && !focused && !isActive('/tasks')"
       aria-label="Main"
       class="shrink-0 border-t border-default bg-default pb-[env(safe-area-inset-bottom)] ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]"
     >

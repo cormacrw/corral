@@ -92,6 +92,7 @@ Docked, stacked layout, from [task.md](task.md). It's open by default and closes
 
 - **Below 1100px:** the flyout moves under the message.
 - **Below 768px:** the list stacks above the message, and its height is capped at 360px.
+- **Mobile layout** ([mobile.md](mobile.md#inbox)): the list and the item are separate screens on the same routes, and the task opens as its own page instead of the flyout.
 
 ## Accessibility
 
