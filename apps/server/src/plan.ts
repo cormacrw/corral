@@ -141,14 +141,47 @@ export class PlanService {
     return updated
   }
 
+  // A turn needs the runner, and none starts during the update hold (D9)
+  assertTurnPossible(): void {
+    if (!this.#d.runner.online) throw new ApiFailure(503, { code: 'runner_offline' })
+    if (this.#d.updating()) throw new ApiFailure(503, { code: 'corral_updating' })
+  }
+
+  // Approving a design version opens a Plan session for its build, with the
+  // human's message (D20). One per version: approving it again opens none,
+  // and only sends the message if it never went out. Returns the session.
+  async startDesignBuild(versionId: string, note: string | undefined, actor: Actor): Promise<string> {
+    const { db } = this.#d
+    const [row] = await db.select({ version: designVersions.version, task: tasks, project: projects }).from(designVersions)
+      .innerJoin(tasks, eq(tasks.id, designVersions.taskId)).innerJoin(projects, eq(projects.id, tasks.projectId))
+      .where(eq(designVersions.id, versionId))
+    if (!row) throw notFound()
+    const sessionId = await db.transaction(async (tx) => {
+      const [locked] = await tx.select({ planSessionId: designVersions.planSessionId }).from(designVersions)
+        .where(eq(designVersions.id, versionId)).for('update')
+      if (locked?.planSessionId) return locked.planSessionId
+      const [pm] = await tx.select({ runtime: agents.runtime }).from(agents).where(eq(agents.role, 'pm')).limit(1)
+      const [session] = await tx.insert(planSessions).values({
+        projectId: row.project.id, title: `Build: ${row.task.title}`, runtime: pm?.runtime ?? 'claude-code', createdBy: actor
+      }).returning()
+      await tx.update(designVersions).set({ planSessionId: session!.id, updatedAt: new Date() }).where(eq(designVersions.id, versionId))
+      return session!.id
+    })
+    const [sent] = await db.select({ id: planMessages.id }).from(planMessages).where(eq(planMessages.sessionId, sessionId)).limit(1)
+    if (!sent) {
+      const ref = taskRef(row.project.prefix, row.task.number)
+      await this.message(sessionId, { text: designBuildMessage(ref, row.task.title, row.version, note), taskRef: ref }, actor)
+    }
+    return sessionId
+  }
+
   // A human message starts one PM turn (D9)
   async message(sessionId: string, input: { text: string, taskRef?: string | undefined }, actor: Actor): Promise<PlanMessage> {
     const { db } = this.#d
     const session = await this.#session(sessionId)
     const [project] = await db.select().from(projects).where(eq(projects.id, session.projectId))
     if (!project) throw notFound()
-    if (!this.#d.runner.online) throw new ApiFailure(503, { code: 'runner_offline' })
-    if (this.#d.updating()) throw new ApiFailure(503, { code: 'corral_updating' })
+    this.assertTurnPossible()
     // One turn at a time per session; other sessions, in this project or
     // another, only wait for the PM's concurrency (D9, D13)
     const [active] = await db.select({ id: runs.id }).from(runs)
@@ -779,4 +812,10 @@ function toMessage(row: typeof planMessages.$inferSelect): PlanMessage {
 function titleFrom(text: string): string {
   const line = text.split('\n')[0]!.trim()
   return line.length > 60 ? `${line.slice(0, 57)}…` : line || 'New session'
+}
+
+// The human's first message in a design's build session (D20)
+function designBuildMessage(ref: string, title: string, version: number, note: string | undefined): string {
+  const ask = `I approved design v${version} of ${ref} "${title}". Plan its build: read it with get_design (taskRef ${ref}, version ${version}) and propose the build tasks, each pinned to v${version} and the screens it covers.`
+  return note ? `${ask}\n\nApproval note: ${note}` : ask
 }

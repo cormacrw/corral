@@ -258,8 +258,17 @@ export interface DesignVersion {
   previewUrl: string
   // The human's feedback when they requested changes
   feedback: string | null
+  // The Plan session approving this version opened for its build
+  planSessionId: string | null
   createdAt: string
 }
+
+// Approving a design version (D20). The note goes to the PM in the Plan
+// session the approval opens.
+export const approveDesignInput = z.object({
+  note: z.string().trim().max(10_000).optional()
+})
+export type ApproveDesignInput = z.input<typeof approveDesignInput>
 
 // The runtimes an agent can run on (D15), and the CLI each one needs on the
 // runner. Neutral names, never an auth method (agent-runtime-and-auth.md).

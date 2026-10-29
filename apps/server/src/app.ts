@@ -2,6 +2,7 @@ import {
   addCommentInput,
   ATTACHMENT_MAX_BYTES,
   AVATAR_MAX_BYTES,
+  approveDesignInput,
   approvePlanInput,
   checkRepoInput,
   createAgentInput,
@@ -298,11 +299,17 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       return c.json(await listDesignVersions(db, blobs, await findTaskId(db, project.id, taskNumber(c.req.param('number')))))
     })
 
-    // Approve a design version (D20): it's approved, earlier ones superseded
+    // Approve a design version (D20): it's approved, earlier ones superseded,
+    // and a Plan session opens for its build with the human's note. The
+    // approval is a PM message, so it needs the runner like any other.
     .post('/projects/:slug/tasks/:number/designs/:version/approve', async (c) => {
+      const parsed = approveDesignInput.safeParse(await c.req.json().catch(() => ({})))
+      if (!parsed.success) throw new ApiFailure(400, { code: 'invalid_input', issues: parsed.error.issues.map(i => ({ path: i.path.map(String), message: i.message })) })
       const project = await findProjectBySlug(db, c.req.param('slug'))
       const taskId = await findTaskId(db, project.id, taskNumber(c.req.param('number')))
-      await approveDesign(db, taskId, taskNumber(c.req.param('version')), actor)
+      plans.assertTurnPossible()
+      const versionId = await approveDesign(db, taskId, taskNumber(c.req.param('version')), actor)
+      await plans.startDesignBuild(versionId, parsed.data.note || undefined, actor)
       return c.json(await publishTask(taskId))
     })
 

@@ -212,6 +212,7 @@ export async function listDesignVersions(db: Executor, blobs: BlobStore, taskId:
     screenshots: row.screenshots.map((s, i) => ({ fileName: s.fileName, url: `/api/designs/${row.id}/screenshots/${i}` })),
     previewUrl: designPreviewUrl(row.id),
     feedback: row.feedback,
+    planSessionId: row.planSessionId,
     createdAt: row.createdAt.toISOString()
   })))
 }
@@ -228,9 +229,9 @@ export async function readDesignScreenshot(db: Executor, blobs: BlobStore, versi
 
 // The human approves a version of a design in Human review (D20): it's
 // marked approved and every earlier version superseded. Versions are
-// otherwise immutable.
-export async function approveDesign(db: Database, taskId: string, version: number, actor: Actor): Promise<void> {
-  await db.transaction(async (tx) => {
+// otherwise immutable. Returns the approved version's id.
+export async function approveDesign(db: Database, taskId: string, version: number, actor: Actor): Promise<string> {
+  return db.transaction(async (tx) => {
     const { task, project } = await lockTask(tx, taskId)
     if (task.type !== 'design' || task.status !== 'human_review') {
       throw new ApiFailure(409, { code: 'transition_rejected', reason: { code: 'invalid_transition', status: task.status, event: 'human_approve' } })
@@ -244,5 +245,6 @@ export async function approveDesign(db: Database, taskId: string, version: numbe
       if (before.status !== next.status) await tx.update(designVersions).set({ status: next.status, updatedAt: new Date() }).where(eq(designVersions.id, next.id))
     }
     await tx.insert(auditLog).values({ projectId: project.id, taskId, actor, action: 'design.approved', detail: { version } })
+    return result.versions.find(v => v.version === version)!.id
   })
 }

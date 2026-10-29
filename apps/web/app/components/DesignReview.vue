@@ -56,6 +56,8 @@ const decidable = computed(() => props.task.status === 'human_review' && selecte
 const requesting = ref(false)
 const feedback = ref('')
 const approving = ref(false)
+// Goes to the PM in the Plan session the approval opens for the build
+const note = ref('')
 function fail(e: unknown) {
   toast.add({ title: 'Not saved', description: e instanceof ApiError ? e.message : String(e), color: 'error' })
 }
@@ -63,8 +65,9 @@ async function approve() {
   if (!selected.value) return
   approving.value = true
   try {
-    emit('updated', await api.tasks.approveDesign(props.slug, props.task.number, selected.value.version))
-    toast.add({ title: `Design v${selected.value.version} approved`, color: 'success' })
+    emit('updated', await api.tasks.approveDesign(props.slug, props.task.number, selected.value.version, note.value.trim() || undefined))
+    toast.add({ title: `Design v${selected.value.version} approved`, description: 'The PM is planning the build.', color: 'success' })
+    note.value = ''
     await load()
   } catch (e) {
     fail(e)
@@ -171,6 +174,25 @@ async function requestChanges(text: string): Promise<boolean> {
       </div>
 
       <div
+        v-if="selected.planSessionId"
+        class="flex flex-wrap items-center gap-2 rounded-lg border border-success/40 bg-success/5 px-3 py-2 text-sm"
+      >
+        <UIcon
+          name="i-lucide-messages-square"
+          class="size-4 text-success"
+        />
+        <span class="me-auto">Approving v{{ selected.version }} started planning its build.</span>
+        <UButton
+          label="Open Plan session"
+          trailing-icon="i-lucide-arrow-right"
+          variant="link"
+          size="sm"
+          :to="`/plan/${selected.planSessionId}`"
+          data-testid="design-plan-session"
+        />
+      </div>
+
+      <div
         v-if="selected.feedback"
         class="rounded-lg border border-default bg-elevated px-3 py-2 text-sm"
       >
@@ -205,6 +227,13 @@ async function requestChanges(text: string): Promise<boolean> {
             @click="approve"
           />
         </div>
+        <UInput
+          v-if="!requesting"
+          v-model="note"
+          placeholder="Note for the build plan (optional)"
+          aria-label="Approval note for the PM"
+          size="sm"
+        />
         <PromptComposer
           v-if="requesting"
           v-model="feedback"

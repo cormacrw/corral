@@ -1,0 +1,2 @@
+ALTER TABLE "design_versions" ADD COLUMN "plan_session_id" uuid;--> statement-breakpoint
+ALTER TABLE "design_versions" ADD CONSTRAINT "design_versions_plan_session_id_plan_sessions_id_fk" FOREIGN KEY ("plan_session_id") REFERENCES "public"."plan_sessions"("id") ON DELETE set null ON UPDATE no action;
