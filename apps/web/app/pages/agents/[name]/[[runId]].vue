@@ -59,7 +59,7 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
             />
           </div>
           <p class="text-sm text-muted">
-            {{ ROLE[agent.role] }} · <span data-testid="agent-runtime">{{ runtimeLabel(agent.runtime) }}</span> · {{ today.length }} runs today
+            {{ ROLE[agent.role] }} · <span data-testid="agent-runtime-label">{{ runtimeLabel(agent.runtime) }}</span> · {{ today.length }} runs today
             <span v-if="agent.pausedUntil && new Date(agent.pausedUntil).getTime() > now"> · Waiting on usage limit until {{ new Date(agent.pausedUntil).toLocaleTimeString() }}</span>
           </p>
         </div>

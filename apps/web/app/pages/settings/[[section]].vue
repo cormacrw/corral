@@ -200,7 +200,7 @@ const items = [
                 :key="agent.id"
                 class="flex flex-wrap items-center gap-3 py-3"
               >
-                <div class="min-w-0 flex-1 basis-56">
+                <div class="min-w-0 flex-1 basis-48">
                   <div class="flex items-center gap-2">
                     <span class="font-medium">{{ agent.name }}</span>
                     <UBadge
@@ -211,7 +211,7 @@ const items = [
                     />
                   </div>
                   <p class="text-xs text-muted">
-                    <span data-testid="agent-runtime">{{ runtimeLabel(agent.runtime) }}</span> · concurrency {{ agent.concurrency }} · <span class="font-mono">.corral/agents/{{ agent.role }}.md</span>
+                    <span data-testid="agent-runtime-label">{{ runtimeLabel(agent.runtime) }}</span> · concurrency {{ agent.concurrency }} · <span class="font-mono">.corral/agents/{{ agent.role }}.md</span>
                   </p>
                   <AvatarUpload
                     :name="agent.name"
@@ -229,6 +229,7 @@ const items = [
                   <UInput
                     :model-value="agent.name"
                     size="xs"
+                    class="w-32"
                     @change="patchAgent(agent, { name: String(($event.target as HTMLInputElement).value).trim() })"
                   />
                 </UFormField>
@@ -257,6 +258,7 @@ const items = [
                     :model-value="agent.concurrency"
                     :min="1"
                     size="xs"
+                    class="w-28"
                     @update:model-value="$event && patchAgent(agent, { concurrency: $event })"
                   />
                 </UFormField>
