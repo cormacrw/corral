@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { projectColor } from '~/utils/labels'
+
 // The mobile shell (D17, design/mobile.md): a header with the runner's
 // status, the page, and a five-tab bar. app.vue swaps it in for the
 // default layout on mobile; the URLs are the same as on the web.
@@ -40,22 +42,48 @@ const projectPage = computed(() => {
   const [section, slug, page] = parts.value
   if (section !== 'projects' || !slug || !page || !PROJECT_PAGES[page]) return null
   const project = state.value.projects.find(p => p.slug === slug)
-  return { title: PROJECT_PAGES[page], eyebrow: project?.name ?? slug, back: `/projects/${slug}` }
+  return { title: PROJECT_PAGES[page], eyebrow: project?.name ?? slug, back: `/projects/${slug}`, backLabel: 'Back to the project', dot: null }
 })
+// A Plan conversation names its project and session, goes back to a new
+// session, and takes the full height: no runner status, Settings or tab bar
+const planSession = computed(() => {
+  const [section, id] = parts.value
+  if (section !== 'plan' || !id) return null
+  const session = state.value.planSessions.find(s => s.id === id)
+  const project = state.value.projects.find(p => p.id === session?.projectId)
+  return { title: session?.title ?? 'Plan', eyebrow: project?.name ?? '', back: '/plan', backLabel: 'Back to Plan', dot: project ? projectColor(project) : null }
+})
+// An Inbox item is its own screen: the task above where it sits in the
+// list, a back button to the list, and the tray at the bottom in place of
+// the tab bar
+const mobileHeader = useMobileHeader()
+const inboxItem = computed(() => {
+  const [section, id] = parts.value
+  if (section !== 'inbox' || !id) return null
+  return { title: mobileHeader.value?.title || 'Inbox', eyebrow: mobileHeader.value?.eyebrow ?? 'Inbox', back: '/inbox', backLabel: 'Back to Inbox', dot: null }
+})
+const subPage = computed(() => projectPage.value ?? planSession.value ?? inboxItem.value)
+// Screens that take the full height for their own composer
+const focused = computed(() => Boolean(planSession.value || inboxItem.value))
 
 // A screen below a tab's top level goes back up to it, and can swap the
 // Settings button for its own action
 const agentPage = computed(() => parts.value[0] === 'agents' && parts.value.length === 2)
-const back = computed(() => projectPage.value
-  ? { to: projectPage.value.back, label: 'Back to the project' }
-  : agentPage.value ? { to: '/agents', label: 'Back' } : null)
+const overviewPage = computed(() => parts.value[0] === 'projects' && parts.value.length === 2)
+const back = computed(() => subPage.value
+  ? { to: subPage.value.back, label: subPage.value.backLabel }
+  : agentPage.value
+    ? { to: '/agents', label: 'Back' }
+    : overviewPage.value ? { to: '/projects', label: 'Back to Projects' } : null)
 const action = computed(() => agentPage.value
   ? { to: '/settings/agents', icon: 'i-lucide-sliders-horizontal', label: 'Agent settings' }
-  : { to: '/settings/profile', icon: 'i-lucide-settings', label: 'Settings' })
+  : overviewPage.value
+    ? { to: `/projects/${parts.value[1]}/settings`, icon: 'i-lucide-sliders-horizontal', label: 'Project settings' }
+    : { to: '/settings/profile', icon: 'i-lucide-settings', label: 'Settings' })
 
-// The header names the page; later tasks give each screen its own header
+// The header names the page
 const title = computed(() => {
-  if (projectPage.value) return projectPage.value.title
+  if (subPage.value) return subPage.value.title
   const [section, id] = parts.value
   switch (section) {
     case 'home': return 'Home'
@@ -64,7 +92,7 @@ const title = computed(() => {
     case 'settings': return 'Settings'
     case 'tasks': return id ?? 'Task'
     case 'epics': return 'Epic'
-    case 'projects': return state.value.projects.find(p => p.slug === id)?.name ?? 'Projects'
+    case 'projects': return id ? 'Overview' : 'Projects'
     case 'agents': {
       if (!id) return 'Agents'
       return state.value.agents.find(a => a.name.toLowerCase() === id)?.name ?? 'Agent'
@@ -92,16 +120,23 @@ const title = computed(() => {
         />
         <div class="min-w-0 flex-1">
           <p
-            v-if="projectPage"
-            class="truncate text-xs text-muted"
+            v-if="subPage"
+            class="flex items-center gap-1.5 truncate text-xs text-muted"
           >
-            {{ projectPage.eyebrow }}
+            <span
+              v-if="subPage.dot"
+              class="size-2 shrink-0 rounded-full"
+              :style="{ background: subPage.dot }"
+              aria-hidden="true"
+            />
+            {{ subPage.eyebrow }}
           </p>
-          <h1 :class="['truncate font-semibold text-highlighted', projectPage ? 'text-lg leading-tight' : 'text-xl']">
+          <h1 :class="['truncate font-semibold text-highlighted', subPage ? 'text-lg leading-tight' : 'text-xl']">
             {{ title }}
           </h1>
         </div>
         <span
+          v-if="!focused"
           class="flex shrink-0 items-center gap-1.5 text-xs text-muted"
           data-testid="runner-status"
         >
@@ -117,6 +152,7 @@ const title = computed(() => {
           class="contents"
         />
         <UButton
+          v-if="!focused"
           :to="action.to"
           :icon="action.icon"
           variant="ghost"
@@ -137,7 +173,7 @@ const title = computed(() => {
     </UDashboardGroup>
 
     <nav
-      v-if="!fullScreen"
+      v-if="!fullScreen && !focused"
       aria-label="Main"
       class="shrink-0 border-t border-default bg-default pb-[env(safe-area-inset-bottom)] ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]"
     >

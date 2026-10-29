@@ -1,14 +1,21 @@
 <script setup lang="ts">
 import { initials, projectColor } from '~/utils/labels'
 
-// Placeholder for the mobile Projects tab (design/mobile.md); its real
-// screen comes in a later task
+// The Projects tab: MobileProjects on mobile (design/mobile.md), a plain
+// project list on the web
 const state = useLive().state
+const device = useDevice()
 useSeoMeta({ title: 'Projects · Corral' })
 </script>
 
 <template>
-  <UDashboardPanel>
+  <div
+    v-if="device.isMobile.value"
+    class="flex min-h-0 min-w-0 flex-1 flex-col"
+  >
+    <MobileProjects />
+  </div>
+  <UDashboardPanel v-else>
     <div class="flex flex-col gap-2 p-4">
       <UButton
         v-for="project in state.projects"

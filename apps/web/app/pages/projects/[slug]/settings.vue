@@ -3,8 +3,10 @@ import type { PatchProjectInput, Project } from '@corral/contracts'
 import { api, ApiError } from '~/composables/useApi'
 import { initials, THUMBNAIL_COLORS } from '~/utils/labels'
 
-// Project settings (design/project-settings.md): one PATCH on Save; pause is its own switch
+// Project settings (design/project-settings.md): one PATCH on Save; pause is its own switch.
+// On mobile the sections stack under the mobile header, which holds Save (design/mobile.md).
 const route = useRoute()
+const device = useDevice()
 const live = useLive()
 const toast = useToast()
 const slug = computed(() => String(route.params.slug))
@@ -95,9 +97,32 @@ async function remove() {
   <UDashboardPanel>
     <div
       v-if="project"
-      class="mx-auto flex w-full max-w-[880px] flex-col gap-6 p-6"
+      :class="['mx-auto flex w-full max-w-[880px] flex-col gap-6', device.isMobile.value ? 'p-4' : 'p-6']"
     >
-      <header class="sticky top-0 z-10 flex items-center gap-3 border-b border-default bg-default py-3">
+      <template v-if="device.isMobile.value">
+        <Teleport
+          defer
+          to="#mobile-header-actions"
+        >
+          <span
+            v-if="saved"
+            class="text-xs text-success"
+          >Saved</span>
+          <UButton
+            label="Save"
+            :disabled="!dirty || !prefixValid || !form.name.trim()"
+            :loading="saving"
+            @click="save"
+          />
+        </Teleport>
+        <p class="text-sm text-muted">
+          Settings for {{ project.name }} only. Agents and the runner are shared by every project and live in Settings.
+        </p>
+      </template>
+      <header
+        v-else
+        class="sticky top-0 z-10 flex items-center gap-3 border-b border-default bg-default py-3"
+      >
         <div class="min-w-0 flex-1">
           <h1 class="text-xl font-semibold">
             Project settings
@@ -185,7 +210,7 @@ async function remove() {
               <UInput
                 id="prefix"
                 :model-value="form.prefix"
-                class="font-mono"
+                :class="['font-mono', device.isMobile.value && 'w-full']"
                 maxlength="5"
                 @update:model-value="form.prefix = String($event).toUpperCase().replace(/[^A-Z]/g, '')"
               />

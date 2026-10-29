@@ -10,6 +10,7 @@ const pm = computed(() => live.state.value.agents.find(a => a.role === 'pm') ?? 
 const router = useRouter()
 const route = useRoute()
 const toast = useToast()
+const device = useDevice()
 useSeoMeta({ title: 'Plan · Corral' })
 
 const lastProject = useLocalStorage<string | null>('corral.plan.project', null)
@@ -22,6 +23,16 @@ const text = ref('')
 const taskRef = ref<string | null>(null)
 const busy = ref(false)
 const runnerOffline = computed(() => live.state.value.loaded && !live.state.value.runner?.online)
+const reconnecting = ref(false)
+// Re-reads the runner's status, in case its live update was missed
+async function reconnect() {
+  reconnecting.value = true
+  try {
+    await live.load()
+  } finally {
+    reconnecting.value = false
+  }
+}
 
 const backlog = computed(() => project.value ? (live.state.value.tasks[project.value.id] ?? []).filter(t => t.status === 'backlog') : [])
 const recent = computed(() => live.state.value.planSessions.slice(0, 4))
@@ -29,14 +40,17 @@ const suggestions = computed(() => taskRef.value
   ? ['Tighten the acceptance criteria', 'Split it into smaller tasks', 'Check its dependencies']
   : ['Plan a new feature', 'Break an epic into tasks', 'What’s blocking progress?'])
 
-async function start(message: string) {
-  if (!project.value) return
+// Resolves false when not started, so the composer keeps its images
+async function start(message: string): Promise<boolean> {
+  if (!project.value) return false
   busy.value = true
   try {
     const session = await api.plan.start(project.value.id, message, taskRef.value ?? undefined)
     await router.push(`/plan/${session.id}`)
+    return true
   } catch (e) {
     toast.add({ title: 'Could not start the session', description: e instanceof Error ? e.message : String(e), color: 'error' })
+    return false
   } finally {
     busy.value = false
   }
@@ -45,8 +59,16 @@ async function start(message: string) {
 
 <template>
   <UDashboardPanel>
-    <PlanTabs />
-    <div class="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto p-6">
+    <!-- Phones switch sessions from a header button (design/mobile.md) -->
+    <Teleport
+      v-if="device.isMobile.value"
+      defer
+      to="#mobile-header-actions"
+    >
+      <PlanSessionSwitcher />
+    </Teleport>
+    <PlanTabs v-else />
+    <div :class="['flex min-h-0 flex-1 flex-col items-center overflow-y-auto', device.isMobile.value ? 'justify-start p-4' : 'justify-center p-6']">
       <div class="flex w-full max-w-[720px] flex-col gap-6">
         <div class="flex flex-col items-center gap-2 text-center">
           <AgentAvatar
@@ -62,7 +84,17 @@ async function start(message: string) {
         </div>
 
         <UAlert
-          v-if="runnerOffline"
+          v-if="runnerOffline && device.isMobile.value"
+          color="error"
+          variant="subtle"
+          icon="i-lucide-triangle-alert"
+          title="Plan needs the runner. It's offline."
+          :description="`${pm?.name ?? 'The PM'} runs in the runner container. Your sessions and drafts are safe.`"
+          :actions="[{ label: 'Reconnect', color: 'error', variant: 'outline', loading: reconnecting, onClick: reconnect }]"
+          data-testid="plan-runner-offline"
+        />
+        <UAlert
+          v-else-if="runnerOffline"
           color="warning"
           variant="subtle"
           icon="i-lucide-server-off"
@@ -72,11 +104,12 @@ async function start(message: string) {
 
         <PromptComposer
           v-model="text"
-          placeholder="Describe what you want to build…"
+          :placeholder="runnerOffline && device.isMobile.value ? `${pm?.name ?? 'The PM'} is unavailable while the runner is offline` : 'Describe what you want to build…'"
           :disabled="runnerOffline || !project"
           :busy="busy"
           :allow-empty="taskRef !== null"
           :rows="3"
+          :project="project?.slug"
           @submit="start"
         >
           <template #header>
@@ -136,6 +169,7 @@ async function start(message: string) {
               @update:model-value="taskRef = ($event as string | null)"
             />
             <USelectMenu
+              v-if="!device.isMobile.value"
               :items="live.state.value.planSessions.map(s => ({ label: s.title, value: s.id }))"
               value-key="value"
               size="xs"
@@ -150,7 +184,16 @@ async function start(message: string) {
           </template>
         </PromptComposer>
 
-        <div class="flex flex-wrap justify-center gap-2">
+        <p
+          v-if="runnerOffline && device.isMobile.value"
+          class="-mt-3 text-xs text-muted"
+        >
+          You can still read the Inbox, the board and past runs.
+        </p>
+        <div
+          v-else
+          class="flex flex-wrap justify-center gap-2"
+        >
           <UButton
             v-for="s in suggestions"
             :key="s"

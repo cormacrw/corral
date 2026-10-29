@@ -1,6 +1,7 @@
 import type {
   Agent,
   ApiErrorBody,
+  Attachment,
   AuditEntry,
   CliStatus,
   Comment,
@@ -121,6 +122,11 @@ export const api = {
     history: (slug: string, number: number) => call<AuditEntry[]>('GET', `/projects/${slug}/tasks/${number}/history`),
     evidence: (slug: string, number: number) => call<Evidence[]>('GET', `/projects/${slug}/tasks/${number}/evidence`),
     reviews: (slug: string, number: number) => call<Review[]>('GET', `/projects/${slug}/tasks/${number}/reviews`)
+  },
+
+  attachments: {
+    // An image for task text; referenced as ![name](attachment:<id>)
+    upload: (slug: string, file: Blob, name: string) => call<Attachment>('POST', `/projects/${slug}/attachments?name=${encodeURIComponent(name)}`, file)
   },
 
   agents: {
