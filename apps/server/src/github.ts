@@ -3,6 +3,8 @@ import type { RunnerHub } from './runner-hub.ts'
 
 export interface PullRequest {
   number: number
+  // GraphQL node id, for mutations that take a PR id (updateBranch)
+  nodeId: string
   url: string
   state: 'open' | 'closed'
   merged: boolean
@@ -31,8 +33,9 @@ export interface GitHubClient {
   updatePullRequest(repository: string, number: number, input: { title?: string, body?: string }): Promise<void>
   getPullRequest(repository: string, number: number): Promise<PullRequest>
   checks(repository: string, sha: string): Promise<CheckResult[]>
-  // Merges the base branch into the PR branch on GitHub; false on a conflict
-  updateBranch(repository: string, number: number, expectedHeadSha: string): Promise<boolean>
+  // Rebases the PR branch onto its base on GitHub (never merges the base
+  // in); false on a conflict or when GitHub can't update it
+  updateBranch(repository: string, pr: { number: number, nodeId: string }, expectedHeadSha: string): Promise<boolean>
   merge(repository: string, number: number, method: MergeMethod, expectedHeadSha: string): Promise<{ merged: boolean, sha: string | null, message: string }>
   closePullRequest(repository: string, number: number): Promise<void>
   deleteBranch(repository: string, branch: string): Promise<void>
@@ -48,6 +51,7 @@ export class GitHubError extends Error {
 
 interface RawPull {
   number: number
+  node_id: string
   html_url: string
   state: 'open' | 'closed'
   merged?: boolean
@@ -61,6 +65,7 @@ interface RawPull {
 function toPullRequest(raw: RawPull): PullRequest {
   return {
     number: raw.number,
+    nodeId: raw.node_id,
     url: raw.html_url,
     state: raw.state,
     merged: Boolean(raw.merged ?? raw.merged_at),
@@ -70,6 +75,17 @@ function toPullRequest(raw: RawPull): PullRequest {
     mergeableState: raw.mergeable_state ?? null
   }
 }
+
+interface GraphQLError {
+  type?: string
+  message: string
+}
+
+const UPDATE_BRANCH_MUTATION = `mutation($pullRequestId: ID!, $expectedHeadOid: GitObjectID!) {
+  updatePullRequestBranch(input: { pullRequestId: $pullRequestId, expectedHeadOid: $expectedHeadOid, updateMethod: REBASE }) {
+    pullRequest { headRefOid }
+  }
+}`
 
 export class RunnerGitHub implements GitHubClient {
   #runner: RunnerHub
@@ -134,9 +150,20 @@ export class RunnerGitHub implements GitHubClient {
     ]
   }
 
-  async updateBranch(repository: string, number: number, expectedHeadSha: string) {
-    const result = await this.#call('PUT', `/repos/${repository}/pulls/${number}/update-branch`, { expected_head_sha: expectedHeadSha }, [202, 422])
-    return result.status === 202
+  // GraphQL, because the REST endpoint can only merge the base in.
+  // GraphQL answers 200 with an `errors` array when the mutation fails.
+  async updateBranch(repository: string, pr: { number: number, nodeId: string }, expectedHeadSha: string) {
+    const result = await this.#call('POST', 'graphql', {
+      query: UPDATE_BRANCH_MUTATION,
+      variables: { pullRequestId: pr.nodeId, expectedHeadOid: expectedHeadSha }
+    })
+    const body = result.body as { data?: { updatePullRequestBranch: unknown } | null, errors?: GraphQLError[] } | null
+    const errors = body?.errors ?? []
+    if (errors.length === 0) return Boolean(body?.data?.updatePullRequestBranch)
+    // A conflict, a moved head or anything else GitHub couldn't update is the
+    // developer's to fix; access and lookup failures are ours, so they throw
+    if (errors.every(e => e.type === 'UNPROCESSABLE' || /conflict|could not (update|rebase)|failed to (update|rebase)/i.test(e.message))) return false
+    throw new GitHubError(result.status, errors.map(e => e.message).join('; '))
   }
 
   async merge(repository: string, number: number, method: MergeMethod, expectedHeadSha: string) {
