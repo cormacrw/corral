@@ -92,7 +92,7 @@ On the mobile layout ([mobile.md](mobile.md)) the same two routes keep their beh
 
 ## Data
 
-- **Sessions:** id, project, title, preview, updated time, unread, status (needs approval / question / none), messages.
+- **Sessions:** id, project, title, preview, updated time, unread (set whenever a Juno turn finishes, cleared on opening the session or sending a message), closed (set when its plan is approved, to the board or the Backlog; a new message reopens it), status (needs approval / question / none), messages.
 - **Messages:** role, text, and an optional attached plan id.
 - **Plans:** version, status, epics (key, id, title), tasks (ref, title, epic, change type, priority, human review, dependencies).
 - **Backlog search:** filtered to the session's project.

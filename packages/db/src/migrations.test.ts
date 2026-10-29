@@ -108,4 +108,22 @@ describe('migrations', () => {
     await db.execute(sql`delete from tasks where number = 4`)
     expect((await db.execute(sql`select * from design_versions`)).rows).toEqual([])
   }, 60_000)
+
+  it('0023 adds closed_at to plan sessions, leaving existing sessions open', async () => {
+    const before = await migrationsBefore('0023_third_mandrill')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const client = new PGlite()
+    cleanup.push(() => client.close())
+    const db = drizzle(client, { casing: 'snake_case' })
+    await migrate(db, { migrationsFolder: before })
+
+    const actor = sql`'{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb`
+    await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('P', 'p', 'PA', 'o/r', 'main')`)
+    await db.execute(sql`insert into plan_sessions (project_id, title, unread, created_by) select id, 'S', true, ${actor} from projects`)
+
+    await migrate(db, { migrationsFolder })
+
+    const sessions = await db.execute(sql`select title, unread, closed_at from plan_sessions`)
+    expect(sessions.rows).toEqual([{ title: 'S', unread: true, closed_at: null }])
+  }, 60_000)
 })

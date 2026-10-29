@@ -340,16 +340,16 @@ export const planSessions: PlanSession[] = [
   {
     id: 's-1', projectId: 'p-corral', title: 'Design tasks', runtime: 'claude-code',
     preview: 'Here is a plan with six tasks. Approve it to put them on the board.',
-    unread: true, status: 'needs_approval', activeRunId: null, createdAt: ago(60 * 26), updatedAt: ago(60 * 25)
+    unread: true, closed: false, status: 'needs_approval', activeRunId: null, createdAt: ago(60 * 26), updatedAt: ago(60 * 25)
   },
   {
     id: 's-2', projectId: 'p-corral', title: 'Mobile push', runtime: 'claude-code',
-    preview: 'Which push service should we use?', unread: false, status: 'question', activeRunId: null,
+    preview: 'Which push service should we use?', unread: false, closed: false, status: 'question', activeRunId: null,
     createdAt: ago(60 * 4), updatedAt: ago(60 * 3)
   },
   {
     id: 's-3', projectId: 'p-corral', title: 'Board polish', runtime: 'claude-code',
-    preview: 'Here is a plan with two tasks. Approve it to put them on the board.', unread: false, status: 'needs_approval', activeRunId: null,
+    preview: 'Here is a plan with two tasks. Approve it to put them on the board.', unread: false, closed: false, status: 'needs_approval', activeRunId: null,
     createdAt: ago(60 * 51), updatedAt: ago(60 * 50)
   }
 ]

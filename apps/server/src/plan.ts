@@ -264,7 +264,8 @@ export class PlanService {
     }
     const text = input.text || `Refine ${attached}`
     const [message] = await db.insert(planMessages).values({ sessionId, role: 'human', text, runId: null }).returning()
-    await db.update(planSessions).set({ updatedAt: new Date(), unread: false }).where(eq(planSessions.id, sessionId))
+    // A new message reopens a session closed by approving its plan
+    await db.update(planSessions).set({ updatedAt: new Date(), unread: false, closedAt: null }).where(eq(planSessions.id, sessionId))
     await db.insert(auditLog).values({ projectId: project.id, actor, action: 'plan.message', detail: { sessionId, messageId: message!.id } })
     this.#d.events.publish({ type: 'plan.message', message: toMessage(message!) })
 
@@ -312,7 +313,8 @@ export class PlanService {
       const [message] = await db.insert(planMessages).values({ sessionId, role: 'pm', kind: 'error', text: error, runId }).returning()
       events.publish({ type: 'plan.message', message: toMessage(message!) })
     }
-    await db.update(planSessions).set({ updatedAt: new Date() }).where(eq(planSessions.id, sessionId))
+    // Every finished turn (reply, question or plan) waits for the human to read it
+    await db.update(planSessions).set({ updatedAt: new Date(), unread: true }).where(eq(planSessions.id, sessionId))
     events.publish({ type: 'plan.session', session: await this.#toSession(await this.#session(sessionId), null) })
   }
 
@@ -609,8 +611,11 @@ export class PlanService {
         // Revised Backlog tasks, and plans proposed before Drafts existed
         else if (row?.status === 'backlog' && to === 'ready') await transitionTask(tx, item.taskId, { type: 'approve' }, actor)
       }
+      // Approving the plan closes its session
+      const now = new Date()
+      await tx.update(plans).set({ status: 'approved', approvedBy: actor, approvedAt: now }).where(eq(plans.id, planId))
+      await tx.update(planSessions).set({ closedAt: now }).where(eq(planSessions.id, plan.sessionId))
     })
-    await db.update(plans).set({ status: 'approved', approvedBy: actor, approvedAt: new Date() }).where(eq(plans.id, planId))
     await db.insert(auditLog).values({ projectId: plan.projectId, actor, action: 'plan.approved', detail: { planId, version: plan.version, to, ...(via && { viaPmRun: via.runId }) } })
     const full = await this.toPlan((await db.select().from(plans).where(eq(plans.id, planId)))[0]!)
     this.#d.events.publish({ type: 'plan.updated', plan: full })
@@ -869,6 +874,7 @@ export class PlanService {
       runtime: row.runtime as AgentRuntime,
       preview: last?.text.slice(0, 160) ?? '',
       unread: row.unread,
+      closed: row.closedAt !== null,
       status: proposed ? 'needs_approval' : last?.kind === 'question' ? 'question' : 'none',
       activeRunId: runId,
       createdAt: row.createdAt.toISOString(),
