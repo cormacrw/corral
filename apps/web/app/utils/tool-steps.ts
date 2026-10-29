@@ -179,3 +179,15 @@ function lowerFirst(text: string): string {
 function plural(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? '' : 's'}`
 }
+
+// How many tool steps a transcript shows, for a turn's "N steps" disclosure
+export function countSteps(events: RunEvent[]): number {
+  return transcriptEntries(events).reduce((n, entry) => n + (entry.type === 'steps' ? entry.steps.length : 0), 0)
+}
+
+// A transcript without the messages already shown on their own, such as the
+// PM's reply in Plan, so they don't appear twice
+export function withoutMessages(events: RunEvent[], texts: string[]): RunEvent[] {
+  const shown = new Set(texts.map(t => t.trim()))
+  return events.filter(e => e.type !== 'message' || !shown.has(e.text.trim()))
+}
