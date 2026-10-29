@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Evidence, Inbox, InboxActionInput, InboxItem, Review, Task } from '@corral/contracts'
 import { api } from '~/composables/useApi'
-import { timeAgo } from '~/utils/labels'
+import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
 
 // The Inbox (design/inbox.md, D11): list, selected item, action tray, task flyout
@@ -138,13 +138,6 @@ async function submit(message: string) {
     busy.value = false
   }
 }
-const typeBadge = (type: InboxItem['type']) => ({
-  human_review: { label: 'Human review', color: 'warning' as const },
-  question: { label: 'Question', color: 'info' as const },
-  blocked: { label: 'Blocked', color: 'error' as const },
-  failed: { label: 'Failed', color: 'error' as const },
-  activity: { label: 'Activity', color: 'neutral' as const }
-})[type]
 </script>
 
 <template>

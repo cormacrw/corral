@@ -29,7 +29,8 @@ const tabs = computed(() => [
   { label: 'Agents', icon: 'i-lucide-bot', to: '/agents', active: isActive('/agents') }
 ])
 
-// The header names the page; later tasks give each screen its own header
+// The header names the page, unless the screen brings its own MobileHeader
+const pageHeaders = useState('mobile.pageHeaders', () => 0)
 const title = computed(() => {
   const [section, id] = route.path.split('/').filter(Boolean)
   switch (section) {
@@ -52,7 +53,11 @@ const title = computed(() => {
 <template>
   <div class="flex h-svh flex-col bg-default text-default">
     <header class="shrink-0 border-b border-default bg-default pt-[env(safe-area-inset-top)] ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]">
-      <div class="flex h-14 items-center gap-2 px-4">
+      <div id="mobile-header" />
+      <div
+        v-if="pageHeaders === 0"
+        class="flex h-14 items-center gap-2 px-4"
+      >
         <h1 class="min-w-0 flex-1 truncate text-xl font-semibold text-highlighted">
           {{ title }}
         </h1>

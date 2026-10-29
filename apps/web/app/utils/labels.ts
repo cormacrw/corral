@@ -1,4 +1,4 @@
-import type { Agent, Project, Run, Task } from '@corral/contracts'
+import type { Agent, InboxItem, Project, Run, Task } from '@corral/contracts'
 import type { AgentRole, RunOutcome, RunState, TaskPriority, TaskStatus } from '@corral/core'
 
 type Color = 'primary' | 'secondary' | 'success' | 'info' | 'warning' | 'error' | 'neutral'
@@ -25,6 +25,17 @@ export const PRIORITY: Record<TaskPriority, { label: string, color: Color }> = {
 }
 
 export const ROLE: Record<AgentRole, string> = { pm: 'PM', developer: 'Developer', reviewer: 'Reviewer' }
+
+// design/inbox.md item type badges
+export function inboxTypeBadge(type: InboxItem['type']): { label: string, color: Color } {
+  return ({
+    human_review: { label: 'Human review', color: 'warning' as const },
+    question: { label: 'Question', color: 'info' as const },
+    blocked: { label: 'Blocked', color: 'error' as const },
+    failed: { label: 'Failed', color: 'error' as const },
+    activity: { label: 'Activity', color: 'neutral' as const }
+  })[type]
+}
 
 export const TASK_TYPE: Record<Task['type'], string> = {
   frontend: 'Frontend', backend: 'Backend', full_stack: 'Full stack', infrastructure: 'Infrastructure'
