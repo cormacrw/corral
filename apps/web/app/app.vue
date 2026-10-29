@@ -1,4 +1,6 @@
 <script setup lang="ts">
+useDarkNeutral()
+
 useHead({
   meta: [
     { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' }
