@@ -211,6 +211,32 @@ describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
       expect(second.acceptanceCriteria.map(c => c.text)).toEqual(['Shows an error on a bad password'])
     })
 
+    it('names the developer and reviewer from the task\'s latest run of each role (D15)', async () => {
+      const project = await t.createProject({ prefix: 'WHO' })
+      const created = await t.createTask(project.slug)
+      expect(created).toMatchObject({ developer: null, reviewer: null })
+      const get = async () => await t.request('GET', `/api/projects/${project.slug}/tasks/${created.number}`).then(r => r.json()) as Task
+      expect(await get()).toMatchObject({ developer: null, reviewer: null })
+
+      const [first] = await t.db.insert(schema.agents).values({ name: `Dev-${randomBytes(3).toString('hex')}`, role: 'developer' }).returning()
+      const [second] = await t.db.insert(schema.agents).values({ name: `Dev-${randomBytes(3).toString('hex')}`, role: 'developer' }).returning()
+      const [reviewer] = await t.db.insert(schema.agents).values({ name: `Rev-${randomBytes(3).toString('hex')}`, role: 'reviewer' }).returning()
+      const run = (agentId: string, role: 'developer' | 'reviewer', minutesAgo: number) => ({
+        agentId, projectId: project.id, taskId: created.id, role, state: 'completed' as const, queuedAt: new Date(Date.now() - minutesAgo * 60_000)
+      })
+
+      await t.db.insert(schema.runs).values(run(second!.id, 'developer', 30))
+      expect(await get()).toMatchObject({ developer: { id: second!.id, name: second!.name }, reviewer: null })
+
+      await t.db.insert(schema.runs).values([run(reviewer!.id, 'reviewer', 20), run(first!.id, 'developer', 10)])
+      expect(await get()).toMatchObject({
+        developer: { id: first!.id, name: first!.name },
+        reviewer: { id: reviewer!.id, name: reviewer!.name }
+      })
+      const listed = await t.request('GET', `/api/projects/${project.slug}/tasks?view=all`).then(r => r.json()) as Task[]
+      expect(listed.find(x => x.id === created.id)?.developer).toEqual({ id: first!.id, name: first!.name })
+    })
+
     it('takes the human-review default from the project (D5)', async () => {
       const project = await t.createProject({ humanReviewDefault: true })
       expect((await t.createTask(project.slug)).humanReview).toBe(true)
