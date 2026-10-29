@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import type { AgentRuns } from '~/composables/useAgentRuns'
-import { duration, isLiveRun, runBadge, runTokens, timeAgo } from '~/utils/labels'
+import { duration, isLiveRun, runBadge, runTokens } from '~/utils/labels'
 
 // One run's transcript on mobile (design/agent.md, design/mobile.md). It
 // fills the screen: its own header with the run and its controls, the
 // transcript (streamed over the live connection while the run is live),
-// and a footer. The layout drops its header and tab bar here.
+// and a footer with the composer while it's live. The layout drops its
+// header and tab bar here.
 const props = defineProps<{ view: AgentRuns }>()
-const { name, agent, runs, events, now, selected, stop } = props.view
+const { name, agent, runs, events, now, selected, stop, sent } = props.view
 const live = computed(() => !!selected.value && isLiveRun(selected.value))
 </script>
 
@@ -76,6 +77,7 @@ const live = computed(() => !!selected.value && isLiveRun(selected.value))
       :events="events"
       :live="live"
       :agent-name="agent.name"
+      :mine="sent[selected.id]"
     />
     <p
       v-else-if="agent && runs.length > 0"
@@ -92,13 +94,12 @@ const live = computed(() => !!selected.value && isLiveRun(selected.value))
 
     <footer
       v-if="selected && agent"
-      class="shrink-0 border-t border-default px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-xs text-muted"
+      class="shrink-0 border-t border-default px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]"
     >
-      <span v-if="live">Live. Mid-run messages aren't supported yet; comment on the task and {{ agent.name }} reads it on its next run.</span>
-      <span v-else><UIcon
-        name="i-lucide-lock"
-        class="size-3"
-      /> Read-only. This run finished {{ timeAgo(selected.endedAt, now) }}. To change the work, comment on the task.</span>
+      <RunComposer
+        :view="props.view"
+        :run="selected"
+      />
     </footer>
   </div>
 </template>

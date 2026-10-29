@@ -85,7 +85,7 @@ export const projects: Project[] = [
 export const agents: Agent[] = [
   { id: 'a-pm', name: 'Pam', role: 'pm', runtime: 'claude-code', concurrency: 1, paused: false, pausedUntil: null, activeRuns: 0, avatarUrl: null },
   { id: 'a-dev', name: 'Victor', role: 'developer', runtime: 'claude-code', concurrency: 2, paused: false, pausedUntil: null, activeRuns: 1, avatarUrl: null },
-  { id: 'a-dev2', name: 'Dana', role: 'developer', runtime: 'codex', concurrency: 1, paused: false, pausedUntil: null, activeRuns: 0, avatarUrl: null },
+  { id: 'a-dev2', name: 'Dana', role: 'developer', runtime: 'codex', concurrency: 1, paused: false, pausedUntil: null, activeRuns: 1, avatarUrl: null },
   { id: 'a-rev', name: 'Rita', role: 'reviewer', runtime: 'claude-code', concurrency: 1, paused: false, pausedUntil: null, activeRuns: 1, avatarUrl: null }
 ]
 
@@ -203,7 +203,15 @@ export const tasks: Task[] = [
   task(corral, 11, { title: 'Dark mode for the epic graph', status: 'backlog', priority: 'low' }),
   task(corral, 12, { title: 'Spike: Codex reasoning effort', status: 'backlog', type: 'spike' }),
   task(site, 1, { title: 'New landing page hero', status: 'ready', type: 'design' }),
-  task(site, 2, { title: 'Fix broken pricing link', status: 'backlog', type: 'bug' })
+  task(site, 2, { title: 'Fix broken pricing link', status: 'backlog', type: 'bug' }),
+  task(site, 3, {
+    title: 'Footer links open in the same tab',
+    status: 'in_progress',
+    type: 'bug',
+    branch: 'corral/web-3-footer-links',
+    lease: { runId: 'r-4', role: 'developer', expiresAt: ago(-14) },
+    acceptanceCriteria: criteria('Footer links open in the same tab')
+  })
 ]
 
 const at = (ref: string): Task => tasks.find(t => t.ref === ref)!
@@ -227,6 +235,13 @@ export const runs: Run[] = [
     summary: 'Approving a version marks it approved and supersedes earlier ones.', error: null, headSha: '5b030d7',
     inputTokens: 30_000, cacheReadTokens: 400_000, outputTokens: 9_800, rateLimitResetAt: null,
     queuedAt: ago(140), startedAt: ago(139), endedAt: ago(95)
+  },
+  // A live Codex run, which can't take messages mid-run
+  {
+    id: 'r-4', number: 130, agentId: 'a-dev2', agentName: 'Dana', role: 'developer', projectId: 'p-site',
+    taskId: at('WEB-3').id, taskRef: 'WEB-3', taskTitle: at('WEB-3').title, state: 'running', outcome: null, summary: null,
+    error: null, headSha: null, inputTokens: 4_000, cacheReadTokens: 22_000, outputTokens: 900, rateLimitResetAt: null,
+    queuedAt: ago(5), startedAt: ago(4), endedAt: null
   }
 ]
 
@@ -238,6 +253,17 @@ export const runEvents: Record<string, RunEvent[]> = {
     { type: 'tool_result', id: 'call-1', output: 'export default defineNuxtConfig({ … })', isError: false },
     { type: 'thinking', text: 'All API calls go through one function, so fixtures can replace it.' },
     { type: 'message', text: 'Adding a fixture-backed data layer behind a build flag.' }
+  ],
+  'r-3': [
+    { type: 'system', text: 'Run #127 started on home-server' },
+    { type: 'message', text: 'Approving a version marks it approved and supersedes earlier ones.' },
+    { type: 'system', text: 'Reported pr_opened' }
+  ],
+  'r-4': [
+    { type: 'system', text: 'Run #130 started on home-server' },
+    { type: 'message', text: 'Looking for the footer component.' },
+    { type: 'tool_call', id: 'call-1', tool: 'Bash', input: { command: 'grep -rn target=\\"_blank\\" src/components' } },
+    { type: 'tool_result', id: 'call-1', output: 'src/components/SiteFooter.vue:14', isError: false }
   ]
 }
 

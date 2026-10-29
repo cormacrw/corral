@@ -41,10 +41,11 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
     if (!run || run.id === old?.id) return
     try {
       events.value = await api.runs.transcript(run.id)
-      live.watchRun(run.id, events.value)
     } catch {
       events.value = []
     }
+    // The live connection appends the run's new events to this same list
+    live.watchRun(run.id, events.value)
   }, { immediate: true })
   onMounted(() => {
     const timer = setInterval(() => {
@@ -56,7 +57,6 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
         if (i >= 0) runs.value.splice(i, 1, event.run)
         else runs.value.unshift(event.run)
       }
-      if (event.type === 'run.events' && event.runId === selected.value?.id) events.value.push(...event.events)
     })
     onBeforeUnmount(() => {
       clearInterval(timer)
@@ -111,7 +111,25 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
   const project = (run: Run) => live.state.value.projects.find(p => p.id === run.projectId) ?? null
   const projectName = (run: Run) => project(run)?.name ?? ''
 
-  return { name, agent, runs, error, events, now, selected, current, load, today, tiles, facts, stop, project, projectName }
+  // Mid-run messages (design/agent.md). The runner shows a delivered one as
+  // a message event with the text the server sent, so the transcript marks
+  // the ones sent from here as yours.
+  const runnerOnline = computed(() => !!live.state.value.runner?.online)
+  const sent = ref<Record<string, string[]>>({})
+  async function message(run: Run, text: string): Promise<boolean> {
+    const slug = project(run)?.slug
+    if (!slug) return false
+    try {
+      const { comment } = await api.runs.message(slug, run.id, text)
+      ;(sent.value[run.id] ??= []).push(comment.body.trim())
+      return true
+    } catch (e) {
+      toast.add({ title: 'Message not sent', description: e instanceof Error ? e.message : String(e), color: 'error' })
+      return false
+    }
+  }
+
+  return { name, agent, runs, error, events, now, selected, current, load, today, tiles, facts, stop, project, projectName, runnerOnline, sent, message }
 }
 
 export type AgentRuns = ReturnType<typeof useAgentRuns>
