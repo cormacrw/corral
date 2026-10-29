@@ -10,9 +10,11 @@ export class FakeRunner {
   received: ServerMessage[] = []
   #waiters: { match: (m: ServerMessage) => boolean, resolve: (m: ServerMessage) => void }[] = []
 
-  // Answers setup jobs the server sends (e.g. cleanup_worktrees)
+  // Answers setup jobs the server sends (e.g. cleanup_worktrees). Both CLIs
+  // are installed and signed in unless a test says otherwise.
   onJob: (job: Extract<ServerMessage, { type: 'job.request' }>['job']) => SetupJobResult | null = (job) => {
     if (job.kind === 'cleanup_worktrees') return { kind: 'cleanup_worktrees', removed: [`worktrees/${job.taskId}`], kept: [] }
+    if (job.kind === 'detect_clis') return { kind: 'detect_clis', clis: [{ id: 'claude', version: '2.0.0', signedIn: true }, { id: 'codex', version: '0.50.0', signedIn: true }] }
     return null
   }
 

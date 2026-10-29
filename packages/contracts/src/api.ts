@@ -233,12 +233,23 @@ export interface Task {
   updatedAt: string
 }
 
+// The runtimes an agent can run on (D15), and the CLI each one needs on the
+// runner. Neutral names, never an auth method (agent-runtime-and-auth.md).
+export const AGENT_RUNTIMES = { 'claude-code': 'claude', 'codex': 'codex' } as const satisfies Record<string, CliId>
+export type AgentRuntime = keyof typeof AGENT_RUNTIMES
+const agentRuntime = z.enum(Object.keys(AGENT_RUNTIMES) as [AgentRuntime, ...AgentRuntime[]], {
+  message: `Unknown runtime; use one of ${Object.keys(AGENT_RUNTIMES).join(', ')}`
+})
+
 // ── Plan (D9, design/plan.md) ─────────────────────────────────────────────
 
 export interface PlanSession {
   id: string
   projectId: string
   title: string
+  // The PM's runtime (D18), e.g. 'claude-code' or 'codex'. Locked once the
+  // session has messages.
+  runtime: AgentRuntime
   preview: string
   unread: boolean
   // What the human has to do here, if anything
@@ -301,6 +312,8 @@ export interface PlanSessionDetail extends PlanSession {
 
 export const startPlanSessionInput = z.object({
   projectId: z.uuid(),
+  // The PM's runtime for this session (D18); only a CLI the runner has
+  runtime: agentRuntime.default('claude-code'),
   text: z.string().trim().default(''),
   // "Refine a task": a Backlog task ref attached to the message
   taskRef: z.string().trim().optional()
@@ -312,6 +325,12 @@ export const planMessageInput = z.object({
   taskRef: z.string().trim().optional()
 }).refine(input => input.text.length > 0 || input.taskRef, { message: 'Write a message or attach a task' })
 export type PlanMessageInput = z.infer<typeof planMessageInput>
+
+// Only while the session has no messages (D18)
+export const patchPlanSessionInput = z.object({
+  runtime: agentRuntime
+})
+export type PatchPlanSessionInput = z.infer<typeof patchPlanSessionInput>
 
 // The PM's ask_question: a question, optionally with a suggested answer
 // and 2–5 short answer choices
@@ -379,14 +398,6 @@ export interface GlobalStatus {
   // Held for a redeploy: nothing new starts, running work finishes
   updating: boolean
 }
-
-// The runtimes an agent can run on (D15), and the CLI each one needs on the
-// runner. Neutral names, never an auth method (agent-runtime-and-auth.md).
-export const AGENT_RUNTIMES = { 'claude-code': 'claude', 'codex': 'codex' } as const satisfies Record<string, CliId>
-export type AgentRuntime = keyof typeof AGENT_RUNTIMES
-const agentRuntime = z.enum(Object.keys(AGENT_RUNTIMES) as [AgentRuntime, ...AgentRuntime[]], {
-  message: `Unknown runtime; use one of ${Object.keys(AGENT_RUNTIMES).join(', ')}`
-})
 
 // New agents. There is only one PM (D13), so only developers and reviewers.
 export const createAgentInput = z.object({

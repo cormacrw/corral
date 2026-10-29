@@ -1,0 +1,1 @@
+ALTER TABLE "plan_sessions" ADD COLUMN "runtime" text DEFAULT 'claude-code' NOT NULL;

@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import type { AgentRuntime, CliStatus } from '@corral/contracts'
 import { api } from '~/composables/useApi'
-import { initials, projectColor, timeAgo } from '~/utils/labels'
+import { detectedRuntimes, initials, projectColor, runtimeLabel, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
 
 // Plan, new session (design/plan.md)
@@ -19,6 +20,26 @@ const project = computed(() => live.state.value.projects.find(p => p.id === proj
 watch(project, (p) => {
   if (p) lastProject.value = p.id
 }, { immediate: true })
+// The PM's runtime for the new session (D18): only CLIs the runner has.
+// Until the runner answers, Claude is the one on offer.
+const clis = ref<CliStatus[] | null>(null)
+async function detect() {
+  try {
+    clis.value = await api.setup.clis()
+  } catch {
+    clis.value = null
+  }
+}
+watch(() => live.state.value.runner?.online, (online) => {
+  if (online) void detect()
+}, { immediate: true })
+const runtimes = computed(() => {
+  const found = detectedRuntimes(clis.value ?? [])
+  return found.length > 0 ? found : ['claude-code' as const]
+})
+const runtimeItems = computed(() => runtimes.value.map(r => ({ label: runtimeLabel(r), value: r })))
+const lastRuntime = useLocalStorage<AgentRuntime>('corral.plan.runtime', 'claude-code')
+const runtime = computed<AgentRuntime>(() => runtimes.value.includes(lastRuntime.value) ? lastRuntime.value : runtimes.value[0]!)
 const text = ref('')
 const taskRef = ref<string | null>(null)
 const busy = ref(false)
@@ -45,7 +66,7 @@ async function start(message: string): Promise<boolean> {
   if (!project.value) return false
   busy.value = true
   try {
-    const session = await api.plan.start(project.value.id, message, taskRef.value ?? undefined)
+    const session = await api.plan.start(project.value.id, message, taskRef.value ?? undefined, runtime.value)
     await router.push(`/plan/${session.id}`)
     return true
   } catch (e) {
@@ -155,6 +176,19 @@ async function start(message: string): Promise<boolean> {
                 />
               </template>
             </USelectMenu>
+            <USelectMenu
+              :model-value="runtime"
+              :items="runtimeItems"
+              value-key="value"
+              size="xs"
+              variant="ghost"
+              icon="i-lucide-cpu"
+              :search-input="false"
+              aria-label="Runtime"
+              data-testid="plan-runtime"
+              :ui="{ content: 'w-48', base: 'max-w-40' }"
+              @update:model-value="lastRuntime = $event as AgentRuntime"
+            />
             <USelectMenu
               :model-value="taskRef ?? undefined"
               :items="backlog.map(t => ({ label: `${t.ref} ${t.title}`, value: t.ref }))"

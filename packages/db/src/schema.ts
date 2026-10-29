@@ -249,6 +249,10 @@ export const planSessions = pgTable('plan_sessions', {
   projectId: uuid().notNull().references(() => projects.id, { onDelete: 'cascade' }),
   title: text().notNull(),
   agentSessionId: text(),
+  // The PM's runtime for this session (D18), picked in the composer and
+  // locked once it has messages: an agent session ID only resumes on the
+  // vendor that made it
+  runtime: text().notNull().default('claude-code'),
   // The one PM turn the human didn't start: the epic delivery summary (D11)
   unread: boolean().notNull().default(false),
   createdBy: actor('created_by'),

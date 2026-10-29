@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Plan, PlanMessage, PlanSessionDetail } from '@corral/contracts'
 import { api } from '~/composables/useApi'
-import { projectColor } from '~/utils/labels'
+import { projectColor, runtimeLabel } from '~/utils/labels'
 import { answerTo, openQuestionId, STOP_ASKING } from '~/utils/plan-questions'
 import { withoutMessages } from '~/utils/tool-steps'
 
@@ -186,6 +186,14 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
           />
           <span class="text-muted">{{ project?.name }}</span>
           <span class="truncate font-medium">{{ session?.title }}</span>
+          <UBadge
+            v-if="session"
+            :label="runtimeLabel(session.runtime)"
+            variant="subtle"
+            color="neutral"
+            size="sm"
+            data-testid="plan-session-runtime"
+          />
           <UButton
             to="/plan"
             label="New session"
@@ -365,6 +373,22 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
                 </div>
               </template>
               <template #tools>
+                <!-- Locked: an agent session only resumes on the vendor that made it (D18) -->
+                <UTooltip
+                  v-if="session"
+                  text="A session keeps the runtime it started with"
+                >
+                  <UButton
+                    :label="runtimeLabel(session.runtime)"
+                    icon="i-lucide-lock"
+                    size="xs"
+                    variant="ghost"
+                    color="neutral"
+                    disabled
+                    aria-label="Runtime (locked)"
+                    data-testid="plan-runtime-locked"
+                  />
+                </UTooltip>
                 <USelectMenu
                   :model-value="taskRef ?? undefined"
                   :items="backlog.map(t => ({ label: `${t.ref} ${t.title}`, value: t.ref }))"
