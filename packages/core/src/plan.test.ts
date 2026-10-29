@@ -63,6 +63,18 @@ describe('checkPlan', () => {
   })
 })
 
+describe('checkPlan without epics', () => {
+  it('accepts tasks with no epic, with or without epics in the plan', () => {
+    expect(checkPlan({ title: 'Fix', summary: '', epics: [], tasks: [task('a', { epic: undefined })] })).toEqual([])
+    expect(checkPlan({ title: 'Login', summary: '', epics, tasks: [task('a'), task('b', { epic: undefined })] })).toEqual([])
+  })
+
+  it('still rejects an unknown epic key and an epic no task names', () => {
+    expect(checkPlan({ title: 'x', summary: '', epics: [], tasks: [task('a', { epic: 'e9' })] })).toEqual([{ code: 'unknown_epic', key: 'a', epic: 'e9' }])
+    expect(checkPlan({ title: 'x', summary: '', epics, tasks: [task('a', { epic: undefined })] })).toEqual([{ code: 'empty_epic', key: 'e1' }])
+  })
+})
+
 describe('checkPlan with refs', () => {
   const refs = new Map<string, PlanRef>([
     ['COR-1', { kind: 'task', status: 'backlog' }],
@@ -123,5 +135,7 @@ describe('diffPlans', () => {
 
   it('counts a move to another epic as a change', () => {
     expect(diffPlans([task('a')], [task('a', { epic: 'e2' })])).toEqual([{ key: 'a', change: 'changed' }])
+    expect(diffPlans([task('a')], [task('a', { epic: undefined })])).toEqual([{ key: 'a', change: 'changed' }])
+    expect(diffPlans([task('a', { epic: undefined })], [task('a', { epic: undefined })])).toEqual([{ key: 'a', change: 'unchanged' }])
   })
 })

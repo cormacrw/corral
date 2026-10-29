@@ -308,7 +308,8 @@ export interface PlanRevision {
   priority: 'urgent' | 'high' | 'medium' | 'low'
   humanReview: boolean
   acceptanceCriteria: string[]
-  epicId: string
+  // Null when the revised task has no epic
+  epicId: string | null
   // Task numbers in the same project
   dependsOn: number[]
 }
