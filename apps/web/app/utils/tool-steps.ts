@@ -41,10 +41,13 @@ export function transcriptEntries(events: RunEvent[]): TranscriptEntry[] {
         list.push({ key: i, type: 'message', text: event.text })
         break
       case 'thinking': {
-        // Consecutive empty thinking blocks show as one "Thinking" step
+        // The CLI marks an empty thinking block at the start of most turns.
+        // One between tool calls doesn't split their group, and consecutive
+        // empty ones show as one "Thinking" step. Thinking with text does
+        // split the group, as its own step.
         const last = list.at(-1)
         const text = event.text.trim()
-        if (!text && last?.type === 'thinking' && !last.text) break
+        if (!text && (last?.type === 'steps' || (last?.type === 'thinking' && !last.text))) break
         list.push({ key: i, type: 'thinking', text })
         break
       }
