@@ -34,7 +34,7 @@ const layout = computed(() => device.isMobile.value && route.meta.layout === und
 </script>
 
 <template>
-  <UApp>
+  <UApp :toaster="device.isMobile.value ? { position: 'top-center', ui: { viewport: 'top-[calc(env(safe-area-inset-top)+1rem)]' } } : undefined">
     <NuxtLayout :name="layout">
       <NuxtPage />
     </NuxtLayout>

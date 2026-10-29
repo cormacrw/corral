@@ -43,6 +43,7 @@ From top to bottom:
 | Settings | `settings` | `/settings` | `/settings`, `/settings/**` | |
 
 - The header and tab bar pad themselves with `env(safe-area-inset-*)`, and the viewport uses `viewport-fit=cover`, so nothing sits under a notch or the home indicator.
+- Toasts appear at the top centre on mobile, 1rem below `env(safe-area-inset-top)`, keeping the tab bar and composers clear. Desktop keeps Nuxt UI's default bottom-right position. Dismissal and automatic closing use Nuxt UI's defaults.
 - Home’s runner status and the Inbox count come from the app's one live connection (`useLive()`), so they update without a reload.
 
 On the web, `/projects` renders in the normal shell as a plain project list.
