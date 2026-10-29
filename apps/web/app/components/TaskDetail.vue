@@ -263,6 +263,7 @@ function historyText(entry: AuditEntry): string {
   switch (entry.action) {
     case 'task.created': return 'created the task'
     case 'task.updated': return `edited ${(d.changed as string[] | undefined)?.join(', ') ?? 'the task'}`
+    case 'task.revised': return `revised it with plan v${String(d.version)}`
     case 'task.claimed': return `claimed it (${String(d.from).replaceAll('_', ' ')} → ${String(d.to).replaceAll('_', ' ')})`
     case 'task.transition': return `${String(d.from).replaceAll('_', ' ')} → ${String(d.to).replaceAll('_', ' ')}${d.error ? `: ${String(d.error)}` : ''}`
     case 'run.ended': return `run #${String(d.runNumber)} ended ${String(d.state)}${d.outcome ? ` (${String(d.outcome)})` : ''}${d.error ? `: ${String(d.error)}` : ''}`

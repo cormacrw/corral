@@ -170,6 +170,13 @@ watch(() => props.plan.id, () => {
                   {{ task.criteriaCount }} criteria<span v-if="task.dependsOn.length"> · after {{ task.dependsOn.join(', ') }}</span>
                 </span>
               </span>
+              <UBadge
+                :label="task.revises ? 'Revised' : 'New'"
+                :color="task.revises ? 'warning' : 'success'"
+                variant="subtle"
+                size="xs"
+                class="shrink-0"
+              />
               <UIcon
                 v-if="task.ref"
                 name="i-lucide-chevron-right"
@@ -231,7 +238,7 @@ watch(() => props.plan.id, () => {
             class="flex items-center gap-2"
           >
             <UBadge
-              :label="task.change[0]!.toUpperCase() + task.change.slice(1)"
+              :label="task.revises && task.change === 'added' ? 'Revised' : task.change[0]!.toUpperCase() + task.change.slice(1)"
               :color="changeColor[task.change]"
               variant="subtle"
               size="xs"
@@ -261,7 +268,7 @@ watch(() => props.plan.id, () => {
             @click="emit('approve', 'backlog')"
           />
         </div>
-        <span class="text-xs text-muted">Drafts until you choose. The board schedules them now; the Backlog keeps them for later or for refining.</span>
+        <span class="text-xs text-muted">New tasks stay Drafts, and revised ones unchanged, until you choose. The board schedules them now; the Backlog keeps them for later or for refining.</span>
       </template>
       <span
         v-else-if="props.plan.status === 'approved'"

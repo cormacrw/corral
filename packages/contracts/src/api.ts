@@ -255,6 +255,9 @@ export interface Plan {
   tasks: {
     key: string
     change: PlanChange
+    // True when the plan revises an existing task rather than adding a new
+    // one; its edits are staged until approval
+    revises: boolean
     taskId: string | null
     epicId: string | null
     ref: string | null

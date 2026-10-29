@@ -80,7 +80,7 @@ const toolDefinitions = {
     input: { question: z.string().min(1) }
   },
   propose_plan: {
-    description: 'Propose a plan: epics and tasks with acceptance criteria and dependencies. Corral validates it and shows it to the human for approval. Give `epics` when the work splits into separate features, and put each task in one with `epic`; leave it out for a single epic named after the plan. A revision keeps the epic and task keys it reuses.',
+    description: 'Propose a plan: epics and tasks with acceptance criteria and dependencies. Corral validates it and shows it to the human for approval. Give `epics` when the work splits into separate features, and put each task in one with `epic`; leave it out for a single epic named after the plan. A revision keeps the epic and task keys it reuses. To refine an existing Backlog task, read it with get_task and include it in the plan with its `ref`: the plan then revises that task instead of creating a new one, and the edits are applied when the human approves.',
     input: {
       title: z.string().min(1),
       summary: z.string().default(''),
@@ -91,6 +91,7 @@ const toolDefinitions = {
       })).optional(),
       tasks: z.array(z.object({
         key: z.string().describe('A short handle used by dependsOn, e.g. t1'),
+        ref: z.string().optional().describe('The ref of an existing Backlog task this revises, e.g. COR-4; leave out for a new task'),
         epic: z.string().optional().describe('The key of its epic; needed when there are several'),
         title: z.string().min(1),
         description: z.string().min(1),
@@ -98,7 +99,7 @@ const toolDefinitions = {
         priority: z.enum(['urgent', 'high', 'medium', 'low']).default('medium'),
         humanReview: z.boolean().default(false),
         acceptanceCriteria: z.array(z.string().min(1)).min(1),
-        dependsOn: z.array(z.string()).default([])
+        dependsOn: z.array(z.string()).default([]).describe('Keys of tasks in this plan, or refs of existing tasks')
       })).min(1)
     }
   },

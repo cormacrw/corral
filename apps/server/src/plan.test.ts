@@ -1,6 +1,7 @@
 import type { Epic, EpicDetail, Plan, PlanSession, PlanSessionDetail, RunJob, Task } from '@corral/contracts'
+import { richTextToMarkdown } from '@corral/core'
 import { schema } from '@corral/db'
-import { desc, eq, ne } from 'drizzle-orm'
+import { and, desc, eq, ne } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner, sleep } from './test-runner.ts'
@@ -23,7 +24,7 @@ describe('plan sessions', () => {
     await t?.close()
   })
 
-  const plan = (tasksIn: Partial<{ key: string, title: string, description: string, acceptanceCriteria: string[], dependsOn: string[], humanReview: boolean }>[]) => ({
+  const plan = (tasksIn: Partial<{ key: string, ref: string, title: string, description: string, acceptanceCriteria: string[], dependsOn: string[], humanReview: boolean }>[]) => ({
     title: 'Login',
     summary: 'Email and password login',
     tasks: tasksIn.map((task, i) => ({
@@ -169,6 +170,125 @@ describe('plan sessions', () => {
     expect(await runner.call(job.runId, job.leaseEpoch, 'get_task', { taskRef: missing })).toMatchObject({ ok: false, error: `No task ${missing} in this project` })
     expect(await runner.call(job.runId, job.leaseEpoch, 'get_task', { taskRef: 'XYZ-1' })).toMatchObject({ ok: false, error: expect.stringContaining('No task XYZ-1 in this project') })
     await endTurn(job, 'Read it.')
+  })
+
+  // A Backlog task with a dependency and two criteria, to refine by ref
+  async function backlogSetup() {
+    const project = await t.createProject()
+    await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+    const base = await t.createTask(project.slug, { title: 'User table' })
+    const other = await t.createTask(project.slug, { title: 'Sessions' })
+    const target = await t.createTask(project.slug, {
+      title: 'Add login',
+      dependsOn: [base.number],
+      acceptanceCriteria: ['Shows an error on a bad password', 'Remembers the session']
+    })
+    const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: `Refine ${target.ref}` }).then(r => r.json()) as PlanSessionDetail
+    const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.planSessionId === created.id)).job
+    const getTask = (ref: string) => t.request('GET', `/api/tasks/${ref}`).then(r => r.json()) as Promise<Task>
+    const count = async () => (await t.db.select().from(tasks).where(eq(tasks.projectId, project.id))).length
+    // Revises the target by ref (written in lower case) and adds one new task
+    const revise = () => runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([
+      {
+        ref: target.ref.toLowerCase(),
+        title: 'Add email login',
+        description: '## Why\n\nPasswords only',
+        acceptanceCriteria: ['Shows an error on a bad password', 'Locks the account after 5 tries'],
+        dependsOn: [other.ref, 't2']
+      },
+      { title: 'Rate limiter' }
+    ]))
+    return { project, base, other, target, created, job, getTask, count, revise }
+  }
+
+  it('revises a Backlog task by ref without creating a new one, staging the edits until Add to backlog', async () => {
+    const { project, base, other, target, created, job, getTask, count, revise } = await backlogSetup()
+    expect(await count()).toBe(3)
+
+    const proposed = await revise()
+    expect(proposed).toMatchObject({ ok: true, result: { version: 1, tasks: [{ key: 't1', ref: target.ref, change: 'added', revises: true }, { key: 't2', change: 'added', revises: false }] } })
+    // Only the new task is created; the referenced one is untouched
+    expect(await count()).toBe(4)
+    const before = await getTask(target.ref)
+    expect(before).toMatchObject({ title: 'Add login', status: 'backlog', dependsOn: [base.ref], epicId: null })
+    expect(before.acceptanceCriteria.map(c => [c.id, c.text])).toEqual(target.acceptanceCriteria.map(c => [c.id, c.text]))
+    expect(richTextToMarkdown(before.description)).toBe('Email and password')
+
+    // The plan shows the staged edits under the task's own ref
+    const [v1] = (await session(created.id)).plans
+    const rateLimiter = v1!.tasks[1]!.ref!
+    expect(v1!.tasks).toMatchObject([
+      { key: 't1', ref: target.ref, revises: true, title: 'Add email login', status: 'backlog', criteriaCount: 2, dependsOn: [other.ref, rateLimiter], epicId: v1!.epicId },
+      { key: 't2', revises: false, title: 'Rate limiter', status: 'draft' }
+    ])
+    await endTurn(job, 'Proposed.')
+
+    const approved = await t.request('POST', `/api/plan/plans/${v1!.id}/approve`, { to: 'backlog' })
+    expect(approved.status).toBe(200)
+    const after = await getTask(target.ref)
+    expect(after).toMatchObject({ title: 'Add email login', status: 'backlog', dependsOn: [other.ref, rateLimiter], epicId: v1!.epicId })
+    expect(richTextToMarkdown(after.description)).toBe('## Why\n\nPasswords only')
+    // The unchanged criterion keeps its ID; the new one gets its own
+    expect(after.acceptanceCriteria.map(c => c.text)).toEqual(['Shows an error on a bad password', 'Locks the account after 5 tries'])
+    expect(after.acceptanceCriteria[0]!.id).toBe(target.acceptanceCriteria[0]!.id)
+    expect(after.acceptanceCriteria[1]!.id).not.toBe(target.acceptanceCriteria[1]!.id)
+    expect((await getTask(rateLimiter)).status).toBe('backlog')
+    expect(await count()).toBe(4)
+
+    const audit = await t.db.select().from(schema.auditLog).where(and(eq(schema.auditLog.taskId, target.id), eq(schema.auditLog.action, 'task.revised')))
+    expect(audit).toEqual([expect.objectContaining({ actor: t.actor, detail: expect.objectContaining({ planId: v1!.id, version: 1 }) })])
+    void project
+  })
+
+  it('moves a revised Backlog task to Ready with its edits on Add to board', async () => {
+    const { other, target, created, job, getTask, revise } = await backlogSetup()
+    expect(await revise()).toMatchObject({ ok: true })
+    await endTurn(job, 'Proposed.')
+    const [v1] = (await session(created.id)).plans
+    const approved = await t.request('POST', `/api/plan/plans/${v1!.id}/approve`, { to: 'ready' })
+    expect(approved.status).toBe(200)
+    expect(await approved.json() as Plan).toMatchObject({ tasks: [{ ref: target.ref, revises: true, status: 'ready' }, { revises: false, status: 'ready' }] })
+    const after = await getTask(target.ref)
+    expect(after).toMatchObject({ title: 'Add email login', status: 'ready', dependsOn: [other.ref, v1!.tasks[1]!.ref] })
+    expect(after.acceptanceCriteria.map(c => c.text)).toEqual(['Shows an error on a bad password', 'Locks the account after 5 tries'])
+    expect(after.acceptanceCriteria[0]!.id).toBe(target.acceptanceCriteria[0]!.id)
+    expect(await t.db.select().from(schema.auditLog).where(and(eq(schema.auditLog.taskId, target.id), eq(schema.auditLog.action, 'task.revised')))).toHaveLength(1)
+  })
+
+  it('only un-stages a revised task a later version drops, never deleting or changing it', async () => {
+    const { target, created, job, getTask, count, revise } = await backlogSetup()
+    expect(await revise()).toMatchObject({ ok: true })
+    const v2 = await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ key: 't2', title: 'Rate limiter' }]))
+    expect(v2).toMatchObject({ ok: true, result: { version: 2, tasks: [{ key: 't2', change: 'unchanged' }, { key: 't1', ref: target.ref, change: 'removed' }] } })
+    await endTurn(job, 'Dropped it.')
+    expect(await count()).toBe(4)
+    const latest = (await session(created.id)).plans[1]!
+    expect((await t.request('POST', `/api/plan/plans/${latest.id}/approve`, { to: 'ready' })).status).toBe(200)
+    const after = await getTask(target.ref)
+    expect(after).toMatchObject({ title: 'Add login', status: 'backlog', acceptanceCriteria: target.acceptanceCriteria.map(c => ({ id: c.id, text: c.text })) })
+    expect(await t.db.select().from(schema.auditLog).where(and(eq(schema.auditLog.taskId, target.id), eq(schema.auditLog.action, 'task.revised')))).toEqual([])
+  })
+
+  it('rejects a ref that is unknown, deleted, from another project or past the Backlog, saying why', async () => {
+    const { project, target, job, count } = await backlogSetup()
+    const deleted = await t.createTask(project.slug, { title: 'Old idea' })
+    expect((await t.request('DELETE', `/api/projects/${project.slug}/tasks/${deleted.number}`)).status).toBe(204)
+    const started = await t.createTask(project.slug, { title: 'Started' })
+    await t.db.update(tasks).set({ status: 'ready' }).where(eq(tasks.id, started.id))
+    const elsewhere = await t.createProject()
+    const foreign = await t.createTask(elsewhere.slug, { title: 'Foreign' })
+    const tasksBefore = await count()
+
+    const propose = (ref: string) => runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ ref, title: 'Revised' }]))
+    expect(await propose(`${project.prefix}-999`)).toMatchObject({ ok: false, error: expect.stringContaining(`There is no task ${project.prefix}-999 in this project`) })
+    expect(await propose(deleted.ref)).toMatchObject({ ok: false, error: expect.stringContaining(`${deleted.ref} was deleted`) })
+    expect(await propose(foreign.ref)).toMatchObject({ ok: false, error: expect.stringContaining(`${foreign.ref} belongs to the project`) })
+    expect(await propose(started.ref)).toMatchObject({ ok: false, error: expect.stringContaining(`${started.ref} is ready; only Backlog tasks can be revised`) })
+    // A dependency may name any existing task, but not a deleted one
+    expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ dependsOn: [deleted.ref] }]))).toMatchObject({ ok: false, error: expect.stringContaining('deleted_ref') })
+    expect(await count()).toBe(tasksBefore)
+    expect((await t.request('GET', `/api/tasks/${target.ref}`).then(r => r.json()) as Task).title).toBe('Add login')
+    await endTurn(job, 'Nothing saved.')
   })
 
   it('spans several epics, keeping each one a revision still names and deleting the one it drops', async () => {

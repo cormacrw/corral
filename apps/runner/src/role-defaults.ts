@@ -27,5 +27,6 @@ export const DEFAULT_ROLE_INSTRUCTIONS: Record<AgentRole, string> = {
 - When a request needs planning or code knowledge, read only the relevant parts: the project docs (CORRAL.md or CLAUDE.md, and .corral/wiki/ if present) and the code involved.
 - Break work into small tasks that each become one pull request, with verifiable acceptance criteria and explicit dependencies.
 - Use the Corral tools to see the live board. Propose plans with propose_plan; a human approves them.
+- To refine an existing Backlog task, read it with get_task and include it in the plan with its \`ref\` instead of proposing a duplicate.
 - Ask the human when requirements are ambiguous rather than guessing.`
 }

@@ -1,6 +1,6 @@
 import type { Plan, PlanMessage, PlanSession, PlanSessionDetail, RunJob } from '@corral/contracts'
-import { checkPlan, diffPlans, markdownToRichText, richTextToMarkdown, taskRef, type Actor, type ProposedPlan, type ProposedTask } from '@corral/core'
-import { schema, type Database } from '@corral/db'
+import { checkPlan, diffPlans, markdownToRichText, REVISABLE_STATUSES, richTextToMarkdown, taskRef, type Actor, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
+import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { listEpics } from './epics.ts'
@@ -19,6 +19,7 @@ class ToolError extends Error {}
 
 const proposedTask = z.object({
   key: z.string().trim().min(1),
+  ref: z.string().trim().toUpperCase().optional().transform(ref => ref || undefined),
   epic: z.string().trim().optional(),
   title: z.string().trim().min(1),
   description: z.string().trim(),
@@ -46,8 +47,20 @@ const proposedPlan = z.object({
   // without one is left for checkPlan to report.
   const list = plan.epics.length > 0 ? plan.epics : [{ key: ONLY_EPIC, title: plan.title, summary: plan.summary }]
   const fallback = list.length === 1 ? list[0]!.key : ''
-  return { ...plan, epics: list, tasks: plan.tasks.map(t => ({ ...t, epic: t.epic || fallback })) }
+  // A dependency that isn't a key is an existing task's ref, in any case
+  const keys = new Set(plan.tasks.map(t => t.key))
+  const dependency = (dep: string) => keys.has(dep) || !REF.test(dep) ? dep : dep.toUpperCase()
+  return { ...plan, epics: list, tasks: plan.tasks.map(t => ({ ...t, epic: t.epic || fallback, dependsOn: t.dependsOn.map(dependency) })) }
 })
+
+const REF = /^([A-Za-z]+)-(\d+)$/
+
+// An existing task a plan names by ref
+interface RefTarget {
+  id: string
+  number: number
+  status: string
+}
 
 type SessionRow = typeof planSessions.$inferSelect
 type PlanRow = typeof plans.$inferSelect
@@ -279,10 +292,13 @@ export class PlanService {
 
   // Validates with core and saves a plan version. Tasks are created as
   // Drafts, seen only in the plan (D10); a revision updates, adds or deletes
-  // the ones still in Draft by key.
+  // the ones still in Draft by key. A task with a `ref` revises an existing
+  // Backlog task instead: its edits are staged on the plan and written only
+  // when the human approves.
   async #propose(session: SessionRow, project: ProjectRow, runId: string, proposed: ProposedPlan, actor: Actor) {
     const { db } = this.#d
-    const problems = checkPlan(proposed)
+    const { found, targets } = await this.#lookupRefs(project, proposed)
+    const problems = checkPlan(proposed, found)
     if (problems.length > 0) throw new ToolError(`The plan was not saved: ${JSON.stringify(problems)}. Fix every problem and call propose_plan again.`)
 
     const [previous] = await db.select().from(plans).where(eq(plans.sessionId, session.id)).orderBy(desc(plans.version)).limit(1)
@@ -313,17 +329,28 @@ export class PlanService {
       const planId = row!.id
       await tx.insert(planEpics).values(proposed.epics.map((epic, position) => ({ planId, key: epic.key, epicId: epicIds.get(epic.key)!, position })))
 
-      // Existing tasks by key, from the previous version
+      // The previous version's tasks by key, and of those, the Drafts it
+      // created (not the tasks it only revised)
+      const previousItems = previous
+        ? await tx.select().from(planTasks).where(and(eq(planTasks.planId, previous.id), ne(planTasks.change, 'removed')))
+        : []
       const existing = new Map<string, string>()
-      if (previous) {
-        const rows = await tx.select().from(planTasks).where(and(eq(planTasks.planId, previous.id), ne(planTasks.change, 'removed')))
-        for (const r of rows) if (r.taskId) existing.set(r.key, r.taskId)
-      }
+      for (const r of previousItems) if (r.taskId && !r.revision) existing.set(r.key, r.taskId)
+      const owned = new Set(existing.values())
       // Create or update in dependency order isn't needed: dependencies are
       // set in a second pass once every task has a number
       const ids = new Map<string, string>()
+      const revising = new Set<string>()
       for (const task of proposed.tasks) {
-        const current = existing.get(task.key)
+        const target = task.ref ? targets.get(task.ref)! : null
+        if (target && !owned.has(target.id)) {
+          // Staged below, once every dependency has a number
+          ids.set(task.key, target.id)
+          revising.add(task.key)
+          continue
+        }
+        // A ref to one of this plan's own Drafts is that Draft
+        const current = target?.id ?? existing.get(task.key)
         const input = {
           title: task.title,
           description: markdownToRichText(task.description),
@@ -335,12 +362,7 @@ export class PlanService {
         if (current) {
           const [row] = await tx.select().from(tasks).where(and(eq(tasks.id, current), isNull(tasks.deletedAt)))
           if (row && row.status === 'draft') {
-            const criteria = await tx.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, current)).orderBy(asc(acceptanceCriteria.position))
-            await patchTask(tx, project, current, {
-              ...input,
-              // Keep IDs where the text is unchanged
-              acceptanceCriteria: task.acceptanceCriteria.map(text => ({ text, ...(criteria.find(c => c.text === text) && { id: criteria.find(c => c.text === text)!.id }) }))
-            }, actor)
+            await patchTask(tx, project, current, { ...input, acceptanceCriteria: await keepCriterionIds(tx, current, task.acceptanceCriteria) }, actor)
             ids.set(task.key, current)
             continue
           }
@@ -357,14 +379,35 @@ export class PlanService {
         const [row] = await tx.select({ number: tasks.number, status: tasks.status }).from(tasks).where(eq(tasks.id, id))
         numbers.set(key, row!.number)
       }
+      // A dependency is a key in the plan, the ref of a task it revises, or
+      // any other task in the project
+      const keyOfRef = new Map(proposed.tasks.filter(t => t.ref).map(t => [t.ref!, t.key]))
+      const numberOf = (dep: string) => numbers.get(dep) ?? numbers.get(keyOfRef.get(dep) ?? '') ?? targets.get(dep)!.number
+      const revisions = new Map<string, PlanRevision>()
       for (const task of proposed.tasks) {
+        const dependsOn = task.dependsOn.map(numberOf)
+        if (revising.has(task.key)) {
+          revisions.set(task.key, {
+            title: task.title,
+            description: task.description,
+            type: task.type,
+            priority: task.priority,
+            humanReview: task.humanReview,
+            acceptanceCriteria: task.acceptanceCriteria,
+            epicId: epicIds.get(task.epic)!,
+            dependsOn
+          })
+          continue
+        }
         const [row] = await tx.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, ids.get(task.key)!))
         if (row?.status !== 'draft') continue
-        await patchTask(tx, project, ids.get(task.key)!, { dependsOn: task.dependsOn.map(k => numbers.get(k)!), epicId: epicIds.get(task.epic)! }, actor)
+        await patchTask(tx, project, ids.get(task.key)!, { dependsOn, epicId: epicIds.get(task.epic)! }, actor)
       }
-      // Removed Drafts are deleted outright (D10)
-      for (const [key, taskId] of existing) {
-        if (ids.has(key)) continue
+      // Removed Drafts are deleted outright (D10). A revised task the plan
+      // drops is only un-staged: it was never changed.
+      const kept = new Set(ids.values())
+      for (const [, taskId] of existing) {
+        if (kept.has(taskId)) continue
         const [row] = await tx.select({ status: tasks.status }).from(tasks).where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt)))
         if (row?.status === 'draft') await deleteTaskRows(tx, taskId, actor, 'Removed from the plan')
       }
@@ -374,12 +417,13 @@ export class PlanService {
         const [left] = await tx.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.epicId, epicId), isNull(tasks.deletedAt))).limit(1)
         if (!left) await tx.delete(epics).where(eq(epics.id, epicId))
       }
+      const dropped = previousItems.filter(r => !ids.has(r.key) && !(r.taskId && kept.has(r.taskId)))
       await tx.insert(planTasks).values([
-        ...proposed.tasks.map((task, position) => ({ planId, key: task.key, taskId: ids.get(task.key)!, change: changes.get(task.key) ?? 'added', position })),
-        ...[...existing.keys()].filter(key => !ids.has(key)).map((key, i) => ({ planId, key, taskId: null, change: 'removed' as const, position: proposed.tasks.length + i }))
+        ...proposed.tasks.map((task, position) => ({ planId, key: task.key, taskId: ids.get(task.key)!, change: changes.get(task.key) ?? 'added', position, revision: revisions.get(task.key) ?? null })),
+        ...dropped.map((r, i) => ({ planId, key: r.key, taskId: r.revision ? r.taskId : null, change: 'removed' as const, position: proposed.tasks.length + i }))
       ])
       await tx.insert(planMessages).values({ sessionId: session.id, role: 'pm', kind: 'message', text: proposed.summary || `Proposed plan v${row!.version}: ${proposed.title}`, planId, runId })
-      await tx.insert(auditLog).values({ projectId: project.id, actor, action: 'plan.proposed', detail: { planId, version: row!.version, tasks: proposed.tasks.length } })
+      await tx.insert(auditLog).values({ projectId: project.id, actor, action: 'plan.proposed', detail: { planId, version: row!.version, tasks: proposed.tasks.length, revises: revisions.size } })
       return row!
     })
 
@@ -394,11 +438,12 @@ export class PlanService {
     for (const t of full.tasks) {
       if (t.taskId) this.#d.events.publish({ type: 'task.updated', task: await loadTask(db, t.taskId) })
     }
-    return { ok: true, planId: plan.id, version: plan.version, tasks: full.tasks.map(t => ({ key: t.key, ref: t.ref, change: t.change })), message: 'The plan is saved and shown to the human for approval. Tell them what you proposed and why.' }
+    return { ok: true, planId: plan.id, version: plan.version, tasks: full.tasks.map(t => ({ key: t.key, ref: t.ref, change: t.change, revises: t.revises })), message: 'The plan is saved and shown to the human for approval. Tell them what you proposed and why.' }
   }
 
   // Approve plan (design/plan.md): human only. Its Drafts go to the board
-  // (Ready) or to the Backlog for later or for refining.
+  // (Ready) or to the Backlog for later or for refining. Tasks it revises
+  // get their staged edits first, then go the same way.
   // `via` is the PM run that carried out the human's say-so in chat
   async approve(planId: string, actor: Actor, to: 'ready' | 'backlog' = 'ready', via: { runId: string } | null = null): Promise<Plan> {
     if (actor.kind !== 'human') throw new ApiFailure(409, { code: 'transition_rejected', reason: { code: 'actor_not_allowed', actor: null, event: 'approve' } })
@@ -406,14 +451,26 @@ export class PlanService {
     const [plan] = await db.select().from(plans).where(eq(plans.id, planId))
     if (!plan) throw notFound()
     if (plan.status !== 'proposed') throw new ApiFailure(409, { code: 'conflict', constraint: `plan_${plan.status}` })
+    const [project] = await db.select().from(projects).where(eq(projects.id, plan.projectId))
+    if (!project) throw notFound()
     const items = await db.select().from(planTasks).where(and(eq(planTasks.planId, planId), ne(planTasks.change, 'removed')))
-    for (const item of items) {
-      if (!item.taskId) continue
-      const [row] = await db.select({ status: tasks.status }).from(tasks).where(and(eq(tasks.id, item.taskId), isNull(tasks.deletedAt)))
-      if (row?.status === 'draft') await transitionTask(db, item.taskId, { type: to === 'ready' ? 'approve' : 'accept' }, actor)
-      // Plans proposed before Drafts existed put their tasks in Backlog
-      else if (row?.status === 'backlog' && to === 'ready') await transitionTask(db, item.taskId, { type: 'approve' }, actor)
-    }
+    await db.transaction(async (tx) => {
+      // A revised task someone has since started (or deleted) can't take the
+      // plan's edits; nothing is written then
+      for (const item of items) {
+        if (!item.taskId || !item.revision) continue
+        const [row] = await tx.select({ number: tasks.number, status: tasks.status }).from(tasks).where(and(eq(tasks.id, item.taskId), isNull(tasks.deletedAt)))
+        if (!row || !REVISABLE_STATUSES.includes(row.status)) throw new ApiFailure(409, { code: 'conflict', constraint: 'revised_task_not_in_backlog' })
+      }
+      for (const item of items) {
+        if (!item.taskId) continue
+        if (item.revision) await reviseTask(tx, project, item.taskId, item.revision, { planId, version: plan.version }, actor)
+        const [row] = await tx.select({ status: tasks.status }).from(tasks).where(and(eq(tasks.id, item.taskId), isNull(tasks.deletedAt)))
+        if (row?.status === 'draft') await transitionTask(tx, item.taskId, { type: to === 'ready' ? 'approve' : 'accept' }, actor)
+        // Revised Backlog tasks, and plans proposed before Drafts existed
+        else if (row?.status === 'backlog' && to === 'ready') await transitionTask(tx, item.taskId, { type: 'approve' }, actor)
+      }
+    })
     await db.update(plans).set({ status: 'approved', approvedBy: actor, approvedAt: new Date() }).where(eq(plans.id, planId))
     await db.insert(auditLog).values({ projectId: plan.projectId, actor, action: 'plan.approved', detail: { planId, version: plan.version, to, ...(via && { viaPmRun: via.runId }) } })
     const full = await this.toPlan((await db.select().from(plans).where(eq(plans.id, planId)))[0]!)
@@ -451,16 +508,20 @@ export class PlanService {
       status: row.status,
       approvedAt: row.approvedAt?.toISOString() ?? null,
       epics: [...keyed].flatMap(([key, id]) => epicRows.filter(e => e.id === id).map(e => ({ key, id, title: e.title }))),
+      // A revised task shows the plan's staged edits, not what it has now
       tasks: items.map(({ item, task }) => ({
         key: item.key,
         change: item.change,
+        revises: Boolean(item.revision),
         taskId: task?.id ?? null,
-        epicId: task?.epicId ?? null,
+        epicId: item.revision?.epicId ?? task?.epicId ?? null,
         ref: task && project ? taskRef(project.prefix, task.number) : null,
-        title: task?.title ?? item.key,
+        title: item.revision?.title ?? task?.title ?? item.key,
         status: task?.status ?? null,
-        criteriaCount: criteria.filter(c => c.taskId === task?.id).length,
-        dependsOn: deps.filter(d => d.taskId === task?.id).map(d => taskRef(project!.prefix, d.number))
+        criteriaCount: item.revision?.acceptanceCriteria.length ?? criteria.filter(c => c.taskId === task?.id).length,
+        dependsOn: item.revision
+          ? item.revision.dependsOn.map(n => taskRef(project!.prefix, n))
+          : deps.filter(d => d.taskId === task?.id).map(d => taskRef(project!.prefix, d.number))
       })),
       createdAt: row.createdAt.toISOString()
     }
@@ -469,12 +530,24 @@ export class PlanService {
   async #proposedTasksOf(plan: PlanRow, project: ProjectRow): Promise<ProposedTask[]> {
     const full = await this.toPlan(plan)
     const keyOf = new Map([...await this.#epicsOf(plan)].map(([key, id]) => [id, key]))
+    const keys = new Map(full.tasks.filter(t => t.ref).map(t => [t.ref!, t.key]))
+    const revisions = new Map((await this.#d.db.select().from(planTasks).where(eq(planTasks.planId, plan.id))).map(r => [r.key, r.revision]))
     const result: ProposedTask[] = []
     for (const item of full.tasks) {
       if (item.change === 'removed' || !item.taskId) continue
+      const revision = revisions.get(item.key)
+      if (revision) {
+        result.push({
+          ...revision,
+          key: item.key,
+          ref: item.ref!,
+          epic: keyOf.get(revision.epicId) ?? '',
+          dependsOn: revision.dependsOn.map(n => taskRef(project.prefix, n)).map(ref => keys.get(ref) ?? ref)
+        })
+        continue
+      }
       const task = await loadTask(this.#d.db, item.taskId).catch(() => null)
       if (!task) continue
-      const keys = new Map(full.tasks.filter(t => t.ref).map(t => [t.ref!, t.key]))
       result.push({
         key: item.key,
         epic: (task.epicId && keyOf.get(task.epicId)) || '',
@@ -487,8 +560,45 @@ export class PlanService {
         dependsOn: task.dependsOn.map(ref => keys.get(ref) ?? ref)
       })
     }
-    void project
     return result
+  }
+
+  // Looks up every existing-task ref the plan names, for checkPlan, and the
+  // tasks the valid ones point at
+  async #lookupRefs(project: ProjectRow, plan: ProposedPlan): Promise<{ found: Map<string, PlanRef>, targets: Map<string, RefTarget> }> {
+    const { db } = this.#d
+    const keys = new Set(plan.tasks.map(t => t.key))
+    const names = new Set([
+      ...plan.tasks.flatMap(t => t.ref ? [t.ref] : []),
+      ...plan.tasks.flatMap(t => t.dependsOn.filter(dep => !keys.has(dep) && REF.test(dep)))
+    ])
+    const found = new Map<string, PlanRef>()
+    const targets = new Map<string, RefTarget>()
+    const [current] = await db.select({ nextTaskNumber: projects.nextTaskNumber }).from(projects).where(eq(projects.id, project.id))
+    for (const name of names) {
+      const match = REF.exec(name)
+      if (!match) {
+        found.set(name, { kind: 'unknown' })
+        continue
+      }
+      const [, prefix, digits] = match
+      const number = Number(digits)
+      if (prefix!.toUpperCase() !== project.prefix) {
+        const [other] = await db.select({ name: projects.name }).from(projects).where(eq(projects.prefix, prefix!.toUpperCase()))
+        found.set(name, other ? { kind: 'other_project', project: other.name } : { kind: 'unknown' })
+        continue
+      }
+      const [row] = await db.select({ id: tasks.id, number: tasks.number, status: tasks.status, deletedAt: tasks.deletedAt }).from(tasks)
+        .where(and(eq(tasks.projectId, project.id), eq(tasks.number, number)))
+      if (row && !row.deletedAt) {
+        found.set(name, { kind: 'task', status: row.status })
+        targets.set(name, { id: row.id, number: row.number, status: row.status })
+      } else {
+        // Backlog tasks are deleted outright, but their number stays used
+        found.set(name, row || (number > 0 && number < (current?.nextTaskNumber ?? 0)) ? { kind: 'deleted' } : { kind: 'unknown' })
+      }
+    }
+    return { found, targets }
   }
 
   // A plan's epics by key, in order. Plans saved before plan_epics have
@@ -541,6 +651,33 @@ export class PlanService {
       updatedAt: row.updatedAt.toISOString()
     }
   }
+}
+
+// Writes a plan's staged edits to the task it revises, keeping criterion IDs
+// where the text is unchanged
+async function reviseTask(tx: Executor, project: ProjectRow, taskId: string, revision: PlanRevision, plan: { planId: string, version: number }, actor: Actor): Promise<void> {
+  await patchTask(tx, project, taskId, {
+    title: revision.title,
+    description: markdownToRichText(revision.description),
+    type: revision.type,
+    priority: revision.priority,
+    humanReview: revision.humanReview,
+    epicId: revision.epicId,
+    dependsOn: revision.dependsOn,
+    acceptanceCriteria: await keepCriterionIds(tx, taskId, revision.acceptanceCriteria)
+  }, actor)
+  await tx.insert(auditLog).values({ projectId: project.id, taskId, actor, action: 'task.revised', detail: { ...plan, fields: ['title', 'description', 'type', 'priority', 'humanReview', 'acceptanceCriteria', 'epicId', 'dependsOn'] } })
+}
+
+// A task's new criteria, each with the ID of an existing one that has the
+// same text, so evidence and verdicts stay attached to it
+async function keepCriterionIds(tx: Executor, taskId: string, texts: string[]): Promise<{ id?: string, text: string }[]> {
+  const unused = await tx.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, taskId)).orderBy(asc(acceptanceCriteria.position))
+  return texts.map((text) => {
+    const index = unused.findIndex(c => c.text === text)
+    if (index === -1) return { text }
+    return { id: unused.splice(index, 1)[0]!.id, text }
+  })
 }
 
 function toMessage(row: typeof planMessages.$inferSelect): PlanMessage {

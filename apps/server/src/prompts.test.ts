@@ -27,6 +27,7 @@ describe('pmPrompt', () => {
     expect(intro).toContain('Task IDs look like TA-12')
     expect(intro).toContain('list_tasks shows it live')
     expect(intro).toContain('Propose work with propose_plan (one epic per separate feature, small tasks, one PR each, descriptions in markdown, verifiable acceptance criteria, explicit dependencies')
+    expect(intro).toContain('To refine an existing Backlog task, read it with get_task and include it in the plan with its `ref`')
     expect(intro).toContain('humanReview true for auth, data migrations, payments, deletions and security-sensitive code')
     expect(intro).toContain('Ask with ask_question when requirements are ambiguous')
     expect(intro).toContain('only then may you call approve_plan ("ready" for the board, "backlog" for later)')
