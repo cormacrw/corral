@@ -478,7 +478,7 @@ export const clis: CliStatus[] = [
 
 // The inbox is derived from the tasks above that need the human
 export function inbox(): Inbox {
-  const needsYou = tasks
+  const needsYou: Inbox['needsYou'] = tasks
     .filter(t => t.status === 'human_review' || t.status === 'blocked' || t.status === 'failed')
     .map((t) => {
       const project = projects.find(p => p.id === t.projectId)!
@@ -500,5 +500,18 @@ export function inbox(): Inbox {
         resolution: null
       }
     })
-  return { needsYou, activity: [], resolved: [], count: needsYou.length }
+  for (const session of planSessions.filter(s => !s.closed)) {
+    const project = projects.find(p => p.id === session.projectId)!
+    needsYou.push({
+      id: session.id, type: 'plan_thread', sessionId: session.id,
+      project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor },
+      subject: session.title, preview: session.preview ?? '', body: session.preview ?? '',
+      sender: { name: 'Juno', role: 'pm' }, at: session.updatedAt,
+      taskId: null, taskRef: null, prUrl: null, resolution: null,
+      runtime: session.runtime, status: session.status, unread: session.unread,
+      activeRunId: session.activeRunId,
+      planId: plans[session.id]?.find(p => p.status === 'proposed')?.id ?? null
+    })
+  }
+  return { needsYou, activity: [], resolved: [], count: needsYou.filter(i => i.type !== 'plan_thread' || i.status !== 'none' || i.unread).length }
 }
