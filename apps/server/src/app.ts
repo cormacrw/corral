@@ -5,6 +5,7 @@ import {
   checkRepoInput,
   createProjectInput,
   createTaskInput,
+  deleteProjectInput,
   humanTransitionInput,
   inboxActionInput,
   patchAgentInput,
@@ -178,6 +179,15 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     })
 
     .get('/tasks/:ref', async c => c.json(await loadTask(db, (await findByRef(c.req.param('ref'))).taskId)))
+
+    .delete('/projects/:slug', validate('json', deleteProjectInput), async (c) => {
+      const project = await findProjectBySlug(db, c.req.param('slug'))
+      if (c.req.valid('json').confirm !== project.name) {
+        throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['confirm'], message: 'Type the project name to remove it' }] })
+      }
+      await orchestrator.deleteProject(project.id, actor)
+      return c.body(null, 204)
+    })
 
     .get('/projects/:slug/epics', async (c) => {
       const project = await findProjectBySlug(db, c.req.param('slug'))

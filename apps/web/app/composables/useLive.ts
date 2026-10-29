@@ -94,6 +94,12 @@ export function useLive() {
       case 'project.updated':
         s.projects = s.projects.map(p => p.id === event.project.id ? event.project : p)
         break
+      case 'project.deleted':
+        s.projects = s.projects.filter(p => p.id !== event.projectId)
+        s.tasks = Object.fromEntries(Object.entries(s.tasks).filter(([id]) => id !== event.projectId))
+        s.epics = Object.fromEntries(Object.entries(s.epics).filter(([id]) => id !== event.projectId))
+        s.planSessions = s.planSessions.filter(x => x.projectId !== event.projectId)
+        break
       case 'task.created':
       case 'task.updated':
         upsertTask(event.task)
@@ -142,7 +148,7 @@ export function useLive() {
     }
     // Inbox counts depend on task status; recount from the tasks we know,
     // and ask the server when we don't know the project's tasks
-    if (event.type === 'task.updated' || event.type === 'task.deleted' || event.type === 'task.created') {
+    if (event.type === 'task.updated' || event.type === 'task.deleted' || event.type === 'task.created' || event.type === 'project.deleted') {
       void api.inbox.get().then((inbox) => {
         s.inboxCount = inbox.needsYou.length
       })
@@ -155,7 +161,7 @@ export function useLive() {
     state.value.connection = source ? 'open' : state.value.connection
     source = new EventSource('/api/events')
     const types: ServerEvent['type'][] = [
-      'project.created', 'project.updated', 'task.created', 'task.updated', 'task.deleted', 'runner.status', 'run.updated',
+      'project.created', 'project.updated', 'project.deleted', 'task.created', 'task.updated', 'task.deleted', 'runner.status', 'run.updated',
       'run.events', 'agent.updated', 'global.status', 'plan.session', 'plan.message', 'plan.updated', 'epic.updated', 'profile.updated', 'comment.created'
     ]
     for (const type of types) {

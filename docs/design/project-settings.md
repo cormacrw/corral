@@ -50,6 +50,7 @@ A card with an `error`-tinted border.
 
 - **Project:** name, thumbnail (colour or image), prefix, GitHub remote, default branch, merge method, required checks, paused, human-review default, review-round cap, failed-run cap.
 - **Writes:** a single `PATCH` on Save. Pause is its own call.
+- **Remove:** `DELETE /api/projects/:slug` with `{ "confirm": "<project name>" }`; anything else is a 400. The server pauses the project, stops its queued and running runs and releases their leases, then deletes the project with its tasks, epics, plans, plan sessions and runs in one transaction. It makes no GitHub call. Clients get a `project.deleted` event. The runner is asked to remove each worked task's worktrees (keeping any with uncommitted changes); it has no hook yet for removing the repository's clone, so that stays on disk.
 
 ## States
 

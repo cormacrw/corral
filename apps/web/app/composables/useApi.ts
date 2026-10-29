@@ -102,7 +102,8 @@ export const api = {
     list: () => call<Project[]>('GET', '/projects'),
     get: (slug: string) => call<Project>('GET', `/projects/${slug}`),
     create: (input: CreateProjectInput) => call<Project>('POST', '/projects', input),
-    patch: (slug: string, input: PatchProjectInput) => call<Project>('PATCH', `/projects/${slug}`, input)
+    patch: (slug: string, input: PatchProjectInput) => call<Project>('PATCH', `/projects/${slug}`, input),
+    remove: (slug: string, confirm: string) => call<null>('DELETE', `/projects/${slug}`, { confirm })
   },
 
   tasks: {

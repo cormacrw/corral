@@ -50,6 +50,10 @@ export const patchProjectInput = z.object({
 })
 export type PatchProjectInput = z.infer<typeof patchProjectInput>
 
+// design/project-settings.md, Danger zone: the human types the project name
+export const deleteProjectInput = z.object({ confirm: z.string() })
+export type DeleteProjectInput = z.infer<typeof deleteProjectInput>
+
 export interface Project {
   id: string
   name: string

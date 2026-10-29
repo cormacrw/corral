@@ -630,6 +630,40 @@ export class Orchestrator implements RunnerHandlers {
     this.#d.events.publish({ type: 'task.deleted', taskId, projectId: project.id })
   }
 
+  // design/project-settings.md, Danger zone: stop every run, then remove the
+  // project and everything under it. GitHub is left alone: the repository,
+  // branches and PRs stay.
+  async deleteProject(projectId: string, actor: Actor): Promise<void> {
+    const { db, runner } = this.#d
+    // Nothing new is claimed while the runs stop
+    await db.update(projects).set({ paused: true }).where(eq(projects.id, projectId))
+    const live = await db.select({ id: runs.id }).from(runs)
+      .where(and(eq(runs.projectId, projectId), inArray(runs.state, [...ACTIVE_RUN_STATES])))
+    for (const { id } of live) {
+      const ctx = await this.#load(id)
+      if (!ctx) continue
+      runner.send({ type: 'run.stop', runId: id, reason: 'The project was removed' })
+      await this.#endRun(ctx, { state: 'interrupted', error: 'The project was removed' })
+      this.#d.events.publish({ type: 'run.updated', run: await getRun(db, id) })
+    }
+    const worked = await db.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.projectId, projectId), ne(tasks.status, 'backlog')))
+    const project = await db.transaction(async (tx) => {
+      // Tasks, epics, plans, plan sessions and runs go with it (onDelete: cascade)
+      const [row] = await tx.delete(projects).where(eq(projects.id, projectId)).returning()
+      if (!row) throw new ApiFailure(404, { code: 'not_found' })
+      // Not tied to the project, or it would go too
+      await tx.insert(auditLog).values({ projectId: null, actor, action: 'project.deleted', detail: { projectId, name: row.name, repository: row.repository } })
+      return row
+    })
+    this.#d.events.publish({ type: 'project.deleted', projectId })
+    // Worktrees with uncommitted work are kept (PRD §7.4). The runner has no
+    // hook yet for removing a repository's clone.
+    for (const { id } of worked) {
+      void runner.request({ kind: 'cleanup_worktrees', repository: project.repository, taskId: id })
+        .catch(error => console.error(`Worktree cleanup for task ${id} failed`, error))
+    }
+  }
+
   // ── Agent tools ────────────────────────────────────────────────────────────
 
   async onToolCall(message: Extract<RunnerMessage, { type: 'tool.call' }>): Promise<unknown> {
