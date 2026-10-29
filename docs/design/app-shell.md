@@ -54,7 +54,7 @@ The active item has `bg-elevated` and `text-primary`, with its icon in `primary`
 
 ## Banners
 
-**Updating (D16):** while either update-hold phase is active, show an info banner: "Corral is updating. Running work will finish first; new runs start once the update is done. You can keep chatting in Plan." Plan messages and question replies remain enabled: turns start during draining and queue during finishing.
+**Updating (D16):** while either update-hold phase is active, show an info banner: "Corral is waiting to update". Plan messages and question replies remain enabled: turns start during draining and queue during finishing.
 
 **Project paused:** a full-width `warning` bar above the shell, shown only on that project's pages. It reads "{Project} is paused. No new runs will start; work already running will finish." and has a **Resume** button. Pausing happens in project settings.
 
