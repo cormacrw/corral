@@ -11,13 +11,18 @@ On the server, in the checkout you run `docker compose` from (with `.env` in
 place, as in the main README):
 
 ```sh
-# Run as a user that can use docker (root, or in the docker group)
 sudo cp scripts/deploy/corral-deploy.{service,timer} /etc/systemd/system/
-sudo sed -i "s#/opt/corral#$PWD#" /etc/systemd/system/corral-deploy.service
-# To run as a non-root user, add `User=<you>` under [Service]
+sudo sed -i "s#/opt/corral#$PWD#; s#^User=.*#User=$(stat -c %U .)#" /etc/systemd/system/corral-deploy.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now corral-deploy.timer
 ```
+
+The service must run as the user who owns the checkout, and that user must be
+able to run `docker` without sudo (`sudo usermod -aG docker <user>`, then log
+in again). As any other user, root included, git refuses the repository
+("dubious ownership") and the deploy fails. A `sudo git …` test won't show
+this, because git trusts root when it comes in through sudo; systemd doesn't
+use sudo. To check: `sudo -u <user> git -C <checkout> ls-remote origin`.
 
 Without systemd, a cron line does the same:
 

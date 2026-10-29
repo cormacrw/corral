@@ -23,6 +23,10 @@ flock -n 9 || exit 0
 
 log() { echo "$(date +%Y-%m-%dT%H:%M:%S%z) $*"; }
 
+# Git silently ignores a repo owned by another user for commands like
+# ls-remote, which then fail confusingly; rev-parse says why
+git rev-parse --git-dir >/dev/null || { log "git can't use this checkout; run the service as the user who owns it (User= in the unit)"; exit 1; }
+
 # Calls the server API from inside its container; the API is never published
 api() {
   docker compose exec -T server node -e "
