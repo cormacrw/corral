@@ -101,8 +101,9 @@ const placeholder = computed(() => {
 })
 const submitLabel = computed(() => action.value ? (actions.value.find(a => a.value === action.value)?.label ?? 'Send') : '')
 
-async function submit(message: string) {
-  if (!selected.value) return
+// Resolves false when not sent, so the composer keeps its images
+async function submit(message: string): Promise<boolean> {
+  if (!selected.value) return false
   busy.value = true
   actionError.value = null
   try {
@@ -132,8 +133,10 @@ async function submit(message: string) {
       const next = inbox.value?.needsYou[Math.min(Math.max(position, 0), (inbox.value?.needsYou.length ?? 1) - 1)]
       void router.replace(next ? `/inbox/${next.id}` : '/inbox')
     }
+    return true
   } catch (e) {
     actionError.value = e instanceof Error ? e.message : String(e)
+    return false
   } finally {
     busy.value = false
   }
@@ -372,6 +375,7 @@ const typeBadge = (type: InboxItem['type']) => ({
                 :submit-color="action === 'delete' ? 'error' : 'primary'"
                 :allow-empty="action !== null && !needsText"
                 :busy="busy"
+                :project="selected.project.slug"
                 @submit="submit"
               />
             </div>

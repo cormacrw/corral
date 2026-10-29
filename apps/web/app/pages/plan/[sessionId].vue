@@ -60,15 +60,18 @@ watch(() => latest.value?.id, (planId) => {
 })
 const backlog = computed(() => project.value ? (live.state.value.tasks[project.value.id] ?? []).filter(t => t.status === 'backlog') : [])
 
-async function send(message: string) {
-  if (!session.value) return
+// Resolves false when not sent, so the composer keeps its images
+async function send(message: string): Promise<boolean> {
+  if (!session.value) return false
   busy.value = true
   try {
     await api.plan.message(session.value.id, message, taskRef.value ?? undefined)
     text.value = ''
     taskRef.value = null
+    return true
   } catch (e) {
     toast.add({ title: 'Could not send', description: e instanceof Error ? e.message : String(e), color: 'error' })
+    return false
   } finally {
     busy.value = false
   }
@@ -162,9 +165,12 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
             >
               <div
                 v-if="message.role === 'human'"
-                class="max-w-[85%] rounded-lg bg-elevated px-3 py-2 text-sm whitespace-pre-wrap"
+                class="max-w-[85%] rounded-lg bg-elevated px-3 py-2 text-sm"
               >
-                {{ message.text }}
+                <MarkdownText
+                  :text="message.text"
+                  breaks
+                />
               </div>
               <div
                 v-else
@@ -255,6 +261,7 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
               :disabled="runnerOffline || Boolean(session?.activeRunId)"
               :busy="busy"
               :allow-empty="taskRef !== null"
+              :project="project?.slug"
               @submit="send"
             >
               <template #header>

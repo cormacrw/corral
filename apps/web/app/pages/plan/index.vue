@@ -29,14 +29,17 @@ const suggestions = computed(() => taskRef.value
   ? ['Tighten the acceptance criteria', 'Split it into smaller tasks', 'Check its dependencies']
   : ['Plan a new feature', 'Break an epic into tasks', 'What’s blocking progress?'])
 
-async function start(message: string) {
-  if (!project.value) return
+// Resolves false when not started, so the composer keeps its images
+async function start(message: string): Promise<boolean> {
+  if (!project.value) return false
   busy.value = true
   try {
     const session = await api.plan.start(project.value.id, message, taskRef.value ?? undefined)
     await router.push(`/plan/${session.id}`)
+    return true
   } catch (e) {
     toast.add({ title: 'Could not start the session', description: e instanceof Error ? e.message : String(e), color: 'error' })
+    return false
   } finally {
     busy.value = false
   }
@@ -77,6 +80,7 @@ async function start(message: string) {
           :busy="busy"
           :allow-empty="taskRef !== null"
           :rows="3"
+          :project="project?.slug"
           @submit="start"
         >
           <template #header>
