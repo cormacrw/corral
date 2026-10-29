@@ -1,6 +1,6 @@
 import type { RunnerMessage } from '@corral/contracts'
-import { rm } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { chmod, readFile, rm, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createRuntimeRegistry, type AgentRuntime, type RuntimeOptions } from './agent-runtime.ts'
 import type { RunnerConfig } from './config.ts'
@@ -44,10 +44,30 @@ describe('RunManager runtimes', () => {
     return sent.filter(m => 'runId' in m && m.runId === runId)
   }
 
-  it('registers Claude Code as claude-code', () => {
+  it('registers Claude Code as claude-code and Codex as codex', () => {
     const registry = createRuntimeRegistry(config)
-    expect([...registry.keys()]).toEqual(['claude-code'])
+    expect([...registry.keys()]).toEqual(['claude-code', 'codex'])
     expect(registry.get('claude-code')?.spawnSession).toBeTypeOf('function')
+    // No streaming session: a Codex PM turn is a one-shot resume
+    expect(registry.get('codex')?.spawnSession).toBeUndefined()
+  })
+
+  it('ends a Codex run that hits its usage limit as rate_limited with the reset time', async () => {
+    const fixture = join(import.meta.dirname, 'fixtures', 'codex', 'usage-limit.jsonl')
+    const codexBin = join(dirname(dataDir), 'codex')
+    // Stands in for `codex`: logs its arguments and prints the fixture
+    await writeFile(codexBin, `#!/bin/sh\nprintf '%s\\n' "$@" > "$0.args"\ncat ${JSON.stringify(fixture)}\nexit 1\n`)
+    await chmod(codexBin, 0o755)
+    const manager = new RunManager({ ...config, codexBin }, connection, tools)
+    manager.assign(pmJob({ runId: 'r1', runtime: 'codex', prompt: 'Plan it', model: 'gpt-5.5-codex' }))
+    const messages = await finish('r1')
+
+    expect(messages.find(m => m.type === 'run.started')).toMatchObject({ agentSessionId: '01a185f0-2c11-7a40-9d1e-3f4b5c6d7e8f' })
+    expect(messages.find(m => m.type === 'run.ended')).toMatchObject({ exit: { kind: 'rate_limited', resetsAt: new Date(2026, 9, 30, 15, 5).toISOString() } })
+    const args = (await readFile(`${codexBin}.args`, 'utf8')).trim().split('\n')
+    expect(args.slice(0, 2)).toEqual(['exec', '--json'])
+    expect(args).toContain('mcp_servers.corral.url="http://127.0.0.1:9/mcp"')
+    expect(args.slice(-2)).toEqual(['--', 'Plan it'])
   })
 
   it('ends a job with an unknown runtime with an error that names it', async () => {

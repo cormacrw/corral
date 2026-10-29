@@ -53,7 +53,7 @@ interface StreamLine {
 }
 
 // What the CLI prints when a subscription or API limit is exhausted
-const LIMIT_TEXT = /usage limit|hit your limit|rate limit|limit reached|out of extra usage/i
+export const LIMIT_TEXT = /usage limit|hit your limit|rate limit|limit reached|out of extra usage/i
 
 const empty = (): ParsedLine => ({ events: [], sessionId: null, rateLimit: null, result: null })
 
