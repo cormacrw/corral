@@ -17,6 +17,7 @@ import { z } from 'zod'
 import { listTaskAttachments, readProjectAttachment } from './attachments.ts'
 import type { BlobStore } from './blob-store.ts'
 import { claimNextTask, type Claim } from './claim.ts'
+import { publishDependents } from './dependent-tasks.ts'
 import { bundleHasRootIndex, DesignNotFound, readDesign } from './designs.ts'
 import { ApiFailure } from './errors.ts'
 import type { EventBus } from './events.ts'
@@ -132,6 +133,7 @@ export class Orchestrator implements RunnerHandlers {
       events: deps.events,
       github: deps.github,
       runner: deps.runner,
+      wake: ids => this.poke(ids),
       ...(deps.now && { now: deps.now })
     })
   }
@@ -1378,6 +1380,7 @@ export class Orchestrator implements RunnerHandlers {
     // A soft-deleted task has nothing left to show
     const task = ctx.task ? await loadTask(db, ctx.task.id).catch(() => null) : null
     if (task) events.publish({ type: 'task.updated', task })
+    if (task?.status === 'merged') this.poke(await publishDependents(db, events, task.id))
   }
 }
 

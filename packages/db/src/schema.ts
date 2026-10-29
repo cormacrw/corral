@@ -93,6 +93,16 @@ export const epics = pgTable('epics', {
   updatedAt: updatedAt()
 }, t => [index().on(t.projectId)])
 
+// Epic prerequisites gate developer claims; core validates the combined graph.
+export const epicDependencies = pgTable('epic_dependencies', {
+  epicId: uuid().notNull().references(() => epics.id, { onDelete: 'cascade' }),
+  dependsOnEpicId: uuid().notNull().references(() => epics.id, { onDelete: 'cascade' })
+}, t => [
+  primaryKey({ columns: [t.epicId, t.dependsOnEpicId] }),
+  index().on(t.dependsOnEpicId),
+  check('epic_dependencies_not_self', sql`${t.epicId} <> ${t.dependsOnEpicId}`)
+])
+
 // The unit of work that becomes one PR (PRD §4.3). Status, counters and
 // reason mirror core's TaskState; the lease columns are the lock (PRD §4.6).
 export const tasks = pgTable('tasks', {

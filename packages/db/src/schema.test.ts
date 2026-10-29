@@ -2,7 +2,7 @@ import type { Actor } from '@corral/core'
 import { eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Database, DatabaseHandle } from './client.ts'
-import { agents, attachments, projects, runs, taskDependencies, tasks } from './schema.ts'
+import { agents, attachments, epicDependencies, epics, projects, runs, taskDependencies, tasks } from './schema.ts'
 import { createTestDatabase, postgresAvailable } from './testing.ts'
 
 const human: Actor = { kind: 'human', userId: '00000000-0000-4000-8000-000000000001' }
@@ -68,9 +68,25 @@ describe.each([
       select table_name from information_schema.tables
       where table_schema = 'public' order by table_name`) as unknown as { rows: { table_name: string }[] }
     expect(result.rows.map(r => r.table_name)).toEqual([
-      'acceptance_criteria', 'agents', 'attachments', 'audit_log', 'comments', 'design_versions', 'epics', 'evidence', 'plan_epics', 'plan_messages', 'plan_sessions', 'plan_tasks', 'plans',
+      'acceptance_criteria', 'agents', 'attachments', 'audit_log', 'comments', 'design_versions', 'epic_dependencies', 'epics', 'evidence', 'plan_epics', 'plan_messages', 'plan_sessions', 'plan_tasks', 'plans',
       'projects', 'reviews', 'runs', 'settings', 'task_dependencies', 'task_design_pins', 'tasks', 'users'
     ])
+  })
+
+  it.skipIf(!enabled)('constrains epic dependencies and cascades deletion of either epic', async () => {
+    const project = await insertProject()
+    const [a, b, c] = await db.insert(epics).values(['A', 'B', 'C'].map(title => ({
+      projectId: project.id, title, createdBy: human
+    }))).returning()
+    const edge = { epicId: b!.id, dependsOnEpicId: a!.id }
+    await db.insert(epicDependencies).values(edge)
+    await expectViolation(db.insert(epicDependencies).values(edge), 'epic_dependencies_epic_id_depends_on_epic_id_pk')
+    await expectViolation(db.insert(epicDependencies).values({ epicId: a!.id, dependsOnEpicId: a!.id }), 'epic_dependencies_not_self')
+    await db.delete(epics).where(eq(epics.id, a!.id))
+    expect(await db.select().from(epicDependencies).where(eq(epicDependencies.epicId, b!.id))).toEqual([])
+    await db.insert(epicDependencies).values({ epicId: b!.id, dependsOnEpicId: c!.id })
+    await db.delete(epics).where(eq(epics.id, b!.id))
+    expect(await db.select().from(epicDependencies).where(eq(epicDependencies.dependsOnEpicId, c!.id))).toEqual([])
   })
 
   it.skipIf(!enabled)('fills in project defaults', async () => {

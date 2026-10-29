@@ -570,3 +570,13 @@ The bundle, spec and screenshots are content-addressed blobs and the database st
 - **Agent instructions:** developers use a note only when there is nothing to show, explaining concretely what changed and how it was checked with file and line references. Reviewers explain why each criterion is met or not in its verdict note, which the human reads next to the evidence; they request changes for visibly testable criteria proven only by a note, or criteria proven only by test output. Spike findings may cite command output as a note with the relevant excerpt rather than a full log where possible.
 
 **Why:** Passing checks is necessary for delivery but doesn't show a person whether the requested behaviour meets a criterion. Separating gates and raw artifacts from human evidence keeps review focused on the result, while note-only evidence avoids meaningless file attachments for work best explained in writing.
+
+---
+
+## D22 — Epic dependencies gate developer work
+
+**Status:** Accepted 2026-10-29 (COR-133).
+
+An epic may depend on other epics. Developers can claim its tasks only when every prerequisite epic is done, in addition to satisfying task dependencies. Tasks without an epic are unaffected. An epic is done when all its non-deleted tasks outside Draft and Backlog are Merged; an epic with no such tasks is done. Progress counts use the same rule. Completing the last board task wakes tasks in dependent epics immediately, bypassing agent wake intervals. Deleting either epic cascades its dependency edges.
+
+The core helper validates epic dependency cycles and cycles in the combined task/epic wait graph, reporting the epics involved. Callers supply the complete proposed graph when validating dependency changes.
