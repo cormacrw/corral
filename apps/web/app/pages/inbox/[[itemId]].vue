@@ -26,15 +26,15 @@ const task = ref<Task | null>(null)
 const evidence = ref<Evidence[]>([])
 const reviews = ref<Review[]>([])
 const showTask = ref(true)
-const planApproving = ref(false)
-let approvalPosition = 0
+const planResolving = ref(false)
+let resolutionPosition = 0
 
 async function load() {
-  if (planApproving.value) return
+  if (planResolving.value) return
   error.value = null
   try {
     const loaded = await api.inbox.get()
-    if (!planApproving.value) inbox.value = loaded
+    if (!planResolving.value) inbox.value = loaded
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   }
@@ -50,10 +50,10 @@ onMounted(() => {
 const items = computed<InboxItem[]>(() => (inbox.value?.[tab.value] ?? []).filter(i => !search.value || `${i.taskRef ?? ''} ${i.subject} ${i.preview}`.toLowerCase().includes(search.value.toLowerCase())))
 const selectedId = computed(() => typeof route.params.itemId === 'string' ? route.params.itemId : null)
 watch(selectedId, () => {
-  // Leaving during an approval unmounts its conversation before it can
+  // Leaving during approval or close unmounts the thread before it can
   // release the hold. Resume live refreshes for the new selection.
-  if (planApproving.value) {
-    planApproving.value = false
+  if (planResolving.value) {
+    planResolving.value = false
     void load()
   }
 })
@@ -100,22 +100,19 @@ watch(selected, async (item, previous) => {
   if (selected.value?.id !== item?.id) return
   if (item && showTask.value && !device.isMobile.value) flyout.open(item.taskRef, { replace: true })
 }, { immediate: true })
-function setPlanApproving(value: boolean) {
-  planApproving.value = value
-  if (value) approvalPosition = items.value.findIndex(i => i.id === selectedId.value)
+// Capture before the request: plan.session can remove the row before it resolves.
+// Hold refreshes through both the request and flyout close, as for approval.
+function setPlanResolving(value: boolean) {
+  planResolving.value = value
+  if (value) resolutionPosition = items.value.findIndex(i => i.id === selectedId.value)
 }
-async function nextAfterApproval() {
-  planApproving.value = false
-  const position = approvalPosition
+async function nextAfterPlanResolution() {
+  planResolving.value = false
+  const position = resolutionPosition
   await load()
   const remaining = inbox.value?.needsYou ?? []
   const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
   await router.replace(next ? `/inbox/${next.id}` : '/inbox')
-}
-// Closed: the thread leaves the list, and selection moves on as after approving
-async function nextAfterClose() {
-  approvalPosition = items.value.findIndex(i => i.id === selectedId.value)
-  await nextAfterApproval()
 }
 function select(item: InboxItem) {
   void router.push(`/inbox/${item.id}`)
@@ -345,9 +342,10 @@ onBeforeUnmount(() => {
         :key="selected.sessionId"
         :item="selected"
         @read="load"
-        @approved="nextAfterApproval"
-        @approving="setPlanApproving"
-        @closed="nextAfterClose"
+        @approved="nextAfterPlanResolution"
+        @approving="setPlanResolving"
+        @closed="nextAfterPlanResolution"
+        @closing="setPlanResolving"
       />
       <div
         v-else

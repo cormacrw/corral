@@ -9,7 +9,7 @@ import { STOP_ASKING } from '~/utils/plan-questions'
 // you, the question or the plan, never the conversation. The full
 // conversation is one click away with Open in Plan.
 const props = defineProps<{ item: PlanThreadItem }>()
-const emit = defineEmits<{ read: [], approved: [], approving: [value: boolean], closed: [] }>()
+const emit = defineEmits<{ read: [], approved: [], approving: [value: boolean], closed: [], closing: [value: boolean] }>()
 const live = useLive()
 const flyout = useTaskFlyout()
 const toast = useToast()
@@ -111,6 +111,7 @@ const closing = ref(false)
 const closeError = ref<string | null>(null)
 async function close() {
   closing.value = true
+  emit('closing', true)
   closeError.value = null
   try {
     await api.plan.close(props.item.sessionId)
@@ -123,6 +124,7 @@ async function close() {
     closeError.value = e instanceof Error ? e.message : String(e)
   } finally {
     closing.value = false
+    emit('closing', false)
   }
 }
 </script>
