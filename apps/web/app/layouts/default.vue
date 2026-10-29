@@ -93,6 +93,15 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
       :actions="[{ label: 'Resume everything', color: 'neutral', variant: 'solid', onClick: resumeAll }]"
     />
     <UAlert
+      v-else-if="state.status.updating"
+      color="info"
+      variant="subtle"
+      icon="i-lucide-download"
+      title="Corral is updating. Running work will finish first; new runs start once the update is done."
+      :ui="{ root: 'shrink-0 rounded-none py-2' }"
+      orientation="horizontal"
+    />
+    <UAlert
       v-else-if="currentProject?.paused"
       color="warning"
       variant="solid"

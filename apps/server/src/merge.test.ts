@@ -277,13 +277,42 @@ describe('merge orchestrator and human controls', () => {
     await runner.next('run.stop', m => m.runId === run.runId)
     expect((await t.db.select().from(runs).where(eq(runs.id, run.runId)))[0]).toMatchObject({ state: 'interrupted' })
     expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', leaseRunId: null, failedRuns: 0 })
-    expect(await t.request('GET', '/api/status').then(r => r.json())).toEqual({ stopped: true })
+    expect(await t.request('GET', '/api/status').then(r => r.json())).toEqual({ stopped: true, updating: false })
     await t.orchestrator.schedule()
     expect(runner.received.filter(m => m.type === 'run.assign' && m.job.taskId === task.id)).toHaveLength(0)
 
     await t.request('POST', '/api/resume-all')
     const again = await runner.next('run.assign', m => m.job.taskId === task.id)
     expect(again.job.leaseEpoch).toBe(run.leaseEpoch + 1)
+    await pause(project)
+  })
+
+  it('holds new work for an update while running work finishes, then carries on', async () => {
+    const project = await t.createProject()
+    const task = await t.createTask(project.slug)
+    await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'approve' })
+    await t.orchestrator.schedule()
+    const run = (await runner.next('run.assign', m => m.job.taskId === task.id)).job
+
+    const { busy } = await t.request('POST', '/api/update-hold').then(r => r.json()) as { busy: number }
+    expect(busy).toBeGreaterThan(0)
+    expect(await t.request('GET', '/api/status').then(r => r.json())).toEqual({ stopped: false, updating: true })
+    expect(runner.received.some(m => m.type === 'run.stop' && m.runId === run.runId)).toBe(false)
+
+    // A task approved during the hold waits
+    const waiting = await t.createTask(project.slug)
+    await t.request('POST', `/api/projects/${project.slug}/tasks/${waiting.number}/transitions`, { type: 'approve' })
+    await t.orchestrator.schedule()
+    expect(runner.received.filter(m => m.type === 'run.assign' && m.job.taskId === waiting.id)).toHaveLength(0)
+
+    runner.send({ type: 'run.ended', runId: run.runId, leaseEpoch: run.leaseEpoch, exit: { kind: 'stopped' }, headSha: null })
+    await vi.waitFor(async () => {
+      const again = await t.request('POST', '/api/update-hold').then(r => r.json()) as { busy: number }
+      expect(again.busy).toBe(busy - 1)
+    })
+
+    expect(await t.request('DELETE', '/api/update-hold').then(r => r.json())).toEqual({ stopped: false, updating: false })
+    await runner.next('run.assign', m => m.job.taskId === waiting.id)
     await pause(project)
   })
 

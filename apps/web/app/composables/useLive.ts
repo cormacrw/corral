@@ -42,7 +42,7 @@ export function useLive() {
     agents: [],
     profile: null,
     runner: null,
-    status: { stopped: false },
+    status: { stopped: false, updating: false },
     inboxCount: 0,
     planSessions: [],
     runEvents: {}

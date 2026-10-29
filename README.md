@@ -43,6 +43,7 @@ Both logins live on volumes that only the runner container mounts. Corral never 
 
 - **State:** `server-data` (evidence and transcripts) and `postgres-data` hold everything worth backing up (`pg_dump` plus the blob folder). `runner-data` is a cache of clones, worktrees and spools.
 - **Config:** everything environment-specific is an environment variable; see `docker-compose.yml` and `.env.example`.
+- **Auto-deploy:** a systemd timer can redeploy whenever `main` moves and CI passes, waiting for agent runs to finish first; see `scripts/deploy/README.md`.
 - **Agents** run inside the runner container, which has `git`, `gh`, `claude`, a headless Chromium and Node/pnpm. Give it a memory limit sized for the concurrency you configure (`CORRAL_RUNNER_MEMORY`).
 
 Stopping the stack sends `SIGTERM`: the runner gives agents a few seconds, reports their runs as interrupted, and the server closes its connections.

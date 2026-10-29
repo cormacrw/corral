@@ -337,6 +337,8 @@ export type InboxActionInput = z.infer<typeof inboxActionInput>
 export interface GlobalStatus {
   // The kill switch: no runs start and running ones are stopped
   stopped: boolean
+  // Held for a redeploy: nothing new starts, running work finishes
+  updating: boolean
 }
 
 export const patchAgentInput = z.object({
@@ -355,6 +357,7 @@ export type ApiError =
   | { code: 'transition_rejected', reason: TransitionError }
   | { code: 'invalid_dependencies', problems: unknown }
   | { code: 'runner_offline' }
+  | { code: 'corral_updating' }
 
 export interface ApiErrorBody {
   error: ApiError

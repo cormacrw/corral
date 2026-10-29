@@ -358,16 +358,24 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     })
 
     // The kill switch (PRD §7.11)
-    .get('/status', c => c.json({ stopped: orchestrator.stopped }))
+    .get('/status', c => c.json(orchestrator.status))
 
     .post('/stop-all', async (c) => {
       await orchestrator.stopAll(actor)
-      return c.json({ stopped: true })
+      return c.json(orchestrator.status)
     })
 
     .post('/resume-all', async (c) => {
       await orchestrator.resumeAll(actor)
-      return c.json({ stopped: false })
+      return c.json(orchestrator.status)
+    })
+
+    // The update hold, for scripts/deploy/auto-deploy.sh
+    .post('/update-hold', async c => c.json({ busy: await orchestrator.holdForUpdate() }))
+
+    .delete('/update-hold', (c) => {
+      orchestrator.releaseUpdate()
+      return c.json(orchestrator.status)
     })
 
     .get('/runs', async (c) => {

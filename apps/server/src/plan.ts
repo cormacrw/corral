@@ -56,6 +56,8 @@ export interface PlanDeps {
   db: Database
   events: EventBus
   runner: RunnerHub
+  // True while the update hold is on; no turn may start
+  updating(): boolean
   // Starts a PM run for a session; the orchestrator owns runs
   startRun(session: SessionRow, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'>): Promise<string>
 }
@@ -110,6 +112,7 @@ export class PlanService {
     const [project] = await db.select().from(projects).where(eq(projects.id, session.projectId))
     if (!project) throw notFound()
     if (!this.#d.runner.online) throw new ApiFailure(503, { code: 'runner_offline' })
+    if (this.#d.updating()) throw new ApiFailure(503, { code: 'corral_updating' })
     const [active] = await db.select({ id: runs.id }).from(runs)
       .where(and(eq(runs.role, 'pm'), eq(runs.projectId, session.projectId), inArray(runs.state, ['queued', 'starting', 'running'])))
     if (active) throw new ApiFailure(409, { code: 'conflict', constraint: 'pm_turn_in_progress' })

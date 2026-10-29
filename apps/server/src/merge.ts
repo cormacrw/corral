@@ -41,7 +41,7 @@ export class MergeOrchestrator {
   #attempts = new Map<string, number>()
   // Tasks being advanced right now: a tick and a human approval can overlap
   #busy = new Set<string>()
-  // Set by the Orchestrator while the kill switch is on
+  // Set by the Orchestrator while the kill switch or the update hold is on
   stopped = false
 
   constructor(deps: MergeDeps) {
@@ -50,6 +50,11 @@ export class MergeOrchestrator {
 
   #now(): Date {
     return this.#d.now?.() ?? new Date()
+  }
+
+  // Merges being advanced right now; a redeploy waits for these
+  get inFlight(): number {
+    return this.#busy.size
   }
 
   // One pass over every task in Ready to merge
@@ -61,6 +66,7 @@ export class MergeOrchestrator {
       .where(and(eq(tasks.status, 'ready_to_merge'), isNull(tasks.leaseRunId), isNull(tasks.deletedAt), eq(tasks.paused, false), eq(schema.projects.paused, false)))
       .orderBy(asc(tasks.updatedAt))
     for (const { task, project } of waiting) {
+      if (this.stopped) return
       if (!task.prNumber || !task.headSha) continue
       await this.#advanceOnce(task, project)
     }

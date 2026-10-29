@@ -1,4 +1,4 @@
-import { EVIDENCE_KINDS, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type RunnerMessage } from '@corral/contracts'
+import { EVIDENCE_KINDS, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type RunnerMessage } from '@corral/contracts'
 import {
   ACTIVE_RUN_STATES,
   transition,
@@ -91,6 +91,7 @@ export class Orchestrator implements RunnerHandlers {
   #scheduling: Promise<void> | null = null
   #again = false
   #stopped = false
+  #updating = false
   readonly merges: MergeOrchestrator
   // Set once the plan service exists (it needs the orchestrator to start runs)
   plans: PlanService | null = null
@@ -110,6 +111,7 @@ export class Orchestrator implements RunnerHandlers {
   async startPmRun(session: PlanSessionRow, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'>): Promise<string> {
     const { db, runner } = this.#d
     if (this.#stopped) throw new ApiFailure(409, { code: 'conflict', constraint: 'corral_stopped' })
+    if (this.#updating) throw new ApiFailure(503, { code: 'corral_updating' })
     const [juno] = await db.select().from(agents).where(eq(agents.role, 'pm')).orderBy(asc(agents.createdAt)).limit(1)
     if (!juno) throw new ApiFailure(409, { code: 'conflict', constraint: 'no_pm_agent' })
     if (juno.paused || (juno.pausedUntil && juno.pausedUntil > this.#now())) throw new ApiFailure(409, { code: 'conflict', constraint: 'pm_paused' })
@@ -137,6 +139,34 @@ export class Orchestrator implements RunnerHandlers {
     return this.#stopped
   }
 
+  get status(): GlobalStatus {
+    return { stopped: this.#stopped, updating: this.#updating }
+  }
+
+  // The update hold (scripts/deploy): like the kill switch, nothing new
+  // starts, but running work finishes. Returns how much is still running, so
+  // the deploy can call it until that reaches zero. Kept in memory: the
+  // redeployed server starts without it.
+  async holdForUpdate(): Promise<number> {
+    if (!this.#updating) {
+      this.#updating = true
+      this.merges.stopped = true
+      this.#d.events.publish({ type: 'global.status', status: this.status })
+    }
+    // A pass that began before the hold may still be claiming
+    await this.#scheduling
+    const live = await this.#d.db.select({ id: runs.id }).from(runs).where(inArray(runs.state, [...ACTIVE_RUN_STATES]))
+    return live.length + this.merges.inFlight
+  }
+
+  releaseUpdate(): void {
+    if (!this.#updating) return
+    this.#updating = false
+    this.merges.stopped = this.#stopped
+    this.#d.events.publish({ type: 'global.status', status: this.status })
+    this.poke()
+  }
+
   // The kill switch (PRD §7.11): nothing new starts, and every live run is
   // stopped. Resuming lets the scheduler carry on; stopped runs retry.
   async stopAll(actor: Actor): Promise<void> {
@@ -158,10 +188,10 @@ export class Orchestrator implements RunnerHandlers {
 
   async #setStopped(stopped: boolean, actor: Actor): Promise<void> {
     this.#stopped = stopped
-    this.merges.stopped = stopped
+    this.merges.stopped = stopped || this.#updating
     await this.#d.db.insert(settings).values({ key: 'stopped', value: stopped }).onConflictDoUpdate({ target: settings.key, set: { value: stopped, updatedAt: this.#now() } })
     await this.#d.db.insert(auditLog).values({ actor, action: stopped ? 'corral.stopped' : 'corral.resumed', detail: {} })
-    this.#d.events.publish({ type: 'global.status', status: { stopped } })
+    this.#d.events.publish({ type: 'global.status', status: this.status })
   }
 
   #now(): Date {
@@ -206,12 +236,13 @@ export class Orchestrator implements RunnerHandlers {
 
   async #schedulePass(): Promise<void> {
     const { db, runner } = this.#d
-    if (!runner.online || this.#stopped) return
+    if (!runner.online || this.#stopped || this.#updating) return
     // PM turns aren't scheduled; they run when the human writes (D9)
     const workers = await db.select().from(agents).where(ne(agents.role, 'pm')).orderBy(asc(agents.createdAt))
     for (const agent of workers) {
       for (let claim = await claimNextTask(db, agent.id, this.#now()); claim; claim = await claimNextTask(db, agent.id, this.#now())) {
         await this.#assign(claim)
+        if (this.#stopped || this.#updating) return
       }
     }
   }

@@ -71,6 +71,7 @@ export function describe(status: number, error: ApiErrorBody['error'] | null): s
   switch (error.code) {
     case 'not_found': return 'Not found'
     case 'runner_offline': return 'The runner is offline'
+    case 'corral_updating': return 'Corral is updating; try again in a few minutes'
     case 'invalid_input': {
       // The first issue says what to fix, e.g. "The image is over 2 MB"
       const first = Array.isArray(error.issues) ? (error.issues[0] as { message?: unknown } | undefined)?.message : undefined

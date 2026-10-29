@@ -1,0 +1,9 @@
+# Installed by scripts/deploy/README.md. Set the path to your Corral checkout.
+[Unit]
+Description=Redeploy Corral if main has moved
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/corral/scripts/deploy/auto-deploy.sh
