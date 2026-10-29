@@ -161,6 +161,11 @@ export function useLive() {
 
   function connect(): void {
     if (source || !import.meta.client) return
+    // The static prototype has no server to stream from
+    if (import.meta.prototype) {
+      state.value.connection = 'open'
+      return
+    }
     state.value.connection = source ? 'open' : state.value.connection
     source = new EventSource('/api/events')
     const types: ServerEvent['type'][] = [

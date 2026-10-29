@@ -23,6 +23,7 @@ Three processes. In development they're all started together by `turbo dev`; whe
 - `ssr: false` for now; everything shown is live data from the server.
 - Nuxt `routeRules` proxy `/api/**` to `apps/server` (no CORS).
 - Live updates arrive over SSE from the server.
+- The one exception is `pnpm --filter web prototype` (D20): a static build of the same app on fixtures from `app/prototype/`, with no server, API or SSE. How to use it is in `CLAUDE.md`.
 - Types come from the Hono typed client (`hc`) and `packages/contracts`.
 - Theme: `app/app.config.ts` (colors) and `app/assets/css/main.css` (tokens, fonts). After `pnpm install`, `.nuxt/ui/<component>.ts` contains the exact Tailwind classes for every Nuxt UI component, slot and variant. Use these as the reference when designing or matching components.
 

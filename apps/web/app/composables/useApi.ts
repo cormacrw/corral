@@ -49,6 +49,11 @@ export class ApiError extends Error {
 }
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  // The static prototype answers from fixtures instead (app/prototype)
+  if (import.meta.prototype) {
+    const { mockCall } = await import('~/prototype/mock-api')
+    return mockCall<T>(method, path, body)
+  }
   // A Blob (an image upload) goes as is, with its own type; anything else is JSON
   const res = await fetch(`/api${path}`, {
     method,
