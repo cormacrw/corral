@@ -61,6 +61,8 @@ interface ActiveRun {
   started: boolean
   // Set once the server accepted report_outcome; the run is over
   outcomeAccepted: boolean
+  // Settles when the server answers a report_outcome call that is still open
+  reportingOutcome: Promise<unknown> | null
   // Set when the server or the timeout asked for the process to die
   stopping: StopReason | null
   rateLimit: { resetsAt: string | null } | null
@@ -157,6 +159,7 @@ export class RunManager {
       sessionId: job.agentSessionId,
       started: false,
       outcomeAccepted: false,
+      reportingOutcome: null,
       stopping: null,
       rateLimit: null,
       resumed: false,
@@ -188,7 +191,15 @@ export class RunManager {
       return
     }
     run.stopping ??= reason
+    // The server stops the run as it accepts report_outcome, so the stop can
+    // arrive before the tool result: wait for the answer before signalling
     const process = run.process
+    const reporting = run.reportingOutcome
+    if (reporting && reason === 'stopped') void reporting.then(() => this.#signal(run, process, reason))
+    else this.#signal(run, process, reason)
+  }
+
+  #signal(run: ActiveRun, process: AgentProcess, reason: StopReason): void {
     // After an accepted outcome the agent is just finishing its last reply;
     // let it see the tool result and exit on its own before signalling
     const delay = run.outcomeAccepted && reason === 'stopped' ? OUTCOME_EXIT_GRACE_MS : 0
@@ -599,9 +610,16 @@ export class RunManager {
         if (!pushed.ok) return pushed
         payload = { ...input, headSha: pushed.result }
       }
-      const result = await this.#forward(run, tool, payload)
-      if (result.ok) run.outcomeAccepted = true
-      return result
+      const reporting = this.#forward(run, tool, payload).then((result) => {
+        if (result.ok) run.outcomeAccepted = true
+        return result
+      })
+      run.reportingOutcome = reporting
+      try {
+        return await reporting
+      } finally {
+        if (run.reportingOutcome === reporting) run.reportingOutcome = null
+      }
     }
 
     return this.#forward(run, tool, input)
