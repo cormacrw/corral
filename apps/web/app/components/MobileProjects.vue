@@ -78,8 +78,9 @@ const cards = computed(() => state.value.projects.map((project) => {
           <span class="flex items-center gap-2">
             <span class="truncate font-semibold text-highlighted">{{ card.project.name }}</span>
             <UBadge
-              :label="card.project.paused ? 'Paused' : 'Running'"
-              :color="card.project.paused ? 'warning' : 'success'"
+              v-if="card.project.paused"
+              label="Paused"
+              color="warning"
               variant="subtle"
               size="sm"
             />

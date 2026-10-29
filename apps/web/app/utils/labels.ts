@@ -167,6 +167,15 @@ export function isWorking(agent: Agent): boolean {
   return agent.activeRuns > 0
 }
 
+// Idle has no marker. Explicit pause takes precedence over a usage cooldown.
+// Layouts that already indicate work can request exception markers only.
+export function agentStatus(agent: Pick<Agent, 'paused' | 'pausedUntil' | 'activeRuns'>, now = Date.now(), showWorking = true): { label: string, color: Color } | null {
+  if (agent.paused) return { label: 'Paused', color: 'neutral' }
+  if (agent.pausedUntil && new Date(agent.pausedUntil).getTime() > now) return { label: 'Waiting on usage limit', color: 'neutral' }
+  if (showWorking && agent.activeRuns > 0) return { label: 'Working', color: 'success' }
+  return null
+}
+
 // The note under a board card (design/board.md)
 // An epic's name for display; numbered when it isn't loaded yet
 export function epicTitle(epics: { id: string, title: string }[] | undefined, id: string, fallbackIndex: number): string {

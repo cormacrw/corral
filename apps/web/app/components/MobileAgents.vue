@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import type { Run } from '@corral/contracts'
+import type { Agent, Run } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { groupAgents, todayStats } from '~/utils/agents'
-import { duration, projectColor, ROLE, timeAgo, tokens } from '~/utils/labels'
+import { agentStatus, duration, projectColor, ROLE, timeAgo, tokens } from '~/utils/labels'
 
 // The mobile Agents tab (design/mobile.md): working agents with their live
 // run, the idle ones, and today's totals. Status follows the live
@@ -41,10 +41,8 @@ const today = computed(() => todayStats(runs.value, Object.values(state.value.ta
 const project = (run: Run) => state.value.projects.find(p => p.id === run.projectId) ?? null
 const to = (name: string) => `/agents/${name.toLowerCase()}`
 
-function idleLine(row: { agent: { role: string, paused: boolean, pausedUntil: string | null }, run: Run | null }): string {
+function idleLine(row: { agent: Agent, run: Run | null }): string {
   if (row.agent.role === 'pm') return 'Runs only when you message it in Plan'
-  if (row.agent.paused) return 'Paused'
-  if (row.agent.pausedUntil && new Date(row.agent.pausedUntil).getTime() > now.value) return `Waiting on usage limit until ${new Date(row.agent.pausedUntil).toLocaleTimeString()}`
   if (!row.run) return 'No runs yet'
   return `Last run ${timeAgo(row.run.endedAt ?? row.run.queuedAt, now.value)}${row.run.taskRef ? ` · ${row.run.taskRef}` : ''}`
 }
@@ -80,8 +78,8 @@ function idleLine(row: { agent: { role: string, paused: boolean, pausedUntil: st
             <span class="font-semibold text-highlighted">{{ row.agent.name }}</span>
             <span class="text-sm text-muted">{{ ROLE[row.agent.role] }}</span>
             <UBadge
-              label="Working"
-              color="success"
+              v-if="agentStatus(row.agent, now, false)"
+              v-bind="agentStatus(row.agent, now, false)"
               variant="subtle"
               size="sm"
               class="ms-auto"
@@ -137,8 +135,8 @@ function idleLine(row: { agent: { role: string, paused: boolean, pausedUntil: st
                 <span class="font-semibold text-highlighted">{{ row.agent.name }}</span>
                 <span class="text-sm text-muted">{{ ROLE[row.agent.role] }}</span>
                 <UBadge
-                  :label="row.agent.paused ? 'Paused' : 'Idle'"
-                  color="neutral"
+                  v-if="agentStatus(row.agent, now, false)"
+                  v-bind="agentStatus(row.agent, now, false)"
                   variant="subtle"
                   size="sm"
                   class="ms-auto"

@@ -1,12 +1,19 @@
 <script setup lang="ts">
 import type { Project } from '@corral/contracts'
-import { initials, isWorking, projectColor, ROLE, taskCounts } from '~/utils/labels'
+import { agentStatus, initials, isWorking, projectColor, ROLE, taskCounts } from '~/utils/labels'
 import { searchPages } from '~/utils/search'
 
 // The app shell (design/app-shell.md): global nav, projects, agents, runner
 const live = useLive()
 const state = live.state
 const route = useRoute()
+const now = ref(Date.now())
+onMounted(() => {
+  const timer = setInterval(() => {
+    now.value = Date.now()
+  }, 1000)
+  onBeforeUnmount(() => clearInterval(timer))
+})
 
 const expanded = useLocalStorage<Record<string, boolean>>('corral.sidebar.projects', {})
 const toggle = (project: Project) => {
@@ -305,9 +312,9 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
                   class="truncate"
                 >{{ agent.name }} <span class="text-muted">· {{ ROLE[agent.role] }}</span></span>
                 <span
-                  v-if="!collapsed"
+                  v-if="!collapsed && agentStatus(agent, now)"
                   class="ms-auto text-xs text-muted"
-                >{{ isWorking(agent) ? 'Working' : agent.paused ? 'Paused' : 'Idle' }}</span>
+                >{{ agentStatus(agent, now)?.label }}</span>
               </UButton>
             </UTooltip>
           </div>

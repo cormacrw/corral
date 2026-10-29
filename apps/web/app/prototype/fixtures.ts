@@ -84,7 +84,9 @@ export const projects: Project[] = [
 ]
 
 export const agents: Agent[] = [
-  { id: 'a-pm', name: 'Pam', role: 'pm', runtime: 'claude-code', concurrency: 1, paused: false, wakeIntervalSeconds: null, pausedUntil: null, activeRuns: 0, avatarUrl: null },
+  { id: 'a-paused', name: 'Pax', role: 'developer', runtime: 'codex', concurrency: 1, paused: true, wakeIntervalSeconds: null, pausedUntil: null, activeRuns: 0, avatarUrl: null },
+  { id: 'a-limited', name: 'Uma', role: 'reviewer', runtime: 'codex', concurrency: 1, paused: false, wakeIntervalSeconds: null, pausedUntil: ago(-120), activeRuns: 0, avatarUrl: null },
+  { id: 'a-pm', name: 'Pam', role: 'pm', runtime: 'claude-code', concurrency: 1, paused: false, wakeIntervalSeconds: null, pausedUntil: ago(60), activeRuns: 0, avatarUrl: null },
   { id: 'a-dev', name: 'Victor', role: 'developer', runtime: 'claude-code', concurrency: 2, paused: false, wakeIntervalSeconds: null, pausedUntil: null, activeRuns: 1, avatarUrl: null },
   { id: 'a-dev2', name: 'Dana', role: 'developer', runtime: 'codex', concurrency: 1, paused: false, wakeIntervalSeconds: null, pausedUntil: null, activeRuns: 1, avatarUrl: null },
   { id: 'a-rev', name: 'Rita', role: 'reviewer', runtime: 'claude-code', concurrency: 1, paused: false, wakeIntervalSeconds: null, pausedUntil: null, activeRuns: 1, avatarUrl: null }

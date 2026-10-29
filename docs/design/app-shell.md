@@ -33,7 +33,7 @@ There is no top header on desktop; every page owns the full height. Below 1024px
    - The expanded or collapsed state of each project is remembered per user.
 5. **Agents:** Juno · PM, Atlas · Developer and Vera · Reviewer.
    - Each has an avatar with a status dot: `success` with the ping animation when working, `text-dimmed` when idle.
-   - Each shows a status label on the right (Working or Idle).
+   - Each shows a status label on the right only for Working, Paused or Waiting on usage limit, from the shared `agentStatus` helper. Idle agents, including those with expired usage cooldowns, have no marker.
    - Clicking one opens that agent's page.
 6. **Settings:** pinned to the bottom of the scroll area. Global settings.
 
