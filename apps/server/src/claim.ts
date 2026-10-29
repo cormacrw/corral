@@ -29,7 +29,11 @@ export interface Claim {
 // waiting for this one. Locking the agent row first means its concurrency
 // limit can't be overshot either. This is only meaningful on Postgres; PGlite
 // runs one transaction at a time (D14).
-export async function claimNextTask(db: Executor, agentId: string, now = new Date()): Promise<Claim | null> {
+//
+// `only` limits the claim to those tasks, for an agent still inside its
+// wake interval that an event about them may start anyway.
+export async function claimNextTask(db: Executor, agentId: string, now = new Date(), only?: readonly string[]): Promise<Claim | null> {
+  if (only?.length === 0) return null
   return db.transaction(async (tx) => {
     const [agent] = await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')
     if (!agent) throw new Error(`Unknown agent ${agentId}`)
@@ -61,6 +65,7 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
       .innerJoin(projects, eq(projects.id, tasks.projectId))
       .where(and(
         eligible,
+        only && inArray(tasks.id, [...only]),
         isNull(tasks.leaseRunId),
         isNull(tasks.deletedAt),
         eq(tasks.paused, false),

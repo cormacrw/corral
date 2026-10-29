@@ -82,7 +82,7 @@ Approval writes the status change and an audit entry, then triggers an immediate
 
 ### Step 2 — Claim (server, no model call)
 
-The scheduler checks: project and group not paused, the task not paused, developer group under its concurrency limit, runner online, and the task is Ready with all dependencies Merged. On the periodic tick (not on events like approval), an agent with a wake interval is also skipped until that long has passed since its last run started, and starts at most one run per tick. Then it claims in one statement:
+The scheduler checks: project and group not paused, the task not paused, developer group under its concurrency limit, runner online, and the task is Ready with all dependencies Merged. An agent with a wake interval starts at most one task of its own choosing per interval, counted from when its last run started. Only the task an event is about skips that wait: a task the human approved or acted on, the tasks of an approved plan, and a task handed on by a pushed PR or a review verdict. Other passes, such as a run ending, a runner reconnecting, a settings change or a resume, leave the agent's waiting work for the interval. Then it claims in one statement:
 
 ```sql
 UPDATE tasks SET status = 'in_progress', lease_epoch = lease_epoch + 1, ...
