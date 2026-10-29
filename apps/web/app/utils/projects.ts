@@ -19,7 +19,8 @@ export function projectCardSummary(
   needsYou: number,
   now = Date.now()
 ): ProjectCardSummary {
-  const board = tasks.filter(t => onBoard(t, now)).length
+  // Work in flight: the Board's columns without recently merged tasks
+  const board = tasks.filter(t => t.status !== 'merged' && onBoard(t, now)).length
   const backlog = tasks.filter(t => t.status === 'backlog').length
   const needs = needsYou > 0 ? `${needsYou} needs you.` : ''
   const leased = tasks.filter(t => t.lease)
