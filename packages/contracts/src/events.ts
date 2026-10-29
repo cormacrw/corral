@@ -15,6 +15,7 @@ export type ServerEvent =
   | { type: 'task.deleted', taskId: string, projectId: string }
   | { type: 'comment.created', comment: Comment }
   | { type: 'project.updated', project: Project }
+  | { type: 'project.deleted', projectId: string }
   | { type: 'global.status', status: GlobalStatus }
   | { type: 'plan.session', session: PlanSession }
   | { type: 'plan.message', message: PlanMessage }
