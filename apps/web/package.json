@@ -6,6 +6,7 @@
     "build": "nuxt build",
     "dev": "nuxt dev --no-tui",
     "preview": "nuxt preview",
+    "prototype": "CORRAL_PROTOTYPE=1 nuxt generate",
     "postinstall": "nuxt prepare",
     "lint": "eslint .",
     "typecheck": "nuxt typecheck",

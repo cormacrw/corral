@@ -4,7 +4,8 @@ useHead({
     { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' }
   ],
   link: [
-    { rel: 'icon', href: '/favicon.ico' }
+    // Relative in the prototype, which runs from a sub-path
+    { rel: 'icon', href: import.meta.prototype ? 'favicon.ico' : '/favicon.ico' }
   ],
   htmlAttrs: {
     lang: 'en'

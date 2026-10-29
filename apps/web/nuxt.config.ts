@@ -1,4 +1,10 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
+
+// `pnpm prototype` (D20): the same app on fixture data, generated as static
+// files with relative paths and hash routes, so it runs from any sub-path in
+// a sandboxed iframe with no server. Off for dev and production builds.
+const prototype = process.env.CORRAL_PROTOTYPE === '1'
+
 export default defineNuxtConfig({
   modules: [
     '@nuxt/eslint',
@@ -17,27 +23,37 @@ export default defineNuxtConfig({
   // script runs. Paths are relative to the origin: Corral runs behind
   // whatever hostname the tunnel gives it (D12).
   app: {
-    head: {
-      meta: [
-        { name: 'theme-color', content: '#ffffff', media: '(prefers-color-scheme: light)' },
-        { name: 'theme-color', content: '#0f172b', media: '(prefers-color-scheme: dark)' },
-        { name: 'mobile-web-app-capable', content: 'yes' },
-        { name: 'apple-mobile-web-app-capable', content: 'yes' },
-        { name: 'apple-mobile-web-app-title', content: 'Corral' },
-        { name: 'apple-mobile-web-app-status-bar-style', content: 'default' }
-      ],
-      link: [
-        { rel: 'manifest', href: '/manifest.webmanifest' },
-        { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' }
-      ]
-    }
+    ...(prototype && { cdnURL: './' }),
+    head: prototype
+      ? {}
+      : {
+          meta: [
+            { name: 'theme-color', content: '#ffffff', media: '(prefers-color-scheme: light)' },
+            { name: 'theme-color', content: '#0f172b', media: '(prefers-color-scheme: dark)' },
+            { name: 'mobile-web-app-capable', content: 'yes' },
+            { name: 'apple-mobile-web-app-capable', content: 'yes' },
+            { name: 'apple-mobile-web-app-title', content: 'Corral' },
+            { name: 'apple-mobile-web-app-status-bar-style', content: 'default' }
+          ],
+          link: [
+            { rel: 'manifest', href: '/manifest.webmanifest' },
+            { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' }
+          ]
+        }
   },
 
   css: ['~/assets/css/main.css'],
 
-  routeRules: {
-    '/api/**': { proxy: `${process.env.CORRAL_SERVER_URL || 'http://127.0.0.1:4100'}/api/**` }
+  // A sub-path inside a sandbox can't use history routes or a server
+  router: {
+    options: { hashMode: prototype }
   },
+
+  routeRules: prototype
+    ? {}
+    : {
+        '/api/**': { proxy: `${process.env.CORRAL_SERVER_URL || 'http://127.0.0.1:4100'}/api/**` }
+      },
 
   // Set by scripts/dev.ts so several checkouts can run at once
   devServer: {
@@ -45,6 +61,18 @@ export default defineNuxtConfig({
   },
 
   compatibilityDate: '2026-06-30',
+
+  // Swaps the API for fixtures (app/prototype); a constant, so dev and
+  // production builds drop the fixtures entirely
+  vite: {
+    define: { 'import.meta.prototype': JSON.stringify(prototype) }
+  },
+
+  ...(prototype && {
+    nitro: { output: { publicDir: 'prototype-dist' } },
+    // No icon server and no network: bundle every icon the code names
+    icon: { provider: 'none', clientBundle: { scan: { globInclude: ['app/**/*.{vue,ts}'] }, sizeLimitKb: 0 } }
+  }),
 
   eslint: {
     config: {

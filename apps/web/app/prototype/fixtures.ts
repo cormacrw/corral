@@ -1,0 +1,339 @@
+import type {
+  Agent,
+  AuditEntry,
+  CliStatus,
+  Comment,
+  Epic,
+  Evidence,
+  GlobalStatus,
+  Inbox,
+  PlanMessage,
+  Plan,
+  PlanSession,
+  Profile,
+  Project,
+  RepoList,
+  Review,
+  Run,
+  RunEvent,
+  RunnerStatus,
+  Task
+} from '@corral/contracts'
+
+// The prototype's data (D20, `pnpm prototype`): what the server would return,
+// as plain objects of the contract types. Design agents edit or add to these
+// so a screen shows the states they're designing; app/prototype/mock-api.ts
+// serves them in place of /api. Nothing here reaches dev or production builds.
+
+// An ISO time `minutes` before the page loaded, so the fixtures always look recent
+const loadedAt = Date.now()
+export function ago(minutes: number): string {
+  return new Date(loadedAt - minutes * 60_000).toISOString()
+}
+
+export const profile: Profile = { id: 'user-1', name: 'Cormac', avatarUrl: null }
+
+export const runner: RunnerStatus = {
+  online: true,
+  runnerId: 'runner-1',
+  name: 'home-server',
+  connectedAt: ago(600),
+  lastHeartbeatAt: ago(0)
+}
+
+export const status: GlobalStatus = { stopped: false, updating: false }
+
+export const projects: Project[] = [
+  {
+    id: 'p-corral',
+    name: 'Corral',
+    slug: 'corral',
+    prefix: 'COR',
+    thumbnailColor: '#14b8a6',
+    nextTaskNumber: 13,
+    repository: 'cormacrw/corral',
+    defaultBranch: 'main',
+    mergeMethod: 'squash',
+    requiredChecks: ['lint', 'test'],
+    paused: false,
+    humanReviewDefault: false,
+    reviewRoundCap: 3,
+    failedRunCap: 3,
+    createdAt: ago(60 * 24 * 14),
+    updatedAt: ago(60)
+  },
+  {
+    id: 'p-site',
+    name: 'Marketing site',
+    slug: 'marketing-site',
+    prefix: 'WEB',
+    thumbnailColor: '#8b5cf6',
+    nextTaskNumber: 3,
+    repository: 'cormacrw/site',
+    defaultBranch: 'main',
+    mergeMethod: 'squash',
+    requiredChecks: [],
+    paused: true,
+    humanReviewDefault: true,
+    reviewRoundCap: 3,
+    failedRunCap: 3,
+    createdAt: ago(60 * 24 * 3),
+    updatedAt: ago(60 * 5)
+  }
+]
+
+export const agents: Agent[] = [
+  { id: 'a-pm', name: 'Pam', role: 'pm', runtime: 'claude-code', concurrency: 1, paused: false, pausedUntil: null, activeRuns: 0, avatarUrl: null },
+  { id: 'a-dev', name: 'Victor', role: 'developer', runtime: 'claude-code', concurrency: 2, paused: false, pausedUntil: null, activeRuns: 1, avatarUrl: null },
+  { id: 'a-dev2', name: 'Dana', role: 'developer', runtime: 'codex', concurrency: 1, paused: false, pausedUntil: null, activeRuns: 0, avatarUrl: null },
+  { id: 'a-rev', name: 'Rita', role: 'reviewer', runtime: 'claude-code', concurrency: 1, paused: false, pausedUntil: null, activeRuns: 1, avatarUrl: null }
+]
+
+export const epics: Epic[] = [
+  {
+    id: 'e-design',
+    projectId: 'p-corral',
+    title: 'Design tasks',
+    description: 'Versioned, sandboxed prototypes the human approves before the build is planned (D20).',
+    taskCount: 6,
+    mergedCount: 2,
+    createdAt: ago(60 * 24 * 2),
+    updatedAt: ago(60)
+  },
+  {
+    id: 'e-mobile',
+    projectId: 'p-corral',
+    title: 'Mobile app',
+    description: 'The installable app for phones (D17).',
+    taskCount: 3,
+    mergedCount: 1,
+    createdAt: ago(60 * 24 * 7),
+    updatedAt: ago(60 * 24)
+  }
+]
+
+// A paragraph of task text, as the editor stores it
+function doc(...paragraphs: string[]): Task['description'] {
+  return { type: 'doc', content: paragraphs.map(text => ({ type: 'paragraph', content: [{ type: 'text', text }] })) }
+}
+
+// A task with sensible defaults; give only what the screen needs
+export function task(project: Project, number: number, fields: Partial<Task> & Pick<Task, 'title' | 'status'>): Task {
+  return {
+    id: `t-${project.prefix.toLowerCase()}-${number}`,
+    projectId: project.id,
+    ref: `${project.prefix}-${number}`,
+    number,
+    description: doc(`${fields.title}.`),
+    priority: 'medium',
+    type: 'task',
+    epicId: null,
+    humanReview: project.humanReviewDefault,
+    reviewRounds: 0,
+    failedRuns: 0,
+    statusReason: null,
+    paused: false,
+    branch: null,
+    prNumber: null,
+    prUrl: null,
+    acceptanceCriteria: [],
+    dependsOn: [],
+    lease: null,
+    headSha: null,
+    latestReview: null,
+    mergeCommitSha: null,
+    mergedAt: null,
+    gateChecks: null,
+    design: null,
+    createdAt: ago(60 * 24),
+    updatedAt: ago(30),
+    ...fields
+  }
+}
+
+function criteria(...texts: string[]): Task['acceptanceCriteria'] {
+  return texts.map((text, position) => ({ id: `c-${position + 1}-${text.length}`, position, text, met: null }))
+}
+
+const [corral, site] = projects as [Project, Project]
+
+export const tasks: Task[] = [
+  task(corral, 1, { title: 'Design task type and versions', status: 'merged', epicId: 'e-design', prNumber: 60, prUrl: 'https://github.com/cormacrw/corral/pull/60', mergedAt: ago(60 * 20), mergeCommitSha: 'da0ebe6' }),
+  task(corral, 2, { title: 'Serve design bundles sandboxed', status: 'merged', epicId: 'e-design', dependsOn: ['COR-1'], prNumber: 62, prUrl: 'https://github.com/cormacrw/corral/pull/62', mergedAt: ago(60 * 3), mergeCommitSha: 'e5e8457' }),
+  task(corral, 3, {
+    title: 'Static prototype build with mock data',
+    status: 'in_progress',
+    priority: 'high',
+    epicId: 'e-design',
+    dependsOn: ['COR-2'],
+    branch: 'corral/cor-3-static-prototype',
+    lease: { runId: 'r-1', role: 'developer', expiresAt: ago(-10) },
+    acceptanceCriteria: criteria('`pnpm prototype` outputs index.html with fixture data', 'Works from a sub-path with no API', 'CLAUDE.md documents it')
+  }),
+  task(corral, 4, {
+    title: 'Design review screen',
+    status: 'agent_review',
+    type: 'design',
+    epicId: 'e-design',
+    branch: 'design/COR-4',
+    prNumber: 63,
+    prUrl: 'https://github.com/cormacrw/corral/pull/63',
+    lease: { runId: 'r-2', role: 'reviewer', expiresAt: ago(-12) },
+    reviewRounds: 1,
+    acceptanceCriteria: criteria('Shows every version with its screenshots', 'Approve and request changes from the page')
+  }),
+  task(corral, 5, {
+    title: 'Approve a design version from the inbox',
+    status: 'human_review',
+    humanReview: true,
+    epicId: 'e-design',
+    branch: 'corral/cor-5-approve-design',
+    prNumber: 64,
+    prUrl: 'https://github.com/cormacrw/corral/pull/64',
+    reviewRounds: 1,
+    gateChecks: [{ name: 'lint', url: null }, { name: 'test', url: null }],
+    acceptanceCriteria: criteria('Approve marks the version approved', 'Earlier versions are superseded').map(c => ({ ...c, met: true }))
+  }),
+  task(corral, 6, { title: 'Pin build tasks to a design', status: 'ready', epicId: 'e-design', dependsOn: ['COR-5'] }),
+  task(corral, 7, { title: 'PM drafts tasks from an approved design', status: 'ready_to_merge', epicId: 'e-design', prNumber: 65, prUrl: 'https://github.com/cormacrw/corral/pull/65' }),
+  task(corral, 8, { title: 'Push notifications for Needs you', status: 'blocked', epicId: 'e-mobile', statusReason: 'Which push service should the server use: Web Push with VAPID keys, or ntfy?' }),
+  task(corral, 9, { title: 'Offline board', status: 'failed', type: 'bug', priority: 'urgent', epicId: 'e-mobile', failedRuns: 3, statusReason: 'The runner lost its worktree three times in a row.' }),
+  task(corral, 10, { title: 'Install sheet on iOS', status: 'merged', epicId: 'e-mobile', mergedAt: ago(60 * 30) }),
+  task(corral, 11, { title: 'Dark mode for the epic graph', status: 'backlog', priority: 'low' }),
+  task(corral, 12, { title: 'Spike: Codex reasoning effort', status: 'backlog', type: 'spike' }),
+  task(site, 1, { title: 'New landing page hero', status: 'ready', type: 'design' }),
+  task(site, 2, { title: 'Fix broken pricing link', status: 'backlog', type: 'bug' })
+]
+
+const at = (ref: string): Task => tasks.find(t => t.ref === ref)!
+
+export const runs: Run[] = [
+  {
+    id: 'r-1', number: 128, agentId: 'a-dev', agentName: 'Victor', role: 'developer', projectId: 'p-corral',
+    taskId: at('COR-3').id, taskRef: 'COR-3', taskTitle: at('COR-3').title, state: 'running', outcome: null, summary: null,
+    error: null, headSha: null, inputTokens: 18_200, cacheReadTokens: 240_000, outputTokens: 6_100, rateLimitResetAt: null,
+    queuedAt: ago(25), startedAt: ago(24), endedAt: null
+  },
+  {
+    id: 'r-2', number: 129, agentId: 'a-rev', agentName: 'Rita', role: 'reviewer', projectId: 'p-corral',
+    taskId: at('COR-4').id, taskRef: 'COR-4', taskTitle: at('COR-4').title, state: 'running', outcome: null, summary: null,
+    error: null, headSha: '9e71e28', inputTokens: 9_000, cacheReadTokens: 80_000, outputTokens: 1_200, rateLimitResetAt: null,
+    queuedAt: ago(8), startedAt: ago(7), endedAt: null
+  },
+  {
+    id: 'r-3', number: 127, agentId: 'a-dev', agentName: 'Victor', role: 'developer', projectId: 'p-corral',
+    taskId: at('COR-5').id, taskRef: 'COR-5', taskTitle: at('COR-5').title, state: 'completed', outcome: 'pr_opened',
+    summary: 'Approving a version marks it approved and supersedes earlier ones.', error: null, headSha: '5b030d7',
+    inputTokens: 30_000, cacheReadTokens: 400_000, outputTokens: 9_800, rateLimitResetAt: null,
+    queuedAt: ago(140), startedAt: ago(139), endedAt: ago(95)
+  }
+]
+
+export const runEvents: Record<string, RunEvent[]> = {
+  'r-1': [
+    { type: 'system', text: 'Run #128 started on home-server' },
+    { type: 'message', text: 'Reading CLAUDE.md and docs/README.md first.' },
+    { type: 'tool_call', id: 'call-1', tool: 'Bash', input: { command: 'cat apps/web/nuxt.config.ts' } },
+    { type: 'tool_result', id: 'call-1', output: 'export default defineNuxtConfig({ … })', isError: false },
+    { type: 'thinking', text: 'All API calls go through one function, so fixtures can replace it.' },
+    { type: 'message', text: 'Adding a fixture-backed data layer behind a build flag.' }
+  ]
+}
+
+export const comments: Record<string, Comment[]> = {
+  [at('COR-3').id]: [
+    { id: 'cm-1', taskId: at('COR-3').id, author: { kind: 'human', userId: 'user-1' }, body: 'Keep the fixtures out of the production bundle.', pinned: true, createdAt: ago(40) },
+    { id: 'cm-2', taskId: at('COR-3').id, author: { kind: 'agent', role: 'developer', runId: 'r-1' }, body: 'Done: the fixtures load only when the prototype flag is set.', pinned: false, createdAt: ago(10) }
+  ]
+}
+
+export const history: Record<string, AuditEntry[]> = {
+  [at('COR-3').id]: [
+    { id: 1, projectId: 'p-corral', taskId: at('COR-3').id, actor: { kind: 'human', userId: 'user-1' }, action: 'task.created', detail: {}, createdAt: ago(60 * 24) },
+    { id: 2, projectId: 'p-corral', taskId: at('COR-3').id, actor: { kind: 'system', component: 'scheduler' }, action: 'task.transition', detail: { from: 'ready', to: 'in_progress' }, createdAt: ago(25) }
+  ]
+}
+
+export const evidence: Record<string, Evidence[]> = {}
+
+export const reviews: Record<string, Review[]> = {}
+
+export const planSessions: PlanSession[] = [
+  {
+    id: 's-1', projectId: 'p-corral', title: 'Design tasks', runtime: 'claude-code',
+    preview: 'Here is a plan with six tasks. Approve it to put them on the board.',
+    unread: true, status: 'needs_approval', activeRunId: null, createdAt: ago(60 * 26), updatedAt: ago(60 * 25)
+  },
+  {
+    id: 's-2', projectId: 'p-corral', title: 'Mobile push', runtime: 'claude-code',
+    preview: 'Which push service should we use?', unread: false, status: 'question', activeRunId: null,
+    createdAt: ago(60 * 4), updatedAt: ago(60 * 3)
+  }
+]
+
+export const planMessages: Record<string, PlanMessage[]> = {
+  's-1': [
+    { id: 'm-1', sessionId: 's-1', role: 'human', kind: 'message', text: 'Plan design tasks: prototypes the human approves before the build.', recommendation: null, options: null, planId: null, runId: null, createdAt: ago(60 * 26) },
+    { id: 'm-2', sessionId: 's-1', role: 'pm', kind: 'message', text: 'Here is a plan with six tasks. Approve it to put them on the board.', recommendation: null, options: null, planId: 'plan-1', runId: null, createdAt: ago(60 * 25) }
+  ],
+  's-2': [
+    { id: 'm-3', sessionId: 's-2', role: 'human', kind: 'message', text: 'Add push notifications for Needs you.', recommendation: null, options: null, planId: null, runId: null, createdAt: ago(60 * 4) },
+    { id: 'm-4', sessionId: 's-2', role: 'pm', kind: 'question', text: 'Which push service should we use?', recommendation: 'Web Push', options: ['Web Push with VAPID keys', 'ntfy'], planId: null, runId: null, createdAt: ago(60 * 3) }
+  ]
+}
+
+export const plans: Record<string, Plan[]> = {
+  's-1': [
+    {
+      id: 'plan-1', sessionId: 's-1', projectId: 'p-corral', epicId: null, version: 1, title: 'Design tasks',
+      summary: 'A design task type whose deliverable is an approved, versioned prototype.', status: 'proposed', approvedAt: null,
+      epics: [{ key: 'E1', id: 'e-design', title: 'Design tasks' }],
+      tasks: [
+        { key: 'T1', change: 'added', revises: false, taskId: null, epicId: 'e-design', ref: null, title: 'Design review screen', status: 'draft', criteriaCount: 2, dependsOn: [] },
+        { key: 'T2', change: 'added', revises: false, taskId: null, epicId: 'e-design', ref: null, title: 'Approve a design version', status: 'draft', criteriaCount: 2, dependsOn: ['T1'] }
+      ],
+      createdAt: ago(60 * 25)
+    }
+  ]
+}
+
+export const repos: RepoList = {
+  signedIn: true,
+  fetchedAt: ago(1),
+  repos: [
+    { nameWithOwner: 'cormacrw/corral', description: 'An autonomous software factory', isPrivate: true, updatedAt: ago(30), defaultBranch: 'main', selectable: false, reason: 'used_by_project', usedBy: { slug: 'corral', name: 'Corral' } },
+    { nameWithOwner: 'cormacrw/test-app', description: 'Test repository', isPrivate: false, updatedAt: ago(60 * 24), defaultBranch: 'main', selectable: true, reason: null, usedBy: null }
+  ]
+}
+
+export const clis: CliStatus[] = [
+  { id: 'claude', name: 'Claude Code', version: '2.1.0', signedIn: true },
+  { id: 'codex', name: 'Codex', version: '0.50.0', signedIn: false }
+]
+
+// The inbox is derived from the tasks above that need the human
+export function inbox(): Inbox {
+  const needsYou = tasks
+    .filter(t => t.status === 'human_review' || t.status === 'blocked' || t.status === 'failed')
+    .map((t) => {
+      const project = projects.find(p => p.id === t.projectId)!
+      const type = t.status === 'human_review' ? 'human_review' as const : t.status === 'blocked' ? 'blocked' as const : 'failed' as const
+      const subject = type === 'human_review' ? `Review ${t.title}` : t.title
+      const body = t.statusReason ?? 'The reviewer approved this change and it needs your review.'
+      return {
+        id: t.id,
+        type,
+        project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor },
+        taskId: t.id,
+        taskRef: t.ref,
+        subject,
+        preview: body,
+        body,
+        sender: type === 'failed' ? { name: 'Corral', role: 'system' as const } : { name: type === 'blocked' ? 'Victor' : 'Rita', role: type === 'blocked' ? 'developer' as const : 'reviewer' as const },
+        at: t.updatedAt,
+        prUrl: t.prUrl,
+        resolution: null
+      }
+    })
+  return { needsYou, activity: [], resolved: [] }
+}
