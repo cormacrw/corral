@@ -84,7 +84,9 @@ const title = computed(() => {
             {{ title }}
           </h1>
         </div>
+        <!-- Home shows the runner's status in the page instead -->
         <span
+          v-if="title !== 'Home'"
           class="flex shrink-0 items-center gap-1.5 text-xs text-muted"
           data-testid="runner-status"
         >
