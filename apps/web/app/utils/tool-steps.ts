@@ -153,6 +153,8 @@ function describe(rawTool: string, input: unknown): Pick<ToolStep, 'kind' | 'ver
       return { kind: 'phrase', verb: 'Checked the evidence', target: str('evidenceId') }
     case 'get_attachment':
       return { kind: 'phrase', verb: 'Looked at an attachment', target: str('attachmentId') }
+    case 'get_design':
+      return { kind: 'phrase', verb: 'Read the design', target: [str('taskRef'), typeof o.version === 'number' ? `v${o.version}` : ''].filter(Boolean).join(' ') }
     case 'report_outcome':
       return { kind: 'phrase', verb: 'Reported the outcome', target: str('outcome') }
     case 'list_tasks':
