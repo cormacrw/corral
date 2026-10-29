@@ -98,14 +98,12 @@ async function start(message: string): Promise<boolean> {
 <template>
   <UDashboardPanel>
     <!-- Phones switch sessions from a header button (design/mobile.md) -->
-    <Teleport
-      v-if="device.isMobile.value"
-      defer
-      to="#mobile-header-actions"
-    >
-      <PlanSessionSwitcher />
-    </Teleport>
-    <div :class="['flex min-h-0 flex-1 flex-col items-center overflow-y-auto overscroll-contain', device.isMobile.value ? 'justify-start p-4' : 'justify-center p-6']">
+    <MobilePageHeader v-if="device.isMobile.value">
+      <template #actions>
+        <PlanSessionSwitcher />
+      </template>
+    </MobilePageHeader>
+    <div :class="['flex flex-col items-center', device.isMobile.value ? 'shrink-0 justify-start p-4' : 'min-h-0 flex-1 justify-center overflow-y-auto overscroll-contain p-6']">
       <div class="flex w-full max-w-[720px] flex-col gap-6">
         <div class="flex flex-col items-center gap-2 text-center">
           <AgentAvatar

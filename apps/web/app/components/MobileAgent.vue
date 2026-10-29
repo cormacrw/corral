@@ -16,6 +16,7 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
 </script>
 
 <template>
+  <MobilePageHeader />
   <div
     v-if="!agent"
     class="p-4"

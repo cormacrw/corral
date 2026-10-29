@@ -32,19 +32,18 @@ const cards = computed(() => state.value.projects.map((project) => {
 </script>
 
 <template>
-  <Teleport
-    defer
-    to="#mobile-header-actions"
-  >
-    <UButton
-      to="/setup?step=repo&add=1"
-      icon="i-lucide-plus"
-      variant="ghost"
-      color="neutral"
-      aria-label="Add project"
-    />
-  </Teleport>
   <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4">
+    <MobilePageHeader class="-mx-4 -mt-4">
+      <template #actions>
+        <UButton
+          to="/setup?step=repo&add=1"
+          icon="i-lucide-plus"
+          variant="ghost"
+          color="neutral"
+          aria-label="Add project"
+        />
+      </template>
+    </MobilePageHeader>
     <template v-if="!state.loaded">
       <USkeleton
         v-for="n in 2"

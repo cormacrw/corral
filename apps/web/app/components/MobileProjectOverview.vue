@@ -4,7 +4,7 @@ import { duration, inboxTypeBadge, initials, projectColor, STATUS, timeAgo } fro
 
 // Project overview on mobile (design/mobile.md, frame "Project overview").
 // The same sections as the web page in one column, with links to the
-// Board and Backlog. The mobile layout's header holds Back and Settings.
+// Board and Backlog. The in-page title row holds Back and Settings.
 const props = defineProps<{ overview: ProjectOverview }>()
 const { project, tasks, runs, history, error, load, DOT, count, needsYou, mergedThisWeek, firstPass, waitingOnDependency, developer, reviewer, pmName, epics, taskOf, actorName, taskRefOf, activityText } = props.overview
 </script>
@@ -13,6 +13,7 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
   <div class="flex min-h-0 min-w-0 flex-1 flex-col">
     <!-- The active runs' glow spills past the screen's edge -->
     <div class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
+      <MobilePageHeader />
       <div
         v-if="!project"
         class="flex flex-col gap-3 p-4"

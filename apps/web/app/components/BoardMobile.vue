@@ -72,20 +72,19 @@ const note = (task: Task) => taskNote(task, props.all, props.reviewRoundCap)
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col">
-    <Teleport
-      defer
-      to="#mobile-header-actions"
-    >
-      <UButton
-        icon="i-lucide-search"
-        variant="ghost"
-        color="neutral"
-        aria-label="Search tasks"
-        :aria-pressed="searching"
-        @click="toggleSearch"
-      />
-    </Teleport>
+  <div class="*:shrink-0 flex h-full min-h-0 flex-col overflow-y-auto overscroll-contain">
+    <MobilePageHeader>
+      <template #actions>
+        <UButton
+          icon="i-lucide-search"
+          variant="ghost"
+          color="neutral"
+          aria-label="Search tasks"
+          :aria-pressed="searching"
+          @click="toggleSearch"
+        />
+      </template>
+    </MobilePageHeader>
 
     <div class="flex shrink-0 flex-col gap-3 border-b border-default pt-3">
       <UInput
@@ -162,7 +161,7 @@ const note = (task: Task) => taskNote(task, props.all, props.reviewRoundCap)
       id="board-column"
       role="tabpanel"
       :aria-label="`${column.label}, ${column.tasks.length}`"
-      class="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain bg-muted/40 p-4"
+      class="flex flex-1 flex-col bg-muted/40 p-4"
       data-testid="board-column"
       @touchstart.passive="onTouchStart"
       @touchend.passive="onTouchEnd"

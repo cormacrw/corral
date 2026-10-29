@@ -87,7 +87,8 @@ const summary = computed(() => {
 <template>
   <UDashboardPanel :ui="{ body: 'p-0' }">
     <div class="flex h-full min-h-0">
-      <div class="flex min-w-0 flex-1 flex-col">
+      <div :class="['flex min-w-0 flex-1 flex-col', device.isMobile.value && 'overflow-y-auto overscroll-contain']">
+        <MobilePageHeader v-if="device.isMobile.value" />
         <div
           v-if="!device.isMobile.value"
           class="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b border-default px-4 py-2"
@@ -136,7 +137,7 @@ const summary = computed(() => {
         <!-- Phones: one card per PR -->
         <ul
           v-else-if="device.isMobile.value"
-          class="flex flex-col gap-3 overflow-y-auto overscroll-contain p-4"
+          class="flex shrink-0 flex-col gap-3 p-4"
         >
           <li
             v-for="row in rows"

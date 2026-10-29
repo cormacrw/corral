@@ -32,19 +32,18 @@ const collapsed = defineModel<Record<string, boolean>>('collapsed', { required: 
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col">
-    <Teleport
-      defer
-      to="#mobile-header-actions"
-    >
-      <UButton
-        icon="i-lucide-plus"
-        variant="ghost"
-        color="neutral"
-        aria-label="New task"
-        @click="emit('newTask')"
-      />
-    </Teleport>
+  <div class="*:shrink-0 flex h-full min-h-0 flex-col overflow-y-auto overscroll-contain">
+    <MobilePageHeader>
+      <template #actions>
+        <UButton
+          icon="i-lucide-plus"
+          variant="ghost"
+          color="neutral"
+          aria-label="New task"
+          @click="emit('newTask')"
+        />
+      </template>
+    </MobilePageHeader>
 
     <div class="flex shrink-0 flex-col gap-2 border-b border-default px-4 py-3">
       <UInput
@@ -76,7 +75,7 @@ const collapsed = defineModel<Record<string, boolean>>('collapsed', { required: 
     </div>
     <div
       v-else
-      class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain p-4"
+      class="flex flex-col gap-3 p-4"
     >
       <section
         v-for="group in groups"

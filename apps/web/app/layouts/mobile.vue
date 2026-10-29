@@ -1,9 +1,6 @@
 <script setup lang="ts">
-import { projectColor } from '~/utils/labels'
-
-// The mobile shell (D17, design/mobile.md): a header with the runner's
-// status, the page, and a five-tab bar. app.vue swaps it in for the
-// default layout on mobile; the URLs are the same as on the web.
+// The mobile shell (D17, design/mobile.md): banners, the page and a five-tab
+// bar. app.vue swaps it in for the default layout; URLs stay the same.
 const live = useLive()
 const state = live.state
 const route = useRoute()
@@ -16,7 +13,6 @@ watch(() => state.value.projects, (projects) => {
 }, { immediate: true })
 
 const planUnread = computed(() => state.value.planSessions.some(s => s.unread))
-const runnerColor = computed(() => !state.value.runner?.online ? 'error' : state.value.connection === 'open' ? 'success' : 'warning')
 
 const isActive = (...paths: string[]) => paths.some(path => route.path === path || route.path.startsWith(`${path}/`))
 
@@ -30,88 +26,9 @@ const tabs = computed(() => [
 ])
 
 const parts = computed(() => route.path.split('/').filter(Boolean))
-
-// A run's transcript fills the screen with its own header and footer
-// (design/mobile.md), like a conversation
 const fullScreen = computed(() => parts.value[0] === 'agents' && parts.value.length >= 3)
-
-// A task and an epic bring their own header with a back arrow, and a task
-// is a full page with no tab bar (design/mobile.md)
 const ownHeader = computed(() => isActive('/tasks', '/epics'))
-
-// A project's own pages (Board, Backlog, Pull requests, Settings) name the project above
-// the page and go back to its overview
-const PROJECT_PAGES: Record<string, string> = { 'board': 'Board', 'backlog': 'Backlog', 'pull-requests': 'Pull requests', 'settings': 'Settings' }
-const projectPage = computed(() => {
-  const [section, slug, page] = parts.value
-  if (section !== 'projects' || !slug || !page || !PROJECT_PAGES[page]) return null
-  const project = state.value.projects.find(p => p.slug === slug)
-  return { title: PROJECT_PAGES[page], eyebrow: project?.name ?? slug, back: `/projects/${slug}`, backLabel: 'Back to the project', dot: null }
-})
-// A Plan conversation names its project and session, goes back to a new
-// session, and takes the full height: no runner status or tab bar
-const planSession = computed(() => {
-  const [section, id] = parts.value
-  if (section !== 'plan' || !id) return null
-  const session = state.value.planSessions.find(s => s.id === id)
-  const project = state.value.projects.find(p => p.id === session?.projectId)
-  return { title: session?.title ?? 'Plan', eyebrow: project?.name ?? '', back: '/plan', backLabel: 'Back to Plan', dot: project ? projectColor(project) : null }
-})
-// An Inbox item is its own screen: the task above where it sits in the
-// list, a back button to the list, and the tray at the bottom in place of
-// the tab bar
-const mobileHeader = useMobileHeader()
-const inboxItem = computed(() => {
-  const [section, id] = parts.value
-  if (section !== 'inbox' || !id) return null
-  return { title: mobileHeader.value?.title || 'Inbox', eyebrow: mobileHeader.value?.eyebrow ?? 'Inbox', back: '/inbox', backLabel: 'Back to Inbox', dot: null }
-})
-const subPage = computed(() => projectPage.value ?? planSession.value ?? inboxItem.value)
-// Screens that take the full height for their own composer
-const focused = computed(() => Boolean(planSession.value || inboxItem.value))
-
-// Agent and project overview screens have their own settings action
-const agentPage = computed(() => parts.value[0] === 'agents' && parts.value.length === 2)
-// Settings lists its sections at /settings, and each section is its own
-// screen that goes back to the list.
-const SETTINGS_SECTIONS: Record<string, string> = { profile: 'Profile', agents: 'Agents', runner: 'Runner', appearance: 'Appearance' }
-const settingsPage = computed(() => parts.value[0] === 'settings')
-const settingsSection = computed(() => settingsPage.value ? SETTINGS_SECTIONS[parts.value[1] ?? ''] ?? null : null)
-const overviewPage = computed(() => parts.value[0] === 'projects' && parts.value.length === 2)
-const back = computed(() => subPage.value
-  ? { to: subPage.value.back, label: subPage.value.backLabel }
-  : agentPage.value
-    ? { to: '/home', label: 'Back to Home' }
-    : overviewPage.value
-      ? { to: '/projects', label: 'Back to Projects' }
-      : settingsSection.value
-        ? { to: '/settings', label: 'Back to Settings' }
-        : null)
-const action = computed(() => agentPage.value
-  ? { to: '/settings/agents', icon: 'i-lucide-sliders-horizontal', label: 'Agent settings' }
-  : overviewPage.value
-    ? { to: `/projects/${parts.value[1]}/settings`, icon: 'i-lucide-sliders-horizontal', label: 'Project settings' }
-    : null)
-
-// The header names the page
-const title = computed(() => {
-  if (subPage.value) return subPage.value.title
-  const [section, id] = parts.value
-  switch (section) {
-    case 'home': return 'Home'
-    case 'plan': return 'Plan'
-    case 'inbox': return 'Inbox'
-    case 'settings': return settingsSection.value ?? 'Settings'
-    case 'tasks': return id ?? 'Task'
-    case 'epics': return 'Epic'
-    case 'projects': return id ? 'Overview' : 'Projects'
-    case 'agents': {
-      if (!id) return 'Agents'
-      return state.value.agents.find(a => a.name.toLowerCase() === id)?.name ?? 'Agent'
-    }
-    default: return 'Corral'
-  }
-})
+const focused = computed(() => ['plan', 'inbox'].includes(parts.value[0] ?? '') && parts.value.length >= 2)
 </script>
 
 <template>
@@ -120,72 +37,14 @@ const title = computed(() => {
       v-if="ownHeader"
       class="shrink-0 pt-[env(safe-area-inset-top)]"
     />
-    <header
-      v-else-if="!fullScreen"
-      class="shrink-0 border-b border-default bg-default pt-[env(safe-area-inset-top)] ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]"
-    >
-      <div class="flex h-14 items-center gap-2 px-4">
-        <UButton
-          v-if="back"
-          :to="back.to"
-          icon="i-lucide-arrow-left"
-          variant="ghost"
-          color="neutral"
-          :aria-label="back.label"
-          class="-ms-2"
-        />
-        <div class="min-w-0 flex-1">
-          <p
-            v-if="subPage"
-            class="flex items-center gap-1.5 truncate text-xs text-muted"
-          >
-            <span
-              v-if="subPage.dot"
-              class="size-2 shrink-0 rounded-full"
-              :style="{ background: subPage.dot }"
-              aria-hidden="true"
-            />
-            {{ subPage.eyebrow }}
-          </p>
-          <h1 :class="['truncate font-semibold text-highlighted', subPage ? 'text-lg leading-tight' : 'text-xl']">
-            {{ title }}
-          </h1>
-        </div>
-        <!-- Home shows the runner's status in the page instead -->
-        <span
-          v-if="!focused && title !== 'Home' && !settingsPage"
-          class="flex shrink-0 items-center gap-1.5 text-xs text-muted"
-          data-testid="runner-status"
-        >
-          <span
-            :class="['size-2 rounded-full', runnerColor === 'success' ? 'bg-success' : runnerColor === 'warning' ? 'bg-warning' : 'bg-error']"
-            aria-hidden="true"
-          />
-          Runner {{ state.runner?.online ? 'online' : 'offline' }}
-        </span>
-        <!-- Pages put their own header actions here (search, New task) -->
-        <div
-          id="mobile-header-actions"
-          class="contents"
-        />
-        <UButton
-          v-if="!focused && action"
-          :to="action.to"
-          :icon="action.icon"
-          variant="ghost"
-          color="neutral"
-          :aria-label="action.label"
-        />
-      </div>
-    </header>
 
-    <ShellBanners />
+    <div class="shrink-0 has-[*]:pt-[env(safe-area-inset-top)]">
+      <ShellBanners />
+    </div>
 
-    <!-- Pages without a mobile screen yet reflow in here as well as they can.
-         The page itself is the vertical scroll container, between the fixed
-         header and tab bar, so pages that put their content in the panel's
-         default slot rather than #body still scroll. Screens that scroll an
-         inner part fill the page exactly, so it never scrolls twice. -->
+    <!-- Panels with default-slot content scroll above the tab bar, including
+         their in-page title. Focused screens scroll only their inner body,
+         leaving the compact title row and composer in place. -->
     <UDashboardGroup
       class="relative inset-auto min-h-0 flex-1 overflow-x-auto overscroll-contain *:min-h-0 *:overflow-y-auto *:overscroll-contain"
       storage-key="mobile-dashboard"
