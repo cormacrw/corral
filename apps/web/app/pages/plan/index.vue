@@ -74,10 +74,6 @@ onMounted(() => {
   })
   onBeforeUnmount(stop)
 })
-const suggestions = computed(() => taskRef.value
-  ? ['Tighten the acceptance criteria', 'Split it into smaller tasks', 'Check its dependencies']
-  : ['Plan a new feature', 'Break an epic into tasks', 'What’s blocking progress?'])
-
 // Resolves false when not started, so the composer keeps its images
 async function start(message: string): Promise<boolean> {
   if (!project.value) return false
@@ -113,9 +109,6 @@ async function start(message: string): Promise<boolean> {
           <h1 class="text-2xl font-semibold">
             What should we plan?
           </h1>
-          <p class="text-sm text-muted">
-            {{ pm?.name ?? 'The PM' }} reads {{ project?.name ?? 'the project' }}'s code, wiki and board before answering. Nothing reaches the board until you approve it.
-          </p>
         </div>
 
         <UAlert
@@ -245,21 +238,6 @@ async function start(message: string): Promise<boolean> {
         >
           You can still read the Inbox, the board and past runs.
         </p>
-        <div
-          v-else
-          class="flex flex-wrap justify-center gap-2"
-        >
-          <UButton
-            v-for="s in suggestions"
-            :key="s"
-            :label="s"
-            size="xs"
-            variant="outline"
-            color="neutral"
-            class="rounded-full"
-            @click="text = s"
-          />
-        </div>
 
         <PlanDrafts
           :sessions="drafts"

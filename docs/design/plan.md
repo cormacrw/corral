@@ -26,7 +26,7 @@ Open sessions appear as indented sub-items under **Plan** in the left sidebar, i
 
 Everything is centred vertically and horizontally, in a column up to 720px wide:
 
-1. **Greeting:** Juno's avatar (a `primary`-tinted circle), "What should we plan, Cormac?", and "Juno reads {project}'s code, wiki and board before answering. Nothing reaches the board until you approve it."
+1. **Greeting:** the PM’s avatar (a `primary`-tinted circle) and "What should we plan?".
 2. **Composer** (large; see shared pattern): a 3-row minimum and 15px text, with a soft shadow. Toolbar, left to right:
    - **Attach** (paperclip).
    - **Project picker:** the project's colour dot, name and a chevron. Opens a listbox of projects, each with thumbnail, name, prefix and a check on the current one. It defaults to the project you were last in. It's locked once a session has messages, because a session belongs to one project.
@@ -35,10 +35,7 @@ Everything is centred vertically and horizontally, in a column up to 720px wide:
    - **Grill me:** asks Juno to question you. With an empty composer it sends "Grill me"; with a draft it sends "Grill me on this: {draft}". It's on the conversation's composer too, and is disabled while Juno is working.
    - **Resume:** opens a searchable popover of all past sessions (title and time). Picking one opens it.
    - The Enter hint and the Send button.
-3. **Starter suggestions:** pill buttons that fill the composer.
-   - Default: "Plan a new feature", "Break an epic into tasks", "What's blocking progress?"
-   - With a task attached: "Tighten the acceptance criteria", "Split it into smaller tasks", "Check its dependencies"
-4. **Drafts:** shown only when the project has Drafts (`GET /projects/:slug/drafts`), in the same bordered list style. Drafts are grouped by the Plan session they belong to: a header row with the session title, "Needs approval" in `primary` while its plan waits, and the time, then one row per draft with its ref, type icon, title and priority. The header opens the session; a draft opens the session with that task in the flyout (`/plan/:id?task=COR-13`), or the task sheet on phones, where every row is full width and at least 48px tall. `plan.drafts` keeps it current, so approving a plan to the board or the Backlog takes its drafts out straight away. A Draft's task detail banner has an **Open plan session** link back to its session.
+3. **Drafts:** shown only when the project has Drafts (`GET /projects/:slug/drafts`), in the same bordered list style. Drafts are grouped by the Plan session they belong to: a header row with the session title, "Needs approval" in `primary` while its plan waits, and the time, then one row per draft with its ref, type icon, title and priority. The header opens the session; a draft opens the session with that task in the flyout (`/plan/:id?task=COR-13`), or the task sheet on phones, where every row is full width and at least 48px tall. `plan.drafts` keeps it current, so approving a plan to the board or the Backlog takes its drafts out straight away. A Draft's task detail banner has an **Open plan session** link back to its session.
 
 ### Conversation
 
@@ -83,7 +80,7 @@ On the mobile layout ([mobile.md](mobile.md)) the same two routes keep their beh
 - **Grill me** comes first in both composers' toolbars, so it's in reach without scrolling the toolbar sideways.
 - **Plan pill:** on phones a proposed plan **no longer opens on arrival**; a sheet popping up mid-reply would cover what Juno just said. Instead, while the session has a plan, a floating pill sits above the composer: centred and rounded, with a list icon, reading "Plan vN · x tasks" (excluding removed tasks). A proposed plan uses `primary` styling and "Needs approval"; an approved plan uses neutral styling. The pill sits in its own fixed row just above the composer, outside the scrolling log, so it covers neither answers nor the composer. Tapping it opens the plan sheet (`?plan`); it hides while the plan is open and returns on close.
 - **Plan sheet:** `?plan` opens the plan in a bottom sheet instead of the flyout, with the approve buttons side by side. A task or epic opened from it opens in a taller sheet over it, whose back arrow returns to the plan. Swiping a sheet down closes it. Approving from the sheet, to the board or the Backlog, closes it and goes to a new thread (`/plan`) so the next request is a tap away, with a "Plan approved" toast saying "2 tasks added to the board" (or "…to the Backlog"). If approval fails, the sheet stays open on the session with the error toast.
-- **Runner offline:** an error alert, "Plan needs the runner. It's offline.", says the sessions and drafts are safe and has **Reconnect** (which re-reads the runner's status). The composer is disabled with "Juno is unavailable while the runner is offline".
+- **Runner offline:** an error alert, "Plan needs the runner. It's offline.", says the sessions and drafts are safe and has **Reconnect** (which re-reads the runner's status). The composer is disabled with "Juno is unavailable while the runner is offline". Below it, "You can still read the Inbox, the board and past runs." remains visible.
 
 ## Rules
 
