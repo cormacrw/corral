@@ -161,9 +161,11 @@ export function useLive() {
 
   function connect(): void {
     if (source || !import.meta.client) return
-    // The static prototype has no server to stream from
+    // The static prototype has no server to stream from; its mock API sends
+    // the events a write would have caused
     if (import.meta.prototype) {
       state.value.connection = 'open'
+      void import('~/prototype/mock-api').then(({ onMockEvent }) => onMockEvent(apply))
       return
     }
     state.value.connection = source ? 'open' : state.value.connection

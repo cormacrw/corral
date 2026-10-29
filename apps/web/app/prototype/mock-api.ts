@@ -1,12 +1,14 @@
-import type { PlanSessionDetail, Task } from '@corral/contracts'
+import type { Plan, PlanMessage, PlanSessionDetail, ServerEvent, Task } from '@corral/contracts'
 import { ApiError } from '~/composables/useApi'
+import { STOP_ASKING } from '~/utils/plan-questions'
 import * as f from './fixtures'
 
 // The server API for the static prototype (`pnpm prototype`, D20): the same
 // paths useApi calls, answered from ./fixtures in memory. Reads return the
 // fixtures; writes change them for the session so clicks show their result,
 // and reload resets everything. A path nobody handles is a 404, as on the
-// server, so a page's error state shows instead of a crash.
+// server, so a page's error state shows instead of a crash. Writes that the
+// server would follow with live events send them through onMockEvent.
 
 type Handler = (params: string[], body: unknown, query: URLSearchParams) => unknown
 
@@ -100,6 +102,57 @@ route('GET', '/inbox', () => f.inbox())
 route('GET', '/plan/sessions', () => f.planSessions)
 route('GET', '/plan/sessions/:id', ([id]) => session(id!))
 route('POST', '/plan/sessions/:id/read', ([id]) => Object.assign(f.planSessions.find(s => s.id === id) ?? notFound(), { unread: false }))
+
+// The live stream: useLive listens here instead of /api/events
+const eventListeners = new Set<(event: ServerEvent) => void>()
+export function onMockEvent(listener: (event: ServerEvent) => void): () => void {
+  eventListeners.add(listener)
+  return () => eventListeners.delete(listener)
+}
+function emit(event: ServerEvent): void {
+  for (const listener of eventListeners) listener(JSON.parse(JSON.stringify(event)) as ServerEvent)
+}
+
+let nextId = 0
+function postMessage(sessionId: string, message: Omit<PlanMessage, 'id' | 'sessionId' | 'createdAt' | 'runId' | 'planId' | 'recommendation' | 'options'> & Partial<PlanMessage>): PlanMessage {
+  const m: PlanMessage = { recommendation: null, options: null, planId: null, runId: null, ...message, id: `mock-m-${++nextId}`, sessionId, createdAt: new Date().toISOString() }
+  ;(f.planMessages[sessionId] ??= []).push(m)
+  emit({ type: 'plan.message', message: m })
+  return m
+}
+
+// Juno's reply, from fixtures.grilling: the next question, or the plan once
+// they run out or you say stop
+export function pmReply(sessionId: string, text: string): void {
+  const s = f.planSessions.find(x => x.id === sessionId)
+  const script = f.grilling[sessionId]
+  if (!s || !script) return
+  const question = text === STOP_ASKING ? undefined : script.questions.shift()
+  if (question) {
+    postMessage(sessionId, { role: 'pm', kind: 'question', ...question })
+    Object.assign(s, { status: 'question', preview: question.text, updatedAt: new Date().toISOString() })
+  } else {
+    const previous = f.plans[sessionId] ?? []
+    const plan: Plan = {
+      ...script.plan, id: `mock-plan-${++nextId}`, sessionId, projectId: s.projectId, epicId: null, version: previous.length + 1,
+      epics: [], status: 'proposed', approvedAt: null, createdAt: new Date().toISOString()
+    }
+    ;(f.plans[sessionId] ??= []).push(plan)
+    emit({ type: 'plan.updated', plan })
+    const summary = `Here is a plan with ${plan.tasks.length} tasks. Approve it to put them on the board.`
+    postMessage(sessionId, { role: 'pm', kind: 'message', text: summary, planId: plan.id })
+    Object.assign(s, { status: 'needs_approval', preview: summary, updatedAt: new Date().toISOString() })
+  }
+  emit({ type: 'plan.session', session: s })
+}
+
+route('POST', '/plan/sessions/:id/messages', ([id], body) => {
+  const s = f.planSessions.find(x => x.id === id) ?? notFound()
+  const { text } = body as { text: string }
+  const message = postMessage(s.id, { role: 'human', kind: 'message', text })
+  setTimeout(() => pmReply(s.id, text), 1000)
+  return message
+})
 
 export async function mockCall<T>(method: string, path: string, body?: unknown): Promise<T> {
   const [pathname = '', search] = path.split('?')

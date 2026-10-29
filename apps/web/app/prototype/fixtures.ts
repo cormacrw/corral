@@ -282,6 +282,27 @@ export const planMessages: Record<string, PlanMessage[]> = {
   ]
 }
 
+// What Juno does next in a session when you reply (mock-api.ts): asks the
+// next question, then proposes the plan once they run out or you say stop
+export const grilling: Record<string, { questions: Pick<PlanMessage, 'text' | 'recommendation' | 'options'>[], plan: Pick<Plan, 'title' | 'summary' | 'tasks'> }> = {
+  's-2': {
+    questions: [
+      { text: 'What should a push say? Only the task and why it needs you, or a preview of the agent\'s message too?', recommendation: 'Task ref, title and the reason', options: ['Task ref, title and the reason', 'Include a preview of the message'] },
+      { text: 'Which items should push? Everything in Needs you can get noisy.', recommendation: 'Questions and human review only', options: ['Everything in Needs you', 'Questions and human review only', 'Only blocked tasks'] },
+      { text: 'Should tapping a push open the Inbox item, or the task page?', recommendation: 'The Inbox item', options: ['The Inbox item', 'The task page'] }
+    ],
+    plan: {
+      title: 'Mobile push',
+      summary: 'Web Push notifications for Needs you items, opening the Inbox item.',
+      tasks: [
+        { key: 'T1', change: 'added', revises: false, taskId: null, epicId: null, ref: null, title: 'VAPID keys and push subscriptions', status: 'draft', criteriaCount: 3, dependsOn: [] },
+        { key: 'T2', change: 'added', revises: false, taskId: null, epicId: null, ref: null, title: 'Send a push when an item needs you', status: 'draft', criteriaCount: 3, dependsOn: ['T1'] },
+        { key: 'T3', change: 'added', revises: false, taskId: null, epicId: null, ref: null, title: 'Open the Inbox item from a push', status: 'draft', criteriaCount: 2, dependsOn: ['T2'] }
+      ]
+    }
+  }
+}
+
 export const plans: Record<string, Plan[]> = {
   's-1': [
     {
