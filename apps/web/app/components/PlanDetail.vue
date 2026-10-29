@@ -4,7 +4,8 @@ import { api } from '~/composables/useApi'
 
 // The session's latest plan, docked in the flyout (design/plan.md). Each
 // revision replaces it here rather than adding another card to the chat.
-const props = defineProps<{ plan: Plan, previous: Plan | null, busy: boolean }>()
+// `sheet`: in the mobile bottom sheet, where the approve buttons share the width
+const props = defineProps<{ plan: Plan, previous: Plan | null, busy: boolean, sheet?: boolean }>()
 const emit = defineEmits<{ approve: [to: 'ready' | 'backlog'], close: [] }>()
 const flyout = useTaskFlyout()
 const live = useLive()
@@ -256,6 +257,7 @@ watch(() => props.plan.id, () => {
           <UButton
             label="Add to board"
             icon="i-lucide-kanban"
+            :class="props.sheet && 'flex-1 justify-center'"
             :loading="props.busy"
             @click="emit('approve', 'ready')"
           />
@@ -264,6 +266,7 @@ watch(() => props.plan.id, () => {
             icon="i-lucide-list"
             variant="outline"
             color="neutral"
+            :class="props.sheet && 'flex-1 justify-center'"
             :disabled="props.busy"
             @click="emit('approve', 'backlog')"
           />

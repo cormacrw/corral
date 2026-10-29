@@ -1,7 +1,7 @@
 import type { Agent, InboxItem, Project, Run, Task } from '@corral/contracts'
 import type { AgentRole, RunOutcome, RunState, TaskPriority, TaskStatus } from '@corral/core'
 
-type Color = 'primary' | 'secondary' | 'success' | 'info' | 'warning' | 'error' | 'neutral'
+export type Color = 'primary' | 'secondary' | 'success' | 'info' | 'warning' | 'error' | 'neutral'
 
 // Status colours from design/README.md (D10). Always shown with the label.
 export const STATUS: Record<TaskStatus, { label: string, color: Color }> = {

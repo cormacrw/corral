@@ -10,6 +10,7 @@ const router = useRouter()
 const live = useLive()
 const flyout = useTaskFlyout()
 const toast = useToast()
+const device = useDevice()
 useSeoMeta({ title: 'Inbox · Corral' })
 
 const inbox = ref<Inbox | null>(null)
@@ -67,8 +68,9 @@ watch(selected, async (item) => {
     evidence.value = []
     reviews.value = []
   }
-  // Following the selection, not a click of its own: no extra history entry
-  if (item && showTask.value) flyout.open(item.taskRef, { replace: true })
+  // Following the selection, not a click of its own: no extra history entry.
+  // Phones open the task as its own page instead.
+  if (item && showTask.value && !device.isMobile.value) flyout.open(item.taskRef, { replace: true })
 }, { immediate: true })
 function select(item: InboxItem) {
   void router.push(`/inbox/${item.id}`)
@@ -101,8 +103,9 @@ const placeholder = computed(() => {
 })
 const submitLabel = computed(() => action.value ? (actions.value.find(a => a.value === action.value)?.label ?? 'Send') : '')
 
-async function submit(message: string) {
-  if (!selected.value) return
+// Resolves false when not sent, so the composer keeps its images
+async function submit(message: string): Promise<boolean> {
+  if (!selected.value) return false
   busy.value = true
   actionError.value = null
   try {
@@ -132,17 +135,65 @@ async function submit(message: string) {
       const next = inbox.value?.needsYou[Math.min(Math.max(position, 0), (inbox.value?.needsYou.length ?? 1) - 1)]
       void router.replace(next ? `/inbox/${next.id}` : '/inbox')
     }
+    return true
   } catch (e) {
     actionError.value = e instanceof Error ? e.message : String(e)
+    return false
   } finally {
     busy.value = false
   }
 }
+// On a phone the shell's header names the item and where it sits in the list
+const mobileHeader = useMobileHeader()
+watchEffect(() => {
+  if (!device.isMobile.value || !selectedId.value) {
+    mobileHeader.value = null
+    return
+  }
+  const position = inbox.value?.needsYou.findIndex(i => i.id === selectedId.value) ?? -1
+  mobileHeader.value = {
+    title: selected.value?.taskRef ?? '',
+    eyebrow: position >= 0 ? `Inbox · ${position + 1} of ${inbox.value!.needsYou.length}` : 'Inbox'
+  }
+})
+onBeforeUnmount(() => {
+  mobileHeader.value = null
+})
 </script>
 
 <template>
   <UDashboardPanel :ui="{ body: 'p-0' }">
-    <div class="flex h-full min-h-0 max-md:flex-col">
+    <!-- Phones get the list and the item as separate screens (design/mobile.md) -->
+    <InboxMobile
+      v-if="device.isMobile.value"
+      v-model:tab="tab"
+      v-model:search="search"
+      v-model:action="action"
+      v-model:resolve-to="resolveTo"
+      v-model:text="text"
+      :inbox="inbox"
+      :error="error"
+      :items="items"
+      :selected-id="selectedId"
+      :selected="selected"
+      :already-resolved="alreadyResolved"
+      :task="task"
+      :evidence="evidence"
+      :reviews="reviews"
+      :actions="actions"
+      :placeholder="placeholder"
+      :submit-label="submitLabel"
+      :needs-text="needsText"
+      :busy="busy"
+      :action-error="actionError"
+      :type-badge="typeBadge"
+      :on-submit="submit"
+      :on-retry="load"
+    />
+    <div
+      v-else
+      class="flex h-full min-h-0 max-md:flex-col"
+    >
       <div class="flex w-[380px] shrink-0 flex-col border-e border-default max-md:max-h-[360px] max-md:w-full max-md:border-e-0 max-md:border-b">
         <!-- The tabs row lines up with the item and flyout headers (56px) -->
         <div class="flex h-14 shrink-0 items-center border-b border-default px-3">
@@ -365,6 +416,7 @@ async function submit(message: string) {
                 :submit-color="action === 'delete' ? 'error' : 'primary'"
                 :allow-empty="action !== null && !needsText"
                 :busy="busy"
+                :project="selected.project.slug"
                 @submit="submit"
               />
             </div>
