@@ -1,11 +1,14 @@
 import type { RunnerMessage } from '@corral/contracts'
-import { chmod, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ServerConnection } from './connection.ts'
 import type { ToolServer } from './mcp.ts'
 import { RunManager } from './run-manager.ts'
-import { createTestDataDir, pmJob } from './test-repo.ts'
+import { DEFAULT_ROLE_INSTRUCTIONS } from './role-defaults.ts'
+import { createTestDataDir, pmJob, TEST_REPOSITORY } from './test-repo.ts'
+import { exec } from './exec.ts'
+import { barePath } from './repos.ts'
 import { pmWorktreePath } from './workspace.ts'
 
 // Stands in for `claude`: logs how it was called, fails a --resume of any
@@ -81,4 +84,61 @@ describe('RunManager PM turns', () => {
     expect(log.map(c => c.cwd)).toEqual([pmWorktreePath(dataDir, 'project-1', 's1'), pmWorktreePath(dataDir, 'project-1', 's1')])
     expect(log[1]!.args).toEqual(expect.arrayContaining(['--resume', 'fresh-session']))
   })
+
+  // Commits files to the origin the bare clone fetches from
+  async function commitToOrigin(files: Record<string, string>): Promise<string> {
+    const origin = join(dirname(dataDir), 'origin')
+    for (const [path, text] of Object.entries(files)) {
+      await mkdir(join(origin, dirname(path)), { recursive: true })
+      await writeFile(join(origin, path), text)
+    }
+    const git = (args: string[]) => exec('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], { cwd: origin })
+    await git(['add', '.'])
+    await git(['commit', '--quiet', '-m', 'Docs'])
+    return (await git(['rev-parse', 'HEAD'])).stdout.trim()
+  }
+
+  function systemPrompt(call: { args: string[] }): string {
+    return call.args[call.args.indexOf('--append-system-prompt') + 1]!
+  }
+
+  it('puts the project brief in the PM system prompt', async () => {
+    await commitToOrigin({ 'CORRAL.md': '# Acme brief\n', '.corral/wiki/setup.md': 'Setup' })
+    manager.assign(pmJob({ runId: 'r1' }))
+    await finish('r1')
+
+    const prompt = systemPrompt((await calls())[0]!)
+    expect(prompt).toContain(`${DEFAULT_ROLE_INSTRUCTIONS.pm}\n\n## Project brief\n`)
+    expect(prompt).toContain('### CORRAL.md\n\n# Acme brief')
+    expect(prompt).toContain('- setup.md')
+    expect(prompt).toMatch(/\n\n## Corral runner notes\n/)
+  })
+
+  it('starts a PM run with no brief section when the repo has no brief files', async () => {
+    manager.assign(pmJob({ runId: 'r1' }))
+    const messages = await finish('r1')
+
+    expect(messages.find(m => m.type === 'run.ended')).toMatchObject({ exit: { kind: 'exited', code: 0 } })
+    const prompt = systemPrompt((await calls())[0]!)
+    expect(prompt).not.toContain('## Project brief')
+    expect(prompt).toMatch(new RegExp(`^${escape(DEFAULT_ROLE_INSTRUCTIONS.pm)}\\n\\n## Corral runner notes\\n`))
+  })
+
+  it.each(['developer', 'reviewer'] as const)('leaves the %s system prompt without a brief', async (role) => {
+    const sha = await commitToOrigin({ 'CORRAL.md': '# Acme brief\n', '.corral/wiki/setup.md': 'Setup' })
+    if (role === 'reviewer') {
+      await exec('git', ['fetch', '--quiet', 'origin'], { cwd: barePath(dataDir, TEST_REPOSITORY) })
+    }
+    manager.assign(pmJob({ runId: 'r1', role, planSessionId: null, taskId: 'task-1', taskRef: 'APP-1', branch: 'corral/app-1', headSha: role === 'reviewer' ? sha : null }))
+    await finish('r1')
+
+    const prompt = systemPrompt((await calls())[0]!)
+    expect(prompt).toMatch(new RegExp(`^${escape(DEFAULT_ROLE_INSTRUCTIONS[role]!)}\\n\\n## Corral runner notes\\n`))
+    expect(prompt).not.toContain('Project brief')
+    expect(prompt).not.toContain('Acme brief')
+  })
 })
+
+function escape(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}

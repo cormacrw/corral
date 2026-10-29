@@ -1,7 +1,7 @@
 import type { RunJob } from '@corral/contracts'
 import type { AgentRole } from '@corral/core'
-import { readFile, rm, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { readdir, readFile, rm, stat } from 'node:fs/promises'
+import { join, relative, sep } from 'node:path'
 import { git } from './exec.ts'
 import { barePath, syncRepository, withRepoLock } from './repos.ts'
 import { DEFAULT_ROLE_INSTRUCTIONS } from './role-defaults.ts'
@@ -81,6 +81,50 @@ async function checkOut(dataDir: string, bare: string, job: RunJob): Promise<{ w
 export async function readRoleInstructions(worktree: string, role: AgentRole): Promise<string> {
   const text = await readFile(join(worktree, '.corral', 'agents', `${role}.md`), 'utf8').catch(() => null)
   return text?.trim() || DEFAULT_ROLE_INSTRUCTIONS[role] || ''
+}
+
+// The PM's project brief, so a first turn doesn't spend model calls finding
+// the top-level docs. Searched in this order; the first that exists wins.
+const BRIEF_FILES = ['CORRAL.md', join('.corral', 'CORRAL.md'), 'CLAUDE.md']
+export const MAX_BRIEF_CHARS = 20_000
+
+async function wikiPages(worktree: string): Promise<string[]> {
+  const wiki = join(worktree, '.corral', 'wiki')
+  const entries = await readdir(wiki, { recursive: true, withFileTypes: true }).catch(() => [])
+  return entries
+    .filter(entry => entry.isFile())
+    .map(entry => relative(wiki, join(entry.parentPath, entry.name)).split(sep).join('/'))
+    .sort()
+}
+
+// Returns '' when the worktree has none of the brief files and no wiki
+export async function readProjectBrief(worktree: string): Promise<string> {
+  let doc: { name: string, text: string } | null = null
+  for (const name of BRIEF_FILES) {
+    const text = await readFile(join(worktree, name), 'utf8').catch(() => null)
+    if (text?.trim()) {
+      doc = { name: name.split(sep).join('/'), text: text.trim() }
+      break
+    }
+  }
+  const pages = await wikiPages(worktree)
+  if (!doc && pages.length === 0) return ''
+
+  const parts: string[] = []
+  if (doc) parts.push(`### ${doc.name}`, '', doc.text, '')
+  if (pages.length > 0) parts.push('### Wiki pages in .corral/wiki/', '', ...pages.map(page => `- ${page}`), '')
+  let body = parts.join('\n').trim()
+  if (body.length > MAX_BRIEF_CHARS) {
+    body = `${body.slice(0, MAX_BRIEF_CHARS)}\n\n[Brief truncated: it is longer than ${MAX_BRIEF_CHARS.toLocaleString('en')} characters. Read ${doc ? doc.name : 'the files above'} for the rest if you need it.]`
+  }
+  const listed = [doc?.name, pages.length > 0 ? 'the .corral/wiki/ file list' : null].filter(Boolean).join(' and ')
+  return [
+    '## Project brief',
+    '',
+    `The runner has already read ${listed} from your checkout and included it below, so don't read ${doc ? 'that file' : 'it'} again. Open other files, including individual wiki pages, only when a request needs them.`,
+    '',
+    body
+  ].join('\n')
 }
 
 export async function headSha(worktree: string): Promise<string | null> {
