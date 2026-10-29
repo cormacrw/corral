@@ -27,11 +27,12 @@ export function claudeCodeRuntime(claudeBin: string): AgentRuntime {
 type ArgOptions = Pick<AgentOptions, 'systemPrompt' | 'mcpConfigPath' | 'model' | 'resumeSessionId'>
 
 // One-shot runs pass the prompt with -p. A streaming session passes none: it
-// reads user messages from stdin, which the CLI only allows with --print.
+// reads user messages from stdin, which the CLI only allows with --print, and
+// echoes each one as it takes it in.
 export function agentArgs(options: ArgOptions & ({ prompt: string } | { input: 'stream-json' })): string[] {
   const args = 'prompt' in options
     ? ['-p', options.prompt]
-    : ['--print', '--input-format', 'stream-json']
+    : ['--print', '--input-format', 'stream-json', '--replay-user-messages']
   args.push(
     '--output-format', 'stream-json',
     '--verbose',
@@ -77,23 +78,39 @@ export type AgentOptionsWithoutPrompt = Omit<AgentOptions, 'prompt'>
 
 // A long-lived agent that takes turns over stdin: each send() is one user
 // message, and each turn ends with a result line. onLine still sees every line.
+// A message() can join the turn under way, which then ends with one result
+// for both, so each result records whether the CLI had taken in every
+// message by then (its replay of the message came first).
 export function spawnAgentSession(options: AgentOptionsWithoutPrompt): AgentSession {
-  const results: TurnResult[] = []
-  const waiting: ((result: TurnResult | null) => void)[] = []
+  const results: Turn[] = []
+  const waiting: ((turn: Turn | null) => void)[] = []
+  const unreplayed: string[] = []
   let ended = false
   const { child, exited, parser } = startAgent(agentArgs({ ...options, input: 'stream-json' }), 'pipe', {
     ...options,
     onLine(raw, parsed) {
       options.onLine(raw, parsed)
+      if (parsed.replayed !== undefined) {
+        const index = unreplayed.indexOf(parsed.replayed)
+        if (index >= 0) unreplayed.splice(index, 1)
+      }
       if (!parsed.result) return
+      const turn = { result: parsed.result, idle: unreplayed.length === 0 }
       const next = waiting.shift()
-      if (next) next(parsed.result)
-      else results.push(parsed.result)
+      if (next) next(turn)
+      else results.push(turn)
     }
   })
+  const nextTurn = (): Promise<Turn | null> => {
+    const turn = results.shift()
+    if (turn) return Promise.resolve(turn)
+    if (ended) return Promise.resolve(null)
+    return new Promise(resolve => waiting.push(resolve))
+  }
   const stdin = child.stdin!
   // Writing after the process died raises EPIPE; exited already reports that
   stdin.on('error', () => {})
+  const write = (content: string) => stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n')
   void exited.then(() => {
     ended = true
     for (const resolve of waiting.splice(0)) resolve(null)
@@ -106,15 +123,33 @@ export function spawnAgentSession(options: AgentOptionsWithoutPrompt): AgentSess
     send(prompt) {
       if (ended || !stdin.writable) return
       parser.startTurn()
-      stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: prompt } }) + '\n')
+      write(prompt)
     },
-    nextResult() {
-      const result = results.shift()
-      if (result) return Promise.resolve(result)
-      if (ended) return Promise.resolve(null)
-      return new Promise(resolve => waiting.push(resolve))
+    message(text) {
+      if (ended || !stdin.writable) return false
+      unreplayed.push(text)
+      write(text)
+      return true
+    },
+    close() {
+      stdin.end()
+    },
+    async nextResult() {
+      return (await nextTurn())?.result ?? null
+    },
+    async nextIdle() {
+      for (;;) {
+        const turn = await nextTurn()
+        if (!turn || turn.idle) return turn?.result ?? null
+      }
     }
   }
+}
+
+interface Turn {
+  result: TurnResult
+  // Every message() had been taken in when this result arrived
+  idle: boolean
 }
 
 function startAgent(args: string[], stdin: 'ignore' | 'pipe', options: AgentOptionsWithoutPrompt): { child: ChildProcess, exited: Promise<AgentExit>, parser: StreamJsonParser } {

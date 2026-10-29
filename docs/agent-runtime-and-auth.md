@@ -18,6 +18,7 @@ There are two `AgentRuntime` adapters in the runner, one per CLI. They differ on
 | Where the login lives | `claude-config` volume (`~/.claude`) | `codex-config` volume (`~/.codex`) |
 | Headless run | `claude -p ... --output-format stream-json` | `codex exec ... --json` |
 | Resuming a session (PM, D9) | `--resume <sessionId>` | `codex exec resume <sessionId>` |
+| Messages mid-run (`run.message`) | Developer, reviewer and warm PM processes use `--print --input-format stream-json --replay-user-messages` and read user messages from stdin | Not supported: the runner rejects the message |
 | Vendor | Anthropic | OpenAI |
 
 - The user installs and logs in to each CLI **themselves**: on the laptop in development, or with `docker exec -it` in the runner container once deployed (D12). Each CLI's config lives on a volume that only that CLI reads.

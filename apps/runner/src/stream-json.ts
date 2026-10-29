@@ -18,6 +18,9 @@ export interface ParsedLine {
   rateLimit: { resetsAt: string | null } | null
   // Set on the final result line
   result: { isError: boolean, text: string } | null
+  // A user message the CLI echoes as it takes it in (--replay-user-messages),
+  // whether it starts a turn or joins the one under way
+  replayed?: string
 }
 
 interface ContentBlock {
@@ -48,6 +51,7 @@ interface StreamLine {
   rate_limit_info?: { status?: string, resetsAt?: number }
   is_error?: boolean
   result?: string
+  isReplay?: boolean
   errors?: unknown[]
   usage?: Usage
 }
@@ -119,6 +123,7 @@ export class StreamJsonParser {
       }
 
       case 'user':
+        if (data.isReplay) out.replayed = blocks(data.message?.content).flatMap(block => block.type === 'text' ? [block.text ?? ''] : []).join('\n')
         for (const block of blocks(data.message?.content)) {
           if (block.type === 'tool_result') {
             out.events.push({ type: 'tool_result', id: block.tool_use_id ?? '', output: resultText(block.content), isError: block.is_error === true })

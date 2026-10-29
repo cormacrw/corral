@@ -42,11 +42,21 @@ export interface AgentProcess {
 export type TurnResult = NonNullable<ParsedLine['result']>
 
 export interface AgentSession extends AgentProcess {
-  // Writes one user message. A no-op once the process has exited.
+  // Writes one user message that starts a new run's turn. A no-op once the
+  // process has exited.
   send(prompt: string): void
+  // Writes a user message within the current run, whose usage totals carry
+  // on. Claude Code takes it in the turn under way, or as the next turn.
+  // False once the process has exited or stdin is closed.
+  message(text: string): boolean
+  // Closes stdin: the CLI finishes the turn under way, then exits
+  close(): void
   // The next turn's result line, in order. Resolves null if the process
   // ends first, so a caller waiting on a killed or crashed turn never hangs.
   nextResult(): Promise<TurnResult | null>
+  // The next result line by which the agent had taken in every message()
+  // and answered it: nothing is left for it to do. Null if the process ends first.
+  nextIdle(): Promise<TurnResult | null>
 }
 
 export const STOP_GRACE_MS = 5_000
