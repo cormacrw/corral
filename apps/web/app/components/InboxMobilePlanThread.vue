@@ -3,6 +3,7 @@ import type { Plan, PlanSessionDetail, PlanThreadItem } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { FLYOUT_SHEETS } from '~/composables/useTaskFlyout'
 import { approvePlan } from '~/utils/plan-approval'
+import { timeAgo } from '~/utils/labels'
 import { STOP_ASKING } from '~/utils/plan-questions'
 
 // Inbox shows the decision only. The session is loaded for the plan sheet;
@@ -11,6 +12,7 @@ const props = defineProps<{ item: PlanThreadItem, onRefresh: () => Promise<void>
 const router = useRouter()
 const live = useLive()
 const threads = usePlanThreads()
+const deleting = useDeletePlanThread()
 const flyout = useTaskFlyout()
 // A task or epic opened from the plan sheet opens in a taller sheet over it,
 // on this route, rather than on its own page (design/inbox.md#mobile)
@@ -19,14 +21,14 @@ const toast = useToast()
 const text = ref('')
 const busy = ref(false)
 const error = ref<string | null>(null)
-const confirmClose = ref(false)
-const closing = ref(false)
 const session = ref<PlanSessionDetail | null>(null)
 const loadingPlan = ref(false)
 const composer = ref<{ focus: () => void } | null>(null)
 const offline = computed(() => live.state.value.loaded && !live.state.value.runner?.online)
 const working = computed(() => Boolean(props.item.activeRunId))
-const cantSend = computed(() => busy.value || closing.value || offline.value || working.value)
+const cantSend = computed(() => busy.value || offline.value || working.value)
+// A question or an unread reply is answered here; a plan is approved instead
+const canReply = computed(() => Boolean(props.item.question || (!props.item.plan && props.item.reply)))
 const latest = computed(() => session.value?.plans.find(p => p.id === props.item.planId) ?? null)
 const previous = computed(() => session.value?.plans.find(p => p.version === (latest.value?.version ?? 0) - 1) ?? null)
 // The plan sheet stays under a task or epic opened from it
@@ -64,7 +66,7 @@ watch(() => props.item.planId, (id) => {
   if (id) void loadPlan()
 }, { immediate: true })
 onMounted(() => {
-  // A read acknowledgement removes an unread-reply-only item from Needs you.
+  // A read acknowledgement removes an unread-reply-only item from the Inbox.
   if (props.item.unread) {
     void api.plan.read(props.item.sessionId).then(props.onRefresh).catch((e) => {
       error.value = messageOf(e)
@@ -90,7 +92,7 @@ async function send(message: string): Promise<boolean> {
   }
 }
 async function approve(plan: Plan, to: 'ready' | 'backlog') {
-  if (busy.value || closing.value) return
+  if (busy.value) return
   busy.value = true
   try {
     await approvePlan(plan, to, {
@@ -107,22 +109,12 @@ async function approve(plan: Plan, to: 'ready' | 'backlog') {
     busy.value = false
   }
 }
-async function closeThread() {
-  if (closing.value || busy.value) return
-  closing.value = true
-  error.value = null
-  try {
-    await api.plan.close(props.item.sessionId)
-    threads.remove(props.item.sessionId)
-    confirmClose.value = false
-    await flyout.close()
-    await props.onRefresh()
-    await router.replace('/inbox')
-  } catch (e) {
-    error.value = messageOf(e)
-  } finally {
-    closing.value = false
-  }
+// Deleting waits five seconds for Undo before closing the session; the
+// thread leaves the list at once (design/inbox.md#mobile)
+async function deleteThread() {
+  deleting.remove(props.item)
+  await flyout.close()
+  await router.replace('/inbox')
 }
 </script>
 
@@ -140,7 +132,7 @@ async function closeThread() {
           color="neutral"
           class="min-h-11"
         />
-        <UDropdownMenu :items="[{ label: 'Close thread', icon: 'i-lucide-x', color: 'error' as const, disabled: busy || closing, onSelect: () => { error = null; confirmClose = true } }]">
+        <UDropdownMenu :items="[{ label: 'Delete thread', icon: 'i-lucide-trash-2', color: 'error' as const, disabled: busy, onSelect: deleteThread }]">
           <UButton
             icon="i-lucide-ellipsis"
             variant="ghost"
@@ -154,7 +146,7 @@ async function closeThread() {
     <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
       <div class="flex flex-col gap-4">
         <UAlert
-          v-if="error && !confirmClose"
+          v-if="error"
           color="error"
           variant="subtle"
           :title="error"
@@ -198,22 +190,29 @@ async function closeThread() {
               label="Approve to board"
               class="min-h-11 min-w-0 flex-1 justify-center text-xs"
               :loading="busy"
-              :disabled="!latest || closing"
+              :disabled="!latest"
               @click="latest && approve(latest, 'ready')"
             />
             <UButton
               label="Approve to Backlog"
               variant="outline"
               class="min-h-11 min-w-0 flex-1 justify-center text-xs"
-              :disabled="!latest || busy || closing"
+              :disabled="!latest || busy"
               @click="latest && approve(latest, 'backlog')"
             />
           </div>
         </template>
-        <MarkdownText
-          v-else-if="item.reply"
-          :text="item.reply"
-        />
+        <!-- An unread reply: Juno's latest message, answered from the composer -->
+        <template v-else-if="item.reply">
+          <span class="flex items-center gap-2 text-xs text-muted">
+            <AgentAvatar
+              :name="item.sender.name"
+              size="xs"
+            />
+            <span class="font-medium text-default">{{ item.sender.name }}</span> · {{ timeAgo(item.at) }}
+          </span>
+          <MarkdownText :text="item.reply" />
+        </template>
         <p
           v-if="working"
           role="status"
@@ -224,7 +223,7 @@ async function closeThread() {
       </div>
     </div>
     <div
-      v-if="item.question"
+      v-if="canReply"
       class="shrink-0 border-t border-default p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
     >
       <UAlert
@@ -287,49 +286,6 @@ async function closeThread() {
             mode="flyout"
             class="flex-1"
             @close="detailSheet = false"
-          />
-        </div>
-      </template>
-    </UDrawer>
-    <UDrawer
-      v-model:open="confirmClose"
-      title="Close this thread?"
-      :dismissible="!closing"
-    >
-      <template #body>
-        <p class="text-sm">
-          {{ item.sender.name }}'s draft tasks and the unapproved plan will be discarded. You can reopen the thread later by sending it a message from Plan.
-        </p>
-        <p
-          v-if="working"
-          class="mt-2 text-sm"
-        >
-          {{ item.sender.name }}'s current turn will be stopped.
-        </p>
-        <UAlert
-          v-if="error"
-          color="error"
-          variant="subtle"
-          :title="error"
-          class="mt-3"
-        />
-      </template>
-      <template #footer>
-        <div class="flex gap-2 pb-[env(safe-area-inset-bottom)]">
-          <UButton
-            label="Cancel"
-            variant="outline"
-            color="neutral"
-            class="min-h-11 flex-1 justify-center"
-            :disabled="closing"
-            @click="confirmClose = false"
-          />
-          <UButton
-            label="Close thread"
-            color="error"
-            class="min-h-11 flex-1 justify-center"
-            :loading="closing"
-            @click="closeThread"
           />
         </div>
       </template>
