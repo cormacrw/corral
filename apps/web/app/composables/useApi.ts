@@ -190,6 +190,7 @@ export const api = {
     session: (id: string) => call<PlanSessionDetail>('GET', `/plan/sessions/${id}`),
     start: (projectId: string, text: string, taskRef?: string, runtime?: AgentRuntime) => call<PlanSessionDetail>('POST', '/plan/sessions', { projectId, text, ...(taskRef && { taskRef }), ...(runtime && { runtime }) }),
     message: (id: string, text: string, taskRef?: string) => call<PlanMessage>('POST', `/plan/sessions/${id}/messages`, { text, ...(taskRef && { taskRef }) }),
+    close: (id: string) => call<PlanSession>('POST', `/plan/sessions/${id}/close`),
     read: (id: string) => call<PlanSession>('POST', `/plan/sessions/${id}/read`),
     approve: (planId: string, to: 'ready' | 'backlog') => call<Plan>('POST', `/plan/plans/${planId}/approve`, { to }),
     discard: (planId: string) => call<Plan>('POST', `/plan/plans/${planId}/discard`),

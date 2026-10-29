@@ -451,10 +451,10 @@ export async function listHistory(db: Executor, taskId: string): Promise<AuditEn
 // D10 "Deleting": Backlog tasks go outright; the rest are hidden but kept
 // with their history. Dependents move to Blocked unless the dependency was
 // removed first. The caller has already stopped the run and closed the PR.
-export async function deleteTaskRows(db: Executor, taskId: string, actor: Actor, reason: string | null): Promise<void> {
+export async function deleteTaskRows(db: Executor, taskId: string, actor: Actor, reason: string | null, options: { soft?: boolean } = {}): Promise<void> {
   await db.transaction(async (tx) => {
     const { task, project } = await lockTask(tx, taskId)
-    const mode = deletionFor(task.status)
+    const mode = options.soft && task.status === 'draft' ? 'soft' : deletionFor(task.status)
     if (mode === 'not_allowed') throw new ApiFailure(409, { code: 'conflict', constraint: 'merged_tasks_are_immutable' })
     const dependents = await tx.select({ task: tasks }).from(taskDependencies)
       .innerJoin(tasks, eq(tasks.id, taskDependencies.taskId))

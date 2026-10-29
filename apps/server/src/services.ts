@@ -44,7 +44,7 @@ export function createServices(options: ServiceOptions): Services {
     ...(options.now && { now: options.now })
   })
   runner.setHandlers(orchestrator)
-  const plans = new PlanService({ db, events, runner, startRun: (session, job) => orchestrator.startPmRun(session, job) })
+  const plans = new PlanService({ db, events, runner, stopRun: (runId, actor) => orchestrator.stopRun(runId, actor), startRun: (session, job) => orchestrator.startPmRun(session, job) })
   orchestrator.plans = plans
   return { runner, orchestrator, blobs, transcripts, github, plans }
 }

@@ -471,6 +471,8 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       return c.json(await plans.message(c.req.param('id'), { text: input.text, taskRef: input.taskRef }, actor), 201)
     })
 
+    .post('/plan/sessions/:id/close', async c => c.json(await plans.close(c.req.param('id'), actor)))
+
     .post('/plan/sessions/:id/read', async c => c.json(await plans.markRead(c.req.param('id'))))
 
     .post('/plan/plans/:id/approve', async (c) => {
