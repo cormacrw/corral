@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Agent, AgentRuntime, CliStatus } from '@corral/contracts'
 import { api } from '~/composables/useApi'
+import { agentLimit } from '~/utils/agents'
 import { parseOverride } from '~/utils/device'
 import { cliLoginCommand, detectedRuntimes, ROLE, runtimeLabel, timeAgo } from '~/utils/labels'
 
@@ -211,7 +212,7 @@ const items = [
                     />
                   </div>
                   <p class="text-xs text-muted">
-                    <span data-testid="agent-runtime-label">{{ runtimeLabel(agent.runtime) }}</span> · {{ agent.role === 'pm' ? 'one turn per session' : `concurrency ${agent.concurrency}` }} · <span class="font-mono">.corral/agents/{{ agent.role }}.md</span>
+                    <span data-testid="agent-runtime-label">{{ runtimeLabel(agent.runtime) }}</span> · {{ agentLimit(agent) }} · <span class="font-mono">.corral/agents/{{ agent.role }}.md</span>
                   </p>
                   <AvatarUpload
                     :name="agent.name"
