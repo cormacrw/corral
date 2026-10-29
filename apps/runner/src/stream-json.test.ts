@@ -36,6 +36,29 @@ describe('StreamJsonParser', () => {
     expect(second.events.at(-1)).toEqual({ type: 'usage', inputTokens: 113, outputTokens: 5 })
   })
 
+  it('turns thinking blocks into events, with or without text', () => {
+    const parser = new StreamJsonParser()
+    const parsed = parser.parse(line({
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'thinking', thinking: 'Check the parser first.', signature: 'sig' },
+          { type: 'thinking', thinking: '', signature: 'sig' },
+          { type: 'thinking', signature: 'sig' },
+          { type: 'redacted_thinking', data: 'abc' },
+          { type: 'text', text: 'Found it.' }
+        ]
+      }
+    }))
+    expect(parsed.events).toEqual([
+      { type: 'thinking', text: 'Check the parser first.' },
+      { type: 'thinking', text: '' },
+      { type: 'thinking', text: '' },
+      { type: 'thinking', text: '' },
+      { type: 'message', text: 'Found it.' }
+    ])
+  })
+
   it('turns tool results into events, flattening text parts', () => {
     const parser = new StreamJsonParser()
     const parsed = parser.parse(line({

@@ -3,8 +3,9 @@ import type { RunEvent } from '@corral/contracts'
 import { summarizeSteps, transcriptEntries, type ToolStep } from '~/utils/tool-steps'
 
 // The transcript log (design/agent.md): system dividers, agent messages,
-// collapsed groups of tool steps, and a working line while live. `inline`
-// drops its own scrolling log so it can sit inside another one, like Plan's.
+// muted "Thinking" steps, collapsed groups of tool steps, and a working line
+// while live. `inline` drops its own scrolling log so it can sit inside
+// another one, like Plan's.
 const props = defineProps<{ events: RunEvent[], live: boolean, agentName: string, inline?: boolean, working?: string }>()
 
 const OUTPUT_LINES = 12
@@ -60,6 +61,40 @@ watch(() => props.events.length, async () => {
           :text="entry.text"
           class="text-sm text-highlighted"
         />
+        <div
+          v-else-if="entry.type === 'thinking' && !entry.text"
+          :key="`t${entry.key}`"
+          class="flex items-center gap-2 self-start py-1 ps-1 pe-2 text-sm text-dimmed italic"
+        >
+          <UIcon
+            name="i-lucide-brain"
+            class="size-3.5 shrink-0"
+          />
+          Thinking
+        </div>
+        <div
+          v-else-if="entry.type === 'thinking'"
+          :key="`t${entry.key}`"
+          class="flex flex-col"
+        >
+          <button
+            type="button"
+            class="flex items-center gap-2 self-start rounded-md py-1 ps-1 pe-2 text-start text-sm text-dimmed italic hover:bg-elevated"
+            :aria-expanded="isOpen(`t${entry.key}`, false)"
+            @click="toggle(`t${entry.key}`, false)"
+          >
+            <UIcon
+              :name="isOpen(`t${entry.key}`, false) ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
+              class="size-3.5 shrink-0"
+            />
+            Thinking
+          </button>
+          <div
+            v-if="isOpen(`t${entry.key}`, false)"
+            class="ms-2.5 border-s border-default ps-3.5 text-sm whitespace-pre-wrap text-muted"
+            v-text="entry.text"
+          />
+        </div>
         <div
           v-else
           :key="`g${entry.key}`"
