@@ -297,7 +297,7 @@ const items = [
                   <UInputNumber
                     :model-value="agent.wakeIntervalSeconds === null ? null : agent.wakeIntervalSeconds / 60"
                     :min="1"
-                    placeholder="Every check"
+                    placeholder="None"
                     :aria-label="`Wake interval for ${agent.name} in minutes`"
                     size="xs"
                     class="w-28"
