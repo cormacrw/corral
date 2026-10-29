@@ -9,7 +9,7 @@ definePageMeta({ layout: 'bare' })
 useSeoMeta({ title: 'Set up Corral' })
 const { isMobile } = useDevice()
 const setup = useSetup()
-const { adding, steps, step, index, userName, savingName, repos, reposError, repoSearch, picked, pasted, showPaste, check, checking, defaultBranch, mergeMethod, loadRepos, repoRows, pick, clis, cliError, scan, cliDetail, agentNames, suggest, finishing, next, canContinue } = setup
+const { adding, steps, step, index, userName, savingName, repos, reposError, repoSearch, picked, pasted, showPaste, check, checking, prefix, prefixError, setPrefix, defaultBranch, mergeMethod, loadRepos, repoRows, pick, clis, cliError, scan, cliDetail, agentNames, suggest, finishing, next, canContinue } = setup
 </script>
 
 <template>
@@ -221,6 +221,19 @@ const { adding, steps, step, index, userName, savingName, repos, reposError, rep
           </template>
 
           <template v-if="picked">
+            <UFormField
+              label="Task ID prefix"
+              :error="prefixError"
+              :help="`Task IDs: ${prefix || '…'}-1`"
+              required
+            >
+              <UInput
+                :model-value="prefix"
+                :disabled="checking"
+                class="w-full font-mono"
+                @update:model-value="setPrefix(String($event))"
+              />
+            </UFormField>
             <div class="grid gap-3 sm:grid-cols-2">
               <UFormField
                 label="Default branch"

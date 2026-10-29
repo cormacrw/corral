@@ -1,5 +1,6 @@
 import type { CliStatus, RepoCheck, RepoChoice, RepoList } from '@corral/contracts'
-import { api } from '~/composables/useApi'
+import { suggestPrefix } from '~/utils/prefix'
+import { ApiError, api } from '~/composables/useApi'
 import { cliLoginCommand } from '~/utils/labels'
 
 // Onboarding state and actions (design/onboarding.md), shared by the web
@@ -55,6 +56,14 @@ export function useSetup() {
   const showPaste = ref(false)
   const check = ref<RepoCheck | null>(null)
   const checking = ref(false)
+  const prefix = ref('')
+  const prefixConflict = ref('')
+  const prefixValid = computed(() => /^[A-Z]{2,5}$/.test(prefix.value))
+  const prefixError = computed(() => prefixConflict.value || (!prefixValid.value ? 'Use 2–5 letters, A–Z.' : undefined))
+  function setPrefix(value: string) {
+    prefix.value = value.toUpperCase().replace(/[^A-Z]/g, '')
+    prefixConflict.value = ''
+  }
   const defaultBranch = ref('main')
   const mergeMethod = ref<'squash' | 'merge' | 'rebase'>('squash')
   async function loadRepos(refresh = false) {
@@ -66,19 +75,26 @@ export function useSetup() {
     }
   }
   const repoRows = computed(() => repos.value?.signedIn ? repos.value.repos.filter(r => !repoSearch.value || r.nameWithOwner.toLowerCase().includes(repoSearch.value.toLowerCase())) : [])
+  let pickVersion = 0
   async function pick(repo: RepoChoice | string) {
+    const version = ++pickVersion
     const name = typeof repo === 'string' ? repo : repo.nameWithOwner
     picked.value = typeof repo === 'string' ? { nameWithOwner: name, description: null, isPrivate: false, updatedAt: '', defaultBranch: 'main', selectable: true, reason: null, usedBy: null } : repo
+    setPrefix('')
     defaultBranch.value = picked.value.defaultBranch
     checking.value = true
     check.value = null
     try {
-      check.value = await api.setup.checkRepo(name)
+      const [result, projects] = await Promise.all([api.setup.checkRepo(name), api.projects.list()])
+      if (version !== pickVersion) return
+      setPrefix(suggestPrefix(name.split('/')[1] ?? name, projects.map(p => p.prefix)))
+      check.value = result
       if (check.value.defaultBranch) defaultBranch.value = check.value.defaultBranch
     } catch (e) {
+      if (version !== pickVersion) return
       toast.add({ title: 'Check failed', description: e instanceof Error ? e.message : String(e), color: 'error' })
     } finally {
-      checking.value = false
+      if (version === pickVersion) checking.value = false
     }
   }
   watch(step, (s) => {
@@ -116,12 +132,11 @@ export function useSetup() {
 
   const finishing = ref(false)
   async function finish() {
-    if (!picked.value) return
+    if (!picked.value || !prefixValid.value || prefixConflict.value || finishing.value) return
     finishing.value = true
     try {
       const name = picked.value.nameWithOwner.split('/')[1] ?? picked.value.nameWithOwner
-      const prefix = name.replace(/[^a-zA-Z]/g, '').slice(0, 3).toUpperCase().padEnd(2, 'X')
-      const project = await api.projects.create({ name, prefix, repository: picked.value.nameWithOwner, defaultBranch: defaultBranch.value, mergeMethod: mergeMethod.value })
+      const project = await api.projects.create({ name, prefix: prefix.value, repository: picked.value.nameWithOwner, defaultBranch: defaultBranch.value, mergeMethod: mergeMethod.value })
       if (!adding.value) {
         for (const agent of live.state.value.agents.length ? live.state.value.agents : await api.agents.list()) {
           const wanted = agentNames[agent.role]
@@ -131,27 +146,33 @@ export function useSetup() {
       await live.load()
       await router.push(`/projects/${project.slug}`)
     } catch (e) {
+      if (e instanceof ApiError && e.body?.code === 'conflict' && e.body.constraint?.includes('prefix')) {
+        prefixConflict.value = 'Another project uses this prefix.'
+        step.value = 'repo'
+        return
+      }
       toast.add({ title: 'Could not finish', description: e instanceof Error ? e.message : String(e), color: 'error' })
     } finally {
       finishing.value = false
     }
   }
   async function next() {
-    if (adding.value && step.value === 'repo') return void finish()
-    if (step.value === 'names') return void finish()
+    if (!canContinue.value || finishing.value) return
+    if (adding.value && step.value === 'repo') return finish()
+    if (step.value === 'names') return finish()
     if (step.value === 'you' && !await saveName()) return
     step.value = steps[index.value + 1]!.value
   }
   const canContinue = computed(() => {
     switch (step.value) {
       case 'you': return userName.value.trim().length > 0 && userName.value.trim().length <= 80
-      case 'repo': return Boolean(picked.value && check.value?.ready)
+      case 'repo': return Boolean(picked.value && check.value?.ready && !checking.value && prefixValid.value && !prefixConflict.value)
       case 'agents': return cliReady.value
-      default: return Object.values(agentNames).every(n => n.trim())
+      default: return prefixValid.value && !prefixConflict.value && Object.values(agentNames).every(n => n.trim())
     }
   })
 
-  return { adding, steps, step, index, userName, savingName, repos, reposError, repoSearch, picked, pasted, showPaste, check, checking, defaultBranch, mergeMethod, loadRepos, repoRows, pick, clis, cliError, scan, cliDetail, agentNames, suggest, finishing, next, canContinue }
+  return { adding, steps, step, index, userName, savingName, repos, reposError, repoSearch, picked, pasted, showPaste, check, checking, prefix, prefixError, setPrefix, defaultBranch, mergeMethod, loadRepos, repoRows, pick, clis, cliError, scan, cliDetail, agentNames, suggest, finishing, next, canContinue }
 }
 
 export type Setup = ReturnType<typeof useSetup>
