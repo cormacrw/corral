@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Evidence, Inbox, InboxActionInput, Review, Task, InboxItem } from '@corral/contracts'
+import type { Evidence, Inbox, InboxActionInput, Review, Task, InboxItem, PlanThreadItem } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
@@ -57,9 +57,17 @@ watch(selectedId, () => {
     void load()
   }
 })
+// A thread leaves Needs you once it's answered or replied to (D11), while
+// the PM's turn is still running. Keep its conversation open so the turn
+// streams in, until another item is picked.
+const openThread = shallowRef<PlanThreadItem | null>(null)
+watch(() => inbox.value?.needsYou.find(i => i.id === selectedId.value), (item) => {
+  if (item?.type === 'plan_thread') openThread.value = item
+}, { immediate: true })
 const selected = computed<InboxItem | null>(() => {
   if (!inbox.value || !selectedId.value) return null
-  return [...inbox.value.needsYou, ...inbox.value.activity, ...inbox.value.resolved].find(i => i.id === selectedId.value) ?? null
+  return [...inbox.value.needsYou, ...inbox.value.activity, ...inbox.value.resolved].find(i => i.id === selectedId.value)
+    ?? (openThread.value?.id === selectedId.value ? openThread.value : null)
 })
 const alreadyResolved = computed(() => selected.value !== null && selected.value.type !== 'activity' && !inbox.value?.needsYou.some(i => i.id === selected.value!.id))
 watch(selected, async (item, previous) => {
