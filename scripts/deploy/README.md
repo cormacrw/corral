@@ -1,7 +1,7 @@
 # Auto-deploy on the home server (D16)
 
 `auto-deploy.sh` redeploys Corral whenever `main` moves and CI on the new
-commit has passed, without interrupting agent runs. A systemd timer runs it every minute on the server. It pulls
+commit has passed, without interrupting agent runs. A systemd timer runs it every 20 minutes on the server, so several merges usually go out in one deploy (and one hold). It pulls
 from GitHub, so nothing extra goes through the Cloudflare Tunnel and GitHub
 holds no credentials for the server.
 
@@ -27,7 +27,7 @@ use sudo. To check: `sudo -u <user> git -C <checkout> ls-remote origin`.
 Without systemd, a cron line does the same:
 
 ```cron
-* * * * * /path/to/corral/scripts/deploy/auto-deploy.sh >>/path/to/corral/.corral/deploy/log 2>&1
+*/20 * * * * /path/to/corral/scripts/deploy/auto-deploy.sh >>/path/to/corral/.corral/deploy/log 2>&1
 ```
 
 ## Operating it

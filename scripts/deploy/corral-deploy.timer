@@ -1,9 +1,9 @@
 [Unit]
-Description=Check for a new Corral main every minute
+Description=Check for a new Corral main every 20 minutes
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=1min
+OnUnitActiveSec=20min
 
 [Install]
 WantedBy=timers.target

@@ -353,7 +353,7 @@ The UI specs are in [design/](design/README.md).
 
 **Status:** Accepted 2026-10-28
 
-**Decision:** A systemd timer on the home server runs `scripts/deploy/auto-deploy.sh` every minute. When `main` has moved and the `ci` check on the new commit has passed, it builds the new images and redeploys with Docker Compose. A deploy never cuts off an agent run: if anything other than `web` would restart, the server first goes on an **update hold** and the deploy waits until nothing is running.
+**Decision:** A systemd timer on the home server runs `scripts/deploy/auto-deploy.sh` every 20 minutes, so merges close together share one deploy and one hold. When `main` has moved and the `ci` check on the new commit has passed, it builds the new images and redeploys with Docker Compose. A deploy never cuts off an agent run: if anything other than `web` would restart, the server first goes on an **update hold** and the deploy waits until nothing is running.
 
 - **Pull, not push:** the server polls GitHub. Nothing new is exposed through the Cloudflare Tunnel, GitHub holds no credentials for the server, and no self-hosted GitHub Actions runner runs on it (the repo is public, so that would let fork PRs run code there).
 - **The update hold** (`POST /api/update-hold`, lifted with `DELETE`): no new runs, PM turns or merges start, and running work finishes. It's like the kill switch (PRD §7.11) without stopping anything. `POST` returns how many runs and merges are still in flight, so the deploy calls it until that reaches zero. `GET /api/status` reports it as `updating`, and the app shows a banner.
