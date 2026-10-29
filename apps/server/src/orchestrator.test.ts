@@ -133,6 +133,20 @@ describe('orchestrator', () => {
     await pause(project)
   })
 
+  it('stores the token totals of the last usage event, with cache reads apart', async () => {
+    const { project, job } = await assigned()
+    runner.send({
+      type: 'run.events', runId: job.runId, leaseEpoch: job.leaseEpoch, events: [
+        { type: 'usage', inputTokens: 100, cacheReadTokens: 5000, outputTokens: 10 },
+        { type: 'message', text: 'Working' },
+        { type: 'usage', inputTokens: 120, cacheReadTokens: 9000, outputTokens: 30 }
+      ]
+    })
+    await sleep(200)
+    expect(await runRow(job.runId)).toMatchObject({ inputTokens: 120, cacheReadTokens: 9000, outputTokens: 30 })
+    await pause(project)
+  })
+
   it('interrupts a run whose lease expired and leaves the task for a retry (D10)', async () => {
     const { project, task, job } = await assigned()
     t.clock.now = new Date(t.clock.now.getTime() + 16 * 60_000)

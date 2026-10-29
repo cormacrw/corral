@@ -59,9 +59,10 @@ const empty = (): ParsedLine => ({ events: [], sessionId: null, rateLimit: null,
 
 export class StreamJsonParser {
   #inputTokens = 0
+  #cacheReadTokens = 0
   #outputTokens = 0
   // Totals at the end of the last turn that reported a result
-  #turnStart = { inputTokens: 0, outputTokens: 0 }
+  #turnStart = { inputTokens: 0, cacheReadTokens: 0, outputTokens: 0 }
   #countedMessages = new Set<string>()
   sessionId: string | null = null
   // A follow-up turn that resumes this session gets no "Session started" note
@@ -112,7 +113,7 @@ export class StreamJsonParser {
         if (data.message?.usage && !(messageId && this.#countedMessages.has(messageId))) {
           if (messageId) this.#countedMessages.add(messageId)
           this.#add(data.message.usage)
-          out.events.push({ type: 'usage', inputTokens: this.#inputTokens, outputTokens: this.#outputTokens })
+          out.events.push(this.#usage())
         }
         return out
       }
@@ -142,11 +143,12 @@ export class StreamJsonParser {
         if (isError) out.events.push({ type: 'system', text: `The agent ended with an error: ${text || data.subtype}` })
         if (data.usage) {
           this.#inputTokens = this.#turnStart.inputTokens
+          this.#cacheReadTokens = this.#turnStart.cacheReadTokens
           this.#outputTokens = this.#turnStart.outputTokens
           this.#add(data.usage)
-          out.events.push({ type: 'usage', inputTokens: this.#inputTokens, outputTokens: this.#outputTokens })
+          out.events.push(this.#usage())
         }
-        this.#turnStart = { inputTokens: this.#inputTokens, outputTokens: this.#outputTokens }
+        this.#turnStart = { inputTokens: this.#inputTokens, cacheReadTokens: this.#cacheReadTokens, outputTokens: this.#outputTokens }
         return out
       }
 
@@ -158,12 +160,19 @@ export class StreamJsonParser {
   // A long-lived session's next turn is a new run, whose totals start at zero
   startTurn(): void {
     this.#inputTokens = 0
+    this.#cacheReadTokens = 0
     this.#outputTokens = 0
   }
 
+  // Cache reads are kept apart: they cost far less than fresh input
   #add(usage: Usage): void {
-    this.#inputTokens += (usage.input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0)
+    this.#inputTokens += (usage.input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0)
+    this.#cacheReadTokens += usage.cache_read_input_tokens ?? 0
     this.#outputTokens += usage.output_tokens ?? 0
+  }
+
+  #usage(): RunEvent {
+    return { type: 'usage', inputTokens: this.#inputTokens, cacheReadTokens: this.#cacheReadTokens, outputTokens: this.#outputTokens }
   }
 }
 

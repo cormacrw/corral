@@ -227,6 +227,7 @@ export const runs = pgTable('runs', {
   // sha256 of the JSONL transcript in the blob store; transcripts never go in the database (D8)
   transcriptBlob: text(),
   inputTokens: integer(),
+  cacheReadTokens: integer(),
   outputTokens: integer(),
   queuedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   startedAt: timestamp({ withTimezone: true }),

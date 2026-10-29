@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AgentRuns } from '~/composables/useAgentRuns'
-import { duration, isLiveRun, runBadge, timeAgo, tokens } from '~/utils/labels'
+import { duration, isLiveRun, runBadge, runTokens, timeAgo } from '~/utils/labels'
 
 // One run's transcript on mobile (design/agent.md, design/mobile.md). It
 // fills the screen: its own header with the run and its controls, the
@@ -57,7 +57,7 @@ const live = computed(() => !!selected.value && isLiveRun(selected.value))
             variant="subtle"
             size="sm"
           />
-          <span class="truncate tabular-nums">{{ duration(selected.startedAt, selected.endedAt, now) }} · {{ tokens((selected.inputTokens ?? 0) + (selected.outputTokens ?? 0)) }} tokens</span>
+          <span class="truncate tabular-nums">{{ duration(selected.startedAt, selected.endedAt, now) }} · {{ runTokens(selected) }}</span>
         </p>
         <UButton
           v-if="live"

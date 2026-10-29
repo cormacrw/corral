@@ -110,6 +110,14 @@ export function tokens(n: number | null): string {
   return String(n)
 }
 
+// Cache reads are shown apart: they cost far less than fresh input
+export function runTokens(run: Pick<Run, 'inputTokens' | 'cacheReadTokens' | 'outputTokens'>): string {
+  const parts = [`${tokens(run.inputTokens ?? 0)} in`]
+  if (run.cacheReadTokens !== null) parts.push(`${tokens(run.cacheReadTokens)} cache read`)
+  parts.push(`${tokens(run.outputTokens ?? 0)} out`)
+  return parts.join(' · ')
+}
+
 // Working comes from the lease, not the status (D10)
 export function isWorking(agent: Agent): boolean {
   return agent.activeRuns > 0

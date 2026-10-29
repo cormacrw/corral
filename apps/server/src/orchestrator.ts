@@ -462,7 +462,7 @@ export class Orchestrator implements RunnerHandlers {
       events.publish({ type: 'run.events', runId: message.runId, events: message.events })
       const usage = message.events.filter((e): e is Extract<RunEvent, { type: 'usage' }> => e.type === 'usage').at(-1)
       if (usage) {
-        await db.update(runs).set({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens }).where(eq(runs.id, message.runId))
+        await db.update(runs).set({ inputTokens: usage.inputTokens, cacheReadTokens: usage.cacheReadTokens, outputTokens: usage.outputTokens }).where(eq(runs.id, message.runId))
       }
       return
     }

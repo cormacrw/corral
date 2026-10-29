@@ -40,6 +40,7 @@ function toRun({ run, agentName, prefix, taskNumber, taskTitle }: RunJoin): Run 
     error: run.error,
     headSha: run.headSha,
     inputTokens: run.inputTokens,
+    cacheReadTokens: run.cacheReadTokens,
     outputTokens: run.outputTokens,
     rateLimitResetAt: run.rateLimitResetAt?.toISOString() ?? null,
     queuedAt: run.queuedAt.toISOString(),
