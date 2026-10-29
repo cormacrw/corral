@@ -53,6 +53,7 @@ The PM has **no** tools to merge, edit docs or change status. This is enforced b
 - The `claude` session ID is stored with the conversation in the database. If the session is lost (e.g. the runner's disk was wiped), the next turn starts a fresh session seeded with a summary built from the database messages. The database is the source of truth; `~/.claude` is only a cache.
 - A PM turn runs only when the human sends a message. Nothing goes back to the PM when tasks or epics merge.
 - **One checkout and one turn per session.** Each Plan session gets its own read-only checkout of the default branch, kept between turns so `claude --resume` finds the session. A session runs one turn at a time: a second message while its turn is active gets 409 `pm_turn_in_progress`, and the session's `activeRunId` is that turn. Other sessions, in the same project or another, can talk to Juno meanwhile.
+- **Warm process between turns** (D9). After a turn, its `claude` process stays alive for `CORRAL_PM_WARM_SECONDS` (default 5 minutes). A message within that time goes to the same process over stdin, after the checkout is reset to fresh code, so the reply skips CLI startup. After the timeout, or if the model or session changed, the next turn cold-starts with `--resume`.
 - **Juno's concurrency still applies** (D13, global across projects). A turn over the limit is accepted and waits as `queued`; it's sent to the runner, oldest first, when another PM turn ends.
 
 ---

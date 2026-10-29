@@ -57,6 +57,7 @@ export class StreamJsonParser {
   sessionId: string | null = null
   // A follow-up turn that resumes this session gets no "Session started" note
   #quietResumeOf: string | null
+  #sawInit = false
 
   constructor(options: { quietResumeOf?: string | null } = {}) {
     this.#quietResumeOf = options.quietResumeOf ?? null
@@ -84,6 +85,9 @@ export class StreamJsonParser {
         if (data.subtype === 'init') {
           out.sessionId = data.session_id ?? null
           if (this.#quietResumeOf && data.session_id === this.#quietResumeOf) return out
+          // A long-lived session may announce itself again on later turns
+          if (this.#sawInit) return out
+          this.#sawInit = true
           out.events.push({ type: 'system', text: `Session started${data.model ? ` (${data.model})` : ''}` })
         }
         return out
@@ -131,6 +135,12 @@ export class StreamJsonParser {
       default:
         return out
     }
+  }
+
+  // A long-lived session's next turn is a new run, whose totals start at zero
+  startTurn(): void {
+    this.#inputTokens = 0
+    this.#outputTokens = 0
   }
 
   #add(usage: Usage): void {
