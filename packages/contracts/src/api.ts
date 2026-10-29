@@ -340,7 +340,8 @@ export interface Plan {
     ref: string | null
     title: string
     status: TaskStatus | null
-    criteriaCount: number
+    priority: TaskPriority
+    humanReview: boolean
     dependsOn: string[]
   }[]
   createdAt: string

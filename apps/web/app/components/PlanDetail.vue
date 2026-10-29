@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Plan, Task } from '@corral/contracts'
 import { api } from '~/composables/useApi'
+import { PRIORITY } from '~/utils/labels'
 
 // The session's latest plan, docked in the flyout (design/plan.md). Each
 // revision replaces it here rather than adding another card to the chat.
@@ -14,7 +15,6 @@ const showDiff = ref(false)
 const changeColor = { added: 'success', changed: 'warning', unchanged: 'neutral', removed: 'error' } as const
 // Removed tasks only matter to the diff, not to the plan as it stands
 const tasks = computed(() => props.plan.tasks.filter(t => t.change !== 'removed'))
-const criteria = computed(() => tasks.value.reduce((n, t) => n + t.criteriaCount, 0))
 // Removed Drafts are deleted (D10), so only their count is left to show
 const changed = computed(() => tasks.value.filter(t => t.change !== 'unchanged'))
 const removed = computed(() => props.plan.tasks.length - tasks.value.length)
@@ -29,7 +29,7 @@ const groups = computed(() => {
   const other = { key: '', id: '', title: props.plan.epics.length > 0 ? 'Other tasks' : 'Tasks' }
   return [...props.plan.epics, other].map((epic) => {
     const own = tasks.value.filter(t => epic.id ? t.epicId === epic.id : !t.epicId || !planned.has(t.epicId))
-    return { ...epic, tasks: own, criteria: own.reduce((n, t) => n + t.criteriaCount, 0) }
+    return { ...epic, tasks: own }
   }).filter(g => g.tasks.length > 0)
 })
 const epicCount = computed(() => groups.value.filter(g => g.id).length)
@@ -108,7 +108,7 @@ watch(() => props.plan.id, () => {
         <p class="text-xs text-muted">
           <template v-if="epicCount > 0">
             {{ epicCount }} {{ epicCount === 1 ? 'epic' : 'epics' }} ·
-          </template>{{ tasks.length }} tasks · {{ criteria }} criteria
+          </template>{{ tasks.length }} tasks
         </p>
       </div>
       <section
@@ -134,7 +134,7 @@ watch(() => props.plan.id, () => {
               </template>
             </h3>
             <p class="text-xs text-muted">
-              {{ group.tasks.length }} tasks · {{ group.criteria }} criteria
+              {{ group.tasks.length }} tasks
             </p>
           </div>
           <UTabs
@@ -170,7 +170,14 @@ watch(() => props.plan.id, () => {
                   >{{ task.ref }}</span>{{ task.title }}
                 </span>
                 <span class="block text-xs text-muted">
-                  {{ task.criteriaCount }} criteria<span v-if="task.dependsOn.length"> · after {{ task.dependsOn.join(', ') }}</span>
+                  <span :class="task.priority === 'urgent' ? 'text-error' : task.priority === 'high' ? 'text-warning' : 'text-muted'">{{ PRIORITY[task.priority].label }}</span>
+                  <template v-if="task.humanReview">
+                    · <UIcon
+                      name="i-lucide-user-check"
+                      class="size-3 align-[-2px]"
+                    /> Human review
+                  </template>
+                  <span v-if="task.dependsOn.length"> · after {{ task.dependsOn.join(', ') }}</span>
                 </span>
               </span>
               <UBadge

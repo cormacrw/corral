@@ -57,9 +57,9 @@ Everything is centred vertically and horizontally, in a column up to 720px wide:
 Docked on the right (`?plan`), the same flyout as tasks and epics; the conversation narrows to make room. It always shows the session's **latest** plan version, so each revision updates it in place. It opens by itself when a new version arrives waiting for approval, unless a task or epic is already open.
 
 - **Header:** a "Plan v2" badge, a status badge ("Waiting for approval" in `primary`, or "Approved" in `success`), and Close.
-- **Title:** the plan title and "2 epics · 4 tasks · 8 criteria" (the epic count only when the plan has epics, "1 epic" for one).
-- **One section per epic**, in the order Juno gave them: the epic title (opens the epic), "N tasks · N criteria", and **List** / **Graph** tabs, remembered per epic.
-  - **List:** one row per task: the ref and title, "N criteria · after {dependency}", and a **New** (`success`) or **Revised** (`warning`) badge. A Revised row is an existing Backlog task the plan refines by its ref; it shows the plan's proposed title, criteria and dependencies, while the task itself (opened from the row) is unchanged until approval. Rows open the task in the flyout, with a back arrow to the plan.
+- **Title:** the plan title and "2 epics · 4 tasks" (the epic count only when the plan has epics, "1 epic" for one).
+- **One section per epic**, in the order Juno gave them: the epic title (opens the epic), "N tasks", and **List** / **Graph** tabs, remembered per epic.
+  - **List:** one row per task: the ref and title, a subline with the priority (Urgent in `error`, High in `warning`, Medium and Low muted), "· Human review" with a user-check icon when the task needs human review, and "· after {dependency}", and a **New** (`success`) or **Revised** (`warning`) badge. A Revised row is an existing Backlog task the plan refines by its ref; it shows the plan's proposed title, priority, human review and dependencies, while the task itself (opened from the row) is unchanged until approval. Rows open the task in the flyout, with a back arrow to the plan.
   - **Graph:** the epic's dependency tree, top to bottom, as on the epic flyout ([epic.md](epic.md)). A dependency in another epic shows as a dashed placeholder. Clicking a node opens the task.
   - Tasks with no epic, and a Draft moved to another epic by hand, are listed last, under **Other tasks** (just **Tasks** when the plan has no epics).
   - Removed tasks aren't listed, and what changed lives under Changes from v1.
@@ -93,7 +93,7 @@ On the mobile layout ([mobile.md](mobile.md)) the same two routes keep their beh
 
 - **Sessions:** id, project, title, preview, updated time, unread, status (needs approval / question / none), messages.
 - **Messages:** role, text, and an optional attached plan id.
-- **Plans:** version, status, epics (key, id, title), tasks (ref, title, epic, change type, criteria count, dependencies).
+- **Plans:** version, status, epics (key, id, title), tasks (ref, title, epic, change type, priority, human review, dependencies).
 - **Backlog search:** filtered to the session's project.
 - **Streaming:** SSE for tokens and plan versions.
 

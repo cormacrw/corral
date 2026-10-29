@@ -296,9 +296,9 @@ export const grilling: Record<string, { questions: Pick<PlanMessage, 'text' | 'r
       title: 'Mobile push',
       summary: 'Web Push notifications for Needs you items, opening the Inbox item.',
       tasks: [
-        { key: 'T1', change: 'added', revises: false, taskId: null, epicId: null, ref: null, title: 'VAPID keys and push subscriptions', status: 'draft', criteriaCount: 3, dependsOn: [] },
-        { key: 'T2', change: 'added', revises: false, taskId: null, epicId: null, ref: null, title: 'Send a push when an item needs you', status: 'draft', criteriaCount: 3, dependsOn: ['T1'] },
-        { key: 'T3', change: 'added', revises: false, taskId: null, epicId: null, ref: null, title: 'Open the Inbox item from a push', status: 'draft', criteriaCount: 2, dependsOn: ['T2'] }
+        { key: 'T1', change: 'added', revises: false, taskId: null, epicId: null, ref: null, title: 'VAPID keys and push subscriptions', status: 'draft', priority: 'urgent', humanReview: false, dependsOn: [] },
+        { key: 'T2', change: 'added', revises: false, taskId: null, epicId: null, ref: null, title: 'Send a push when an item needs you', status: 'draft', priority: 'high', humanReview: true, dependsOn: ['T1'] },
+        { key: 'T3', change: 'added', revises: false, taskId: null, epicId: null, ref: null, title: 'Open the Inbox item from a push', status: 'draft', priority: 'low', humanReview: false, dependsOn: ['T2'] }
       ]
     }
   }
@@ -311,8 +311,9 @@ export const plans: Record<string, Plan[]> = {
       summary: 'A design task type whose deliverable is an approved, versioned prototype.', status: 'proposed', approvedAt: null,
       epics: [{ key: 'E1', id: 'e-design', title: 'Design tasks' }],
       tasks: [
-        { key: 'T1', change: 'added', revises: false, taskId: null, epicId: 'e-design', ref: null, title: 'Design review screen', status: 'draft', criteriaCount: 2, dependsOn: [] },
-        { key: 'T2', change: 'added', revises: false, taskId: null, epicId: 'e-design', ref: null, title: 'Approve a design version', status: 'draft', criteriaCount: 2, dependsOn: ['T1'] }
+        { key: 'T1', change: 'added', revises: false, taskId: null, epicId: 'e-design', ref: null, title: 'Design review screen', status: 'draft', priority: 'high', humanReview: true, dependsOn: [] },
+        { key: 'T2', change: 'added', revises: false, taskId: null, epicId: 'e-design', ref: null, title: 'Approve a design version', status: 'draft', priority: 'urgent', humanReview: false, dependsOn: ['T1'] },
+        { key: 'T3', change: 'added', revises: false, taskId: null, epicId: 'e-design', ref: null, title: 'Pin a design version to a task', status: 'draft', priority: 'low', humanReview: false, dependsOn: ['T2'] }
       ],
       createdAt: ago(60 * 25)
     }
