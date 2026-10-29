@@ -428,12 +428,18 @@ export interface Agent {
   avatarUrl: string | null
 }
 
-// The human using Corral. The name shown in the app still comes from the
-// browser (design/settings.md); the picture is kept on the server.
+// The human using Corral. Name and picture are kept on the server, so every
+// browser and device sees the same profile (design/settings.md).
 export interface Profile {
   id: string
+  name: string
   avatarUrl: string | null
 }
+
+export const patchProfileInput = z.object({
+  name: z.string().trim().min(1).max(80)
+})
+export type PatchProfileInput = z.infer<typeof patchProfileInput>
 
 // Profile pictures: small square images, resized in the browser before upload
 export const AVATAR_CONTENT_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const

@@ -9,6 +9,7 @@ import {
   inboxActionInput,
   patchAgentInput,
   patchEpicInput,
+  patchProfileInput,
   patchProjectInput,
   patchTaskInput,
   planMessageInput,
@@ -27,7 +28,7 @@ import { bodyLimit } from 'hono/body-limit'
 import { streamSSE } from 'hono/streaming'
 import type { ZodType } from 'zod'
 import { ApiFailure, fromDatabaseError } from './errors.ts'
-import { checkAvatar, getProfile, readAvatar, setAgentAvatar, setUserAvatar } from './avatars.ts'
+import { checkAvatar, getProfile, patchProfile, readAvatar, setAgentAvatar, setUserAvatar } from './avatars.ts'
 import { getEpic, listEpics, patchEpic } from './epics.ts'
 import type { EventBus } from './events.ts'
 import { loadInbox } from './inbox.ts'
@@ -308,6 +309,11 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     .get('/agents/:id/avatar', async c => serveAvatar(c, await readAvatar(db, blobs, { agentId: c.req.param('id') })))
 
     .get('/me', async c => c.json(await getProfile(db, ownerId())))
+    .patch('/me', validate('json', patchProfileInput), async (c) => {
+      const profile = await patchProfile(db, ownerId(), c.req.valid('json'))
+      events.publish({ type: 'profile.updated', profile })
+      return c.json(profile)
+    })
     .put('/me/avatar', avatarBodyLimit, async (c) => {
       const data = new Uint8Array(await c.req.arrayBuffer())
       const profile = await setUserAvatar(db, blobs, ownerId(), { data, type: checkAvatar(data, c.req.header('content-type')) })
