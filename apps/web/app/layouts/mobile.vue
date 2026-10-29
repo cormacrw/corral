@@ -29,8 +29,19 @@ const tabs = computed(() => [
   { label: 'Agents', icon: 'i-lucide-bot', to: '/agents', active: isActive('/agents') }
 ])
 
+// A project's own pages (Board, Backlog, Settings) name the project above
+// the page and go back to its overview
+const PROJECT_PAGES: Record<string, string> = { board: 'Board', backlog: 'Backlog', settings: 'Settings' }
+const projectPage = computed(() => {
+  const [section, slug, page] = route.path.split('/').filter(Boolean)
+  if (section !== 'projects' || !slug || !page || !PROJECT_PAGES[page]) return null
+  const project = state.value.projects.find(p => p.slug === slug)
+  return { title: PROJECT_PAGES[page], eyebrow: project?.name ?? slug, back: `/projects/${slug}` }
+})
+
 // The header names the page; later tasks give each screen its own header
 const title = computed(() => {
+  if (projectPage.value) return projectPage.value.title
   const [section, id] = route.path.split('/').filter(Boolean)
   switch (section) {
     case 'home': return 'Home'
@@ -53,9 +64,26 @@ const title = computed(() => {
   <div class="flex h-svh flex-col bg-default text-default">
     <header class="shrink-0 border-b border-default bg-default pt-[env(safe-area-inset-top)] ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]">
       <div class="flex h-14 items-center gap-2 px-4">
-        <h1 class="min-w-0 flex-1 truncate text-xl font-semibold text-highlighted">
-          {{ title }}
-        </h1>
+        <UButton
+          v-if="projectPage"
+          :to="projectPage.back"
+          icon="i-lucide-arrow-left"
+          variant="ghost"
+          color="neutral"
+          aria-label="Back to the project"
+          class="-ms-2"
+        />
+        <div class="min-w-0 flex-1">
+          <p
+            v-if="projectPage"
+            class="truncate text-xs text-muted"
+          >
+            {{ projectPage.eyebrow }}
+          </p>
+          <h1 :class="['truncate font-semibold text-highlighted', projectPage ? 'text-lg leading-tight' : 'text-xl']">
+            {{ title }}
+          </h1>
+        </div>
         <span
           class="flex shrink-0 items-center gap-1.5 text-xs text-muted"
           data-testid="runner-status"
@@ -66,6 +94,11 @@ const title = computed(() => {
           />
           Runner {{ state.runner?.online ? 'online' : 'offline' }}
         </span>
+        <!-- Pages put their own header actions here (search, New task) -->
+        <div
+          id="mobile-header-actions"
+          class="contents"
+        />
         <UButton
           to="/settings/profile"
           icon="i-lucide-settings"
