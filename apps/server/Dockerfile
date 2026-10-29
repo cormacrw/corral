@@ -25,6 +25,9 @@ ENV NODE_ENV=production
 ENV CORRAL_SERVER_HOST=0.0.0.0
 ENV CORRAL_SERVER_PORT=4100
 ENV CORRAL_SERVER_DATA_DIR=/data/server
+# Must exist owned by node here, or Docker creates the volume's mount point
+# as root and the server can't write blobs or transcripts
+RUN mkdir -p /data/server && chown node:node /data/server
 VOLUME ["/data/server"]
 EXPOSE 4100
 USER node

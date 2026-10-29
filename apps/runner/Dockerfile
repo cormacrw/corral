@@ -40,9 +40,13 @@ ENV CORRAL_CLAUDE_BIN=claude
 ENV CHROME_BIN=/usr/bin/chromium
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PUPPETEER_SKIP_DOWNLOAD=1
-# claude and gh keep their logins under HOME; both directories are volumes
+# claude and gh keep their logins under HOME; both directories are volumes.
+# They must exist owned by runner here, or Docker creates the mount points
+# as root and the logins can't be saved.
 ENV HOME=/home/runner
-RUN useradd --create-home --uid 1001 runner && mkdir -p /data/runner && chown -R runner:runner /data/runner /home/runner
+RUN useradd --create-home --uid 1001 runner \
+  && mkdir -p /data/runner /home/runner/.claude /home/runner/.config/gh \
+  && chown -R runner:runner /data/runner /home/runner
 VOLUME ["/data/runner", "/home/runner/.claude", "/home/runner/.config/gh"]
 USER runner
 WORKDIR /app/apps/runner

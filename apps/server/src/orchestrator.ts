@@ -442,6 +442,12 @@ export class Orchestrator implements RunnerHandlers {
         error = exit.message
         break
     }
+    // A turn that ends without saying anything still answers the human, with
+    // what the runner noted last (e.g. "The agent ended with an error: …")
+    if (!reply && !error) {
+      const note = events.filter((e): e is Extract<RunEvent, { type: 'system' }> => e.type === 'system').at(-1)?.text
+      error = note ?? 'Juno finished without replying'
+    }
     if (ctx.run.planSessionId) await this.plans?.onRunEnded(ctx.run.planSessionId, ctx.run.id, reply, error)
   }
 
