@@ -6,6 +6,7 @@ import { basename, extname, isAbsolute, join, resolve } from 'node:path'
 import { createRuntimeRegistry, STOP_GRACE_MS, type AgentExit, type AgentProcess, type AgentRuntime, type AgentSession, type ParsedLine, type RuntimeRegistry } from './agent-runtime.ts'
 import type { RunnerConfig } from './config.ts'
 import type { ServerConnection } from './connection.ts'
+import { saveDesign } from './designs.ts'
 import { outcomesFor, ROLE_TOOLS, type ToolOutcome, type ToolServer } from './mcp.ts'
 import { headSha, prepareWorkspace, pushBranch, readProjectBrief, readRoleInstructions } from './workspace.ts'
 
@@ -565,6 +566,12 @@ export class RunManager {
       const file = await this.#readEvidence(run, input)
       if (!file.ok) return file
       return this.#forward(run, tool, { ...input, ...(file.result as object) })
+    }
+
+    if (tool === 'get_design') {
+      const design = await this.#forward(run, tool, input)
+      if (!design.ok) return design
+      return saveDesign(run.scratchDir, design.result as Parameters<typeof saveDesign>[1])
     }
 
     if (tool === 'report_outcome') {

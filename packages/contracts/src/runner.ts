@@ -103,6 +103,7 @@ export type AgentTool =
   | 'attach_evidence'
   | 'get_evidence'
   | 'get_attachment'
+  | 'get_design'
   | 'report_outcome'
   | 'list_tasks'
   | 'get_run_outcomes'

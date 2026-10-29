@@ -26,6 +26,16 @@ export interface ProposedTask {
   humanReview: boolean
   acceptanceCriteria: string[]
   dependsOn: string[]
+  // The approved design version this task builds, and the screens (ids
+  // from its design.md) it covers (D20)
+  design?: DesignPin | undefined
+}
+
+export interface DesignPin {
+  // The design task, e.g. COR-70
+  taskRef: string
+  version: number
+  screens: string[]
 }
 
 export interface ProposedPlan {
@@ -52,6 +62,9 @@ export type PlanProblem =
   | { code: 'deleted_ref', key: string, ref: string, message: string }
   | { code: 'ref_in_other_project', key: string, ref: string, project: string, message: string }
   | { code: 'ref_not_revisable', key: string, ref: string, status: TaskStatus, message: string }
+  | { code: 'design_not_found', key: string, design: string, message: string }
+  | { code: 'design_not_approved', key: string, design: string, status: string, message: string }
+  | { code: 'design_without_screens', key: string, design: string, message: string }
 
 // What an existing task's ref points at, looked up by the server before
 // checkPlan runs
@@ -61,6 +74,17 @@ export type PlanRef =
   | { kind: 'deleted' }
   | { kind: 'other_project', project: string }
 
+// What a design pin points at, looked up by the server before checkPlan
+// runs. Keyed by designPinKey.
+export type DesignPinTarget =
+  | { kind: 'version', status: string }
+  | { kind: 'not_design', status: TaskStatus }
+  | { kind: 'unknown' }
+
+export function designPinKey(pin: Pick<DesignPin, 'taskRef' | 'version'>): string {
+  return `${pin.taskRef.toUpperCase()}@v${pin.version}`
+}
+
 // Only tasks nobody has started can be revised by a plan
 export const REVISABLE_STATUSES: readonly TaskStatus[] = ['backlog', 'draft']
 
@@ -68,8 +92,9 @@ export const REVISABLE_STATUSES: readonly TaskStatus[] = ['backlog', 'draft']
 // has acceptance criteria. Returns every problem, so the PM can fix them all.
 // `refs` holds every existing-task ref the plan names, in `ref` or
 // `dependsOn`; a task may revise only a Backlog task or a Draft, but may
-// depend on any task in the project.
-export function checkPlan(plan: ProposedPlan, refs: ReadonlyMap<string, PlanRef> = new Map()): PlanProblem[] {
+// depend on any task in the project. `designs` holds every design pin's
+// target by designPinKey; a task may pin only an approved version (D20).
+export function checkPlan(plan: ProposedPlan, refs: ReadonlyMap<string, PlanRef> = new Map(), designs: ReadonlyMap<string, DesignPinTarget> = new Map()): PlanProblem[] {
   const problems: PlanProblem[] = []
   if (plan.tasks.length === 0) return [{ code: 'no_tasks' }]
   const epicKeys = new Set<string>()
@@ -94,6 +119,10 @@ export function checkPlan(plan: ProposedPlan, refs: ReadonlyMap<string, PlanRef>
       if (plan.tasks.some(t => t !== task && t.ref === task.ref) && !problems.some(p => p.code === 'duplicate_ref' && p.ref === task.ref)) {
         problems.push({ code: 'duplicate_ref', key: task.key, ref: task.ref })
       }
+    }
+    if (task.design) {
+      const problem = designProblem(task.key, task.design, designs.get(designPinKey(task.design)) ?? { kind: 'unknown' })
+      if (problem) problems.push(problem)
     }
   }
   // A dependency names a key in the plan, the ref of a task the plan
@@ -128,6 +157,20 @@ function refProblem(key: string, ref: string, found: PlanRef, revising: boolean)
   }
 }
 
+function designProblem(key: string, pin: DesignPin, found: DesignPinTarget): PlanProblem | null {
+  const design = designPinKey(pin).replace('@', ' ')
+  switch (found.kind) {
+    case 'unknown':
+      return { code: 'design_not_found', key, design, message: `There is no design ${design} in this project. Check the version with get_design.` }
+    case 'not_design':
+      return { code: 'design_not_found', key, design, message: `${pin.taskRef} isn't a design task, so it has no versions to pin.` }
+    case 'version':
+      if (found.status !== 'approved') return { code: 'design_not_approved', key, design, status: found.status, message: `Design ${design} is ${found.status}; pin only the approved version.` }
+      if (pin.screens.length === 0 || pin.screens.some(s => !s.trim())) return { code: 'design_without_screens', key, design, message: 'List the screen ids (from design.md) the task covers.' }
+      return null
+  }
+}
+
 export type PlanChange = 'added' | 'changed' | 'unchanged' | 'removed'
 
 // How a revised plan differs from the previous version, by key (design/plan.md)
@@ -156,4 +199,10 @@ function sameTask(a: ProposedTask, b: ProposedTask): boolean {
     && a.acceptanceCriteria.every((c, i) => c === b.acceptanceCriteria[i])
     && a.dependsOn.length === b.dependsOn.length
     && a.dependsOn.every(d => b.dependsOn.includes(d))
+    && samePin(a.design, b.design)
+}
+
+function samePin(a: DesignPin | undefined, b: DesignPin | undefined): boolean {
+  if (!a || !b) return !a && !b
+  return designPinKey(a) === designPinKey(b) && a.screens.length === b.screens.length && a.screens.every(s => b.screens.includes(s))
 }

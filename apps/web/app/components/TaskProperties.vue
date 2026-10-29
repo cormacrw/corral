@@ -36,6 +36,7 @@ const dotClass = (status: TaskStatus) => ({
     v-for="row in [
       { key: 'project', label: 'Project' },
       { key: 'epic', label: 'Epic' },
+      { key: 'design', label: 'Design' },
       { key: 'status', label: 'Status' },
       { key: 'priority', label: 'Priority' },
       { key: 'type', label: 'Type' },
@@ -45,7 +46,7 @@ const dotClass = (status: TaskStatus) => ({
       { key: 'branch', label: 'Branch' },
       { key: 'pr', label: 'Pull request' },
       { key: 'round', label: 'Review round' }
-    ].filter(r => !props.draft || !DRAFT_HIDDEN.includes(r.key))"
+    ].filter(r => (!props.draft || !DRAFT_HIDDEN.includes(r.key)) && (r.key !== 'design' || props.task.design))"
     :key="row.key"
   >
     <dt :class="['text-muted', props.stacked ? 'mt-2 text-xs' : 'flex min-h-8 items-center']">
@@ -74,6 +75,35 @@ const dotClass = (status: TaskStatus) => ({
           class="text-muted"
         >None</span>
       </template>
+
+      <!-- The approved design version a build task builds, and its screens (D20) -->
+      <span
+        v-else-if="row.key === 'design' && props.task.design"
+        class="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1"
+      >
+        <NuxtLink
+          v-if="props.stacked"
+          :to="`/tasks/${props.task.design.taskRef}`"
+          class="text-primary hover:underline"
+        >{{ props.task.design.taskRef }} v{{ props.task.design.version }}</NuxtLink>
+        <button
+          v-else
+          type="button"
+          class="text-primary hover:underline"
+          @click="flyout.open(props.task.design.taskRef)"
+        >
+          {{ props.task.design.taskRef }} v{{ props.task.design.version }}
+        </button>
+        <UBadge
+          v-for="screen in props.task.design.screens"
+          :key="screen"
+          :label="screen"
+          color="neutral"
+          variant="subtle"
+          size="sm"
+          class="font-mono"
+        />
+      </span>
 
       <UTooltip
         v-else-if="row.key === 'status'"

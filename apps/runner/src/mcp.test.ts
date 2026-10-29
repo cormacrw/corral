@@ -62,6 +62,32 @@ describe('ToolServer', () => {
     await client.close()
   })
 
+  it('lets propose_plan pin a task to a design version and its screens (D20)', async () => {
+    const { client, calls } = await connect('pm')
+    const propose = (await client.listTools()).tools.find(t => t.name === 'propose_plan')!
+    expect(propose.inputSchema).toMatchObject({ properties: { tasks: { items: { properties: { design: { type: 'object', required: ['taskRef', 'version', 'screens'] } } } } } })
+
+    const task = { key: 't1', title: 'Login', description: 'Build it', type: 'task', acceptanceCriteria: ['It works'] }
+    const pin = { taskRef: 'COR-7', version: 2, screens: ['login'] }
+    await client.callTool({ name: 'propose_plan', arguments: { title: 'Login', tasks: [{ ...task, design: pin }] } })
+    expect(calls).toEqual([{ tool: 'propose_plan', input: expect.objectContaining({ tasks: [expect.objectContaining({ design: pin })] }) }])
+
+    // A pin without screens is refused before it reaches Corral
+    const empty = await client.callTool({ name: 'propose_plan', arguments: { title: 'Login', tasks: [{ ...task, design: { ...pin, screens: [] } }] } })
+    expect(empty.isError).toBe(true)
+    expect(calls).toHaveLength(1)
+    await client.close()
+  })
+
+  it('gives the PM get_design with an optional version', async () => {
+    const { client, calls } = await connect('pm')
+    const getDesign = (await client.listTools()).tools.find(t => t.name === 'get_design')!
+    expect(getDesign.inputSchema).toMatchObject({ properties: { taskRef: { type: 'string' }, version: { type: 'integer' } }, required: ['taskRef'] })
+    await client.callTool({ name: 'get_design', arguments: { taskRef: 'COR-7' } })
+    expect(calls).toEqual([{ tool: 'get_design', input: { taskRef: 'COR-7' } }])
+    await client.close()
+  })
+
   it('builds the propose_plan task type from TASK_TYPES and rejects the old area types (D19)', async () => {
     const { client, calls } = await connect('pm')
     const propose = (await client.listTools()).tools.find(t => t.name === 'propose_plan')!

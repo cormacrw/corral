@@ -318,6 +318,9 @@ export interface PlanRevision {
   epicId: string | null
   // Task numbers in the same project
   dependsOn: number[]
+  // The design version the task is pinned to, and its screens (D20). Absent
+  // on revisions saved before pins existed.
+  design?: { designVersionId: string, screens: string[] } | null
 }
 
 // The epics of a plan version, by the PM's key, so a revision keeps each
@@ -433,3 +436,13 @@ export const designVersions = pgTable('design_versions', {
   unique('design_versions_task_version_unique').on(t.taskId, t.version),
   check('design_versions_version_positive', sql`${t.version} > 0`)
 ])
+
+// A build task's pin to the approved design version it builds and the
+// screens (ids from design.md) it covers (D20). One per task.
+export const taskDesignPins = pgTable('task_design_pins', {
+  taskId: uuid().primaryKey().references(() => tasks.id, { onDelete: 'cascade' }),
+  designVersionId: uuid().notNull().references(() => designVersions.id, { onDelete: 'cascade' }),
+  screens: jsonb().$type<string[]>().notNull().default([]),
+  createdAt: createdAt(),
+  updatedAt: updatedAt()
+}, t => [index().on(t.designVersionId)])
