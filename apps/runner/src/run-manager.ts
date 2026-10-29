@@ -574,6 +574,8 @@ export class RunManager {
     if (!toolsFor(run.job).includes(tool)) return { ok: false, error: `The ${run.job.role} can't use ${tool}${tool === 'submit_design' ? ' on a task that isn\'t a design' : ''}` }
 
     if (tool === 'attach_evidence') {
+      // No path: a note on its own, which the server checks (D21)
+      if (input.path === undefined) return this.#forward(run, tool, input)
       const file = await this.#readEvidence(run, input)
       if (!file.ok) return file
       return this.#forward(run, tool, { ...input, ...(file.result as object) })
@@ -666,7 +668,7 @@ export class RunManager {
   // live outside the repository: the scratch folder is the usual place.
   async #readEvidence(run: ActiveRun, input: Record<string, unknown>): Promise<ToolOutcome> {
     const given = String(input.path ?? '')
-    if (!given) return { ok: false, error: 'Pass the path of the file to attach' }
+    if (!given) return { ok: false, error: 'Pass the path of the file to attach, or leave out path and use kind "note" for a written explanation' }
     const path = isAbsolute(given) ? given : resolve(run.scratchDir, given)
     const info = await stat(path).catch(() => null)
     if (!info?.isFile()) return { ok: false, error: `No file at ${path}` }

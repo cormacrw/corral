@@ -382,11 +382,12 @@ export const reviews = pgTable('reviews', {
   createdAt: createdAt()
 }, t => [index().on(t.taskId, t.headSha)])
 
-export const evidenceKind = pgEnum('evidence_kind', ['screenshot', 'video', 'test_output', 'log', 'request', 'text', 'other'])
+export const evidenceKind = pgEnum('evidence_kind', ['screenshot', 'video', 'test_output', 'log', 'request', 'text', 'other', 'note'])
 
 // Proof for acceptance criteria (PRD §7.7). The file is an immutable blob;
 // this row says what it proves. `round` is the task's review round when it
-// was attached, so each revision needs its own evidence.
+// was attached, so each revision needs its own evidence. A `note` is a
+// written explanation with no file (D21): its text is the evidence.
 export const evidence = pgTable('evidence', {
   id: uuid().primaryKey().defaultRandom(),
   taskId: uuid().notNull().references(() => tasks.id, { onDelete: 'cascade' }),
@@ -396,13 +397,16 @@ export const evidence = pgTable('evidence', {
   round: integer().notNull(),
   kind: evidenceKind().notNull(),
   note: text().notNull().default(''),
-  // sha256 in the blob store (D8)
-  blob: text().notNull(),
-  fileName: text().notNull(),
-  contentType: text().notNull(),
+  // sha256 in the blob store (D8); the file columns are null only for a note
+  blob: text(),
+  fileName: text(),
+  contentType: text(),
   size: integer().notNull(),
   createdAt: createdAt()
-}, t => [index().on(t.taskId, t.round)])
+}, t => [
+  index().on(t.taskId, t.round),
+  check('evidence_file_unless_note', sql`${t.kind}::text = 'note' or (${t.blob} is not null and ${t.fileName} is not null and ${t.contentType} is not null)`)
+])
 
 // Images pasted into task descriptions and comments. The bytes are an
 // immutable blob (D8), so the same picture twice is stored once; each

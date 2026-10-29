@@ -241,3 +241,37 @@ describe('spike prompts', () => {
     expect(intro).toContain('turn them into a plan with propose_plan')
   })
 })
+
+describe('reviewer evidence list', () => {
+  const task = {
+    ref: 'TA-1',
+    title: 'Refactor login',
+    description: null,
+    branch: 'corral/ta-1-refactor',
+    defaultBranch: 'main',
+    reviewRounds: 0,
+    reviewRoundCap: 3,
+    criteria: [{ id: 'c1', text: 'Login works as before' }, { id: 'c2', text: 'Shows the form' }],
+    comments: [],
+    attachments: [],
+    headSha: 'abc',
+    prUrl: null,
+    previousFeedback: null
+  }
+
+  it('shows the text of a note inline, and files by name (D21)', () => {
+    const prompt = reviewerPrompt({
+      ...task,
+      evidence: [
+        { id: 'e1', criterionId: 'c1', kind: 'note', note: 'No behaviour change: only moved code.\nSee src/login.ts:12.', fileName: null },
+        { id: 'e2', criterionId: 'c2', kind: 'screenshot', note: 'The form', fileName: 'form.png' }
+      ]
+    }, 'Rita')
+    expect(prompt).toContain([
+      '- e1: note (no file; judge the explanation) for [c1]:',
+      '  No behaviour change: only moved code.',
+      '  See src/login.ts:12.',
+      '- e2: screenshot "form.png" for [c2] — The form'
+    ].join('\n'))
+  })
+})

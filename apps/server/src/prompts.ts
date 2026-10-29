@@ -73,7 +73,7 @@ ${role === 'developer'
 export interface ReviewTask extends PromptTask {
   headSha: string
   prUrl: string | null
-  evidence: { id: string, criterionId: string | null, kind: string, note: string, fileName: string }[]
+  evidence: { id: string, criterionId: string | null, kind: string, note: string, fileName: string | null }[]
   previousFeedback: string | null
   // A spike's latest findings, which are what's under review
   findings?: string | null
@@ -113,9 +113,14 @@ export function reviewerPrompt(task: ReviewTask & { underReview?: DesignUnderRev
   ].join('\n')
 }
 
+// A note has no file (D21): its text is the evidence, so it goes in whole,
+// indented under its item
 function evidenceList(task: ReviewTask): string {
+  const target = (e: ReviewTask['evidence'][number]) => e.criterionId ? `[${e.criterionId}]` : 'the task as a whole'
   return task.evidence.length > 0
-    ? task.evidence.map(e => `- ${e.id}: ${e.kind} "${e.fileName}" for ${e.criterionId ? `[${e.criterionId}]` : 'the task as a whole'}${e.note ? ` — ${e.note}` : ''}`).join('\n')
+    ? task.evidence.map(e => e.kind === 'note'
+        ? `- ${e.id}: note (no file; judge the explanation) for ${target(e)}:\n${e.note.trim().split('\n').map(line => `  ${line}`.trimEnd()).join('\n')}`
+        : `- ${e.id}: ${e.kind} "${e.fileName}" for ${target(e)}${e.note ? ` — ${e.note}` : ''}`).join('\n')
     : '(none attached)'
 }
 

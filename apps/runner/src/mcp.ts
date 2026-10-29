@@ -43,12 +43,12 @@ const toolDefinitions = {
     input: { body: z.string().min(1).describe('Markdown text') }
   },
   attach_evidence: {
-    description: 'Attach a file as evidence that an acceptance criterion is met. Save the file outside the repository first (your scratch folder), then pass its path.',
+    description: 'Attach a file as evidence that an acceptance criterion is met. Save the file outside the repository first (your scratch folder), then pass its path. For a criterion with nothing to show, such as a refactor with no behaviour change, leave out path and use kind "note" with a written explanation; a note is not a replacement for screenshots or video of a visible change.',
     input: {
       criterionId: z.string().nullable().optional().describe('The acceptance criterion this proves, or null for the task as a whole'),
-      kind: z.enum(EVIDENCE_KINDS).describe('screenshot, video, test_output, log, request, text or other'),
-      note: z.string().optional().describe('What the file shows and how it was produced'),
-      path: z.string().min(1).describe('Absolute path of the file to attach')
+      kind: z.enum(EVIDENCE_KINDS).describe('screenshot, video, test_output, log, request, text or other for a file; note for a written explanation with no file'),
+      note: z.string().optional().describe('What the file shows and how it was produced; for kind note, the explanation of how the criterion is met (required)'),
+      path: z.string().min(1).optional().describe('Absolute path of the file to attach; leave out for kind note')
     }
   },
   get_evidence: {

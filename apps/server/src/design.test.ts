@@ -191,6 +191,22 @@ describe('design tasks submit versions instead of a PR', () => {
     await pause(project)
   })
 
+  it('accepts a design submission whose criteria are covered by notes alone (D21)', async () => {
+    const { project, task } = await approved()
+    const developer = await nextJob(task, 'developer')
+    t.github.setBranch(project.repository, developer.branch!, 'n1')
+    expect(await runner.call(developer.runId, developer.leaseEpoch, 'submit_design', submission('n1'))).toMatchObject({ ok: true })
+    for (const criterion of task.acceptanceCriteria) {
+      expect(await runner.call(developer.runId, developer.leaseEpoch, 'attach_evidence', { criterionId: criterion.id, kind: 'note', note: 'See the screenshots in v1' }))
+        .toMatchObject({ ok: true })
+    }
+    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'design_submitted', summary: 'Login form', headSha: 'n1' }))
+      .toMatchObject({ ok: true })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'agent_review' })
+    await runner.next('run.stop', m => m.runId === developer.runId)
+    await pause(project)
+  })
+
   it('rejects a bundle without index.html at its root with a clear error, and records nothing', async () => {
     const { project, task } = await approved()
     const developer = await nextJob(task, 'developer')

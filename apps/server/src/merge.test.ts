@@ -39,7 +39,7 @@ describe('merge orchestrator and human controls', () => {
 
   // Approve, claim, submit with evidence, review and approve: the task waits
   // in Agent review with an approved verdict for 'abc123'
-  async function approved(options: { humanReview?: boolean, requiredChecks?: string[], task?: Parameters<TestApp['createTask']>[1] } = {}) {
+  async function approved(options: { humanReview?: boolean, requiredChecks?: string[], task?: Parameters<TestApp['createTask']>[1], noteEvidence?: boolean } = {}) {
     const project = await t.createProject()
     await t.request('PATCH', `/api/projects/${project.slug}`, { requiredChecks: options.requiredChecks ?? ['lint'] })
     const created = await t.createTask(project.slug, { ...(options.humanReview !== undefined && { humanReview: options.humanReview }), ...options.task })
@@ -49,7 +49,9 @@ describe('merge orchestrator and human controls', () => {
     const task = await getTask(project, created.number)
     t.github.setBranch(project.repository, dev.branch!, 'abc123')
     for (const criterion of task.acceptanceCriteria) {
-      await runner.call(dev.runId, dev.leaseEpoch, 'attach_evidence', { criterionId: criterion.id, kind: 'test_output', fileName: 't.txt', contentType: 'text/plain', dataBase64: Buffer.from('ok').toString('base64') })
+      await runner.call(dev.runId, dev.leaseEpoch, 'attach_evidence', options.noteEvidence
+        ? { criterionId: criterion.id, kind: 'note', note: 'No behaviour change' }
+        : { criterionId: criterion.id, kind: 'test_output', fileName: 't.txt', contentType: 'text/plain', dataBase64: Buffer.from('ok').toString('base64') })
     }
     expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', summary: 'Done', headSha: 'abc123' })).toMatchObject({ ok: true })
     await t.orchestrator.schedule()
@@ -104,6 +106,19 @@ describe('merge orchestrator and human controls', () => {
     const history = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/history`).then(r => r.json()) as { action: string, detail: Record<string, unknown> }[]
     expect(history.map(h => h.action)).toEqual(expect.arrayContaining(['task.claimed', 'review.recorded', 'branch.update_requested', 'branch.head_moved', 'task.transition', 'worktrees.cleaned']))
     expect(history.find(h => h.action === 'worktrees.cleaned')?.detail).toMatchObject({ removed: [`worktrees/${task.id}`] })
+    await pause(project)
+  })
+
+  it('treats note-only evidence as complete and merges (D21)', async () => {
+    const { project, task, pr } = await approved({ noteEvidence: true })
+    const evidence = await t.db.select().from(schema.evidence).where(eq(schema.evidence.taskId, task.id))
+    expect(evidence.map(e => ({ kind: e.kind, blob: e.blob }))).toEqual([{ kind: 'note', blob: null }])
+    t.github.setChecks('abc123', [{ name: 'lint', conclusion: 'success', url: null }])
+    const status = await t.request('GET', `/api/projects/${project.slug}/pull-requests`).then(r => r.json()) as { taskRef: string, evidenceComplete: boolean, merge: { eligible: boolean } }[]
+    expect(status.find(s => s.taskRef === task.ref)).toMatchObject({ evidenceComplete: true, merge: { eligible: true } })
+    await t.orchestrator.merges.tick()
+    expect(await taskRow(task.id)).toMatchObject({ status: 'merged' })
+    expect(t.github.pulls.get(pr.number)).toMatchObject({ merged: true })
     await pause(project)
   })
 
