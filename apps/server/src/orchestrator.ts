@@ -11,7 +11,7 @@ import {
 import { schema, type Database, type Executor } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne } from 'drizzle-orm'
 import { z } from 'zod'
-import { readProjectAttachment } from './attachments.ts'
+import { listTaskAttachments, readProjectAttachment } from './attachments.ts'
 import type { BlobStore } from './blob-store.ts'
 import { claimNextTask, type Claim } from './claim.ts'
 import { ApiFailure } from './errors.ts'
@@ -306,6 +306,7 @@ export class Orchestrator implements RunnerHandlers {
     }
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
     const notes = await this.#comments(task.id)
+    const attached = await listTaskAttachments(db, ctx.project.id, task.description, notes)
     return {
       runId: ctx.run.id,
       runNumber: ctx.run.number,
@@ -333,7 +334,8 @@ export class Orchestrator implements RunnerHandlers {
         reviewRounds: task.reviewRounds,
         reviewRoundCap: ctx.project.reviewRoundCap,
         criteria: criteria.map(c => ({ id: c.id, text: c.text })),
-        comments: notes
+        comments: notes,
+        attachments: attached
       }, ctx.agent.name)
     }
   }
@@ -346,6 +348,8 @@ export class Orchestrator implements RunnerHandlers {
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
     const items = (await listEvidence(db, task.id)).filter(e => e.round === task.reviewRounds)
     const [previous] = await db.select().from(reviews).where(eq(reviews.taskId, task.id)).orderBy(desc(reviews.createdAt)).limit(1)
+    const notes = await this.#comments(task.id)
+    const attached = await listTaskAttachments(db, ctx.project.id, task.description, notes)
     return {
       runId: ctx.run.id,
       runNumber: ctx.run.number,
@@ -373,7 +377,8 @@ export class Orchestrator implements RunnerHandlers {
         reviewRounds: task.reviewRounds,
         reviewRoundCap: ctx.project.reviewRoundCap,
         criteria: criteria.map(c => ({ id: c.id, text: c.text })),
-        comments: await this.#comments(task.id),
+        comments: notes,
+        attachments: attached,
         headSha: task.headSha!,
         prUrl: task.prUrl,
         evidence: items.map(e => ({ id: e.id, criterionId: e.criterionId, kind: e.kind, note: e.note, fileName: e.fileName })),
@@ -723,6 +728,7 @@ export class Orchestrator implements RunnerHandlers {
     const task = ctx.task!
     const criteria = await this.#d.db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
     const items = await listEvidence(this.#d.db, task.id)
+    const notes = await this.#comments(task.id)
     return {
       ref: taskRef(ctx.project.prefix, task.number),
       title: task.title,
@@ -731,7 +737,8 @@ export class Orchestrator implements RunnerHandlers {
       branch: task.branch,
       reviewRound: task.reviewRounds,
       criteria: criteria.map(c => ({ id: c.id, text: c.text })),
-      comments: (await this.#comments(task.id)).map(c => ({ ...c, createdAt: c.createdAt.toISOString() })),
+      comments: notes.map(c => ({ ...c, createdAt: c.createdAt.toISOString() })),
+      attachments: await listTaskAttachments(this.#d.db, ctx.project.id, task.description, notes),
       evidence: items.map(e => ({ id: e.id, criterionId: e.criterionId, kind: e.kind, note: e.note, fileName: e.fileName, round: e.round }))
     }
   }

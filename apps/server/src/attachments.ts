@@ -1,7 +1,7 @@
 import { ATTACHMENT_MAX_BYTES, type Attachment, type AttachmentContentType } from '@corral/contracts'
-import { attachmentUrl, type Actor } from '@corral/core'
+import { attachmentIdsInMarkdown, attachmentIdsInRichText, attachmentUrl, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import type { BlobStore } from './blob-store.ts'
 import { ApiFailure } from './errors.ts'
 import { declaredImageType, hasImageSignature } from './images.ts'
@@ -66,4 +66,28 @@ export async function readProjectAttachment(db: Executor, blobs: BlobStore, proj
   if (!row || !mimeType) return null
   const data = await blobs.get(row.blob)
   return data ? { id: row.id, fileName: row.fileName, mimeType, byteSize: row.byteSize, data } : null
+}
+
+export interface TaskAttachment {
+  id: string
+  fileName: string
+  // Where the task text references it: "the description", "a comment by …"
+  foundIn: string[]
+}
+
+// The project's attachments referenced in a task's description and
+// comments, once each, in order of appearance, for the agents' prompts and
+// get_task. References to images outside the project are left out.
+export async function listTaskAttachments(db: Executor, projectId: string, description: unknown, comments: { author: string, body: string, createdAt: Date }[]): Promise<TaskAttachment[]> {
+  const found = new Map<string, string[]>()
+  const note = (ids: string[], where: string) => {
+    for (const id of ids) found.set(id, [...found.get(id) ?? [], where])
+  }
+  note(attachmentIdsInRichText(description), 'the description')
+  for (const c of comments) note(attachmentIdsInMarkdown(c.body), `a comment by ${c.author} (${c.createdAt.toISOString()})`)
+  if (found.size === 0) return []
+  const rows = await db.select({ id: attachments.id, fileName: attachments.fileName }).from(attachments)
+    .where(and(eq(attachments.projectId, projectId), inArray(attachments.id, [...found.keys()])))
+  const names = new Map(rows.map(r => [r.id, r.fileName]))
+  return [...found].filter(([id]) => names.has(id)).map(([id, foundIn]) => ({ id, fileName: names.get(id)!, foundIn }))
 }

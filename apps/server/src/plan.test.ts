@@ -162,7 +162,8 @@ describe('plan sessions', () => {
           { id: task.acceptanceCriteria[0]!.id, text: 'Shows an error on a bad password' },
           { id: task.acceptanceCriteria[1]!.id, text: 'Remembers the session' }
         ],
-        comments: [{ author: 'human', body: 'Use argon2' }]
+        comments: [{ author: 'human', body: 'Use argon2' }],
+        attachments: []
       }
     })
 
@@ -190,6 +191,22 @@ describe('plan sessions', () => {
       expect(await runner.call(job.runId, job.leaseEpoch, 'get_attachment', { attachmentId: id })).toMatchObject({ ok: false, error: `${id} isn't an attachment in this project` })
     }
     await endTurn(job, 'Looked at it.')
+  })
+
+  it('lists a task\'s images in the PM\'s get_task', async () => {
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
+    const project = await t.createProject()
+    await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+    const image = await t.request('POST', `/api/projects/${project.slug}/attachments?name=login.png`, new Blob([png], { type: 'image/png' })).then(r => r.json()) as Attachment
+    const task = await t.createTask(project.slug, { description: { type: 'doc', content: [{ type: 'image', attrs: { src: `attachment:${image.id}` } }] } })
+
+    await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: `Refine ${task.ref}` })
+    const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
+    expect(await runner.call(job.runId, job.leaseEpoch, 'get_task', { taskRef: task.ref })).toMatchObject({
+      ok: true,
+      result: { attachments: [{ id: image.id, fileName: 'login.png', foundIn: ['the description'] }] }
+    })
+    await endTurn(job, 'Read it.')
   })
 
   // A Backlog task with a dependency and two criteria, to refine by ref

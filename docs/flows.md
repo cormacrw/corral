@@ -38,6 +38,8 @@ web            server                          runner                     claude
 | `approve_plan` | Approve the current plan (to the board or the Backlog) when the human asks in chat. Recorded as the human's approval; refused unless the human has written since the plan was proposed |
 | `flag_stale_docs` | Create a documentation task (PRD §7.10) |
 
+Agents are told about images so they look at them: a PM turn whose message references `attachment:<id>` lists the ids and asks the PM to fetch them first; developer and reviewer prompts have an "Attached images" section (id, file name, and whether each is in the description or which comment); and `get_task` returns an `attachments` list of the same, for every role.
+
 The PM has **no** tools to merge, edit docs or change status. This is enforced by which tools it's given, not by its instructions.
 
 ### Editing and approving a plan
