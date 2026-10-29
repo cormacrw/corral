@@ -1,10 +1,12 @@
-import { bundlePath, taskRef, unpackBundle } from '@corral/core'
-import { schema, type Executor } from '@corral/db'
-import { and, desc, eq, isNull } from 'drizzle-orm'
+import type { DesignVersion } from '@corral/contracts'
+import { approveDesignVersion, bundlePath, designPreviewUrl, taskRef, unpackBundle, type Actor } from '@corral/core'
+import { schema, type Database, type Executor } from '@corral/db'
+import { and, asc, desc, eq, isNull } from 'drizzle-orm'
 import type { BlobStore } from './blob-store.ts'
 import { ApiFailure } from './errors.ts'
+import { lockTask } from './tasks.ts'
 
-const { designVersions, taskDesignPins, tasks } = schema
+const { auditLog, designVersions, taskDesignPins, tasks } = schema
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -194,4 +196,53 @@ export function bundleHasRootIndex(archive: Uint8Array): boolean {
   } catch {
     return false
   }
+}
+
+// A design task's versions for the design view (D20), newest first. The
+// spec comes inline; the bundle and screenshots by URL.
+export async function listDesignVersions(db: Executor, blobs: BlobStore, taskId: string): Promise<DesignVersion[]> {
+  const rows = await db.select().from(designVersions).where(eq(designVersions.taskId, taskId)).orderBy(desc(designVersions.version))
+  return Promise.all(rows.map(async row => ({
+    id: row.id,
+    version: row.version,
+    status: row.status,
+    branch: row.branch,
+    commitSha: row.commitSha,
+    spec: Buffer.from(await blobs.get(row.specBlob) ?? new Uint8Array()).toString('utf8'),
+    screenshots: row.screenshots.map((s, i) => ({ fileName: s.fileName, url: `/api/designs/${row.id}/screenshots/${i}` })),
+    previewUrl: designPreviewUrl(row.id),
+    feedback: row.feedback,
+    createdAt: row.createdAt.toISOString()
+  })))
+}
+
+// One of a version's screenshots. They're the agent's files, so they get
+// the bundle's sandbox headers too (an SVG can carry script).
+export async function readDesignScreenshot(db: Executor, blobs: BlobStore, versionId: string, index: number): Promise<{ data: Uint8Array, type: string } | null> {
+  if (!UUID.test(versionId) || !Number.isInteger(index) || index < 0) return null
+  const [row] = await db.select({ screenshots: designVersions.screenshots }).from(designVersions).where(eq(designVersions.id, versionId))
+  const shot = row?.screenshots[index]
+  const data = shot ? await blobs.get(shot.blob) : null
+  return shot && data ? { data, type: bundleContentType(shot.fileName) } : null
+}
+
+// The human approves a version of a design in Human review (D20): it's
+// marked approved and every earlier version superseded. Versions are
+// otherwise immutable.
+export async function approveDesign(db: Database, taskId: string, version: number, actor: Actor): Promise<void> {
+  await db.transaction(async (tx) => {
+    const { task, project } = await lockTask(tx, taskId)
+    if (task.type !== 'design' || task.status !== 'human_review') {
+      throw new ApiFailure(409, { code: 'transition_rejected', reason: { code: 'invalid_transition', status: task.status, event: 'human_approve' } })
+    }
+    const rows = await tx.select({ id: designVersions.id, version: designVersions.version, status: designVersions.status })
+      .from(designVersions).where(eq(designVersions.taskId, taskId)).orderBy(asc(designVersions.version))
+    const result = approveDesignVersion(rows, version)
+    if (!result.ok) throw new ApiFailure(409, { code: 'invalid_input', issues: [{ path: ['version'], message: result.error }] })
+    for (const next of result.versions) {
+      const before = rows.find(r => r.id === next.id)!
+      if (before.status !== next.status) await tx.update(designVersions).set({ status: next.status, updatedAt: new Date() }).where(eq(designVersions.id, next.id))
+    }
+    await tx.insert(auditLog).values({ projectId: project.id, taskId, actor, action: 'design.approved', detail: { version } })
+  })
 }

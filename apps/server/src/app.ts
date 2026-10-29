@@ -35,7 +35,7 @@ import { streamSSE } from 'hono/streaming'
 import type { ZodType } from 'zod'
 import { ApiFailure, fromDatabaseError } from './errors.ts'
 import { createAttachment, readAttachment } from './attachments.ts'
-import { DESIGN_BUNDLE_HEADERS, readDesignFile } from './designs.ts'
+import { approveDesign, DESIGN_BUNDLE_HEADERS, listDesignVersions, readDesignFile, readDesignScreenshot } from './designs.ts'
 import { checkAvatar, getProfile, patchProfile, readAvatar, setAgentAvatar, setUserAvatar } from './avatars.ts'
 import { getEpic, listEpics, patchEpic } from './epics.ts'
 import type { EventBus } from './events.ts'
@@ -292,6 +292,20 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       return c.json(await publishTask(taskId))
     })
 
+    // A design task's versions (D20), newest first
+    .get('/projects/:slug/tasks/:number/designs', async (c) => {
+      const project = await findProjectBySlug(db, c.req.param('slug'))
+      return c.json(await listDesignVersions(db, blobs, await findTaskId(db, project.id, taskNumber(c.req.param('number')))))
+    })
+
+    // Approve a design version (D20): it's approved, earlier ones superseded
+    .post('/projects/:slug/tasks/:number/designs/:version/approve', async (c) => {
+      const project = await findProjectBySlug(db, c.req.param('slug'))
+      const taskId = await findTaskId(db, project.id, taskNumber(c.req.param('number')))
+      await approveDesign(db, taskId, taskNumber(c.req.param('version')), actor)
+      return c.json(await publishTask(taskId))
+    })
+
     .get('/projects/:slug/tasks/:number/comments', async (c) => {
       const project = await findProjectBySlug(db, c.req.param('slug'))
       return c.json(await listComments(db, await findTaskId(db, project.id, taskNumber(c.req.param('number')))))
@@ -381,6 +395,12 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
         'cache-control': 'private, max-age=31536000, immutable',
         'x-content-type-options': 'nosniff'
       })
+    })
+
+    .get('/designs/:versionId/screenshots/:index', async (c) => {
+      const file = await readDesignScreenshot(db, blobs, c.req.param('versionId'), Number(c.req.param('index')))
+      if (!file) throw new ApiFailure(404, { code: 'not_found' })
+      return c.body(new Uint8Array(file.data), 200, { ...DESIGN_BUNDLE_HEADERS, 'content-type': file.type })
     })
 
     // Without the trailing slash, a prototype's relative asset paths would

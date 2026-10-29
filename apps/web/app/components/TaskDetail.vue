@@ -330,6 +330,7 @@ function historyText(entry: AuditEntry): string {
     case 'branch.head_moved': return `branch moved to ${String(d.to).slice(0, 10)}${d.approvalKept ? ' (approval kept)' : ''}`
     case 'worktrees.cleaned': return 'worktrees removed on the runner'
     case 'task.human_approved': return 'approved the merge'
+    case 'design.approved': return `approved design v${String(d.version)}`
     case 'task.deleted': return 'deleted the task'
     case 'run.stopped': return 'stopped the run'
     default: return entry.action
@@ -586,6 +587,14 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
             @patch="patch"
           />
         </dl>
+
+        <DesignReview
+          v-if="task.type === 'design' && !isDraft && shows('details')"
+          :task="task"
+          :slug="slug"
+          :mobile="mobile"
+          @updated="task = $event"
+        />
 
         <section v-if="shows('details')">
           <h3 class="mb-1 text-xs font-medium text-muted">
