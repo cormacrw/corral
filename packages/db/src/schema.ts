@@ -430,6 +430,8 @@ export const designVersions = pgTable('design_versions', {
   commitSha: text().notNull(),
   // The human's feedback when they requested changes
   feedback: text(),
+  // The Plan session approving this version opened for its build; at most one
+  planSessionId: uuid().references(() => planSessions.id, { onDelete: 'set null' }),
   createdAt: createdAt(),
   updatedAt: updatedAt()
 }, t => [

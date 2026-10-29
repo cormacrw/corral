@@ -6,6 +6,7 @@ import { request as httpRequest } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { bundleContentType, DESIGN_BUNDLE_CSP } from './designs.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
+import { FakeRunner } from './test-runner.ts'
 
 const text = (s: string) => new TextEncoder().encode(s)
 
@@ -129,12 +130,16 @@ describe('bundleContentType', () => {
 // The design view's API (D20): list versions, their screenshots, approve one
 describe('design versions in the task view', () => {
   let t: TestApp
+  let runner: FakeRunner
 
+  // Approving opens a Plan session, whose PM turn needs the runner
   beforeAll(async () => {
-    t = await createTestApp('pglite')
+    t = await createTestApp('pglite', { listen: true })
+    runner = await FakeRunner.connect(t.server!.url)
   })
 
   afterAll(async () => {
+    runner?.close()
     await t?.close()
   })
 

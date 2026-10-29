@@ -141,6 +141,13 @@
       "when": 1793261018538,
       "tag": "0019_design_submitted",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1793264172393,
+      "tag": "0020_design_plan_session",
+      "breakpoints": true
     }
   ]
 }

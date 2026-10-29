@@ -1,4 +1,4 @@
-import type { Project, RunJob, Task } from '@corral/contracts'
+import type { DesignVersion, Project, RunJob, Task } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { and, asc, eq } from 'drizzle-orm'
 import { execFileSync } from 'node:child_process'
@@ -10,7 +10,7 @@ import { bundleHasRootIndex } from './designs.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './test-runner.ts'
 
-const { agents, auditLog, designVersions, runs, tasks } = schema
+const { agents, auditLog, designVersions, planMessages, planSessions, runs, tasks } = schema
 
 // A tar of the files, as the runner packs a bundle
 function tarball(files: Record<string, string>): Buffer {
@@ -236,6 +236,79 @@ describe('design tasks submit versions instead of a PR', () => {
     expect(await taskRow(task.id)).toMatchObject({ status: 'human_review', headSha: 'd2' })
     expect(t.github.pulls.size).toBe(0)
     await pause(project)
+  })
+
+  // D20: approving a version opens one Plan session for its build, whose
+  // PM reads the version with get_design
+  it('opens one Plan session for the build when a version is approved, and none when it is approved again', async () => {
+    const { project, task } = await approved()
+    const developer = await nextJob(task, 'developer')
+    await submit(project, developer, task, 'd1')
+    await review(task)
+    expect(await taskRow(task.id)).toMatchObject({ status: 'human_review' })
+    await pause(project)
+
+    const path = `/api/projects/${project.slug}/tasks/${task.number}/designs/1/approve`
+    expect((await t.request('POST', path, { note: 'Ship the desktop layout first.' })).status).toBe(200)
+    const sessions = async () => t.db.select().from(planSessions).where(eq(planSessions.projectId, project.id))
+    const [session] = await sessions()
+    expect(session).toMatchObject({ title: 'Build: Login screen' })
+    expect((await sessions())).toHaveLength(1)
+
+    // The version links to it, for the design view
+    const [version] = await versionsOf(task)
+    expect(version).toMatchObject({ status: 'approved', planSessionId: session!.id })
+    const listed = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/designs`).then(r => r.json()) as DesignVersion[]
+    expect(listed[0]).toMatchObject({ version: 1, planSessionId: session!.id })
+
+    // The human's first message names the design and version, with the note,
+    // and its PM turn is queued like any other
+    const messages = await t.db.select().from(planMessages).where(eq(planMessages.sessionId, session!.id))
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toMatchObject({ role: 'human' })
+    expect(messages[0]!.text).toContain(`design v1 of ${task.ref} "Login screen"`)
+    expect(messages[0]!.text).toContain('get_design')
+    expect(messages[0]!.text).toContain('Approval note: Ship the desktop layout first.')
+    const pmRuns = await t.db.select().from(runs).where(and(eq(runs.planSessionId, session!.id), eq(runs.role, 'pm')))
+    expect(pmRuns).toHaveLength(1)
+    await t.orchestrator.schedule()
+    const pm = (await runner.next('run.assign', m => m.job.planSessionId === session!.id)).job
+    expect(pm).toMatchObject({ role: 'pm', taskId: null, projectId: project.id })
+    expect(pm.prompt).toContain(`design v1 of ${task.ref}`)
+    expect(pm.prompt).toContain(`About task ${task.ref} Login screen`)
+
+    // The PM reads the approved version
+    expect(await runner.call(pm.runId, pm.leaseEpoch, 'get_design', { taskRef: task.ref, version: 1 }))
+      .toMatchObject({ ok: true, result: { taskRef: task.ref, title: 'Login screen', version: 1, status: 'approved', spec: SPEC.trim(), commitSha: 'd1' } })
+
+    // Approving the same version again opens no second session and sends no
+    // second message
+    expect((await t.request('POST', path, { note: 'Again' })).status).toBe(200)
+    expect((await t.request('POST', path)).status).toBe(200)
+    expect(await sessions()).toHaveLength(1)
+    expect(await t.db.select().from(planMessages).where(eq(planMessages.sessionId, session!.id))).toHaveLength(1)
+    expect(await t.db.select().from(runs).where(and(eq(runs.planSessionId, session!.id), eq(runs.role, 'pm')))).toHaveLength(1)
+    expect((await versionsOf(task))[0]).toMatchObject({ planSessionId: session!.id })
+  })
+
+  it('refuses to approve while the runner is offline, so the build is never left unplanned', async () => {
+    const { project, task } = await approved()
+    const developer = await nextJob(task, 'developer')
+    await submit(project, developer, task, 'd1')
+    await review(task)
+    await pause(project)
+    runner.close()
+    try {
+      await expect.poll(() => t.runner.online).toBe(false)
+      const res = await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/designs/1/approve`)
+      expect(res.status).toBe(503)
+      expect(await res.json()).toMatchObject({ error: { code: 'runner_offline' } })
+      expect((await versionsOf(task))[0]).toMatchObject({ status: 'submitted', planSessionId: null })
+      expect(await t.db.select().from(planSessions).where(eq(planSessions.projectId, project.id))).toHaveLength(0)
+    } finally {
+      runner = await FakeRunner.connect(t.server!.url)
+      await expect.poll(() => t.runner.online).toBe(true)
+    }
   })
 
   it('keeps other task types off the design path', async () => {

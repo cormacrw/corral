@@ -131,7 +131,7 @@ export const api = {
     evidence: (slug: string, number: number) => call<Evidence[]>('GET', `/projects/${slug}/tasks/${number}/evidence`),
     reviews: (slug: string, number: number) => call<Review[]>('GET', `/projects/${slug}/tasks/${number}/reviews`),
     designs: (slug: string, number: number) => call<DesignVersion[]>('GET', `/projects/${slug}/tasks/${number}/designs`),
-    approveDesign: (slug: string, number: number, version: number) => call<Task>('POST', `/projects/${slug}/tasks/${number}/designs/${version}/approve`)
+    approveDesign: (slug: string, number: number, version: number, note?: string) => call<Task>('POST', `/projects/${slug}/tasks/${number}/designs/${version}/approve`, { note })
   },
 
   attachments: {
