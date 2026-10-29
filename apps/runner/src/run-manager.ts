@@ -199,6 +199,7 @@ export class RunManager {
       run.rateLimit = null
       await this.#spawn(run, { prompt: job.fallbackPrompt, systemPrompt, mcpConfigPath, resume: null })
     }
+    if (!run.started) this.#started(run)
 
     // PRD §8.6: an agent that exits without an outcome gets one chance to report
     if (this.#needsAnotherTurn(run)) {
@@ -237,7 +238,9 @@ export class RunManager {
     run.process = process
     const exit = await process.exited
     this.#flush(run)
-    if (!run.started) this.#started(run)
+    // A failed --resume waits: the fresh session that replaces it is the one
+    // the server must record, or the next turn tries the dead one again
+    if (!run.started && !(options.resume && !run.sawInit)) this.#started(run)
     if (exit.signal && !run.stopping && !run.outcomeAccepted) this.#note(run, `The agent was killed by ${exit.signal}`)
   }
 

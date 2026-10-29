@@ -3,7 +3,7 @@ import type { AgentRole } from '@corral/core'
 import { readFile, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { git } from './exec.ts'
-import { barePath, syncRepository } from './repos.ts'
+import { barePath, syncRepository, withRepoLock } from './repos.ts'
 import { DEFAULT_ROLE_INSTRUCTIONS } from './role-defaults.ts'
 
 // Worktrees under <dataDir>/worktrees (architecture.md, Layout on disk):
@@ -11,6 +11,12 @@ import { DEFAULT_ROLE_INSTRUCTIONS } from './role-defaults.ts'
 // one at the PR commit for the reviewer (flows.md step 6)
 export function worktreePath(dataDir: string, taskId: string, role: AgentRole): string {
   return join(dataDir, 'worktrees', role === 'reviewer' ? `${taskId}-review` : taskId)
+}
+
+// A PM checkout per Plan session (D9). It must stay put between turns:
+// `claude --resume` finds a session by its working directory.
+export function pmWorktreePath(dataDir: string, projectId: string, planSessionId: string): string {
+  return join(dataDir, 'worktrees', `pm-${projectId}-${planSessionId}`)
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -28,12 +34,18 @@ export async function prepareWorkspace(dataDir: string, job: RunJob): Promise<{ 
   const syncError = await syncRepository(dataDir, job.repository)
   if (syncError) return { workspace: null, error: `Could not fetch ${job.repository}: ${syncError}` }
   const bare = barePath(dataDir, job.repository)
+  // Adding worktrees writes to the bare clone too, so it takes the same lock
+  return withRepoLock(bare, () => checkOut(dataDir, bare, job))
+}
+
+async function checkOut(dataDir: string, bare: string, job: RunJob): Promise<{ workspace: Workspace, error: null } | { workspace: null, error: string }> {
   // Forget worktrees whose folders were removed by hand
   await git(['worktree', 'prune'], { cwd: bare })
 
   if (job.role === 'pm') {
-    // A read-only checkout of the default branch (D9), shared by every PM turn
-    const path = join(dataDir, 'worktrees', `pm-${job.projectId}`)
+    // A read-only checkout of the default branch (D9), one per Plan session
+    if (!job.planSessionId) return { workspace: null, error: 'The job has no plan session' }
+    const path = pmWorktreePath(dataDir, job.projectId, job.planSessionId)
     const result = await exists(path)
       ? await git(['checkout', '--detach', '--force', `origin/${job.defaultBranch}`], { cwd: path })
       : await git(['worktree', 'add', '--detach', path, `origin/${job.defaultBranch}`], { cwd: bare })
@@ -93,14 +105,16 @@ export async function hasUncommittedChanges(worktree: string): Promise<boolean> 
 
 // Removes a worktree unless it holds uncommitted work (PRD §7.4). Returns
 // whether it was removed.
-export async function removeWorktree(bare: string, path: string, force = false): Promise<boolean> {
-  if (!(await exists(path))) {
+export function removeWorktree(bare: string, path: string, force = false): Promise<boolean> {
+  return withRepoLock(bare, async () => {
+    if (!(await exists(path))) {
+      await git(['worktree', 'prune'], { cwd: bare })
+      return true
+    }
+    if (!force && await hasUncommittedChanges(path)) return false
+    const result = await git(['worktree', 'remove', '--force', path], { cwd: bare })
+    if (result.code !== 0) await rm(path, { recursive: true, force: true })
     await git(['worktree', 'prune'], { cwd: bare })
     return true
-  }
-  if (!force && await hasUncommittedChanges(path)) return false
-  const result = await git(['worktree', 'remove', '--force', path], { cwd: bare })
-  if (result.code !== 0) await rm(path, { recursive: true, force: true })
-  await git(['worktree', 'prune'], { cwd: bare })
-  return true
+  })
 }

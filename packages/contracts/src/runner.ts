@@ -59,6 +59,8 @@ export interface RunJob {
   branch: string | null
   // Reviewer runs check out this commit
   headSha: string | null
+  // PM turns: the Plan session, which gets its own checkout on the runner
+  planSessionId: string | null
   // PM turns resume this agent session when the runner still has it
   agentSessionId: string | null
   prompt: string

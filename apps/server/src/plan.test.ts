@@ -58,7 +58,7 @@ describe('plan sessions', () => {
     expect(created.activeRunId).not.toBeNull()
 
     const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
-    expect(job).toMatchObject({ role: 'pm', taskId: null, agentSessionId: null, repository: project.repository })
+    expect(job).toMatchObject({ role: 'pm', taskId: null, planSessionId: created.id, agentSessionId: null, repository: project.repository })
     expect(job.prompt).toContain('product-manager agent')
     expect(job.prompt).toContain('Plan a login feature')
     runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'claude-sess-1' })
