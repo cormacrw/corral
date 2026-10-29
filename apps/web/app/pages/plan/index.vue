@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AgentRuntime, CliStatus } from '@corral/contracts'
+import type { AgentRuntime, CliStatus, DraftSession } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { detectedRuntimes, initials, projectColor, runtimeLabel, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
@@ -57,6 +57,25 @@ async function reconnect() {
 
 const backlog = computed(() => project.value ? (live.state.value.tasks[project.value.id] ?? []).filter(t => t.status === 'backlog') : [])
 const recent = computed(() => live.state.value.planSessions.slice(0, 4))
+// The project's Drafts by session, kept current by plan.drafts, which
+// follows every propose, approve and discard
+const drafts = ref<DraftSession[]>([])
+watch(() => project.value?.slug, async (slug) => {
+  drafts.value = []
+  if (!slug) return
+  try {
+    const sessions = await api.plan.drafts(slug)
+    if (project.value?.slug === slug) drafts.value = sessions
+  } catch {
+    // The section stays hidden; the rest of the page still works
+  }
+}, { immediate: true })
+onMounted(() => {
+  const stop = live.subscribe((event) => {
+    if (event.type === 'plan.drafts' && event.projectId === project.value?.id) drafts.value = event.sessions
+  })
+  onBeforeUnmount(stop)
+})
 const suggestions = computed(() => taskRef.value
   ? ['Tighten the acceptance criteria', 'Split it into smaller tasks', 'Check its dependencies']
   : ['Plan a new feature', 'Break an epic into tasks', 'What’s blocking progress?'])
@@ -246,6 +265,11 @@ async function start(message: string): Promise<boolean> {
             @click="text = s"
           />
         </div>
+
+        <PlanDrafts
+          :sessions="drafts"
+          :mobile="device.isMobile.value"
+        />
 
         <section
           v-if="recent.length > 0"

@@ -37,7 +37,8 @@ Everything is centred vertically and horizontally, in a column up to 720px wide:
 3. **Starter suggestions:** pill buttons that fill the composer.
    - Default: "Plan a new feature", "Break an epic into tasks", "What's blocking progress?"
    - With a task attached: "Tighten the acceptance criteria", "Split it into smaller tasks", "Check its dependencies"
-4. **Recent sessions:** a bordered list of the last 4 sessions. Each row has an unread dot, the title, a status badge where there's something to do ("Needs approval" in `primary`, "Question" in `info`), the project dot and name, a one-line preview and the time. Clicking a row opens the session.
+4. **Drafts:** shown only when the project has Drafts (`GET /projects/:slug/drafts`), in the same bordered list style. Drafts are grouped by the Plan session they belong to: a header row with the session title, "Needs approval" in `primary` while its plan waits, and the time, then one row per draft with its ref, type icon, title and priority. The header opens the session; a draft opens the session with that task in the flyout (`/plan/:id?task=COR-13`), or the task sheet on phones, where every row is full width and at least 48px tall. `plan.drafts` keeps it current, so approving a plan to the board or the Backlog takes its drafts out straight away. A Draft's task detail banner has an **Open plan session** link back to its session.
+5. **Recent sessions:** a bordered list of the last 4 sessions. Each row has an unread dot, the title, a status badge where there's something to do ("Needs approval" in `primary`, "Question" in `info`), the project dot and name, a one-line preview and the time. Clicking a row opens the session.
 
 ### Conversation
 
@@ -102,6 +103,7 @@ On the mobile layout ([mobile.md](mobile.md)) the same two routes keep their beh
 - **Runner offline:** the composer is disabled, with "Plan needs the runner. It's offline." and Reconnect (D9).
 - **Juno errors mid-turn:** an inline `UAlert` in the log with Retry.
 - **No sessions yet:** the Recent list is hidden.
+- **No drafts:** the Drafts section is hidden.
 
 ## Accessibility
 

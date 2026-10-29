@@ -207,6 +207,12 @@ export const tasks: Task[] = [
   task(corral, 10, { title: 'Install sheet on iOS', status: 'merged', epicId: 'e-mobile', mergedAt: ago(60 * 30) }),
   task(corral, 11, { title: 'Dark mode for the epic graph', status: 'backlog', priority: 'low' }),
   task(corral, 12, { title: 'Spike: Codex reasoning effort', status: 'backlog', type: 'spike' }),
+  // Drafts from the proposed plans in planSessions s-1 and s-3
+  task(corral, 13, { title: 'Design review screen', status: 'draft', type: 'design', priority: 'high', epicId: 'e-design', planSessionId: 's-1', planSessionTitle: 'Design tasks' }),
+  task(corral, 14, { title: 'Approve a design version', status: 'draft', priority: 'urgent', epicId: 'e-design', dependsOn: ['COR-13'], planSessionId: 's-1', planSessionTitle: 'Design tasks' }),
+  task(corral, 15, { title: 'Pin a design version to a task', status: 'draft', priority: 'low', epicId: 'e-design', dependsOn: ['COR-14'], planSessionId: 's-1', planSessionTitle: 'Design tasks' }),
+  task(corral, 16, { title: 'Cards jump when a run starts', status: 'draft', type: 'bug', planSessionId: 's-3', planSessionTitle: 'Board polish' }),
+  task(corral, 17, { title: 'Spike: virtualise long columns', status: 'draft', type: 'spike', priority: 'low', planSessionId: 's-3', planSessionTitle: 'Board polish' }),
   task(site, 1, { title: 'New landing page hero', status: 'ready', type: 'design' }),
   task(site, 2, { title: 'Fix broken pricing link', status: 'backlog', type: 'bug' }),
   task(site, 3, {
@@ -340,6 +346,11 @@ export const planSessions: PlanSession[] = [
     id: 's-2', projectId: 'p-corral', title: 'Mobile push', runtime: 'claude-code',
     preview: 'Which push service should we use?', unread: false, status: 'question', activeRunId: null,
     createdAt: ago(60 * 4), updatedAt: ago(60 * 3)
+  },
+  {
+    id: 's-3', projectId: 'p-corral', title: 'Board polish', runtime: 'claude-code',
+    preview: 'Here is a plan with two tasks. Approve it to put them on the board.', unread: false, status: 'needs_approval', activeRunId: null,
+    createdAt: ago(60 * 51), updatedAt: ago(60 * 50)
   }
 ]
 
@@ -351,6 +362,10 @@ export const planMessages: Record<string, PlanMessage[]> = {
   's-2': [
     { id: 'm-3', sessionId: 's-2', role: 'human', kind: 'message', text: 'Add push notifications for Needs you.', recommendation: null, options: null, planId: null, runId: null, createdAt: ago(60 * 4) },
     { id: 'm-4', sessionId: 's-2', role: 'pm', kind: 'question', text: 'Which push service should we use?', recommendation: 'Web Push', options: ['Web Push with VAPID keys', 'ntfy'], planId: null, runId: null, createdAt: ago(60 * 3) }
+  ],
+  's-3': [
+    { id: 'm-5', sessionId: 's-3', role: 'human', kind: 'message', text: 'The board jumps around when runs start. Tidy it up.', recommendation: null, options: null, planId: null, runId: null, createdAt: ago(60 * 51) },
+    { id: 'm-6', sessionId: 's-3', role: 'pm', kind: 'message', text: 'Here is a plan with two tasks. Approve it to put them on the board.', recommendation: null, options: null, planId: 'plan-3', runId: null, createdAt: ago(60 * 50) }
   ]
 }
 
@@ -382,11 +397,23 @@ export const plans: Record<string, Plan[]> = {
       summary: 'A design task type whose deliverable is an approved, versioned prototype.', status: 'proposed', approvedAt: null,
       epics: [{ key: 'E1', id: 'e-design', title: 'Design tasks' }],
       tasks: [
-        { key: 'T1', change: 'added', revises: false, taskId: null, epicId: 'e-design', ref: null, title: 'Design review screen', status: 'draft', priority: 'high', humanReview: true, dependsOn: [] },
-        { key: 'T2', change: 'added', revises: false, taskId: null, epicId: 'e-design', ref: null, title: 'Approve a design version', status: 'draft', priority: 'urgent', humanReview: false, dependsOn: ['T1'] },
-        { key: 'T3', change: 'added', revises: false, taskId: null, epicId: 'e-design', ref: null, title: 'Pin a design version to a task', status: 'draft', priority: 'low', humanReview: false, dependsOn: ['T2'] }
+        { key: 'T1', change: 'added', revises: false, taskId: 't-cor-13', epicId: 'e-design', ref: 'COR-13', title: 'Design review screen', status: 'draft', priority: 'high', humanReview: true, dependsOn: [] },
+        { key: 'T2', change: 'added', revises: false, taskId: 't-cor-14', epicId: 'e-design', ref: 'COR-14', title: 'Approve a design version', status: 'draft', priority: 'urgent', humanReview: false, dependsOn: ['T1'] },
+        { key: 'T3', change: 'added', revises: false, taskId: 't-cor-15', epicId: 'e-design', ref: 'COR-15', title: 'Pin a design version to a task', status: 'draft', priority: 'low', humanReview: false, dependsOn: ['T2'] }
       ],
       createdAt: ago(60 * 25)
+    }
+  ],
+  's-3': [
+    {
+      id: 'plan-3', sessionId: 's-3', projectId: 'p-corral', epicId: null, version: 1, title: 'Board polish',
+      summary: 'Steadier cards while runs start, and a look at long columns.', status: 'proposed', approvedAt: null,
+      epics: [],
+      tasks: [
+        { key: 'T1', change: 'added', revises: false, taskId: 't-cor-16', epicId: null, ref: 'COR-16', title: 'Cards jump when a run starts', status: 'draft', priority: 'medium', humanReview: false, dependsOn: [] },
+        { key: 'T2', change: 'added', revises: false, taskId: 't-cor-17', epicId: null, ref: 'COR-17', title: 'Spike: virtualise long columns', status: 'draft', priority: 'low', humanReview: false, dependsOn: [] }
+      ],
+      createdAt: ago(60 * 50)
     }
   ]
 }

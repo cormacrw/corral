@@ -552,7 +552,16 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
           v-if="isDraft && shows('details')"
           class="flex flex-wrap items-center gap-2 rounded-lg border border-default bg-muted px-3 py-2 text-sm"
         >
-          <span class="text-muted">Proposed in a plan. Only you can see it until you add the plan to the board or the Backlog.</span>
+          <span class="me-auto text-muted">Proposed in a plan. Only you can see it until you add the plan to the board or the Backlog.</span>
+          <UButton
+            v-if="task.planSessionId"
+            label="Open plan session"
+            trailing-icon="i-lucide-arrow-right"
+            variant="link"
+            size="sm"
+            :to="`/plan/${task.planSessionId}`"
+            data-testid="task-plan-session"
+          />
         </div>
         <div
           v-else-if="task.status === 'backlog' && shows('details')"

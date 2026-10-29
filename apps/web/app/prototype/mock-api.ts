@@ -1,4 +1,4 @@
-import type { Plan, PlanMessage, PlanSessionDetail, RunEvent, ServerEvent, Task } from '@corral/contracts'
+import type { DraftSession, Plan, PlanMessage, PlanSessionDetail, RunEvent, ServerEvent, Task } from '@corral/contracts'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
 import * as f from './fixtures'
@@ -122,17 +122,36 @@ route('GET', '/inbox', () => f.inbox())
 
 route('GET', '/plan/sessions', () => f.planSessions)
 route('GET', '/plan/sessions/:id', ([id]) => session(id!))
-// Drafts by session: each session's latest plan, while it waits for approval
-route('GET', '/projects/:slug/drafts', ([slug]) => f.planSessions
-  .filter(s => s.projectId === project(slug!).id)
-  .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-  .flatMap((s) => {
-    const latest = f.plans[s.id]?.at(-1)
-    const drafts = latest?.status === 'proposed' ? latest.tasks.filter(t => t.status === 'draft') : []
-    return drafts.length === 0
-      ? []
-      : [{ sessionId: s.id, title: s.title, updatedAt: s.updatedAt, planStatus: latest!.status, drafts: drafts.map(t => ({ taskId: t.taskId ?? t.key, ref: t.ref ?? t.key, title: t.title, type: 'task' as const, priority: t.priority })) }]
-  }))
+// Drafts by the session they belong to, newest session first, as the server lists them
+function drafts(projectId: string): DraftSession[] {
+  const rows = f.tasks.filter(t => t.projectId === projectId && t.status === 'draft').toSorted((a, b) => a.number - b.number)
+  return f.planSessions
+    .filter(s => rows.some(t => t.planSessionId === s.id))
+    .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .map(s => ({
+      sessionId: s.id,
+      title: s.title,
+      updatedAt: s.updatedAt,
+      planStatus: f.plans[s.id]?.at(-1)?.status ?? null,
+      drafts: rows.filter(t => t.planSessionId === s.id).map(t => ({ taskId: t.id, ref: t.ref, title: t.title, type: t.type, priority: t.priority }))
+    }))
+}
+route('GET', '/projects/:slug/drafts', ([slug]) => drafts(project(slug!).id))
+// Approving moves the plan's Drafts to Ready or the Backlog
+route('POST', '/plan/plans/:id/approve', ([id], body) => {
+  const plan = Object.values(f.plans).flat().find(p => p.id === id) ?? notFound()
+  const { to } = body as { to: 'ready' | 'backlog' }
+  Object.assign(plan, { status: 'approved', approvedAt: new Date().toISOString(), tasks: plan.tasks.map(p => p.status === 'draft' ? { ...p, status: to } : p) })
+  for (const t of f.tasks.filter(t => plan.tasks.some(p => p.taskId === t.id) && t.status === 'draft')) {
+    Object.assign(t, { status: to, planSessionId: null, planSessionTitle: null })
+    emit({ type: 'task.updated', task: t })
+  }
+  const s = f.planSessions.find(x => x.id === plan.sessionId)
+  if (s) emit({ type: 'plan.session', session: Object.assign(s, { status: 'none' }) })
+  emit({ type: 'plan.updated', plan })
+  emit({ type: 'plan.drafts', projectId: plan.projectId, sessions: drafts(plan.projectId) })
+  return plan
+})
 route('POST', '/plan/sessions/:id/read', ([id]) => Object.assign(f.planSessions.find(s => s.id === id) ?? notFound(), { unread: false }))
 
 // The live stream: useLive listens here instead of /api/events
