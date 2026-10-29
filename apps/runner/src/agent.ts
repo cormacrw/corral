@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import type { GitAuthor } from './config.ts'
 import { StreamJsonParser, type ParsedLine } from './stream-json.ts'
@@ -38,16 +38,22 @@ export interface AgentProcess {
 
 export const STOP_GRACE_MS = 5_000
 
-export function agentArgs(options: Pick<AgentOptions, 'prompt' | 'systemPrompt' | 'mcpConfigPath' | 'model' | 'resumeSessionId'>): string[] {
-  const args = [
-    '-p', options.prompt,
+type ArgOptions = Pick<AgentOptions, 'systemPrompt' | 'mcpConfigPath' | 'model' | 'resumeSessionId'>
+
+// One-shot runs pass the prompt with -p. A streaming session passes none: it
+// reads user messages from stdin, which the CLI only allows with --print.
+export function agentArgs(options: ArgOptions & ({ prompt: string } | { input: 'stream-json' })): string[] {
+  const args = 'prompt' in options
+    ? ['-p', options.prompt]
+    : ['--print', '--input-format', 'stream-json']
+  args.push(
     '--output-format', 'stream-json',
     '--verbose',
     '--mcp-config', options.mcpConfigPath,
     '--strict-mcp-config',
     '--permission-mode', 'bypassPermissions',
     '--append-system-prompt', options.systemPrompt
-  ]
+  )
   if (options.model) args.push('--model', options.model)
   if (options.resumeSessionId) args.push('--resume', options.resumeSessionId)
   return args
@@ -77,20 +83,78 @@ export function agentEnv(base: NodeJS.ProcessEnv = process.env, gitAuthor: GitAu
 }
 
 export function spawnAgent(options: AgentOptions): AgentProcess {
+  const { child, exited } = startAgent(agentArgs(options), 'ignore', options)
+  return { pid: child.pid ?? -1, exited, kill: signal => killGroup(child, signal) }
+}
+
+export type AgentOptionsWithoutPrompt = Omit<AgentOptions, 'prompt'>
+
+export type TurnResult = NonNullable<ParsedLine['result']>
+
+export interface AgentSession extends AgentProcess {
+  // Writes one user message. A no-op once the process has exited.
+  send(prompt: string): void
+  // The next turn's result line, in order. Resolves null if the process
+  // ends first, so a caller waiting on a killed or crashed turn never hangs.
+  nextResult(): Promise<TurnResult | null>
+}
+
+// A long-lived agent that takes turns over stdin: each send() is one user
+// message, and each turn ends with a result line. onLine still sees every line.
+export function spawnAgentSession(options: AgentOptionsWithoutPrompt): AgentSession {
+  const results: TurnResult[] = []
+  const waiting: ((result: TurnResult | null) => void)[] = []
+  let ended = false
+  const { child, exited } = startAgent(agentArgs({ ...options, input: 'stream-json' }), 'pipe', {
+    ...options,
+    onLine(raw, parsed) {
+      options.onLine(raw, parsed)
+      if (!parsed.result) return
+      const next = waiting.shift()
+      if (next) next(parsed.result)
+      else results.push(parsed.result)
+    }
+  })
+  const stdin = child.stdin!
+  // Writing after the process died raises EPIPE; exited already reports that
+  stdin.on('error', () => {})
+  void exited.then(() => {
+    ended = true
+    for (const resolve of waiting.splice(0)) resolve(null)
+  })
+
+  return {
+    pid: child.pid ?? -1,
+    exited,
+    kill: signal => killGroup(child, signal),
+    send(prompt) {
+      if (ended || !stdin.writable) return
+      stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: prompt } }) + '\n')
+    },
+    nextResult() {
+      const result = results.shift()
+      if (result) return Promise.resolve(result)
+      if (ended) return Promise.resolve(null)
+      return new Promise(resolve => waiting.push(resolve))
+    }
+  }
+}
+
+function startAgent(args: string[], stdin: 'ignore' | 'pipe', options: AgentOptionsWithoutPrompt): { child: ChildProcess, exited: Promise<AgentExit> } {
   const parser = new StreamJsonParser({ quietResumeOf: options.quietResume ? options.resumeSessionId : null })
-  const child = spawn(options.claudeBin, agentArgs(options), {
+  const child = spawn(options.claudeBin, args, {
     cwd: options.cwd,
     env: agentEnv(process.env, options.gitAuthor),
     // Its own process group, so the whole tree can be killed at once
     detached: true,
-    stdio: ['ignore', 'pipe', 'pipe']
+    stdio: [stdin, 'pipe', 'pipe']
   })
 
   // Line by line, never the whole transcript in memory (runner rule 3)
-  const stdout = createInterface({ input: child.stdout })
+  const stdout = createInterface({ input: child.stdout! })
   stdout.on('line', line => options.onLine(line, parser.parse(line)))
   let stderr = ''
-  child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
+  child.stderr!.setEncoding('utf8').on('data', (chunk: string) => {
     // Keep only the tail: enough to explain a crash
     stderr = (stderr + chunk).slice(-4000)
   })
@@ -107,17 +171,14 @@ export function spawnAgent(options: AgentOptions): AgentProcess {
       resolve({ code, signal })
     })
   })
+  return { child, exited }
+}
 
-  return {
-    pid: child.pid ?? -1,
-    exited,
-    kill(signal) {
-      if (!child.pid) return
-      try {
-        process.kill(-child.pid, signal)
-      } catch {
-        // The group is already gone
-      }
-    }
+function killGroup(child: ChildProcess, signal: NodeJS.Signals): void {
+  if (!child.pid) return
+  try {
+    process.kill(-child.pid, signal)
+  } catch {
+    // The group is already gone
   }
 }
