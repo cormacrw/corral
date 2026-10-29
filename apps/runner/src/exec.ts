@@ -45,6 +45,9 @@ export function exec(command: string, args: string[], options: ExecOptions = {})
     })
     child.on('error', error => done({ code: null, stdout, stderr: error.message }))
     child.on('close', code => done({ code, stdout, stderr }))
+    // A command that exits before reading its input closes the pipe (EPIPE);
+    // its exit code still reports the result, so the write error is noise
+    child.stdin.on('error', () => {})
     child.stdin.end(options.input ?? '')
   })
 }

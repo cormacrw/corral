@@ -12,9 +12,29 @@ async function exists(path: string): Promise<boolean> {
   return stat(path).then(() => true, () => false)
 }
 
+// Git work that writes to a bare clone (fetches, adding and pruning
+// worktrees) runs one at a time per clone: concurrent runs would otherwise
+// race on its ref locks
+const repoQueues = new Map<string, Promise<unknown>>()
+
+export function withRepoLock<T>(bare: string, work: () => Promise<T>): Promise<T> {
+  const previous = repoQueues.get(bare) ?? Promise.resolve()
+  const result = previous.then(work, work)
+  const settled = result.then(() => {}, () => {})
+  repoQueues.set(bare, settled)
+  void settled.then(() => {
+    if (repoQueues.get(bare) === settled) repoQueues.delete(bare)
+  })
+  return result
+}
+
 // Clones on first use, then fetches. Returns an error message or null.
-export async function syncRepository(dataDir: string, repository: string): Promise<string | null> {
+export function syncRepository(dataDir: string, repository: string): Promise<string | null> {
   const path = barePath(dataDir, repository)
+  return withRepoLock(path, () => cloneOrFetch(dataDir, path, repository))
+}
+
+async function cloneOrFetch(dataDir: string, path: string, repository: string): Promise<string | null> {
   if (!(await exists(path))) {
     await mkdir(join(dataDir, 'repos'), { recursive: true })
     const clone = await git(['clone', '--bare', `https://github.com/${repository}.git`, path], { timeoutMs: 10 * 60_000 })

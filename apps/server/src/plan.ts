@@ -145,6 +145,7 @@ export class PlanService {
       taskRef: null,
       branch: null,
       headSha: null,
+      planSessionId: session.id,
       agentSessionId: session.agentSessionId,
       model: null,
       timeoutSeconds: PM_TURN_TIMEOUT_SECONDS,

@@ -105,8 +105,12 @@ The root is configurable (env vars). `pnpm dev` puts it in the checkout's own `.
     blobs/sha256/ab/cd…         content-addressed files
   runner/
     config.json                 server URL, runner ID
-    repos/<repoId>.git          bare clone, fetched before each job
+    repos/<repoId>.git          bare clone, fetched before each job; fetches
+                                and worktree changes run one at a time per clone
     worktrees/<taskId>/         one per task, removed after merge
+    worktrees/pm-<projectId>-<planSessionId>/
+                                read-only default-branch checkout, one per Plan
+                                session; stable so `claude --resume` finds it
     spool/<runId>.jsonl         transcript being written, uploaded at run end
 ```
 
