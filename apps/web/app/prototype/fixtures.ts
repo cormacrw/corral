@@ -256,6 +256,18 @@ export const runs: Run[] = [
   }
 ]
 
+// Unbreakable tokens that once widened the Plan conversation past a phone's screen
+const LONG_PATH = 'apps/web/app/components/plan/conversation/PlanConversationMessageLogWithAVeryLongName.vue'
+const LONG_URL = 'https://github.com/cormacrw/corral/blob/main/apps/web/app/pages/plan/%5BsessionId%5D.vue?plain=1#L180-L260'
+const LONG_CODE = 'useTaskFlyout().openPlanWithAVeryLongOptionName({ replace: true })'
+const WIDE_TABLE = [
+  '| File | Change | Reason |',
+  '| --- | --- | --- |',
+  `| ${LONG_PATH} | Adds overflow-wrap anywhere to every paragraph | A long token widens its flex parent |`,
+  '| apps/web/app/components/RunTranscript.vue | Constrains the step list | Tool output is whitespace-pre-wrap |'
+].join('\n')
+const LONG_BLOCK = '```ts\nconst message = await api.plan.message(session.value.id, text.value, taskRef.value ?? undefined) // and a long trailing comment\n```'
+
 export const runEvents: Record<string, RunEvent[]> = {
   'r-1': [
     { type: 'system', text: 'Run #128 started on home-server' },
@@ -275,6 +287,19 @@ export const runEvents: Record<string, RunEvent[]> = {
     { type: 'message', text: 'Looking for the footer component.' },
     { type: 'tool_call', id: 'call-1', tool: 'Bash', input: { command: 'grep -rn target=\\"_blank\\" src/components' } },
     { type: 'tool_result', id: 'call-1', output: 'src/components/SiteFooter.vue:14', isError: false }
+  ],
+  // The Plan session full of long tokens (s-4): a finished turn and the live one
+  'r-plan-1': [
+    { type: 'thinking', text: `The overflow comes from ${LONG_PATH}, where a ${LONG_CODE} never breaks.` },
+    { type: 'tool_call', id: 'call-1', tool: 'Read', input: { file_path: LONG_PATH } },
+    { type: 'tool_result', id: 'call-1', output: `${LONG_URL}\n${'x'.repeat(240)}`, isError: false },
+    { type: 'tool_call', id: 'call-2', tool: 'Bash', input: { command: `grep -rn "${LONG_CODE}" ${LONG_PATH}` } },
+    { type: 'tool_result', id: 'call-2', output: `grep: ${LONG_PATH}: No such file or directory`, isError: true }
+  ],
+  'r-plan-2': [
+    { type: 'thinking', text: `Checking ${LONG_URL} next.` },
+    { type: 'tool_call', id: 'call-1', tool: 'Bash', input: { command: `curl -s ${LONG_URL}` } },
+    { type: 'tool_result', id: 'call-1', output: 'y'.repeat(300), isError: true }
   ]
 }
 
@@ -351,6 +376,11 @@ export const planSessions: PlanSession[] = [
     id: 's-3', projectId: 'p-corral', title: 'Board polish', runtime: 'claude-code',
     preview: 'Here is a plan with two tasks. Approve it to put them on the board.', unread: false, status: 'needs_approval', activeRunId: null,
     createdAt: ago(60 * 51), updatedAt: ago(60 * 50)
+  },
+  {
+    id: 's-4', projectId: 'p-corral', title: 'Long tokens', runtime: 'claude-code',
+    preview: 'Here is what widens the thread.', unread: false, status: 'none', activeRunId: 'r-plan-2',
+    createdAt: ago(60 * 2), updatedAt: ago(5)
   }
 ]
 
@@ -366,6 +396,10 @@ export const planMessages: Record<string, PlanMessage[]> = {
   's-3': [
     { id: 'm-5', sessionId: 's-3', role: 'human', kind: 'message', text: 'The board jumps around when runs start. Tidy it up.', recommendation: null, options: null, planId: null, runId: null, createdAt: ago(60 * 51) },
     { id: 'm-6', sessionId: 's-3', role: 'pm', kind: 'message', text: 'Here is a plan with two tasks. Approve it to put them on the board.', recommendation: null, options: null, planId: 'plan-3', runId: null, createdAt: ago(60 * 50) }
+  ],
+  's-4': [
+    { id: 'm-7', sessionId: 's-4', role: 'human', kind: 'message', text: `On my phone the thread scrolls sideways. See ${LONG_PATH} and ${LONG_URL}, around \`${LONG_CODE}\`.\n\n${WIDE_TABLE}\n\n${LONG_BLOCK}`, recommendation: null, options: null, planId: null, runId: null, createdAt: ago(60 * 2) },
+    { id: 'm-8', sessionId: 's-4', role: 'pm', kind: 'message', text: `Here is what widens the thread:\n\n- ${LONG_PATH}\n- [${LONG_URL}](${LONG_URL})\n- \`${LONG_CODE}\`\n\n${WIDE_TABLE}\n\n${LONG_BLOCK}`, recommendation: null, options: null, planId: 'plan-4', runId: 'r-plan-1', createdAt: ago(60) }
   ]
 }
 
@@ -414,6 +448,16 @@ export const plans: Record<string, Plan[]> = {
         { key: 'T2', change: 'added', revises: false, taskId: 't-cor-17', epicId: null, ref: 'COR-17', title: 'Spike: virtualise long columns', status: 'draft', priority: 'low', humanReview: false, dependsOn: [] }
       ],
       createdAt: ago(60 * 50)
+    }
+  ],
+  's-4': [
+    {
+      id: 'plan-4', sessionId: 's-4', projectId: 'p-corral', epicId: null, version: 1, title: 'Keep the Plan conversation within a phone\'s screen width',
+      summary: 'Long tokens wrap; code blocks and tables scroll in their own box.', status: 'approved', approvedAt: ago(30), epics: [],
+      tasks: [
+        { key: 'T1', change: 'added', revises: false, taskId: null, epicId: null, ref: null, title: 'Wrap long tokens in messages', status: 'draft', priority: 'high', humanReview: false, dependsOn: [] }
+      ],
+      createdAt: ago(60)
     }
   ]
 }

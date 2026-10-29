@@ -60,7 +60,7 @@ watch(() => props.events.length, async () => {
         <div
           v-else-if="entry.type === 'message' && isMine(entry.text)"
           :key="`y${entry.key}`"
-          class="flex max-w-[80%] flex-col items-end gap-1 self-end"
+          class="flex max-w-[80%] min-w-0 flex-col items-end gap-1 self-end"
           data-testid="mid-run-message"
         >
           <span class="text-xs text-muted">You, mid-run</span>
@@ -105,7 +105,7 @@ watch(() => props.events.length, async () => {
           </button>
           <div
             v-if="isOpen(`t${entry.key}`, false)"
-            class="ms-2.5 border-s border-default ps-3.5 text-sm whitespace-pre-wrap text-muted"
+            class="ms-2.5 border-s border-default ps-3.5 text-sm wrap-anywhere whitespace-pre-wrap text-muted"
             v-text="entry.text"
           />
         </div>
@@ -190,7 +190,7 @@ watch(() => props.events.length, async () => {
               >
                 <pre
                   v-if="step.output"
-                  :class="['max-h-80 overflow-auto rounded-md p-2 font-mono text-xs/5 whitespace-pre-wrap', step.isError ? 'bg-error/10 text-error' : 'bg-elevated text-default']"
+                  :class="['max-h-80 overflow-auto rounded-md p-2 font-mono text-xs/5 wrap-anywhere whitespace-pre-wrap', step.isError ? 'bg-error/10 text-error' : 'bg-elevated text-default']"
                 >{{ shownOutput(step) }}</pre>
                 <div class="flex gap-3 text-xs">
                   <UButton
@@ -213,7 +213,7 @@ watch(() => props.events.length, async () => {
                 </div>
                 <pre
                   v-if="isOpen(`raw${step.key}`, false)"
-                  class="max-h-60 overflow-auto rounded-md bg-elevated p-2 font-mono text-xs/5 whitespace-pre-wrap"
+                  class="max-h-60 overflow-auto rounded-md bg-elevated p-2 font-mono text-xs/5 wrap-anywhere whitespace-pre-wrap"
                 >{{ JSON.stringify(step.input, null, 2) }}</pre>
               </div>
             </div>
