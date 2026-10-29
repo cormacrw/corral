@@ -62,6 +62,8 @@ Each decision has an ID so code comments, commits and PRs can refer to it (e.g. 
 
 **Amended by D19:** evidence is chosen per acceptance criterion, not by task type. PRD §7.7's evidence kinds remain the guidance.
 
+**Amended by D21:** checks are gates, never criterion evidence; human evidence may be note-only. D21 overrides the test-results guidance in PRD §7.7.
+
 Open gaps to consider are in [open-recommendations.md](open-recommendations.md) (R3).
 
 ---
@@ -443,6 +445,8 @@ The UI specs are in [design/](design/README.md).
 
 **Amended by D20:** a fourth type, **Design** (`design`), delivers an approved design version instead of a PR.
 
+**Amended by D21:** checks are gates, never criterion evidence. Human evidence is chosen per criterion and may be note-only; logs and test output are agent artifacts.
+
 **Decision:** A task's type says what kind of work it is, not which part of the stack it touches. There are three:
 
 | Type | What it is | Deliverable |
@@ -546,3 +550,19 @@ The bundle, spec and screenshots are content-addressed blobs and the database st
 - New tables for design versions (task, number, state, branch, commit, blob pointers) and for build tasks' pins (version, screen ids).
 - The runner creates `design/<ref>` branches for design tasks instead of `corral/<taskId>-<slug>`, and exposes `submit_design` only on design-task runs.
 - The server's preview route sets the sandbox headers above; the web app gets a design view (versions, screenshots, sandboxed preview, approve and request changes).
+
+---
+
+## D21 — Evidence is for judging criteria; checks are gates
+
+**Status:** Accepted 2026-10-29. Amends D4 and D19 and overrides PRD §7.7's "test results" evidence.
+
+**Decision:**
+
+- **Checks aren't evidence.** Lint, typecheck, tests and build are gates: the developer runs them, the reviewer reruns them without the cache, and the project's required CI checks gate merge. They are never attached as evidence for a criterion.
+- **Human evidence** is what a person would look at to judge a criterion: screenshots and video, real requests and responses, before/after metrics, and the reviewer's per-criterion note.
+- **Agent artifacts** are logs, test output and other raw files. They are kept for the reviewer and for debugging, and are collapsed in the UI.
+- **Note-only evidence:** a criterion with nothing visual to show (a refactor with no behaviour change, for example) can be covered by a written explanation without a file. The reviewer judges the explanation, and its verdict note is the proof.
+- **Criteria describe behaviour.** The PM doesn't write criteria like "tests pass" or "build succeeds".
+
+**Why:** Passing checks is necessary for delivery but doesn't show a person whether the requested behaviour meets a criterion. Separating gates and raw artifacts from human evidence keeps review focused on the result, while note-only evidence avoids meaningless file attachments for work best explained in writing.

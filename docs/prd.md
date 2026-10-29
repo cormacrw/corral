@@ -482,6 +482,8 @@ Evidence is a mandatory deliverable.
 
 **Overridden by D19:** evidence follows each acceptance criterion, not the task type. The kinds below are guidance for choosing it.
 
+**Amended by D21:** lint, typecheck, tests and build are gates, never criterion evidence. The test results and CI results below are agent artifacts kept for review and debugging, collapsed in the UI. Human evidence is screenshots/video, real requests/responses, before/after metrics and the reviewer's per-criterion note. A criterion with nothing visual to show may use a written explanation without a file; the reviewer judges it and its verdict note is the proof. See [D21](decisions.md#d21--evidence-is-for-judging-criteria-checks-are-gates).
+
 | Kind of change | Evidence |
 |---|---|
 | Visible (UI) | Screenshots of relevant acceptance criteria, viewport details, test results |
