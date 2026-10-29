@@ -124,7 +124,10 @@ export function useLive() {
         s.runner = event.status
         break
       case 'agent.updated':
-        s.agents = s.agents.map(a => a.id === event.agent.id ? event.agent : a)
+        // A new agent (Add agent in Settings) is appended
+        s.agents = s.agents.some(a => a.id === event.agent.id)
+          ? s.agents.map(a => a.id === event.agent.id ? event.agent : a)
+          : [...s.agents, event.agent]
         break
       case 'run.updated':
         // Lease changes show on agents; refresh their counts cheaply

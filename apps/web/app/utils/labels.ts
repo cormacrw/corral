@@ -1,4 +1,4 @@
-import type { Agent, InboxItem, Project, Run, Task } from '@corral/contracts'
+import { AGENT_RUNTIMES, type Agent, type AgentRuntime, type CliStatus, type InboxItem, type Project, type Run, type Task } from '@corral/contracts'
 import type { AgentRole, RunOutcome, RunState, TaskPriority, TaskStatus } from '@corral/core'
 
 export type Color = 'primary' | 'secondary' | 'success' | 'info' | 'warning' | 'error' | 'neutral'
@@ -25,6 +25,20 @@ export const PRIORITY: Record<TaskPriority, { label: string, color: Color }> = {
 }
 
 export const ROLE: Record<AgentRole, string> = { pm: 'PM', developer: 'Developer', reviewer: 'Reviewer' }
+
+// Runtime names in the UI. Never "Claude Code" (agent-runtime-and-auth.md, branding).
+export const RUNTIME: Record<AgentRuntime, string> = { 'claude-code': 'Claude', 'codex': 'Codex' }
+export function runtimeLabel(runtime: string): string {
+  return RUNTIME[runtime as AgentRuntime] ?? runtime
+}
+// The runtimes whose CLI the runner found installed, for the runtime menu (D18)
+export function detectedRuntimes(clis: Pick<CliStatus, 'id' | 'version'>[]): AgentRuntime[] {
+  return (Object.keys(AGENT_RUNTIMES) as AgentRuntime[]).filter(r => clis.some(c => c.id === AGENT_RUNTIMES[r] && c.version))
+}
+// How to sign a CLI in inside the runner container (D12, D18)
+export function cliLoginCommand(id: CliStatus['id']): string {
+  return `docker exec -it corral-runner ${id === 'codex' ? 'codex login --device-auth' : 'claude'}`
+}
 
 // design/inbox.md item type badges
 export function inboxTypeBadge(type: InboxItem['type']): { label: string, color: Color } {

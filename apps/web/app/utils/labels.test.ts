@@ -1,6 +1,6 @@
 import type { TaskStatus } from '@corral/core'
 import { describe, expect, it } from 'vitest'
-import { runTokens, taskCounts } from './labels.ts'
+import { cliLoginCommand, detectedRuntimes, runtimeLabel, runTokens, taskCounts } from './labels.ts'
 
 const tasks = (...statuses: TaskStatus[]) => statuses.map(status => ({ status }))
 
@@ -33,5 +33,23 @@ describe('runTokens', () => {
 
   it('leaves cache reads out for runs recorded before they were counted', () => {
     expect(runTokens({ inputTokens: 44_244, cacheReadTokens: null, outputTokens: 369 })).toBe('44k in · 369 out')
+  })
+})
+
+describe('runtimes', () => {
+  it('labels runtimes Claude and Codex, never Claude Code', () => {
+    expect(runtimeLabel('claude-code')).toBe('Claude')
+    expect(runtimeLabel('codex')).toBe('Codex')
+  })
+
+  it('offers only runtimes whose CLI the runner found', () => {
+    expect(detectedRuntimes([{ id: 'claude', version: '2.1.0' }, { id: 'codex', version: null }])).toEqual(['claude-code'])
+    expect(detectedRuntimes([{ id: 'claude', version: '2.1.0' }, { id: 'codex', version: '0.50.0' }])).toEqual(['claude-code', 'codex'])
+    expect(detectedRuntimes([])).toEqual([])
+  })
+
+  it('signs Codex in with device auth', () => {
+    expect(cliLoginCommand('codex')).toBe('docker exec -it corral-runner codex login --device-auth')
+    expect(cliLoginCommand('claude')).toBe('docker exec -it corral-runner claude')
   })
 })
