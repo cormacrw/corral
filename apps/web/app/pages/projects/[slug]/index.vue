@@ -51,6 +51,7 @@ const firstPass = computed(() => {
 const waitingOnDependency = computed(() => tasks.value.filter(t => t.status === 'ready' && t.dependsOn.some(ref => tasks.value.find(x => x.ref === ref)?.status !== 'merged')).length)
 const developer = computed(() => live.state.value.agents.find(a => a.role === 'developer'))
 const reviewer = computed(() => live.state.value.agents.find(a => a.role === 'reviewer'))
+const pmName = computed(() => live.state.value.agents.find(a => a.role === 'pm')?.name ?? 'the PM')
 const epics = computed(() => {
   const groups = new Map<string, { id: string, title: string, merged: number, total: number }>()
   for (const task of tasks.value) {
@@ -110,7 +111,7 @@ const activityText = (entry: AuditEntry) => {
         <div class="flex gap-2">
           <UButton
             :to="`/plan?project=${project.id}`"
-            label="Plan with Juno"
+            :label="`Plan with ${pmName}`"
             variant="outline"
             color="neutral"
             icon="i-lucide-message-square"
@@ -135,11 +136,11 @@ const activityText = (entry: AuditEntry) => {
         class="rounded-lg border border-default p-8 text-center"
       >
         <p class="mb-3 text-muted">
-          Plan your first epic with Juno
+          Plan your first epic with {{ pmName }}
         </p>
         <UButton
           :to="`/plan?project=${project.id}`"
-          label="Plan with Juno"
+          :label="`Plan with ${pmName}`"
         />
       </div>
 

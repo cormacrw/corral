@@ -268,7 +268,7 @@ const projectName = (run: Run) => live.state.value.projects.find(p => p.id === r
             v-else
             class="flex flex-1 items-center justify-center p-6 text-center text-sm text-muted"
           >
-            <span v-if="agent.role === 'pm'">Juno isn't running. Juno only runs when you send a message in Plan.</span>
+            <span v-if="agent.role === 'pm'">{{ agent.name }} isn't running. {{ agent.name }} only runs when you send a message in Plan.</span>
             <span v-else>{{ agent.name }} is idle.</span>
           </div>
         </div>

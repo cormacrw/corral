@@ -13,6 +13,7 @@ const project = computed(() => live.state.value.projects.find(p => p.slug === sl
 const all = computed<Task[]>(() => project.value ? live.state.value.tasks[project.value.id] ?? [] : [])
 const loading = computed(() => Boolean(project.value) && !live.state.value.tasks[project.value!.id])
 const error = ref<string | null>(null)
+const pmName = computed(() => live.state.value.agents.find(a => a.role === 'pm')?.name ?? 'the PM')
 useSeoMeta({ title: () => `Backlog · ${project.value?.name ?? ''} · Corral` })
 
 watch(project, async (p) => {
@@ -177,7 +178,7 @@ async function newTask() {
               />
               <UButton
                 :to="`/plan?project=${project?.id}`"
-                label="Plan with Juno"
+                :label="`Plan with ${pmName}`"
                 variant="link"
                 size="xs"
                 class="ms-auto"
@@ -238,7 +239,7 @@ async function newTask() {
             v-if="groups.length === 0"
             class="text-sm text-muted"
           >
-            Nothing in the Backlog. Plan something with Juno or add a task.
+            Nothing in the Backlog. Plan something with {{ pmName }} or add a task.
           </p>
         </div>
       </div>
