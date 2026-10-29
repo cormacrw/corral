@@ -26,6 +26,7 @@ export interface ToolStep {
 export type TranscriptEntry
   = | { key: number, type: 'system', text: string }
     | { key: number, type: 'message', text: string }
+    | { key: number, type: 'thinking', text: string }
     | { key: number, type: 'steps', steps: ToolStep[] }
 
 export function transcriptEntries(events: RunEvent[]): TranscriptEntry[] {
@@ -39,6 +40,14 @@ export function transcriptEntries(events: RunEvent[]): TranscriptEntry[] {
       case 'message':
         list.push({ key: i, type: 'message', text: event.text })
         break
+      case 'thinking': {
+        // Consecutive empty thinking blocks show as one "Thinking" step
+        const last = list.at(-1)
+        const text = event.text.trim()
+        if (!text && last?.type === 'thinking' && !last.text) break
+        list.push({ key: i, type: 'thinking', text })
+        break
+      }
       case 'tool_call': {
         if (HIDDEN_TOOLS.has(event.tool)) break
         const step: ToolStep = { key: i, ...describe(event.tool, event.input), input: event.input, isError: false, done: false }

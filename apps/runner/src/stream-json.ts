@@ -17,6 +17,7 @@ export interface ParsedLine {
 interface ContentBlock {
   type: string
   text?: string
+  thinking?: string
   id?: string
   name?: string
   input?: unknown
@@ -83,6 +84,8 @@ export class StreamJsonParser {
       case 'assistant': {
         for (const block of blocks(data.message?.content)) {
           if (block.type === 'text' && block.text?.trim()) out.events.push({ type: 'message', text: block.text })
+          // Kept even when empty, so the transcript shows that the agent thought
+          if (block.type === 'thinking' || block.type === 'redacted_thinking') out.events.push({ type: 'thinking', text: block.thinking ?? '' })
           if (block.type === 'tool_use') out.events.push({ type: 'tool_call', id: block.id ?? '', tool: block.name ?? '', input: block.input })
         }
         if (data.message?.usage) {

@@ -75,6 +75,8 @@ export interface RunJob {
 export type RunEvent =
   | { type: 'system', text: string }
   | { type: 'message', text: string }
+  // The agent's reasoning. Text can be empty when the CLI only marks that it thought.
+  | { type: 'thinking', text: string }
   | { type: 'tool_call', id: string, tool: string, input: unknown }
   | { type: 'tool_result', id: string, output: string, isError: boolean }
   | { type: 'usage', inputTokens: number, outputTokens: number }
