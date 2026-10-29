@@ -47,7 +47,9 @@ See what an agent is doing right now, attach to its live run, and look back at p
      - an **outcome card**, tinted with the outcome colour, e.g. "Stuck. Asked you a question. The task is Blocked until you answer in the Inbox."
      - a **"{Agent} is working…"** line with a ping dot while the run is live
    - **Footer:**
-     - **Live run:** the composer, "Message Atlas mid-run…" with "Atlas reads this at its next step". When interrupted it reads "Tell Atlas what to do next…" and "Atlas is waiting for you".
+     - **Live run:** the composer, "Message Atlas mid-run…" with "Atlas reads this at its next step". When interrupted it reads "Tell Atlas what to do next…" and "Atlas is waiting for you". Sending posts to `POST /projects/:slug/runs/:runId/messages`; the message is kept as your comment on the task and shows in the transcript as your bubble once the runner delivers it.
+     - **Live run that can't take messages:** the composer is disabled, with the reason under it. A Codex run reads "Codex can't take messages mid-run. Comment on the task and Atlas reads it on its next run." A queued or stopping run, or the runner being offline, says so the same way.
+     - **Live PM turn:** no composer; the PM is messaged in Plan.
      - **Previous run:** a lock icon and "Read-only. This run finished 2h ago. To change the work, comment on the task."
 3. **Task flyout:** docked on the right when you press Open task.
 
@@ -56,7 +58,7 @@ See what an agent is doing right now, attach to its live run, and look back at p
 - **Attaching:** opening the page while a run is live streams its events (SSE) and ticks the timer.
 - **Interrupt:** pauses the agent at its next step. Resume continues it.
 - **Stop:** ends the run. The task stays in its status with no lease, and the scheduler retries under D10.
-- **Mid-run messages:** go to the agent through the runner's MCP channel.
+- **Mid-run messages:** go to the agent through the runner, which writes them to a Claude Code run's input. Codex runs one prompt to the end, so it can't take them.
 
 ## The PM (Juno)
 

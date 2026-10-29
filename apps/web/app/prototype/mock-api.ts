@@ -1,4 +1,4 @@
-import type { Plan, PlanMessage, PlanSessionDetail, ServerEvent, Task } from '@corral/contracts'
+import type { Plan, PlanMessage, PlanSessionDetail, RunEvent, ServerEvent, Task } from '@corral/contracts'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
 import * as f from './fixtures'
@@ -96,6 +96,23 @@ route('GET', '/runs', (_, __, query) => f.runs.filter(r =>
   && (!query.get('active') || ['queued', 'starting', 'running', 'waiting_for_input', 'stopping'].includes(r.state))))
 route('GET', '/runs/:id', ([id]) => f.runs.find(r => r.id === id) ?? notFound())
 route('GET', '/runs/:id/transcript', ([id]) => f.runEvents[id!] ?? [])
+
+// A mid-run message: kept as a comment, then the "runner" delivers it and
+// the agent answers, through the same live events as the server's
+route('POST', '/projects/:slug/runs/:runId/messages', ([slug, runId], body) => {
+  const run = f.runs.find(r => r.id === runId && r.projectId === project(slug!).id) ?? notFound()
+  const { text } = body as { text: string }
+  const comment = { id: `cm-${Date.now()}`, taskId: run.taskId!, author: { kind: 'human' as const, userId: f.profile.id }, body: text.trim(), pinned: false, createdAt: new Date().toISOString() }
+  ;(f.comments[run.taskId!] ??= []).push(comment)
+  emit({ type: 'comment.created', comment })
+  const deliver = (events: RunEvent[]) => {
+    ;(f.runEvents[run.id] ??= []).push(...events)
+    emit({ type: 'run.events', runId: run.id, events })
+  }
+  setTimeout(() => deliver([{ type: 'message', text: comment.body }]), 300)
+  setTimeout(() => deliver([{ type: 'message', text: 'Got it, I\'ll do that next.' }]), 1200)
+  return { runId: run.id, comment }
+})
 
 route('GET', '/inbox', () => f.inbox())
 

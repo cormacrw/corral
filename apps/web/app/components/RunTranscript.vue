@@ -5,8 +5,10 @@ import { summarizeSteps, transcriptEntries, type ToolStep } from '~/utils/tool-s
 // The transcript log (design/agent.md): system dividers, agent messages,
 // muted "Thinking" steps, collapsed groups of tool steps, and a working line
 // while live. `inline` drops its own scrolling log so it can sit inside
-// another one, like Plan's.
-const props = defineProps<{ events: RunEvent[], live: boolean, agentName: string, inline?: boolean, working?: string }>()
+// another one, like Plan's. `mine` are the texts of mid-run messages you
+// sent, shown as your bubbles rather than the agent's words.
+const props = defineProps<{ events: RunEvent[], live: boolean, agentName: string, inline?: boolean, working?: string, mine?: string[] }>()
+const isMine = (text: string) => props.mine?.includes(text.trim()) ?? false
 
 const OUTPUT_LINES = 12
 
@@ -54,6 +56,18 @@ watch(() => props.events.length, async () => {
           <span class="h-px flex-1 bg-border" />
           <span class="max-w-[80%] truncate">{{ entry.text }}</span>
           <span class="h-px flex-1 bg-border" />
+        </div>
+        <div
+          v-else-if="entry.type === 'message' && isMine(entry.text)"
+          :key="`y${entry.key}`"
+          class="flex max-w-[80%] flex-col items-end gap-1 self-end"
+          data-testid="mid-run-message"
+        >
+          <span class="text-xs text-muted">You, mid-run</span>
+          <MarkdownText
+            :text="entry.text"
+            class="rounded-lg bg-elevated px-3 py-2 text-sm text-highlighted"
+          />
         </div>
         <MarkdownText
           v-else-if="entry.type === 'message'"

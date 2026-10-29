@@ -9,7 +9,7 @@ const router = useRouter()
 const flyout = useTaskFlyout()
 const device = useDevice()
 const view = useAgentRuns({ autoSelect: () => !device.isMobile.value })
-const { name, agent, runs, error, events, now, selected, load, today, tiles, facts, stop, projectName } = view
+const { name, agent, runs, error, events, now, selected, load, today, tiles, facts, stop, projectName, sent } = view
 useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
 </script>
 
@@ -173,13 +173,13 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
               :events="events"
               :live="isLive(selected)"
               :agent-name="agent.name"
+              :mine="sent[selected.id]"
             />
-            <footer class="border-t border-default px-4 py-2 text-xs text-muted">
-              <span v-if="isLive(selected)">Live. Mid-run messages aren't supported yet; comment on the task and {{ agent.name }} reads it on its next run.</span>
-              <span v-else><UIcon
-                name="i-lucide-lock"
-                class="size-3"
-              /> Read-only. This run finished {{ timeAgo(selected.endedAt, now) }}. To change the work, comment on the task.</span>
+            <footer class="border-t border-default px-4 py-2">
+              <RunComposer
+                :view="view"
+                :run="selected"
+              />
             </footer>
           </template>
           <div
