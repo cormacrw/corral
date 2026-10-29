@@ -112,6 +112,11 @@ async function nextAfterApproval() {
   const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
   await router.replace(next ? `/inbox/${next.id}` : '/inbox')
 }
+// Closed: the thread leaves the list, and selection moves on as after approving
+async function nextAfterClose() {
+  approvalPosition = items.value.findIndex(i => i.id === selectedId.value)
+  await nextAfterApproval()
+}
 function select(item: InboxItem) {
   void router.push(`/inbox/${item.id}`)
 }
@@ -335,14 +340,14 @@ onBeforeUnmount(() => {
         </ul>
       </div>
 
-      <PlanConversation
+      <InboxPlanThread
         v-if="selected?.type === 'plan_thread'"
         :key="selected.sessionId"
-        :session-id="selected.sessionId"
-        inbox
+        :item="selected"
         @read="load"
         @approved="nextAfterApproval"
         @approving="setPlanApproving"
+        @closed="nextAfterClose"
       />
       <div
         v-else
