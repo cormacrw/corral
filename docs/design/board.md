@@ -25,9 +25,10 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
      | Ready to merge | Ready to merge | Corral |
      | Blocked & failed | Blocked, Failed | You |
      | Merged | Merged | Last 3 days |
+     | Approved | Approved | Designs (D20; not built yet) |
 
    - **Cards:** buttons with a `bg-default` background, a 1px border and `rounded-md`.
-     - **Line 1:** the ref, the priority (Urgent in `error`, High in `warning`, others muted), a type badge for Bug (`error`, bug icon) and Spike (`info`, flask icon) but not Task (D19), and the PR number with an icon.
+     - **Line 1:** the ref, the priority (Urgent in `error`, High in `warning`, others muted), a type badge for Bug (`error`, bug icon), Spike (`info`, flask icon) and Design (D20) but not Task (D19), and the PR number with an icon.
      - **Line 2:** the title (medium, highlighted).
      - **Optional note:** "Waiting on COR-31", "Review round 1 of 5", "Waiting for you", or "Review-round limit reached" (in `error` for blocked).
      - **Line 3:** the epic tag, plus the agent avatar on the right when assigned. While the agent is working, the avatar has a status dot and the agent's name is shown.
