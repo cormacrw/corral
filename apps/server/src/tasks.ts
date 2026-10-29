@@ -44,6 +44,11 @@ export function toTaskState(row: TaskRow): TaskState {
 export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]): Promise<Task[]> {
   if (rows.length === 0) return []
   const ids = rows.map(r => r.id)
+  const leaseRunIds = rows.flatMap(r => r.leaseRunId ? [r.leaseRunId] : [])
+  const leasedRuns = leaseRunIds.length > 0
+    ? await db.select({ id: runs.id, agentId: runs.agentId }).from(runs).where(inArray(runs.id, leaseRunIds))
+    : []
+  const leaseAgents = new Map(leasedRuns.map(r => [r.id, r.agentId]))
   const criteria = await db.select().from(acceptanceCriteria)
     .where(inArray(acceptanceCriteria.taskId, ids))
     .orderBy(asc(acceptanceCriteria.position))
@@ -72,7 +77,7 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
     const newest = pin ? latestApproved.get(pin.designTaskId) ?? null : null
     const stale = pin && isDesignPinStale({ version: pin.version, latestApproved: newest }, { status: row.status, started: started.has(row.id) })
     const design = pin ? { taskRef: taskRef(project.prefix, pin.number), version: pin.version, screens: pin.screens, newerVersion: stale ? newest : null } : null
-    return toTask(project, row, criteria, dependencies, latest, current, design, owners.get(row.id) ?? null)
+    return toTask(project, row, criteria, dependencies, latest, current, design, owners.get(row.id) ?? null, row.leaseRunId ? leaseAgents.get(row.leaseRunId) ?? null : null)
   })
 }
 
@@ -103,7 +108,8 @@ function toTask(
   latest: typeof reviews.$inferSelect | null,
   current: typeof reviews.$inferSelect | null,
   design: TaskDesignPin | null,
-  session: { id: string, title: string } | null
+  session: { id: string, title: string } | null,
+  leaseAgentId: string | null
 ): Task {
   return {
     id: row.id,
@@ -128,8 +134,8 @@ function toTask(
       .filter(c => c.taskId === row.id)
       .map(c => ({ id: c.id, position: c.position, text: c.text, met: current?.criteria.find(v => v.criterionId === c.id)?.met ?? null })),
     dependsOn: dependencies.filter(d => d.taskId === row.id).map(d => taskRef(project.prefix, d.number)),
-    lease: row.leaseRunId && row.leaseRole && row.leaseExpiresAt
-      ? { runId: row.leaseRunId, role: row.leaseRole, expiresAt: row.leaseExpiresAt.toISOString() }
+    lease: row.leaseRunId && row.leaseRole && row.leaseExpiresAt && leaseAgentId
+      ? { agentId: leaseAgentId, runId: row.leaseRunId, role: row.leaseRole, expiresAt: row.leaseExpiresAt.toISOString() }
       : null,
     headSha: row.headSha,
     latestReview: latest ? toReview(latest) : null,

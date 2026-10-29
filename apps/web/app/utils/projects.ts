@@ -16,7 +16,7 @@ const VERB: Record<Agent['role'], string> = { pm: 'planning', developer: 'buildi
 export function projectCardSummary(
   project: { paused: boolean },
   tasks: Pick<Task, 'ref' | 'status' | 'mergedAt' | 'lease'>[],
-  agents: Pick<Agent, 'name' | 'role'>[],
+  agents: Pick<Agent, 'id' | 'name' | 'role'>[],
   needsYou: number,
   now = Date.now()
 ): ProjectCardSummary {
@@ -30,7 +30,7 @@ export function projectCardSummary(
   }
   if (first?.lease) {
     const role = first.lease.role
-    const agent = agents.find(a => a.role === role)?.name ?? (role === 'reviewer' ? 'Reviewer' : 'Developer')
+    const agent = agents.find(a => a.id === first.lease!.agentId)?.name ?? (role === 'reviewer' ? 'Reviewer' : 'Developer')
     const more = leased.length > 1 ? ` and ${leased.length - 1} more` : ''
     return { board, backlog, working: { agent, role }, line: `${agent} ${VERB[role]} ${first.ref}${more}` }
   }

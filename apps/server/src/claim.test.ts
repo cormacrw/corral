@@ -68,6 +68,22 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
     expect(audit).toMatchObject({ actor: { kind: 'system', component: 'scheduler' }, detail: { from: 'ready', to: 'in_progress', leaseEpoch: 1 } })
   })
 
+  it('exposes the second developer holding the lease in API tasks and live updates', async () => {
+    const project = await projectWithReadyTasks(1)
+    // Atlas is the first developer seeded by createTestApp.
+    const agentId = await developer(1, { runtime: 'codex' })
+    const claim = await claimNextTask(t.db, agentId)
+    const expected = { agentId, runId: claim!.runId, role: 'developer' }
+    const path = `/api/projects/${project.slug}/tasks`
+    const detail = await t.request('GET', `${path}/1`)
+    expect(await detail.json()).toMatchObject({ lease: expected })
+    const list = await t.request('GET', path)
+    expect(await list.json()).toMatchObject([{ lease: expected }])
+    t.events.length = 0
+    await t.request('PATCH', `${path}/1`, { title: 'Leased by the second developer' })
+    expect(t.events).toContainEqual(expect.objectContaining({ type: 'task.updated', task: expect.objectContaining({ lease: expect.objectContaining(expected) }) }))
+  })
+
   it('lets a Codex developer added through the API claim Ready tasks like Atlas', async () => {
     vi.spyOn(t.runner, 'request').mockResolvedValue({ kind: 'detect_clis', clis: [
       { id: 'claude', version: '2.1.312', signedIn: true },

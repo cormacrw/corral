@@ -67,7 +67,7 @@ function toggleSearch() {
   if (!searching.value) search.value = ''
 }
 const epicLabel = (id: string) => props.epics.find(e => e.id === id)?.label ?? ''
-const agentFor = (task: Task) => task.lease ? live.state.value.agents.find(a => a.role === task.lease!.role) : null
+const agentFor = (task: Task) => task.lease ? live.state.value.agents.find(a => a.id === task.lease!.agentId) : null
 const note = (task: Task) => taskNote(task, props.all, props.reviewRoundCap)
 </script>
 

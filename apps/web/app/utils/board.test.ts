@@ -157,7 +157,7 @@ describe('taskAgentIds', () => {
     { id: 'dev2', role: 'developer' as const },
     { id: 'rev', role: 'reviewer' as const }
   ]
-  const lease = (role: 'developer' | 'reviewer') => ({ runId: 'r', role, expiresAt: '' })
+  const lease = (role: 'developer' | 'reviewer') => ({ agentId: role === 'developer' ? 'dev2' : 'rev', runId: 'r', role, expiresAt: '' })
 
   it('assigns the developer columns to the developer and Agent review to the reviewer', () => {
     expect(taskAgentIds({ status: 'ready', lease: null }, agents)).toEqual(['dev'])
@@ -165,9 +165,17 @@ describe('taskAgentIds', () => {
     expect(taskAgentIds({ status: 'human_review', lease: null }, agents)).toEqual([])
   })
 
-  it('adds the agent holding the lease', () => {
-    expect(taskAgentIds({ status: 'in_progress', lease: lease('developer') }, agents)).toEqual(['dev'])
-    expect(taskAgentIds({ status: 'in_progress', lease: lease('reviewer') }, agents)).toEqual(['rev', 'dev'])
+  it('filters leased tasks by the holder and unleased tasks by turn', () => {
+    const task = { ref: 'TA-1', title: 'Running', epicId: null, priority: 'medium' as const, status: 'in_progress' as const, lease: lease('developer') }
+    const ids = taskAgentIds(task, agents)
+    expect(matchesFilter(task, { ...NO_FILTERS, agents: ['dev2'] }, ids)).toBe(true)
+    expect(matchesFilter(task, { ...NO_FILTERS, agents: ['dev'] }, ids)).toBe(false)
+    expect(matchesFilter(task, { ...NO_FILTERS, agents: ['dev'] }, taskAgentIds({ ...task, lease: null }, agents))).toBe(true)
+  })
+
+  it('uses only the second developer holding the lease', () => {
+    expect(taskAgentIds({ status: 'in_progress', lease: lease('developer') }, agents)).toEqual(['dev2'])
+    expect(taskAgentIds({ status: 'in_progress', lease: lease('reviewer') }, agents)).toEqual(['rev'])
   })
 })
 
