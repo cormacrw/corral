@@ -6,7 +6,7 @@ Reference material for agents building Corral. Read this file first.
 
 | File | What it is | Binding? |
 |---|---|---|
-| [decisions.md](decisions.md) | Decisions made after the PRD was written. These override the PRD (e.g. D19: task types are Task, Bug and Spike, and evidence follows the acceptance criteria). | **Yes** |
+| [decisions.md](decisions.md) | Decisions made after the PRD was written. These override the PRD (e.g. D19: task types are Task, Bug and Spike, and evidence follows the acceptance criteria; D20: Design tasks deliver versioned, sandboxed prototypes that the human approves before the build is planned). | **Yes** |
 | [architecture.md](architecture.md) | Processes, repo layout, stack, runner implementation rules, resource estimates (D7). | **Yes** |
 | [flows.md](flows.md) | Walkthroughs: talking to the PM, a task from Ready to Merged, failure handling. | **Yes** |
 | [prd.md](prd.md) | The MVP Product Requirements Document (v1.0, 2026-10-26). | **Yes**, except where `decisions.md` overrides it |

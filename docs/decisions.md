@@ -77,6 +77,8 @@ Open gaps to consider are in [open-recommendations.md](open-recommendations.md) 
 
 Only the flag sends a task to a human. A project with no required checks doesn't force human review: its unflagged tasks merge on the reviewer's approval alone (amended 2026-10-28; previously every task in such a project needed a human). Either way the task then sits in *Ready to merge* until it's merged, and all other merge gates in PRD §7.9 still apply.
 
+**Amended by D20:** Design tasks always go to *Human review*, whatever their flag, and never to *Ready to merge*.
+
 ---
 
 ## D6 — CI starts basic (lint)
@@ -132,6 +134,8 @@ Full table, disk layout, flows and the known POC push limitation are in [archite
 
 **Why:** D2 means the model is only reachable through the user's local CLI, so the server can't run the PM. Running it on the runner also gives it direct, fast access to the code and wiki.
 
+**Amended by D20:** approving a design version also starts a PM turn, in a new Plan session opened with the human's message.
+
 **Amended by D18:** a Plan session can run on Codex instead of `claude`, picked per session and locked once it has messages. What this decision says about `claude` sessions and `--resume` applies to the session's runtime.
 
 **Consequence:** PM chat requires the runner to be online. When hosted, that means the user's runner must be connected to chat.
@@ -156,6 +160,8 @@ Full table, disk layout, flows and the known POC push limitation are in [archite
 | **Merged** | PR merged. Final and immutable; follow-up work is a new task. This is what "Done" means everywhere in the PRD. |
 | **Blocked** | An agent needs a **human decision**. |
 | **Failed** | **The system broke** and can't continue on its own. |
+
+**Amended by D20:** design tasks end in a new **Approved** status instead of Merged, with their own transitions (see D20).
 
 There is no Testing status (add it when a tester agent exists), and no Cancelled or Archived status (see Deleting below).
 
@@ -226,7 +232,9 @@ Both appear in the Inbox (D11) with their reason. When a human resolves a Failed
 - **Needs you:** tasks in **Human review**, **Blocked** tasks (including an agent asking a question, which reports `stuck` and blocks the task with the question as its reason) and **Failed** tasks. Each item can be resolved from the Inbox itself, following the D10 transitions. An item stays until it's resolved; reading it doesn't clear it.
 - **Activity:** informational events from those runs (PR opened, changes requested, approved and merged). Nothing to act on.
 
-Nothing from the PM goes in the Inbox. PM questions (`ask_question`), proposed plans and plan approval live in the **Plan** conversation. A PM turn only runs when the human sends a message (D9), so the human is already there. `flag_stale_docs` creates a task in Backlog.
+A design in Human review is a Needs-you item like any other (D20).
+
+Nothing from the PM goes in the Inbox. PM questions (`ask_question`), proposed plans and plan approval live in the **Plan** conversation. A PM turn only runs when the human sends a message or approves a design (D9, D20), so the human is already there. `flag_stale_docs` creates a task in Backlog.
 
 There is no separate notifications feed or bell. System events (usage limits, runner disconnects) are shown on Runs and in the runner status, not in the Inbox. OS or desktop notifications can be added later and would point into the Inbox or Plan.
 
@@ -329,7 +337,7 @@ The UI specs are in [design/](design/README.md).
   - The task becomes Ready: Jev picks the developer agent, plus its model and thinking level.
   - The task enters Agent review: Jev picks the reviewer agent, plus its model and thinking level.
   - A retry or a new review round: Jev picks the model and thinking level again, but the agent stays the same, so the developer keeps its session and branch context.
-- **Input:** the task (type, which is `task`, `bug` or `spike` per D19; priority, description, acceptance criteria, human-review flag, review rounds, failed runs, how earlier runs ended), the diff size and the developer agent for reviews, and a menu of options. Jev's answers can only be options from that menu.
+- **Input:** the task (type, which is `task`, `bug`, `spike` or `design` per D19 and D20; priority, description, acceptance criteria, human-review flag, review rounds, failed runs, how earlier runs ended), the diff size and the developer agent for reviews, and a menu of options. Jev's answers can only be options from that menu.
 - **Corral's own rules, not Jev's:** the menu only lists agents of the right role that aren't paused or rate-limited (D3), each with the models and thinking levels configured for it (rule 4).
 - **Fallback:** a short timeout (about 2 s). On a timeout, an error or low confidence, the agent's configured default is used, so a Jev outage never blocks a run.
 - **Recorded and overridable:**
@@ -423,6 +431,8 @@ The UI specs are in [design/](design/README.md).
 
 **Status:** Accepted 2026-10-29. Replaces the task types in PRD §4.3 and overrides the evidence-by-type table in PRD §7.7. (Numbered D19 because D18 was already taken by Codex.)
 
+**Amended by D20:** a fourth type, **Design** (`design`), delivers an approved design version instead of a PR.
+
 **Decision:** A task's type says what kind of work it is, not which part of the stack it touches. There are three:
 
 | Type | What it is | Deliverable |
@@ -442,3 +452,81 @@ The UI specs are in [design/](design/README.md).
 **Consequences for the build:**
 - `TASK_TYPES` in `packages/core` is the single list; the database enum, API contracts, plan schema and the runner's `propose_plan` schema are built from it.
 - Board and Backlog cards show a badge for Bug and Spike only; Task cards show none.
+
+---
+
+## D20 — Design tasks: faithful prototypes, versioned and approved by the human
+
+**Status:** Accepted 2026-10-29. Adds a fourth task type to D19 and amends D5, D9, D10 and D11 (below). (Numbered D20 because D18 is Codex and D19 is the task types.)
+
+**Decision:** **Design** (`design`) is a fourth task type, alongside Task, Bug and Spike. Its deliverable is a **design**, an approved prototype and spec, not a merged PR.
+
+| Type | What it is | Deliverable |
+|---|---|---|
+| **Design** (`design`) | A UI or flow to be agreed before it's built | An approved design version |
+
+### Faithful prototypes
+
+- The developer builds the prototype in the project's own repo, **from its real components and styles**, so what the human approves is what the build will look like. No separate mockup tool, no restyled copies.
+- It's built on a **`design/<ref>` branch** (e.g. `design/COR-70`) off the default branch. The runner pushes it, as it pushes any leased branch (D8), but Corral **never opens a PR for it and never merges it**. The build happens in separate tasks (below).
+- The prototype uses **mock data and no live API**: no calls to the project's backend or any other service. It has to work as static files on their own.
+
+### How a project builds a prototype
+
+The project's `CLAUDE.md` or `CORRAL.md` says how to produce a **static bundle** of the prototype: the command to run and the folder it writes (an `index.html` and its assets, with relative paths). Corral doesn't guess. If a project doesn't say, the developer reports `stuck` and asks.
+
+### Design versions
+
+Each submission is a new, **immutable** design version, numbered per task (v1, v2, …). A version holds:
+
+- the **static bundle**, as one archive;
+- a **`design.md` spec**: the screens (each with a stable id), their states, the components used, the interactions and the mock data's shape;
+- **screenshots**, one or more per screen;
+- the **branch and commit SHA** it was built from.
+
+The bundle, spec and screenshots are content-addressed blobs and the database stores pointers (D8), so a version survives force-pushes, branch deletion and worktree cleanup. A version's state is *submitted*, *approved* or *superseded*.
+
+### Tools
+
+- **`submit_design`** (developer, design tasks only): takes the bundle folder, the `design.md` path and the screenshot paths. The runner pushes the branch and uploads the files, and the server records a new version at the pushed commit. The run then ends with `report_outcome('design_submitted', summary)`, which the server accepts only when a version exists for the branch's current commit and every acceptance criterion has evidence (D19; the screenshots can be attached as that evidence).
+- **`get_design`** (developer, reviewer and PM): returns a version's spec, screen ids, screenshots, branch and commit, and the URL of its sandboxed preview. With no version given it returns the one that applies: a design task's latest version, or a build task's pinned version.
+
+### Review
+
+- **Design tasks always need human review**, whatever their human-review flag says. Valid `design_submitted` → **Agent review**: the reviewer checks the version with `get_design` against the criteria and the project's real components. Reviewer requests changes → In progress, as for any task. Reviewer approves → **Human review**, never Ready to merge.
+- **Request changes:** the human's feedback goes back to the developer (Human review → In progress), and the next submission is a **new version**. Earlier versions are kept unchanged.
+- **Approve:** marks that version **approved** and **supersedes** every earlier version. The task moves to **Approved** (a new status, below). There's nothing to merge, so no CI wait and no merge gates.
+
+### Auto-planning
+
+- **Approving a version starts a Plan session** for the build, in the task's project. The server opens it with a message that links the design task and the approved version. The message is the human's: the approval is what triggers it.
+- The PM reads the version with `get_design` and proposes the build with `propose_plan` as usual. It **may split the build across several epics**. Each build task **pins the design version and the screens it covers** (screen ids from `design.md`), and its developer reads them with `get_design`.
+- The plan is approved by the human as any other plan (D9). Build tasks are normal `task`s, open PRs and merge.
+
+### Changes after planning
+
+- The human can reopen an Approved design (Approved → In progress, with feedback). The approved version stays approved until a newer one is.
+- **Approving a newer version flags the pinned build tasks that haven't started** (Draft, Backlog or Ready with no run yet): each shows "design changed: v2 → v3" until the human or the PM repins or revises it. The approval opens a Plan session as above, listing the flagged tasks, so Juno can propose revisions (a plan task with a `ref`, see [flows.md](flows.md)).
+- Tasks that have started keep the version they pinned. Catching them up is a new task.
+
+### Security
+
+- **Prototype HTML is untrusted**: it's code an agent wrote, from a repo Corral doesn't control (PRD §9).
+- The server serves a version's bundle from the blob store under its own path with a `Content-Security-Policy: sandbox allow-scripts` header (an opaque origin, so no cookies, storage or same-origin access to Corral) and a CSP that allows only the bundle's own files (`connect-src 'none'`, so no network calls). The web app shows it in an `<iframe sandbox="allow-scripts">` without `allow-same-origin`. Never serve it from Corral's origin unsandboxed, and never inline it into a Corral page.
+
+### Amendments to earlier decisions
+
+- **D19:** there are four task types. The PM picks `design` in `propose_plan` for work whose look or flow should be agreed before it's built. Board and Backlog cards show a badge for Design too. Jev (D15) gets `design` as a type value.
+- **D10:** a new status, **Approved**: "Design approved by the human; nothing to merge." It's on the board after Merged. New transitions: In progress → Agent review on a valid `design_submitted` (Server); Agent review → Human review for a design task, whatever its flag (Server); Human review → Approved when the human approves a design (**Human only**); Approved → In progress when the human reopens it (**Human only**). Design tasks never enter Ready to merge or Merged. A dependency on a design task counts as satisfied once it's Approved. Deleting an Approved task soft-deletes it like the others in Ready…Failed, deletes its `design/<ref>` branch when safe and keeps its versions' blobs.
+- **D5:** the human-review flag doesn't apply to design tasks; they always go to Human review.
+- **D9:** a PM turn runs when the human sends a message **or approves a design version**, which posts the human's message above. Nothing else starts one.
+- **D11:** a design in Human review is a Needs-you item, with the version's screenshots and preview link; "design submitted" and "design approved" are Activity.
+- **PRD §4.3** ("the unit of work that becomes one PR"): a design task becomes an approved design version, not a PR.
+
+**Why:** Agreeing on a UI before it's built is cheaper than reviewing it in a PR, and a prototype built from the real components shows what will actually ship. Immutable versions let build tasks point at exactly what was approved, and pinning screens lets one design feed several epics. Keeping the branch unmerged keeps mock data and prototype shortcuts out of main.
+
+**Consequences for the build:**
+- `TASK_TYPES` gains `design`, with a new migration for the enum. `packages/core` gains the Approved status and its transitions.
+- New tables for design versions (task, number, state, branch, commit, blob pointers) and for build tasks' pins (version, screen ids).
+- The runner creates `design/<ref>` branches for design tasks instead of `corral/<taskId>-<slug>`, and exposes `submit_design` only on design-task runs.
+- The server's preview route sets the sandbox headers above; the web app gets a design view (versions, screenshots, sandboxed preview, approve and request changes).
