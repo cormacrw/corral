@@ -229,8 +229,18 @@ export interface Task {
   mergedAt: string | null
   // Required checks seen passing when the task reached Human review
   gateChecks: { name: string, url: string | null }[] | null
+  // The approved design version a build task builds, and the screens it
+  // covers (D20)
+  design: TaskDesignPin | null
   createdAt: string
   updatedAt: string
+}
+
+export interface TaskDesignPin {
+  // The design task, e.g. COR-70
+  taskRef: string
+  version: number
+  screens: string[]
 }
 
 // The runtimes an agent can run on (D15), and the CLI each one needs on the
