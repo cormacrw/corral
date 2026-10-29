@@ -5,33 +5,9 @@ import { projectColor } from '~/utils/labels'
 // The sessions you have open, as tabs above Plan (design/plan.md). Status
 // comes from live.state.planSessions, which plan.session events keep current.
 const live = useLive()
-const route = useRoute()
 const router = useRouter()
-const { tabs, add, remove, prune } = usePlanTabs()
-
-const active = computed(() => typeof route.params.sessionId === 'string' ? route.params.sessionId : null)
-watch(active, (id) => {
-  if (id) add(id)
-}, { immediate: true })
-// Only against a full load: a session you just started may not have arrived yet
-watch(() => live.state.value.loaded, (loaded) => {
-  if (loaded) prune(live.state.value.planSessions.map(s => s.id))
-}, { immediate: true })
-
-const sessions = computed(() => {
-  const byId = new Map(live.state.value.planSessions.map(s => [s.id, s]))
-  return tabs.value.map(id => byId.get(id)).filter((s): s is PlanSession => s !== undefined)
-})
+const { active, sessions, close } = useOpenPlanSessions()
 const projectOf = (session: PlanSession) => live.state.value.projects.find(p => p.id === session.projectId) ?? null
-
-async function close(session: PlanSession) {
-  const list = sessions.value
-  const index = list.findIndex(s => s.id === session.id)
-  remove(session.id)
-  if (session.id !== active.value) return
-  const next = list[index + 1] ?? list[index - 1]
-  await router.push(next ? `/plan/${next.id}` : '/plan')
-}
 
 // Arrow keys move between tabs (the last one is +); Enter or Space opens one
 const strip = ref<HTMLElement | null>(null)
