@@ -1,4 +1,4 @@
-import type { EpicDetail, Inbox, PlanSessionDetail, Project, PullRequestStatus, Task } from '@corral/contracts'
+import type { DraftSession, EpicDetail, Inbox, PlanSessionDetail, Project, PullRequestStatus, ServerEvent, Task } from '@corral/contracts'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
@@ -73,5 +73,21 @@ describe('prototype mock API', () => {
     const detail = await mockCall<PlanSessionDetail>('GET', '/plan/sessions/s-2')
     expect(detail.plans.at(-1)?.status).toBe('proposed')
     expect(detail.status).toBe('needs_approval')
+  })
+
+  it('lists drafts by session, and drops a session\'s drafts when its plan is approved', async () => {
+    const before = await mockCall<DraftSession[]>('GET', '/projects/corral/drafts')
+    expect(before.map(s => [s.sessionId, s.drafts.map(d => d.ref)])).toEqual([
+      ['s-1', ['COR-13', 'COR-14', 'COR-15']],
+      ['s-3', ['COR-16', 'COR-17']]
+    ])
+    await expect(mockCall('GET', '/projects/marketing-site/drafts')).resolves.toEqual([])
+    const events: ServerEvent[] = []
+    const stop = onMockEvent(e => events.push(e))
+    await mockCall('POST', '/plan/plans/plan-3/approve', { to: 'backlog' })
+    stop()
+    const drafts = events.find(e => e.type === 'plan.drafts')
+    expect(drafts?.type === 'plan.drafts' && drafts.sessions.map(s => s.sessionId)).toEqual(['s-1'])
+    await expect(mockCall<Task>('GET', '/tasks/COR-16')).resolves.toMatchObject({ status: 'backlog', planSessionId: null })
   })
 })

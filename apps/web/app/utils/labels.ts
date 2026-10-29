@@ -77,6 +77,10 @@ export function taskTypeBadge(type: Task['type']): { label: string, color: Color
   if (type === 'design') return { label: TASK_TYPE.design, color: 'secondary', icon: 'i-lucide-palette' }
   return null
 }
+// Every type's icon, plain tasks included, for rows that show it on its own
+export function taskTypeIcon(type: Task['type']): string {
+  return taskTypeBadge(type)?.icon ?? 'i-lucide-square-check'
+}
 
 // A run that hasn't finished yet
 const LIVE_RUN_STATES: readonly string[] = ['queued', 'starting', 'running', 'waiting_for_input', 'stopping']
