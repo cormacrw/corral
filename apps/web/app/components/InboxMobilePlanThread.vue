@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Plan, PlanSessionDetail, PlanThreadItem } from '@corral/contracts'
 import { api } from '~/composables/useApi'
+import { FLYOUT_SHEETS } from '~/composables/useTaskFlyout'
 import { approvePlan } from '~/utils/plan-approval'
 import { STOP_ASKING } from '~/utils/plan-questions'
 
@@ -11,6 +12,9 @@ const router = useRouter()
 const live = useLive()
 const threads = usePlanThreads()
 const flyout = useTaskFlyout()
+// A task or epic opened from the plan sheet opens in a taller sheet over it,
+// on this route, rather than on its own page (design/inbox.md#mobile)
+provide(FLYOUT_SHEETS, true)
 const toast = useToast()
 const text = ref('')
 const busy = ref(false)
@@ -25,13 +29,23 @@ const working = computed(() => Boolean(props.item.activeRunId))
 const cantSend = computed(() => busy.value || closing.value || offline.value || working.value)
 const latest = computed(() => session.value?.plans.find(p => p.id === props.item.planId) ?? null)
 const previous = computed(() => session.value?.plans.find(p => p.version === (latest.value?.version ?? 0) - 1) ?? null)
-const planSheet = computed({
-  get: () => flyout.plan.value && !flyout.ref.value && !flyout.epic.value,
-  set: (open) => { if (!open && flyout.plan.value) flyout.close() }
-})
+// The plan sheet stays under a task or epic opened from it
+const planUnder = ref(false)
 const detailSheet = computed({
   get: () => Boolean(flyout.ref.value || flyout.epic.value),
-  set: (open) => { if (!open && (flyout.ref.value || flyout.epic.value)) flyout.close() }
+  // Dismissing goes back to what the item was opened from: the plan, or another item
+  set: (open) => {
+    if (open || !detailSheet.value) return
+    if (planUnder.value || flyout.canGoBack.value) flyout.back()
+    else void flyout.close()
+  }
+})
+watch([flyout.plan, detailSheet], ([, detail], [wasPlan]) => {
+  planUnder.value = detail && (planUnder.value || wasPlan)
+})
+const planSheet = computed({
+  get: () => flyout.plan.value || (planUnder.value && detailSheet.value),
+  set: (open) => { if (!open && flyout.plan.value) void flyout.close() }
 })
 const messageOf = (e: unknown) => e instanceof Error ? e.message : String(e)
 
@@ -265,14 +279,14 @@ async function closeThread() {
             :task-ref="flyout.ref.value"
             mode="flyout"
             class="flex-1"
-            @close="flyout.close()"
+            @close="detailSheet = false"
           />
           <EpicDetail
             v-else-if="flyout.epic.value"
             :epic-id="flyout.epic.value"
             mode="flyout"
             class="flex-1"
-            @close="flyout.close()"
+            @close="detailSheet = false"
           />
         </div>
       </template>

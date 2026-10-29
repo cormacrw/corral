@@ -1,9 +1,12 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
+import { computed, defineComponent, h, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
+import { createRouter, createWebHistory, useRoute, useRouter } from 'vue-router'
 import type { Plan, PlanThreadItem } from '@corral/contracts'
+import { useTaskFlyout } from '~/composables/useTaskFlyout'
 import InboxMobilePlanThread from './InboxMobilePlanThread.vue'
+import PlanDetail from './PlanDetail.vue'
 
 const mocks = vi.hoisted(() => ({
   message: vi.fn(), close: vi.fn(), session: vi.fn(), read: vi.fn(), approve: vi.fn(),
@@ -26,7 +29,10 @@ const UButton = defineComponent({
 })
 const UDrawer = defineComponent({
   props: ['open', 'title'],
-  setup: (p, { slots }) => () => p.open ? h('section', [h('h2', p.title), slots.body?.(), slots.footer?.(), slots.content?.()]) : null
+  emits: ['update:open'],
+  setup: (p, { emit, slots }) => () => p.open
+    ? h('section', { 'data-sheet': p.title }, [h('h2', p.title), slots.body?.(), slots.footer?.(), slots.content?.(), h('button', { onClick: () => emit('update:open', false) }, `Dismiss ${p.title}`)])
+    : null
 })
 const UDropdownMenu = defineComponent({
   props: ['items'], setup: p => () => h('button', { onClick: () => p.items[0].onSelect() }, 'Close thread menu')
@@ -56,7 +62,7 @@ const click = async (w: ReturnType<typeof screen>, label: string) => {
 
 beforeEach(() => {
   vi.resetAllMocks()
-  for (const [name, value] of Object.entries({ computed, ref, watch, onMounted })) vi.stubGlobal(name, value)
+  for (const [name, value] of Object.entries({ computed, ref, watch, onMounted, onBeforeUnmount, provide })) vi.stubGlobal(name, value)
   vi.stubGlobal('useRouter', () => ({ replace: mocks.replace }))
   vi.stubGlobal('useLive', () => ({ state: ref({ loaded: true, runner: { online: true } }) }))
   vi.stubGlobal('usePlanThreads', () => ({ remove: mocks.remove, add: mocks.add }))
@@ -127,5 +133,79 @@ describe('focused mobile Plan thread', () => {
     expect(w.text()).toContain('Juno is working…')
     await click(w, 'Close thread menu')
     expect(w.text()).toContain('Juno\'s current turn will be stopped.')
+  })
+})
+
+// The real router, flyout composable and PlanDetail on a phone, so a task
+// tapped in the plan sheet takes the route PlanDetail really gives it
+describe('a task opened from the mobile plan sheet', () => {
+  const planned = { ...plan, epics: [], tasks: [{ key: 't1', change: 'added', revises: false, taskId: 't1', epicId: null, ref: 'TA-7', title: 'Send push', status: 'draft', priority: 'medium', humanReview: false, dependsOn: [] }] } as unknown as Plan
+  const sheets = (w: ReturnType<typeof mount>) => w.findAll('[data-sheet]').map(s => s.attributes('data-sheet'))
+
+  async function phone() {
+    const page = defineComponent({ render: () => null })
+    const router = createRouter({
+      history: createWebHistory(),
+      routes: [{ path: '/inbox/:itemId?', component: page }, { path: '/tasks/:ref', component: page }, { path: '/epics/:id', component: page }]
+    })
+    await router.push('/inbox/s-2')
+    vi.stubGlobal('useRoute', useRoute)
+    vi.stubGlobal('useRouter', useRouter)
+    vi.stubGlobal('useDevice', () => ({ isMobile: computed(() => true) }))
+    vi.stubGlobal('useTaskFlyout', useTaskFlyout)
+    vi.stubGlobal('useLocalStorage', <T>(_key: string, fallback: T) => ref(fallback))
+    vi.stubGlobal('useLive', () => ({ state: ref({ loaded: true, runner: { online: true } }), subscribe: () => () => {} }))
+    mocks.session.mockResolvedValue({ plans: [planned], messages: [] })
+    const stub = (tag = 'span') => defineComponent({ props: ['label'], setup: p => () => h(tag, p.label) })
+    const w = mount(InboxMobilePlanThread, {
+      props: { item: { ...planItem, planId: planned.id }, onRefresh: mocks.refresh },
+      global: {
+        plugins: [router],
+        components: {
+          UButton, UDrawer, UDropdownMenu, PlanDetail,
+          UBadge: stub(), UIcon: stub(), UTabs: stub(), USkeleton: stub(), EpicGraph: stub('div'),
+          MobilePageHeader: defineComponent({ setup: (_, { slots }) => () => h('header', slots.actions?.()) }),
+          MarkdownText: defineComponent({ props: ['text'], setup: p => () => h('p', p.text) }),
+          TaskDetail: defineComponent({ props: ['taskRef'], emits: ['close'], setup: (p, { emit }) => () => h('div', [`Task detail ${p.taskRef}`, h('button', { onClick: () => emit('close') }, 'Close task')]) }),
+          EpicDetail: defineComponent({ setup: () => () => h('div') }),
+          UAlert: defineComponent({ props: ['title'], setup: p => () => h('p', { role: 'alert' }, p.title) })
+        }
+      }
+    })
+    await flushPromises()
+    return { w, router }
+  }
+  // Back finishes on the browser's popstate, after the click
+  const settle = async (done: () => boolean) => {
+    for (let i = 0; i < 50 && !done(); i++) await new Promise(r => setTimeout(r, 10))
+    await flushPromises()
+  }
+
+  it('opens the task in a taller sheet over the plan on the Inbox route, and Back returns to the plan', async () => {
+    const { w, router } = await phone()
+    await click(w, 'View plan')
+    expect(router.currentRoute.value.path).toBe('/inbox/s-2')
+    expect(sheets(w)).toEqual(['Plan v1'])
+
+    await w.findAll('button').find(b => b.text().includes('Send push'))!.trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.path).toBe('/inbox/s-2')
+    expect(router.currentRoute.value.query.task).toBe('TA-7')
+    expect(sheets(w)).toEqual(['Plan v1', 'Task TA-7'])
+    expect(w.text()).toContain('Task detail TA-7')
+
+    await click(w, 'Dismiss Task TA-7')
+    await settle(() => !router.currentRoute.value.query.task)
+    expect(router.currentRoute.value.path).toBe('/inbox/s-2')
+    expect('plan' in router.currentRoute.value.query).toBe(true)
+    expect(sheets(w)).toEqual(['Plan v1'])
+
+    // The task's own close button goes back to the plan too
+    await w.findAll('button').find(b => b.text().includes('Send push'))!.trigger('click')
+    await flushPromises()
+    await click(w, 'Close task')
+    await settle(() => !router.currentRoute.value.query.task)
+    expect(router.currentRoute.value.fullPath).toBe('/inbox/s-2?plan')
+    expect(sheets(w)).toEqual(['Plan v1'])
   })
 })
