@@ -218,7 +218,7 @@ onBeforeUnmount(() => {
       :error="error"
       :items="items"
       :selected-id="selectedId"
-      :selected="selected"
+      :selected="selected?.type === 'plan_thread' ? null : selected"
       :already-resolved="alreadyResolved"
       :task="task"
       :evidence="evidence"

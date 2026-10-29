@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Evidence, Inbox, InboxActionInput, InboxItem, Review, Task } from '@corral/contracts'
+import type { Evidence, Inbox, InboxActionInput, InboxItem, Review, Task, TaskInboxItem } from '@corral/contracts'
 import { needsAttention } from '@corral/contracts'
 import { ROLE, timeAgo, type Color } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
@@ -13,7 +13,7 @@ const props = defineProps<{
   error: string | null
   items: InboxItem[]
   selectedId: string | null
-  selected: InboxItem | null
+  selected: TaskInboxItem | null
   alreadyResolved: boolean
   task: Task | null
   evidence: Evidence[]
