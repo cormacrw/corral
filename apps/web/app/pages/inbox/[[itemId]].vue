@@ -205,22 +205,15 @@ onBeforeUnmount(() => {
 <template>
   <UDashboardPanel :ui="{ body: 'p-0' }">
     <!-- Phones get the list and the item as separate screens (design/mobile.md) -->
-    <PlanConversation
-      v-if="device.isMobile.value && selected?.type === 'plan_thread'"
-      :key="selected.sessionId"
-      :session-id="selected.sessionId"
-      inbox
-      @read="load"
-      @approved="nextAfterApproval"
-      @approving="setPlanApproving"
-    />
     <InboxMobile
-      v-else-if="device.isMobile.value"
+      v-if="device.isMobile.value"
       v-model:tab="tab"
       v-model:search="search"
       v-model:action="action"
       v-model:resolve-to="resolveTo"
       v-model:text="text"
+      :plan-thread="selected?.type === 'plan_thread' ? selected : null"
+      :on-refresh="load"
       :inbox="inbox"
       :error="error"
       :items="items"

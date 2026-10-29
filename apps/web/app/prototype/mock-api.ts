@@ -189,6 +189,28 @@ route('POST', '/plan/plans/:id/approve', ([id], body) => {
   emit({ type: 'plan.drafts', projectId: plan.projectId, sessions: drafts(plan.projectId) })
   return plan
 })
+// Closing discards only Drafts and unapproved plans, as the real endpoint does.
+route('POST', '/plan/sessions/:id/close', ([id]) => {
+  const s = f.planSessions.find(x => x.id === id) ?? notFound()
+  for (const task of f.tasks.filter(t => t.planSessionId === s.id)) {
+    if (task.status === 'draft') {
+      f.tasks.splice(f.tasks.indexOf(task), 1)
+      emit({ type: 'task.deleted', taskId: task.id, projectId: task.projectId })
+    } else {
+      Object.assign(task, { planSessionId: null, planSessionTitle: null })
+    }
+  }
+  for (const plan of f.plans[s.id] ?? []) {
+    if (plan.status === 'proposed') {
+      plan.status = 'discarded'
+      emit({ type: 'plan.updated', plan })
+    }
+  }
+  Object.assign(s, { closed: true, unread: false, status: 'none', activeRunId: null })
+  emit({ type: 'plan.session', session: s })
+  emit({ type: 'plan.drafts', projectId: s.projectId, sessions: drafts(s.projectId) })
+  return s
+})
 route('POST', '/plan/sessions/:id/read', ([id]) => {
   const s = Object.assign(f.planSessions.find(s => s.id === id) ?? notFound(), { unread: false })
   emit({ type: 'plan.session', session: s })

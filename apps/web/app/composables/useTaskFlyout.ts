@@ -11,7 +11,13 @@
 //
 // Mobile has no flyout (design/mobile.md): opening a task or epic goes to
 // its page. Opening that replaces the entry still sets the query, so a page
-// following a selection doesn't navigate away by itself.
+// following a selection doesn't navigate away by itself. A mobile screen
+// that shows these items in its own bottom sheets (the Inbox's Plan thread)
+// provides FLYOUT_SHEETS, so opening from inside it stays on that screen.
+import { inject, type InjectionKey } from 'vue'
+
+export const FLYOUT_SHEETS: InjectionKey<true> = Symbol('flyout-sheets')
+
 interface OpenOptions {
   replace?: boolean
 }
@@ -20,6 +26,8 @@ export function useTaskFlyout() {
   const route = useRoute()
   const router = useRouter()
   const device = useDevice()
+  const sheets = inject(FLYOUT_SHEETS, false)
+  const toPage = (options: OpenOptions) => device.isMobile.value && !options.replace && !sheets
   const ref = computed(() => typeof route.query.task === 'string' ? route.query.task : null)
   const epic = computed(() => typeof route.query.epic === 'string' ? route.query.epic : null)
   const plan = computed(() => 'plan' in route.query)
@@ -36,12 +44,12 @@ export function useTaskFlyout() {
     else void router.push({ query, state: { flyoutBack } })
   }
   function open(taskRef: string, options: OpenOptions = {}) {
-    if (device.isMobile.value && !options.replace) return void router.push(`/tasks/${taskRef}`)
+    if (toPage(options)) return void router.push(`/tasks/${taskRef}`)
     const { epic: _epic, plan: _plan, ...rest } = route.query
     go({ ...rest, task: taskRef }, options)
   }
   function openEpic(epicId: string, options: OpenOptions = {}) {
-    if (device.isMobile.value && !options.replace) return void router.push(`/epics/${epicId}`)
+    if (toPage(options)) return void router.push(`/epics/${epicId}`)
     const { task: _task, plan: _plan, ...rest } = route.query
     go({ ...rest, epic: epicId }, options)
   }
