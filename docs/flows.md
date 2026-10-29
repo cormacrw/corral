@@ -103,7 +103,7 @@ It creates a run (Queued) and a 15-minute lease, then sends `job.assign` (RunJob
 ### Step 3 — Set up the workspace (runner)
 
 1. `git fetch`
-2. `git worktree add worktrees/<taskId> -b corral/<taskId>-<slug> origin/<base>` (or reuse the existing worktree on a revision). The base is the project's target branch (`defaultBranch`), or the epic branch for a task in an `epic` or `each_task` epic (D23; see section 4). A design task's branch is `design/<ref>` instead, pushed but never merged (D20)
+2. `git worktree add worktrees/<taskId> -b corral/<taskId>-<slug> origin/<base>` (or reuse the existing worktree on a revision). The base is the project's target branch (`defaultBranch`), or the epic branch for a task in an `epic` or `each_task` epic (D27; see section 4). A design task's branch is `design/<ref>` instead, pushed but never merged (D20)
 3. `pnpm install`
 4. Write the per-run MCP config.
 5. Spawn the agent's CLI (`claude` or `codex`, D18) in its own process group, with no `GH_TOKEN` in its environment, and with `GIT_AUTHOR_*`/`GIT_COMMITTER_*` set from `CORRAL_GIT_AUTHOR_NAME`/`CORRAL_GIT_AUTHOR_EMAIL` when both are configured (the runner warns at startup when they aren't).
@@ -145,11 +145,11 @@ Run: Starting → Running. A heartbeat every 2 minutes renews the lease, and eve
 
 - **Flagged for human review:** → **Human review**. It appears in the Inbox (D11) as a short note with each criterion next to its evidence, and approve and request-changes actions. Human approves → **Ready to merge** (the Inbox item resolves at once), or requests changes → In progress.
 - **Not flagged:** → **Ready to merge**.
-- **In an `each_task` epic (D23):** always → **Human review**, whatever the flag.
+- **In an `each_task` epic (D27):** always → **Human review**, whatever the flag.
 
 ### Step 7c — Ready to merge: wait for CI and the base branch
 
-The task waits in Ready to merge. Its base branch is the project's target branch, or the epic branch for a task in an `epic` or `each_task` epic (D23). Waiting is a webhook or a cheap polling check, never an agent.
+The task waits in Ready to merge. Its base branch is the project's target branch, or the epic branch for a task in an `epic` or `each_task` epic (D27). Waiting is a webhook or a cheap polling check, never an agent.
 
 - **CI fails:** → In progress with the logs attached.
 - **The base branch has moved:** the server asks GitHub to rebase the branch onto the base (GraphQL `updatePullRequestBranch` with `updateMethod: REBASE`, so no local git is needed and the base is never merged in). A clean rebase keeps the approval and CI runs again on the new head: the server recorded that it asked for the update, so the new head counts as mechanical. A conflict (`base_conflict`) → **In progress** for a **rebase-only round**, excluded from `reviewRoundCap` ([D24](decisions.md#d24--rebase-only-rounds-preserve-approved-work)). The developer only rebases onto `origin/<default>` (or `origin/<base branch>` for an epic-based task PR), resolves conflicts preserving both sides' intent without reverting newly merged work, and re-runs the gates; no feature changes. It reports `pr_rebased` → **Agent review** for a **rebase review**: compare approved and new heads with `git range-diff`, check every conflicted hunk against the base's change, and check any binding docs the base changed. The gates follow the same rule as any review: left to required CI, or run without the cache when the project has none (D26). A clean resolution carries over approval and previous criteria verdicts → **Ready to merge**, with CI and merge gates on the new head. Changes requested start a normal round; a changed binding decision that the criteria rely on instead → **Blocked** for the human, never an agent picking a side.
@@ -217,7 +217,7 @@ A design task follows steps 1–7 with these differences: the developer builds a
 
 ---
 
-## 4. An epic from its first task to its epic PR merging (D23)
+## 4. An epic from its first task to its epic PR merging (D27)
 
 How an epic in `epic` or `each_task` mode gets its work onto the target branch. A `direct` epic, and a task without an epic, follow section 2 alone and merge straight into the target branch. The example project's target branch is whatever its settings name (`defaultBranch`); Corral never assumes its name.
 
@@ -247,7 +247,7 @@ The scheduler claims a reviewer run for the epic PR. The reviewer checks out the
 
 ### Step 5 — Human review and a fix task
 
-The reviewer approves, and the epic PR becomes a **Needs you** item in the Inbox (D11, D23), with the reviewer's verdict and the combined diff. The human tries it and requests changes: "Deleting a saved search doesn't ask for confirmation."
+The reviewer approves, and the epic PR becomes a **Needs you** item in the Inbox (D11, D27), with the reviewer's verdict and the combined diff. The human tries it and requests changes: "Deleting a saved search doesn't ask for confirmation."
 
 The server creates fix task **#44** in E7, in **Ready**, titled from the feedback, with the feedback as its description and each of its points (list items, or paragraphs) as a criterion. The epic PR's review state becomes `changes_requested`, which keeps it from being approved or merged, and the Inbox item is resolved. #44 runs through section 2 like any task in E7: its branch is cut from the epic branch, it's reviewed in `epic` mode, and it squash-merges into the epic branch. (A reviewer's `changes_requested` on the epic PR in step 4 creates a fix task the same way.)
 
@@ -274,6 +274,6 @@ The final gate check (section 2, step 8) runs against live GitHub data for the e
 
 Then:
 
-- E7 is **done** (D22 as amended by D23). Epics that depend on it wake at once, as do tasks elsewhere that depended on #41–#45.
+- E7 is **done** (D22 as amended by D27). Epics that depend on it wake at once, as do tasks elsewhere that depended on #41–#45.
 - "Epic PR merged" is posted to Activity.
 - The server deletes the epic branch, and the runner removes any worktrees left for it.
