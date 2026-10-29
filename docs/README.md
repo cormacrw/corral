@@ -6,9 +6,9 @@ Reference material for agents building Corral. Read this file first.
 
 | File | What it is | Binding? |
 |---|---|---|
-| [decisions.md](decisions.md) | Decisions made after the PRD was written. These override the PRD (e.g. D19: task types are Task, Bug and Spike, and evidence follows the acceptance criteria; D20: Design tasks deliver versioned, sandboxed prototypes that the human approves before the build is planned; D21: checks are gates, human evidence judges criteria and may be note-only). | **Yes** |
+| [decisions.md](decisions.md) | Decisions made after the PRD was written. These override the PRD (e.g. D19: task types are Task, Bug and Spike, and evidence follows the acceptance criteria; D20: Design tasks deliver versioned, sandboxed prototypes that the human approves before the build is planned; D21: checks are gates, human evidence judges criteria and may be note-only; D23: epics have review modes, and their tasks merge into an epic branch whose epic PR is the only way their work reaches the target branch). | **Yes** |
 | [architecture.md](architecture.md) | Processes, repo layout, stack, runner implementation rules, resource estimates (D7). | **Yes** |
-| [flows.md](flows.md) | Walkthroughs: talking to the PM, a task from Ready to Merged, failure handling. | **Yes** |
+| [flows.md](flows.md) | Walkthroughs: talking to the PM, a task from Ready to Merged, failure handling, an epic from its first task to its epic PR merging. | **Yes** |
 | [prd.md](prd.md) | The MVP Product Requirements Document (v1.0, 2026-10-26). | **Yes**, except where `decisions.md` overrides it |
 | [design/](design/README.md) | Page-by-page UI specs for the web app, matching the design canvas. | **Yes** for UI, except where `decisions.md` overrides it |
 | [agent-runtime-and-auth.md](agent-runtime-and-auth.md) | How Corral runs the AI agents (Claude Code and Codex), the auth/terms background, and the rules that keep the runtime swappable. | **Yes** (its rules follow from D2 and D18) |

@@ -1,6 +1,6 @@
 # Flows
 
-Step-by-step walkthroughs of Corral's two main flows. Uses the statuses and transitions from D10 and the PM design from D9 ([decisions.md](decisions.md)); storage and process roles are in [architecture.md](architecture.md).
+Step-by-step walkthroughs of Corral's main flows. Uses the statuses and transitions from D10 and the PM design from D9 ([decisions.md](decisions.md)); storage and process roles are in [architecture.md](architecture.md).
 
 ---
 
@@ -100,7 +100,7 @@ It creates a run (Queued) and a 15-minute lease, then sends `job.assign` (RunJob
 ### Step 3 — Set up the workspace (runner)
 
 1. `git fetch`
-2. `git worktree add worktrees/<taskId> -b corral/<taskId>-<slug> origin/main` (or reuse the existing worktree on a revision). A design task's branch is `design/<ref>` instead, pushed but never merged (D20)
+2. `git worktree add worktrees/<taskId> -b corral/<taskId>-<slug> origin/<base>` (or reuse the existing worktree on a revision). The base is the project's target branch (`defaultBranch`), or the epic branch for a task in an `epic` or `each_task` epic (D23; see section 4). A design task's branch is `design/<ref>` instead, pushed but never merged (D20)
 3. `pnpm install`
 4. Write the per-run MCP config.
 5. Spawn the agent's CLI (`claude` or `codex`, D18) in its own process group, with no `GH_TOKEN` in its environment, and with `GIT_AUTHOR_*`/`GIT_COMMITTER_*` set from `CORRAL_GIT_AUTHOR_NAME`/`CORRAL_GIT_AUTHOR_EMAIL` when both are configured (the runner warns at startup when they aren't).
@@ -142,13 +142,14 @@ Run: Starting → Running. A heartbeat every 2 minutes renews the lease, and eve
 
 - **Flagged for human review:** → **Human review**. It appears in the Inbox (D11) as a short note with each criterion next to its evidence, and approve and request-changes actions. Human approves → **Ready to merge** (the Inbox item resolves at once), or requests changes → In progress.
 - **Not flagged:** → **Ready to merge**.
+- **In an `each_task` epic (D23):** always → **Human review**, whatever the flag.
 
 ### Step 7c — Ready to merge: wait for CI and the base branch
 
-The task waits in Ready to merge. Waiting is a webhook or a cheap polling check, never an agent.
+The task waits in Ready to merge. Its base branch is the project's target branch, or the epic branch for a task in an `epic` or `each_task` epic (D23). Waiting is a webhook or a cheap polling check, never an agent.
 
 - **CI fails:** → In progress with the logs attached.
-- **The base branch has moved:** the server asks GitHub to rebase the branch onto the base (GraphQL `updatePullRequestBranch` with `updateMethod: REBASE`, so no local git is needed and the base is never merged in). A conflict → In progress for the developer, who rebases onto `origin/<default branch>` and reports `pr_updated`. A clean rebase rewrites every commit, but it keeps the approval and CI runs again on the new head (R7 default): the server recorded that it asked for the update, so the new head counts as mechanical.
+- **The base branch has moved:** the server asks GitHub to rebase the branch onto the base (GraphQL `updatePullRequestBranch` with `updateMethod: REBASE`, so no local git is needed and the base is never merged in). A conflict → In progress for the developer, who rebases onto `origin/<base branch>` and reports `pr_updated`. A clean rebase rewrites every commit, but it keeps the approval and CI runs again on the new head (R7 default): the server recorded that it asked for the update, so the new head counts as mechanical.
 - **Any other new commit:** → Agent review for a fresh review.
 
 ### Spikes: findings instead of a PR (D19)
@@ -209,3 +210,66 @@ A design task follows steps 1–7 with these differences: the developer builds a
 | Review cap reached | Task → **Blocked** |
 | Unrecoverable error / unsafe merge failure | Task → **Failed** |
 | Human deletes the task | Run stopped, PR closed, branch removed when safe, task soft-deleted; dependents → Blocked (D10) |
+
+---
+
+## 4. An epic from its first task to its epic PR merging (D23)
+
+How an epic in `epic` or `each_task` mode gets its work onto the target branch. A `direct` epic, and a task without an epic, follow section 2 alone and merge straight into the target branch. The example project's target branch is whatever its settings name (`defaultBranch`); Corral never assumes its name.
+
+The example: epic **E7 "Saved searches"** in `epic` mode, with three board tasks: **#41** (API), **#42** (UI, depends on #41) and **#43** (docs). #42 has `humanReview` set.
+
+### Step 1 — First claim creates the epic branch
+
+The plan is approved and the scheduler claims #41 (section 2, step 2). E7 has no epic branch yet, so the server creates `corral/epic-<epicId>-saved-searches` from the tip of the target branch. The runner then creates #41's branch from `origin/corral/epic-…` instead of the target branch (section 2, step 3), and the server opens #41's PR with the epic branch as its base.
+
+### Step 2 — Task PRs merge into the epic branch
+
+Each task follows section 2, steps 4–10, against the epic branch:
+
+- **#41:** the reviewer approves; it isn't flagged, so in `epic` mode it goes straight to Ready to merge, and once CI passes it squash-merges into the epic branch. #41 is **Merged**, meaning merged into the epic branch. #42 depends on it in the same epic, so it becomes eligible.
+- **#43** was opened before #41 merged. The epic branch moved under it, so Corral rebases #43's PR onto the epic branch (section 2, step 7c, with the epic branch as the base). It's clean; the approval stands, CI reruns, and #43 squash-merges.
+- **#42** is flagged, so after the reviewer approves it waits in **Human review**. The human approves and it squash-merges. (In `each_task` mode, #41 and #43 would have gone to Human review too.)
+
+Meanwhile the target branch has moved on with other work. Corral doesn't touch the epic branch for that: the target branch is never merged into it. A task in another epic, or without one, that depends on #41 is still waiting, because #41 isn't on the target branch yet.
+
+### Step 3 — Corral opens the epic PR
+
+#42 was the last board task of E7 still unmerged. With all three Merged, the server opens the **epic PR** from the epic branch into the target branch. Its description lists the epic's tasks with links to their PRs and evidence. In the Inbox it's Activity: "Epic PR opened". E7 isn't done yet, so epics that depend on it (D22) are still waiting.
+
+### Step 4 — Integration review
+
+The scheduler claims a reviewer run for the epic PR. The reviewer checks out the epic branch, reads the combined diff, the epic's goal and its tasks' criteria, and runs the project's checks as gates without the cache (D21). It's looking for what each task's review couldn't see: the UI calling the API with the wrong field name, docs describing behaviour neither task built, duplicated helpers. It reports `approved` or `changes_requested` with its reasoning.
+
+### Step 5 — Human review and a fix task
+
+The reviewer approves, and the epic PR becomes a **Needs you** item in the Inbox (D11, D23), with the reviewer's verdict and the combined diff. The human tries it and requests changes: "Deleting a saved search doesn't ask for confirmation."
+
+The server creates fix task **#44** in E7, in **Ready**, with the feedback as its description and criteria, and moves the epic PR back to waiting on the epic's tasks. #44 runs through section 2 like any task in E7: its branch is cut from the epic branch, it's reviewed in `epic` mode, and it squash-merges into the epic branch. (A reviewer's `changes_requested` on the epic PR in step 4 creates a fix task the same way.)
+
+With #44 merged, every board task is Merged again, and the epic PR goes back to **integration review** (step 4) and then to the human. This time the human approves, and the epic PR is **ready to merge**.
+
+### Step 6 — Rebase before merge, and a conflict
+
+Just before merging, the server compares the epic branch with the target branch. The target branch has moved since E7's branch was created, so the server asks GitHub to rebase the epic PR onto it (`updatePullRequestBranch` with `updateMethod: REBASE`).
+
+- **Clean rebase:** the approval stands, as for task PRs. CI runs again on the new head, and when it passes the epic PR goes to step 7.
+- **Conflict (this example):** another task changed the same route file on the target branch, so GitHub reports a conflict. The epic PR leaves ready to merge, "Epic PR conflict" is posted to Activity, and the server creates conflict task **#45** in E7, in Ready, naming the conflicting files.
+
+#45's job carries the epic branch itself as its branch, not a new task branch. The developer:
+
+1. Checks out the epic branch and rebases it onto `origin/<target branch>`.
+2. Resolves the conflict in the route file, keeping both changes, and runs lint, typecheck, tests and build.
+3. Reports `pr_updated` with what it resolved and how it checked it. The runner force-pushes the epic branch with `--force-with-lease`; no task PR is opened.
+
+#45 goes to Agent review like any task in E7; the reviewer checks the rebased epic branch against the target branch and approves. #45 is Merged, since its work is already on the epic branch. Because a resolved conflict isn't a mechanical update, the epic PR goes back to **integration review** and then to the **human**, who approves it again. On this second pass the epic branch is already on top of the target branch, so nothing needs rebasing; if the target branch had moved again, step 6 would repeat.
+
+### Step 7 — The epic PR merges
+
+The final gate check (section 2, step 8) runs against live GitHub data for the epic PR: approved by the human at the current commit, required CI checks passed, mergeable. The server squash-merges the epic PR into the target branch with the project's merge method, so E7 lands as one commit, and records the merge commit. Never marked merged without seeing a merged state (section 2, step 9).
+
+Then:
+
+- E7 is **done** (D22 as amended by D23). Epics that depend on it wake at once, as do tasks elsewhere that depended on #41–#45.
+- "Epic PR merged" is posted to Activity.
+- The server deletes the epic branch, and the runner removes any worktrees left for it.
