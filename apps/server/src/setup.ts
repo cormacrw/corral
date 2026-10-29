@@ -1,5 +1,6 @@
-import type { CliId, CliStatus, RepoCheck, RepoChoice, RepoList } from '@corral/contracts'
+import { AGENT_RUNTIMES, type AgentRuntime, type CliId, type CliStatus, type RepoCheck, type RepoChoice, type RepoList } from '@corral/contracts'
 import { schema, type Executor } from '@corral/db'
+import { ApiFailure } from './errors.ts'
 import type { RunnerHub } from './runner-hub.ts'
 
 const CACHE_MS = 3 * 60 * 1000
@@ -92,4 +93,16 @@ const CLI_NAMES: Record<CliId, string> = { claude: 'Claude Code', codex: 'Codex 
 export async function detectClis(runner: RunnerHub): Promise<CliStatus[]> {
   const result = await runner.request({ kind: 'detect_clis' })
   return result.clis.map(cli => ({ id: cli.id, name: CLI_NAMES[cli.id], version: cli.version, signedIn: cli.signedIn }))
+}
+
+// Agents can only be given a runtime whose CLI is installed on the runner.
+// Signing in is checked by the run itself, so a lapsed login can be fixed
+// without recreating the agent.
+export async function requireRuntimeCli(runner: RunnerHub, runtime: AgentRuntime): Promise<void> {
+  const id = AGENT_RUNTIMES[runtime]
+  const cli = (await detectClis(runner)).find(c => c.id === id)
+  if (!cli?.version) {
+    const message = `${CLI_NAMES[id]} isn’t installed on the runner, so the ${runtime} runtime can’t be used`
+    throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['runtime'], message }] })
+  }
 }

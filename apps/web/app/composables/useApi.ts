@@ -14,6 +14,7 @@ import type {
   HumanTransitionInput,
   Inbox,
   InboxActionInput,
+  CreateAgentInput,
   PatchAgentInput,
   PatchEpicInput,
   PatchProfileInput,
@@ -131,6 +132,7 @@ export const api = {
 
   agents: {
     list: () => call<Agent[]>('GET', '/agents'),
+    create: (input: CreateAgentInput) => call<Agent>('POST', '/agents', input),
     patch: (id: string, input: PatchAgentInput) => call<Agent>('PATCH', `/agents/${id}`, input),
     setAvatar: (id: string, image: Blob) => call<Agent>('PUT', `/agents/${id}/avatar`, image),
     clearAvatar: (id: string) => call<Agent>('DELETE', `/agents/${id}/avatar`)

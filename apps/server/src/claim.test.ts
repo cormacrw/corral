@@ -2,7 +2,7 @@ import type { Project } from '@corral/contracts'
 import type { TaskPriority } from '@corral/core'
 import { schema } from '@corral/db'
 import { and, eq } from 'drizzle-orm'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { claimNextTask } from './claim.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 
@@ -70,6 +70,26 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
     const [audit] = await t.db.select().from(auditLog)
       .where(and(eq(auditLog.taskId, task.id), eq(auditLog.action, 'task.claimed')))
     expect(audit).toMatchObject({ actor: { kind: 'system', component: 'scheduler' }, detail: { from: 'ready', to: 'in_progress', leaseEpoch: 1 } })
+    await pauseProject(project)
+  })
+
+  it('lets a Codex developer added through the API claim Ready tasks like Atlas', async () => {
+    vi.spyOn(t.runner, 'request').mockResolvedValue({ kind: 'detect_clis', clis: [
+      { id: 'claude', version: '2.1.312', signedIn: true },
+      { id: 'codex', version: '0.165.0', signedIn: true }
+    ] } as never)
+    const res = await t.request('POST', '/api/agents', { name: `Orion ${driver}`, role: 'developer', runtime: 'codex', concurrency: 1 })
+    vi.restoreAllMocks()
+    expect(res.status).toBe(201)
+    const { id: agentId } = await res.json() as { id: string }
+    const project = await projectWithReadyTasks(2)
+
+    const claim = await claimNextTask(t.db, agentId)
+    expect(claim).toMatchObject({ taskId: (await taskRow(project, 1)).id, leaseEpoch: 1, status: 'in_progress' })
+    const [run] = await t.db.select().from(runs).where(eq(runs.id, claim!.runId))
+    expect(run).toMatchObject({ agentId, role: 'developer', state: 'queued' })
+    // Its concurrency limit applies like any other agent's
+    expect(await claimNextTask(t.db, agentId)).toBeNull()
     await pauseProject(project)
   })
 
