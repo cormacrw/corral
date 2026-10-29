@@ -381,6 +381,8 @@ export class PlanService {
         const { question, recommendation, options } = parsed.data
         const [message] = await db.insert(planMessages).values({ sessionId, role: 'pm', kind: 'question', text: question, recommendation, options, runId }).returning()
         this.#d.events.publish({ type: 'plan.message', message: toMessage(message!) })
+        // The session now has a question: its Inbox item moves up (D11)
+        this.#d.events.publish({ type: 'plan.session', session: await this.#toSession(await this.#session(sessionId), runId) })
         return { ok: true, message: 'The question is shown to the human. Finish your turn; their answer arrives as the next message.' }
       }
 
@@ -577,6 +579,8 @@ export class PlanService {
     }
     const [message] = await db.select().from(planMessages).where(eq(planMessages.planId, plan.id))
     if (message) this.#d.events.publish({ type: 'plan.message', message: toMessage(message) })
+    // The session now needs approval: its Inbox item moves up (D11)
+    this.#d.events.publish({ type: 'plan.session', session: await this.#toSession(await this.#session(session.id), runId) })
     await this.#publishTasks(full)
     await this.#publishDrafts(project.id)
     return { ok: true, planId: plan.id, version: plan.version, tasks: full.tasks.map(t => ({ key: t.key, ref: t.ref, change: t.change, revises: t.revises })), message: 'The plan is saved and shown to the human for approval. Tell them what you proposed and why.' }
@@ -858,29 +862,35 @@ export class PlanService {
   }
 
   async #toSession(row: SessionRow, activeRunId?: string | null): Promise<PlanSession> {
-    const { db } = this.#d
-    const [last] = await db.select().from(planMessages).where(eq(planMessages.sessionId, row.id)).orderBy(desc(planMessages.createdAt)).limit(1)
-    const [proposed] = await db.select({ id: plans.id }).from(plans).where(and(eq(plans.sessionId, row.id), eq(plans.status, 'proposed'))).limit(1)
-    let runId = activeRunId ?? null
-    if (activeRunId === undefined) {
-      const [active] = await db.select({ id: runs.id }).from(runs)
-        .where(and(eq(runs.role, 'pm'), eq(runs.planSessionId, row.id), inArray(runs.state, ['queued', 'starting', 'running'])))
-      runId = active?.id ?? null
-    }
-    return {
-      id: row.id,
-      projectId: row.projectId,
-      title: row.title,
-      runtime: row.runtime as AgentRuntime,
-      preview: last?.text.slice(0, 160) ?? '',
-      unread: row.unread,
-      closed: row.closedAt !== null,
-      status: proposed ? 'needs_approval' : last?.kind === 'question' ? 'question' : 'none',
-      activeRunId: runId,
-      createdAt: row.createdAt.toISOString(),
-      updatedAt: row.updatedAt.toISOString()
-    }
+    return (await sessionState(this.#d.db, row, activeRunId)).session
   }
+}
+
+// A session as the API shows it, with the plan waiting for approval and its
+// latest message, which the Inbox's Plan thread items also need (D11)
+export async function sessionState(db: Executor, row: SessionRow, activeRunId?: string | null): Promise<{ session: PlanSession, planId: string | null, last: typeof planMessages.$inferSelect | null }> {
+  const [last] = await db.select().from(planMessages).where(eq(planMessages.sessionId, row.id)).orderBy(desc(planMessages.createdAt)).limit(1)
+  const [proposed] = await db.select({ id: plans.id }).from(plans).where(and(eq(plans.sessionId, row.id), eq(plans.status, 'proposed'))).limit(1)
+  let runId = activeRunId ?? null
+  if (activeRunId === undefined) {
+    const [active] = await db.select({ id: runs.id }).from(runs)
+      .where(and(eq(runs.role, 'pm'), eq(runs.planSessionId, row.id), inArray(runs.state, ['queued', 'starting', 'running'])))
+    runId = active?.id ?? null
+  }
+  const session: PlanSession = {
+    id: row.id,
+    projectId: row.projectId,
+    title: row.title,
+    runtime: row.runtime as AgentRuntime,
+    preview: last?.text.slice(0, 160) ?? '',
+    unread: row.unread,
+    closed: row.closedAt !== null,
+    status: proposed ? 'needs_approval' : last?.kind === 'question' ? 'question' : 'none',
+    activeRunId: runId,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString()
+  }
+  return { session, planId: proposed?.id ?? null, last: last ?? null }
 }
 
 // Writes a plan's staged edits to the task it revises, keeping criterion IDs

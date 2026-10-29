@@ -1,22 +1,31 @@
-import type { Inbox, InboxItem, InboxItemType } from '@corral/contracts'
+import { needsAttention, type Inbox, type InboxItem, type PlanThreadItem, type TaskInboxItem, type TaskInboxItemType } from '@corral/contracts'
 import { richTextToPlainText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { actorLabel } from './orchestrator.ts'
+import { sessionState } from './plan.ts'
 
-const { agents, auditLog, projects, reviews, runs, tasks } = schema
+const { agents, auditLog, planSessions, projects, reviews, runs, tasks } = schema
 
 const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'findings_reported', 'design_submitted', 'changes_requested', 'merged', 'ci_failed', 'base_conflict', 'head_moved']
 
 // The Inbox (D11, design/inbox.md): what developer and reviewer runs need
-// from the human, plus what they did. Nothing from the PM. Items are derived
-// from tasks and the audit log, so there's nothing to keep in sync.
+// from the human, plus what they did, and every open Plan session as a Plan
+// thread (D11, amended). Items are derived from tasks, Plan sessions and the
+// audit log, so there's nothing to keep in sync.
 export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
   const open = await db.select({ task: tasks, project: projects }).from(tasks)
     .innerJoin(projects, eq(projects.id, tasks.projectId))
     .where(and(inArray(tasks.status, ['human_review', 'blocked', 'failed']), isNull(tasks.deletedAt)))
     .orderBy(desc(tasks.updatedAt))
-  const needsYou = await Promise.all(open.map(({ task, project }) => needsYouItem(db, task, project)))
+  const taskItems = await Promise.all(open.map(({ task, project }) => needsYouItem(db, task, project)))
+  const threads = await planThreads(db)
+  // Threads that need the human sit with the task items, newest first; the
+  // other open threads go below everything, newest first
+  const newestFirst = (a: InboxItem, b: InboxItem) => b.at.localeCompare(a.at)
+  const attention = [...taskItems, ...threads.filter(needsAttention)].sort(newestFirst)
+  const idle = threads.filter(t => !needsAttention(t)).sort(newestFirst)
+  const needsYou = [...attention, ...idle]
 
   const entries = await db.select({ entry: auditLog, task: tasks, project: projects }).from(auditLog)
     .innerJoin(tasks, eq(tasks.id, auditLog.taskId))
@@ -25,8 +34,8 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     .orderBy(desc(auditLog.createdAt), desc(auditLog.id))
     .limit(limit * 3)
 
-  const activity: InboxItem[] = []
-  const resolved: InboxItem[] = []
+  const activity: TaskInboxItem[] = []
+  const resolved: TaskInboxItem[] = []
   for (const { entry, task, project } of entries) {
     const detail = entry.detail as Record<string, unknown>
     const event = typeof detail.event === 'string' ? detail.event : typeof detail.event === 'object' && detail.event ? String((detail.event as { type?: string }).type) : null
@@ -40,10 +49,43 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     }
     if (activity.length >= limit && resolved.length >= limit) break
   }
-  return { needsYou, activity: activity.slice(0, limit), resolved: resolved.slice(0, limit) }
+  return { needsYou, activity: activity.slice(0, limit), resolved: resolved.slice(0, limit), count: attention.length }
 }
 
-async function needsYouItem(db: Executor, task: typeof tasks.$inferSelect, project: typeof projects.$inferSelect): Promise<InboxItem> {
+// Every Plan session that isn't closed (its plan approved) is a Plan thread
+async function planThreads(db: Executor): Promise<PlanThreadItem[]> {
+  const rows = await db.select({ session: planSessions, project: projects }).from(planSessions)
+    .innerJoin(projects, eq(projects.id, planSessions.projectId))
+    .where(isNull(planSessions.closedAt))
+  if (rows.length === 0) return []
+  const [pm] = await db.select({ name: agents.name }).from(agents).where(eq(agents.role, 'pm')).limit(1)
+  const sender = { name: pm?.name ?? 'PM', role: 'pm' as const }
+  return Promise.all(rows.map(async ({ session: row, project }) => {
+    const { session, planId, last } = await sessionState(db, row)
+    return {
+      id: session.id,
+      type: 'plan_thread' as const,
+      project: projectTag(project),
+      sessionId: session.id,
+      runtime: session.runtime,
+      subject: session.title,
+      preview: session.preview,
+      body: last?.text ?? '',
+      sender,
+      at: (last && last.createdAt > row.updatedAt ? last.createdAt : row.updatedAt).toISOString(),
+      status: session.status,
+      unread: session.unread,
+      planId,
+      activeRunId: session.activeRunId,
+      taskId: null,
+      taskRef: null,
+      prUrl: null,
+      resolution: null
+    }
+  }))
+}
+
+async function needsYouItem(db: Executor, task: typeof tasks.$inferSelect, project: typeof projects.$inferSelect): Promise<TaskInboxItem> {
   // The last run on the task is the sender
   const [last] = await db.select({ run: runs, agent: agents }).from(runs).innerJoin(agents, eq(agents.id, runs.agentId))
     .where(eq(runs.taskId, task.id)).orderBy(desc(runs.number)).limit(1)
@@ -59,7 +101,7 @@ async function needsYouItem(db: Executor, task: typeof tasks.$inferSelect, proje
           return (full?.detail as { event?: string } | undefined)?.event === 'stuck' ? [full] : []
         })
     : []
-  const type: InboxItemType = task.status === 'human_review' ? 'human_review' : task.status === 'failed' ? 'failed' : stuck ? 'question' : 'blocked'
+  const type: TaskInboxItemType = task.status === 'human_review' ? 'human_review' : task.status === 'failed' ? 'failed' : stuck ? 'question' : 'blocked'
   // A human review gets a short note, not the reviewer's full write-up: the
   // criteria and evidence sit right under it (design/inbox.md)
   const body = task.status === 'human_review'
@@ -93,7 +135,7 @@ function projectTag(project: typeof projects.$inferSelect) {
   return { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor }
 }
 
-function senderOf(actor: Actor): InboxItem['sender'] {
+function senderOf(actor: Actor): TaskInboxItem['sender'] {
   if (actor.kind === 'agent') return { name: actorLabel(actor), role: actor.role }
   return { name: actorLabel(actor), role: 'system' }
 }
