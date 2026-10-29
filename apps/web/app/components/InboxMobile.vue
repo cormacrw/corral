@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Evidence, Inbox, InboxActionInput, InboxItem, Review, Task } from '@corral/contracts'
-import { ROLE, timeAgo } from '~/utils/labels'
+import { ROLE, timeAgo, type Color } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
 
 // The Inbox on a phone (design/inbox.md, design/mobile.md): /inbox is the
@@ -23,7 +23,7 @@ const props = defineProps<{
   needsText: boolean
   busy: boolean
   actionError: string | null
-  typeBadge: (type: InboxItem['type']) => { label: string, color: 'warning' | 'info' | 'error' | 'neutral' }
+  typeBadge: (type: InboxItem['type']) => { label: string, color: Color }
   onSubmit: (text: string) => Promise<boolean>
   onRetry: () => unknown
 }>()

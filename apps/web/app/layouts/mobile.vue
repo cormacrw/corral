@@ -69,14 +69,19 @@ const focused = computed(() => Boolean(planSession.value || inboxItem.value))
 // A screen below a tab's top level goes back up to it, and can swap the
 // Settings button for its own action
 const agentPage = computed(() => parts.value[0] === 'agents' && parts.value.length === 2)
+const overviewPage = computed(() => parts.value[0] === 'projects' && parts.value.length === 2)
 const back = computed(() => subPage.value
   ? { to: subPage.value.back, label: subPage.value.backLabel }
-  : agentPage.value ? { to: '/agents', label: 'Back' } : null)
+  : agentPage.value
+    ? { to: '/agents', label: 'Back' }
+    : overviewPage.value ? { to: '/projects', label: 'Back to Projects' } : null)
 const action = computed(() => agentPage.value
   ? { to: '/settings/agents', icon: 'i-lucide-sliders-horizontal', label: 'Agent settings' }
-  : { to: '/settings/profile', icon: 'i-lucide-settings', label: 'Settings' })
+  : overviewPage.value
+    ? { to: `/projects/${parts.value[1]}/settings`, icon: 'i-lucide-sliders-horizontal', label: 'Project settings' }
+    : { to: '/settings/profile', icon: 'i-lucide-settings', label: 'Settings' })
 
-// The header names the page; later tasks give each screen its own header
+// The header names the page
 const title = computed(() => {
   if (subPage.value) return subPage.value.title
   const [section, id] = parts.value
@@ -87,7 +92,7 @@ const title = computed(() => {
     case 'settings': return 'Settings'
     case 'tasks': return id ?? 'Task'
     case 'epics': return 'Epic'
-    case 'projects': return state.value.projects.find(p => p.slug === id)?.name ?? 'Projects'
+    case 'projects': return id ? 'Overview' : 'Projects'
     case 'agents': {
       if (!id) return 'Agents'
       return state.value.agents.find(a => a.name.toLowerCase() === id)?.name ?? 'Agent'
