@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { duration, isLiveRun as isLive, ROLE, runBadge, runTokens, timeAgo } from '~/utils/labels'
+import { duration, isLiveRun as isLive, ROLE, runBadge, runTokens, runtimeLabel, timeAgo } from '~/utils/labels'
 
 // An agent's page (design/agent.md): runs list and the transcript. Mobile
 // shows the agent and its runs at /agents/:name, and a run's transcript
@@ -59,7 +59,7 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
             />
           </div>
           <p class="text-sm text-muted">
-            {{ ROLE[agent.role] }} · Claude · {{ today.length }} runs today
+            {{ ROLE[agent.role] }} · <span data-testid="agent-runtime-label">{{ runtimeLabel(agent.runtime) }}</span> · {{ today.length }} runs today
             <span v-if="agent.pausedUntil && new Date(agent.pausedUntil).getTime() > now"> · Waiting on usage limit until {{ new Date(agent.pausedUntil).toLocaleTimeString() }}</span>
           </p>
         </div>

@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import type { Agent, CliStatus } from '@corral/contracts'
+import type { Agent, AgentRuntime, CliStatus } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { parseOverride } from '~/utils/device'
-import { ROLE, timeAgo } from '~/utils/labels'
+import { cliLoginCommand, detectedRuntimes, ROLE, runtimeLabel, timeAgo } from '~/utils/labels'
 
 // Global settings (design/settings.md): profile, agents, runner, appearance
 const route = useRoute()
@@ -39,9 +39,21 @@ async function scan() {
     cliError.value = e instanceof Error ? e.message : String(e)
   }
 }
+// The runner page shows the logins; the agents page needs them for the runtime menu
 watch(section, (s) => {
-  if (s === 'runner') void scan()
+  if (s === 'runner' || s === 'agents') void scan()
 }, { immediate: true })
+
+const adding = ref(false)
+// The live agent.updated event adds it too; this covers a slow stream
+function added(agent: Agent) {
+  if (!live.state.value.agents.some(a => a.id === agent.id)) live.state.value.agents = [...live.state.value.agents, agent]
+}
+// Existing agents can switch to any detected runtime, keeping their current one listed
+function runtimeItems(agent: Agent) {
+  const values = new Set<string>([...detectedRuntimes(clis.value ?? []), agent.runtime])
+  return [...values].map(value => ({ label: runtimeLabel(value), value }))
+}
 
 async function patchAgent(agent: Agent, input: Parameters<typeof api.agents.patch>[1]) {
   try {
@@ -164,13 +176,22 @@ const items = [
         <template v-else-if="section === 'agents'">
           <UCard>
             <template #header>
-              <div>
-                <h2 class="font-medium">
-                  Agents
-                </h2>
-                <p class="text-xs text-muted">
-                  Shared by every project. Each runs through your local CLI login; Corral never sees your credentials.
-                </p>
+              <div class="flex items-start gap-3">
+                <div class="flex-1">
+                  <h2 class="font-medium">
+                    Agents
+                  </h2>
+                  <p class="text-xs text-muted">
+                    Shared by every project. Each runs through your local CLI login; Corral never sees your credentials.
+                  </p>
+                </div>
+                <UButton
+                  label="Add agent"
+                  icon="i-lucide-plus"
+                  size="sm"
+                  data-testid="add-agent"
+                  @click="adding = true"
+                />
               </div>
             </template>
             <ul class="divide-y divide-default">
@@ -179,7 +200,7 @@ const items = [
                 :key="agent.id"
                 class="flex flex-wrap items-center gap-3 py-3"
               >
-                <div class="min-w-0 flex-1 basis-56">
+                <div class="min-w-0 flex-1 basis-48">
                   <div class="flex items-center gap-2">
                     <span class="font-medium">{{ agent.name }}</span>
                     <UBadge
@@ -190,7 +211,7 @@ const items = [
                     />
                   </div>
                   <p class="text-xs text-muted">
-                    Claude · concurrency {{ agent.concurrency }} · <span class="font-mono">.corral/agents/{{ agent.role }}.md</span>
+                    <span data-testid="agent-runtime-label">{{ runtimeLabel(agent.runtime) }}</span> · concurrency {{ agent.concurrency }} · <span class="font-mono">.corral/agents/{{ agent.role }}.md</span>
                   </p>
                   <AvatarUpload
                     :name="agent.name"
@@ -208,7 +229,25 @@ const items = [
                   <UInput
                     :model-value="agent.name"
                     size="xs"
+                    class="w-32"
                     @change="patchAgent(agent, { name: String(($event.target as HTMLInputElement).value).trim() })"
+                  />
+                </UFormField>
+                <UFormField
+                  v-if="agent.role !== 'pm'"
+                  label="Runtime"
+                  size="xs"
+                  :help="agent.activeRuns > 0 ? 'Changes once its runs end' : undefined"
+                >
+                  <USelectMenu
+                    :model-value="agent.runtime"
+                    :items="runtimeItems(agent)"
+                    value-key="value"
+                    :search-input="false"
+                    :disabled="agent.activeRuns > 0"
+                    size="xs"
+                    class="w-28"
+                    @update:model-value="$event !== agent.runtime && patchAgent(agent, { runtime: $event as AgentRuntime })"
                   />
                 </UFormField>
                 <UFormField
@@ -219,6 +258,7 @@ const items = [
                     :model-value="agent.concurrency"
                     :min="1"
                     size="xs"
+                    class="w-28"
                     @update:model-value="$event && patchAgent(agent, { concurrency: $event })"
                   />
                 </UFormField>
@@ -234,6 +274,12 @@ const items = [
                 </UFormField>
               </li>
             </ul>
+            <AgentForm
+              v-model:open="adding"
+              :clis="clis"
+              :cli-error="cliError"
+              @created="added"
+            />
           </UCard>
           <UCard :ui="{ root: 'ring-error/40' }">
             <template #header>
@@ -305,7 +351,8 @@ const items = [
                 <li
                   v-for="cli in clis"
                   :key="cli.id"
-                  class="flex items-center gap-2"
+                  class="flex flex-wrap items-center gap-2"
+                  :data-testid="`cli-${cli.id}`"
                 >
                   <UBadge
                     :label="cli.signedIn ? 'Signed in' : 'Not signed in'"
@@ -314,6 +361,10 @@ const items = [
                     size="xs"
                   />
                   <span>{{ cli.name }} {{ cli.version ?? '(not found)' }}</span>
+                  <code
+                    v-if="cli.version && !cli.signedIn"
+                    class="font-mono text-xs text-muted"
+                  >{{ cliLoginCommand(cli.id) }}</code>
                 </li>
               </ul>
               <USkeleton
@@ -321,7 +372,7 @@ const items = [
                 class="h-5 w-48"
               />
               <p class="mt-2 text-xs text-muted">
-                Sign in inside the runner container: <code class="font-mono">docker exec -it corral-runner claude</code> and <code class="font-mono">docker exec -it corral-runner gh auth login</code>. Corral shows the state only and never reads the credentials.
+                Sign in inside the runner container: <code class="font-mono">{{ cliLoginCommand('claude') }}</code>, <code class="font-mono">{{ cliLoginCommand('codex') }}</code> and <code class="font-mono">docker exec -it corral-runner gh auth login</code>. Corral shows the state only and never reads the credentials.
               </p>
             </div>
           </div>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { CliStatus, RepoCheck, RepoChoice, RepoList } from '@corral/contracts'
 import { api } from '~/composables/useApi'
-import { initials, timeAgo } from '~/utils/labels'
+import { cliLoginCommand, initials, timeAgo } from '~/utils/labels'
 
 // Onboarding (design/onboarding.md): You → Repository → Agents → Names.
 // With ?add=1 it's the add-project flow from the sidebar (repository only).
@@ -101,9 +101,8 @@ async function scan() {
 // Claude Code runs the default agents; Codex runs only agents set to it
 const cliReady = computed(() => clis.value?.some(c => c.id === 'claude' && c.signedIn) ?? false)
 function cliDetail(cli: CliStatus): string {
-  const command = cli.id === 'codex' ? 'codex login' : 'claude'
   if (!cli.version) return `Install ${cli.name} in the runner container.`
-  if (!cli.signedIn) return `${cli.version}. Sign in with: docker exec -it corral-runner ${command}`
+  if (!cli.signedIn) return `${cli.version}. Sign in with: ${cliLoginCommand(cli.id)}`
   return cli.id === 'claude' ? `${cli.version}. Signed in. Will run your PM, developer and reviewer agents.` : `${cli.version}. Signed in. Runs agents set to Codex.`
 }
 
@@ -183,7 +182,7 @@ const canContinue = computed(() => {
           {{ step === 'you' ? 'Your name' : step === 'repo' ? (adding ? 'Add a project' : 'Choose a repository') : step === 'agents' ? 'Confirm agent CLIs' : 'Name your agents' }}
         </h1>
         <p class="text-sm text-muted">
-          {{ step === 'you' ? 'How you appear on comments, approvals and PM questions.' : step === 'repo' ? 'Repositories the runner’s GitHub login can see, most recently updated first.' : step === 'agents' ? 'Detected inside the runner. Your credentials stay with your CLI.' : 'All three run on Claude Code for now.' }}
+          {{ step === 'you' ? 'How you appear on comments, approvals and PM questions.' : step === 'repo' ? 'Repositories the runner’s GitHub login can see, most recently updated first.' : step === 'agents' ? 'Detected inside the runner. Your credentials stay with your CLI.' : 'All three run on Claude for now. Add Codex agents later in Settings.' }}
         </p>
       </div>
 
@@ -496,7 +495,7 @@ const canContinue = computed(() => {
                 Agent roles
               </p>
               <p class="text-xs text-muted">
-                All three run on Claude Code for now
+                All three run on Claude for now. Add Codex agents later in Settings.
               </p>
             </div>
             <UButton
@@ -544,7 +543,7 @@ const canContinue = computed(() => {
               >
                 <USelectMenu
                   model-value="claude"
-                  :items="[{ label: 'Claude Code', value: 'claude' }]"
+                  :items="[{ label: 'Claude', value: 'claude' }]"
                   value-key="value"
                   size="xs"
                   :search-input="false"

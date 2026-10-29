@@ -22,7 +22,8 @@
 
 - **Header:** "Agents" with "Shared by every project. Each runs through your local CLI login; Corral never sees your credentials." (D1–D2), and **Add agent**.
 - **One row per agent:** the name, a role badge, "{runtime} · concurrency 1 · `.corral/agents/<role>.md`", the agent's picture with **Upload picture** / **Remove**, and its name, concurrency and paused controls.
-- **Edit screen** (to design): name, role, runtime (`USelectMenu`, offering only the detected CLIs; Claude Code or Codex, D18), concurrency, instructions file, and the caps that apply per role.
+- **Add agent** opens a dialog: name, role (Developer or Reviewer), runtime (`USelectMenu`, offering only the CLIs the runner detected, labelled "Claude" and "Codex", never "Claude Code"; D18) and concurrency. The new agent appears in the list live. Each developer and reviewer row also has a runtime menu, disabled while the agent has active runs.
+- **Edit screen** (to design): instructions file, and the caps that apply per role.
 
 ### Profile pictures
 
@@ -32,7 +33,7 @@ Pictures are optional; without one, an avatar shows initials. The browser crops 
 
 - **Status row:** a status dot, "Online · {runner name}", "Runs agents for every project · last heartbeat a few seconds ago", and **Reconnect**.
 - **Data directory:** where the runner keeps clones, worktrees and its spool. It's read-only here: it comes from the runner's configuration and is a Docker volume (D12), never a hard-coded `~/.corral`.
-- **Logins:** whether `claude`, `codex` and `gh` are signed in inside the runner container, with the `docker exec -it` command to sign in. Corral shows the state only and never reads the credentials (D2).
+- **Logins:** each CLI's version and whether `claude`, `codex` and `gh` are signed in inside the runner container, with the `docker exec -it` command to sign in (`codex login --device-auth` for Codex, shown next to it when signed out). Corral shows the state only and never reads the credentials (D2).
 
 ### Appearance
 

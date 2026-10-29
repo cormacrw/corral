@@ -187,7 +187,7 @@ function idleLine(row: { agent: { role: string, paused: boolean, pausedUntil: st
         </dl>
       </div>
       <p class="text-xs text-muted">
-        Usage is in tokens from your Claude Code subscription. Agents are shared by every project.
+        Usage is in tokens from your own subscription. Agents are shared by every project.
       </p>
     </section>
   </div>

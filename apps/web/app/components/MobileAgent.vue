@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Run } from '@corral/contracts'
 import type { AgentRuns } from '~/composables/useAgentRuns'
-import { duration, isLiveRun, projectColor, ROLE, runBadge, timeAgo } from '~/utils/labels'
+import { duration, isLiveRun, projectColor, ROLE, runBadge, runtimeLabel, timeAgo } from '~/utils/labels'
 
 // An agent's page on mobile (design/agent.md, design/mobile.md): the
 // header and stat tiles, then the current run and previous runs. Each run
@@ -49,7 +49,7 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
           />
         </div>
         <p class="text-sm text-muted">
-          {{ ROLE[agent.role] }} · Claude Code · {{ today.length }} {{ today.length === 1 ? 'run' : 'runs' }} today
+          {{ ROLE[agent.role] }} · {{ runtimeLabel(agent.runtime) }} · {{ today.length }} {{ today.length === 1 ? 'run' : 'runs' }} today
         </p>
         <p
           v-if="limited"
