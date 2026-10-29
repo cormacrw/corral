@@ -1,7 +1,9 @@
 import { EVIDENCE_KINDS, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type RunnerMessage } from '@corral/contracts'
 import {
   ACTIVE_RUN_STATES,
+  feedbackSimilarity,
   nextDesignVersion,
+  reviewFeedbackText,
   transition,
   taskRef,
   richTextToMarkdown,
@@ -1035,22 +1037,26 @@ export class Orchestrator implements RunnerHandlers {
     // every criterion for the developer.
     const feedback = verdict === 'approved' ? `Approved: all ${kept.length} criteria met. ${report.summary.trim()}`.trim() : feedbackComment(report.summary, kept, criteria)
 
-    await db.transaction(async (tx) => {
+    const next = await db.transaction(async (tx) => {
       const locked = await lockTask(tx, task.id)
       if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease. Stop working.')
       const headSha = locked.task.headSha!
+      // A change request is compared with the previous round's, if that
+      // one requested changes too; near-identical feedback blocks the task
+      const similarity = verdict === 'changes_requested' ? await this.#feedbackSimilarity(tx, task.id, locked.task.reviewRounds, report.summary, kept) : undefined
       await tx.insert(reviews).values({
         taskId: task.id, runId: ctx.run.id, round: locked.task.reviewRounds, headSha, verdict, summary: report.summary, criteria: kept, author: this.#actor(ctx)
       })
       await tx.insert(comments).values({ taskId: task.id, author: this.#actor(ctx), body: feedback })
       await tx.insert(auditLog).values({
         projectId: ctx.project.id, taskId: task.id, actor: this.#actor(ctx), action: 'review.recorded',
-        detail: { runId: ctx.run.id, verdict, headSha, round: locked.task.reviewRounds, met: kept.filter(v => v.met).length, of: kept.length }
+        detail: { runId: ctx.run.id, verdict, headSha, round: locked.task.reviewRounds, met: kept.filter(v => v.met).length, of: kept.length, ...(similarity !== undefined && { similarity }) }
       })
       // Changes requested → the developer; approved → Human review when
       // flagged, otherwise Ready to merge (D10)
-      await applyTransition(tx, locked.task, locked.project, { type: verdict === 'approved' ? 'review_approved' : 'changes_requested' }, server, { event: verdict === 'approved' ? 'review_approved' : 'changes_requested', runId: ctx.run.id, headSha })
+      const state = await applyTransition(tx, locked.task, locked.project, verdict === 'approved' ? { type: 'review_approved' } : { type: 'changes_requested', similarity }, server, { event: verdict === 'approved' ? 'review_approved' : 'changes_requested', runId: ctx.run.id, headSha, ...(similarity !== undefined && { similarity }) })
       await this.#endRunIn(tx, ctx, { state: 'completed', outcome: verdict, summary: report.summary, headSha })
+      return state
     })
     this.#finished(ctx, `Review recorded: ${verdict}`)
     const spike = task.type === 'spike'
@@ -1059,13 +1065,27 @@ export class Orchestrator implements RunnerHandlers {
     return {
       ok: true,
       message: verdict === 'changes_requested'
-        ? 'Changes requested; your feedback was sent to the developer. You can stop now.'
+        ? next.status === 'blocked'
+          ? `Changes requested. The task is Blocked for a human (${next.reason}). You can stop now.`
+          : 'Changes requested; your feedback was sent to the developer. You can stop now.'
         : task.type === 'design'
           ? 'Approval recorded. The human reviews the design next. You can stop now.'
           : spike
             ? `Approval recorded. ${task.humanReview ? 'A human reviews the findings next.' : 'The spike is finished and its findings stay on the task.'} You can stop now.`
             : 'Approval recorded. Corral handles human review, CI and the merge from here. You can stop now.'
     }
+  }
+
+  // How alike this change request is to the previous round's (0 to 1);
+  // undefined when the previous round didn't request changes
+  // (the first round, or the first since the task was unblocked)
+  async #feedbackSimilarity(tx: Executor, taskId: string, round: number, summary: string, criteria: { met: boolean, note: string }[]): Promise<number | undefined> {
+    if (round === 0) return undefined
+    const [previous] = await tx.select({ summary: reviews.summary, criteria: reviews.criteria }).from(reviews)
+      .where(and(eq(reviews.taskId, taskId), eq(reviews.round, round - 1), eq(reviews.verdict, 'changes_requested')))
+      .orderBy(desc(reviews.createdAt)).limit(1)
+    if (!previous) return undefined
+    return feedbackSimilarity(reviewFeedbackText(previous.summary, previous.criteria), reviewFeedbackText(summary, criteria))
   }
 
   // Asks a human: the task becomes Blocked with the question as its reason (D11)

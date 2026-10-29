@@ -1,11 +1,11 @@
-import type { Project, Task } from '@corral/contracts'
+import type { Inbox, Project, Task } from '@corral/contracts'
 import { schema } from '@corral/db'
-import { eq, ne } from 'drizzle-orm'
+import { and, asc, eq, ne } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner, sleep } from './test-runner.ts'
 
-const { agents, runs, tasks } = schema
+const { agents, auditLog, runs, tasks } = schema
 
 // Concurrency and leases: Postgres only (D14)
 describe('orchestrator', () => {
@@ -372,6 +372,59 @@ describe('orchestrator', () => {
       outcome: 'changes_requested', summary: 'Still wrong', criteria: [{ criterionId: task.acceptanceCriteria[0]!.id, met: false, note: '' }]
     })
     expect(await taskRow(task.id)).toMatchObject({ status: 'blocked', reviewRounds: 5, statusReason: 'Review-round cap reached (5)' })
+    await pause(project)
+  })
+
+  // A reviewer requests changes, the developer pushes a new commit, and a
+  // second reviewer run starts on it
+  async function secondReview(first: { summary: string, note: string }) {
+    const { project, task, review } = await underReview()
+    const criterion = task.acceptanceCriteria[0]!
+    await runner.call(review.runId, review.leaseEpoch, 'report_outcome', {
+      outcome: 'changes_requested', summary: first.summary, criteria: [{ criterionId: criterion.id, met: false, note: first.note }]
+    })
+    await runner.next('run.stop', m => m.runId === review.runId)
+    const developer = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
+    t.github.setBranch(project.repository, developer.branch!, 'def456')
+    await runner.call(developer.runId, developer.leaseEpoch, 'attach_evidence', {
+      criterionId: criterion.id, kind: 'screenshot', note: 'the page', fileName: 'shot.png', contentType: 'image/png', dataBase64: Buffer.from('png-bytes').toString('base64')
+    })
+    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'pr_updated', summary: 'Fixed', headSha: 'def456' })).toMatchObject({ ok: true })
+    await runner.next('run.stop', m => m.runId === developer.runId)
+    await t.orchestrator.schedule()
+    const second = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'reviewer')).job
+    return { project, task, criterion, review: second }
+  }
+
+  async function reviewAudit(taskId: string) {
+    return t.db.select().from(auditLog).where(and(eq(auditLog.taskId, taskId), eq(auditLog.action, 'review.recorded'))).orderBy(asc(auditLog.id))
+  }
+
+  it('blocks the task when the reviewer repeats the previous round’s feedback', async () => {
+    const { project, task, criterion, review } = await secondReview({ summary: 'The error message is missing when the form is submitted empty', note: 'No message shown' })
+    const result = await runner.call(review.runId, review.leaseEpoch, 'report_outcome', {
+      outcome: 'changes_requested', summary: 'The error message is still missing when the form is submitted empty.', criteria: [{ criterionId: criterion.id, met: false, note: 'No message shown' }]
+    })
+    expect(result).toMatchObject({ ok: true, result: { message: expect.stringContaining('Blocked') } })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'blocked', reviewRounds: 2, statusReason: 'The reviewer asked for the same changes twice', leaseRunId: null })
+    const audit = await reviewAudit(task.id)
+    expect(audit.map(a => (a.detail as { similarity?: number }).similarity)).toEqual([undefined, expect.any(Number)])
+    expect((audit[1]!.detail as { similarity: number }).similarity).toBeGreaterThanOrEqual(0.8)
+
+    // It needs the human, like any other Blocked task
+    const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
+    expect(inbox.needsYou.find(i => i.taskId === task.id)).toMatchObject({ type: 'blocked', body: 'The reviewer asked for the same changes twice' })
+    await pause(project)
+  })
+
+  it('sends the task back to the developer when the new feedback is different', async () => {
+    const { project, task, criterion, review } = await secondReview({ summary: 'The error message is missing when the form is submitted empty', note: 'No message shown' })
+    await runner.call(review.runId, review.leaseEpoch, 'report_outcome', {
+      outcome: 'changes_requested', summary: 'The message shows now, but the README still describes the old command', criteria: [{ criterionId: criterion.id, met: false, note: 'Update the README' }]
+    })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', reviewRounds: 2, statusReason: null })
+    const audit = await reviewAudit(task.id)
+    expect((audit[1]!.detail as { similarity: number }).similarity).toBeLessThan(0.8)
     await pause(project)
   })
 

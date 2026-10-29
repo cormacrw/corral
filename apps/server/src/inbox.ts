@@ -110,7 +110,7 @@ function activityText(action: string, event: string | null, detail: Record<strin
     case 'pr_updated': return `Pushed a revision to ${pr}`
     case 'findings_reported': return 'Reported findings; on to the reviewer'
     case 'design_submitted': return `Submitted design v${String(detail.version)}; on to the reviewer`
-    case 'changes_requested': return 'Changes requested; back to the developer'
+    case 'changes_requested': return detail.to === 'blocked' ? 'Changes requested; Blocked for you' : 'Changes requested; back to the developer'
     case 'merged': return `Merged ${pr}`
     case 'ci_failed': return `CI failed on ${pr}; back to the developer`
     case 'base_conflict': return `${pr} conflicts with the base branch; back to the developer`

@@ -190,6 +190,23 @@ describe('review rounds', () => {
       .toBe('blocked')
   })
 
+  it('blocks the task when the feedback repeats the previous round', () => {
+    expect(expectOk(transition(task('agent_review', { reviewRounds: 1 }), { type: 'changes_requested', similarity: 0.9 }, server)))
+      .toEqual(task('blocked', { reviewRounds: 2, reason: 'The reviewer asked for the same changes twice' }))
+    expect(expectOk(transition(task('agent_review', { reviewRounds: 1 }), { type: 'changes_requested', similarity: 0.8 }, server)).status)
+      .toBe('blocked')
+  })
+
+  it('returns the task to In progress when the feedback is different', () => {
+    expect(expectOk(transition(task('agent_review', { reviewRounds: 1 }), { type: 'changes_requested', similarity: 0.79 }, server)))
+      .toEqual(task('in_progress', { reviewRounds: 2 }))
+  })
+
+  it('reports the review-round cap when both apply', () => {
+    expect(expectOk(transition(task('agent_review', { reviewRounds: 4 }), { type: 'changes_requested', similarity: 1 }, server)).reason)
+      .toBe('Review-round cap reached (5)')
+  })
+
   it('does not count CI failures or human change requests as review rounds', () => {
     expect(expectOk(transition(task('ready_to_merge'), validEvents.ci_failed, server)).reviewRounds).toBe(0)
     expect(expectOk(transition(task('human_review'), validEvents.human_request_changes, human)).reviewRounds).toBe(0)
