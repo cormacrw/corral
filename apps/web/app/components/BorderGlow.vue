@@ -4,7 +4,9 @@
 // BorderGlow (https://vue-bits.dev) with the pointer tracking removed: the
 // cone is driven by the `glow-spin` animation in main.css, and the layers sit
 // over the slot so the wrapped card keeps its own border and background.
-// Reduced motion stops the sweep and leaves the glow where it is.
+// Reduced motion stops the sweep and leaves the glow where it is. The wrapper
+// is a flex column so the wrapped element stretches to its full width, as it
+// would without the glow (a button otherwise shrinks to fit its content).
 const props = withDefaults(defineProps<{
   active?: boolean
   // HSL values as "H S L", e.g. "172 66% 50%"
@@ -93,7 +95,7 @@ const glowCone = 'conic-gradient(from var(--glow-angle) at center, black 2.5%, t
 <template>
   <div
     v-if="props.active"
-    class="relative isolate motion-safe:animate-glow-spin"
+    class="relative isolate flex flex-col motion-safe:animate-glow-spin"
     :style="{ borderRadius: `${props.borderRadius}px`, animationDuration: `${props.duration}s` }"
   >
     <slot />
