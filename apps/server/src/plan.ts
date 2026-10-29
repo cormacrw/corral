@@ -1,4 +1,4 @@
-import type { Plan, PlanMessage, PlanSession, PlanSessionDetail, RunJob } from '@corral/contracts'
+import { askQuestionInput, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type RunJob } from '@corral/contracts'
 import { checkPlan, diffPlans, markdownToRichText, REVISABLE_STATUSES, richTextToMarkdown, taskRef, type Actor, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
@@ -7,7 +7,7 @@ import { listTaskAttachments } from './attachments.ts'
 import { listEpics } from './epics.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
-import { pmFallbackPrompt, pmPrompt } from './prompts.ts'
+import { pmFallbackPrompt, pmPrompt, questionText } from './prompts.ts'
 import type { RunnerHub } from './runner-hub.ts'
 import { createTask, deleteTaskRows, findTaskId, loadTask, patchTask, transitionTask, type ProjectRow } from './tasks.ts'
 
@@ -250,8 +250,10 @@ export class PlanService {
       }
 
       case 'ask_question': {
-        const { question } = z.object({ question: z.string().trim().min(1) }).parse(input)
-        const [message] = await db.insert(planMessages).values({ sessionId, role: 'pm', kind: 'question', text: question, runId }).returning()
+        const parsed = askQuestionInput.safeParse(input)
+        if (!parsed.success) throw new ToolError(`The question was not asked: ${z.prettifyError(parsed.error)}`)
+        const { question, recommendation, options } = parsed.data
+        const [message] = await db.insert(planMessages).values({ sessionId, role: 'pm', kind: 'question', text: question, recommendation, options, runId }).returning()
         this.#d.events.publish({ type: 'plan.message', message: toMessage(message!) })
         return { ok: true, message: 'The question is shown to the human. Finish your turn; their answer arrives as the next message.' }
       }
@@ -629,7 +631,7 @@ export class PlanService {
   // The conversation so far, for reseeding a lost session (D9)
   async #history(sessionId: string): Promise<{ role: string, text: string }[]> {
     const rows = await this.#d.db.select().from(planMessages).where(eq(planMessages.sessionId, sessionId)).orderBy(asc(planMessages.createdAt))
-    return rows.map(m => ({ role: m.role === 'human' ? 'Human' : m.kind === 'question' ? 'PM (question)' : 'PM', text: m.text }))
+    return rows.map(m => ({ role: m.role === 'human' ? 'Human' : m.kind === 'question' ? 'PM (question)' : 'PM', text: m.kind === 'question' ? questionText(m) : m.text }))
   }
 
   async #toSession(row: SessionRow, activeRunId?: string | null): Promise<PlanSession> {
@@ -690,6 +692,8 @@ function toMessage(row: typeof planMessages.$inferSelect): PlanMessage {
     role: row.role as 'human' | 'pm',
     kind: row.kind as PlanMessage['kind'],
     text: row.text,
+    recommendation: row.recommendation,
+    options: row.options,
     planId: row.planId,
     runId: row.runId,
     createdAt: row.createdAt.toISOString()
