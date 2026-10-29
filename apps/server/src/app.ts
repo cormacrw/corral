@@ -272,7 +272,9 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     .patch('/projects/:slug/tasks/:number', validate('json', patchTaskInput), async (c) => {
       const project = await findProjectBySlug(db, c.req.param('slug'))
       const taskId = await findTaskId(db, project.id, taskNumber(c.req.param('number')))
-      await patchTask(db, project, taskId, c.req.valid('json'), actor)
+      const edit = await patchTask(db, project, taskId, c.req.valid('json'), actor)
+      // The edit is saved either way; telling the run is best effort (PRD §7.3)
+      if (edit) await orchestrator.noticeTaskEdit(taskId, edit, actor).catch(error => console.error(`Telling the run about the edit to task ${taskId} failed`, error))
       return c.json(await publishTask(taskId))
     })
 

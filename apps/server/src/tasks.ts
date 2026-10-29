@@ -304,10 +304,17 @@ export async function applyTransition(
   return next
 }
 
+// What a PATCH changed in the text an agent works to (PRD §7.3), or null
+// when the description and criteria are as they were
+export interface TaskContentEdit {
+  description: boolean
+  criteria: { added: number, removed: number, reworded: number } | null
+}
+
 // design/task.md: a PATCH per field. Criteria keep their IDs (and so their
 // evidence and verdicts) when passed back with the same ID.
-export async function patchTask(db: Executor, project: ProjectRow, taskId: string, input: PatchTaskInput, actor: Actor): Promise<void> {
-  await db.transaction(async (tx) => {
+export async function patchTask(db: Executor, project: ProjectRow, taskId: string, input: PatchTaskInput, actor: Actor): Promise<TaskContentEdit | null> {
+  return db.transaction(async (tx) => {
     const { task } = await lockTask(tx, taskId)
     // Merged is final (D10): the record stays as it shipped; comments still work
     if (task.status === 'merged') throw new ApiFailure(409, { code: 'conflict', constraint: 'task_merged' })
@@ -318,6 +325,8 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
       const [epic] = await tx.select({ id: epics.id }).from(epics).where(and(eq(epics.id, fields.epicId), eq(epics.projectId, project.id)))
       if (!epic) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['epicId'], message: 'Unknown epic' }] })
     }
+    const descriptionChanged = fields.description !== undefined && JSON.stringify(fields.description) !== JSON.stringify(task.description)
+    let criteriaChange: TaskContentEdit['criteria'] = null
     if (Object.keys(fields).length > 0) {
       await tx.update(tasks).set({ ...fields, updatedAt: new Date() }).where(eq(tasks.id, taskId))
     }
@@ -326,6 +335,10 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
       const keep = new Set(criteriaInput.map(c => c.id).filter((id): id is string => Boolean(id)))
       const gone = existing.filter(c => !keep.has(c.id)).map(c => c.id)
       if (gone.length > 0) await tx.delete(acceptanceCriteria).where(inArray(acceptanceCriteria.id, gone))
+      const added = criteriaInput.filter(c => !c.id || !existing.some(e => e.id === c.id)).length
+      const reworded = criteriaInput.filter(c => existing.some(e => e.id === c.id && e.text !== c.text)).length
+      const reordered = criteriaInput.some((c, i) => c.id !== undefined && existing.find(e => e.id === c.id)?.position !== i)
+      if (added + gone.length + reworded > 0 || reordered) criteriaChange = { added, removed: gone.length, reworded }
       for (const [position, criterion] of criteriaInput.entries()) {
         if (criterion.id && existing.some(c => c.id === criterion.id)) {
           await tx.update(acceptanceCriteria).set({ position, text: criterion.text, updatedAt: new Date() }).where(eq(acceptanceCriteria.id, criterion.id))
@@ -336,6 +349,7 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
     }
     if (dependsOn) await setDependencies(tx, project, task, dependsOn)
     await tx.insert(auditLog).values({ projectId: project.id, taskId, actor, action: 'task.updated', detail: { changed: Object.keys(input) } })
+    return descriptionChanged || criteriaChange ? { description: descriptionChanged, criteria: criteriaChange } : null
   })
 }
 
