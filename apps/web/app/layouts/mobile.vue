@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ROLE } from '~/utils/labels'
+import { projectColor, ROLE } from '~/utils/labels'
 
 // The mobile shell (D17, design/mobile.md): a header with the runner's
 // status, the page, and a five-tab bar. app.vue swaps it in for the
@@ -36,12 +36,22 @@ const projectPage = computed(() => {
   const [section, slug, page] = route.path.split('/').filter(Boolean)
   if (section !== 'projects' || !slug || !page || !PROJECT_PAGES[page]) return null
   const project = state.value.projects.find(p => p.slug === slug)
-  return { title: PROJECT_PAGES[page], eyebrow: project?.name ?? slug, back: `/projects/${slug}` }
+  return { title: PROJECT_PAGES[page], eyebrow: project?.name ?? slug, back: `/projects/${slug}`, backLabel: 'Back to the project', dot: null }
 })
+// A Plan conversation names its project and session, goes back to a new
+// session, and takes the full height: no runner status, Settings or tab bar
+const planSession = computed(() => {
+  const [section, id] = route.path.split('/').filter(Boolean)
+  if (section !== 'plan' || !id) return null
+  const session = state.value.planSessions.find(s => s.id === id)
+  const project = state.value.projects.find(p => p.id === session?.projectId)
+  return { title: session?.title ?? 'Plan', eyebrow: project?.name ?? '', back: '/plan', backLabel: 'Back to Plan', dot: project ? projectColor(project) : null }
+})
+const subPage = computed(() => projectPage.value ?? planSession.value)
 
 // The header names the page; later tasks give each screen its own header
 const title = computed(() => {
-  if (projectPage.value) return projectPage.value.title
+  if (subPage.value) return subPage.value.title
   const [section, id] = route.path.split('/').filter(Boolean)
   switch (section) {
     case 'home': return 'Home'
@@ -65,26 +75,33 @@ const title = computed(() => {
     <header class="shrink-0 border-b border-default bg-default pt-[env(safe-area-inset-top)] ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]">
       <div class="flex h-14 items-center gap-2 px-4">
         <UButton
-          v-if="projectPage"
-          :to="projectPage.back"
+          v-if="subPage"
+          :to="subPage.back"
           icon="i-lucide-arrow-left"
           variant="ghost"
           color="neutral"
-          aria-label="Back to the project"
+          :aria-label="subPage.backLabel"
           class="-ms-2"
         />
         <div class="min-w-0 flex-1">
           <p
-            v-if="projectPage"
-            class="truncate text-xs text-muted"
+            v-if="subPage"
+            class="flex items-center gap-1.5 truncate text-xs text-muted"
           >
-            {{ projectPage.eyebrow }}
+            <span
+              v-if="subPage.dot"
+              class="size-2 shrink-0 rounded-full"
+              :style="{ background: subPage.dot }"
+              aria-hidden="true"
+            />
+            {{ subPage.eyebrow }}
           </p>
-          <h1 :class="['truncate font-semibold text-highlighted', projectPage ? 'text-lg leading-tight' : 'text-xl']">
+          <h1 :class="['truncate font-semibold text-highlighted', subPage ? 'text-lg leading-tight' : 'text-xl']">
             {{ title }}
           </h1>
         </div>
         <span
+          v-if="!planSession"
           class="flex shrink-0 items-center gap-1.5 text-xs text-muted"
           data-testid="runner-status"
         >
@@ -100,6 +117,7 @@ const title = computed(() => {
           class="contents"
         />
         <UButton
+          v-if="!planSession"
           to="/settings/profile"
           icon="i-lucide-settings"
           variant="ghost"
@@ -120,6 +138,7 @@ const title = computed(() => {
     </UDashboardGroup>
 
     <nav
+      v-if="!planSession"
       aria-label="Main"
       class="shrink-0 border-t border-default bg-default pb-[env(safe-area-inset-bottom)] ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]"
     >

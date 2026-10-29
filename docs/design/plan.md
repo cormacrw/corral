@@ -67,6 +67,16 @@ Docked on the right (`?plan`), the same flyout as tasks and epics; the conversat
 
 Docked on the right (see [task.md](task.md)). It opens from plan-flyout rows and from the attached-task chip. A proposed task is a **Draft**: the flyout shows a "Draft" badge and a reduced view: title, the editable properties (project, priority, type, developer, reviewer, human review), dependencies, description and acceptance criteria. There's no per-task Add to board / Add to backlog: Drafts are placed only with the whole plan, from the plan flyout. Status, branch, pull request, review round and the Activity / Evidence / History tabs are hidden, since none of them exist yet.
 
+## Mobile
+
+On the mobile layout ([mobile.md](mobile.md)) the same two routes keep their behaviour, laid out for a phone:
+
+- **Session switcher:** the tab strip becomes a history button in the header. It opens a bottom sheet with **New session**, the open sessions (status badges, unread dot, spinner while Juno works, and × to close one, same rules as the tabs) and the other sessions under **Resume**.
+- **New session:** the column starts at the top and scrolls. The Resume picker moves to the switcher.
+- **Conversation:** full height, without the tab bar. The header shows a back button to `/plan`, the project dot and name above the session title, the switcher and **+** (new session).
+- **Plan sheet:** `?plan` opens the plan in a bottom sheet instead of the flyout, with the approve buttons side by side. A task or epic opened from it opens in a taller sheet over it, whose back arrow returns to the plan. Swiping a sheet down closes it.
+- **Runner offline:** an error alert, "Plan needs the runner. It's offline.", says the sessions and drafts are safe and has **Reconnect** (which re-reads the runner's status). The composer is disabled with "Juno is unavailable while the runner is offline".
+
 ## Rules
 
 - Only a human can approve a plan: with the buttons, or by telling Juno to in chat, which Juno carries out with `approve_plan` (D9). The approve endpoint rejects any other actor, and Juno's tool is refused unless the human has written since the plan was proposed.

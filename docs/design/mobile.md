@@ -28,10 +28,10 @@ Pages and components use `useDevice().isMobile` to choose a mobile component. Do
 
 From top to bottom:
 
-- **Header:** the page title (on a project's Board, Backlog and Settings, the project name above it and a back button to the project's overview), the runner's live status (a dot and "Runner online" / "Runner offline", coloured like the sidebar footer), and a Settings button. Pages add their own header buttons by teleporting into `#mobile-header-actions` (`<Teleport defer to="#mobile-header-actions">`), next to Settings: the Board's search, the Backlog's New task.
+- **Header:** the page title (on a project's Board, Backlog and Settings, the project name above it and a back button to the project's overview; on a Plan conversation, the project above the session title and a back button to `/plan`), the runner's live status (a dot and "Runner online" / "Runner offline", coloured like the sidebar footer), and a Settings button. Pages add their own header buttons by teleporting into `#mobile-header-actions` (`<Teleport defer to="#mobile-header-actions">`), next to Settings: the Board's search, the Backlog's New task.
 - **Banners:** the same shell banners as the web layout (stopped, updating, project paused, runner offline, reconnecting), from `ShellBanners.vue`.
 - **Page:** fills the space between, and scrolls.
-- **Tab bar:** five tabs, each an icon over a label. The active tab is `primary`.
+- **Tab bar:** five tabs, each an icon over a label. The active tab is `primary`. A Plan conversation hides the tab bar, the runner status and Settings, so the chat and its composer get the full height.
 
 | Tab | Icon | Route | Active on | Indicator |
 |---|---|---|---|---|
@@ -58,8 +58,7 @@ Frames in the export, grouped by the task that will build them:
 |---|---|
 | Home | Home |
 | Inbox | Inbox, Inbox · Human review, Inbox · Question, Inbox · Blocked |
-| Plan | Plan · New session, Plan · Conversation, Plan · Plan v2, Plan · Runner offline |
-| Projects | Projects, Project overview, Project settings (Board and Backlog are built, see [board.md](board.md) and [backlog.md](backlog.md)) |
+| Projects | Projects, Project overview, Project settings (Board and Backlog are built, see [board.md](board.md) and [backlog.md](backlog.md); so is Plan, see [plan.md](plan.md#mobile)) |
 | Task and epic | Task COR-35, Task COR-35 · Activity, Epic · Billing |
 | Agents | Agents, Agent · Atlas, Run #128 |
 | Settings | Settings, Settings · Runner |

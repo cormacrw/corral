@@ -11,6 +11,7 @@ const live = useLive()
 const pm = computed(() => live.state.value.agents.find(a => a.role === 'pm') ?? null)
 const flyout = useTaskFlyout()
 const toast = useToast()
+const device = useDevice()
 const id = computed(() => String(route.params.sessionId))
 const session = ref<PlanSessionDetail | null>(null)
 const error = ref<string | null>(null)
@@ -20,6 +21,16 @@ const busy = ref(false)
 const approving = ref<string | null>(null)
 const project = computed(() => live.state.value.projects.find(p => p.id === session.value?.projectId) ?? null)
 const runnerOffline = computed(() => live.state.value.loaded && !live.state.value.runner?.online)
+const reconnecting = ref(false)
+// Re-reads the runner's status, in case its live update was missed
+async function reconnect() {
+  reconnecting.value = true
+  try {
+    await live.load()
+  } finally {
+    reconnecting.value = false
+  }
+}
 useSeoMeta({ title: () => `${session.value?.title ?? 'Plan'} · Corral` })
 
 async function load() {
@@ -102,6 +113,22 @@ const liveEvents = computed(() => activeRunId.value ? withoutMessages(live.state
 const firstOfTurn = (message: PlanMessage) => message.role === 'pm' && message.runId !== null && message.runId !== activeRunId.value
   && session.value?.messages.find(m => m.role === 'pm' && m.runId === message.runId)?.id === message.id
 
+// On phones the plan opens in a bottom sheet, and a task or epic from it
+// in a taller one over it; closing either clears ?plan, ?task and ?epic.
+// The drawers also report closing when the route closed them, so check first.
+const planSheet = computed({
+  get: () => flyout.plan.value && !flyout.ref.value && !flyout.epic.value,
+  set: (open) => {
+    if (!open && flyout.plan.value) flyout.close()
+  }
+})
+const detailSheet = computed({
+  get: () => Boolean(flyout.ref.value || flyout.epic.value),
+  set: (open) => {
+    if (!open && (flyout.ref.value || flyout.epic.value)) flyout.close()
+  }
+})
+
 const log = ref<HTMLElement | null>(null)
 watch(() => [session.value?.messages.length, liveEvents.value.length], async () => {
   await nextTick()
@@ -111,10 +138,28 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
 
 <template>
   <UDashboardPanel :ui="{ body: 'p-0' }">
-    <PlanTabs />
+    <!-- Phones switch sessions from the header (design/mobile.md) -->
+    <Teleport
+      v-if="device.isMobile.value"
+      defer
+      to="#mobile-header-actions"
+    >
+      <PlanSessionSwitcher />
+      <UButton
+        to="/plan"
+        icon="i-lucide-plus"
+        variant="ghost"
+        color="neutral"
+        aria-label="New session"
+      />
+    </Teleport>
+    <PlanTabs v-else />
     <div class="flex min-h-0 flex-1">
       <div class="flex min-w-0 flex-1 flex-col">
-        <header class="flex h-14 shrink-0 items-center gap-2 border-b border-default px-4 text-sm">
+        <header
+          v-if="!device.isMobile.value"
+          class="flex h-14 shrink-0 items-center gap-2 border-b border-default px-4 text-sm"
+        >
           <span
             v-if="project"
             class="size-2.5 rounded-full"
@@ -239,10 +284,21 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
           </div>
         </div>
 
-        <div class="shrink-0 border-t border-default p-3">
+        <div :class="['shrink-0 border-t border-default p-3', device.isMobile.value && 'pb-[max(0.75rem,env(safe-area-inset-bottom))]']">
           <div class="mx-auto w-full max-w-[768px]">
             <UAlert
-              v-if="runnerOffline"
+              v-if="runnerOffline && device.isMobile.value"
+              color="error"
+              variant="subtle"
+              icon="i-lucide-triangle-alert"
+              title="Plan needs the runner. It's offline."
+              :description="`${pm?.name ?? 'The PM'} runs in the runner container. Your sessions and drafts are safe.`"
+              :actions="[{ label: 'Reconnect', color: 'error', variant: 'outline', loading: reconnecting, onClick: reconnect }]"
+              class="mb-2"
+              data-testid="plan-runner-offline"
+            />
+            <UAlert
+              v-else-if="runnerOffline"
               color="warning"
               variant="subtle"
               icon="i-lucide-server-off"
@@ -251,7 +307,7 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
             />
             <PromptComposer
               v-model="text"
-              :placeholder="`Reply to ${pm?.name ?? 'the PM'}…`"
+              :placeholder="runnerOffline && device.isMobile.value ? `${pm?.name ?? 'The PM'} is unavailable while the runner is offline` : `Reply to ${pm?.name ?? 'the PM'}…`"
               :disabled="runnerOffline || Boolean(session?.activeRunId)"
               :busy="busy"
               :allow-empty="taskRef !== null"
@@ -297,7 +353,56 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
           </div>
         </div>
       </div>
-      <TaskFlyout>
+      <template v-if="device.isMobile.value">
+        <UDrawer
+          v-model:open="planSheet"
+          :title="latest ? `Plan v${latest.version}` : 'Plan'"
+          :ui="{ content: 'h-[88svh]' }"
+        >
+          <template #content>
+            <div
+              v-if="latest"
+              class="flex min-h-0 flex-1 flex-col pb-[env(safe-area-inset-bottom)]"
+              data-testid="plan-sheet"
+            >
+              <PlanDetail
+                class="flex-1"
+                :plan="latest"
+                :previous="previous"
+                :busy="approving === latest.id"
+                sheet
+                @approve="approve(latest, $event)"
+                @close="flyout.close()"
+              />
+            </div>
+          </template>
+        </UDrawer>
+        <UDrawer
+          v-model:open="detailSheet"
+          :title="flyout.ref.value ? `Task ${flyout.ref.value}` : 'Epic'"
+          :ui="{ content: 'h-[94svh]' }"
+        >
+          <template #content>
+            <div class="flex min-h-0 flex-1 flex-col pb-[env(safe-area-inset-bottom)]">
+              <TaskDetail
+                v-if="flyout.ref.value"
+                class="flex-1"
+                :task-ref="flyout.ref.value"
+                mode="flyout"
+                @close="flyout.close()"
+              />
+              <EpicDetail
+                v-else-if="flyout.epic.value"
+                class="flex-1"
+                :epic-id="flyout.epic.value"
+                mode="flyout"
+                @close="flyout.close()"
+              />
+            </div>
+          </template>
+        </UDrawer>
+      </template>
+      <TaskFlyout v-else>
         <template
           v-if="latest"
           #plan
