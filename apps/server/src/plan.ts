@@ -72,7 +72,8 @@ export interface PlanDeps {
   // True while the update hold is on; no turn may start
   updating(): boolean
   // Starts a PM run for a session; the orchestrator owns runs
-  startRun(session: SessionRow, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'>): Promise<string>
+  // The orchestrator fills in `runtime` from the PM agent that takes the turn
+  startRun(session: SessionRow, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch' | 'runtime'>): Promise<string>
 }
 
 // The PM conversation (D9, design/plan.md). Each turn is a runner job with

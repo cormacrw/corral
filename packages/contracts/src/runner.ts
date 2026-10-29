@@ -50,6 +50,9 @@ export interface RunJob {
   runNumber: number
   leaseEpoch: number
   role: AgentRole
+  // The agent's runtime id, e.g. 'claude-code': which adapter the runner
+  // starts (D15). A neutral name, never an auth method.
+  runtime: string
   projectId: string
   repository: string
   defaultBranch: string

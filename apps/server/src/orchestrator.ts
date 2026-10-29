@@ -109,7 +109,7 @@ export class Orchestrator implements RunnerHandlers {
 
   // A PM turn (D9): a run with no task and no lease, fenced by its own epoch.
   // It waits as `queued`, holding its job, until the PM has a free slot (D13).
-  async startPmRun(session: PlanSessionRow, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'>): Promise<string> {
+  async startPmRun(session: PlanSessionRow, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch' | 'runtime'>): Promise<string> {
     const { db } = this.#d
     if (this.#stopped) throw new ApiFailure(409, { code: 'conflict', constraint: 'corral_stopped' })
     if (this.#updating) throw new ApiFailure(503, { code: 'corral_updating' })
@@ -145,7 +145,8 @@ export class Orchestrator implements RunnerHandlers {
           .orderBy(asc(runs.queuedAt), asc(runs.number)).limit(free)
         for (const w of waiting) {
           await tx.update(runs).set({ pmJob: null }).where(eq(runs.id, w.id))
-          picked.push({ id: w.id, job: w.job as Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'> })
+          // The runtime is the agent's that takes the turn, not whoever queued it
+          picked.push({ id: w.id, job: { ...w.job as Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch' | 'runtime'>, runtime: agent.runtime } })
         }
       }
       return picked
@@ -309,6 +310,7 @@ export class Orchestrator implements RunnerHandlers {
       runNumber: ctx.run.number,
       leaseEpoch: ctx.run.leaseEpoch!,
       role: 'developer',
+      runtime: ctx.agent.runtime,
       projectId: ctx.project.id,
       repository: ctx.project.repository,
       defaultBranch: ctx.project.defaultBranch,
@@ -348,6 +350,7 @@ export class Orchestrator implements RunnerHandlers {
       runNumber: ctx.run.number,
       leaseEpoch: ctx.run.leaseEpoch!,
       role: 'reviewer',
+      runtime: ctx.agent.runtime,
       projectId: ctx.project.id,
       repository: ctx.project.repository,
       defaultBranch: ctx.project.defaultBranch,

@@ -37,6 +37,7 @@ export function pmJob(overrides: Partial<RunJob> = {}): RunJob {
     runNumber: 1,
     leaseEpoch: 1,
     role: 'pm',
+    runtime: 'claude-code',
     projectId: 'project-1',
     repository: TEST_REPOSITORY,
     defaultBranch: 'main',
