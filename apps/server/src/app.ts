@@ -13,6 +13,7 @@ import {
   inboxActionInput,
   patchAgentInput,
   patchEpicInput,
+  setEpicDependenciesInput,
   patchPlanSessionInput,
   patchProfileInput,
   patchProjectInput,
@@ -38,7 +39,7 @@ import { ApiFailure, fromDatabaseError } from './errors.ts'
 import { createAttachment, readAttachment } from './attachments.ts'
 import { approveDesign, DESIGN_BUNDLE_HEADERS, listDesignVersions, readDesignFile, readDesignScreenshot } from './designs.ts'
 import { checkAvatar, getProfile, patchProfile, readAvatar, setAgentAvatar, setUserAvatar } from './avatars.ts'
-import { getEpic, listEpics, patchEpic } from './epics.ts'
+import { getEpic, listEpics, patchEpic, setEpicDependencies } from './epics.ts'
 import type { EventBus } from './events.ts'
 import { loadInbox } from './inbox.ts'
 import { listPullRequests } from './pull-requests.ts'
@@ -240,6 +241,15 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     })
 
     .get('/epics/:id', async c => c.json(await getEpic(db, c.req.param('id'))))
+
+    .put('/epics/:id/dependencies', validate('json', setEpicDependenciesInput), async (c) => {
+      const id = c.req.param('id')
+      const updated = await setEpicDependencies(db, id, c.req.valid('json').dependsOn, actor)
+      for (const epic of updated) events.publish({ type: 'epic.updated', epic })
+      const detail = await getEpic(db, id)
+      orchestrator.poke(detail.tasks.map(t => t.id))
+      return c.json(updated.find(e => e.id === id)!)
+    })
 
     .patch('/epics/:id', validate('json', patchEpicInput), async (c) => {
       const epic = await patchEpic(db, c.req.param('id'), c.req.valid('json'), actor)

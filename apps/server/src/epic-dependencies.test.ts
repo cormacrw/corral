@@ -37,6 +37,37 @@ describe('epic scheduling', () => {
     return { project, a: a!, b: b!, first, second, dev: dev! }
   }
 
+  it('edits dependencies through the API, audits and rejects cycles and task deadlocks atomically', async () => {
+    const { project, a, b, first, second, dev } = await setup()
+    const put = (id: string, dependsOn: string[]) => t.request('PUT', `/api/epics/${id}/dependencies`, { dependsOn })
+    expect((await put(b.id, [])).status).toBe(200)
+    const claim = await claimNextTask(t.db, dev.id, new Date(), [second.id])
+    expect(claim?.taskId).toBe(second.id)
+    await t.db.update(schema.runs).set({ state: 'completed' }).where(eq(schema.runs.id, claim!.runId))
+    await t.db.update(tasks).set({ status: 'ready', leaseRunId: null, leaseRole: null, leaseExpiresAt: null }).where(eq(tasks.id, second.id))
+    expect((await put(b.id, [a.id])).status).toBe(200)
+    expect(await claimNextTask(t.db, dev.id, new Date(), [second.id])).toBeNull()
+    const cycle = await put(a.id, [b.id])
+    expect(cycle.status).toBe(400)
+    expect(JSON.stringify(await cycle.json())).toContain('Foundation → Application → Foundation')
+    expect((await t.request('GET', `/api/epics/${a.id}`)).status).toBe(200)
+    expect(await (await t.request('GET', `/api/epics/${a.id}`)).json()).toMatchObject({ dependsOn: [], blocks: [b.id] })
+    await put(b.id, [])
+    await t.db.insert(schema.taskDependencies).values({ taskId: first.id, dependsOnId: second.id })
+    const deadlock = await put(b.id, [a.id])
+    expect(deadlock.status).toBe(400)
+    const message = JSON.stringify(await deadlock.json())
+    expect(message).toContain('Foundation')
+    expect(message).toContain('Application')
+    expect(await (await t.request('GET', `/api/epics/${b.id}`)).json()).toMatchObject({ dependsOn: [] })
+    const other = await t.createProject()
+    const [foreign] = await t.db.insert(epics).values({ projectId: other.id, title: 'Foreign', createdBy: t.actor }).returning()
+    expect((await put(b.id, [foreign!.id])).status).toBe(400)
+    expect((await put(b.id, [b.id])).status).toBe(400)
+    const audits = await t.db.select().from(schema.auditLog).where(eq(schema.auditLog.projectId, project.id))
+    expect(audits.filter(a => a.action === 'epic.updated')).toHaveLength(3)
+  })
+
   it('blocks for every unfinished board state and permits Merged, Draft, Backlog, deleted and empty epics', async () => {
     const { first, second, dev } = await setup()
     for (const status of ['ready', 'in_progress', 'agent_review', 'human_review', 'ready_to_merge', 'blocked', 'failed'] as const) {
@@ -68,6 +99,20 @@ describe('epic scheduling', () => {
     await t.db.delete(tasks).where(eq(tasks.id, first.id))
     expect((await claimNextTask(t.db, dev.id, new Date(), [second.id]))?.taskId).toBe(second.id)
     expect((await t.db.select().from(epics).where(eq(epics.id, a.id))).length).toBe(1)
+  })
+
+  it('wakes Ready tasks on removal through the API despite a wake interval', async () => {
+    const { project, b, first, second, dev } = await setup()
+    runner = await FakeRunner.connect(t.server!.url)
+    await t.db.update(agents).set({ wakeIntervalSeconds: 3600 }).where(eq(agents.id, dev.id))
+    await t.db.insert(schema.runs).values({ agentId: dev.id, projectId: project.id, taskId: first.id, role: 'developer', state: 'completed', queuedAt: t.clock.now })
+    await t.orchestrator.schedule()
+    expect((await t.db.select().from(tasks).where(eq(tasks.id, second.id)))[0]?.leaseRunId).toBeNull()
+    const response = await t.request('PUT', `/api/epics/${b.id}/dependencies`, { dependsOn: [] })
+    expect(response.status).toBe(200)
+    await vi.waitFor(async () => {
+      expect((await t.db.select().from(tasks).where(eq(tasks.id, second.id)))[0]?.leaseRunId).not.toBeNull()
+    })
   })
 
   it('reports the same board-only progress used for completion', async () => {
