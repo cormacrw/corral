@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkPlan, diffPlans, type PlanRef, type ProposedTask } from './plan.ts'
+import { checkPlan, designPinKey, diffPlans, type DesignPinTarget, type PlanRef, type ProposedTask } from './plan.ts'
 
 const task = (key: string, overrides: Partial<ProposedTask> = {}): ProposedTask => ({
   key,
@@ -121,7 +121,50 @@ describe('checkPlan with refs', () => {
   })
 })
 
+describe('checkPlan with design pins', () => {
+  const designs = new Map<string, DesignPinTarget>([
+    ['COR-7@v2', { kind: 'version', status: 'approved' }],
+    ['COR-7@v1', { kind: 'version', status: 'superseded' }],
+    ['COR-7@v3', { kind: 'version', status: 'submitted' }],
+    ['COR-3@v1', { kind: 'not_design', status: 'ready' }]
+  ])
+  const pinned = (key: string, taskRef: string, version: number, screens = ['login']) => task(key, { design: { taskRef, version, screens } })
+
+  it('keys pins by upper-cased ref and version', () => {
+    expect(designPinKey({ taskRef: 'cor-7', version: 2 })).toBe('COR-7@v2')
+  })
+
+  it('accepts a pin to an approved version with screens', () => {
+    expect(checkPlan({ title: 'x', summary: '', epics, tasks: [pinned('a', 'COR-7', 2, ['login', 'login-error'])] }, new Map(), designs)).toEqual([])
+  })
+
+  it('rejects a pin to a version that isn\'t approved, an unknown version, a non-design task, or no screens', () => {
+    const problems = checkPlan({
+      title: 'x',
+      summary: '',
+      epics,
+      tasks: [pinned('a', 'COR-7', 1), pinned('b', 'COR-7', 3), pinned('c', 'COR-7', 9), pinned('d', 'COR-3', 1), pinned('e', 'COR-7', 2, [])]
+    }, new Map(), designs)
+    expect(problems.map(p => [p.code, 'key' in p ? p.key : null])).toEqual([
+      ['design_not_approved', 'a'],
+      ['design_not_approved', 'b'],
+      ['design_not_found', 'c'],
+      ['design_not_found', 'd'],
+      ['design_without_screens', 'e']
+    ])
+    expect(problems[0]).toMatchObject({ design: 'COR-7 v1', status: 'superseded' })
+  })
+})
+
 describe('diffPlans', () => {
+  it('counts a changed design pin as a change', () => {
+    const pin = { taskRef: 'COR-7', version: 2, screens: ['login'] }
+    expect(diffPlans([task('a', { design: pin }), task('b', { design: pin })], [task('a', { design: pin }), task('b', { design: { ...pin, screens: ['signup'] } })])).toEqual([
+      { key: 'a', change: 'unchanged' },
+      { key: 'b', change: 'changed' }
+    ])
+  })
+
   it('marks added, changed, unchanged and removed tasks by key', () => {
     const v1 = [task('a'), task('b'), task('c')]
     const v2 = [task('a'), task('b', { acceptanceCriteria: ['It works', 'It is fast'] }), task('d')]

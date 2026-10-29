@@ -34,9 +34,17 @@ web            server                          runner                     claude
 | `list_tasks`, `get_task`, `get_run_outcomes` | Live board state, so answers reflect current state, not only chat history (PRD §7.2) |
 | `get_attachment` | An image pasted into task text (`attachment:<id>`), returned as image content with its file name and mime type. Only attachments in the run's own project; developers and reviewers have it too |
 | `ask_question` | A structured question, shown in the Plan conversation only, never in the Inbox (D11). Optionally with a `recommendation` (the PM's suggested answer) and `options` (2–5 short choices, each at most 120 characters). Both are stored on the message and shown, options numbered, in the history the PM sees on later turns |
-| `propose_plan` | Create or revise a draft plan: epics, tasks, acceptance criteria, dependencies, priority, task type (`task`, `bug` or `spike`, D19), human-review flag |
+| `propose_plan` | Create or revise a draft plan: epics, tasks, acceptance criteria, dependencies, priority, task type (`task`, `bug`, `spike` or `design`, D19, D20), human-review flag, and for build tasks the design version and screens they pin (D20) |
 | `approve_plan` | Approve the current plan (to the board or the Backlog) when the human asks in chat. Recorded as the human's approval; refused unless the human has written since the plan was proposed |
 | `flag_stale_docs` | Create a documentation task (PRD §7.10) |
+| `get_design` | A design version's `design.md` spec, screen ids, screenshots, branch and commit, and its sandboxed preview URL (D20). Takes a design task's ref (its latest version by default, or a given `version`) or a build task's ref (its pinned version and screens). The runner saves the spec and screenshots in the agent's scratch folder and extracts the bundle (a gzipped tar) there, and returns the paths. Developers and reviewers have it too |
+
+### Developer and reviewer design tools (D20)
+
+| Tool | Who | Purpose |
+|---|---|---|
+| `submit_design` | Developer, design tasks only | Submit the static bundle folder, `design.md` and screenshots. The runner pushes the `design/<ref>` branch and uploads the files; the server records a new immutable version at that commit. The run then ends with `report_outcome('design_submitted')` |
+| `get_design` | Developer, reviewer, PM | Read a design version (above). The reviewer uses it to check a submission; a build task's developer uses it to read its pinned screens |
 
 Agents are told about images so they look at them: a PM turn whose message references `attachment:<id>` lists the ids and asks the PM to fetch them first; developer and reviewer prompts have an "Attached images" section (id, file name, and whether each is in the description or which comment); and `get_task` returns an `attachments` list of the same, for every role.
 
@@ -50,13 +58,14 @@ The PM has **no** tools to merge, edit docs or change status. This is enforced b
 - **Edits through chat:** e.g. "split task 3, drop the dark-mode bit". The PM calls `propose_plan` again, producing plan v2, and the UI shows the differences from v1.
 - **Epics:** a plan can span several epics, one per multi-task feature. A task names its epic with `epic`; a task without one has no epic, and a plan without `epics` creates none (a lone small fix needs no epic). A revision keeps every epic it still names (by key); an epic it drops is deleted once it has no tasks left.
 - **Drafts:** the plan's tasks are created as **Drafts**. They appear only in the plan flyout, never on the board or in the Backlog, and a revision can still change or remove them.
+- **Design pins (D20):** a plan task's `design: { taskRef, version, screens }` pins it to a design version and the screen ids from its `design.md`. `propose_plan` rejects a pin to a version that isn't approved, to an unknown version or a task that isn't a design, and a pin without screens. A Draft gets its pin at once; a revised Backlog task's pin is staged with its other edits. The pin is shown in the task's properties.
 - **Refining Backlog tasks:** a plan task with a `ref` (e.g. `COR-4`) revises that existing task instead of creating a Draft, so refining doesn't leave a duplicate. Only Backlog tasks (or Drafts) can be referenced; `propose_plan` rejects a ref that's unknown, deleted, in another project or in any other status, and says why. The edits (title, description, type, priority, human review, criteria, epic, dependencies) are staged on the plan, and the task is unchanged until approval. `dependsOn` may name refs of existing tasks too. Dropping a referenced task from a later version only un-stages it; it's never deleted.
 - **Approval:** two buttons call an endpoint that only accepts a human actor. **Add to board** moves each Draft → Ready, onto the board; tasks with unmerged dependencies are still Ready and their cards show "waiting on #N". **Add to backlog** moves each Draft → Backlog, to be scheduled later or refined further. A revised Backlog task first gets the plan's edits (criterion IDs are kept where the text is unchanged, and a `task.revised` audit entry is written), then goes to Ready with **Add to board** or stays in Backlog with **Add to backlog**. If it has left the Backlog since the plan was proposed, approval is refused and nothing is written. A single Draft can't be placed on its own; the task flyout offers no buttons for it.
 
 ### Sessions and cost
 
 - The agent session ID (from `claude` or `codex`; the session's runtime is locked once it has messages, D18) is stored with the conversation in the database. If the session is lost (e.g. the runner's disk was wiped), the next turn starts a fresh session seeded with a summary built from the database messages. The database is the source of truth; `~/.claude` and `~/.codex` are only caches.
-- A PM turn runs only when the human sends a message. Nothing goes back to the PM when tasks or epics merge.
+- A PM turn runs only when the human sends a message, or approves a design version, which opens a Plan session for the build with the human's message (D20). Nothing goes back to the PM when tasks or epics merge.
 - **One checkout and one turn per session.** Each Plan session gets its own read-only checkout of the default branch, kept between turns so the agent CLI can resume the session. A session runs one turn at a time: a second message while its turn is active gets 409 `pm_turn_in_progress`, and the session's `activeRunId` is that turn. Other sessions, in the same project or another, can talk to Juno meanwhile.
 - **Warm process between turns** (D9). After a turn, its agent CLI process stays alive for `CORRAL_PM_WARM_SECONDS` (default 5 minutes). A message within that time goes to the same process over stdin, after the checkout is reset to fresh code, so the reply skips CLI startup. After the timeout, or if the model or session changed, the next turn cold-starts with `--resume`.
 - **Juno's concurrency still applies** (D13, global across projects). A turn over the limit is accepted and waits as `queued`; it's sent to the runner, oldest first, when another PM turn ends.
@@ -87,7 +96,7 @@ It creates a run (Queued) and a 15-minute lease, then sends `job.assign` (RunJob
 ### Step 3 — Set up the workspace (runner)
 
 1. `git fetch`
-2. `git worktree add worktrees/<taskId> -b corral/<taskId>-<slug> origin/main` (or reuse the existing worktree on a revision)
+2. `git worktree add worktrees/<taskId> -b corral/<taskId>-<slug> origin/main` (or reuse the existing worktree on a revision). A design task's branch is `design/<ref>` instead, pushed but never merged (D20)
 3. `pnpm install`
 4. Write the per-run MCP config.
 5. Spawn the agent's CLI (`claude` or `codex`, D18) in its own process group, with no `GH_TOKEN` in its environment, and with `GIT_AUTHOR_*`/`GIT_COMMITTER_*` set from `CORRAL_GIT_AUTHOR_NAME`/`CORRAL_GIT_AUTHOR_EMAIL` when both are configured (the runner warns at startup when they aren't).
@@ -167,6 +176,12 @@ When every gate passes → step 9.
 
 - The runner removes the worktrees. If one somehow has uncommitted changes, it's kept and flagged.
 - Tasks that depended on this one become eligible; the scheduler checks again.
+
+---
+
+### Design tasks (D20)
+
+A design task follows steps 1–7 with these differences: the developer builds a prototype from the project's real components with mock data, produces the static bundle the way the project's `CLAUDE.md`/`CORRAL.md` says, calls `submit_design` and reports `design_submitted`. No PR is opened. After Agent review it always goes to **Human review**. Request changes → In progress, and the next submission is a new version. Approve → **Approved**: the version is approved, earlier ones are superseded, and a Plan session for the build starts. Steps 7c–10 don't apply.
 
 ---
 

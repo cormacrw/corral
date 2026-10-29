@@ -217,6 +217,19 @@ describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
       expect((await t.createTask(project.slug, { humanReview: false })).humanReview).toBe(false)
     })
 
+    it('always gives a design task human review, and it can\'t be turned off (D20)', async () => {
+      const project = await t.createProject()
+      const design = await t.createTask(project.slug, { type: 'design', humanReview: false })
+      expect(design.humanReview).toBe(true)
+      const patched = await t.request('PATCH', `/api/projects/${project.slug}/tasks/${design.number}`, { humanReview: false })
+      expect(patched.status).toBe(200)
+      expect(await t.request('GET', `/api/tasks/${design.ref}`).then(r => r.json())).toMatchObject({ type: 'design', humanReview: true })
+      // Changing a task's type to design turns it on too
+      const plain = await t.createTask(project.slug, { humanReview: false })
+      await t.request('PATCH', `/api/projects/${project.slug}/tasks/${plain.number}`, { type: 'design' })
+      expect(await t.request('GET', `/api/tasks/${plain.ref}`).then(r => r.json())).toMatchObject({ type: 'design', humanReview: true })
+    })
+
     it('rejects a dependency on a task that does not exist', async () => {
       const project = await t.createProject({ prefix: 'DEP' })
       const res = await t.request('POST', `/api/projects/${project.slug}/tasks`, { title: 'X', type: 'task', dependsOn: [7] })

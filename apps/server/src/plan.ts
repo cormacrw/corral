@@ -1,5 +1,5 @@
 import { askQuestionInput, type AgentRuntime, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type RunJob } from '@corral/contracts'
-import { checkPlan, diffPlans, markdownToRichText, REVISABLE_STATUSES, richTextToMarkdown, TASK_TYPES, taskRef, type Actor, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
+import { checkPlan, designPinKey, diffPlans, markdownToRichText, REVISABLE_STATUSES, requiresHumanReview, richTextToMarkdown, TASK_TYPES, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
@@ -9,9 +9,9 @@ import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
 import { pmFallbackPrompt, pmPrompt, questionText } from './prompts.ts'
 import type { RunnerHub } from './runner-hub.ts'
-import { createTask, deleteTaskRows, findTaskId, loadTask, patchTask, transitionTask, type ProjectRow } from './tasks.ts'
+import { createTask, deleteTaskRows, findTaskId, loadTask, patchTask, setDesignPin, transitionTask, type ProjectRow } from './tasks.ts'
 
-const { acceptanceCriteria, agents, auditLog, epics, planEpics, planMessages, planSessions, planTasks, plans, projects, runs, taskDependencies, tasks } = schema
+const { acceptanceCriteria, agents, auditLog, designVersions, epics, planEpics, planMessages, planSessions, planTasks, plans, projects, runs, taskDependencies, tasks } = schema
 
 const PM_TURN_TIMEOUT_SECONDS = 20 * 60
 
@@ -28,7 +28,13 @@ const proposedTask = z.object({
   priority: z.enum(['urgent', 'high', 'medium', 'low']).default('medium'),
   humanReview: z.boolean().default(false),
   acceptanceCriteria: z.array(z.string().trim()).default([]),
-  dependsOn: z.array(z.string().trim()).default([])
+  dependsOn: z.array(z.string().trim()).default([]),
+  // The approved design version a build task builds (D20)
+  design: z.object({
+    taskRef: z.string().trim().toUpperCase(),
+    version: z.number().int().positive(),
+    screens: z.array(z.string().trim()).default([])
+  }).optional()
 })
 
 // The key old plans that stored only plans.epicId give their epic. New
@@ -48,8 +54,9 @@ const proposedPlan = z.object({
   // A dependency that isn't a key is an existing task's ref, in any case
   const keys = new Set(plan.tasks.map(t => t.key))
   const dependency = (dep: string) => keys.has(dep) || !REF.test(dep) ? dep : dep.toUpperCase()
-  // A task without `epic` has no epic
-  return { ...plan, tasks: plan.tasks.map(t => ({ ...t, epic: t.epic || undefined, dependsOn: t.dependsOn.map(dependency) })) }
+  // A task without `epic` has no epic. A design task always gets human
+  // review, whatever the PM asked for (D20).
+  return { ...plan, tasks: plan.tasks.map(t => ({ ...t, epic: t.epic || undefined, humanReview: requiresHumanReview(t.type, t.humanReview), dependsOn: t.dependsOn.map(dependency) })) }
 })
 
 const REF = /^([A-Za-z]+)-(\d+)$/
@@ -318,7 +325,8 @@ export class PlanService {
   async #propose(session: SessionRow, project: ProjectRow, runId: string, proposed: ProposedPlan, actor: Actor) {
     const { db } = this.#d
     const { found, targets } = await this.#lookupRefs(project, proposed)
-    const problems = checkPlan(proposed, found)
+    const { found: designs, versionIds } = await this.#lookupDesigns(project, proposed)
+    const problems = checkPlan(proposed, found, designs)
     if (problems.length > 0) throw new ToolError(`The plan was not saved: ${JSON.stringify(problems)}. Fix every problem and call propose_plan again.`)
 
     const [previous] = await db.select().from(plans).where(eq(plans.sessionId, session.id)).orderBy(desc(plans.version)).limit(1)
@@ -351,6 +359,7 @@ export class PlanService {
         await tx.insert(planEpics).values(proposed.epics.map((epic, position) => ({ planId, key: epic.key, epicId: epicIds.get(epic.key)!, position })))
       }
       const epicOf = (task: ProposedTask) => task.epic ? epicIds.get(task.epic)! : null
+      const pinOf = (task: ProposedTask) => task.design ? { designVersionId: versionIds.get(designPinKey(task.design))!, screens: task.design.screens } : null
 
       // The previous version's tasks by key, and of those, the Drafts it
       // created (not the tasks it only revised)
@@ -386,6 +395,7 @@ export class PlanService {
           const [row] = await tx.select().from(tasks).where(and(eq(tasks.id, current), isNull(tasks.deletedAt)))
           if (row && row.status === 'draft') {
             await patchTask(tx, project, current, { ...input, acceptanceCriteria: await keepCriterionIds(tx, current, task.acceptanceCriteria) }, actor)
+            await setDesignPin(tx, current, pinOf(task))
             ids.set(task.key, current)
             continue
           }
@@ -395,7 +405,9 @@ export class PlanService {
             continue
           }
         }
-        ids.set(task.key, await createTask(tx, project, { ...input, epicId: epicOf(task) }, actor, { draft: true }))
+        const created = await createTask(tx, project, { ...input, epicId: epicOf(task) }, actor, { draft: true })
+        await setDesignPin(tx, created, pinOf(task))
+        ids.set(task.key, created)
       }
       const numbers = new Map<string, number>()
       for (const [key, id] of ids) {
@@ -418,7 +430,8 @@ export class PlanService {
             humanReview: task.humanReview,
             acceptanceCriteria: task.acceptanceCriteria,
             epicId: epicOf(task),
-            dependsOn
+            dependsOn,
+            design: pinOf(task)
           })
           continue
         }
@@ -555,6 +568,15 @@ export class PlanService {
     const keyOf = new Map([...await this.#epicsOf(plan)].map(([key, id]) => [id, key]))
     const keys = new Map(full.tasks.filter(t => t.ref).map(t => [t.ref!, t.key]))
     const revisions = new Map((await this.#d.db.select().from(planTasks).where(eq(planTasks.planId, plan.id))).map(r => [r.key, r.revision]))
+    const pinIds = [...revisions.values()].flatMap(r => r?.design ? [r.design.designVersionId] : [])
+    const pinned = pinIds.length > 0
+      ? await this.#d.db.select({ id: designVersions.id, version: designVersions.version, number: tasks.number }).from(designVersions)
+          .innerJoin(tasks, eq(tasks.id, designVersions.taskId)).where(inArray(designVersions.id, pinIds))
+      : []
+    const pinOf = (pin: { designVersionId: string, screens: string[] } | null | undefined): DesignPin | undefined => {
+      const row = pin && pinned.find(p => p.id === pin.designVersionId)
+      return row ? { taskRef: taskRef(project.prefix, row.number), version: row.version, screens: pin.screens } : undefined
+    }
     const result: ProposedTask[] = []
     for (const item of full.tasks) {
       if (item.change === 'removed' || !item.taskId) continue
@@ -562,6 +584,7 @@ export class PlanService {
       if (revision) {
         result.push({
           ...revision,
+          design: pinOf(revision.design),
           key: item.key,
           ref: item.ref!,
           epic: revision.epicId ? keyOf.get(revision.epicId) : undefined,
@@ -580,7 +603,8 @@ export class PlanService {
         priority: task.priority,
         humanReview: task.humanReview,
         acceptanceCriteria: task.acceptanceCriteria.map(c => c.text),
-        dependsOn: task.dependsOn.map(ref => keys.get(ref) ?? ref)
+        dependsOn: task.dependsOn.map(ref => keys.get(ref) ?? ref),
+        design: task.design ?? undefined
       })
     }
     return result
@@ -622,6 +646,37 @@ export class PlanService {
       }
     }
     return { found, targets }
+  }
+
+  // Looks up every design version the plan pins, for checkPlan, and the IDs
+  // of the ones that exist. Only this project's design tasks count.
+  async #lookupDesigns(project: ProjectRow, plan: ProposedPlan): Promise<{ found: Map<string, DesignPinTarget>, versionIds: Map<string, string> }> {
+    const { db } = this.#d
+    const found = new Map<string, DesignPinTarget>()
+    const versionIds = new Map<string, string>()
+    for (const task of plan.tasks) {
+      if (!task.design) continue
+      const key = designPinKey(task.design)
+      if (found.has(key)) continue
+      const match = REF.exec(task.design.taskRef)
+      const [row] = match && match[1]!.toUpperCase() === project.prefix
+        ? await db.select({ id: tasks.id, type: tasks.type, status: tasks.status }).from(tasks)
+            .where(and(eq(tasks.projectId, project.id), eq(tasks.number, Number(match[2])), isNull(tasks.deletedAt)))
+        : []
+      if (!row) {
+        found.set(key, { kind: 'unknown' })
+        continue
+      }
+      if (row.type !== 'design') {
+        found.set(key, { kind: 'not_design', status: row.status })
+        continue
+      }
+      const [version] = await db.select({ id: designVersions.id, status: designVersions.status }).from(designVersions)
+        .where(and(eq(designVersions.taskId, row.id), eq(designVersions.version, task.design.version)))
+      found.set(key, version ? { kind: 'version', status: version.status } : { kind: 'unknown' })
+      if (version) versionIds.set(key, version.id)
+    }
+    return { found, versionIds }
   }
 
   // A plan's epics by key, in order. Plans saved before plan_epics have
@@ -690,7 +745,9 @@ async function reviseTask(tx: Executor, project: ProjectRow, taskId: string, rev
     dependsOn: revision.dependsOn,
     acceptanceCriteria: await keepCriterionIds(tx, taskId, revision.acceptanceCriteria)
   }, actor)
-  await tx.insert(auditLog).values({ projectId: project.id, taskId, actor, action: 'task.revised', detail: { ...plan, fields: ['title', 'description', 'type', 'priority', 'humanReview', 'acceptanceCriteria', 'epicId', 'dependsOn'] } })
+  // Revisions saved before pins existed leave the task's pin alone
+  if (revision.design !== undefined) await setDesignPin(tx, taskId, revision.design)
+  await tx.insert(auditLog).values({ projectId: project.id, taskId, actor, action: 'task.revised', detail: { ...plan, fields: ['title', 'description', 'type', 'priority', 'humanReview', 'acceptanceCriteria', 'epicId', 'dependsOn', ...(revision.design !== undefined ? ['design'] : [])] } })
 }
 
 // A task's new criteria, each with the ID of an existing one that has the

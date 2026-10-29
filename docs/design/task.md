@@ -68,7 +68,7 @@ Read and edit any task from wherever you are, without losing your place. It's th
 
 ## Data
 
-- **Task:** ref, project, title, status, priority, type (Task / Bug / Spike, D19), epic, developer, reviewer, human review flag, branch, PR, review round, description (rich text JSON), criteria (text, met), dependencies, activity.
+- **Task:** ref, project, title, status, priority, type (Task / Bug / Spike / Design, D19, D20), epic, developer, reviewer, human review flag, branch, PR, review round, description (rich text JSON), criteria (text, met), dependencies, activity.
 - **Writes:** a `PATCH` per field, saved as you go. Description saves on Save. Comments are a `POST`.
 
 ## Responsive

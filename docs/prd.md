@@ -138,7 +138,7 @@ Fields:
 
 ### 4.3 Task
 
-A task is the unit of work that becomes one PR.
+A task is the unit of work that becomes one PR. (A Design task becomes an approved design version instead, D20.)
 
 Fields:
 
@@ -150,7 +150,7 @@ Fields:
 - Priority
 - Epic ID
 - Dependencies
-- Task type: Task, Bug or Spike (D19)
+- Task type: Task, Bug, Spike or Design (D19, D20)
 - Human review flag
 - Lock and active run reference
 - Branch name

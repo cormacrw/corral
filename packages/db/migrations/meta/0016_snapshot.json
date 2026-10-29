@@ -1,5 +1,5 @@
 {
-  "id": "db1ff411-24fa-4d7e-9175-a97be0a5f7f9",
+  "id": "39a08d26-29fc-45cb-8631-ba41bdf8b190",
   "prevId": "98c3ddbb-69ee-4078-a9aa-897be924784e",
   "version": "7",
   "dialect": "postgresql",
@@ -496,6 +496,125 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.design_versions": {
+      "name": "design_versions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "design_version_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'submitted'"
+        },
+        "bundle_blob": {
+          "name": "bundle_blob",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "spec_blob": {
+          "name": "spec_blob",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "screenshots": {
+          "name": "screenshots",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "branch": {
+          "name": "branch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "commit_sha": {
+          "name": "commit_sha",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "feedback": {
+          "name": "feedback",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "design_versions_task_id_tasks_id_fk": {
+          "name": "design_versions_task_id_tasks_id_fk",
+          "tableFrom": "design_versions",
+          "tableTo": "tasks",
+          "columnsFrom": [
+            "task_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "design_versions_task_version_unique": {
+          "name": "design_versions_task_version_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "task_id",
+            "version"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "design_versions_version_positive": {
+          "name": "design_versions_version_positive",
+          "value": "\"design_versions\".\"version\" > 0"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.epics": {
@@ -2312,6 +2431,16 @@
         "reviewer"
       ]
     },
+    "public.design_version_status": {
+      "name": "design_version_status",
+      "schema": "public",
+      "values": [
+        "submitted",
+        "changes_requested",
+        "approved",
+        "superseded"
+      ]
+    },
     "public.evidence_kind": {
       "name": "evidence_kind",
       "schema": "public",
@@ -2367,7 +2496,6 @@
       "values": [
         "pr_opened",
         "pr_updated",
-        "findings_reported",
         "approved",
         "changes_requested",
         "stuck",
@@ -2421,7 +2549,8 @@
       "values": [
         "task",
         "bug",
-        "spike"
+        "spike",
+        "design"
       ]
     }
   },

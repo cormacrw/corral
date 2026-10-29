@@ -55,9 +55,10 @@ describe('runtimes', () => {
 })
 
 describe('taskTypeBadge', () => {
-  it('badges bugs and spikes, not plain tasks (D19)', () => {
+  it('badges bugs, spikes and designs, not plain tasks (D19, D20)', () => {
     expect(taskTypeBadge('task')).toBeNull()
     expect(taskTypeBadge('bug')).toMatchObject({ label: 'Bug', color: 'error' })
     expect(taskTypeBadge('spike')).toMatchObject({ label: 'Spike', color: 'info' })
+    expect(taskTypeBadge('design')).toMatchObject({ label: 'Design', color: 'secondary' })
   })
 })

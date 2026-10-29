@@ -59,6 +59,13 @@ const toolDefinitions = {
     description: 'Fetch an image attached to this project’s task text, written there as ![name](attachment:<id>). It comes back as an image, with its file name and mime type.',
     input: { attachmentId: z.string().min(1).describe('The id after attachment: in the image link') }
   },
+  get_design: {
+    description: 'Read a design version (D20): its design.md spec, screenshots, branch and commit. Pass the design task\'s ref, or a build task pinned to a design. With no version you get the design task\'s latest version, or the build task\'s pinned one. Corral saves the spec and screenshots in your scratch folder and extracts the prototype\'s static bundle there; the result lists the paths.',
+    input: {
+      taskRef: z.string().describe('A design task, or a task pinned to one, e.g. COR-70'),
+      version: z.number().int().positive().optional().describe('The version number; leave out for the latest (or pinned) one')
+    }
+  },
   report_outcome: {
     description: 'Finish your run by reporting what happened. Corral validates it; if something is missing, the call fails and tells you what to fix.',
     input: {
@@ -84,7 +91,7 @@ const toolDefinitions = {
     input: askQuestionInput.shape
   },
   propose_plan: {
-    description: 'Propose a plan: epics and tasks with acceptance criteria and dependencies. Corral validates it and shows it to the human for approval. Use `epics` to group the tasks of a feature, and put each of those tasks in one with `epic`. A task without `epic` gets no epic, and a plan without `epics` creates none: leave them out for a lone small fix. A revision keeps the epic and task keys it reuses. To refine an existing Backlog task, read it with get_task and include it in the plan with its `ref`: the plan then revises that task instead of creating a new one, and the edits are applied when the human approves.',
+    description: 'Propose a plan: epics and tasks with acceptance criteria and dependencies. Corral validates it and shows it to the human for approval. Use `epics` to group the tasks of a feature, and put each of those tasks in one with `epic`. A task without `epic` gets no epic, and a plan without `epics` creates none: leave them out for a lone small fix. A revision keeps the epic and task keys it reuses. To refine an existing Backlog task, read it with get_task and include it in the plan with its `ref`: the plan then revises that task instead of creating a new one, and the edits are applied when the human approves. Pin a task that builds part of an approved design with `design`; only an approved version can be pinned.',
     input: {
       title: z.string().min(1),
       summary: z.string().default(''),
@@ -103,7 +110,12 @@ const toolDefinitions = {
         priority: z.enum(['urgent', 'high', 'medium', 'low']).default('medium'),
         humanReview: z.boolean().default(false),
         acceptanceCriteria: z.array(z.string().min(1)).min(1),
-        dependsOn: z.array(z.string()).default([]).describe('Keys of tasks in this plan, or refs of existing tasks')
+        dependsOn: z.array(z.string()).default([]).describe('Keys of tasks in this plan, or refs of existing tasks'),
+        design: z.object({
+          taskRef: z.string().describe('The design task, e.g. COR-70'),
+          version: z.number().int().positive().describe('Its approved version'),
+          screens: z.array(z.string().min(1)).min(1).describe('Ids of the screens in design.md this task builds')
+        }).optional().describe('For a task that builds part of an approved design: the version and the screens it covers')
       })).min(1)
     }
   },
@@ -133,7 +145,7 @@ const roleToolDefinitions: Record<AgentRole, Partial<Record<AgentTool, ToolDefin
 export const ROLE_TOOLS: Record<AgentRole, AgentTool[]> = {
   developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'report_outcome'],
   reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'report_outcome'],
-  pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
+  pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
 }
 
 interface Route {
