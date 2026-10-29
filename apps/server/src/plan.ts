@@ -1,4 +1,4 @@
-import { askQuestionInput, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type RunJob } from '@corral/contracts'
+import { askQuestionInput, type AgentRuntime, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type RunJob } from '@corral/contracts'
 import { checkPlan, diffPlans, markdownToRichText, REVISABLE_STATUSES, richTextToMarkdown, taskRef, type Actor, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
@@ -72,9 +72,9 @@ export interface PlanDeps {
   runner: RunnerHub
   // True while the update hold is on; no turn may start
   updating(): boolean
-  // Starts a PM run for a session; the orchestrator owns runs
-  // The orchestrator fills in `runtime` from the PM agent that takes the turn
-  startRun(session: SessionRow, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch' | 'runtime'>): Promise<string>
+  // Starts a PM run for a session; the orchestrator owns runs. The job
+  // carries the session's runtime, not the PM agent's (D18).
+  startRun(session: SessionRow, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'>): Promise<string>
 }
 
 // The PM conversation (D9, design/plan.md). Each turn is a runner job with
@@ -110,14 +110,30 @@ export class PlanService {
     return session
   }
 
-  // design/plan.md: the project is locked once the session has messages
-  async start(projectId: string, input: { text: string, taskRef?: string | undefined }, actor: Actor): Promise<PlanSessionDetail> {
+  // design/plan.md: the project and runtime are locked once the session has messages
+  async start(projectId: string, input: { text: string, taskRef?: string | undefined, runtime?: AgentRuntime }, actor: Actor): Promise<PlanSessionDetail> {
     const [project] = await this.#d.db.select().from(projects).where(eq(projects.id, projectId))
     if (!project) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['projectId'], message: 'Unknown project' }] })
     const text = input.text || (input.taskRef ? `Refine ${input.taskRef}` : '')
-    const [session] = await this.#d.db.insert(planSessions).values({ projectId, title: titleFrom(text), createdBy: actor }).returning()
+    const [session] = await this.#d.db.insert(planSessions).values({ projectId, title: titleFrom(text), runtime: input.runtime ?? 'claude-code', createdBy: actor }).returning()
     await this.message(session!.id, input, actor)
     return this.getSession(session!.id)
+  }
+
+  // A session's runtime can only change while it has no messages, since an
+  // agent session ID only resumes on the vendor that made it (D18)
+  async setRuntime(sessionId: string, runtime: AgentRuntime, actor: Actor): Promise<PlanSession> {
+    const { db } = this.#d
+    const session = await this.#session(sessionId)
+    if (session.runtime !== runtime) {
+      const [message] = await db.select({ id: planMessages.id }).from(planMessages).where(eq(planMessages.sessionId, sessionId)).limit(1)
+      if (message || session.agentSessionId) throw new ApiFailure(409, { code: 'conflict', constraint: 'plan_session_runtime_locked' })
+      await db.update(planSessions).set({ runtime, updatedAt: new Date() }).where(eq(planSessions.id, sessionId))
+      await db.insert(auditLog).values({ projectId: session.projectId, actor, action: 'plan.runtime', detail: { sessionId, from: session.runtime, to: runtime } })
+    }
+    const updated = await this.#toSession(await this.#session(sessionId))
+    this.#d.events.publish({ type: 'plan.session', session: updated })
+    return updated
   }
 
   // A human message starts one PM turn (D9)
@@ -164,6 +180,7 @@ export class PlanService {
       headSha: null,
       planSessionId: session.id,
       agentSessionId: session.agentSessionId,
+      runtime: session.runtime,
       model: null,
       timeoutSeconds: PM_TURN_TIMEOUT_SECONDS,
       ...prompts
@@ -648,6 +665,7 @@ export class PlanService {
       id: row.id,
       projectId: row.projectId,
       title: row.title,
+      runtime: row.runtime as AgentRuntime,
       preview: last?.text.slice(0, 160) ?? '',
       unread: row.unread,
       status: proposed ? 'needs_approval' : last?.kind === 'question' ? 'question' : 'none',

@@ -12,6 +12,7 @@ import {
   inboxActionInput,
   patchAgentInput,
   patchEpicInput,
+  patchPlanSessionInput,
   patchProfileInput,
   patchProjectInput,
   patchTaskInput,
@@ -381,10 +382,18 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
 
     .post('/plan/sessions', validate('json', startPlanSessionInput), async (c) => {
       const input = c.req.valid('json')
-      return c.json(await plans.start(input.projectId, { text: input.text, taskRef: input.taskRef }, actor), 201)
+      await requireRuntimeCli(runner, input.runtime)
+      return c.json(await plans.start(input.projectId, { text: input.text, taskRef: input.taskRef, runtime: input.runtime }, actor), 201)
     })
 
     .get('/plan/sessions/:id', async c => c.json(await plans.getSession(c.req.param('id'))))
+
+    // Only the runtime, and only before the session's first message (D18)
+    .patch('/plan/sessions/:id', validate('json', patchPlanSessionInput), async (c) => {
+      const input = c.req.valid('json')
+      await requireRuntimeCli(runner, input.runtime)
+      return c.json(await plans.setRuntime(c.req.param('id'), input.runtime, actor))
+    })
 
     .post('/plan/sessions/:id/messages', validate('json', planMessageInput), async (c) => {
       const input = c.req.valid('json')

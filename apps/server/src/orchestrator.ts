@@ -110,7 +110,7 @@ export class Orchestrator implements RunnerHandlers {
 
   // A PM turn (D9): a run with no task and no lease, fenced by its own epoch.
   // It waits as `queued`, holding its job, until the PM has a free slot (D13).
-  async startPmRun(session: PlanSessionRow, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch' | 'runtime'>): Promise<string> {
+  async startPmRun(session: PlanSessionRow, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'>): Promise<string> {
     const { db } = this.#d
     if (this.#stopped) throw new ApiFailure(409, { code: 'conflict', constraint: 'corral_stopped' })
     if (this.#updating) throw new ApiFailure(503, { code: 'corral_updating' })
@@ -146,8 +146,10 @@ export class Orchestrator implements RunnerHandlers {
           .orderBy(asc(runs.queuedAt), asc(runs.number)).limit(free)
         for (const w of waiting) {
           await tx.update(runs).set({ pmJob: null }).where(eq(runs.id, w.id))
-          // The runtime is the agent's that takes the turn, not whoever queued it
-          picked.push({ id: w.id, job: { ...w.job as Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch' | 'runtime'>, runtime: agent.runtime } })
+          // The runtime is the session's (D18); a job queued before sessions
+          // had one runs on the PM agent's, as it always did
+          const job = w.job as Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch' | 'runtime'> & { runtime?: string }
+          picked.push({ id: w.id, job: { ...job, runtime: job.runtime ?? agent.runtime } })
         }
       }
       return picked
