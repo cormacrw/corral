@@ -4,7 +4,7 @@ import { createRequire } from 'node:module'
 import { mount } from '@vue/test-utils'
 import { compile } from 'tailwindcss'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { computed, defineComponent, h, ref, watch } from 'vue'
+import { computed, defineComponent, h, reactive, ref, watch } from 'vue'
 
 // The mobile shell's styling comes from Tailwind classes, so the test builds
 // the CSS for the classes the shell and page render and checks the computed
@@ -30,7 +30,8 @@ vi.stubGlobal('computed', computed)
 vi.stubGlobal('ref', ref)
 vi.stubGlobal('watch', watch)
 vi.stubGlobal('useLive', () => live)
-vi.stubGlobal('useRoute', () => ({ path: '/home', fullPath: '/home' }))
+const route = reactive({ path: '/home', fullPath: '/home' })
+vi.stubGlobal('useRoute', () => route)
 vi.stubGlobal('useMobileHeader', () => ref(null))
 
 const { default: MobileLayout } = await import('./mobile.vue')
@@ -40,7 +41,8 @@ const { default: MobileLayout } = await import('./mobile.vue')
 const UDashboardGroup = defineComponent({ setup: (_, { slots }) => () => h('div', { class: 'fixed inset-0 flex overflow-hidden' }, slots.default?.()) })
 const UDashboardPanel = defineComponent({ setup: (_, { slots }) => () => h('div', { 'class': 'relative flex flex-col min-w-0 min-h-svh shrink-0 flex-1', 'data-testid': 'panel' }, slots.default?.()) })
 const Plain = defineComponent({ setup: (_, { slots }) => () => h('span', slots.default?.()) })
-const global = { components: { UDashboardGroup, UDashboardPanel, UButton: Plain, UIcon: Plain, NuxtLink: Plain, ShellBanners: Plain, MobileSearch: Plain } }
+const Link = defineComponent({ props: ['to'], setup: (props, { slots }) => () => h('a', { href: props.to }, slots.default?.()) })
+const global = { components: { UDashboardGroup, UDashboardPanel, UButton: Link, UIcon: Plain, NuxtLink: Link, ShellBanners: Plain } }
 
 const Home = defineComponent({
   setup: () => () => h(UDashboardPanel, () => h('div', { class: 'flex flex-col gap-4 p-4' }, Array.from({ length: 30 }, (_, i) => h('p', { class: 'h-20' }, `Item ${i}`))))
@@ -48,9 +50,49 @@ const Home = defineComponent({
 
 afterEach(() => {
   document.head.innerHTML = ''
+  route.path = route.fullPath = '/home'
 })
 
 describe('mobile layout', () => {
+  it.each(['/settings', '/settings/runner'])('selects the Settings tab on %s', (path) => {
+    route.path = route.fullPath = path
+    const wrapper = mount(MobileLayout, { global })
+    const tabs = wrapper.findAll('nav a')
+    expect(tabs.map(tab => tab.text())).toEqual(['Home', 'Plan', 'Inbox', 'Projects', 'Settings'])
+    expect(tabs.map(tab => tab.attributes('href'))).toEqual(['/home', '/plan', '/inbox', '/projects', '/settings'])
+    expect(wrapper.get('nav [aria-current="page"]').text()).toBe('Settings')
+    expect(wrapper.find('header [aria-label="Back to Home"]').exists()).toBe(false)
+    if (path !== '/settings') expect(wrapper.get('header [aria-label="Back to Settings"]').attributes('href')).toBe('/settings')
+    wrapper.unmount()
+  })
+
+  it.each(['/home', '/plan', '/inbox', '/projects', '/settings', '/settings/runner', '/agents/atlas', '/projects/corral', '/projects/corral/board', '/projects/corral/backlog'])('has no global search or settings action on %s', (path) => {
+    route.path = route.fullPath = path
+    const wrapper = mount(MobileLayout, { global })
+    expect(wrapper.find('header [aria-label="Search"]').exists()).toBe(false)
+    expect(wrapper.find('header [aria-label="Settings"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="open-search"]').exists()).toBe(false)
+    // Pages can still teleport their own search and other actions here.
+    expect(wrapper.find('#mobile-header-actions').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('returns from an agent to Home without selecting a tab and keeps Agent settings', () => {
+    route.path = route.fullPath = '/agents/atlas'
+    const wrapper = mount(MobileLayout, { global })
+    expect(wrapper.get('header [aria-label="Back to Home"]').attributes('href')).toBe('/home')
+    expect(wrapper.get('header [aria-label="Agent settings"]').attributes('href')).toBe('/settings/agents')
+    expect(wrapper.find('nav [aria-current="page"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps Project settings on the project overview', () => {
+    route.path = route.fullPath = '/projects/corral'
+    const wrapper = mount(MobileLayout, { global })
+    expect(wrapper.get('header [aria-label="Project settings"]').attributes('href')).toBe('/projects/corral/settings')
+    wrapper.unmount()
+  })
+
   it('makes a page whose content is in the panel\'s default slot the vertical scroll container', async () => {
     const wrapper = mount(MobileLayout, { global, slots: { default: () => h(Home) }, attachTo: document.body })
     const style = document.createElement('style')

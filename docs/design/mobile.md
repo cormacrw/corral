@@ -28,10 +28,10 @@ Pages and components use `useDevice().isMobile` to choose a mobile component. Do
 
 From top to bottom:
 
-- **Header:** the page title (on a project's Board, Backlog and Settings, the project name above it and a back button to the project's overview; on a project's overview, a back button to Projects and Project settings in place of Settings; on a Plan conversation, the project above the session title and a back button to `/plan`; on an Inbox item, "Inbox · n of m" above the task ref and a back button to `/inbox`), the runner's live status (a dot and "Runner online" / "Runner offline", coloured like the sidebar footer), a Search button that opens [Search](#search), and a Settings button (to `/settings`). The Board, Backlog and Inbox list have their own search button that filters the page, so they don't show the global one. Pages add their own header buttons by teleporting into `#mobile-header-actions` (`<Teleport defer to="#mobile-header-actions">`), next to Settings: the Board's search, the Backlog's New task, Projects' Add project, Project settings' Save.
+- **Header:** the page title (on a project's Board, Backlog and Settings, the project name above it and a back button to the project's overview; on a project's overview, a back button to Projects and Project settings; on a Plan conversation, the project above the session title and a back button to `/plan`; on an Inbox item, "Inbox · n of m" above the task ref and a back button to `/inbox`), the runner's live status (a dot and "Runner online" / "Runner offline", coloured like the sidebar footer). There are no global Search or Settings buttons; Settings is a tab. The Board, Backlog and Inbox list keep their own search controls that filter the page. Pages add their own header buttons by teleporting into `#mobile-header-actions` (`<Teleport defer to="#mobile-header-actions">`), in the header: the Board's search, the Backlog's New task, Projects' Add project, Project settings' Save.
 - **Banners:** the same shell banners as the web layout (stopped, updating, project paused, runner offline, reconnecting), from `ShellBanners.vue`.
 - **Page:** fills the space between, and scrolls.
-- **Tab bar:** five tabs, each an icon over a label. The active tab is `primary`. A Plan conversation and an Inbox item hide the tab bar, the runner status and Settings, so the chat or the tray and its composer get the full height.
+- **Tab bar:** five tabs, each an icon over a label. The active tab is `primary`. A Plan conversation and an Inbox item hide the tab bar and runner status, so the chat or the tray and its composer get the full height.
 
 | Tab | Icon | Route | Active on | Indicator |
 |---|---|---|---|---|
@@ -39,7 +39,7 @@ From top to bottom:
 | Plan | `message-square` | `/plan` | `/plan/**` | Unread dot when a session is unread |
 | Inbox | `inbox` | `/inbox` | `/inbox/**` | Badge with the live count of open items (Needs you) |
 | Projects | `folder` | `/projects` | `/projects/**`, `/tasks/**`, `/epics/**` | |
-| Agents | `bot` | `/agents` | `/agents/**` | |
+| Settings | `settings` | `/settings` | `/settings`, `/settings/**` | |
 
 - The header and tab bar pad themselves with `env(safe-area-inset-*)`, and the viewport uses `viewport-fit=cover`, so nothing sits under a notch or the home indicator.
 - The runner status and Inbox count come from the app's one live connection (`useLive()`), so they update without a reload.
@@ -61,7 +61,7 @@ On the web, `/projects` renders in the normal shell as a plain project list, as 
 Built from the **Agents**, **Agent · Atlas** and **Agent · live run** frames. Behaviour follows [agent.md](agent.md); the web and mobile pages share `useAgentRuns()`.
 
 - **Agents** (`/agents`): **Working now** cards (the agent, its live run's task, project, run number and elapsed time), then **Idle** rows (the PM's "Runs only when you message it in Plan", or the last run), then **Today**: runs, PRs merged and token usage across every agent. Rows show a marker only for Paused or Waiting on usage limit, using the shared `agentStatus` helper; working and idle states already have section headings. Expired usage cooldowns have no marker. Status follows the live connection. Tapping an agent opens its page.
-- **Agent** (`/agents/:name`): the header gets a back arrow to Agents and an **Agent settings** button in place of Settings. The avatar, name and status, the role's stat tiles (they scroll sideways), the facts line, the **Current run** card and **Previous runs**. Each run opens its transcript. Mobile doesn't auto-select a run here, unlike the web.
+- **Agent** (`/agents/:name`): the header gets a back arrow to Home (`/home`) and an **Agent settings** button; no tab is active. The avatar, name and status, the role's stat tiles (they scroll sideways), the facts line, the **Current run** card and **Previous runs**. Each run opens its transcript. Mobile doesn't auto-select a run here, unlike the web.
 - **Run** (`/agents/:name/:runId`): full screen, without the shell's header or tab bar. Its own header has a back arrow to the agent, "{Agent} · Run #n", the task, **Open task** (goes to the task page), the outcome badge, elapsed time and tokens (input, cache read and output), and **Stop run** while live. The body is `RunTranscript`, thinking included, streamed while live. The footer is the same as the web's (the composer while live, disabled with the reason on a Codex run, the read-only note once finished), padded for the home indicator.
 
 ## Task and epic
@@ -77,7 +77,7 @@ Built from the **Agents**, **Agent · Atlas** and **Agent · live run** frames. 
 Built from the frames **Projects**, **Project overview** and **Project settings**. The behaviour is [project-overview.md](project-overview.md) and [project-settings.md](project-settings.md).
 
 - **Projects** (`/projects`, `MobileProjects.vue`): header "Projects" with an Add project button. One card per project: the thumbnail, name, Paused badge only while paused, and `owner/repo · PREFIX`, which opens the overview. Under it, one line: the agent holding a lease ("Atlas building COR-35", with the working dot), or for a paused project "No new runs start while paused." and how many items need you. The card ends in four cells: **Board** with the count of tasks on the board, **Backlog** with the Backlog count, **PRs** (the Pull requests page), and **Settings**. An outlined **Add project** button follows the cards.
-- **Project overview** (`/projects/:slug`, `MobileProjectOverview.vue`): header "Overview" with Back (to Projects) and a Project settings button in place of Settings. The web page's sections in one column: the project header with **Plan with Juno** and **Open board** side by side, stat tiles that scroll sideways, Needs you as full-width rows (ref and title over the type badge and time), Active now, Epics with **Open Backlog**, and Recent activity. It shares its data with the web page through `useProjectOverview()`.
+- **Project overview** (`/projects/:slug`, `MobileProjectOverview.vue`): header "Overview" with Back (to Projects) and a Project settings button. The web page's sections in one column: the project header with **Plan with Juno** and **Open board** side by side, stat tiles that scroll sideways, Needs you as full-width rows (ref and title over the type badge and time), Active now, Epics with **Open Backlog**, and Recent activity. It shares its data with the web page through `useProjectOverview()`.
 - **Project settings** (`/projects/:slug/settings`): the web page's cards, stacked, under the project page header (the project name over "Settings", Back to the overview) with the "Saved" note and **Save**, which follows the same rules as Save changes on the web.
 
 ## Inbox
@@ -115,13 +115,13 @@ Built from the **Setup · Your name**, **Setup · Repository**, **Setup · Agent
 
 Built from the **Settings** and **Settings · Runner** frames. Behaviour follows [settings.md](settings.md).
 
-- **Settings** (`/settings`, `SettingsMobile.vue`): on mobile, `/settings` lists the sections instead of opening Profile. The header has a back button to Home and no runner status or Settings button. From the top: your picture and name (opens Profile), **Profile** and **Runner** rows (the runner row shows its live status, "Online · {name}" with the dot), **Agents** (one row per agent with its role, runtime and concurrency, opening the Agents section), **Appearance** with the colour mode and the **Layout** override (Auto / Desktop / Mobile, see [Override](#override)) set in place, and **App → Install Corral** where the browser can install it.
+- **Settings** (`/settings`, `SettingsMobile.vue`): on mobile, `/settings` lists the sections instead of opening Profile. This is a top-level tab: the header has no back button, runner status or Settings button. From the top: your picture and name (opens Profile), **Profile** and **Runner** rows (the runner row shows its live status, "Online · {name}" with the dot), **Agents** (one row per agent with its role, runtime and concurrency, opening the Agents section), **Appearance** with the colour mode and the **Layout** override (Auto / Desktop / Mobile, see [Override](#override)) set in place, and **App → Install Corral** where the browser can install it.
 - **Sections** (`/settings/<section>`): each its own screen, titled with the section, with a back button to `/settings`. Profile, Agents and Appearance show the web cards stacked, without the section menu.
 - **Runner** (`/settings/runner`, `SettingsRunnerMobile.vue`): the status card (dot, "Online · {name}", last heartbeat, live from `useLive()`) with **Reconnect**, which reloads the live state and scans the logins again; the data directory (`CORRAL_RUNNER_DATA_DIR`, read-only); **Logins inside the runner** with each CLI's version and Signed in / Not signed in; the sign-in commands with a copy button each; and the note that Corral never reads credentials.
 
 ## Search
 
-Built from the **Search** frame (`MobileSearch.vue`): the web's command palette as a full screen over the shell, opened from the header's Search button. The search box (focused) and **Cancel** sit at the top. With no query it lists the pages to go to; a query matches, case-insensitively, **Go to** pages (the same list as the web palette, `utils/search.ts`), **Epics** (with the project and merged count), **Tasks** (by title or ref, with the status), and **Plan sessions** (with the time), the matched text in bold. Each group shows up to 8 results. Picking one goes to it and closes Search; so does navigating away.
+Mobile has no global Search button or command palette. Board, Backlog and the Inbox list retain their own in-page search. The desktop command palette (`layouts/default.vue`, `utils/search.ts`) remains available through its Search button and ⌘K/Ctrl+K.
 
 ## Pages without a mobile screen yet
 
