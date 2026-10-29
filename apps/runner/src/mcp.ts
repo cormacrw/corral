@@ -1,4 +1,4 @@
-import { askQuestionInput, EVIDENCE_KINDS, type AgentTool } from '@corral/contracts'
+import { askQuestionInput, EVIDENCE_KINDS, type AgentTool, type RunJob } from '@corral/contracts'
 import { TASK_TYPES, type AgentRole } from '@corral/core'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -23,7 +23,7 @@ interface ImageResult {
 }
 
 const outcomes: Record<AgentRole, readonly string[]> = {
-  developer: ['pr_opened', 'pr_updated', 'findings_reported', 'stuck', 'failed'],
+  developer: ['pr_opened', 'pr_updated', 'findings_reported', 'design_submitted', 'stuck', 'failed'],
   reviewer: ['approved', 'changes_requested', 'failed'],
   pm: []
 }
@@ -64,6 +64,14 @@ const toolDefinitions = {
     input: {
       taskRef: z.string().describe('A design task, or a task pinned to one, e.g. COR-70'),
       version: z.number().int().positive().optional().describe('The version number; leave out for the latest (or pinned) one')
+    }
+  },
+  submit_design: {
+    description: 'Design tasks only (D20): submit your prototype as a new design version. Pass the folder of the static bundle (it must have index.html at its root, with relative paths to its assets), the path of design.md and the screenshot paths. Corral pushes your branch and uploads the files; the version is recorded at the pushed commit. Commit your work first. Then finish with report_outcome "design_submitted".',
+    input: {
+      bundleDir: z.string().min(1).describe('Absolute path of the folder holding the static bundle, with index.html at its root'),
+      specPath: z.string().min(1).describe('Absolute path of design.md'),
+      screenshots: z.array(z.string().min(1)).min(1).describe('Absolute paths of the screenshots (PNG, JPEG or WebP), at least one per screen, desktop and mobile widths')
     }
   },
   report_outcome: {
@@ -143,13 +151,22 @@ const roleToolDefinitions: Record<AgentRole, Partial<Record<AgentTool, ToolDefin
 }
 
 export const ROLE_TOOLS: Record<AgentRole, AgentTool[]> = {
-  developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'report_outcome'],
-  reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'report_outcome'],
+  developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'report_outcome'],
+  reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'get_design', 'report_outcome'],
   pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
+}
+
+// The tools a run gets: its role's, plus submit_design for a design task's
+// developer (D20)
+export function toolsFor(job: Pick<RunJob, 'role' | 'taskType'>): AgentTool[] {
+  const tools = ROLE_TOOLS[job.role] ?? []
+  if (job.role === 'developer' && job.taskType === 'design') return [...tools.slice(0, -1), 'submit_design', ...tools.slice(-1)]
+  return tools
 }
 
 interface Route {
   role: AgentRole
+  tools: readonly AgentTool[]
   handler: ToolHandler
 }
 
@@ -176,9 +193,10 @@ export class ToolServer {
     return `http://127.0.0.1:${this.#port}/runs/${secret}`
   }
 
-  // Exposes the role's tools at a secret path until the returned function is called
-  register(secret: string, role: AgentRole, handler: ToolHandler): () => void {
-    this.#routes.set(secret, { role, handler })
+  // Exposes the role's tools (or the given ones) at a secret path until the
+  // returned function is called
+  register(secret: string, role: AgentRole, handler: ToolHandler, tools: readonly AgentTool[] = ROLE_TOOLS[role]): () => void {
+    this.#routes.set(secret, { role, tools, handler })
     return () => this.#routes.delete(secret)
   }
 
@@ -192,7 +210,7 @@ export class ToolServer {
     // Stateless: a fresh server per request, so a resumed agent process can
     // initialise again without a session clash
     const server = new McpServer({ name: 'corral', version: '1' })
-    for (const name of ROLE_TOOLS[route.role]) {
+    for (const name of route.tools) {
       const definition = roleToolDefinitions[route.role][name] ?? toolDefinitions[name]
       server.registerTool(name, { description: definition.description, inputSchema: definition.input }, async (input: Record<string, unknown>) => {
         const outcome = await route.handler(name, input).catch((error: unknown): ToolOutcome => ({ ok: false, error: error instanceof Error ? error.message : String(error) }))

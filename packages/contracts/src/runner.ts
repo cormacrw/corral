@@ -1,4 +1,4 @@
-import type { AgentRole, RunOutcome } from '@corral/core'
+import type { AgentRole, RunOutcome, TaskType } from '@corral/core'
 
 // The protocol between apps/server and apps/runner over WebSocket (D7). The
 // runner always dials out (D1), so the same messages work on localhost, the
@@ -62,6 +62,9 @@ export interface RunJob {
   // Developer and reviewer runs
   taskId: string | null
   taskRef: string | null
+  // The task's type: a design task's developer gets submit_design (D20).
+  // Absent on PM turns and from older servers.
+  taskType?: TaskType | null | undefined
   branch: string | null
   // Reviewer runs check out this commit
   headSha: string | null
@@ -104,6 +107,7 @@ export type AgentTool =
   | 'get_evidence'
   | 'get_attachment'
   | 'get_design'
+  | 'submit_design'
   | 'report_outcome'
   | 'list_tasks'
   | 'get_run_outcomes'

@@ -21,6 +21,8 @@ export const RUN_OUTCOMES = [
   'pr_updated',
   // A spike's developer: findings instead of a PR (D19)
   'findings_reported',
+  // A design task's developer: a new design version instead of a PR (D20)
+  'design_submitted',
   'approved',
   'changes_requested',
   'stuck',

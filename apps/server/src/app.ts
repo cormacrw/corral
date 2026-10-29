@@ -117,7 +117,7 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
         break
       case 'request_changes':
         await addComment(db, taskId, { body: input.text, pinned: true }, actor)
-        await transitionTask(db, taskId, { type: 'human_request_changes' }, actor)
+        await transitionTask(db, taskId, { type: 'human_request_changes', feedback: input.text }, actor)
         break
       case 'delete':
         await orchestrator.deleteTask(taskId, actor, input.text ?? null)

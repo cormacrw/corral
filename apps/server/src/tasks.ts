@@ -266,6 +266,16 @@ export async function applyTransition(
     ...(task.type === 'spike' && next.status === 'merged' && task.status !== 'merged' && { mergedAt: new Date() }),
     updatedAt: new Date()
   }).where(eq(tasks.id, task.id))
+  // D20: a design version sent back, by the reviewer or the human, is kept
+  // unchanged except for its status; the next submission is a new version
+  if (task.type === 'design' && (event.type === 'changes_requested' || event.type === 'human_request_changes')) {
+    const [latest] = await tx.select({ id: designVersions.id }).from(designVersions)
+      .where(and(eq(designVersions.taskId, task.id), eq(designVersions.status, 'submitted'))).orderBy(desc(designVersions.version)).limit(1)
+    if (latest) {
+      await tx.update(designVersions).set({ status: 'changes_requested', ...(event.type === 'human_request_changes' && event.feedback && { feedback: event.feedback }), updatedAt: new Date() })
+        .where(eq(designVersions.id, latest.id))
+    }
+  }
   await tx.insert(auditLog).values({
     projectId: project.id,
     taskId: task.id,

@@ -10,6 +10,9 @@ export interface PromptTask {
   // Spikes have no branch: they deliver findings, not a PR (D19)
   branch: string | null
   spike?: boolean
+  // D20: a design task delivers a prototype and spec as a design version.
+  // `version` is the latest one submitted, null before the first.
+  design?: { version: number | null } | null
   defaultBranch: string
   reviewRounds: number
   reviewRoundCap: number
@@ -48,8 +51,16 @@ export interface ReviewTask extends PromptTask {
   findings?: string | null
 }
 
-export function reviewerPrompt(task: ReviewTask, agentName: string): string {
+// The design version under review (D20)
+export interface DesignUnderReview {
+  version: number
+  commitSha: string
+  screenshots: string[]
+}
+
+export function reviewerPrompt(task: ReviewTask & { underReview?: DesignUnderReview | null }, agentName: string): string {
   if (task.spike) return spikeReviewerPrompt(task, agentName)
+  if (task.design) return designReviewerPrompt(task, task.underReview ?? null, agentName)
   const evidence = evidenceList(task)
   return [
     `You are ${agentName}, the reviewer agent in Corral. Review round ${task.reviewRounds + 1} of ${task.reviewRoundCap} for task ${task.ref}: ${task.title}.`,
@@ -175,6 +186,7 @@ export function questionText(m: { text: string, recommendation: string | null, o
 
 export function developerPrompt(task: PromptTask, agentName: string): string {
   if (task.spike) return spikeDeveloperPrompt(task, agentName)
+  if (task.design) return designDeveloperPrompt(task, agentName)
   const revision = task.reviewRounds > 0
   return [
     `You are ${agentName}, the developer agent in Corral. You are working on task ${task.ref}: ${task.title}.`,
@@ -222,6 +234,85 @@ function spikeDeveloperPrompt(task: PromptTask, agentName: string): string {
 - When you're done, call \`report_outcome\` with outcome "findings_reported" and your findings as the summary. If anything is missing, the call fails and tells you what to fix.
 - Write the findings in markdown with these sections: **Answer** (the answer to the question, criterion by criterion), **Evidence** (what you checked and what it showed), **Recommendation**, and **Suggested follow-up tasks** (each with a title, a line on what it would do, and its acceptance criteria). They're posted on the task for the human, and the PM can turn them into a plan.${revision ? ' Report the complete findings again, not just what changed: they replace the earlier ones.' : ''}
 - If you cannot continue without a human decision, call \`report_outcome\` with outcome "stuck" and put the question in the summary.
+- Always finish by calling \`report_outcome\`.`)
+  ].join('\n')
+}
+
+// D20: a design task's deliverable is a faithful prototype and its spec,
+// submitted as a new design version. Nothing is merged and no PR is opened.
+const DESIGN_HOW_TO = (task: PromptTask) => `
+- You are in a git worktree on branch \`${task.branch}\`, based on \`${task.defaultBranch}\`. Commit your work on this branch. It is pushed but never merged, and no PR is opened.
+- Do not push and do not use \`gh\`. Corral pushes the branch when you call \`submit_design\`.
+- Read \`.corral/CORRAL.md\`, \`CLAUDE.md\` and the relevant \`.corral/wiki/\` pages first, if they exist. They say how this project builds a prototype: the command that produces its static bundle and the folder it writes. If they don't say, call \`report_outcome\` with outcome "stuck" and ask how; don't guess.
+- Build the prototype from the project's real components and styles, so it looks like what will ship. Don't restyle or copy them into a separate mockup.
+- Use mock data only: no calls to the project's backend or any other service. The bundle must work as static files on their own, with an \`index.html\` at its root and relative paths to its assets.
+- Write \`design.md\` (in your scratch folder or the bundle) with: the screens, each with a stable id (e.g. \`login\`, \`login-error\`); their states; the interactions; the components used; the shape of the mock data; and open questions.
+- Capture screenshots of every screen at a desktop width (1280 px) and a mobile width (390 px) with agent-browser, from the built bundle. Save them in your scratch folder.
+- Commit, then call \`submit_design\` with the bundle folder, the path of \`design.md\` and the screenshot paths. Corral pushes the branch and records a new design version at that commit. A bundle without \`index.html\` at its root is rejected.
+- Attach evidence for every acceptance criterion with \`attach_evidence\`, using the criterion ID in brackets above. The screenshots can be that evidence.
+- Use \`get_task\` to re-read the task, comments and evidence at any time, \`get_design\` to read a version you submitted, and \`add_comment\` to leave notes for the human or reviewer.
+- When the version is submitted and evidenced, call \`report_outcome\` with outcome "design_submitted" and a summary of the design: the screens and the decisions worth the human's attention. If you committed after \`submit_design\`, submit again first: the outcome is accepted only for a version at your branch's latest commit.
+- If you cannot continue without a human decision, call \`report_outcome\` with outcome "stuck" and put the question in the summary.
+- Always finish by calling \`report_outcome\`.`
+
+function designDeveloperPrompt(task: PromptTask, agentName: string): string {
+  const version = task.design?.version ?? null
+  return [
+    `You are ${agentName}, the developer agent in Corral. You are working on design task ${task.ref}: ${task.title}.`,
+    version !== null
+      ? `This is a revision: changes were requested on design v${version}. Address every piece of feedback below and submit the result as v${version + 1}.`
+      : 'A design task agrees a UI or flow before it is built. Build a prototype and a spec that meet every acceptance criterion, and submit them as a design version for review.',
+    '',
+    section('Task', richTextToMarkdown(task.description) || '(no description)'),
+    section('Acceptance criteria', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
+    commentsSection(task),
+    attachmentsSection(task),
+    section('How to work', DESIGN_HOW_TO(task))
+  ].join('\n')
+}
+
+// The message a resumed design session gets after changes were requested:
+// the session already holds the task and the earlier work (D20)
+export function designRevisionPrompt(task: PromptTask, feedback: PromptTask['comments']): string {
+  const version = task.design?.version ?? 0
+  const format = (c: PromptTask['comments'][number]) => `- ${c.author} (${c.createdAt.toISOString()}): ${c.body}`
+  return [
+    `Changes were requested on design v${version} of ${task.ref}. This is the same session and the same branch, \`${task.branch}\`: continue from your earlier work.`,
+    '',
+    section('Feedback', feedback.length > 0 ? feedback.map(format).join('\n') : '(no written feedback: re-read the task with get_task)'),
+    section('What to do', `
+- Address every point of the feedback in the prototype and in \`design.md\`.
+- Rebuild the bundle, capture fresh screenshots at desktop and mobile widths, commit, and call \`submit_design\` again. It records v${version + 1}; v${version} is kept unchanged.
+- Attach evidence for every acceptance criterion again with \`attach_evidence\` if the review round has moved on (\`get_task\` shows the round).
+- Then call \`report_outcome\` with outcome "design_submitted" and a summary of what changed.`)
+  ].join('\n')
+}
+
+// D20: the reviewer checks a design version's spec and screenshots against
+// the criteria. There is no diff to review.
+function designReviewerPrompt(task: ReviewTask, underReview: DesignUnderReview | null, agentName: string): string {
+  return [
+    `You are ${agentName}, the reviewer agent in Corral. Review round ${task.reviewRounds + 1} of ${task.reviewRoundCap} for design task ${task.ref}: ${task.title}.`,
+    underReview
+      ? `You are checking design v${underReview.version}, built at commit ${underReview.commitSha} on branch \`${task.branch}\`. A design is a prototype and a spec, not a change to merge: there is no PR and no diff to review.`
+      : 'No design version was found for this submission; request changes and say so.',
+    '',
+    section('Task', richTextToMarkdown(task.description) || '(no description)'),
+    section('Acceptance criteria', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
+    underReview ? section('Screenshots in this version', underReview.screenshots.map(s => `- ${s}`).join('\n') || '(none)') : '',
+    section('Evidence the developer attached (this round)', evidenceList(task)),
+    task.previousFeedback ? section('Your feedback last round', task.previousFeedback) : '',
+    commentsSection(task),
+    attachmentsSection(task),
+    section('How to review', `
+- Do not edit, commit or push.
+- Read the version with \`get_design\` and taskRef "${task.ref}"${underReview ? ` and version ${underReview.version}` : ''}: it saves \`design.md\` and the screenshots in your scratch folder and extracts the bundle there. Look at every screenshot.
+- Judge every acceptance criterion against the spec and the screenshots: is each screen, state and interaction it asks for there, specified in \`design.md\` and visible in a screenshot?
+- Check that the spec gives each screen a stable id, its states, the interactions, the components used, the mock data's shape and open questions, and that there are desktop and mobile screenshots.
+- Check that the prototype uses the project's real components and styles (compare with the code in your checkout) and mock data only, with no calls to a backend.
+- Call \`report_outcome\` with outcome "approved" or "changes_requested" and a \`criteria\` verdict for every criterion ID above (met true/false with a note). Approving sends the design to the human, who approves it or requests changes.
+- When you approve, keep it short: the summary is one or two sentences, and each criterion note is a few words.
+- When you request changes, the summary is posted to the developer as a comment: make every point specific and actionable.
 - Always finish by calling \`report_outcome\`.`)
   ].join('\n')
 }

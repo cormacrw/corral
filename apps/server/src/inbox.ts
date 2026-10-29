@@ -6,7 +6,7 @@ import { actorLabel } from './orchestrator.ts'
 
 const { agents, auditLog, projects, reviews, runs, tasks } = schema
 
-const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'findings_reported', 'changes_requested', 'merged', 'ci_failed', 'base_conflict', 'head_moved']
+const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'findings_reported', 'design_submitted', 'changes_requested', 'merged', 'ci_failed', 'base_conflict', 'head_moved']
 
 // The Inbox (D11, design/inbox.md): what developer and reviewer runs need
 // from the human, plus what they did. Nothing from the PM. Items are derived
@@ -35,7 +35,7 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
       const resolution = resolutionText(entry.action, event, detail)
       resolved.push({ ...base, type: 'activity', preview: resolution, body: resolution, sender: { name: 'You', role: 'system' }, resolution })
     } else if (entry.action === 'review.recorded' || (entry.action === 'task.transition' && ACTIVITY_EVENTS.includes(event ?? ''))) {
-      const text = activityText(entry.action, event, detail, task.prNumber)
+      const text = activityText(entry.action, event, detail, task.prNumber, task.type)
       activity.push({ ...base, type: 'activity', preview: text, body: text, sender: senderOf(entry.actor), resolution: null })
     }
     if (activity.length >= limit && resolved.length >= limit) break
@@ -98,17 +98,18 @@ function senderOf(actor: Actor): InboxItem['sender'] {
   return { name: actorLabel(actor), role: 'system' }
 }
 
-function activityText(action: string, event: string | null, detail: Record<string, unknown>, prNumber: number | null): string {
+function activityText(action: string, event: string | null, detail: Record<string, unknown>, prNumber: number | null, type: string): string {
   const pr = prNumber ? `PR #${prNumber}` : 'the PR'
   if (action === 'review.recorded') {
-    // Only a spike is reviewed without a PR: its findings are (D19)
-    const reviewed = prNumber ? pr : 'the findings'
+    // A spike's findings (D19) and a design (D20) are reviewed without a PR
+    const reviewed = prNumber ? pr : type === 'design' ? 'the design' : 'the findings'
     return detail.verdict === 'approved' ? `Approved ${reviewed} (${String(detail.met)} of ${String(detail.of)} criteria met)` : `Requested changes on ${reviewed} (${String(detail.met)} of ${String(detail.of)} criteria met)`
   }
   switch (event) {
     case 'pr_opened': return `Opened ${pr}`
     case 'pr_updated': return `Pushed a revision to ${pr}`
     case 'findings_reported': return 'Reported findings; on to the reviewer'
+    case 'design_submitted': return `Submitted design v${String(detail.version)}; on to the reviewer`
     case 'changes_requested': return 'Changes requested; back to the developer'
     case 'merged': return `Merged ${pr}`
     case 'ci_failed': return `CI failed on ${pr}; back to the developer`

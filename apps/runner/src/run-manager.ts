@@ -6,8 +6,8 @@ import { basename, extname, isAbsolute, join, resolve } from 'node:path'
 import { createRuntimeRegistry, STOP_GRACE_MS, type AgentExit, type AgentProcess, type AgentRuntime, type AgentSession, type ParsedLine, type RuntimeRegistry } from './agent-runtime.ts'
 import type { RunnerConfig } from './config.ts'
 import type { ServerConnection } from './connection.ts'
-import { saveDesign } from './designs.ts'
-import { outcomesFor, ROLE_TOOLS, type ToolOutcome, type ToolServer } from './mcp.ts'
+import { packDesign, saveDesign } from './designs.ts'
+import { outcomesFor, toolsFor, type ToolOutcome, type ToolServer } from './mcp.ts'
 import { headSha, prepareWorkspace, pushBranch, readProjectBrief, readRoleInstructions } from './workspace.ts'
 
 // Runs on this runner (flows.md §2 steps 3–5, PRD §8.6). Each run gets a
@@ -334,7 +334,7 @@ export class RunManager {
 
   async #registerTools(mcpConfigPath: string, job: RunJob, handler: (tool: AgentTool, input: Record<string, unknown>) => Promise<ToolOutcome>): Promise<() => void> {
     const secret = randomBytes(24).toString('base64url')
-    const unregister = this.#tools.register(secret, job.role, handler)
+    const unregister = this.#tools.register(secret, job.role, handler, toolsFor(job))
     await writeFile(mcpConfigPath, JSON.stringify({ mcpServers: { corral: { type: 'http', url: this.#tools.url(secret) } } }))
     return unregister
   }
@@ -560,7 +560,7 @@ export class RunManager {
 
   async #toolCall(run: ActiveRun, tool: AgentTool, input: Record<string, unknown>): Promise<ToolOutcome> {
     if (run.ended || run.outcomeAccepted) return { ok: false, error: 'This run is over. Stop working.' }
-    if (!ROLE_TOOLS[run.job.role]?.includes(tool)) return { ok: false, error: `The ${run.job.role} can't use ${tool}` }
+    if (!toolsFor(run.job).includes(tool)) return { ok: false, error: `The ${run.job.role} can't use ${tool}${tool === 'submit_design' ? ' on a task that isn\'t a design' : ''}` }
 
     if (tool === 'attach_evidence') {
       const file = await this.#readEvidence(run, input)
@@ -574,20 +574,29 @@ export class RunManager {
       return saveDesign(run.scratchDir, design.result as Parameters<typeof saveDesign>[1])
     }
 
+    // D20: pack the bundle, push the design branch, then the server records
+    // a new version at the pushed commit
+    if (tool === 'submit_design') {
+      const packed = await packDesign(run.worktree!, input)
+      if (!packed.ok) return packed
+      const pushed = await this.#push(run)
+      if (!pushed.ok) return pushed
+      return this.#forward(run, tool, { ...packed.result, headSha: pushed.result })
+    }
+
     if (tool === 'report_outcome') {
       const outcome = String(input.outcome ?? '')
       if (!outcomesFor(run.job.role).includes(outcome)) {
         return { ok: false, error: `A ${run.job.role} reports one of: ${outcomesFor(run.job.role).join(', ')}` }
       }
       let payload: Record<string, unknown> = input
-      if (run.job.role === 'developer' && (outcome === 'pr_opened' || outcome === 'pr_updated')) {
+      if (run.job.role === 'developer' && (outcome === 'pr_opened' || outcome === 'pr_updated' || outcome === 'design_submitted')) {
         // A spike has no branch to push (D19)
         if (!run.job.branch) return { ok: false, error: 'A spike opens no PR: report your findings with outcome findings_reported.' }
         // The runner pushes, not the agent (D8); the commit goes with the report
-        const pushed = await pushBranch(run.worktree!, run.job.branch!)
-        if (pushed.sha === null) return { ok: false, error: `Corral could not push your branch: ${pushed.error}. Commit your work and report again.` }
-        this.#note(run, `Pushed ${pushed.sha.slice(0, 10)} to ${run.job.branch}`)
-        payload = { ...input, headSha: pushed.sha }
+        const pushed = await this.#push(run)
+        if (!pushed.ok) return pushed
+        payload = { ...input, headSha: pushed.result }
       }
       const result = await this.#forward(run, tool, payload)
       if (result.ok) run.outcomeAccepted = true
@@ -595,6 +604,14 @@ export class RunManager {
     }
 
     return this.#forward(run, tool, input)
+  }
+
+  async #push(run: ActiveRun): Promise<{ ok: true, result: string } | { ok: false, error: string }> {
+    if (!run.job.branch) return { ok: false, error: 'This run has no branch to push' }
+    const pushed = await pushBranch(run.worktree!, run.job.branch)
+    if (pushed.sha === null) return { ok: false, error: `Corral could not push your branch: ${pushed.error}. Commit your work and try again.` }
+    this.#note(run, `Pushed ${pushed.sha.slice(0, 10)} to ${run.job.branch}`)
+    return { ok: true, result: pushed.sha }
   }
 
   #forward(run: ActiveRun, tool: AgentTool, input: unknown): Promise<ToolOutcome> {
@@ -640,9 +657,9 @@ function runnerNotes(run: ActiveRun, job: RunJob): string {
   return [
     '## Corral runner notes',
     '',
-    `- Your Corral tools are on the MCP server "corral": ${(ROLE_TOOLS[job.role] ?? []).join(', ')}.`,
+    `- Your Corral tools are on the MCP server "corral": ${toolsFor(job).join(', ')}.`,
     `- Save evidence files and other scratch output under ${run.scratchDir} (outside the repository), then attach them with attach_evidence using the absolute path.`,
-    job.role === 'developer' && job.branch ? `- You are in a git worktree on branch ${job.branch}. Pushing is disabled; Corral pushes when you report.` : '',
+    job.role === 'developer' && job.branch ? `- You are in a git worktree on branch ${job.branch}. Pushing is disabled; Corral pushes when you ${job.taskType === 'design' ? 'call submit_design' : 'report'}.` : '',
     // A spike (D19): findings, not commits
     job.role === 'developer' && !job.branch ? '- You are in a detached checkout of the default branch for a spike. Don\'t commit or push; report your findings.' : '',
     `- This run has a time limit of ${Math.round(job.timeoutSeconds / 60)} minutes.`

@@ -221,6 +221,10 @@ describe('approval and merging', () => {
     expect(expectOk(transition(task('agent_review', { type: 'spike' }), validEvents.review_approved, server)).status).toBe('merged')
   })
 
+  it('always sends an approved design to Human review, whatever its flag (D20)', () => {
+    expect(expectOk(transition(task('agent_review', { type: 'design' }), validEvents.review_approved, server)).status).toBe('human_review')
+  })
+
   it('sends a flagged spike to Human review, and finishes it on the human’s approval', () => {
     expect(expectOk(transition(task('agent_review', { type: 'spike', humanReview: true }), validEvents.review_approved, server)).status).toBe('human_review')
     expect(expectOk(transition(task('human_review', { type: 'spike' }), validEvents.human_approve, human)).status).toBe('merged')

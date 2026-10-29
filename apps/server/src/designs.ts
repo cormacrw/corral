@@ -1,3 +1,4 @@
+import { gunzipSync } from 'node:zlib'
 import { taskRef } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, desc, eq, isNull } from 'drizzle-orm'
@@ -71,4 +72,37 @@ export async function readDesign(db: Executor, blobs: BlobStore, project: { id: 
     screenshots: await Promise.all(row.screenshots.map(async s => ({ fileName: s.fileName, contentType: s.contentType, dataBase64: (await read(s.blob, `screenshot ${s.fileName}`)).toString('base64') }))),
     bundle: { dataBase64: (await read(row.bundleBlob, 'bundle')).toString('base64') }
   }
+}
+
+// Whether a gzipped tar has index.html at its root (D20), so the preview can
+// serve it on its own. Members are read from the tar headers without
+// unpacking anything: the bundle is untrusted.
+export function bundleHasRootIndex(archive: Uint8Array): boolean {
+  let tar: Buffer
+  try {
+    tar = gunzipSync(archive)
+  } catch {
+    return false
+  }
+  let longName: string | null = null
+  for (let offset = 0; offset + 512 <= tar.length;) {
+    const header = tar.subarray(offset, offset + 512)
+    if (header.every(b => b === 0)) break
+    const field = (start: number, length: number) => header.subarray(start, start + length).toString('utf8').replace(/\0.*$/s, '')
+    const size = Number.parseInt(field(124, 12).trim() || '0', 8)
+    if (!Number.isFinite(size)) break
+    const type = field(156, 1)
+    const body = offset + 512
+    if (type === 'L') {
+      // GNU long name: the next member's name is in this one's body
+      longName = tar.subarray(body, body + size).toString('utf8').replace(/\0.*$/s, '')
+    } else {
+      const prefix = field(345, 155)
+      const name = longName ?? (prefix ? `${prefix}/${field(0, 100)}` : field(0, 100))
+      longName = null
+      if ((type === '0' || type === '') && name.replace(/^(\.\/)+/, '') === 'index.html') return true
+    }
+    offset = body + Math.ceil(size / 512) * 512
+  }
+  return false
 }
