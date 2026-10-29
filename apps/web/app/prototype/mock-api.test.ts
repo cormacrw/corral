@@ -39,7 +39,9 @@ describe('prototype mock API', () => {
     const inbox = await mockCall<Inbox>('GET', '/inbox')
     expect(inbox.count).toBe(inbox.needsYou.length)
     const threads = inbox.needsYou.filter(i => i.type === 'plan_thread')
-    expect(threads.map(i => i.sessionId).sort()).toEqual(['s-1', 's-2', 's-3'])
+    expect(threads.map(i => i.sessionId).sort()).toEqual(['s-1', 's-2', 's-3', 's-5'])
+    expect(inbox.needsYou.map(i => i.at)).toEqual(inbox.needsYou.map(i => i.at).sort().reverse())
+    expect(threads.find(i => i.sessionId === 's-5')).toMatchObject({ status: 'none', unread: true, question: null, plan: null, reply: expect.stringContaining('SSE reconnect') })
     expect(threads.find(i => i.sessionId === 's-2')).toMatchObject({
       question: { text: 'Which push service should we use?', recommendation: 'Web Push', options: ['Web Push with VAPID keys', 'ntfy'] },
       plan: null
@@ -49,6 +51,13 @@ describe('prototype mock API', () => {
     })
     expect(threads.every(i => !('body' in i))).toBe(true)
     expect(inbox.needsYou.filter(i => i.type !== 'plan_thread').map(i => i.type).sort()).toEqual(['blocked', 'failed', 'human_review'])
+  })
+
+  it('drops an unread-reply thread from the inbox once it is read', async () => {
+    await mockCall('POST', '/plan/sessions/s-5/read')
+    const inbox = await mockCall<Inbox>('GET', '/inbox')
+    expect(inbox.needsYou.some(i => i.id === 's-5')).toBe(false)
+    expect(inbox.count).toBe(inbox.needsYou.length)
   })
 
   it('opens a plan session with its messages and plans', async () => {

@@ -34,7 +34,7 @@ Three processes. In development they're all started together by `turbo dev`; whe
 - **The only process that opens the database.** The web app and runner never touch it directly.
 - **Exactly one instance.** The scheduler and orchestrator are long-running loops inside this process. That's the reason it isn't folded into Nuxt's Nitro server: the web layer should be free to scale or redeploy on its own.
 - Serves the HTTP API (for web), SSE (to web), and the runner WebSocket endpoint.
-- Inbox Plan threads include only open sessions with a pending question or proposed plan. Each carries a nullable question (text, recommendation, options) and plan summary (id, version, title, summary, epicCount, taskCount), rather than a last-message body. The Needs you count equals all listed task items and Plan threads.
+- Inbox Needs you is one list, newest first by `at`: when a task entered its current status (its latest `task.transition` into it, else `updatedAt`), or when a Plan thread started waiting. Plan threads include only open sessions with a pending question, a proposed plan or an unread PM reply. Each carries a nullable question (text, recommendation, options), plan summary (id, version, title, summary, epicCount, taskCount) and reply (the latest PM message, set only when listed for an unread reply), rather than a last-message body. The Needs you count equals all listed task items and Plan threads.
 
 ### `apps/runner`: runner daemon
 

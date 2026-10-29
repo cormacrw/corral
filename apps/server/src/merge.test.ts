@@ -1,6 +1,6 @@
 import type { Inbox, Project, Task, TaskInboxItem } from '@corral/contracts'
 import { schema } from '@corral/db'
-import { and, eq, ne } from 'drizzle-orm'
+import { and, desc, eq, ne } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner, sleep } from './test-runner.ts'
@@ -179,6 +179,13 @@ describe('merge orchestrator and human controls', () => {
     const item = inbox.needsYou.filter((i): i is TaskInboxItem => i.type !== 'plan_thread').find(i => i.taskId === task.id)
     expect(item).toMatchObject({ type: 'human_review', taskRef: task.ref, prUrl: pr.url, sender: { name: 'Vera', role: 'reviewer' } })
     expect(item?.body).toBe('Approved, all 1 criteria met. This task is marked for human review, so it needs your OK before it merges.')
+    // It arrived when it entered Human review; an update that keeps the status, such as the PR head moving, doesn't move it
+    const [entered] = await t.db.select().from(auditLog).where(and(eq(auditLog.taskId, task.id), eq(auditLog.action, 'task.transition'))).orderBy(desc(auditLog.createdAt)).limit(1)
+    expect(item?.at).toBe(entered!.createdAt.toISOString())
+    await t.db.update(tasks).set({ headSha: 'def456', updatedAt: new Date(Date.now() + 60_000) }).where(eq(tasks.id, task.id))
+    const moved = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
+    expect(moved.needsYou.find(i => i.taskId === task.id)?.at).toBe(item?.at)
+    await t.db.update(tasks).set({ headSha: 'abc123' }).where(eq(tasks.id, task.id))
 
     // The human's part is done on approval: the item resolves at once and
     // the merge finishes in the background
