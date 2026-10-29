@@ -62,6 +62,33 @@ const toggleCheck = (name: string) => {
   form.requiredChecks = form.requiredChecks.includes(name) ? form.requiredChecks.filter(c => c !== name) : [...form.requiredChecks, name]
 }
 const customCheck = ref('')
+
+// Remove: the server wants the exact name echoed back, so the confirm button waits for it
+const removeOpen = ref(false)
+const removeConfirm = ref('')
+const removing = ref(false)
+function openRemove() {
+  removeConfirm.value = ''
+  removeOpen.value = true
+}
+async function remove() {
+  const p = project.value
+  if (!p || removeConfirm.value !== p.name) return
+  removing.value = true
+  try {
+    await api.projects.remove(p.slug, removeConfirm.value)
+    // Drop it now rather than waiting for the project.deleted event
+    live.state.value.projects = live.state.value.projects.filter(x => x.id !== p.id)
+    removeOpen.value = false
+    toast.add({ title: `Removed ${p.name}`, color: 'success' })
+    const next = live.state.value.projects[0]
+    await navigateTo(next ? `/projects/${next.slug}` : '/setup')
+  } catch (e) {
+    toast.add({ title: 'Not removed', description: e instanceof Error ? e.message : String(e), color: 'error' })
+  } finally {
+    removing.value = false
+  }
+}
 </script>
 
 <template>
@@ -306,17 +333,53 @@ const customCheck = ref('')
           <div>
             <span class="font-medium">Remove project</span>
             <p class="text-xs text-muted">
-              Not available in this version. Pause the project instead; your repository, branches and PRs on GitHub are left alone.
+              Stops every run and removes the project from Corral. Your repository, branches and PRs on GitHub are left alone.
             </p>
           </div>
           <UButton
             :label="`Remove ${project.name}`"
             color="error"
             variant="outline"
-            disabled
+            @click="openRemove"
           />
         </div>
       </UCard>
+      <UModal
+        v-model:open="removeOpen"
+        :title="`Remove ${project.name}?`"
+        description="Stops every run and removes the project with its tasks, epics and plans from Corral. Your repository, branches and PRs on GitHub are left alone."
+      >
+        <template #body>
+          <form
+            id="remove-project"
+            @submit.prevent="remove"
+          >
+            <UFormField :label="`Type ${project.name} to confirm`">
+              <UInput
+                v-model="removeConfirm"
+                autocomplete="off"
+                class="w-full"
+              />
+            </UFormField>
+          </form>
+        </template>
+        <template #footer>
+          <UButton
+            label="Cancel"
+            variant="outline"
+            color="neutral"
+            @click="removeOpen = false"
+          />
+          <UButton
+            type="submit"
+            form="remove-project"
+            :label="`Remove ${project.name}`"
+            color="error"
+            :disabled="removeConfirm !== project.name"
+            :loading="removing"
+          />
+        </template>
+      </UModal>
     </div>
   </UDashboardPanel>
 </template>
