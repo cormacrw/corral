@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os'
 import type { RepoSummary, SetupJob, SetupJobResult } from '@corral/contracts'
 import type { RunnerConfig } from './config.ts'
 import { exec } from './exec.ts'
@@ -49,7 +50,24 @@ export async function runSetupJob(config: RunnerConfig, job: SetupJob): Promise<
       }
       return { kind: 'cleanup_worktrees', removed, kept }
     }
+
+    case 'session_title':
+      return { kind: 'session_title', title: await sessionTitle(config, job.prompt) }
   }
+}
+
+export const TITLE_TIMEOUT_MS = 30_000
+
+// One non-interactive `claude` call with the small model, no tools, no MCP
+// servers and no saved session, run from a folder with no CLAUDE.md. It runs
+// outside the RunManager, so it never takes a PM slot or waits for one (COR-40).
+async function sessionTitle(config: RunnerConfig, prompt: string): Promise<string> {
+  const result = await exec(config.claudeBin, [
+    '-p', '--model', config.titleModel, '--tools', '', '--strict-mcp-config', '--no-session-persistence', '--output-format', 'text'
+  ], { cwd: tmpdir(), input: prompt, timeoutMs: TITLE_TIMEOUT_MS })
+  const title = result.stdout.trim()
+  if (result.code !== 0 || !title) throw new Error(result.stderr.trim() || `claude exited with code ${result.code}`)
+  return title
 }
 
 type DetectedCli = Extract<SetupJobResult, { kind: 'detect_clis' }>['clis'][number]

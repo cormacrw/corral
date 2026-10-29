@@ -76,7 +76,7 @@ describe('RunManager messages for live runs', () => {
     claudeBin = join(dirname(dataDir), 'claude')
     await writeFile(claudeBin, FAKE_CLAUDE)
     await chmod(claudeBin, 0o755)
-    config = { dataDir, claudeBin, codexBin: '/nonexistent/codex', name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds: 0 }
+    config = { dataDir, claudeBin, codexBin: '/nonexistent/codex', name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds: 0, titleModel: 'haiku' }
     sent = []
     handlers = []
   })

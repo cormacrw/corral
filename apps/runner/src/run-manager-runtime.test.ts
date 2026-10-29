@@ -31,7 +31,7 @@ describe('RunManager runtimes', () => {
   beforeEach(async () => {
     dataDir = await createTestDataDir()
     // A binary that doesn't exist: nothing here may start `claude`
-    config = { dataDir, claudeBin: '/nonexistent/claude', codexBin: '/nonexistent/codex', name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds: 300 }
+    config = { dataDir, claudeBin: '/nonexistent/claude', codexBin: '/nonexistent/codex', name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds: 300, titleModel: 'haiku' }
     sent = []
   })
 

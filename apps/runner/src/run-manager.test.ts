@@ -41,7 +41,7 @@ describe('RunManager PM turns', () => {
     sent = []
     const connection = { send: (message: RunnerMessage) => sent.push(message) > 0 } as unknown as ServerConnection
     const tools = { register: () => () => {}, url: () => 'http://127.0.0.1:9/mcp' } as unknown as ToolServer
-    manager = new RunManager({ dataDir, claudeBin, codexBin: 'codex', name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds: 0 }, connection, tools)
+    manager = new RunManager({ dataDir, claudeBin, codexBin: 'codex', name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds: 0, titleModel: 'haiku' }, connection, tools)
   })
 
   afterEach(async () => {
@@ -184,7 +184,7 @@ describe('RunManager PM turns', () => {
       return true
     }
     const tools = { register: () => () => {}, url: () => 'http://127.0.0.1:9/mcp' } as unknown as ToolServer
-    manager = new RunManager({ dataDir, claudeBin, codexBin: 'codex', name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds: 0 }, { send } as unknown as ServerConnection, tools)
+    manager = new RunManager({ dataDir, claudeBin, codexBin: 'codex', name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds: 0, titleModel: 'haiku' }, { send } as unknown as ServerConnection, tools)
     manager.assign(pmJob({ runId: 'r1', role, planSessionId: null, taskId: 'task-2', taskRef: 'APP-2', designPinned: true, branch: 'corral/app-2', headSha: role === 'reviewer' ? sha : null }))
     await finish('r1')
 

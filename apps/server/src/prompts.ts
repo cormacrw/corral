@@ -181,6 +181,16 @@ const GRILL_INSTRUCTIONS = `(The human asked to be grilled. Follow the grill-me 
 // Planning the build of an approved design (D20)
 const PM_DESIGN_GUIDANCE = 'To plan the build of an approved design, read it with get_design: its design.md spec is the source of truth, and the extracted prototype bundle and screenshots are a reference for the look, not code to copy. Plan from the spec and the real codebase, split the build across several epics when it has distinct parts, pin every task that builds UI to the approved version and the screen ids (from design.md) it covers with `design: { taskRef, version, screens }`, and write its acceptance criteria from the spec\'s screens, states and interactions.'
 
+// The runner's smallest model titles a new Plan session from its first
+// message (COR-40). The answer is cleaned up by `cleanSessionTitle`.
+export function sessionTitlePrompt(input: { text: string, attachedTask: string | null }): string {
+  return [
+    'Write a title for a planning conversation that starts with the message below. Use at most 6 words, in sentence case. Reply with the title only: no quotes, no punctuation at the end, nothing else.',
+    input.attachedTask ? `Attached task: ${input.attachedTask}` : '',
+    `Message:\n${input.text.slice(0, 4000)}`
+  ].filter(Boolean).join('\n\n')
+}
+
 // Each PM turn is one message; the session carries the rest (D9)
 export function pmPrompt(turn: PmTurn & { grilling?: boolean }): string {
   const intro = turn.fresh

@@ -59,6 +59,8 @@ services:
       CORRAL_GIT_AUTHOR_EMAIL: ${CORRAL_GIT_AUTHOR_EMAIL:-}
       # Seconds a PM session's claude process stays warm between turns; 0 turns it off
       CORRAL_PM_WARM_SECONDS: ${CORRAL_PM_WARM_SECONDS:-300}
+      # The smallest model, which writes Plan session titles
+      CORRAL_TITLE_MODEL: ${CORRAL_TITLE_MODEL:-haiku}
     volumes:
       - runner-data:/data/runner
       - claude-config:/home/runner/.claude
