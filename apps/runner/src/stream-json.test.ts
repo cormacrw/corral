@@ -50,6 +50,43 @@ describe('StreamJsonParser', () => {
     expect(second.events.at(-1)).toEqual({ type: 'usage', inputTokens: 113, outputTokens: 5 })
   })
 
+  it('counts the usage of an API message once across its content block lines', () => {
+    const parser = new StreamJsonParser()
+    const usage = { input_tokens: 2, cache_creation_input_tokens: 100, cache_read_input_tokens: 10, output_tokens: 6 }
+    const first = parser.parse(line({ type: 'assistant', message: { id: 'msg_1', content: [{ type: 'thinking', thinking: 'Hmm' }], usage } }))
+    expect(first.events.at(-1)).toEqual({ type: 'usage', inputTokens: 112, outputTokens: 6 })
+    const second = parser.parse(line({ type: 'assistant', message: { id: 'msg_1', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Read', input: {} }], usage } }))
+    expect(second.events).toEqual([{ type: 'tool_call', id: 'toolu_1', tool: 'Read', input: {} }])
+  })
+
+  it('adds up the usage of different API messages', () => {
+    const parser = new StreamJsonParser()
+    parser.parse(line({ type: 'assistant', message: { id: 'msg_1', content: [{ type: 'text', text: 'a' }], usage: { input_tokens: 10, output_tokens: 1 } } }))
+    parser.parse(line({ type: 'assistant', message: { id: 'msg_1', content: [{ type: 'text', text: 'b' }], usage: { input_tokens: 10, output_tokens: 1 } } }))
+    const third = parser.parse(line({ type: 'assistant', message: { id: 'msg_2', content: [{ type: 'text', text: 'c' }], usage: { input_tokens: 20, output_tokens: 2 } } }))
+    expect(third.events.at(-1)).toEqual({ type: 'usage', inputTokens: 30, outputTokens: 3 })
+  })
+
+  it('takes the result usage as the final figure for the turn', () => {
+    const parser = new StreamJsonParser()
+    parser.parse(line({ type: 'assistant', message: { id: 'msg_1', content: [{ type: 'text', text: 'a' }], usage: { input_tokens: 10, output_tokens: 1 } } }))
+    const result = parser.parse(line({
+      type: 'result', subtype: 'success', is_error: false, result: 'Done',
+      usage: { input_tokens: 4, cache_creation_input_tokens: 12398, cache_read_input_tokens: 31842, output_tokens: 369 }
+    }))
+    expect(result.events.filter(e => e.type === 'usage').at(-1)).toEqual({ type: 'usage', inputTokens: 44244, outputTokens: 369 })
+  })
+
+  it('adds each turn result of a long-lived session to the earlier turns', () => {
+    const parser = new StreamJsonParser()
+    parser.parse(line({ type: 'assistant', message: { id: 'msg_1', content: 'hi', usage: { input_tokens: 10, output_tokens: 1 } } }))
+    parser.parse(line({ type: 'result', subtype: 'success', result: 'hi', usage: { input_tokens: 10, output_tokens: 40 } }))
+    const next = parser.parse(line({ type: 'assistant', message: { id: 'msg_2', content: 'bye', usage: { input_tokens: 20, output_tokens: 1 } } }))
+    expect(next.events.at(-1)).toEqual({ type: 'usage', inputTokens: 30, outputTokens: 41 })
+    const result = parser.parse(line({ type: 'result', subtype: 'success', result: 'bye', usage: { input_tokens: 20, output_tokens: 25 } }))
+    expect(result.events.at(-1)).toEqual({ type: 'usage', inputTokens: 30, outputTokens: 65 })
+  })
+
   it('turns thinking blocks into events, with or without text', () => {
     const parser = new StreamJsonParser()
     const parsed = parser.parse(line({
