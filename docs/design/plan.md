@@ -56,11 +56,11 @@ Everything is centred vertically and horizontally, in a column up to 720px wide:
 Docked on the right (`?plan`), the same flyout as tasks and epics; the conversation narrows to make room. It always shows the session's **latest** plan version, so each revision updates it in place. It opens by itself when a new version arrives waiting for approval, unless a task or epic is already open.
 
 - **Header:** a "Plan v2" badge, a status badge ("Waiting for approval" in `primary`, or "Approved" in `success`), and Close.
-- **Title:** the plan title and "2 epics · 4 tasks · 8 criteria" (the epic count only when there's more than one).
+- **Title:** the plan title and "2 epics · 4 tasks · 8 criteria" (the epic count only when the plan has epics, "1 epic" for one).
 - **One section per epic**, in the order Juno gave them: the epic title (opens the epic), "N tasks · N criteria", and **List** / **Graph** tabs, remembered per epic.
   - **List:** one row per task: the ref and title, "N criteria · after {dependency}", and a **New** (`success`) or **Revised** (`warning`) badge. A Revised row is an existing Backlog task the plan refines by its ref; it shows the plan's proposed title, criteria and dependencies, while the task itself (opened from the row) is unchanged until approval. Rows open the task in the flyout, with a back arrow to the plan.
   - **Graph:** the epic's dependency tree, top to bottom, as on the epic flyout ([epic.md](epic.md)). A dependency in another epic shows as a dashed placeholder. Clicking a node opens the task.
-  - A Draft moved to another epic by hand is listed last, under **Other tasks**.
+  - Tasks with no epic, and a Draft moved to another epic by hand, are listed last, under **Other tasks** (just **Tasks** when the plan has no epics).
   - Removed tasks aren't listed, and what changed lives under Changes from v1.
 - **Changes from v1** (collapsed): the added and changed tasks with a change badge (Added `success`, or Revised for an existing task the revision starts refining; Changed `warning`), and "N tasks from v1 removed." Removed Drafts are deleted (D10), so only their count remains; a revised task that's removed is only un-staged and stays as it was.
 - **Footer** (pinned): **Add to board** (solid primary), **Add to backlog** (outline), and "New tasks stay Drafts, and revised ones unchanged, until you choose. The board schedules them now; the Backlog keeps them for later or for refining." Afterwards it reads "✓ 4 tasks added to the board." (or "…to the Backlog").
