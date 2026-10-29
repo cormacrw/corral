@@ -1,17 +1,21 @@
 import { api } from '~/composables/useApi'
+import { onboardingRedirect } from '~/utils/onboarding'
 
-// First run: with no projects, everything leads to onboarding (design/onboarding.md)
+// First run: with no projects, everything leads to onboarding; once the
+// server has one, onboarding is over on every device (design/onboarding.md)
 export default defineNuxtRouteMiddleware(async (to) => {
-  if (to.path.startsWith('/setup')) return
   const live = useLive()
   if (!live.state.value.loaded) {
     try {
-      live.state.value.projects = await api.projects.list()
+      const projects = await api.projects.list()
+      // Anything but a list (say, a proxy's HTML page) says nothing either way
+      if (!Array.isArray(projects)) return
+      live.state.value.projects = projects
     } catch {
       // The server is unreachable; pages show the error themselves
       return
     }
   }
-  if (live.state.value.projects.length === 0) return navigateTo('/setup')
-  if (to.path === '/') return navigateTo(`/projects/${live.state.value.projects[0]!.slug}`)
+  const target = onboardingRedirect(to, live.state.value.projects)
+  if (target) return navigateTo(target)
 })

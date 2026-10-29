@@ -7,6 +7,8 @@ import { epicTitle, PRIORITY, timeAgo } from '~/utils/labels'
 const route = useRoute()
 const live = useLive()
 const flyout = useTaskFlyout()
+const device = useDevice()
+const router = useRouter()
 const toast = useToast()
 const slug = computed(() => String(route.params.slug))
 const project = computed(() => live.state.value.projects.find(p => p.slug === slug.value) ?? null)
@@ -79,7 +81,9 @@ async function newTask() {
   if (!project.value) return
   try {
     const task = await api.tasks.create(slug.value, { title: 'New task', type: 'backend', description: null })
-    flyout.open(task.ref)
+    // A phone has no room for the flyout, so the task opens on its own page
+    if (device.isMobile.value) void router.push(`/tasks/${task.ref}`)
+    else flyout.open(task.ref)
   } catch (e) {
     toast.add({ title: 'Could not create the task', description: e instanceof Error ? e.message : String(e), color: 'error' })
   }
@@ -88,7 +92,26 @@ async function newTask() {
 
 <template>
   <UDashboardPanel :ui="{ body: 'p-0' }">
-    <div class="flex h-full min-h-0">
+    <BacklogMobile
+      v-if="device.isMobile.value"
+      v-model:search="search"
+      v-model:collapsed="collapsed"
+      :groups="groups"
+      :count="backlog.length"
+      :in-plan="task => Boolean(inPlan.get(task.projectId))"
+      :moving="moving"
+      :pm-name="pmName"
+      :plan-to="`/plan?project=${project?.id}`"
+      :loading="loading"
+      :error="error"
+      @move-task="moveToBoard([$event])"
+      @move-epic="moveEpic"
+      @new-task="newTask"
+    />
+    <div
+      v-else
+      class="flex h-full min-h-0"
+    >
       <div class="flex min-w-0 flex-1 flex-col">
         <div class="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b border-default px-4 py-2">
           <UInput

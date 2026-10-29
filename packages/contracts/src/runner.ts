@@ -22,6 +22,9 @@ export interface RepoSummary {
   canPush: boolean
 }
 
+// The agent CLIs detect_clis looks for in the runner
+export type CliId = 'claude' | 'codex'
+
 export type SetupJob =
   | { kind: 'list_repos' }
   | { kind: 'check_repo', repository: string }
@@ -37,7 +40,7 @@ export type SetupJobResult =
   | { kind: 'list_repos', signedIn: false }
   | { kind: 'list_repos', signedIn: true, repos: RepoSummary[] }
   | { kind: 'check_repo', signedIn: boolean, found: boolean, canPush: boolean, defaultBranch: string | null, cloned: boolean, error: string | null }
-  | { kind: 'detect_clis', clis: { id: 'claude', version: string | null, signedIn: boolean }[] }
+  | { kind: 'detect_clis', clis: { id: CliId, version: string | null, signedIn: boolean }[] }
   | { kind: 'github', status: number, body: unknown }
   | { kind: 'cleanup_worktrees', removed: string[], kept: string[] }
 
@@ -50,6 +53,9 @@ export interface RunJob {
   runNumber: number
   leaseEpoch: number
   role: AgentRole
+  // The agent's runtime id, e.g. 'claude-code': which adapter the runner
+  // starts (D15). A neutral name, never an auth method.
+  runtime: string
   projectId: string
   repository: string
   defaultBranch: string
@@ -95,6 +101,7 @@ export type AgentTool =
   | 'add_comment'
   | 'attach_evidence'
   | 'get_evidence'
+  | 'get_attachment'
   | 'report_outcome'
   | 'list_tasks'
   | 'get_run_outcomes'

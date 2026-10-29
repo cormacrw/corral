@@ -236,14 +236,17 @@ const agentHolds = computed(() => task.value && ['in_progress', 'blocked', 'agen
 const composerHint = computed(() => agentHolds.value
   ? `${developer.value?.name ?? 'The developer'} gets this on its next step.`
   : 'No agent is working on this task, so this is saved as a note.')
-async function sendComment(text: string) {
-  if (!task.value) return
+// Resolves false when not sent, so the composer keeps its images
+async function sendComment(text: string): Promise<boolean> {
+  if (!task.value) return false
   try {
     const comment = await api.tasks.comment(slug.value, number.value, text)
     if (!comments.value.some(c => c.id === comment.id)) comments.value.push(comment)
     draft.value = ''
+    return true
   } catch (e) {
     fail(e)
+    return false
   }
 }
 
@@ -766,6 +769,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
               v-model="draft"
               placeholder="Comment…"
               :hint="composerHint"
+              :project="slug || null"
               @submit="sendComment"
             />
           </div>

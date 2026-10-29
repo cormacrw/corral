@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import type { Task } from '@corral/contracts'
 import type { TaskStatus } from '@corral/core'
-import { MERGED_WINDOW_DAYS, onBoard } from '~/utils/board'
+import { BOARD_COLUMNS, onBoard } from '~/utils/board'
 import { epicTitle, PRIORITY, STATUS, taskNote } from '~/utils/labels'
 
 // The board (design/board.md): approved work by status, no drag and drop
 const route = useRoute()
 const live = useLive()
 const flyout = useTaskFlyout()
+const device = useDevice()
 const slug = computed(() => String(route.params.slug))
 const project = computed(() => live.state.value.projects.find(p => p.slug === slug.value) ?? null)
 const all = computed<Task[]>(() => project.value ? live.state.value.tasks[project.value.id] ?? [] : [])
@@ -32,24 +33,33 @@ const visible = computed(() => all.value.filter(t => onBoard(t)
   && (!epic.value || t.epicId === epic.value)
   && (!search.value || `${t.ref} ${t.title}`.toLowerCase().includes(search.value.toLowerCase()))))
 
-const columns: { label: string, statuses: TaskStatus[], hint: string }[] = [
-  { label: 'Ready', statuses: ['ready'], hint: 'Scheduled next' },
-  { label: 'In progress', statuses: ['in_progress'], hint: 'Developer' },
-  { label: 'Agent review', statuses: ['agent_review'], hint: 'Reviewer' },
-  { label: 'Human review', statuses: ['human_review'], hint: 'You' },
-  { label: 'Ready to merge', statuses: ['ready_to_merge'], hint: 'Corral' },
-  { label: 'Blocked & failed', statuses: ['blocked', 'failed'], hint: 'You' },
-  { label: 'Merged', statuses: ['merged'], hint: `Last ${MERGED_WINDOW_DAYS} days` }
-]
+const columns = BOARD_COLUMNS
 const DOT = { neutral: 'bg-neutral-400', info: 'bg-info', primary: 'bg-primary', warning: 'bg-warning', error: 'bg-error', success: 'bg-success', secondary: 'bg-secondary' } as const
 const inColumn = (statuses: TaskStatus[]) => visible.value.filter(t => statuses.includes(t.status))
+const mobileColumns = computed(() => columns.map(c => ({ ...c, color: DOT[STATUS[c.statuses[0]!].color], tasks: inColumn(c.statuses) })))
 const agentFor = (task: Task) => task.lease ? live.state.value.agents.find(a => a.role === task.lease!.role) : null
 const epicLabel = (id: string) => epicTitle(live.state.value.epics[project.value?.id ?? ''], id, epics.value.indexOf(id))
 </script>
 
 <template>
   <UDashboardPanel :ui="{ body: 'p-0' }">
-    <div class="flex h-full min-h-0">
+    <!-- Phones get one column at a time (design/mobile.md) -->
+    <BoardMobile
+      v-if="device.isMobile.value"
+      v-model:search="search"
+      v-model:epic="epic"
+      :columns="mobileColumns"
+      :epics="epics.map(id => ({ id, label: epicLabel(id) }))"
+      :total="visible.length"
+      :all="all"
+      :review-round-cap="project?.reviewRoundCap ?? 5"
+      :loading="loading"
+      :error="error"
+    />
+    <div
+      v-else
+      class="flex h-full min-h-0"
+    >
       <div class="flex min-w-0 flex-1 flex-col">
         <div class="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b border-default px-4 py-2">
           <UInput

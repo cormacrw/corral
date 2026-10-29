@@ -28,10 +28,10 @@ Pages and components use `useDevice().isMobile` to choose a mobile component. Do
 
 From top to bottom:
 
-- **Header:** the page title, the runner's live status (a dot and "Runner online" / "Runner offline", coloured like the sidebar footer), and a Settings button. Later screens can give themselves a richer header (the frames show search on some).
+- **Header:** the page title (on a project's Board, Backlog and Settings, the project name above it and a back button to the project's overview; on a Plan conversation, the project above the session title and a back button to `/plan`), the runner's live status (a dot and "Runner online" / "Runner offline", coloured like the sidebar footer), and a Settings button. Pages add their own header buttons by teleporting into `#mobile-header-actions` (`<Teleport defer to="#mobile-header-actions">`), next to Settings: the Board's search, the Backlog's New task.
 - **Banners:** the same shell banners as the web layout (stopped, updating, project paused, runner offline, reconnecting), from `ShellBanners.vue`.
 - **Page:** fills the space between, and scrolls.
-- **Tab bar:** five tabs, each an icon over a label. The active tab is `primary`.
+- **Tab bar:** five tabs, each an icon over a label. The active tab is `primary`. A Plan conversation hides the tab bar, the runner status and Settings, so the chat and its composer get the full height.
 
 | Tab | Icon | Route | Active on | Indicator |
 |---|---|---|---|---|
@@ -44,7 +44,15 @@ From top to bottom:
 - The header and tab bar pad themselves with `env(safe-area-inset-*)`, and the viewport uses `viewport-fit=cover`, so nothing sits under a notch or the home indicator.
 - The runner status and Inbox count come from the app's one live connection (`useLive()`), so they update without a reload.
 
-`/home`, `/projects` and `/agents` are placeholders for now (a short summary, the project list and the agent list), so every tab has a target. On the web they render in the normal shell.
+`/home` and `/projects` are placeholders for now (a short summary and the project list), so every tab has a target. On the web they render in the normal shell, as does `/agents`' simple list.
+
+## Agents
+
+Built from the **Agents**, **Agent · Atlas** and **Agent · live run** frames. Behaviour follows [agent.md](agent.md); the web and mobile pages share `useAgentRuns()`.
+
+- **Agents** (`/agents`): **Working now** cards (the agent, its live run's task, project, run number and elapsed time), then **Idle** rows (the PM's "Runs only when you message it in Plan", or the last run), then **Today**: runs, PRs merged and token usage across every agent. Status follows the live connection. Tapping an agent opens its page.
+- **Agent** (`/agents/:name`): the header gets a back arrow to Agents and an **Agent settings** button in place of Settings. The avatar, name and status, the role's stat tiles (they scroll sideways), the facts line, the **Current run** card and **Previous runs**. Each run opens its transcript. Mobile doesn't auto-select a run here, unlike the web.
+- **Run** (`/agents/:name/:runId`): full screen, without the shell's header or tab bar. Its own header has a back arrow to the agent, "{Agent} · Run #n", the task, **Open task** (goes to the task page), the outcome badge, elapsed time and tokens, and **Stop run** while live. The body is `RunTranscript`, thinking included, streamed while live. The footer is the same note as the web's (mid-run messages aren't supported yet), padded for the home indicator.
 
 ## Task and epic
 
@@ -66,9 +74,7 @@ Frames in the export, grouped by the task that will build them:
 |---|---|
 | Home | Home |
 | Inbox | Inbox, Inbox · Human review, Inbox · Question, Inbox · Blocked |
-| Plan | Plan · New session, Plan · Conversation, Plan · Plan v2, Plan · Runner offline |
-| Projects | Projects, Project overview, Board, Backlog, Project settings |
-| Agents | Agents, Agent · Atlas, Run #128 |
+| Projects | Projects, Project overview, Project settings (Board and Backlog are built, see [board.md](board.md) and [backlog.md](backlog.md); so is Plan, see [plan.md](plan.md#mobile)) |
 | Settings | Settings, Settings · Runner |
 | Search | Search |
 | Onboarding | Setup · Your name, Setup · Repository, Setup · Agent CLIs, Setup · Name agents |

@@ -98,7 +98,14 @@ async function scan() {
     cliError.value = e instanceof Error ? e.message : String(e)
   }
 }
-const cliReady = computed(() => clis.value?.some(c => c.signedIn) ?? false)
+// Claude Code runs the default agents; Codex runs only agents set to it
+const cliReady = computed(() => clis.value?.some(c => c.id === 'claude' && c.signedIn) ?? false)
+function cliDetail(cli: CliStatus): string {
+  const command = cli.id === 'codex' ? 'codex login' : 'claude'
+  if (!cli.version) return `Install ${cli.name} in the runner container.`
+  if (!cli.signedIn) return `${cli.version}. Sign in with: docker exec -it corral-runner ${command}`
+  return cli.id === 'claude' ? `${cli.version}. Signed in. Will run your PM, developer and reviewer agents.` : `${cli.version}. Signed in. Runs agents set to Codex.`
+}
 
 // Step 4
 const nameSets = [['Juno', 'Atlas', 'Vera'], ['Iris', 'Bolt', 'Sage'], ['Nova', 'Forge', 'Echo']]
@@ -448,12 +455,12 @@ const canContinue = computed(() => {
                   />
                 </div>
                 <p class="text-xs text-muted">
-                  {{ cli.signedIn ? `${cli.version}. Signed in. Will run your PM, developer and reviewer agents.` : cli.version ? `${cli.version}. Sign in with: docker exec -it corral-runner claude` : 'Install Claude Code in the runner container.' }}
+                  {{ cliDetail(cli) }}
                 </p>
               </div>
             </li>
             <li
-              v-for="other in ['Codex CLI', 'Gemini CLI']"
+              v-for="other in ['Gemini CLI']"
               :key="other"
               class="flex items-center gap-3 rounded-md border border-default p-3 text-sm opacity-60"
             >

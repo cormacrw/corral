@@ -7,8 +7,9 @@
 #   cp .env.docker.example .env
 #   docker compose up -d --build
 #   docker exec -it corral-runner claude          # sign in to Claude, once
+#   docker exec -it corral-runner codex login --device-auth   # sign in to Codex, once
 #   docker exec -it corral-runner gh auth login   # sign in to GitHub, once
-# Both logins persist on volumes. Corral never reads them (D2).
+# The logins persist on volumes. Corral never reads them (D2).
 
 name: corral
 
@@ -56,9 +57,12 @@ services:
       # Author and committer of agent commits; unset makes the runner warn
       CORRAL_GIT_AUTHOR_NAME: ${CORRAL_GIT_AUTHOR_NAME:-}
       CORRAL_GIT_AUTHOR_EMAIL: ${CORRAL_GIT_AUTHOR_EMAIL:-}
+      # Seconds a PM session's claude process stays warm between turns; 0 turns it off
+      CORRAL_PM_WARM_SECONDS: ${CORRAL_PM_WARM_SECONDS:-300}
     volumes:
       - runner-data:/data/runner
       - claude-config:/home/runner/.claude
+      - codex-config:/home/runner/.codex
       - gh-config:/home/runner/.config/gh
     # Sized for the configured concurrency (architecture.md, resource expectations)
     mem_limit: ${CORRAL_RUNNER_MEMORY:-6g}
@@ -88,4 +92,5 @@ volumes:
   postgres-data:
   runner-data:
   claude-config:
+  codex-config:
   gh-config:

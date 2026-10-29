@@ -10,7 +10,9 @@ describe('loadConfig', () => {
       serverUrl: new URL('http://127.0.0.1:4100'),
       name: hostname(),
       claudeBin: 'claude',
-      gitAuthor: null
+      codexBin: 'codex',
+      gitAuthor: null,
+      pmWarmSeconds: 300
     })
   })
 
@@ -20,19 +22,28 @@ describe('loadConfig', () => {
       CORRAL_SERVER_URL: 'http://server:4100',
       CORRAL_RUNNER_NAME: 'home-server',
       CORRAL_CLAUDE_BIN: '/usr/local/bin/claude',
+      CORRAL_CODEX_BIN: '/opt/codex/bin/codex',
       CORRAL_GIT_AUTHOR_NAME: 'Configured Person',
-      CORRAL_GIT_AUTHOR_EMAIL: 'configured@example.com'
+      CORRAL_GIT_AUTHOR_EMAIL: 'configured@example.com',
+      CORRAL_PM_WARM_SECONDS: '0'
     })).toEqual({
       dataDir: '/data/runner',
       serverUrl: new URL('http://server:4100'),
       name: 'home-server',
       claudeBin: '/usr/local/bin/claude',
-      gitAuthor: { name: 'Configured Person', email: 'configured@example.com' }
+      codexBin: '/opt/codex/bin/codex',
+      gitAuthor: { name: 'Configured Person', email: 'configured@example.com' },
+      pmWarmSeconds: 0
     })
   })
 
   it('rejects a server URL that does not parse', () => {
     expect(() => loadConfig({ CORRAL_SERVER_URL: 'not a url' })).toThrow(/CORRAL_SERVER_URL/)
+  })
+
+  it('rejects a PM warm time that is not a whole number of seconds', () => {
+    expect(() => loadConfig({ CORRAL_PM_WARM_SECONDS: '-1' })).toThrow(/CORRAL_PM_WARM_SECONDS/)
+    expect(() => loadConfig({ CORRAL_PM_WARM_SECONDS: 'soon' })).toThrow(/CORRAL_PM_WARM_SECONDS/)
   })
 
   it('needs both git author settings, and warns at startup without them', () => {

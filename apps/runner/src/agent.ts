@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import type { AgentExit, AgentProcess, AgentRuntime, AgentSession, RuntimeOptions, TurnResult } from './agent-runtime.ts'
 import type { GitAuthor } from './config.ts'
 import { StreamJsonParser, type ParsedLine } from './stream-json.ts'
 
@@ -8,35 +9,20 @@ import { StreamJsonParser, type ParsedLine } from './stream-json.ts'
 // Corral never sees it (D2). Everything provider-specific lives here, so
 // another CLI means another adapter, not changes to the run manager.
 
-export interface AgentOptions {
+export interface AgentOptions extends RuntimeOptions {
   claudeBin: string
-  cwd: string
-  prompt: string
-  // Role instructions from the repo, plus the runner's notes
-  systemPrompt: string
-  mcpConfigPath: string
-  model: string | null
-  resumeSessionId: string | null
-  // Set on PM follow-up turns: resuming this session adds no "Session started" note
-  quietResume?: boolean
-  gitAuthor: GitAuthor | null
-  onLine(raw: string, parsed: ParsedLine): void
 }
 
-export interface AgentExit {
-  code: number | null
-  signal: NodeJS.Signals | null
-}
+export type { AgentExit, AgentProcess, AgentSession, TurnResult } from './agent-runtime.ts'
 
-export interface AgentProcess {
-  pid: number
-  exited: Promise<AgentExit>
-  // Signals the whole process group: dev servers and browsers the agent
-  // started go with it (architecture.md, runner rule 2)
-  kill(signal: NodeJS.Signals): void
+// The registry's entry for runtime id 'claude-code'
+export function claudeCodeRuntime(claudeBin: string): AgentRuntime {
+  return {
+    id: 'claude-code',
+    spawn: options => spawnAgent({ ...options, claudeBin }),
+    spawnSession: options => spawnAgentSession({ ...options, claudeBin })
+  }
 }
-
-export const STOP_GRACE_MS = 5_000
 
 type ArgOptions = Pick<AgentOptions, 'systemPrompt' | 'mcpConfigPath' | 'model' | 'resumeSessionId'>
 
@@ -89,23 +75,13 @@ export function spawnAgent(options: AgentOptions): AgentProcess {
 
 export type AgentOptionsWithoutPrompt = Omit<AgentOptions, 'prompt'>
 
-export type TurnResult = NonNullable<ParsedLine['result']>
-
-export interface AgentSession extends AgentProcess {
-  // Writes one user message. A no-op once the process has exited.
-  send(prompt: string): void
-  // The next turn's result line, in order. Resolves null if the process
-  // ends first, so a caller waiting on a killed or crashed turn never hangs.
-  nextResult(): Promise<TurnResult | null>
-}
-
 // A long-lived agent that takes turns over stdin: each send() is one user
 // message, and each turn ends with a result line. onLine still sees every line.
 export function spawnAgentSession(options: AgentOptionsWithoutPrompt): AgentSession {
   const results: TurnResult[] = []
   const waiting: ((result: TurnResult | null) => void)[] = []
   let ended = false
-  const { child, exited } = startAgent(agentArgs({ ...options, input: 'stream-json' }), 'pipe', {
+  const { child, exited, parser } = startAgent(agentArgs({ ...options, input: 'stream-json' }), 'pipe', {
     ...options,
     onLine(raw, parsed) {
       options.onLine(raw, parsed)
@@ -129,6 +105,7 @@ export function spawnAgentSession(options: AgentOptionsWithoutPrompt): AgentSess
     kill: signal => killGroup(child, signal),
     send(prompt) {
       if (ended || !stdin.writable) return
+      parser.startTurn()
       stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: prompt } }) + '\n')
     },
     nextResult() {
@@ -140,9 +117,21 @@ export function spawnAgentSession(options: AgentOptionsWithoutPrompt): AgentSess
   }
 }
 
-function startAgent(args: string[], stdin: 'ignore' | 'pipe', options: AgentOptionsWithoutPrompt): { child: ChildProcess, exited: Promise<AgentExit> } {
+function startAgent(args: string[], stdin: 'ignore' | 'pipe', options: AgentOptionsWithoutPrompt): { child: ChildProcess, exited: Promise<AgentExit>, parser: StreamJsonParser } {
   const parser = new StreamJsonParser({ quietResumeOf: options.quietResume ? options.resumeSessionId : null })
-  const child = spawn(options.claudeBin, args, {
+  return { ...startProcess(options.claudeBin, args, stdin, options, parser), parser }
+}
+
+// Starts an agent CLI in the worktree with agentEnv, in its own process
+// group, feeding each stdout line through the adapter's parser to onLine
+export function startProcess(
+  bin: string,
+  args: string[],
+  stdin: 'ignore' | 'pipe',
+  options: Pick<RuntimeOptions, 'cwd' | 'gitAuthor' | 'onLine'>,
+  parser: { parse(line: string): ParsedLine }
+): { child: ChildProcess, exited: Promise<AgentExit> } {
+  const child = spawn(bin, args, {
     cwd: options.cwd,
     env: agentEnv(process.env, options.gitAuthor),
     // Its own process group, so the whole tree can be killed at once
@@ -174,7 +163,7 @@ function startAgent(args: string[], stdin: 'ignore' | 'pipe', options: AgentOpti
   return { child, exited }
 }
 
-function killGroup(child: ChildProcess, signal: NodeJS.Signals): void {
+export function killGroup(child: ChildProcess, signal: NodeJS.Signals): void {
   if (!child.pid) return
   try {
     process.kill(-child.pid, signal)

@@ -3,6 +3,12 @@ import type { RunEvent } from '@corral/contracts'
 // Turns Claude Code's `--output-format stream-json` lines into Corral's
 // runtime-neutral RunEvents (agent-runtime-and-auth.md rule 7). One parser
 // per process: it keeps running token totals and remembers the session ID.
+//
+// The CLI prints one `assistant` line per content block, each repeating its
+// API message's ID and usage, so a message's usage is counted only the first
+// time its ID is seen. That usage is a streaming snapshot (its output_tokens
+// is low), so each turn's `result` usage, when present, replaces the running
+// figure for that turn. A long-lived session's results each cover one turn.
 
 export interface ParsedLine {
   events: RunEvent[]
@@ -38,7 +44,7 @@ interface StreamLine {
   subtype?: string
   session_id?: string
   model?: string
-  message?: { content?: ContentBlock[] | string, usage?: Usage }
+  message?: { id?: string, content?: ContentBlock[] | string, usage?: Usage }
   rate_limit_info?: { status?: string, resetsAt?: number }
   is_error?: boolean
   result?: string
@@ -47,16 +53,20 @@ interface StreamLine {
 }
 
 // What the CLI prints when a subscription or API limit is exhausted
-const LIMIT_TEXT = /usage limit|hit your limit|rate limit|limit reached|out of extra usage/i
+export const LIMIT_TEXT = /usage limit|hit your limit|rate limit|limit reached|out of extra usage/i
 
 const empty = (): ParsedLine => ({ events: [], sessionId: null, rateLimit: null, result: null })
 
 export class StreamJsonParser {
   #inputTokens = 0
   #outputTokens = 0
+  // Totals at the end of the last turn that reported a result
+  #turnStart = { inputTokens: 0, outputTokens: 0 }
+  #countedMessages = new Set<string>()
   sessionId: string | null = null
   // A follow-up turn that resumes this session gets no "Session started" note
   #quietResumeOf: string | null
+  #sawInit = false
 
   constructor(options: { quietResumeOf?: string | null } = {}) {
     this.#quietResumeOf = options.quietResumeOf ?? null
@@ -84,6 +94,9 @@ export class StreamJsonParser {
         if (data.subtype === 'init') {
           out.sessionId = data.session_id ?? null
           if (this.#quietResumeOf && data.session_id === this.#quietResumeOf) return out
+          // A long-lived session may announce itself again on later turns
+          if (this.#sawInit) return out
+          this.#sawInit = true
           out.events.push({ type: 'system', text: `Session started${data.model ? ` (${data.model})` : ''}` })
         }
         return out
@@ -95,7 +108,9 @@ export class StreamJsonParser {
           if (block.type === 'thinking' || block.type === 'redacted_thinking') out.events.push({ type: 'thinking', text: block.thinking ?? '' })
           if (block.type === 'tool_use') out.events.push({ type: 'tool_call', id: block.id ?? '', tool: block.name ?? '', input: block.input })
         }
-        if (data.message?.usage) {
+        const messageId = data.message?.id
+        if (data.message?.usage && !(messageId && this.#countedMessages.has(messageId))) {
+          if (messageId) this.#countedMessages.add(messageId)
           this.#add(data.message.usage)
           out.events.push({ type: 'usage', inputTokens: this.#inputTokens, outputTokens: this.#outputTokens })
         }
@@ -125,12 +140,25 @@ export class StreamJsonParser {
         out.result = { isError, text }
         if (isError && LIMIT_TEXT.test(text)) out.rateLimit = { resetsAt: parseResetTime(text) }
         if (isError) out.events.push({ type: 'system', text: `The agent ended with an error: ${text || data.subtype}` })
+        if (data.usage) {
+          this.#inputTokens = this.#turnStart.inputTokens
+          this.#outputTokens = this.#turnStart.outputTokens
+          this.#add(data.usage)
+          out.events.push({ type: 'usage', inputTokens: this.#inputTokens, outputTokens: this.#outputTokens })
+        }
+        this.#turnStart = { inputTokens: this.#inputTokens, outputTokens: this.#outputTokens }
         return out
       }
 
       default:
         return out
     }
+  }
+
+  // A long-lived session's next turn is a new run, whose totals start at zero
+  startTurn(): void {
+    this.#inputTokens = 0
+    this.#outputTokens = 0
   }
 
   #add(usage: Usage): void {
