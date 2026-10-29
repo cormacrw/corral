@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { pmFallbackPrompt, pmPrompt } from './prompts.ts'
+import { developerPrompt, pmFallbackPrompt, pmPrompt, reviewerPrompt, type PromptTask } from './prompts.ts'
 
 const turn = { text: 'hi', attachedTask: null, projectName: 'Test app', prefix: 'TA' }
 
@@ -37,6 +37,67 @@ describe('pmPrompt', () => {
 
   it('points at an attached task', () => {
     expect(pmPrompt({ ...turn, attachedTask: 'TA-3', fresh: false })).toBe('(About task TA-3; read it with get_task.)\n\nhi')
+  })
+})
+
+describe('pmPrompt attachments', () => {
+  const a = '11111111-1111-4111-8111-111111111111'
+  const b = '22222222-2222-4222-8222-222222222222'
+
+  it('lists every attached image and says to fetch them with get_attachment', () => {
+    const prompt = pmPrompt({ ...turn, text: `Build this ![login](attachment:${a}) and attachment:${b}`, fresh: false })
+    expect(prompt).toBe(`(This message has 2 attached images: ${a}, ${b}. Fetch each with get_attachment before answering.)\n\nBuild this ![login](attachment:${a}) and attachment:${b}`)
+  })
+
+  it('names a single image once, after the attached task', () => {
+    const prompt = pmPrompt({ ...turn, attachedTask: 'TA-3', text: `![x](attachment:${a}) again ![x](attachment:${a})`, fresh: false })
+    expect(prompt.startsWith(`(About task TA-3; read it with get_task.)\n\n(This message has an attached image: ${a}. Fetch it with get_attachment before answering.)\n\n`)).toBe(true)
+  })
+
+  it('leaves a message without attachments unchanged', () => {
+    expect(pmPrompt({ ...turn, text: 'see https://example.com/a.png', fresh: false })).toBe('see https://example.com/a.png')
+  })
+})
+
+describe('developer and reviewer attachments', () => {
+  const task: PromptTask = {
+    ref: 'TA-1',
+    title: 'Login',
+    description: null,
+    branch: 'corral/ta-1-login',
+    defaultBranch: 'main',
+    reviewRounds: 0,
+    reviewRoundCap: 3,
+    criteria: [{ id: 'c1', text: 'Works' }],
+    comments: [],
+    attachments: []
+  }
+  const review = { ...task, headSha: 'abc', prUrl: null, evidence: [], previousFeedback: null }
+  const attachments = [
+    { id: '11111111-1111-4111-8111-111111111111', fileName: 'mockup.png', foundIn: ['the description'] },
+    { id: '22222222-2222-4222-8222-222222222222', fileName: 'bug.jpg', foundIn: ['a comment by human (2026-10-01T00:00:00.000Z)'] }
+  ]
+  const expected = [
+    '## Attached images',
+    '',
+    'Images attached by the human are part of the requirements; view each with `get_attachment` before you start.',
+    '',
+    '- 11111111-1111-4111-8111-111111111111: "mockup.png" in the description',
+    '- 22222222-2222-4222-8222-222222222222: "bug.jpg" in a comment by human (2026-10-01T00:00:00.000Z)'
+  ].join('\n')
+
+  it('lists images from the description and comments for the developer', () => {
+    expect(developerPrompt({ ...task, attachments }, 'Victor')).toContain(expected)
+  })
+
+  it('lists them for the reviewer too', () => {
+    expect(reviewerPrompt({ ...review, attachments }, 'Rita')).toContain(expected)
+  })
+
+  it('adds nothing when there are none', () => {
+    expect(developerPrompt(task, 'Victor')).not.toContain('Attached images')
+    expect(reviewerPrompt(review, 'Rita')).not.toContain('Attached images')
+    expect(developerPrompt(task, 'Victor')).not.toContain('get_attachment')
   })
 })
 

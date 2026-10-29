@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { isWorking, ROLE } from '~/utils/labels'
 
-// Placeholder for the mobile Agents tab (design/mobile.md); its real
-// screen comes in a later task
+// The Agents tab (design/mobile.md). The web keeps its simple list for now.
+const device = useDevice()
 const state = useLive().state
 useSeoMeta({ title: 'Agents · Corral' })
 </script>
 
 <template>
   <UDashboardPanel>
-    <div class="flex flex-col gap-2 p-4">
+    <MobileAgents v-if="device.isMobile.value" />
+    <div
+      v-else
+      class="flex flex-col gap-2 p-4"
+    >
       <UButton
         v-for="agent in state.agents"
         :key="agent.id"

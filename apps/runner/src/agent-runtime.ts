@@ -1,4 +1,5 @@
 import { claudeCodeRuntime } from './agent.ts'
+import { codexRuntime } from './codex.ts'
 import type { GitAuthor, RunnerConfig } from './config.ts'
 import type { ParsedLine } from './stream-json.ts'
 
@@ -62,6 +63,6 @@ export interface AgentRuntime {
 export type RuntimeRegistry = ReadonlyMap<string, AgentRuntime>
 
 export function createRuntimeRegistry(config: RunnerConfig): RuntimeRegistry {
-  const runtimes: AgentRuntime[] = [claudeCodeRuntime(config.claudeBin)]
+  const runtimes: AgentRuntime[] = [claudeCodeRuntime(config.claudeBin), codexRuntime(config.codexBin)]
   return new Map(runtimes.map(runtime => [runtime.id, runtime]))
 }

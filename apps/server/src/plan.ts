@@ -3,6 +3,7 @@ import { checkPlan, diffPlans, markdownToRichText, REVISABLE_STATUSES, richTextT
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
+import { listTaskAttachments } from './attachments.ts'
 import { listEpics } from './epics.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
@@ -232,7 +233,8 @@ export class PlanService {
           ...task,
           description: richTextToMarkdown(task.description),
           epic: epic ?? null,
-          comments: notes.map(c => ({ author: c.author.kind, body: c.body, pinned: c.pinned, at: c.createdAt.toISOString() }))
+          comments: notes.map(c => ({ author: c.author.kind, body: c.body, pinned: c.pinned, at: c.createdAt.toISOString() })),
+          attachments: await listTaskAttachments(db, project.id, task.description, notes.map(c => ({ author: c.author.kind, body: c.body, createdAt: c.createdAt })))
         }
       }
 

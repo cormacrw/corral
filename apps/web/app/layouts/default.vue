@@ -6,7 +6,6 @@ import { initials, isWorking, projectColor, ROLE, taskCounts } from '~/utils/lab
 const live = useLive()
 const state = live.state
 const route = useRoute()
-const router = useRouter()
 
 const expanded = useLocalStorage<Record<string, boolean>>('corral.sidebar.projects', {})
 const toggle = (project: Project) => {
@@ -26,6 +25,10 @@ watch(() => state.value.projects, (projects) => {
 const planUnread = computed(() => state.value.planSessions.some(s => s.unread))
 const runnerColor = computed(() => !state.value.runner?.online ? 'error' : state.value.connection === 'open' ? 'success' : 'warning')
 
+// UDashboardSearch owns the palette's behaviour: it binds ⌘K/Ctrl+K, opens on the
+// Search… button (via the dashboard toggle hook) and closes once an item is picked.
+// Items navigate through their `to`. Don't add handlers for any of these here, or
+// one action runs twice and the palette flashes open and shut.
 const searchOpen = ref(false)
 const searchGroups = computed(() => [{
   id: 'pages',
@@ -46,15 +49,6 @@ const searchGroups = computed(() => [{
   label: 'Tasks',
   items: Object.values(state.value.tasks).flat().map(t => ({ label: `${t.ref} ${t.title}`, icon: 'i-lucide-square-check', to: `/tasks/${t.ref}` }))
 }])
-function onSearchSelect(item: { to?: string }) {
-  searchOpen.value = false
-  if (item.to) void router.push(item.to)
-}
-defineShortcuts({
-  meta_k: () => {
-    searchOpen.value = !searchOpen.value
-  }
-})
 
 const isActive = (path: string) => route.path === path || route.path.startsWith(`${path}/`)
 </script>
@@ -87,7 +81,6 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
           <UDashboardSearchButton
             :collapsed="collapsed"
             label="Search…"
-            @click="searchOpen = true"
           />
 
           <nav
@@ -319,7 +312,6 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
       v-model:open="searchOpen"
       :groups="searchGroups"
       placeholder="Search pages and tasks…"
-      @update:model-value="onSearchSelect"
     />
   </div>
 </template>

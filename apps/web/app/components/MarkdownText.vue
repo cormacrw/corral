@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import type { Token, Tokens } from 'marked'
+import { attachmentIdFromSrc, attachmentUrl } from '@corral/core'
 import { marked } from 'marked'
 import type { VNode } from 'vue'
 
 // Agents write markdown (PM replies, transcripts, comments, summaries).
 // Rendered from marked's tokens into Vue nodes rather than v-html, so agent
-// output can never inject markup.
-const props = defineProps<{ text: string }>()
+// output can never inject markup. Images show only when they're attachments
+// (![name](attachment:<id>)), as thumbnails that open full size.
+// `breaks` keeps single newlines, for text a person typed into a composer
+const props = defineProps<{ text: string, breaks?: boolean }>()
+const lightbox = ref<{ src: string, alt: string } | null>(null)
 
 const SAFE_HREF = /^(https?:|mailto:|\/|#)/i
 
@@ -70,6 +74,18 @@ function inline(tokens: Token[]): (VNode | string)[] {
         if (!SAFE_HREF.test(href)) return h('span', inline(token.tokens ?? []))
         return h('a', { href, target: href.startsWith('/') || href.startsWith('#') ? undefined : '_blank', rel: 'noopener', class: 'text-primary hover:underline' }, inline(token.tokens ?? []))
       }
+      case 'image': {
+        const image = token as Tokens.Image
+        const id = attachmentIdFromSrc(image.href)
+        if (!id) return image.text
+        const src = attachmentUrl(id)
+        return h('button', {
+          'type': 'button',
+          'class': 'me-1 inline-block cursor-zoom-in overflow-hidden rounded-md border border-default align-top',
+          'aria-label': `Open ${image.text || 'image'} full size`,
+          'onClick': () => (lightbox.value = { src, alt: image.text })
+        }, h('img', { src, alt: image.text, loading: 'lazy', class: 'block max-h-40 max-w-full object-contain sm:max-w-60' }))
+      }
       case 'text': return token.tokens ? h('span', inline(token.tokens)) : unescapeHtml((token as Tokens.Text).text)
       default: return unescapeHtml('text' in token && typeof token.text === 'string' ? token.text : token.raw)
     }
@@ -80,9 +96,26 @@ function unescapeHtml(text: string): string {
   return text.replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&quot;', '"').replaceAll('&#39;', '\'').replaceAll('&amp;', '&')
 }
 
-const Rendered = () => h('div', { class: 'flex min-w-0 flex-col gap-2 wrap-break-word' }, blocks(marked.lexer(props.text)))
+const Rendered = () => blocks(marked.lexer(props.text, { breaks: props.breaks }))
 </script>
 
 <template>
-  <Rendered />
+  <div class="flex min-w-0 flex-col gap-2 wrap-break-word">
+    <Rendered />
+    <UModal
+      :open="lightbox !== null"
+      :title="lightbox?.alt || 'Image'"
+      :ui="{ content: 'max-w-5xl' }"
+      @update:open="lightbox = null"
+    >
+      <template #body>
+        <img
+          v-if="lightbox"
+          :src="lightbox.src"
+          :alt="lightbox.alt"
+          class="max-h-[80vh] w-full object-contain"
+        >
+      </template>
+    </UModal>
+  </div>
 </template>

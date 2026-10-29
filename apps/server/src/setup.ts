@@ -1,4 +1,4 @@
-import type { CliStatus, RepoCheck, RepoChoice, RepoList } from '@corral/contracts'
+import type { CliId, CliStatus, RepoCheck, RepoChoice, RepoList } from '@corral/contracts'
 import { schema, type Executor } from '@corral/db'
 import type { RunnerHub } from './runner-hub.ts'
 
@@ -87,7 +87,9 @@ export async function checkRepository(db: Executor, runner: RunnerHub, repositor
   return { repository, defaultBranch: result.defaultBranch, checks, ready: checks.every(c => c.ok) }
 }
 
+const CLI_NAMES: Record<CliId, string> = { claude: 'Claude Code', codex: 'Codex CLI' }
+
 export async function detectClis(runner: RunnerHub): Promise<CliStatus[]> {
   const result = await runner.request({ kind: 'detect_clis' })
-  return result.clis.map(cli => ({ id: cli.id, name: 'Claude Code', version: cli.version, signedIn: cli.signedIn }))
+  return result.clis.map(cli => ({ id: cli.id, name: CLI_NAMES[cli.id], version: cli.version, signedIn: cli.signedIn }))
 }

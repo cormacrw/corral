@@ -5,7 +5,7 @@ import { barePath, syncRepository } from './repos.ts'
 import { removeWorktree, worktreePath } from './workspace.ts'
 
 // Setup jobs from the server (architecture.md, "Setup jobs, not only agent
-// runs"). Tokens stay in `gh`'s and `claude`'s own config; these only report
+// runs"). Tokens stay in `gh`'s, `claude`'s and `codex`'s own config; these only report
 // whether a login exists (D2, D12).
 export async function runSetupJob(config: RunnerConfig, job: SetupJob): Promise<SetupJobResult> {
   switch (job.kind) {
@@ -31,15 +31,8 @@ export async function runSetupJob(config: RunnerConfig, job: SetupJob): Promise<
       return { kind: 'check_repo', signedIn: true, found: true, canPush: repo.canPush, defaultBranch: repo.defaultBranch, cloned: error === null, error }
     }
 
-    case 'detect_clis': {
-      const version = await exec(config.claudeBin, ['--version'], { timeoutMs: 15_000 })
-      // Only the exit code is used: Corral never reads the login itself (D2)
-      const auth = version.code === 0 ? await exec(config.claudeBin, ['auth', 'status'], { timeoutMs: 15_000 }) : null
-      return {
-        kind: 'detect_clis',
-        clis: [{ id: 'claude', version: version.code === 0 ? version.stdout.trim() : null, signedIn: auth?.code === 0 }]
-      }
-    }
+    case 'detect_clis':
+      return { kind: 'detect_clis', clis: [await detectClaude(config.claudeBin), await detectCodex(config.codexBin)] }
 
     case 'github':
       return githubRequest(job.method, job.path, job.body)
@@ -57,6 +50,29 @@ export async function runSetupJob(config: RunnerConfig, job: SetupJob): Promise<
       return { kind: 'cleanup_worktrees', removed, kept }
     }
   }
+}
+
+type DetectedCli = Extract<SetupJobResult, { kind: 'detect_clis' }>['clis'][number]
+
+async function detectClaude(bin: string): Promise<DetectedCli> {
+  const version = await exec(bin, ['--version'], { timeoutMs: 15_000 })
+  // Only the exit code is used: Corral never reads the login itself (D2)
+  const auth = version.code === 0 ? await exec(bin, ['auth', 'status'], { timeoutMs: 15_000 }) : null
+  return { id: 'claude', version: version.code === 0 ? version.stdout.trim() : null, signedIn: auth?.code === 0 }
+}
+
+// Never runs `codex login`: the human signs in inside the container (D2)
+async function detectCodex(bin: string): Promise<DetectedCli> {
+  const version = await exec(bin, ['--version'], { timeoutMs: 15_000 })
+  if (version.code !== 0) return { id: 'codex', version: null, signedIn: false }
+  const status = await exec(bin, ['login', 'status'], { timeoutMs: 15_000 })
+  return { id: 'codex', version: version.stdout.trim(), signedIn: codexSignedIn(`${status.stdout}\n${status.stderr}`) }
+}
+
+// `codex login status` prints e.g. "Logged in using ChatGPT" (on stderr) or
+// "Not logged in". Only the logged-in line counts; the rest says nothing secret.
+export function codexSignedIn(output: string): boolean {
+  return /^\s*logged in\b/im.test(output)
 }
 
 async function ghSignedIn(): Promise<boolean> {

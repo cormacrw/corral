@@ -74,6 +74,53 @@ describe('orchestrator', () => {
     await pause(project)
   })
 
+  it('lets the developer read an attachment from its own project, but not another project\'s', async () => {
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
+    const upload = (slug: string) => t.request('POST', `/api/projects/${slug}/attachments`, new Blob([png], { type: 'image/png' })).then(r => r.json()) as Promise<{ id: string }>
+    const { project, job } = await assigned()
+    const own = await upload(project.slug)
+    const foreign = await upload((await t.createProject()).slug)
+    expect(await runner.call(job.runId, job.leaseEpoch, 'get_attachment', { attachmentId: own.id }))
+      .toMatchObject({ ok: true, result: { id: own.id, fileName: 'image.png', mimeType: 'image/png', images: [{ mimeType: 'image/png', dataBase64: png.toString('base64') }] } })
+    expect(await runner.call(job.runId, job.leaseEpoch, 'get_attachment', { attachmentId: foreign.id }))
+      .toMatchObject({ ok: false, error: `${foreign.id} isn't an attachment in this project` })
+    await pause(project)
+  })
+
+  it('lists the task\'s images in the developer prompt and get_task', async () => {
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
+    const project = await t.createProject()
+    const upload = (slug: string, name: string) => t.request('POST', `/api/projects/${slug}/attachments?name=${name}`, new Blob([png], { type: 'image/png' })).then(r => r.json()) as Promise<{ id: string }>
+    const mockup = await upload(project.slug, 'mockup.png')
+    const bug = await upload(project.slug, 'bug.png')
+    const foreign = await upload((await t.createProject()).slug, 'other.png')
+    await pause(project)
+    const task = await t.createTask(project.slug, {
+      description: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Like this' }] }, { type: 'image', attrs: { src: `attachment:${mockup.id}` } }, { type: 'image', attrs: { src: `attachment:${foreign.id}` } }] }
+    })
+    expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/comments`, { body: `Also ![bug](attachment:${bug.id}) and ![again](attachment:${mockup.id})` })).status).toBe(201)
+    expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'approve' })).status).toBe(200)
+    await t.db.update(schema.projects).set({ paused: false }).where(eq(schema.projects.id, project.id))
+    await t.orchestrator.schedule()
+    const { job } = await runner.next('run.assign', m => m.job.taskId === task.id)
+
+    expect(job.prompt).toContain('## Attached images')
+    expect(job.prompt).toContain(`- ${mockup.id}: "mockup.png" in the description, a comment by`)
+    expect(job.prompt).toMatch(new RegExp(`- ${bug.id}: "bug.png" in a comment by \\S+`))
+    expect(job.prompt).not.toContain(foreign.id)
+    const read = await runner.call(job.runId, job.leaseEpoch, 'get_task', {})
+    expect(read).toMatchObject({
+      ok: true,
+      result: {
+        attachments: [
+          { id: mockup.id, fileName: 'mockup.png', foundIn: ['the description', expect.stringMatching(/^a comment by /)] },
+          { id: bug.id, fileName: 'bug.png', foundIn: [expect.stringMatching(/^a comment by /)] }
+        ]
+      }
+    })
+    await pause(project)
+  })
+
   it('renews the lease from heartbeats and marks the run running on run.started', async () => {
     const { project, task, job } = await assigned()
     const before = (await taskRow(task.id)).leaseExpiresAt!
@@ -104,7 +151,7 @@ describe('orchestrator', () => {
     const stale = await runner.call(job.runId, job.leaseEpoch - 1, 'get_task', {})
     expect(stale).toMatchObject({ ok: false, error: expect.stringContaining('no longer holds its task') })
     const fresh = await runner.call(job.runId, job.leaseEpoch, 'get_task', {})
-    expect(fresh).toMatchObject({ ok: true, result: { ref: task.ref, status: 'in_progress' } })
+    expect(fresh).toMatchObject({ ok: true, result: { ref: task.ref, status: 'in_progress', attachments: [] } })
     await pause(project)
   })
 
