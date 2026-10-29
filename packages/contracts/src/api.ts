@@ -7,6 +7,7 @@ import {
   TASK_TYPES,
   type Actor,
   type AgentRole,
+  type DesignVersionStatus,
   type MergeMethod,
   type RunOutcome,
   type RunState,
@@ -241,6 +242,23 @@ export interface TaskDesignPin {
   taskRef: string
   version: number
   screens: string[]
+}
+
+// A design task's version as the design view shows it (D20). The bundle is
+// served sandboxed under previewUrl; screenshots by their own URLs.
+export interface DesignVersion {
+  id: string
+  version: number
+  status: DesignVersionStatus
+  branch: string
+  commitSha: string
+  // design.md, as the developer wrote it
+  spec: string
+  screenshots: { fileName: string, url: string }[]
+  previewUrl: string
+  // The human's feedback when they requested changes
+  feedback: string | null
+  createdAt: string
 }
 
 // The runtimes an agent can run on (D15), and the CLI each one needs on the

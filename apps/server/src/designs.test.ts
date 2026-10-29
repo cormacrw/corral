@@ -1,5 +1,7 @@
+import type { DesignVersion } from '@corral/contracts'
 import { packBundle } from '@corral/core'
 import { schema } from '@corral/db'
+import { eq } from 'drizzle-orm'
 import { request as httpRequest } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { bundleContentType, DESIGN_BUNDLE_CSP } from './designs.ts'
@@ -121,5 +123,70 @@ describe('bundleContentType', () => {
     expect(bundleContentType('font.woff2')).toBe('font/woff2')
     expect(bundleContentType('Makefile')).toBe('application/octet-stream')
     expect(bundleContentType('x.unknown')).toBe('application/octet-stream')
+  })
+})
+
+// The design view's API (D20): list versions, their screenshots, approve one
+describe('design versions in the task view', () => {
+  let t: TestApp
+
+  beforeAll(async () => {
+    t = await createTestApp('pglite')
+  })
+
+  afterAll(async () => {
+    await t?.close()
+  })
+
+  async function designTask(versions: number) {
+    const project = await t.createProject()
+    const task = await t.createTask(project.slug, { type: 'design' })
+    const bundleBlob = await t.blobs.put(packBundle([{ path: 'index.html', data: text('<p>hi</p>') }]))
+    for (let v = 1; v <= versions; v++) {
+      const specBlob = await t.blobs.put(text(`# Design v${v}`))
+      const shot = await t.blobs.put(text(`png v${v}`))
+      await t.db.insert(schema.designVersions).values({
+        taskId: task.id, version: v, status: v < versions ? 'changes_requested' : 'submitted', bundleBlob, specBlob,
+        screenshots: [{ blob: shot, fileName: 'login.png', contentType: 'image/png' }], branch: 'design/T-1', commitSha: String(v).repeat(40)
+      })
+    }
+    return { project, task }
+  }
+
+  it('lists versions newest first with their spec, screenshots and preview', async () => {
+    const { project, task } = await designTask(2)
+    const res = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/designs`)
+    expect(res.status).toBe(200)
+    const list = await res.json() as DesignVersion[]
+    expect(list.map(v => [v.version, v.status, v.spec])).toEqual([[2, 'submitted', '# Design v2'], [1, 'changes_requested', '# Design v1']])
+    expect(list[0]!.previewUrl).toBe(`/api/designs/${list[0]!.id}/files/`)
+    const shot = await t.request('GET', list[0]!.screenshots[0]!.url)
+    expect(shot.status).toBe(200)
+    expect(shot.headers.get('content-type')).toBe('image/png')
+    expect(shot.headers.get('content-security-policy')).toBe(DESIGN_BUNDLE_CSP)
+    expect(await shot.text()).toBe('png v2')
+    expect((await t.request('GET', `/api/designs/${list[0]!.id}/screenshots/5`)).status).toBe(404)
+  })
+
+  it('approves a version in Human review and supersedes the earlier ones', async () => {
+    const { project, task } = await designTask(2)
+    const path = `/api/projects/${project.slug}/tasks/${task.number}/designs/2/approve`
+    expect((await t.request('POST', path)).status).toBe(409)
+
+    await t.db.update(schema.tasks).set({ status: 'human_review' }).where(eq(schema.tasks.id, task.id))
+    expect((await t.request('POST', path)).status).toBe(200)
+    const list = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/designs`).then(r => r.json()) as DesignVersion[]
+    expect(list.map(v => [v.version, v.status])).toEqual([[2, 'approved'], [1, 'superseded']])
+
+    // A superseded version can't be approved
+    const again = await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/designs/1/approve`)
+    expect(again.status).toBe(409)
+  })
+
+  it('refuses to approve a version of a task that is not a design', async () => {
+    const project = await t.createProject()
+    const task = await t.createTask(project.slug)
+    await t.db.update(schema.tasks).set({ status: 'human_review' }).where(eq(schema.tasks.id, task.id))
+    expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/designs/1/approve`)).status).toBe(409)
   })
 })
