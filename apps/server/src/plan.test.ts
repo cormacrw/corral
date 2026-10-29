@@ -240,6 +240,76 @@ describe('plan sessions', () => {
     expect(detail.activeRunId).toBeNull()
   })
 
+  it('runs one turn at a time per session, not per project', async () => {
+    await t.db.update(agents).set({ concurrency: 50 }).where(eq(agents.role, 'pm'))
+    const project = await t.createProject()
+    const assigned = (sessionId: string) => runner.next('run.assign', m => m.job.planSessionId === sessionId).then(m => m.job)
+    const a = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan search' }).then(r => r.json()) as PlanSessionDetail
+    const aJob = await assigned(a.id)
+    const b = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan billing' }).then(r => r.json()) as PlanSessionDetail
+    const bJob = await assigned(b.id)
+    await endTurn(bJob, 'Billing noted.')
+    expect((await session(b.id)).activeRunId).toBeNull()
+
+    // A's turn is still running; B's next message starts B's own turn
+    const res = await t.request('POST', `/api/plan/sessions/${b.id}/messages`, { text: 'Add invoices' })
+    expect(res.status).toBe(201)
+    const bNext = await assigned(b.id)
+    expect(bNext).toMatchObject({ role: 'pm', projectId: project.id, planSessionId: b.id })
+
+    // Each session shows only its own run as active
+    const c = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan audit' }).then(r => r.json()) as PlanSessionDetail
+    const cJob = await assigned(c.id)
+    await endTurn(cJob, 'Audit noted.')
+    expect((await session(a.id)).activeRunId).toBe(aJob.runId)
+    expect((await session(b.id)).activeRunId).toBe(bNext.runId)
+    expect((await session(c.id)).activeRunId).toBeNull()
+    const list = await t.request('GET', '/api/plan/sessions').then(r => r.json()) as PlanSession[]
+    expect(list.filter(x => [a.id, b.id, c.id].includes(x.id)).map(x => [x.id, x.activeRunId])).toEqual(expect.arrayContaining([
+      [a.id, aJob.runId], [b.id, bNext.runId], [c.id, null]
+    ]))
+
+    // A session whose own turn is active still refuses a second one
+    const again = await t.request('POST', `/api/plan/sessions/${a.id}/messages`, { text: 'Again' })
+    expect(again.status).toBe(409)
+    expect(await again.json()).toMatchObject({ error: { code: 'conflict', constraint: 'pm_turn_in_progress' } })
+
+    await endTurn(aJob, 'Search planned.')
+    await endTurn(bNext, 'Invoices added.')
+    expect((await session(a.id)).activeRunId).toBeNull()
+    expect((await session(b.id)).activeRunId).toBeNull()
+  })
+
+  it('queues a turn over Juno\'s concurrency and starts it when a slot frees', async () => {
+    await t.db.update(agents).set({ concurrency: 1 }).where(eq(agents.role, 'pm'))
+    const project = await t.createProject()
+    const other = await t.createProject()
+    const a = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan search' }).then(r => r.json()) as PlanSessionDetail
+    const aJob = (await runner.next('run.assign', m => m.job.planSessionId === a.id)).job
+    runner.send({ type: 'run.started', runId: aJob.runId, leaseEpoch: aJob.leaseEpoch, agentSessionId: 'claude-a' })
+
+    // Concurrency is global (D13): a session in another project waits too
+    const res = await t.request('POST', '/api/plan/sessions', { projectId: other.id, text: 'Plan billing' })
+    expect(res.status).toBe(201)
+    const b = await res.json() as PlanSessionDetail
+    expect(b.activeRunId).not.toBeNull()
+    await sleep(200)
+    expect(runner.received.some(m => m.type === 'run.assign' && m.job.planSessionId === b.id)).toBe(false)
+    const [waiting] = await t.db.select().from(runs).where(eq(runs.id, b.activeRunId!))
+    expect(waiting).toMatchObject({ state: 'queued', planSessionId: b.id })
+    // Still B's own turn, so B refuses another message meanwhile
+    expect((await t.request('POST', `/api/plan/sessions/${b.id}/messages`, { text: 'Again' })).status).toBe(409)
+
+    await endTurn(aJob, 'Search planned.')
+    const bJob = (await runner.next('run.assign', m => m.job.planSessionId === b.id)).job
+    expect(bJob).toMatchObject({ runId: b.activeRunId, role: 'pm', projectId: other.id, prompt: expect.stringContaining('Plan billing') })
+    expect((await session(a.id)).activeRunId).toBeNull()
+    expect((await session(b.id)).activeRunId).toBe(bJob.runId)
+    await endTurn(bJob, 'Billing planned.')
+    expect((await session(b.id)).activeRunId).toBeNull()
+    await t.db.update(agents).set({ concurrency: 50 }).where(eq(agents.role, 'pm'))
+  })
+
   it('leaves the plan session alone when the last task of an epic merges', async () => {
     const project = await t.createProject()
     await t.request('PATCH', `/api/projects/${project.slug}`, { requiredChecks: ['lint'] })

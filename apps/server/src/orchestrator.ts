@@ -107,25 +107,59 @@ export class Orchestrator implements RunnerHandlers {
     })
   }
 
-  // A PM turn (D9): a run with no task and no lease, fenced by its own epoch
+  // A PM turn (D9): a run with no task and no lease, fenced by its own epoch.
+  // It waits as `queued`, holding its job, until Juno has a free slot (D13).
   async startPmRun(session: PlanSessionRow, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'>): Promise<string> {
-    const { db, runner } = this.#d
+    const { db } = this.#d
     if (this.#stopped) throw new ApiFailure(409, { code: 'conflict', constraint: 'corral_stopped' })
     if (this.#updating) throw new ApiFailure(503, { code: 'corral_updating' })
     const [juno] = await db.select().from(agents).where(eq(agents.role, 'pm')).orderBy(asc(agents.createdAt)).limit(1)
     if (!juno) throw new ApiFailure(409, { code: 'conflict', constraint: 'no_pm_agent' })
     if (juno.paused || (juno.pausedUntil && juno.pausedUntil > this.#now())) throw new ApiFailure(409, { code: 'conflict', constraint: 'pm_paused' })
     const [run] = await db.insert(runs).values({
-      agentId: juno.id, projectId: job.projectId, taskId: null, role: 'pm', leaseEpoch: 1, planSessionId: session.id, queuedAt: this.#now()
+      agentId: juno.id, projectId: job.projectId, taskId: null, role: 'pm', leaseEpoch: 1, planSessionId: session.id, pmJob: job, queuedAt: this.#now()
     }).returning()
     const ctx = await this.#load(run!.id)
     if (!ctx) throw new Error('PM run vanished')
-    if (!runner.send({ type: 'run.assign', job: { ...job, runId: run!.id, runNumber: run!.number, leaseEpoch: 1 } })) {
-      await this.#endRun(ctx, { state: 'interrupted', error: 'The runner went offline before the turn started' })
-      throw new ApiFailure(503, { code: 'runner_offline' })
-    }
     await this.#publish(ctx)
+    await this.#startPmTurns()
     return run!.id
+  }
+
+  // Sends waiting PM turns to the runner, oldest first, while Juno's
+  // concurrency allows. A waiting turn is `queued` with its job still held.
+  async #startPmTurns(): Promise<void> {
+    const { db, runner } = this.#d
+    if (!runner.online || this.#stopped || this.#updating) return
+    const due = await db.transaction(async (tx) => {
+      const pmAgents = await tx.select().from(agents).where(eq(agents.role, 'pm')).orderBy(asc(agents.createdAt)).for('update')
+      const picked: { id: string, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'> }[] = []
+      for (const agent of pmAgents) {
+        if (agent.paused || (agent.pausedUntil && agent.pausedUntil > this.#now())) continue
+        const active = await tx.select({ id: runs.id }).from(runs)
+          .where(and(eq(runs.agentId, agent.id), inArray(runs.state, [...ACTIVE_RUN_STATES]), isNull(runs.pmJob)))
+        const free = agent.concurrency - active.length
+        if (free <= 0) continue
+        const waiting = await tx.select({ id: runs.id, job: runs.pmJob }).from(runs)
+          .where(and(eq(runs.agentId, agent.id), eq(runs.state, 'queued'), isNotNull(runs.pmJob)))
+          .orderBy(asc(runs.queuedAt), asc(runs.number)).limit(free)
+        for (const w of waiting) {
+          await tx.update(runs).set({ pmJob: null }).where(eq(runs.id, w.id))
+          picked.push({ id: w.id, job: w.job as Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'> })
+        }
+      }
+      return picked
+    })
+    for (const { id, job } of due) {
+      const ctx = await this.#load(id)
+      if (!ctx) continue
+      if (!runner.send({ type: 'run.assign', job: { ...job, runId: id, runNumber: ctx.run.number, leaseEpoch: ctx.run.leaseEpoch! } })) {
+        const error = 'The runner went offline before the turn started'
+        await this.#endRun(ctx, { state: 'interrupted', error })
+        if (ctx.run.planSessionId) await this.plans?.onRunEnded(ctx.run.planSessionId, id, null, error)
+      }
+      await this.#publish(ctx)
+    }
   }
 
   // Reads the kill switch; called once at startup
@@ -155,7 +189,8 @@ export class Orchestrator implements RunnerHandlers {
     }
     // A pass that began before the hold may still be claiming
     await this.#scheduling
-    const live = await this.#d.db.select({ id: runs.id }).from(runs).where(inArray(runs.state, [...ACTIVE_RUN_STATES]))
+    // PM turns still waiting for a slot keep their job and start after the update
+    const live = await this.#d.db.select({ id: runs.id }).from(runs).where(and(inArray(runs.state, [...ACTIVE_RUN_STATES]), isNull(runs.pmJob)))
     return live.length + this.merges.inFlight
   }
 
@@ -237,7 +272,9 @@ export class Orchestrator implements RunnerHandlers {
   async #schedulePass(): Promise<void> {
     const { db, runner } = this.#d
     if (!runner.online || this.#stopped || this.#updating) return
-    // PM turns aren't scheduled; they run when the human writes (D9)
+    // PM turns aren't claimed; they run when the human writes (D9), and
+    // only wait here for one of Juno's slots
+    await this.#startPmTurns()
     const workers = await db.select().from(agents).where(ne(agents.role, 'pm')).orderBy(asc(agents.createdAt))
     for (const agent of workers) {
       for (let claim = await claimNextTask(db, agent.id, this.#now()); claim; claim = await claimNextTask(db, agent.id, this.#now())) {
@@ -368,6 +405,8 @@ export class Orchestrator implements RunnerHandlers {
     // when the runner restarted
     const live = await db.select().from(runs).where(inArray(runs.state, [...ACTIVE_RUN_STATES]))
     for (const run of live) {
+      // A PM turn waiting for a slot was never sent
+      if (run.pmJob !== null) continue
       if (activeRuns.some(a => a.runId === run.id && a.leaseEpoch === run.leaseEpoch)) continue
       const ctx = await this.#load(run.id)
       if (!ctx) continue
@@ -528,7 +567,7 @@ export class Orchestrator implements RunnerHandlers {
 
   // Ends the run and releases its lease, if it still holds one
   async #endRunIn(tx: Executor, ctx: RunContext, fields: Partial<typeof runs.$inferInsert> & { state: RunState }): Promise<void> {
-    await tx.update(runs).set({ endedAt: this.#now(), ...fields }).where(eq(runs.id, ctx.run.id))
+    await tx.update(runs).set({ endedAt: this.#now(), pmJob: null, ...fields }).where(eq(runs.id, ctx.run.id))
     if (ctx.task) {
       await tx.update(tasks).set({ leaseRunId: null, leaseRole: null, leaseExpiresAt: null, leaseHeartbeatAt: null, updatedAt: this.#now() })
         .where(and(eq(tasks.id, ctx.task.id), eq(tasks.leaseRunId, ctx.run.id)))
