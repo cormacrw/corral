@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Task } from '@corral/contracts'
 import type { TaskStatus } from '@corral/core'
+import { MERGED_WINDOW_DAYS, onBoard } from '~/utils/board'
 import { epicTitle, PRIORITY, STATUS, taskNote } from '~/utils/labels'
 
 // The board (design/board.md): approved work by status, no drag and drop
@@ -27,7 +28,7 @@ watch(project, async (p) => {
 const search = ref('')
 const epic = ref<string | null>(null)
 const epics = computed(() => [...new Set(all.value.map(t => t.epicId).filter((id): id is string => Boolean(id)))])
-const visible = computed(() => all.value.filter(t => t.status !== 'backlog'
+const visible = computed(() => all.value.filter(t => onBoard(t)
   && (!epic.value || t.epicId === epic.value)
   && (!search.value || `${t.ref} ${t.title}`.toLowerCase().includes(search.value.toLowerCase()))))
 
@@ -38,7 +39,7 @@ const columns: { label: string, statuses: TaskStatus[], hint: string }[] = [
   { label: 'Human review', statuses: ['human_review'], hint: 'You' },
   { label: 'Ready to merge', statuses: ['ready_to_merge'], hint: 'Corral' },
   { label: 'Blocked & failed', statuses: ['blocked', 'failed'], hint: 'You' },
-  { label: 'Merged', statuses: ['merged'], hint: '' }
+  { label: 'Merged', statuses: ['merged'], hint: `Last ${MERGED_WINDOW_DAYS} days` }
 ]
 const DOT = { neutral: 'bg-neutral-400', info: 'bg-info', primary: 'bg-primary', warning: 'bg-warning', error: 'bg-error', success: 'bg-success', secondary: 'bg-secondary' } as const
 const inColumn = (statuses: TaskStatus[]) => visible.value.filter(t => statuses.includes(t.status))

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Project } from '@corral/contracts'
 import { api } from '~/composables/useApi'
+import { onBoard } from '~/utils/board'
 import { initials, isWorking, projectColor, ROLE } from '~/utils/labels'
 
 // The app shell (design/app-shell.md): global nav, projects, agents, runner
@@ -21,7 +22,7 @@ const currentProject = computed(() => state.value.projects.find(p => p.slug === 
 
 const counts = (project: Project) => {
   const tasks = state.value.tasks[project.id] ?? []
-  return { board: tasks.filter(t => t.status !== 'backlog').length, backlog: tasks.filter(t => t.status === 'backlog').length }
+  return { board: tasks.filter(t => onBoard(t)).length, backlog: tasks.filter(t => t.status === 'backlog').length }
 }
 watch(() => state.value.projects, (projects) => {
   for (const project of projects) {
