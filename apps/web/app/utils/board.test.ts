@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MERGED_WINDOW_DAYS, onBoard } from './board.ts'
+import { BOARD_COLUMNS, MERGED_WINDOW_DAYS, onBoard, swipeStep } from './board.ts'
 
 const DAY = 24 * 60 * 60 * 1000
 const now = Date.parse('2026-10-29T12:00:00Z')
@@ -29,5 +29,33 @@ describe('onBoard', () => {
     expect(onBoard({ status: 'ready', mergedAt: null }, now)).toBe(true)
     expect(onBoard({ status: 'blocked', mergedAt: null }, now)).toBe(true)
     expect(onBoard({ status: 'backlog', mergedAt: null }, now)).toBe(false)
+  })
+})
+
+describe('BOARD_COLUMNS', () => {
+  it('covers every status past Backlog exactly once', () => {
+    const statuses = BOARD_COLUMNS.flatMap(c => c.statuses)
+    expect(new Set(statuses).size).toBe(statuses.length)
+    expect(statuses.sort()).toEqual(['agent_review', 'blocked', 'failed', 'human_review', 'in_progress', 'merged', 'ready', 'ready_to_merge'])
+  })
+
+  it('has unique keys', () => {
+    expect(new Set(BOARD_COLUMNS.map(c => c.key)).size).toBe(BOARD_COLUMNS.length)
+  })
+})
+
+describe('swipeStep', () => {
+  it('moves to the next column on a swipe left and the previous on a swipe right', () => {
+    expect(swipeStep(-80, 10)).toBe(1)
+    expect(swipeStep(80, -10)).toBe(-1)
+  })
+
+  it('ignores taps and short drags', () => {
+    expect(swipeStep(0, 0)).toBe(0)
+    expect(swipeStep(-30, 0)).toBe(0)
+  })
+
+  it('ignores mostly vertical scrolls', () => {
+    expect(swipeStep(-60, 120)).toBe(0)
   })
 })
