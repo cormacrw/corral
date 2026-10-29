@@ -95,26 +95,25 @@ async function remove() {
 
 <template>
   <UDashboardPanel>
+    <MobilePageHeader v-if="device.isMobile.value">
+      <template #actions>
+        <span
+          v-if="saved"
+          class="text-xs text-success"
+        >Saved</span>
+        <UButton
+          label="Save"
+          :disabled="!dirty || !prefixValid || !form.name.trim()"
+          :loading="saving"
+          @click="save"
+        />
+      </template>
+    </MobilePageHeader>
     <div
       v-if="project"
       :class="['mx-auto flex w-full max-w-[880px] flex-col gap-6', device.isMobile.value ? 'p-4' : 'p-6']"
     >
       <template v-if="device.isMobile.value">
-        <Teleport
-          defer
-          to="#mobile-header-actions"
-        >
-          <span
-            v-if="saved"
-            class="text-xs text-success"
-          >Saved</span>
-          <UButton
-            label="Save"
-            :disabled="!dirty || !prefixValid || !form.name.trim()"
-            :loading="saving"
-            @click="save"
-          />
-        </Teleport>
         <p class="text-sm text-muted">
           Settings for {{ project.name }} only. Agents and the runner are shared by every project and live in Settings.
         </p>

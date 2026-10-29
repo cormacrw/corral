@@ -171,28 +171,29 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
 <template>
   <UDashboardPanel :ui="{ body: 'p-0' }">
     <!-- Phones switch sessions from the header (design/mobile.md) -->
-    <Teleport
+    <MobilePageHeader
       v-if="device.isMobile.value"
-      defer
-      to="#mobile-header-actions"
+      compact
     >
-      <UButton
-        v-if="props.inbox"
-        :to="`/plan/${id}`"
-        label="Open in Plan"
-        variant="ghost"
-        color="neutral"
-      />
-      <PlanSessionSwitcher v-else />
-      <UButton
-        v-if="!props.inbox"
-        to="/plan"
-        icon="i-lucide-plus"
-        variant="ghost"
-        color="neutral"
-        aria-label="New session"
-      />
-    </Teleport>
+      <template #actions>
+        <UButton
+          v-if="props.inbox"
+          :to="`/plan/${id}`"
+          label="Open in Plan"
+          variant="ghost"
+          color="neutral"
+        />
+        <PlanSessionSwitcher v-else />
+        <UButton
+          v-if="!props.inbox"
+          to="/plan"
+          icon="i-lucide-plus"
+          variant="ghost"
+          color="neutral"
+          aria-label="New session"
+        />
+      </template>
+    </MobilePageHeader>
     <div class="flex min-h-0 flex-1">
       <div class="flex min-w-0 flex-1 flex-col">
         <header

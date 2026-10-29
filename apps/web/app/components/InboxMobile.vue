@@ -68,19 +68,18 @@ const tabs = computed(() => [
     class="flex h-full min-h-0 flex-col"
     data-testid="inbox-item"
   >
-    <Teleport
-      defer
-      to="#mobile-header-actions"
-    >
-      <UButton
-        v-if="selected"
-        :to="`/tasks/${selected.taskRef}`"
-        label="Task"
-        icon="i-lucide-list"
-        variant="ghost"
-        color="neutral"
-      />
-    </Teleport>
+    <MobilePageHeader compact>
+      <template #actions>
+        <UButton
+          v-if="selected"
+          :to="`/tasks/${selected.taskRef}`"
+          label="Task"
+          icon="i-lucide-list"
+          variant="ghost"
+          color="neutral"
+        />
+      </template>
+    </MobilePageHeader>
     <template v-if="selected">
       <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
         <div class="flex flex-col gap-4">
@@ -255,22 +254,21 @@ const tabs = computed(() => [
   <!-- The list -->
   <div
     v-else
-    class="flex h-full min-h-0 flex-col"
+    class="flex h-full min-h-0 flex-col overflow-y-auto overscroll-contain"
     data-testid="inbox-list"
   >
-    <Teleport
-      defer
-      to="#mobile-header-actions"
-    >
-      <UButton
-        icon="i-lucide-search"
-        variant="ghost"
-        color="neutral"
-        aria-label="Search the Inbox"
-        :aria-pressed="searching"
-        @click="toggleSearch"
-      />
-    </Teleport>
+    <MobilePageHeader>
+      <template #actions>
+        <UButton
+          icon="i-lucide-search"
+          variant="ghost"
+          color="neutral"
+          aria-label="Search the Inbox"
+          :aria-pressed="searching"
+          @click="toggleSearch"
+        />
+      </template>
+    </MobilePageHeader>
     <div class="flex shrink-0 flex-col gap-3 border-b border-default p-3">
       <UInput
         v-if="searching"
@@ -314,7 +312,7 @@ const tabs = computed(() => [
     </div>
     <ul
       v-else
-      class="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+      class="shrink-0"
     >
       <li
         v-for="item in items"

@@ -28,10 +28,11 @@ Pages and components use `useDevice().isMobile` to choose a mobile component. Do
 
 From top to bottom:
 
-- **Header:** the page title (on a project's Board, Backlog and Settings, the project name above it and a back button to the project's overview; on a project's overview, a back button to Projects and Project settings; on a Plan conversation, the project above the session title and a back button to `/plan`; on an Inbox item, "Inbox · n of m" above the task ref and a back button to `/inbox`), the runner's live status (a dot and "Runner online" / "Runner offline", coloured like the sidebar footer). There are no global Search or Settings buttons; Settings is a tab. The Board, Backlog and Inbox list keep their own search controls that filter the page. Pages add their own header buttons by teleporting into `#mobile-header-actions` (`<Teleport defer to="#mobile-header-actions">`), in the header: the Board's search, the Backlog's New task, Projects' Add project, Project settings' Save.
+- **Header:** `MobilePageHeader` lives at the top of each page's scroll area and scrolls away with its content. Home, Plan, Inbox, Projects and Settings show a large title with page actions on the right. Sub-pages keep their back link and accessible label: project Board, Backlog, Pull requests and Settings return to the overview with the project name and dot above the title; Overview returns to Projects with Project settings; Agent returns to Home with Agent settings; Settings sections return to Settings. Actions render directly in the row's `actions` slot: Board search, Backlog New task, Projects Add project, Project settings Save, Plan session switcher and Inbox search. There is no shell header or teleport target, and runner status appears only in Home.
+- **Focused header:** Plan conversations and Inbox items keep a slim, non-scrolling `MobilePageHeader` above their body (back, eyebrow, title and actions). Plan shows the project above the session title and returns to `/plan`; Inbox shows “Inbox · n of m” above the task ref and returns to `/inbox`. The body takes the remaining height with its composer/tray pinned at the bottom. Task, Epic and Run retain their own headers.
 - **Banners:** the same shell banners as the web layout (stopped, updating, project paused, runner offline, reconnecting), from `ShellBanners.vue`.
 - **Page:** fills the space between, and scrolls.
-- **Tab bar:** five tabs, each an icon over a label. The active tab is `primary`. A Plan conversation and an Inbox item hide the tab bar and runner status, so the chat or the tray and its composer get the full height.
+- **Tab bar:** five tabs, each an icon over a label. The active tab is `primary`. A Plan conversation and an Inbox item hide the tab bar, so the chat or the tray and its composer get the full height.
 
 | Tab | Icon | Route | Active on | Indicator |
 |---|---|---|---|---|
@@ -42,7 +43,7 @@ From top to bottom:
 | Settings | `settings` | `/settings` | `/settings`, `/settings/**` | |
 
 - The header and tab bar pad themselves with `env(safe-area-inset-*)`, and the viewport uses `viewport-fit=cover`, so nothing sits under a notch or the home indicator.
-- The runner status and Inbox count come from the app's one live connection (`useLive()`), so they update without a reload.
+- Home’s runner status and the Inbox count come from the app's one live connection (`useLive()`), so they update without a reload.
 
 On the web, `/projects` renders in the normal shell as a plain project list.
 
@@ -50,7 +51,7 @@ On the web, `/projects` renders in the normal shell as a plain project list.
 
 `/home` is the global dashboard, counted from the live task lists so it matches each project's Board and updates without a reload:
 
-- **Runner status** and a project filter (**All projects** or one project) · **Today**. The header hides its own runner status on Home.
+- **Runner status** and a project filter (**All projects** or one project) · **Today**. Runner status is shown only here.
 - **Tiles:** **To do** (Ready), **In progress** (In progress, Agent review, Human review and Ready to merge) and **Merged today** (merged since local midnight) with how many were first-pass (no changes requested).
 - **Today totals**, immediately after the count tiles: **Runs** and **Usage**, from `todayStats` (`utils/agents.ts`), counting today’s queued runs and their input plus output tokens. Both respect the project filter. The note reads "Usage is in tokens from your own subscription." Merged today already covers PRs merged.
 - **In progress by stage:** a bar and counts per stage, and a link to the Inbox with the blocked (Blocked and Failed) and waiting-for-your-review (Human review) counts.

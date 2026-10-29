@@ -1,4 +1,4 @@
-import type { DraftSession, Plan, PlanMessage, PlanSessionDetail, RunEvent, ServerEvent, Task } from '@corral/contracts'
+import type { CreateTaskInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, RunEvent, ServerEvent, Task } from '@corral/contracts'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
 import * as f from './fixtures'
@@ -63,6 +63,23 @@ route('GET', '/projects/:slug/tasks', ([slug], _, query) => {
   const view = query.get('view') ?? 'all'
   return f.tasks.filter(t => t.projectId === p.id && t.status !== 'draft'
     && (view === 'all' || (view === 'backlog') === (t.status === 'backlog')))
+})
+// Backlog's New task action opens the created task on mobile.
+route('POST', '/projects/:slug/tasks', ([slug], body) => {
+  const p = project(slug!)
+  const input = body as CreateTaskInput
+  const number = Math.max(p.nextTaskNumber, ...f.tasks.filter(t => t.projectId === p.id).map(t => t.number + 1))
+  const task = f.task(p, number, {
+    title: input.title, type: input.type, description: input.description ?? null,
+    status: 'backlog', priority: input.priority ?? 'medium', epicId: input.epicId ?? null,
+    humanReview: input.humanReview ?? p.humanReviewDefault,
+    acceptanceCriteria: (input.acceptanceCriteria ?? []).map((text, position) => ({ id: `mock-${number}-${position}`, text, position, met: null })),
+    dependsOn: (input.dependsOn ?? []).map(n => `${p.prefix}-${n}`)
+  })
+  p.nextTaskNumber = number + 1
+  f.tasks.push(task)
+  emit({ type: 'task.created', task })
+  return task
 })
 route('GET', '/projects/:slug/tasks/:number', ([slug, number]) => taskIn(slug!, number!))
 route('PATCH', '/projects/:slug/tasks/:number', ([slug, number], body) => Object.assign(taskIn(slug!, number!), body))

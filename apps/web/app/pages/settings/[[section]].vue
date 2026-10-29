@@ -105,6 +105,7 @@ const items = [
     :ui="{ body: 'p-0 sm:p-0 gap-0 sm:gap-0' }"
   >
     <template #body>
+      <MobilePageHeader />
       <SettingsMobile v-if="section === null" />
       <SettingsRunnerMobile
         v-else
@@ -115,6 +116,7 @@ const items = [
     </template>
   </UDashboardPanel>
   <UDashboardPanel v-else>
+    <MobilePageHeader v-if="device.isMobile.value" />
     <!-- On mobile each section is its own screen, so the menu is the Settings list -->
     <div :class="['mx-auto flex w-full max-w-[1100px] gap-8 max-[800px]:flex-col', device.isMobile.value ? 'p-4' : 'p-6']">
       <aside
