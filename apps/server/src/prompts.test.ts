@@ -36,6 +36,14 @@ describe('pmPrompt', () => {
     expect(intro).toContain('Keep replies short and concrete')
   })
 
+  it('tells the PM not to restate a proposed plan the panel already shows', () => {
+    const intro = pmPrompt({ ...turn, fresh: true })
+    expect(intro).toContain('The human sees the proposed plan in a panel beside the chat')
+    expect(intro).toContain('after propose_plan don\'t restate its tasks as a table or list')
+    expect(intro).toContain('reply with only what the panel doesn\'t show, such as open questions, assumptions or trade-offs, in a sentence or two')
+    expect(pmPrompt({ ...turn, fresh: false })).not.toContain('propose_plan')
+  })
+
   it('plans a design\'s build from the spec and the codebase, across epics, pinning screens (D20)', () => {
     const intro = pmPrompt({ ...turn, fresh: true })
     expect(intro).toContain('read it with get_design')

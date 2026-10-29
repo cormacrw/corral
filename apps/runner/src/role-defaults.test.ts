@@ -13,6 +13,11 @@ describe('pm role defaults', () => {
     expect(pm).toContain('CORRAL.md or CLAUDE.md, and .corral/wiki/ if present')
     expect(pm).not.toContain('Read CORRAL.md, the wiki')
   })
+
+  it('does not restate a proposed plan the panel already shows', () => {
+    expect(pm).toContain('The human sees the proposed plan in a panel beside the chat, so after propose_plan don\'t restate its tasks as a table or list')
+    expect(pm).toContain('reply with only what the panel doesn\'t show')
+  })
 })
 
 describe('developer role defaults', () => {
