@@ -126,4 +126,34 @@ describe('migrations', () => {
     const sessions = await db.execute(sql`select title, unread, closed_at from plan_sessions`)
     expect(sessions.rows).toEqual([{ title: 'S', unread: true, closed_at: null }])
   }, 60_000)
+
+  it('0024 makes evidence files optional for notes, keeping existing evidence (D21)', async () => {
+    const before = await migrationsBefore('0024_evidence_note')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const client = new PGlite()
+    cleanup.push(() => client.close())
+    const db = drizzle(client, { casing: 'snake_case' })
+    await migrate(db, { migrationsFolder: before })
+
+    const actor = sql`'{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb`
+    await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('P', 'p', 'PA', 'o/r', 'main')`)
+    await db.execute(sql`insert into tasks (project_id, number, title, type, created_by) select id, 1, 'T', 'task', ${actor} from projects`)
+    await db.execute(sql`insert into agents (role, name) values ('developer', 'Dev')`)
+    await db.execute(sql`insert into runs (task_id, project_id, agent_id, role) select t.id, t.project_id, a.id, 'developer' from tasks t, agents a`)
+    await db.execute(sql`insert into evidence (task_id, run_id, round, kind, note, blob, file_name, content_type, size)
+      select t.id, r.id, 0, 'screenshot', 'Login page', 'abc123', 'login.png', 'image/png', 42 from tasks t, runs r`)
+
+    await migrate(db, { migrationsFolder })
+
+    // Existing evidence keeps its file
+    const existing = await db.execute(sql`select kind::text as kind, note, blob, file_name, content_type, size from evidence`)
+    expect(existing.rows).toEqual([{ kind: 'screenshot', note: 'Login page', blob: 'abc123', file_name: 'login.png', content_type: 'image/png', size: 42 }])
+    const insert = (kind: string) => db.execute(sql`insert into evidence (task_id, run_id, round, kind, note, size)
+      select t.id, r.id, 0, ${kind}::evidence_kind, 'No visible change', 0 from tasks t, runs r`)
+    // A note needs no file; any other kind still does
+    await insert('note')
+    await expect(insert('screenshot')).rejects.toThrow()
+    const notes = await db.execute(sql`select note, blob, file_name, content_type from evidence where kind = 'note'`)
+    expect(notes.rows).toEqual([{ note: 'No visible change', blob: null, file_name: null, content_type: null }])
+  }, 60_000)
 })

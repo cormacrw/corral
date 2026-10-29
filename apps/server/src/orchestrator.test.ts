@@ -330,6 +330,54 @@ describe('orchestrator', () => {
     await pause(project)
   })
 
+  it('records a note as evidence without a file, accepts a submission covered by notes, and shows the text to the reviewer (D21)', async () => {
+    const { project, task, job } = await assigned({ acceptanceCriteria: ['Login works as before', 'Uses the new helper'] })
+    const criteria = (await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}`).then(r => r.json()) as Task).acceptanceCriteria
+    t.github.setBranch(project.repository, job.branch!, 'abc123')
+    const blobsBefore = t.blobs.size
+    for (const [i, criterion] of criteria.entries()) {
+      const attach = await runner.call(job.runId, job.leaseEpoch, 'attach_evidence', { criterionId: criterion.id, kind: 'note', note: `  Refactor only, see src/login.ts:${i + 1}\n` })
+      expect(attach).toMatchObject({ ok: true, result: { id: expect.any(String) } })
+    }
+    expect(t.blobs.size).toBe(blobsBefore)
+    const rows = await t.db.select().from(schema.evidence).where(eq(schema.evidence.taskId, task.id)).orderBy(asc(schema.evidence.createdAt))
+    expect(rows.map(r => ({ criterionId: r.criterionId, kind: r.kind, note: r.note, blob: r.blob, fileName: r.fileName, contentType: r.contentType, size: r.size }))).toEqual(criteria.map((c, i) => ({
+      criterionId: c.id, kind: 'note', note: `Refactor only, see src/login.ts:${i + 1}`, blob: null, fileName: null, contentType: null, size: 0
+    })))
+    const listed = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/evidence`).then(r => r.json()) as { id: string, url: string | null }[]
+    expect(listed.map(e => e.url)).toEqual([null, null])
+    expect((await t.request('GET', `/api/evidence/${listed[0]!.id}/file`)).status).toBe(404)
+
+    // Notes alone cover every criterion
+    const result = await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', summary: 'Refactored login', headSha: 'abc123' })
+    expect(result).toMatchObject({ ok: true })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'agent_review', headSha: 'abc123' })
+    await runner.next('run.stop', m => m.runId === job.runId)
+
+    await t.orchestrator.schedule()
+    const review = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'reviewer')).job
+    expect(review.prompt).toContain(`note (no file; judge the explanation) for [${criteria[0]!.id}]:\n  Refactor only, see src/login.ts:1`)
+    const list = await runner.call(review.runId, review.leaseEpoch, 'get_evidence', {})
+    expect(list).toMatchObject({ ok: true, result: { evidence: [{ kind: 'note', fileName: null }, { kind: 'note', fileName: null }] } })
+    const item = await runner.call(review.runId, review.leaseEpoch, 'get_evidence', { evidenceId: rows[0]!.id })
+    expect(item).toMatchObject({ ok: true, result: { id: rows[0]!.id, kind: 'note', text: 'Refactor only, see src/login.ts:1' } })
+    await pause(project)
+  })
+
+  it('rejects evidence with no file unless it is a note with text (D21)', async () => {
+    const { project, task, job } = await assigned()
+    const criterion = (await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}`).then(r => r.json()) as Task).acceptanceCriteria[0]!
+    const noFile = await runner.call(job.runId, job.leaseEpoch, 'attach_evidence', { criterionId: criterion.id, kind: 'screenshot', note: 'The page' })
+    expect(noFile).toMatchObject({ ok: false, error: expect.stringContaining('Pass the path of the file to attach, or use kind "note"') })
+    expect((noFile as { error: string }).error).toContain('screenshot needs a file')
+    for (const note of [undefined, '', '   ']) {
+      const empty = await runner.call(job.runId, job.leaseEpoch, 'attach_evidence', { criterionId: criterion.id, kind: 'note', ...(note !== undefined && { note }) })
+      expect(empty).toMatchObject({ ok: false, error: 'Not attached. A note needs its text: explain how the criterion is met.' })
+    }
+    expect(await t.db.select().from(schema.evidence).where(eq(schema.evidence.taskId, task.id))).toEqual([])
+    await pause(project)
+  })
+
   it('rejects verdicts that skip a criterion or approve with one unmet', async () => {
     const { project, task, review } = await underReview()
     const criterion = task.acceptanceCriteria[0]!

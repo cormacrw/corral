@@ -8,19 +8,21 @@ const props = defineProps<{ evidence: Evidence[], criteria: Task['acceptanceCrit
 const open = ref<Evidence | null>(null)
 
 const latest = computed(() => props.reviews[0] ?? null)
-const byCriterion = (id: string | null) => props.evidence.filter(e => e.criterionId === id)
+// Notes have no file (D21): their text is shown in place
+const byCriterion = (id: string | null) => props.evidence.filter(e => e.criterionId === id && e.url !== null)
+const notesFor = (id: string | null) => props.evidence.filter(e => e.criterionId === id && e.url === null)
 const note = (id: string) => latest.value?.criteria.find(c => c.criterionId === id)?.note ?? ''
-const isImage = (e: Evidence) => e.contentType.startsWith('image/')
-const isVideo = (e: Evidence) => e.contentType.startsWith('video/')
+const isImage = (e: Evidence) => !!e.contentType?.startsWith('image/')
+const isVideo = (e: Evidence) => !!e.contentType?.startsWith('video/')
 // Logs, test output and requests: shown as text in the app's theme, not in
 // an iframe where the browser picks its own colours
-const isText = (e: Evidence) => e.contentType.startsWith('text/') || /json|xml|yaml/.test(e.contentType)
+const isText = (e: Evidence) => !!e.contentType && (e.contentType.startsWith('text/') || /json|xml|yaml/.test(e.contentType))
 const text = ref<string | null>(null)
 const textError = ref<string | null>(null)
 watch(open, async (item) => {
   text.value = null
   textError.value = null
-  if (!item || !isText(item)) return
+  if (!item?.url || !isText(item)) return
   try {
     const res = await fetch(item.url)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -68,8 +70,8 @@ watch(open, async (item) => {
         >
           <img
             v-if="isImage(item)"
-            :src="item.url"
-            :alt="item.note || item.fileName"
+            :src="item.url ?? undefined"
+            :alt="item.note || item.fileName || undefined"
             class="size-12 shrink-0 rounded object-cover"
           >
           <UIcon
@@ -84,19 +86,36 @@ watch(open, async (item) => {
         </button>
       </div>
       <p
-        v-else
+        v-else-if="notesFor(criterion.id).length === 0"
         class="mt-2 text-xs text-dimmed"
       >
         No evidence attached.
       </p>
+      <div
+        v-for="item in notesFor(criterion.id)"
+        :key="item.id"
+        class="mt-2 rounded-md border border-default bg-muted p-2 text-xs"
+      >
+        <p class="mb-1 text-muted">
+          Note · round {{ item.round + 1 }}
+        </p>
+        <MarkdownText :text="item.note" />
+      </div>
     </div>
     <div
-      v-if="byCriterion(null).length > 0"
+      v-if="byCriterion(null).length > 0 || notesFor(null).length > 0"
       class="rounded-lg border border-default p-3"
     >
       <p class="mb-2 text-sm font-medium">
         Task as a whole
       </p>
+      <div
+        v-for="item in notesFor(null)"
+        :key="item.id"
+        class="mb-2 rounded-md border border-default bg-muted p-2 text-xs"
+      >
+        <MarkdownText :text="item.note" />
+      </div>
       <div class="flex flex-wrap gap-2">
         <button
           v-for="item in byCriterion(null)"
@@ -122,7 +141,7 @@ watch(open, async (item) => {
 
     <UModal
       :open="open !== null"
-      :title="open?.fileName"
+      :title="open?.fileName ?? undefined"
       :description="open ? `${open.kind.replace('_', ' ')} · ${timeAgo(open.createdAt)}${open.note ? ` · ${open.note}` : ''}` : ''"
       :ui="{ content: 'max-w-4xl' }"
       @update:open="open = null"
@@ -130,13 +149,13 @@ watch(open, async (item) => {
       <template #body>
         <img
           v-if="open && isImage(open)"
-          :src="open.url"
-          :alt="open.note || open.fileName"
+          :src="open.url ?? undefined"
+          :alt="open.note || open.fileName || undefined"
           class="max-h-[70vh] w-full object-contain"
         >
         <video
           v-else-if="open && isVideo(open)"
-          :src="open.url"
+          :src="open.url ?? undefined"
           controls
           class="max-h-[70vh] w-full"
         />
@@ -158,8 +177,8 @@ watch(open, async (item) => {
         </template>
         <iframe
           v-else-if="open"
-          :src="open.url"
-          :title="open.fileName"
+          :src="open.url ?? undefined"
+          :title="open.fileName ?? undefined"
           class="h-[60vh] w-full rounded-md border border-default"
         />
       </template>

@@ -82,13 +82,23 @@ const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp)$/
 // Text evidence is returned inline up to this size
 const MAX_INLINE_TEXT = 64 * 1024
 
+// A file, or a note on its own: written evidence for a criterion with
+// nothing to show (D21)
 const evidenceSchema = z.object({
   criterionId: z.string().uuid().nullable().default(null),
   kind: z.enum(EVIDENCE_KINDS),
   note: z.string().default(''),
-  fileName: z.string().min(1),
-  contentType: z.string().min(1),
-  dataBase64: z.string()
+  fileName: z.string().min(1).optional(),
+  contentType: z.string().min(1).optional(),
+  dataBase64: z.string().optional()
+}).superRefine((input, ctx) => {
+  if (input.dataBase64 !== undefined) {
+    if (input.kind === 'note') ctx.addIssue({ code: 'custom', message: 'A note is evidence without a file: leave out path, or pick the kind of the file' })
+    if (!input.fileName || !input.contentType) ctx.addIssue({ code: 'custom', message: 'A file needs its fileName and contentType' })
+    return
+  }
+  if (input.kind !== 'note') ctx.addIssue({ code: 'custom', path: ['path'], message: `Pass the path of the file to attach, or use kind "note" to explain in writing a criterion with nothing to show (${input.kind} needs a file)` })
+  else if (!input.note.trim()) ctx.addIssue({ code: 'custom', path: ['note'], message: 'A note needs its text: explain how the criterion is met' })
 })
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -895,8 +905,11 @@ export class Orchestrator implements RunnerHandlers {
         await this.#d.db.insert(comments).values({ taskId: ctx.task!.id, author: this.#actor(ctx), body })
         return { ok: true }
       }
-      case 'attach_evidence':
-        return this.#attachEvidence(ctx, evidenceSchema.parse(input))
+      case 'attach_evidence': {
+        const parsed = evidenceSchema.safeParse(input)
+        if (!parsed.success) throw new ToolError(`Not attached. ${parsed.error.issues.map(i => i.message).join('. ')}.`)
+        return this.#attachEvidence(ctx, parsed.data)
+      }
       case 'get_evidence':
         return this.#getEvidence(ctx, z.object({ evidenceId: z.string().optional() }).parse(input))
       case 'submit_design':
@@ -937,22 +950,24 @@ export class Orchestrator implements RunnerHandlers {
         .where(and(eq(acceptanceCriteria.id, input.criterionId), eq(acceptanceCriteria.taskId, task.id)))
       if (!criterion) throw new ToolError(`${input.criterionId} isn't one of this task's acceptance criteria`)
     }
+    const row = { taskId: task.id, criterionId: input.criterionId, runId: ctx.run.id, round: task.reviewRounds, kind: input.kind }
+    if (input.dataBase64 === undefined) {
+      // A note: no blob, the text is the evidence
+      const [note] = await this.#d.db.insert(evidence).values({ ...row, note: input.note.trim(), size: 0 }).returning()
+      return { id: note!.id }
+    }
     const data = Buffer.from(input.dataBase64, 'base64')
     if (data.length > MAX_EVIDENCE_BYTES) throw new ToolError('Evidence files are limited to 25 MB')
     const blob = await this.#d.blobs.put(data)
-    const [row] = await this.#d.db.insert(evidence).values({
-      taskId: task.id,
-      criterionId: input.criterionId,
-      runId: ctx.run.id,
-      round: task.reviewRounds,
-      kind: input.kind,
+    const [file] = await this.#d.db.insert(evidence).values({
+      ...row,
       note: input.note,
       blob,
-      fileName: input.fileName,
-      contentType: input.contentType,
+      fileName: input.fileName!,
+      contentType: input.contentType!,
       size: data.length
     }).returning()
-    return { id: row!.id, sha256: blob }
+    return { id: file!.id, sha256: blob }
   }
 
   // Evidence for the reviewer: a listing, or one item with its content.
@@ -968,10 +983,12 @@ export class Orchestrator implements RunnerHandlers {
     }
     const item = items.find(e => e.id === input.evidenceId)
     if (!item) throw new ToolError(`${input.evidenceId} isn't evidence on this task`)
-    const [row] = await this.#d.db.select({ blob: evidence.blob }).from(evidence).where(eq(evidence.id, item.id))
-    const data = row ? await this.#d.blobs.get(row.blob) : null
-    if (!data) throw new ToolError('The file for this evidence is missing')
     const meta = { id: item.id, criterionId: item.criterionId, kind: item.kind, note: item.note, fileName: item.fileName, contentType: item.contentType, size: item.size }
+    // A note is all text, already in the listing
+    if (!item.contentType) return { ...meta, text: item.note }
+    const [row] = await this.#d.db.select({ blob: evidence.blob }).from(evidence).where(eq(evidence.id, item.id))
+    const data = row?.blob ? await this.#d.blobs.get(row.blob) : null
+    if (!data) throw new ToolError('The file for this evidence is missing')
     if (IMAGE_TYPES.test(item.contentType)) {
       return { ...meta, images: [{ mimeType: item.contentType, dataBase64: Buffer.from(data).toString('base64') }] }
     }

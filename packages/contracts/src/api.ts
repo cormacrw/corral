@@ -646,12 +646,13 @@ export interface Evidence {
   runId: string
   round: number
   kind: EvidenceKind
+  // For a `note`, the text is the evidence and there is no file (D21)
   note: string
-  fileName: string
-  contentType: string
+  fileName: string | null
+  contentType: string | null
   size: number
-  // Served by the server (D8: web never touches storage)
-  url: string
+  // Served by the server (D8: web never touches storage); null for a note
+  url: string | null
   createdAt: string
 }
 
@@ -670,7 +671,7 @@ export interface Review {
   createdAt: string
 }
 
-export const EVIDENCE_KINDS = ['screenshot', 'video', 'test_output', 'log', 'request', 'text', 'other'] as const
+export const EVIDENCE_KINDS = ['screenshot', 'video', 'test_output', 'log', 'request', 'text', 'other', 'note'] as const
 export type EvidenceKind = typeof EVIDENCE_KINDS[number]
 
 // ── Pull requests ───────────────────────────────────────────────────────────

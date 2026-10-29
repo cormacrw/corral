@@ -109,7 +109,7 @@ Run: Starting → Running. A heartbeat every 2 minutes renews the lease, and eve
 
 1. Reads `CORRAL.md`, relevant wiki pages, and pinned comments.
 2. Implements the task; runs lint, typecheck, tests and build as gates (D21). Checks are never attached as criterion evidence.
-3. Produces human evidence per criterion: screenshots/video of the running app with the agent browser, real requests and responses, or before/after metrics. Calls `attach_evidence` for files. A criterion with nothing visual to show can instead use a written explanation without a file (for example, a refactor with no behaviour change); the reviewer judges it and its verdict note is the proof (D21).
+3. Produces human evidence per criterion: screenshots/video of the running app with the agent browser, real requests and responses, or before/after metrics. Calls `attach_evidence` for files. A criterion with nothing visual to show can instead use a written explanation without a file (`attach_evidence` with `kind: "note"` and no path) (for example, a refactor with no behaviour change); the reviewer judges it and its verdict note is the proof (D21).
 4. Updates the wiki; commits.
 5. Calls `report_outcome('pr_opened', summary)`, or `pr_updated` on a revision.
 

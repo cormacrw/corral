@@ -359,13 +359,14 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
 
     .get('/evidence/:id/file', async (c) => {
       const [row] = await db.select().from(schema.evidence).where(eq(schema.evidence.id, c.req.param('id')))
-      const data = row ? await blobs.get(row.blob) : null
+      // A note has no file
+      const data = row?.blob ? await blobs.get(row.blob) : null
       if (!row || !data) throw new ApiFailure(404, { code: 'not_found' })
       return c.body(new Uint8Array(data), 200, {
-        'content-type': row.contentType,
+        'content-type': row.contentType!,
         // Blobs are immutable, so they can be cached forever
         'cache-control': 'private, max-age=31536000, immutable',
-        'content-disposition': `inline; filename="${row.fileName.replace(/"/g, '')}"`
+        'content-disposition': `inline; filename="${row.fileName!.replace(/"/g, '')}"`
       })
     })
 

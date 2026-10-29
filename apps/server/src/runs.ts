@@ -108,7 +108,7 @@ export function toEvidence(row: typeof evidence.$inferSelect): Evidence {
     fileName: row.fileName,
     contentType: row.contentType,
     size: row.size,
-    url: `/api/evidence/${row.id}/file`,
+    url: row.blob ? `/api/evidence/${row.id}/file` : null,
     createdAt: row.createdAt.toISOString()
   }
 }

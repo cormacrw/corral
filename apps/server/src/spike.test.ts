@@ -131,6 +131,19 @@ describe('spikes deliver findings instead of a PR', () => {
     await pause(project)
   })
 
+  it('accepts findings whose criteria are covered by notes alone (D21)', async () => {
+    const { project, task } = await approved()
+    const developer = await nextJob(task, 'developer')
+    for (const criterion of task.acceptanceCriteria) {
+      expect(await runner.call(developer.runId, developer.leaseEpoch, 'attach_evidence', { criterionId: criterion.id, kind: 'note', note: 'Read the locking code in src/claim.ts' }))
+        .toMatchObject({ ok: true })
+    }
+    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'findings_reported', summary: FINDINGS })).toMatchObject({ ok: true })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'agent_review' })
+    await runner.next('run.stop', m => m.runId === developer.runId)
+    await pause(project)
+  })
+
   it('sends findings that miss a criterion back to the developer, like a failed review, and reviews the new findings', async () => {
     const { project, task } = await approved()
     const developer = await nextJob(task, 'developer')
