@@ -1,5 +1,5 @@
 import type { RunnerMessage, ServerMessage } from '@corral/contracts'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import WebSocket from 'ws'
 import type { RunnerHub } from './runner-hub.ts'
 import type { RunningServer } from './server.ts'
@@ -10,30 +10,38 @@ describe('runner connection', () => {
   let t: TestApp
   let server: RunningServer
   let hub: RunnerHub
+  let socket: WebSocket | undefined
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     t = await createTestApp('pglite', { listen: true })
     server = t.server!
     hub = t.runner
   })
 
-  afterAll(async () => {
+  afterEach(async () => {
+    if (socket && socket.readyState !== WebSocket.CLOSED) {
+      const closed = new Promise<void>(resolve => socket!.once('close', () => resolve()))
+      socket.close()
+      await closed
+    }
+    socket = undefined
     await t?.close()
   })
 
   async function connectRunner(onJob: (message: Extract<ServerMessage, { type: 'job.request' }>) => RunnerMessage) {
-    const socket = new WebSocket(`${server.url.replace('http', 'ws')}/runner`)
+    const connection = new WebSocket(`${server.url.replace('http', 'ws')}/runner`)
+    socket = connection
     const welcomed = new Promise<void>((resolve) => {
-      socket.on('message', (data) => {
+      connection.on('message', (data) => {
         const message = JSON.parse(String(data)) as ServerMessage
         if (message.type === 'welcome') resolve()
-        if (message.type === 'job.request') socket.send(JSON.stringify(onJob(message)))
+        if (message.type === 'job.request') connection.send(JSON.stringify(onJob(message)))
       })
     })
-    await new Promise(resolve => socket.once('open', resolve))
-    socket.send(JSON.stringify({ type: 'hello', protocol: 1, runnerId: 'r1', name: 'test-runner', activeRuns: [] } satisfies RunnerMessage))
+    await new Promise(resolve => connection.once('open', resolve))
+    connection.send(JSON.stringify({ type: 'hello', protocol: 1, runnerId: 'r1', name: 'test-runner', activeRuns: [] } satisfies RunnerMessage))
     await welcomed
-    return socket
+    return connection
   }
 
   it('reports the runner offline before it connects', async () => {
@@ -63,8 +71,9 @@ describe('runner connection', () => {
     ])
 
     socket.close()
-    await new Promise(resolve => setTimeout(resolve, 100))
-    expect(hub.online).toBe(false)
+    // The server's close handler can run later under load; observe its state
+    // instead of assuming the close handshake finishes within 100 ms.
+    await vi.waitFor(() => expect(hub.online).toBe(false))
   })
 
   it('marks repos already used by a project, and read-only ones, as not selectable', async () => {

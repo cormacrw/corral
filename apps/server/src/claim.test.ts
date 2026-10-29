@@ -2,20 +2,22 @@ import type { Project } from '@corral/contracts'
 import type { TaskPriority } from '@corral/core'
 import { schema } from '@corral/db'
 import { and, eq } from 'drizzle-orm'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { claimNextTask } from './claim.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 
-const { agents, auditLog, projects, runs, tasks } = schema
+const { agents, auditLog, runs, tasks } = schema
 
 describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) => {
   let t: TestApp
 
-  beforeAll(async () => {
+  // A failed assertion must not leave claimable tasks for the next test.
+  beforeEach(async () => {
     t = await createTestApp(driver)
   })
 
-  afterAll(async () => {
+  afterEach(async () => {
+    vi.restoreAllMocks()
     await t?.close()
   })
 
@@ -28,7 +30,6 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
     return agent!.id
   }
 
-  // A fresh project, so earlier tests' tasks can't be claimed
   async function projectWithReadyTasks(count: number, priorities: TaskPriority[] = []): Promise<Project> {
     const project = await t.createProject()
     for (let i = 0; i < count; i++) {
@@ -36,11 +37,6 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
       await t.request('POST', `/api/projects/${project.slug}/tasks/${i + 1}/transitions`, { type: 'approve' })
     }
     return project
-  }
-
-  // Every test pauses the projects it's done with, so they don't leak tasks
-  async function pauseProject(project: Project) {
-    await t.db.update(projects).set({ paused: true }).where(eq(projects.id, project.id))
   }
 
   async function taskRow(project: Project, number: number) {
@@ -70,7 +66,6 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
     const [audit] = await t.db.select().from(auditLog)
       .where(and(eq(auditLog.taskId, task.id), eq(auditLog.action, 'task.claimed')))
     expect(audit).toMatchObject({ actor: { kind: 'system', component: 'scheduler' }, detail: { from: 'ready', to: 'in_progress', leaseEpoch: 1 } })
-    await pauseProject(project)
   })
 
   it('lets a Codex developer added through the API claim Ready tasks like Atlas', async () => {
@@ -90,14 +85,12 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
     expect(run).toMatchObject({ agentId, role: 'developer', state: 'queued' })
     // Its concurrency limit applies like any other agent's
     expect(await claimNextTask(t.db, agentId)).toBeNull()
-    await pauseProject(project)
   })
 
   it('finds nothing when only Backlog tasks exist', async () => {
     const project = await t.createProject()
     await t.createTask(project.slug)
     expect(await claimNextTask(t.db, await developer())).toBeNull()
-    await pauseProject(project)
   })
 
   it('waits until every dependency is Merged', async () => {
@@ -110,44 +103,39 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
     expect(await claimNextTask(t.db, agentId)).toBeNull()
     await t.db.update(tasks).set({ status: 'merged' }).where(eq(tasks.id, (await taskRow(project, 1)).id))
     expect((await claimNextTask(t.db, agentId))?.taskId).toBe((await taskRow(project, 2)).id)
-    await pauseProject(project)
   })
 
   it('skips paused projects and paused tasks', async () => {
     const paused = await projectWithReadyTasks(1)
-    await pauseProject(paused)
+    await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, paused.id))
     const project = await projectWithReadyTasks(1)
     await t.db.update(tasks).set({ paused: true }).where(eq(tasks.id, (await taskRow(project, 1)).id))
     expect(await claimNextTask(t.db, await developer())).toBeNull()
-    await pauseProject(project)
   })
 
   it('takes urgent work first', async () => {
     const project = await projectWithReadyTasks(3, ['low', 'urgent', 'medium'])
     const claim = await claimNextTask(t.db, await developer())
     expect(claim?.taskId).toBe((await taskRow(project, 2)).id)
-    await pauseProject(project)
   })
 
   it('stops at the agent’s concurrency limit', async () => {
-    const project = await projectWithReadyTasks(2)
+    await projectWithReadyTasks(2)
     const agentId = await developer(1)
     expect(await claimNextTask(t.db, agentId)).not.toBeNull()
     expect(await claimNextTask(t.db, agentId)).toBeNull()
-    await pauseProject(project)
   })
 
   it('claims nothing for a paused agent or one waiting on a usage limit (D3)', async () => {
-    const project = await projectWithReadyTasks(1)
+    await projectWithReadyTasks(1)
     const now = new Date('2026-10-27T12:00:00Z')
     expect(await claimNextTask(t.db, await developer(1, { paused: true }), now)).toBeNull()
     expect(await claimNextTask(t.db, await developer(1, { pausedUntil: new Date('2026-10-27T15:00:00Z') }), now)).toBeNull()
     expect(await claimNextTask(t.db, await developer(1, { pausedUntil: new Date('2026-10-27T11:00:00Z') }), now)).not.toBeNull()
-    await pauseProject(project)
   })
 
   it('gives an In progress task with no lease a new lease and a higher epoch', async () => {
-    const project = await projectWithReadyTasks(1)
+    await projectWithReadyTasks(1)
     const first = await claimNextTask(t.db, await developer())
     // The run ends, e.g. changes were requested: the task stays In progress, unleased (D10)
     await t.db.update(runs).set({ state: 'completed' }).where(eq(runs.id, first!.runId))
@@ -155,7 +143,6 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
 
     const second = await claimNextTask(t.db, await developer())
     expect(second).toMatchObject({ taskId: first!.taskId, leaseEpoch: 2, status: 'in_progress' })
-    await pauseProject(project)
   })
 })
 
@@ -164,11 +151,11 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
 describe('concurrent claims on postgres', () => {
   let t: TestApp
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     t = await createTestApp('postgres')
   })
 
-  afterAll(async () => {
+  afterEach(async () => {
     await t?.close()
   })
 
@@ -197,7 +184,6 @@ describe('concurrent claims on postgres', () => {
     const rows = await t.db.select().from(tasks).where(eq(tasks.projectId, project.id))
     expect(rows.every(r => r.status === 'in_progress' && r.leaseEpoch === 1)).toBe(true)
     expect(await t.db.$count(runs, eq(runs.projectId, project.id))).toBe(10)
-    await t.db.update(projects).set({ paused: true }).where(eq(projects.id, project.id))
   })
 
   it('never exceeds an agent’s concurrency limit', async () => {
