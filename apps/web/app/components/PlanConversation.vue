@@ -2,12 +2,13 @@
 import type { Plan, PlanMessage, PlanSessionDetail } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { projectColor, runtimeLabel } from '~/utils/labels'
-import { approvePlan } from '~/utils/plan-approval'
+import { approvedMessage, approvePlan } from '~/utils/plan-approval'
 import { answerTo, openQuestionId, STOP_ASKING } from '~/utils/plan-questions'
 import { withoutMessages } from '~/utils/tool-steps'
 
 // A Plan conversation (design/plan.md)
 const props = defineProps<{ sessionId: string, inbox?: boolean }>()
+const emit = defineEmits<{ read: [], approved: [], approving: [value: boolean] }>()
 const router = useRouter()
 const live = useLive()
 const threads = usePlanThreads()
@@ -23,6 +24,7 @@ const text = ref('')
 const taskRef = ref<string | null>(null)
 const busy = ref(false)
 const approving = ref<string | null>(null)
+const approvalTarget = ref<'ready' | 'backlog' | null>(null)
 const project = computed(() => live.state.value.projects.find(p => p.id === session.value?.projectId) ?? null)
 const runnerOffline = computed(() => live.state.value.loaded && !live.state.value.runner?.online)
 const reconnecting = ref(false)
@@ -35,18 +37,32 @@ async function reconnect() {
     reconnecting.value = false
   }
 }
-useSeoMeta({ title: () => `${session.value?.title ?? 'Plan'} · Corral` })
+useSeoMeta({ title: () => props.inbox ? 'Inbox · Corral' : `${session.value?.title ?? 'Plan'} · Corral` })
 
 async function load() {
   error.value = null
+  const requested = id.value
   try {
-    session.value = await api.plan.session(id.value)
-    if (session.value.unread) void api.plan.read(id.value)
+    const loaded = await api.plan.session(requested)
+    if (requested !== id.value) return
+    session.value = loaded
+    if (session.value.unread) {
+      await api.plan.read(requested)
+      if (session.value?.id !== requested) return
+      session.value.unread = false
+      emit('read')
+    }
   } catch (e) {
+    if (requested !== id.value) return
     error.value = e instanceof Error ? e.message : String(e)
   }
 }
-watch(id, () => void load(), { immediate: true })
+watch(id, () => {
+  session.value = null
+  text.value = ''
+  approvalTarget.value = null
+  void load()
+}, { immediate: true })
 onMounted(() => {
   const stop = live.subscribe((event) => {
     if (!session.value) return
@@ -60,6 +76,7 @@ onMounted(() => {
     }
     if (event.type === 'plan.session' && event.session.id === session.value.id) {
       Object.assign(session.value, event.session)
+      if (event.session.unread) void api.plan.read(id.value).then(() => emit('read'))
     }
   })
   onBeforeUnmount(stop)
@@ -78,13 +95,16 @@ const backlog = computed(() => project.value ? (live.state.value.tasks[project.v
 
 // Resolves false when not sent, so the composer keeps its images
 async function send(message: string): Promise<boolean> {
-  if (!session.value) return false
+  if (!session.value || cantSend.value) return false
+  const sendingTo = session.value.id
   busy.value = true
   try {
-    await api.plan.message(session.value.id, message, taskRef.value ?? undefined)
-    threads.add(session.value.id)
-    text.value = ''
-    taskRef.value = null
+    await api.plan.message(sendingTo, message, taskRef.value ?? undefined)
+    threads.add(sendingTo)
+    if (session.value?.id === sendingTo) {
+      text.value = ''
+      taskRef.value = null
+    }
     return true
   } catch (e) {
     toast.add({ title: 'Could not send', description: e instanceof Error ? e.message : String(e), color: 'error' })
@@ -97,7 +117,12 @@ async function send(message: string): Promise<boolean> {
 // draft and attached task alone; Grill me sends the draft.
 const composer = ref<{ focus: () => void } | null>(null)
 const openQuestion = computed(() => session.value ? openQuestionId(session.value.messages) : null)
-const cantSend = computed(() => busy.value || runnerOffline.value || Boolean(session.value?.activeRunId))
+const cantApprove = computed(() => busy.value || approving.value !== null || Boolean(session.value?.activeRunId))
+const cantSend = computed(() => cantApprove.value || runnerOffline.value)
+async function submit(message: string): Promise<boolean> {
+  if (props.inbox && approvalTarget.value && latest.value) return approve(latest.value, approvalTarget.value)
+  return send(message)
+}
 async function quick(message: string, keepDraft = true) {
   const draft = text.value
   const task = taskRef.value
@@ -109,17 +134,30 @@ async function quick(message: string, keepDraft = true) {
   }
 }
 async function approve(plan: Plan, to: 'ready' | 'backlog') {
+  if (cantApprove.value) return false
   approving.value = plan.id
+  emit('approving', true)
   try {
-    await approvePlan(plan, to, {
+    if (props.inbox) {
+      const approved = await api.plan.approve(plan.id, to)
+      toast.add({ title: 'Resolved', description: approvedMessage(approved, to), color: 'success' })
+      await flyout.close()
+      emit('approved')
+      return true
+    }
+    return await approvePlan(plan, to, {
       approve: api.plan.approve,
       toast,
       mobile: device.isMobile.value,
       closeSheet: flyout.close,
-      push: path => router.push(props.inbox ? '/inbox' : path)
+      push: path => router.push(path)
     })
+  } catch (e) {
+    toast.add({ title: 'Could not approve', description: e instanceof Error ? e.message : String(e), color: 'error' })
+    return false
   } finally {
     approving.value = null
+    emit('approving', false)
   }
 }
 // The PM's turn as it happens: the saved part, then live run.events
@@ -170,7 +208,7 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
 </script>
 
 <template>
-  <UDashboardPanel :ui="{ body: 'p-0' }">
+  <div class="flex h-full min-h-0 min-w-0 flex-1 flex-col">
     <!-- Phones switch sessions from the header (design/mobile.md) -->
     <MobilePageHeader
       v-if="device.isMobile.value"
@@ -216,9 +254,16 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
             size="sm"
             data-testid="plan-session-runtime"
           />
+          <UBadge
+            v-if="inbox && session && session.status !== 'none'"
+            :label="session.status === 'needs_approval' ? 'Needs approval' : 'Question'"
+            :color="session.status === 'needs_approval' ? 'primary' : 'info'"
+            variant="subtle"
+            size="xs"
+          />
           <UButton
-            to="/plan"
-            label="New session"
+            :to="inbox ? `/plan/${id}` : '/plan'"
+            :label="inbox ? 'Open in Plan' : 'New session'"
             variant="ghost"
             color="neutral"
             size="sm"
@@ -368,6 +413,61 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
 
         <div :class="['shrink-0 border-t border-default p-3', device.isMobile.value && 'pb-[max(0.75rem,env(safe-area-inset-bottom))]']">
           <div class="mx-auto w-full max-w-[768px]">
+            <!-- Phones view the plan in a sheet and approve with one tap (design/inbox.md) -->
+            <template v-if="inbox && device.isMobile.value">
+              <UButton
+                v-if="latest"
+                label="View plan"
+                variant="ghost"
+                class="mb-2 min-h-11"
+                @click="flyout.openPlan()"
+              />
+              <div
+                v-if="latest?.status === 'proposed'"
+                class="mb-2 flex min-w-0 gap-2"
+              >
+                <UButton
+                  class="min-h-11 min-w-0 flex-1 justify-center text-xs"
+                  label="Approve to board"
+                  :loading="approving !== null"
+                  :disabled="cantApprove"
+                  @click="approve(latest, 'ready')"
+                />
+                <UButton
+                  class="min-h-11 min-w-0 flex-1 justify-center text-xs"
+                  label="Approve to Backlog"
+                  variant="outline"
+                  :loading="approving !== null"
+                  :disabled="cantApprove"
+                  @click="approve(latest, 'backlog')"
+                />
+              </div>
+            </template>
+            <div
+              v-else-if="inbox && latest?.status === 'proposed'"
+              role="radiogroup"
+              aria-label="Plan actions"
+              class="mb-2 flex flex-wrap gap-2"
+            >
+              <UButton
+                label="Approve to board"
+                size="sm"
+                role="radio"
+                :aria-checked="approvalTarget === 'ready'"
+                :variant="approvalTarget === 'ready' ? 'subtle' : 'outline'"
+                :disabled="cantApprove"
+                @click="approvalTarget = approvalTarget === 'ready' ? null : 'ready'"
+              />
+              <UButton
+                label="Approve to Backlog"
+                role="radio"
+                :aria-checked="approvalTarget === 'backlog'"
+                :variant="approvalTarget === 'backlog' ? 'subtle' : 'outline'"
+                size="sm"
+                :disabled="cantApprove"
+                @click="approvalTarget = approvalTarget === 'backlog' ? null : 'backlog'"
+              />
+            </div>
             <UAlert
               v-if="runnerOffline && device.isMobile.value"
               color="error"
@@ -387,40 +487,16 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
               title="Plan needs the runner. It's offline."
               class="mb-2"
             />
-            <UButton
-              v-if="props.inbox && latest"
-              label="View plan"
-              variant="ghost"
-              class="mb-2 min-h-11"
-              @click="flyout.openPlan()"
-            />
-            <div
-              v-if="props.inbox && latest?.status === 'proposed'"
-              class="mb-2 flex min-w-0 gap-2"
-            >
-              <UButton
-                class="min-h-11 min-w-0 flex-1 justify-center text-xs"
-                label="Approve to board"
-                :loading="approving !== null"
-                @click="approve(latest, 'ready')"
-              />
-              <UButton
-                class="min-h-11 min-w-0 flex-1 justify-center text-xs"
-                label="Approve to Backlog"
-                variant="outline"
-                :loading="approving !== null"
-                @click="approve(latest, 'backlog')"
-              />
-            </div>
             <PromptComposer
               ref="composer"
               v-model="text"
               :placeholder="runnerOffline && device.isMobile.value ? `${pm?.name ?? 'The PM'} is unavailable while the runner is offline` : `Reply to ${pm?.name ?? 'the PM'}…`"
               :disabled="runnerOffline || Boolean(session?.activeRunId)"
-              :busy="busy"
-              :allow-empty="taskRef !== null"
+              :busy="busy || approving !== null"
+              :submit-label="inbox && approvalTarget ? approvalTarget === 'ready' ? 'Approve to board' : 'Approve to Backlog' : ''"
+              :allow-empty="taskRef !== null || (inbox && approvalTarget !== null)"
               :project="project?.slug"
-              @submit="send"
+              @submit="submit"
             >
               <template #header>
                 <div
@@ -549,5 +625,5 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
         </template>
       </TaskFlyout>
     </div>
-  </UDashboardPanel>
+  </div>
 </template>

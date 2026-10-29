@@ -181,4 +181,4 @@ On the mobile layout ([mobile.md](mobile.md#inbox)), a Plan thread opens as its 
 - Approve could be one click instead of select-then-send. Two steps are safer; decide after testing.
 - Should Activity items expire, or stay forever?
 
-Mobile Plan threads reuse Plan's `PlanQuestion`, composer and `PlanDetail` bottom sheet, without `PlanConversation`. The Inbox header keeps Back to Inbox and Open in Plan (the session route). A waiting plan has View plan and side-by-side approval destinations; either successful approval closes the sheet and returns to `/inbox`. Failed approvals keep the screen and sheet open.
+Mobile Plan threads reuse `PlanConversation` with Plan's `PlanQuestion`, composer and `PlanDetail` bottom sheet. The Inbox header keeps Back to Inbox and Open in Plan (the session route). A waiting plan has View plan and side-by-side approval destinations above the composer; either successful approval closes the sheet and moves on to the next item that needs you, as on desktop. Failed approvals keep the conversation and sheet open.

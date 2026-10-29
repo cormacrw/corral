@@ -169,7 +169,11 @@ route('POST', '/plan/plans/:id/approve', ([id], body) => {
   emit({ type: 'plan.drafts', projectId: plan.projectId, sessions: drafts(plan.projectId) })
   return plan
 })
-route('POST', '/plan/sessions/:id/read', ([id]) => Object.assign(f.planSessions.find(s => s.id === id) ?? notFound(), { unread: false }))
+route('POST', '/plan/sessions/:id/read', ([id]) => {
+  const s = Object.assign(f.planSessions.find(s => s.id === id) ?? notFound(), { unread: false })
+  emit({ type: 'plan.session', session: s })
+  return s
+})
 
 // The live stream: useLive listens here instead of /api/events
 const eventListeners = new Set<(event: ServerEvent) => void>()
@@ -218,12 +222,34 @@ route('POST', '/plan/sessions/:id/messages', ([id], body) => {
   const s = f.planSessions.find(x => x.id === id) ?? notFound()
   const { text } = body as { text: string }
   const message = postMessage(s.id, { role: 'human', kind: 'message', text })
+  const runId = `mock-run-${++nextId}`
   Object.assign(s, {
-    closed: false, unread: false, preview: text, updatedAt: message.createdAt,
+    closed: false, unread: false, activeRunId: runId, preview: text, updatedAt: message.createdAt,
     status: f.plans[s.id]?.some(p => p.status === 'proposed') ? 'needs_approval' : 'none'
   })
   emit({ type: 'plan.session', session: s })
-  setTimeout(() => pmReply(s.id, text), 1000)
+  const reply = 'I will incorporate that into the plan.'
+  const updates: RunEvent[] = [
+    { type: 'thinking', text: 'Checking the existing plan and your reply.' },
+    { type: 'message', text: reply },
+    { type: 'thinking', text: 'Preparing the next question or plan.' }
+  ]
+  for (let i = 1; i <= updates.length; i++) {
+    setTimeout(() => {
+      const events: RunEvent[] = [updates[i - 1]!]
+      ;(f.runEvents[runId] ??= []).push(...events)
+      emit({ type: 'run.events', runId, events })
+    }, i * 400)
+  }
+  setTimeout(() => {
+    if (f.grilling[s.id]) pmReply(s.id, text)
+    else {
+      postMessage(s.id, { role: 'pm', kind: 'message', text: reply, runId })
+      Object.assign(s, { preview: reply, status: f.plans[s.id]?.at(-1)?.status === 'proposed' ? 'needs_approval' : 'none' })
+    }
+    Object.assign(s, { activeRunId: null, unread: true, updatedAt: new Date().toISOString() })
+    emit({ type: 'plan.session', session: s })
+  }, 1800)
   return message
 })
 

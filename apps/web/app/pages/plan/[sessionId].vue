@@ -3,5 +3,7 @@ const route = useRoute()
 </script>
 
 <template>
-  <PlanConversation :session-id="String(route.params.sessionId)" />
+  <UDashboardPanel :ui="{ body: 'p-0' }">
+    <PlanConversation :session-id="String(route.params.sessionId)" />
+  </UDashboardPanel>
 </template>
