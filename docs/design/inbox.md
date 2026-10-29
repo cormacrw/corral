@@ -11,7 +11,7 @@ One place for everything an agent needs you to decide, from every project, with 
 Items come from two places:
 
 - **Developer and reviewer runs:** human reviews, blocked and failed tasks, questions, and Activity.
-- **Plan sessions that need you** (D11, amended 2026-10-29): each open session with a question from Juno or a plan needing approval is a **Plan thread** item. They can be handled from the Inbox or from Plan; both act on the same session. See [Plan threads](#plan-threads).
+- **Plan sessions that need you** (D11, amended 2026-10-29): each open session with a question from Juno, a plan needing approval or an unread reply from Juno is a **Plan thread** item. They can be handled from the Inbox or from Plan; both act on the same session. See [Plan threads](#plan-threads).
 
 There's no separate notifications feed.
 
@@ -76,19 +76,23 @@ An open Plan session (D9) that's waiting on you, shown as an Inbox item (D11). A
 
 ### Where they're listed
 
-- Only open sessions with a pending **question** or a plan **needing approval** are listed, under **Needs you**, never Activity or Resolved. They sit with the task items, newest first.
-- Idle sessions, and sessions whose only news is an **unread reply**, aren't Inbox items. They stay in Plan and its side nav threads ([plan.md](plan.md#side-nav-threads)). There's no "Open in Plan" divider or group.
-- The **Needs you** count includes exactly the listed threads (question or approval), plus the task items.
-- `plan.session` events add, re-sort and remove threads live: a question or a new plan version adds or moves a thread up; answering its question (until Juno asks again), approving its plan or closing it, here or in Plan, removes it at once.
+- Open sessions waiting on you are listed, under **Needs you**, never Activity or Resolved. There are three kinds:
+  - a pending **question** from Juno (`question` holds it)
+  - a plan **needing approval** (`plan` holds its summary)
+  - an **unread reply**: Juno finished a turn you haven't seen, with no question or plan pending (`reply` holds that message's text). Reading the thread, here or in Plan, takes it out of the list.
+- Idle sessions, with none of the three, aren't Inbox items. They stay in Plan and its side nav threads ([plan.md](plan.md#side-nav-threads)). There's no "Open in Plan" divider or group.
+- **Order:** Needs you is one list of task items and threads, **newest first** by when each arrived (`at`), with no grouping. A task arrives when it enters Human review, Blocked or Failed (its latest transition into that status), so an update that keeps its status, such as its PR head moving, doesn't move it. A thread arrives when it started waiting: when the question was asked, the plan was proposed or the unread reply came in.
+- The **Needs you** count is exactly the number of listed items: the task items and the threads.
+- `plan.session` events add, re-sort and remove threads live: a question, a new plan version or a finished Juno turn adds or moves a thread up; answering its question (until Juno asks again), approving its plan, reading its reply or closing it, here or in Plan, removes it at once.
 
 ### Row
 
 One button, in the same list as the other items:
 
 - the **project dot** (in place of the sender's avatar, with the project name in its tooltip and `aria-label`)
-- the **session title** (bold), and the **time** of its last message
-- a **status badge**: "Needs approval" in `primary` or "Question" in `info`. While Juno is working (`activeRunId`), a spinner sits next to the time.
-- a two-line **preview**: Juno's question, or the plan summary ("Plan v2 · 2 epics · 4 tasks")
+- the **session title** (bold), and the **time** it started waiting
+- a **status badge**: "Needs approval" in `primary` or "Question" in `info`; an unread reply has the unread dot instead. While Juno is working (`activeRunId`), a spinner sits next to the time.
+- a two-line **preview**: Juno's question, the plan summary ("Plan v2 · 2 epics · 4 tasks"), or Juno's reply
 
 ### Detail pane
 
@@ -150,7 +154,7 @@ On the mobile layout ([mobile.md](mobile.md#inbox)), a Plan thread opens as its 
 ## Data
 
 - **Items:** id, project, task ref, type (question / human review / blocked / failed / activity / plan thread), sender agent and role, time, subject, preview, body, unread, resolved outcome.
-- **Type-specific fields:** PR, checks, criteria with evidence, positions, suggested answers. A plan thread has the session id, title, status (needs approval / question), `activeRunId`, preview and last-message time; its question and plan come from the Plan session endpoints.
+- **Type-specific fields:** PR, checks, criteria with evidence, positions, suggested answers. A plan thread has the session id, title, status (needs approval / question / none with an unread reply), `activeRunId`, preview, `reply` and the time it started waiting; its question and plan come from the Plan session endpoints.
 - **Counts per filter.**
 - New items stream in over SSE; plan threads follow `plan.session` events.
 

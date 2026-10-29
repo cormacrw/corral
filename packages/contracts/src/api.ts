@@ -458,7 +458,8 @@ export interface TaskInboxItem extends InboxItemBase {
   resolution: string | null
 }
 
-// An open Plan session waiting on the human (D11, amended)
+// An open Plan session waiting on the human (D11, amended): a question, a plan
+// needing approval or an unread PM reply
 export interface PlanThreadItem extends InboxItemBase {
   // The session ID
   id: string
@@ -472,6 +473,8 @@ export interface PlanThreadItem extends InboxItemBase {
   runtime: AgentRuntime
   status: PlanSession['status']
   question: Pick<PlanMessage, 'text' | 'recommendation' | 'options'> | null
+  // The latest PM message, when the thread is listed only for an unread reply
+  reply: string | null
   plan: (Pick<Plan, 'id' | 'version' | 'title' | 'summary'> & { epicCount: number, taskCount: number }) | null
   unread: boolean
   // The plan waiting for approval, when status is needs_approval
@@ -483,16 +486,13 @@ export interface PlanThreadItem extends InboxItemBase {
 export type InboxItem = TaskInboxItem | PlanThreadItem
 
 export interface Inbox {
-  // Task items and Plan threads waiting on the human, newest first
+  // Task items and Plan threads waiting on the human, one list newest first by
+  // when each arrived (`at`)
   needsYou: InboxItem[]
   activity: TaskInboxItem[]
   resolved: TaskInboxItem[]
   // The Needs you count (the Inbox badge): exactly the listed items
   count: number
-}
-
-export function needsAttention(item: InboxItem): boolean {
-  return item.type !== 'plan_thread' || item.status === 'question' || item.status === 'needs_approval'
 }
 
 // What the human can do from an item's tray (design/inbox.md, D10)

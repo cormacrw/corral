@@ -1,11 +1,11 @@
 import type { Inbox, InboxItem, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
 import { richTextToPlainText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, count, desc, eq, inArray, isNull, ne } from 'drizzle-orm'
+import { and, count, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { actorLabel } from './orchestrator.ts'
 import { sessionState } from './plan.ts'
 
-const { agents, auditLog, planSessions, plans, planEpics, planTasks, projects, reviews, runs, tasks } = schema
+const { agents, auditLog, planMessages, planSessions, plans, planEpics, planTasks, projects, reviews, runs, tasks } = schema
 
 const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'findings_reported', 'design_submitted', 'changes_requested', 'merged', 'ci_failed', 'base_conflict', 'head_moved']
 
@@ -17,9 +17,9 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
   const open = await db.select({ task: tasks, project: projects }).from(tasks)
     .innerJoin(projects, eq(projects.id, tasks.projectId))
     .where(and(inArray(tasks.status, ['human_review', 'blocked', 'failed']), isNull(tasks.deletedAt)))
-    .orderBy(desc(tasks.updatedAt))
   const taskItems = await Promise.all(open.map(({ task, project }) => needsYouItem(db, task, project)))
   const threads = await planThreads(db)
+  // One list, newest first by when each item arrived (design/inbox.md)
   const needsYou = [...taskItems, ...threads].sort((a: InboxItem, b: InboxItem) => b.at.localeCompare(a.at))
 
   const entries = await db.select({ entry: auditLog, task: tasks, project: projects }).from(auditLog)
@@ -47,7 +47,9 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
   return { needsYou, activity: activity.slice(0, limit), resolved: resolved.slice(0, limit), count: needsYou.length }
 }
 
-// Only open sessions waiting on a question or plan approval belong in the Inbox
+// Only open sessions waiting on the human belong in the Inbox: a question, a
+// plan needing approval or an unread PM reply. Each is dated by when it
+// started waiting.
 async function planThreads(db: Executor): Promise<PlanThreadItem[]> {
   const rows = await db.select({ session: planSessions, project: projects }).from(planSessions)
     .innerJoin(projects, eq(projects.id, planSessions.projectId))
@@ -57,8 +59,14 @@ async function planThreads(db: Executor): Promise<PlanThreadItem[]> {
   const sender = { name: pm?.name ?? 'PM', role: 'pm' as const }
   const items = await Promise.all(rows.map(async ({ session: row, project }) => {
     const { session, planId, last } = await sessionState(db, row)
-    if (session.status !== 'question' && session.status !== 'needs_approval') return null
+    const waitingOnReply = session.status === 'none' && session.unread
+    if (session.status !== 'question' && session.status !== 'needs_approval' && !waitingOnReply) return null
+    const [reply] = waitingOnReply
+      ? await db.select().from(planMessages).where(and(eq(planMessages.sessionId, row.id), eq(planMessages.role, 'pm'))).orderBy(desc(planMessages.createdAt)).limit(1)
+      : []
+    if (waitingOnReply && !reply) return null
     const [waiting] = planId ? await db.select().from(plans).where(eq(plans.id, planId)) : []
+    const since = session.status === 'needs_approval' ? waiting!.createdAt : session.status === 'question' ? last!.createdAt : reply!.createdAt
     // Tasks dropped in a revision keep a 'removed' row and aren't part of the plan. Plans saved before
     // plan_epics existed have no epic rows, only plans.epicId, so count that as one epic.
     const [epics, tasks] = waiting
@@ -76,9 +84,10 @@ async function planThreads(db: Executor): Promise<PlanThreadItem[]> {
       subject: session.title,
       preview: session.preview,
       question: session.status === 'question' && last ? { text: last.text, recommendation: last.recommendation, options: last.options } : null,
+      reply: reply ? reply.text : null,
       plan: waiting ? { id: waiting.id, version: waiting.version, title: waiting.title, summary: waiting.summary, epicCount: epics[0]?.rows === 0 && waiting.epicId ? 1 : epics[0]?.count ?? 0, taskCount: tasks[0]?.count ?? 0 } : null,
       sender,
-      at: (last && last.createdAt > row.updatedAt ? last.createdAt : row.updatedAt).toISOString(),
+      at: since.toISOString(),
       status: session.status,
       unread: session.unread,
       planId,
@@ -97,17 +106,13 @@ async function needsYouItem(db: Executor, task: typeof tasks.$inferSelect, proje
   const [last] = await db.select({ run: runs, agent: agents }).from(runs).innerJoin(agents, eq(agents.id, runs.agentId))
     .where(eq(runs.taskId, task.id)).orderBy(desc(runs.number)).limit(1)
   const sender = last ? { name: last.agent.name, role: last.agent.role } : { name: 'Corral', role: 'system' as const }
+  // The item arrived when the task entered its status. Updates that keep the
+  // status (a PR head moving, an edit) don't move it.
+  const [entered] = await db.select({ detail: auditLog.detail, createdAt: auditLog.createdAt }).from(auditLog)
+    .where(and(eq(auditLog.taskId, task.id), eq(auditLog.action, 'task.transition'), sql`${auditLog.detail}->>'to' = ${task.status}`, sql`${auditLog.detail}->>'from' is distinct from ${task.status}`))
+    .orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(1)
   // A Blocked task whose reason came from the agent's own report is a question
-  const [stuck] = task.status === 'blocked'
-    ? await db.select({ id: auditLog.id }).from(auditLog)
-        .where(and(eq(auditLog.taskId, task.id), eq(auditLog.action, 'task.transition')))
-        .orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(1)
-        .then(async ([row]) => {
-          if (!row) return []
-          const [full] = await db.select().from(auditLog).where(eq(auditLog.id, row.id))
-          return (full?.detail as { event?: string } | undefined)?.event === 'stuck' ? [full] : []
-        })
-    : []
+  const stuck = task.status === 'blocked' && (entered?.detail as { event?: string } | undefined)?.event === 'stuck'
   const type: TaskInboxItemType = task.status === 'human_review' ? 'human_review' : task.status === 'failed' ? 'failed' : stuck ? 'question' : 'blocked'
   // A human review gets a short note, not the reviewer's full write-up: the
   // criteria and evidence sit right under it (design/inbox.md)
@@ -124,7 +129,7 @@ async function needsYouItem(db: Executor, task: typeof tasks.$inferSelect, proje
     preview: (body || richTextToPlainText(task.description)).slice(0, 200),
     body,
     sender,
-    at: task.updatedAt.toISOString(),
+    at: (entered?.createdAt ?? task.updatedAt).toISOString(),
     prUrl: task.prUrl,
     resolution: null
   }

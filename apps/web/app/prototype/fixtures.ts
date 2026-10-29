@@ -431,6 +431,11 @@ export const planSessions: PlanSession[] = [
     id: 's-4', projectId: 'p-corral', title: 'Long tokens', runtime: 'claude-code',
     preview: 'Here is what widens the thread.', unread: false, closed: false, status: 'none', activeRunId: 'r-plan-2',
     createdAt: ago(60 * 2), updatedAt: ago(5)
+  },
+  {
+    id: 's-5', projectId: 'p-corral', title: 'Flaky CI', runtime: 'claude-code',
+    preview: 'The flaky test is the SSE reconnect one.', unread: true, closed: false, status: 'none', activeRunId: null,
+    createdAt: ago(60 * 7), updatedAt: ago(60 * 6)
   }
 ]
 
@@ -450,6 +455,10 @@ export const planMessages: Record<string, PlanMessage[]> = {
   's-4': [
     { id: 'm-7', sessionId: 's-4', role: 'human', kind: 'message', text: `On my phone the thread scrolls sideways. See ${LONG_PATH} and ${LONG_URL}, around \`${LONG_CODE}\`.\n\n${WIDE_TABLE}\n\n${LONG_BLOCK}`, recommendation: null, options: null, planId: null, runId: null, createdAt: ago(60 * 2) },
     { id: 'm-8', sessionId: 's-4', role: 'pm', kind: 'message', text: `Here is what widens the thread:\n\n- ${LONG_PATH}\n- [${LONG_URL}](${LONG_URL})\n- \`${LONG_CODE}\`\n\n${WIDE_TABLE}\n\n${LONG_BLOCK}`, recommendation: null, options: null, planId: 'plan-4', runId: 'r-plan-1', createdAt: ago(60) }
+  ],
+  's-5': [
+    { id: 'm-9', sessionId: 's-5', role: 'human', kind: 'message', text: 'Why does CI keep failing on main?', recommendation: null, options: null, planId: null, runId: null, createdAt: ago(60 * 7) },
+    { id: 'm-10', sessionId: 's-5', role: 'pm', kind: 'message', text: 'The flaky test is the SSE reconnect one. It waits a fixed 50 ms for the server to restart; polling for the reconnect would fix it.', recommendation: null, options: null, planId: null, runId: null, createdAt: ago(60 * 6) }
   ]
 }
 
@@ -550,17 +559,23 @@ export function inbox(): Inbox {
         resolution: null
       }
     })
-  for (const session of planSessions.filter(s => !s.closed && (s.status === 'question' || s.status === 'needs_approval'))) {
+  // Threads waiting on the human: a question, a plan needing approval or an unread reply
+  for (const session of planSessions.filter(s => !s.closed && (s.status !== 'none' || s.unread))) {
     const project = projects.find(p => p.id === session.projectId)!
-    const last = planMessages[session.id]?.at(-1)
+    const messages = planMessages[session.id] ?? []
+    const last = messages.at(-1)
     const plan = plans[session.id]?.find(p => p.status === 'proposed')
+    const reply = session.status === 'none' ? messages.findLast(m => m.role === 'pm') : undefined
+    if (session.status === 'none' && !reply) continue
     needsYou.push({
       id: session.id, type: 'plan_thread', sessionId: session.id,
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor },
       subject: session.title, preview: session.preview ?? '',
       question: session.status === 'question' && last ? { text: last.text, recommendation: last.recommendation, options: last.options } : null,
+      reply: reply?.text ?? null,
       plan: plan ? { id: plan.id, version: plan.version, title: plan.title, summary: plan.summary, epicCount: plan.epics.length, taskCount: plan.tasks.filter(t => t.change !== 'removed').length } : null,
-      sender: { name: 'Juno', role: 'pm' }, at: session.updatedAt,
+      // When it started waiting: the question, the plan or the reply
+      sender: { name: 'Juno', role: 'pm' }, at: (session.status === 'needs_approval' ? plan?.createdAt : session.status === 'question' ? last?.createdAt : reply?.createdAt) ?? session.updatedAt,
       taskId: null, taskRef: null, prUrl: null, resolution: null,
       runtime: session.runtime, status: session.status, unread: session.unread,
       activeRunId: session.activeRunId,

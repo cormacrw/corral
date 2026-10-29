@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { needsAttention, type Inbox } from '@corral/contracts'
+import type { Inbox } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { initials, projectColor } from '~/utils/labels'
 import { projectCardSummary } from '~/utils/projects'
@@ -26,7 +26,7 @@ onMounted(() => {
 })
 
 const cards = computed(() => state.value.projects.map((project) => {
-  const needsYou = inbox.value?.needsYou.filter(i => i.project.id === project.id && needsAttention(i)).length ?? 0
+  const needsYou = inbox.value?.needsYou.filter(i => i.project.id === project.id).length ?? 0
   return { project, loaded: Boolean(state.value.tasks[project.id]), ...projectCardSummary(project, state.value.tasks[project.id] ?? [], needsYou) }
 }))
 </script>
