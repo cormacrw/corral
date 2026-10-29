@@ -37,6 +37,7 @@ Take a new user from nothing to a working first project in four steps. Setup che
     - read-only access: "Read-only access: agents couldn't push branches or open PRs"
     - already used by another project (D13): "Used by {project}"
   - **Fallback:** a "Can't find it? Paste a GitHub URL" link reveals a URL input and **Check access**, for repos the list doesn't show (for example an org that hasn't granted the `gh` app access).
+- **Task ID prefix**, shown after picking a repo in setup and Add project (desktop and mobile): prefilled with the first three letters of the repo name, extended or varied to avoid existing prefixes. Input uppercases and strips non A–Z; 2–5 letters are required, with “Use 2–5 letters, A–Z.” and Continue/Finish disabled otherwise. Shows “Task IDs: ABC-1”. Creation uses the edited prefix. A server prefix conflict returns to Repository with “Another project uses this prefix.” on the field so it can be corrected.
 - **After a repo is picked**, two selects (`USelectMenu`):
   - **Default branch:** prefilled from GitHub's `defaultBranchRef`. "From GitHub. Agents branch from it and merge back into it."
   - **Merge method:** Squash and merge, Merge commit, or Rebase and merge.
@@ -89,5 +90,4 @@ Take a new user from nothing to a working first project in four steps. Setup che
 
 ## Open questions
 
-- Does the project's task ID prefix get set here (defaulting to the first three letters of the repo) or only in project settings? Today it defaults silently, and project settings can change it.
 - Agent setup moved to global Settings. Should step 4 stay, or should onboarding create default agents and point to Settings?

@@ -7,7 +7,7 @@ import { initials, timeAgo } from '~/utils/labels'
 // the web page in one column, with a progress bar in place of the stepper and
 // the step's action pinned to the bottom. It sits in the bare layout: no tab bar.
 const props = defineProps<{ setup: Setup }>()
-const { adding, steps, step, index, userName, savingName, repos, reposError, repoSearch, picked, pasted, showPaste, check, checking, defaultBranch, mergeMethod, loadRepos, repoRows, pick, clis, cliError, scan, cliDetail, agentNames, suggest, finishing, next, canContinue } = props.setup
+const { adding, steps, step, index, userName, savingName, repos, reposError, repoSearch, picked, pasted, showPaste, check, checking, prefix, prefixError, setPrefix, defaultBranch, mergeMethod, loadRepos, repoRows, pick, clis, cliError, scan, cliDetail, agentNames, suggest, finishing, next, canContinue } = props.setup
 
 const TITLES: Record<string, string> = { you: 'Your name', repo: 'Choose a repository', agents: 'Confirm agent CLIs', names: 'Name your agents' }
 const title = computed(() => adding.value ? 'Add a project' : TITLES[step.value] ?? 'Set up Corral')
@@ -263,6 +263,20 @@ function back() {
         </template>
 
         <template v-if="picked">
+          <UFormField
+            label="Task ID prefix"
+            :error="prefixError"
+            :help="`Task IDs: ${prefix || '…'}-1`"
+            required
+          >
+            <UInput
+              :model-value="prefix"
+              size="lg"
+              :disabled="checking"
+              class="w-full font-mono"
+              @update:model-value="setPrefix(String($event))"
+            />
+          </UFormField>
           <UFormField
             label="Default branch"
             help="From GitHub. Agents branch from it and merge back into it."
