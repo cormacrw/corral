@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { projectCardSummary } from './projects.ts'
 
 const now = Date.parse('2026-10-29T12:00:00Z')
-const task = (ref: string, status: 'backlog' | 'ready' | 'in_progress' | 'agent_review' | 'merged', lease: 'developer' | 'reviewer' | null = null) => ({
-  ref, status, mergedAt: status === 'merged' ? new Date(now - 1000).toISOString() : null,
+type Status = 'backlog' | 'ready' | 'in_progress' | 'agent_review' | 'human_review' | 'ready_to_merge' | 'blocked' | 'failed' | 'merged'
+const task = (ref: string, status: Status, lease: 'developer' | 'reviewer' | null = null) => ({
+  ref, status, mergedAt: status === 'merged' ? new Date(now - 60 * 60 * 1000).toISOString() : null,
   lease: lease ? { agentId: lease === 'developer' ? 'bolt' : 'vera', runId: 'r', role: lease, expiresAt: '' } : null,
   developer: lease ? { id: 'bolt', name: 'Bolt' } : null,
   reviewer: lease === 'reviewer' ? { id: 'vera', name: 'Vera' } : null
@@ -12,8 +13,18 @@ const task = (ref: string, status: 'backlog' | 'ready' | 'in_progress' | 'agent_
 describe('projectCardSummary', () => {
   it('counts board and backlog tasks', () => {
     const s = projectCardSummary({ paused: false }, [task('A-1', 'backlog'), task('A-2', 'backlog'), task('A-3', 'ready'), task('A-4', 'merged')], 0, now)
-    expect(s.board).toBe(2)
+    expect(s.board).toBe(1)
     expect(s.backlog).toBe(2)
+  })
+
+  it('leaves recently merged tasks out of the board count', () => {
+    expect(projectCardSummary({ paused: false }, [task('A-1', 'ready'), task('A-2', 'ready'), task('A-3', 'merged')], 0, now).board).toBe(2)
+    expect(projectCardSummary({ paused: false }, [task('A-1', 'backlog'), task('A-2', 'merged'), task('A-3', 'merged')], 0, now).board).toBe(0)
+  })
+
+  it('counts every in-flight status toward the board', () => {
+    const statuses: Status[] = ['ready', 'in_progress', 'agent_review', 'human_review', 'ready_to_merge', 'blocked', 'failed']
+    expect(projectCardSummary({ paused: false }, statuses.map((s, i) => task(`A-${i}`, s)), 0, now).board).toBe(statuses.length)
   })
 
   it('names the agent of the task\'s run, not the first of its role', () => {
