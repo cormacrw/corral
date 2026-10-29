@@ -174,7 +174,7 @@ const dotClass = (status: TaskStatus) => ({
         <span
           v-else
           class="text-muted"
-        >Not opened yet</span>
+        >{{ props.task.type === 'spike' ? 'None: a spike reports findings' : 'Not opened yet' }}</span>
       </template>
 
       <span v-else-if="row.key === 'round'">{{ props.task.reviewRounds }} of {{ props.project?.reviewRoundCap ?? 5 }}</span>
