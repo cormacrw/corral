@@ -2,10 +2,10 @@ import type { ApiError } from '@corral/contracts'
 
 // A failure the API reports to the client with a status and an ApiError body
 export class ApiFailure extends Error {
-  readonly status: 400 | 404 | 409 | 503
+  readonly status: 400 | 404 | 409 | 413 | 503
   readonly body: ApiError
 
-  constructor(status: 400 | 404 | 409 | 503, body: ApiError) {
+  constructor(status: 400 | 404 | 409 | 413 | 503, body: ApiError) {
     super(body.code)
     this.status = status
     this.body = body

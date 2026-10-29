@@ -28,8 +28,7 @@ Pages and components use `useDevice().isMobile` to choose a mobile component. Do
 
 From top to bottom:
 
-- **Header:** the page title, the runner's live status (a dot and "Runner online" / "Runner offline", coloured like the sidebar footer), and a Settings button.
-  A screen can bring its own header instead with `MobileHeader.vue`: an optional back button, an optional eyebrow line over the title (e.g. the project name), and its actions. While one is mounted it replaces the default title row; the runner status is then left to the Home and Agents screens.
+- **Header:** the page title, the runner's live status (a dot and "Runner online" / "Runner offline", coloured like the sidebar footer), and a Settings button. Below a tab's top level it gets a back button: a project's overview goes back to Projects and swaps Settings for Project settings; its Board, Backlog and Settings show the project name above the page and go back to the overview. Pages add their own header buttons by teleporting into `#mobile-header-actions` (`<Teleport defer to="#mobile-header-actions">`), next to Settings: the Board's search, the Backlog's New task, Projects' Add project, Project settings' Save.
 - **Banners:** the same shell banners as the web layout (stopped, updating, project paused, runner offline, reconnecting), from `ShellBanners.vue`.
 - **Page:** fills the space between, and scrolls.
 - **Tab bar:** five tabs, each an icon over a label. The active tab is `primary`.
@@ -45,15 +44,23 @@ From top to bottom:
 - The header and tab bar pad themselves with `env(safe-area-inset-*)`, and the viewport uses `viewport-fit=cover`, so nothing sits under a notch or the home indicator.
 - The runner status and Inbox count come from the app's one live connection (`useLive()`), so they update without a reload.
 
-`/home` and `/agents` are placeholders for now (a short summary and the agent list), so every tab has a target. On the web they render in the normal shell, as does `/projects` (a plain project list).
+`/home` is a placeholder for now (a short summary), so every tab has a target. On the web it renders in the normal shell, as does `/projects` (a plain project list) and `/agents`' simple list.
+
+## Agents
+
+Built from the **Agents**, **Agent · Atlas** and **Agent · live run** frames. Behaviour follows [agent.md](agent.md); the web and mobile pages share `useAgentRuns()`.
+
+- **Agents** (`/agents`): **Working now** cards (the agent, its live run's task, project, run number and elapsed time), then **Idle** rows (the PM's "Runs only when you message it in Plan", or the last run), then **Today**: runs, PRs merged and token usage across every agent. Status follows the live connection. Tapping an agent opens its page.
+- **Agent** (`/agents/:name`): the header gets a back arrow to Agents and an **Agent settings** button in place of Settings. The avatar, name and status, the role's stat tiles (they scroll sideways), the facts line, the **Current run** card and **Previous runs**. Each run opens its transcript. Mobile doesn't auto-select a run here, unlike the web.
+- **Run** (`/agents/:name/:runId`): full screen, without the shell's header or tab bar. Its own header has a back arrow to the agent, "{Agent} · Run #n", the task, **Open task** (goes to the task page), the outcome badge, elapsed time and tokens, and **Stop run** while live. The body is `RunTranscript`, thinking included, streamed while live. The footer is the same note as the web's (mid-run messages aren't supported yet), padded for the home indicator.
 
 ## Projects
 
 Built from the frames **Projects**, **Project overview** and **Project settings**. The behaviour is [project-overview.md](project-overview.md) and [project-settings.md](project-settings.md).
 
 - **Projects** (`/projects`, `MobileProjects.vue`): header "Projects" with an Add project button. One card per project: the thumbnail, name, Running/Paused badge, and `owner/repo · PREFIX`, which opens the overview. Under it, one line: the agent holding a lease ("Atlas building COR-35", with the working dot), or for a paused project "No new runs start while paused." and how many items need you. The card ends in three cells: **Board** with the count of tasks on the board, **Backlog** with the Backlog count, and **Settings**. An outlined **Add project** button follows the cards.
-- **Project overview** (`/projects/:slug`, `MobileProjectOverview.vue`): header "Overview" with Back (to Projects) and a Project settings button. The web page's sections in one column: the project header with **Plan with Juno** and **Open board** side by side, stat tiles that scroll sideways, Needs you as full-width rows (ref and title over the type badge and time), Active now, Epics with **Open Backlog**, and Recent activity. It shares its data with the web page through `useProjectOverview()`.
-- **Project settings** (`/projects/:slug/settings`): the web page's cards, stacked, under a header with the project name over "Project settings", Back (to the overview), the "Saved" note and **Save**, which follows the same rules as Save changes on the web.
+- **Project overview** (`/projects/:slug`, `MobileProjectOverview.vue`): header "Overview" with Back (to Projects) and a Project settings button in place of Settings. The web page's sections in one column: the project header with **Plan with Juno** and **Open board** side by side, stat tiles that scroll sideways, Needs you as full-width rows (ref and title over the type badge and time), Active now, Epics with **Open Backlog**, and Recent activity. It shares its data with the web page through `useProjectOverview()`.
+- **Project settings** (`/projects/:slug/settings`): the web page's cards, stacked, under the project page header (the project name over "Settings", Back to the overview) with the "Saved" note and **Save**, which follows the same rules as Save changes on the web.
 
 ## Pages without a mobile screen yet
 
@@ -68,9 +75,7 @@ Frames in the export, grouped by the task that will build them:
 | Home | Home |
 | Inbox | Inbox, Inbox · Human review, Inbox · Question, Inbox · Blocked |
 | Plan | Plan · New session, Plan · Conversation, Plan · Plan v2, Plan · Runner offline |
-| Projects | Board, Backlog |
 | Task and epic | Task COR-35, Task COR-35 · Activity, Epic · Billing |
-| Agents | Agents, Agent · Atlas, Run #128 |
 | Settings | Settings, Settings · Runner |
 | Search | Search |
 | Onboarding | Setup · Your name, Setup · Repository, Setup · Agent CLIs, Setup · Name agents |

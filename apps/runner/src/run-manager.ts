@@ -3,16 +3,16 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { createWriteStream, type WriteStream } from 'node:fs'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { basename, extname, isAbsolute, join, resolve } from 'node:path'
-import { spawnAgent, spawnAgentSession, STOP_GRACE_MS, type AgentExit, type AgentProcess, type AgentSession } from './agent.ts'
+import { createRuntimeRegistry, STOP_GRACE_MS, type AgentExit, type AgentProcess, type AgentRuntime, type AgentSession, type ParsedLine, type RuntimeRegistry } from './agent-runtime.ts'
 import type { RunnerConfig } from './config.ts'
 import type { ServerConnection } from './connection.ts'
 import { outcomesFor, ROLE_TOOLS, type ToolOutcome, type ToolServer } from './mcp.ts'
-import type { ParsedLine } from './stream-json.ts'
 import { headSha, prepareWorkspace, pushBranch, readProjectBrief, readRoleInstructions } from './workspace.ts'
 
 // Runs on this runner (flows.md §2 steps 3–5, PRD §8.6). Each run gets a
-// worktree, a secret MCP path, and a `claude` process in its own process
-// group. Events stream to the server in batches; raw lines go to the spool.
+// worktree, a secret MCP path, and an agent process in its own process
+// group, started by the adapter for the job's runtime (D15). Events stream
+// to the server in batches; raw lines go to the spool.
 // A PM turn is still one run, but its process can outlive the run: it stays
 // warm for the session's next message until the idle timeout (D9).
 
@@ -48,6 +48,8 @@ type StopReason = Extract<RunExit, { kind: 'stopped' | 'timed_out' }>['kind']
 
 interface ActiveRun {
   job: RunJob
+  // Null when the runner has no adapter for job.runtime; the run ends at once
+  runtime: AgentRuntime | null
   worktree: string | null
   scratchDir: string
   process: AgentProcess | null
@@ -72,11 +74,12 @@ interface ActiveRun {
   unregisterTools: (() => void) | null
 }
 
-// A PM session's `claude` process kept alive between turns (D9). It holds no
+// A PM session's agent process kept alive between turns (D9). It holds no
 // concurrency slot while idle (D13): the slot belongs to the run, which ended.
 interface WarmSession {
   planSessionId: string
   session: AgentSession
+  runtime: string
   model: string | null
   // The agent session it holds, known once the init line arrives
   sessionId: string | null
@@ -89,6 +92,7 @@ interface WarmSession {
 
 export class RunManager {
   #config: RunnerConfig
+  #runtimes: RuntimeRegistry
   #connection: ServerConnection
   #tools: ToolServer
   #runs = new Map<string, ActiveRun>()
@@ -96,8 +100,9 @@ export class RunManager {
   #warm = new Map<string, WarmSession>()
   #pendingCalls = new Map<string, { resolve: (o: ToolOutcome) => void, timer: NodeJS.Timeout }>()
 
-  constructor(config: RunnerConfig, connection: ServerConnection, tools: ToolServer) {
+  constructor(config: RunnerConfig, connection: ServerConnection, tools: ToolServer, runtimes: RuntimeRegistry = createRuntimeRegistry(config)) {
     this.#config = config
+    this.#runtimes = runtimes
     this.#connection = connection
     this.#tools = tools
   }
@@ -133,6 +138,7 @@ export class RunManager {
     if (this.#runs.has(job.runId)) return
     const run: ActiveRun = {
       job,
+      runtime: this.#runtimes.get(job.runtime) ?? null,
       worktree: null,
       // A warm process's system prompt names its scratch dir, so it can't be per run
       scratchDir: join(this.#config.dataDir, 'scratch', this.#keepsWarm(job) ? `pm-${job.projectId}-${job.planSessionId}` : job.runId),
@@ -197,6 +203,10 @@ export class RunManager {
 
   async #start(run: ActiveRun): Promise<void> {
     const { job } = run
+    if (!run.runtime) {
+      this.#end(run, { kind: 'error', message: `This runner has no agent runtime "${job.runtime}". It knows: ${[...this.#runtimes.keys()].join(', ')}` })
+      return
+    }
     await mkdir(join(this.#config.dataDir, 'spool'), { recursive: true })
     await mkdir(run.scratchDir, { recursive: true })
     run.spool = createWriteStream(join(this.#config.dataDir, 'spool', `${job.runId}.jsonl`), { flags: 'a' })
@@ -294,8 +304,7 @@ export class RunManager {
   }
 
   async #spawnOnce(run: ActiveRun, options: SpawnOptions): Promise<AgentExit> {
-    const process = spawnAgent({
-      claudeBin: this.#config.claudeBin,
+    const process = run.runtime!.spawn({
       cwd: run.worktree!,
       prompt: options.prompt,
       systemPrompt: options.systemPrompt,
@@ -314,17 +323,18 @@ export class RunManager {
 
   // ── Warm PM sessions (D9) ──────────────────────────────────────────────────
 
+  // Only runtimes with a streaming session can keep one warm
   #keepsWarm(job: RunJob): boolean {
-    return job.role === 'pm' && job.planSessionId !== null && this.#config.pmWarmSeconds > 0
+    return job.role === 'pm' && job.planSessionId !== null && this.#config.pmWarmSeconds > 0 && this.#runtimes.get(job.runtime)?.spawnSession !== undefined
   }
 
   // The session's warm process, if it can take this turn. One that can't
-  // (dead, busy, another agent session or another model) is killed, and the
+  // (dead, busy, another agent session, runtime or model) is killed, and the
   // turn cold-starts with --resume as usual.
   async #takeWarm(job: RunJob): Promise<WarmSession | null> {
     const warm = this.#warm.get(job.planSessionId!)
     if (!warm) return null
-    if (warm.alive && warm.run === null && warm.sessionId !== null && warm.sessionId === job.agentSessionId && warm.model === job.model) return warm
+    if (warm.alive && warm.run === null && warm.sessionId !== null && warm.sessionId === job.agentSessionId && warm.runtime === job.runtime && warm.model === job.model) return warm
     await this.#killWarm(warm)
     return null
   }
@@ -336,8 +346,7 @@ export class RunManager {
       warm.run ? this.#toolCall(warm.run, tool, input) : Promise.resolve({ ok: false, error: 'This run is over. Stop working.' }))
     const warm: WarmSession = {
       planSessionId: job.planSessionId!,
-      session: spawnAgentSession({
-        claudeBin: this.#config.claudeBin,
+      session: run.runtime!.spawnSession!({
         cwd: run.worktree!,
         systemPrompt: options.systemPrompt,
         mcpConfigPath: options.mcpConfigPath,
@@ -349,6 +358,7 @@ export class RunManager {
           if (warm.run) this.#onLine(warm.run, raw, parsed)
         }
       }),
+      runtime: job.runtime,
       model: job.model,
       sessionId: null,
       run: null,

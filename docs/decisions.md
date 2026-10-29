@@ -35,6 +35,8 @@ Each decision has an ID so code comments, commits and PRs can refer to it (e.g. 
 
 **This may change.** If Corral is packaged and sold, we'll likely need user-supplied API keys, Bedrock/Vertex, or explicit approval from Anthropic. The rules in `agent-runtime-and-auth.md` exist so that switch means writing a new adapter, not a rewrite.
 
+**Extended by D18:** OpenAI's Codex CLI (`codex`) is a second runtime, run the same way through the user's own login.
+
 ---
 
 ## D3 — Hitting a usage limit is a pausable state, not a failure
@@ -127,6 +129,8 @@ Full table, disk layout, flows and the known POC push limitation are in [archite
 - **Warm sessions (amended 2026-10-29):** a turn's `claude` process outlives its run. The runner starts PM processes in stream-json input mode and sends each message over stdin; a turn's run ends when its `result` line arrives, and the process then waits, idle, for the session's next message. That message reuses it if it's still alive and idle, holds the same `claude` session ID as the job, and runs the same model; the runner still fetches and resets the checkout to `origin/<defaultBranch>` first, and points the MCP tools at the new run and lease. Otherwise the runner kills it and cold-starts with `--resume` as before. An idle process is killed (its whole process group) after `CORRAL_PM_WARM_SECONDS` (runner config `pmWarmSeconds`, default 300; `0` turns warm sessions off and starts a process per turn). Stopping a turn, its time limit and runner shutdown kill it too. A warm process uses a scratch dir per session, since its system prompt is fixed when it starts. Each turn is still one run with its own `run.started` and `run.ended`, so the server doesn't know about warm processes, and an idle one holds no concurrency slot (D13).
 
 **Why:** D2 means the model is only reachable through the user's local CLI, so the server can't run the PM. Running it on the runner also gives it direct, fast access to the code and wiki.
+
+**Amended by D18:** a Plan session can run on Codex instead of `claude`, picked per session and locked once it has messages. What this decision says about `claude` sessions and `--resume` applies to the session's runtime.
 
 **Consequence:** PM chat requires the runner to be online. When hosted, that means the user's runner must be connected to chat.
 
@@ -386,3 +390,27 @@ The UI specs are in [design/](design/README.md).
 **Consequences for the build:**
 - Pages must work under both layouts. Use `useDevice()` to choose a mobile component; never fork a route.
 - The mobile screens arrive one group at a time (see [design/mobile.md](design/mobile.md)). Until then, a page reflows inside the mobile layout as well as it can.
+
+---
+
+## D18 — Codex is a second agent runtime
+
+**Status:** Accepted 2026-10-29. Extends D2 to a second CLI and fills in the "one provider per agent" part of D15. (Numbered D18 because D17 was already taken by the mobile layout.)
+
+**Decision:** Besides Claude Code (`claude`), the runner can run agents through OpenAI's Codex CLI (`codex`), through a second `AgentRuntime` adapter. Everything D2 says about `claude` applies to `codex` too.
+
+- **The user's own login:** the human signs in once with `docker exec -it <runner> codex login --device-auth` in the runner container (D12), and the login lives on the `codex-config` volume. Corral never sees, stores or relays OpenAI credentials, and **never sets `OPENAI_API_KEY`**, in the agent's environment, Compose files, `.env` files or its own config.
+- **One runtime per agent:** each developer and reviewer agent has exactly one runtime (D15). A Codex developer is a separate agent from Atlas, with its own concurrency, pause state and usage limits (D3). A task keeps the same developer across retries, so a session never moves between vendors.
+- **The PM is the exception:** Juno can run on either runtime. The runtime is picked per Plan session, in the composer next to the project, and **locked once the session has messages**, because an agent session ID (used by `--resume`, D9) only works with the vendor that made it. A new session can pick the other runtime.
+- **Same rules for both adapters:** the rules in [agent-runtime-and-auth.md](agent-runtime-and-auth.md) apply to each adapter: structured output, neutral `rate_limited` outcomes, optional cost data, the same per-run MCP tools, and nothing Claude- or OpenAI-specific in the task model, `RunJob` or the API beyond the neutral `runtime` field.
+- **Terms still open:** whether OpenAI's terms allow a product to script the Codex CLI with a user's ChatGPT login is unchecked. It's fine for the POC (one user, their own login), and must be checked before any hosted or paid launch, as for Anthropic.
+
+**Out of scope (future work):**
+- Handing a task, or a PM session, off to the other vendor when one hits a usage limit. Until then, a rate-limited agent pauses as in D3.
+- A rule that a task's reviewer must use a different vendor from its developer. Jev (D15) or a human may choose that, but Corral doesn't require it.
+
+**Why:** A second vendor gives more capacity under subscription limits and a second opinion in review. Keeping one runtime per agent keeps sessions, limits and pausing per agent, as they already work. The PM gets a choice because a Plan session is a conversation the human starts, not a task the scheduler assigns.
+
+**Consequences for the build:**
+- The runner detects which CLIs are installed and signed in, and reports them (D15). The UI only offers detected runtimes.
+- A PM session stores its runtime next to its agent session ID. A turn on a session whose runtime isn't available fails clearly instead of starting a fresh session on the other vendor.

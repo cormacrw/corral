@@ -4,7 +4,7 @@ import { api, ApiError } from '~/composables/useApi'
 import { initials, THUMBNAIL_COLORS } from '~/utils/labels'
 
 // Project settings (design/project-settings.md): one PATCH on Save; pause is its own switch.
-// On mobile the sections stack under a MobileHeader that holds Save (design/mobile.md).
+// On mobile the sections stack under the mobile header, which holds Save (design/mobile.md).
 const route = useRoute()
 const device = useDevice()
 const live = useLive()
@@ -100,10 +100,9 @@ async function remove() {
       :class="['mx-auto flex w-full max-w-[880px] flex-col gap-6', device.isMobile.value ? 'p-4' : 'p-6']"
     >
       <template v-if="device.isMobile.value">
-        <MobileHeader
-          :eyebrow="project.name"
-          title="Project settings"
-          :back="`/projects/${project.slug}`"
+        <Teleport
+          defer
+          to="#mobile-header-actions"
         >
           <span
             v-if="saved"
@@ -115,7 +114,7 @@ async function remove() {
             :loading="saving"
             @click="save"
           />
-        </MobileHeader>
+        </Teleport>
         <p class="text-sm text-muted">
           Settings for {{ project.name }} only. Agents and the runner are shared by every project and live in Settings.
         </p>

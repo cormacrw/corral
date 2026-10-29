@@ -64,7 +64,7 @@ describe('RunManager warm PM sessions', () => {
   function createManager(pmWarmSeconds: number): RunManager {
     const connection = { send: (message: RunnerMessage) => sent.push(message) > 0 } as unknown as ServerConnection
     const tools = { register: () => () => {}, url: () => 'http://127.0.0.1:9/mcp' } as unknown as ToolServer
-    return new RunManager({ dataDir, claudeBin, name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds }, connection, tools)
+    return new RunManager({ dataDir, claudeBin, codexBin: 'codex', name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds }, connection, tools)
   }
 
   beforeEach(async () => {

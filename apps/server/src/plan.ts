@@ -3,6 +3,7 @@ import { checkPlan, diffPlans, markdownToRichText, REVISABLE_STATUSES, richTextT
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
+import { listTaskAttachments } from './attachments.ts'
 import { listEpics } from './epics.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
@@ -72,7 +73,8 @@ export interface PlanDeps {
   // True while the update hold is on; no turn may start
   updating(): boolean
   // Starts a PM run for a session; the orchestrator owns runs
-  startRun(session: SessionRow, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'>): Promise<string>
+  // The orchestrator fills in `runtime` from the PM agent that takes the turn
+  startRun(session: SessionRow, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch' | 'runtime'>): Promise<string>
 }
 
 // The PM conversation (D9, design/plan.md). Each turn is a runner job with
@@ -231,7 +233,8 @@ export class PlanService {
           ...task,
           description: richTextToMarkdown(task.description),
           epic: epic ?? null,
-          comments: notes.map(c => ({ author: c.author.kind, body: c.body, pinned: c.pinned, at: c.createdAt.toISOString() }))
+          comments: notes.map(c => ({ author: c.author.kind, body: c.body, pinned: c.pinned, at: c.createdAt.toISOString() })),
+          attachments: await listTaskAttachments(db, project.id, task.description, notes.map(c => ({ author: c.author.kind, body: c.body, createdAt: c.createdAt })))
         }
       }
 

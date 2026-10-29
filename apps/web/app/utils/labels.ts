@@ -41,9 +41,15 @@ export const TASK_TYPE: Record<Task['type'], string> = {
   frontend: 'Frontend', backend: 'Backend', full_stack: 'Full stack', infrastructure: 'Infrastructure'
 }
 
+// A run that hasn't finished yet
+const LIVE_RUN_STATES: readonly string[] = ['queued', 'starting', 'running', 'waiting_for_input', 'stopping']
+export function isLiveRun(run: Pick<Run, 'state'>): boolean {
+  return LIVE_RUN_STATES.includes(run.state)
+}
+
 // design/agent.md outcome badges
 export function runBadge(run: Pick<Run, 'state' | 'outcome' | 'role'>): { label: string, color: Color } {
-  if (['queued', 'starting', 'running', 'waiting_for_input', 'stopping'].includes(run.state)) return { label: 'Live', color: 'primary' }
+  if (isLiveRun(run)) return { label: 'Live', color: 'primary' }
   const outcome = run.outcome as RunOutcome | null
   switch (outcome) {
     case 'pr_opened': return { label: 'PR opened', color: 'primary' }

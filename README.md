@@ -36,7 +36,7 @@ Corral runs as four containers on your own server (`docs/decisions.md` D12, D14)
 cp .env.docker.example .env        # set POSTGRES_PASSWORD and CORRAL_PUBLIC_URL
 docker compose up -d --build
 docker exec -it corral-runner claude            # sign in to Claude once
-docker exec -it corral-runner codex login --device-auth   # sign in to Codex once (not used by agents yet)
+docker exec -it corral-runner codex login --device-auth   # sign in to Codex once, for agents whose runtime is codex
 docker exec -it corral-runner gh auth login     # sign in to GitHub once
 ```
 

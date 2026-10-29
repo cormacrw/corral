@@ -3,29 +3,14 @@ import type { ProjectOverview } from '~/composables/useProjectOverview'
 import { duration, inboxTypeBadge, initials, projectColor, STATUS, timeAgo } from '~/utils/labels'
 
 // Project overview on mobile (design/mobile.md, frame "Project overview").
-// The same sections as the web page in one column, with the header's
-// Settings button and links to the Board and Backlog.
+// The same sections as the web page in one column, with links to the
+// Board and Backlog. The mobile layout's header holds Back and Settings.
 const props = defineProps<{ overview: ProjectOverview }>()
 const { project, tasks, runs, history, error, load, DOT, count, needsYou, mergedThisWeek, firstPass, waitingOnDependency, developer, reviewer, pmName, epics, taskOf, actorName, taskRefOf, activityText } = props.overview
 </script>
 
 <template>
   <div class="flex min-h-0 min-w-0 flex-1 flex-col">
-    <MobileHeader
-      title="Overview"
-      back="/projects"
-    >
-      <UButton
-        v-if="project"
-        :to="`/projects/${project.slug}/settings`"
-        icon="i-lucide-sliders-horizontal"
-        variant="ghost"
-        color="neutral"
-        aria-label="Project settings"
-        class="-me-2"
-      />
-    </MobileHeader>
-
     <div class="min-h-0 flex-1 overflow-y-auto">
       <div
         v-if="!project"
