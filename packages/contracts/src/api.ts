@@ -194,6 +194,7 @@ export const humanTransitionInput = z.discriminatedUnion('type', [
 export type HumanTransitionInput = z.infer<typeof humanTransitionInput>
 
 export interface Lease {
+  agentId: string
   runId: string
   role: AgentRole
   expiresAt: string

@@ -174,7 +174,7 @@ export const tasks: Task[] = [
     branch: 'corral/cor-3-static-prototype',
     prNumber: 66,
     prUrl: 'https://github.com/cormacrw/corral/pull/66',
-    lease: { runId: 'r-1', role: 'developer', expiresAt: ago(-10) },
+    lease: { agentId: 'a-dev2', runId: 'r-1', role: 'developer', expiresAt: ago(-10) },
     acceptanceCriteria: criteria('`pnpm prototype` outputs index.html with fixture data', 'Works from a sub-path with no API', 'CLAUDE.md documents it')
   }),
   task(corral, 4, {
@@ -185,7 +185,7 @@ export const tasks: Task[] = [
     branch: 'design/COR-4',
     prNumber: 63,
     prUrl: 'https://github.com/cormacrw/corral/pull/63',
-    lease: { runId: 'r-2', role: 'reviewer', expiresAt: ago(-12) },
+    lease: { agentId: 'a-rev', runId: 'r-2', role: 'reviewer', expiresAt: ago(-12) },
     reviewRounds: 1,
     acceptanceCriteria: criteria('Shows every version with its screenshots', 'Approve and request changes from the page')
   }),
@@ -222,7 +222,7 @@ export const tasks: Task[] = [
     status: 'in_progress',
     type: 'bug',
     branch: 'corral/web-3-footer-links',
-    lease: { runId: 'r-4', role: 'developer', expiresAt: ago(-14) },
+    lease: { agentId: 'a-dev', runId: 'r-4', role: 'developer', expiresAt: ago(-14) },
     acceptanceCriteria: criteria('Footer links open in the same tab')
   })
 ]
@@ -231,7 +231,7 @@ const at = (ref: string): Task => tasks.find(t => t.ref === ref)!
 
 export const runs: Run[] = [
   {
-    id: 'r-1', number: 128, agentId: 'a-dev', agentName: 'Victor', role: 'developer', projectId: 'p-corral',
+    id: 'r-1', number: 128, agentId: 'a-dev2', agentName: 'Dana', role: 'developer', projectId: 'p-corral',
     taskId: at('COR-3').id, taskRef: 'COR-3', taskTitle: at('COR-3').title, state: 'running', outcome: null, summary: null,
     error: null, headSha: null, inputTokens: 18_200, cacheReadTokens: 240_000, outputTokens: 6_100, rateLimitResetAt: null,
     queuedAt: ago(25), startedAt: ago(24), endedAt: null
@@ -249,9 +249,9 @@ export const runs: Run[] = [
     inputTokens: 30_000, cacheReadTokens: 400_000, outputTokens: 9_800, rateLimitResetAt: null,
     queuedAt: ago(140), startedAt: ago(139), endedAt: ago(95)
   },
-  // A live Codex run, which can't take messages mid-run
+  // A live run on the other project
   {
-    id: 'r-4', number: 130, agentId: 'a-dev2', agentName: 'Dana', role: 'developer', projectId: 'p-site',
+    id: 'r-4', number: 130, agentId: 'a-dev', agentName: 'Victor', role: 'developer', projectId: 'p-site',
     taskId: at('WEB-3').id, taskRef: 'WEB-3', taskTitle: at('WEB-3').title, state: 'running', outcome: null, summary: null,
     error: null, headSha: null, inputTokens: 4_000, cacheReadTokens: 22_000, outputTokens: 900, rateLimitResetAt: null,
     queuedAt: ago(5), startedAt: ago(4), endedAt: null

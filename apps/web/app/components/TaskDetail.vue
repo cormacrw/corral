@@ -143,8 +143,12 @@ async function changeStatus(value: string) {
 
 const priorityOptions = (Object.keys(PRIORITY) as TaskPriority[]).map(p => ({ label: PRIORITY[p].label, value: p }))
 const typeOptions = (Object.keys(TASK_TYPE) as Task['type'][]).map(t => ({ label: TASK_TYPE[t], value: t }))
-const developer = computed(() => live.state.value.agents.find(a => a.role === 'developer'))
-const reviewer = computed(() => live.state.value.agents.find(a => a.role === 'reviewer'))
+function agentForRole(role: 'developer' | 'reviewer') {
+  const lease = task.value?.lease
+  return live.state.value.agents.find(a => lease?.role === role ? a.id === lease.agentId : a.role === role)
+}
+const developer = computed(() => agentForRole('developer'))
+const reviewer = computed(() => agentForRole('reviewer'))
 
 const metCount = computed(() => task.value?.acceptanceCriteria.filter(c => c.met).length ?? 0)
 async function saveCriterion(id: string, text: string) {
@@ -336,7 +340,7 @@ function historyText(entry: AuditEntry): string {
     default: return entry.action
   }
 }
-const workingAgent = computed(() => task.value?.lease ? live.state.value.agents.find(a => a.role === task.value!.lease!.role) ?? null : null)
+const workingAgent = computed(() => task.value?.lease ? live.state.value.agents.find(a => a.id === task.value!.lease!.agentId) ?? null : null)
 const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/${props.taskRef}`)
 </script>
 

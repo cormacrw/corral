@@ -60,16 +60,13 @@ export interface BoardFilters {
 
 export const NO_FILTERS: BoardFilters = { search: '', epics: [], statuses: [], priorities: [], agents: [] }
 
-// Which role's turn it is in a column: the agent of that role is the one a
-// task there is assigned to. Tasks have no per-agent assignee, so this
-// matches the first agent of the role, as the task's properties do.
+// For an unleased task, guess whose turn it is from the column's role.
 const TURN: Partial<Record<TaskStatus, AgentRole>> = { ready: 'developer', in_progress: 'developer', agent_review: 'reviewer' }
 
-// The agents a task belongs to: the one holding its lease and the one it's
-// assigned to.
 export function taskAgentIds(task: Pick<Task, 'status' | 'lease'>, agents: Pick<Agent, 'id' | 'role'>[]): string[] {
-  const roles = [task.lease?.role, TURN[task.status]]
-  return [...new Set(roles.flatMap(role => role ? agents.filter(a => a.role === role).slice(0, 1).map(a => a.id) : []))]
+  if (task.lease) return [task.lease.agentId]
+  const agent = agents.find(a => a.role === TURN[task.status])
+  return agent ? [agent.id] : []
 }
 
 // The column a task's status puts it in
