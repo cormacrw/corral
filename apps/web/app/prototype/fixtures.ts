@@ -500,5 +500,5 @@ export function inbox(): Inbox {
         resolution: null
       }
     })
-  return { needsYou, activity: [], resolved: [] }
+  return { needsYou, activity: [], resolved: [], count: needsYou.length }
 }

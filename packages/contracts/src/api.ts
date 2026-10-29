@@ -423,29 +423,66 @@ export type ApprovePlanInput = z.input<typeof approvePlanInput>
 
 // ── Inbox (D11, design/inbox.md) ───────────────────────────────────────────
 
-export type InboxItemType = 'human_review' | 'question' | 'blocked' | 'failed' | 'activity'
+export type TaskInboxItemType = 'human_review' | 'question' | 'blocked' | 'failed' | 'activity'
+export type InboxItemType = TaskInboxItemType | 'plan_thread'
 
-export interface InboxItem {
-  // The task ID for Needs-you items; the audit entry for Activity and Resolved
-  id: string
-  type: InboxItemType
+interface InboxItemBase {
   project: { id: string, slug: string, name: string, thumbnailColor: string | null }
-  taskId: string
-  taskRef: string
   subject: string
   preview: string
   body: string
   sender: { name: string, role: AgentRole | 'system' }
   at: string
+}
+
+// An item raised by a developer or reviewer run, about a task
+export interface TaskInboxItem extends InboxItemBase {
+  // The task ID for Needs-you items; the audit entry for Activity and Resolved
+  id: string
+  type: TaskInboxItemType
+  taskId: string
+  taskRef: string
   prUrl: string | null
   // Set on Resolved items: what the human did
   resolution: string | null
 }
 
+// An open Plan session (D11, amended): always under Needs you
+export interface PlanThreadItem extends InboxItemBase {
+  // The session ID
+  id: string
+  type: 'plan_thread'
+  // Not about a task, so these are always null
+  taskId: null
+  taskRef: null
+  prUrl: null
+  resolution: null
+  sessionId: string
+  runtime: AgentRuntime
+  // What the human has to do here, if anything (as on PlanSession)
+  status: PlanSession['status']
+  unread: boolean
+  // The plan waiting for approval, when status is needs_approval
+  planId: string | null
+  // Set while a PM turn is running
+  activeRunId: string | null
+}
+
+export type InboxItem = TaskInboxItem | PlanThreadItem
+
 export interface Inbox {
+  // Task items and the Plan threads that need the human, newest first, then
+  // the other open Plan threads, newest first
   needsYou: InboxItem[]
-  activity: InboxItem[]
-  resolved: InboxItem[]
+  activity: TaskInboxItem[]
+  resolved: TaskInboxItem[]
+  // The Needs you count (the Inbox badge): every task item, and only the
+  // Plan threads needing approval, with a question or with an unread reply
+  count: number
+}
+
+export function needsAttention(item: InboxItem): boolean {
+  return item.type !== 'plan_thread' || item.status !== 'none' || item.unread
 }
 
 // What the human can do from an item's tray (design/inbox.md, D10)
