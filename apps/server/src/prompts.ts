@@ -243,6 +243,9 @@ export function questionText(m: { text: string, recommendation: string | null, o
   return [m.text, options && `Options:\n${options}`, m.recommendation && `Recommended: ${m.recommendation}`].filter(Boolean).join('\n\n')
 }
 
+// Every developer outcome carries a one-line note, posted as its comment
+const WORK_NOTE = '- Every `report_outcome` needs a `note` as well: one line of at most 200 characters saying what this run did, e.g. "Rebased onto 6e67d6f; resolved conflict in docs/architecture.md keeping main’s SSE wording". It\'s posted on the task as your comment, so the history shows your work between reviews.'
+
 export function developerPrompt(task: PromptTask, agentName: string): string {
   if (task.spike) return spikeDeveloperPrompt(task, agentName)
   if (task.design) return designDeveloperPrompt(task, agentName)
@@ -267,6 +270,7 @@ export function developerPrompt(task: PromptTask, agentName: string): string {
 - Use \`get_task\` to re-read the task, comments and evidence at any time, and \`add_comment\` to leave notes for the human or reviewer.
 - When the work is committed and evidenced, call \`report_outcome\` with outcome "${revision ? 'pr_updated' : 'pr_opened'}" and a summary. If anything is missing, the call fails and tells you what to fix.
 - The summary becomes the pull request description, read by someone reviewing the code. Write it in markdown: one or two sentences on what changed and why, then a short bulleted list of how you verified it. Describe the change as a whole, not this run: don't mention comments, run numbers or earlier attempts, and don't list commit hashes.
+${WORK_NOTE}
 - If you cannot continue without a human decision, call \`report_outcome\` with outcome "stuck" and put the question in the summary.
 - Always finish by calling \`report_outcome\`.`)
   ].join('\n')
@@ -293,6 +297,7 @@ function spikeDeveloperPrompt(task: PromptTask, agentName: string): string {
 - Use \`get_task\` to re-read the task, comments and evidence at any time, and \`add_comment\` to leave notes for the human or reviewer.
 - When you're done, call \`report_outcome\` with outcome "findings_reported" and your findings as the summary. If anything is missing, the call fails and tells you what to fix.
 - Write the findings in markdown with these sections: **Answer** (the answer to the question, criterion by criterion), **Evidence** (what you checked and what it showed), **Recommendation**, and **Suggested follow-up tasks** (each with a title, a line on what it would do, and its acceptance criteria). They're posted on the task for the human, and the PM can turn them into a plan.${revision ? ' Report the complete findings again, not just what changed: they replace the earlier ones.' : ''}
+${WORK_NOTE}
 - If you cannot continue without a human decision, call \`report_outcome\` with outcome "stuck" and put the question in the summary.
 - Always finish by calling \`report_outcome\`.`)
   ].join('\n')
@@ -312,6 +317,7 @@ const DESIGN_HOW_TO = (task: PromptTask) => `
 - Attach evidence for every acceptance criterion with \`attach_evidence\`, using the criterion ID in brackets above. The screenshots can be that evidence.
 - Use \`get_task\` to re-read the task, comments and evidence at any time, \`get_design\` to read a version you submitted, and \`add_comment\` to leave notes for the human or reviewer.
 - When the version is submitted and evidenced, call \`report_outcome\` with outcome "design_submitted" and a summary of the design: the screens and the decisions worth the human's attention. If you committed after \`submit_design\`, submit again first: the outcome is accepted only for a version at your branch's latest commit.
+${WORK_NOTE}
 - If you cannot continue without a human decision, call \`report_outcome\` with outcome "stuck" and put the question in the summary.
 - Always finish by calling \`report_outcome\`.`
 
@@ -363,7 +369,7 @@ export function designRevisionPrompt(task: PromptTask, feedback: PromptTask['com
 - Address every point of the feedback in the prototype and in \`design.md\`.
 - Rebuild the bundle, capture fresh screenshots at desktop and mobile widths, commit, and call \`submit_design\` again. It records v${version + 1}; v${version} is kept unchanged.
 - Attach evidence for every acceptance criterion again with \`attach_evidence\` if the review round has moved on (\`get_task\` shows the round).
-- Then call \`report_outcome\` with outcome "design_submitted" and a summary of what changed.`)
+- Then call \`report_outcome\` with outcome "design_submitted" and a summary of what changed, and a one-line \`note\` of what this run did.`)
   ].join('\n')
 }
 

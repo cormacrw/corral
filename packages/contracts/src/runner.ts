@@ -140,6 +140,8 @@ export type AgentTool =
 export interface OutcomeReport {
   outcome: RunOutcome
   summary: string
+  // Developer: a one-line work note, posted as a comment by the agent
+  note?: string
   // Reviewer verdicts per acceptance criterion
   criteria?: { criterionId: string, met: boolean, note: string }[]
   // Developer: the commit the runner pushed

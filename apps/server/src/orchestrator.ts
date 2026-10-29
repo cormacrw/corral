@@ -66,10 +66,14 @@ export interface OrchestratorDeps {
 const RATE_LIMIT_BACKOFF_MS = 30 * 60 * 1000
 const RUN_TIMEOUT_SECONDS = 60 * 60
 const MAX_EVIDENCE_BYTES = 25 * 1024 * 1024
+// The developer's one-line work note, posted as a comment on every outcome
+export const MAX_NOTE_LENGTH = 200
+const NOTE_EXAMPLE = 'Rebased onto 6e67d6f; resolved conflict in docs/architecture.md keeping main’s SSE wording'
 
 const reportSchema = z.object({
   outcome: z.string(),
   summary: z.string().trim().min(1, 'Add a summary'),
+  note: z.string().trim().optional(),
   criteria: z.array(z.object({ criterionId: z.string(), met: z.boolean(), note: z.string().default('') })).optional(),
   headSha: z.string().optional()
 })
@@ -817,8 +821,9 @@ export class Orchestrator implements RunnerHandlers {
   }
 
   // A failed run counts towards the failed-run cap (D10); at the cap the task fails
-  async #failRun(ctx: RunContext, error: string): Promise<void> {
-    await this.#d.db.transaction(async (tx) => {
+  async #failRun(ctx: RunContext, error: string, note?: string): Promise<void> {
+    const comment = await this.#d.db.transaction(async (tx) => {
+      const comment = note && ctx.task ? await this.#postNote(tx, ctx, note) : null
       if (ctx.task) {
         const { task, project } = await lockTask(tx, ctx.task.id)
         if (task.leaseRunId === ctx.run.id && ['in_progress', 'agent_review'].includes(task.status)) {
@@ -826,7 +831,15 @@ export class Orchestrator implements RunnerHandlers {
         }
       }
       await this.#endRunIn(tx, ctx, { state: 'failed', outcome: 'failed', error })
+      return comment
     })
+    if (comment) this.#d.events.publish({ type: 'comment.created', comment })
+  }
+
+  // The developer's work note: what this run did, as a comment by its agent,
+  // so the task's history shows the developer's turns between reviews
+  async #postNote(tx: Executor, ctx: RunContext, note: string): Promise<Comment> {
+    return addComment(tx, ctx.task!.id, { body: note, pinned: false }, this.#actor(ctx))
   }
 
   async #endRun(ctx: RunContext, fields: Partial<typeof runs.$inferInsert> & { state: RunState }): Promise<void> {
@@ -1212,6 +1225,8 @@ export class Orchestrator implements RunnerHandlers {
       throw new ToolError('A reviewer reports approved, changes_requested or failed')
     }
     if (ctx.run.role === 'developer') {
+      const problem = noteProblem(report.note)
+      if (problem) throw new ToolError(`Not reported. ${problem} Add \`note\`: one line of at most ${MAX_NOTE_LENGTH} characters saying what this run did, e.g. "${NOTE_EXAMPLE}". Then report again.`)
       const spike = ctx.task!.type === 'spike'
       const design = ctx.task!.type === 'design'
       switch (report.outcome) {
@@ -1227,9 +1242,9 @@ export class Orchestrator implements RunnerHandlers {
           if (!design) throw new ToolError(`Not submitted. Only a design task reports design_submitted; this task reports ${spike ? 'findings_reported' : 'pr_opened or pr_updated'}.`)
           return this.#reportDesign(ctx, report)
         case 'stuck':
-          return this.#stuck(ctx, report.summary)
+          return this.#stuck(ctx, report.summary, report.note!)
         case 'failed':
-          await this.#failRun(ctx, report.summary)
+          await this.#failRun(ctx, report.summary, report.note)
           this.#finished(ctx, 'Reported failed')
           return { ok: true, message: 'Recorded. You can stop now.' }
       }
@@ -1316,12 +1331,15 @@ export class Orchestrator implements RunnerHandlers {
   }
 
   // Asks a human: the task becomes Blocked with the question as its reason (D11)
-  async #stuck(ctx: RunContext, question: string) {
-    await this.#d.db.transaction(async (tx) => {
+  async #stuck(ctx: RunContext, question: string, note: string) {
+    const comment = await this.#d.db.transaction(async (tx) => {
       const { task, project } = await lockTask(tx, ctx.task!.id)
+      const comment = await this.#postNote(tx, ctx, note)
       await applyTransition(tx, task, project, { type: 'block', reason: question }, server, { event: 'stuck', runId: ctx.run.id })
       await this.#endRunIn(tx, ctx, { state: 'completed', outcome: 'stuck', summary: question })
+      return comment
     })
+    this.#d.events.publish({ type: 'comment.created', comment })
     this.#finished(ctx, 'Stuck: waiting on a human')
     return { ok: true, message: 'The task is Blocked until a human answers. You can stop now.' }
   }
@@ -1362,15 +1380,18 @@ export class Orchestrator implements RunnerHandlers {
     if (pr) await github.updatePullRequest(ctx.project.repository, pr.number, { body })
     else pr = await github.openPullRequest(ctx.project.repository, { head: task.branch!, base: await taskBase(db, task, ctx.project, github), title: `${ref}: ${task.title}`, body })
 
-    await db.transaction(async (tx) => {
+    const comment = await db.transaction(async (tx) => {
       const locked = await lockTask(tx, task.id)
       if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease while submitting. Stop working.')
       await applyTransition(tx, locked.task, locked.project, {
         type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true
       }, server, { event: report.outcome, runId: ctx.run.id, headSha: report.headSha, pr: pr.number })
       await tx.update(tasks).set({ headSha: report.headSha, prNumber: pr.number, prUrl: pr.url }).where(eq(tasks.id, task.id))
+      const comment = await this.#postNote(tx, ctx, report.note!)
       await this.#endRunIn(tx, ctx, { state: 'completed', outcome: report.outcome as RunOutcome, summary: report.summary, headSha: report.headSha })
+      return comment
     })
+    this.#d.events.publish({ type: 'comment.created', comment })
     this.#finished(ctx, 'Outcome accepted', { handoff: true })
     return { ok: true, pr: pr.url, message: `PR #${pr.number} is ready for review. You can stop now.` }
   }
@@ -1391,18 +1412,19 @@ export class Orchestrator implements RunnerHandlers {
       throw new ToolError(`Not submitted. No evidence yet for: ${missing.map(c => `[${c.id}] ${c.text}`).join('; ')}. Attach it and report again.`)
     }
     const marker = findingsMarker(ctx.run.id)
-    const comment = await db.transaction(async (tx) => {
+    const posted = await db.transaction(async (tx) => {
       const locked = await lockTask(tx, task.id)
       if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease while submitting. Stop working.')
       await applyTransition(tx, locked.task, locked.project, {
         type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true
       }, server, { event: 'findings_reported', runId: ctx.run.id, headSha: marker })
       await tx.update(tasks).set({ headSha: marker }).where(eq(tasks.id, task.id))
-      const comment = await addComment(tx, task.id, { body: `## Findings\n\n${report.summary.trim()}`, pinned: false }, this.#actor(ctx))
+      const note = await this.#postNote(tx, ctx, report.note!)
+      const findings = await addComment(tx, task.id, { body: `## Findings\n\n${report.summary.trim()}`, pinned: false }, this.#actor(ctx))
       await this.#endRunIn(tx, ctx, { state: 'completed', outcome: 'findings_reported', summary: report.summary })
-      return comment
+      return [note, findings]
     })
-    this.#d.events.publish({ type: 'comment.created', comment })
+    for (const comment of posted) this.#d.events.publish({ type: 'comment.created', comment })
     this.#finished(ctx, 'Findings accepted for review', { handoff: true })
     return { ok: true, message: 'Your findings are on the task and go to the reviewer next. You can stop now.' }
   }
@@ -1471,15 +1493,18 @@ export class Orchestrator implements RunnerHandlers {
     ].filter(Boolean)
     if (problems.length > 0) throw new ToolError(`Not submitted. ${problems.join(' ')} Fix this and report again.`)
 
-    await db.transaction(async (tx) => {
+    const comment = await db.transaction(async (tx) => {
       const locked = await lockTask(tx, task.id)
       if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease while submitting. Stop working.')
       await applyTransition(tx, locked.task, locked.project, {
         type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true
       }, server, { event: 'design_submitted', runId: ctx.run.id, headSha: report.headSha, version: version!.version })
       await tx.update(tasks).set({ headSha: report.headSha }).where(eq(tasks.id, task.id))
+      const comment = await this.#postNote(tx, ctx, report.note!)
       await this.#endRunIn(tx, ctx, { state: 'completed', outcome: 'design_submitted', summary: report.summary, headSha: report.headSha })
+      return comment
     })
+    this.#d.events.publish({ type: 'comment.created', comment })
     this.#finished(ctx, `Design v${version!.version} submitted for review`, { handoff: true })
     return { ok: true, message: `Design v${version!.version} goes to the reviewer next, then to the human. You can stop now.` }
   }
@@ -1564,6 +1589,14 @@ export class Orchestrator implements RunnerHandlers {
 // submission, and a spike has no commits to tell them apart
 export function findingsMarker(runId: string): string {
   return `findings-${runId}`
+}
+
+// Why a developer's work note is not acceptable, if it isn't
+export function noteProblem(note: string | undefined): string | null {
+  if (!note) return 'The work note is missing.'
+  if (/[\r\n]/.test(note)) return 'The work note must be a single line.'
+  if (note.length > MAX_NOTE_LENGTH) return `The work note is ${note.length} characters; the limit is ${MAX_NOTE_LENGTH}.`
+  return null
 }
 
 // The review as a comment the developer reads next round
