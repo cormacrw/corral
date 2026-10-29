@@ -43,7 +43,7 @@ Everything is centred vertically and horizontally, in a column up to 720px wide:
 ### Conversation
 
 - **Header** (48px): the project dot and name, the session title, a neutral badge naming the session's runtime ("Claude" or "Codex"), **Close thread** (ghost) and a **New session** ghost button.
-- **Close thread:** asks for confirmation ("Close this thread?", with **Close thread** in `error` and **Cancel**), then discards the session's Draft tasks and its unapproved plan, stops a running Juno turn and closes the session, the same action as in the Inbox ([inbox.md](inbox.md#close-thread)). The thread leaves the side nav and the Inbox at once; the conversation stays on screen, and sending a message reopens the session, without the discarded drafts and plan. It's hidden on a session that's already closed.
+- **Close thread:** asks for confirmation ("Close this thread?", with **Close thread** in `error` and **Cancel**), then discards the session's Draft tasks and its unapproved plan, stops a running Juno turn and closes the session, the same action as in the Inbox ([inbox.md](inbox.md#close-thread)). The thread leaves the side nav and the Inbox at once; the conversation stays on screen, and sending a message reopens the session, without the discarded drafts and plan. Tasks already added to the board or Backlog are left as they are; any dependency they had on a discarded draft is dropped rather than blocking them. It's hidden on a session that's already closed.
 - **Message log** (`UChatMessages`, `role="log"`), centred and up to 768px wide:
   - **Your messages:** right-aligned, in a `bg-elevated` bubble.
   - **Juno's messages:** left-aligned with the avatar and "Juno · PM".

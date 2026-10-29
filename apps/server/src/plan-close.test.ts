@@ -107,3 +107,25 @@ it('leaves an already approved session and its plan unchanged', async () => {
   expect((await t.db.select().from(schema.planSessions).where(eq(schema.planSessions.id, session!.id)))[0]).toEqual(session)
   expect(t.events).toHaveLength(count)
 })
+
+it('detaches accepted dependents from discarded drafts instead of blocking them', async () => {
+  const project = await t.createProject()
+  const [session] = await t.db.insert(schema.planSessions).values({ projectId: project.id, title: 'Closing', createdBy: t.actor }).returning()
+  const [accepted, draft] = await t.db.insert(schema.tasks).values([
+    { projectId: project.id, number: 1, type: 'task', title: 'Accepted', status: 'ready', createdBy: t.actor },
+    { projectId: project.id, number: 2, type: 'task', title: 'Draft', status: 'draft', createdBy: t.actor }
+  ]).returning()
+  const [plan] = await t.db.insert(schema.plans).values({ projectId: project.id, sessionId: session!.id, title: 'Work', version: 1 }).returning()
+  await t.db.insert(schema.planTasks).values([
+    { planId: plan!.id, taskId: accepted!.id, key: 'a', change: 'added', position: 0 },
+    { planId: plan!.id, taskId: draft!.id, key: 'b', change: 'added', position: 1 }
+  ])
+  await t.db.insert(schema.taskDependencies).values({ taskId: accepted!.id, dependsOnId: draft!.id })
+  expect((await t.request('POST', `/api/plan/sessions/${session!.id}/close`)).status).toBe(200)
+  expect((await t.db.select().from(schema.tasks).where(eq(schema.tasks.id, accepted!.id)))[0]).toEqual(accepted)
+  expect((await t.db.select().from(schema.tasks).where(eq(schema.tasks.id, draft!.id)))[0]!.deletedAt).not.toBeNull()
+  // A dependency on a discarded draft would never merge, so it can't stay
+  expect(await t.db.select().from(schema.taskDependencies).where(eq(schema.taskDependencies.taskId, accepted!.id))).toEqual([])
+  expect(await t.db.select().from(schema.auditLog).where(eq(schema.auditLog.taskId, accepted!.id))).toEqual([])
+  expect(t.events).toContainEqual({ type: 'task.updated', task: expect.objectContaining({ id: accepted!.id, status: 'ready', dependsOn: [] }) })
+})

@@ -164,16 +164,20 @@ export class PlanService {
         .where(and(eq(tasks.projectId, session.projectId), eq(tasks.status, 'draft'), isNull(tasks.deletedAt))).for('update')
       const owners = await draftSessions(tx, drafts.map(t => t.id))
       const owned = drafts.filter(t => owners.get(t.id)?.id === sessionId)
-      for (const task of owned) await deleteTaskRows(tx, task.id, actor, 'Discarded with the Plan thread', { soft: true })
+      const detached = new Set<string>()
+      for (const task of owned) {
+        for (const id of await deleteTaskRows(tx, task.id, actor, 'Discarded with the Plan thread', { soft: true, detachDependents: true })) detached.add(id)
+      }
       await tx.update(plans).set({ status: 'discarded' })
         .where(and(eq(plans.sessionId, sessionId), eq(plans.status, 'proposed'), isNull(plans.approvedAt)))
       const now = new Date()
       await tx.update(planSessions).set({ closedAt: now, updatedAt: now, unread: false }).where(eq(planSessions.id, sessionId))
-      return owned
+      return { owned, detached: [...detached].filter(id => !owned.some(t => t.id === id)) }
     })
     const closed = await this.#toSession(await this.#session(sessionId))
     if (deleted) {
-      for (const task of deleted) events.publish({ type: 'task.deleted', taskId: task.id, projectId: session.projectId })
+      for (const task of deleted.owned) events.publish({ type: 'task.deleted', taskId: task.id, projectId: session.projectId })
+      for (const id of deleted.detached) events.publish({ type: 'task.updated', task: await loadTask(db, id) })
       const discarded = await db.select().from(plans).where(and(eq(plans.sessionId, sessionId), eq(plans.status, 'discarded')))
       for (const plan of discarded) events.publish({ type: 'plan.updated', plan: await this.toPlan(plan) })
       events.publish({ type: 'plan.session', session: closed })
