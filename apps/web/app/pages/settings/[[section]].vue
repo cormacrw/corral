@@ -105,7 +105,7 @@ const items = [
     :ui="{ body: 'p-0 sm:p-0 gap-0 sm:gap-0' }"
   >
     <template #body>
-      <MobilePageHeader>
+      <MobilePageHeader v-if="section !== null">
         <template
           v-if="section === 'agents'"
           #actions

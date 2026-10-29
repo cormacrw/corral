@@ -265,18 +265,6 @@ const tabs = computed(() => [
     class="flex h-full min-h-0 flex-col overflow-y-auto overscroll-contain"
     data-testid="inbox-list"
   >
-    <MobilePageHeader>
-      <template #actions>
-        <UButton
-          icon="i-lucide-search"
-          variant="ghost"
-          color="neutral"
-          aria-label="Search the Inbox"
-          :aria-pressed="searching"
-          @click="toggleSearch"
-        />
-      </template>
-    </MobilePageHeader>
     <div class="flex shrink-0 flex-col gap-3 border-b border-default p-3">
       <UInput
         v-if="searching"
@@ -285,20 +273,30 @@ const tabs = computed(() => [
         icon="i-lucide-search"
         autofocus
       />
-      <UTabs
-        v-model="tab"
-        :items="tabs"
-        :content="false"
-        :ui="{ trigger: 'gap-1 px-1.5', label: 'overflow-visible' }"
-        class="w-full"
-      >
-        <template #trailing="{ item }">
-          <span
-            v-if="item.count !== null"
-            class="text-xs opacity-75"
-          >{{ item.count }}</span>
-        </template>
-      </UTabs>
+      <div class="flex items-center gap-2">
+        <UTabs
+          v-model="tab"
+          :items="tabs"
+          :content="false"
+          :ui="{ trigger: 'gap-1 px-1.5', label: 'overflow-visible', leadingIcon: 'max-[375px]:hidden' }"
+          class="min-w-0 flex-1"
+        >
+          <template #trailing="{ item }">
+            <span
+              v-if="item.count !== null"
+              class="text-xs opacity-75"
+            >{{ item.count }}</span>
+          </template>
+        </UTabs>
+        <UButton
+          icon="i-lucide-search"
+          variant="ghost"
+          color="neutral"
+          aria-label="Search the Inbox"
+          :aria-pressed="searching"
+          @click="toggleSearch"
+        />
+      </div>
     </div>
     <UAlert
       v-if="error"

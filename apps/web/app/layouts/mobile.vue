@@ -25,6 +25,7 @@ const tabs = computed(() => [
   { label: 'Settings', icon: 'i-lucide-settings', to: '/settings', active: isActive('/settings') }
 ])
 
+const tabRoot = computed(() => ['/home', '/plan', '/inbox', '/projects', '/settings'].includes(route.path))
 const parts = computed(() => route.path.split('/').filter(Boolean))
 const fullScreen = computed(() => parts.value[0] === 'agents' && parts.value.length >= 3)
 const ownHeader = computed(() => isActive('/tasks', '/epics'))
@@ -43,10 +44,11 @@ const focused = computed(() => ['plan', 'inbox'].includes(parts.value[0] ?? '') 
     </div>
 
     <!-- Panels with default-slot content scroll above the tab bar, including
-         their in-page title. Focused screens scroll only their inner body,
+         sub-page headers. Focused screens scroll only their inner body,
          leaving the compact title row and composer in place. -->
     <UDashboardGroup
       class="relative inset-auto min-h-0 flex-1 overflow-x-auto overscroll-contain *:min-h-0 *:overflow-y-auto *:overscroll-contain"
+      :class="tabRoot && 'pt-[env(safe-area-inset-top)]'"
       storage-key="mobile-dashboard"
     >
       <slot />

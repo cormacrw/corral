@@ -209,7 +209,7 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
 
 <template>
   <div class="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-    <!-- Phones switch sessions from the header (design/mobile.md) -->
+    <!-- Focused mobile conversations keep their compact header. -->
     <MobilePageHeader
       v-if="device.isMobile.value"
       compact
@@ -222,7 +222,6 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
           variant="ghost"
           color="neutral"
         />
-        <PlanSessionSwitcher v-else />
         <UButton
           v-if="!props.inbox"
           to="/plan"
