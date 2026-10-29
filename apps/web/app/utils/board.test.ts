@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BOARD_COLUMNS, MERGED_WINDOW_DAYS, onBoard, sortColumn, swipeStep } from './board.ts'
+import { BOARD_COLUMNS, epicFilterLabel, matchesFilter, MERGED_WINDOW_DAYS, onBoard, sortColumn, swipeStep } from './board.ts'
 
 const DAY = 24 * 60 * 60 * 1000
 const now = Date.parse('2026-10-29T12:00:00Z')
@@ -96,5 +96,44 @@ describe('sortColumn', () => {
     for (const column of BOARD_COLUMNS.filter(c => c.key !== 'merged')) {
       expect(refs(sortColumn(column.key, tasks))).toEqual(['COR-3', 'COR-1', 'COR-2'])
     }
+  })
+})
+
+describe('matchesFilter', () => {
+  const tasks = [
+    { ref: 'TA-1', title: 'Login form', epicId: 'auth' },
+    { ref: 'TA-2', title: 'Logout button', epicId: 'auth' },
+    { ref: 'TA-3', title: 'Billing page', epicId: 'billing' },
+    { ref: 'TA-4', title: 'Login audit log', epicId: 'audit' },
+    { ref: 'TA-5', title: 'Loose task', epicId: null }
+  ]
+  const refs = (epics: string[], search = '') => tasks.filter(t => matchesFilter(t, epics, search)).map(t => t.ref)
+
+  it('shows every task when no epic is selected', () => {
+    expect(refs([])).toEqual(['TA-1', 'TA-2', 'TA-3', 'TA-4', 'TA-5'])
+  })
+
+  it('shows only tasks from the one selected epic', () => {
+    expect(refs(['billing'])).toEqual(['TA-3'])
+  })
+
+  it('shows tasks from every selected epic, and none without an epic', () => {
+    expect(refs(['auth', 'audit'])).toEqual(['TA-1', 'TA-2', 'TA-4'])
+  })
+
+  it('combines the epics with search', () => {
+    expect(refs(['auth', 'audit'], 'login')).toEqual(['TA-1', 'TA-4'])
+    expect(refs([], 'ta-3')).toEqual(['TA-3'])
+  })
+})
+
+describe('epicFilterLabel', () => {
+  const names: Record<string, string> = { auth: 'Auth', billing: 'Billing' }
+  const label = (id: string) => names[id]!
+
+  it('reads All epics, the epic name, or N epics', () => {
+    expect(epicFilterLabel([], label)).toBe('All epics')
+    expect(epicFilterLabel(['billing'], label)).toBe('Billing')
+    expect(epicFilterLabel(['auth', 'billing'], label)).toBe('2 epics')
   })
 })

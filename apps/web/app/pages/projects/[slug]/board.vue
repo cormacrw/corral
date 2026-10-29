@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Task } from '@corral/contracts'
 import type { TaskStatus } from '@corral/core'
-import { BOARD_COLUMNS, onBoard, sortColumn } from '~/utils/board'
+import { BOARD_COLUMNS, matchesFilter, onBoard, sortColumn } from '~/utils/board'
 import { epicTitle, PRIORITY, STATUS, taskNote } from '~/utils/labels'
 
 // The board (design/board.md): approved work by status, no drag and drop
@@ -27,11 +27,11 @@ watch(project, async (p) => {
 }, { immediate: true })
 
 const search = ref('')
-const epic = ref<string | null>(null)
+const selected = ref<string[]>([])
 const epics = computed(() => [...new Set(all.value.map(t => t.epicId).filter((id): id is string => Boolean(id)))])
-const visible = computed(() => all.value.filter(t => onBoard(t)
-  && (!epic.value || t.epicId === epic.value)
-  && (!search.value || `${t.ref} ${t.title}`.toLowerCase().includes(search.value.toLowerCase()))))
+const visible = computed(() => all.value.filter(t => onBoard(t) && matchesFilter(t, selected.value, search.value)))
+// Epic details opens the epic only when exactly one is selected
+const single = computed(() => selected.value.length === 1 ? selected.value[0]! : null)
 
 const columns = BOARD_COLUMNS
 const DOT = { neutral: 'bg-neutral-400', info: 'bg-info', primary: 'bg-primary', warning: 'bg-warning', error: 'bg-error', success: 'bg-success', secondary: 'bg-secondary' } as const
@@ -39,6 +39,7 @@ const inColumn = (column: { key: string, statuses: TaskStatus[] }) => sortColumn
 const mobileColumns = computed(() => columns.map(c => ({ ...c, color: DOT[STATUS[c.statuses[0]!].color], tasks: inColumn(c) })))
 const agentFor = (task: Task) => task.lease ? live.state.value.agents.find(a => a.role === task.lease!.role) : null
 const epicLabel = (id: string) => epicTitle(live.state.value.epics[project.value?.id ?? ''], id, epics.value.indexOf(id))
+const epicOptions = computed(() => epics.value.map(id => ({ id, label: epicLabel(id) })))
 </script>
 
 <template>
@@ -47,9 +48,9 @@ const epicLabel = (id: string) => epicTitle(live.state.value.epics[project.value
     <BoardMobile
       v-if="device.isMobile.value"
       v-model:search="search"
-      v-model:epic="epic"
+      v-model:selected="selected"
       :columns="mobileColumns"
-      :epics="epics.map(id => ({ id, label: epicLabel(id) }))"
+      :epics="epicOptions"
       :total="visible.length"
       :all="all"
       :review-round-cap="project?.reviewRoundCap ?? 5"
@@ -69,41 +70,21 @@ const epicLabel = (id: string) => epicTitle(live.state.value.epics[project.value
             size="sm"
             class="w-60"
           />
-          <div
-            role="radiogroup"
-            aria-label="Epic"
-            class="flex flex-wrap gap-1"
-          >
-            <UButton
-              label="All epics"
-              size="xs"
-              :variant="epic === null ? 'subtle' : 'ghost'"
-              :color="epic === null ? 'primary' : 'neutral'"
-              role="radio"
-              :aria-checked="epic === null"
-              @click="epic = null"
-            />
-            <UButton
-              v-for="id in epics"
-              :key="id"
-              :label="epicLabel(id)"
-              size="xs"
-              :variant="epic === id ? 'subtle' : 'ghost'"
-              :color="epic === id ? 'primary' : 'neutral'"
-              role="radio"
-              :aria-checked="epic === id"
-              @click="epic = id"
-            />
-          </div>
+          <EpicFilter
+            v-model="selected"
+            :epics="epicOptions"
+            size="sm"
+            class="w-52"
+          />
           <UButton
-            v-if="epic"
+            v-if="single"
             label="Epic details"
             icon="i-lucide-network"
             size="xs"
             variant="outline"
             color="neutral"
-            :aria-pressed="flyout.epic.value === epic"
-            @click="flyout.toggleEpic(epic)"
+            :aria-pressed="flyout.epic.value === single"
+            @click="flyout.toggleEpic(single)"
           />
           <span class="ms-auto text-sm text-muted">{{ visible.length }} tasks</span>
         </div>

@@ -4,7 +4,7 @@ An epic groups related tasks of a plan (D9); one plan can propose several epics.
 
 ## Where it opens
 
-- **Board:** with an epic chosen in the epic filter, **Epic details** opens it in the flyout.
+- **Board:** with exactly one epic selected in the epic filter dropdown, **Epic details** opens it in the flyout.
 - **Backlog:** **Epic details** in each epic's group header.
 - **Project overview:** each epic's name in the Epics list links to the epic page.
 - **Task:** the **Epic** property links to the task's epic (flyout in the task flyout, page on the task page).
