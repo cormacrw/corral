@@ -32,6 +32,7 @@ vi.stubGlobal('watch', watch)
 vi.stubGlobal('useLive', () => live)
 const route = reactive({ path: '/home', fullPath: '/home' })
 vi.stubGlobal('useRoute', () => route)
+vi.stubGlobal('useRouter', () => ({ replace: vi.fn(), options: { history: { go: vi.fn() } } }))
 const mobileHeader = ref<{ title: string, eyebrow: string } | null>(null)
 vi.stubGlobal('useMobileHeader', () => mobileHeader)
 
@@ -43,7 +44,7 @@ const { default: MobileLayout } = await import('./mobile.vue')
 const UDashboardGroup = defineComponent({ setup: (_, { slots }) => () => h('div', { class: 'fixed inset-0 flex overflow-hidden' }, slots.default?.()) })
 const UDashboardPanel = defineComponent({ setup: (_, { slots }) => () => h('div', { 'class': 'relative flex flex-col min-w-0 min-h-svh shrink-0 flex-1', 'data-testid': 'panel' }, slots.default?.()) })
 const Plain = defineComponent({ setup: (_, { slots }) => () => h('span', slots.default?.()) })
-const Link = defineComponent({ props: ['to'], setup: (props, { slots }) => () => h('a', { href: props.to }, slots.default?.()) })
+const Link = defineComponent({ props: ['to', 'custom'], setup: (props, { slots }) => () => props.custom !== undefined ? slots.default?.({ href: props.to }) : h('a', { href: props.to }, slots.default?.()) })
 const global = { components: { UDashboardGroup, UDashboardPanel, UButton: Link, UIcon: Plain, NuxtLink: Link, ShellBanners: Plain, MobilePageHeader } }
 
 const Home = defineComponent({

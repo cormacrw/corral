@@ -4,6 +4,38 @@
 const live = useLive()
 const state = live.state
 const route = useRoute()
+const router = useRouter()
+
+let pendingTab = ''
+let resettingHistory = false
+
+async function selectTab(event: MouseEvent, to: string) {
+  // Keep normal link behaviour for opening a tab in another browser tab.
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+  event.preventDefault()
+  pendingTab = to
+  if (resettingHistory) return
+  resettingHistory = true
+  try {
+    const position = window.history.state?.position
+    if (typeof position === 'number' && position > 0) {
+      await new Promise<void>((resolve) => {
+        window.addEventListener('popstate', () => resolve(), { once: true })
+        // Suppress the router's pop navigation: intermediate pages must not
+        // render (or unmount this shell) while returning to the first entry.
+        router.options.history.go(-position, false)
+      })
+    }
+    // Rapid taps during the asynchronous traversal use the latest destination.
+    let destination: string
+    do {
+      destination = pendingTab
+      await router.replace(destination)
+    } while (pendingTab !== destination)
+  } finally {
+    resettingHistory = false
+  }
+}
 
 // Pages read tasks from live state, as they do under the web shell
 watch(() => state.value.projects, (projects) => {
@@ -65,28 +97,35 @@ const focused = computed(() => ['plan', 'inbox'].includes(parts.value[0] ?? '') 
           :key="tab.to"
         >
           <NuxtLink
+            v-slot="{ href }"
             :to="tab.to"
-            :class="['flex h-14 flex-col items-center justify-center gap-0.5 text-xs', tab.active ? 'font-medium text-primary' : 'text-muted']"
-            :aria-current="tab.active ? 'page' : undefined"
+            custom
           >
-            <span class="relative">
-              <UIcon
-                :name="tab.icon"
-                class="size-6"
-              />
-              <span
-                v-if="tab.badge"
-                class="absolute -end-2.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-inverted"
-                :aria-label="`${tab.badge} open`"
-                data-testid="inbox-count"
-              >{{ tab.badge }}</span>
-              <span
-                v-else-if="tab.dot"
-                class="absolute -end-0.5 -top-0.5 size-2 rounded-full bg-primary"
-                aria-label="Unread"
-              />
-            </span>
-            {{ tab.label }}
+            <a
+              :href="href ?? undefined"
+              :class="['flex h-14 flex-col items-center justify-center gap-0.5 text-xs', tab.active ? 'font-medium text-primary' : 'text-muted']"
+              :aria-current="tab.active ? 'page' : undefined"
+              @click="selectTab($event, tab.to)"
+            >
+              <span class="relative">
+                <UIcon
+                  :name="tab.icon"
+                  class="size-6"
+                />
+                <span
+                  v-if="tab.badge"
+                  class="absolute -end-2.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-inverted"
+                  :aria-label="`${tab.badge} open`"
+                  data-testid="inbox-count"
+                >{{ tab.badge }}</span>
+                <span
+                  v-else-if="tab.dot"
+                  class="absolute -end-0.5 -top-0.5 size-2 rounded-full bg-primary"
+                  aria-label="Unread"
+                />
+              </span>
+              {{ tab.label }}
+            </a>
           </NuxtLink>
         </li>
       </ul>
