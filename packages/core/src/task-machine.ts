@@ -1,6 +1,7 @@
 import { actorType, type Actor, type ActorType } from './actor.ts'
 import { failedMergeGates, type MergeGate, type MergeGateFacts } from './merge-gates.ts'
 import { checkDefinitionOfReady, type ReadyProblem, type TaskContent } from './ready.ts'
+import { isRepeatedFeedback, REPEATED_FEEDBACK_REASON } from './review-feedback.ts'
 import type { TaskStatus } from './status.ts'
 import { requiresHumanReview, type TaskType } from './task.ts'
 
@@ -46,8 +47,11 @@ export type TaskEvent =
   // In progress → Agent review: a pr_opened / pr_updated outcome, a
   // spike's findings_reported or a design's design_submitted
   | { type: 'submit', branchAtExpectedCommit: boolean, evidenceComplete: boolean }
-  // Agent review → In progress, or Blocked once the review-round cap is reached
-  | { type: 'changes_requested' }
+  // Agent review → In progress, or Blocked once the review-round cap is
+  // reached or when the feedback repeats the previous round's. `similarity`
+  // compares it with the previous round's change request (feedbackSimilarity);
+  // absent when there was none.
+  | { type: 'changes_requested', similarity?: number | undefined }
   // Agent review → Human review for a flagged task, otherwise Ready to
   // merge (a spike: Merged, its findings accepted)
   | { type: 'review_approved' }
@@ -170,6 +174,10 @@ export function transition(
       // Another round would go past the cap (flows.md step 7a)
       if (reviewRounds >= limits.reviewRoundCap) {
         return ok({ ...task, reviewRounds, status: 'blocked', reason: `Review-round cap reached (${limits.reviewRoundCap})` })
+      }
+      // Another round would likely end the same way, so a human looks first
+      if (event.similarity !== undefined && isRepeatedFeedback(event.similarity)) {
+        return ok({ ...task, reviewRounds, status: 'blocked', reason: REPEATED_FEEDBACK_REASON })
       }
       return ok({ ...task, reviewRounds, status: 'in_progress' })
     }

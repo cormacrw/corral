@@ -130,6 +130,7 @@ Run: Starting → Running. A heartbeat every 2 minutes renews the lease, and eve
 - **Agent review → In progress** (no lease), with the feedback posted as a comment.
 - The next developer run works in the **same worktree and branch**, reports `pr_updated`, and the flow returns to step 5.
 - If this would be round 6 (past the cap of 5): **→ Blocked**, and the human is notified.
+- If the previous round also requested changes and this feedback repeats it (normalised token similarity of the summary and unmet-criterion notes at or above 0.8, `REPEATED_FEEDBACK_THRESHOLD` in `packages/core`): **→ Blocked** with "The reviewer asked for the same changes twice", and it reaches the Inbox like any Blocked task. The score is kept in the `review.recorded` and `task.transition` audit entries. The round cap still applies on its own.
 
 ### Step 7b — Approved
 
