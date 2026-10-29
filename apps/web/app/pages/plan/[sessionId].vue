@@ -2,6 +2,7 @@
 import type { Plan, PlanMessage, PlanSessionDetail } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { projectColor } from '~/utils/labels'
+import { answerTo, openQuestionId, STOP_ASKING } from '~/utils/plan-questions'
 import { withoutMessages } from '~/utils/tool-steps'
 
 // A Plan conversation (design/plan.md)
@@ -85,6 +86,21 @@ async function send(message: string): Promise<boolean> {
     return false
   } finally {
     busy.value = false
+  }
+}
+// One-tap answers and Grill me send straight away. An answer leaves the
+// draft and attached task alone; Grill me sends the draft.
+const composer = ref<{ focus: () => void } | null>(null)
+const openQuestion = computed(() => session.value ? openQuestionId(session.value.messages) : null)
+const cantSend = computed(() => busy.value || runnerOffline.value || Boolean(session.value?.activeRunId))
+async function quick(message: string, keepDraft = true) {
+  const draft = text.value
+  const task = taskRef.value
+  if (keepDraft) taskRef.value = null
+  const sent = await send(message)
+  if (keepDraft) {
+    taskRef.value = task
+    if (sent) text.value = draft
   }
 }
 async function approve(plan: Plan, to: 'ready' | 'backlog') {
@@ -240,14 +256,20 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
                     :title="message.text"
                     :actions="[{ label: 'Retry', onClick: () => send('Please continue.') }]"
                   />
+                  <PlanQuestion
+                    v-else-if="message.kind === 'question'"
+                    :message="message"
+                    :active="message.id === openQuestion"
+                    :answer="answerTo(session.messages, message.id)"
+                    :disabled="cantSend"
+                    @answer="quick"
+                    @other="composer?.focus()"
+                    @stop="quick(STOP_ASKING)"
+                  />
                   <div
                     v-else
-                    :class="['text-sm', message.kind === 'question' && 'rounded-md border border-info/40 bg-info/5 px-3 py-2']"
+                    class="text-sm"
                   >
-                    <span
-                      v-if="message.kind === 'question'"
-                      class="mb-1 block text-xs font-medium text-info"
-                    >Question</span>
                     <MarkdownText :text="message.text" />
                   </div>
                   <button
@@ -312,6 +334,7 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
               class="mb-2"
             />
             <PromptComposer
+              ref="composer"
               v-model="text"
               :placeholder="runnerOffline && device.isMobile.value ? `${pm?.name ?? 'The PM'} is unavailable while the runner is offline` : `Reply to ${pm?.name ?? 'the PM'}…`"
               :disabled="runnerOffline || Boolean(session?.activeRunId)"
@@ -354,6 +377,11 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
                   aria-label="Refine a task"
                   :ui="{ content: 'w-80 max-w-[calc(100vw-2rem)]', base: 'max-w-56' }"
                   @update:model-value="taskRef = ($event as string | null)"
+                />
+                <PlanGrillButton
+                  :draft="text"
+                  :disabled="cantSend"
+                  @send="quick($event, false)"
                 />
               </template>
             </PromptComposer>

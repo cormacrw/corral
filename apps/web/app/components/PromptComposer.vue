@@ -86,6 +86,10 @@ function remove(image: Image) {
 }
 onBeforeUnmount(() => images.value.forEach(i => URL.revokeObjectURL(i.preview)))
 
+// Lets a page put the cursor in the composer (e.g. Other… on a question)
+const box = ref<HTMLElement | null>(null)
+defineExpose({ focus: () => box.value?.querySelector('textarea')?.focus() })
+
 function filesOf(data: DataTransfer | null): File[] {
   if (!data) return []
   return [...data.items].filter(item => item.kind === 'file').map(item => item.getAsFile()).filter((f): f is File => f !== null)
@@ -121,6 +125,7 @@ function onPick(event: Event) {
 <template>
   <!-- UChatPrompt passes listeners to its textarea, so the whole box listens here -->
   <div
+    ref="box"
     :class="['rounded-lg', dragging && 'ring-2 ring-primary']"
     @paste="onPaste"
     @dragover="onDragOver"

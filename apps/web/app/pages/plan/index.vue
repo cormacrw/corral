@@ -168,6 +168,11 @@ async function start(message: string): Promise<boolean> {
               :ui="{ content: 'w-80 max-w-[calc(100vw-2rem)]', base: 'max-w-56' }"
               @update:model-value="taskRef = ($event as string | null)"
             />
+            <PlanGrillButton
+              :draft="text"
+              :disabled="busy || runnerOffline || !project"
+              @send="start"
+            />
             <USelectMenu
               v-if="!device.isMobile.value"
               :items="live.state.value.planSessions.map(s => ({ label: s.title, value: s.id }))"
