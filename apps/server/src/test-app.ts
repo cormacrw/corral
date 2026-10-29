@@ -57,9 +57,11 @@ export async function createTestApp(driver: 'pglite' | 'postgres', options: { li
 
   const request = async (method: string, path: string, body?: unknown) => app.request(path, {
     method,
-    ...(body instanceof Blob
-      ? { body: new Uint8Array(await body.arrayBuffer()), headers: { 'content-type': body.type } }
-      : body !== undefined && { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } })
+    ...(body instanceof FormData
+      ? { body }
+      : body instanceof Blob
+        ? { body: new Uint8Array(await body.arrayBuffer()), headers: { 'content-type': body.type } }
+        : body !== undefined && { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } })
   })
 
   return {

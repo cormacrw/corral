@@ -36,6 +36,7 @@ import { bodyLimit } from 'hono/body-limit'
 import { streamSSE } from 'hono/streaming'
 import type { ZodType } from 'zod'
 import { ApiFailure, fromDatabaseError } from './errors.ts'
+import { checkThumbnail, readThumbnail, THUMBNAIL_MAX_BYTES } from './thumbnails.ts'
 import { createAttachment, readAttachment } from './attachments.ts'
 import { approveDesign, DESIGN_BUNDLE_HEADERS, listDesignVersions, readDesignFile, readDesignScreenshot } from './designs.ts'
 import { checkAvatar, getProfile, patchProfile, readAvatar, setAgentAvatar, setUserAvatar } from './avatars.ts'
@@ -43,7 +44,7 @@ import { getEpic, listEpics, patchEpic, setEpicDependencies } from './epics.ts'
 import type { EventBus } from './events.ts'
 import { loadInbox } from './inbox.ts'
 import { listPullRequests } from './pull-requests.ts'
-import { createProject, findProjectBySlug, listProjects, patchProject, toProject } from './projects.ts'
+import { createProject, findProjectBySlug, listProjects, patchProject, setProjectThumbnail, toProject } from './projects.ts'
 import type { BlobStore } from './blob-store.ts'
 import type { Orchestrator } from './orchestrator.ts'
 import type { PlanService } from './plan.ts'
@@ -164,6 +165,12 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     onError: c => c.json<ApiErrorBody>({ error: { code: 'invalid_input', issues: [{ path: ['avatar'], message: 'The image is over 2 MB' }] } }, 413)
   })
 
+  const thumbnailBodyLimit = bodyLimit({
+    // Bound parsing memory, including a small multipart envelope.
+    maxSize: THUMBNAIL_MAX_BYTES + 64 * 1024,
+    onError: c => c.json<ApiErrorBody>({ error: { code: 'invalid_input', issues: [{ path: ['file'], message: 'The image is over 2 MB' }] } }, 413)
+  })
+
   const attachmentBodyLimit = bodyLimit({
     maxSize: ATTACHMENT_MAX_BYTES,
     onError: c => c.json<ApiErrorBody>({ error: { code: 'invalid_input', issues: [{ path: ['file'], message: 'The image is over 10 MB' }] } }, 413)
@@ -210,6 +217,36 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     })
 
     .get('/projects/:slug', async c => c.json(toProject(await findProjectBySlug(db, c.req.param('slug')))))
+
+    .put('/projects/:slug/thumbnail', thumbnailBodyLimit, async (c) => {
+      const project = await findProjectBySlug(db, c.req.param('slug'))
+      const invalid = () => new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['file'], message: 'Provide a multipart file image' }] })
+      const form = await c.req.formData().catch(() => {
+        throw invalid()
+      })
+      const files = form.getAll('file')
+      const file = files[0]
+      if (files.length !== 1 || !(file instanceof File)) throw invalid()
+      const data = new Uint8Array(await file.arrayBuffer())
+      checkThumbnail(data, file.type)
+      const saved = await setProjectThumbnail(db, project, await blobs.put(data), actor)
+      events.publish({ type: 'project.updated', project: saved })
+      return c.json(saved)
+    })
+    .get('/projects/:slug/thumbnail', async (c) => {
+      const file = await readThumbnail(db, blobs, c.req.param('slug'), c.req.query('v'))
+      if (!file) throw new ApiFailure(404, { code: 'not_found' })
+      return c.body(new Uint8Array(file.data), 200, {
+        'content-type': file.type,
+        'cache-control': 'private, no-cache',
+        'x-content-type-options': 'nosniff'
+      })
+    })
+    .delete('/projects/:slug/thumbnail', async (c) => {
+      const project = await setProjectThumbnail(db, await findProjectBySlug(db, c.req.param('slug')), null, actor)
+      events.publish({ type: 'project.updated', project })
+      return c.json(project)
+    })
 
     .patch('/projects/:slug', validate('json', patchProjectInput), async (c) => {
       const project = await patchProject(db, await findProjectBySlug(db, c.req.param('slug')), c.req.valid('json'), actor)

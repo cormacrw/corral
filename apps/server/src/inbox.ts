@@ -3,6 +3,7 @@ import { richTextToPlainText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, count, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { actorLabel } from './orchestrator.ts'
+import { thumbnailUrl } from './projects.ts'
 import { sessionState } from './plan.ts'
 
 const { agents, auditLog, planMessages, planSessions, plans, planEpics, planTasks, projects, reviews, runs, tasks } = schema
@@ -144,7 +145,7 @@ async function humanReviewNote(db: Executor, task: typeof tasks.$inferSelect): P
 }
 
 function projectTag(project: typeof projects.$inferSelect) {
-  return { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor }
+  return { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: thumbnailUrl(project) }
 }
 
 function senderOf(actor: Actor): TaskInboxItem['sender'] {
