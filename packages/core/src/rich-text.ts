@@ -2,7 +2,8 @@ import { marked, type Token, type Tokens } from 'marked'
 
 // Task descriptions are rich-text documents from the editor (design/task.md),
 // in the ProseMirror/TipTap JSON shape: nodes with `text` or `content`.
-// The Definition of Ready only needs to know whether there's any text.
+// The Definition of Ready only needs to know whether there's any text, so
+// images (attachment nodes with no text) don't count.
 export function richTextToPlainText(doc: unknown): string {
   const parts: string[] = []
   const stack: unknown[] = [doc]
@@ -160,6 +161,7 @@ function blockToMarkdown(node: RichNode): string {
   switch (node.type) {
     case 'heading': return `${'#'.repeat(Number(node.attrs?.level ?? 2))} ${inlineToMarkdown(children)}`
     case 'codeBlock': return `\`\`\`${typeof node.attrs?.language === 'string' ? node.attrs.language : ''}\n${children.map(c => c.text ?? '').join('')}\n\`\`\``
+    case 'image': return `![${String(node.attrs?.alt ?? '').replace(/[[\]\\\r\n]/g, ' ').trim()}](${String(node.attrs?.src ?? '')})`
     case 'blockquote': return children.map(blockToMarkdown).join('\n\n').split('\n').map(line => `> ${line}`).join('\n')
     case 'bulletList':
     case 'orderedList': {
