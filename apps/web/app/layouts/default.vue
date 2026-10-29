@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Project } from '@corral/contracts'
 import { api } from '~/composables/useApi'
-import { initials, isWorking, projectColor, ROLE } from '~/utils/labels'
+import { initials, isWorking, projectColor, ROLE, taskCounts } from '~/utils/labels'
 
 // The app shell (design/app-shell.md): global nav, projects, agents, runner
 const live = useLive()
@@ -19,10 +19,7 @@ const isExpanded = (project: Project) => expanded.value[project.id] ?? true
 const currentSlug = computed(() => typeof route.params.slug === 'string' ? route.params.slug : null)
 const currentProject = computed(() => state.value.projects.find(p => p.slug === currentSlug.value) ?? null)
 
-const counts = (project: Project) => {
-  const tasks = state.value.tasks[project.id] ?? []
-  return { board: tasks.filter(t => t.status !== 'backlog').length, backlog: tasks.filter(t => t.status === 'backlog').length }
-}
+const counts = (project: Project) => taskCounts(state.value.tasks[project.id] ?? [])
 watch(() => state.value.projects, (projects) => {
   for (const project of projects) {
     if (!state.value.tasks[project.id]) void live.loadTasks(project)
