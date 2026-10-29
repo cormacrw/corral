@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { agentFacts, agentLimit, groupAgents, todayStats } from './agents.ts'
 
 const agent = (id: string, activeRuns = 0): Agent => ({
-  id, name: id, role: 'developer', runtime: 'claude', concurrency: 1, paused: false, pausedUntil: null, activeRuns, avatarUrl: null
+  id, name: id, role: 'developer', runtime: 'claude', concurrency: 1, paused: false, wakeIntervalSeconds: null, pausedUntil: null, activeRuns, avatarUrl: null
 })
 const run = (id: string, agentId: string, state: Run['state'], queuedAt = '2026-10-29T10:00:00Z', tokens = 0): Run => ({
   id, number: 1, agentId, agentName: agentId, role: 'developer', projectId: 'p', taskId: null, taskRef: null, taskTitle: null,

@@ -104,6 +104,8 @@ export class Orchestrator implements RunnerHandlers {
   #timer: NodeJS.Timeout | null = null
   #scheduling: Promise<void> | null = null
   #again = false
+  // Set when an event asked for a pass, so the next one ignores wake intervals
+  #eventPending = false
   #stopped = false
   #updating = false
   readonly merges: MergeOrchestrator
@@ -260,7 +262,7 @@ export class Orchestrator implements RunnerHandlers {
   async tick(): Promise<void> {
     await this.sweepLeases()
     await this.merges.tick().catch(error => console.error('Merge pass failed', error))
-    await this.schedule()
+    await this.schedule('tick')
   }
 
   // Asks for a scheduling pass soon; passes never overlap
@@ -268,7 +270,10 @@ export class Orchestrator implements RunnerHandlers {
     void this.schedule()
   }
 
-  async schedule(): Promise<void> {
+  // An event (approval, a pushed PR, a run ending) starts work right away;
+  // the periodic tick holds back agents still inside their wake interval
+  async schedule(trigger: 'event' | 'tick' = 'event'): Promise<void> {
+    if (trigger === 'event') this.#eventPending = true
     if (this.#scheduling) {
       this.#again = true
       return this.#scheduling
@@ -276,7 +281,9 @@ export class Orchestrator implements RunnerHandlers {
     this.#scheduling = (async () => {
       do {
         this.#again = false
-        await this.#schedulePass().catch(error => console.error('Scheduling failed', error))
+        const fromTick = !this.#eventPending
+        this.#eventPending = false
+        await this.#schedulePass(fromTick).catch(error => console.error('Scheduling failed', error))
       } while (this.#again)
     })().finally(() => {
       this.#scheduling = null
@@ -284,7 +291,7 @@ export class Orchestrator implements RunnerHandlers {
     return this.#scheduling
   }
 
-  async #schedulePass(): Promise<void> {
+  async #schedulePass(fromTick: boolean): Promise<void> {
     const { db, runner } = this.#d
     if (!runner.online || this.#stopped || this.#updating) return
     // PM turns aren't claimed; they run when the human writes (D9), and
@@ -292,11 +299,23 @@ export class Orchestrator implements RunnerHandlers {
     await this.#startPmTurns()
     const workers = await db.select().from(agents).where(ne(agents.role, 'pm')).orderBy(asc(agents.createdAt))
     for (const agent of workers) {
+      // An agent with a wake interval gets at most one start per interval
+      // from the tick, counted from its last run however that one started
+      const throttled = fromTick && agent.wakeIntervalSeconds !== null
+      if (throttled && !(await this.#awake(agent))) continue
       for (let claim = await claimNextTask(db, agent.id, this.#now()); claim; claim = await claimNextTask(db, agent.id, this.#now())) {
         await this.#assign(claim)
         if (this.#stopped || this.#updating) return
+        if (throttled) break
       }
     }
+  }
+
+  // Whether the agent's wake interval has passed since its last run started
+  async #awake(agent: AgentRow): Promise<boolean> {
+    const [last] = await this.#d.db.select({ queuedAt: runs.queuedAt }).from(runs)
+      .where(eq(runs.agentId, agent.id)).orderBy(desc(runs.queuedAt)).limit(1)
+    return !last || this.#now().getTime() - last.queuedAt.getTime() >= agent.wakeIntervalSeconds! * 1000
   }
 
   async #assign(claim: Claim): Promise<void> {

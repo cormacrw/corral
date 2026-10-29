@@ -458,6 +458,8 @@ export const patchAgentInput = z.object({
   name: z.string().trim().min(1).optional(),
   concurrency: z.number().int().positive().optional(),
   paused: z.boolean().optional(),
+  // How often the periodic tick may start work for the agent; null for every tick
+  wakeIntervalSeconds: z.number().int().positive().nullable().optional(),
   // Only while the agent has no active runs
   runtime: agentRuntime.optional()
 })
@@ -536,6 +538,9 @@ export interface Agent {
   runtime: string
   concurrency: number
   paused: boolean
+  // The periodic tick starts work for it at most this often; events such as
+  // plan approval still start it right away. Null means every tick.
+  wakeIntervalSeconds: number | null
   // Set while waiting out a usage limit (D3)
   pausedUntil: string | null
   // Runs holding a lease right now

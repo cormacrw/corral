@@ -1,0 +1,2 @@
+ALTER TABLE "agents" ADD COLUMN "wake_interval_seconds" integer;--> statement-breakpoint
+ALTER TABLE "agents" ADD CONSTRAINT "agents_wake_interval_positive" CHECK ("agents"."wake_interval_seconds" > 0);

@@ -148,6 +148,13 @@
       "when": 1793264172393,
       "tag": "0020_design_plan_session",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1793272427827,
+      "tag": "0021_agent_wake_interval",
+      "breakpoints": true
     }
   ]
 }
