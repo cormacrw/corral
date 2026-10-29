@@ -2,6 +2,8 @@
 
 Page-by-page specs for the web app (`apps/web`). The interactive mockups live on the design canvas: <https://claude.ai/artifact/QBjDV6Wyj72DXqKA6RU8AT>. Each spec names its canvas frame.
 
+The mobile PWA design is on its own canvas: <https://claude.ai/artifact/VwiPAt4wMA2v9cCEALMGss>, with an offline export in [mobile-pwa.html](mobile-pwa.html). It has no written spec yet; the page specs below still apply to its behaviour.
+
 These specs describe the UI only. Behaviour rules come from [decisions.md](../decisions.md) and [flows.md](../flows.md); where a spec and a decision disagree, the decision wins.
 
 ## Pages
