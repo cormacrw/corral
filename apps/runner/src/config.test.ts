@@ -10,6 +10,7 @@ describe('loadConfig', () => {
       serverUrl: new URL('http://127.0.0.1:4100'),
       name: hostname(),
       claudeBin: 'claude',
+      codexBin: 'codex',
       gitAuthor: null,
       pmWarmSeconds: 300
     })
@@ -21,6 +22,7 @@ describe('loadConfig', () => {
       CORRAL_SERVER_URL: 'http://server:4100',
       CORRAL_RUNNER_NAME: 'home-server',
       CORRAL_CLAUDE_BIN: '/usr/local/bin/claude',
+      CORRAL_CODEX_BIN: '/opt/codex/bin/codex',
       CORRAL_GIT_AUTHOR_NAME: 'Configured Person',
       CORRAL_GIT_AUTHOR_EMAIL: 'configured@example.com',
       CORRAL_PM_WARM_SECONDS: '0'
@@ -29,6 +31,7 @@ describe('loadConfig', () => {
       serverUrl: new URL('http://server:4100'),
       name: 'home-server',
       claudeBin: '/usr/local/bin/claude',
+      codexBin: '/opt/codex/bin/codex',
       gitAuthor: { name: 'Configured Person', email: 'configured@example.com' },
       pmWarmSeconds: 0
     })

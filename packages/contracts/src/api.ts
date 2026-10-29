@@ -16,6 +16,7 @@ import {
   type TransitionError
 } from '@corral/core'
 import { z } from 'zod'
+import type { CliId } from './runner.ts'
 
 // HTTP API between apps/web and apps/server. Inputs are zod schemas the server
 // validates; outputs are plain types (JSON, so dates are ISO strings).
@@ -409,7 +410,7 @@ export interface RepoCheck {
 }
 
 export interface CliStatus {
-  id: 'claude'
+  id: CliId
   name: string
   version: string | null
   signedIn: boolean
