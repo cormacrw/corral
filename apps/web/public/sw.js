@@ -2,7 +2,7 @@
 // shell only, so the installed app opens fast. All data is live from
 // apps/server: /api/** (the /api/events stream included) and any other live
 // connection always go straight to the network and are never cached.
-// app.vue registers it in production builds only.
+// plugins/pwa.client.ts registers it in production builds only.
 const CACHE = 'corral-shell-v1'
 
 // Fetched when the worker installs. Paths are relative to the origin, since
