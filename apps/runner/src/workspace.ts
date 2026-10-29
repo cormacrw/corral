@@ -53,8 +53,21 @@ async function checkOut(dataDir: string, bare: string, job: RunJob): Promise<{ w
     return { workspace: { path, bare }, error: null }
   }
 
-  if (!job.taskId || !job.branch) return { workspace: null, error: 'The job has no task or branch' }
+  if (!job.taskId) return { workspace: null, error: 'The job has no task' }
   const path = worktreePath(dataDir, job.taskId, job.role)
+
+  // A spike has no branch or commit (D19): both its developer and its
+  // reviewer get a detached checkout of the default branch. The developer's
+  // is kept between revisions, like any developer worktree.
+  if (!job.branch) {
+    if (job.role === 'developer' && await exists(path)) return { workspace: { path, bare }, error: null }
+    const start = `origin/${job.defaultBranch}`
+    const result = await exists(path)
+      ? await git(['checkout', '--detach', '--force', start], { cwd: path })
+      : await git(['worktree', 'add', '--detach', path, start], { cwd: bare })
+    if (result.code !== 0) return { workspace: null, error: result.stderr.trim() || 'git worktree add failed' }
+    return { workspace: { path, bare }, error: null }
+  }
 
   if (job.role === 'reviewer') {
     // The reviewer looks at exactly the commit the developer submitted

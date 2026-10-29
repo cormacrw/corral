@@ -581,6 +581,8 @@ export class RunManager {
       }
       let payload: Record<string, unknown> = input
       if (run.job.role === 'developer' && (outcome === 'pr_opened' || outcome === 'pr_updated')) {
+        // A spike has no branch to push (D19)
+        if (!run.job.branch) return { ok: false, error: 'A spike opens no PR: report your findings with outcome findings_reported.' }
         // The runner pushes, not the agent (D8); the commit goes with the report
         const pushed = await pushBranch(run.worktree!, run.job.branch!)
         if (pushed.sha === null) return { ok: false, error: `Corral could not push your branch: ${pushed.error}. Commit your work and report again.` }
@@ -640,7 +642,9 @@ function runnerNotes(run: ActiveRun, job: RunJob): string {
     '',
     `- Your Corral tools are on the MCP server "corral": ${(ROLE_TOOLS[job.role] ?? []).join(', ')}.`,
     `- Save evidence files and other scratch output under ${run.scratchDir} (outside the repository), then attach them with attach_evidence using the absolute path.`,
-    job.role === 'developer' ? `- You are in a git worktree on branch ${job.branch}. Pushing is disabled; Corral pushes when you report.` : '',
+    job.role === 'developer' && job.branch ? `- You are in a git worktree on branch ${job.branch}. Pushing is disabled; Corral pushes when you report.` : '',
+    // A spike (D19): findings, not commits
+    job.role === 'developer' && !job.branch ? '- You are in a detached checkout of the default branch for a spike. Don\'t commit or push; report your findings.' : '',
     `- This run has a time limit of ${Math.round(job.timeoutSeconds / 60)} minutes.`
   ].filter(Boolean).join('\n')
 }

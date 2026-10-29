@@ -1,0 +1,1 @@
+ALTER TYPE "public"."run_outcome" ADD VALUE 'findings_reported' BEFORE 'approved';

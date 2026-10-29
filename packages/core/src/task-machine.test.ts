@@ -217,6 +217,24 @@ describe('approval and merging', () => {
     expect(expectOk(transition(task('agent_review'), validEvents.review_approved, server)).status).toBe('ready_to_merge')
   })
 
+  it('finishes an unflagged spike when the reviewer approves: there is no PR to merge', () => {
+    expect(expectOk(transition(task('agent_review', { type: 'spike' }), validEvents.review_approved, server)).status).toBe('merged')
+  })
+
+  it('sends a flagged spike to Human review, and finishes it on the human’s approval', () => {
+    expect(expectOk(transition(task('agent_review', { type: 'spike', humanReview: true }), validEvents.review_approved, server)).status).toBe('human_review')
+    expect(expectOk(transition(task('human_review', { type: 'spike' }), validEvents.human_approve, human)).status).toBe('merged')
+  })
+
+  it('sends a spike back to the developer when the review requests changes, like any task', () => {
+    expect(expectOk(transition(task('agent_review', { type: 'spike' }), validEvents.changes_requested, server)))
+      .toEqual(task('in_progress', { type: 'spike', reviewRounds: 1 }))
+  })
+
+  it('treats bugs like plain tasks', () => {
+    expect(expectOk(transition(task('agent_review', { type: 'bug' }), validEvents.review_approved, server)).status).toBe('ready_to_merge')
+  })
+
   it('moves a human-approved task to Ready to merge', () => {
     expect(expectOk(transition(task('human_review'), validEvents.human_approve, human)).status).toBe('ready_to_merge')
   })

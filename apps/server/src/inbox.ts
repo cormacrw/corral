@@ -6,7 +6,7 @@ import { actorLabel } from './orchestrator.ts'
 
 const { agents, auditLog, projects, reviews, runs, tasks } = schema
 
-const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'changes_requested', 'merged', 'ci_failed', 'base_conflict', 'head_moved']
+const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'findings_reported', 'changes_requested', 'merged', 'ci_failed', 'base_conflict', 'head_moved']
 
 // The Inbox (D11, design/inbox.md): what developer and reviewer runs need
 // from the human, plus what they did. Nothing from the PM. Items are derived
@@ -101,11 +101,14 @@ function senderOf(actor: Actor): InboxItem['sender'] {
 function activityText(action: string, event: string | null, detail: Record<string, unknown>, prNumber: number | null): string {
   const pr = prNumber ? `PR #${prNumber}` : 'the PR'
   if (action === 'review.recorded') {
-    return detail.verdict === 'approved' ? `Approved ${pr} (${String(detail.met)} of ${String(detail.of)} criteria met)` : `Requested changes on ${pr} (${String(detail.met)} of ${String(detail.of)} criteria met)`
+    // Only a spike is reviewed without a PR: its findings are (D19)
+    const reviewed = prNumber ? pr : 'the findings'
+    return detail.verdict === 'approved' ? `Approved ${reviewed} (${String(detail.met)} of ${String(detail.of)} criteria met)` : `Requested changes on ${reviewed} (${String(detail.met)} of ${String(detail.of)} criteria met)`
   }
   switch (event) {
     case 'pr_opened': return `Opened ${pr}`
     case 'pr_updated': return `Pushed a revision to ${pr}`
+    case 'findings_reported': return 'Reported findings; on to the reviewer'
     case 'changes_requested': return 'Changes requested; back to the developer'
     case 'merged': return `Merged ${pr}`
     case 'ci_failed': return `CI failed on ${pr}; back to the developer`

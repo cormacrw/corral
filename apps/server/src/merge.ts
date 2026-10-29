@@ -312,7 +312,9 @@ export class MergeOrchestrator {
     await this.#publish(taskId)
     const [row] = await db.select({ task: tasks, project: schema.projects }).from(tasks)
       .innerJoin(schema.projects, eq(schema.projects.id, tasks.projectId)).where(eq(tasks.id, taskId))
-    if (row && !this.stopped && row.task.prNumber && row.task.headSha) void this.#advanceOnce(row.task, row.project)
+    // A spike is finished once approved (D19): there's no PR to merge
+    if (row?.task.status === 'merged') void this.cleanup(taskId)
+    else if (row && !this.stopped && row.task.prNumber && row.task.headSha) void this.#advanceOnce(row.task, row.project)
   }
 
   async #transition(taskId: string, event: Parameters<typeof applyTransition>[3], detail: Record<string, unknown>, comment?: string): Promise<void> {

@@ -144,6 +144,16 @@ The task waits in Ready to merge. Waiting is a webhook or a cheap polling check,
 - **The base branch has moved:** the server calls GitHub's "update branch" API (no local git needed). A conflict → In progress for the developer. A clean update keeps the approval (R7 default).
 - **Any other new commit:** → Agent review for a fresh review.
 
+### Spikes: findings instead of a PR (D19)
+
+A `spike` follows steps 1–7 with these differences, and never reaches step 7c:
+
+- **Step 3:** the job has no branch. The developer's worktree is a detached checkout of the default branch (kept between revisions); the reviewer's is too.
+- **Steps 4–5:** the developer investigates without changing code, attaches evidence per criterion, and reports `findings_reported` with its findings (answer, evidence, recommendation, suggested follow-up tasks). The server checks the evidence, posts the findings on the task as a `## Findings` comment, and moves **In progress → Agent review**. Nothing is pushed and no PR is opened.
+- **Step 6:** the reviewer judges the latest findings, which are in its prompt, against every criterion and the evidence. There is no diff.
+- **Step 7a:** changes requested works exactly as for any task.
+- **Step 7b:** approved → **Merged** (via Human review when flagged). The worktrees are cleaned up as in step 10.
+
 ### Step 8 — Final gate check
 
 A pure function in `packages/core`, run against live GitHub data:
