@@ -153,6 +153,7 @@ const dotClass = (status: TaskStatus) => ({
       <USwitch
         v-else-if="row.key === 'humanReview'"
         :model-value="props.task.humanReview"
+        :disabled="props.task.type === 'design'"
         size="sm"
         aria-label="Human review"
         @update:model-value="emit('patch', { humanReview: $event })"

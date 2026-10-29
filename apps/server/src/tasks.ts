@@ -5,6 +5,7 @@ import {
   createTask as createTaskState,
   DEPENDENCY_DELETED_REASON,
   deletionFor,
+  requiresHumanReview,
   richTextToPlainText,
   taskRef,
   transition,
@@ -138,7 +139,7 @@ export async function listTasks(db: Executor, project: ProjectRow, view: TaskVie
 // Returns the new task's ID.
 export async function createTask(db: Executor, project: ProjectRow, rawInput: CreateTaskInput, actor: Actor, options: { draft?: boolean } = {}): Promise<string> {
   const input = createTaskInput.parse(rawInput)
-  const created = createTaskState(actor, input.humanReview ?? project.humanReviewDefault, options.draft)
+  const created = createTaskState(actor, requiresHumanReview(input.type, input.humanReview ?? project.humanReviewDefault), options.draft)
   if (!created.ok) throw new ApiFailure(409, { code: 'transition_rejected', reason: created.error })
 
   return db.transaction(async (tx) => {
@@ -260,6 +261,8 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
     // Merged is final (D10): the record stays as it shipped; comments still work
     if (task.status === 'merged') throw new ApiFailure(409, { code: 'conflict', constraint: 'task_merged' })
     const { acceptanceCriteria: criteriaInput, dependsOn, ...fields } = input
+    // D20: a design task's flag can't be turned off, by the human or a plan
+    if ((fields.type ?? task.type) === 'design') fields.humanReview = true
     if (fields.epicId) {
       const [epic] = await tx.select({ id: epics.id }).from(epics).where(and(eq(epics.id, fields.epicId), eq(epics.projectId, project.id)))
       if (!epic) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['epicId'], message: 'Unknown epic' }] })

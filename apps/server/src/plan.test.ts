@@ -441,7 +441,7 @@ describe('plan sessions', () => {
     await endTurn(job, 'Proposed.')
   })
 
-  it('accepts task, bug and spike in propose_plan and rejects the old area types (D19)', async () => {
+  it('accepts task, bug, spike and design in propose_plan and rejects the old area types (D19, D20)', async () => {
     const project = await t.createProject()
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
     await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan login' })
@@ -449,10 +449,38 @@ describe('plan sessions', () => {
     for (const type of ['frontend', 'backend', 'full_stack', 'infrastructure']) {
       expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ type }]))).toMatchObject({ ok: false })
     }
-    expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ type: 'task' }, { type: 'bug' }, { type: 'spike' }]))).toMatchObject({ ok: true })
+    expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ type: 'task' }, { type: 'bug' }, { type: 'spike' }, { type: 'design' }]))).toMatchObject({ ok: true })
     const rows = await t.db.select().from(tasks).where(eq(tasks.projectId, project.id)).orderBy(tasks.number)
-    expect(rows.map(r => r.type)).toEqual(['task', 'bug', 'spike'])
+    expect(rows.map(r => r.type)).toEqual(['task', 'bug', 'spike', 'design'])
     await endTurn(job, 'Proposed.')
+  })
+
+  it('gives a design task human review even when the plan sets it false (D20)', async () => {
+    const project = await t.createProject()
+    await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+    const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Design login' }).then(r => r.json()) as PlanSessionDetail
+    const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
+    const proposed = await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ type: 'design', humanReview: false }, { type: 'task', humanReview: false }]))
+    expect(proposed).toMatchObject({ ok: true })
+    await endTurn(job, 'Proposed.')
+    const [v1] = (await session(created.id)).plans
+    expect(await t.request('POST', `/api/plan/plans/${v1!.id}/approve`, { to: 'backlog' }).then(r => r.status)).toBe(200)
+    const rows = await t.db.select().from(tasks).where(eq(tasks.projectId, project.id)).orderBy(tasks.number)
+    expect(rows.map(r => [r.type, r.humanReview])).toEqual([['design', true], ['task', false]])
+  })
+
+  it('gives a Backlog task revised into a design task human review (D20)', async () => {
+    const project = await t.createProject()
+    await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+    const target = await t.createTask(project.slug, { title: 'Login page', humanReview: false })
+    const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: `Design ${target.ref}` }).then(r => r.json()) as PlanSessionDetail
+    const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.planSessionId === created.id)).job
+    expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ ref: target.ref, type: 'design', humanReview: false }]))).toMatchObject({ ok: true })
+    await endTurn(job, 'Proposed.')
+    const [v1] = (await session(created.id)).plans
+    expect(await t.request('POST', `/api/plan/plans/${v1!.id}/approve`, { to: 'backlog' }).then(r => r.status)).toBe(200)
+    const after = await t.request('GET', `/api/tasks/${target.ref}`).then(r => r.json()) as Task
+    expect(after).toMatchObject({ type: 'design', humanReview: true })
   })
 
   it('creates flag_stale_docs tasks with type task', async () => {
