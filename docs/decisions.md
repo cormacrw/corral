@@ -670,3 +670,15 @@ If the resolution needs changes, the reviewer requests changes: **Agent review â
 If main changed a **binding decision that the task's criteria rely on**, the reviewer instead **blocks the task for the human**, explaining the changed decision and the affected criteria. It must not pick a side or silently rewrite the criteria, even if the textual conflicts are easy to resolve. COR-118 changing the binding decision under COR-106 is the motivating example.
 
 **Why existing roles:** This is a mode of the existing developer and reviewer roles, not a third agent role. The developer still changes the branch and the reviewer independently judges those changes; only their scope and the review's accounting differ. A third role would duplicate those responsibilities without adding an independent check. Explicit modes keep a mechanical conflict repair from consuming feature-review rounds or becoming an excuse to undo newly merged work.
+
+---
+
+## D25 â€” Private-network runners and shared authentication
+
+**Status:** Accepted 2026-10-29 (COR-182). Amends D1 and D12.
+
+Corral supports runners on multiple machines over a private tailnet. The server has an optional runner-only listener, separate from the HTTP API. Only that listener may be published on the tailnet; the API stays on localhost or the internal Docker network behind web and Cloudflare Access. The existing internal `/runner` endpoint remains available during the Compose transition.
+
+For the POC, all runners share `CORRAL_RUNNER_TOKEN`. Both runner endpoints require it when configured; the runner sends it in the WebSocket Authorization header, and the server compares it in constant time before registering the runner. The token is never logged. Without a token, only the existing internal endpoint is available; configuring the external listener fails at startup. Shared authentication is separate from runner identity and job scheduling: connections for distinct runner identities remain independent, and a newer authenticated connection replaces only the connection with the same runner identity.
+
+Per-runner pairing and revocation come later with hosting. Remote runners run under WSL2 or Linux and update themselves by pulling from GitHub (see the runner updater task), rather than receiving executable updates from the control plane.

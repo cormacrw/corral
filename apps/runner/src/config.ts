@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path'
 // for local development only; the Docker images set every value explicitly.
 export interface RunnerConfig {
   // Holds repos/, worktrees/ and spool/ (docs/architecture.md, Layout on disk)
+  runnerToken?: string | undefined
   dataDir: string
   // The runner always dials out to the server (D1)
   serverUrl: URL
@@ -31,6 +32,7 @@ export interface GitAuthor {
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): RunnerConfig {
   return {
+    runnerToken: env.CORRAL_RUNNER_TOKEN || undefined,
     dataDir: resolve(env.CORRAL_RUNNER_DATA_DIR || join(homedir(), '.corral', 'runner')),
     serverUrl: parseUrl(env.CORRAL_SERVER_URL || 'http://127.0.0.1:4100'),
     name: env.CORRAL_RUNNER_NAME || hostname(),

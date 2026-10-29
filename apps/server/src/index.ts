@@ -22,15 +22,17 @@ const services = createServices({
   publicUrl: config.publicUrl
 })
 
-const server = await startServer(
-  { db: database.db, events, actor: await ensureOwner(database.db), ...services },
-  { host: config.host, port: config.port }
-)
+const deps = { db: database.db, events, actor: await ensureOwner(database.db), ...services }
+const server = await startServer(deps, { host: config.host, port: config.port, runnerToken: config.runnerToken })
+const runnerServer = config.runnerListen
+  ? await startServer(deps, { ...config.runnerListen, runnerToken: config.runnerToken, runnerOnly: true })
+  : undefined
 await services.orchestrator.init()
 services.orchestrator.start()
 printReady(`Corral API ready in ${formatDuration(process.uptime() * 1000)}`, {
   API: `${server.url}/api`,
   Runner: `${server.url.replace(/^http/, 'ws')}/runner`,
+  ...(runnerServer ? { 'Tailnet runner': `${runnerServer.url.replace(/^http/, 'ws')}/runner` } : {}),
   Database: location.driver === 'postgres'
     ? `Postgres ${redactUrl(location.url)}`
     : `PGlite ${shortenHome(location.dataDir ?? 'in memory')}`
@@ -41,7 +43,7 @@ printReady(`Corral API ready in ${formatDuration(process.uptime() * 1000)}`, {
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
     services.orchestrator.stop()
-    void server.close().finally(() => database.close().finally(() => process.exit(0)))
+    void Promise.all([server.close(), runnerServer?.close()]).finally(() => database.close().finally(() => process.exit(0)))
     // Never hang a stop: if something above doesn't finish, exit anyway
     setTimeout(() => process.exit(0), 5000).unref()
   })

@@ -19,6 +19,7 @@ const MAX_BACKOFF_MS = 30_000
 // forever; heartbeats run on their own timer so agent work can't delay them
 // (architecture.md, runner rule 1).
 export class ServerConnection {
+  #token: string | undefined
   #url: string
   #identity: { runnerId: string, name: string }
   #handlers: ConnectionHandlers
@@ -28,7 +29,8 @@ export class ServerConnection {
   #backoff = 1000
   #closed = false
 
-  constructor(serverUrl: URL, identity: { runnerId: string, name: string }, handlers: ConnectionHandlers) {
+  constructor(serverUrl: URL, identity: { runnerId: string, name: string }, handlers: ConnectionHandlers, token?: string) {
+    this.#token = token
     const url = new URL(RUNNER_PATH, serverUrl)
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
     this.#url = url.href
@@ -59,7 +61,7 @@ export class ServerConnection {
   }
 
   #open(): void {
-    const socket = new WebSocket(this.#url)
+    const socket = new WebSocket(this.#url, { headers: this.#token ? { authorization: `Bearer ${this.#token}` } : {} })
     this.#socket = socket
 
     socket.on('open', () => {

@@ -41,7 +41,7 @@ const connection: ServerConnection = new ServerConnection(config.serverUrl, { ru
     }
     runs.handle(message)
   }
-})
+}, config.runnerToken)
 const runs = new RunManager(config, connection, tools)
 connection.start()
 

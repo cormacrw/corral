@@ -34,7 +34,7 @@ Three processes. In development they're all started together by `turbo dev`; whe
 - Owns task state, locks/leases, role permissions, merge eligibility, the scheduler, the merge orchestrator, and the GitHub API client.
 - **The only process that opens the database.** The web app and runner never touch it directly.
 - **Exactly one instance.** The scheduler and orchestrator are long-running loops inside this process. That's the reason it isn't folded into Nuxt's Nitro server: the web layer should be free to scale or redeploy on its own.
-- Serves the HTTP API (for web), SSE (to web), and the runner WebSocket endpoint.
+- Serves the HTTP API (for web), SSE (to web), and the internal `/runner` WebSocket endpoint. An optional separate runner-only listener serves `/runner` and returns 404 for all other paths, including `/api/**` (D25). Both endpoints authenticate before registering a runner when a shared token is configured.
 - Project thumbnails: `PUT /api/projects/:slug/thumbnail` accepts one multipart `file`, PNG/JPEG/WebP/GIF with matching signature, at most 2 MiB. The existing `thumbnailBlob` stores its content hash; no image metadata migration is needed. `GET` infers the raster content type from the same signatures, sends `nosniff` and `private, no-cache`, and rejects stale `v` hashes. Project and inbox summaries expose nullable `thumbnailUrl` with a short hash query. `DELETE` clears the pointer while preserving the colour; upload and removal audit and broadcast `project.updated`. Blobs remain immutable and may be shared, so removal does not delete their bytes.
 - Inbox Needs you is one list, newest first by `at`: when a task entered its current status (its latest `task.transition` into it, else `updatedAt`), or when a Plan thread started waiting. Plan threads include only open sessions with a pending question, a proposed plan or an unread PM reply. Each carries a nullable question (text, recommendation, options), plan summary (id, version, title, summary, epicCount, taskCount) and reply (the latest PM message, set only when listed for an unread reply), rather than a last-message body. The Needs you count equals all listed task items and Plan threads.
 
@@ -187,13 +187,14 @@ Internet ──▶ Cloudflare Tunnel ──▶ Cloudflare Access (login)
 | Container | Contents | Volumes | Exposed |
 |---|---|---|---|
 | `web` | Static Nuxt build and a server that proxies `/api/**` to `server` | — | Through the tunnel only, behind Cloudflare Access |
-| `server` | Hono control plane | `server/` data dir (blobs) | No. Docker network only |
+| `server` | Hono control plane | `server/` data dir (blobs) | API: Docker network only. Optional runner-only port: tailnet (D25) |
 | `postgres` | Postgres (D14) | Postgres data dir | No. Docker network only |
 | `runner` | Runner daemon, `claude`, `codex`, `gh`, `git`, headless Chromium, target-project toolchains (Node/pnpm etc.) | `runner/` data dir, `claude` config, `codex` config, `gh` config | No. Dials out to `server` |
 
 Rules:
 
-- **Only `web` is exposed.** The server API and runner WebSocket are never published to the host or the tunnel.
+- **Only `web` is exposed publicly.** The exception is the optional authenticated runner-only port exposed on the private tailnet (D25). Never publish the server API port to the host or tunnel.
+- **Runner listener configuration:** set `CORRAL_RUNNER_LISTEN=host:port` (IPv6: `[address]:port`) on the server to enable the separate listener, and set the same nonempty `CORRAL_RUNNER_TOKEN` on the server and every runner. Startup fails if the listener is configured without the token. Each runner sets `CORRAL_SERVER_URL=http://<tailnet-host>:<runner-port>`; it sends the token as `Authorization: Bearer …` on `/runner`. Missing or wrong credentials close with code 4003 and reason `Missing or invalid runner token`, with a credential-free server warning. Without a token, the internal endpoint remains compatible; keep it on localhost or the private Docker network. Compose passes the shared token to both processes while retaining the internal endpoint; publishing the new port is a separate deployment change. Remote runners use Linux or WSL2 and pull updates from GitHub (runner updater task).
 - **Credentials are set up by the user, by hand.** After the first `docker compose up`, the user runs `docker exec -it <runner> claude`, `docker exec -it <runner> codex login --device-auth` and `gh auth login` once. The configs persist on volumes. No model-provider token goes in a Compose file, `.env` file or Corral config (D2).
 - **Linux, not just macOS.** The runner image is Linux. No keychain, `open` or BSD-only flags anywhere in runner code.
 - **Everything environment-specific is config:** data dirs, server URL, bind address, ports.
