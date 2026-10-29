@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { projectColor, ROLE } from '~/utils/labels'
+import { projectColor } from '~/utils/labels'
 
 // The mobile shell (D17, design/mobile.md): a header with the runner's
 // status, the page, and a five-tab bar. app.vue swaps it in for the
@@ -29,11 +29,17 @@ const tabs = computed(() => [
   { label: 'Agents', icon: 'i-lucide-bot', to: '/agents', active: isActive('/agents') }
 ])
 
+const parts = computed(() => route.path.split('/').filter(Boolean))
+
+// A run's transcript fills the screen with its own header and footer
+// (design/mobile.md), like a conversation
+const fullScreen = computed(() => parts.value[0] === 'agents' && parts.value.length >= 3)
+
 // A project's own pages (Board, Backlog, Settings) name the project above
 // the page and go back to its overview
 const PROJECT_PAGES: Record<string, string> = { board: 'Board', backlog: 'Backlog', settings: 'Settings' }
 const projectPage = computed(() => {
-  const [section, slug, page] = route.path.split('/').filter(Boolean)
+  const [section, slug, page] = parts.value
   if (section !== 'projects' || !slug || !page || !PROJECT_PAGES[page]) return null
   const project = state.value.projects.find(p => p.slug === slug)
   return { title: PROJECT_PAGES[page], eyebrow: project?.name ?? slug, back: `/projects/${slug}`, backLabel: 'Back to the project', dot: null }
@@ -41,7 +47,7 @@ const projectPage = computed(() => {
 // A Plan conversation names its project and session, goes back to a new
 // session, and takes the full height: no runner status, Settings or tab bar
 const planSession = computed(() => {
-  const [section, id] = route.path.split('/').filter(Boolean)
+  const [section, id] = parts.value
   if (section !== 'plan' || !id) return null
   const session = state.value.planSessions.find(s => s.id === id)
   const project = state.value.projects.find(p => p.id === session?.projectId)
@@ -49,10 +55,20 @@ const planSession = computed(() => {
 })
 const subPage = computed(() => projectPage.value ?? planSession.value)
 
+// A screen below a tab's top level goes back up to it, and can swap the
+// Settings button for its own action
+const agentPage = computed(() => parts.value[0] === 'agents' && parts.value.length === 2)
+const back = computed(() => subPage.value
+  ? { to: subPage.value.back, label: subPage.value.backLabel }
+  : agentPage.value ? { to: '/agents', label: 'Back' } : null)
+const action = computed(() => agentPage.value
+  ? { to: '/settings/agents', icon: 'i-lucide-sliders-horizontal', label: 'Agent settings' }
+  : { to: '/settings/profile', icon: 'i-lucide-settings', label: 'Settings' })
+
 // The header names the page; later tasks give each screen its own header
 const title = computed(() => {
   if (subPage.value) return subPage.value.title
-  const [section, id] = route.path.split('/').filter(Boolean)
+  const [section, id] = parts.value
   switch (section) {
     case 'home': return 'Home'
     case 'plan': return 'Plan'
@@ -62,8 +78,8 @@ const title = computed(() => {
     case 'epics': return 'Epic'
     case 'projects': return state.value.projects.find(p => p.slug === id)?.name ?? 'Projects'
     case 'agents': {
-      const agent = state.value.agents.find(a => a.name.toLowerCase() === id)
-      return agent ? `${agent.name} · ${ROLE[agent.role]}` : 'Agents'
+      if (!id) return 'Agents'
+      return state.value.agents.find(a => a.name.toLowerCase() === id)?.name ?? 'Agent'
     }
     default: return 'Corral'
   }
@@ -72,15 +88,18 @@ const title = computed(() => {
 
 <template>
   <div class="flex h-svh flex-col bg-default text-default">
-    <header class="shrink-0 border-b border-default bg-default pt-[env(safe-area-inset-top)] ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]">
+    <header
+      v-if="!fullScreen"
+      class="shrink-0 border-b border-default bg-default pt-[env(safe-area-inset-top)] ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]"
+    >
       <div class="flex h-14 items-center gap-2 px-4">
         <UButton
-          v-if="subPage"
-          :to="subPage.back"
+          v-if="back"
+          :to="back.to"
           icon="i-lucide-arrow-left"
           variant="ghost"
           color="neutral"
-          :aria-label="subPage.backLabel"
+          :aria-label="back.label"
           class="-ms-2"
         />
         <div class="min-w-0 flex-1">
@@ -118,11 +137,11 @@ const title = computed(() => {
         />
         <UButton
           v-if="!planSession"
-          to="/settings/profile"
-          icon="i-lucide-settings"
+          :to="action.to"
+          :icon="action.icon"
           variant="ghost"
           color="neutral"
-          aria-label="Settings"
+          :aria-label="action.label"
         />
       </div>
     </header>
@@ -138,7 +157,7 @@ const title = computed(() => {
     </UDashboardGroup>
 
     <nav
-      v-if="!planSession"
+      v-if="!fullScreen && !planSession"
       aria-label="Main"
       class="shrink-0 border-t border-default bg-default pb-[env(safe-area-inset-bottom)] ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]"
     >

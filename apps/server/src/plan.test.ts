@@ -1,4 +1,4 @@
-import type { Epic, EpicDetail, Plan, PlanSession, PlanSessionDetail, RunJob, Task } from '@corral/contracts'
+import type { Attachment, Epic, EpicDetail, Plan, PlanSession, PlanSessionDetail, RunJob, Task } from '@corral/contracts'
 import { richTextToMarkdown } from '@corral/core'
 import { schema } from '@corral/db'
 import { and, desc, eq, ne } from 'drizzle-orm'
@@ -162,13 +162,50 @@ describe('plan sessions', () => {
           { id: task.acceptanceCriteria[0]!.id, text: 'Shows an error on a bad password' },
           { id: task.acceptanceCriteria[1]!.id, text: 'Remembers the session' }
         ],
-        comments: [{ author: 'human', body: 'Use argon2' }]
+        comments: [{ author: 'human', body: 'Use argon2' }],
+        attachments: []
       }
     })
 
     const missing = `${project.prefix}-99`
     expect(await runner.call(job.runId, job.leaseEpoch, 'get_task', { taskRef: missing })).toMatchObject({ ok: false, error: `No task ${missing} in this project` })
     expect(await runner.call(job.runId, job.leaseEpoch, 'get_task', { taskRef: 'XYZ-1' })).toMatchObject({ ok: false, error: expect.stringContaining('No task XYZ-1 in this project') })
+    await endTurn(job, 'Read it.')
+  })
+
+  it('gives the PM an attachment from its own project as an image, and refuses other projects\' and unknown ids', async () => {
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
+    const project = await t.createProject()
+    const other = await t.createProject()
+    const upload = (slug: string) => t.request('POST', `/api/projects/${slug}/attachments?name=login.png`, new Blob([png], { type: 'image/png' })).then(r => r.json()) as Promise<Attachment>
+    const own = await upload(project.slug)
+    const foreign = await upload(other.slug)
+
+    await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: `Plan from ![login](attachment:${own.id})` })
+    const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
+    expect(await runner.call(job.runId, job.leaseEpoch, 'get_attachment', { attachmentId: own.id })).toMatchObject({
+      ok: true,
+      result: { id: own.id, fileName: 'login.png', mimeType: 'image/png', byteSize: png.byteLength, images: [{ mimeType: 'image/png', dataBase64: png.toString('base64') }] }
+    })
+    for (const id of [foreign.id, '00000000-0000-4000-8000-000000000000', 'nope']) {
+      expect(await runner.call(job.runId, job.leaseEpoch, 'get_attachment', { attachmentId: id })).toMatchObject({ ok: false, error: `${id} isn't an attachment in this project` })
+    }
+    await endTurn(job, 'Looked at it.')
+  })
+
+  it('lists a task\'s images in the PM\'s get_task', async () => {
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
+    const project = await t.createProject()
+    await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+    const image = await t.request('POST', `/api/projects/${project.slug}/attachments?name=login.png`, new Blob([png], { type: 'image/png' })).then(r => r.json()) as Attachment
+    const task = await t.createTask(project.slug, { description: { type: 'doc', content: [{ type: 'image', attrs: { src: `attachment:${image.id}` } }] } })
+
+    await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: `Refine ${task.ref}` })
+    const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
+    expect(await runner.call(job.runId, job.leaseEpoch, 'get_task', { taskRef: task.ref })).toMatchObject({
+      ok: true,
+      result: { attachments: [{ id: image.id, fileName: 'login.png', foundIn: ['the description'] }] }
+    })
     await endTurn(job, 'Read it.')
   })
 

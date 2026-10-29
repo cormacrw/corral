@@ -12,6 +12,8 @@ export interface RunnerConfig {
   name: string
   // The agent CLI binary comes from configuration (agent-runtime-and-auth.md rule 4)
   claudeBin: string
+  // Runs agents whose runtime is 'codex'
+  codexBin: string
   // Author and committer of agent commits. No default (D12): unset leaves the
   // identity to whatever the agent's git finds, so startup warns about it
   gitAuthor: GitAuthor | null
@@ -31,6 +33,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RunnerConfig {
     serverUrl: parseUrl(env.CORRAL_SERVER_URL || 'http://127.0.0.1:4100'),
     name: env.CORRAL_RUNNER_NAME || hostname(),
     claudeBin: env.CORRAL_CLAUDE_BIN || 'claude',
+    codexBin: env.CORRAL_CODEX_BIN || 'codex',
     gitAuthor: env.CORRAL_GIT_AUTHOR_NAME && env.CORRAL_GIT_AUTHOR_EMAIL
       ? { name: env.CORRAL_GIT_AUTHOR_NAME, email: env.CORRAL_GIT_AUTHOR_EMAIL }
       : null,

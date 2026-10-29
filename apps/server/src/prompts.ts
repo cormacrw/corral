@@ -1,4 +1,4 @@
-import { richTextToMarkdown } from '@corral/core'
+import { attachmentIdsInMarkdown, richTextToMarkdown } from '@corral/core'
 
 // The task-specific part of each agent's prompt. Role instructions come
 // from the repo's .corral/agents/<role>.md, added by the runner (D13).
@@ -13,6 +13,7 @@ export interface PromptTask {
   reviewRoundCap: number
   criteria: { id: string, text: string }[]
   comments: { author: string, body: string, pinned: boolean, createdAt: Date }[]
+  attachments: { id: string, fileName: string, foundIn: string[] }[]
 }
 
 function section(title: string, body: string): string {
@@ -27,6 +28,13 @@ function commentsSection(task: PromptTask): string {
     pinned.length > 0 ? section('Pinned comments (read these first)', pinned.map(format).join('\n')) : '',
     recent.length > 0 ? section('Recent comments and feedback', recent.map(format).join('\n')) : ''
   ].join('\n')
+}
+
+// Images the human attached to the task text, so the agent fetches them
+function attachmentsSection(task: PromptTask): string {
+  if (task.attachments.length === 0) return ''
+  const list = task.attachments.map(a => `- ${a.id}: "${a.fileName}" in ${a.foundIn.join(', ')}`).join('\n')
+  return section('Attached images', `Images attached by the human are part of the requirements; view each with \`get_attachment\` before you start.\n\n${list}`)
 }
 
 export interface ReviewTask extends PromptTask {
@@ -49,6 +57,7 @@ export function reviewerPrompt(task: ReviewTask, agentName: string): string {
     section('Evidence the developer attached (this round)', evidence),
     task.previousFeedback ? section('Your feedback last round', task.previousFeedback) : '',
     commentsSection(task),
+    attachmentsSection(task),
     section('How to review', `
 - You are in a read-only checkout of the commit under review. Do not edit, commit or push. Run \`git diff ${task.defaultBranch}...HEAD\` or \`git log\` to see the change; \`origin/${task.defaultBranch}\` is available locally.
 - Read \`.corral/CORRAL.md\` and the wiki if they exist, and check the wiki was updated where behaviour changed.
@@ -70,13 +79,26 @@ export interface PmTurn {
   fresh: boolean
 }
 
+// attachment:<id> anywhere in a message, bare or as a markdown image
+const ATTACHMENT_REFERENCE = /attachment:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi
+
+function messageAttachmentIds(text: string): string[] {
+  const ids = new Set(attachmentIdsInMarkdown(text))
+  for (const match of text.matchAll(ATTACHMENT_REFERENCE)) ids.add(match[1]!.toLowerCase())
+  return [...ids]
+}
+
 // Each PM turn is one message; the session carries the rest (D9)
 export function pmPrompt(turn: PmTurn): string {
   const intro = turn.fresh
     ? `You are the product-manager agent for the project "${turn.projectName}" in Corral. Task IDs look like ${turn.prefix}-12. You are in a read-only checkout of the default branch. Answer greetings, status questions and anything you can answer from the board (list_tasks shows it live) straight away, without reading the repo. Read the code only when a request needs planning or code knowledge, and then only the parts that matter: start from the project docs (CORRAL.md or CLAUDE.md, and .corral/wiki/ if present) and don't go looking for files that aren't there. Propose work with propose_plan (one epic per separate feature, small tasks, one PR each, descriptions in markdown, verifiable acceptance criteria, explicit dependencies, humanReview true for auth, data migrations, payments, deletions and security-sensitive code). To refine an existing Backlog task, read it with get_task and include it in the plan with its \`ref\`, so the plan revises it instead of creating a duplicate. Ask with ask_question when requirements are ambiguous. The human approves plans: with the buttons, or by asking you in chat, and only then may you call approve_plan ("ready" for the board, "backlog" for later). Never approve on your own initiative. Keep replies short and concrete.\n\n`
     : ''
   const attached = turn.attachedTask ? `(About task ${turn.attachedTask}; read it with get_task.)\n\n` : ''
-  return `${intro}${attached}${turn.text}`
+  const ids = messageAttachmentIds(turn.text)
+  const images = ids.length > 0
+    ? `(This message has ${ids.length === 1 ? 'an attached image' : `${ids.length} attached images`}: ${ids.join(', ')}. Fetch ${ids.length === 1 ? 'it' : 'each'} with get_attachment before answering.)\n\n`
+    : ''
+  return `${intro}${attached}${images}${turn.text}`
 }
 
 // The session was lost: the database is the record, so the turn carries it
@@ -99,6 +121,7 @@ export function developerPrompt(task: PromptTask, agentName: string): string {
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
     section('Acceptance criteria', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
     commentsSection(task),
+    attachmentsSection(task),
     section('How to work', `
 - You are in a git worktree on branch \`${task.branch}\`, based on \`${task.defaultBranch}\`. Commit your work on this branch.
 - Do not push and do not use \`gh\`. Corral pushes the branch and opens the PR when you report your outcome.

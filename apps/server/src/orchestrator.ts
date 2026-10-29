@@ -11,6 +11,7 @@ import {
 import { schema, type Database, type Executor } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne } from 'drizzle-orm'
 import { z } from 'zod'
+import { listTaskAttachments, readProjectAttachment } from './attachments.ts'
 import type { BlobStore } from './blob-store.ts'
 import { claimNextTask, type Claim } from './claim.ts'
 import { ApiFailure } from './errors.ts'
@@ -305,6 +306,7 @@ export class Orchestrator implements RunnerHandlers {
     }
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
     const notes = await this.#comments(task.id)
+    const attached = await listTaskAttachments(db, ctx.project.id, task.description, notes)
     return {
       runId: ctx.run.id,
       runNumber: ctx.run.number,
@@ -332,7 +334,8 @@ export class Orchestrator implements RunnerHandlers {
         reviewRounds: task.reviewRounds,
         reviewRoundCap: ctx.project.reviewRoundCap,
         criteria: criteria.map(c => ({ id: c.id, text: c.text })),
-        comments: notes
+        comments: notes,
+        attachments: attached
       }, ctx.agent.name)
     }
   }
@@ -345,6 +348,8 @@ export class Orchestrator implements RunnerHandlers {
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
     const items = (await listEvidence(db, task.id)).filter(e => e.round === task.reviewRounds)
     const [previous] = await db.select().from(reviews).where(eq(reviews.taskId, task.id)).orderBy(desc(reviews.createdAt)).limit(1)
+    const notes = await this.#comments(task.id)
+    const attached = await listTaskAttachments(db, ctx.project.id, task.description, notes)
     return {
       runId: ctx.run.id,
       runNumber: ctx.run.number,
@@ -372,7 +377,8 @@ export class Orchestrator implements RunnerHandlers {
         reviewRounds: task.reviewRounds,
         reviewRoundCap: ctx.project.reviewRoundCap,
         criteria: criteria.map(c => ({ id: c.id, text: c.text })),
-        comments: await this.#comments(task.id),
+        comments: notes,
+        attachments: attached,
         headSha: task.headSha!,
         prUrl: task.prUrl,
         evidence: items.map(e => ({ id: e.id, criterionId: e.criterionId, kind: e.kind, note: e.note, fileName: e.fileName })),
@@ -685,11 +691,12 @@ export class Orchestrator implements RunnerHandlers {
   async #tool(ctx: RunContext, tool: string, input: unknown): Promise<unknown> {
     const role = ctx.run.role
     const allowed: Record<string, readonly string[]> = {
-      developer: ['get_task', 'add_comment', 'attach_evidence', 'report_outcome'],
-      reviewer: ['get_task', 'add_comment', 'get_evidence', 'report_outcome'],
-      pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
+      developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'report_outcome'],
+      reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'report_outcome'],
+      pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
     }
     if (!allowed[role]?.includes(tool)) throw new ToolError(`The ${role} can’t use ${tool}`)
+    if (tool === 'get_attachment') return this.#getAttachment(ctx, z.object({ attachmentId: z.string() }).parse(input))
     if (role === 'pm') {
       if (!this.plans || !ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
       return this.plans.tool(ctx.run.planSessionId, ctx.run.id, tool, input, this.#actor(ctx))
@@ -721,6 +728,7 @@ export class Orchestrator implements RunnerHandlers {
     const task = ctx.task!
     const criteria = await this.#d.db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
     const items = await listEvidence(this.#d.db, task.id)
+    const notes = await this.#comments(task.id)
     return {
       ref: taskRef(ctx.project.prefix, task.number),
       title: task.title,
@@ -729,7 +737,8 @@ export class Orchestrator implements RunnerHandlers {
       branch: task.branch,
       reviewRound: task.reviewRounds,
       criteria: criteria.map(c => ({ id: c.id, text: c.text })),
-      comments: (await this.#comments(task.id)).map(c => ({ ...c, createdAt: c.createdAt.toISOString() })),
+      comments: notes.map(c => ({ ...c, createdAt: c.createdAt.toISOString() })),
+      attachments: await listTaskAttachments(this.#d.db, ctx.project.id, task.description, notes),
       evidence: items.map(e => ({ id: e.id, criterionId: e.criterionId, kind: e.kind, note: e.note, fileName: e.fileName, round: e.round }))
     }
   }
@@ -784,6 +793,15 @@ export class Orchestrator implements RunnerHandlers {
       return { ...meta, text: data.length > MAX_INLINE_TEXT ? `${text}\n… (${data.length - MAX_INLINE_TEXT} more bytes)` : text }
     }
     return { ...meta, note: `${item.note} (binary ${item.contentType}; view it in Corral at ${this.#d.publicUrl}${item.url})`.trim() }
+  }
+
+  // An image from the task text, for any role, as MCP image content. Only
+  // the run's own project: another project's id reads as unknown.
+  async #getAttachment(ctx: RunContext, input: { attachmentId: string }) {
+    const file = await readProjectAttachment(this.#d.db, this.#d.blobs, ctx.project.id, input.attachmentId)
+    if (!file) throw new ToolError(`${input.attachmentId} isn't an attachment in this project`)
+    const { data, ...meta } = file
+    return { ...meta, images: [{ mimeType: meta.mimeType, dataBase64: Buffer.from(data).toString('base64') }] }
   }
 
   async #reportOutcome(ctx: RunContext, report: OutcomeReport & { outcome: string }): Promise<unknown> {

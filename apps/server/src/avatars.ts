@@ -3,6 +3,7 @@ import { schema, type Executor } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import type { BlobStore } from './blob-store.ts'
 import { ApiFailure, notFound } from './errors.ts'
+import { declaredImageType, hasImageSignature } from './images.ts'
 
 const { agents, users } = schema
 
@@ -15,22 +16,13 @@ export function avatarUrl(path: string, blob: string | null): string | null {
   return blob ? `/api/${path}/avatar?v=${blob.slice(0, 12)}` : null
 }
 
-// The declared type must match the file's first bytes, so a mislabelled
-// upload can't be served as an image
-const SIGNATURES: Record<AvatarType, (b: Uint8Array) => boolean> = {
-  'image/png': b => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47,
-  'image/jpeg': b => b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF,
-  'image/webp': b => String.fromCharCode(...b.slice(0, 4)) === 'RIFF' && String.fromCharCode(...b.slice(8, 12)) === 'WEBP',
-  'image/gif': b => String.fromCharCode(...b.slice(0, 4)) === 'GIF8'
-}
-
 export function checkAvatar(data: Uint8Array, contentType: string | undefined): AvatarType {
-  const type = (contentType ?? '').split(';')[0]!.trim().toLowerCase() as AvatarType
+  const type = declaredImageType(contentType)
   const invalid = (message: string) => new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['avatar'], message }] })
-  if (!AVATAR_CONTENT_TYPES.includes(type)) throw invalid('Use a PNG, JPEG, WebP or GIF image')
+  if (!type || !AVATAR_CONTENT_TYPES.includes(type)) throw invalid('Use a PNG, JPEG, WebP or GIF image')
   if (data.byteLength === 0) throw invalid('The image is empty')
   if (data.byteLength > AVATAR_MAX_BYTES) throw invalid('The image is over 2 MB')
-  if (!SIGNATURES[type](data)) throw invalid(`The file isn't a ${type.slice(6).toUpperCase()} image`)
+  if (!hasImageSignature(data, type)) throw invalid(`The file isn't a ${type.slice(6).toUpperCase()} image`)
   return type
 }
 

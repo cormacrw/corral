@@ -723,7 +723,7 @@ Corral uses a hosted control plane and a local execution plane.
 | Database | PostgreSQL |
 | Scheduler | Lightweight worker with database-backed scheduling |
 | Local runner | Rust or Node.js, selected once for the MVP |
-| Agent runtime | Claude Code CLI adapter |
+| Agent runtime | Claude Code CLI adapter (Codex CLI added by D18) |
 | Workspace isolation | Git worktrees |
 | Git provider | GitHub App or appropriately scoped credentials |
 | Evidence storage | S3-compatible object storage |
@@ -1017,7 +1017,7 @@ Build:
 
 - Runner registration and pairing.
 - Workspace and Git worktree management.
-- Claude Code CLI adapter.
+- Claude Code CLI adapter (and a Codex CLI adapter, per D18).
 - Run lifecycle and structured outcomes.
 - Live logs and run controls.
 - Developer task implementation.

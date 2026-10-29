@@ -17,7 +17,7 @@ export type ToolOutcome =
 
 export type ToolHandler = (tool: AgentTool, input: Record<string, unknown>) => Promise<ToolOutcome>
 
-// Tool results may carry images (evidence screenshots for the reviewer)
+// Tool results may carry images (evidence screenshots, task attachments)
 interface ImageResult {
   images?: { mimeType: string, dataBase64: string }[]
 }
@@ -54,6 +54,10 @@ const toolDefinitions = {
   get_evidence: {
     description: 'List the evidence attached to this task, or fetch one item by ID (screenshots come back as images).',
     input: { evidenceId: z.string().optional().describe('Omit to list everything for the current review round') }
+  },
+  get_attachment: {
+    description: 'Fetch an image attached to this project’s task text, written there as ![name](attachment:<id>). It comes back as an image, with its file name and mime type.',
+    input: { attachmentId: z.string().min(1).describe('The id after attachment: in the image link') }
   },
   report_outcome: {
     description: 'Finish your run by reporting what happened. Corral validates it; if something is missing, the call fails and tells you what to fix.',
@@ -127,9 +131,9 @@ const roleToolDefinitions: Record<AgentRole, Partial<Record<AgentTool, ToolDefin
 }
 
 export const ROLE_TOOLS: Record<AgentRole, AgentTool[]> = {
-  developer: ['get_task', 'add_comment', 'attach_evidence', 'report_outcome'],
-  reviewer: ['get_task', 'add_comment', 'get_evidence', 'report_outcome'],
-  pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
+  developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'report_outcome'],
+  reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'report_outcome'],
+  pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
 }
 
 interface Route {

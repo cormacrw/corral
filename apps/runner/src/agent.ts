@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import type { AgentExit, AgentProcess, AgentRuntime, AgentSession, RuntimeOptions, TurnResult } from './agent-runtime.ts'
 import type { GitAuthor } from './config.ts'
-import { StreamJsonParser } from './stream-json.ts'
+import { StreamJsonParser, type ParsedLine } from './stream-json.ts'
 
 // The Claude Code AgentRuntime adapter (agent-runtime-and-auth.md). Auth is
 // the CLI's own business: it reads its login from the user's config and
@@ -119,7 +119,19 @@ export function spawnAgentSession(options: AgentOptionsWithoutPrompt): AgentSess
 
 function startAgent(args: string[], stdin: 'ignore' | 'pipe', options: AgentOptionsWithoutPrompt): { child: ChildProcess, exited: Promise<AgentExit>, parser: StreamJsonParser } {
   const parser = new StreamJsonParser({ quietResumeOf: options.quietResume ? options.resumeSessionId : null })
-  const child = spawn(options.claudeBin, args, {
+  return { ...startProcess(options.claudeBin, args, stdin, options, parser), parser }
+}
+
+// Starts an agent CLI in the worktree with agentEnv, in its own process
+// group, feeding each stdout line through the adapter's parser to onLine
+export function startProcess(
+  bin: string,
+  args: string[],
+  stdin: 'ignore' | 'pipe',
+  options: Pick<RuntimeOptions, 'cwd' | 'gitAuthor' | 'onLine'>,
+  parser: { parse(line: string): ParsedLine }
+): { child: ChildProcess, exited: Promise<AgentExit> } {
+  const child = spawn(bin, args, {
     cwd: options.cwd,
     env: agentEnv(process.env, options.gitAuthor),
     // Its own process group, so the whole tree can be killed at once
@@ -148,10 +160,10 @@ function startAgent(args: string[], stdin: 'ignore' | 'pipe', options: AgentOpti
       resolve({ code, signal })
     })
   })
-  return { child, exited, parser }
+  return { child, exited }
 }
 
-function killGroup(child: ChildProcess, signal: NodeJS.Signals): void {
+export function killGroup(child: ChildProcess, signal: NodeJS.Signals): void {
   if (!child.pid) return
   try {
     process.kill(-child.pid, signal)

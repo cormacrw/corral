@@ -3,6 +3,8 @@
 **Canvas frames:** `1 · Your name`, `2 · Choose a repo`, `3 · Detect agents`, `4 · Name agents`
 **Route:** `/setup`, one step per query (`/setup?step=repo`). Shown on first run, before the app shell exists. The shell isn't rendered here.
 
+Onboarding is done once the server has a project, on every browser and device; nothing in the browser (localStorage, cookies) decides it. With no projects, every page leads here. With one, `/` and any `/setup` visit go to the first project, except the add-project flow (`/setup?step=repo&add=1`). If the project list can't be fetched, nothing redirects (`middleware/setup.global.ts`, `utils/onboarding.ts`).
+
 ## Purpose
 
 Take a new user from nothing to a working first project in four steps. Setup checks run along the way, so the user never lands on an empty app that can't do anything (PRD §7.1: a project can't start work until setup checks pass).
@@ -50,13 +52,14 @@ Take a new user from nothing to a working first project in four steps. Setup che
 - **Card header:** "Detected on your PATH", "1 of 3 supported CLIs found", and a **Scan again** ghost button.
 - **One row per supported CLI**, card-style checkboxes:
   - **Claude Code:** the detected path, a **Ready** success badge, "Signed in. Will run your PM, developer and reviewer agents." Checked by default.
-  - **Codex CLI, Gemini CLI:** "not found", a **Coming later** neutral badge, disabled.
+  - **Codex CLI:** the same row as Claude Code when detected and signed in (D18); when it isn't signed in, show the `docker exec -it … codex login --device-auth` step.
+  - **Gemini CLI:** "not found", a **Coming later** neutral badge, disabled.
 - **Info alert** (`UAlert`, subtle info, shield icon): "Your credentials stay with your CLI. Corral never sees, stores or sends your model-provider login." (D1–D2)
 - **Continue** ("Confirm and continue") needs at least one ready CLI selected.
 
 ### 4. Name your agents
 
-- **Card header:** "Agent roles", "All three run on Claude Code for now", and a **Suggest names** ghost button that cycles name sets.
+- **Card header:** "Agent roles", "Each runs on one of the CLIs you selected" with a runtime picker per role (D18), and a **Suggest names** ghost button that cycles name sets.
 - **One row per role** (PM, Developer, Reviewer), each with:
   - an avatar with initials
   - the name and a role badge (`primary` subtle)
@@ -69,7 +72,7 @@ Take a new user from nothing to a working first project in four steps. Setup che
 ## Data
 
 - **Writes:** user profile (name); first project (name taken from the repo, GitHub remote, default branch, merge method, task prefix); agents (name, role, runtime).
-- **Server calls:** `list_repos` on the runner (cached), then setup checks for the chosen repo; a scan of the **runner container** for supported CLIs, which also checks whether `claude` is signed in, without reading credentials (D2, D12). If it isn't signed in, show the `docker exec -it … claude` login step.
+- **Server calls:** `list_repos` on the runner (cached), then setup checks for the chosen repo; a scan of the **runner container** for supported CLIs, which also checks whether `claude` and `codex` are signed in, without reading credentials (D2, D12). If one isn't signed in, show its `docker exec -it …` login step.
 
 ## States
 

@@ -20,3 +20,11 @@ describe('developer role defaults', () => {
     expect(DEFAULT_ROLE_INSTRUCTIONS.developer).toContain('Don\'t set or change the git identity')
   })
 })
+
+describe('attachments in role defaults', () => {
+  it('tells every role to view attached images', () => {
+    for (const role of ['developer', 'reviewer', 'pm'] as const) {
+      expect(DEFAULT_ROLE_INSTRUCTIONS[role]).toContain('Images attached by the human are part of the requirements; view them with get_attachment.')
+    }
+  })
+})
