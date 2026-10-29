@@ -6,6 +6,7 @@ import {
   approvePlanInput,
   checkRepoInput,
   createAgentInput,
+  createDeploymentInput,
   createProjectInput,
   createTaskInput,
   deleteProjectInput,
@@ -39,6 +40,7 @@ import { ApiFailure, fromDatabaseError } from './errors.ts'
 import { checkThumbnail, readThumbnail, THUMBNAIL_MAX_BYTES } from './thumbnails.ts'
 import { byteRange } from './byte-range.ts'
 import { createAttachment, readAttachment } from './attachments.ts'
+import { recordDeployment } from './deployments.ts'
 import { approveDesign, DESIGN_BUNDLE_HEADERS, listDesignVersions, readDesignFile, readDesignScreenshot } from './designs.ts'
 import { checkAvatar, getProfile, patchProfile, readAvatar, setAgentAvatar, setUserAvatar } from './avatars.ts'
 import { getEpic, listEpics, patchEpic, setEpicDependencies } from './epics.ts'
@@ -578,6 +580,13 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     .delete('/update-hold', (c) => {
       orchestrator.releaseUpdate()
       return c.json(orchestrator.status)
+    })
+
+    // What a deploy shipped, also from auto-deploy.sh once the new server
+    // answers. 201 when recorded, 200 when this toSha already was.
+    .post('/deployments', validate('json', createDeploymentInput), async (c) => {
+      const { deployment, created } = await recordDeployment(db, c.req.valid('json'))
+      return c.json(deployment, created ? 201 : 200)
     })
 
     .get('/runs', async (c) => {
