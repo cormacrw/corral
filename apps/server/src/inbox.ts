@@ -1,7 +1,7 @@
 import type { Inbox, InboxItem, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
 import { richTextToPlainText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, count, desc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, count, desc, eq, inArray, isNull, ne } from 'drizzle-orm'
 import { actorLabel } from './orchestrator.ts'
 import { sessionState } from './plan.ts'
 
@@ -59,10 +59,12 @@ async function planThreads(db: Executor): Promise<PlanThreadItem[]> {
     const { session, planId, last } = await sessionState(db, row)
     if (session.status !== 'question' && session.status !== 'needs_approval') return null
     const [waiting] = planId ? await db.select().from(plans).where(eq(plans.id, planId)) : []
+    // Tasks dropped in a revision keep a 'removed' row and aren't part of the plan. Plans saved before
+    // plan_epics existed have no epic rows, only plans.epicId, so count that as one epic.
     const [epics, tasks] = waiting
       ? await Promise.all([
           db.select({ rows: count(), count: count(planEpics.epicId) }).from(planEpics).where(eq(planEpics.planId, waiting.id)),
-          db.select({ count: count() }).from(planTasks).where(eq(planTasks.planId, waiting.id))
+          db.select({ count: count() }).from(planTasks).where(and(eq(planTasks.planId, waiting.id), ne(planTasks.change, 'removed')))
         ])
       : [[], []]
     return {

@@ -559,7 +559,7 @@ export function inbox(): Inbox {
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor },
       subject: session.title, preview: session.preview ?? '',
       question: session.status === 'question' && last ? { text: last.text, recommendation: last.recommendation, options: last.options } : null,
-      plan: plan ? { id: plan.id, version: plan.version, title: plan.title, summary: plan.summary, epicCount: plan.epics.length, taskCount: plan.tasks.length } : null,
+      plan: plan ? { id: plan.id, version: plan.version, title: plan.title, summary: plan.summary, epicCount: plan.epics.length, taskCount: plan.tasks.filter(t => t.change !== 'removed').length } : null,
       sender: { name: 'Juno', role: 'pm' }, at: session.updatedAt,
       taskId: null, taskRef: null, prUrl: null, resolution: null,
       runtime: session.runtime, status: session.status, unread: session.unread,

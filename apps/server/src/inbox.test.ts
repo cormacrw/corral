@@ -52,7 +52,8 @@ describe('plan threads in the inbox', () => {
     await t.db.insert(planEpics).values({ planId: plan!.id, epicId: epic!.id, key: 'search', position: 0 })
     await t.db.insert(planTasks).values([
       { planId: plan!.id, key: 'index', position: 0, change: 'added' },
-      { planId: plan!.id, key: 'ui', position: 1, change: 'added' }
+      { planId: plan!.id, key: 'ui', position: 1, change: 'unchanged' },
+      { planId: plan!.id, key: 'filters', position: 2, change: 'removed' }
     ])
     await session('Closed', 1, { closedAt: at(1) })
     const blocked = await t.createTask(project.slug, { title: 'Blocked task' })
