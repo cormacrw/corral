@@ -107,7 +107,6 @@ async function start(message: string): Promise<boolean> {
     >
       <PlanSessionSwitcher />
     </Teleport>
-    <PlanTabs v-else />
     <div :class="['flex min-h-0 flex-1 flex-col items-center overflow-y-auto', device.isMobile.value ? 'justify-start p-4' : 'justify-center p-6']">
       <div class="flex w-full max-w-[720px] flex-col gap-6">
         <div class="flex flex-col items-center gap-2 text-center">

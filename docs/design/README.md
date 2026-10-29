@@ -69,7 +69,7 @@ A status is always shown with its label. Colour is never the only signal.
 - **Task flyout.** One component, docked on the right of Inbox, Plan, Board, Backlog, Pull requests and Agent pages. See [task.md](task.md).
 - **Resizable panes.** Splits that hold lists can be resized with a 1px divider. The divider turns `primary` on hover, focus and drag, and moves 16px per arrow-key press. Use `UDashboardPanel` with `resizable`.
 - **Working indicator.** Anything an agent is actively running on (it holds a lease) gets the pulse: the outline breathes in `primary` and the avatar's status dot pings. Respect `prefers-reduced-motion` with a static `primary` outline and no ping. "Working" comes from the lease, not the status (D10).
-- **Unread dot.** An 8px `primary` dot. It's used on Inbox rows, the Plan nav item and Plan sessions.
+- **Unread dot.** An 8px `primary` dot. It's used on Inbox rows and Recent Plan sessions. Side nav Plan threads use the attention indicators described in [Plan](plan.md#side-nav-threads).
 
 ### States every page must handle
 

@@ -32,6 +32,7 @@ let retryTimer: ReturnType<typeof setTimeout> | null = null
 let retryMs = 1000
 
 export function useLive() {
+  const route = useRoute()
   const state = useState<LiveState>('live', () => ({
     loaded: false,
     error: null,
@@ -144,6 +145,10 @@ export function useLive() {
         s.status = event.status
         break
       case 'plan.session':
+        if (event.session.unread && route.params.sessionId === event.session.id) {
+          event.session = { ...event.session, unread: false }
+          void api.plan.read(event.session.id).catch(() => {})
+        }
         s.planSessions = [event.session, ...s.planSessions.filter(x => x.id !== event.session.id)]
         break
       default:

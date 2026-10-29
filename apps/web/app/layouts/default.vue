@@ -23,7 +23,13 @@ watch(() => state.value.projects, (projects) => {
   }
 }, { immediate: true })
 
-const planUnread = computed(() => state.value.planSessions.some(s => s.unread))
+const { active, sessions: threads, close: closeThread } = useOpenPlanSessions()
+const attention = (session: typeof threads.value[number]) => session.status === 'needs_approval' ? 'Needs approval' : session.status === 'question' ? 'Question' : session.unread ? 'Unread reply' : null
+const attentionCount = computed(() => threads.value.filter(s => attention(s)).length)
+const threadColor = (projectId: string) => {
+  const project = state.value.projects.find(p => p.id === projectId)
+  return project ? projectColor(project) : undefined
+}
 const runnerColor = computed(() => !state.value.runner?.online ? 'error' : state.value.connection === 'open' ? 'success' : 'warning')
 
 // UDashboardSearch owns the palette's behaviour: it binds ⌘K/Ctrl+K, opens on the
@@ -84,17 +90,69 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
               :label="collapsed ? undefined : 'Plan'"
               variant="ghost"
               :color="isActive('/plan') ? 'primary' : 'neutral'"
-              :class="['justify-start', isActive('/plan') && 'bg-elevated']"
+              :class="['relative justify-start', isActive('/plan') && 'bg-elevated']"
               :aria-current="isActive('/plan') ? 'page' : undefined"
             >
               <template #trailing>
-                <span
-                  v-if="planUnread"
-                  class="ms-auto size-2 rounded-full bg-primary"
-                  aria-label="Unread"
+                <UBadge
+                  v-if="attentionCount"
+                  :class="collapsed ? 'absolute -end-1 -top-1 px-1 text-[10px]' : 'ms-auto'"
+                  :aria-label="`${attentionCount} threads need attention`"
+                  :label="String(attentionCount)"
+                  size="sm"
                 />
               </template>
             </UButton>
+            <div
+              v-if="!collapsed && threads.length"
+              aria-label="Open Plan threads"
+              class="ms-4 flex max-h-64 flex-col gap-0.5 overflow-y-auto border-s border-default ps-2"
+            >
+              <div
+                v-for="thread in threads"
+                :key="thread.id"
+                :class="['group flex min-w-0 items-center rounded-md', active === thread.id && 'bg-elevated text-primary']"
+                data-testid="plan-thread"
+              >
+                <NuxtLink
+                  :to="`/plan/${thread.id}`"
+                  :title="thread.title"
+                  :aria-current="active === thread.id ? 'page' : undefined"
+                  class="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-sm hover:bg-elevated"
+                >
+                  <span
+                    class="size-2 shrink-0 rounded-full bg-muted"
+                    :style="{ background: threadColor(thread.projectId) }"
+                    aria-hidden="true"
+                  />
+                  <span :class="['min-w-0 flex-1 truncate', attention(thread) && 'font-semibold text-highlighted']">{{ thread.title }}</span>
+                  <UIcon
+                    v-if="thread.activeRunId"
+                    name="i-lucide-loader-circle"
+                    class="size-3.5 shrink-0 animate-spin text-muted"
+                    aria-label="Juno is working"
+                  />
+                  <UTooltip
+                    v-else-if="attention(thread)"
+                    :text="attention(thread)!"
+                  >
+                    <span
+                      :aria-label="attention(thread)!"
+                      :class="['size-2 shrink-0 rounded-full', thread.status === 'needs_approval' ? 'bg-primary' : thread.status === 'question' ? 'bg-info' : 'bg-inverted']"
+                    />
+                  </UTooltip>
+                </NuxtLink>
+                <UButton
+                  icon="i-lucide-x"
+                  size="xs"
+                  variant="ghost"
+                  color="neutral"
+                  :aria-label="`Close ${thread.title}`"
+                  class="shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+                  @click="closeThread(thread)"
+                />
+              </div>
+            </div>
             <UButton
               to="/inbox"
               icon="i-lucide-inbox"
