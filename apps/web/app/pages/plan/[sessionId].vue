@@ -2,11 +2,13 @@
 import type { Plan, PlanMessage, PlanSessionDetail } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { projectColor, runtimeLabel } from '~/utils/labels'
+import { approvePlan } from '~/utils/plan-approval'
 import { answerTo, openQuestionId, STOP_ASKING } from '~/utils/plan-questions'
 import { withoutMessages } from '~/utils/tool-steps'
 
 // A Plan conversation (design/plan.md)
 const route = useRoute()
+const router = useRouter()
 const live = useLive()
 const threads = usePlanThreads()
 // The PM by its current name and picture
@@ -108,9 +110,13 @@ async function quick(message: string, keepDraft = true) {
 async function approve(plan: Plan, to: 'ready' | 'backlog') {
   approving.value = plan.id
   try {
-    await api.plan.approve(plan.id, to)
-  } catch (e) {
-    toast.add({ title: 'Could not approve', description: e instanceof Error ? e.message : String(e), color: 'error' })
+    await approvePlan(plan, to, {
+      approve: api.plan.approve,
+      toast,
+      mobile: device.isMobile.value,
+      closeSheet: flyout.close,
+      push: path => router.push(path)
+    })
   } finally {
     approving.value = null
   }

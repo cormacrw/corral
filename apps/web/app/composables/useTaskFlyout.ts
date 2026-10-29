@@ -51,7 +51,7 @@ export function useTaskFlyout() {
   }
   function close() {
     const { task: _task, epic: _epic, plan: _plan, ...rest } = route.query
-    void router.replace({ query: rest })
+    return router.replace({ query: rest })
   }
   function back() {
     router.back()
