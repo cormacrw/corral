@@ -1,13 +1,11 @@
 // The static prototype (`pnpm prototype`, D20) runs in a sandboxed iframe
 // with an opaque origin, where reading document.cookie or localStorage
 // throws. Nuxt UI keeps panel sizes in a cookie, so stand in memory for both:
-// preferences last until reload. Does nothing in dev and production builds.
+// preferences last until reload. Registered only in the prototype build
+// (nuxt.config.ts).
 export default defineNuxtPlugin({
-  name: 'prototype-storage',
   enforce: 'pre',
   setup() {
-    if (!import.meta.prototype) return
-
     try {
       void document.cookie
     } catch {

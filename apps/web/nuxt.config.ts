@@ -69,6 +69,7 @@ export default defineNuxtConfig({
   },
 
   ...(prototype && {
+    plugins: ['~/prototype/storage.client.ts'],
     nitro: { output: { publicDir: 'prototype-dist' } },
     // No icon server and no network: bundle every icon the code names
     icon: { provider: 'none', clientBundle: { scan: { globInclude: ['app/**/*.{vue,ts}'] }, sizeLimitKb: 0 } }
