@@ -5,7 +5,8 @@ import { STOP_ASKING } from '~/utils/plan-questions'
 
 // A PM question in the Plan log (design/plan.md). With a recommendation or
 // options it has one-tap answers, live only on the open question; once
-// answered, the chosen one stays marked.
+// answered, the chosen one stays marked. Stacked (on phones), the open
+// question's answers are full-width tap targets, at least 44px tall.
 const props = defineProps<{
   message: Pick<PlanMessage, 'text' | 'recommendation' | 'options'>
   // The latest question, not answered yet
@@ -14,6 +15,8 @@ const props = defineProps<{
   answer?: string | null
   // Can't send right now (a turn is running, or the runner is offline)
   disabled?: boolean
+  // One answer per row, for thumbs (design/mobile.md)
+  stacked?: boolean
 }>()
 const emit = defineEmits<{ answer: [text: string], other: [], stop: [] }>()
 
@@ -24,6 +27,10 @@ const answer = computed(() => props.answer ?? null)
 const chose = (text: string) => answer.value === text
 const choseOther = computed(() => answer.value !== null && answer.value !== props.message.recommendation
   && !options.value.includes(answer.value) && answer.value !== STOP_ASKING)
+// Only the open question stacks; past ones keep the compact row, disabled
+const stack = computed(() => props.stacked && props.active)
+const size = computed(() => stack.value ? 'lg' : 'xs')
+const tap = computed(() => stack.value ? 'min-h-11 w-full justify-center whitespace-normal text-center' : undefined)
 </script>
 
 <template>
@@ -39,50 +46,53 @@ const choseOther = computed(() => answer.value !== null && answer.value !== prop
     >
       <div
         v-if="props.message.recommendation"
-        class="flex flex-wrap items-center gap-2"
+        :class="stack ? 'flex flex-col gap-2' : 'flex flex-wrap items-center gap-2'"
       >
         <span class="text-xs text-muted">Recommended: <span class="text-default">{{ props.message.recommendation }}</span></span>
         <UButton
           label="Accept recommendation"
-          size="xs"
+          :size="size"
           :icon="chose(props.message.recommendation) ? 'i-lucide-check' : 'i-lucide-thumbs-up'"
           :variant="chose(props.message.recommendation) ? 'solid' : 'soft'"
           color="primary"
+          :class="tap"
           :disabled="locked"
           :aria-pressed="chose(props.message.recommendation)"
           @click="emit('answer', props.message.recommendation)"
         />
       </div>
-      <div class="flex flex-wrap gap-2">
+      <div :class="stack ? 'flex flex-col gap-2' : 'flex flex-wrap gap-2'">
         <UButton
           v-for="option in options"
           :key="option"
           :label="option"
-          size="xs"
+          :size="size"
           :icon="chose(option) ? 'i-lucide-check' : undefined"
           :variant="chose(option) ? 'solid' : 'outline'"
           :color="chose(option) ? 'primary' : 'neutral'"
+          :class="tap"
           :disabled="locked"
           :aria-pressed="chose(option)"
           @click="emit('answer', option)"
         />
         <UButton
           label="Other…"
-          size="xs"
+          :size="size"
           :icon="choseOther ? 'i-lucide-check' : undefined"
-          :variant="choseOther ? 'solid' : 'ghost'"
+          :variant="choseOther ? 'solid' : stack ? 'outline' : 'ghost'"
           :color="choseOther ? 'primary' : 'neutral'"
+          :class="tap"
           :disabled="locked"
           :aria-pressed="choseOther"
           @click="emit('other')"
         />
         <UButton
           label="Stop and propose the plan"
-          size="xs"
+          :size="size"
           :icon="chose(STOP_ASKING) ? 'i-lucide-check' : 'i-lucide-list-checks'"
-          :variant="chose(STOP_ASKING) ? 'solid' : 'ghost'"
+          :variant="chose(STOP_ASKING) ? 'solid' : stack ? 'outline' : 'ghost'"
           :color="chose(STOP_ASKING) ? 'primary' : 'neutral'"
-          class="ms-auto"
+          :class="stack ? tap : 'ms-auto'"
           :disabled="locked"
           :aria-pressed="chose(STOP_ASKING)"
           @click="emit('stop')"

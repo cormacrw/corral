@@ -202,9 +202,11 @@ async function start(message: string): Promise<boolean> {
               :ui="{ content: 'w-80 max-w-[calc(100vw-2rem)]', base: 'max-w-56' }"
               @update:model-value="taskRef = ($event as string | null)"
             />
+            <!-- First on phones, so it's in reach without scrolling the toolbar -->
             <PlanGrillButton
               :draft="text"
               :disabled="busy || runnerOffline || !project"
+              :class="device.isMobile.value && 'order-first'"
               @send="start"
             />
             <USelectMenu

@@ -148,10 +148,15 @@ const detailSheet = computed({
   }
 })
 
+// Follows the conversation. When the PM's next question arrives it scrolls
+// to the question's top, so a long one isn't cut off above its answers.
 const log = ref<HTMLElement | null>(null)
 watch(() => [session.value?.messages.length, liveEvents.value.length], async () => {
   await nextTick()
-  if (log.value) log.value.scrollTop = log.value.scrollHeight
+  if (!log.value) return
+  const last = session.value?.messages.at(-1)
+  const question = last?.kind === 'question' ? log.value.querySelector<HTMLElement>(`[data-message-id="${last.id}"]`) : null
+  log.value.scrollTop = question ? question.offsetTop - 16 : log.value.scrollHeight
 })
 </script>
 
@@ -224,12 +229,13 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
           ref="log"
           role="log"
           aria-live="polite"
-          class="min-h-0 flex-1 overflow-y-auto p-4"
+          class="relative min-h-0 flex-1 overflow-y-auto p-4"
         >
           <div class="mx-auto flex w-full max-w-[768px] flex-col gap-4">
             <div
               v-for="message in session.messages"
               :key="message.id"
+              :data-message-id="message.id"
               :class="['flex', message.role === 'human' ? 'justify-end' : 'justify-start']"
             >
               <div
@@ -241,15 +247,16 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
                   breaks
                 />
               </div>
+              <!-- Full width on phones, so a question's answers span the screen -->
               <div
                 v-else
-                class="flex max-w-full min-w-0 gap-2"
+                :class="['flex max-w-full min-w-0 gap-2', device.isMobile.value && 'flex-1']"
               >
                 <AgentAvatar
                   :name="pm?.name ?? 'PM'"
                   size="sm"
                 />
-                <div class="flex min-w-0 flex-col gap-2">
+                <div :class="['flex min-w-0 flex-col gap-2', device.isMobile.value && 'flex-1']">
                   <span class="text-xs text-muted">{{ pm?.name ?? 'PM' }} · PM</span>
                   <PlanTurnSteps
                     v-if="firstOfTurn(message)"
@@ -270,6 +277,7 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
                     :active="message.id === openQuestion"
                     :answer="answerTo(session.messages, message.id)"
                     :disabled="cantSend"
+                    :stacked="device.isMobile.value"
                     @answer="quick"
                     @other="composer?.focus()"
                     @stop="quick(STOP_ASKING)"
@@ -402,9 +410,11 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
                   :ui="{ content: 'w-80 max-w-[calc(100vw-2rem)]', base: 'max-w-56' }"
                   @update:model-value="taskRef = ($event as string | null)"
                 />
+                <!-- First on phones, so it's in reach without scrolling the toolbar -->
                 <PlanGrillButton
                   :draft="text"
                   :disabled="cantSend"
+                  :class="device.isMobile.value && 'order-first'"
                   @send="quick($event, false)"
                 />
               </template>

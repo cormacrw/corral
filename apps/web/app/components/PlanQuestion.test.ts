@@ -79,6 +79,22 @@ describe('PlanQuestion', () => {
     expect(button(wrapper, chosen).attributes('data-variant')).toBe('solid')
     expect(buttons(wrapper).every(b => b.attributes('disabled') !== undefined)).toBe(true)
   })
+
+  it('stacks the open question as full-width tap targets, recommendation first', () => {
+    const wrapper = mount(PlanQuestion, { props: { message: question, active: true, stacked: true }, global })
+    expect(labels(wrapper)).toEqual(['Accept recommendation', 'Postgres', 'SQLite', 'MySQL', 'Other…', 'Stop and propose the plan'])
+    for (const b of buttons(wrapper)) {
+      expect(b.classes()).toEqual(expect.arrayContaining(['w-full', 'min-h-11']))
+      expect(b.attributes('disabled')).toBeUndefined()
+    }
+  })
+
+  it('keeps an older question compact and disabled when stacked', () => {
+    const wrapper = mount(PlanQuestion, { props: { message: question, active: false, answer: 'SQLite', stacked: true }, global })
+    expect(buttons(wrapper).some(b => b.classes().includes('w-full'))).toBe(false)
+    expect(buttons(wrapper).every(b => b.attributes('disabled') !== undefined)).toBe(true)
+    expect(button(wrapper, 'SQLite').attributes('aria-pressed')).toBe('true')
+  })
 })
 
 describe('PlanGrillButton', () => {
