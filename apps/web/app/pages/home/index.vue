@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import type { Agent, Run } from '@corral/contracts'
 import { api } from '~/composables/useApi'
+import { todayStats } from '~/utils/agents'
 import { dashboardCounts, elapsed, IN_PROGRESS_STAGES } from '~/utils/dashboard'
-import { agentStatus, initials, isWorking, projectColor, ROLE, STATUS } from '~/utils/labels'
+import { agentStatus, isLiveRun, isWorking, projectColor, ROLE, STATUS, tokens } from '~/utils/labels'
 
 // Home, the global dashboard (design/mobile.md). Counts come from the live
-// task lists the shell loads; the active runs come from /api/runs and are
+// task lists the shell loads; runs come from /api/runs and are
 // refetched whenever a run changes.
 const live = useLive()
 const state = live.state
@@ -38,9 +39,14 @@ const attention = computed(() => {
 })
 
 const runs = ref<Run[]>([])
+const today = computed(() => todayStats(
+  runs.value.filter(r => scope.value.some(p => p.id === r.projectId)),
+  [],
+  now.value
+))
 async function loadRuns() {
   try {
-    runs.value = await api.runs.list({ active: true })
+    runs.value = await api.runs.list()
   } catch {
     // The agents still show, just without their current run
   }
@@ -64,7 +70,7 @@ const taskOf = (run: Run) => run.taskId ? state.value.tasks[run.projectId]?.find
 const projectOf = (id: string) => state.value.projects.find(p => p.id === id)
 // One line per active run: what it's on, where, and for how long
 const runLines = (agent: Agent) => runs.value
-  .filter(r => r.agentId === agent.id && scope.value.some(p => p.id === r.projectId))
+  .filter(r => isLiveRun(r) && r.agentId === agent.id && scope.value.some(p => p.id === r.projectId))
   .map((run) => {
     const task = taskOf(run)
     const session = run.taskId ? null : state.value.planSessions.find(s => s.activeRunId === run.id)
@@ -83,10 +89,6 @@ const agents = computed(() => state.value.agents
   .map(agent => ({ agent, lines: runLines(agent), working: isWorking(agent) }))
   // Working agents first, in the shell's order otherwise
   .sort((a, b) => Number(b.working) - Number(a.working)))
-const byProject = computed(() => state.value.projects.map((project) => {
-  const c = dashboardCounts(state.value.tasks[project.id] ?? [], new Date(now.value))
-  return { project, todo: c.todo, inProgress: c.inProgress, merged: c.mergedToday, loaded: Boolean(state.value.tasks[project.id]) }
-}))
 </script>
 
 <template>
@@ -148,6 +150,28 @@ const byProject = computed(() => state.value.projects.map((project) => {
           </dd>
         </dl>
       </div>
+
+      <!-- Today's agent totals, scoped to the same project filter -->
+      <section class="flex flex-col gap-2">
+        <div class="grid grid-cols-2 gap-2">
+          <dl
+            v-for="tile in [{ key: 'runs', label: 'Runs', value: String(today.runs) }, { key: 'usage', label: 'Usage', value: tokens(today.tokens) }]"
+            :key="tile.key"
+            class="rounded-lg border border-default p-3"
+            :data-testid="`home-${tile.key}`"
+          >
+            <dt class="text-xs text-muted">
+              {{ tile.label }}
+            </dt>
+            <dd class="text-2xl font-semibold tabular-nums text-highlighted">
+              {{ tile.value }}
+            </dd>
+          </dl>
+        </div>
+        <p class="text-xs text-muted">
+          Usage is in tokens from your own subscription.
+        </p>
+      </section>
 
       <!-- In progress by stage -->
       <section
@@ -264,76 +288,6 @@ const byProject = computed(() => state.value.projects.map((project) => {
         >
           No agents yet.
         </p>
-      </section>
-
-      <!-- By project -->
-      <section class="flex flex-col gap-2">
-        <h2 class="text-sm font-semibold text-highlighted">
-          By project
-        </h2>
-        <div
-          class="rounded-lg border border-default text-sm"
-          role="table"
-          aria-label="Tasks by project"
-        >
-          <div
-            class="grid grid-cols-[minmax(0,1fr)_2.75rem_4.5rem_3.25rem] gap-2 border-b border-default px-3 py-2 text-xs text-muted"
-            role="row"
-          >
-            <span role="columnheader">Project</span>
-            <span
-              role="columnheader"
-              class="text-end"
-            >To do</span>
-            <span
-              role="columnheader"
-              class="text-end"
-            >In progress</span>
-            <span
-              role="columnheader"
-              class="text-end"
-            >Merged</span>
-          </div>
-          <NuxtLink
-            v-for="row in byProject"
-            :key="row.project.id"
-            :to="`/projects/${row.project.slug}`"
-            class="grid grid-cols-[minmax(0,1fr)_2.75rem_4.5rem_3.25rem] items-center gap-2 border-b border-default px-3 py-2.5 last:border-b-0"
-            role="row"
-            :data-testid="`home-project-${row.project.slug}`"
-          >
-            <span
-              role="cell"
-              class="flex min-w-0 items-center gap-2 font-medium text-highlighted"
-            >
-              <span
-                class="flex size-6 shrink-0 items-center justify-center rounded text-xs font-semibold text-white"
-                :style="{ background: projectColor(row.project) }"
-                aria-hidden="true"
-              >{{ initials(row.project.name).slice(0, 1) }}</span>
-              <span class="truncate">{{ row.project.name }}</span>
-              <UBadge
-                v-if="row.project.paused"
-                label="Paused"
-                color="warning"
-                variant="subtle"
-                size="sm"
-              />
-            </span>
-            <span
-              v-for="(value, i) in [row.todo, row.inProgress, row.merged]"
-              :key="i"
-              role="cell"
-              class="text-end tabular-nums text-highlighted"
-            >{{ row.loaded ? value : '–' }}</span>
-          </NuxtLink>
-          <p
-            v-if="state.loaded && byProject.length === 0"
-            class="px-3 py-2.5 text-muted"
-          >
-            No projects yet.
-          </p>
-        </div>
       </section>
     </div>
   </UDashboardPanel>
