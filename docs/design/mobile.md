@@ -46,6 +46,14 @@ From top to bottom:
 
 `/home`, `/projects` and `/agents` are placeholders for now (a short summary, the project list and the agent list), so every tab has a target. On the web they render in the normal shell.
 
+## Task and epic
+
+- **Task** (`/tasks/<ref>`, frames *Task · details* and *Task · criteria and activity*): `TaskDetail` in `mobile` mode, a full page with no shell header or tab bar. Its header has a back arrow, the epic (linking to it) over the ref, copy link, and a **⋯** menu with **Delete task**. Under the title, a "{agent} is working · Watch" strip while an agent holds the task, then two tabs:
+  - **Details:** the property rows (label and value, divided), Depends on, and the description.
+  - **Criteria and activity:** acceptance criteria, then Activity, Evidence and History with the composer. `?evidence=1` opens this tab on Evidence.
+- **Epic** (`/epics/<id>`, frame *Epic*): `EpicDetail` in `mobile` mode with its own header (back, an Epic badge and the project over the title, copy link) and the tab bar. The body is stacked like the flyout, with Tasks and Graph as a segmented control. Tapping a task, in the list or the graph, opens its page.
+- **No flyout on mobile:** `useTaskFlyout().open()` and `openEpic()` go to `/tasks/<ref>` and `/epics/<id>` instead, so every place that opens a task (Board, Backlog, Plan, Agents) gets the page. Opening with `replace` (a page following its selection, like the Inbox) still sets the query.
+
 ## Pages without a mobile screen yet
 
 They render inside the mobile layout as they are, and reflow as well as they can: panels stack or scroll sideways. Each later task replaces one group with its mobile screen.
@@ -60,7 +68,6 @@ Frames in the export, grouped by the task that will build them:
 | Inbox | Inbox, Inbox · Human review, Inbox · Question, Inbox · Blocked |
 | Plan | Plan · New session, Plan · Conversation, Plan · Plan v2, Plan · Runner offline |
 | Projects | Projects, Project overview, Board, Backlog, Project settings |
-| Task and epic | Task COR-35, Task COR-35 · Activity, Epic · Billing |
 | Agents | Agents, Agent · Atlas, Run #128 |
 | Settings | Settings, Settings · Runner |
 | Search | Search |

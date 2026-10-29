@@ -29,6 +29,11 @@ const tabs = computed(() => [
   { label: 'Agents', icon: 'i-lucide-bot', to: '/agents', active: isActive('/agents') }
 ])
 
+// A task and an epic bring their own header with a back arrow, and a task
+// is a full page with no tab bar (design/mobile.md)
+const ownHeader = computed(() => isActive('/tasks', '/epics'))
+const showTabs = computed(() => !isActive('/tasks'))
+
 // The header names the page; later tasks give each screen its own header
 const title = computed(() => {
   const [section, id] = route.path.split('/').filter(Boolean)
@@ -51,7 +56,14 @@ const title = computed(() => {
 
 <template>
   <div class="flex h-svh flex-col bg-default text-default">
-    <header class="shrink-0 border-b border-default bg-default pt-[env(safe-area-inset-top)] ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]">
+    <div
+      v-if="ownHeader"
+      class="shrink-0 pt-[env(safe-area-inset-top)]"
+    />
+    <header
+      v-else
+      class="shrink-0 border-b border-default bg-default pt-[env(safe-area-inset-top)] ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]"
+    >
       <div class="flex h-14 items-center gap-2 px-4">
         <h1 class="min-w-0 flex-1 truncate text-xl font-semibold text-highlighted">
           {{ title }}
@@ -87,6 +99,7 @@ const title = computed(() => {
     </UDashboardGroup>
 
     <nav
+      v-if="showTabs"
       aria-label="Main"
       class="shrink-0 border-t border-default bg-default pb-[env(safe-area-inset-bottom)] ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]"
     >
