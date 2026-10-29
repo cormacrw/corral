@@ -201,9 +201,13 @@ const title = computed(() => {
 
     <ShellBanners />
 
-    <!-- Pages without a mobile screen yet reflow in here as well as they can -->
+    <!-- Pages without a mobile screen yet reflow in here as well as they can.
+         The page itself is the vertical scroll container, between the fixed
+         header and tab bar, so pages that put their content in the panel's
+         default slot rather than #body still scroll. Screens that scroll an
+         inner part fill the page exactly, so it never scrolls twice. -->
     <UDashboardGroup
-      class="relative inset-auto min-h-0 flex-1 overflow-x-auto *:min-h-0"
+      class="relative inset-auto min-h-0 flex-1 overflow-x-auto *:min-h-0 *:overflow-y-auto"
       storage-key="mobile-dashboard"
     >
       <slot />
