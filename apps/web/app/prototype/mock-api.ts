@@ -164,7 +164,7 @@ route('POST', '/plan/plans/:id/approve', ([id], body) => {
     emit({ type: 'task.updated', task: t })
   }
   const s = f.planSessions.find(x => x.id === plan.sessionId)
-  if (s) emit({ type: 'plan.session', session: Object.assign(s, { status: 'none' }) })
+  if (s) emit({ type: 'plan.session', session: Object.assign(s, { status: 'none', closed: true, unread: false }) })
   emit({ type: 'plan.updated', plan })
   emit({ type: 'plan.drafts', projectId: plan.projectId, sessions: drafts(plan.projectId) })
   return plan
@@ -218,6 +218,11 @@ route('POST', '/plan/sessions/:id/messages', ([id], body) => {
   const s = f.planSessions.find(x => x.id === id) ?? notFound()
   const { text } = body as { text: string }
   const message = postMessage(s.id, { role: 'human', kind: 'message', text })
+  Object.assign(s, {
+    closed: false, unread: false, preview: text, updatedAt: message.createdAt,
+    status: f.plans[s.id]?.some(p => p.status === 'proposed') ? 'needs_approval' : 'none'
+  })
+  emit({ type: 'plan.session', session: s })
   setTimeout(() => pmReply(s.id, text), 1000)
   return message
 })

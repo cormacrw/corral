@@ -1,4 +1,4 @@
-import type { Inbox, Project, Task } from '@corral/contracts'
+import type { Inbox, Project, Task, TaskInboxItem } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { and, eq, ne } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -176,7 +176,7 @@ describe('merge orchestrator and human controls', () => {
     expect(t.github.pulls.get(pr.number)).toMatchObject({ merged: false })
 
     const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
-    const item = inbox.needsYou.find(i => i.taskId === task.id)
+    const item = inbox.needsYou.filter((i): i is TaskInboxItem => i.type !== 'plan_thread').find(i => i.taskId === task.id)
     expect(item).toMatchObject({ type: 'human_review', taskRef: task.ref, prUrl: pr.url, sender: { name: 'Vera', role: 'reviewer' } })
     expect(item?.body).toBe('Approved, all 1 criteria met. This task is marked for human review, so it needs your OK before it merges.')
 

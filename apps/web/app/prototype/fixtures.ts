@@ -550,18 +550,23 @@ export function inbox(): Inbox {
         resolution: null
       }
     })
-  for (const session of planSessions.filter(s => !s.closed)) {
+  for (const session of planSessions.filter(s => !s.closed && (s.status === 'question' || s.status === 'needs_approval'))) {
     const project = projects.find(p => p.id === session.projectId)!
+    const last = planMessages[session.id]?.at(-1)
+    const plan = plans[session.id]?.find(p => p.status === 'proposed')
     needsYou.push({
       id: session.id, type: 'plan_thread', sessionId: session.id,
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor },
-      subject: session.title, preview: session.preview ?? '', body: session.preview ?? '',
+      subject: session.title, preview: session.preview ?? '',
+      question: session.status === 'question' && last ? { text: last.text, recommendation: last.recommendation, options: last.options } : null,
+      plan: plan ? { id: plan.id, version: plan.version, title: plan.title, summary: plan.summary, epicCount: plan.epics.length, taskCount: plan.tasks.length } : null,
       sender: { name: 'Juno', role: 'pm' }, at: session.updatedAt,
       taskId: null, taskRef: null, prUrl: null, resolution: null,
       runtime: session.runtime, status: session.status, unread: session.unread,
       activeRunId: session.activeRunId,
-      planId: plans[session.id]?.find(p => p.status === 'proposed')?.id ?? null
+      planId: plan?.id ?? null
     })
   }
-  return { needsYou, activity: [], resolved: [], count: needsYou.filter(i => i.type !== 'plan_thread' || i.status !== 'none' || i.unread).length }
+  needsYou.sort((a, b) => b.at.localeCompare(a.at))
+  return { needsYou, activity: [], resolved: [], count: needsYou.length }
 }

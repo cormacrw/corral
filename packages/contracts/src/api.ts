@@ -441,13 +441,13 @@ interface InboxItemBase {
   project: { id: string, slug: string, name: string, thumbnailColor: string | null }
   subject: string
   preview: string
-  body: string
   sender: { name: string, role: AgentRole | 'system' }
   at: string
 }
 
 // An item raised by a developer or reviewer run, about a task
 export interface TaskInboxItem extends InboxItemBase {
+  body: string
   // The task ID for Needs-you items; the audit entry for Activity and Resolved
   id: string
   type: TaskInboxItemType
@@ -458,7 +458,7 @@ export interface TaskInboxItem extends InboxItemBase {
   resolution: string | null
 }
 
-// An open Plan session (D11, amended): always under Needs you
+// An open Plan session waiting on the human (D11, amended)
 export interface PlanThreadItem extends InboxItemBase {
   // The session ID
   id: string
@@ -470,8 +470,9 @@ export interface PlanThreadItem extends InboxItemBase {
   resolution: null
   sessionId: string
   runtime: AgentRuntime
-  // What the human has to do here, if anything (as on PlanSession)
   status: PlanSession['status']
+  question: Pick<PlanMessage, 'text' | 'recommendation' | 'options'> | null
+  plan: (Pick<Plan, 'id' | 'version' | 'title' | 'summary'> & { epicCount: number, taskCount: number }) | null
   unread: boolean
   // The plan waiting for approval, when status is needs_approval
   planId: string | null
@@ -482,18 +483,16 @@ export interface PlanThreadItem extends InboxItemBase {
 export type InboxItem = TaskInboxItem | PlanThreadItem
 
 export interface Inbox {
-  // Task items and the Plan threads that need the human, newest first, then
-  // the other open Plan threads, newest first
+  // Task items and Plan threads waiting on the human, newest first
   needsYou: InboxItem[]
   activity: TaskInboxItem[]
   resolved: TaskInboxItem[]
-  // The Needs you count (the Inbox badge): every task item, and only the
-  // Plan threads needing approval, with a question or with an unread reply
+  // The Needs you count (the Inbox badge): exactly the listed items
   count: number
 }
 
 export function needsAttention(item: InboxItem): boolean {
-  return item.type !== 'plan_thread' || item.status !== 'none' || item.unread
+  return item.type !== 'plan_thread' || item.status === 'question' || item.status === 'needs_approval'
 }
 
 // What the human can do from an item's tray (design/inbox.md, D10)

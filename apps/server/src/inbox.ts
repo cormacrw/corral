@@ -1,16 +1,16 @@
-import { needsAttention, type Inbox, type InboxItem, type PlanThreadItem, type TaskInboxItem, type TaskInboxItemType } from '@corral/contracts'
+import type { Inbox, InboxItem, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
 import { richTextToPlainText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, count, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { actorLabel } from './orchestrator.ts'
 import { sessionState } from './plan.ts'
 
-const { agents, auditLog, planSessions, projects, reviews, runs, tasks } = schema
+const { agents, auditLog, planSessions, plans, planEpics, planTasks, projects, reviews, runs, tasks } = schema
 
 const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'findings_reported', 'design_submitted', 'changes_requested', 'merged', 'ci_failed', 'base_conflict', 'head_moved']
 
 // The Inbox (D11, design/inbox.md): what developer and reviewer runs need
-// from the human, plus what they did, and every open Plan session as a Plan
+// from the human, plus what they did, and Plan sessions waiting on the human as a Plan
 // thread (D11, amended). Items are derived from tasks, Plan sessions and the
 // audit log, so there's nothing to keep in sync.
 export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
@@ -20,12 +20,7 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     .orderBy(desc(tasks.updatedAt))
   const taskItems = await Promise.all(open.map(({ task, project }) => needsYouItem(db, task, project)))
   const threads = await planThreads(db)
-  // Threads that need the human sit with the task items, newest first; the
-  // other open threads go below everything, newest first
-  const newestFirst = (a: InboxItem, b: InboxItem) => b.at.localeCompare(a.at)
-  const attention = [...taskItems, ...threads.filter(needsAttention)].sort(newestFirst)
-  const idle = threads.filter(t => !needsAttention(t)).sort(newestFirst)
-  const needsYou = [...attention, ...idle]
+  const needsYou = [...taskItems, ...threads].sort((a: InboxItem, b: InboxItem) => b.at.localeCompare(a.at))
 
   const entries = await db.select({ entry: auditLog, task: tasks, project: projects }).from(auditLog)
     .innerJoin(tasks, eq(tasks.id, auditLog.taskId))
@@ -49,10 +44,10 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     }
     if (activity.length >= limit && resolved.length >= limit) break
   }
-  return { needsYou, activity: activity.slice(0, limit), resolved: resolved.slice(0, limit), count: attention.length }
+  return { needsYou, activity: activity.slice(0, limit), resolved: resolved.slice(0, limit), count: needsYou.length }
 }
 
-// Every Plan session that isn't closed (its plan approved) is a Plan thread
+// Only open sessions waiting on a question or plan approval belong in the Inbox
 async function planThreads(db: Executor): Promise<PlanThreadItem[]> {
   const rows = await db.select({ session: planSessions, project: projects }).from(planSessions)
     .innerJoin(projects, eq(projects.id, planSessions.projectId))
@@ -60,8 +55,16 @@ async function planThreads(db: Executor): Promise<PlanThreadItem[]> {
   if (rows.length === 0) return []
   const [pm] = await db.select({ name: agents.name }).from(agents).where(eq(agents.role, 'pm')).limit(1)
   const sender = { name: pm?.name ?? 'PM', role: 'pm' as const }
-  return Promise.all(rows.map(async ({ session: row, project }) => {
+  const items = await Promise.all(rows.map(async ({ session: row, project }) => {
     const { session, planId, last } = await sessionState(db, row)
+    if (session.status !== 'question' && session.status !== 'needs_approval') return null
+    const [waiting] = planId ? await db.select().from(plans).where(eq(plans.id, planId)) : []
+    const [epics, tasks] = waiting
+      ? await Promise.all([
+          db.select({ rows: count(), count: count(planEpics.epicId) }).from(planEpics).where(eq(planEpics.planId, waiting.id)),
+          db.select({ count: count() }).from(planTasks).where(eq(planTasks.planId, waiting.id))
+        ])
+      : [[], []]
     return {
       id: session.id,
       type: 'plan_thread' as const,
@@ -70,7 +73,8 @@ async function planThreads(db: Executor): Promise<PlanThreadItem[]> {
       runtime: session.runtime,
       subject: session.title,
       preview: session.preview,
-      body: last?.text ?? '',
+      question: session.status === 'question' && last ? { text: last.text, recommendation: last.recommendation, options: last.options } : null,
+      plan: waiting ? { id: waiting.id, version: waiting.version, title: waiting.title, summary: waiting.summary, epicCount: epics[0]?.rows === 0 && waiting.epicId ? 1 : epics[0]?.count ?? 0, taskCount: tasks[0]?.count ?? 0 } : null,
       sender,
       at: (last && last.createdAt > row.updatedAt ? last.createdAt : row.updatedAt).toISOString(),
       status: session.status,
@@ -83,6 +87,7 @@ async function planThreads(db: Executor): Promise<PlanThreadItem[]> {
       resolution: null
     }
   }))
+  return items.filter((item): item is NonNullable<typeof item> => item !== null)
 }
 
 async function needsYouItem(db: Executor, task: typeof tasks.$inferSelect, project: typeof projects.$inferSelect): Promise<TaskInboxItem> {
