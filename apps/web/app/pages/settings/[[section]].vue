@@ -101,14 +101,44 @@ const items = [
 
 <template>
   <UDashboardPanel
-    v-if="device.isMobile.value && (section === null || section === 'runner')"
+    v-if="device.isMobile.value && (section === null || section === 'runner' || section === 'agents')"
     :ui="{ body: 'p-0 sm:p-0 gap-0 sm:gap-0' }"
   >
     <template #body>
-      <MobilePageHeader />
+      <MobilePageHeader>
+        <template
+          v-if="section === 'agents'"
+          #actions
+        >
+          <UButton
+            label="Add agent"
+            icon="i-lucide-plus"
+            data-testid="add-agent"
+            @click="adding = true"
+          />
+        </template>
+      </MobilePageHeader>
       <SettingsMobile v-if="section === null" />
+      <SettingsAgentsMobile
+        v-else-if="section === 'agents'"
+        :agents="live.state.value.agents"
+        :stopped="live.state.value.status.stopped"
+        :runtime-items="runtimeItems"
+        :patch-agent="patchAgent"
+        :patch-wake-interval="patchWakeInterval"
+        :save-avatar="saveAgentAvatar"
+        @stop="stopAll"
+        @resume="resumeAll"
+      />
+      <AgentForm
+        v-if="section === 'agents'"
+        v-model:open="adding"
+        :clis="clis"
+        :cli-error="cliError"
+        @created="added"
+      />
       <SettingsRunnerMobile
-        v-else
+        v-if="section === 'runner'"
         :clis="clis"
         :cli-error="cliError"
         @scan="scan"

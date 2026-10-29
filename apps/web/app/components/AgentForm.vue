@@ -9,6 +9,9 @@ const props = defineProps<{ clis: CliStatus[] | null, cliError: string | null }>
 const open = defineModel<boolean>('open', { required: true })
 const emit = defineEmits<{ created: [agent: Agent] }>()
 const toast = useToast()
+const device = useDevice()
+const UDrawer = resolveComponent('UDrawer')
+const UModal = resolveComponent('UModal')
 
 const roles = [{ label: 'Developer', value: 'developer' }, { label: 'Reviewer', value: 'reviewer' }]
 const runtimes = computed(() => detectedRuntimes(props.clis ?? []).map(value => ({ label: RUNTIME[value], value })))
@@ -39,7 +42,8 @@ async function save() {
 </script>
 
 <template>
-  <UModal
+  <component
+    :is="device.isMobile.value ? UDrawer : UModal"
     v-model:open="open"
     title="Add agent"
     description="A developer or reviewer shared by every project. It runs through the CLI you pick, with your own login."
@@ -122,5 +126,5 @@ async function save() {
         />
       </div>
     </template>
-  </UModal>
+  </component>
 </template>
