@@ -20,6 +20,11 @@ RUN apt-get update \
 # The agent CLI (D2): installed here, logged in by the user, never configured by Corral
 RUN npm install -g @anthropic-ai/claude-code
 
+# The agent browser (D4) agents capture evidence with. It drives the Debian
+# Chromium above instead of downloading its own.
+RUN npm install -g agent-browser
+ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
+
 WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY packages/tsconfig/package.json packages/tsconfig/
