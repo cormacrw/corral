@@ -53,7 +53,18 @@ const planSession = computed(() => {
   const project = state.value.projects.find(p => p.id === session?.projectId)
   return { title: session?.title ?? 'Plan', eyebrow: project?.name ?? '', back: '/plan', backLabel: 'Back to Plan', dot: project ? projectColor(project) : null }
 })
-const subPage = computed(() => projectPage.value ?? planSession.value)
+// An Inbox item is its own screen: the task above where it sits in the
+// list, a back button to the list, and the tray at the bottom in place of
+// the tab bar
+const mobileHeader = useMobileHeader()
+const inboxItem = computed(() => {
+  const [section, id] = parts.value
+  if (section !== 'inbox' || !id) return null
+  return { title: mobileHeader.value?.title || 'Inbox', eyebrow: mobileHeader.value?.eyebrow ?? 'Inbox', back: '/inbox', backLabel: 'Back to Inbox', dot: null }
+})
+const subPage = computed(() => projectPage.value ?? planSession.value ?? inboxItem.value)
+// Screens that take the full height for their own composer
+const focused = computed(() => Boolean(planSession.value || inboxItem.value))
 
 // A screen below a tab's top level goes back up to it, and can swap the
 // Settings button for its own action
@@ -120,7 +131,7 @@ const title = computed(() => {
           </h1>
         </div>
         <span
-          v-if="!planSession"
+          v-if="!focused"
           class="flex shrink-0 items-center gap-1.5 text-xs text-muted"
           data-testid="runner-status"
         >
@@ -136,7 +147,7 @@ const title = computed(() => {
           class="contents"
         />
         <UButton
-          v-if="!planSession"
+          v-if="!focused"
           :to="action.to"
           :icon="action.icon"
           variant="ghost"
@@ -157,7 +168,7 @@ const title = computed(() => {
     </UDashboardGroup>
 
     <nav
-      v-if="!fullScreen && !planSession"
+      v-if="!fullScreen && !focused"
       aria-label="Main"
       class="shrink-0 border-t border-default bg-default pb-[env(safe-area-inset-bottom)] ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]"
     >
