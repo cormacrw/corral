@@ -1,4 +1,4 @@
-import { AVATAR_CONTENT_TYPES, AVATAR_MAX_BYTES, type Profile } from '@corral/contracts'
+import { AVATAR_CONTENT_TYPES, AVATAR_MAX_BYTES, type PatchProfileInput, type Profile } from '@corral/contracts'
 import { schema, type Executor } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import type { BlobStore } from './blob-store.ts'
@@ -37,7 +37,12 @@ export function checkAvatar(data: Uint8Array, contentType: string | undefined): 
 export async function getProfile(db: Executor, userId: string): Promise<Profile> {
   const [user] = await db.select().from(users).where(eq(users.id, userId))
   if (!user) throw notFound()
-  return { id: user.id, avatarUrl: avatarUrl('me', user.avatarBlob) }
+  return { id: user.id, name: user.name, avatarUrl: avatarUrl('me', user.avatarBlob) }
+}
+
+export async function patchProfile(db: Executor, userId: string, input: PatchProfileInput): Promise<Profile> {
+  await db.update(users).set({ name: input.name }).where(eq(users.id, userId))
+  return getProfile(db, userId)
 }
 
 export async function setUserAvatar(db: Executor, blobs: BlobStore, userId: string, image: { data: Uint8Array, type: AvatarType } | null): Promise<Profile> {

@@ -23,7 +23,29 @@ const step = ref<string>(adding.value ? 'repo' : (typeof route.query.step === 's
 watch(step, s => router.replace({ query: { ...route.query, step: s } }))
 const index = computed(() => steps.findIndex(s => s.value === step.value))
 
-const userName = useLocalStorage('corral.user.name', '')
+// Step 1: the name is kept on the server, so any browser sees it
+const userName = ref('')
+onMounted(async () => {
+  try {
+    const profile = await api.me.get()
+    if (!userName.value) userName.value = profile.name
+  } catch {
+    // Leave the field empty; saving reports any error
+  }
+})
+const savingName = ref(false)
+async function saveName() {
+  savingName.value = true
+  try {
+    live.state.value.profile = await api.me.patch({ name: userName.value.trim() })
+    return true
+  } catch (e) {
+    toast.add({ title: 'Could not save your name', description: e instanceof Error ? e.message : String(e), color: 'error' })
+    return false
+  } finally {
+    savingName.value = false
+  }
+}
 
 // Step 2
 const repos = ref<RepoList | null>(null)
@@ -109,14 +131,15 @@ async function finish() {
     finishing.value = false
   }
 }
-function next() {
+async function next() {
   if (adding.value && step.value === 'repo') return void finish()
   if (step.value === 'names') return void finish()
+  if (step.value === 'you' && !await saveName()) return
   step.value = steps[index.value + 1]!.value
 }
 const canContinue = computed(() => {
   switch (step.value) {
-    case 'you': return userName.value.trim().length > 0
+    case 'you': return userName.value.trim().length > 0 && userName.value.trim().length <= 80
     case 'repo': return Boolean(picked.value && check.value?.ready)
     case 'agents': return cliReady.value
     default: return Object.values(agentNames).every(n => n.trim())
@@ -171,6 +194,7 @@ const canContinue = computed(() => {
               size="lg"
               icon="i-lucide-user"
               placeholder="Your name"
+              :maxlength="80"
             />
           </UFormField>
           <div class="flex items-center gap-3 text-sm text-muted">
@@ -532,15 +556,11 @@ const canContinue = computed(() => {
               :disabled="index === 0 || adding"
               @click="step = steps[index - 1]!.value"
             />
-            <span
-              v-if="step === 'you'"
-              class="text-xs text-muted"
-            >Saved on this machine only.</span>
             <UButton
               :label="adding ? 'Add project' : step === 'names' ? 'Finish setup' : step === 'agents' ? 'Confirm and continue' : 'Continue'"
               :trailing-icon="step === 'names' || adding ? 'i-lucide-check' : 'i-lucide-arrow-right'"
               :disabled="!canContinue"
-              :loading="finishing"
+              :loading="finishing || savingName"
               @click="next"
             />
           </div>

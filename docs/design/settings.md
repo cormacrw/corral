@@ -15,7 +15,7 @@
 
 ### Profile
 
-- **Your name** (`UInput`): "How agents address you, and the author on approvals."
+- **Your name** (`UInput`): "How agents address you, and the author on approvals." Saved on the server (`PATCH /api/me`) when the field changes, so it is the same in every browser.
 - **Picture:** a preview, **Upload picture** (**Change picture** once set) and **Remove**. Shown on your comments, approvals and in the sidebar footer.
 
 ### Agents

@@ -21,7 +21,7 @@ Take a new user from nothing to a working first project in four steps. Setup che
 
 - **Field:** Your name (`UFormField` + `UInput` size `lg`, leading user icon), required.
 - **Avatar preview:** a `UAvatar` with live initials, plus "How you'll appear on comments, approvals and PM questions".
-- **Footer note:** "Saved on this machine only."
+- **Saves:** the name goes to the server (`PATCH /api/me`, trimmed, 1–80 characters) when you continue, so any browser or device sees it.
 - **Validation:** non-empty.
 
 ### 2. Choose a repository

@@ -15,6 +15,7 @@ import type {
   InboxActionInput,
   PatchAgentInput,
   PatchEpicInput,
+  PatchProfileInput,
   PatchProjectInput,
   PatchTaskInput,
   Plan,
@@ -129,6 +130,7 @@ export const api = {
   },
   me: {
     get: () => call<Profile>('GET', '/me'),
+    patch: (input: PatchProfileInput) => call<Profile>('PATCH', '/me', input),
     setAvatar: (image: Blob) => call<Profile>('PUT', '/me/avatar', image),
     clearAvatar: () => call<Profile>('DELETE', '/me/avatar')
   },

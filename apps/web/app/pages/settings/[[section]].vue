@@ -11,7 +11,21 @@ const colorMode = useColorMode()
 const section = computed(() => (typeof route.params.section === 'string' ? route.params.section : 'profile'))
 useSeoMeta({ title: 'Settings · Corral' })
 
-const userName = useLocalStorage('corral.user.name', 'You')
+// Kept on the server with the picture, so every browser shows the same name
+const userName = ref(live.state.value.profile?.name ?? '')
+watch(() => live.state.value.profile?.name, (name) => {
+  if (name !== undefined) userName.value = name
+})
+async function saveName() {
+  const name = userName.value.trim()
+  if (name === live.state.value.profile?.name) return
+  try {
+    live.state.value.profile = await api.me.patch({ name })
+    toast.add({ title: 'Saved', color: 'success' })
+  } catch (e) {
+    toast.add({ title: 'Not saved', description: e instanceof Error ? e.message : String(e), color: 'error' })
+  }
+}
 const clis = ref<CliStatus[] | null>(null)
 const cliError = ref<string | null>(null)
 async function scan() {
@@ -107,12 +121,14 @@ const items = [
                 class="font-medium"
               >Your name</label>
               <p class="text-xs text-muted">
-                How agents address you. Saved in this browser.
+                How agents address you.
               </p>
             </div>
             <UInput
               id="yourName"
               v-model="userName"
+              :maxlength="80"
+              @change="saveName"
             />
           </div>
         </UCard>

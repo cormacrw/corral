@@ -24,6 +24,26 @@ describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
     expect(await res.json()).toEqual({ ok: true })
   })
 
+  describe('profile name', () => {
+    it('stores the trimmed name and returns it from GET /me', async () => {
+      const res = await t.request('PATCH', '/api/me', { name: '  Cormac  ' })
+      expect(res.status).toBe(200)
+      expect(await res.json()).toMatchObject({ name: 'Cormac' })
+      expect(await t.request('GET', '/api/me').then(r => r.json())).toMatchObject({ name: 'Cormac' })
+      expect(t.events.some(e => e.type === 'profile.updated' && e.profile.name === 'Cormac')).toBe(true)
+    })
+
+    it('rejects an empty name or one over 80 characters', async () => {
+      for (const name of ['', '   ', 'x'.repeat(81)]) {
+        const res = await t.request('PATCH', '/api/me', { name })
+        expect(res.status).toBe(400)
+        expect(await res.json()).toMatchObject({ error: { code: 'invalid_input' } })
+      }
+      expect((await t.request('PATCH', '/api/me', { name: 'x'.repeat(80) })).status).toBe(200)
+      expect((await t.request('PATCH', '/api/me', {})).status).toBe(400)
+    })
+  })
+
   describe('profile pictures', () => {
     // A 1×1 PNG
     const png = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64'))
