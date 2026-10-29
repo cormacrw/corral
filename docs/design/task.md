@@ -98,3 +98,14 @@ Read and edit any task from wherever you are, without losing your place. It's th
 ## Merged tasks
 
 Merged is final (D10). The task reads as it shipped: title, properties, dependencies, description and criteria are shown but not editable (a lock note says "Merged, so read-only. You can still comment."), and the server rejects edits with `409 task_merged`. Comments still work.
+
+## Evidence review (D21)
+
+The shared evidence list on the task page and desktop and mobile Inbox shows
+the latest reviewer's criterion note first, followed by screenshot, video and
+request cards, then note evidence rendered inline as markdown without a file
+link. File cards still open the existing viewer.
+
+Test output, logs, text and other files sit under a native **Agent artifacts (n)**
+disclosure, closed by default for each criterion and for the task as a whole.
+Artifact-only criteria have no evidence placeholder in their main area.

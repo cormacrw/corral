@@ -199,7 +199,7 @@ export const tasks: Task[] = [
     prUrl: 'https://github.com/cormacrw/corral/pull/64',
     reviewRounds: 1,
     gateChecks: [{ name: 'lint', url: null }, { name: 'test', url: null }],
-    acceptanceCriteria: criteria('Approve marks the version approved', 'Earlier versions are superseded').map(c => ({ ...c, met: true }))
+    acceptanceCriteria: criteria('Approve marks the version approved', 'Earlier versions are superseded', 'The approval response identifies the version', 'Diagnostic artifacts are retained').map(c => ({ ...c, met: true }))
   }),
   // Pinned to v1 of the design after v2 was approved, so it's flagged (D20)
   task(corral, 6, { title: 'Pin build tasks to a design', status: 'ready', epicId: 'e-design', dependsOn: ['COR-5'], design: { taskRef: 'COR-4', version: 1, screens: ['review', 'review-empty'], newerVersion: 2 } }),
@@ -319,9 +319,37 @@ export const history: Record<string, AuditEntry[]> = {
   ]
 }
 
-export const evidence: Record<string, Evidence[]> = {}
+// D21: human files, note-only proof, mixed evidence and artifact-only proof.
+const reviewTask = at('COR-5')
+const criterionId = (position: number) => reviewTask.acceptanceCriteria[position]!.id
+const fileEvidence = (id: string, position: number | null, kind: Evidence['kind'], fileName: string, contentType: string, url: string): Evidence => ({
+  id, taskId: reviewTask.id, criterionId: position === null ? null : criterionId(position),
+  runId: 'r-2', round: 0, kind, note: '', fileName, contentType, size: 128, url, createdAt: ago(20)
+})
+const requestUrl = 'data:text/plain,' + encodeURIComponent('POST /api/designs/v1/approve\nHTTP/1.1 200 OK\n{"version":1,"state":"approved"}')
+const logUrl = 'data:text/plain,' + encodeURIComponent('Approval recorded for version 1. Earlier versions superseded.')
+// A self-contained preview image keeps the prototype independent of the API.
+const screenshotUrl = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#f8fafc"/><rect x="32" y="32" width="576" height="296" rx="12" fill="white" stroke="#cbd5e1"/><text x="64" y="90" font-family="sans-serif" font-size="24" fill="#0f172a">Design version 1</text><text x="64" y="146" font-family="sans-serif" font-size="20" fill="#15803d">✓ Approved</text><text x="64" y="198" font-family="sans-serif" font-size="16" fill="#475569">The build can now be planned.</text></svg>')
+export const evidence: Record<string, Evidence[]> = {
+  [reviewTask.id]: [
+    fileEvidence('ev-shot', 0, 'screenshot', 'approved-version.svg', 'image/svg+xml', screenshotUrl),
+    fileEvidence('ev-log', 0, 'log', 'approval.log', 'text/plain', logUrl),
+    { ...fileEvidence('ev-note', 1, 'note', '', '', ''), fileName: null, contentType: null, url: null, size: 0, note: '**Earlier versions are superseded.** The approval transaction updates previous versions atomically. See `approveDesignVersion` in the design service.' },
+    fileEvidence('ev-request', 2, 'request', 'approval-response.txt', 'text/plain', requestUrl),
+    fileEvidence('ev-output', 3, 'test_output', 'diagnostics.txt', 'text/plain', logUrl),
+    fileEvidence('ev-text', null, 'text', 'agent-summary.txt', 'text/plain', logUrl),
+    fileEvidence('ev-other', null, 'other', 'debug.json', 'application/json', 'data:application/json,%7B%22version%22%3A1%7D')
+  ]
+}
 
-export const reviews: Record<string, Review[]> = {}
+export const reviews: Record<string, Review[]> = {
+  [reviewTask.id]: [{
+    id: 'review-5', taskId: reviewTask.id, runId: 'r-2', round: 0, headSha: '5b030d7e1c',
+    verdict: 'approved', summary: 'Approval verified.', author: { kind: 'agent', role: 'reviewer', runId: 'r-2' },
+    criteria: reviewTask.acceptanceCriteria.map(c => ({ criterionId: c.id, met: true, note: 'Verified the approval flow and its recorded result.' })),
+    createdAt: ago(15)
+  }]
+}
 
 // Open PRs and their merge gates (GET /projects/:slug/pull-requests), one
 // for each state the Pull requests page shows
