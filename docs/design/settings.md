@@ -38,6 +38,7 @@ Pictures are optional; without one, an avatar shows initials. The browser crops 
 ### Appearance
 
 - **Colour mode:** a segmented control (System / Light / Dark), which maps to `useColorMode()`.
+- **Dark background:** swatch buttons for slate (default), gray, zinc, neutral, stone, mauve, olive, mist and taupe. Remaps neutral tokens only in dark mode; light mode stays slate. Shared by desktop and mobile, saved per device in `localStorage` (`corral.device.darkNeutral`) and restored in the static head before paint.
 - **Layout:** a segmented control (Auto / Desktop / Mobile), saved per device. See [mobile.md](mobile.md).
 - **Primary colour and font:** "Coming soon". For now they're set in `app.config.ts` and `main.css`.
 

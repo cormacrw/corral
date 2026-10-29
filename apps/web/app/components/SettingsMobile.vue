@@ -137,6 +137,15 @@ const name = computed(() => state.value.profile?.name || 'You')
       />
       <div>
         <p class="mb-1.5 text-sm text-highlighted">
+          Dark background
+        </p>
+        <DarkNeutralPicker />
+        <p class="mt-1.5 text-xs text-muted">
+          Dark mode only. Saved for this device only.
+        </p>
+      </div>
+      <div>
+        <p class="mb-1.5 text-sm text-highlighted">
           Layout
         </p>
         <UTabs

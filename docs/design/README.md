@@ -39,7 +39,7 @@ Multiple projects, global agents and per-project task prefixes are decided in **
 ### Nuxt UI and tokens
 
 - Use Nuxt UI components and semantic tokens only: `--ui-bg`, `--ui-bg-muted`, `--ui-bg-elevated`, `--ui-bg-accented`, `--ui-text-dimmed|muted|toned|highlighted|inverted`, `--ui-border`, `--ui-border-accented`, and the colour aliases `primary`, `success`, `info`, `warning`, `error`, `neutral`.
-- Theme comes from `app.config.ts` (`ui.colors.primary`, `ui.colors.neutral: 'slate'`) and `main.css` (`--font-sans`). Never hard-code hex values in components. The only exception is a project's thumbnail colour, which is user data.
+- Theme comes from `app.config.ts` (`ui.colors.primary`, `ui.colors.neutral: 'slate'`) and `main.css` (`--font-sans`). Settings can override the neutral palette in dark mode only, saved per device (see [Settings](settings.md#appearance)). Never hard-code hex values in components. The only exception is a project's thumbnail colour, which is user data.
 - Light and dark mode both have to work. Primary uses shade 500 in light mode and 400 in dark mode, which is Nuxt UI's default.
 - Radii follow Nuxt UI: controls `rounded-md`, cards and panels `rounded-lg`, avatars and dots `rounded-full`.
 

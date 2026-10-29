@@ -1,3 +1,5 @@
+import { darkNeutralInit } from './app/utils/dark-neutral'
+
 // https://nuxt.com/docs/api/configuration/nuxt-config
 
 // `pnpm prototype` (D20): the same app on fixture data, generated as static
@@ -25,8 +27,9 @@ export default defineNuxtConfig({
   app: {
     ...(prototype && { cdnURL: './' }),
     head: prototype
-      ? {}
+      ? { script: [{ innerHTML: darkNeutralInit }] }
       : {
+          script: [{ innerHTML: darkNeutralInit }],
           meta: [
             { name: 'theme-color', content: '#ffffff', media: '(prefers-color-scheme: light)' },
             { name: 'theme-color', content: '#0f172b', media: '(prefers-color-scheme: dark)' },

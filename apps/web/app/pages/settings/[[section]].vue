@@ -430,7 +430,7 @@ const items = [
             <div>
               <span class="font-medium">Colour mode</span>
               <p class="text-xs text-muted">
-                Primary colour and font are set in app.config.ts and main.css for now.
+                Primary colour, light palette and font are configured in app.config.ts and main.css.
               </p>
             </div>
             <UTabs
@@ -440,6 +440,15 @@ const items = [
               :content="false"
               @update:model-value="colorMode.preference = String($event)"
             />
+          </div>
+          <div class="mt-5 grid gap-2 sm:grid-cols-[1fr_320px]">
+            <div>
+              <span class="font-medium">Dark background</span>
+              <p class="text-xs text-muted">
+                Background, surfaces and borders in dark mode. Saved for this device only.
+              </p>
+            </div>
+            <DarkNeutralPicker />
           </div>
           <div class="mt-5 grid gap-2 sm:grid-cols-[1fr_320px]">
             <div>

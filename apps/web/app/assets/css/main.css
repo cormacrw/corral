@@ -18,3 +18,234 @@
   inherits: true;
   initial-value: 0deg;
 }
+
+/* Keep every offered Tailwind palette in production, including swatches.
+ * Nuxt UI preserves Tailwind neutral as old-neutral to free its semantic alias. */
+@theme static {
+  --dark-neutral-slate-50: var(--color-slate-50);
+  --dark-neutral-slate-100: var(--color-slate-100);
+  --dark-neutral-slate-200: var(--color-slate-200);
+  --dark-neutral-slate-300: var(--color-slate-300);
+  --dark-neutral-slate-400: var(--color-slate-400);
+  --dark-neutral-slate-500: var(--color-slate-500);
+  --dark-neutral-slate-600: var(--color-slate-600);
+  --dark-neutral-slate-700: var(--color-slate-700);
+  --dark-neutral-slate-800: var(--color-slate-800);
+  --dark-neutral-slate-900: var(--color-slate-900);
+  --dark-neutral-slate-950: var(--color-slate-950);
+  --dark-neutral-gray-50: var(--color-gray-50);
+  --dark-neutral-gray-100: var(--color-gray-100);
+  --dark-neutral-gray-200: var(--color-gray-200);
+  --dark-neutral-gray-300: var(--color-gray-300);
+  --dark-neutral-gray-400: var(--color-gray-400);
+  --dark-neutral-gray-500: var(--color-gray-500);
+  --dark-neutral-gray-600: var(--color-gray-600);
+  --dark-neutral-gray-700: var(--color-gray-700);
+  --dark-neutral-gray-800: var(--color-gray-800);
+  --dark-neutral-gray-900: var(--color-gray-900);
+  --dark-neutral-gray-950: var(--color-gray-950);
+  --dark-neutral-zinc-50: var(--color-zinc-50);
+  --dark-neutral-zinc-100: var(--color-zinc-100);
+  --dark-neutral-zinc-200: var(--color-zinc-200);
+  --dark-neutral-zinc-300: var(--color-zinc-300);
+  --dark-neutral-zinc-400: var(--color-zinc-400);
+  --dark-neutral-zinc-500: var(--color-zinc-500);
+  --dark-neutral-zinc-600: var(--color-zinc-600);
+  --dark-neutral-zinc-700: var(--color-zinc-700);
+  --dark-neutral-zinc-800: var(--color-zinc-800);
+  --dark-neutral-zinc-900: var(--color-zinc-900);
+  --dark-neutral-zinc-950: var(--color-zinc-950);
+  --dark-neutral-neutral-50: var(--color-old-neutral-50);
+  --dark-neutral-neutral-100: var(--color-old-neutral-100);
+  --dark-neutral-neutral-200: var(--color-old-neutral-200);
+  --dark-neutral-neutral-300: var(--color-old-neutral-300);
+  --dark-neutral-neutral-400: var(--color-old-neutral-400);
+  --dark-neutral-neutral-500: var(--color-old-neutral-500);
+  --dark-neutral-neutral-600: var(--color-old-neutral-600);
+  --dark-neutral-neutral-700: var(--color-old-neutral-700);
+  --dark-neutral-neutral-800: var(--color-old-neutral-800);
+  --dark-neutral-neutral-900: var(--color-old-neutral-900);
+  --dark-neutral-neutral-950: var(--color-old-neutral-950);
+  --dark-neutral-stone-50: var(--color-stone-50);
+  --dark-neutral-stone-100: var(--color-stone-100);
+  --dark-neutral-stone-200: var(--color-stone-200);
+  --dark-neutral-stone-300: var(--color-stone-300);
+  --dark-neutral-stone-400: var(--color-stone-400);
+  --dark-neutral-stone-500: var(--color-stone-500);
+  --dark-neutral-stone-600: var(--color-stone-600);
+  --dark-neutral-stone-700: var(--color-stone-700);
+  --dark-neutral-stone-800: var(--color-stone-800);
+  --dark-neutral-stone-900: var(--color-stone-900);
+  --dark-neutral-stone-950: var(--color-stone-950);
+  --dark-neutral-mauve-50: var(--color-mauve-50);
+  --dark-neutral-mauve-100: var(--color-mauve-100);
+  --dark-neutral-mauve-200: var(--color-mauve-200);
+  --dark-neutral-mauve-300: var(--color-mauve-300);
+  --dark-neutral-mauve-400: var(--color-mauve-400);
+  --dark-neutral-mauve-500: var(--color-mauve-500);
+  --dark-neutral-mauve-600: var(--color-mauve-600);
+  --dark-neutral-mauve-700: var(--color-mauve-700);
+  --dark-neutral-mauve-800: var(--color-mauve-800);
+  --dark-neutral-mauve-900: var(--color-mauve-900);
+  --dark-neutral-mauve-950: var(--color-mauve-950);
+  --dark-neutral-olive-50: var(--color-olive-50);
+  --dark-neutral-olive-100: var(--color-olive-100);
+  --dark-neutral-olive-200: var(--color-olive-200);
+  --dark-neutral-olive-300: var(--color-olive-300);
+  --dark-neutral-olive-400: var(--color-olive-400);
+  --dark-neutral-olive-500: var(--color-olive-500);
+  --dark-neutral-olive-600: var(--color-olive-600);
+  --dark-neutral-olive-700: var(--color-olive-700);
+  --dark-neutral-olive-800: var(--color-olive-800);
+  --dark-neutral-olive-900: var(--color-olive-900);
+  --dark-neutral-olive-950: var(--color-olive-950);
+  --dark-neutral-mist-50: var(--color-mist-50);
+  --dark-neutral-mist-100: var(--color-mist-100);
+  --dark-neutral-mist-200: var(--color-mist-200);
+  --dark-neutral-mist-300: var(--color-mist-300);
+  --dark-neutral-mist-400: var(--color-mist-400);
+  --dark-neutral-mist-500: var(--color-mist-500);
+  --dark-neutral-mist-600: var(--color-mist-600);
+  --dark-neutral-mist-700: var(--color-mist-700);
+  --dark-neutral-mist-800: var(--color-mist-800);
+  --dark-neutral-mist-900: var(--color-mist-900);
+  --dark-neutral-mist-950: var(--color-mist-950);
+  --dark-neutral-taupe-50: var(--color-taupe-50);
+  --dark-neutral-taupe-100: var(--color-taupe-100);
+  --dark-neutral-taupe-200: var(--color-taupe-200);
+  --dark-neutral-taupe-300: var(--color-taupe-300);
+  --dark-neutral-taupe-400: var(--color-taupe-400);
+  --dark-neutral-taupe-500: var(--color-taupe-500);
+  --dark-neutral-taupe-600: var(--color-taupe-600);
+  --dark-neutral-taupe-700: var(--color-taupe-700);
+  --dark-neutral-taupe-800: var(--color-taupe-800);
+  --dark-neutral-taupe-900: var(--color-taupe-900);
+  --dark-neutral-taupe-950: var(--color-taupe-950);
+}
+
+/* Light mode continues to use app.config.ts; only dark aliases change. */
+.dark[data-dark-neutral="slate"] {
+  --ui-color-neutral-50: var(--color-slate-50);
+  --ui-color-neutral-100: var(--color-slate-100);
+  --ui-color-neutral-200: var(--color-slate-200);
+  --ui-color-neutral-300: var(--color-slate-300);
+  --ui-color-neutral-400: var(--color-slate-400);
+  --ui-color-neutral-500: var(--color-slate-500);
+  --ui-color-neutral-600: var(--color-slate-600);
+  --ui-color-neutral-700: var(--color-slate-700);
+  --ui-color-neutral-800: var(--color-slate-800);
+  --ui-color-neutral-900: var(--color-slate-900);
+  --ui-color-neutral-950: var(--color-slate-950);
+}
+
+.dark[data-dark-neutral="gray"] {
+  --ui-color-neutral-50: var(--color-gray-50);
+  --ui-color-neutral-100: var(--color-gray-100);
+  --ui-color-neutral-200: var(--color-gray-200);
+  --ui-color-neutral-300: var(--color-gray-300);
+  --ui-color-neutral-400: var(--color-gray-400);
+  --ui-color-neutral-500: var(--color-gray-500);
+  --ui-color-neutral-600: var(--color-gray-600);
+  --ui-color-neutral-700: var(--color-gray-700);
+  --ui-color-neutral-800: var(--color-gray-800);
+  --ui-color-neutral-900: var(--color-gray-900);
+  --ui-color-neutral-950: var(--color-gray-950);
+}
+
+.dark[data-dark-neutral="zinc"] {
+  --ui-color-neutral-50: var(--color-zinc-50);
+  --ui-color-neutral-100: var(--color-zinc-100);
+  --ui-color-neutral-200: var(--color-zinc-200);
+  --ui-color-neutral-300: var(--color-zinc-300);
+  --ui-color-neutral-400: var(--color-zinc-400);
+  --ui-color-neutral-500: var(--color-zinc-500);
+  --ui-color-neutral-600: var(--color-zinc-600);
+  --ui-color-neutral-700: var(--color-zinc-700);
+  --ui-color-neutral-800: var(--color-zinc-800);
+  --ui-color-neutral-900: var(--color-zinc-900);
+  --ui-color-neutral-950: var(--color-zinc-950);
+}
+
+.dark[data-dark-neutral="neutral"] {
+  --ui-color-neutral-50: var(--color-old-neutral-50);
+  --ui-color-neutral-100: var(--color-old-neutral-100);
+  --ui-color-neutral-200: var(--color-old-neutral-200);
+  --ui-color-neutral-300: var(--color-old-neutral-300);
+  --ui-color-neutral-400: var(--color-old-neutral-400);
+  --ui-color-neutral-500: var(--color-old-neutral-500);
+  --ui-color-neutral-600: var(--color-old-neutral-600);
+  --ui-color-neutral-700: var(--color-old-neutral-700);
+  --ui-color-neutral-800: var(--color-old-neutral-800);
+  --ui-color-neutral-900: var(--color-old-neutral-900);
+  --ui-color-neutral-950: var(--color-old-neutral-950);
+}
+
+.dark[data-dark-neutral="stone"] {
+  --ui-color-neutral-50: var(--color-stone-50);
+  --ui-color-neutral-100: var(--color-stone-100);
+  --ui-color-neutral-200: var(--color-stone-200);
+  --ui-color-neutral-300: var(--color-stone-300);
+  --ui-color-neutral-400: var(--color-stone-400);
+  --ui-color-neutral-500: var(--color-stone-500);
+  --ui-color-neutral-600: var(--color-stone-600);
+  --ui-color-neutral-700: var(--color-stone-700);
+  --ui-color-neutral-800: var(--color-stone-800);
+  --ui-color-neutral-900: var(--color-stone-900);
+  --ui-color-neutral-950: var(--color-stone-950);
+}
+
+.dark[data-dark-neutral="mauve"] {
+  --ui-color-neutral-50: var(--color-mauve-50);
+  --ui-color-neutral-100: var(--color-mauve-100);
+  --ui-color-neutral-200: var(--color-mauve-200);
+  --ui-color-neutral-300: var(--color-mauve-300);
+  --ui-color-neutral-400: var(--color-mauve-400);
+  --ui-color-neutral-500: var(--color-mauve-500);
+  --ui-color-neutral-600: var(--color-mauve-600);
+  --ui-color-neutral-700: var(--color-mauve-700);
+  --ui-color-neutral-800: var(--color-mauve-800);
+  --ui-color-neutral-900: var(--color-mauve-900);
+  --ui-color-neutral-950: var(--color-mauve-950);
+}
+
+.dark[data-dark-neutral="olive"] {
+  --ui-color-neutral-50: var(--color-olive-50);
+  --ui-color-neutral-100: var(--color-olive-100);
+  --ui-color-neutral-200: var(--color-olive-200);
+  --ui-color-neutral-300: var(--color-olive-300);
+  --ui-color-neutral-400: var(--color-olive-400);
+  --ui-color-neutral-500: var(--color-olive-500);
+  --ui-color-neutral-600: var(--color-olive-600);
+  --ui-color-neutral-700: var(--color-olive-700);
+  --ui-color-neutral-800: var(--color-olive-800);
+  --ui-color-neutral-900: var(--color-olive-900);
+  --ui-color-neutral-950: var(--color-olive-950);
+}
+
+.dark[data-dark-neutral="mist"] {
+  --ui-color-neutral-50: var(--color-mist-50);
+  --ui-color-neutral-100: var(--color-mist-100);
+  --ui-color-neutral-200: var(--color-mist-200);
+  --ui-color-neutral-300: var(--color-mist-300);
+  --ui-color-neutral-400: var(--color-mist-400);
+  --ui-color-neutral-500: var(--color-mist-500);
+  --ui-color-neutral-600: var(--color-mist-600);
+  --ui-color-neutral-700: var(--color-mist-700);
+  --ui-color-neutral-800: var(--color-mist-800);
+  --ui-color-neutral-900: var(--color-mist-900);
+  --ui-color-neutral-950: var(--color-mist-950);
+}
+
+.dark[data-dark-neutral="taupe"] {
+  --ui-color-neutral-50: var(--color-taupe-50);
+  --ui-color-neutral-100: var(--color-taupe-100);
+  --ui-color-neutral-200: var(--color-taupe-200);
+  --ui-color-neutral-300: var(--color-taupe-300);
+  --ui-color-neutral-400: var(--color-taupe-400);
+  --ui-color-neutral-500: var(--color-taupe-500);
+  --ui-color-neutral-600: var(--color-taupe-600);
+  --ui-color-neutral-700: var(--color-taupe-700);
+  --ui-color-neutral-800: var(--color-taupe-800);
+  --ui-color-neutral-900: var(--color-taupe-900);
+  --ui-color-neutral-950: var(--color-taupe-950);
+}
