@@ -59,7 +59,7 @@ export function useLive() {
       state.value.agents = agents
       state.value.runner = runner
       state.value.status = status
-      state.value.inboxCount = inbox.needsYou.length
+      state.value.inboxCount = inbox.count
       state.value.planSessions = planSessions
       state.value.error = null
       state.value.loaded = true
@@ -154,11 +154,11 @@ export function useLive() {
       default:
         break
     }
-    // Inbox counts depend on task status; recount from the tasks we know,
-    // and ask the server when we don't know the project's tasks
-    if (event.type === 'task.updated' || event.type === 'task.deleted' || event.type === 'task.created' || event.type === 'project.deleted') {
+    // Inbox counts depend on task status and Plan session state (D11);
+    // ask the server, which owns the count
+    if (event.type === 'task.updated' || event.type === 'task.deleted' || event.type === 'task.created' || event.type === 'project.deleted' || event.type === 'plan.session') {
       void api.inbox.get().then((inbox) => {
-        s.inboxCount = inbox.needsYou.length
+        s.inboxCount = inbox.count
       })
     }
     for (const listener of listeners) listener(event)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Evidence, Inbox, InboxActionInput, InboxItem, Review, Task } from '@corral/contracts'
+import type { Evidence, Inbox, InboxActionInput, Review, Task, TaskInboxItem } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
@@ -13,7 +13,7 @@ const toast = useToast()
 const device = useDevice()
 useSeoMeta({ title: 'Inbox · Corral' })
 
-const inbox = ref<Inbox | null>(null)
+const inbox = ref<(Omit<Inbox, 'needsYou'> & { needsYou: TaskInboxItem[] }) | null>(null)
 const error = ref<string | null>(null)
 const tab = ref<'needsYou' | 'activity' | 'resolved'>('needsYou')
 const search = ref('')
@@ -30,7 +30,10 @@ const showTask = ref(true)
 async function load() {
   error.value = null
   try {
-    inbox.value = await api.inbox.get()
+    // Plan threads (D11, amended) aren't shown here yet: this page only
+    // knows how to show and act on task items
+    const loaded = await api.inbox.get()
+    inbox.value = { ...loaded, needsYou: loaded.needsYou.filter((i): i is TaskInboxItem => i.type !== 'plan_thread') }
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   }
@@ -38,14 +41,14 @@ async function load() {
 onMounted(() => {
   void load()
   const stop = live.subscribe((event) => {
-    if (['task.updated', 'task.deleted', 'task.created', 'run.updated'].includes(event.type)) void load()
+    if (['task.updated', 'task.deleted', 'task.created', 'run.updated', 'plan.session'].includes(event.type)) void load()
   })
   onBeforeUnmount(stop)
 })
 
-const items = computed<InboxItem[]>(() => (inbox.value?.[tab.value] ?? []).filter(i => !search.value || `${i.taskRef} ${i.subject} ${i.preview}`.toLowerCase().includes(search.value.toLowerCase())))
+const items = computed<TaskInboxItem[]>(() => (inbox.value?.[tab.value] ?? []).filter(i => !search.value || `${i.taskRef} ${i.subject} ${i.preview}`.toLowerCase().includes(search.value.toLowerCase())))
 const selectedId = computed(() => typeof route.params.itemId === 'string' ? route.params.itemId : null)
-const selected = computed<InboxItem | null>(() => {
+const selected = computed<TaskInboxItem | null>(() => {
   if (!inbox.value || !selectedId.value) return null
   return [...inbox.value.needsYou, ...inbox.value.activity, ...inbox.value.resolved].find(i => i.id === selectedId.value) ?? null
 })
@@ -72,7 +75,7 @@ watch(selected, async (item) => {
   // Phones open the task as its own page instead.
   if (item && showTask.value && !device.isMobile.value) flyout.open(item.taskRef, { replace: true })
 }, { immediate: true })
-function select(item: InboxItem) {
+function select(item: TaskInboxItem) {
   void router.push(`/inbox/${item.id}`)
 }
 function toggleTask() {
