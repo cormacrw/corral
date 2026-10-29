@@ -290,8 +290,24 @@ export const planTasks = pgTable('plan_tasks', {
   // The PM's handle inside the plan
   key: text().notNull(),
   change: planChange().notNull(),
-  position: integer().notNull()
+  position: integer().notNull(),
+  // Set when the item revises an existing Backlog task (or a Draft from
+  // elsewhere): the proposed edits, written to the task only on approval
+  revision: jsonb().$type<PlanRevision>()
 }, t => [primaryKey({ columns: [t.planId, t.key] })])
+
+export interface PlanRevision {
+  title: string
+  // Markdown, as the PM wrote it
+  description: string
+  type: 'frontend' | 'backend' | 'full_stack' | 'infrastructure'
+  priority: 'urgent' | 'high' | 'medium' | 'low'
+  humanReview: boolean
+  acceptanceCriteria: string[]
+  epicId: string
+  // Task numbers in the same project
+  dependsOn: number[]
+}
 
 // The epics of a plan version, by the PM's key, so a revision keeps each
 // epic it still names (a plan can span several; plans.epicId is the first)

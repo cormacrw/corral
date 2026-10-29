@@ -41,6 +41,18 @@ describe('ToolServer', () => {
     await client.close()
   })
 
+  it('tells the PM to refine a Backlog task by ref in propose_plan, and passes the ref through', async () => {
+    const { client, calls } = await connect('pm')
+    const propose = (await client.listTools()).tools.find(t => t.name === 'propose_plan')!
+    expect(propose.description).toContain('To refine an existing Backlog task, read it with get_task and include it in the plan with its `ref`')
+    expect(propose.inputSchema).toMatchObject({ properties: { tasks: { items: { properties: { ref: { type: 'string' } } } } } })
+
+    const task = { key: 't1', ref: 'COR-4', title: 'Login', description: 'Build it', type: 'backend', acceptanceCriteria: ['It works'], dependsOn: ['COR-2'] }
+    await client.callTool({ name: 'propose_plan', arguments: { title: 'Login', tasks: [task] } })
+    expect(calls).toEqual([{ tool: 'propose_plan', input: expect.objectContaining({ tasks: [expect.objectContaining({ ref: 'COR-4', dependsOn: ['COR-2'] })] }) }])
+    await client.close()
+  })
+
   it.each(['developer', 'reviewer'] as const)('keeps the %s get_task for its own task, with no input', async (role) => {
     const { client, calls } = await connect(role)
     const getTask = (await client.listTools()).tools.find(t => t.name === 'get_task')!

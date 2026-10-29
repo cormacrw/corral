@@ -1,4 +1,5 @@
 import { checkDependencies, type DependencyProblem } from './dependencies.ts'
+import type { TaskStatus } from './status.ts'
 import type { TaskPriority, TaskType } from './task.ts'
 
 // What the PM proposes with `propose_plan` (D9). Keys are the PM's own
@@ -12,6 +13,9 @@ export interface ProposedEpic {
 
 export interface ProposedTask {
   key: string
+  // The ref of an existing task this one revises (e.g. COR-4), instead of
+  // creating a new one
+  ref?: string | undefined
   // The key of the epic it belongs to
   epic: string
   title: string
@@ -42,10 +46,29 @@ export type PlanProblem =
   | { code: 'missing_acceptance_criteria', key: string }
   | { code: 'blank_acceptance_criterion', key: string }
   | { code: 'dependency', problem: DependencyProblem }
+  | { code: 'duplicate_ref', key: string, ref: string }
+  | { code: 'unknown_ref', key: string, ref: string, message: string }
+  | { code: 'deleted_ref', key: string, ref: string, message: string }
+  | { code: 'ref_in_other_project', key: string, ref: string, project: string, message: string }
+  | { code: 'ref_not_revisable', key: string, ref: string, status: TaskStatus, message: string }
+
+// What an existing task's ref points at, looked up by the server before
+// checkPlan runs
+export type PlanRef =
+  | { kind: 'task', status: TaskStatus }
+  | { kind: 'unknown' }
+  | { kind: 'deleted' }
+  | { kind: 'other_project', project: string }
+
+// Only tasks nobody has started can be revised by a plan
+export const REVISABLE_STATUSES: readonly TaskStatus[] = ['backlog', 'draft']
 
 // D9: a plan is saved only if the dependencies form a DAG and every task
 // has acceptance criteria. Returns every problem, so the PM can fix them all.
-export function checkPlan(plan: ProposedPlan): PlanProblem[] {
+// `refs` holds every existing-task ref the plan names, in `ref` or
+// `dependsOn`; a task may revise only a Backlog task or a Draft, but may
+// depend on any task in the project.
+export function checkPlan(plan: ProposedPlan, refs: ReadonlyMap<string, PlanRef> = new Map()): PlanProblem[] {
   const problems: PlanProblem[] = []
   if (plan.tasks.length === 0) return [{ code: 'no_tasks' }]
   const epicKeys = new Set<string>()
@@ -64,10 +87,44 @@ export function checkPlan(plan: ProposedPlan): PlanProblem[] {
     if (!task.description.trim()) problems.push({ code: 'missing_description', key: task.key })
     if (task.acceptanceCriteria.length === 0) problems.push({ code: 'missing_acceptance_criteria', key: task.key })
     else if (task.acceptanceCriteria.some(c => !c.trim())) problems.push({ code: 'blank_acceptance_criterion', key: task.key })
+    if (task.ref) {
+      const problem = refProblem(task.key, task.ref, refs.get(task.ref) ?? { kind: 'unknown' }, true)
+      if (problem) problems.push(problem)
+      if (plan.tasks.some(t => t !== task && t.ref === task.ref) && !problems.some(p => p.code === 'duplicate_ref' && p.ref === task.ref)) {
+        problems.push({ code: 'duplicate_ref', key: task.key, ref: task.ref })
+      }
+    }
   }
-  const graph = new Map(plan.tasks.map(t => [t.key, t.dependsOn]))
+  // A dependency names a key in the plan, the ref of a task the plan
+  // revises (the same node), or any other existing task (outside the graph)
+  const keyOfRef = new Map(plan.tasks.filter(t => t.ref).map(t => [t.ref!, t.key]))
+  const keys = new Set(plan.tasks.map(t => t.key))
+  const graph = new Map(plan.tasks.map(t => [t.key, t.dependsOn.flatMap((dep) => {
+    if (keys.has(dep)) return [dep]
+    const key = keyOfRef.get(dep)
+    if (key) return [key]
+    const found = refs.get(dep)
+    if (!found) return [dep]
+    const problem = refProblem(t.key, dep, found, false)
+    if (problem) problems.push(problem)
+    return []
+  })]))
   for (const problem of checkDependencies(graph)) problems.push({ code: 'dependency', problem })
   return problems
+}
+
+function refProblem(key: string, ref: string, found: PlanRef, revising: boolean): PlanProblem | null {
+  switch (found.kind) {
+    case 'unknown':
+      return { code: 'unknown_ref', key, ref, message: `There is no task ${ref} in this project. Check the ref with list_tasks.` }
+    case 'deleted':
+      return { code: 'deleted_ref', key, ref, message: `${ref} was deleted. ${revising ? 'Leave out its ref to propose it as a new task.' : 'Remove it from dependsOn.'}` }
+    case 'other_project':
+      return { code: 'ref_in_other_project', key, ref, project: found.project, message: `${ref} belongs to the project "${found.project}", not this one.` }
+    case 'task':
+      if (!revising || REVISABLE_STATUSES.includes(found.status)) return null
+      return { code: 'ref_not_revisable', key, ref, status: found.status, message: `${ref} is ${found.status}; only Backlog tasks can be revised by a plan. Leave out its ref to propose a new task, or depend on it instead.` }
+  }
 }
 
 export type PlanChange = 'added' | 'changed' | 'unchanged' | 'removed'
@@ -88,6 +145,7 @@ export function diffPlans(previous: readonly ProposedTask[], next: readonly Prop
 
 function sameTask(a: ProposedTask, b: ProposedTask): boolean {
   return a.title === b.title
+    && a.ref === b.ref
     && a.epic === b.epic
     && a.description === b.description
     && a.type === b.type
