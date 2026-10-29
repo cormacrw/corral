@@ -1,0 +1,104 @@
+import type { AuditEntry, Comment, RunMessageAccepted } from '@corral/contracts'
+import { schema } from '@corral/db'
+import { eq } from 'drizzle-orm'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { createTestApp, type TestApp } from './test-app.ts'
+import { FakeRunner } from './test-runner.ts'
+
+// POST /projects/:slug/runs/:runId/messages, against a fake runner
+describe('messages to a live run', () => {
+  let t: TestApp
+  let runner: FakeRunner
+
+  beforeAll(async () => {
+    t = await createTestApp('pglite', { listen: true })
+    // Each test leaves its run live, so the developer needs room for all of them
+    await t.db.update(schema.agents).set({ concurrency: 50 }).where(eq(schema.agents.role, 'developer'))
+    runner = await FakeRunner.connect(t.server!.url)
+  })
+
+  afterAll(async () => {
+    runner?.close()
+    await t?.close()
+  })
+
+  // An approved task the developer has claimed, with its run started
+  async function liveRun() {
+    const project = await t.createProject()
+    const task = await t.createTask(project.slug)
+    await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'approve' })
+    await t.orchestrator.schedule()
+    const { job } = await runner.next('run.assign', m => m.job.taskId === task.id)
+    runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 's1' })
+    await expect.poll(async () => (await t.db.select().from(schema.runs).where(eq(schema.runs.id, job.runId)))[0]?.state).toBe('running')
+    return { project, task, job }
+  }
+
+  const post = (slug: string, runId: string, body: unknown) => t.request('POST', `/api/projects/${slug}/runs/${runId}/messages`, body)
+
+  it('forwards the message to the runner, keeps it as a comment and audits it', async () => {
+    const { project, task, job } = await liveRun()
+    const res = await post(project.slug, job.runId, { text: '  Use the existing login form  ' })
+    expect(res.status).toBe(202)
+    const body = await res.json() as RunMessageAccepted
+    expect(body).toMatchObject({ runId: job.runId, comment: { taskId: task.id, author: t.actor, body: 'Use the existing login form', pinned: false } })
+
+    const sent = await runner.next('run.message', m => m.runId === job.runId)
+    expect(sent).toEqual({ type: 'run.message', runId: job.runId, leaseEpoch: job.leaseEpoch, text: 'Use the existing login form' })
+
+    const comments = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/comments`).then(r => r.json()) as Comment[]
+    expect(comments.map(c => c.body)).toContain('Use the existing login form')
+    const history = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/history`).then(r => r.json()) as AuditEntry[]
+    const entry = history.find(h => h.action === 'run.message_sent')
+    expect(entry).toMatchObject({ actor: t.actor, taskId: task.id, detail: { runId: job.runId, commentId: body.comment.id } })
+    expect(Date.parse(entry!.createdAt)).not.toBeNaN()
+    expect(t.events.some(e => e.type === 'comment.created' && e.comment.id === body.comment.id)).toBe(true)
+  })
+
+  it('references attachments from the project in the message', async () => {
+    const { project, job } = await liveRun()
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
+    const upload = await t.request('POST', `/api/projects/${project.slug}/attachments?name=screen.png`, new Blob([png], { type: 'image/png' })).then(r => r.json()) as { id: string }
+    const res = await post(project.slug, job.runId, { text: 'Like this', attachments: [upload.id] })
+    expect(res.status).toBe(202)
+    const sent = await runner.next('run.message', m => m.runId === job.runId)
+    expect(sent.text).toBe(`Like this\n\n![screen.png](attachment:${upload.id})`)
+
+    const other = await t.createProject()
+    const foreign = await t.request('POST', `/api/projects/${other.slug}/attachments`, new Blob([png], { type: 'image/png' })).then(r => r.json()) as { id: string }
+    expect((await post(project.slug, job.runId, { text: 'x', attachments: [foreign.id] })).status).toBe(400)
+  })
+
+  it('returns 409 with a reason for an ended run, and records nothing', async () => {
+    const { project, task, job } = await liveRun()
+    await t.request('POST', `/api/runs/${job.runId}/stop`)
+    const res = await post(project.slug, job.runId, { text: 'Too late' })
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: { code: 'run_not_live', reason: expect.stringMatching(/has ended$/) } })
+    const comments = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/comments`).then(r => r.json()) as Comment[]
+    expect(comments.map(c => c.body)).not.toContain('Too late')
+    expect(runner.received.some(m => m.type === 'run.message' && m.runId === job.runId)).toBe(false)
+  })
+
+  it('returns 409 when no runner is connected', async () => {
+    const { project, task, job } = await liveRun()
+    runner.close()
+    await expect.poll(() => t.runner.online).toBe(false)
+    try {
+      const res = await post(project.slug, job.runId, { text: 'Anyone there?' })
+      expect(res.status).toBe(409)
+      expect(await res.json()).toMatchObject({ error: { code: 'run_not_live', reason: 'No runner is connected to deliver the message' } })
+      const history = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/history`).then(r => r.json()) as AuditEntry[]
+      expect(history.some(h => h.action === 'run.message_sent')).toBe(false)
+    } finally {
+      runner = await FakeRunner.connect(t.server!.url, [{ runId: job.runId, leaseEpoch: job.leaseEpoch }])
+    }
+  })
+
+  it('404s for a run in another project, and 400s for an empty message', async () => {
+    const { project, job } = await liveRun()
+    const other = await t.createProject()
+    expect((await post(other.slug, job.runId, { text: 'Hi' })).status).toBe(404)
+    expect((await post(project.slug, job.runId, { text: '   ' })).status).toBe(400)
+  })
+})

@@ -164,7 +164,8 @@ export class RunnerHub {
         }
         return
       }
-      // Nobody sends run.message yet; when the API does, it answers with this
+      // A run.message the runner couldn't deliver (POST /projects/:slug/runs/:runId/messages).
+      // The runner has already noted it in the run's transcript.
       case 'run.message.rejected':
         console.warn(`Run ${message.runId} did not take a message: ${message.error}`)
         return

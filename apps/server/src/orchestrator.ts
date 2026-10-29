@@ -1,4 +1,4 @@
-import { EVIDENCE_KINDS, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type RunnerMessage } from '@corral/contracts'
+import { EVIDENCE_KINDS, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type RunnerMessage } from '@corral/contracts'
 import {
   ACTIVE_RUN_STATES,
   transition,
@@ -23,10 +23,10 @@ import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
 import { MergeOrchestrator } from './merge.ts'
 import type { PlanService } from './plan.ts'
 import { getRun, listAgents, listEvidence } from './runs.ts'
-import { applyTransition, deleteTaskRows, loadTask, lockTask, toTaskState, type ProjectRow, type TaskRow } from './tasks.ts'
+import { addComment, applyTransition, deleteTaskRows, loadTask, lockTask, toTaskState, type ProjectRow, type TaskRow } from './tasks.ts'
 import type { Transcripts } from './transcripts.ts'
 
-const { acceptanceCriteria, agents, auditLog, comments, evidence, projects, reviews, runs, settings, tasks } = schema
+const { acceptanceCriteria, agents, attachments, auditLog, comments, evidence, projects, reviews, runs, settings, tasks } = schema
 type PlanSessionRow = typeof schema.planSessions.$inferSelect
 
 const server: Actor = { kind: 'system', component: 'server' }
@@ -602,6 +602,50 @@ export class Orchestrator implements RunnerHandlers {
       await tx.insert(auditLog).values({ projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor, action: 'run.stopped', detail: { runId } })
     })
     await this.#publish(ctx)
+  }
+
+  // A human messages a live developer or reviewer run. It's kept as their
+  // comment on the task, with an audit entry, and sent to the runner as
+  // run.message. The runner may still turn it down (e.g. a Codex run); it
+  // says so in the run's transcript. Throws 409 run_not_live when no runner
+  // holds the run.
+  async messageRun(projectId: string, runId: string, input: { text: string, attachments: string[] }, actor: Actor): Promise<{ runId: string, comment: Comment }> {
+    const { db, events, runner } = this.#d
+    const ctx = await this.#load(runId)
+    if (!ctx || ctx.run.projectId !== projectId) throw new ApiFailure(404, { code: 'not_found' })
+    const notLive = (reason: string) => new ApiFailure(409, { code: 'run_not_live', reason })
+    const { run, task } = ctx
+    if (!task || (run.role !== 'developer' && run.role !== 'reviewer')) throw notLive(`Run #${run.number} is a ${run.role} run; only developer and reviewer runs take messages`)
+    if (run.state === 'queued') throw notLive(`Run #${run.number} hasn't started yet`)
+    if (!(ACTIVE_RUN_STATES as readonly RunState[]).includes(run.state) || run.state === 'stopping') throw notLive(`Run #${run.number} has ended`)
+    if (task.leaseRunId !== run.id || task.leaseEpoch !== run.leaseEpoch) throw notLive(`Run #${run.number} no longer holds ${taskRef(ctx.project.prefix, task.number)}`)
+    if (!runner.online) throw notLive('No runner is connected to deliver the message')
+
+    const found = input.attachments.length === 0
+      ? []
+      : await db.select({ id: attachments.id, fileName: attachments.fileName }).from(attachments)
+          .where(and(eq(attachments.projectId, projectId), inArray(attachments.id, input.attachments)))
+    const missing = input.attachments.filter(id => !found.some(a => a.id === id))
+    if (missing.length > 0) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['attachments'], message: `Not an attachment in this project: ${missing.join(', ')}` }] })
+    // The same references as images in a comment, so get_task lists them and
+    // the agent can read each with get_attachment
+    const images = input.attachments.map(id => `![${found.find(a => a.id === id)!.fileName.replace(/[[\]]/g, '')}](attachment:${id})`)
+    const body = [input.text, ...images].join('\n\n')
+
+    const comment = await db.transaction(async (tx) => {
+      const comment = await addComment(tx, task.id, { body, pinned: false }, actor)
+      await tx.insert(auditLog).values({
+        projectId, taskId: task.id, actor, action: 'run.message_sent',
+        detail: { runId: run.id, runNumber: run.number, commentId: comment.id, attachments: input.attachments }
+      })
+      // Sent last, so a runner that dropped off rolls the comment back
+      if (!runner.send({ type: 'run.message', runId: run.id, leaseEpoch: run.leaseEpoch!, text: body })) {
+        throw notLive('No runner is connected to deliver the message')
+      }
+      return comment
+    })
+    events.publish({ type: 'comment.created', comment })
+    return { runId: run.id, comment }
   }
 
   // D10 "Deleting": stop the run, close the PR, delete the branch when safe,
