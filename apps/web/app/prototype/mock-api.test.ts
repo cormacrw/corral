@@ -162,4 +162,20 @@ describe('prototype mock API', () => {
     await mockCall('POST', '/plan/sessions/s-3/close')
     await expect(mockCall<Task>('GET', '/tasks/COR-16')).resolves.toMatchObject({ status: 'backlog' })
   })
+  it('closes a thread: discards its drafts and plan, and drops it from the inbox', async () => {
+    // Fresh fixtures: the tests above approved s-3's plan
+    vi.resetModules()
+    const { mockCall, onMockEvent } = await import('./mock-api')
+    const events: ServerEvent[] = []
+    const stop = onMockEvent(event => events.push(event))
+    await expect(mockCall('POST', '/plan/sessions/s-3/close')).resolves.toMatchObject({ closed: true, status: 'none' })
+    stop()
+    const inbox = await mockCall<Inbox>('GET', '/inbox')
+    expect(inbox.needsYou.some(i => i.id === 's-3')).toBe(false)
+    expect(inbox.resolved.some(i => i.id === 's-3')).toBe(false)
+    await expect(mockCall('GET', '/tasks/COR-16')).rejects.toMatchObject({ status: 404 })
+    const detail = await mockCall<PlanSessionDetail>('GET', '/plan/sessions/s-3')
+    expect(detail.plans.every(p => p.status === 'discarded')).toBe(true)
+    expect(events.map(e => e.type)).toEqual(expect.arrayContaining(['task.deleted', 'plan.updated', 'plan.session', 'plan.drafts']))
+  })
 })
