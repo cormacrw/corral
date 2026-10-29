@@ -37,6 +37,7 @@ Pictures are optional; without one, an avatar shows initials. The browser crops 
 ### Appearance
 
 - **Colour mode:** a segmented control (System / Light / Dark), which maps to `useColorMode()`.
+- **Layout:** a segmented control (Auto / Desktop / Mobile), saved per device. See [mobile.md](mobile.md).
 - **Primary colour and font:** "Coming soon". For now they're set in `app.config.ts` and `main.css`.
 
 ## Open questions

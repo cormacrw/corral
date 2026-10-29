@@ -2,7 +2,7 @@
 
 Page-by-page specs for the web app (`apps/web`). The interactive mockups live on the design canvas: <https://claude.ai/artifact/QBjDV6Wyj72DXqKA6RU8AT>. Each spec names its canvas frame.
 
-The mobile PWA design is on its own canvas: <https://claude.ai/artifact/VwiPAt4wMA2v9cCEALMGss>, with an offline export in [mobile-pwa.html](mobile-pwa.html). It has no written spec yet; the page specs below still apply to its behaviour.
+The mobile PWA design is on its own canvas: <https://claude.ai/artifact/VwiPAt4wMA2v9cCEALMGss>, with an offline export in [mobile-pwa.html](mobile-pwa.html). The mobile shell (layout switch, override and tab bar) is in [mobile.md](mobile.md) (D17); the page specs below still apply to its behaviour.
 
 These specs describe the UI only. Behaviour rules come from [decisions.md](../decisions.md) and [flows.md](../flows.md); where a spec and a decision disagree, the decision wins.
 
@@ -12,6 +12,7 @@ These specs describe the UI only. Behaviour rules come from [decisions.md](../de
 |---|---|---|---|
 | Onboarding | [onboarding.md](onboarding.md) | `/setup` | Global, first run |
 | App shell (sidebar) | [app-shell.md](app-shell.md) | wraps everything | Global |
+| Mobile shell (tab bar) | [mobile.md](mobile.md) | wraps everything on mobile | Global |
 | Plan | [plan.md](plan.md) | `/plan`, `/plan/:sessionId` | Global, picks a project |
 | Inbox | [inbox.md](inbox.md) | `/inbox`, `/inbox/:itemId` | Global, items tagged by project |
 | Task flyout and task page | [task.md](task.md) | `?task=COR-29`, `/tasks/COR-29` | Shared everywhere |
