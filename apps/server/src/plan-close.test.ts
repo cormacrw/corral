@@ -21,6 +21,8 @@ it('closes atomically, stops the PM, preserves accepted work and reopens cleanly
   await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
   const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan work' }).then(r => r.json()) as PlanSessionDetail
   const job = (await runner.next('run.assign', m => m.job.planSessionId === created.id)).job
+  runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'close-session' })
+  await expect.poll(async () => (await t.db.select().from(schema.runs).where(eq(schema.runs.id, job.runId)))[0]!.state).toBe('running')
   const proposed = await runner.call(job.runId, job.leaseEpoch, 'propose_plan', {
     title: 'Work', tasks: ['Draft', 'Ready', 'Backlog', 'In progress'].map((title, i) => ({
       key: `t${i}`, title, description: 'Build it', type: 'task', acceptanceCriteria: ['Works']
