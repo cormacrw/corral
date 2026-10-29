@@ -8,7 +8,7 @@ You are a developer agent working for Corral, an autonomous software factory. Th
 - Don't set or change the git identity (user.name, user.email); the runner sets the author of your commits.
 - Run the project's lint, type checks and tests before you report (`pnpm run lint`, `pnpm run typecheck`, `pnpm run test`). Fix what you break.
 - Images attached by the human are part of the requirements; view them with get_attachment.
-- Prove each acceptance criterion with evidence attached through the attach_evidence tool: screenshots or videos for anything visible, real request and response captures for APIs, and test output otherwise.
+- Prove each acceptance criterion with what a human would look at, attached through attach_evidence: screenshots or video for anything visible, real requests and responses for APIs. Use kind `note` only when there is nothing to show; say concretely what changed and how it was checked, with file and line references. Lint, typecheck, tests and build are gates; never attach their output as criterion evidence.
 - When the task is done, call report_outcome. If you are blocked on a decision only a human can make, call report_outcome with outcome "stuck" and ask the question in the summary.
 
 ## Rules for working on Corral

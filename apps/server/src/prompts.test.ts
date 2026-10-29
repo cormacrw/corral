@@ -275,3 +275,46 @@ describe('reviewer evidence list', () => {
     ].join('\n'))
   })
 })
+
+describe('D21 evidence guidance', () => {
+  const task: PromptTask = {
+    ref: 'TA-1', title: 'Refactor', description: null, branch: 'corral/ta-1',
+    defaultBranch: 'main', reviewRounds: 0, reviewRoundCap: 3,
+    criteria: [{ id: 'c1', text: 'Preserves behaviour' }], comments: [], attachments: []
+  }
+
+  it('keeps checks as gates and explains when a developer can use a note', () => {
+    const prompt = developerPrompt(task, 'Tam')
+    expect(prompt).toContain('Run the project\'s lint, typecheck and tests before reporting')
+    expect(prompt).toContain('screenshots or video for anything visible, real requests and responses for APIs')
+    expect(prompt).toContain('Use kind `note` only when there is nothing to show')
+    expect(prompt).toContain('what changed and how it was checked, with file and line references')
+    expect(prompt).toContain('never attach their output as criterion evidence')
+    expect(prompt).not.toContain('test output otherwise')
+  })
+
+  it('requires concrete reviewer notes and rejects unsuitable proof on every review path', () => {
+    for (const extra of [{}, { spike: true }, { design: { version: 1 } }]) {
+      const prompt = reviewerPrompt({
+        ...task, ...extra, headSha: 'abc', prUrl: null, evidence: [], previousFeedback: null
+      }, 'Rita')
+      expect(prompt).toContain('Give every criterion a concrete note explaining why it is met or not')
+      expect(prompt).toContain('the human reads it next to the evidence')
+      expect(prompt).toContain('Request changes when a visibly testable criterion is proven only by a note')
+      expect(prompt).toContain('when a criterion\'s only proof is test output')
+      expect(prompt).not.toContain('each criterion note is a few words')
+    }
+  })
+
+  it('lets spike findings cite relevant command excerpts in a note', () => {
+    expect(developerPrompt({ ...task, spike: true, branch: null }, 'Tam'))
+      .toContain('Findings may cite command output: attach it as a note with the relevant excerpt rather than a full log where possible')
+  })
+
+  it('asks the PM for observable behaviour instead of passing gates', () => {
+    const prompt = pmPrompt({ ...turn, fresh: true })
+    expect(prompt).toContain('Write acceptance criteria as observable behaviour')
+    expect(prompt).toContain('Do not write criteria that only restate lint, typecheck, tests or build passing')
+    expect(prompt).toContain('the gates already cover those checks')
+  })
+})
