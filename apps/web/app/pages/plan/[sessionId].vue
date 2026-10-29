@@ -2,6 +2,7 @@
 import type { Plan, PlanMessage, PlanSessionDetail } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { projectColor } from '~/utils/labels'
+import { withoutMessages } from '~/utils/tool-steps'
 
 // A Plan conversation (design/plan.md)
 const route = useRoute()
@@ -82,8 +83,27 @@ async function approve(plan: Plan, to: 'ready' | 'backlog') {
     approving.value = null
   }
 }
+// The PM's turn as it happens: the saved part, then live run.events
+const activeRunId = computed(() => session.value?.activeRunId ?? null)
+watch(activeRunId, async (runId) => {
+  if (!runId) return
+  live.watchRun(runId, [])
+  try {
+    const saved = await api.runs.transcript(runId)
+    if (activeRunId.value === runId) live.watchRun(runId, saved)
+  } catch {
+    // The live events still arrive
+  }
+}, { immediate: true })
+// What the turn has posted to the log already (a question, a plan) isn't repeated in its transcript
+const repliesOf = (runId: string) => session.value?.messages.filter(m => m.role === 'pm' && m.runId === runId).map(m => m.text) ?? []
+const liveEvents = computed(() => activeRunId.value ? withoutMessages(live.state.value.runEvents[activeRunId.value] ?? [], repliesOf(activeRunId.value)) : [])
+// A finished turn's steps sit above its first message
+const firstOfTurn = (message: PlanMessage) => message.role === 'pm' && message.runId !== null && message.runId !== activeRunId.value
+  && session.value?.messages.find(m => m.role === 'pm' && m.runId === message.runId)?.id === message.id
+
 const log = ref<HTMLElement | null>(null)
-watch(() => session.value?.messages.length, async () => {
+watch(() => [session.value?.messages.length, liveEvents.value.length], async () => {
   await nextTick()
   if (log.value) log.value.scrollTop = log.value.scrollHeight
 })
@@ -155,6 +175,12 @@ watch(() => session.value?.messages.length, async () => {
                 />
                 <div class="flex min-w-0 flex-col gap-2">
                   <span class="text-xs text-muted">{{ pm?.name ?? 'PM' }} · PM</span>
+                  <PlanTurnSteps
+                    v-if="firstOfTurn(message)"
+                    :run-id="message.runId!"
+                    :replies="repliesOf(message.runId!)"
+                    :agent-name="pm?.name ?? 'PM'"
+                  />
                   <UAlert
                     v-if="message.kind === 'error'"
                     color="error"
@@ -190,16 +216,25 @@ watch(() => session.value?.messages.length, async () => {
                 </div>
               </div>
             </div>
-            <p
-              v-if="session.activeRunId"
-              class="flex items-center gap-2 text-sm text-muted"
+            <div
+              v-if="activeRunId"
+              class="flex max-w-full min-w-0 gap-2"
             >
-              <span class="relative flex size-2">
-                <span class="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-75 motion-reduce:hidden" />
-                <span class="relative inline-flex size-2 rounded-full bg-primary" />
-              </span>
-              Reading the code, wiki and board…
-            </p>
+              <AgentAvatar
+                :name="pm?.name ?? 'PM'"
+                size="sm"
+              />
+              <div class="flex min-w-0 flex-1 flex-col gap-2">
+                <span class="text-xs text-muted">{{ pm?.name ?? 'PM' }} · PM</span>
+                <RunTranscript
+                  :events="liveEvents"
+                  live
+                  :agent-name="pm?.name ?? 'PM'"
+                  working="Reading the code, wiki and board…"
+                  inline
+                />
+              </div>
+            </div>
           </div>
         </div>
 

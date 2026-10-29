@@ -31,7 +31,10 @@ Everything is centred vertically and horizontally, in a column up to 720px wide:
 - **Header** (48px): the project dot and name, the session title, and a **New session** ghost button.
 - **Message log** (`UChatMessages`, `role="log"`), centred and up to 768px wide:
   - **Your messages:** right-aligned, in a `bg-elevated` bubble.
-  - **Juno's messages:** left-aligned with the avatar and "Juno · PM". While Juno is working, a thinking line reads "Reading the code, wiki and board…".
+  - **Juno's messages:** left-aligned with the avatar and "Juno · PM".
+    - **Live turn:** while Juno is working, the turn's transcript streams in at the bottom of the log as it arrives (SSE `run.events`), in the agent page's style ([agent.md](agent.md)): messages, and tool calls with their input and output collapsed into step groups. The log stays scrolled to the bottom. Until the first event arrives, a working line reads "Reading the code, wiki and board…".
+    - **Past turns:** a finished turn's first message has a collapsed "Steps" disclosure above it. Opening it loads that run's saved transcript (`GET /runs/:id/transcript`) and the label becomes "N steps". The count isn't stored anywhere, so it's only known once loaded.
+    - The turn's own messages (its reply, a question, a plan summary) are shown once, as messages in the log, and left out of its transcript.
   - **Plan link** (inside Juno's message, when the message proposed or revised a plan): a compact bordered button, "Plan v2 · {epic}" and "Open plan" (or "Now v3" on an older version's message). It toggles the plan flyout. The plan itself is never drawn in the log, so revisions don't stack up cards.
 - **Composer:** pinned to the bottom of the conversation, with a top divider. Same tools as above; the popovers open upwards.
 

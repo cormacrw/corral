@@ -3,8 +3,9 @@ import type { RunEvent } from '@corral/contracts'
 import { summarizeSteps, transcriptEntries, type ToolStep } from '~/utils/tool-steps'
 
 // The transcript log (design/agent.md): system dividers, agent messages,
-// collapsed groups of tool steps, and a working line while live
-const props = defineProps<{ events: RunEvent[], live: boolean, agentName: string }>()
+// collapsed groups of tool steps, and a working line while live. `inline`
+// drops its own scrolling log so it can sit inside another one, like Plan's.
+const props = defineProps<{ events: RunEvent[], live: boolean, agentName: string, inline?: boolean, working?: string }>()
 
 const OUTPUT_LINES = 12
 
@@ -31,18 +32,18 @@ const outputLines = (step: ToolStep) => (step.output ?? '').trimEnd().split('\n'
 const log = ref<HTMLElement | null>(null)
 watch(() => props.events.length, async () => {
   await nextTick()
-  if (props.live && log.value) log.value.scrollTop = log.value.scrollHeight
+  if (props.live && log.value && !props.inline) log.value.scrollTop = log.value.scrollHeight
 })
 </script>
 
 <template>
   <div
     ref="log"
-    role="log"
-    aria-live="polite"
-    class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4"
+    :role="props.inline ? undefined : 'log'"
+    :aria-live="props.inline ? undefined : 'polite'"
+    :class="props.inline ? 'flex flex-col gap-3' : 'flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4'"
   >
-    <div class="mx-auto flex w-full max-w-[880px] flex-col gap-3">
+    <div :class="['flex w-full flex-col gap-3', !props.inline && 'mx-auto max-w-[880px]']">
       <template v-for="entry in entries">
         <div
           v-if="entry.type === 'system'"
@@ -178,7 +179,7 @@ watch(() => props.events.length, async () => {
           <span class="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-75 motion-reduce:hidden" />
           <span class="relative inline-flex size-2 rounded-full bg-primary" />
         </span>
-        {{ props.agentName }} is working…
+        {{ entries.length === 0 && props.working ? props.working : `${props.agentName} is working…` }}
       </p>
       <p
         v-if="entries.length === 0 && !props.live"
