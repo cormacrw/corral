@@ -24,7 +24,7 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
      | Human review | Human review | You |
      | Ready to merge | Ready to merge | Corral |
      | Blocked & failed | Blocked, Failed | You |
-     | Merged | Merged | — |
+     | Merged | Merged | Last 3 days |
 
    - **Cards:** buttons with a `bg-default` background, a 1px border and `rounded-md`.
      - **Line 1:** the ref, the priority (Urgent in `error`, High in `warning`, others muted) and the PR number with an icon.
@@ -44,12 +44,13 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
 
 ## Rules
 
+- The Merged column only shows tasks merged in the last 3 days (`MERGED_WINDOW_DAYS` in `apps/web/app/utils/board.ts`). Older merged tasks stay on the Backlog, epic and task pages.
 - Ready tasks with unmerged dependencies stay in Ready, with the note "Waiting on {ref}" (D10).
 - "Working" comes from an active lease, not from the status. A task in In progress waiting for a retry doesn't pulse.
 
 ## Data
 
-- **Tasks** (status other than Backlog): ref, title, status, priority, epic, PR, review round, assigned agent, working (lease), note.
+- **Tasks** (status other than Backlog, and merged within the last 3 days): ref, title, status, priority, epic, PR, review round, assigned agent, working (lease), note.
 - **Epics** for the filter.
 - Live updates over SSE. Cards move between columns without a reload.
 
@@ -66,5 +67,4 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
 
 ## Open questions
 
-- Should Merged collapse after N items, or only show this week?
 - Should columns be collapsible for wide boards?
