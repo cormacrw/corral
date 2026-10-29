@@ -62,7 +62,7 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
 
     <div class="flex flex-col gap-3">
       <!-- The tiles scroll sideways rather than wrap -->
-      <div class="flex snap-x gap-2 overflow-x-auto px-4 pb-1">
+      <div class="flex snap-x gap-2 overflow-x-auto overscroll-contain px-4 pb-1">
         <dl
           v-for="tile in tiles"
           :key="tile.label"

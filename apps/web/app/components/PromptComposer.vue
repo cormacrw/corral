@@ -192,7 +192,7 @@ function onPick(event: Event) {
         <slot name="header" />
       </template>
       <template #footer>
-        <div class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+        <div class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overscroll-contain">
           <template v-if="props.project">
             <input
               ref="picker"

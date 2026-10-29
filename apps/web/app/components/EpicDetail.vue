@@ -203,9 +203,9 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
 
     <div
       v-else
-      :class="['flex min-h-0 flex-1', props.mode === 'page' ? 'max-[900px]:flex-col' : 'flex-col overflow-y-auto']"
+      :class="['flex min-h-0 flex-1', props.mode === 'page' ? 'max-[900px]:flex-col' : 'flex-col overflow-y-auto overscroll-contain']"
     >
-      <div :class="['flex flex-col gap-5 p-4', props.mode === 'page' && 'w-[360px] shrink-0 overflow-y-auto border-e border-default max-[900px]:w-full max-[900px]:border-e-0']">
+      <div :class="['flex flex-col gap-5 p-4', props.mode === 'page' && 'w-[360px] shrink-0 overflow-y-auto overscroll-contain border-e border-default max-[900px]:w-full max-[900px]:border-e-0']">
         <input
           :value="epic.title"
           class="w-full rounded-md bg-transparent px-1 py-0.5 text-lg font-semibold text-highlighted hover:bg-elevated focus:ring-2 focus:ring-primary focus:outline-none"
@@ -312,7 +312,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
         </p>
         <ul
           v-else-if="tab === 'tasks'"
-          :class="[props.mode !== 'mobile' && 'min-h-0 overflow-y-auto', props.mode === 'page' ? 'flex-1 px-4 py-2' : 'mt-2']"
+          :class="[props.mode !== 'mobile' && 'min-h-0 overflow-y-auto overscroll-contain', props.mode === 'page' ? 'flex-1 px-4 py-2' : 'mt-2']"
         >
           <li
             v-for="task in epic.tasks"

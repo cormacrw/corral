@@ -106,7 +106,7 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
             <div
               v-if="!collapsed && threads.length"
               aria-label="Open Plan threads"
-              class="ms-4 flex max-h-64 flex-col gap-0.5 overflow-y-auto border-s border-default ps-2"
+              class="ms-4 flex max-h-64 flex-col gap-0.5 overflow-y-auto overscroll-contain border-s border-default ps-2"
             >
               <div
                 v-for="thread in threads"

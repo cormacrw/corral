@@ -207,7 +207,7 @@ const title = computed(() => {
          default slot rather than #body still scroll. Screens that scroll an
          inner part fill the page exactly, so it never scrolls twice. -->
     <UDashboardGroup
-      class="relative inset-auto min-h-0 flex-1 overflow-x-auto *:min-h-0 *:overflow-y-auto"
+      class="relative inset-auto min-h-0 flex-1 overflow-x-auto overscroll-contain *:min-h-0 *:overflow-y-auto *:overscroll-contain"
       storage-key="mobile-dashboard"
     >
       <slot />

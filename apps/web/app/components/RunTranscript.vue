@@ -44,7 +44,7 @@ watch(() => props.events.length, async () => {
     ref="log"
     :role="props.inline ? undefined : 'log'"
     :aria-live="props.inline ? undefined : 'polite'"
-    :class="props.inline ? 'flex flex-col gap-3' : 'flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4'"
+    :class="props.inline ? 'flex flex-col gap-3' : 'flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain p-4'"
   >
     <div :class="['flex w-full flex-col gap-3', !props.inline && 'mx-auto max-w-[880px]']">
       <template v-for="entry in entries">
@@ -190,7 +190,7 @@ watch(() => props.events.length, async () => {
               >
                 <pre
                   v-if="step.output"
-                  :class="['max-h-80 overflow-auto rounded-md p-2 font-mono text-xs/5 wrap-anywhere whitespace-pre-wrap', step.isError ? 'bg-error/10 text-error' : 'bg-elevated text-default']"
+                  :class="['max-h-80 overflow-auto overscroll-contain rounded-md p-2 font-mono text-xs/5 wrap-anywhere whitespace-pre-wrap', step.isError ? 'bg-error/10 text-error' : 'bg-elevated text-default']"
                 >{{ shownOutput(step) }}</pre>
                 <div class="flex gap-3 text-xs">
                   <UButton
@@ -213,7 +213,7 @@ watch(() => props.events.length, async () => {
                 </div>
                 <pre
                   v-if="isOpen(`raw${step.key}`, false)"
-                  class="max-h-60 overflow-auto rounded-md bg-elevated p-2 font-mono text-xs/5 wrap-anywhere whitespace-pre-wrap"
+                  class="max-h-60 overflow-auto overscroll-contain rounded-md bg-elevated p-2 font-mono text-xs/5 wrap-anywhere whitespace-pre-wrap"
                 >{{ JSON.stringify(step.input, null, 2) }}</pre>
               </div>
             </div>

@@ -10,10 +10,10 @@ export default defineAppConfig({
       base: 'relative inset-auto min-h-0 flex-1'
     },
     dashboardPanel: {
-      slots: { root: 'min-h-0' }
+      slots: { root: 'min-h-0', body: 'overscroll-contain' }
     },
     dashboardSidebar: {
-      slots: { root: 'min-h-0' }
+      slots: { root: 'min-h-0', body: 'overscroll-contain' }
     }
   }
 })

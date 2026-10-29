@@ -139,7 +139,7 @@ const epicOptions = computed(() => epics.value.map(id => ({ id, label: epicLabel
           role="region"
           aria-label="Board columns"
           tabindex="0"
-          class="flex min-h-0 flex-1 items-start gap-3 overflow-x-auto p-4"
+          class="flex min-h-0 flex-1 items-start gap-3 overflow-x-auto overscroll-contain p-4"
         >
           <section
             v-for="column in columns"
@@ -164,7 +164,7 @@ const epicOptions = computed(() => epics.value.map(id => ({ id, label: epicLabel
             <!-- The padding matches the glow radius so the working glow and the
                  selected ring fit inside the list: anything past it counts as
                  overflow and makes the column scroll (and clips the glow) -->
-            <div class="flex min-h-0 flex-col gap-2 overflow-y-auto p-2">
+            <div class="flex min-h-0 flex-col gap-2 overflow-y-auto overscroll-contain p-2">
               <BorderGlow
                 v-for="task in inColumn(column)"
                 :key="task.id"

@@ -1,6 +1,12 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
 
+/* Keep the document stationary in every layout, including setup (bare). */
+html,
+body {
+  overscroll-behavior: none;
+}
+
 @theme static {
   --font-sans: 'Outfit', sans-serif;
 

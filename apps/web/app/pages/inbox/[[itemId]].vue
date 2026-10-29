@@ -238,7 +238,7 @@ onBeforeUnmount(() => {
         </div>
         <ul
           v-else
-          class="min-h-0 flex-1 overflow-y-auto"
+          class="min-h-0 flex-1 overflow-y-auto overscroll-contain"
         >
           <li
             v-for="item in items"
@@ -317,7 +317,7 @@ onBeforeUnmount(() => {
               @click="toggleTask"
             />
           </header>
-          <div class="min-h-0 flex-1 overflow-y-auto p-4">
+          <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
             <div class="mx-auto flex max-w-[720px] flex-col gap-4">
               <UAlert
                 v-if="selected.resolution"

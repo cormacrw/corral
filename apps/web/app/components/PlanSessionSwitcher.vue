@@ -56,7 +56,7 @@ async function go(to: string) {
             @click="go('/plan')"
           />
         </div>
-        <div class="min-h-0 flex-1 overflow-y-auto pb-4">
+        <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-4">
           <section
             v-if="sessions.length > 0"
             aria-label="Open sessions"

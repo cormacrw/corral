@@ -495,7 +495,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
 
     <div
       v-else-if="task"
-      :class="['min-h-0 flex-1 overflow-y-auto', props.mode === 'page' ? 'mx-auto grid w-full max-w-[1200px] gap-8 p-6 max-[900px]:grid-cols-1 min-[900px]:grid-cols-[1fr_260px]' : mobile ? 'pt-4 pb-[env(safe-area-inset-bottom)]' : 'p-4']"
+      :class="['min-h-0 flex-1 overflow-y-auto overscroll-contain', props.mode === 'page' ? 'mx-auto grid w-full max-w-[1200px] gap-8 p-6 max-[900px]:grid-cols-1 min-[900px]:grid-cols-[1fr_260px]' : mobile ? 'pt-4 pb-[env(safe-area-inset-bottom)]' : 'p-4']"
     >
       <div :class="['flex min-w-0 flex-col gap-5', mobile && '*:mx-4']">
         <h2

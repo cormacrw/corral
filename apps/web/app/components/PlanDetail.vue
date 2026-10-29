@@ -100,7 +100,7 @@ watch(() => props.plan.id, () => {
       />
     </header>
 
-    <div class="min-h-0 flex-1 overflow-y-auto">
+    <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain">
       <div class="px-4 pt-4 pb-2">
         <h2 class="text-lg font-semibold">
           {{ props.plan.title }}

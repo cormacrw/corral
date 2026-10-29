@@ -230,7 +230,7 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
           ref="log"
           role="log"
           aria-live="polite"
-          class="relative min-h-0 flex-1 overflow-y-auto p-4"
+          class="relative min-h-0 flex-1 overflow-y-auto overscroll-contain p-4"
         >
           <div class="mx-auto flex w-full max-w-[768px] flex-col gap-4">
             <div

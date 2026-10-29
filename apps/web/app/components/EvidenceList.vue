@@ -153,7 +153,7 @@ watch(open, async (item) => {
           />
           <pre
             v-else
-            class="max-h-[60vh] overflow-auto rounded-md border border-default bg-muted p-3 font-mono text-xs/5 whitespace-pre-wrap text-default"
+            class="max-h-[60vh] overflow-auto overscroll-contain rounded-md border border-default bg-muted p-3 font-mono text-xs/5 whitespace-pre-wrap text-default"
           >{{ text }}</pre>
         </template>
         <iframe
