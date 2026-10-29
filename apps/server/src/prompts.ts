@@ -88,8 +88,25 @@ function messageAttachmentIds(text: string): string[] {
   return [...ids]
 }
 
+// "grill me", "/grill-me" or the Grill me button's message
+const GRILL_REQUEST = /(^|[^\w-])\/?grill[ -]me\b/i
+
+export function isGrillRequest(text: string): boolean {
+  return GRILL_REQUEST.test(text)
+}
+
+// The grill-me skill adapted to Corral: questions go through ask_question,
+// and the interview ends in a plan instead of waiting to be told to plan
+const GRILL_INSTRUCTIONS = `(The human asked to be grilled. Follow the grill-me skill, adapted to Corral:
+- Map the decisions this needs and work through them in dependency order: ask a decision only once the ones it depends on are settled.
+- Ask exactly one question per ask_question call, always with a \`recommendation\`, and with \`options\` whenever the answer can be picked from a list, so the human rarely has to type. Word it so accepting the recommendation is the easy answer. After asking, end your turn and wait for the answer.
+- Answer anything you can from the code or the board yourself (list_tasks, get_task, the project docs) instead of asking. Ask only for decisions that are the human's to make.
+- Once the decisions are settled, or the human says to stop, call propose_plan right away, without first asking whether to plan, and list the agreed decisions in the plan summary.)
+
+`
+
 // Each PM turn is one message; the session carries the rest (D9)
-export function pmPrompt(turn: PmTurn): string {
+export function pmPrompt(turn: PmTurn & { grilling?: boolean }): string {
   const intro = turn.fresh
     ? `You are the product-manager agent for the project "${turn.projectName}" in Corral. Task IDs look like ${turn.prefix}-12. You are in a read-only checkout of the default branch. Answer greetings, status questions and anything you can answer from the board (list_tasks shows it live) straight away, without reading the repo. Read the code only when a request needs planning or code knowledge, and then only the parts that matter: start from the project docs (CORRAL.md or CLAUDE.md, and .corral/wiki/ if present) and don't go looking for files that aren't there. Propose work with propose_plan (one epic per separate feature, small tasks, one PR each, descriptions in markdown, verifiable acceptance criteria, explicit dependencies, humanReview true for auth, data migrations, payments, deletions and security-sensitive code). To refine an existing Backlog task, read it with get_task and include it in the plan with its \`ref\`, so the plan revises it instead of creating a duplicate. Ask with ask_question when requirements are ambiguous. The human approves plans: with the buttons, or by asking you in chat, and only then may you call approve_plan ("ready" for the board, "backlog" for later). Never approve on your own initiative. Keep replies short and concrete.\n\n`
     : ''
@@ -98,7 +115,8 @@ export function pmPrompt(turn: PmTurn): string {
   const images = ids.length > 0
     ? `(This message has ${ids.length === 1 ? 'an attached image' : `${ids.length} attached images`}: ${ids.join(', ')}. Fetch ${ids.length === 1 ? 'it' : 'each'} with get_attachment before answering.)\n\n`
     : ''
-  return `${intro}${attached}${images}${turn.text}`
+  const grill = turn.grilling || isGrillRequest(turn.text) ? GRILL_INSTRUCTIONS : ''
+  return `${intro}${grill}${attached}${images}${turn.text}`
 }
 
 // The session was lost: the database is the record, so the turn carries it
@@ -107,7 +125,16 @@ export function pmFallbackPrompt(turn: Omit<PmTurn, 'fresh'> & { history: { role
   const history = earlier.length > 0
     ? section('Conversation so far (your previous session was lost; this is the record)', earlier.map(m => `**${m.role}:** ${m.text}`).join('\n\n'))
     : ''
-  return `${pmPrompt({ ...turn, fresh: true })}\n\n${history}`.trim()
+  // A lost session mid-grilling keeps grilling
+  const grilling = turn.history.some(m => m.role.toLowerCase() === 'human' && isGrillRequest(m.text))
+  return `${pmPrompt({ ...turn, fresh: true, grilling })}\n\n${history}`.trim()
+}
+
+// A question as the PM sees it in its history: numbered options, so an
+// answer like "2" or the option's text can be matched to one
+export function questionText(m: { text: string, recommendation: string | null, options: string[] | null }): string {
+  const options = m.options?.map((option, i) => `${i + 1}. ${option}`).join('\n')
+  return [m.text, options && `Options:\n${options}`, m.recommendation && `Recommended: ${m.recommendation}`].filter(Boolean).join('\n\n')
 }
 
 export function developerPrompt(task: PromptTask, agentName: string): string {

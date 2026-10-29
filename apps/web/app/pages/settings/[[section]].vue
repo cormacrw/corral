@@ -10,6 +10,7 @@ const live = useLive()
 const toast = useToast()
 const colorMode = useColorMode()
 const device = useDevice()
+const install = useInstall()
 const section = computed(() => (typeof route.params.section === 'string' ? route.params.section : 'profile'))
 useSeoMeta({ title: 'Settings · Corral' })
 
@@ -93,6 +94,31 @@ const items = [
         <p class="mt-3 text-xs text-muted">
           Settings here apply to every project. Each project has its own settings in the sidebar.
         </p>
+        <!-- Only where the browser can install it, and not once installed -->
+        <template v-if="install.mode.value">
+          <h2 class="mt-6 mb-2 text-xs font-semibold text-muted">
+            App
+          </h2>
+          <button
+            type="button"
+            class="flex w-full items-center gap-3 rounded-md px-2.5 py-1.5 text-start hover:bg-elevated/50"
+            data-testid="open-install"
+            @click="install.open.value = true"
+          >
+            <UIcon
+              name="i-lucide-square-plus"
+              class="size-5 shrink-0 text-muted"
+            />
+            <span class="flex min-w-0 flex-1 flex-col">
+              <span class="text-sm text-highlighted">Install Corral</span>
+              <span class="text-xs text-muted">Add it to your home screen</span>
+            </span>
+            <UIcon
+              name="i-lucide-chevron-right"
+              class="size-4 shrink-0 text-dimmed"
+            />
+          </button>
+        </template>
       </aside>
 
       <div class="flex min-w-0 max-w-[880px] flex-1 flex-col gap-6">

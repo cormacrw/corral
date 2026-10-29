@@ -38,7 +38,8 @@ interface CodexLine {
   type?: string
   thread_id?: string
   item?: CodexItem
-  usage?: { input_tokens?: number, output_tokens?: number }
+  // input_tokens includes cached_input_tokens
+  usage?: { input_tokens?: number, cached_input_tokens?: number, output_tokens?: number }
   message?: string
   error?: { message?: string }
 }
@@ -47,6 +48,7 @@ const empty = (): ParsedLine => ({ events: [], sessionId: null, rateLimit: null,
 
 export class CodexJsonParser {
   #inputTokens = 0
+  #cacheReadTokens = 0
   #outputTokens = 0
   #started = new Set<string>()
   #lastMessage = ''
@@ -92,9 +94,11 @@ export class CodexJsonParser {
 
       case 'turn.completed':
         if (data.usage) {
-          this.#inputTokens += data.usage.input_tokens ?? 0
+          const cached = data.usage.cached_input_tokens ?? 0
+          this.#inputTokens += (data.usage.input_tokens ?? 0) - cached
+          this.#cacheReadTokens += cached
           this.#outputTokens += data.usage.output_tokens ?? 0
-          out.events.push({ type: 'usage', inputTokens: this.#inputTokens, outputTokens: this.#outputTokens })
+          out.events.push({ type: 'usage', inputTokens: this.#inputTokens, cacheReadTokens: this.#cacheReadTokens, outputTokens: this.#outputTokens })
         }
         out.result = { isError: false, text: this.#lastMessage }
         return out

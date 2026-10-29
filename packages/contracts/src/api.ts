@@ -238,6 +238,9 @@ export interface PlanMessage {
   role: 'human' | 'pm'
   kind: 'message' | 'question' | 'error'
   text: string
+  // Set only on questions, and only when the PM gave them
+  recommendation: string | null
+  options: string[] | null
   planId: string | null
   runId: string | null
   createdAt: string
@@ -292,6 +295,17 @@ export const planMessageInput = z.object({
   taskRef: z.string().trim().optional()
 }).refine(input => input.text.length > 0 || input.taskRef, { message: 'Write a message or attach a task' })
 export type PlanMessageInput = z.infer<typeof planMessageInput>
+
+// The PM's ask_question: a question, optionally with a suggested answer
+// and 2–5 short answer choices
+export const askQuestionInput = z.object({
+  question: z.string().trim().min(1),
+  recommendation: z.string().trim().min(1).optional().describe('Your suggested answer, in a few words'),
+  options: z.array(z.string().trim().min(1, 'An option can’t be empty').max(120, 'An option can be at most 120 characters'))
+    .min(2, 'Give 2–5 options, or leave options out').max(5, 'Give 2–5 options, or leave options out')
+    .optional().describe('2–5 short answer choices')
+})
+export type AskQuestionInput = z.infer<typeof askQuestionInput>
 
 // The plan's Drafts go to the board (Ready) or to the Backlog
 export const approvePlanInput = z.object({
@@ -349,10 +363,29 @@ export interface GlobalStatus {
   updating: boolean
 }
 
+// The runtimes an agent can run on (D15), and the CLI each one needs on the
+// runner. Neutral names, never an auth method (agent-runtime-and-auth.md).
+export const AGENT_RUNTIMES = { 'claude-code': 'claude', 'codex': 'codex' } as const satisfies Record<string, CliId>
+export type AgentRuntime = keyof typeof AGENT_RUNTIMES
+const agentRuntime = z.enum(Object.keys(AGENT_RUNTIMES) as [AgentRuntime, ...AgentRuntime[]], {
+  message: `Unknown runtime; use one of ${Object.keys(AGENT_RUNTIMES).join(', ')}`
+})
+
+// New agents. There is only one PM (D13), so only developers and reviewers.
+export const createAgentInput = z.object({
+  name: z.string().trim().min(1).max(80),
+  role: z.enum(['developer', 'reviewer'], { message: 'Only one PM agent exists; the role must be developer or reviewer' }),
+  runtime: agentRuntime,
+  concurrency: z.number().int().positive().default(1)
+})
+export type CreateAgentInput = z.infer<typeof createAgentInput>
+
 export const patchAgentInput = z.object({
   name: z.string().trim().min(1).optional(),
   concurrency: z.number().int().positive().optional(),
-  paused: z.boolean().optional()
+  paused: z.boolean().optional(),
+  // Only while the agent has no active runs
+  runtime: agentRuntime.optional()
 })
 export type PatchAgentInput = z.infer<typeof patchAgentInput>
 
@@ -489,6 +522,7 @@ export interface Run {
   error: string | null
   headSha: string | null
   inputTokens: number | null
+  cacheReadTokens: number | null
   outputTokens: number | null
   rateLimitResetAt: string | null
   queuedAt: string

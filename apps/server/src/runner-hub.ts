@@ -164,6 +164,10 @@ export class RunnerHub {
         }
         return
       }
+      // Nobody sends run.message yet; when the API does, it answers with this
+      case 'run.message.rejected':
+        console.warn(`Run ${message.runId} did not take a message: ${message.error}`)
+        return
       case 'hello':
         return
     }

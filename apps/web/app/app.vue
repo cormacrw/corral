@@ -35,5 +35,6 @@ const layout = computed(() => device.isMobile.value && route.meta.layout === und
     <NuxtLayout :name="layout">
       <NuxtPage />
     </NuxtLayout>
+    <InstallSheet />
   </UApp>
 </template>

@@ -11,7 +11,7 @@ import { pmWorktreePath } from './workspace.ts'
 
 // Stands in for `claude`. With -p it answers once and exits; with
 // --input-format stream-json it stays alive and answers each stdin message,
-// repeating the init line every turn. A --resume of any session but
+// repeating the init line every turn, until stdin closes. A --resume of any session but
 // "fresh-session" fails at startup. Each process starts a `sleep` helper in
 // its group, like a dev server an agent leaves running, and logs both pids.
 const FAKE_CLAUDE = `#!/usr/bin/env node
@@ -37,7 +37,10 @@ if (args.includes('-p')) {
   answer(args[args.indexOf('-p') + 1])
   helper.kill()
 } else {
-  createInterface({ input: process.stdin }).on('line', line => answer(JSON.parse(line).message.content))
+  // Like the CLI, it exits once stdin closes, leaving the helper behind
+  createInterface({ input: process.stdin })
+    .on('line', line => answer(JSON.parse(line).message.content))
+    .on('close', () => process.exit(0))
 }
 `
 

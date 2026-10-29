@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BOARD_COLUMNS, MERGED_WINDOW_DAYS, onBoard, swipeStep } from './board.ts'
+import { BOARD_COLUMNS, MERGED_WINDOW_DAYS, onBoard, sortColumn, swipeStep } from './board.ts'
 
 const DAY = 24 * 60 * 60 * 1000
 const now = Date.parse('2026-10-29T12:00:00Z')
@@ -57,5 +57,44 @@ describe('swipeStep', () => {
 
   it('ignores mostly vertical scrolls', () => {
     expect(swipeStep(-60, 120)).toBe(0)
+  })
+})
+
+describe('sortColumn', () => {
+  const task = (ref: string, mergedAt: string | null) => ({ ref, mergedAt })
+  const refs = (tasks: { ref: string }[]) => tasks.map(t => t.ref)
+
+  it('lists merged tasks newest first', () => {
+    const tasks = [
+      task('COR-1', '2026-10-27T09:00:00Z'),
+      task('COR-2', '2026-10-29T09:00:00Z'),
+      task('COR-3', '2026-10-28T09:00:00Z')
+    ]
+    expect(refs(sortColumn('merged', tasks))).toEqual(['COR-2', 'COR-3', 'COR-1'])
+  })
+
+  it('puts tasks with no merge time last', () => {
+    const tasks = [task('COR-1', null), task('COR-2', '2026-10-27T09:00:00Z'), task('COR-3', null), task('COR-4', '2026-10-28T09:00:00Z')]
+    expect(refs(sortColumn('merged', tasks))).toEqual(['COR-4', 'COR-2', 'COR-1', 'COR-3'])
+  })
+
+  it('breaks ties by ref, whatever order they came in', () => {
+    const at = '2026-10-28T09:00:00Z'
+    const expected = ['COR-2', 'COR-10', 'COR-11']
+    expect(refs(sortColumn('merged', [task('COR-11', at), task('COR-2', at), task('COR-10', at)]))).toEqual(expected)
+    expect(refs(sortColumn('merged', [task('COR-10', at), task('COR-11', at), task('COR-2', at)]))).toEqual(expected)
+  })
+
+  it('does not change the input', () => {
+    const tasks = [task('COR-1', '2026-10-27T09:00:00Z'), task('COR-2', '2026-10-29T09:00:00Z')]
+    sortColumn('merged', tasks)
+    expect(refs(tasks)).toEqual(['COR-1', 'COR-2'])
+  })
+
+  it('leaves other columns in the order they came', () => {
+    const tasks = [task('COR-3', '2026-10-27T09:00:00Z'), task('COR-1', null), task('COR-2', '2026-10-29T09:00:00Z')]
+    for (const column of BOARD_COLUMNS.filter(c => c.key !== 'merged')) {
+      expect(refs(sortColumn(column.key, tasks))).toEqual(['COR-3', 'COR-1', 'COR-2'])
+    }
   })
 })

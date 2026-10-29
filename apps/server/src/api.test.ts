@@ -2,7 +2,7 @@ import type { Attachment, Task } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { asc, eq } from 'drizzle-orm'
 import { randomBytes } from 'node:crypto'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { readProjectAttachment } from './attachments.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 
@@ -237,6 +237,94 @@ describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
       expect(await list('board')).toEqual([2])
       expect(await list('backlog')).toEqual([1])
       expect(await list('all')).toEqual([1, 2])
+    })
+  })
+
+  describe('agents', () => {
+    // What the runner's detect_clis reports
+    function runnerClis(clis: { id: 'claude' | 'codex', version: string | null }[]) {
+      vi.spyOn(t.runner, 'request').mockImplementation(async (job) => {
+        if (job.kind !== 'detect_clis') throw new Error(`unexpected job ${job.kind}`)
+        return { kind: 'detect_clis', clis: clis.map(c => ({ ...c, signedIn: c.version !== null })) } as never
+      })
+    }
+    const both = [{ id: 'claude', version: '2.1.312' }, { id: 'codex', version: '0.165.0' }] as const
+
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
+    it('creates a developer or reviewer with its runtime, lists it and publishes it', async () => {
+      runnerClis([...both])
+      t.events.length = 0
+      const res = await t.request('POST', '/api/agents', { name: 'Orion', role: 'developer', runtime: 'codex', concurrency: 2 })
+      expect(res.status).toBe(201)
+      const agent = await res.json() as { id: string }
+      expect(agent).toMatchObject({ name: 'Orion', role: 'developer', runtime: 'codex', concurrency: 2, paused: false, activeRuns: 0 })
+      const reviewer = await t.request('POST', '/api/agents', { name: 'Lyra', role: 'reviewer', runtime: 'claude-code', concurrency: 1 })
+      expect(reviewer.status).toBe(201)
+
+      const listed = await t.request('GET', '/api/agents').then(r => r.json()) as { name: string, role: string, runtime: string }[]
+      expect(listed.map(a => [a.name, a.role, a.runtime])).toEqual(expect.arrayContaining([
+        ['Orion', 'developer', 'codex'],
+        ['Lyra', 'reviewer', 'claude-code']
+      ]))
+      expect(t.events).toMatchObject([
+        { type: 'agent.updated', agent: { id: agent.id, runtime: 'codex' } },
+        { type: 'agent.updated', agent: { name: 'Lyra' } }
+      ])
+      const [audit] = await t.db.select().from(schema.auditLog).where(eq(schema.auditLog.action, 'agent.created')).orderBy(asc(schema.auditLog.id)).limit(1)
+      expect(audit).toMatchObject({ actor: t.actor, detail: { agentId: agent.id, role: 'developer', runtime: 'codex' } })
+    })
+
+    it('rejects a PM, an unknown runtime and a runtime whose CLI isn\'t installed, saying why', async () => {
+      runnerClis([{ id: 'claude', version: '2.1.312' }, { id: 'codex', version: null }])
+      const cases = [
+        [{ name: 'Second PM', role: 'pm', runtime: 'claude-code', concurrency: 1 }, 'Only one PM agent exists; the role must be developer or reviewer'],
+        [{ name: 'Gemini dev', role: 'developer', runtime: 'gemini', concurrency: 1 }, 'Unknown runtime; use one of claude-code, codex'],
+        [{ name: 'Codex dev', role: 'developer', runtime: 'codex', concurrency: 1 }, 'Codex CLI isn’t installed on the runner, so the codex runtime can’t be used']
+      ] as const
+      for (const [body, message] of cases) {
+        const res = await t.request('POST', '/api/agents', body)
+        expect(res.status).toBe(400)
+        expect(await res.json()).toMatchObject({ error: { code: 'invalid_input', issues: [{ message }] } })
+      }
+      const names = (await t.db.select({ name: schema.agents.name }).from(schema.agents)).map(a => a.name)
+      expect(names).not.toContain('Second PM')
+      expect(names).not.toContain('Codex dev')
+    })
+
+    it('rejects a duplicate name, and says when the runner is offline', async () => {
+      runnerClis([...both])
+      expect((await t.request('POST', '/api/agents', { name: 'Atlas', role: 'developer', runtime: 'claude-code', concurrency: 1 })).status).toBe(409)
+      vi.restoreAllMocks()
+      const offline = await t.request('POST', '/api/agents', { name: 'Nova', role: 'developer', runtime: 'claude-code', concurrency: 1 })
+      expect(offline.status).toBe(503)
+      expect(await offline.json()).toEqual({ error: { code: 'runner_offline' } })
+    })
+
+    it('changes the runtime only while the agent has no queued or running run', async () => {
+      runnerClis([...both])
+      const created = await t.request('POST', '/api/agents', { name: 'Switcher', role: 'developer', runtime: 'claude-code', concurrency: 1 }).then(r => r.json()) as { id: string }
+      const project = await t.createProject()
+      const task = await t.createTask(project.slug)
+
+      for (const state of ['queued', 'running'] as const) {
+        const [run] = await t.db.insert(schema.runs).values({ agentId: created.id, projectId: project.id, taskId: task.id, role: 'developer', state }).returning()
+        const res = await t.request('PATCH', `/api/agents/${created.id}`, { runtime: 'codex' })
+        expect(res.status).toBe(409)
+        expect(await res.json()).toEqual({ error: { code: 'conflict', constraint: 'agent_has_active_runs' } })
+        // Other settings can still change
+        expect((await t.request('PATCH', `/api/agents/${created.id}`, { concurrency: 2 })).status).toBe(200)
+        await t.db.update(schema.runs).set({ state: 'completed' }).where(eq(schema.runs.id, run!.id))
+      }
+
+      t.events.length = 0
+      const res = await t.request('PATCH', `/api/agents/${created.id}`, { runtime: 'codex' })
+      expect(res.status).toBe(200)
+      expect(await res.json()).toMatchObject({ id: created.id, runtime: 'codex' })
+      expect(t.events).toMatchObject([{ type: 'agent.updated', agent: { id: created.id, runtime: 'codex' } }])
+      expect((await t.request('PATCH', `/api/agents/${created.id}`, { runtime: 'gemini' })).status).toBe(400)
     })
   })
 

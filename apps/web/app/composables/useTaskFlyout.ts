@@ -8,6 +8,10 @@
 // another flyout item is marked, and the flyout shows its own back arrow.
 // Opening that happens on its own (the Inbox following the selected item)
 // replaces the entry instead.
+//
+// Mobile has no flyout (design/mobile.md): opening a task or epic goes to
+// its page. Opening that replaces the entry still sets the query, so a page
+// following a selection doesn't navigate away by itself.
 interface OpenOptions {
   replace?: boolean
 }
@@ -15,6 +19,7 @@ interface OpenOptions {
 export function useTaskFlyout() {
   const route = useRoute()
   const router = useRouter()
+  const device = useDevice()
   const ref = computed(() => typeof route.query.task === 'string' ? route.query.task : null)
   const epic = computed(() => typeof route.query.epic === 'string' ? route.query.epic : null)
   const plan = computed(() => 'plan' in route.query)
@@ -31,10 +36,12 @@ export function useTaskFlyout() {
     else void router.push({ query, state: { flyoutBack } })
   }
   function open(taskRef: string, options: OpenOptions = {}) {
+    if (device.isMobile.value && !options.replace) return void router.push(`/tasks/${taskRef}`)
     const { epic: _epic, plan: _plan, ...rest } = route.query
     go({ ...rest, task: taskRef }, options)
   }
   function openEpic(epicId: string, options: OpenOptions = {}) {
+    if (device.isMobile.value && !options.replace) return void router.push(`/epics/${epicId}`)
     const { task: _task, plan: _plan, ...rest } = route.query
     go({ ...rest, epic: epicId }, options)
   }

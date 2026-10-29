@@ -5,10 +5,12 @@ import { loadRunnerId } from './identity.ts'
 import { runSetupJob } from './jobs.ts'
 import { ToolServer } from './mcp.ts'
 import { RunManager } from './run-manager.ts'
+import { installSkills, pinnedSkillsDir, skillTargets } from './skills.ts'
 
 const config = loadConfig()
 const warning = gitAuthorWarning(config)
 if (warning) console.warn(`Warning: ${warning}`)
+await installSkills(pinnedSkillsDir, skillTargets())
 const runnerId = await loadRunnerId(config.dataDir)
 const tools = new ToolServer()
 await tools.start()

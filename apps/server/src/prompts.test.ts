@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { developerPrompt, pmFallbackPrompt, pmPrompt, reviewerPrompt, type PromptTask } from './prompts.ts'
+import { developerPrompt, isGrillRequest, pmFallbackPrompt, pmPrompt, questionText, reviewerPrompt, type PromptTask } from './prompts.ts'
 
 const turn = { text: 'hi', attachedTask: null, projectName: 'Test app', prefix: 'TA' }
 
@@ -37,6 +37,45 @@ describe('pmPrompt', () => {
 
   it('points at an attached task', () => {
     expect(pmPrompt({ ...turn, attachedTask: 'TA-3', fresh: false })).toBe('(About task TA-3; read it with get_task.)\n\nhi')
+  })
+})
+
+describe('pmPrompt grilling', () => {
+  it('recognises a request to be grilled', () => {
+    for (const text of ['grill me on CSV export', 'Grill me', '/grill-me', 'Can you grill-me about this?', '/grill-me CSV export']) {
+      expect(isGrillRequest(text), text).toBe(true)
+    }
+    for (const text of ['hi', 'plan CSV export', 'add a grill to the menu', 'grilled cheese', 'grillme.com']) {
+      expect(isGrillRequest(text), text).toBe(false)
+    }
+  })
+
+  it('adds the grill-me instructions only when asked', () => {
+    const prompt = pmPrompt({ ...turn, text: 'grill me on CSV export', fresh: false })
+    expect(prompt).toContain('Follow the grill-me skill, adapted to Corral')
+    expect(prompt).toContain('work through them in dependency order')
+    expect(prompt).toContain('Ask exactly one question per ask_question call, always with a `recommendation`, and with `options` whenever the answer can be picked from a list')
+    expect(prompt).toContain('Answer anything you can from the code or the board yourself')
+    expect(prompt).toContain('call propose_plan right away, without first asking whether to plan, and list the agreed decisions in the plan summary')
+    expect(prompt.endsWith('grill me on CSV export')).toBe(true)
+    expect(pmPrompt({ ...turn, fresh: true })).not.toContain('grill')
+  })
+
+  it('keeps the fresh intro first and the grill instructions before the message', () => {
+    const prompt = pmPrompt({ ...turn, text: '/grill-me', attachedTask: 'TA-3', fresh: true })
+    expect(prompt.startsWith(pmPrompt({ ...turn, fresh: true }).replace(/hi$/, ''))).toBe(true)
+    expect(prompt.endsWith('(About task TA-3; read it with get_task.)\n\n/grill-me')).toBe(true)
+  })
+
+  it('stays runtime-neutral', () => {
+    const prompt = pmPrompt({ ...turn, text: 'grill me', fresh: false })
+    expect(prompt).not.toMatch(/Skill tool|Claude|Codex/)
+  })
+
+  it('keeps grilling when a lost session is rebuilt mid-interview', () => {
+    const history = [{ role: 'Human', text: 'grill me on exports' }, { role: 'PM (question)', text: 'Which format?' }, { role: 'Human', text: '1' }]
+    expect(pmFallbackPrompt({ ...turn, text: '1', history })).toContain('Follow the grill-me skill')
+    expect(pmFallbackPrompt({ ...turn, history: [{ role: 'Human', text: 'hi' }] })).not.toContain('grill')
   })
 })
 
@@ -106,5 +145,15 @@ describe('pmFallbackPrompt', () => {
     const prompt = pmFallbackPrompt({ ...turn, history: [{ role: 'human', text: 'earlier' }, { role: 'human', text: 'hi' }] })
     expect(prompt.startsWith(pmPrompt({ ...turn, fresh: true }))).toBe(true)
     expect(prompt).toContain('**human:** earlier')
+  })
+})
+
+describe('questionText', () => {
+  it('leaves a plain question as it is', () => {
+    expect(questionText({ text: 'Who uses exports?', recommendation: null, options: null })).toBe('Who uses exports?')
+  })
+
+  it('numbers the options and adds the recommendation', () => {
+    expect(questionText({ text: 'Which format?', recommendation: 'CSV', options: ['CSV', 'Excel'] })).toBe('Which format?\n\nOptions:\n1. CSV\n2. Excel\n\nRecommended: CSV')
   })
 })

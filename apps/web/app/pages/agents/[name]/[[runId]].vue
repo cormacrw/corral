@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { duration, isLiveRun as isLive, ROLE, runBadge, timeAgo, tokens } from '~/utils/labels'
+import { duration, isLiveRun as isLive, ROLE, runBadge, runTokens, timeAgo } from '~/utils/labels'
 
 // An agent's page (design/agent.md): runs list and the transcript. Mobile
 // shows the agent and its runs at /agents/:name, and a run's transcript
@@ -149,7 +149,7 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
                 variant="subtle"
                 size="xs"
               />
-              <span class="min-w-0 truncate text-xs text-muted">Run #{{ selected.number }} · {{ duration(selected.startedAt, selected.endedAt, now) }} · {{ tokens((selected.inputTokens ?? 0) + (selected.outputTokens ?? 0)) }} tokens</span>
+              <span class="min-w-0 truncate text-xs text-muted">Run #{{ selected.number }} · {{ duration(selected.startedAt, selected.endedAt, now) }} · {{ runTokens(selected) }}</span>
               <div class="ms-auto flex shrink-0 gap-2">
                 <UButton
                   v-if="selected.taskRef"

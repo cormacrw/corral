@@ -33,7 +33,7 @@ describe('CodexJsonParser', () => {
       { type: 'tool_call', id: 'item_5', tool: 'Bash', input: { command: 'ls nonexistent-dir' } },
       { type: 'tool_result', id: 'item_5', output: 'ls: cannot access \'nonexistent-dir\': No such file or directory\n', isError: true },
       { type: 'message', text: 'Retrieved “Say hello,” attempted comment “hi” (comments closed), created `b.txt` containing the title, and ran `ls nonexistent-dir` (failed: directory missing).' },
-      { type: 'usage', inputTokens: 77491, outputTokens: 299 }
+      { type: 'usage', inputTokens: 7091, cacheReadTokens: 70400, outputTokens: 299 }
     ])
     const result = lines.find(line => line.result)!.result
     expect(result).toEqual({ isError: false, text: expect.stringMatching(/^Retrieved “Say hello,”/) })
@@ -47,7 +47,7 @@ describe('CodexJsonParser', () => {
     expect(events(lines)).toEqual([
       { type: 'thinking', text: expect.stringMatching(/^\*\*Counting prime numbers\*\*/) },
       { type: 'message', text: '21' },
-      { type: 'usage', inputTokens: 93800, outputTokens: 347 }
+      { type: 'usage', inputTokens: 11112, cacheReadTokens: 82688, outputTokens: 347 }
     ])
     expect(lines.find(line => line.result)!.result).toEqual({ isError: false, text: '21' })
   })

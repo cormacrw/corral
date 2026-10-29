@@ -1,8 +1,8 @@
-import type { Agent, Evidence, PatchAgentInput, Review, Run } from '@corral/contracts'
+import type { Agent, CreateAgentInput, Evidence, PatchAgentInput, Review, Run } from '@corral/contracts'
 import { ACTIVE_RUN_STATES, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, count, desc, eq, inArray, type SQL } from 'drizzle-orm'
-import { notFound } from './errors.ts'
+import { ApiFailure, notFound } from './errors.ts'
 import { avatarUrl } from './avatars.ts'
 
 const { agents, auditLog, evidence, projects, reviews, runs, tasks } = schema
@@ -40,6 +40,7 @@ function toRun({ run, agentName, prefix, taskNumber, taskTitle }: RunJoin): Run 
     error: run.error,
     headSha: run.headSha,
     inputTokens: run.inputTokens,
+    cacheReadTokens: run.cacheReadTokens,
     outputTokens: run.outputTokens,
     rateLimitResetAt: run.rateLimitResetAt?.toISOString() ?? null,
     queuedAt: run.queuedAt.toISOString(),
@@ -111,11 +112,29 @@ export function toEvidence(row: typeof evidence.$inferSelect): Evidence {
   }
 }
 
-// Agent pause and concurrency (PRD §7.11 control panel, design/settings.md)
+// A new developer or reviewer (design/settings.md). The scheduler treats it
+// like the defaults: any free agent of the role claims the next task.
+export async function createAgent(db: Executor, input: CreateAgentInput, actor: Actor): Promise<Agent> {
+  const [row] = await db.insert(agents).values(input).returning()
+  await db.insert(auditLog).values({ actor, action: 'agent.created', detail: { agentId: row!.id, role: row!.role, runtime: row!.runtime } })
+  return (await listAgents(db)).find(a => a.id === row!.id)!
+}
+
+// Agent pause, concurrency and runtime (PRD §7.11 control panel, design/settings.md)
 export async function patchAgent(db: Executor, agentId: string, input: PatchAgentInput, actor: Actor): Promise<Agent> {
-  const [row] = await db.update(agents).set({ ...input, updatedAt: new Date() }).where(eq(agents.id, agentId)).returning()
-  if (!row) throw notFound()
-  await db.insert(auditLog).values({ actor, action: input.paused !== undefined ? (input.paused ? 'agent.paused' : 'agent.resumed') : 'agent.updated', detail: { agentId, changed: Object.keys(input) } })
+  await db.transaction(async (tx) => {
+    // Locked like claimNextTask does, so no run starts while the runtime changes
+    const [current] = await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')
+    if (!current) throw notFound()
+    if (input.runtime !== undefined && input.runtime !== current.runtime) {
+      // A queued or running run was started for the old runtime
+      const [active] = await tx.select({ n: count() }).from(runs)
+        .where(and(eq(runs.agentId, agentId), inArray(runs.state, [...ACTIVE_RUN_STATES])))
+      if (active!.n > 0) throw new ApiFailure(409, { code: 'conflict', constraint: 'agent_has_active_runs' })
+    }
+    await tx.update(agents).set({ ...input, updatedAt: new Date() }).where(eq(agents.id, agentId))
+    await tx.insert(auditLog).values({ actor, action: input.paused !== undefined ? (input.paused ? 'agent.paused' : 'agent.resumed') : 'agent.updated', detail: { agentId, changed: Object.keys(input) } })
+  })
   return (await listAgents(db)).find(a => a.id === agentId)!
 }
 

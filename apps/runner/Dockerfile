@@ -36,6 +36,8 @@ RUN pnpm install --frozen-lockfile --prod --filter @corral/runner...
 
 COPY packages/core packages/core
 COPY packages/contracts packages/contracts
+# Includes apps/runner/skills, which the runner copies into the claude and
+# codex skill directories at startup (they're on volumes, so it can't be baked in)
 COPY apps/runner apps/runner
 
 ENV NODE_ENV=production

@@ -35,6 +35,10 @@ const parts = computed(() => route.path.split('/').filter(Boolean))
 // (design/mobile.md), like a conversation
 const fullScreen = computed(() => parts.value[0] === 'agents' && parts.value.length >= 3)
 
+// A task and an epic bring their own header with a back arrow, and a task
+// is a full page with no tab bar (design/mobile.md)
+const ownHeader = computed(() => isActive('/tasks', '/epics'))
+
 // A project's own pages (Board, Backlog, Settings) name the project above
 // the page and go back to its overview
 const PROJECT_PAGES: Record<string, string> = { board: 'Board', backlog: 'Backlog', settings: 'Settings' }
@@ -104,8 +108,12 @@ const title = computed(() => {
 
 <template>
   <div class="flex h-svh flex-col bg-default text-default">
+    <div
+      v-if="ownHeader"
+      class="shrink-0 pt-[env(safe-area-inset-top)]"
+    />
     <header
-      v-if="!fullScreen"
+      v-else-if="!fullScreen"
       class="shrink-0 border-b border-default bg-default pt-[env(safe-area-inset-top)] ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]"
     >
       <div class="flex h-14 items-center gap-2 px-4">
@@ -174,7 +182,7 @@ const title = computed(() => {
     </UDashboardGroup>
 
     <nav
-      v-if="!fullScreen && !focused"
+      v-if="!fullScreen && !focused && !isActive('/tasks')"
       aria-label="Main"
       class="shrink-0 border-t border-default bg-default pb-[env(safe-area-inset-bottom)] ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]"
     >

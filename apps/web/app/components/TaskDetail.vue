@@ -6,9 +6,10 @@ import { availableEvents } from '@corral/core'
 import { api, ApiError } from '~/composables/useApi'
 import { PRIORITY, STATUS, TASK_TYPE, timeAgo } from '~/utils/labels'
 
-// One TaskDetail with two modes (design/task.md): docked flyout, or the
-// task page with a properties rail
-const props = defineProps<{ taskRef: string, mode: 'flyout' | 'page' }>()
+// One TaskDetail with three modes (design/task.md): docked flyout, the
+// task page with a properties rail, or the full mobile page with Details
+// and Criteria and activity tabs (design/mobile.md)
+const props = defineProps<{ taskRef: string, mode: 'flyout' | 'page' | 'mobile' }>()
 const emit = defineEmits<{ close: [] }>()
 
 const live = useLive()
@@ -29,6 +30,11 @@ const descriptionDraft = ref<{ type: 'doc', content?: never[] }>({ type: 'doc', 
 const newCriterion = ref('')
 // PR bodies link to ?evidence=1
 const tab = ref<'activity' | 'evidence' | 'history'>(useRoute().query.evidence ? 'evidence' : 'activity')
+// Mobile splits the body in two; evidence lives with criteria and activity
+const mobileTab = ref<'details' | 'criteria'>(useRoute().query.evidence ? 'criteria' : 'details')
+const mobile = computed(() => props.mode === 'mobile')
+// Every part shows in the flyout and page; mobile shows one tab's parts
+const shows = (part: 'details' | 'criteria') => !mobile.value || mobileTab.value === part
 const confirmDelete = ref(false)
 let savedTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -281,6 +287,7 @@ function historyText(entry: AuditEntry): string {
     default: return entry.action
   }
 }
+const workingAgent = computed(() => task.value?.lease ? live.state.value.agents.find(a => a.role === task.value!.lease!.role) ?? null : null)
 const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/${props.taskRef}`)
 </script>
 
@@ -360,6 +367,56 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
           />
         </div>
       </template>
+      <template v-else-if="mobile">
+        <UButton
+          icon="i-lucide-arrow-left"
+          variant="ghost"
+          color="neutral"
+          aria-label="Back"
+          class="-ms-2"
+          @click="emit('close')"
+        />
+        <div class="min-w-0 flex-1 leading-tight">
+          <NuxtLink
+            v-if="epic"
+            :to="`/epics/${epic.id}`"
+            class="block truncate text-xs text-muted underline"
+          >{{ epic.title }} ›</NuxtLink>
+          <h1 class="flex items-center gap-2 text-base font-semibold text-highlighted">
+            {{ props.taskRef }}
+            <UBadge
+              v-if="isDraft"
+              label="Draft"
+              color="neutral"
+              variant="subtle"
+              size="sm"
+            />
+            <span
+              v-if="saved"
+              class="text-xs font-normal text-success"
+            >✓ Saved</span>
+          </h1>
+        </div>
+        <UButton
+          icon="i-lucide-link"
+          variant="ghost"
+          color="neutral"
+          aria-label="Copy link"
+          @click="copyLink"
+        />
+        <UDropdownMenu
+          v-if="task && task.status !== 'merged'"
+          :items="[{ label: 'Delete task', icon: 'i-lucide-trash-2', color: 'error', onSelect: () => { confirmDelete = true } }]"
+          :content="{ align: 'end' }"
+        >
+          <UButton
+            icon="i-lucide-ellipsis"
+            variant="ghost"
+            color="neutral"
+            aria-label="More"
+          />
+        </UDropdownMenu>
+      </template>
       <template v-else>
         <UBreadcrumb :items="[{ label: 'Board', to: project ? `/projects/${project.slug}/board` : '/' }, ...(epic ? [{ label: epic.title, to: `/epics/${epic.id}` }] : []), { label: props.taskRef }]" />
         <span
@@ -389,9 +446,9 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
 
     <div
       v-else-if="task"
-      :class="['min-h-0 flex-1 overflow-y-auto', props.mode === 'page' ? 'mx-auto grid w-full max-w-[1200px] gap-8 p-6 max-[900px]:grid-cols-1 min-[900px]:grid-cols-[1fr_260px]' : 'p-4']"
+      :class="['min-h-0 flex-1 overflow-y-auto', props.mode === 'page' ? 'mx-auto grid w-full max-w-[1200px] gap-8 p-6 max-[900px]:grid-cols-1 min-[900px]:grid-cols-[1fr_260px]' : mobile ? 'pt-4 pb-[env(safe-area-inset-bottom)]' : 'p-4']"
     >
-      <div class="flex min-w-0 flex-col gap-5">
+      <div :class="['flex min-w-0 flex-col gap-5', mobile && '*:mx-4']">
         <h2
           v-if="readonly"
           class="px-1 py-0.5 text-lg font-semibold text-highlighted"
@@ -406,8 +463,33 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
           @change="patch({ title: ($event.target as HTMLInputElement).value })"
         >
 
+        <template v-if="mobile">
+          <div
+            v-if="agentHolds && task.lease && workingAgent"
+            class="-mt-2 flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/5 px-3 py-2 text-sm"
+          >
+            <AgentAvatar
+              :name="workingAgent.name"
+              size="xs"
+              working
+            />
+            <span class="min-w-0 flex-1 truncate"><span class="font-medium">{{ workingAgent.name }}</span> <span class="text-muted">is working</span></span>
+            <NuxtLink
+              :to="`/agents/${workingAgent.name.toLowerCase()}/${task.lease.runId}`"
+              class="font-medium text-primary"
+            >Watch</NuxtLink>
+          </div>
+          <UTabs
+            v-model="mobileTab"
+            :items="[{ label: 'Details', value: 'details' }, { label: isDraft ? 'Criteria' : 'Criteria and activity', value: 'criteria' }]"
+            :content="false"
+            :ui="{ indicator: 'bg-default shadow-xs', trigger: 'data-[state=active]:text-highlighted' }"
+            class="-mt-2"
+          />
+        </template>
+
         <p
-          v-if="readonly"
+          v-if="readonly && shows('details')"
           class="flex items-center gap-1.5 text-xs text-muted"
         >
           <UIcon
@@ -418,13 +500,13 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
         </p>
 
         <div
-          v-if="isDraft"
+          v-if="isDraft && shows('details')"
           class="flex flex-wrap items-center gap-2 rounded-lg border border-default bg-muted px-3 py-2 text-sm"
         >
           <span class="text-muted">Proposed in a plan. Only you can see it until you add the plan to the board or the Backlog.</span>
         </div>
         <div
-          v-else-if="task.status === 'backlog'"
+          v-else-if="task.status === 'backlog' && shows('details')"
           class="flex flex-wrap items-center gap-2 rounded-lg border border-default bg-muted px-3 py-2 text-sm"
         >
           <span class="me-auto text-muted">In the Backlog, so never scheduled until you move it.</span>
@@ -438,8 +520,8 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
         </div>
 
         <dl
-          v-if="props.mode === 'flyout'"
-          class="grid grid-cols-[112px_1fr] gap-x-4 gap-y-1 text-sm"
+          v-if="props.mode === 'flyout' || (mobile && shows('details'))"
+          :class="['grid grid-cols-[112px_1fr] text-sm', mobile ? 'mx-0! -mt-2 border-y border-default px-4 [&>*]:min-h-11 [&>*:not(:nth-last-child(-n+2))]:border-b [&>*]:border-default' : 'gap-x-4 gap-y-1']"
         >
           <TaskProperties
             :task="task"
@@ -457,7 +539,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
           />
         </dl>
 
-        <section>
+        <section v-if="shows('details')">
           <h3 class="mb-1 text-xs font-medium text-muted">
             Depends on
           </h3>
@@ -471,7 +553,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
               class="flex items-center gap-2 text-sm"
             >
               <NuxtLink
-                :to="{ query: { ...$route.query, task: ref } }"
+                :to="mobile ? `/tasks/${ref}` : { query: { ...$route.query, task: ref } }"
                 class="font-mono text-muted"
               >{{ ref }}</NuxtLink>
               <span class="truncate">{{ dependencyTask(ref)?.title ?? '' }}</span>
@@ -512,7 +594,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
           />
         </section>
 
-        <section>
+        <section v-if="shows('details')">
           <h3 class="mb-1 text-xs font-medium text-muted">
             Description
           </h3>
@@ -574,7 +656,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
           </p>
         </section>
 
-        <section>
+        <section v-if="shows('criteria')">
           <div class="mb-1 flex items-center justify-between">
             <h3 class="text-xs font-medium text-muted">
               Acceptance criteria · {{ metCount }} of {{ task.acceptanceCriteria.length }} met
@@ -640,7 +722,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
         </section>
 
         <section
-          v-if="!isDraft"
+          v-if="!isDraft && shows('criteria')"
           class="flex min-h-0 flex-col"
         >
           <UTabs
@@ -725,7 +807,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
 
         <section
           v-if="task.status !== 'merged'"
-          class="border-t border-default pt-3"
+          :class="mobile ? 'hidden' : 'border-t border-default pt-3'"
         >
           <UButton
             label="Delete task"

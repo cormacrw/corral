@@ -33,12 +33,14 @@ web            server                          runner                     claude
 |---|---|
 | `list_tasks`, `get_task`, `get_run_outcomes` | Live board state, so answers reflect current state, not only chat history (PRD §7.2) |
 | `get_attachment` | An image pasted into task text (`attachment:<id>`), returned as image content with its file name and mime type. Only attachments in the run's own project; developers and reviewers have it too |
-| `ask_question` | A structured question, shown in the Plan conversation only, never in the Inbox (D11) |
+| `ask_question` | A structured question, shown in the Plan conversation only, never in the Inbox (D11). Optionally with a `recommendation` (the PM's suggested answer) and `options` (2–5 short choices, each at most 120 characters). Both are stored on the message and shown, options numbered, in the history the PM sees on later turns |
 | `propose_plan` | Create or revise a draft plan: epics, tasks, acceptance criteria, dependencies, priority, task type, human-review flag |
 | `approve_plan` | Approve the current plan (to the board or the Backlog) when the human asks in chat. Recorded as the human's approval; refused unless the human has written since the plan was proposed |
 | `flag_stale_docs` | Create a documentation task (PRD §7.10) |
 
 Agents are told about images so they look at them: a PM turn whose message references `attachment:<id>` lists the ids and asks the PM to fetch them first; developer and reviewer prompts have an "Attached images" section (id, file name, and whether each is in the description or which comment); and `get_task` returns an `attachments` list of the same, for every role.
+
+**Grilling.** A message that asks to be grilled ("grill me", `/grill-me`, or the Grill me button's message) gets the grill-me skill's instructions, adapted to Corral, put before it: work through the decisions in dependency order, one `ask_question` per decision, always with a `recommendation` and with `options` where the answer is one of a few; look up anything the code or board can answer instead of asking; and once the decisions are settled, or the human says to stop, call `propose_plan` straight away with the agreed decisions in its summary. Other messages don't get these instructions, so the PM never grills unless asked. A session rebuilt after it was lost keeps grilling if an earlier human message asked for it.
 
 The PM has **no** tools to merge, edit docs or change status. This is enforced by which tools it's given, not by its instructions.
 

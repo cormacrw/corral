@@ -1,6 +1,6 @@
 # Epic flyout and epic page
 
-An epic groups related tasks of a plan (D9); one plan can propose several epics. It has a title, a markdown description and a canvas showing its tasks as a dependency tree. Like a task, it opens in two modes: docked in the flyout (`?epic=<id>` on the current page) or as a page (`/epics/<id>`). The flyout shows one thing at a time, so opening an epic replaces an open task and the other way round.
+An epic groups related tasks of a plan (D9); one plan can propose several epics. It has a title, a markdown description and a canvas showing its tasks as a dependency tree. Like a task, it opens in two modes: docked in the flyout (`?epic=<id>` on the current page) or as a page (`/epics/<id>`). The flyout shows one thing at a time, so opening an epic replaces an open task and the other way round. On mobile it's always the page, and its tasks open as pages ([mobile.md](mobile.md#task-and-epic)).
 
 ## Where it opens
 

@@ -266,7 +266,7 @@ There is no separate notifications feed or bell. System events (usage limits, ru
 |---|---|
 | Plan (PM sessions), Inbox, agents, the runner, user settings | Overview, Board, Backlog, project settings (name, thumbnail, repo, default branch, merge method, required checks, task ID prefix, pause, limits) |
 
-- **Agents are global.** Juno (PM), Atlas (developer) and Vera (reviewer) are set up once, in Settings, and serve every project. Concurrency applies across all projects, not per project. Role instructions stay in each repo (`.corral/agents/<role>.md` on the default branch), so the same agent can follow different project rules.
+- **Agents are global.** Juno (PM), Atlas (developer) and Vera (reviewer) are set up once, in Settings, and serve every project. Concurrency applies across all projects, not per project. Role instructions stay in each repo (`.corral/agents/<role>.md` on the default branch), so the same agent can follow different project rules. More developers and reviewers can be added (`POST /api/agents`), each with one runtime whose CLI the runner has; there is only ever one PM. An agent's runtime can only change while it has no queued or running run.
 - **Plan sessions belong to one project.** The project is picked in the composer and locked once the session has messages. Juno works in a read-only checkout of that project, one per session (D9).
 - **The Inbox is global**, and every item carries its project (D11). The same goes for runs on the agent pages.
 - **Task IDs are `PREFIX-NUMBER`**, e.g. `COR-29`. Each project has a 2–5 letter prefix that is unique across projects, and numbers count up per project. PRs keep `#41` and runs keep `#128`.
