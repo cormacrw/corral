@@ -246,7 +246,7 @@ export const runs = pgTable('runs', {
   check('runs_task_unless_pm', sql`${t.taskId} is not null or ${t.role} = 'pm'`)
 ])
 
-export const planStatus = pgEnum('plan_status', ['proposed', 'approved', 'superseded'])
+export const planStatus = pgEnum('plan_status', ['proposed', 'approved', 'superseded', 'discarded'])
 export const planChange = pgEnum('plan_change', ['added', 'changed', 'unchanged', 'removed'])
 
 // A conversation with the PM (D9, design/plan.md). Belongs to one project.

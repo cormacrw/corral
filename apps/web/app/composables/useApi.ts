@@ -3,6 +3,7 @@ import type {
   AgentRuntime,
   ApiErrorBody,
   Attachment,
+  DraftSession,
   AuditEntry,
   CliStatus,
   Comment,
@@ -190,6 +191,8 @@ export const api = {
     start: (projectId: string, text: string, taskRef?: string, runtime?: AgentRuntime) => call<PlanSessionDetail>('POST', '/plan/sessions', { projectId, text, ...(taskRef && { taskRef }), ...(runtime && { runtime }) }),
     message: (id: string, text: string, taskRef?: string) => call<PlanMessage>('POST', `/plan/sessions/${id}/messages`, { text, ...(taskRef && { taskRef }) }),
     read: (id: string) => call<PlanSession>('POST', `/plan/sessions/${id}/read`),
-    approve: (planId: string, to: 'ready' | 'backlog') => call<Plan>('POST', `/plan/plans/${planId}/approve`, { to })
+    approve: (planId: string, to: 'ready' | 'backlog') => call<Plan>('POST', `/plan/plans/${planId}/approve`, { to }),
+    discard: (planId: string) => call<Plan>('POST', `/plan/plans/${planId}/discard`),
+    drafts: (slug: string) => call<DraftSession[]>('GET', `/projects/${slug}/drafts`)
   }
 }

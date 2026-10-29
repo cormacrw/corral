@@ -233,6 +233,12 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       return c.json(await listEpics(db, project))
     })
 
+    // Drafts by the Plan session they belong to, for the Plan tab (D10)
+    .get('/projects/:slug/drafts', async (c) => {
+      const project = await findProjectBySlug(db, c.req.param('slug'))
+      return c.json(await plans.listDrafts(project.id))
+    })
+
     .get('/epics/:id', async c => c.json(await getEpic(db, c.req.param('id'))))
 
     .patch('/epics/:id', validate('json', patchEpicInput), async (c) => {
@@ -474,6 +480,9 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       orchestrator.poke(plan.tasks.flatMap(t => t.taskId ? [t.taskId] : []))
       return c.json(plan)
     })
+
+    // Its Drafts are deleted; the session stays, so the PM can propose again
+    .post('/plan/plans/:id/discard', async c => c.json(await plans.discard(c.req.param('id'), actor)))
 
     .get('/inbox', async c => c.json(await loadInbox(db)))
 

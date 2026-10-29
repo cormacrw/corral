@@ -234,6 +234,11 @@ export interface Task {
   // The approved design version a build task builds, and the screens it
   // covers (D20)
   design: TaskDesignPin | null
+  // A Draft's Plan session: the session of the latest proposed plan that
+  // includes it, so a revision from another session moves it there. Null
+  // for every other status.
+  planSessionId: string | null
+  planSessionTitle: string | null
   createdAt: string
   updatedAt: string
 }
@@ -319,6 +324,8 @@ export interface PlanMessage {
   createdAt: string
 }
 
+export type PlanStatus = 'proposed' | 'approved' | 'superseded' | 'discarded'
+
 export type PlanChange = 'added' | 'changed' | 'unchanged' | 'removed'
 
 export interface Plan {
@@ -329,7 +336,7 @@ export interface Plan {
   version: number
   title: string
   summary: string
-  status: 'proposed' | 'approved' | 'superseded'
+  status: PlanStatus
   approvedAt: string | null
   // In the order the PM gave them; epicId above is the first
   epics: { key: string, id: string, title: string }[]
@@ -349,6 +356,23 @@ export interface Plan {
     dependsOn: string[]
   }[]
   createdAt: string
+}
+
+// A project's Drafts by the Plan session they belong to (GET
+// /projects/:slug/drafts), newest session first
+export interface DraftSession {
+  sessionId: string
+  title: string
+  updatedAt: string
+  // The status of the session's latest plan version
+  planStatus: PlanStatus | null
+  drafts: {
+    taskId: string
+    ref: string
+    title: string
+    type: TaskType
+    priority: TaskPriority
+  }[]
 }
 
 export interface PlanSessionDetail extends PlanSession {

@@ -150,7 +150,7 @@ Full table, disk layout, flows and the known POC push limitation are in [archite
 
 | Status | Meaning |
 |---|---|
-| **Draft** | Proposed by the PM in a plan and not yet confirmed. Seen only in that plan, never on the board or in the Backlog. The PM's revisions can change or remove it (added 2026-10-28). |
+| **Draft** | Proposed by the PM in a plan and not yet confirmed. Belongs to the Plan session that proposed it, and is listed on the Plan tab under that session; never on the board or in the Backlog. A plan in another session that revises it by ref takes it over: it belongs to the session of the latest proposed plan that includes it. The PM's revisions can change or remove it (added 2026-10-28; owning session added 2026-10-29). |
 | **Backlog** | Created by the human, or a Draft the human kept for later or for refining, or sent back for rethinking. Replaces "Needs refinement" (and the earlier name "Draft"). Never scheduled. **Not shown on the board** (see below). |
 | **Ready** | Approved and fully specified. **Can still have unmerged dependencies.** The scheduler only starts it once all dependencies are Merged; until then the card shows "waiting on #12". |
 | **In progress** | The developer's turn. |
@@ -216,7 +216,7 @@ Both appear in the Inbox (D11) with their reason. When a human resolves a Failed
 
 ### Deleting (instead of Cancelled)
 
-- **Draft, Backlog:** deleted outright. A Draft the PM drops from a revised plan is deleted the same way.
+- **Draft, Backlog:** deleted outright. A Draft the PM drops from a revised plan is deleted the same way, and so are the Drafts of a plan the human discards (a Draft the discarded plan only revised goes back to its own session).
 - **Ready, In progress, Agent review, Human review, Ready to merge, Blocked, Failed:** stop any active run, close the PR, delete the Corral branch when safe (never discarding uncommitted work), then **soft-delete**. The task is hidden from the board, but it and its audit history are kept.
 - **Merged:** can't be deleted.
 - **Dependents:** deleting a task that others depend on moves those dependents to Blocked with the reason "dependency deleted", unless the human removes the dependency first.

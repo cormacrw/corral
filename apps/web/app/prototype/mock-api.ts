@@ -122,6 +122,17 @@ route('GET', '/inbox', () => f.inbox())
 
 route('GET', '/plan/sessions', () => f.planSessions)
 route('GET', '/plan/sessions/:id', ([id]) => session(id!))
+// Drafts by session: each session's latest plan, while it waits for approval
+route('GET', '/projects/:slug/drafts', ([slug]) => f.planSessions
+  .filter(s => s.projectId === project(slug!).id)
+  .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  .flatMap((s) => {
+    const latest = f.plans[s.id]?.at(-1)
+    const drafts = latest?.status === 'proposed' ? latest.tasks.filter(t => t.status === 'draft') : []
+    return drafts.length === 0
+      ? []
+      : [{ sessionId: s.id, title: s.title, updatedAt: s.updatedAt, planStatus: latest!.status, drafts: drafts.map(t => ({ taskId: t.taskId ?? t.key, ref: t.ref ?? t.key, title: t.title, type: 'task' as const, priority: t.priority })) }]
+  }))
 route('POST', '/plan/sessions/:id/read', ([id]) => Object.assign(f.planSessions.find(s => s.id === id) ?? notFound(), { unread: false }))
 
 // The live stream: useLive listens here instead of /api/events

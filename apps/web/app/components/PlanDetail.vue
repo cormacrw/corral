@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Plan, Task } from '@corral/contracts'
 import { api } from '~/composables/useApi'
-import { PRIORITY } from '~/utils/labels'
+import { PLAN_STATUS, PRIORITY } from '~/utils/labels'
 
 // The session's latest plan, docked in the flyout (design/plan.md). Each
 // revision replaces it here rather than adding another card to the chat.
@@ -84,8 +84,8 @@ watch(() => props.plan.id, () => {
         size="sm"
       />
       <UBadge
-        :label="props.plan.status === 'approved' ? 'Approved' : props.plan.status === 'superseded' ? 'Superseded' : 'Waiting for approval'"
-        :color="props.plan.status === 'approved' ? 'success' : props.plan.status === 'superseded' ? 'neutral' : 'primary'"
+        :label="PLAN_STATUS[props.plan.status].label"
+        :color="PLAN_STATUS[props.plan.status].color"
         variant="subtle"
         size="sm"
       />

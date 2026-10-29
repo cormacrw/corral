@@ -155,6 +155,13 @@
       "when": 1793272427827,
       "tag": "0021_agent_wake_interval",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1793285399461,
+      "tag": "0022_plan_discarded",
+      "breakpoints": true
     }
   ]
 }
