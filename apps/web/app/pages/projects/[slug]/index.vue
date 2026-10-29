@@ -35,8 +35,9 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
               {{ project.name }}
             </h1>
             <UBadge
-              :label="project.paused ? 'Paused' : 'Running'"
-              :color="project.paused ? 'warning' : 'success'"
+              v-if="project.paused"
+              label="Paused"
+              color="warning"
               variant="subtle"
             />
           </div>

@@ -2,7 +2,7 @@
 import type { Agent, Run } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { dashboardCounts, elapsed, IN_PROGRESS_STAGES } from '~/utils/dashboard'
-import { initials, isWorking, projectColor, ROLE, STATUS } from '~/utils/labels'
+import { agentStatus, initials, isWorking, projectColor, ROLE, STATUS } from '~/utils/labels'
 
 // Home, the global dashboard (design/mobile.md). Counts come from the live
 // task lists the shell loads; the active runs come from /api/runs and are
@@ -83,10 +83,6 @@ const agents = computed(() => state.value.agents
   .map(agent => ({ agent, lines: runLines(agent), working: isWorking(agent) }))
   // Working agents first, in the shell's order otherwise
   .sort((a, b) => Number(b.working) - Number(a.working)))
-const agentBadge = (agent: Agent) => isWorking(agent)
-  ? { label: 'Working', color: 'success' as const }
-  : agent.paused || agent.pausedUntil ? { label: 'Paused', color: 'warning' as const } : { label: 'Idle', color: 'neutral' as const }
-
 const byProject = computed(() => state.value.projects.map((project) => {
   const c = dashboardCounts(state.value.tasks[project.id] ?? [], new Date(now.value))
   return { project, todo: c.todo, inProgress: c.inProgress, merged: c.mergedToday, loaded: Boolean(state.value.tasks[project.id]) }
@@ -232,12 +228,10 @@ const byProject = computed(() => state.value.projects.map((project) => {
                 />
                 <span class="font-semibold text-highlighted">{{ agent.name }}</span>
                 <span class="text-sm text-muted">{{ ROLE[agent.role] }}</span>
-                <UBadge
-                  v-bind="agentBadge(agent)"
-                  variant="subtle"
-                  size="sm"
-                  class="ms-auto"
-                />
+                <span
+                  v-if="agentStatus(agent, now, false)"
+                  class="ms-auto text-xs text-muted"
+                >{{ agentStatus(agent, now, false)?.label }}</span>
               </div>
               <div
                 v-for="line in lines"

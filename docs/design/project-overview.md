@@ -13,7 +13,7 @@ The page scrolls, in a column up to 1200px wide with 24px padding.
 
 1. **Header:**
    - a 44px thumbnail with the project's colour and initial, or an image
-   - the name (`text-2xl` semibold) and a status badge: **Running** (`success`) or **Paused** (`warning`)
+   - the name (`text-2xl` semibold) and a **Paused** (`warning`) badge only while paused
    - a meta line with the GitHub remote (mono), "Branch main" and "Task IDs COR-123"
    - actions: **Plan with Juno** (outline; opens Plan with this project selected) and **Open board** (solid primary)
 2. **Stat tiles:** an auto-fit grid with a 160px minimum. Each tile is a `dl` with a status-colour dot and label, a big number (24px, tabular) and a sub-line.

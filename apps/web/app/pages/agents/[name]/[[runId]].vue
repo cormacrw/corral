@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { duration, isLiveRun as isLive, ROLE, runBadge, runTokens, runtimeLabel, timeAgo } from '~/utils/labels'
+import { agentStatus, duration, isLiveRun as isLive, ROLE, runBadge, runTokens, runtimeLabel, timeAgo } from '~/utils/labels'
 
 // An agent's page (design/agent.md): runs list and the transcript. Mobile
 // shows the agent and its runs at /agents/:name, and a run's transcript
@@ -53,14 +53,14 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
               {{ agent.name }}
             </h1>
             <UBadge
-              :label="agent.activeRuns > 0 ? 'Working' : agent.paused ? 'Paused' : agent.pausedUntil && new Date(agent.pausedUntil).getTime() > now ? 'Waiting on usage limit' : 'Idle'"
-              :color="agent.activeRuns > 0 ? 'success' : 'neutral'"
+              v-if="agentStatus(agent, now)"
+              v-bind="agentStatus(agent, now)"
               variant="subtle"
             />
           </div>
           <p class="text-sm text-muted">
             {{ ROLE[agent.role] }} · <span data-testid="agent-runtime-label">{{ runtimeLabel(agent.runtime) }}</span> · {{ today.length }} runs today
-            <span v-if="agent.pausedUntil && new Date(agent.pausedUntil).getTime() > now"> · Waiting on usage limit until {{ new Date(agent.pausedUntil).toLocaleTimeString() }}</span>
+            <span v-if="agentStatus(agent, now)?.label === 'Waiting on usage limit'"> · Waiting on usage limit until {{ new Date(agent.pausedUntil!).toLocaleTimeString() }}</span>
           </p>
         </div>
         <UButton

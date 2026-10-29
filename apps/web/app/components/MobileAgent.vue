@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Run } from '@corral/contracts'
 import type { AgentRuns } from '~/composables/useAgentRuns'
-import { duration, isLiveRun, projectColor, ROLE, runBadge, runtimeLabel, timeAgo } from '~/utils/labels'
+import { agentStatus, duration, isLiveRun, projectColor, ROLE, runBadge, runtimeLabel, timeAgo } from '~/utils/labels'
 
 // An agent's page on mobile (design/agent.md, design/mobile.md): the
 // header and stat tiles, then the current run and previous runs. Each run
@@ -10,12 +10,7 @@ const props = defineProps<{ view: AgentRuns }>()
 const { name, agent, runs, error, now, current, today, tiles, facts, load, project } = props.view
 
 const previous = computed(() => runs.value.filter(r => !isLiveRun(r)))
-const limited = computed(() => !!agent.value?.pausedUntil && new Date(agent.value.pausedUntil).getTime() > now.value)
-const status = computed(() => {
-  if (!agent.value) return { label: 'Idle', color: 'neutral' as const }
-  if (agent.value.activeRuns > 0) return { label: 'Working', color: 'success' as const }
-  return { label: agent.value.paused ? 'Paused' : limited.value ? 'Waiting on usage limit' : 'Idle', color: 'neutral' as const }
-})
+const status = computed(() => agent.value ? agentStatus(agent.value, now.value) : null)
 const to = (run: Run) => `/agents/${name.value}/${run.id}`
 const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(run) ? null : duration(run.startedAt, run.endedAt, now.value)].filter(Boolean).join(' · ')
 </script>
@@ -43,8 +38,8 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
             {{ agent.name }}
           </h2>
           <UBadge
-            :label="status.label"
-            :color="status.color"
+            v-if="status"
+            v-bind="status"
             variant="subtle"
           />
         </div>
@@ -52,7 +47,7 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
           {{ ROLE[agent.role] }} · {{ runtimeLabel(agent.runtime) }} · {{ today.length }} {{ today.length === 1 ? 'run' : 'runs' }} today
         </p>
         <p
-          v-if="limited"
+          v-if="status?.label === 'Waiting on usage limit'"
           class="text-xs text-muted"
         >
           Waiting on usage limit until {{ new Date(agent.pausedUntil!).toLocaleTimeString() }}

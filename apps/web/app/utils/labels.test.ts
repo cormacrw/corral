@@ -1,6 +1,6 @@
 import type { TaskStatus } from '@corral/core'
 import { describe, expect, it } from 'vitest'
-import { cliLoginCommand, detectedRuntimes, runtimeLabel, runTokens, taskCounts, taskTypeBadge } from './labels.ts'
+import { agentStatus, cliLoginCommand, detectedRuntimes, runtimeLabel, runTokens, taskCounts, taskTypeBadge } from './labels.ts'
 
 const tasks = (...statuses: TaskStatus[]) => statuses.map(status => ({ status }))
 
@@ -60,5 +60,34 @@ describe('taskTypeBadge', () => {
     expect(taskTypeBadge('bug')).toMatchObject({ label: 'Bug', color: 'error' })
     expect(taskTypeBadge('spike')).toMatchObject({ label: 'Spike', color: 'info' })
     expect(taskTypeBadge('design')).toMatchObject({ label: 'Design', color: 'secondary' })
+  })
+})
+
+describe('agentStatus', () => {
+  const now = Date.parse('2026-10-29T12:00:00Z')
+  const idle = { paused: false, pausedUntil: null, activeRuns: 0 }
+
+  it('shows explicit pause even during a usage cooldown or active run', () => {
+    expect(agentStatus({ ...idle, paused: true, pausedUntil: new Date(now + 1000).toISOString(), activeRuns: 1 }, now)).toEqual({ label: 'Paused', color: 'neutral' })
+  })
+
+  it('shows a future usage cooldown', () => {
+    expect(agentStatus({ ...idle, pausedUntil: new Date(now + 1000).toISOString() }, now)?.label).toBe('Waiting on usage limit')
+  })
+
+  it('leaves past and just-expired cooldowns unmarked', () => {
+    for (const offset of [-1000, 0]) {
+      expect(agentStatus({ ...idle, pausedUntil: new Date(now + offset).toISOString() }, now)).toBeNull()
+    }
+  })
+
+  it('leaves idle agents unmarked', () => {
+    expect(agentStatus(idle, now)).toBeNull()
+  })
+
+  it('can omit Working when the layout already indicates work', () => {
+    expect(agentStatus({ ...idle, activeRuns: 1 }, now)?.label).toBe('Working')
+    expect(agentStatus({ ...idle, activeRuns: 1 }, now, false)).toBeNull()
+    expect(agentStatus({ ...idle, paused: true }, now, false)?.label).toBe('Paused')
   })
 })
