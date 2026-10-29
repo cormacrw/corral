@@ -40,6 +40,11 @@ it('closes atomically, stops the PM, preserves accepted work and reopens cleanly
   expect(await runner.next('run.stop', m => m.runId === job.runId)).toMatchObject({ runId: job.runId })
   expect((await t.db.select().from(schema.runs).where(eq(schema.runs.id, job.runId)))[0]!.state).toBe('interrupted')
   expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', { title: 'Late', tasks: [] })).toMatchObject({ ok: false })
+  // An already-dispatched tool must also refuse to write after close,
+  // even if it passed the orchestrator's fence before the run stopped.
+  await expect(t.plans.tool(created.id, job.runId, 'propose_plan', {
+    title: 'Late proposal', tasks: [{ key: 'late', title: 'Late draft', type: 'task', description: 'Build it', acceptanceCriteria: ['Works'] }]
+  }, t.actor)).rejects.toThrow('This Plan turn has stopped')
   const after = await t.db.select().from(schema.tasks).where(eq(schema.tasks.projectId, project.id))
   expect(after.find(r => r.title === 'Draft')!.deletedAt).not.toBeNull()
   const deleted = await t.db.select().from(schema.auditLog).where(eq(schema.auditLog.taskId, rows.find(r => r.title === 'Draft')!.id))

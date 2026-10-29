@@ -477,6 +477,12 @@ export class PlanService {
     const changes = new Map(diffPlans(previousTasks, proposed.tasks).map(c => [c.key, c.change]))
 
     const plan = await db.transaction(async (tx) => {
+      // A tool already past the orchestrator's fence can still be in flight
+      // when close stops its run. Serialize its writes with the close.
+      const [current] = await tx.select().from(planSessions).where(eq(planSessions.id, session.id)).for('update')
+      const [active] = await tx.select({ id: runs.id }).from(runs)
+        .where(and(eq(runs.id, runId), inArray(runs.state, ['queued', 'starting', 'running'])))
+      if (current!.closedAt || !active) throw new ToolError('This Plan turn has stopped; the plan was not saved.')
       // Each epic the revision still names keeps its row; a lone epic is
       // kept even if its key changed
       const epicIds = new Map<string, string>()
