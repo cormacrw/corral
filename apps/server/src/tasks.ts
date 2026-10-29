@@ -451,15 +451,18 @@ export async function listHistory(db: Executor, taskId: string): Promise<AuditEn
 // D10 "Deleting": Backlog tasks go outright; the rest are hidden but kept
 // with their history. Dependents move to Blocked unless the dependency was
 // removed first. The caller has already stopped the run and closed the PR.
-export async function deleteTaskRows(db: Executor, taskId: string, actor: Actor, reason: string | null): Promise<void> {
-  await db.transaction(async (tx) => {
+// `detachDependents` drops the dependents' edges instead, for drafts that
+// were never accepted work, so accepted tasks keep their status (COR-119).
+export async function deleteTaskRows(db: Executor, taskId: string, actor: Actor, reason: string | null, options: { soft?: boolean, detachDependents?: boolean } = {}): Promise<string[]> {
+  return db.transaction(async (tx) => {
     const { task, project } = await lockTask(tx, taskId)
-    const mode = deletionFor(task.status)
+    const mode = options.soft && task.status === 'draft' ? 'soft' : deletionFor(task.status)
     if (mode === 'not_allowed') throw new ApiFailure(409, { code: 'conflict', constraint: 'merged_tasks_are_immutable' })
     const dependents = await tx.select({ task: tasks }).from(taskDependencies)
       .innerJoin(tasks, eq(tasks.id, taskDependencies.taskId))
       .where(and(eq(taskDependencies.dependsOnId, taskId), isNull(tasks.deletedAt)))
-    for (const { task: dependent } of dependents) {
+    if (options.detachDependents) await tx.delete(taskDependencies).where(eq(taskDependencies.dependsOnId, taskId))
+    else for (const { task: dependent } of dependents) {
       const check = transition(toTaskState(dependent), { type: 'block', reason: DEPENDENCY_DELETED_REASON }, { kind: 'system', component: 'server' })
       if (!check.ok) continue // e.g. Backlog: nothing to block yet
       await applyTransition(tx, dependent, project, { type: 'block', reason: DEPENDENCY_DELETED_REASON }, { kind: 'system', component: 'server' }, { event: 'dependency_deleted', dependency: taskRef(project.prefix, task.number) })
@@ -467,6 +470,7 @@ export async function deleteTaskRows(db: Executor, taskId: string, actor: Actor,
     await tx.insert(auditLog).values({ projectId: project.id, taskId, actor, action: 'task.deleted', detail: { mode, number: task.number, title: task.title, reason } })
     if (mode === 'hard') await tx.delete(tasks).where(eq(tasks.id, taskId))
     else await tx.update(tasks).set({ deletedAt: new Date(), updatedAt: new Date() }).where(eq(tasks.id, taskId))
+    return dependents.map(d => d.task.id)
   })
 }
 

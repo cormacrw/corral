@@ -79,6 +79,7 @@ export interface PlanDeps {
   db: Database
   events: EventBus
   runner: RunnerHub
+  stopRun(runId: string, actor: Actor): Promise<void>
   // Starts a PM run for a session; the orchestrator owns runs. The job
   // carries the session's runtime, not the PM agent's (D18).
   startRun(session: SessionRow, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'>): Promise<string>
@@ -145,6 +146,44 @@ export class PlanService {
     const session = await this.#toSession(await this.#session(sessionId))
     this.#d.events.publish({ type: 'plan.session', session })
     return session
+  }
+
+  // Stop the turn before discarding anything, so its fenced tools cannot
+  // create more drafts after the thread closes.
+  async close(sessionId: string, actor: Actor): Promise<PlanSession> {
+    const { db, events } = this.#d
+    const session = await this.#session(sessionId)
+    if (session.closedAt) return this.#toSession(session)
+    const active = await db.select({ id: runs.id }).from(runs)
+      .where(and(eq(runs.planSessionId, sessionId), eq(runs.role, 'pm'), inArray(runs.state, ['queued', 'starting', 'running', 'stopping'])))
+    for (const run of active) await this.#d.stopRun(run.id, actor)
+    const deleted = await db.transaction(async (tx) => {
+      const [locked] = await tx.select().from(planSessions).where(eq(planSessions.id, sessionId)).for('update')
+      if (locked!.closedAt) return null
+      const drafts = await tx.select({ id: tasks.id }).from(tasks)
+        .where(and(eq(tasks.projectId, session.projectId), eq(tasks.status, 'draft'), isNull(tasks.deletedAt))).for('update')
+      const owners = await draftSessions(tx, drafts.map(t => t.id))
+      const owned = drafts.filter(t => owners.get(t.id)?.id === sessionId)
+      const detached = new Set<string>()
+      for (const task of owned) {
+        for (const id of await deleteTaskRows(tx, task.id, actor, 'Discarded with the Plan thread', { soft: true, detachDependents: true })) detached.add(id)
+      }
+      await tx.update(plans).set({ status: 'discarded' })
+        .where(and(eq(plans.sessionId, sessionId), eq(plans.status, 'proposed'), isNull(plans.approvedAt)))
+      const now = new Date()
+      await tx.update(planSessions).set({ closedAt: now, updatedAt: now, unread: false }).where(eq(planSessions.id, sessionId))
+      return { owned, detached: [...detached].filter(id => !owned.some(t => t.id === id)) }
+    })
+    const closed = await this.#toSession(await this.#session(sessionId))
+    if (deleted) {
+      for (const task of deleted.owned) events.publish({ type: 'task.deleted', taskId: task.id, projectId: session.projectId })
+      for (const id of deleted.detached) events.publish({ type: 'task.updated', task: await loadTask(db, id) })
+      const discarded = await db.select().from(plans).where(and(eq(plans.sessionId, sessionId), eq(plans.status, 'discarded')))
+      for (const plan of discarded) events.publish({ type: 'plan.updated', plan: await this.toPlan(plan) })
+      events.publish({ type: 'plan.session', session: closed })
+      await this.#publishDrafts(session.projectId)
+    }
+    return closed
   }
 
   // design/plan.md: the project and runtime are locked once the session has messages
@@ -442,6 +481,12 @@ export class PlanService {
     const changes = new Map(diffPlans(previousTasks, proposed.tasks).map(c => [c.key, c.change]))
 
     const plan = await db.transaction(async (tx) => {
+      // A tool already past the orchestrator's fence can still be in flight
+      // when close stops its run. Serialize its writes with the close.
+      const [current] = await tx.select().from(planSessions).where(eq(planSessions.id, session.id)).for('update')
+      const [active] = await tx.select({ id: runs.id }).from(runs)
+        .where(and(eq(runs.id, runId), inArray(runs.state, ['queued', 'starting', 'running'])))
+      if (current!.closedAt || !active) throw new ToolError('This Plan turn has stopped; the plan was not saved.')
       // Each epic the revision still names keeps its row; a lone epic is
       // kept even if its key changed
       const epicIds = new Map<string, string>()
@@ -597,6 +642,9 @@ export class PlanService {
     if (!project) throw notFound()
     const items = await db.select().from(planTasks).where(and(eq(planTasks.planId, planId), ne(planTasks.change, 'removed')))
     await db.transaction(async (tx) => {
+      await tx.select().from(planSessions).where(eq(planSessions.id, plan.sessionId)).for('update')
+      const [current] = await tx.select().from(plans).where(eq(plans.id, planId)).for('update')
+      if (current?.status !== 'proposed') throw new ApiFailure(409, { code: 'conflict', constraint: `plan_${current?.status}` })
       // A revised task someone has since started (or deleted) can't take the
       // plan's edits; nothing is written then
       for (const item of items) {
