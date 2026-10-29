@@ -1,5 +1,5 @@
 import { askQuestionInput, type AgentRuntime, type DraftSession, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type RunJob } from '@corral/contracts'
-import { checkPlan, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, REVISABLE_STATUSES, requiresHumanReview, richTextToMarkdown, TASK_TYPES, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
+import { checkPlan, checkPlanEpicDependencies, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, REVISABLE_STATUSES, requiresHumanReview, richTextToMarkdown, TASK_TYPES, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
@@ -11,7 +11,7 @@ import { pmFallbackPrompt, pmPrompt, questionText, sessionTitlePrompt } from './
 import type { RunnerHub } from './runner-hub.ts'
 import { createTask, deleteTaskRows, draftSessions, findTaskId, loadTask, patchTask, pinStaleness, setDesignPin, transitionTask, type ProjectRow } from './tasks.ts'
 
-const { acceptanceCriteria, agents, auditLog, designVersions, epics, planEpics, planMessages, planSessions, planTasks, plans, projects, runs, taskDependencies, taskDesignPins, tasks } = schema
+const { acceptanceCriteria, agents, auditLog, designVersions, epicDependencies, epics, planEpics, planMessages, planSessions, planTasks, plans, projects, runs, taskDependencies, taskDesignPins, tasks } = schema
 
 const PM_TURN_TIMEOUT_SECONDS = 20 * 60
 // The runner gives `claude` 30 s to write a title; this covers the round trip
@@ -51,7 +51,8 @@ const proposedPlan = z.object({
   epics: z.array(z.object({
     key: z.string().trim().min(1),
     title: z.string().trim(),
-    summary: z.string().trim().default('')
+    summary: z.string().trim().default(''),
+    dependsOn: z.array(z.string().trim()).optional()
   })).default([]),
   tasks: z.array(proposedTask)
 }).transform((plan): ProposedPlan => {
@@ -368,9 +369,10 @@ export class PlanService {
         const deps = await db.select({ taskId: taskDependencies.taskId, number: tasks.number }).from(taskDependencies)
           .innerJoin(tasks, eq(tasks.id, taskDependencies.dependsOnId))
         const epicRows = await db.select().from(epics).where(eq(epics.projectId, project.id))
+        const epicDeps = await db.select().from(epicDependencies).innerJoin(epics, eq(epics.id, epicDependencies.epicId)).where(eq(epics.projectId, project.id))
         return {
           project: { name: project.name, prefix: project.prefix, defaultBranch: project.defaultBranch },
-          epics: epicRows.map(e => ({ id: e.id, title: e.title })),
+          epics: epicRows.map(e => ({ id: e.id, title: e.title, dependsOn: epicDeps.filter(d => d.epic_dependencies.epicId === e.id).map(d => d.epic_dependencies.dependsOnEpicId) })),
           tasks: rows.map(t => ({
             ref: taskRef(project.prefix, t.number),
             title: t.title,
@@ -468,8 +470,6 @@ export class PlanService {
     const { db } = this.#d
     const { found, targets } = await this.#lookupRefs(project, proposed)
     const { found: designs, versionIds } = await this.#lookupDesigns(project, proposed)
-    const problems = checkPlan(proposed, found, designs)
-    if (problems.length > 0) throw new ToolError(`The plan was not saved: ${JSON.stringify(problems)}. Fix every problem and call propose_plan again.`)
 
     const [latest] = await db.select().from(plans).where(eq(plans.sessionId, session.id)).orderBy(desc(plans.version)).limit(1)
     // A discarded plan's Drafts are gone, so the next version starts afresh
@@ -479,6 +479,13 @@ export class PlanService {
     const renamed = proposed.epics.length === 1 && previousEpics.size === 1
     const previousTasks = previous ? (await this.#proposedTasksOf(previous, project)).map(t => renamed && t.epic ? { ...t, epic: proposed.epics[0]!.key } : t) : []
     const changes = new Map(diffPlans(previousTasks, proposed.tasks).map(c => [c.key, c.change]))
+    const previousEpicRows = previous ? await db.select().from(planEpics).where(eq(planEpics.planId, previous.id)) : []
+    for (const epic of proposed.epics) {
+      epic.dependsOn ??= previousEpicRows.find(e => e.key === epic.key)?.dependsOn ?? []
+    }
+    const context = await this.#dependencyContext(project, proposed, previous)
+    const problems = checkPlan(proposed, found, designs, context)
+    if (problems.length > 0) throw new ToolError(`The plan was not saved: ${JSON.stringify(problems)}. Fix every problem and call propose_plan again.`)
 
     const plan = await db.transaction(async (tx) => {
       // A tool already past the orchestrator's fence can still be in flight
@@ -506,7 +513,7 @@ export class PlanService {
       }).returning()
       const planId = row!.id
       if (proposed.epics.length > 0) {
-        await tx.insert(planEpics).values(proposed.epics.map((epic, position) => ({ planId, key: epic.key, epicId: epicIds.get(epic.key)!, position })))
+        await tx.insert(planEpics).values(proposed.epics.map((epic, position) => ({ planId, key: epic.key, epicId: epicIds.get(epic.key)!, dependsOn: epic.dependsOn ?? [], position })))
       }
       const epicOf = (task: ProposedTask) => task.epic ? epicIds.get(task.epic)! : null
       const pinOf = (task: ProposedTask) => task.design ? { designVersionId: versionIds.get(designPinKey(task.design))!, screens: task.design.screens } : null
@@ -641,6 +648,7 @@ export class PlanService {
     const [project] = await db.select().from(projects).where(eq(projects.id, plan.projectId))
     if (!project) throw notFound()
     const items = await db.select().from(planTasks).where(and(eq(planTasks.planId, planId), ne(planTasks.change, 'removed')))
+    const proposed = await this.#planProposal(plan, project)
     await db.transaction(async (tx) => {
       await tx.select().from(planSessions).where(eq(planSessions.id, plan.sessionId)).for('update')
       const [current] = await tx.select().from(plans).where(eq(plans.id, planId)).for('update')
@@ -652,6 +660,9 @@ export class PlanService {
         const [row] = await tx.select({ number: tasks.number, status: tasks.status }).from(tasks).where(and(eq(tasks.id, item.taskId), isNull(tasks.deletedAt)))
         if (!row || !REVISABLE_STATUSES.includes(row.status)) throw new ApiFailure(409, { code: 'conflict', constraint: 'revised_task_not_in_backlog' })
       }
+      const problems = checkPlanEpicDependencies(proposed, await this.#dependencyContext(project, proposed, plan, tx))
+      if (problems.length) throw new ApiFailure(409, { code: 'invalid_dependencies', problems })
+
       for (const item of items) {
         if (!item.taskId) continue
         if (item.revision) await reviseTask(tx, project, item.taskId, item.revision, { planId, version: plan.version }, actor)
@@ -659,6 +670,13 @@ export class PlanService {
         if (row?.status === 'draft') await transitionTask(tx, item.taskId, { type: to === 'ready' ? 'approve' : 'accept' }, actor)
         // Revised Backlog tasks, and plans proposed before Drafts existed
         else if (row?.status === 'backlog' && to === 'ready') await transitionTask(tx, item.taskId, { type: 'approve' }, actor)
+      }
+      const epicIds = await this.#epicsOf(plan, tx)
+      for (const epic of proposed.epics) {
+        const epicId = epicIds.get(epic.key)!
+        await tx.delete(epicDependencies).where(eq(epicDependencies.epicId, epicId))
+        const deps = [...new Set((epic.dependsOn ?? []).map(dep => epicIds.get(dep) ?? dep))]
+        if (deps.length) await tx.insert(epicDependencies).values(deps.map(dep => ({ epicId, dependsOnEpicId: dep })))
       }
       // Approving the plan closes its session
       const now = new Date()
@@ -731,6 +749,12 @@ export class PlanService {
       : []
     const keyed = await this.#epicsOf(row)
     const epicRows = keyed.size > 0 ? await db.select({ id: epics.id, title: epics.title }).from(epics).where(inArray(epics.id, [...keyed.values()])) : []
+    const snapshots = await db.select().from(planEpics).where(eq(planEpics.planId, row.id))
+    const allEpics = await db.select({ id: epics.id, title: epics.title }).from(epics).where(eq(epics.projectId, row.projectId))
+    const dependenciesOf = (key: string) => (snapshots.find(e => e.key === key)?.dependsOn ?? []).map((dep) => {
+      const id = keyed.get(dep) ?? dep
+      return { id, title: allEpics.find(e => e.id === id)?.title ?? dep }
+    })
     return {
       id: row.id,
       sessionId: row.sessionId,
@@ -741,7 +765,7 @@ export class PlanService {
       summary: row.summary,
       status: row.status,
       approvedAt: row.approvedAt?.toISOString() ?? null,
-      epics: [...keyed].flatMap(([key, id]) => epicRows.filter(e => e.id === id).map(e => ({ key, id, title: e.title }))),
+      epics: [...keyed].flatMap(([key, id]) => epicRows.filter(e => e.id === id).map(e => ({ key, id, title: e.title, dependsOn: dependenciesOf(key) }))),
       // A revised task shows the plan's staged edits, not what it has now
       tasks: items.map(({ item, task }) => ({
         key: item.key,
@@ -786,7 +810,7 @@ export class PlanService {
           design: pinOf(revision.design),
           key: item.key,
           ref: item.ref!,
-          epic: revision.epicId ? keyOf.get(revision.epicId) : undefined,
+          epic: revision.epicId ? keyOf.get(revision.epicId) ?? revision.epicId : undefined,
           dependsOn: revision.dependsOn.map(n => taskRef(project.prefix, n)).map(ref => keys.get(ref) ?? ref)
         })
         continue
@@ -795,7 +819,7 @@ export class PlanService {
       if (!task) continue
       result.push({
         key: item.key,
-        epic: task.epicId ? keyOf.get(task.epicId) : undefined,
+        epic: task.epicId ? keyOf.get(task.epicId) ?? task.epicId : undefined,
         title: task.title,
         description: richTextToMarkdown(task.description),
         type: task.type,
@@ -878,10 +902,43 @@ export class PlanService {
     return { found, versionIds }
   }
 
+  async #planProposal(plan: PlanRow, project: ProjectRow): Promise<ProposedPlan> {
+    const full = await this.toPlan(plan)
+    const snapshots = await this.#d.db.select().from(planEpics).where(eq(planEpics.planId, plan.id))
+    return { title: plan.title, summary: plan.summary, tasks: await this.#proposedTasksOf(plan, project),
+      epics: full.epics.map(e => ({ key: e.key, title: e.title, summary: '', dependsOn: snapshots.find(s => s.key === e.key)?.dependsOn ?? [] })) }
+  }
+
+  async #dependencyContext(project: ProjectRow, proposed: ProposedPlan, previous?: PlanRow, db: Executor = this.#d.db): Promise<PlanDependencyContext> {
+    const epicRows = await db.select().from(epics).where(eq(epics.projectId, project.id))
+    const edges = await db.select().from(epicDependencies).innerJoin(epics, eq(epics.id, epicDependencies.epicId)).where(eq(epics.projectId, project.id))
+    const rows = await db.select().from(tasks).where(and(eq(tasks.projectId, project.id), isNull(tasks.deletedAt)))
+    const deps = await db.select().from(taskDependencies).innerJoin(tasks, eq(tasks.id, taskDependencies.taskId)).where(eq(tasks.projectId, project.id))
+    const previousItems = previous ? await db.select().from(planTasks).where(and(eq(planTasks.planId, previous.id), ne(planTasks.change, 'removed'))) : []
+    const previousEpics = previous ? await this.#epicsOf(previous, db) : new Map<string, string>()
+    const renamed = proposed.epics.length === 1 && previousEpics.size === 1
+    const taskIds = new Map(previousItems.flatMap(t => t.taskId ? [[t.key, t.taskId] as const] : []))
+    const removedDrafts = new Set(previousItems.filter(t => !proposed.tasks.some(p => p.key === t.key || p.ref === taskRef(project.prefix, rows.find(r => r.id === t.taskId)?.number ?? 0)) && !t.revision).map(t => t.taskId))
+    return {
+      epics: new Map(epicRows.map(e => [e.id, edges.filter(d => d.epic_dependencies.epicId === e.id).map(d => d.epic_dependencies.dependsOnEpicId)])),
+      titles: new Map(epicRows.map(e => [e.id, e.title])),
+      epicIds: new Map(proposed.epics.flatMap((e) => {
+        const id = renamed ? [...previousEpics.values()][0] : previousEpics.get(e.key)
+        return id ? [[e.key, id] as const] : []
+      })),
+      taskIds,
+      refIds: new Map(rows.map(t => [taskRef(project.prefix, t.number), t.id])),
+      tasks: rows.filter(t => t.status !== 'draft' || !removedDrafts.has(t.id)).map(t => ({
+        id: t.id, epicId: t.epicId, status: t.status,
+        dependsOn: deps.filter(d => d.task_dependencies.taskId === t.id).map(d => d.task_dependencies.dependsOnId)
+      }))
+    }
+  }
+
   // A plan's epics by key, in order. Plans saved before plan_epics have
   // only plans.epicId, under ONLY_EPIC.
-  async #epicsOf(plan: PlanRow): Promise<Map<string, string>> {
-    const rows = await this.#d.db.select().from(planEpics).where(eq(planEpics.planId, plan.id)).orderBy(asc(planEpics.position))
+  async #epicsOf(plan: PlanRow, db: Executor = this.#d.db): Promise<Map<string, string>> {
+    const rows = await db.select().from(planEpics).where(eq(planEpics.planId, plan.id)).orderBy(asc(planEpics.position))
     if (rows.length === 0) return new Map(plan.epicId ? [[ONLY_EPIC, plan.epicId]] : [])
     return new Map(rows.filter(r => r.epicId).map(r => [r.key, r.epicId!]))
   }

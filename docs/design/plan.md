@@ -57,7 +57,7 @@ Docked on the right (`?plan`), the same flyout as tasks and epics; the conversat
 
 - **Header:** a "Plan v2" badge, a status badge ("Waiting for approval" in `primary`, or "Approved" in `success`), and Close.
 - **Title:** the plan title and "2 epics · 4 tasks" (the epic count only when the plan has epics, "1 epic" for one).
-- **One section per epic**, in the order Juno gave them: the epic title (opens the epic), "N tasks", and **List** / **Graph** tabs, remembered per epic.
+- **One section per epic**, in the order Juno gave them: the epic title (opens the epic), "N tasks", an "After: {epic titles}" line when it depends on other epics, and **List** / **Graph** tabs, remembered per epic.
   - **List:** one row per task: the ref and title, a subline with the priority (Urgent in `error`, High in `warning`, Medium and Low muted), "· Human review" with a user-check icon when the task needs human review, and "· after {dependency}", and a **New** (`success`) or **Revised** (`warning`) badge. A Revised row is an existing Backlog task the plan refines by its ref; it shows the plan's proposed title, priority, human review and dependencies, while the task itself (opened from the row) is unchanged until approval. Rows open the task in the flyout, with a back arrow to the plan.
   - **Graph:** the epic's dependency tree, top to bottom, as on the epic flyout ([epic.md](epic.md)). A dependency in another epic shows as a dashed placeholder. Clicking a node opens the task.
   - Tasks with no epic, and a Draft moved to another epic by hand, are listed last, under **Other tasks** (just **Tasks** when the plan has no epics).
@@ -115,3 +115,9 @@ On the mobile layout ([mobile.md](mobile.md)) the same two routes keep their beh
 
 - Should editing a proposed task in the flyout create a new plan version, the way chat edits do? flows.md says no today.
 - Do we need a full "All sessions" page, or is the Resume search enough?
+
+## Epic dependencies in proposals
+
+`propose_plan` accepts an optional `dependsOn` on each epic: keys of epics in the same plan or IDs of existing epics in this project. `list_tasks` includes each epic’s dependency IDs. Unknown epics, self-dependencies, epic cycles and combined task/epic deadlocks are returned as plan problems naming the epics, before a version is saved.
+
+Dependencies are stored on each plan version. A revision that keeps an epic key inherits omitted dependencies; an explicit array replaces them, including `[]` to clear them. Approval validates the graph again using each Draft’s current epic membership, including moves to epics outside the plan. A combined deadlock rejects approval with named epics and leaves tasks and dependency edges unchanged. Approval writes the snapshot to live epic dependencies atomically with task approval. Developers then wait for prerequisite epics as described in D22.

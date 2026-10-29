@@ -1,3 +1,4 @@
+import { checkEpicDependencies, type EpicDependencyProblem, type EpicDependencyTask } from './epic-dependencies.ts'
 import { checkDependencies, type DependencyProblem } from './dependencies.ts'
 import type { TaskStatus } from './status.ts'
 import type { TaskPriority, TaskType } from './task.ts'
@@ -9,6 +10,7 @@ export interface ProposedEpic {
   key: string
   title: string
   summary: string
+  dependsOn?: string[] | undefined
 }
 
 export interface ProposedTask {
@@ -16,7 +18,8 @@ export interface ProposedTask {
   // The ref of an existing task this one revises (e.g. COR-4), instead of
   // creating a new one
   ref?: string | undefined
-  // The key of the epic it belongs to, if any. A task without one has no
+  // The key of the epic it belongs to (or its existing id when reconstructing
+  // edited Drafts for approval). A task without one has no
   // epic.
   epic?: string | undefined
   title: string
@@ -46,6 +49,7 @@ export interface ProposedPlan {
 }
 
 export type PlanProblem =
+  | EpicDependencyProblem
   | { code: 'no_tasks' }
   | { code: 'duplicate_epic_key', key: string }
   | { code: 'missing_epic_title', key: string }
@@ -88,13 +92,23 @@ export function designPinKey(pin: Pick<DesignPin, 'taskRef' | 'version'>): strin
 // Only tasks nobody has started can be revised by a plan
 export const REVISABLE_STATUSES: readonly TaskStatus[] = ['backlog', 'draft']
 
+// Identity maps match proposed keys to rows reused by a revision.
+export interface PlanDependencyContext {
+  epics: ReadonlyMap<string, readonly string[]>
+  titles: ReadonlyMap<string, string>
+  tasks: readonly EpicDependencyTask[]
+  epicIds: ReadonlyMap<string, string>
+  taskIds: ReadonlyMap<string, string>
+  refIds: ReadonlyMap<string, string>
+}
+
 // D9: a plan is saved only if the dependencies form a DAG and every task
 // has acceptance criteria. Returns every problem, so the PM can fix them all.
 // `refs` holds every existing-task ref the plan names, in `ref` or
 // `dependsOn`; a task may revise only a Backlog task or a Draft, but may
 // depend on any task in the project. `designs` holds every design pin's
 // target by designPinKey; a task may pin only an approved version (D20).
-export function checkPlan(plan: ProposedPlan, refs: ReadonlyMap<string, PlanRef> = new Map(), designs: ReadonlyMap<string, DesignPinTarget> = new Map()): PlanProblem[] {
+export function checkPlan(plan: ProposedPlan, refs: ReadonlyMap<string, PlanRef> = new Map(), designs: ReadonlyMap<string, DesignPinTarget> = new Map(), context?: PlanDependencyContext): PlanProblem[] {
   const problems: PlanProblem[] = []
   if (plan.tasks.length === 0) return [{ code: 'no_tasks' }]
   const epicKeys = new Set<string>()
@@ -140,7 +154,36 @@ export function checkPlan(plan: ProposedPlan, refs: ReadonlyMap<string, PlanRef>
     return []
   })]))
   for (const problem of checkDependencies(graph)) problems.push({ code: 'dependency', problem })
+  const taskCycle = problems.some(p => p.code === 'dependency' && p.problem.code === 'cycle')
+  problems.push(...checkPlanEpicDependencies(plan, context).filter(p => !taskCycle || p.code !== 'epic_task_deadlock'))
   return problems
+}
+
+// Overlay the proposal on the complete project graph. Approval uses this
+// separately because Drafts may have been edited directly since proposing.
+export function checkPlanEpicDependencies(plan: ProposedPlan, context?: PlanDependencyContext): EpicDependencyProblem[] {
+  const epicKeys = new Set(plan.epics.map(e => e.key))
+  const epicId = (key: string) => context?.epicIds.get(key) ?? (epicKeys.has(key) ? `plan-epic:${key}` : key)
+  const taskId = (task: ProposedTask) => (task.ref ? context?.refIds.get(task.ref) : undefined) ?? context?.taskIds.get(task.key) ?? `plan-task:${task.key}`
+  const epicGraph = new Map(context?.epics)
+  const titles = new Map(context?.titles)
+  for (const epic of plan.epics) {
+    titles.set(epicId(epic.key), epic.title)
+    epicGraph.set(epicId(epic.key), (epic.dependsOn ?? []).map(dep => epicKeys.has(dep) ? epicId(dep) : dep))
+  }
+  const proposedIds = new Map(plan.tasks.map(t => [t.key, taskId(t)]))
+  const proposedRefs = new Map(plan.tasks.filter(t => t.ref).map(t => [t.ref!, taskId(t)]))
+  const effectiveTasks = new Map((context?.tasks ?? []).map(t => [t.id, t]))
+  for (const task of plan.tasks) {
+    const id = taskId(task)
+    effectiveTasks.set(id, {
+      id, epicId: task.epic ? epicId(task.epic) : null,
+      // Validate as board work even though proposed tasks are stored as Drafts.
+      status: 'ready',
+      dependsOn: task.dependsOn.map(dep => proposedIds.get(dep) ?? proposedRefs.get(dep) ?? context?.refIds.get(dep) ?? dep)
+    })
+  }
+  return checkEpicDependencies(epicGraph, [...effectiveTasks.values()], titles).filter(p => p.code !== 'epic_task_deadlock' || p.epics.length > 0)
 }
 
 function refProblem(key: string, ref: string, found: PlanRef, revising: boolean): PlanProblem | null {

@@ -183,6 +183,13 @@
       "when": 1793298073710,
       "tag": "0025_ambiguous_rockslide",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1793302758548,
+      "tag": "0026_kind_black_cat",
+      "breakpoints": true
     }
   ]
 }
