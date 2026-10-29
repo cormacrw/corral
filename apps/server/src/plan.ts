@@ -127,7 +127,7 @@ export class PlanService {
     if (!this.#d.runner.online) throw new ApiFailure(503, { code: 'runner_offline' })
     if (this.#d.updating()) throw new ApiFailure(503, { code: 'corral_updating' })
     // One turn at a time per session; other sessions, in this project or
-    // another, only wait for Juno's concurrency (D9, D13)
+    // another, only wait for the PM's concurrency (D9, D13)
     const [active] = await db.select({ id: runs.id }).from(runs)
       .where(and(eq(runs.role, 'pm'), eq(runs.planSessionId, sessionId), inArray(runs.state, ['queued', 'starting', 'running'])))
     if (active) throw new ApiFailure(409, { code: 'conflict', constraint: 'pm_turn_in_progress' })

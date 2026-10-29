@@ -108,16 +108,16 @@ export class Orchestrator implements RunnerHandlers {
   }
 
   // A PM turn (D9): a run with no task and no lease, fenced by its own epoch.
-  // It waits as `queued`, holding its job, until Juno has a free slot (D13).
+  // It waits as `queued`, holding its job, until the PM has a free slot (D13).
   async startPmRun(session: PlanSessionRow, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'>): Promise<string> {
     const { db } = this.#d
     if (this.#stopped) throw new ApiFailure(409, { code: 'conflict', constraint: 'corral_stopped' })
     if (this.#updating) throw new ApiFailure(503, { code: 'corral_updating' })
-    const [juno] = await db.select().from(agents).where(eq(agents.role, 'pm')).orderBy(asc(agents.createdAt)).limit(1)
-    if (!juno) throw new ApiFailure(409, { code: 'conflict', constraint: 'no_pm_agent' })
-    if (juno.paused || (juno.pausedUntil && juno.pausedUntil > this.#now())) throw new ApiFailure(409, { code: 'conflict', constraint: 'pm_paused' })
+    const [pm] = await db.select().from(agents).where(eq(agents.role, 'pm')).orderBy(asc(agents.createdAt)).limit(1)
+    if (!pm) throw new ApiFailure(409, { code: 'conflict', constraint: 'no_pm_agent' })
+    if (pm.paused || (pm.pausedUntil && pm.pausedUntil > this.#now())) throw new ApiFailure(409, { code: 'conflict', constraint: 'pm_paused' })
     const [run] = await db.insert(runs).values({
-      agentId: juno.id, projectId: job.projectId, taskId: null, role: 'pm', leaseEpoch: 1, planSessionId: session.id, pmJob: job, queuedAt: this.#now()
+      agentId: pm.id, projectId: job.projectId, taskId: null, role: 'pm', leaseEpoch: 1, planSessionId: session.id, pmJob: job, queuedAt: this.#now()
     }).returning()
     const ctx = await this.#load(run!.id)
     if (!ctx) throw new Error('PM run vanished')
@@ -126,7 +126,7 @@ export class Orchestrator implements RunnerHandlers {
     return run!.id
   }
 
-  // Sends waiting PM turns to the runner, oldest first, while Juno's
+  // Sends waiting PM turns to the runner, oldest first, while the PM's
   // concurrency allows. A waiting turn is `queued` with its job still held.
   async #startPmTurns(): Promise<void> {
     const { db, runner } = this.#d
@@ -273,7 +273,7 @@ export class Orchestrator implements RunnerHandlers {
     const { db, runner } = this.#d
     if (!runner.online || this.#stopped || this.#updating) return
     // PM turns aren't claimed; they run when the human writes (D9), and
-    // only wait here for one of Juno's slots
+    // only wait here for one of the PM's slots
     await this.#startPmTurns()
     const workers = await db.select().from(agents).where(ne(agents.role, 'pm')).orderBy(asc(agents.createdAt))
     for (const agent of workers) {
@@ -490,7 +490,7 @@ export class Orchestrator implements RunnerHandlers {
         const resetsAt = exit.resetsAt ? new Date(exit.resetsAt) : new Date(this.#now().getTime() + RATE_LIMIT_BACKOFF_MS)
         await this.#endRun(ctx, { state: 'completed', outcome: 'rate_limited', rateLimitResetAt: resetsAt, summary: 'Hit a usage limit' })
         await this.#d.db.update(agents).set({ pausedUntil: resetsAt }).where(eq(agents.id, ctx.agent.id))
-        error = `Juno hit a usage limit; try again after ${resetsAt.toISOString()}`
+        error = `${ctx.agent.name} hit a usage limit; try again after ${resetsAt.toISOString()}`
         break
       }
       case 'exited':
@@ -518,7 +518,7 @@ export class Orchestrator implements RunnerHandlers {
     // what the runner noted last (e.g. "The agent ended with an error: …")
     if (!reply && !error) {
       const note = events.filter((e): e is Extract<RunEvent, { type: 'system' }> => e.type === 'system').at(-1)?.text
-      error = note ?? 'Juno finished without replying'
+      error = note ?? `${ctx.agent.name} finished without replying`
     }
     if (ctx.run.planSessionId) await this.plans?.onRunEnded(ctx.run.planSessionId, ctx.run.id, reply, error)
   }
