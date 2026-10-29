@@ -1,4 +1,4 @@
-import { EVIDENCE_KINDS, type AgentTool } from '@corral/contracts'
+import { askQuestionInput, EVIDENCE_KINDS, type AgentTool } from '@corral/contracts'
 import type { AgentRole } from '@corral/core'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -80,8 +80,8 @@ const toolDefinitions = {
     input: { taskRef: z.string().describe('e.g. COR-12') }
   },
   ask_question: {
-    description: 'Ask the human a question in the Plan conversation.',
-    input: { question: z.string().min(1) }
+    description: 'Ask the human a question in the Plan conversation. Add `recommendation` with the answer you suggest, and `options` (2–5 short choices) when the answer is one of a few.',
+    input: askQuestionInput.shape
   },
   propose_plan: {
     description: 'Propose a plan: epics and tasks with acceptance criteria and dependencies. Corral validates it and shows it to the human for approval. Give `epics` when the work splits into separate features, and put each task in one with `epic`; leave it out for a single epic named after the plan. A revision keeps the epic and task keys it reuses. To refine an existing Backlog task, read it with get_task and include it in the plan with its `ref`: the plan then revises that task instead of creating a new one, and the edits are applied when the human approves.',

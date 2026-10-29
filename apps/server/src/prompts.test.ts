@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { developerPrompt, pmFallbackPrompt, pmPrompt, reviewerPrompt, type PromptTask } from './prompts.ts'
+import { developerPrompt, pmFallbackPrompt, pmPrompt, questionText, reviewerPrompt, type PromptTask } from './prompts.ts'
 
 const turn = { text: 'hi', attachedTask: null, projectName: 'Test app', prefix: 'TA' }
 
@@ -106,5 +106,15 @@ describe('pmFallbackPrompt', () => {
     const prompt = pmFallbackPrompt({ ...turn, history: [{ role: 'human', text: 'earlier' }, { role: 'human', text: 'hi' }] })
     expect(prompt.startsWith(pmPrompt({ ...turn, fresh: true }))).toBe(true)
     expect(prompt).toContain('**human:** earlier')
+  })
+})
+
+describe('questionText', () => {
+  it('leaves a plain question as it is', () => {
+    expect(questionText({ text: 'Who uses exports?', recommendation: null, options: null })).toBe('Who uses exports?')
+  })
+
+  it('numbers the options and adds the recommendation', () => {
+    expect(questionText({ text: 'Which format?', recommendation: 'CSV', options: ['CSV', 'Excel'] })).toBe('Which format?\n\nOptions:\n1. CSV\n2. Excel\n\nRecommended: CSV')
   })
 })

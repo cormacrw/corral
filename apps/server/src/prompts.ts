@@ -110,6 +110,13 @@ export function pmFallbackPrompt(turn: Omit<PmTurn, 'fresh'> & { history: { role
   return `${pmPrompt({ ...turn, fresh: true })}\n\n${history}`.trim()
 }
 
+// A question as the PM sees it in its history: numbered options, so an
+// answer like "2" or the option's text can be matched to one
+export function questionText(m: { text: string, recommendation: string | null, options: string[] | null }): string {
+  const options = m.options?.map((option, i) => `${i + 1}. ${option}`).join('\n')
+  return [m.text, options && `Options:\n${options}`, m.recommendation && `Recommended: ${m.recommendation}`].filter(Boolean).join('\n\n')
+}
+
 export function developerPrompt(task: PromptTask, agentName: string): string {
   const revision = task.reviewRounds > 0
   return [

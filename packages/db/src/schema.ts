@@ -263,6 +263,9 @@ export const planMessages = pgTable('plan_messages', {
   role: text().notNull(),
   kind: text().notNull().default('message'),
   text: text().notNull(),
+  // A question's suggested answer and answer choices (ask_question)
+  recommendation: text(),
+  options: jsonb().$type<string[]>(),
   planId: uuid().references((): AnyPgColumn => plans.id, { onDelete: 'set null' }),
   runId: uuid().references(() => runs.id, { onDelete: 'set null' }),
   createdAt: createdAt()

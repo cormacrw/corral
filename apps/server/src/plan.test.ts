@@ -131,6 +131,52 @@ describe('plan sessions', () => {
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
   })
 
+  it('records a question\'s optional recommendation and options, and shows them in the PM\'s history', async () => {
+    const project = await t.createProject()
+    const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan exports' }).then(r => r.json()) as PlanSessionDetail
+    const job = (await runner.next('run.assign', m => m.job.planSessionId === created.id)).job
+    runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'claude-sess-q' })
+    await sleep(100)
+
+    // A plain question has neither
+    expect(await runner.call(job.runId, job.leaseEpoch, 'ask_question', { question: 'Who uses exports?' })).toMatchObject({ ok: true })
+    expect((await session(created.id)).messages.at(-1)).toMatchObject({ kind: 'question', text: 'Who uses exports?', recommendation: null, options: null })
+
+    // Invalid options are refused with a tool error, and nothing is recorded
+    const count = (await session(created.id)).messages.length
+    for (const [options, error] of [
+      [['CSV'], 'Give 2–5 options'],
+      [['a', 'b', 'c', 'd', 'e', 'f'], 'Give 2–5 options'],
+      [['CSV', '  '], 'can’t be empty'],
+      [['CSV', 'x'.repeat(121)], 'at most 120 characters'],
+      ['CSV', 'options']
+    ] as const) {
+      expect(await runner.call(job.runId, job.leaseEpoch, 'ask_question', { question: 'Which format?', options })).toMatchObject({ ok: false, error: expect.stringContaining(error) })
+    }
+    expect(await runner.call(job.runId, job.leaseEpoch, 'ask_question', { question: 'Which format?', recommendation: '' })).toMatchObject({ ok: false, error: expect.stringContaining('recommendation') })
+    expect((await session(created.id)).messages).toHaveLength(count)
+
+    // With both, the GET and the plan.message event carry them
+    const asked = await runner.call(job.runId, job.leaseEpoch, 'ask_question', { question: 'Which format?', recommendation: 'CSV', options: ['CSV', ' Excel ', 'JSON'] })
+    expect(asked).toMatchObject({ ok: true })
+    const expected = { kind: 'question', text: 'Which format?', recommendation: 'CSV', options: ['CSV', 'Excel', 'JSON'] }
+    expect((await session(created.id)).messages.at(-1)).toMatchObject(expected)
+    expect(t.events.findLast(e => e.type === 'plan.message')).toMatchObject({ message: expected })
+    // Recommendation alone works too
+    expect(await runner.call(job.runId, job.leaseEpoch, 'ask_question', { question: 'Daily?', recommendation: 'Yes' })).toMatchObject({ ok: true })
+    expect((await session(created.id)).messages.at(-1)).toMatchObject({ text: 'Daily?', recommendation: 'Yes', options: null })
+    await endTurn(job, 'Over to you.')
+
+    // The next turn's history numbers the options, so "2" can be matched
+    await t.request('POST', `/api/plan/sessions/${created.id}/messages`, { text: '2' })
+    const next = (await runner.next('run.assign', m => m.job.planSessionId === created.id && m.job.runId !== job.runId)).job
+    expect(next.fallbackPrompt).toContain('**PM (question):** Who uses exports?\n\n**')
+    expect(next.fallbackPrompt).toContain('**PM (question):** Which format?\n\nOptions:\n1. CSV\n2. Excel\n3. JSON\n\nRecommended: CSV')
+    expect(next.fallbackPrompt).toContain('**PM (question):** Daily?\n\nRecommended: Yes')
+    await endTurn(next, 'Excel it is.')
+    await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+  })
+
   it('lets the PM read any task by ref, and names a ref that doesn\'t exist', async () => {
     const project = await t.createProject()
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))

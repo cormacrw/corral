@@ -238,6 +238,9 @@ export interface PlanMessage {
   role: 'human' | 'pm'
   kind: 'message' | 'question' | 'error'
   text: string
+  // Set only on questions, and only when the PM gave them
+  recommendation: string | null
+  options: string[] | null
   planId: string | null
   runId: string | null
   createdAt: string
@@ -292,6 +295,17 @@ export const planMessageInput = z.object({
   taskRef: z.string().trim().optional()
 }).refine(input => input.text.length > 0 || input.taskRef, { message: 'Write a message or attach a task' })
 export type PlanMessageInput = z.infer<typeof planMessageInput>
+
+// The PM's ask_question: a question, optionally with a suggested answer
+// and 2–5 short answer choices
+export const askQuestionInput = z.object({
+  question: z.string().trim().min(1),
+  recommendation: z.string().trim().min(1).optional().describe('Your suggested answer, in a few words'),
+  options: z.array(z.string().trim().min(1, 'An option can’t be empty').max(120, 'An option can be at most 120 characters'))
+    .min(2, 'Give 2–5 options, or leave options out').max(5, 'Give 2–5 options, or leave options out')
+    .optional().describe('2–5 short answer choices')
+})
+export type AskQuestionInput = z.infer<typeof askQuestionInput>
 
 // The plan's Drafts go to the board (Ready) or to the Backlog
 export const approvePlanInput = z.object({
