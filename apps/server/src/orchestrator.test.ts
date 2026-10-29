@@ -54,9 +54,20 @@ describe('orchestrator', () => {
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
   }
 
+  it('names the claiming agent’s runtime in the job (D15)', async () => {
+    await t.db.update(agents).set({ runtime: 'other-cli' }).where(eq(agents.role, 'developer'))
+    try {
+      const { project, job } = await assigned()
+      expect(job.runtime).toBe('other-cli')
+      await pause(project)
+    } finally {
+      await t.db.update(agents).set({ runtime: 'claude-code' }).where(eq(agents.role, 'developer'))
+    }
+  })
+
   it('claims an approved task and assigns a developer job', async () => {
     const { project, task, job } = await assigned()
-    expect(job).toMatchObject({ role: 'developer', taskId: task.id, taskRef: task.ref, leaseEpoch: 1, repository: project.repository })
+    expect(job).toMatchObject({ role: 'developer', runtime: 'claude-code', taskId: task.id, taskRef: task.ref, leaseEpoch: 1, repository: project.repository })
     expect(job.branch).toMatch(new RegExp(`^corral/${task.ref.toLowerCase()}-`))
     expect(job.prompt).toContain('Shows an error on a bad password')
     expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', leaseRunId: job.runId, leaseEpoch: 1 })
@@ -243,7 +254,7 @@ describe('orchestrator', () => {
 
   it('claims an Agent review task for the reviewer at the submitted commit', async () => {
     const { project, task, review } = await underReview()
-    expect(review).toMatchObject({ role: 'reviewer', headSha: 'abc123', branch: task.branch, leaseEpoch: 2 })
+    expect(review).toMatchObject({ role: 'reviewer', runtime: 'claude-code', headSha: 'abc123', branch: task.branch, leaseEpoch: 2 })
     expect(review.prompt).toContain('commit abc123')
     expect(review.prompt).toContain('shot.png')
     expect(await taskRow(task.id)).toMatchObject({ status: 'agent_review', leaseRole: 'reviewer', leaseRunId: review.runId })

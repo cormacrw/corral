@@ -1,42 +1,28 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import type { AgentExit, AgentProcess, AgentRuntime, AgentSession, RuntimeOptions, TurnResult } from './agent-runtime.ts'
 import type { GitAuthor } from './config.ts'
-import { StreamJsonParser, type ParsedLine } from './stream-json.ts'
+import { StreamJsonParser } from './stream-json.ts'
 
 // The Claude Code AgentRuntime adapter (agent-runtime-and-auth.md). Auth is
 // the CLI's own business: it reads its login from the user's config and
 // Corral never sees it (D2). Everything provider-specific lives here, so
 // another CLI means another adapter, not changes to the run manager.
 
-export interface AgentOptions {
+export interface AgentOptions extends RuntimeOptions {
   claudeBin: string
-  cwd: string
-  prompt: string
-  // Role instructions from the repo, plus the runner's notes
-  systemPrompt: string
-  mcpConfigPath: string
-  model: string | null
-  resumeSessionId: string | null
-  // Set on PM follow-up turns: resuming this session adds no "Session started" note
-  quietResume?: boolean
-  gitAuthor: GitAuthor | null
-  onLine(raw: string, parsed: ParsedLine): void
 }
 
-export interface AgentExit {
-  code: number | null
-  signal: NodeJS.Signals | null
-}
+export type { AgentExit, AgentProcess, AgentSession, TurnResult } from './agent-runtime.ts'
 
-export interface AgentProcess {
-  pid: number
-  exited: Promise<AgentExit>
-  // Signals the whole process group: dev servers and browsers the agent
-  // started go with it (architecture.md, runner rule 2)
-  kill(signal: NodeJS.Signals): void
+// The registry's entry for runtime id 'claude-code'
+export function claudeCodeRuntime(claudeBin: string): AgentRuntime {
+  return {
+    id: 'claude-code',
+    spawn: options => spawnAgent({ ...options, claudeBin }),
+    spawnSession: options => spawnAgentSession({ ...options, claudeBin })
+  }
 }
-
-export const STOP_GRACE_MS = 5_000
 
 type ArgOptions = Pick<AgentOptions, 'systemPrompt' | 'mcpConfigPath' | 'model' | 'resumeSessionId'>
 
@@ -88,16 +74,6 @@ export function spawnAgent(options: AgentOptions): AgentProcess {
 }
 
 export type AgentOptionsWithoutPrompt = Omit<AgentOptions, 'prompt'>
-
-export type TurnResult = NonNullable<ParsedLine['result']>
-
-export interface AgentSession extends AgentProcess {
-  // Writes one user message. A no-op once the process has exited.
-  send(prompt: string): void
-  // The next turn's result line, in order. Resolves null if the process
-  // ends first, so a caller waiting on a killed or crashed turn never hangs.
-  nextResult(): Promise<TurnResult | null>
-}
 
 // A long-lived agent that takes turns over stdin: each send() is one user
 // message, and each turn ends with a result line. onLine still sees every line.
