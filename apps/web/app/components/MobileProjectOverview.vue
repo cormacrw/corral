@@ -11,7 +11,8 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
 
 <template>
   <div class="flex min-h-0 min-w-0 flex-1 flex-col">
-    <div class="min-h-0 flex-1 overflow-y-auto">
+    <!-- The active runs' glow spills past the screen's edge -->
+    <div class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
       <div
         v-if="!project"
         class="flex flex-col gap-3 p-4"

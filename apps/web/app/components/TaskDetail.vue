@@ -507,7 +507,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
         <input
           v-else
           :value="task.title"
-          class="w-full rounded-md bg-transparent px-1 py-0.5 text-lg font-semibold text-highlighted hover:bg-elevated focus:ring-2 focus:ring-primary focus:outline-none"
+          class="self-stretch rounded-md bg-transparent px-1 py-0.5 text-lg font-semibold text-highlighted hover:bg-elevated focus:ring-2 focus:ring-primary focus:outline-none"
           aria-label="Title"
           @change="patch({ title: ($event.target as HTMLInputElement).value })"
         >

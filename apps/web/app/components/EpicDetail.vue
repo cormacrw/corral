@@ -292,7 +292,9 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
         </section>
       </div>
 
-      <section :class="['flex min-h-0 min-w-0 flex-col', props.mode === 'page' ? 'flex-1 max-[900px]:h-[560px]' : 'px-4 pb-4']">
+      <!-- On mobile the tasks follow the details in the one scroll, so the
+           list never shrinks into a scroll of its own -->
+      <section :class="['flex min-w-0 flex-col', props.mode === 'page' ? 'min-h-0 flex-1 max-[900px]:h-[560px]' : props.mode === 'mobile' ? 'shrink-0 px-4 pb-4' : 'min-h-0 px-4 pb-4']">
         <UTabs
           v-model="tab"
           :items="[{ label: `Tasks (${epic.tasks.length})`, value: 'tasks', icon: 'i-lucide-list' }, { label: 'Graph', value: 'graph', icon: 'i-lucide-network' }]"
@@ -310,7 +312,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
         </p>
         <ul
           v-else-if="tab === 'tasks'"
-          :class="['min-h-0 overflow-y-auto', props.mode === 'page' ? 'flex-1 px-4 py-2' : 'mt-2']"
+          :class="[props.mode !== 'mobile' && 'min-h-0 overflow-y-auto', props.mode === 'page' ? 'flex-1 px-4 py-2' : 'mt-2']"
         >
           <li
             v-for="task in epic.tasks"
