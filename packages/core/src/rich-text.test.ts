@@ -17,6 +17,11 @@ describe('richTextToPlainText', () => {
     expect(richTextToPlainText({ type: 'doc', content: [{ type: 'paragraph' }] })).toBe('')
     expect(richTextToPlainText(null)).toBe('')
   })
+
+  it('ignores images, which carry no text', () => {
+    const image = { type: 'image', attrs: { src: 'attachment:0d6f7c2e-5b1a-4c3d-9e8f-1a2b3c4d5e6f', alt: 'screenshot.png' } }
+    expect(richTextToPlainText({ type: 'doc', content: [image, { type: 'paragraph' }] })).toBe('')
+  })
 })
 
 describe('markdownToRichText', () => {
@@ -40,6 +45,11 @@ describe('markdownToRichText', () => {
   it('round-trips through richTextToMarkdown', () => {
     const markdown = '## Goal\n\nAdd a **shared** header.\n\n- Home\n- Hello\n\n```ts\nconst a = 1\n```'
     expect(richTextToMarkdown(markdownToRichText(markdown))).toBe(markdown)
+  })
+
+  it('writes images as markdown images', () => {
+    const doc = { type: 'doc', content: [{ type: 'image', attrs: { src: 'attachment:0d6f7c2e-5b1a-4c3d-9e8f-1a2b3c4d5e6f', alt: 'the [login] page' } }] }
+    expect(richTextToMarkdown(doc)).toBe('![the  login  page](attachment:0d6f7c2e-5b1a-4c3d-9e8f-1a2b3c4d5e6f)')
   })
 })
 

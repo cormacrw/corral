@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import type { AuditEntry, Comment, Evidence, Review, Task } from '@corral/contracts'
 import type { EditorToolbarItem } from '@nuxt/ui'
+import type { EditorView } from '@tiptap/pm/view'
 import type { TaskPriority, TaskStatus } from '@corral/core'
 import { availableEvents } from '@corral/core'
 import { api, ApiError } from '~/composables/useApi'
 import { PRIORITY, STATUS, TASK_TYPE, timeAgo } from '~/utils/labels'
+import { attachmentProblem } from '~/utils/attachments'
+import { AttachmentImage, imageFiles, insertImages } from '~/utils/editor-image'
 
 // One TaskDetail with three modes (design/task.md): docked flyout, the
 // task page with a properties rail, or the full mobile page with Details
@@ -187,7 +190,51 @@ function onDescriptionClick(event: MouseEvent) {
 // The editor's defaults suit a full page; a task's description sits in a
 // narrow column at body text size
 const descriptionUi = {
-  base: 'text-sm sm:px-0 *:my-2 [&_p]:leading-6 [&_h1]:text-lg [&_h2]:text-base [&_h3]:text-sm [&_h2>code]:text-sm [&_h3>code]:text-sm [&_li]:my-0.5 [&_pre]:px-3 [&_pre]:py-2 [&_pre]:text-xs/5 [&_code]:text-xs'
+  base: 'text-sm sm:px-0 *:my-2 [&_p]:leading-6 [&_h1]:text-lg [&_h2]:text-base [&_h3]:text-sm [&_h2>code]:text-sm [&_h3>code]:text-sm [&_li]:my-0.5 [&_pre]:px-3 [&_pre]:py-2 [&_pre]:text-xs/5 [&_code]:text-xs [&_img]:max-w-full [&_img]:rounded-md [&_img.ProseMirror-selectednode]:ring-2 [&_img.ProseMirror-selectednode]:ring-primary'
+}
+// Images upload as attachments and are stored as attachment:<id>
+// (utils/editor-image.ts); pasted, dropped or picked from the toolbar
+const descriptionExtensions = [AttachmentImage]
+const descriptionEditor = useTemplateRef<{ editor?: { view: EditorView } }>('descriptionEditor')
+const imageInput = useTemplateRef<HTMLInputElement>('imageInput')
+const uploadingImages = ref(0)
+async function uploadImage(file: File): Promise<{ id: string } | null> {
+  const name = file.name || 'pasted-image.png'
+  const problem = attachmentProblem(file)
+  if (problem) {
+    toast.add({ title: `Couldn't add ${name}`, description: problem, color: 'error' })
+    return null
+  }
+  uploadingImages.value++
+  try {
+    return await api.attachments.upload(slug.value, file, name)
+  } catch (e) {
+    toast.add({ title: `Couldn't upload ${name}`, description: e instanceof Error ? e.message : String(e), color: 'error' })
+    return null
+  } finally {
+    uploadingImages.value--
+  }
+}
+const descriptionEditorProps = {
+  handlePaste: (view: EditorView, event: ClipboardEvent) => {
+    const files = imageFiles(event.clipboardData)
+    if (files.length === 0) return false
+    insertImages(view, files, uploadImage)
+    return true
+  },
+  handleDrop: (view: EditorView, event: DragEvent, _slice: unknown, moved: boolean) => {
+    const files = moved ? [] : imageFiles(event.dataTransfer)
+    if (files.length === 0) return false
+    event.preventDefault()
+    insertImages(view, files, uploadImage, view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos)
+    return true
+  }
+}
+function onImagePicked(event: Event) {
+  const input = event.target as HTMLInputElement
+  const view = descriptionEditor.value?.editor?.view
+  if (view) insertImages(view, imageFiles({ files: input.files } as DataTransfer), uploadImage)
+  input.value = ''
 }
 const toolbarItems: EditorToolbarItem[][] = [
   [
@@ -200,7 +247,8 @@ const toolbarItems: EditorToolbarItem[][] = [
     { 'kind': 'bulletList', 'icon': 'i-lucide-list', 'aria-label': 'Bulleted list' },
     { 'kind': 'orderedList', 'icon': 'i-lucide-list-ordered', 'aria-label': 'Numbered list' },
     { 'kind': 'codeBlock', 'icon': 'i-lucide-square-code', 'aria-label': 'Code block' },
-    { 'kind': 'link', 'icon': 'i-lucide-link', 'aria-label': 'Link' }
+    { 'kind': 'link', 'icon': 'i-lucide-link', 'aria-label': 'Link' },
+    { 'icon': 'i-lucide-image', 'aria-label': 'Insert image', 'onClick': () => imageInput.value?.click() }
   ]
 ] as const
 async function saveDescription() {
@@ -600,9 +648,13 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
           </h3>
           <template v-if="editingDescription">
             <UEditor
+              ref="descriptionEditor"
               v-slot="{ editor }"
               v-model="descriptionDraft"
               content-type="json"
+              :image="false"
+              :extensions="descriptionExtensions"
+              :editor-props="descriptionEditorProps"
               autofocus="end"
               class="rounded-md ring-2 ring-primary"
               :ui="{ ...descriptionUi, base: `${descriptionUi.base} min-h-24 px-3 py-2 sm:px-3` }"
@@ -615,6 +667,14 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
                 class="border-b border-default px-1 py-1"
               />
             </UEditor>
+            <input
+              ref="imageInput"
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              multiple
+              class="hidden"
+              @change="onImagePicked"
+            >
             <div class="mt-2 flex justify-end gap-2">
               <UButton
                 label="Cancel"
@@ -624,8 +684,9 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
                 @click="editingDescription = false"
               />
               <UButton
-                label="Save"
+                :label="uploadingImages > 0 ? 'Uploading…' : 'Save'"
                 size="sm"
+                :disabled="uploadingImages > 0"
                 @click="saveDescription"
               />
             </div>
@@ -644,6 +705,8 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
               :model-value="(task.description ?? { type: 'doc', content: [] }) as never"
               content-type="json"
               :editable="false"
+              :image="false"
+              :extensions="descriptionExtensions"
               placeholder="Add a description…"
               :ui="{ base: `${descriptionUi.base} [&>p:last-child:not(:first-child):has(>br:only-child)]:hidden` }"
             />

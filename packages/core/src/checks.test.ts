@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { deletionFor } from './deletion.ts'
 import { checkDependencies, findCycle } from './dependencies.ts'
 import { checkDefinitionOfReady } from './ready.ts'
+import { richTextToPlainText } from './rich-text.ts'
 
 describe('checkDefinitionOfReady', () => {
   it('passes a complete task', () => {
@@ -11,6 +12,12 @@ describe('checkDefinitionOfReady', () => {
   it('reports every missing part', () => {
     expect(checkDefinitionOfReady({ title: ' ', description: '', acceptanceCriteria: [] }))
       .toEqual(['missing_title', 'missing_description', 'missing_acceptance_criteria'])
+  })
+
+  it('reports a description that is only an image as missing', () => {
+    const description = { type: 'doc', content: [{ type: 'image', attrs: { src: 'attachment:0d6f7c2e-5b1a-4c3d-9e8f-1a2b3c4d5e6f', alt: 'mockup.png' } }] }
+    expect(checkDefinitionOfReady({ title: 'T', description: richTextToPlainText(description), acceptanceCriteria: ['C'] }))
+      .toEqual(['missing_description'])
   })
 
   it('rejects a blank criterion', () => {

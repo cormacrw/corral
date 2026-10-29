@@ -46,7 +46,7 @@ Read and edit any task from wherever you are, without losing your place. It's th
    - The menu uses popover styling, with a trailing `primary` check on the selected item.
    - Picking an option saves immediately and shows "Saved".
 3. **Depends on:** a list of linked tasks (ref, title, status badge), or "Nothing", with an **Add dependency** ghost button.
-4. **Description:** rich text (`UEditor`, TipTap).
+4. **Description:** rich text (`UEditor`, TipTap). Images can be pasted, dropped or added from the toolbar's Insert image button: each uploads as an attachment and is stored in the document as an image node with `src: attachment:<id>`, shown from `/api/attachments/<id>/file`. An image alone isn't a description for the Definition of Ready.
    - It's read-only until you press **Edit**.
    - Editing shows a toolbar: bold, italic, inline code | heading, bulleted list, numbered list, code block, link.
    - It also shows a `primary` focus ring, **Cancel** and **Save**.
