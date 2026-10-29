@@ -126,6 +126,8 @@ export async function patchAgent(db: Executor, agentId: string, input: PatchAgen
     // Locked like claimNextTask does, so no run starts while the runtime changes
     const [current] = await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')
     if (!current) throw notFound()
+    // PM turns are limited only to one per Plan session (D9, D13)
+    if (input.concurrency !== undefined && current.role === 'pm') throw new ApiFailure(400, { code: 'concurrency_not_applicable' })
     if (input.runtime !== undefined && input.runtime !== current.runtime) {
       // A queued or running run was started for the old runtime
       const [active] = await tx.select({ n: count() }).from(runs)

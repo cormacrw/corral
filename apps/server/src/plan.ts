@@ -197,7 +197,7 @@ export class PlanService {
     if (!project) throw notFound()
     this.assertTurnPossible()
     // One turn at a time per session; other sessions, in this project or
-    // another, only wait for the PM's concurrency (D9, D13)
+    // another, aren't held back, since the PM has no concurrency (D9, D13)
     const [active] = await db.select({ id: runs.id }).from(runs)
       .where(and(eq(runs.role, 'pm'), eq(runs.planSessionId, sessionId), inArray(runs.state, ['queued', 'starting', 'running'])))
     if (active) throw new ApiFailure(409, { code: 'conflict', constraint: 'pm_turn_in_progress' })

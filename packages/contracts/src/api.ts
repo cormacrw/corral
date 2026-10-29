@@ -469,6 +469,8 @@ export type ApiError =
   | { code: 'invalid_dependencies', problems: unknown }
   | { code: 'runner_offline' }
   | { code: 'corral_updating' }
+  // PM turns have no concurrency, only one per Plan session (D9, D13)
+  | { code: 'concurrency_not_applicable' }
   // A message for a run that can't take one, with a reason a person can read
   | { code: 'run_not_live', reason: string }
 

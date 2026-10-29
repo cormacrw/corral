@@ -1,7 +1,7 @@
 import type { Attachment, Epic, EpicDetail, Plan, PlanSession, PlanSessionDetail, RunJob, Task } from '@corral/contracts'
 import { richTextToMarkdown } from '@corral/core'
 import { schema } from '@corral/db'
-import { and, desc, eq, ne } from 'drizzle-orm'
+import { and, desc, eq, inArray, ne } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner, sleep } from './test-runner.ts'
@@ -786,33 +786,81 @@ describe('plan sessions', () => {
     expect((await session(b.id)).activeRunId).toBeNull()
   })
 
-  it('queues a turn over the PM\'s concurrency and starts it when a slot frees', async () => {
+  it('starts every session\'s turn at once, whatever the PM\'s concurrency in the DB', async () => {
+    // The column is ignored for the PM (D13): only one turn per session limits it
     await t.db.update(agents).set({ concurrency: 1 }).where(eq(agents.role, 'pm'))
+    const projectA = await t.createProject()
+    const projectB = await t.createProject()
+    const sessions: PlanSessionDetail[] = []
+    for (const [project, text] of [[projectA, 'Plan search'], [projectA, 'Plan billing'], [projectB, 'Plan audit']] as const) {
+      const res = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text })
+      expect(res.status).toBe(201)
+      sessions.push(await res.json() as PlanSessionDetail)
+    }
+    const jobs = await Promise.all(sessions.map(s => runner.next('run.assign', m => m.job.planSessionId === s.id).then(m => m.job)))
+    // All three were sent to the runner, none held back, and all run together
+    const sent = await t.db.select().from(runs).where(inArray(runs.id, jobs.map(j => j.runId)))
+    expect(sent.map(r => r.pmJob)).toEqual([null, null, null])
+    for (const job of jobs) runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: `claude-${job.runId}` })
+    await sleep(150)
+    const rows = await t.db.select().from(runs).where(inArray(runs.id, jobs.map(j => j.runId)))
+    expect(rows.map(r => r.state)).toEqual(['running', 'running', 'running'])
+
+    // Still one turn at a time per session
+    const again = await t.request('POST', `/api/plan/sessions/${sessions[1]!.id}/messages`, { text: 'Again' })
+    expect(again.status).toBe(409)
+    expect(await again.json()).toMatchObject({ error: { code: 'conflict', constraint: 'pm_turn_in_progress' } })
+
+    for (const job of jobs) await endTurn(job, 'Noted.')
+    for (const s of sessions) expect((await session(s.id)).activeRunId).toBeNull()
+    await t.db.update(agents).set({ concurrency: 50 }).where(eq(agents.role, 'pm'))
+  })
+
+  it('holds queued turns while the PM is paused, and sends them all when it resumes or on the next start pass', async () => {
+    await t.db.update(agents).set({ concurrency: 1 }).where(eq(agents.role, 'pm'))
+    const [pm] = await t.db.select().from(agents).where(eq(agents.role, 'pm'))
     const project = await t.createProject()
-    const other = await t.createProject()
-    const a = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan search' }).then(r => r.json()) as PlanSessionDetail
-    const aJob = (await runner.next('run.assign', m => m.job.planSessionId === a.id)).job
-    runner.send({ type: 'run.started', runId: aJob.runId, leaseEpoch: aJob.leaseEpoch, agentSessionId: 'claude-a' })
+    // Turns left `queued` with their jobs, as a restart or a pause leaves them
+    const queue = async (count: number) => {
+      const ids: string[] = []
+      for (let i = 0; i < count; i++) {
+        const [s] = await t.db.insert(schema.planSessions).values({ projectId: project.id, title: `Queued ${i}`, runtime: 'claude-code', createdBy: t.actor }).returning()
+        const job = {
+          role: 'pm', projectId: project.id, repository: project.repository, defaultBranch: project.defaultBranch, taskId: null, taskRef: null, branch: null, headSha: null,
+          planSessionId: s!.id, agentSessionId: null, runtime: 'claude-code', model: null, timeoutSeconds: 600, prompt: `Queued ${i}`
+        }
+        const [run] = await t.db.insert(runs).values({ agentId: pm!.id, projectId: project.id, taskId: null, role: 'pm', leaseEpoch: 1, planSessionId: s!.id, pmJob: job as never, queuedAt: new Date() }).returning()
+        ids.push(run!.id)
+      }
+      return ids
+    }
+    const assigned = (ids: string[]) => runner.received.filter(m => m.type === 'run.assign' && ids.includes(m.job.runId))
 
-    // Concurrency is global (D13): a session in another project waits too
-    const res = await t.request('POST', '/api/plan/sessions', { projectId: other.id, text: 'Plan billing' })
-    expect(res.status).toBe(201)
-    const b = await res.json() as PlanSessionDetail
-    expect(b.activeRunId).not.toBeNull()
-    await sleep(200)
-    expect(runner.received.some(m => m.type === 'run.assign' && m.job.planSessionId === b.id)).toBe(false)
-    const [waiting] = await t.db.select().from(runs).where(eq(runs.id, b.activeRunId!))
-    expect(waiting).toMatchObject({ state: 'queued', planSessionId: b.id })
-    // Still B's own turn, so B refuses another message meanwhile
-    expect((await t.request('POST', `/api/plan/sessions/${b.id}/messages`, { text: 'Again' })).status).toBe(409)
+    // Paused: a start pass leaves them queued
+    expect((await t.request('PATCH', `/api/agents/${pm!.id}`, { paused: true })).status).toBe(200)
+    const paused = await queue(3)
+    await t.orchestrator.schedule()
+    await sleep(150)
+    expect(assigned(paused)).toHaveLength(0)
+    const held = await t.db.select().from(runs).where(inArray(runs.id, paused))
+    expect(held.map(r => r.state)).toEqual(['queued', 'queued', 'queued'])
 
-    await endTurn(aJob, 'Search planned.')
-    const bJob = (await runner.next('run.assign', m => m.job.planSessionId === b.id)).job
-    expect(bJob).toMatchObject({ runId: b.activeRunId, role: 'pm', projectId: other.id, prompt: expect.stringContaining('Plan billing') })
-    expect((await session(a.id)).activeRunId).toBeNull()
-    expect((await session(b.id)).activeRunId).toBe(bJob.runId)
-    await endTurn(bJob, 'Billing planned.')
-    expect((await session(b.id)).activeRunId).toBeNull()
+    // Resumed: all three go to the runner at once
+    expect((await t.request('PATCH', `/api/agents/${pm!.id}`, { paused: false })).status).toBe(200)
+    const resumedJobs = await Promise.all(paused.map(id => runner.next('run.assign', m => m.job.runId === id).then(m => m.job)))
+    expect(resumedJobs.map(j => j.runId).sort()).toEqual([...paused].sort())
+
+    // Queued when the server starts: the next start pass sends them all
+    const atStart = await queue(3)
+    await t.orchestrator.schedule()
+    const startJobs = await Promise.all(atStart.map(id => runner.next('run.assign', m => m.job.runId === id).then(m => m.job)))
+    expect(startJobs).toHaveLength(3)
+    for (const job of startJobs) runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: `claude-${job.runId}` })
+    await sleep(150)
+    const started = await t.db.select().from(runs).where(inArray(runs.id, atStart))
+    expect(started.map(r => [r.state, r.pmJob])).toEqual([['running', null], ['running', null], ['running', null]])
+
+    for (const job of [...resumedJobs, ...startJobs]) await endTurn(job, 'Noted.')
     await t.db.update(agents).set({ concurrency: 50 }).where(eq(agents.role, 'pm'))
   })
 

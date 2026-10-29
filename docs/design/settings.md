@@ -21,7 +21,7 @@
 ### Agents
 
 - **Header:** "Agents" with "Shared by every project. Each runs through your local CLI login; Corral never sees your credentials." (D1–D2), and **Add agent**.
-- **One row per agent:** the name, a role badge, "{runtime} · concurrency 1 · `.corral/agents/<role>.md`", the agent's picture with **Upload picture** / **Remove**, and its name, concurrency and paused controls.
+- **One row per agent:** the name, a role badge, "{runtime} · concurrency 1 · `.corral/agents/<role>.md`", the agent's picture with **Upload picture** / **Remove**, and its name, concurrency and paused controls. The PM's row says "one turn per session" instead and has no concurrency control: PM turns are limited only to one per Plan session (D9, D13), and the API refuses a PM concurrency.
 - **Add agent** opens a dialog: name, role (Developer or Reviewer), runtime (`USelectMenu`, offering only the CLIs the runner detected, labelled "Claude" and "Codex", never "Claude Code"; D18) and concurrency. The new agent appears in the list live. Each developer and reviewer row also has a runtime menu, disabled while the agent has active runs.
 - **Edit screen** (to design): instructions file, and the caps that apply per role.
 
