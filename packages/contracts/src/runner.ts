@@ -22,6 +22,9 @@ export interface RepoSummary {
   canPush: boolean
 }
 
+// The agent CLIs detect_clis looks for in the runner
+export type CliId = 'claude' | 'codex'
+
 export type SetupJob =
   | { kind: 'list_repos' }
   | { kind: 'check_repo', repository: string }
@@ -37,7 +40,7 @@ export type SetupJobResult =
   | { kind: 'list_repos', signedIn: false }
   | { kind: 'list_repos', signedIn: true, repos: RepoSummary[] }
   | { kind: 'check_repo', signedIn: boolean, found: boolean, canPush: boolean, defaultBranch: string | null, cloned: boolean, error: string | null }
-  | { kind: 'detect_clis', clis: { id: 'claude', version: string | null, signedIn: boolean }[] }
+  | { kind: 'detect_clis', clis: { id: CliId, version: string | null, signedIn: boolean }[] }
   | { kind: 'github', status: number, body: unknown }
   | { kind: 'cleanup_worktrees', removed: string[], kept: string[] }
 
