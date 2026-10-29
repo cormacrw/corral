@@ -53,7 +53,10 @@ describe('migrations', () => {
       select p.id, t.id, 't1', 'changed', 0, '{"title":"T","description":"","type":"frontend","priority":"medium","humanReview":false,"acceptanceCriteria":[],"epicId":null,"dependsOn":[]}'::jsonb
       from plans p, tasks t where t.number = 1`)
 
-    await migrate(db, { migrationsFolder })
+    // Up to 0015 only, so later changes to the enum don't show
+    const through = await migrationsBefore('0016_design_tasks')
+    cleanup.push(() => rm(through, { recursive: true, force: true }))
+    await migrate(db, { migrationsFolder: through })
 
     const tasks = await db.execute(sql`select number, type::text as type from tasks order by number`)
     expect(tasks.rows).toEqual(oldTypes.map((_, i) => ({ number: i + 1, type: 'task' })))
@@ -62,5 +65,47 @@ describe('migrations', () => {
     const values = await db.execute(sql`select unnest(enum_range(null::task_type))::text as value`)
     expect(values.rows.map(r => r.value)).toEqual(['task', 'bug', 'spike'])
     // Two full migration runs on PGlite
+  }, 60_000)
+  it('0016 adds the design type and design versions to a database with tasks (D20)', async () => {
+    const before = await migrationsBefore('0016_design_tasks')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const client = new PGlite()
+    cleanup.push(() => client.close())
+    const db = drizzle(client, { casing: 'snake_case' })
+    await migrate(db, { migrationsFolder: before })
+
+    const actor = sql`'{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb`
+    await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('P', 'p', 'PA', 'o/r', 'main')`)
+    for (const [i, type] of ['task', 'bug', 'spike'].entries()) {
+      await db.execute(sql`insert into tasks (project_id, number, title, type, human_review, created_by)
+        select id, ${i + 1}, ${`Task ${i + 1}`}, ${type}::task_type, ${i === 1}, ${actor} from projects`)
+    }
+
+    await migrate(db, { migrationsFolder })
+
+    // Existing tasks are untouched
+    const existing = await db.execute(sql`select number, type::text as type, human_review from tasks order by number`)
+    expect(existing.rows).toEqual([
+      { number: 1, type: 'task', human_review: false },
+      { number: 2, type: 'bug', human_review: true },
+      { number: 3, type: 'spike', human_review: false }
+    ])
+    const values = await db.execute(sql`select unnest(enum_range(null::task_type))::text as value`)
+    expect(values.rows.map(r => r.value)).toEqual(['task', 'bug', 'spike', 'design'])
+
+    // A design task with versions numbered per task
+    await db.execute(sql`insert into tasks (project_id, number, title, type, human_review, created_by)
+      select id, 4, 'Login design', 'design', true, ${actor} from projects`)
+    const version = (n: number) => sql`insert into design_versions (task_id, version, bundle_blob, spec_blob, screenshots, branch, commit_sha)
+      select id, ${n}, 'bundle', 'spec', '[{"blob":"shot","fileName":"login.png","contentType":"image/png"}]'::jsonb, 'design/PA-4', 'abc123' from tasks where number = 4`
+    await db.execute(version(1))
+    await db.execute(version(2))
+    const versions = await db.execute(sql`select version, status::text as status, feedback from design_versions order by version`)
+    expect(versions.rows).toEqual([{ version: 1, status: 'submitted', feedback: null }, { version: 2, status: 'submitted', feedback: null }])
+    await expect(db.execute(version(2))).rejects.toThrow()
+    await expect(db.execute(sql`update design_versions set version = 0 where version = 1`)).rejects.toThrow()
+    // Versions go with their task
+    await db.execute(sql`delete from tasks where number = 4`)
+    expect((await db.execute(sql`select * from design_versions`)).rows).toEqual([])
   }, 60_000)
 })
