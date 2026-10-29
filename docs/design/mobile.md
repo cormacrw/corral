@@ -28,7 +28,7 @@ Pages and components use `useDevice().isMobile` to choose a mobile component. Do
 
 From top to bottom:
 
-- **Header:** the page title (on a project's Board, Backlog and Settings, the project name above it and a back button to the project's overview; on a project's overview, a back button to Projects and Project settings in place of Settings; on a Plan conversation, the project above the session title and a back button to `/plan`; on an Inbox item, "Inbox · n of m" above the task ref and a back button to `/inbox`), the runner's live status (a dot and "Runner online" / "Runner offline", coloured like the sidebar footer), and a Settings button. Pages add their own header buttons by teleporting into `#mobile-header-actions` (`<Teleport defer to="#mobile-header-actions">`), next to Settings: the Board's search, the Backlog's New task, Projects' Add project, Project settings' Save.
+- **Header:** the page title (on a project's Board, Backlog and Settings, the project name above it and a back button to the project's overview; on a project's overview, a back button to Projects and Project settings in place of Settings; on a Plan conversation, the project above the session title and a back button to `/plan`; on an Inbox item, "Inbox · n of m" above the task ref and a back button to `/inbox`), the runner's live status (a dot and "Runner online" / "Runner offline", coloured like the sidebar footer), a Search button that opens [Search](#search), and a Settings button (to `/settings`). The Board, Backlog and Inbox list have their own search button that filters the page, so they don't show the global one. Pages add their own header buttons by teleporting into `#mobile-header-actions` (`<Teleport defer to="#mobile-header-actions">`), next to Settings: the Board's search, the Backlog's New task, Projects' Add project, Project settings' Save.
 - **Banners:** the same shell banners as the web layout (stopped, updating, project paused, runner offline, reconnecting), from `ShellBanners.vue`.
 - **Page:** fills the space between, and scrolls.
 - **Tab bar:** five tabs, each an icon over a label. The active tab is `primary`. A Plan conversation and an Inbox item hide the tab bar, the runner status and Settings, so the chat or the tray and its composer get the full height.
@@ -110,15 +110,22 @@ Built from the **Setup · Your name**, **Setup · Repository**, **Setup · Agent
 - **Body:** the step's fields in one column, with no card: step 1 asks "What should agents call you?"; step 2 stacks the repository list, branch and merge method, and the setup checks in a bordered card; step 3 shows each CLI as a card-style checkbox, tinted `primary` when ready; step 4 is one card per role with its Name and Runs on fields.
 - **Footer:** the step's action (Continue, Confirm and continue, Finish setup, Add project) full width, pinned to the bottom and padded for the home indicator.
 
+## Settings
+
+Built from the **Settings** and **Settings · Runner** frames. Behaviour follows [settings.md](settings.md).
+
+- **Settings** (`/settings`, `SettingsMobile.vue`): on mobile, `/settings` lists the sections instead of opening Profile. The header has a back button to Home and no runner status or Settings button. From the top: your picture and name (opens Profile), **Profile** and **Runner** rows (the runner row shows its live status, "Online · {name}" with the dot), **Agents** (one row per agent with its role, runtime and concurrency, opening the Agents section), **Appearance** with the colour mode and the **Layout** override (Auto / Desktop / Mobile, see [Override](#override)) set in place, and **App → Install Corral** where the browser can install it.
+- **Sections** (`/settings/<section>`): each its own screen, titled with the section, with a back button to `/settings`. Profile, Agents and Appearance show the web cards stacked, without the section menu.
+- **Runner** (`/settings/runner`, `SettingsRunnerMobile.vue`): the status card (dot, "Online · {name}", last heartbeat, live from `useLive()`) with **Reconnect**, which reloads the live state and scans the logins again; the data directory (`CORRAL_RUNNER_DATA_DIR`, read-only); **Logins inside the runner** with each CLI's version and Signed in / Not signed in; the sign-in commands with a copy button each; and the note that Corral never reads credentials.
+
+## Search
+
+Built from the **Search** frame (`MobileSearch.vue`): the web's command palette as a full screen over the shell, opened from the header's Search button. The search box (focused) and **Cancel** sit at the top. With no query it lists the pages to go to; a query matches, case-insensitively, **Go to** pages (the same list as the web palette, `utils/search.ts`), **Epics** (with the project and merged count), **Tasks** (by title or ref, with the status), and **Plan sessions** (with the time), the matched text in bold. Each group shows up to 8 results. Picking one goes to it and closes Search; so does navigating away.
+
 ## Pages without a mobile screen yet
 
 They render inside the mobile layout as they are, and reflow as well as they can: panels stack or scroll sideways. Each later task replaces one group with its mobile screen.
 
 ## Remaining frames
 
-Frames in the export, grouped by the task that will build them:
-
-| Task | Frames |
-|---|---|
-| Settings | Settings, Settings · Runner |
-| Search | Search |
+None: every frame in the export has its mobile screen.

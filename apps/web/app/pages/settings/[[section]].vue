@@ -12,7 +12,8 @@ const toast = useToast()
 const colorMode = useColorMode()
 const device = useDevice()
 const install = useInstall()
-const section = computed(() => (typeof route.params.section === 'string' ? route.params.section : 'profile'))
+// On mobile, /settings is the list of sections; on the web it opens Profile
+const section = computed(() => (typeof route.params.section === 'string' ? route.params.section : device.isMobile.value ? null : 'profile'))
 useSeoMeta({ title: 'Settings · Corral' })
 
 // Kept on the server with the picture, so every browser shows the same name
@@ -94,9 +95,27 @@ const items = [
 </script>
 
 <template>
-  <UDashboardPanel>
-    <div class="mx-auto flex w-full max-w-[1100px] gap-8 p-6 max-[800px]:flex-col">
-      <aside class="w-56 shrink-0 max-[800px]:w-full">
+  <UDashboardPanel
+    v-if="device.isMobile.value && (section === null || section === 'runner')"
+    :ui="{ body: 'p-0 sm:p-0 gap-0 sm:gap-0' }"
+  >
+    <template #body>
+      <SettingsMobile v-if="section === null" />
+      <SettingsRunnerMobile
+        v-else
+        :clis="clis"
+        :cli-error="cliError"
+        @scan="scan"
+      />
+    </template>
+  </UDashboardPanel>
+  <UDashboardPanel v-else>
+    <!-- On mobile each section is its own screen, so the menu is the Settings list -->
+    <div :class="['mx-auto flex w-full max-w-[1100px] gap-8 max-[800px]:flex-col', device.isMobile.value ? 'p-4' : 'p-6']">
+      <aside
+        v-if="!device.isMobile.value"
+        class="w-56 shrink-0 max-[800px]:w-full"
+      >
         <h1 class="mb-2 text-lg font-semibold">
           Settings
         </h1>
