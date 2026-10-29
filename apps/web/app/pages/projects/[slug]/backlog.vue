@@ -80,7 +80,7 @@ function moveEpic(group: { id: string, title: string }) {
 async function newTask() {
   if (!project.value) return
   try {
-    const task = await api.tasks.create(slug.value, { title: 'New task', type: 'backend', description: null })
+    const task = await api.tasks.create(slug.value, { title: 'New task', type: 'task', description: null })
     // A phone has no room for the flyout, so the task opens on its own page
     if (device.isMobile.value) void router.push(`/tasks/${task.ref}`)
     else flyout.open(task.ref)
@@ -229,6 +229,7 @@ async function newTask() {
                   @click="flyout.toggle(task.ref)"
                 >
                   <span class="w-14 shrink-0 font-mono text-xs text-muted">{{ task.ref }}</span>
+                  <TaskTypeBadge :type="task.type" />
                   <span class="min-w-0 flex-1 truncate">
                     {{ task.title }}
                     <UBadge

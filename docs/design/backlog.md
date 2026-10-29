@@ -24,6 +24,7 @@ The page spans the full content width.
      - **Move all to board** (outline, kanban icon; "Move to board" when the epic has one Backlog task), which asks to confirm and then moves every Backlog task in the epic to Ready
    - **Rows**, each a full-width button with a top divider:
      - the ref (40px column)
+     - a type badge for Bug and Spike, none for Task (D19)
      - the title, plus an **In plan v2** badge (`primary` subtle) when the task belongs to a plan waiting for approval
      - the criteria count, e.g. "3 criteria" or "No criteria"
      - the priority (Urgent `error`, High `warning`, others muted)
@@ -46,13 +47,13 @@ The page spans the full content width.
 
 ## Data
 
-- **Backlog tasks:** ref, title, epic, priority, created, criteria count, plan id and plan status.
+- **Backlog tasks:** ref, title, type, epic, priority, created, criteria count, plan id and plan status.
 - **Epics:** name, plus merged and total counts across statuses.
 
 ## Responsive
 
 - **Below 768px:** the criteria and age columns hide.
-- **Mobile layout** (D17, `components/BacklogMobile.vue`, the `Backlog` frame): the search input fills the width with the count under it, and **New task** is a **+** in the header. Each epic card puts **Plan with Juno** and **Move all to board** side by side under its header (hidden while collapsed). Rows show the ref and title, then the In plan badge and priority, with an icon-only **Move to board** on the right. Tapping a row, or creating a task, opens the task's page instead of the flyout. There's no Collapse all / Expand all.
+- **Mobile layout** (D17, `components/BacklogMobile.vue`, the `Backlog` frame): the search input fills the width with the count under it, and **New task** is a **+** in the header. Each epic card puts **Plan with Juno** and **Move all to board** side by side under its header (hidden while collapsed). Rows show the ref and title, then the In plan badge, priority and type badge (Bug and Spike only), with an icon-only **Move to board** on the right. Tapping a row, or creating a task, opens the task's page instead of the flyout. There's no Collapse all / Expand all.
 
 ## Open questions
 

@@ -2,7 +2,9 @@
 export const TASK_PRIORITIES = ['urgent', 'high', 'medium', 'low'] as const
 export type TaskPriority = typeof TASK_PRIORITIES[number]
 
-export const TASK_TYPES = ['frontend', 'backend', 'full_stack', 'infrastructure'] as const
+// D19: task = normal PR work, bug = a fix for wrong behaviour, spike = an
+// investigation whose deliverable is written findings
+export const TASK_TYPES = ['task', 'bug', 'spike'] as const
 export type TaskType = typeof TASK_TYPES[number]
 
 // Task IDs are PREFIX-NUMBER, e.g. COR-29 (D13)

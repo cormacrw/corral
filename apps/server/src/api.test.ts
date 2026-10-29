@@ -219,7 +219,7 @@ describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
 
     it('rejects a dependency on a task that does not exist', async () => {
       const project = await t.createProject({ prefix: 'DEP' })
-      const res = await t.request('POST', `/api/projects/${project.slug}/tasks`, { title: 'X', type: 'backend', dependsOn: [7] })
+      const res = await t.request('POST', `/api/projects/${project.slug}/tasks`, { title: 'X', type: 'task', dependsOn: [7] })
       expect(res.status).toBe(400)
       expect(await res.json()).toEqual({
         error: { code: 'invalid_dependencies', problems: [{ code: 'unknown_dependency', dependsOn: 'DEP-7' }] }

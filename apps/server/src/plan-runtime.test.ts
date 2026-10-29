@@ -64,7 +64,7 @@ describe('plan session runtime', () => {
     // The PM's tools work the same on either runtime
     expect(await runner.call(first.runId, first.leaseEpoch, 'list_tasks', {})).toMatchObject({ ok: true, result: { tasks: [] } })
     const proposed = await runner.call(first.runId, first.leaseEpoch, 'propose_plan', {
-      title: 'Login', tasks: [{ key: 't1', title: 'Form', description: 'Build it', type: 'frontend', acceptanceCriteria: ['It works'] }]
+      title: 'Login', tasks: [{ key: 't1', title: 'Form', description: 'Build it', type: 'task', acceptanceCriteria: ['It works'] }]
     })
     expect(proposed).toMatchObject({ ok: true })
     await endTurn(first, 'codex-thread-1', 'Proposed a plan')

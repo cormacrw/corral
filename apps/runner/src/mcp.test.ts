@@ -1,5 +1,5 @@
 import type { AgentTool } from '@corral/contracts'
-import type { AgentRole } from '@corral/core'
+import { TASK_TYPES, type AgentRole } from '@corral/core'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -56,9 +56,27 @@ describe('ToolServer', () => {
     expect(propose.description).toContain('To refine an existing Backlog task, read it with get_task and include it in the plan with its `ref`')
     expect(propose.inputSchema).toMatchObject({ properties: { tasks: { items: { properties: { ref: { type: 'string' } } } } } })
 
-    const task = { key: 't1', ref: 'COR-4', title: 'Login', description: 'Build it', type: 'backend', acceptanceCriteria: ['It works'], dependsOn: ['COR-2'] }
+    const task = { key: 't1', ref: 'COR-4', title: 'Login', description: 'Build it', type: 'task', acceptanceCriteria: ['It works'], dependsOn: ['COR-2'] }
     await client.callTool({ name: 'propose_plan', arguments: { title: 'Login', tasks: [task] } })
     expect(calls).toEqual([{ tool: 'propose_plan', input: expect.objectContaining({ tasks: [expect.objectContaining({ ref: 'COR-4', dependsOn: ['COR-2'] })] }) }])
+    await client.close()
+  })
+
+  it('builds the propose_plan task type from TASK_TYPES and rejects the old area types (D19)', async () => {
+    const { client, calls } = await connect('pm')
+    const propose = (await client.listTools()).tools.find(t => t.name === 'propose_plan')!
+    expect(propose.inputSchema).toMatchObject({ properties: { tasks: { items: { properties: { type: { enum: [...TASK_TYPES] } } } } } })
+
+    const task = (type: string) => ({ key: 't1', title: 'Login', description: 'Build it', type, acceptanceCriteria: ['It works'] })
+    for (const type of TASK_TYPES) {
+      const result = await client.callTool({ name: 'propose_plan', arguments: { title: 'Login', tasks: [task(type)] } })
+      expect(result.isError ?? false).toBe(false)
+    }
+    for (const type of ['frontend', 'backend', 'full_stack', 'infrastructure']) {
+      const result = await client.callTool({ name: 'propose_plan', arguments: { title: 'Login', tasks: [task(type)] } })
+      expect(result.isError).toBe(true)
+    }
+    expect(calls.map(c => (c.input.tasks as { type: string }[])[0]!.type)).toEqual(['task', 'bug', 'spike'])
     await client.close()
   })
 
