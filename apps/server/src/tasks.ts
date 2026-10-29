@@ -1,4 +1,4 @@
-import type { AuditEntry, Comment, CreateTaskInput, HumanTransitionInput, PatchTaskInput, Task, TaskDesignPin } from '@corral/contracts'
+import type { AuditEntry, Comment, CreateTaskInput, HumanTransitionInput, PatchTaskInput, Task, TaskAgent, TaskDesignPin } from '@corral/contracts'
 import { createTaskInput } from '@corral/contracts'
 import {
   checkDependencies,
@@ -21,7 +21,7 @@ import { and, asc, desc, eq, inArray, isNull, max, ne, sql } from 'drizzle-orm'
 import { ApiFailure, notFound } from './errors.ts'
 import { toReview } from './runs.ts'
 
-const { acceptanceCriteria, auditLog, comments, designVersions, epics, planSessions, planTasks, plans, projects, reviews, runs, taskDependencies, taskDesignPins, tasks } = schema
+const { acceptanceCriteria, agents, auditLog, comments, designVersions, epics, planSessions, planTasks, plans, projects, reviews, runs, taskDependencies, taskDesignPins, tasks } = schema
 
 type TaskRow = typeof tasks.$inferSelect
 type ProjectRow = typeof projects.$inferSelect
@@ -68,6 +68,18 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
     .where(inArray(taskDesignPins.taskId, ids))
   const { latestApproved, started } = await pinStaleness(db, pins.map(p => p.designTaskId), ids)
   const owners = await draftSessions(db, rows.filter(r => r.status === 'draft').map(r => r.id))
+  // Newest first, so the first run per task and role names its agent (a retry
+  // keeps the same developer, D15)
+  const runAgents = await db
+    .select({ taskId: runs.taskId, role: runs.role, id: agents.id, name: agents.name })
+    .from(runs)
+    .innerJoin(agents, eq(agents.id, runs.agentId))
+    .where(and(inArray(runs.taskId, ids), inArray(runs.role, ['developer', 'reviewer'])))
+    .orderBy(desc(runs.queuedAt), desc(runs.number))
+  const agentOf = (taskId: string, role: 'developer' | 'reviewer'): TaskAgent | null => {
+    const found = runAgents.find(r => r.taskId === taskId && r.role === role)
+    return found ? { id: found.id, name: found.name } : null
+  }
 
   return rows.map((row) => {
     const latest = reviewRows.find(r => r.taskId === row.id) ?? null
@@ -77,7 +89,11 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
     const newest = pin ? latestApproved.get(pin.designTaskId) ?? null : null
     const stale = pin && isDesignPinStale({ version: pin.version, latestApproved: newest }, { status: row.status, started: started.has(row.id) })
     const design = pin ? { taskRef: taskRef(project.prefix, pin.number), version: pin.version, screens: pin.screens, newerVersion: stale ? newest : null } : null
-    return toTask(project, row, criteria, dependencies, latest, current, design, owners.get(row.id) ?? null, row.leaseRunId ? leaseAgents.get(row.leaseRunId) ?? null : null)
+    return {
+      ...toTask(project, row, criteria, dependencies, latest, current, design, owners.get(row.id) ?? null, row.leaseRunId ? leaseAgents.get(row.leaseRunId) ?? null : null),
+      developer: agentOf(row.id, 'developer'),
+      reviewer: agentOf(row.id, 'reviewer')
+    }
   })
 }
 
@@ -110,7 +126,7 @@ function toTask(
   design: TaskDesignPin | null,
   session: { id: string, title: string } | null,
   leaseAgentId: string | null
-): Task {
+): Omit<Task, 'developer' | 'reviewer'> {
   return {
     id: row.id,
     projectId: row.projectId,

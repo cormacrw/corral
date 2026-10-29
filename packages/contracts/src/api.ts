@@ -200,6 +200,11 @@ export interface Lease {
   expiresAt: string
 }
 
+export interface TaskAgent {
+  id: string
+  name: string
+}
+
 export interface Task {
   id: string
   projectId: string
@@ -225,6 +230,11 @@ export interface Task {
   // Refs of the tasks this one waits on
   dependsOn: string[]
   lease: Lease | null
+  // The agents of the task's latest developer and reviewer runs. Tasks aren't
+  // assigned ahead of time: a free agent claims them (D15), so these are null
+  // until a run of that role exists.
+  developer: TaskAgent | null
+  reviewer: TaskAgent | null
   // The commit last submitted for review
   headSha: string | null
   latestReview: Review | null

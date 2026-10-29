@@ -142,6 +142,9 @@ export function task(project: Project, number: number, fields: Partial<Task> & P
     acceptanceCriteria: [],
     dependsOn: [],
     lease: null,
+    // Filled from the runs below: null until a run of the role claims it (D15)
+    developer: null,
+    reviewer: null,
     headSha: null,
     latestReview: null,
     mergeCommitSha: null,
@@ -249,7 +252,14 @@ export const runs: Run[] = [
     inputTokens: 30_000, cacheReadTokens: 400_000, outputTokens: 9_800, rateLimitResetAt: null,
     queuedAt: ago(140), startedAt: ago(139), endedAt: ago(95)
   },
-  // A live run on the other project
+  {
+    id: 'r-5', number: 126, agentId: 'a-rev', agentName: 'Rita', role: 'reviewer', projectId: 'p-corral',
+    taskId: at('COR-5').id, taskRef: 'COR-5', taskTitle: at('COR-5').title, state: 'completed', outcome: 'approved',
+    summary: 'Every criterion is met.', error: null, headSha: '5b030d7',
+    inputTokens: 12_000, cacheReadTokens: 90_000, outputTokens: 2_000, rateLimitResetAt: null,
+    queuedAt: ago(90), startedAt: ago(89), endedAt: ago(80)
+  },
+  // A live Codex run, which can't take messages mid-run
   {
     id: 'r-4', number: 130, agentId: 'a-dev', agentName: 'Victor', role: 'developer', projectId: 'p-site',
     taskId: at('WEB-3').id, taskRef: 'WEB-3', taskTitle: at('WEB-3').title, state: 'running', outcome: null, summary: null,
@@ -257,6 +267,16 @@ export const runs: Run[] = [
     queuedAt: ago(5), startedAt: ago(4), endedAt: null
   }
 ]
+
+// A task's developer and reviewer are the agents of its latest run of each
+// role, as the server fills them; tasks with no run stay "Any available"
+for (const t of tasks) {
+  const latest = (role: 'developer' | 'reviewer') => runs.filter(r => r.taskId === t.id && r.role === role).sort((a, b) => b.queuedAt.localeCompare(a.queuedAt))[0]
+  const developer = latest('developer')
+  const reviewer = latest('reviewer')
+  t.developer = developer ? { id: developer.agentId, name: developer.agentName } : null
+  t.reviewer = reviewer ? { id: reviewer.agentId, name: reviewer.agentName } : null
+}
 
 // Unbreakable tokens that once widened the Plan conversation past a phone's screen
 const LONG_PATH = 'apps/web/app/components/plan/conversation/PlanConversationMessageLogWithAVeryLongName.vue'

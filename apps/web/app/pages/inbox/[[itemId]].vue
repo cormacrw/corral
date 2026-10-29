@@ -101,7 +101,7 @@ const actions = computed(() => {
 const needsText = computed(() => action.value === 'request_changes' || action.value === 'clarify')
 const placeholder = computed(() => {
   switch (action.value) {
-    case 'request_changes': return `What should ${live.state.value.agents.find(a => a.role === 'developer')?.name ?? 'the developer'} change?`
+    case 'request_changes': return `What should ${task.value?.developer?.name ?? 'the developer'} change?`
     case 'clarify': return 'Your answer or guidance for the developer'
     case 'delete': return 'Reason for deleting (optional)'
     case null: return `Reply to ${selected.value?.sender.name ?? 'the agent'}…`

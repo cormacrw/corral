@@ -85,8 +85,8 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
         <dl
           v-for="tile in [
             { label: 'Ready', color: STATUS.ready.color, value: count('ready'), sub: waitingOnDependency ? `${waitingOnDependency} waiting on a dependency` : 'scheduled next' },
-            { label: 'In progress', color: STATUS.in_progress.color, value: count('in_progress'), sub: runs.some(r => r.role === 'developer') ? `${developer?.name ?? 'Developer'} working` : 'no run active' },
-            { label: 'Agent review', color: STATUS.agent_review.color, value: count('agent_review'), sub: runs.some(r => r.role === 'reviewer') ? `${reviewer?.name ?? 'Reviewer'} reviewing` : 'waiting' },
+            { label: 'In progress', color: STATUS.in_progress.color, value: count('in_progress'), sub: developer ? `${developer} working` : 'no run active' },
+            { label: 'Agent review', color: STATUS.agent_review.color, value: count('agent_review'), sub: reviewer ? `${reviewer} reviewing` : 'waiting' },
             { label: 'Needs you', color: STATUS.human_review.color, value: needsYou.length, sub: `${count('human_review')} review · ${count('blocked')} blocked · ${count('failed')} failed` },
             { label: 'Merged this week', color: STATUS.merged.color, value: mergedThisWeek.length, sub: firstPass === null ? 'no merges yet' : `first-pass approval ${firstPass}%` }
           ]"

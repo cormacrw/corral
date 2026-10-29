@@ -34,8 +34,8 @@ Read and edit any task from wherever you are, without losing your place. It's th
    | Status | `USelectMenu` with a colour dot | Only the moves a human may make under D10 (e.g. Blocked → Backlog / Ready / In progress). Otherwise read-only, with the tooltip "Set by agents while they work" |
    | Priority | `USelectMenu`: Urgent, High, Medium, Low | Yes |
    | Epic | `USelectMenu` | Yes |
-   | Developer | `USelectMenu` with avatar: a named agent or "Any available developer" | Yes |
-   | Reviewer | `USelectMenu` with avatar: a named agent or "Any available reviewer" | Yes |
+   | Developer | avatar and name of the agent of the task's latest developer run (`task.developer`), or "Any available developer" with no avatar until one claims it | No (D15: no manual assignment yet) |
+   | Reviewer | avatar and name of the agent of the task's latest reviewer run (`task.reviewer`), or "Any available reviewer" until one exists | No (D15) |
    | Human review | `USwitch` | Yes (D5) |
    | Branch | mono text | No |
    | Pull request | link, or "Not opened yet" | No |
