@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import type { AgentRuntime, CliStatus, DraftSession } from '@corral/contracts'
 import { api } from '~/composables/useApi'
-import { detectedRuntimes, initials, projectColor, runtimeLabel, timeAgo } from '~/utils/labels'
-import { markdownToPlainText } from '~/utils/markdown'
+import { detectedRuntimes, initials, projectColor, runtimeLabel } from '~/utils/labels'
 
 // Plan, new session (design/plan.md)
 const live = useLive()
@@ -56,7 +55,6 @@ async function reconnect() {
 }
 
 const backlog = computed(() => project.value ? (live.state.value.tasks[project.value.id] ?? []).filter(t => t.status === 'backlog') : [])
-const recent = computed(() => live.state.value.planSessions.slice(0, 4))
 // The project's Drafts by session, kept current by plan.drafts, which
 // follows every propose, approve and discard
 const drafts = ref<DraftSession[]>([])
@@ -269,54 +267,6 @@ async function start(message: string): Promise<boolean> {
           :sessions="drafts"
           :mobile="device.isMobile.value"
         />
-
-        <section
-          v-if="recent.length > 0"
-          class="rounded-lg border border-default"
-        >
-          <h2 class="border-b border-default px-3 py-2 text-xs font-medium text-muted">
-            Recent sessions
-          </h2>
-          <ul class="divide-y divide-default">
-            <li
-              v-for="session in recent"
-              :key="session.id"
-            >
-              <NuxtLink
-                :to="`/plan/${session.id}`"
-                class="flex items-center gap-3 px-3 py-2 text-sm hover:bg-elevated"
-              >
-                <span
-                  :class="['size-2 shrink-0 rounded-full', session.unread ? 'bg-primary' : 'bg-transparent']"
-                  :aria-label="session.unread ? 'Unread' : undefined"
-                />
-                <span class="min-w-0 flex-1">
-                  <span class="flex items-center gap-2">
-                    <span class="truncate font-medium">{{ session.title }}</span>
-                    <UBadge
-                      v-if="session.status === 'needs_approval'"
-                      label="Needs approval"
-                      color="primary"
-                      variant="subtle"
-                      size="xs"
-                    />
-                    <UBadge
-                      v-else-if="session.status === 'question'"
-                      label="Question"
-                      color="info"
-                      variant="subtle"
-                      size="xs"
-                    />
-                  </span>
-                  <span class="block truncate text-xs text-muted">
-                    {{ live.state.value.projects.find(p => p.id === session.projectId)?.name }} · {{ markdownToPlainText(session.preview) }}
-                  </span>
-                </span>
-                <span class="text-xs text-dimmed">{{ timeAgo(session.updatedAt) }}</span>
-              </NuxtLink>
-            </li>
-          </ul>
-        </section>
       </div>
     </div>
   </UDashboardPanel>
