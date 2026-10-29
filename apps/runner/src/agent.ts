@@ -105,7 +105,7 @@ export function spawnAgentSession(options: AgentOptionsWithoutPrompt): AgentSess
   const results: TurnResult[] = []
   const waiting: ((result: TurnResult | null) => void)[] = []
   let ended = false
-  const { child, exited } = startAgent(agentArgs({ ...options, input: 'stream-json' }), 'pipe', {
+  const { child, exited, parser } = startAgent(agentArgs({ ...options, input: 'stream-json' }), 'pipe', {
     ...options,
     onLine(raw, parsed) {
       options.onLine(raw, parsed)
@@ -129,6 +129,7 @@ export function spawnAgentSession(options: AgentOptionsWithoutPrompt): AgentSess
     kill: signal => killGroup(child, signal),
     send(prompt) {
       if (ended || !stdin.writable) return
+      parser.startTurn()
       stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: prompt } }) + '\n')
     },
     nextResult() {
@@ -140,7 +141,7 @@ export function spawnAgentSession(options: AgentOptionsWithoutPrompt): AgentSess
   }
 }
 
-function startAgent(args: string[], stdin: 'ignore' | 'pipe', options: AgentOptionsWithoutPrompt): { child: ChildProcess, exited: Promise<AgentExit> } {
+function startAgent(args: string[], stdin: 'ignore' | 'pipe', options: AgentOptionsWithoutPrompt): { child: ChildProcess, exited: Promise<AgentExit>, parser: StreamJsonParser } {
   const parser = new StreamJsonParser({ quietResumeOf: options.quietResume ? options.resumeSessionId : null })
   const child = spawn(options.claudeBin, args, {
     cwd: options.cwd,
@@ -171,7 +172,7 @@ function startAgent(args: string[], stdin: 'ignore' | 'pipe', options: AgentOpti
       resolve({ code, signal })
     })
   })
-  return { child, exited }
+  return { child, exited, parser }
 }
 
 function killGroup(child: ChildProcess, signal: NodeJS.Signals): void {

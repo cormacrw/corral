@@ -15,6 +15,9 @@ export interface RunnerConfig {
   // Author and committer of agent commits. No default (D12): unset leaves the
   // identity to whatever the agent's git finds, so startup warns about it
   gitAuthor: GitAuthor | null
+  // How long a PM session's `claude` process stays alive after a turn, so the
+  // next message skips startup (D9). 0 starts a new process for every turn.
+  pmWarmSeconds: number
 }
 
 export interface GitAuthor {
@@ -30,7 +33,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RunnerConfig {
     claudeBin: env.CORRAL_CLAUDE_BIN || 'claude',
     gitAuthor: env.CORRAL_GIT_AUTHOR_NAME && env.CORRAL_GIT_AUTHOR_EMAIL
       ? { name: env.CORRAL_GIT_AUTHOR_NAME, email: env.CORRAL_GIT_AUTHOR_EMAIL }
-      : null
+      : null,
+    pmWarmSeconds: parseSeconds(env.CORRAL_PM_WARM_SECONDS, 300)
   }
 }
 
@@ -38,6 +42,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RunnerConfig {
 export function gitAuthorWarning(config: Pick<RunnerConfig, 'gitAuthor'>): string | null {
   if (config.gitAuthor) return null
   return 'CORRAL_GIT_AUTHOR_NAME and CORRAL_GIT_AUTHOR_EMAIL are not both set: agent commits will have an unpredictable author'
+}
+
+function parseSeconds(value: string | undefined, fallback: number): number {
+  if (value === undefined || value === '') return fallback
+  const seconds = Number(value)
+  if (!Number.isInteger(seconds) || seconds < 0) {
+    throw new Error(`CORRAL_PM_WARM_SECONDS must be a whole number of seconds, got "${value}"`)
+  }
+  return seconds
 }
 
 function parseUrl(value: string): URL {

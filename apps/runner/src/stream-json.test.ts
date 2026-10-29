@@ -26,6 +26,23 @@ describe('StreamJsonParser', () => {
     expect(parsed.events).toEqual([{ type: 'system', text: 'Session started (claude-fable-5-1)' }])
   })
 
+  it('announces a long-lived session once, even if later turns repeat the init line', () => {
+    const parser = new StreamJsonParser()
+    parser.parse(line({ type: 'system', subtype: 'init', session_id: 'sess-1' }))
+    const again = parser.parse(line({ type: 'system', subtype: 'init', session_id: 'sess-1' }))
+    expect(again.sessionId).toBe('sess-1')
+    expect(again.events).toEqual([])
+  })
+
+  it('starts token totals again for each turn of a long-lived session', () => {
+    const parser = new StreamJsonParser()
+    const usage = { input_tokens: 10, output_tokens: 2 }
+    parser.parse(line({ type: 'assistant', message: { content: [], usage } }))
+    parser.startTurn()
+    const next = parser.parse(line({ type: 'assistant', message: { content: [], usage } }))
+    expect(next.events).toEqual([{ type: 'usage', inputTokens: 10, outputTokens: 2 }])
+  })
+
   it('ignores hook lines and blank lines', () => {
     const parser = new StreamJsonParser()
     expect(parser.parse(line({ type: 'system', subtype: 'hook_started', session_id: 's' })).events).toEqual([])

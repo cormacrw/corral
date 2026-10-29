@@ -41,6 +41,7 @@ Three processes. In development they're all started together by `turbo dev`; whe
 - **Connects outbound** to the server over WebSocket, whether on localhost, over the Docker network (D12), or to a hosted server behind NAT. Moving between these should be a URL and auth change only (D1).
 - Creates worktrees, spawns agents through `AgentRuntime` adapters (Claude Code first), streams events, sends heartbeats, reports outcomes.
 - **Per-run MCP server for agent tools.** Each spawned agent gets an MCP server from the runner, exposing tools such as reading the task, posting a comment, attaching evidence and reporting an outcome. The runner forwards each call to the server with that run's lease/fencing token attached. Agents never hold server credentials, every call is fenced automatically, and the tools are the same whatever agent CLI is used. See [stale-runners-and-fencing.md](stale-runners-and-fencing.md).
+- **Warm PM sessions (D9).** Developer and reviewer runs get a fresh `claude` process each. A PM turn's process stays alive after its run ends, keyed by Plan session, so the session's next message skips CLI startup: the runner sends it over stdin to the same process, whose `result` line ends that turn's run. It's reused only when it's idle and alive with the same agent session ID and model; otherwise it's killed and the turn cold-starts with `--resume`. The process group is killed after `CORRAL_PM_WARM_SECONDS` idle (default 300, `0` for one process per turn), on stop or timeout of its turn, and on runner shutdown. The server sees only runs, so an idle process holds no concurrency slot.
 - **Setup jobs, not only agent runs.** The server can send the runner short jobs that return data and touch nothing. The first is `list_repos`: it runs `gh` inside the runner and returns the repositories its GitHub login can see, so the UI can offer a picker when adding a project. It returns `nameWithOwner`, `description`, `isPrivate`, `updatedAt`, `defaultBranchRef` and `viewerPermission`, using `gh api --paginate "/user/repos?affiliation=owner,collaborator,organization_member&sort=updated&per_page=100"` (or `gh repo list <owner> --json …`). The GitHub token never leaves the runner (as with `claude` under D2). The server caches the result for a few minutes. Repos where `viewerPermission` is below WRITE, and repos already used by a project (D13), are shown but can't be picked. If `gh` isn't signed in, the job returns that state, and the UI shows the `docker exec` login step (D12). A pasted GitHub URL is checked with the same job.
 
 ## Repo layout (Turborepo + pnpm workspaces)
@@ -111,6 +112,10 @@ The root is configurable (env vars). `pnpm dev` puts it in the checkout's own `.
     worktrees/pm-<projectId>-<planSessionId>/
                                 read-only default-branch checkout, one per Plan
                                 session; stable so `claude --resume` finds it
+    scratch/<runId>/            evidence and other agent scratch output
+    scratch/pm-<projectId>-<planSessionId>/
+                                the same, one per Plan session when PM
+                                processes stay warm (D9)
     spool/<runId>.jsonl         transcript being written, uploaded at run end
 ```
 

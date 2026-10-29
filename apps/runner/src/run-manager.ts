@@ -3,7 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { createWriteStream, type WriteStream } from 'node:fs'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { basename, extname, isAbsolute, join, resolve } from 'node:path'
-import { spawnAgent, STOP_GRACE_MS, type AgentProcess } from './agent.ts'
+import { spawnAgent, spawnAgentSession, STOP_GRACE_MS, type AgentExit, type AgentProcess, type AgentSession } from './agent.ts'
 import type { RunnerConfig } from './config.ts'
 import type { ServerConnection } from './connection.ts'
 import { outcomesFor, ROLE_TOOLS, type ToolOutcome, type ToolServer } from './mcp.ts'
@@ -13,6 +13,8 @@ import { headSha, prepareWorkspace, pushBranch, readProjectBrief, readRoleInstru
 // Runs on this runner (flows.md §2 steps 3–5, PRD §8.6). Each run gets a
 // worktree, a secret MCP path, and a `claude` process in its own process
 // group. Events stream to the server in batches; raw lines go to the spool.
+// A PM turn is still one run, but its process can outlive the run: it stays
+// warm for the session's next message until the idle timeout (D9).
 
 const EVENT_BATCH_MS = 500
 const TOOL_CALL_TIMEOUT_MS = 120_000
@@ -35,6 +37,13 @@ const CONTENT_TYPES: Record<string, string> = {
   '.har': 'application/json'
 }
 
+interface SpawnOptions {
+  prompt: string
+  systemPrompt: string
+  mcpConfigPath: string
+  resume: string | null
+}
+
 type StopReason = Extract<RunExit, { kind: 'stopped' | 'timed_out' }>['kind']
 
 interface ActiveRun {
@@ -54,6 +63,8 @@ interface ActiveRun {
   sawInit: boolean
   resumeFailed: boolean
   ended: boolean
+  // The last agent exit code, or the turn's when a warm PM process answered it
+  exitCode: number | null
   events: RunEvent[]
   flushTimer: NodeJS.Timeout | null
   timeoutTimer: NodeJS.Timeout | null
@@ -61,11 +72,28 @@ interface ActiveRun {
   unregisterTools: (() => void) | null
 }
 
+// A PM session's `claude` process kept alive between turns (D9). It holds no
+// concurrency slot while idle (D13): the slot belongs to the run, which ended.
+interface WarmSession {
+  planSessionId: string
+  session: AgentSession
+  model: string | null
+  // The agent session it holds, known once the init line arrives
+  sessionId: string | null
+  // The turn it is answering; null while idle
+  run: ActiveRun | null
+  alive: boolean
+  idleTimer: NodeJS.Timeout | null
+  unregisterTools: () => void
+}
+
 export class RunManager {
   #config: RunnerConfig
   #connection: ServerConnection
   #tools: ToolServer
   #runs = new Map<string, ActiveRun>()
+  // Keyed by planSessionId
+  #warm = new Map<string, WarmSession>()
   #pendingCalls = new Map<string, { resolve: (o: ToolOutcome) => void, timer: NodeJS.Timeout }>()
 
   constructor(config: RunnerConfig, connection: ServerConnection, tools: ToolServer) {
@@ -106,7 +134,8 @@ export class RunManager {
     const run: ActiveRun = {
       job,
       worktree: null,
-      scratchDir: join(this.#config.dataDir, 'scratch', job.runId),
+      // A warm process's system prompt names its scratch dir, so it can't be per run
+      scratchDir: join(this.#config.dataDir, 'scratch', this.#keepsWarm(job) ? `pm-${job.projectId}-${job.planSessionId}` : job.runId),
       process: null,
       sessionId: job.agentSessionId,
       started: false,
@@ -117,6 +146,7 @@ export class RunManager {
       sawInit: false,
       resumeFailed: false,
       ended: false,
+      exitCode: null,
       events: [],
       flushTimer: null,
       timeoutTimer: null,
@@ -156,7 +186,10 @@ export class RunManager {
   async shutdown(): Promise<void> {
     const live = [...this.#runs.values()].filter(r => !r.ended)
     for (const run of live) this.stop(run.job.runId, 'stopped', 'The runner is shutting down')
-    await Promise.all(live.map(run => run.process?.exited ?? Promise.resolve()))
+    await Promise.all([
+      ...live.map(run => run.process?.exited ?? Promise.resolve()),
+      ...[...this.#warm.values()].map(warm => this.#killWarm(warm))
+    ])
     for (const run of live) {
       if (!run.ended) this.#end(run, { kind: 'stopped' })
     }
@@ -181,14 +214,34 @@ export class RunManager {
       return
     }
 
-    const secret = randomBytes(24).toString('base64url')
-    run.unregisterTools = this.#tools.register(secret, job.role, (tool, input) => this.#toolCall(run, tool, input))
-    const mcpConfigPath = join(run.scratchDir, 'mcp.json')
-    await writeFile(mcpConfigPath, JSON.stringify({ mcpServers: { corral: { type: 'http', url: this.#tools.url(secret) } } }))
+    // The session's warm process takes the message, in the checkout just reset to fresh code
+    const warm = this.#keepsWarm(job) ? await this.#takeWarm(job) : null
+    if (warm) {
+      run.timeoutTimer = setTimeout(() => this.stop(job.runId, 'timed_out', `${job.timeoutSeconds} s`), job.timeoutSeconds * 1000)
+      run.sessionId = warm.sessionId
+      run.sawInit = true
+      this.#started(run)
+      await this.#warmTurn(run, warm, job.prompt)
+      this.#flush(run)
+    } else {
+      await this.#coldStart(run, prepared.workspace.path)
+    }
 
-    const instructions = await readRoleInstructions(run.worktree, job.role)
+    if (run.ended) return
+    if (run.stopping) this.#end(run, { kind: run.stopping })
+    else if (run.rateLimit) this.#end(run, { kind: 'rate_limited', resetsAt: run.rateLimit.resetsAt })
+    else this.#end(run, { kind: 'exited', code: run.exitCode })
+  }
+
+  async #coldStart(run: ActiveRun, worktree: string): Promise<void> {
+    const { job } = run
+    const mcpConfigPath = join(run.scratchDir, 'mcp.json')
+    // A warm process registers its own tools, since it outlives this run
+    if (!this.#keepsWarm(job)) run.unregisterTools = await this.#registerTools(mcpConfigPath, job, (tool, input) => this.#toolCall(run, tool, input))
+
+    const instructions = await readRoleInstructions(worktree, job.role)
     // Only the PM gets the brief; other roles' prompts are unchanged
-    const brief = job.role === 'pm' ? await readProjectBrief(run.worktree) : ''
+    const brief = job.role === 'pm' ? await readProjectBrief(worktree) : ''
     const systemPrompt = `${instructions}\n\n${brief ? `${brief}\n\n` : ''}${runnerNotes(run, job)}`
 
     run.timeoutTimer = setTimeout(() => this.stop(job.runId, 'timed_out', `${job.timeoutSeconds} s`), job.timeoutSeconds * 1000)
@@ -215,19 +268,32 @@ export class RunManager {
         resume: run.sessionId
       })
     }
+  }
 
-    if (run.ended) return
-    if (run.stopping) this.#end(run, { kind: run.stopping })
-    else if (run.rateLimit) this.#end(run, { kind: 'rate_limited', resetsAt: run.rateLimit.resetsAt })
-    else this.#end(run, { kind: 'exited', code: run.process ? (await run.process.exited).code : null })
+  async #registerTools(mcpConfigPath: string, job: RunJob, handler: (tool: AgentTool, input: Record<string, unknown>) => Promise<ToolOutcome>): Promise<() => void> {
+    const secret = randomBytes(24).toString('base64url')
+    const unregister = this.#tools.register(secret, job.role, handler)
+    await writeFile(mcpConfigPath, JSON.stringify({ mcpServers: { corral: { type: 'http', url: this.#tools.url(secret) } } }))
+    return unregister
   }
 
   #needsAnotherTurn(run: ActiveRun): boolean {
     return !run.outcomeAccepted && !run.stopping && !run.rateLimit && !run.ended && !run.resumed && run.sessionId !== null && run.job.role !== 'pm'
   }
 
-  async #spawn(run: ActiveRun, options: { prompt: string, systemPrompt: string, mcpConfigPath: string, resume: string | null }): Promise<void> {
+  async #spawn(run: ActiveRun, options: SpawnOptions): Promise<void> {
     if (run.stopping || run.ended) return
+    const exit = this.#keepsWarm(run.job)
+      ? await this.#warmTurn(run, await this.#spawnWarm(run, options), options.prompt)
+      : await this.#spawnOnce(run, options)
+    this.#flush(run)
+    // A failed --resume waits: the fresh session that replaces it is the one
+    // the server must record, or the next turn tries the dead one again
+    if (!run.started && !(options.resume && !run.sawInit)) this.#started(run)
+    if (exit?.signal && !run.stopping && !run.outcomeAccepted) this.#note(run, `The agent was killed by ${exit.signal}`)
+  }
+
+  async #spawnOnce(run: ActiveRun, options: SpawnOptions): Promise<AgentExit> {
     const process = spawnAgent({
       claudeBin: this.#config.claudeBin,
       cwd: run.worktree!,
@@ -242,11 +308,102 @@ export class RunManager {
     })
     run.process = process
     const exit = await process.exited
-    this.#flush(run)
-    // A failed --resume waits: the fresh session that replaces it is the one
-    // the server must record, or the next turn tries the dead one again
-    if (!run.started && !(options.resume && !run.sawInit)) this.#started(run)
-    if (exit.signal && !run.stopping && !run.outcomeAccepted) this.#note(run, `The agent was killed by ${exit.signal}`)
+    run.exitCode = exit.code
+    return exit
+  }
+
+  // ── Warm PM sessions (D9) ──────────────────────────────────────────────────
+
+  #keepsWarm(job: RunJob): boolean {
+    return job.role === 'pm' && job.planSessionId !== null && this.#config.pmWarmSeconds > 0
+  }
+
+  // The session's warm process, if it can take this turn. One that can't
+  // (dead, busy, another agent session or another model) is killed, and the
+  // turn cold-starts with --resume as usual.
+  async #takeWarm(job: RunJob): Promise<WarmSession | null> {
+    const warm = this.#warm.get(job.planSessionId!)
+    if (!warm) return null
+    if (warm.alive && warm.run === null && warm.sessionId !== null && warm.sessionId === job.agentSessionId && warm.model === job.model) return warm
+    await this.#killWarm(warm)
+    return null
+  }
+
+  async #spawnWarm(run: ActiveRun, options: SpawnOptions): Promise<WarmSession> {
+    const { job } = run
+    // Tool calls go to whichever turn the process is answering
+    const unregisterTools = await this.#registerTools(options.mcpConfigPath, job, (tool, input) =>
+      warm.run ? this.#toolCall(warm.run, tool, input) : Promise.resolve({ ok: false, error: 'This run is over. Stop working.' }))
+    const warm: WarmSession = {
+      planSessionId: job.planSessionId!,
+      session: spawnAgentSession({
+        claudeBin: this.#config.claudeBin,
+        cwd: run.worktree!,
+        systemPrompt: options.systemPrompt,
+        mcpConfigPath: options.mcpConfigPath,
+        model: job.model,
+        resumeSessionId: options.resume,
+        quietResume: true,
+        gitAuthor: this.#config.gitAuthor,
+        onLine: (raw, parsed) => {
+          if (warm.run) this.#onLine(warm.run, raw, parsed)
+        }
+      }),
+      model: job.model,
+      sessionId: null,
+      run: null,
+      alive: true,
+      idleTimer: null,
+      unregisterTools
+    }
+    this.#warm.set(warm.planSessionId, warm)
+    void warm.session.exited.then(() => {
+      warm.alive = false
+      this.#dropWarm(warm)
+    })
+    return warm
+  }
+
+  // Sends one turn and waits for its result line. Returns null when the
+  // process answered and stays warm, or its exit when it ended instead.
+  async #warmTurn(run: ActiveRun, warm: WarmSession, prompt: string): Promise<AgentExit | null> {
+    if (warm.idleTimer) clearTimeout(warm.idleTimer)
+    warm.idleTimer = null
+    warm.run = run
+    run.process = warm.session
+    // A stop that arrived while the turn was setting up
+    if (run.stopping) warm.session.kill('SIGTERM')
+    else warm.session.send(prompt)
+    const result = await warm.session.nextResult()
+    warm.run = null
+    if (result === null) {
+      const exit = await warm.session.exited
+      run.exitCode = exit.code
+      return exit
+    }
+    run.exitCode = result.isError ? 1 : 0
+    warm.sessionId = run.sessionId
+    // A stopped turn already took its process down
+    if (!run.stopping) warm.idleTimer = setTimeout(() => void this.#killWarm(warm), this.#config.pmWarmSeconds * 1000)
+    return null
+  }
+
+  // Kills the process group, gracefully first (architecture.md, runner rule 2)
+  async #killWarm(warm: WarmSession): Promise<void> {
+    this.#dropWarm(warm)
+    warm.session.kill('SIGTERM')
+    const hard = setTimeout(() => warm.session.kill('SIGKILL'), STOP_GRACE_MS)
+    await warm.session.exited
+    clearTimeout(hard)
+    // Anything the agent started that outlived it goes too
+    warm.session.kill('SIGKILL')
+  }
+
+  #dropWarm(warm: WarmSession): void {
+    if (warm.idleTimer) clearTimeout(warm.idleTimer)
+    warm.idleTimer = null
+    warm.unregisterTools()
+    if (this.#warm.get(warm.planSessionId) === warm) this.#warm.delete(warm.planSessionId)
   }
 
   #onLine(run: ActiveRun, raw: string, parsed: ParsedLine): void {

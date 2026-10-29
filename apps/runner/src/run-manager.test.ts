@@ -41,7 +41,7 @@ describe('RunManager PM turns', () => {
     sent = []
     const connection = { send: (message: RunnerMessage) => sent.push(message) > 0 } as unknown as ServerConnection
     const tools = { register: () => () => {}, url: () => 'http://127.0.0.1:9/mcp' } as unknown as ToolServer
-    manager = new RunManager({ dataDir, claudeBin, name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null }, connection, tools)
+    manager = new RunManager({ dataDir, claudeBin, name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds: 0 }, connection, tools)
   })
 
   afterEach(async () => {
