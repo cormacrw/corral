@@ -35,3 +35,12 @@ export function swipeStep(dx: number, dy: number): -1 | 0 | 1 {
   if (Math.abs(dx) < SWIPE_DISTANCE || Math.abs(dx) <= Math.abs(dy)) return 0
   return dx < 0 ? 1 : -1
 }
+
+// Orders a column's tasks. Merged lists the newest merge first, with tasks that
+// have no merge time last and ties broken by ref so the order is stable. Other
+// columns keep the order they came in.
+export function sortColumn<T extends Pick<Task, 'ref' | 'mergedAt'>>(key: string, tasks: T[]): T[] {
+  if (key !== 'merged') return tasks
+  const time = (t: T) => t.mergedAt === null ? -Infinity : new Date(t.mergedAt).getTime()
+  return [...tasks].sort((a, b) => time(b) - time(a) || a.ref.localeCompare(b.ref, undefined, { numeric: true }))
+}

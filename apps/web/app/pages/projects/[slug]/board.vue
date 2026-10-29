@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Task } from '@corral/contracts'
 import type { TaskStatus } from '@corral/core'
-import { BOARD_COLUMNS, onBoard } from '~/utils/board'
+import { BOARD_COLUMNS, onBoard, sortColumn } from '~/utils/board'
 import { epicTitle, PRIORITY, STATUS, taskNote } from '~/utils/labels'
 
 // The board (design/board.md): approved work by status, no drag and drop
@@ -35,8 +35,8 @@ const visible = computed(() => all.value.filter(t => onBoard(t)
 
 const columns = BOARD_COLUMNS
 const DOT = { neutral: 'bg-neutral-400', info: 'bg-info', primary: 'bg-primary', warning: 'bg-warning', error: 'bg-error', success: 'bg-success', secondary: 'bg-secondary' } as const
-const inColumn = (statuses: TaskStatus[]) => visible.value.filter(t => statuses.includes(t.status))
-const mobileColumns = computed(() => columns.map(c => ({ ...c, color: DOT[STATUS[c.statuses[0]!].color], tasks: inColumn(c.statuses) })))
+const inColumn = (column: { key: string, statuses: TaskStatus[] }) => sortColumn(column.key, visible.value.filter(t => column.statuses.includes(t.status)))
+const mobileColumns = computed(() => columns.map(c => ({ ...c, color: DOT[STATUS[c.statuses[0]!].color], tasks: inColumn(c) })))
 const agentFor = (task: Task) => task.lease ? live.state.value.agents.find(a => a.role === task.lease!.role) : null
 const epicLabel = (id: string) => epicTitle(live.state.value.epics[project.value?.id ?? ''], id, epics.value.indexOf(id))
 </script>
@@ -135,7 +135,7 @@ const epicLabel = (id: string) => epicTitle(live.state.value.epics[project.value
           <section
             v-for="column in columns"
             :key="column.label"
-            :aria-label="`${column.label}, ${inColumn(column.statuses).length}`"
+            :aria-label="`${column.label}, ${inColumn(column).length}`"
             class="flex max-h-full w-[272px] shrink-0 flex-col rounded-lg border border-default bg-muted"
           >
             <header class="flex shrink-0 items-center gap-2 px-3 py-2.5 text-sm">
@@ -145,7 +145,7 @@ const epicLabel = (id: string) => epicTitle(live.state.value.epics[project.value
               />
               <span class="font-medium">{{ column.label }}</span>
               <UBadge
-                :label="String(inColumn(column.statuses).length)"
+                :label="String(inColumn(column).length)"
                 size="xs"
                 variant="subtle"
                 color="neutral"
@@ -157,7 +157,7 @@ const epicLabel = (id: string) => epicTitle(live.state.value.epics[project.value
                  overflow and makes the column scroll (and clips the glow) -->
             <div class="flex min-h-0 flex-col gap-2 overflow-y-auto p-2">
               <BorderGlow
-                v-for="task in inColumn(column.statuses)"
+                v-for="task in inColumn(column)"
                 :key="task.id"
                 :active="Boolean(task.lease)"
                 :glow-radius="8"
@@ -210,7 +210,7 @@ const epicLabel = (id: string) => epicTitle(live.state.value.epics[project.value
                 </button>
               </BorderGlow>
               <p
-                v-if="inColumn(column.statuses).length === 0"
+                v-if="inColumn(column).length === 0"
                 class="px-1 pb-2 text-xs text-dimmed"
               >
                 Nothing here
