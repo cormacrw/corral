@@ -236,35 +236,12 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
             v-for="epic in epics"
             :key="epic.id"
           >
-            <div class="flex justify-between gap-2 text-sm">
-              <NuxtLink
-                v-if="epic.id !== 'none'"
-                :to="`/epics/${epic.id}`"
-                class="truncate font-medium"
-              >{{ epic.title }}</NuxtLink>
-              <span
-                v-else
-                class="truncate font-medium"
-              >{{ epic.title }}</span>
-              <span class="shrink-0 text-xs text-muted">{{ epic.merged }} of {{ epic.total }} merged</span>
-            </div>
-            <div
-              role="meter"
-              :aria-label="`${epic.title}: ${epic.merged} of ${epic.total} tasks merged`"
-              :aria-valuenow="epic.merged"
-              aria-valuemin="0"
-              :aria-valuemax="epic.total"
-              class="mt-1.5 flex h-1.5 gap-0.5"
-            >
-              <span
-                class="rounded-full bg-primary"
-                :style="{ flex: epic.merged }"
-              />
-              <span
-                class="rounded-full bg-accented"
-                :style="{ flex: epic.total - epic.merged }"
-              />
-            </div>
+            <EpicProgressRow
+              :id="epic.id"
+              :title="epic.title"
+              :merged="epic.merged"
+              :total="epic.total"
+            />
           </li>
           <li
             v-if="epics.length === 0"

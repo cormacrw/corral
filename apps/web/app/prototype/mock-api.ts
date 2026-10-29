@@ -83,7 +83,26 @@ route('POST', '/projects/:slug/tasks', ([slug], body) => {
   return task
 })
 route('GET', '/projects/:slug/tasks/:number', ([slug, number]) => taskIn(slug!, number!))
-route('PATCH', '/projects/:slug/tasks/:number', ([slug, number], body) => Object.assign(taskIn(slug!, number!), body))
+route('PATCH', '/projects/:slug/tasks/:number', ([slug, number], body) => {
+  const task = taskIn(slug!, number!)
+  const previousEpicId = task.epicId
+  Object.assign(task, body, { updatedAt: new Date().toISOString() })
+  emit({ type: 'task.updated', task })
+  // Keep the prototype's live epic totals in step with task edits, as the
+  // server does after a merge. Drafts never contribute to these counts.
+  for (const id of new Set([previousEpicId, task.epicId])) {
+    const epic = f.epics.find(e => e.id === id)
+    if (!epic) continue
+    const tasks = f.tasks.filter(t => t.epicId === id && t.status !== 'draft')
+    Object.assign(epic, {
+      taskCount: tasks.length,
+      mergedCount: tasks.filter(t => t.status === 'merged').length,
+      updatedAt: task.updatedAt
+    })
+    emit({ type: 'epic.updated', epic })
+  }
+  return task
+})
 route('GET', '/tasks/:ref', ([ref]) => f.tasks.find(t => t.ref === ref) ?? notFound())
 route('GET', '/projects/:slug/tasks/:number/comments', ([slug, number]) => f.comments[taskIn(slug!, number!).id] ?? [])
 route('POST', '/projects/:slug/tasks/:number/comments', ([slug, number], body) => {

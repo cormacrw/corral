@@ -21,6 +21,11 @@ const projectItems = computed(() => [
 ])
 const scope = computed(() => projectId.value === 'all' ? state.value.projects : state.value.projects.filter(p => p.id === projectId.value))
 
+const epics = computed(() => scope.value
+  .flatMap(project => (state.value.epics[project.id] ?? []).map(epic => ({ epic, project })))
+  .filter(({ epic }) => epic.taskCount > 0 && epic.mergedCount < epic.taskCount)
+  .sort((a, b) => Date.parse(b.epic.updatedAt) - Date.parse(a.epic.updatedAt)))
+
 // Re-render the "today" and elapsed numbers as time passes
 const now = ref(Date.now())
 const counts = computed(() => dashboardCounts(scope.value.flatMap(p => state.value.tasks[p.id] ?? []), new Date(now.value)))
@@ -289,6 +294,48 @@ const agents = computed(() => state.value.agents
           class="text-sm text-muted"
         >
           No agents yet.
+        </p>
+      </section>
+
+      <section
+        class="flex flex-col gap-2"
+        data-testid="home-epics"
+      >
+        <h2 class="text-sm font-semibold text-highlighted">
+          Epics
+        </h2>
+        <ul
+          v-if="epics.length"
+          class="flex flex-col gap-3"
+        >
+          <li
+            v-for="{ epic, project } in epics"
+            :key="epic.id"
+          >
+            <p
+              v-if="projectId === 'all'"
+              class="mb-1 flex items-center gap-1.5 text-xs text-muted"
+            >
+              <span
+                class="size-2 shrink-0 rounded-full"
+                :style="{ background: projectColor(project) }"
+                aria-hidden="true"
+              />
+              {{ project.name }}
+            </p>
+            <EpicProgressRow
+              :id="epic.id"
+              :title="epic.title"
+              :merged="epic.mergedCount"
+              :total="epic.taskCount"
+            />
+          </li>
+        </ul>
+        <p
+          v-else
+          class="text-sm text-muted"
+        >
+          No epics in progress.
         </p>
       </section>
     </div>

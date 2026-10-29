@@ -101,7 +101,7 @@ export const epics: Epic[] = [
     projectId: 'p-corral',
     title: 'Design tasks',
     description: 'Versioned, sandboxed prototypes the human approves before the build is planned (D20).',
-    taskCount: 6,
+    taskCount: 7,
     mergedCount: 2,
     createdAt: ago(60 * 24 * 2),
     updatedAt: ago(60)
@@ -117,6 +117,21 @@ export const epics: Epic[] = [
     mergedCount: 1,
     createdAt: ago(60 * 24 * 7),
     updatedAt: ago(60 * 24)
+  },
+  {
+    id: 'e-site', projectId: 'p-site', title: 'Website refresh',
+    description: 'Refresh the landing page and navigation.', dependsOn: [], blocks: [],
+    taskCount: 2, mergedCount: 0, createdAt: ago(60 * 24), updatedAt: ago(30)
+  },
+  {
+    id: 'e-shipped', projectId: 'p-site', title: 'Pricing fixes',
+    description: 'Completed fixes.', dependsOn: [], blocks: [],
+    taskCount: 1, mergedCount: 1, createdAt: ago(60 * 24), updatedAt: ago(10)
+  },
+  {
+    id: 'e-empty', projectId: 'p-site', title: 'Future campaigns',
+    description: 'Planning only.', dependsOn: [], blocks: [],
+    taskCount: 0, mergedCount: 0, createdAt: ago(60), updatedAt: ago(5)
   }
 ]
 
@@ -223,10 +238,11 @@ export const tasks: Task[] = [
   task(corral, 15, { title: 'Pin a design version to a task', status: 'draft', priority: 'low', epicId: 'e-design', dependsOn: ['COR-14'], planSessionId: 's-1', planSessionTitle: 'Design tasks' }),
   task(corral, 16, { title: 'Cards jump when a run starts', status: 'draft', type: 'bug', planSessionId: 's-3', planSessionTitle: 'Board polish' }),
   task(corral, 17, { title: 'Spike: virtualise long columns', status: 'draft', type: 'spike', priority: 'low', planSessionId: 's-3', planSessionTitle: 'Board polish' }),
-  task(site, 1, { title: 'New landing page hero', status: 'ready', type: 'design' }),
-  task(site, 2, { title: 'Fix broken pricing link', status: 'backlog', type: 'bug' }),
+  task(site, 1, { title: 'New landing page hero', status: 'ready', type: 'design', epicId: 'e-site' }),
+  task(site, 2, { title: 'Fix broken pricing link', status: 'merged', type: 'bug', epicId: 'e-shipped', mergedAt: ago(10) }),
   task(site, 3, {
     title: 'Footer links open in the same tab',
+    epicId: 'e-site',
     status: 'in_progress',
     type: 'bug',
     branch: 'corral/web-3-footer-links',
