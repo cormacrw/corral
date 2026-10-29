@@ -36,6 +36,7 @@ const dotClass = (status: TaskStatus) => ({
     v-for="row in [
       { key: 'project', label: 'Project' },
       { key: 'epic', label: 'Epic' },
+      { key: 'waitingEpics', label: 'Waiting on epic:' },
       { key: 'design', label: 'Design' },
       { key: 'status', label: 'Status' },
       { key: 'priority', label: 'Priority' },
@@ -46,7 +47,7 @@ const dotClass = (status: TaskStatus) => ({
       { key: 'branch', label: 'Branch' },
       { key: 'pr', label: 'Pull request' },
       { key: 'round', label: 'Review round' }
-    ].filter(r => (!props.draft || !DRAFT_HIDDEN.includes(r.key)) && (r.key !== 'design' || props.task.design))"
+    ].filter(r => (!props.draft || !DRAFT_HIDDEN.includes(r.key)) && (r.key !== 'design' || props.task.design) && (r.key !== 'waitingEpics' || (props.task.status === 'ready' && props.task.waitingOnEpics.length > 0)))"
     :key="row.key"
   >
     <dt :class="['text-muted', props.stacked ? 'mt-2 text-xs' : 'flex min-h-8 items-center']">
@@ -75,6 +76,18 @@ const dotClass = (status: TaskStatus) => ({
           class="text-muted"
         >None</span>
       </template>
+
+      <span
+        v-else-if="row.key === 'waitingEpics'"
+        class="space-y-1"
+      >
+        <NuxtLink
+          v-for="dependency in props.task.waitingOnEpics"
+          :key="dependency.id"
+          :to="`/epics/${dependency.id}`"
+          class="block text-primary hover:underline"
+        >{{ dependency.title }}</NuxtLink>
+      </span>
 
       <!-- The approved design version a build task builds, and its screens (D20) -->
       <span

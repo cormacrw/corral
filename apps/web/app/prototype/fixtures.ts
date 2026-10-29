@@ -146,6 +146,7 @@ export function task(project: Project, number: number, fields: Partial<Task> & P
     prUrl: null,
     acceptanceCriteria: [],
     dependsOn: [],
+    waitingOnEpics: [],
     lease: null,
     // Filled from the runs below: null until a run of the role claims it (D15)
     developer: null,

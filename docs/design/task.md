@@ -23,6 +23,8 @@ Read and edit any task from wherever you are, without losing your place. It's th
 - **Page:** a breadcrumb (`Board › {epic} › COR-29`, the epic linking to its page) with no close or open-full-page buttons.
 - **No status badge in the header.** Status lives in the properties.
 
+Ready tasks whose epic has unfinished prerequisites show **Waiting on epic: <title>** in their properties, linking to each prerequisite epic. The API supplies `waitingOnEpics` (IDs and titles); live task updates remove the row when the prerequisites finish.
+
 ### Body, in order (stacked; split mode moves the properties to the rail)
 
 1. **Title:** an inline-editable input, 18px semibold. A borderless field that shows a background on hover and a `primary` ring on focus.

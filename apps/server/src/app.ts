@@ -247,6 +247,7 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       const updated = await setEpicDependencies(db, id, c.req.valid('json').dependsOn, actor)
       for (const epic of updated) events.publish({ type: 'epic.updated', epic })
       const detail = await getEpic(db, id)
+      for (const task of detail.tasks) events.publish({ type: 'task.updated', task })
       orchestrator.poke(detail.tasks.map(t => t.id))
       return c.json(updated.find(e => e.id === id)!)
     })
