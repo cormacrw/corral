@@ -349,10 +349,29 @@ export interface GlobalStatus {
   updating: boolean
 }
 
+// The runtimes an agent can run on (D15), and the CLI each one needs on the
+// runner. Neutral names, never an auth method (agent-runtime-and-auth.md).
+export const AGENT_RUNTIMES = { 'claude-code': 'claude', 'codex': 'codex' } as const satisfies Record<string, CliId>
+export type AgentRuntime = keyof typeof AGENT_RUNTIMES
+const agentRuntime = z.enum(Object.keys(AGENT_RUNTIMES) as [AgentRuntime, ...AgentRuntime[]], {
+  message: `Unknown runtime; use one of ${Object.keys(AGENT_RUNTIMES).join(', ')}`
+})
+
+// New agents. There is only one PM (D13), so only developers and reviewers.
+export const createAgentInput = z.object({
+  name: z.string().trim().min(1).max(80),
+  role: z.enum(['developer', 'reviewer'], { message: 'Only one PM agent exists; the role must be developer or reviewer' }),
+  runtime: agentRuntime,
+  concurrency: z.number().int().positive().default(1)
+})
+export type CreateAgentInput = z.infer<typeof createAgentInput>
+
 export const patchAgentInput = z.object({
   name: z.string().trim().min(1).optional(),
   concurrency: z.number().int().positive().optional(),
-  paused: z.boolean().optional()
+  paused: z.boolean().optional(),
+  // Only while the agent has no active runs
+  runtime: agentRuntime.optional()
 })
 export type PatchAgentInput = z.infer<typeof patchAgentInput>
 

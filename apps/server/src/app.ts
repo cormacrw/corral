@@ -4,6 +4,7 @@ import {
   AVATAR_MAX_BYTES,
   approvePlanInput,
   checkRepoInput,
+  createAgentInput,
   createProjectInput,
   createTaskInput,
   deleteProjectInput,
@@ -41,9 +42,9 @@ import type { BlobStore } from './blob-store.ts'
 import type { Orchestrator } from './orchestrator.ts'
 import type { PlanService } from './plan.ts'
 import type { RunnerHub } from './runner-hub.ts'
-import { getRun, listAgents, listEvidence, listReviews, listRuns, patchAgent } from './runs.ts'
+import { createAgent, getRun, listAgents, listEvidence, listReviews, listRuns, patchAgent } from './runs.ts'
 import type { Transcripts } from './transcripts.ts'
-import { checkRepository, detectClis, RepoCatalog } from './setup.ts'
+import { checkRepository, detectClis, RepoCatalog, requireRuntimeCli } from './setup.ts'
 import { addComment, createTask, findTaskId, listComments, listHistory, listTasks, loadTask, patchTask, transitionTask } from './tasks.ts'
 import { and, eq, isNull } from 'drizzle-orm'
 
@@ -307,8 +308,19 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
 
     .get('/agents', async c => c.json(await listAgents(db)))
 
+    .post('/agents', validate('json', createAgentInput), async (c) => {
+      const input = c.req.valid('json')
+      await requireRuntimeCli(runner, input.runtime)
+      const agent = await createAgent(db, input, actor)
+      events.publish({ type: 'agent.updated', agent })
+      orchestrator.poke()
+      return c.json(agent, 201)
+    })
+
     .patch('/agents/:id', validate('json', patchAgentInput), async (c) => {
-      const agent = await patchAgent(db, c.req.param('id'), c.req.valid('json'), actor)
+      const input = c.req.valid('json')
+      if (input.runtime) await requireRuntimeCli(runner, input.runtime)
+      const agent = await patchAgent(db, c.req.param('id'), input, actor)
       events.publish({ type: 'agent.updated', agent })
       orchestrator.poke()
       return c.json(agent)
