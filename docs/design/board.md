@@ -69,7 +69,10 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
 
 - On the web layout, columns scroll sideways at every width.
 - On the mobile layout (D17, `components/BoardMobile.vue`), the Board shows **one column at a time**, from the `Board · one column at a time` frame:
-  - the same filters and Clear filters as the web Board, two to a row, and "N tasks"; the header's search button shows the search input
+  - the header's Search button shows the search input. The **Filters** icon button (`list-filter`) beside it toggles the filter row, **collapsed by default**, with an accessible label and pressed/expanded state
+  - the expanded row contains the same Epic, Status, Priority and Agent filters as the web Board, two to a row, plus Clear filters while anything is filtered and "N tasks". Collapsing it keeps the selections and URL query unchanged
+  - the Filters button shows a dot while any of the four filters is set, open or closed (search alone does not add a dot). Filters from the URL apply immediately without expanding the row
+  - column tabs sit directly under the header, or the search input when open, while filters are collapsed
   - a row of pill tabs (`role="tablist"`), one per column, each with its status dot, name and count. The open tab is `primary` subtle and scrolls into view. Left and right arrow keys move between tabs
   - the open column: its name, "Whose turn: {hint}", and its cards, full width. "Nothing here" when empty
   - **swiping** left or right on the column moves to the next or previous column (at least 50px sideways, and more sideways than vertical)
