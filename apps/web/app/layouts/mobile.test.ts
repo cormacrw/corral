@@ -47,7 +47,7 @@ const Link = defineComponent({ props: ['to'], setup: (props, { slots }) => () =>
 const global = { components: { UDashboardGroup, UDashboardPanel, UButton: Link, UIcon: Plain, NuxtLink: Link, ShellBanners: Plain, MobilePageHeader } }
 
 const Home = defineComponent({
-  setup: () => () => h(UDashboardPanel, () => [h(MobilePageHeader), h('div', { class: 'flex flex-col gap-4 p-4' }, Array.from({ length: 30 }, (_, i) => h('p', { class: 'h-20' }, `Item ${i}`)))])
+  setup: () => () => h(UDashboardPanel, () => [h('div', { class: 'flex flex-col gap-4 p-4' }, Array.from({ length: 30 }, (_, i) => h('p', { class: 'h-20' }, `Item ${i}`)))])
 })
 
 afterEach(() => {
@@ -108,8 +108,8 @@ describe('mobile layout', () => {
     // It fits above the tab bar rather than growing to its content
     expect(getComputedStyle(panel).minHeight).toBe('0px')
     expect(getComputedStyle(panel.parentElement!).flexGrow).toBe('1')
-    // The title is inside the scrolling panel; only the tab bar sits outside it.
-    expect(panel.contains(wrapper.get('[data-testid="mobile-page-header"]').element)).toBe(true)
+    // Tab roots start at their content, above the tab bar.
+    expect(wrapper.find('[data-testid="mobile-page-header"]').exists()).toBe(false)
     expect(wrapper.find('header').exists()).toBe(false)
     expect(panel.closest('header')).toBeNull()
     expect(wrapper.get('nav[aria-label="Main"]').element.contains(panel)).toBe(false)
@@ -134,13 +134,12 @@ describe('mobile layout', () => {
     wrapper.unmount()
   })
 
-  it.each(['Home', 'Plan', 'Inbox', 'Projects', 'Settings'])('shows just the large %s title on a top-level tab', (title) => {
-    route.path = `/${title.toLowerCase()}`
-    const wrapper = mount(MobilePageHeader, { global })
-    expect(wrapper.get('h1').text()).toBe(title)
-    expect(wrapper.get('h1').classes()).toContain('text-2xl')
-    expect(wrapper.find('p').exists()).toBe(false)
-    expect(wrapper.find('a').exists()).toBe(false)
+  it.each(['Home', 'Plan', 'Inbox', 'Projects', 'Settings'])('pads the %s tab root without adding a title', (title) => {
+    route.path = route.fullPath = `/${title.toLowerCase()}`
+    const wrapper = mount(MobileLayout, { global, slots: { default: () => h(UDashboardPanel, () => h('p', 'Content')) } })
+    expect(wrapper.find('h1').exists()).toBe(false)
+    expect(wrapper.get('nav [aria-current="page"]').text()).toBe(title)
+    expect(wrapper.get('[storage-key="mobile-dashboard"]').classes()).toContain('pt-[env(safe-area-inset-top)]')
     wrapper.unmount()
   })
 
