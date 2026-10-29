@@ -176,6 +176,13 @@
       "when": 1793291413936,
       "tag": "0024_evidence_note",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793298073710,
+      "tag": "0025_ambiguous_rockslide",
+      "breakpoints": true
     }
   ]
 }
