@@ -48,7 +48,7 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
 - Clicking a card opens it in the flyout; clicking it again closes the flyout.
 - Each filter shows tasks matching any of its selected items; with nothing selected it doesn't filter. Search and the filters combine with AND (`matchesFilter` in `apps/web/app/utils/board.ts`).
   - **Status** hides the columns that aren't selected (and their tabs on mobile).
-  - **Agent** matches the agent holding the task's lease, or the agent it's assigned to. Tasks have no per-agent assignee, so a task is assigned to the first agent of the role whose turn it is: the developer in Ready and In progress, the reviewer in Agent review (`taskAgentIds`).
+  - **Agent** matches the agent holding the task's lease, or the agent it's assigned to. Tasks aren't assigned ahead of time (D15), so a task belongs to the agent of its latest run of the role whose turn it is (`task.developer` / `task.reviewer`): the developer in Ready and In progress, the reviewer in Agent review (`taskAgentIds`). A task no agent of that role has claimed matches no agent.
 - The search and filters live in the URL query, so a filtered Board reloads and can be shared: `?q=`, and comma-separated `?epics=` (epic ids), `?status=` (column keys), `?priority=` and `?agent=` (agent ids). `?epic=` is taken by the epic flyout.
 - There's **no drag and drop.** Agents and the scheduler move tasks. Human moves (unblocking, sending back to Backlog) happen in the flyout's Status menu or the Inbox, limited to what D10 allows.
 
