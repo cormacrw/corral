@@ -14,7 +14,7 @@ See what an agent is doing right now, attach to its live run, and look back at p
 
 - the avatar, with a ping dot while working
 - the name and a status badge: **Working** (`success`), **Interrupted** (neutral) or **Idle** (neutral)
-- "{Role} · Claude Code · {summary}", e.g. "6 runs today"
+- "{Role} · {runtime} · {summary}" (Claude Code or Codex, D18), e.g. "6 runs today"
 - **Agent settings** (outline; goes to Settings › Agents)
 
 ### Info and stats (bottom border)
