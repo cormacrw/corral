@@ -46,7 +46,7 @@ describe('RunManager stopping a run', () => {
 
   beforeEach(async () => {
     dataDir = await createTestDataDir()
-    config = { dataDir, claudeBin: '/nonexistent/claude', codexBin: '/nonexistent/codex', name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds: 0 }
+    config = { dataDir, claudeBin: '/nonexistent/claude', codexBin: '/nonexistent/codex', name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds: 0, titleModel: 'haiku' }
     sent = []
     handlers = []
     signals = []

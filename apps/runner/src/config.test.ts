@@ -12,7 +12,8 @@ describe('loadConfig', () => {
       claudeBin: 'claude',
       codexBin: 'codex',
       gitAuthor: null,
-      pmWarmSeconds: 300
+      pmWarmSeconds: 300,
+      titleModel: 'haiku'
     })
   })
 
@@ -25,7 +26,8 @@ describe('loadConfig', () => {
       CORRAL_CODEX_BIN: '/opt/codex/bin/codex',
       CORRAL_GIT_AUTHOR_NAME: 'Configured Person',
       CORRAL_GIT_AUTHOR_EMAIL: 'configured@example.com',
-      CORRAL_PM_WARM_SECONDS: '0'
+      CORRAL_PM_WARM_SECONDS: '0',
+      CORRAL_TITLE_MODEL: 'claude-haiku-5-5'
     })).toEqual({
       dataDir: '/data/runner',
       serverUrl: new URL('http://server:4100'),
@@ -33,7 +35,8 @@ describe('loadConfig', () => {
       claudeBin: '/usr/local/bin/claude',
       codexBin: '/opt/codex/bin/codex',
       gitAuthor: { name: 'Configured Person', email: 'configured@example.com' },
-      pmWarmSeconds: 0
+      pmWarmSeconds: 0,
+      titleModel: 'claude-haiku-5-5'
     })
   })
 

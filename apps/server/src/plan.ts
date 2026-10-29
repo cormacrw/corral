@@ -7,13 +7,17 @@ import { listTaskAttachments } from './attachments.ts'
 import { listEpics } from './epics.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
-import { pmFallbackPrompt, pmPrompt, questionText } from './prompts.ts'
+import { pmFallbackPrompt, pmPrompt, questionText, sessionTitlePrompt } from './prompts.ts'
 import type { RunnerHub } from './runner-hub.ts'
 import { createTask, deleteTaskRows, draftSessions, findTaskId, loadTask, patchTask, pinStaleness, setDesignPin, transitionTask, type ProjectRow } from './tasks.ts'
 
 const { acceptanceCriteria, agents, auditLog, designVersions, epics, planEpics, planMessages, planSessions, planTasks, plans, projects, runs, taskDependencies, taskDesignPins, tasks } = schema
 
 const PM_TURN_TIMEOUT_SECONDS = 20 * 60
+// The runner gives `claude` 30 s to write a title; this covers the round trip
+const TITLE_TIMEOUT_MS = 40_000
+const TITLE_MAX_WORDS = 6
+const TITLE_MAX_LENGTH = 60
 
 // Thrown back to the PM as a tool error
 class ToolError extends Error {}
@@ -150,9 +154,30 @@ export class PlanService {
     const [project] = await this.#d.db.select().from(projects).where(eq(projects.id, projectId))
     if (!project) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['projectId'], message: 'Unknown project' }] })
     const text = input.text || (input.taskRef ? `Refine ${input.taskRef}` : '')
-    const [session] = await this.#d.db.insert(planSessions).values({ projectId, title: titleFrom(text), runtime: input.runtime ?? 'claude-code', createdBy: actor }).returning()
+    const fallback = titleFrom(text)
+    const [session] = await this.#d.db.insert(planSessions).values({ projectId, title: fallback, runtime: input.runtime ?? 'claude-code', createdBy: actor }).returning()
     await this.message(session!.id, input, actor)
+    const attached = input.taskRef ? await loadTask(this.#d.db, await this.#taskIdByRef(project, input.taskRef)) : null
+    // Not awaited: the PM turn is already queued and doesn't wait for it
+    void this.#generateTitle(session!.id, fallback, { text, attachedTask: attached && `${attached.ref} ${attached.title}` })
     return this.getSession(session!.id)
+  }
+
+  // Replaces the fallback title with one from the runner's smallest model
+  // (COR-40). It's a setup job, not a run, so it holds no PM slot. On any
+  // failure the fallback stays. A title that's no longer the fallback was
+  // changed by someone else and is kept.
+  async #generateTitle(sessionId: string, fallback: string, input: { text: string, attachedTask: string | null }): Promise<void> {
+    try {
+      const result = await this.#d.runner.request({ kind: 'session_title', prompt: sessionTitlePrompt(input) }, TITLE_TIMEOUT_MS)
+      const title = cleanSessionTitle(result.title)
+      if (!title) throw new Error(`Unusable title "${result.title}"`)
+      const [updated] = await this.#d.db.update(planSessions).set({ title })
+        .where(and(eq(planSessions.id, sessionId), eq(planSessions.title, fallback))).returning()
+      if (updated) this.#d.events.publish({ type: 'plan.session', session: await this.#toSession(updated) })
+    } catch (error) {
+      console.error(`Generating a title for Plan session ${sessionId} failed; keeping "${fallback}"`, error instanceof Error ? error.message : error)
+    }
   }
 
   // A session's runtime can only change while it has no messages, since an
@@ -894,6 +919,22 @@ function toMessage(row: typeof planMessages.$inferSelect): PlanMessage {
     runId: row.runId,
     createdAt: row.createdAt.toISOString()
   }
+}
+
+// The model's answer as a title: its first line without quotes, a "Title:"
+// label or end punctuation, at most 6 words and 60 characters. Null when
+// nothing is left.
+export function cleanSessionTitle(raw: string): string | null {
+  const line = raw.split('\n').map(l => l.trim()).find(Boolean) ?? ''
+  const words = line
+    .replace(/^#+\s*/, '')
+    .replace(/["“”`*]/g, '')
+    .replace(/^title\s*:\s*/i, '')
+    .split(/\s+/)
+    .map(word => word.replace(/^['‘’]+|['‘’]+$/g, ''))
+    .filter(Boolean).slice(0, TITLE_MAX_WORDS)
+  while (words.join(' ').length > TITLE_MAX_LENGTH && words.length > 1) words.pop()
+  return words.join(' ').slice(0, TITLE_MAX_LENGTH).replace(/[\s.!?:;,]+$/, '') || null
 }
 
 function titleFrom(text: string): string {

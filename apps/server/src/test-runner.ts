@@ -11,9 +11,12 @@ export class FakeRunner {
   #waiters: { match: (m: ServerMessage) => boolean, resolve: (m: ServerMessage) => void }[] = []
 
   // Answers setup jobs the server sends (e.g. cleanup_worktrees). Both CLIs
-  // are installed and signed in unless a test says otherwise.
+  // are installed and signed in unless a test says otherwise. Throwing
+  // answers with an error; session titles fail unless a test says otherwise,
+  // so the fallback title stays.
   onJob: (job: Extract<ServerMessage, { type: 'job.request' }>['job']) => SetupJobResult | null = (job) => {
     if (job.kind === 'cleanup_worktrees') return { kind: 'cleanup_worktrees', removed: [`worktrees/${job.taskId}`], kept: [] }
+    if (job.kind === 'session_title') throw new Error('No title in tests')
     if (job.kind === 'detect_clis') return { kind: 'detect_clis', clis: [{ id: 'claude', version: '2.0.0', signedIn: true }, { id: 'codex', version: '0.50.0', signedIn: true }] }
     return null
   }
@@ -23,8 +26,12 @@ export class FakeRunner {
     socket.on('message', (data) => {
       const message = JSON.parse(String(data)) as ServerMessage
       if (message.type === 'job.request') {
-        const result = this.onJob(message.job)
-        if (result) this.send({ type: 'job.result', jobId: message.jobId, ok: true, result })
+        try {
+          const result = this.onJob(message.job)
+          if (result) this.send({ type: 'job.result', jobId: message.jobId, ok: true, result })
+        } catch (error) {
+          this.send({ type: 'job.result', jobId: message.jobId, ok: false, error: (error as Error).message })
+        }
       }
       this.received.push(message)
       const index = this.#waiters.findIndex(w => w.match(message))

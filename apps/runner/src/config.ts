@@ -20,6 +20,8 @@ export interface RunnerConfig {
   // How long a PM session's `claude` process stays alive after a turn, so the
   // next message skips startup (D9). 0 starts a new process for every turn.
   pmWarmSeconds: number
+  // The model that writes Plan session titles: the smallest one (COR-40)
+  titleModel: string
 }
 
 export interface GitAuthor {
@@ -37,7 +39,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RunnerConfig {
     gitAuthor: env.CORRAL_GIT_AUTHOR_NAME && env.CORRAL_GIT_AUTHOR_EMAIL
       ? { name: env.CORRAL_GIT_AUTHOR_NAME, email: env.CORRAL_GIT_AUTHOR_EMAIL }
       : null,
-    pmWarmSeconds: parseSeconds(env.CORRAL_PM_WARM_SECONDS, 300)
+    pmWarmSeconds: parseSeconds(env.CORRAL_PM_WARM_SECONDS, 300),
+    titleModel: env.CORRAL_TITLE_MODEL || 'haiku'
   }
 }
 

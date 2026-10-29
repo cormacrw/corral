@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -97,5 +97,46 @@ describe('toRepoSummary', () => {
     expect(toRepoSummary({ ...repo, permissions: { push: true } }).canPush).toBe(true)
     expect(toRepoSummary({ ...repo, permissions: { admin: true } }).canPush).toBe(true)
     expect(toRepoSummary({ ...repo, permissions: { push: false } }).canPush).toBe(false)
+  })
+})
+
+describe('session_title', () => {
+  let root: string
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'corral-session-title-'))
+  })
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true })
+  })
+
+  // A stub claude that records its arguments and stdin, then runs `script`
+  async function fakeClaude(script: string): Promise<string> {
+    const path = join(root, 'claude')
+    await writeFile(path, `#!/bin/sh\nprintf '%s\\n' "$@" > "${root}/args"\ncat > "${root}/stdin"\n${script}\n`)
+    await chmod(path, 0o755)
+    return path
+  }
+
+  it('asks claude with the configured small model and no tools', async () => {
+    const claudeBin = await fakeClaude('echo "Login page plan"')
+    const config = { ...loadConfig({ CORRAL_TITLE_MODEL: 'tiny' }), claudeBin }
+    expect(await runSetupJob(config, { kind: 'session_title', prompt: 'Title this: plan a login page' })).toEqual({ kind: 'session_title', title: 'Login page plan' })
+    const args = (await readFile(join(root, 'args'), 'utf8')).split('\n')
+    expect(args.slice(0, 5)).toEqual(['-p', '--model', 'tiny', '--tools', ''])
+    expect(args).toContain('--strict-mcp-config')
+    expect(await readFile(join(root, 'stdin'), 'utf8')).toBe('Title this: plan a login page')
+  })
+
+  it('defaults to haiku', () => {
+    expect(loadConfig({}).titleModel).toBe('haiku')
+  })
+
+  it('fails when claude fails or prints nothing', async () => {
+    const config = { ...loadConfig({}), claudeBin: await fakeClaude('echo "Not logged in" >&2; exit 1') }
+    await expect(runSetupJob(config, { kind: 'session_title', prompt: 'x' })).rejects.toThrow('Not logged in')
+    config.claudeBin = await fakeClaude('exit 0')
+    await expect(runSetupJob(config, { kind: 'session_title', prompt: 'x' })).rejects.toThrow(/code 0/)
   })
 })
