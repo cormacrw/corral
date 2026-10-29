@@ -12,6 +12,14 @@ export interface RunnerConfig {
   name: string
   // The agent CLI binary comes from configuration (agent-runtime-and-auth.md rule 4)
   claudeBin: string
+  // Author and committer of agent commits. No default (D12): unset leaves the
+  // identity to whatever the agent's git finds, so startup warns about it
+  gitAuthor: GitAuthor | null
+}
+
+export interface GitAuthor {
+  name: string
+  email: string
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): RunnerConfig {
@@ -19,8 +27,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RunnerConfig {
     dataDir: resolve(env.CORRAL_RUNNER_DATA_DIR || join(homedir(), '.corral', 'runner')),
     serverUrl: parseUrl(env.CORRAL_SERVER_URL || 'http://127.0.0.1:4100'),
     name: env.CORRAL_RUNNER_NAME || hostname(),
-    claudeBin: env.CORRAL_CLAUDE_BIN || 'claude'
+    claudeBin: env.CORRAL_CLAUDE_BIN || 'claude',
+    gitAuthor: env.CORRAL_GIT_AUTHOR_NAME && env.CORRAL_GIT_AUTHOR_EMAIL
+      ? { name: env.CORRAL_GIT_AUTHOR_NAME, email: env.CORRAL_GIT_AUTHOR_EMAIL }
+      : null
   }
+}
+
+// Logged at startup when no identity is configured
+export function gitAuthorWarning(config: Pick<RunnerConfig, 'gitAuthor'>): string | null {
+  if (config.gitAuthor) return null
+  return 'CORRAL_GIT_AUTHOR_NAME and CORRAL_GIT_AUTHOR_EMAIL are not both set: agent commits will have an unpredictable author'
 }
 
 function parseUrl(value: string): URL {

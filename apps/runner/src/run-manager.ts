@@ -235,6 +235,7 @@ export class RunManager {
       mcpConfigPath: options.mcpConfigPath,
       model: run.job.model,
       resumeSessionId: options.resume,
+      gitAuthor: this.#config.gitAuthor,
       onLine: (raw, parsed) => this.#onLine(run, raw, parsed)
     })
     run.process = process

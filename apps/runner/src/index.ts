@@ -1,5 +1,5 @@
 import { printReady, shortenHome } from './banner.ts'
-import { loadConfig } from './config.ts'
+import { gitAuthorWarning, loadConfig } from './config.ts'
 import { ServerConnection } from './connection.ts'
 import { loadRunnerId } from './identity.ts'
 import { runSetupJob } from './jobs.ts'
@@ -7,6 +7,8 @@ import { ToolServer } from './mcp.ts'
 import { RunManager } from './run-manager.ts'
 
 const config = loadConfig()
+const warning = gitAuthorWarning(config)
+if (warning) console.warn(`Warning: ${warning}`)
 const runnerId = await loadRunnerId(config.dataDir)
 const tools = new ToolServer()
 await tools.start()

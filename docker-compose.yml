@@ -53,6 +53,9 @@ services:
     environment:
       CORRAL_SERVER_URL: http://server:4100
       CORRAL_RUNNER_NAME: ${CORRAL_RUNNER_NAME:-home-server}
+      # Author and committer of agent commits; unset makes the runner warn
+      CORRAL_GIT_AUTHOR_NAME: ${CORRAL_GIT_AUTHOR_NAME:-}
+      CORRAL_GIT_AUTHOR_EMAIL: ${CORRAL_GIT_AUTHOR_EMAIL:-}
     volumes:
       - runner-data:/data/runner
       - claude-config:/home/runner/.claude
