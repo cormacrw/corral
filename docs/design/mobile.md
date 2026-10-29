@@ -100,6 +100,16 @@ Built from the **Install Corral** frame. Corral is an installable PWA, served by
   - Already running standalone, or a browser that can't install: no Settings entry, and the sheet closes.
 - Launched from the home screen, `(display-mode: standalone)` matches, so `useDevice()` picks the mobile layout whatever the window size.
 
+## Setup
+
+Built from the **Setup · Your name**, **Setup · Repository**, **Setup · Agent CLIs** and **Setup · Name agents** frames. Behaviour follows [onboarding.md](onboarding.md); the web page and `SetupMobile.vue` share their state and actions through `useSetup()`.
+
+- Setup keeps the `bare` layout on mobile, so there's no shell header or tab bar.
+- **Header:** the Corral logo and "Self-hosted" on step 1; on later steps a back arrow (to the previous step) and the step's title. The add-project flow's back arrow goes to Projects.
+- **Progress:** four segments filled up to the current step, and "Step n of 4 · {step}" under them, in place of the web's stepper. The add-project flow has none.
+- **Body:** the step's fields in one column, with no card: step 1 asks "What should agents call you?"; step 2 stacks the repository list, branch and merge method, and the setup checks in a bordered card; step 3 shows each CLI as a card-style checkbox, tinted `primary` when ready; step 4 is one card per role with its Name and Runs on fields.
+- **Footer:** the step's action (Continue, Confirm and continue, Finish setup, Add project) full width, pinned to the bottom and padded for the home indicator.
+
 ## Pages without a mobile screen yet
 
 They render inside the mobile layout as they are, and reflow as well as they can: panels stack or scroll sideways. Each later task replaces one group with its mobile screen.
@@ -112,4 +122,3 @@ Frames in the export, grouped by the task that will build them:
 |---|---|
 | Settings | Settings, Settings · Runner |
 | Search | Search |
-| Onboarding | Setup · Your name, Setup · Repository, Setup · Agent CLIs, Setup · Name agents |

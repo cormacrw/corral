@@ -1,6 +1,7 @@
 # Onboarding
 
 **Canvas frames:** `1 · Your name`, `2 · Choose a repo`, `3 · Detect agents`, `4 · Name agents`
+**Mobile:** `SetupMobile.vue`, see [mobile.md](mobile.md#setup)
 **Route:** `/setup`, one step per query (`/setup?step=repo`). Shown on first run, before the app shell exists. The shell isn't rendered here.
 
 Onboarding is done once the server has a project, on every browser and device; nothing in the browser (localStorage, cookies) decides it. With no projects, every page leads here. With one, `/` and any `/setup` visit go to the first project, except the add-project flow (`/setup?step=repo&add=1`). If the project list can't be fetched, nothing redirects (`middleware/setup.global.ts`, `utils/onboarding.ts`).
