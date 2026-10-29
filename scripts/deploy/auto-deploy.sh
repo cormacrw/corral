@@ -107,6 +107,13 @@ if needs_hold; then
   fi
 fi
 
+# The new server runs its migrations on start, and they can't be undone, so
+# back up first. Anything it can't compare counts as a change.
+if [ -z "$deployed_sha" ] || ! git diff --quiet "$deployed_sha" "$remote_sha" -- packages/db/migrations 2>/dev/null; then
+  log "migrations may have changed; backing up first"
+  scripts/deploy/backup.sh "pre-${remote_sha:0:7}" || { log "backup failed; not deploying"; exit 1; }
+fi
+
 docker compose up -d --remove-orphans
 # The new server starts without the hold
 trap - EXIT

@@ -11,10 +11,10 @@ On the server, in the checkout you run `docker compose` from (with `.env` in
 place, as in the main README):
 
 ```sh
-sudo cp scripts/deploy/corral-deploy.{service,timer} /etc/systemd/system/
-sudo sed -i "s#/opt/corral#$PWD#; s#^User=.*#User=$(stat -c %U .)#" /etc/systemd/system/corral-deploy.service
+sudo cp scripts/deploy/corral-{deploy,backup}.{service,timer} /etc/systemd/system/
+sudo sed -i "s#/opt/corral#$PWD#; s#^User=.*#User=$(stat -c %U .)#" /etc/systemd/system/corral-{deploy,backup}.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now corral-deploy.timer
+sudo systemctl enable --now corral-deploy.timer corral-backup.timer
 ```
 
 The service must run as the user who owns the checkout, and that user must be
@@ -57,3 +57,38 @@ Images are built before the hold, so the wait covers only running work, not
 the build. A change that only touches `web` deploys straight away. If the
 server can't be reached, the script deploys without waiting, so a broken
 server never blocks the fix.
+
+## Backups
+
+`backup.sh` writes a Postgres dump and a tarball of the server's blob folder
+to `.corral/backups/` (or `CORRAL_BACKUP_DIR`), and deletes backups older
+than 14 days (`CORRAL_BACKUP_KEEP_DAYS`). It runs:
+
+- every night at 03:30, from `corral-backup.timer`
+- before any deploy that changes `packages/db/migrations`, because the new
+  server runs its migrations when it starts and they can't be undone. These
+  files are labelled `pre-<new commit>`. If that backup fails, the deploy stops.
+
+These copies are on the same disk as the volumes, so they cover a bad
+migration but not a dead disk. Point `CORRAL_BACKUP_DIR` at another disk or
+sync the folder somewhere else (set it in the units with `Environment=`).
+
+CI also fails any change to a migration that's already on main, so the
+deployed database never misses one. Schema changes always go in a new migration.
+
+Each file name holds the time and the commit that was running when it was
+taken (`postgres-<time>-<commit>-<label>.dump`). To restore, go back to that
+commit first: newer code would run its migrations again on the old data.
+
+```sh
+sudo systemctl stop corral-deploy.timer   # nothing may redeploy mid-restore
+git checkout --detach <commit>
+docker compose build
+docker compose stop web server runner
+docker compose exec -T postgres pg_restore -U corral -d corral --clean --if-exists <.corral/backups/postgres-<time>-<commit>-<label>.dump
+docker compose run --rm --no-deps -T --entrypoint sh server -c 'rm -rf /data/server/* && tar -C /data/server -xzf -' <.corral/backups/server-data-<time>-<commit>-<label>.tar.gz
+docker compose up -d
+echo <commit> >.corral/deploy/deployed
+```
+
+Fix main before starting the timer again, or it redeploys the bad commit.

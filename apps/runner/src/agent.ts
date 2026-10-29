@@ -50,12 +50,14 @@ export function agentArgs(options: Pick<AgentOptions, 'prompt' | 'systemPrompt' 
 }
 
 // The agent's environment: no GitHub token, and a git config whose push URL
-// fails, so only the runner pushes (architecture.md, known POC limitation)
+// fails, so only the runner pushes (architecture.md, known POC limitation).
+// No CORRAL_* settings either: an agent working on Corral itself that starts
+// a runner would otherwise join this runner's server and share its data dir.
 export function agentEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base }
   for (const key of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT']) delete env[key]
   for (const key of Object.keys(env)) {
-    if (key.startsWith('GIT_CONFIG_')) delete env[key]
+    if (key.startsWith('GIT_CONFIG_') || key.startsWith('CORRAL_')) delete env[key]
   }
   env.GIT_CONFIG_COUNT = '1'
   env.GIT_CONFIG_KEY_0 = 'remote.origin.pushurl'

@@ -1,0 +1,10 @@
+# Installed by scripts/deploy/README.md. Set the path to your Corral checkout
+# and the user who owns it, as for corral-deploy.service.
+[Unit]
+Description=Back up Corral's database and blobs
+After=docker.service
+
+[Service]
+Type=oneshot
+User=corral
+ExecStart=/opt/corral/scripts/deploy/backup.sh

@@ -26,6 +26,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # Full history, so the migration check can find where the branch left main
+          fetch-depth: 0
 
       - name: Install pnpm
         uses: pnpm/action-setup@v6
@@ -50,6 +53,21 @@ jobs:
           pnpm --filter @corral/db generate
           git diff --exit-code --stat -- packages/db/migrations
           test -z "$(git status --porcelain -- packages/db/migrations)"
+
+      # The deployed database has already run every migration on main, so
+      # changing one would leave it out of step with the schema. Add a new
+      # migration instead. On main itself, compare with the previous push.
+      - name: Existing migrations are unchanged
+        run: |
+          base=$(git merge-base origin/main HEAD)
+          if [ "$base" = "$(git rev-parse HEAD)" ]; then base=${{ github.event.before }}; fi
+          git cat-file -e "$base^{commit}" 2>/dev/null || { echo "No earlier commit to compare with"; exit 0; }
+          changed=$(git diff --name-only --diff-filter=MDR "$base" HEAD -- 'packages/db/migrations/*.sql')
+          if [ -n "$changed" ]; then
+            echo "These migrations are already on main and must not change:"
+            echo "$changed"
+            exit 1
+          fi
 
       - name: Test
         run: pnpm run test
