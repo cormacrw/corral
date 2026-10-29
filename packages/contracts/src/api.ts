@@ -799,8 +799,9 @@ export const createDeploymentInput = z.object({
   // Null for the first deploy
   fromSha: commitSha.nullable(),
   toSha: commitSha,
-  // Newest first, as `git log` lists them
-  commits: z.array(z.object({ sha: commitSha, subject: z.string().max(1000) })).max(1000)
+  // Newest first, as `git log` lists them. Every commit in the range, however
+  // many: a capped list would lose the oldest and the PM's notes with them.
+  commits: z.array(z.object({ sha: commitSha, subject: z.string() }))
 })
 export type CreateDeploymentInput = z.infer<typeof createDeploymentInput>
 

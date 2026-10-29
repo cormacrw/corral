@@ -40,6 +40,15 @@ describe.each(['pglite', 'postgres'] as const)('POST /api/deployments on %s', (d
     expect(rows).toHaveLength(1)
   })
 
+  it('keeps every commit of a long range', async () => {
+    const project = await t.createProject()
+    const commits = Array.from({ length: 1001 }, (_, i) => ({ sha: i.toString(16).padStart(40, '0'), subject: `Change ${i}` }))
+    const res = await t.request('POST', '/api/deployments', { repository: project.repository, fromSha: sha('a'), toSha: commits[0]!.sha, commits })
+    expect(res.status).toBe(201)
+    const [row] = await t.db.select().from(schema.deployments).where(eq(schema.deployments.projectId, project.id))
+    expect(row!.commits).toEqual(commits)
+  })
+
   it('keeps the same toSha apart per project', async () => {
     const one = await t.createProject()
     const two = await t.createProject()
