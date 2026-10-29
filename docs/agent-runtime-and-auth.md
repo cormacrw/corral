@@ -21,6 +21,7 @@ There are two `AgentRuntime` adapters in the runner, one per CLI. They differ on
 | Vendor | Anthropic | OpenAI |
 
 - The user installs and logs in to each CLI **themselves**: on the laptop in development, or with `docker exec -it` in the runner container once deployed (D12). Each CLI's config lives on a volume that only that CLI reads.
+- The one thing the runner writes into those config directories is its pinned skills (`apps/runner/skills`, e.g. `grill-me`). At startup it copies them into `$CLAUDE_CONFIG_DIR/skills` (default `~/.claude/skills`) and `$CODEX_HOME/skills` (default `~/.codex/skills`), rewriting a file only when it differs. It never reads or changes anything else there, and a directory it can't write only gets a warning.
 - Corral's runner starts the CLI headless inside the task's worktree (or the Plan session's checkout for the PM).
 - Corral has no "Sign in with Claude" or "Sign in with ChatGPT" step. It never handles Anthropic or OpenAI tokens or API keys, and never sets `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
 
