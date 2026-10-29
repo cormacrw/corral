@@ -489,6 +489,7 @@ export interface Run {
   error: string | null
   headSha: string | null
   inputTokens: number | null
+  cacheReadTokens: number | null
   outputTokens: number | null
   rateLimitResetAt: string | null
   queuedAt: string

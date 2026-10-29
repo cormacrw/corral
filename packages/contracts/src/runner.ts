@@ -85,7 +85,8 @@ export type RunEvent =
   | { type: 'thinking', text: string }
   | { type: 'tool_call', id: string, tool: string, input: unknown }
   | { type: 'tool_result', id: string, output: string, isError: boolean }
-  | { type: 'usage', inputTokens: number, outputTokens: number }
+  // inputTokens is fresh input (including cache writes); cache reads are counted apart
+  | { type: 'usage', inputTokens: number, cacheReadTokens: number, outputTokens: number }
 
 export type RunExit =
   | { kind: 'exited', code: number | null }

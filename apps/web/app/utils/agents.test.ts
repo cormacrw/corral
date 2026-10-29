@@ -7,7 +7,7 @@ const agent = (id: string, activeRuns = 0): Agent => ({
 })
 const run = (id: string, agentId: string, state: Run['state'], queuedAt = '2026-10-29T10:00:00Z', tokens = 0): Run => ({
   id, number: 1, agentId, agentName: agentId, role: 'developer', projectId: 'p', taskId: null, taskRef: null, taskTitle: null,
-  state, outcome: null, summary: null, error: null, headSha: null, inputTokens: tokens, outputTokens: 0, rateLimitResetAt: null,
+  state, outcome: null, summary: null, error: null, headSha: null, inputTokens: tokens, cacheReadTokens: null, outputTokens: 0, rateLimitResetAt: null,
   queuedAt, startedAt: queuedAt, endedAt: null
 })
 
