@@ -33,7 +33,7 @@ web            server                          runner                     claude
 |---|---|
 | `list_tasks`, `get_task`, `get_run_outcomes` | Live board state, so answers reflect current state, not only chat history (PRD §7.2) |
 | `get_attachment` | An image pasted into task text (`attachment:<id>`), returned as image content with its file name and mime type. Only attachments in the run's own project; developers and reviewers have it too |
-| `ask_question` | A structured question, shown in the Plan conversation only, never in the Inbox (D11). Optionally with a `recommendation` (the PM's suggested answer) and `options` (2–5 short choices, each at most 120 characters). Both are stored on the message and shown, options numbered, in the history the PM sees on later turns |
+| `ask_question` | A structured question, shown in the Plan conversation, and in the Inbox while the session is open (as its Plan thread, D11). Optionally with a `recommendation` (the PM's suggested answer) and `options` (2–5 short choices, each at most 120 characters). Both are stored on the message and shown, options numbered, in the history the PM sees on later turns |
 | `propose_plan` | Create or revise a draft plan: epics, tasks, acceptance criteria, dependencies, priority, task type (`task`, `bug`, `spike` or `design`, D19, D20), human-review flag, and for build tasks the design version and screens they pin (D20) |
 | `approve_plan` | Approve the current plan (to the board or the Backlog) when the human asks in chat. Recorded as the human's approval; refused unless the human has written since the plan was proposed |
 | `flag_stale_docs` | Create a documentation task (PRD §7.10) |
