@@ -111,7 +111,7 @@ const note = (task: Task) => taskNote(task, props.all, props.reviewRoundCap)
       <div
         role="tablist"
         aria-label="Board columns"
-        class="flex gap-2 overflow-x-auto px-4 pb-3 [scrollbar-width:none]"
+        class="flex gap-2 overflow-x-auto overscroll-x-contain px-4 pb-3 [scrollbar-width:none]"
         @keydown="onTabKey"
       >
         <button
@@ -162,7 +162,7 @@ const note = (task: Task) => taskNote(task, props.all, props.reviewRoundCap)
       id="board-column"
       role="tabpanel"
       :aria-label="`${column.label}, ${column.tasks.length}`"
-      class="flex min-h-0 flex-1 flex-col overflow-y-auto bg-muted/40 p-4"
+      class="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain bg-muted/40 p-4"
       data-testid="board-column"
       @touchstart.passive="onTouchStart"
       @touchend.passive="onTouchEnd"

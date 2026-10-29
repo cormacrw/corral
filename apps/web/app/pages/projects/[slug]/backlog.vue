@@ -162,7 +162,7 @@ async function newTask() {
         </div>
         <div
           v-else
-          class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4"
+          class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain p-4"
         >
           <section
             v-for="group in groups"

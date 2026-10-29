@@ -81,3 +81,9 @@ Primary colour and font come from `app.config.ts` and `main.css`. The design can
 
 - Should a project's sub-items include Overview explicitly, or does clicking the name stay the only way in?
 - Should the command palette search tasks across all projects, or default to the current project?
+
+## Scrolling
+
+The document (`html` and `body`) disables overscroll bounce in all layouts, including setup’s bare layout. Scrollable dashboard bodies, board columns, task panels, chat and log panes contain scroll chaining. The mobile layout’s scrolling main area and its page panels also contain chaining, keeping the header and tab bar stationary while content scrolls normally.
+
+Horizontal-only scrollers (Markdown code and tables, command snippets, chip rows and the board lane) contain only horizontal chaining, allowing vertical wheel input to reach their surrounding pane. The mobile main area retains containment on both axes because it also hosts vertical page scrolling.

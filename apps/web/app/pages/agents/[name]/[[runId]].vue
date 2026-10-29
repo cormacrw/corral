@@ -103,7 +103,7 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
             class="m-3"
             :actions="[{ label: 'Retry', onClick: load }]"
           />
-          <ul class="min-h-0 flex-1 overflow-y-auto">
+          <ul class="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             <li
               v-for="run in runs"
               :key="run.id"

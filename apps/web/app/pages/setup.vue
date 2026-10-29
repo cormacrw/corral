@@ -133,7 +133,7 @@ const { adding, steps, step, index, userName, savingName, repos, reposError, rep
               <ul
                 role="listbox"
                 aria-label="Repositories"
-                class="max-h-72 overflow-y-auto"
+                class="max-h-72 overflow-y-auto overscroll-contain"
               >
                 <li
                   v-for="repo in repoRows"

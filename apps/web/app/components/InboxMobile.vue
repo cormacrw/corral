@@ -82,7 +82,7 @@ const tabs = computed(() => [
       />
     </Teleport>
     <template v-if="selected">
-      <div class="min-h-0 flex-1 overflow-y-auto p-4">
+      <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
         <div class="flex flex-col gap-4">
           <div class="flex gap-3">
             <AgentAvatar
@@ -314,7 +314,7 @@ const tabs = computed(() => [
     </div>
     <ul
       v-else
-      class="min-h-0 flex-1 overflow-y-auto"
+      class="min-h-0 flex-1 overflow-y-auto overscroll-contain"
     >
       <li
         v-for="item in items"

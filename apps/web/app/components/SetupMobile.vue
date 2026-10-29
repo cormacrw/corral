@@ -54,7 +54,7 @@ function back() {
       </template>
     </header>
 
-    <main class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pt-5 pb-6">
+    <main class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-4 pt-5 pb-6">
       <div
         v-if="!adding"
         class="flex flex-col gap-2"
@@ -131,7 +131,7 @@ function back() {
             <p class="mb-2">
               Sign in inside the runner, then check again. Corral never sees the token.
             </p>
-            <pre class="overflow-x-auto rounded bg-elevated p-2 font-mono text-xs">docker exec -it corral-runner gh auth login</pre>
+            <pre class="overflow-x-auto overscroll-x-contain rounded bg-elevated p-2 font-mono text-xs">docker exec -it corral-runner gh auth login</pre>
             <UButton
               label="Check again"
               size="sm"
@@ -170,7 +170,7 @@ function back() {
             <ul
               role="listbox"
               aria-label="Repositories"
-              class="max-h-72 overflow-y-auto"
+              class="max-h-72 overflow-y-auto overscroll-contain"
             >
               <li
                 v-for="repo in repoRows"

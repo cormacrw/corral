@@ -44,7 +44,7 @@ const cards = computed(() => state.value.projects.map((project) => {
       aria-label="Add project"
     />
   </Teleport>
-  <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
+  <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4">
     <template v-if="!state.loaded">
       <USkeleton
         v-for="n in 2"

@@ -27,7 +27,7 @@ watch(mode, (next) => {
   >
     <template #content>
       <div
-        class="overflow-y-auto pb-[env(safe-area-inset-bottom)]"
+        class="overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom)]"
         data-testid="install-sheet"
       >
         <div class="flex justify-end ps-4 pe-1">

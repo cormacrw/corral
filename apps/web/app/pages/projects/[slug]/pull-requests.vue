@@ -136,7 +136,7 @@ const summary = computed(() => {
         <!-- Phones: one card per PR -->
         <ul
           v-else-if="device.isMobile.value"
-          class="flex flex-col gap-3 overflow-y-auto p-4"
+          class="flex flex-col gap-3 overflow-y-auto overscroll-contain p-4"
         >
           <li
             v-for="row in rows"
@@ -202,7 +202,7 @@ const summary = computed(() => {
         <!-- Desktop: a table; a row opens the task flyout -->
         <div
           v-else
-          class="min-h-0 flex-1 overflow-auto"
+          class="min-h-0 flex-1 overflow-auto overscroll-contain"
         >
           <table class="w-full text-sm">
             <thead class="sticky top-0 bg-default text-start text-xs text-muted">

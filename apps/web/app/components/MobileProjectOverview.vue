@@ -12,7 +12,7 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
 <template>
   <div class="flex min-h-0 min-w-0 flex-1 flex-col">
     <!-- The active runs' glow spills past the screen's edge -->
-    <div class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+    <div class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
       <div
         v-if="!project"
         class="flex flex-col gap-3 p-4"
@@ -90,7 +90,7 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
         </div>
 
         <!-- Stat tiles scroll sideways rather than wrap -->
-        <div class="flex snap-x scroll-px-4 gap-2 overflow-x-auto px-4">
+        <div class="flex snap-x scroll-px-4 gap-2 overflow-x-auto overscroll-x-contain px-4">
           <dl
             v-for="tile in [
               { label: 'Ready', color: STATUS.ready.color, value: count('ready'), sub: waitingOnDependency ? `${waitingOnDependency} waiting on a dependency` : 'scheduled next' },

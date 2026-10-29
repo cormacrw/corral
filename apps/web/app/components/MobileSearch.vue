@@ -59,7 +59,7 @@ async function go(to: string) {
       />
     </div>
 
-    <div class="min-h-0 flex-1 overflow-y-auto pb-[env(safe-area-inset-bottom)]">
+    <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom)]">
       <p
         v-if="empty"
         class="p-6 text-center text-sm text-muted"
