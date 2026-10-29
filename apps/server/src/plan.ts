@@ -559,7 +559,6 @@ export class PlanService {
     const items = await db.select({ item: planTasks, task: tasks }).from(planTasks).leftJoin(tasks, eq(tasks.id, planTasks.taskId))
       .where(eq(planTasks.planId, row.id)).orderBy(asc(planTasks.position))
     const ids = items.map(i => i.task?.id).filter((id): id is string => Boolean(id))
-    const criteria = ids.length > 0 ? await db.select({ taskId: acceptanceCriteria.taskId }).from(acceptanceCriteria).where(inArray(acceptanceCriteria.taskId, ids)) : []
     const deps = ids.length > 0
       ? await db.select({ taskId: taskDependencies.taskId, number: tasks.number }).from(taskDependencies)
           .innerJoin(tasks, eq(tasks.id, taskDependencies.dependsOnId)).where(inArray(taskDependencies.taskId, ids))
@@ -587,7 +586,8 @@ export class PlanService {
         ref: task && project ? taskRef(project.prefix, task.number) : null,
         title: item.revision?.title ?? task?.title ?? item.key,
         status: task?.status ?? null,
-        criteriaCount: item.revision?.acceptanceCriteria.length ?? criteria.filter(c => c.taskId === task?.id).length,
+        priority: item.revision?.priority ?? task?.priority ?? 'medium',
+        humanReview: item.revision?.humanReview ?? task?.humanReview ?? false,
         dependsOn: item.revision
           ? item.revision.dependsOn.map(n => taskRef(project!.prefix, n))
           : deps.filter(d => d.taskId === task?.id).map(d => taskRef(project!.prefix, d.number))

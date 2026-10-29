@@ -24,7 +24,7 @@ describe('plan sessions', () => {
     await t?.close()
   })
 
-  const plan = (tasksIn: Partial<{ key: string, ref: string, title: string, type: string, description: string, acceptanceCriteria: string[], dependsOn: string[], humanReview: boolean, design: { taskRef: string, version: number, screens: string[] } }>[]) => ({
+  const plan = (tasksIn: Partial<{ key: string, ref: string, title: string, type: string, description: string, acceptanceCriteria: string[], dependsOn: string[], priority: string, humanReview: boolean, design: { taskRef: string, version: number, screens: string[] } }>[]) => ({
     title: 'Login',
     summary: 'Email and password login',
     tasks: tasksIn.map((task, i) => ({
@@ -86,7 +86,8 @@ describe('plan sessions', () => {
     expect(detail.status).toBe('needs_approval')
     expect(detail.plans).toHaveLength(1)
     const v1 = detail.plans[0]!
-    expect(v1).toMatchObject({ version: 1, status: 'proposed', title: 'Login', tasks: [{ title: 'Login form', change: 'added', status: 'draft', criteriaCount: 1 }, { title: 'Session cookie', dependsOn: [`${project.prefix}-1`] }] })
+    expect(v1).toMatchObject({ version: 1, status: 'proposed', title: 'Login', tasks: [{ title: 'Login form', change: 'added', status: 'draft', priority: 'medium', humanReview: false }, { title: 'Session cookie', priority: 'medium', humanReview: true, dependsOn: [`${project.prefix}-1`] }] })
+    expect(v1.tasks[0]).not.toHaveProperty('criteriaCount')
     expect(detail.messages.at(-1)).toMatchObject({ role: 'pm', planId: v1.id })
     // A plan without epics creates none, and its tasks have no epic
     expect(v1).toMatchObject({ epicId: null, epics: [] })
@@ -278,6 +279,8 @@ describe('plan sessions', () => {
         title: 'Add email login',
         description: '## Why\n\nPasswords only',
         acceptanceCriteria: ['Shows an error on a bad password', 'Locks the account after 5 tries'],
+        priority: 'urgent',
+        humanReview: true,
         dependsOn: [other.ref, 't2']
       },
       { title: 'Rate limiter' }
@@ -294,7 +297,7 @@ describe('plan sessions', () => {
     // Only the new task is created; the referenced one is untouched
     expect(await count()).toBe(4)
     const before = await getTask(target.ref)
-    expect(before).toMatchObject({ title: 'Add login', status: 'backlog', dependsOn: [base.ref], epicId: null })
+    expect(before).toMatchObject({ title: 'Add login', status: 'backlog', priority: 'medium', humanReview: false, dependsOn: [base.ref], epicId: null })
     expect(before.acceptanceCriteria.map(c => [c.id, c.text])).toEqual(target.acceptanceCriteria.map(c => [c.id, c.text]))
     expect(richTextToMarkdown(before.description)).toBe('Email and password')
 
@@ -302,7 +305,7 @@ describe('plan sessions', () => {
     const [v1] = (await session(created.id)).plans
     const rateLimiter = v1!.tasks[1]!.ref!
     expect(v1!.tasks).toMatchObject([
-      { key: 't1', ref: target.ref, revises: true, title: 'Add email login', status: 'backlog', criteriaCount: 2, dependsOn: [other.ref, rateLimiter], epicId: null },
+      { key: 't1', ref: target.ref, revises: true, title: 'Add email login', status: 'backlog', priority: 'urgent', humanReview: true, dependsOn: [other.ref, rateLimiter], epicId: null },
       { key: 't2', revises: false, title: 'Rate limiter', status: 'draft' }
     ])
     await endTurn(job, 'Proposed.')
@@ -310,7 +313,7 @@ describe('plan sessions', () => {
     const approved = await t.request('POST', `/api/plan/plans/${v1!.id}/approve`, { to: 'backlog' })
     expect(approved.status).toBe(200)
     const after = await getTask(target.ref)
-    expect(after).toMatchObject({ title: 'Add email login', status: 'backlog', dependsOn: [other.ref, rateLimiter], epicId: null })
+    expect(after).toMatchObject({ title: 'Add email login', status: 'backlog', priority: 'urgent', humanReview: true, dependsOn: [other.ref, rateLimiter], epicId: null })
     expect(v1!.epicId).toBeNull()
     expect(richTextToMarkdown(after.description)).toBe('## Why\n\nPasswords only')
     // The unchanged criterion keeps its ID; the new one gets its own
