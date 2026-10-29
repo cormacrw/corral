@@ -128,11 +128,17 @@ Backing up `server/` backs up all of a dev instance's state. For the deployed in
 
 ### Flows
 
-- **Evidence:** the agent saves a file to a scratch folder outside the repo → calls MCP `attach_evidence(criterionId, path)` → the runner uploads it to the server → the server hashes it, stores the blob, and records task, review round, criterion, type and hash in the database. Immutable blobs mean evidence survives force-pushes and worktree cleanup (PRD §7.7).
+- **Evidence files:** the agent saves a file to a scratch folder outside the repo → calls MCP `attach_evidence(criterionId, path)` → the runner uploads it to the server → the server hashes it, stores the blob, and records task, review round, criterion, type and hash in the database. Immutable blobs mean evidence survives force-pushes and worktree cleanup (PRD §7.7).
 - **PR evidence:** the PR body contains the plain-English summary, per-criterion pass/fail, and a **link to Corral's evidence page**. No images are committed to the repo or uploaded to GitHub. Images show for others once Corral is hosted. (This is how D4's "attached to the PR" is implemented.)
 - **Transcripts:** the runner writes events to `spool/` as they arrive and forwards them live (server → SSE → web). At run end it uploads the full JSONL to the blob store; the database stores only run metadata and the blob pointer. Transcripts never go in Postgres.
 - **Design bundles (D20):** a version's static bundle is one **tar archive** (ustar, as `tar -cf` writes it; `packBundle`/`unpackBundle` in `packages/core`) stored as a blob. The server serves its files at `GET /api/designs/:versionId/files/<path>` (a bare `files` redirects to `files/`, which is `index.html`) with `Content-Security-Policy: sandbox allow-scripts; … connect-src 'none'; …` and `X-Content-Type-Options: nosniff`, and a content type from the file's extension. The path is checked as sent, before routing: `..`, `.`, empty segments, absolute paths, drive letters, backslashes and their percent-encoded forms get a 400. The web app shows the bundle only in `<iframe sandbox="allow-scripts">` (`DesignPreview`, and the full-size page `/designs/:versionId`).
 - **GitHub state:** the server keeps a copy of PR number, head SHA, CI status and mergeability, updated from webhooks or polling.
+
+### Evidence (D21)
+
+Human evidence is what a person uses to judge each acceptance criterion: screenshots and video, real requests and responses, before/after metrics, and the reviewer's per-criterion note. File evidence follows the upload flow above. A criterion with nothing visual to show, such as a refactor with no behaviour change, may instead have a written explanation without a file. The reviewer judges the explanation; its per-criterion verdict note is the proof.
+
+Lint, typecheck, tests and build are gates, never attached as criterion evidence. The developer runs them and the reviewer reruns them without the cache; the project's required CI checks gate merge. Logs, test output and other raw files are agent artifacts, retained for the reviewer and debugging and collapsed in the UI. The PM writes criteria describing behaviour, never "tests pass" or "build succeeds". See [D21](decisions.md#d21--evidence-is-for-judging-criteria-checks-are-gates), which amends D4 and D19 and overrides PRD §7.7's test-results evidence.
 
 ### Moving to hosting
 

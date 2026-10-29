@@ -101,20 +101,22 @@ It creates a run (Queued) and a 15-minute lease, then sends `job.assign` (RunJob
 4. Write the per-run MCP config.
 5. Spawn the agent's CLI (`claude` or `codex`, D18) in its own process group, with no `GH_TOKEN` in its environment, and with `GIT_AUTHOR_*`/`GIT_COMMITTER_*` set from `CORRAL_GIT_AUTHOR_NAME`/`CORRAL_GIT_AUTHOR_EMAIL` when both are configured (the runner warns at startup when they aren't).
 
+Keep criterion evidence separate from agent artifacts (D21): logs, test output and other raw files are retained for review and debugging, collapsed in the UI.
+
 Run: Starting → Running. A heartbeat every 2 minutes renews the lease, and every heartbeat carries the lease epoch.
 
 ### Step 4 — Developer works (agent)
 
 1. Reads `CORRAL.md`, relevant wiki pages, and pinned comments.
-2. Implements the task; runs lint, typecheck and tests.
-3. Starts the app, captures screenshots/video with the agent browser, and calls `attach_evidence` per criterion.
+2. Implements the task; runs lint, typecheck, tests and build as gates (D21). Checks are never attached as criterion evidence.
+3. Produces human evidence per criterion: screenshots/video of the running app with the agent browser, real requests and responses, or before/after metrics. Calls `attach_evidence` for files. A criterion with nothing visual to show can instead use a written explanation without a file (for example, a refactor with no behaviour change); the reviewer judges it and its verdict note is the proof (D21).
 4. Updates the wiki; commits.
 5. Calls `report_outcome('pr_opened', summary)`, or `pr_updated` on a revision.
 
 ### Step 5 — Submit (runner → server)
 
 1. The runner pushes the branch.
-2. The server validates the outcome: branch at the expected commit, evidence for every criterion. If anything is missing, the outcome is rejected and the agent is told what's missing while it's still running.
+2. The server validates the outcome: branch at the expected commit, human evidence for every criterion, including note-only explanations where appropriate (D21). Check output is an agent artifact, not criterion evidence. If anything is missing, the outcome is rejected and the agent is told what's missing while it's still running.
 3. If valid, the server opens or updates the PR (summary, per-criterion checklist, link to the evidence page) and moves **In progress → Agent review**.
 4. The run ends Completed and the lease is released. The runner kills the agent's process tree but **keeps the worktree** for possible revisions.
 
@@ -122,8 +124,8 @@ Run: Starting → Running. A heartbeat every 2 minutes renews the lease, and eve
 
 1. The scheduler sees an Agent review task with no lease and no verdict for the current commit, and claims a reviewer lease.
 2. The runner creates a separate review worktree at the PR commit (`worktrees/<taskId>-review`).
-3. The reviewer reads the diff, the criteria and the evidence (`get_evidence`), and runs the project's lint, typecheck and tests independently. The role defaults require bypassing the Turbo cache for all three (`TURBO_FORCE=1 pnpm run lint`, `TURBO_FORCE=1 pnpm run typecheck`, `TURBO_FORCE=1 pnpm run test`): cached output replays the developer's verification. If a check cannot be run without the cache, the reviewer explains which check and why in its outcome.
-4. It calls `report_outcome('approved' | 'changes_requested')` with a verdict per criterion and its reasoning. The server records review round N, tied to that commit.
+3. The reviewer reads the diff, the criteria and the evidence (`get_evidence`), and runs the project's lint, typecheck, tests and build independently as gates (D21), without the cache. For Turbo projects, bypass the cache for all four (`TURBO_FORCE=1 pnpm run lint`, `TURBO_FORCE=1 pnpm run typecheck`, `TURBO_FORCE=1 pnpm run test`, `TURBO_FORCE=1 pnpm run build`): cached output replays the developer's verification. If a check cannot be run without the cache, the reviewer explains which check and why in its outcome.
+4. It calls `report_outcome('approved' | 'changes_requested')` with a verdict per criterion and its reasoning. It judges note-only explanations as well as files; its per-criterion verdict note is the proof for note-only evidence (D21). The server records review round N, tied to that commit.
 
 ### Step 7a — Changes requested
 
