@@ -11,7 +11,8 @@ import { headSha, prepareWorkspace, pushBranch, readProjectBrief, readRoleInstru
 
 // Runs on this runner (flows.md §2 steps 3–5, PRD §8.6). Each run gets a
 // worktree, a secret MCP path, and an agent process in its own process
-// group, started by the adapter for the job's runtime (D15). Events stream to the server in batches; raw lines go to the spool.
+// group, started by the adapter for the job's runtime (D15). Events stream
+// to the server in batches; raw lines go to the spool.
 // A PM turn is still one run, but its process can outlive the run: it stays
 // warm for the session's next message until the idle timeout (D9).
 
