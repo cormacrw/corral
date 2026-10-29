@@ -231,7 +231,7 @@ Both appear in the Inbox (D11) with their reason. When a human resolves a Failed
 
 ## D11 — The Inbox holds developer and reviewer items only; the PM stays in Plan
 
-**Status:** Accepted. Replaces the PRD's "Human queue" (§7.11, §12.2) and its separate notifications. Amended 2026-10-29 (COR-103, COR-118, COR-130): Plan sessions with a question, a plan needing approval or an unread reply now appear in the Inbox too (see the amendment below).
+**Status:** Accepted. Replaces the PRD's "Human queue" (§7.11, §12.2) and its separate notifications. Amended 2026-10-29 (COR-103, COR-118, COR-130): Plan sessions with a question, a plan needing approval or an unread reply now appear in the Inbox too (see the amendment below). Amended 2026-10-29 (COR-127): so do the PM's release notes for each deploy (see the second amendment).
 
 **Decision:** The PRD's Human queue is called the **Inbox**. It only holds items raised by developer and reviewer runs, which happen in the background while the human is elsewhere:
 
@@ -258,6 +258,13 @@ There is no separate notifications feed or bell. System events (usage limits, ru
 - **Unchanged:** `ask_question`, `propose_plan` and `approve_plan` still belong to the Plan session; the Inbox shows the same session's question or plan rather than a copy. System events stay out of the Inbox, and Activity still only holds developer and reviewer events.
 
 **Why the amendment:** with several Plan sessions open across projects, the Inbox was the one place that didn't show what Juno was waiting on, and the human had to check Plan separately. Showing the open sessions themselves (not copies of their questions) keeps one conversation per session while making the Inbox the single list of everything waiting on the human. Plan's own Recent sessions list is dropped, because the Inbox and the side nav threads cover it. Listing only questions, plans needing approval and unread replies, and showing just that instead of the conversation, keeps every Inbox thread something to act on and its count meaning what's waiting on the human; **Close thread** gives the human a way to abandon a session they don't want without approving it (COR-118).
+
+**Amended 2026-10-29 (COR-127): the PM's release notes are an Inbox item.** After each deploy (D16) the server records a **deployment**: the commits it shipped since the last one. The PM writes release notes for it in markdown, and those notes appear in the Inbox as a **Release notes** item for the deployment's project.
+
+- **Not Needs you:** release notes are something to read, not something an agent is waiting on, so they don't count toward the Needs you count (badge and tab) and don't sit under Needs you. They're listed with Activity, unread until the human opens them (the deployment's `readAt`).
+- **Unchanged:** nothing else from the PM goes in the Inbox; system events (including a deploy that failed, which records no deployment) stay out.
+
+**Why:** the notes are written in the background after a deploy the human didn't trigger, which is the kind of thing the Inbox is for. Keeping them out of Needs you keeps that count meaning what's waiting on the human.
 
 ---
 
@@ -400,6 +407,7 @@ The UI specs are in [design/](design/README.md).
 **Consequences for the build:**
 - New worker runs and merges must respect both hold phases. PM dispatch must respect the finishing phase while accepting messages in Plan and Inbox throughout. Count dispatched PM turns in `busy`, but exclude held jobs so the deploy can finish. The existing auto-deploy polling loop needs no change.
 - The hold endpoint sits on the same API as the rest of the app, behind Cloudflare Access. It needs proper auth when hosting arrives (D1).
+- **Recording the deploy (COR-127):** once `docker compose up -d` succeeds and `.corral/deploy/deployed` is written, the script waits for the new server to answer (bounded retries) and posts `POST /api/deployments` with the repository, the previous and new commit and the commits between them (`git log deployed..new`, or just the new commit on a first deploy). The project is found by its repository, and posting the same new commit again returns the existing record. Failing to report is logged as a warning and never fails or rolls back the deploy. A deploy that stops earlier (CI, build or backup failed) records nothing. The PM's release notes for it are an Inbox item (D11), not part of Needs you.
 
 ---
 
