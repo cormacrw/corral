@@ -167,8 +167,8 @@ describe('taskAgentIds', () => {
     expect(taskAgentIds({ status: 'human_review', lease: null, developer, reviewer })).toEqual([])
   })
 
-  it('adds the agent holding the lease', () => {
-    expect(taskAgentIds({ status: 'in_progress', lease: lease('developer'), developer, reviewer })).toEqual(['dev2'])
+  it('uses only the agent holding the lease', () => {
+    expect(taskAgentIds({ status: 'in_progress', lease: lease('developer'), developer: { id: 'dev', name: 'Other developer' }, reviewer })).toEqual(['dev2'])
     expect(taskAgentIds({ status: 'in_progress', lease: lease('reviewer'), developer, reviewer })).toEqual(['rev'])
   })
 })

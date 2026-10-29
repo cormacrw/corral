@@ -68,11 +68,9 @@ const TURN: Partial<Record<TaskStatus, AgentRole>> = { ready: 'developer', in_pr
 // Leased tasks belong to their holder; otherwise use the latest agent of the turn's role.
 export function taskAgentIds(task: Pick<Task, 'status' | 'lease' | 'developer' | 'reviewer'>): string[] {
   if (task.lease) return [task.lease.agentId]
-  const roles = [TURN[task.status]]
-  return [...new Set(roles.flatMap((role) => {
-    const agent = role === 'developer' ? task.developer : role === 'reviewer' ? task.reviewer : null
-    return agent ? [agent.id] : []
-  }))]
+  const role = TURN[task.status]
+  const agent = role === 'developer' ? task.developer : role === 'reviewer' ? task.reviewer : null
+  return agent ? [agent.id] : []
 }
 
 // The column a task's status puts it in
