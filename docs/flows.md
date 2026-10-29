@@ -122,7 +122,7 @@ Run: Starting → Running. A heartbeat every 2 minutes renews the lease, and eve
 
 1. The scheduler sees an Agent review task with no lease and no verdict for the current commit, and claims a reviewer lease.
 2. The runner creates a separate review worktree at the PR commit (`worktrees/<taskId>-review`).
-3. The reviewer reads the diff, the criteria and the evidence (`get_evidence`), and may run tests.
+3. The reviewer reads the diff, the criteria and the evidence (`get_evidence`), and runs the project's lint, typecheck and tests independently. The role defaults require bypassing the Turbo cache for all three (`TURBO_FORCE=1 pnpm run lint`, `TURBO_FORCE=1 pnpm run typecheck`, `TURBO_FORCE=1 pnpm run test`): cached output replays the developer's verification. If a check cannot be run without the cache, the reviewer explains which check and why in its outcome.
 4. It calls `report_outcome('approved' | 'changes_requested')` with a verdict per criterion and its reasoning. The server records review round N, tied to that commit.
 
 ### Step 7a — Changes requested
