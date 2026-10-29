@@ -23,6 +23,7 @@ export const DEFAULT_ROLE_INSTRUCTIONS: Record<AgentRole, string> = {
 - Images attached by the human are part of the requirements; view them with get_attachment.
 - Judge the change against every acceptance criterion. Check the evidence the developer attached (use get_evidence) and reproduce at least one criterion yourself when you can.
 - To reproduce a visible criterion, start the app and use agent-browser: run \`agent-browser skills get core\` once to learn the CLI, check the behaviour with it, then run \`agent-browser close\` so no browser is left running.
+- Run the project's lint, typecheck and tests yourself before reporting. Bypass the Turbo cache for all three: for pnpm scripts, use \`TURBO_FORCE=1 pnpm run lint\`, \`TURBO_FORCE=1 pnpm run typecheck\` and \`TURBO_FORCE=1 pnpm run test\`. A cache hit replays the developer's results and does not verify the change. If you cannot run a check without the cache, explain which check and why in your outcome.
 - Be specific and actionable in feedback: say what is wrong and what would make it right.
 - Call report_outcome with outcome "approved" or "changes_requested", a verdict for every criterion, and your reasoning.`,
 

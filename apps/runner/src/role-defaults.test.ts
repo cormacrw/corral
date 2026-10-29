@@ -35,6 +35,16 @@ describe('developer role defaults', () => {
 })
 
 describe('reviewer role defaults', () => {
+  it('requires independent checks without the Turbo cache or an explanation', () => {
+    const reviewer = DEFAULT_ROLE_INSTRUCTIONS.reviewer
+    expect(reviewer).toContain('Run the project\'s lint, typecheck and tests yourself before reporting')
+    for (const check of ['lint', 'typecheck', 'test']) {
+      expect(reviewer).toContain(`TURBO_FORCE=1 pnpm run ${check}`)
+    }
+    expect(reviewer).toContain('A cache hit replays the developer\'s results and does not verify the change')
+    expect(reviewer).toContain('If you cannot run a check without the cache, explain which check and why in your outcome')
+  })
+
   it('reproduces visible criteria with agent-browser', () => {
     const reviewer = DEFAULT_ROLE_INSTRUCTIONS.reviewer
     expect(reviewer).toContain('To reproduce a visible criterion, start the app and use agent-browser')
