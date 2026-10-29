@@ -5,7 +5,7 @@ import { api, ApiError } from '~/composables/useApi'
 // A big − n + control for a developer or reviewer agent's concurrency (the
 // PM has none, see utils/agents.ts agentLimit). Each tap shows at once in the
 // live state; quick taps go to the server as one PATCH after the last one.
-const props = defineProps<{ agent: Pick<Agent, 'id' | 'name' | 'concurrency' | 'activeRuns'> }>()
+const props = defineProps<{ agent: Pick<Agent, 'id' | 'name' | 'concurrency' | 'activeRuns'>, fullWidth?: boolean }>()
 
 const SAVE_DELAY_MS = 600
 const SAVED_NOTE_MS = 2000
@@ -93,8 +93,8 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="flex items-center gap-3">
-    <div class="flex flex-col items-center">
-      <div class="flex items-center gap-2">
+    <div :class="['flex flex-col items-center', fullWidth && 'w-full']">
+      <div :class="['flex items-center gap-2', fullWidth && 'w-full justify-between']">
         <UButton
           icon="i-lucide-minus"
           color="neutral"
