@@ -14,6 +14,7 @@ import { z } from 'zod'
 import { listTaskAttachments, readProjectAttachment } from './attachments.ts'
 import type { BlobStore } from './blob-store.ts'
 import { claimNextTask, type Claim } from './claim.ts'
+import { DesignNotFound, readDesign } from './designs.ts'
 import { ApiFailure } from './errors.ts'
 import type { EventBus } from './events.ts'
 import type { GitHubClient } from './github.ts'
@@ -739,10 +740,16 @@ export class Orchestrator implements RunnerHandlers {
     const allowed: Record<string, readonly string[]> = {
       developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'report_outcome'],
       reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'report_outcome'],
-      pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
+      pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
     }
     if (!allowed[role]?.includes(tool)) throw new ToolError(`The ${role} can’t use ${tool}`)
     if (tool === 'get_attachment') return this.#getAttachment(ctx, z.object({ attachmentId: z.string() }).parse(input))
+    if (tool === 'get_design') {
+      const { taskRef: ref, version } = z.object({ taskRef: z.string(), version: z.number().int().positive().optional() }).parse(input)
+      return readDesign(this.#d.db, this.#d.blobs, ctx.project, ref, version).catch((error: unknown) => {
+        throw error instanceof DesignNotFound ? new ToolError(error.message) : error
+      })
+    }
     if (role === 'pm') {
       if (!this.plans || !ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
       return this.plans.tool(ctx.run.planSessionId, ctx.run.id, tool, input, this.#actor(ctx))

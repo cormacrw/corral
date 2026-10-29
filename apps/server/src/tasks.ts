@@ -1,4 +1,4 @@
-import type { AuditEntry, Comment, CreateTaskInput, HumanTransitionInput, PatchTaskInput, Task } from '@corral/contracts'
+import type { AuditEntry, Comment, CreateTaskInput, HumanTransitionInput, PatchTaskInput, Task, TaskDesignPin } from '@corral/contracts'
 import { createTaskInput } from '@corral/contracts'
 import {
   checkDependencies,
@@ -20,7 +20,7 @@ import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { ApiFailure, notFound } from './errors.ts'
 import { toReview } from './runs.ts'
 
-const { acceptanceCriteria, auditLog, comments, epics, projects, reviews, taskDependencies, tasks } = schema
+const { acceptanceCriteria, auditLog, comments, designVersions, epics, projects, reviews, taskDependencies, taskDesignPins, tasks } = schema
 
 type TaskRow = typeof tasks.$inferSelect
 type ProjectRow = typeof projects.$inferSelect
@@ -53,12 +53,20 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
     .orderBy(asc(tasks.number))
   // Newest first, so the first row per task is its latest review
   const reviewRows = await db.select().from(reviews).where(inArray(reviews.taskId, ids)).orderBy(desc(reviews.createdAt))
+  const pins = await db
+    .select({ taskId: taskDesignPins.taskId, screens: taskDesignPins.screens, version: designVersions.version, number: tasks.number })
+    .from(taskDesignPins)
+    .innerJoin(designVersions, eq(designVersions.id, taskDesignPins.designVersionId))
+    .innerJoin(tasks, eq(tasks.id, designVersions.taskId))
+    .where(inArray(taskDesignPins.taskId, ids))
 
   return rows.map((row) => {
     const latest = reviewRows.find(r => r.taskId === row.id) ?? null
     // A verdict only describes the commit it was given for
     const current = latest && latest.headSha === row.headSha ? latest : null
-    return toTask(project, row, criteria, dependencies, latest, current)
+    const pin = pins.find(p => p.taskId === row.id)
+    const design = pin ? { taskRef: taskRef(project.prefix, pin.number), version: pin.version, screens: pin.screens } : null
+    return toTask(project, row, criteria, dependencies, latest, current, design)
   })
 }
 
@@ -68,7 +76,8 @@ function toTask(
   criteria: (typeof acceptanceCriteria.$inferSelect)[],
   dependencies: { taskId: string, number: number }[],
   latest: typeof reviews.$inferSelect | null,
-  current: typeof reviews.$inferSelect | null
+  current: typeof reviews.$inferSelect | null,
+  design: TaskDesignPin | null
 ): Task {
   return {
     id: row.id,
@@ -101,6 +110,7 @@ function toTask(
     mergeCommitSha: row.mergeCommitSha,
     mergedAt: row.mergedAt?.toISOString() ?? null,
     gateChecks: row.gateChecks,
+    design,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString()
   }
@@ -113,6 +123,16 @@ export async function loadTask(db: Executor, taskId: string): Promise<Task> {
     .where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt)))
   if (!found) throw notFound()
   return (await toTasks(db, found.project, [found.task]))[0]!
+}
+
+// Pins a build task to a design version and its screens (D20), or unpins it
+export async function setDesignPin(db: Executor, taskId: string, pin: { designVersionId: string, screens: string[] } | null): Promise<void> {
+  if (!pin) {
+    await db.delete(taskDesignPins).where(eq(taskDesignPins.taskId, taskId))
+    return
+  }
+  await db.insert(taskDesignPins).values({ taskId, ...pin })
+    .onConflictDoUpdate({ target: taskDesignPins.taskId, set: { ...pin, updatedAt: new Date() } })
 }
 
 export async function findTaskId(db: Executor, projectId: string, number: number): Promise<string> {

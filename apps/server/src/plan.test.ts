@@ -24,7 +24,7 @@ describe('plan sessions', () => {
     await t?.close()
   })
 
-  const plan = (tasksIn: Partial<{ key: string, ref: string, title: string, type: string, description: string, acceptanceCriteria: string[], dependsOn: string[], humanReview: boolean }>[]) => ({
+  const plan = (tasksIn: Partial<{ key: string, ref: string, title: string, type: string, description: string, acceptanceCriteria: string[], dependsOn: string[], humanReview: boolean, design: { taskRef: string, version: number, screens: string[] } }>[]) => ({
     title: 'Login',
     summary: 'Email and password login',
     tasks: tasksIn.map((task, i) => ({
@@ -481,6 +481,100 @@ describe('plan sessions', () => {
     expect(await t.request('POST', `/api/plan/plans/${v1!.id}/approve`, { to: 'backlog' }).then(r => r.status)).toBe(200)
     const after = await t.request('GET', `/api/tasks/${target.ref}`).then(r => r.json()) as Task
     expect(after).toMatchObject({ type: 'design', humanReview: true })
+  })
+
+  // A design task with v1 superseded, v2 approved and v3 submitted (D20)
+  async function designSetup() {
+    const project = await t.createProject()
+    await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+    const design = await t.createTask(project.slug, { title: 'Login design', type: 'design' })
+    const spec = await t.blobs.put(Buffer.from('# Login\n\n## Screens\n- `login`\n- `login-error`\n'))
+    const bundle = await t.blobs.put(Buffer.from('bundle-bytes'))
+    const shot = await t.blobs.put(Buffer.from('png-bytes'))
+    for (const [version, status] of [[1, 'superseded'], [2, 'approved'], [3, 'submitted']] as const) {
+      await t.db.insert(schema.designVersions).values({
+        taskId: design.id, version, status, specBlob: spec, bundleBlob: bundle, branch: `design/${design.ref}`, commitSha: `sha${version}`,
+        screenshots: [{ blob: shot, fileName: 'login.png', contentType: 'image/png' }]
+      })
+    }
+    const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: `Plan the build of ${design.ref}` }).then(r => r.json()) as PlanSessionDetail
+    const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.planSessionId === created.id)).job
+    const getTask = (ref: string) => t.request('GET', `/api/tasks/${ref}`).then(r => r.json()) as Promise<Task>
+    return { project, design, created, job, getTask, blobs: { spec, bundle, shot } }
+  }
+
+  it('gives the PM a design version with get_design: the latest by default, a given version, or a pinned task\'s version (D20)', async () => {
+    const { design, created, job } = await designSetup()
+    const latest = await runner.call(job.runId, job.leaseEpoch, 'get_design', { taskRef: design.ref.toLowerCase() })
+    expect(latest).toMatchObject({
+      ok: true,
+      result: {
+        taskRef: design.ref, title: 'Login design', version: 3, status: 'submitted', branch: `design/${design.ref}`, commitSha: 'sha3', pinnedScreens: null,
+        spec: expect.stringContaining('`login-error`'),
+        screenshots: [{ fileName: 'login.png', contentType: 'image/png', dataBase64: Buffer.from('png-bytes').toString('base64') }],
+        bundle: { dataBase64: Buffer.from('bundle-bytes').toString('base64') }
+      }
+    })
+    expect(await runner.call(job.runId, job.leaseEpoch, 'get_design', { taskRef: design.ref, version: 2 })).toMatchObject({ ok: true, result: { version: 2, status: 'approved', commitSha: 'sha2' } })
+    expect(await runner.call(job.runId, job.leaseEpoch, 'get_design', { taskRef: design.ref, version: 9 })).toMatchObject({ ok: false, error: `${design.ref} has no design version v9` })
+
+    // A build task pinned to v2 reads v2 and its screens
+    expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ title: 'Login form', design: { taskRef: design.ref, version: 2, screens: ['login'] } }]))).toMatchObject({ ok: true })
+    const [v1] = (await session(created.id)).plans
+    expect(await runner.call(job.runId, job.leaseEpoch, 'get_design', { taskRef: v1!.tasks[0]!.ref })).toMatchObject({ ok: true, result: { taskRef: design.ref, version: 2, pinnedScreens: ['login'] } })
+    expect(await runner.call(job.runId, job.leaseEpoch, 'get_design', { taskRef: 'NOPE-1' })).toMatchObject({ ok: false, error: expect.stringContaining('No task NOPE-1') })
+    await endTurn(job, 'Read it.')
+  })
+
+  it('keeps a task\'s design pin from proposal through approval and shows it on the task (D20)', async () => {
+    const { design, created, job, getTask } = await designSetup()
+    const pin = { taskRef: design.ref.toLowerCase(), version: 2, screens: ['login', 'login-error'] }
+    expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ title: 'Login form', design: pin }, { title: 'API' }]))).toMatchObject({ ok: true })
+    const [v1] = (await session(created.id)).plans
+    const [form, api] = v1!.tasks
+    expect((await getTask(form!.ref!)).design).toEqual({ taskRef: design.ref, version: 2, screens: ['login', 'login-error'] })
+    expect((await getTask(api!.ref!)).design).toBeNull()
+
+    // An unchanged revision keeps the pin and counts the task as unchanged
+    const again = await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ title: 'Login form', design: pin }, { title: 'API' }]))
+    expect(again).toMatchObject({ ok: true, result: { version: 2, tasks: [{ key: 't1', change: 'unchanged' }, { key: 't2', change: 'unchanged' }] } })
+    const [, v2] = (await session(created.id)).plans
+    await endTurn(job, 'Proposed.')
+
+    expect(await t.request('POST', `/api/plan/plans/${v2!.id}/approve`, { to: 'ready' }).then(r => r.status)).toBe(200)
+    expect(await getTask(form!.ref!)).toMatchObject({ status: 'ready', design: { taskRef: design.ref, version: 2, screens: ['login', 'login-error'] } })
+  })
+
+  it('rejects a pin to a design version that isn\'t approved, doesn\'t exist or isn\'t a design, and lists the screens a pin needs (D20)', async () => {
+    const { project, design, job } = await designSetup()
+    const other = await t.createTask(project.slug, { title: 'Not a design' })
+    const count = async () => (await t.db.select().from(tasks).where(eq(tasks.projectId, project.id))).length
+    const before = await count()
+    const propose = (pin: { taskRef: string, version: number, screens: string[] }) => runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ design: pin }]))
+    expect(await propose({ taskRef: design.ref, version: 1, screens: ['login'] })).toMatchObject({ ok: false, error: expect.stringContaining(`Design ${design.ref} v1 is superseded; pin only the approved version.`) })
+    expect(await propose({ taskRef: design.ref, version: 3, screens: ['login'] })).toMatchObject({ ok: false, error: expect.stringContaining('design_not_approved') })
+    expect(await propose({ taskRef: design.ref, version: 7, screens: ['login'] })).toMatchObject({ ok: false, error: expect.stringContaining('design_not_found') })
+    expect(await propose({ taskRef: other.ref, version: 1, screens: ['login'] })).toMatchObject({ ok: false, error: expect.stringContaining('isn\'t a design task') })
+    expect(await propose({ taskRef: 'XYZ-1', version: 1, screens: ['login'] })).toMatchObject({ ok: false, error: expect.stringContaining('design_not_found') })
+    expect(await propose({ taskRef: design.ref, version: 2, screens: [] })).toMatchObject({ ok: false, error: expect.stringContaining('design_without_screens') })
+    // Nothing was saved
+    expect(await count()).toBe(before)
+    await endTurn(job, 'Could not plan.')
+  })
+
+  it('stages a pin on a revised Backlog task and writes it on approval (D20)', async () => {
+    const { project, design, job, created, getTask } = await designSetup()
+    await endTurn(job, 'Hi.')
+    const target = await t.createTask(project.slug, { title: 'Login form' })
+    await t.request('POST', `/api/plan/sessions/${created.id}/messages`, { text: `Pin ${target.ref}` })
+    const next = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.planSessionId === created.id && m.job.runId !== job.runId)).job
+    expect(await runner.call(next.runId, next.leaseEpoch, 'propose_plan', plan([{ ref: target.ref, title: 'Login form', design: { taskRef: design.ref, version: 2, screens: ['login'] } }]))).toMatchObject({ ok: true })
+    // Staged, not yet written
+    expect((await getTask(target.ref)).design).toBeNull()
+    await endTurn(next, 'Proposed.')
+    const [v1] = (await session(created.id)).plans
+    expect(await t.request('POST', `/api/plan/plans/${v1!.id}/approve`, { to: 'backlog' }).then(r => r.status)).toBe(200)
+    expect((await getTask(target.ref)).design).toEqual({ taskRef: design.ref, version: 2, screens: ['login'] })
   })
 
   it('creates flag_stale_docs tasks with type task', async () => {

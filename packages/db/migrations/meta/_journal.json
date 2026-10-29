@@ -120,6 +120,13 @@
       "when": 1793258794005,
       "tag": "0016_design_tasks",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793259506506,
+      "tag": "0017_design_pins",
+      "breakpoints": true
     }
   ]
 }
