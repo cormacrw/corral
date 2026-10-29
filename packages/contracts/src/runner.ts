@@ -101,6 +101,7 @@ export type AgentTool =
   | 'add_comment'
   | 'attach_evidence'
   | 'get_evidence'
+  | 'get_attachment'
   | 'report_outcome'
   | 'list_tasks'
   | 'get_run_outcomes'
