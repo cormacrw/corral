@@ -16,8 +16,9 @@ export interface ProposedTask {
   // The ref of an existing task this one revises (e.g. COR-4), instead of
   // creating a new one
   ref?: string | undefined
-  // The key of the epic it belongs to
-  epic: string
+  // The key of the epic it belongs to, if any. A task without one has no
+  // epic.
+  epic?: string | undefined
   title: string
   description: string
   type: TaskType
@@ -80,7 +81,7 @@ export function checkPlan(plan: ProposedPlan, refs: ReadonlyMap<string, PlanRef>
   }
   const seen = new Set<string>()
   for (const task of plan.tasks) {
-    if (!epicKeys.has(task.epic)) problems.push({ code: 'unknown_epic', key: task.key, epic: task.epic })
+    if (task.epic && !epicKeys.has(task.epic)) problems.push({ code: 'unknown_epic', key: task.key, epic: task.epic })
     if (seen.has(task.key)) problems.push({ code: 'duplicate_key', key: task.key })
     seen.add(task.key)
     if (!task.title.trim()) problems.push({ code: 'missing_title', key: task.key })
@@ -146,7 +147,7 @@ export function diffPlans(previous: readonly ProposedTask[], next: readonly Prop
 function sameTask(a: ProposedTask, b: ProposedTask): boolean {
   return a.title === b.title
     && a.ref === b.ref
-    && a.epic === b.epic
+    && (a.epic || undefined) === (b.epic || undefined)
     && a.description === b.description
     && a.type === b.type
     && a.priority === b.priority

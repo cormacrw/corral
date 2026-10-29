@@ -88,10 +88,11 @@ describe('plan sessions', () => {
     const v1 = detail.plans[0]!
     expect(v1).toMatchObject({ version: 1, status: 'proposed', title: 'Login', tasks: [{ title: 'Login form', change: 'added', status: 'draft', criteriaCount: 1 }, { title: 'Session cookie', dependsOn: [`${project.prefix}-1`] }] })
     expect(detail.messages.at(-1)).toMatchObject({ role: 'pm', planId: v1.id })
-    const [epic] = await t.db.select().from(epics).where(eq(epics.id, v1.epicId!))
-    expect(epic?.title).toBe('Login')
+    // A plan without epics creates none, and its tasks have no epic
+    expect(v1).toMatchObject({ epicId: null, epics: [] })
+    expect(await t.db.select().from(epics).where(eq(epics.projectId, project.id))).toEqual([])
     const rows = await t.db.select().from(tasks).where(eq(tasks.projectId, project.id))
-    expect(rows.map(r => [r.status, r.humanReview, r.epicId])).toEqual([['draft', false, epic!.id], ['draft', true, epic!.id]])
+    expect(rows.map(r => [r.status, r.humanReview, r.epicId])).toEqual([['draft', false, null], ['draft', true, null]])
     // Drafts are seen only in the plan, not on the board or in the Backlog
     expect(await t.request('GET', `/api/projects/${project.slug}/tasks?view=all`).then(r => r.json())).toEqual([])
 
@@ -301,7 +302,7 @@ describe('plan sessions', () => {
     const [v1] = (await session(created.id)).plans
     const rateLimiter = v1!.tasks[1]!.ref!
     expect(v1!.tasks).toMatchObject([
-      { key: 't1', ref: target.ref, revises: true, title: 'Add email login', status: 'backlog', criteriaCount: 2, dependsOn: [other.ref, rateLimiter], epicId: v1!.epicId },
+      { key: 't1', ref: target.ref, revises: true, title: 'Add email login', status: 'backlog', criteriaCount: 2, dependsOn: [other.ref, rateLimiter], epicId: null },
       { key: 't2', revises: false, title: 'Rate limiter', status: 'draft' }
     ])
     await endTurn(job, 'Proposed.')
@@ -309,7 +310,8 @@ describe('plan sessions', () => {
     const approved = await t.request('POST', `/api/plan/plans/${v1!.id}/approve`, { to: 'backlog' })
     expect(approved.status).toBe(200)
     const after = await getTask(target.ref)
-    expect(after).toMatchObject({ title: 'Add email login', status: 'backlog', dependsOn: [other.ref, rateLimiter], epicId: v1!.epicId })
+    expect(after).toMatchObject({ title: 'Add email login', status: 'backlog', dependsOn: [other.ref, rateLimiter], epicId: null })
+    expect(v1!.epicId).toBeNull()
     expect(richTextToMarkdown(after.description)).toBe('## Why\n\nPasswords only')
     // The unchanged criterion keeps its ID; the new one gets its own
     expect(after.acceptanceCriteria.map(c => c.text)).toEqual(['Shows an error on a bad password', 'Locks the account after 5 tries'])
@@ -381,9 +383,10 @@ describe('plan sessions', () => {
     const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
     const epicsIn = [{ key: 'e1', title: 'Login' }, { key: 'e2', title: 'Billing' }, { key: 'e3', title: 'Audit' }]
 
-    // A task must say which epic it's in once there are several
-    const unplaced = await runner.call(job.runId, job.leaseEpoch, 'propose_plan', { ...plan([{}]), epics: epicsIn.slice(0, 2) })
-    expect(unplaced).toMatchObject({ ok: false, error: expect.stringContaining('unknown_epic') })
+    // A task can only name an epic the plan gives
+    const unknown = await runner.call(job.runId, job.leaseEpoch, 'propose_plan', { ...plan([]), epics: epicsIn.slice(0, 1), tasks: plan([{}, {}]).tasks.map((x, i) => ({ ...x, epic: i === 0 ? 'e1' : 'e9' })) })
+    expect(unknown).toMatchObject({ ok: false, error: expect.stringContaining('unknown_epic') })
+    expect(await t.db.select().from(tasks).where(eq(tasks.projectId, project.id))).toEqual([])
 
     const v1 = await runner.call(job.runId, job.leaseEpoch, 'propose_plan', {
       ...plan([{ title: 'Login form' }, { title: 'Invoices', dependsOn: ['t1'] }, { title: 'Audit log' }]),
@@ -414,12 +417,97 @@ describe('plan sessions', () => {
     await endTurn(job, 'Proposed.')
   })
 
+  it('gives a task that leaves out epic no epic, even when the plan has epics', async () => {
+    const project = await t.createProject()
+    await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+    const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan login' }).then(r => r.json()) as PlanSessionDetail
+    const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
+    const proposed = await runner.call(job.runId, job.leaseEpoch, 'propose_plan', {
+      ...plan([]),
+      epics: [{ key: 'e1', title: 'Login' }],
+      tasks: [
+        { key: 't1', epic: 'e1', title: 'Login form', description: 'Build it', type: 'backend', acceptanceCriteria: ['It works'] },
+        { key: 't2', title: 'Fix typo', description: 'Fix it', type: 'frontend', acceptanceCriteria: ['It is spelt right'] }
+      ]
+    })
+    expect(proposed).toMatchObject({ ok: true })
+    const [v1] = (await session(created.id)).plans
+    expect(v1!.epics.map(e => e.title)).toEqual(['Login'])
+    expect(v1!.epicId).toBe(v1!.epics[0]!.id)
+    expect(v1!.tasks.map(x => [x.title, x.epicId])).toEqual([['Login form', v1!.epics[0]!.id], ['Fix typo', null]])
+    const rows = await t.db.select().from(tasks).where(eq(tasks.projectId, project.id)).orderBy(tasks.number)
+    expect(rows.map(r => [r.title, r.epicId])).toEqual([['Login form', v1!.epics[0]!.id], ['Fix typo', null]])
+    expect(await t.db.select().from(epics).where(eq(epics.projectId, project.id))).toHaveLength(1)
+    await endTurn(job, 'Proposed.')
+  })
+
+  it('takes a Backlog task out of its epic when a revision by ref leaves out epic', async () => {
+    const { project, target, job, getTask, revise } = await backlogSetup()
+    const [epic] = await t.db.insert(epics).values({ projectId: project.id, title: 'Accounts', createdBy: t.actor }).returning()
+    await t.db.update(tasks).set({ epicId: epic!.id }).where(eq(tasks.id, target.id))
+    expect(await revise()).toMatchObject({ ok: true })
+    await endTurn(job, 'Proposed.')
+    const plans = (await session(job.planSessionId!)).plans
+    expect(plans[0]!.tasks[0]).toMatchObject({ ref: target.ref, revises: true, epicId: null })
+    // Staged only: the task keeps its epic until approval
+    expect((await getTask(target.ref)).epicId).toBe(epic!.id)
+    expect((await t.request('POST', `/api/plan/plans/${plans[0]!.id}/approve`, { to: 'backlog' })).status).toBe(200)
+    expect(await getTask(target.ref)).toMatchObject({ title: 'Add email login', epicId: null })
+  })
+
+  // Plans saved before plan_epics, or with the implicit epic named after the
+  // plan, have only plans.epicId
+  async function oldPlanSetup() {
+    const project = await t.createProject()
+    await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+    const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan login' }).then(r => r.json()) as PlanSessionDetail
+    const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
+    expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ title: 'Login form' }, { title: 'Logout' }]))).toMatchObject({ ok: true })
+    const [v1] = (await session(created.id)).plans
+    const [epic] = await t.db.insert(epics).values({ projectId: project.id, title: 'Login', createdBy: t.actor }).returning()
+    await t.db.update(schema.plans).set({ epicId: epic!.id }).where(eq(schema.plans.id, v1!.id))
+    await t.db.update(tasks).set({ epicId: epic!.id }).where(eq(tasks.projectId, project.id))
+    return { project, created, job, epic: epic! }
+  }
+
+  it('still loads a plan that stored only plans.epicId, and keeps its epic when a revision names one', async () => {
+    const { created, job, epic } = await oldPlanSetup()
+    const [v1] = (await session(created.id)).plans
+    expect(v1).toMatchObject({ epicId: epic.id, epics: [{ key: 'main', id: epic.id, title: 'Login' }] })
+    expect(v1!.tasks.map(x => x.epicId)).toEqual([epic.id, epic.id])
+
+    // A lone epic under a new key is the same epic, so the tasks are unchanged
+    const v2 = await runner.call(job.runId, job.leaseEpoch, 'propose_plan', {
+      ...plan([]),
+      epics: [{ key: 'e1', title: 'Sign in' }],
+      tasks: plan([{ title: 'Login form' }, { title: 'Logout' }]).tasks.map(x => ({ ...x, epic: 'e1' }))
+    })
+    expect(v2).toMatchObject({ ok: true, result: { tasks: [{ key: 't1', change: 'unchanged' }, { key: 't2', change: 'unchanged' }] } })
+    const second = (await session(created.id)).plans[1]!
+    expect(second.epics).toEqual([{ key: 'e1', id: epic.id, title: 'Sign in' }])
+    expect(second.tasks.map(x => x.epicId)).toEqual([epic.id, epic.id])
+    await endTurn(job, 'Proposed.')
+  })
+
+  it('takes an old plan\'s tasks out of its implicit epic, and deletes it, when a revision leaves out epics', async () => {
+    const { project, created, job, epic } = await oldPlanSetup()
+    const v2 = await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ title: 'Login form' }, { title: 'Logout' }]))
+    expect(v2).toMatchObject({ ok: true, result: { tasks: [{ key: 't1', change: 'changed' }, { key: 't2', change: 'changed' }] } })
+    const second = (await session(created.id)).plans[1]!
+    expect(second).toMatchObject({ epicId: null, epics: [] })
+    expect(second.tasks.map(x => x.epicId)).toEqual([null, null])
+    expect((await t.db.select().from(tasks).where(eq(tasks.projectId, project.id))).map(r => r.epicId)).toEqual([null, null])
+    expect(await t.db.select().from(epics).where(eq(epics.id, epic.id))).toEqual([])
+    await endTurn(job, 'Proposed.')
+  })
+
   it('shows an epic with its tasks, Drafts included, and saves edits to it', async () => {
     const project = await t.createProject()
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
     const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan export' }).then(r => r.json()) as PlanSessionDetail
     const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
-    expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ title: 'CSV export' }, { key: 't2', title: 'Export button', dependsOn: ['t1'] }]))).toMatchObject({ ok: true })
+    const exports = plan([{ title: 'CSV export' }, { key: 't2', title: 'Export button', dependsOn: ['t1'] }])
+    expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', { ...exports, epics: [{ key: 'e1', title: 'Login' }], tasks: exports.tasks.map(x => ({ ...x, epic: 'e1' })) })).toMatchObject({ ok: true })
     await endTurn(job, 'Proposed.')
     const [proposed] = (await session(created.id)).plans
 
@@ -582,7 +670,7 @@ describe('plan sessions', () => {
     await t.request('PATCH', `/api/projects/${project.slug}`, { requiredChecks: ['lint'] })
     const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Ship it' }).then(r => r.json()) as PlanSessionDetail
     const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
-    await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ title: 'Only task' }]))
+    await runner.call(job.runId, job.leaseEpoch, 'propose_plan', { ...plan([]), epics: [{ key: 'e1', title: 'Ship' }], tasks: plan([{ title: 'Only task' }]).tasks.map(x => ({ ...x, epic: 'e1' })) })
     await endTurn(job, 'Proposed.')
     const planId = (await session(created.id)).plans[0]!.id
     await t.request('POST', `/api/plan/plans/${planId}/approve`)

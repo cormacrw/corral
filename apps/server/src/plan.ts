@@ -31,7 +31,8 @@ const proposedTask = z.object({
   dependsOn: z.array(z.string().trim()).default([])
 })
 
-// The key of the epic a plan without `epics` gets, named after the plan
+// The key old plans that stored only plans.epicId give their epic. New
+// plans without `epics` have no epic.
 const ONLY_EPIC = 'main'
 
 const proposedPlan = z.object({
@@ -44,14 +45,11 @@ const proposedPlan = z.object({
   })).default([]),
   tasks: z.array(proposedTask)
 }).transform((plan): ProposedPlan => {
-  // One epic needs no keys: every task belongs to it. With several, a task
-  // without one is left for checkPlan to report.
-  const list = plan.epics.length > 0 ? plan.epics : [{ key: ONLY_EPIC, title: plan.title, summary: plan.summary }]
-  const fallback = list.length === 1 ? list[0]!.key : ''
   // A dependency that isn't a key is an existing task's ref, in any case
   const keys = new Set(plan.tasks.map(t => t.key))
   const dependency = (dep: string) => keys.has(dep) || !REF.test(dep) ? dep : dep.toUpperCase()
-  return { ...plan, epics: list, tasks: plan.tasks.map(t => ({ ...t, epic: t.epic || fallback, dependsOn: t.dependsOn.map(dependency) })) }
+  // A task without `epic` has no epic
+  return { ...plan, tasks: plan.tasks.map(t => ({ ...t, epic: t.epic || undefined, dependsOn: t.dependsOn.map(dependency) })) }
 })
 
 const REF = /^([A-Za-z]+)-(\d+)$/
@@ -310,7 +308,7 @@ export class PlanService {
     const previousEpics = previous ? await this.#epicsOf(previous) : new Map<string, string>()
     // A lone epic that was renamed is the same epic, so its tasks aren't changed
     const renamed = proposed.epics.length === 1 && previousEpics.size === 1
-    const previousTasks = previous ? (await this.#proposedTasksOf(previous, project)).map(t => renamed ? { ...t, epic: proposed.epics[0]!.key } : t) : []
+    const previousTasks = previous ? (await this.#proposedTasksOf(previous, project)).map(t => renamed && t.epic ? { ...t, epic: proposed.epics[0]!.key } : t) : []
     const changes = new Map(diffPlans(previousTasks, proposed.tasks).map(c => [c.key, c.change]))
 
     const plan = await db.transaction(async (tx) => {
@@ -329,10 +327,13 @@ export class PlanService {
       }
       if (previous) await tx.update(plans).set({ status: 'superseded' }).where(eq(plans.id, previous.id))
       const [row] = await tx.insert(plans).values({
-        sessionId: session.id, projectId: project.id, epicId: epicIds.get(proposed.epics[0]!.key)!, version: (previous?.version ?? 0) + 1, title: proposed.title, summary: proposed.summary
+        sessionId: session.id, projectId: project.id, epicId: proposed.epics[0] ? epicIds.get(proposed.epics[0].key)! : null, version: (previous?.version ?? 0) + 1, title: proposed.title, summary: proposed.summary
       }).returning()
       const planId = row!.id
-      await tx.insert(planEpics).values(proposed.epics.map((epic, position) => ({ planId, key: epic.key, epicId: epicIds.get(epic.key)!, position })))
+      if (proposed.epics.length > 0) {
+        await tx.insert(planEpics).values(proposed.epics.map((epic, position) => ({ planId, key: epic.key, epicId: epicIds.get(epic.key)!, position })))
+      }
+      const epicOf = (task: ProposedTask) => task.epic ? epicIds.get(task.epic)! : null
 
       // The previous version's tasks by key, and of those, the Drafts it
       // created (not the tasks it only revised)
@@ -377,7 +378,7 @@ export class PlanService {
             continue
           }
         }
-        ids.set(task.key, await createTask(tx, project, { ...input, epicId: epicIds.get(task.epic)! }, actor, { draft: true }))
+        ids.set(task.key, await createTask(tx, project, { ...input, epicId: epicOf(task) }, actor, { draft: true }))
       }
       const numbers = new Map<string, number>()
       for (const [key, id] of ids) {
@@ -399,14 +400,14 @@ export class PlanService {
             priority: task.priority,
             humanReview: task.humanReview,
             acceptanceCriteria: task.acceptanceCriteria,
-            epicId: epicIds.get(task.epic)!,
+            epicId: epicOf(task),
             dependsOn
           })
           continue
         }
         const [row] = await tx.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, ids.get(task.key)!))
         if (row?.status !== 'draft') continue
-        await patchTask(tx, project, ids.get(task.key)!, { dependsOn, epicId: epicIds.get(task.epic)! }, actor)
+        await patchTask(tx, project, ids.get(task.key)!, { dependsOn, epicId: epicOf(task) }, actor)
       }
       // Removed Drafts are deleted outright (D10). A revised task the plan
       // drops is only un-staged: it was never changed.
@@ -519,7 +520,7 @@ export class PlanService {
         change: item.change,
         revises: Boolean(item.revision),
         taskId: task?.id ?? null,
-        epicId: item.revision?.epicId ?? task?.epicId ?? null,
+        epicId: item.revision ? item.revision.epicId : task?.epicId ?? null,
         ref: task && project ? taskRef(project.prefix, task.number) : null,
         title: item.revision?.title ?? task?.title ?? item.key,
         status: task?.status ?? null,
@@ -546,7 +547,7 @@ export class PlanService {
           ...revision,
           key: item.key,
           ref: item.ref!,
-          epic: keyOf.get(revision.epicId) ?? '',
+          epic: revision.epicId ? keyOf.get(revision.epicId) : undefined,
           dependsOn: revision.dependsOn.map(n => taskRef(project.prefix, n)).map(ref => keys.get(ref) ?? ref)
         })
         continue
@@ -555,7 +556,7 @@ export class PlanService {
       if (!task) continue
       result.push({
         key: item.key,
-        epic: (task.epicId && keyOf.get(task.epicId)) || '',
+        epic: task.epicId ? keyOf.get(task.epicId) : undefined,
         title: task.title,
         description: richTextToMarkdown(task.description),
         type: task.type,
@@ -607,7 +608,7 @@ export class PlanService {
   }
 
   // A plan's epics by key, in order. Plans saved before plan_epics have
-  // only plans.epicId, under the key a plan without epics gets.
+  // only plans.epicId, under ONLY_EPIC.
   async #epicsOf(plan: PlanRow): Promise<Map<string, string>> {
     const rows = await this.#d.db.select().from(planEpics).where(eq(planEpics.planId, plan.id)).orderBy(asc(planEpics.position))
     if (rows.length === 0) return new Map(plan.epicId ? [[ONLY_EPIC, plan.epicId]] : [])

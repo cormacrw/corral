@@ -22,15 +22,17 @@ const removed = computed(() => props.plan.tasks.length - tasks.value.length)
 const kept = computed(() => tasks.value.filter(t => t.status))
 const toBacklog = computed(() => kept.value.length > 0 && kept.value.every(t => t.status === 'backlog'))
 // The plan's tasks under each of its epics, in the order the PM gave them.
-// A Draft moved to another epic by hand is listed last, under Other tasks.
+// Tasks without an epic, or a Draft moved to another epic by hand, are
+// listed last, under Other tasks (just Tasks when the plan has no epics).
 const groups = computed(() => {
   const planned = new Set(props.plan.epics.map(e => e.id))
-  const other = { key: '', id: '', title: 'Other tasks' }
+  const other = { key: '', id: '', title: props.plan.epics.length > 0 ? 'Other tasks' : 'Tasks' }
   return [...props.plan.epics, other].map((epic) => {
     const own = tasks.value.filter(t => epic.id ? t.epicId === epic.id : !t.epicId || !planned.has(t.epicId))
     return { ...epic, tasks: own, criteria: own.reduce((n, t) => n + t.criteriaCount, 0) }
   }).filter(g => g.tasks.length > 0)
 })
+const epicCount = computed(() => groups.value.filter(g => g.id).length)
 
 // Each epic shows its tasks as a list or a dependency graph, remembered per epic
 const views = useLocalStorage<Record<string, 'list' | 'graph'>>('corral.plan.views', {})
@@ -104,8 +106,8 @@ watch(() => props.plan.id, () => {
           {{ props.plan.title }}
         </h2>
         <p class="text-xs text-muted">
-          <template v-if="groups.length > 1">
-            {{ groups.length }} epics ·
+          <template v-if="epicCount > 0">
+            {{ epicCount }} {{ epicCount === 1 ? 'epic' : 'epics' }} ·
           </template>{{ tasks.length }} tasks · {{ criteria }} criteria
         </p>
       </div>
