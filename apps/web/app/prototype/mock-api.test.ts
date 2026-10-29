@@ -90,4 +90,16 @@ describe('prototype mock API', () => {
     expect(drafts?.type === 'plan.drafts' && drafts.sessions.map(s => s.sessionId)).toEqual(['s-1'])
     await expect(mockCall<Task>('GET', '/tasks/COR-16')).resolves.toMatchObject({ status: 'backlog', planSessionId: null })
   })
+  it('creates a Backlog task without reusing a draft number and makes it readable by ref', async () => {
+    const before = await mockCall<Task[]>('GET', '/projects/corral/tasks')
+    const events: ServerEvent[] = []
+    const stop = onMockEvent(e => events.push(e))
+    const task = await mockCall<Task>('POST', '/projects/corral/tasks', { title: 'New task', type: 'task', description: null })
+    stop()
+    expect(before.some(t => t.ref === task.ref)).toBe(false)
+    expect(task.number).toBeGreaterThan(17)
+    expect(task).toMatchObject({ title: 'New task', type: 'task', status: 'backlog', description: null })
+    await expect(mockCall<Task>('GET', `/tasks/${task.ref}`)).resolves.toEqual(task)
+    expect(events).toEqual([{ type: 'task.created', task }])
+  })
 })
