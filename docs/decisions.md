@@ -383,7 +383,7 @@ The UI specs are in [design/](design/README.md).
 **Decision:** A systemd timer on the home server runs `scripts/deploy/auto-deploy.sh` every 20 minutes, so merges close together share one deploy and one hold. When `main` has moved and the `ci` check on the new commit has passed, it builds the new images and redeploys with Docker Compose. A deploy never cuts off an agent run: if anything other than `web` would restart, the server first goes on an **update hold** and the deploy waits until nothing is running.
 
 - **Pull, not push:** the server polls GitHub. Nothing new is exposed through the Cloudflare Tunnel, GitHub holds no credentials for the server, and no self-hosted GitHub Actions runner runs on it (the repo is public, so that would let fork PRs run code there).
-- **The update hold** (`POST /api/update-hold`, lifted with `DELETE`): no new runs, PM turns or merges start, and running work finishes. It's like the kill switch (PRD §7.11) without stopping anything. `POST` returns how many runs and merges are still in flight, so the deploy calls it until that reaches zero. `GET /api/status` reports it as `updating`, and the app shows a banner.
+- **The update hold** (`POST /api/update-hold`, lifted with `DELETE`): two phases, both reported as `updating` by `GET /api/status` and shown in the app banner. **Draining:** no new developer, reviewer or design runs or merges start; PM turns still start as usual, including Inbox replies. **Finishing:** once no non-PM runs or merges are in flight, new PM turns are accepted and saved as `queued` runs holding their `pmJob`. Running PM turns finish. `POST` counts all active runs (including PM) and merges, excluding queued PM turns still holding their job; the deploy polls until zero. `DELETE` or a server restart clears both phases and starts queued turns.
 - **In memory only:** the redeployed server starts without the hold, so a deploy can't leave Corral stuck on hold. If the deploy fails, the script lifts it.
 - **Why the server restart counts too:** while the server is down, the runner drops what it sends, so a run that ends during a server restart would be marked interrupted.
 - **Order:** build first (the old containers keep serving), then hold and wait, then `docker compose up -d`. A change that only rebuilds `web` deploys without a hold. If the server can't be reached, the deploy goes ahead, so a broken server never blocks its fix.
@@ -391,7 +391,7 @@ The UI specs are in [design/](design/README.md).
 **Why:** Interrupted runs don't count as failures, but the agent's work in flight is lost and has to be redone. Every run has a time limit, so the wait is bounded.
 
 **Consequences for the build:**
-- Anything new that starts work (a new kind of run, or server-side work the runner is involved in) must respect the hold and be counted in what `POST /api/update-hold` reports.
+- New worker runs and merges must respect both hold phases. PM dispatch must respect the finishing phase while accepting messages in Plan and Inbox throughout. Count dispatched PM turns in `busy`, but exclude held jobs so the deploy can finish. The existing auto-deploy polling loop needs no change.
 - The hold endpoint sits on the same API as the rest of the app, behind Cloudflare Access. It needs proper auth when hosting arrives (D1).
 
 ---

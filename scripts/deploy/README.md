@@ -47,11 +47,16 @@ its agents, and while the server is down the runner's messages are dropped.
 So when a deploy would restart anything other than `web`, the script first
 puts the server on its **update hold** (`POST /api/update-hold`):
 
-- No new runs, PM turns or merges start. The app shows an "updating" banner.
-- Running work carries on. The script polls until nothing is running, then
-  restarts. Every run has a time limit, so the wait always ends.
+- **Draining:** no new developer, reviewer or design runs or merges start.
+  PM turns still start, so Plan chat and Inbox replies remain available.
+- **Finishing:** once no non-PM runs or merges remain, new PM turns are saved
+  as `queued` runs holding their jobs for after the update. Running PM turns
+  finish first. Both phases show the "updating" banner.
+- The unchanged polling loop waits for `busy` to reach zero: running PM turns
+  count, queued PM turns still holding their jobs do not. Every running turn
+  has a time limit, so new messages cannot extend the finishing phase.
 - The hold is in memory, so the new server starts without it. If the deploy
-  fails, the script lifts it (`DELETE /api/update-hold`).
+  fails, the script lifts it (`DELETE /api/update-hold`). Either starts queued PM turns.
 
 Images are built before the hold, so the wait covers only running work, not
 the build. A change that only touches `web` deploys straight away. If the

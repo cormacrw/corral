@@ -43,7 +43,7 @@ async function resumeAll() {
     color="info"
     variant="subtle"
     icon="i-lucide-download"
-    title="Corral is updating. Running work will finish first; new runs start once the update is done."
+    title="Corral is updating. Running work will finish first; new runs start once the update is done. You can keep chatting in Plan."
     :ui="{ root: 'shrink-0 rounded-none py-2' }"
     orientation="horizontal"
   />

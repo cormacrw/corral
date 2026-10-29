@@ -119,6 +119,8 @@ export class Orchestrator implements RunnerHandlers {
   #urgent = new Set<string>()
   #stopped = false
   #updating = false
+  #finishingUpdate = false
+  #pmStarting: Promise<void> = Promise.resolve()
   readonly merges: MergeOrchestrator
   // Set once the plan service exists (it needs the orchestrator to start runs)
   plans: PlanService | null = null
@@ -136,11 +138,10 @@ export class Orchestrator implements RunnerHandlers {
 
   // A PM turn (D9): a run with no task and no lease, fenced by its own epoch.
   // It starts right away; it only waits as `queued`, holding its job, while
-  // the PM is paused or the runner can't take it (D13).
+  // the PM is paused, the runner can't take it, or an update is finishing (D13, D16).
   async startPmRun(session: PlanSessionRow, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'>): Promise<string> {
     const { db } = this.#d
     if (this.#stopped) throw new ApiFailure(409, { code: 'conflict', constraint: 'corral_stopped' })
-    if (this.#updating) throw new ApiFailure(503, { code: 'corral_updating' })
     const [pm] = await db.select().from(agents).where(eq(agents.role, 'pm')).orderBy(asc(agents.createdAt)).limit(1)
     if (!pm) throw new ApiFailure(409, { code: 'conflict', constraint: 'no_pm_agent' })
     if (pm.paused || (pm.pausedUntil && pm.pausedUntil > this.#now())) throw new ApiFailure(409, { code: 'conflict', constraint: 'pm_paused' })
@@ -156,10 +157,26 @@ export class Orchestrator implements RunnerHandlers {
 
   // Sends every waiting PM turn to the runner, oldest first. The PM has no
   // concurrency, since each session runs one turn at a time (D9, D13), so a
-  // turn only waits, `queued` with its job still held, while the PM is paused.
-  async #startPmTurns(): Promise<void> {
+  // turn waits with its job held while paused, offline, or finishing an update.
+  #startPmTurns(): Promise<void> {
+    const next = this.#pmStarting.then(() => this.#dispatchPmTurns())
+    this.#pmStarting = next.catch(() => {})
+    return next
+  }
+
+  // Once workers and merges have drained, keep the phase latched until
+  // release/restart. Held PM jobs must never make the deploy wait.
+  async #updatePhase(): Promise<void> {
+    if (!this.#updating || this.#finishingUpdate) return
+    const workers = await this.#d.db.select({ id: runs.id }).from(runs)
+      .where(and(inArray(runs.state, [...ACTIVE_RUN_STATES]), ne(runs.role, 'pm'))).limit(1)
+    if (this.#updating && !workers.length && !this.merges.inFlight) this.#finishingUpdate = true
+  }
+
+  async #dispatchPmTurns(): Promise<void> {
     const { db, runner } = this.#d
-    if (!runner.online || this.#stopped || this.#updating) return
+    await this.#updatePhase()
+    if (!runner.online || this.#stopped || this.#finishingUpdate) return
     const due = await db.transaction(async (tx) => {
       const pmAgents = await tx.select().from(agents).where(eq(agents.role, 'pm')).orderBy(asc(agents.createdAt)).for('update')
       const picked: { id: string, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'> }[] = []
@@ -205,8 +222,8 @@ export class Orchestrator implements RunnerHandlers {
     return { stopped: this.#stopped, updating: this.#updating }
   }
 
-  // The update hold (scripts/deploy): like the kill switch, nothing new
-  // starts, but running work finishes. Returns how much is still running, so
+  // The update hold drains workers/merges while PM turns still start, then
+  // queues new PM turns while active turns finish. Returns the busy count so
   // the deploy can call it until that reaches zero. Kept in memory: the
   // redeployed server starts without it.
   async holdForUpdate(): Promise<number> {
@@ -217,6 +234,8 @@ export class Orchestrator implements RunnerHandlers {
     }
     // A pass that began before the hold may still be claiming
     await this.#scheduling
+    await this.#pmStarting
+    await this.#updatePhase()
     // PM turns still waiting for a slot keep their job and start after the update
     const live = await this.#d.db.select({ id: runs.id }).from(runs).where(and(inArray(runs.state, [...ACTIVE_RUN_STATES]), isNull(runs.pmJob)))
     return live.length + this.merges.inFlight
@@ -225,6 +244,7 @@ export class Orchestrator implements RunnerHandlers {
   releaseUpdate(): void {
     if (!this.#updating) return
     this.#updating = false
+    this.#finishingUpdate = false
     this.merges.stopped = this.#stopped
     this.#d.events.publish({ type: 'global.status', status: this.status })
     this.poke()
@@ -304,10 +324,11 @@ export class Orchestrator implements RunnerHandlers {
 
   async #schedulePass(urgent: readonly string[]): Promise<void> {
     const { db, runner } = this.#d
-    if (!runner.online || this.#stopped || this.#updating) return
+    if (!runner.online || this.#stopped) return
     // PM turns aren't claimed; they run when the human writes (D9), and
     // only wait here while the PM was paused or the runner was away
     await this.#startPmTurns()
+    if (this.#updating) return
     const workers = await db.select().from(agents).where(ne(agents.role, 'pm')).orderBy(asc(agents.createdAt))
     for (const agent of workers) {
       // An agent with a wake interval starts at most one task of its own
