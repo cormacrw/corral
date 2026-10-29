@@ -55,7 +55,7 @@ Everything is centred vertically and horizontally, in a column up to 720px wide:
 
 ### Plan flyout
 
-Docked on the right (`?plan`), the same flyout as tasks and epics; the conversation narrows to make room. It always shows the session's **latest** plan version, so each revision updates it in place. It opens by itself when a new version arrives waiting for approval, unless a task or epic is already open.
+Docked on the right (`?plan`), the same flyout as tasks and epics; the conversation narrows to make room. It always shows the session's **latest** plan version, so each revision updates it in place. On desktop it opens by itself when a new version arrives waiting for approval, unless a task or epic is already open.
 
 - **Header:** a "Plan v2" badge, a status badge ("Waiting for approval" in `primary`, or "Approved" in `success`), and Close.
 - **Title:** the plan title and "2 epics · 4 tasks" (the epic count only when the plan has epics, "1 epic" for one).
@@ -80,6 +80,7 @@ On the mobile layout ([mobile.md](mobile.md)) the same two routes keep their beh
 - **Conversation:** full height, without the tab bar. The header shows a back button to `/plan`, the project dot and name above the session title, the switcher and **+** (new session).
 - **Questions:** the open question's answers are stacked, full-width buttons at least 44px tall: Accept recommendation, each option, Other… (focuses the composer, which opens the keyboard) and Stop and propose the plan. Older and answered questions keep the web's compact row, disabled, with the answer marked. When Juno's next question arrives, the log scrolls to the top of it.
 - **Grill me** comes first in both composers' toolbars, so it's in reach without scrolling the toolbar sideways.
+- **Plan pill:** a new plan never opens automatically on mobile. While the session has a plan, a centred, rounded pill with a list icon reads “Plan vN · x tasks” (excluding removed tasks). Proposed plans use primary styling and “Needs approval”; approved plans use neutral styling. The pill sits in its own fixed row just above the composer, outside the scrolling log, so it covers neither answers nor composer. Tapping it opens the plan sheet; it hides while the plan is open and returns on close.
 - **Plan sheet:** `?plan` opens the plan in a bottom sheet instead of the flyout, with the approve buttons side by side. A task or epic opened from it opens in a taller sheet over it, whose back arrow returns to the plan. Swiping a sheet down closes it. Approving from the sheet, to the board or the Backlog, closes it and goes to a new thread (`/plan`) so the next request is a tap away, with a "Plan approved" toast saying "2 tasks added to the board" (or "…to the Backlog"). If approval fails, the sheet stays open on the session with the error toast.
 - **Runner offline:** an error alert, "Plan needs the runner. It's offline.", says the sessions and drafts are safe and has **Reconnect** (which re-reads the runner's status). The composer is disabled with "Juno is unavailable while the runner is offline".
 

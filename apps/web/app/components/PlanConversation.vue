@@ -68,10 +68,11 @@ onMounted(() => {
 const planOf = (message: PlanMessage): Plan | null => session.value?.plans.find(p => p.id === message.planId) ?? null
 // The flyout always shows the newest version; the chat only links to it
 const latest = computed(() => session.value?.plans.reduce<Plan | null>((a, p) => !a || p.version > a.version ? p : a, null) ?? null)
+const planTaskCount = computed(() => latest.value?.tasks.filter(task => task.change !== 'removed').length ?? 0)
 const previous = computed(() => latest.value ? session.value?.plans.find(p => p.version === latest.value!.version - 1) ?? null : null)
-// A plan waiting on you opens on arrival, unless a task or epic is already open
+// Desktop opens a waiting plan on arrival; phones keep the conversation visible.
 watch(() => latest.value?.id, (planId) => {
-  if (planId && latest.value?.status === 'proposed' && !flyout.ref.value && !flyout.epic.value && !flyout.plan.value) flyout.openPlan({ replace: true })
+  if (!device.isMobile.value && planId && latest.value?.status === 'proposed' && !flyout.ref.value && !flyout.epic.value && !flyout.plan.value) flyout.openPlan({ replace: true })
 })
 const backlog = computed(() => project.value ? (live.state.value.tasks[project.value.id] ?? []).filter(t => t.status === 'backlog') : [])
 
@@ -342,6 +343,27 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
               </div>
             </div>
           </div>
+        </div>
+
+        <!-- A reserved row outside the log keeps the pill clear of answers and the composer. -->
+        <div
+          v-if="device.isMobile.value && latest && !flyout.plan.value"
+          class="flex shrink-0 justify-center px-3 py-2"
+        >
+          <UButton
+            icon="i-lucide-list-checks"
+            :color="latest.status === 'proposed' ? 'primary' : 'neutral'"
+            variant="subtle"
+            class="min-h-11 max-w-full rounded-full px-4 shadow-sm"
+            data-testid="plan-pill"
+            @click="flyout.openPlan()"
+          >
+            <span>Plan v{{ latest.version }} · {{ planTaskCount }} {{ planTaskCount === 1 ? 'task' : 'tasks' }}</span>
+            <span
+              v-if="latest.status === 'proposed'"
+              class="text-xs"
+            >Needs approval</span>
+          </UButton>
         </div>
 
         <div :class="['shrink-0 border-t border-default p-3', device.isMobile.value && 'pb-[max(0.75rem,env(safe-area-inset-bottom))]']">
