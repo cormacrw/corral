@@ -35,6 +35,7 @@ import { streamSSE } from 'hono/streaming'
 import type { ZodType } from 'zod'
 import { ApiFailure, fromDatabaseError } from './errors.ts'
 import { createAttachment, readAttachment } from './attachments.ts'
+import { DESIGN_BUNDLE_HEADERS, readDesignFile } from './designs.ts'
 import { checkAvatar, getProfile, patchProfile, readAvatar, setAgentAvatar, setUserAvatar } from './avatars.ts'
 import { getEpic, listEpics, patchEpic } from './epics.ts'
 import type { EventBus } from './events.ts'
@@ -49,6 +50,18 @@ import type { Transcripts } from './transcripts.ts'
 import { checkRepository, detectClis, RepoCatalog, requireRuntimeCli } from './setup.ts'
 import { addComment, createTask, findTaskId, listComments, listHistory, listTasks, loadTask, patchTask, transitionTask } from './tasks.ts'
 import { and, eq, isNull } from 'drizzle-orm'
+
+// The request path exactly as the client sent it, without the query. The
+// Node adapter resolves `..` in the URL before routing, so this reads the
+// raw request line when there is one.
+function rawPath(c: Context): string {
+  const incoming = (c.env as { incoming?: { url?: string } } | undefined)?.incoming?.url
+  const path = incoming ?? c.req.url.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i, '')
+  const end = path.search(/[?#]/)
+  return end === -1 ? path : path.slice(0, end)
+}
+
+const DESIGN_FILES = /^\/api\/designs\/([^/]*)\/files\/(.*)$/s
 
 export interface AppDeps {
   db: Database
@@ -160,6 +173,18 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       if (failure) return c.json<ApiErrorBody>({ error: failure.body }, failure.status)
       console.error(error)
       return c.json({ error: { code: 'internal' } }, 500)
+    })
+
+    // A design version's prototype (D20): untrusted HTML, served only with
+    // the sandbox CSP so it runs in an opaque origin. Matched on the raw path
+    // ahead of every route, so `..` and encoded slashes are refused as sent
+    // instead of resolving to some other route.
+    .use('*', async (c, next) => {
+      const match = c.req.method === 'GET' ? DESIGN_FILES.exec(rawPath(c)) : null
+      if (!match) return next()
+      const file = await readDesignFile(db, blobs, match[1]!, match[2]!)
+      if (!file) throw new ApiFailure(404, { code: 'not_found' })
+      return c.body(new Uint8Array(file.data), 200, { ...DESIGN_BUNDLE_HEADERS, 'content-type': file.type })
     })
 
     .get('/health', c => c.json({ ok: true }))
@@ -358,6 +383,9 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       })
     })
 
+    // Without the trailing slash, a prototype's relative asset paths would
+    // resolve outside its bundle
+    .get('/designs/:versionId/files', c => c.redirect(`${c.req.path}/`, 301))
     .get('/me', async c => c.json(await getProfile(db, ownerId())))
     .patch('/me', validate('json', patchProfileInput), async (c) => {
       const profile = await patchProfile(db, ownerId(), c.req.valid('json'))
