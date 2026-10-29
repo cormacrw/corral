@@ -302,6 +302,8 @@ export interface PlanSession {
   runtime: AgentRuntime
   preview: string
   unread: boolean
+  // True once its plan is approved, until the human sends another message
+  closed: boolean
   // What the human has to do here, if anything
   status: 'needs_approval' | 'question' | 'none'
   // Set while a PM turn is running

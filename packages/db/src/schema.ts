@@ -261,8 +261,11 @@ export const planSessions = pgTable('plan_sessions', {
   // locked once it has messages: an agent session ID only resumes on the
   // vendor that made it
   runtime: text().notNull().default('claude-code'),
-  // The one PM turn the human didn't start: the epic delivery summary (D11)
+  // Set when a PM turn finishes (and for the epic delivery summary, D11);
+  // cleared when the human opens the session or sends a message
   unread: boolean().notNull().default(false),
+  // Set when its plan is approved; a new human message reopens it
+  closedAt: timestamp({ withTimezone: true }),
   createdBy: actor('created_by'),
   createdAt: createdAt(),
   updatedAt: updatedAt()

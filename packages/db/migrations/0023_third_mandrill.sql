@@ -1,0 +1,1 @@
+ALTER TABLE "plan_sessions" ADD COLUMN "closed_at" timestamp with time zone;

@@ -129,7 +129,9 @@ describe('plan sessions', () => {
     expect((await session(created.id)).status).toBe('none')
     expect((await t.request('POST', `/api/plan/plans/${latest.id}/approve`)).status).toBe(409)
     const list = await t.request('GET', '/api/plan/sessions').then(r => r.json()) as PlanSession[]
-    expect(list.find(s => s.id === created.id)).toMatchObject({ status: 'none', unread: false })
+    // Approving to the board closes the session
+    expect(list.find(s => s.id === created.id)).toMatchObject({ status: 'none', closed: true })
+    expect(t.events.findLast(e => e.type === 'plan.session' && e.session.id === created.id)).toMatchObject({ session: { closed: true } })
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
   })
 
@@ -686,13 +688,54 @@ describe('plan sessions', () => {
     await t.request('POST', `/api/plan/sessions/${created.id}/messages`, { text: 'Looks good, add it to the backlog' })
     const second = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id && m.job.runId !== first.runId)).job
     expect(await runner.call(second.runId, second.leaseEpoch, 'approve_plan', { to: 'backlog' })).toMatchObject({ ok: true })
-    const [approvedPlan] = (await session(created.id)).plans
-    expect(approvedPlan).toMatchObject({ status: 'approved', tasks: [{ status: 'backlog' }] })
+    const afterApproval = await session(created.id)
+    expect(afterApproval.plans[0]).toMatchObject({ status: 'approved', tasks: [{ status: 'backlog' }] })
+    // Approving through the PM closes the session too
+    expect(afterApproval.closed).toBe(true)
+    const [closedRow] = await t.db.select().from(schema.planSessions).where(eq(schema.planSessions.id, created.id))
+    expect(closedRow!.closedAt).toBeInstanceOf(Date)
     const [audit] = await t.db.select().from(schema.auditLog).where(eq(schema.auditLog.action, 'plan.approved')).orderBy(desc(schema.auditLog.id)).limit(1)
     expect(audit).toMatchObject({ actor: t.actor, detail: { to: 'backlog', viaPmRun: second.runId } })
     // Once approved there's nothing left to approve
     expect(await runner.call(second.runId, second.leaseEpoch, 'approve_plan', { to: 'ready' })).toMatchObject({ ok: false, error: expect.stringContaining('no plan waiting') })
     await endTurn(second, 'Added.')
+  })
+
+  it('marks a finished PM turn unread, closes the session on approving to the Backlog, and reopens it on a new message', async () => {
+    const project = await t.createProject()
+    await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+    const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan search' }).then(r => r.json()) as PlanSessionDetail
+    expect(created).toMatchObject({ unread: false, closed: false })
+    const job = (await runner.next('run.assign', m => m.job.planSessionId === created.id)).job
+    expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ title: 'Search box' }]))).toMatchObject({ ok: true })
+    const before = t.events.length
+    await endTurn(job, 'Proposed.')
+
+    // The finished turn is unread, and the session event says so
+    expect(t.events.slice(before).findLast(e => e.type === 'plan.session' && e.session.id === created.id)).toMatchObject({ session: { unread: true, activeRunId: null } })
+    expect((await t.request('GET', '/api/plan/sessions').then(r => r.json()) as PlanSession[]).find(s => s.id === created.id)).toMatchObject({ unread: true, closed: false })
+    // Opening it clears it
+    expect(await t.request('POST', `/api/plan/sessions/${created.id}/read`).then(r => r.json())).toMatchObject({ unread: false })
+    expect((await session(created.id)).unread).toBe(false)
+
+    // Add to Backlog closes the session
+    const planId = (await session(created.id)).plans[0]!.id
+    const approving = t.events.length
+    expect((await t.request('POST', `/api/plan/plans/${planId}/approve`, { to: 'backlog' })).status).toBe(200)
+    expect(await session(created.id)).toMatchObject({ closed: true, plans: [{ status: 'approved', tasks: [{ status: 'backlog' }] }] })
+    expect(t.events.slice(approving).findLast(e => e.type === 'plan.session' && e.session.id === created.id)).toMatchObject({ session: { closed: true } })
+    const [row] = await t.db.select().from(schema.planSessions).where(eq(schema.planSessions.id, created.id))
+    const [approvedRow] = await t.db.select().from(schema.plans).where(eq(schema.plans.id, planId))
+    expect(row!.closedAt).toEqual(approvedRow!.approvedAt)
+
+    // A new human message reopens it
+    const reopening = t.events.length
+    expect((await t.request('POST', `/api/plan/sessions/${created.id}/messages`, { text: 'One more thing' })).status).toBe(201)
+    expect(await session(created.id)).toMatchObject({ closed: false, unread: false })
+    expect(t.events.slice(reopening).findLast(e => e.type === 'plan.session' && e.session.id === created.id)).toMatchObject({ session: { closed: false } })
+    const next = (await runner.next('run.assign', m => m.job.planSessionId === created.id && m.job.runId !== job.runId)).job
+    await endTurn(next, 'Noted.')
+    expect(await session(created.id)).toMatchObject({ closed: false, unread: true })
   })
 
   it('adds a plan\'s Drafts to the Backlog instead of the board', async () => {
@@ -872,6 +915,7 @@ describe('plan sessions', () => {
     await runner.call(job.runId, job.leaseEpoch, 'propose_plan', { ...plan([]), epics: [{ key: 'e1', title: 'Ship' }], tasks: plan([{ title: 'Only task' }]).tasks.map(x => ({ ...x, epic: 'e1' })) })
     await endTurn(job, 'Proposed.')
     const planId = (await session(created.id)).plans[0]!.id
+    await t.request('POST', `/api/plan/sessions/${created.id}/read`)
     await t.request('POST', `/api/plan/plans/${planId}/approve`)
 
     // Developer and reviewer runs, then the merge
