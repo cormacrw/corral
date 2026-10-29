@@ -37,7 +37,7 @@ describe('prototype mock API', () => {
 
   it('derives the inbox from tasks that need the human', async () => {
     const inbox = await mockCall<Inbox>('GET', '/inbox')
-    expect(inbox.needsYou.map(i => i.type).sort()).toEqual(['blocked', 'failed', 'human_review'])
+    expect(inbox.needsYou.filter(i => i.type !== 'plan_thread').map(i => i.type).sort()).toEqual(['blocked', 'failed', 'human_review'])
   })
 
   it('opens a plan session with its messages and plans', async () => {

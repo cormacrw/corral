@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Evidence, Inbox, InboxActionInput, Review, Task, TaskInboxItem } from '@corral/contracts'
+import type { Evidence, Inbox, InboxItem, InboxActionInput, Review, Task } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
@@ -13,7 +13,12 @@ const toast = useToast()
 const device = useDevice()
 useSeoMeta({ title: 'Inbox · Corral' })
 
-const inbox = ref<(Omit<Inbox, 'needsYou'> & { needsYou: TaskInboxItem[] }) | null>(null)
+const loadedInbox = ref<Inbox | null>(null)
+// Desktop still owns its task-only view; mobile includes the open sessions.
+const inbox = computed<Inbox | null>(() => {
+  if (!loadedInbox.value || device.isMobile.value) return loadedInbox.value
+  return { ...loadedInbox.value, needsYou: loadedInbox.value.needsYou.filter(i => i.type !== 'plan_thread') }
+})
 const error = ref<string | null>(null)
 const tab = ref<'needsYou' | 'activity' | 'resolved'>('needsYou')
 const search = ref('')
@@ -30,10 +35,7 @@ const showTask = ref(true)
 async function load() {
   error.value = null
   try {
-    // Plan threads (D11, amended) aren't shown here yet: this page only
-    // knows how to show and act on task items
-    const loaded = await api.inbox.get()
-    inbox.value = { ...loaded, needsYou: loaded.needsYou.filter((i): i is TaskInboxItem => i.type !== 'plan_thread') }
+    loadedInbox.value = await api.inbox.get()
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   }
@@ -46,12 +48,14 @@ onMounted(() => {
   onBeforeUnmount(stop)
 })
 
-const items = computed<TaskInboxItem[]>(() => (inbox.value?.[tab.value] ?? []).filter(i => !search.value || `${i.taskRef} ${i.subject} ${i.preview}`.toLowerCase().includes(search.value.toLowerCase())))
+const items = computed<InboxItem[]>(() => (inbox.value?.[tab.value] ?? []).filter(i => (!search.value || `${i.taskRef ?? ''} ${i.subject} ${i.preview}`.toLowerCase().includes(search.value.toLowerCase()))))
 const selectedId = computed(() => typeof route.params.itemId === 'string' ? route.params.itemId : null)
-const selected = computed<TaskInboxItem | null>(() => {
+const selectedItem = computed<InboxItem | null>(() => {
   if (!inbox.value || !selectedId.value) return null
   return [...inbox.value.needsYou, ...inbox.value.activity, ...inbox.value.resolved].find(i => i.id === selectedId.value) ?? null
 })
+const planThread = computed(() => selectedItem.value?.type === 'plan_thread' ? selectedItem.value : null)
+const selected = computed(() => selectedItem.value?.type !== 'plan_thread' ? selectedItem.value : null)
 const alreadyResolved = computed(() => selected.value !== null && selected.value.type !== 'activity' && !inbox.value?.needsYou.some(i => i.id === selected.value!.id))
 watch(selected, async (item) => {
   action.value = null
@@ -75,7 +79,7 @@ watch(selected, async (item) => {
   // Phones open the task as its own page instead.
   if (item && showTask.value && !device.isMobile.value) flyout.open(item.taskRef, { replace: true })
 }, { immediate: true })
-function select(item: TaskInboxItem) {
+function select(item: InboxItem) {
   void router.push(`/inbox/${item.id}`)
 }
 function toggleTask() {
@@ -155,7 +159,7 @@ watchEffect(() => {
   }
   const position = inbox.value?.needsYou.findIndex(i => i.id === selectedId.value) ?? -1
   mobileHeader.value = {
-    title: selected.value?.taskRef ?? '',
+    title: planThread.value?.subject ?? selected.value?.taskRef ?? '',
     eyebrow: position >= 0 ? `Inbox · ${position + 1} of ${inbox.value!.needsYou.length}` : 'Inbox'
   }
 })
@@ -167,8 +171,14 @@ onBeforeUnmount(() => {
 <template>
   <UDashboardPanel :ui="{ body: 'p-0' }">
     <!-- Phones get the list and the item as separate screens (design/mobile.md) -->
+    <PlanConversation
+      v-if="device.isMobile.value && planThread"
+      :key="planThread.sessionId"
+      :session-id="planThread.sessionId"
+      inbox
+    />
     <InboxMobile
-      v-if="device.isMobile.value"
+      v-else-if="device.isMobile.value"
       v-model:tab="tab"
       v-model:search="search"
       v-model:action="action"
