@@ -29,6 +29,7 @@ Everything is centred vertically and horizontally, in a column up to 720px wide:
 2. **Composer** (large; see shared pattern): a 3-row minimum and 15px text, with a soft shadow. Toolbar, left to right:
    - **Attach** (paperclip).
    - **Project picker:** the project's colour dot, name and a chevron. Opens a listbox of projects, each with thumbnail, name, prefix and a check on the current one. It defaults to the project you were last in. It's locked once a session has messages, because a session belongs to one project.
+   - **Runtime picker** (D18): which CLI Juno runs on for this session, "Claude" or "Codex". It lists only the CLIs the runner has, and remembers the last one picked (Claude until the runner answers). Like the project, it's locked once the session has messages, because an agent session only resumes on the vendor that made it: the conversation's composer shows it as a disabled button with a lock, and `PATCH /plan/sessions/:id` refuses to change it (409 `plan_session_runtime_locked`).
    - **Refine a task:** opens a searchable popover listing that project's Backlog (ref, title, epic). Picking a task attaches it as a chip at the top of the composer: "Refining COR-18 Billing settings page". The task name is a link that opens the task flyout, and an × removes the chip. With a task attached you can send without typing, and the placeholder becomes "What should change about COR-18? (optional)".
    - **Grill me:** asks Juno to question you. With an empty composer it sends "Grill me"; with a draft it sends "Grill me on this: {draft}". It's on the conversation's composer too, and is disabled while Juno is working.
    - **Resume:** opens a searchable popover of all past sessions (title and time). Picking one opens it.
@@ -40,7 +41,7 @@ Everything is centred vertically and horizontally, in a column up to 720px wide:
 
 ### Conversation
 
-- **Header** (48px): the project dot and name, the session title, and a **New session** ghost button.
+- **Header** (48px): the project dot and name, the session title, a neutral badge naming the session's runtime ("Claude" or "Codex"), and a **New session** ghost button.
 - **Message log** (`UChatMessages`, `role="log"`), centred and up to 768px wide:
   - **Your messages:** right-aligned, in a `bg-elevated` bubble.
   - **Juno's messages:** left-aligned with the avatar and "Juno · PM".
