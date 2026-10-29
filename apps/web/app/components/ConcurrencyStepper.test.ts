@@ -1,0 +1,106 @@
+// @vitest-environment happy-dom
+import { flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { computed, defineComponent, h, onBeforeUnmount, ref, watch } from 'vue'
+
+// Nuxt auto-imports the stepper uses
+const live = { state: ref({ agents: [{ id: 'a1', name: 'Victor', concurrency: 2, activeRuns: 0 }] }) }
+const toast = { add: vi.fn() }
+vi.stubGlobal('computed', computed)
+vi.stubGlobal('ref', ref)
+vi.stubGlobal('watch', watch)
+vi.stubGlobal('onBeforeUnmount', onBeforeUnmount)
+vi.stubGlobal('useLive', () => live)
+vi.stubGlobal('useToast', () => toast)
+
+const { default: ConcurrencyStepper } = await import('./ConcurrencyStepper.vue')
+
+const UButton = defineComponent({
+  props: ['disabled'],
+  emits: ['click'],
+  setup: (props, { emit, attrs }) => () => h('button', { 'disabled': props.disabled, 'aria-label': attrs['aria-label'], 'class': attrs.class, 'onClick': () => emit('click') })
+})
+
+// The parent passes the live agent, so optimistic updates reach the prop
+function mountStepper() {
+  const Parent = defineComponent({ setup: () => () => h(ConcurrencyStepper, { agent: live.state.value.agents[0]! }) })
+  return mount(Parent, { global: { components: { UButton } } })
+}
+
+const fetchMock = vi.fn()
+beforeEach(() => {
+  vi.useFakeTimers()
+  vi.stubGlobal('fetch', fetchMock)
+  live.state.value.agents[0] = { id: 'a1', name: 'Victor', concurrency: 2, activeRuns: 0 }
+})
+afterEach(() => {
+  vi.useRealTimers()
+  fetchMock.mockReset()
+  toast.add.mockReset()
+})
+
+const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+const number = (wrapper: ReturnType<typeof mountStepper>) => wrapper.get('[data-testid="concurrency"]').text()
+const plus = (wrapper: ReturnType<typeof mountStepper>) => wrapper.get('[aria-label="Increase concurrency for Victor"]')
+const minus = (wrapper: ReturnType<typeof mountStepper>) => wrapper.get('[aria-label="Decrease concurrency for Victor"]')
+
+describe('ConcurrencyStepper', () => {
+  it('shows each tap at once and sends quick taps as one PATCH', async () => {
+    fetchMock.mockResolvedValue(ok({ ...live.state.value.agents[0], concurrency: 5 }))
+    const wrapper = mountStepper()
+    const seen: string[] = []
+    for (let i = 0; i < 3; i++) {
+      await plus(wrapper).trigger('click')
+      seen.push(number(wrapper))
+      vi.advanceTimersByTime(200)
+    }
+    expect(seen).toEqual(['3', '4', '5'])
+    expect(live.state.value.agents[0]!.concurrency).toBe(5)
+    expect(fetchMock).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(600)
+    await flushPromises()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]![0]).toBe('/api/agents/a1')
+    expect(fetchMock.mock.calls[0]![1]).toMatchObject({ method: 'PATCH', body: JSON.stringify({ concurrency: 5 }) })
+    expect(wrapper.text()).toContain('Saved')
+    expect(toast.add).not.toHaveBeenCalled()
+  })
+
+  it('disables − at 1 and sends nothing', async () => {
+    live.state.value.agents[0]!.concurrency = 1
+    const wrapper = mountStepper()
+    expect(minus(wrapper).attributes('disabled')).toBeDefined()
+    await minus(wrapper).trigger('click')
+    vi.advanceTimersByTime(1000)
+    await flushPromises()
+    expect(number(wrapper)).toBe('1')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('goes back to the saved value and toasts "Not saved" when the PATCH fails', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: { code: 'not_found' } }), { status: 404 }))
+    const wrapper = mountStepper()
+    await plus(wrapper).trigger('click')
+    await plus(wrapper).trigger('click')
+    expect(number(wrapper)).toBe('4')
+    vi.advanceTimersByTime(600)
+    await flushPromises()
+    expect(number(wrapper)).toBe('2')
+    expect(live.state.value.agents[0]!.concurrency).toBe(2)
+    expect(toast.add).toHaveBeenCalledWith({ title: 'Not saved', description: 'Not found', color: 'error' })
+    expect(wrapper.text()).not.toContain('Saved')
+  })
+
+  it('shows how many runs are going under the number', () => {
+    live.state.value.agents[0]!.activeRuns = 2
+    expect(mountStepper().text()).toContain('2 running now')
+    live.state.value.agents[0]!.activeRuns = 0
+    expect(mountStepper().text()).not.toContain('running now')
+  })
+
+  it('gives both buttons 44px targets and labels naming the agent', () => {
+    const wrapper = mountStepper()
+    for (const button of [minus(wrapper), plus(wrapper)]) expect(button.classes()).toContain('size-11')
+    expect(wrapper.get('[aria-live="polite"]').text()).toBe('2')
+  })
+})
