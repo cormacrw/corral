@@ -1,4 +1,4 @@
-import { EVIDENCE_KINDS, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type RunnerMessage } from '@corral/contracts'
+import { EVIDENCE_KINDS, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type RunnerMessage } from '@corral/contracts'
 import {
   ACTIVE_RUN_STATES,
   nextDesignVersion,
@@ -25,7 +25,7 @@ import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
 import { MergeOrchestrator } from './merge.ts'
 import type { PlanService } from './plan.ts'
 import { getRun, listAgents, listEvidence } from './runs.ts'
-import { addComment, applyTransition, deleteTaskRows, loadTask, lockTask, toTaskState, type ProjectRow, type TaskRow } from './tasks.ts'
+import { addComment, applyTransition, deleteTaskRows, loadTask, lockTask, toTaskState, type ProjectRow, type TaskContentEdit, type TaskRow } from './tasks.ts'
 import type { Transcripts } from './transcripts.ts'
 
 const { acceptanceCriteria, agents, attachments, auditLog, comments, designVersions, evidence, projects, reviews, runs, settings, taskDesignPins, tasks } = schema
@@ -714,6 +714,51 @@ export class Orchestrator implements RunnerHandlers {
     })
     events.publish({ type: 'comment.created', comment })
     return { runId: run.id, comment }
+  }
+
+  // PRD §7.3: a human edited the description or criteria of a task a
+  // developer or reviewer run holds. A run that takes messages is told at
+  // once; otherwise (Codex, not started yet, no runner) a pinned comment
+  // carries the change to the agent through get_task and to the next run.
+  async noticeTaskEdit(taskId: string, edit: TaskContentEdit, actor: Actor): Promise<void> {
+    const { db, events } = this.#d
+    const [task] = await db.select().from(tasks).where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt)))
+    if (!task?.leaseRunId) return
+    const ctx = await this.#load(task.leaseRunId)
+    if (!ctx || ctx.run.leaseEpoch !== task.leaseEpoch) return
+    const { run, project } = ctx
+    if (run.role !== 'developer' && run.role !== 'reviewer') return
+    if (!(ACTIVE_RUN_STATES as readonly RunState[]).includes(run.state) || run.state === 'stopping') return
+
+    const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, taskId)).orderBy(asc(acceptanceCriteria.position))
+    const ref = taskRef(project.prefix, task.number)
+    const what = [edit.description && 'description', edit.criteria && 'acceptance criteria'].filter(Boolean).join(' and ')
+    const counts = edit.criteria
+      ? [edit.criteria.added && `${edit.criteria.added} added`, edit.criteria.removed && `${edit.criteria.removed} removed`, edit.criteria.reworded && `${edit.criteria.reworded} reworded`].filter(Boolean).join(', ') || 'reordered'
+      : null
+    const body = (lead: string) => [
+      lead,
+      edit.description ? `**Description**\n\n${richTextToMarkdown(task.description) || '(no description)'}` : null,
+      edit.criteria ? `**Acceptance criteria** (${counts})\n\n${criteria.map(c => `- [${c.id}] ${c.text}`).join('\n') || '(none)'}` : null
+    ].filter(Boolean).join('\n\n')
+
+    if ((RUNTIMES_TAKING_MESSAGES as readonly string[]).includes(ctx.agent.runtime) && run.state !== 'queued') {
+      try {
+        await this.messageRun(project.id, run.id, { text: body(`The ${what} of ${ref} changed while you were working on it. Work to the new text below; evidence and verdicts go against these criterion IDs.`), attachments: [] }, actor)
+        return
+      } catch (error) {
+        if (!(error instanceof ApiFailure) || error.status !== 409) throw error
+      }
+    }
+    const comment = await db.transaction(async (tx) => {
+      const comment = await addComment(tx, taskId, { body: body(`The ${what} of ${ref} changed during run #${run.number}, which couldn't be told while it ran. Work to the new text below.`), pinned: true }, actor)
+      await tx.insert(auditLog).values({
+        projectId: project.id, taskId, actor, action: 'task.edit_pinned',
+        detail: { runId: run.id, runNumber: run.number, commentId: comment.id }
+      })
+      return comment
+    })
+    events.publish({ type: 'comment.created', comment })
   }
 
   // D10 "Deleting": stop the run, close the PR, delete the branch when safe,
