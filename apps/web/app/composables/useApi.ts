@@ -8,6 +8,7 @@ import type {
   Comment,
   CreateProjectInput,
   CreateTaskInput,
+  DesignVersion,
   Epic,
   EpicDetail,
   Evidence,
@@ -123,7 +124,9 @@ export const api = {
     comment: (slug: string, number: number, body: string, pinned = false) => call<Comment>('POST', `/projects/${slug}/tasks/${number}/comments`, { body, pinned }),
     history: (slug: string, number: number) => call<AuditEntry[]>('GET', `/projects/${slug}/tasks/${number}/history`),
     evidence: (slug: string, number: number) => call<Evidence[]>('GET', `/projects/${slug}/tasks/${number}/evidence`),
-    reviews: (slug: string, number: number) => call<Review[]>('GET', `/projects/${slug}/tasks/${number}/reviews`)
+    reviews: (slug: string, number: number) => call<Review[]>('GET', `/projects/${slug}/tasks/${number}/reviews`),
+    designs: (slug: string, number: number) => call<DesignVersion[]>('GET', `/projects/${slug}/tasks/${number}/designs`),
+    approveDesign: (slug: string, number: number, version: number) => call<Task>('POST', `/projects/${slug}/tasks/${number}/designs/${version}/approve`)
   },
 
   attachments: {

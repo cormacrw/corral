@@ -1,5 +1,5 @@
 import { AGENT_RUNTIMES, type Agent, type AgentRuntime, type CliStatus, type InboxItem, type Project, type Run, type Task } from '@corral/contracts'
-import type { AgentRole, RunOutcome, RunState, TaskPriority, TaskStatus } from '@corral/core'
+import type { AgentRole, DesignVersionStatus, RunOutcome, RunState, TaskPriority, TaskStatus } from '@corral/core'
 
 export type Color = 'primary' | 'secondary' | 'success' | 'info' | 'warning' | 'error' | 'neutral'
 
@@ -15,6 +15,14 @@ export const STATUS: Record<TaskStatus, { label: string, color: Color }> = {
   merged: { label: 'Merged', color: 'success' },
   blocked: { label: 'Blocked', color: 'error' },
   failed: { label: 'Failed', color: 'error' }
+}
+
+// A design version's state (D20)
+export const DESIGN_VERSION_STATUS: Record<DesignVersionStatus, { label: string, color: Color }> = {
+  submitted: { label: 'Submitted', color: 'warning' },
+  changes_requested: { label: 'Changes requested', color: 'neutral' },
+  approved: { label: 'Approved', color: 'success' },
+  superseded: { label: 'Superseded', color: 'neutral' }
 }
 
 export const PRIORITY: Record<TaskPriority, { label: string, color: Color }> = {
