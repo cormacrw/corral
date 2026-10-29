@@ -640,3 +640,33 @@ Epic PR review state is kept on the epic (open, agent review, human review, read
 - Projects gain a default review mode; epics gain a nullable review mode, an epic branch name and the epic PR's number and review state.
 - The runner creates task branches from `origin/<epic branch>` (or `origin/<target branch>` for tasks without an epic and in `direct` mode), and conflict-task runs check out the epic branch itself.
 - The server opens, reviews, rebases and merges epic PRs, creates fix and conflict tasks, and computes epic done-ness and cross-epic dependencies with the rules above.
+
+---
+
+## D24 — Rebase-only rounds preserve approved work
+
+**Status:** Accepted 2026-10-29 (COR-151). Amends D10's task-PR conflict path and review-round accounting.
+
+**Decision:** When an approved task PR conflicts with its moved base (`base_conflict`), **Ready to merge → In progress** starts a **rebase-only round**. This round, including its rebase review, does not count against `reviewRoundCap`.
+
+### Developer mode
+
+The developer's prompt for this round is limited to fetching and rebasing onto `origin/<default>` (the project's configured `defaultBranch`), resolving conflicts while preserving **both sides' intent**, and re-running the project's gates (lint, typecheck, tests and build, D21). Never revert what main just merged to make the old task pass. Feature changes are not allowed. For a task PR based on an epic branch, use `origin/<base branch>` instead (D23); “main” here means the PR's actual base, not a hard-coded branch name. D23's separate epic-PR conflict-task flow is unchanged.
+
+The developer reports the new **`pr_rebased`** outcome, describing the conflicts and their resolutions. The runner pushes the rebased branch with `--force-with-lease`; the server moves **In progress → Agent review** in rebase-review mode. It retains the approved head, its previous criteria verdicts and the old and new base commits so the reviewer can compare the work before and after the rebase.
+
+### Rebase review
+
+The reviewer:
+
+- Compares the approved head with the new head using `git range-diff` over the old and new commit ranges, so rewritten commits can be checked against the approved work.
+- Checks each conflicted hunk against main's change, verifying that the resolution preserves both sides' intent and introduces no feature changes.
+- Checks the branch against any binding documentation main changed, and independently re-runs the gates without the cache (D21).
+
+If the resolution is clean, the reviewer approves the new head. The **previous criteria verdicts and approval carry over** to that head; a rebase review does not re-judge the feature or require a fresh human approval solely because of the rebase. The task returns to **Ready to merge**, where CI and the live merge gates must pass for the new head.
+
+If the resolution needs changes, the reviewer requests changes: **Agent review → In progress** starts a **normal developer round**, with normal review and `reviewRoundCap` accounting. The developer is no longer restricted to rebase-only work and reports `pr_updated` as usual.
+
+If main changed a **binding decision that the task's criteria rely on**, the reviewer instead **blocks the task for the human**, explaining the changed decision and the affected criteria. It must not pick a side or silently rewrite the criteria, even if the textual conflicts are easy to resolve. COR-118 changing the binding decision under COR-106 is the motivating example.
+
+**Why existing roles:** This is a mode of the existing developer and reviewer roles, not a third agent role. The developer still changes the branch and the reviewer independently judges those changes; only their scope and the review's accounting differ. A third role would duplicate those responsibilities without adding an independent check. Explicit modes keep a mechanical conflict repair from consuming feature-review rounds or becoming an excuse to undo newly merged work.
