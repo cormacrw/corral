@@ -6,6 +6,7 @@ import { BOARD_COLUMNS, filtersFromQuery, filtersToQuery, matchesFilter, onBoard
 import { epicTitle, PRIORITY, STATUS, taskNote } from '~/utils/labels'
 
 // The board (design/board.md): approved work by status, no drag and drop
+const prototype = import.meta.prototype
 const route = useRoute()
 const live = useLive()
 const flyout = useTaskFlyout()
@@ -69,7 +70,11 @@ const epicOptions = computed(() => epics.value.map(id => ({ id, label: epicLabel
 </script>
 
 <template>
-  <UDashboardPanel :ui="{ body: 'p-0' }">
+  <PrototypeCardBoard v-if="prototype" />
+  <UDashboardPanel
+    v-else
+    :ui="{ body: 'p-0' }"
+  >
     <!-- Phones get one column at a time (design/mobile.md) -->
     <BoardMobile
       v-if="device.isMobile.value"

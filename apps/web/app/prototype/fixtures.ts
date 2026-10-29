@@ -235,6 +235,15 @@ export const tasks: Task[] = [
   })
 ]
 
+// COR-154: identical stress cases across every card direction.
+tasks.push(
+  task(corral, 21, { title: 'Keep the board readable when a task has a very long title, multiple dependencies and an agent working on the implementation', status: 'ready', priority: 'urgent', type: 'bug', dependsOn: ['COR-3'], acceptanceCriteria: criteria('Wrap the title', 'Keep metadata visible') }),
+  task(corral, 22, { title: 'Explore a quieter board', status: 'ready', type: 'spike', priority: 'low' }),
+  task(corral, 23, { title: 'Design the next task card', status: 'ready', type: 'design', priority: 'high', epicId: 'e-design', design: { taskRef: 'COR-4', version: 1, screens: ['card'], newerVersion: 2 } }),
+  task(corral, 24, { title: 'Preserve selection after reconnecting', status: 'in_progress', priority: 'urgent', type: 'bug', reviewRounds: 2, acceptanceCriteria: criteria('Restore selection', 'Preserve scroll') }),
+  task(corral, 25, { title: 'Check narrow column rendering', status: 'agent_review', priority: 'low', type: 'spike' })
+)
+
 const at = (ref: string): Task => tasks.find(t => t.ref === ref)!
 
 export const runs: Run[] = [

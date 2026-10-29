@@ -4,6 +4,7 @@ import { onboardingRedirect } from '~/utils/onboarding'
 // First run: with no projects, everything leads to onboarding; once the
 // server has one, onboarding is over on every device (design/onboarding.md)
 export default defineNuxtRouteMiddleware(async (to) => {
+  if (import.meta.prototype && to.path === '/') return navigateTo('/projects/corral/board')
   const live = useLive()
   if (!live.state.value.loaded) {
     try {
