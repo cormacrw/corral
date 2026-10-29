@@ -21,7 +21,7 @@ import { and, asc, desc, eq, inArray, isNull, max, ne, sql } from 'drizzle-orm'
 import { ApiFailure, notFound } from './errors.ts'
 import { toReview } from './runs.ts'
 
-const { acceptanceCriteria, auditLog, comments, designVersions, epics, projects, reviews, runs, taskDependencies, taskDesignPins, tasks } = schema
+const { acceptanceCriteria, auditLog, comments, designVersions, epics, planSessions, planTasks, plans, projects, reviews, runs, taskDependencies, taskDesignPins, tasks } = schema
 
 type TaskRow = typeof tasks.$inferSelect
 type ProjectRow = typeof projects.$inferSelect
@@ -62,6 +62,7 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
     .innerJoin(tasks, eq(tasks.id, designVersions.taskId))
     .where(inArray(taskDesignPins.taskId, ids))
   const { latestApproved, started } = await pinStaleness(db, pins.map(p => p.designTaskId), ids)
+  const owners = await draftSessions(db, rows.filter(r => r.status === 'draft').map(r => r.id))
 
   return rows.map((row) => {
     const latest = reviewRows.find(r => r.taskId === row.id) ?? null
@@ -71,8 +72,27 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
     const newest = pin ? latestApproved.get(pin.designTaskId) ?? null : null
     const stale = pin && isDesignPinStale({ version: pin.version, latestApproved: newest }, { status: row.status, started: started.has(row.id) })
     const design = pin ? { taskRef: taskRef(project.prefix, pin.number), version: pin.version, screens: pin.screens, newerVersion: stale ? newest : null } : null
-    return toTask(project, row, criteria, dependencies, latest, current, design)
+    return toTask(project, row, criteria, dependencies, latest, current, design, owners.get(row.id) ?? null)
   })
+}
+
+// The Plan session each Draft belongs to: the session of the latest proposed
+// plan version that includes it, so a plan in another session that revises
+// it by ref takes it over. A Draft no proposed plan includes falls back to
+// the latest plan that does, so it's never orphaned.
+export async function draftSessions(db: Executor, taskIds: string[]): Promise<Map<string, { id: string, title: string }>> {
+  const owners = new Map<string, { id: string, title: string }>()
+  if (taskIds.length === 0) return owners
+  const rows = await db.select({ taskId: planTasks.taskId, id: planSessions.id, title: planSessions.title })
+    .from(planTasks)
+    .innerJoin(plans, eq(plans.id, planTasks.planId))
+    .innerJoin(planSessions, eq(planSessions.id, plans.sessionId))
+    .where(and(inArray(planTasks.taskId, taskIds), ne(planTasks.change, 'removed')))
+    .orderBy(desc(sql`${plans.status} = 'proposed'`), desc(plans.createdAt), desc(plans.version))
+  for (const row of rows) {
+    if (row.taskId && !owners.has(row.taskId)) owners.set(row.taskId, { id: row.id, title: row.title })
+  }
+  return owners
 }
 
 function toTask(
@@ -82,7 +102,8 @@ function toTask(
   dependencies: { taskId: string, number: number }[],
   latest: typeof reviews.$inferSelect | null,
   current: typeof reviews.$inferSelect | null,
-  design: TaskDesignPin | null
+  design: TaskDesignPin | null,
+  session: { id: string, title: string } | null
 ): Task {
   return {
     id: row.id,
@@ -116,6 +137,8 @@ function toTask(
     mergedAt: row.mergedAt?.toISOString() ?? null,
     gateChecks: row.gateChecks,
     design,
+    planSessionId: row.status === 'draft' ? session?.id ?? null : null,
+    planSessionTitle: row.status === 'draft' ? session?.title ?? null : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString()
   }

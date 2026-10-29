@@ -1,4 +1,4 @@
-import { askQuestionInput, type AgentRuntime, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type RunJob } from '@corral/contracts'
+import { askQuestionInput, type AgentRuntime, type DraftSession, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type RunJob } from '@corral/contracts'
 import { checkPlan, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, REVISABLE_STATUSES, requiresHumanReview, richTextToMarkdown, TASK_TYPES, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
@@ -9,7 +9,7 @@ import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
 import { pmFallbackPrompt, pmPrompt, questionText } from './prompts.ts'
 import type { RunnerHub } from './runner-hub.ts'
-import { createTask, deleteTaskRows, findTaskId, loadTask, patchTask, pinStaleness, setDesignPin, transitionTask, type ProjectRow } from './tasks.ts'
+import { createTask, deleteTaskRows, draftSessions, findTaskId, loadTask, patchTask, pinStaleness, setDesignPin, transitionTask, type ProjectRow } from './tasks.ts'
 
 const { acceptanceCriteria, agents, auditLog, designVersions, epics, planEpics, planMessages, planSessions, planTasks, plans, projects, runs, taskDependencies, taskDesignPins, tasks } = schema
 
@@ -106,6 +106,36 @@ export class PlanService {
       messages: messages.map(toMessage),
       plans: await Promise.all(planRows.map(p => this.toPlan(p)))
     }
+  }
+
+  // A project's Drafts grouped by the Plan session they belong to, newest
+  // session first (D10)
+  async listDrafts(projectId: string): Promise<DraftSession[]> {
+    const { db } = this.#d
+    const [project] = await db.select().from(projects).where(eq(projects.id, projectId))
+    if (!project) throw notFound()
+    const rows = await db.select().from(tasks)
+      .where(and(eq(tasks.projectId, projectId), eq(tasks.status, 'draft'), isNull(tasks.deletedAt))).orderBy(asc(tasks.number))
+    const owners = await draftSessions(db, rows.map(r => r.id))
+    const sessionIds = [...new Set([...owners.values()].map(o => o.id))]
+    if (sessionIds.length === 0) return []
+    const sessionRows = await db.select().from(planSessions).where(inArray(planSessions.id, sessionIds)).orderBy(desc(planSessions.updatedAt), desc(planSessions.createdAt))
+    // Newest version first, so the first row per session is its latest plan
+    const planRows = await db.select({ sessionId: plans.sessionId, status: plans.status }).from(plans)
+      .where(inArray(plans.sessionId, sessionIds)).orderBy(desc(plans.version))
+    return sessionRows.map(session => ({
+      sessionId: session.id,
+      title: session.title,
+      updatedAt: session.updatedAt.toISOString(),
+      planStatus: planRows.find(p => p.sessionId === session.id)?.status ?? null,
+      drafts: rows.filter(r => owners.get(r.id)?.id === session.id).map(r => ({
+        taskId: r.id, ref: taskRef(project.prefix, r.number), title: r.title, type: r.type, priority: r.priority
+      }))
+    }))
+  }
+
+  async #publishDrafts(projectId: string): Promise<void> {
+    this.#d.events.publish({ type: 'plan.drafts', projectId, sessions: await this.listDrafts(projectId) })
   }
 
   async markRead(sessionId: string): Promise<PlanSession> {
@@ -376,7 +406,9 @@ export class PlanService {
     const problems = checkPlan(proposed, found, designs)
     if (problems.length > 0) throw new ToolError(`The plan was not saved: ${JSON.stringify(problems)}. Fix every problem and call propose_plan again.`)
 
-    const [previous] = await db.select().from(plans).where(eq(plans.sessionId, session.id)).orderBy(desc(plans.version)).limit(1)
+    const [latest] = await db.select().from(plans).where(eq(plans.sessionId, session.id)).orderBy(desc(plans.version)).limit(1)
+    // A discarded plan's Drafts are gone, so the next version starts afresh
+    const previous = latest?.status === 'discarded' ? undefined : latest
     const previousEpics = previous ? await this.#epicsOf(previous) : new Map<string, string>()
     // A lone epic that was renamed is the same epic, so its tasks aren't changed
     const renamed = proposed.epics.length === 1 && previousEpics.size === 1
@@ -399,7 +431,7 @@ export class PlanService {
       }
       if (previous) await tx.update(plans).set({ status: 'superseded' }).where(eq(plans.id, previous.id))
       const [row] = await tx.insert(plans).values({
-        sessionId: session.id, projectId: project.id, epicId: proposed.epics[0] ? epicIds.get(proposed.epics[0].key)! : null, version: (previous?.version ?? 0) + 1, title: proposed.title, summary: proposed.summary
+        sessionId: session.id, projectId: project.id, epicId: proposed.epics[0] ? epicIds.get(proposed.epics[0].key)! : null, version: (latest?.version ?? 0) + 1, title: proposed.title, summary: proposed.summary
       }).returning()
       const planId = row!.id
       if (proposed.epics.length > 0) {
@@ -518,9 +550,8 @@ export class PlanService {
     }
     const [message] = await db.select().from(planMessages).where(eq(planMessages.planId, plan.id))
     if (message) this.#d.events.publish({ type: 'plan.message', message: toMessage(message) })
-    for (const t of full.tasks) {
-      if (t.taskId) this.#d.events.publish({ type: 'task.updated', task: await loadTask(db, t.taskId) })
-    }
+    await this.#publishTasks(full)
+    await this.#publishDrafts(project.id)
     return { ok: true, planId: plan.id, version: plan.version, tasks: full.tasks.map(t => ({ key: t.key, ref: t.ref, change: t.change, revises: t.revises })), message: 'The plan is saved and shown to the human for approval. Tell them what you proposed and why.' }
   }
 
@@ -558,11 +589,53 @@ export class PlanService {
     await db.insert(auditLog).values({ projectId: plan.projectId, actor, action: 'plan.approved', detail: { planId, version: plan.version, to, ...(via && { viaPmRun: via.runId }) } })
     const full = await this.toPlan((await db.select().from(plans).where(eq(plans.id, planId)))[0]!)
     this.#d.events.publish({ type: 'plan.updated', plan: full })
-    for (const t of full.tasks) {
-      if (t.taskId) this.#d.events.publish({ type: 'task.updated', task: await loadTask(db, t.taskId) })
-    }
+    await this.#publishTasks(full)
     this.#d.events.publish({ type: 'plan.session', session: await this.#toSession(await this.#session(plan.sessionId)) })
+    await this.#publishDrafts(plan.projectId)
     return full
+  }
+
+  // Discard plan: human only. The Drafts it created are deleted outright
+  // (D10); tasks it only revised keep what they have, and a Draft revised
+  // from another session goes back to that session.
+  async discard(planId: string, actor: Actor): Promise<Plan> {
+    if (actor.kind !== 'human') throw new ApiFailure(409, { code: 'conflict', constraint: 'plan_discard_human_only' })
+    const { db, events } = this.#d
+    const [plan] = await db.select().from(plans).where(eq(plans.id, planId))
+    if (!plan) throw notFound()
+    if (plan.status !== 'proposed') throw new ApiFailure(409, { code: 'conflict', constraint: `plan_${plan.status}` })
+    const items = await db.select().from(planTasks).where(and(eq(planTasks.planId, planId), ne(planTasks.change, 'removed')))
+    const deleted: string[] = []
+    for (const item of items) {
+      if (!item.taskId || item.revision) continue
+      const [row] = await db.select({ status: tasks.status }).from(tasks).where(and(eq(tasks.id, item.taskId), isNull(tasks.deletedAt)))
+      if (row?.status !== 'draft') continue
+      await deleteTaskRows(db, item.taskId, actor, 'Plan discarded')
+      deleted.push(item.taskId)
+    }
+    // So are its epics, once nothing is left in them
+    for (const epicId of (await this.#epicsOf(plan)).values()) {
+      const [left] = await db.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.epicId, epicId), isNull(tasks.deletedAt))).limit(1)
+      if (!left) await db.delete(epics).where(eq(epics.id, epicId))
+    }
+    await db.update(plans).set({ status: 'discarded' }).where(eq(plans.id, planId))
+    await db.insert(auditLog).values({ projectId: plan.projectId, actor, action: 'plan.discarded', detail: { planId, version: plan.version, deleted: deleted.length } })
+    for (const taskId of deleted) events.publish({ type: 'task.deleted', taskId, projectId: plan.projectId })
+    const full = await this.toPlan((await db.select().from(plans).where(eq(plans.id, planId)))[0]!)
+    events.publish({ type: 'plan.updated', plan: full })
+    await this.#publishTasks(full)
+    events.publish({ type: 'plan.session', session: await this.#toSession(await this.#session(plan.sessionId)) })
+    await this.#publishDrafts(plan.projectId)
+    return full
+  }
+
+  // The plan's tasks that still exist, e.g. after approval moves them on
+  async #publishTasks(plan: Plan): Promise<void> {
+    for (const t of plan.tasks) {
+      if (!t.taskId) continue
+      const task = await loadTask(this.#d.db, t.taskId).catch(() => null)
+      if (task) this.#d.events.publish({ type: 'task.updated', task })
+    }
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────

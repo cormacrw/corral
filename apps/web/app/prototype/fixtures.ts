@@ -146,6 +146,8 @@ export function task(project: Project, number: number, fields: Partial<Task> & P
     mergedAt: null,
     gateChecks: null,
     design: null,
+    planSessionId: null,
+    planSessionTitle: null,
     createdAt: ago(60 * 24),
     updatedAt: ago(30),
     ...fields

@@ -1,4 +1,4 @@
-import type { Attachment, Epic, EpicDetail, Plan, PlanSession, PlanSessionDetail, RunJob, Task } from '@corral/contracts'
+import type { Attachment, DraftSession, Epic, EpicDetail, Plan, PlanSession, PlanSessionDetail, RunJob, Task } from '@corral/contracts'
 import { richTextToMarkdown } from '@corral/core'
 import { schema } from '@corral/db'
 import { and, desc, eq, inArray, ne } from 'drizzle-orm'
@@ -893,5 +893,127 @@ describe('plan sessions', () => {
     expect(runner.received.filter(m => m.type === 'run.assign' && m.job.role === 'pm' && m.job.projectId === project.id && m.job.runId !== job.runId)).toHaveLength(0)
     expect((await session(created.id)).unread).toBe(false)
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+  })
+
+  // Each Draft belongs to a Plan session, so it's listed on the Plan tab
+  // even before its plan is approved (D10)
+  describe('drafts by session', () => {
+    async function proposeIn(project: { id: string }, text: string, tasksIn: Parameters<typeof plan>[0]) {
+      const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text }).then(r => r.json()) as PlanSessionDetail
+      const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.planSessionId === created.id)).job
+      const result = await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan(tasksIn))
+      expect(result).toMatchObject({ ok: true })
+      await endTurn(job, 'Proposed.')
+      return { session: created, job, planId: (result as { result: { planId: string } }).result.planId }
+    }
+    const getTask = async (ref: string) => t.request('GET', `/api/tasks/${ref}`).then(r => r.json()) as Promise<Task>
+    const drafts = async (slug: string) => t.request('GET', `/api/projects/${slug}/drafts`).then(r => r.json()) as Promise<DraftSession[]>
+    const lastTaskEvent = (taskId: string) => t.events.filter(e => e.type === 'task.updated' && e.task.id === taskId).at(-1) as { task: Task } | undefined
+    const lastDraftsEvent = (projectId: string) => t.events.filter(e => e.type === 'plan.drafts' && e.projectId === projectId).at(-1) as { sessions: DraftSession[] } | undefined
+
+    async function pausedProject() {
+      const project = await t.createProject()
+      await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+      return project
+    }
+
+    it('gives a Draft the session that proposed it, in task detail and live task events, and null once it leaves Draft', async () => {
+      const project = await pausedProject()
+      const backlog = await t.createTask(project.slug, { title: 'Already here' })
+      const a = await proposeIn(project, 'Plan search', [{ title: 'Search box' }])
+      const [item] = (await session(a.session.id)).plans[0]!.tasks
+      const draft = await getTask(item!.ref!)
+      expect(draft).toMatchObject({ status: 'draft', planSessionId: a.session.id, planSessionTitle: 'Plan search' })
+      expect(lastTaskEvent(draft.id)?.task).toMatchObject({ planSessionId: a.session.id, planSessionTitle: 'Plan search' })
+      expect(await getTask(backlog.ref)).toMatchObject({ status: 'backlog', planSessionId: null, planSessionTitle: null })
+
+      expect((await t.request('POST', `/api/plan/plans/${a.planId}/approve`, { to: 'backlog' })).status).toBe(200)
+      expect(await getTask(draft.ref)).toMatchObject({ status: 'backlog', planSessionId: null, planSessionTitle: null })
+      expect(lastTaskEvent(draft.id)?.task).toMatchObject({ status: 'backlog', planSessionId: null })
+    })
+
+    it('moves a Draft to the session whose plan revises it by ref, and back when that plan is discarded', async () => {
+      const project = await pausedProject()
+      const a = await proposeIn(project, 'Plan search', [{ title: 'Search box' }, { title: 'Search results' }])
+      const [box, results] = (await session(a.session.id)).plans[0]!.tasks
+      const b = await proposeIn(project, 'Refine search', [{ ref: box!.ref!, title: 'Search box with filters' }])
+
+      expect(await getTask(box!.ref!)).toMatchObject({ status: 'draft', title: 'Search box', planSessionId: b.session.id, planSessionTitle: 'Refine search' })
+      expect(lastTaskEvent(box!.taskId!)?.task).toMatchObject({ planSessionId: b.session.id })
+      expect(await getTask(results!.ref!)).toMatchObject({ planSessionId: a.session.id })
+      expect(await drafts(project.slug)).toMatchObject([
+        { sessionId: b.session.id, title: 'Refine search', planStatus: 'proposed', drafts: [{ ref: box!.ref, title: 'Search box' }] },
+        { sessionId: a.session.id, title: 'Plan search', planStatus: 'proposed', drafts: [{ ref: results!.ref }] }
+      ])
+
+      // Discarding B only un-stages its revision: the Draft goes back to A
+      const discarded = await t.request('POST', `/api/plan/plans/${b.planId}/discard`)
+      expect(discarded.status).toBe(200)
+      expect(await discarded.json() as Plan).toMatchObject({ status: 'discarded' })
+      expect(await getTask(box!.ref!)).toMatchObject({ status: 'draft', title: 'Search box', planSessionId: a.session.id })
+      expect(lastTaskEvent(box!.taskId!)?.task).toMatchObject({ planSessionId: a.session.id })
+      expect((await session(b.session.id)).status).toBe('none')
+      expect(await drafts(project.slug)).toMatchObject([{ sessionId: a.session.id, drafts: [{ ref: box!.ref }, { ref: results!.ref }] }])
+    })
+
+    it('lists drafts grouped by session, newest session first, and drops them when a plan is approved or discarded', async () => {
+      const project = await pausedProject()
+      expect(await drafts(project.slug)).toEqual([])
+      const a = await proposeIn(project, 'Plan search', [{ title: 'Search box', type: 'bug', priority: 'high' }, { title: 'Search results', priority: 'low' }])
+      const b = await proposeIn(project, 'Plan login', [{ title: 'Login form', type: 'spike', priority: 'urgent' }])
+      const c = await proposeIn(project, 'Plan export', [{ title: 'CSV export' }])
+      const refs = async (id: string) => (await session(id)).plans[0]!.tasks.map(x => x.ref!)
+      const [box, results] = await refs(a.session.id)
+      const [login] = await refs(b.session.id)
+      const [csv] = await refs(c.session.id)
+
+      const listed = await drafts(project.slug)
+      expect(listed).toEqual([
+        { sessionId: c.session.id, title: 'Plan export', updatedAt: expect.any(String), planStatus: 'proposed', drafts: [{ taskId: expect.any(String), ref: csv, title: 'CSV export', type: 'task', priority: 'medium' }] },
+        { sessionId: b.session.id, title: 'Plan login', updatedAt: expect.any(String), planStatus: 'proposed', drafts: [{ taskId: expect.any(String), ref: login, title: 'Login form', type: 'spike', priority: 'urgent' }] },
+        {
+          sessionId: a.session.id,
+          title: 'Plan search',
+          updatedAt: expect.any(String),
+          planStatus: 'proposed',
+          drafts: [
+            { taskId: expect.any(String), ref: box, title: 'Search box', type: 'bug', priority: 'high' },
+            { taskId: expect.any(String), ref: results, title: 'Search results', type: 'task', priority: 'low' }
+          ]
+        }
+      ])
+      // Sent when the plan was proposed, before the turn ended and moved the session's updatedAt
+      const withoutTime = (groups: DraftSession[] | undefined) => groups?.map(g => ({ ...g, updatedAt: null }))
+      expect(withoutTime(lastDraftsEvent(project.id)?.sessions)).toEqual(withoutTime(listed))
+
+      // Approving moves A's Drafts on; the live event carries the new list
+      expect((await t.request('POST', `/api/plan/plans/${a.planId}/approve`, { to: 'backlog' })).status).toBe(200)
+      expect((await drafts(project.slug)).map(g => g.sessionId)).toEqual([c.session.id, b.session.id])
+      expect(lastDraftsEvent(project.id)?.sessions.map(g => g.sessionId)).toEqual([c.session.id, b.session.id])
+
+      // Discarding deletes B's Drafts outright (D10)
+      const loginId = (await session(b.session.id)).plans[0]!.tasks[0]!.taskId!
+      expect((await t.request('POST', `/api/plan/plans/${b.planId}/discard`)).status).toBe(200)
+      expect((await drafts(project.slug)).map(g => g.sessionId)).toEqual([c.session.id])
+      expect(lastDraftsEvent(project.id)?.sessions.map(g => g.sessionId)).toEqual([c.session.id])
+      expect(t.events).toContainEqual({ type: 'task.deleted', taskId: loginId, projectId: project.id })
+      expect((await t.request('GET', `/api/tasks/${login}`)).status).toBe(404)
+      // Only a proposed plan can be discarded
+      expect((await t.request('POST', `/api/plan/plans/${b.planId}/discard`)).status).toBe(409)
+      expect((await t.request('POST', `/api/plan/plans/${a.planId}/discard`)).status).toBe(409)
+    })
+
+    it('starts the next version afresh after a discard', async () => {
+      const project = await pausedProject()
+      const a = await proposeIn(project, 'Plan search', [{ title: 'Search box' }])
+      expect((await t.request('POST', `/api/plan/plans/${a.planId}/discard`)).status).toBe(200)
+      await t.request('POST', `/api/plan/sessions/${a.session.id}/messages`, { text: 'Try again' })
+      const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.planSessionId === a.session.id && m.job.runId !== a.job.runId)).job
+      expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ title: 'Search box' }]))).toMatchObject({ ok: true, result: { version: 2, tasks: [{ key: 't1', change: 'added' }] } })
+      await endTurn(job, 'Proposed.')
+      const plans = (await session(a.session.id)).plans
+      expect(plans.map(p => p.status)).toEqual(['discarded', 'proposed'])
+      expect(await drafts(project.slug)).toMatchObject([{ sessionId: a.session.id, drafts: [{ title: 'Search box' }] }])
+    })
   })
 })
