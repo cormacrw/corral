@@ -147,6 +147,8 @@ describe('prototype mock API', () => {
     await expect(mockCall<PlanSessionDetail>('GET', '/plan/sessions/s-1')).resolves.toMatchObject({ closed: true })
   })
   it('closes a thread, discards its drafts and plan, and removes it from the Inbox', async () => {
+    vi.resetModules()
+    const { mockCall } = await import('./mock-api')
     await mockCall('POST', '/plan/sessions/s-1/close')
     const detail = await mockCall<PlanSessionDetail>('GET', '/plan/sessions/s-1')
     expect(detail).toMatchObject({ closed: true, status: 'none', activeRunId: null })
@@ -156,6 +158,7 @@ describe('prototype mock API', () => {
     expect((await mockCall<DraftSession[]>('GET', '/projects/corral/drafts')).some(s => s.sessionId === 's-1')).toBe(false)
     await expect(mockCall('GET', '/tasks/COR-13')).rejects.toMatchObject({ status: 404 })
     // Approved Backlog tasks from another session survive closing.
+    await mockCall('POST', '/plan/plans/plan-3/approve', { to: 'backlog' })
     await mockCall('POST', '/plan/sessions/s-3/close')
     await expect(mockCall<Task>('GET', '/tasks/COR-16')).resolves.toMatchObject({ status: 'backlog' })
   })

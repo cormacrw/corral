@@ -212,7 +212,7 @@ onBeforeUnmount(() => {
       v-model:action="action"
       v-model:resolve-to="resolveTo"
       v-model:text="text"
-      :plan-thread="planThread"
+      :plan-thread="selected?.type === 'plan_thread' ? selected : null"
       :on-refresh="load"
       :inbox="inbox"
       :error="error"
