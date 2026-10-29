@@ -1,6 +1,7 @@
 import { failedMergeGates, type Actor, type MergeGateFacts } from '@corral/core'
 import { schema, type Database } from '@corral/db'
 import { and, asc, desc, eq, isNull } from 'drizzle-orm'
+import { publishDependents } from './dependent-tasks.ts'
 import type { EventBus } from './events.ts'
 import type { CheckResult, GitHubClient, PullRequest } from './github.ts'
 import type { RunnerHub } from './runner-hub.ts'
@@ -26,6 +27,7 @@ export interface MergeDeps {
   github: GitHubClient
   runner: RunnerHub
   now?: () => Date
+  wake?: (taskIds: string[]) => void
 }
 
 // Whether a task may be merged right now, from live GitHub data
@@ -336,5 +338,9 @@ export class MergeOrchestrator {
   async #publish(taskId: string): Promise<void> {
     const task = await loadTask(this.#d.db, taskId).catch(() => null)
     if (task) this.#d.events.publish({ type: 'task.updated', task })
+    if (task?.status === 'merged') {
+      const dependents = await publishDependents(this.#d.db, this.#d.events, taskId)
+      this.#d.wake?.(dependents)
+    }
   }
 }

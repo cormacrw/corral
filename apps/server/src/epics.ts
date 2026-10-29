@@ -9,7 +9,7 @@ const { auditLog, epics, projects, tasks } = schema
 
 type EpicRow = typeof epics.$inferSelect
 
-// Epics group a plan's tasks (D9). Counts leave out Drafts, which aren't on
+// Epics group a plan's tasks (D9). Counts leave out Drafts and Backlog tasks, which aren't on
 // the board yet; the detail includes them so the canvas shows the whole plan.
 export async function listEpics(db: Executor, project: ProjectRow): Promise<Epic[]> {
   const rows = await db.select().from(epics).where(eq(epics.projectId, project.id)).orderBy(asc(epics.createdAt))
@@ -45,7 +45,7 @@ async function findEpic(db: Executor, epicId: string): Promise<{ row: EpicRow, p
 }
 
 function toEpic(row: EpicRow, taskStatuses: { status: string }[]): Epic {
-  const counted = taskStatuses.filter(t => t.status !== 'draft')
+  const counted = taskStatuses.filter(t => t.status !== 'draft' && t.status !== 'backlog')
   return {
     id: row.id,
     projectId: row.projectId,
