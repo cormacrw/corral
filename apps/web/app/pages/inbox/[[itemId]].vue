@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Evidence, Inbox, InboxItem, InboxActionInput, Review, Task } from '@corral/contracts'
+import type { Evidence, Inbox, InboxActionInput, Review, Task, InboxItem, PlanThreadItem } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
@@ -13,12 +13,7 @@ const toast = useToast()
 const device = useDevice()
 useSeoMeta({ title: 'Inbox · Corral' })
 
-const loadedInbox = ref<Inbox | null>(null)
-// Desktop still owns its task-only view; mobile includes the open sessions.
-const inbox = computed<Inbox | null>(() => {
-  if (!loadedInbox.value || device.isMobile.value) return loadedInbox.value
-  return { ...loadedInbox.value, needsYou: loadedInbox.value.needsYou.filter(i => i.type !== 'plan_thread') }
-})
+const inbox = ref<Inbox | null>(null)
 const error = ref<string | null>(null)
 const tab = ref<'needsYou' | 'activity' | 'resolved'>('needsYou')
 const search = ref('')
@@ -31,11 +26,15 @@ const task = ref<Task | null>(null)
 const evidence = ref<Evidence[]>([])
 const reviews = ref<Review[]>([])
 const showTask = ref(true)
+const planApproving = ref(false)
+let approvalPosition = 0
 
 async function load() {
+  if (planApproving.value) return
   error.value = null
   try {
-    loadedInbox.value = await api.inbox.get()
+    const loaded = await api.inbox.get()
+    if (!planApproving.value) inbox.value = loaded
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   }
@@ -48,22 +47,43 @@ onMounted(() => {
   onBeforeUnmount(stop)
 })
 
-const items = computed<InboxItem[]>(() => (inbox.value?.[tab.value] ?? []).filter(i => (!search.value || `${i.taskRef ?? ''} ${i.subject} ${i.preview}`.toLowerCase().includes(search.value.toLowerCase()))))
+const items = computed<InboxItem[]>(() => (inbox.value?.[tab.value] ?? []).filter(i => !search.value || `${i.taskRef ?? ''} ${i.subject} ${i.preview}`.toLowerCase().includes(search.value.toLowerCase())))
 const selectedId = computed(() => typeof route.params.itemId === 'string' ? route.params.itemId : null)
-const selectedItem = computed<InboxItem | null>(() => {
-  if (!inbox.value || !selectedId.value) return null
-  return [...inbox.value.needsYou, ...inbox.value.activity, ...inbox.value.resolved].find(i => i.id === selectedId.value) ?? null
+watch(selectedId, () => {
+  // Leaving during an approval unmounts its conversation before it can
+  // release the hold. Resume live refreshes for the new selection.
+  if (planApproving.value) {
+    planApproving.value = false
+    void load()
+  }
 })
-const planThread = computed(() => selectedItem.value?.type === 'plan_thread' ? selectedItem.value : null)
-const selected = computed(() => selectedItem.value?.type !== 'plan_thread' ? selectedItem.value : null)
+// A thread leaves Needs you once it's answered or replied to (D11), while
+// the PM's turn is still running. Keep its conversation open so the turn
+// streams in, until another item is picked.
+const openThread = shallowRef<PlanThreadItem | null>(null)
+watch(() => inbox.value?.needsYou.find(i => i.id === selectedId.value), (item) => {
+  if (item?.type === 'plan_thread') openThread.value = item
+}, { immediate: true })
+const selected = computed<InboxItem | null>(() => {
+  if (!inbox.value || !selectedId.value) return null
+  return [...inbox.value.needsYou, ...inbox.value.activity, ...inbox.value.resolved].find(i => i.id === selectedId.value)
+    ?? (openThread.value?.id === selectedId.value ? openThread.value : null)
+})
 const alreadyResolved = computed(() => selected.value !== null && selected.value.type !== 'activity' && !inbox.value?.needsYou.some(i => i.id === selected.value!.id))
-watch(selected, async (item) => {
+watch(selected, async (item, previous) => {
   action.value = null
   text.value = ''
   actionError.value = null
   // Nothing selected (e.g. the last item was just resolved): nothing to show beside it
   if (!item) flyout.close()
-  task.value = item ? await api.tasks.byRef(item.taskRef).catch(() => null) : null
+  if (item?.type === 'plan_thread') {
+    if (previous?.id !== item.id && (flyout.ref.value || flyout.epic.value)) await flyout.close()
+    task.value = null
+    return
+  }
+  const loadedTask = item ? await api.tasks.byRef(item.taskRef).catch(() => null) : null
+  if (selected.value?.id !== item?.id) return
+  task.value = loadedTask
   // A human review carries its evidence in the message (design/inbox.md)
   const slug = live.state.value.projects.find(p => p.id === task.value?.projectId)?.slug
   if (item?.type === 'human_review' && task.value && slug) {
@@ -77,14 +97,27 @@ watch(selected, async (item) => {
   }
   // Following the selection, not a click of its own: no extra history entry.
   // Phones open the task as its own page instead.
+  if (selected.value?.id !== item?.id) return
   if (item && showTask.value && !device.isMobile.value) flyout.open(item.taskRef, { replace: true })
 }, { immediate: true })
+function setPlanApproving(value: boolean) {
+  planApproving.value = value
+  if (value) approvalPosition = items.value.findIndex(i => i.id === selectedId.value)
+}
+async function nextAfterApproval() {
+  planApproving.value = false
+  const position = approvalPosition
+  await load()
+  const remaining = inbox.value?.needsYou ?? []
+  const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
+  await router.replace(next ? `/inbox/${next.id}` : '/inbox')
+}
 function select(item: InboxItem) {
   void router.push(`/inbox/${item.id}`)
 }
 function toggleTask() {
   showTask.value = !showTask.value
-  if (showTask.value && selected.value) flyout.open(selected.value.taskRef, { replace: true })
+  if (showTask.value && selected.value?.taskRef) flyout.open(selected.value.taskRef, { replace: true })
   else flyout.close()
 }
 
@@ -112,7 +145,7 @@ const submitLabel = computed(() => action.value ? (actions.value.find(a => a.val
 
 // Resolves false when not sent, so the composer keeps its images
 async function submit(message: string): Promise<boolean> {
-  if (!selected.value) return false
+  if (!selected.value || selected.value.type === 'plan_thread') return false
   busy.value = true
   actionError.value = null
   try {
@@ -139,7 +172,8 @@ async function submit(message: string): Promise<boolean> {
     // Resolved: move on to the next item that needs you, or to the empty
     // state when that was the last one
     if (!inbox.value?.needsYou.some(i => i.id === actedOn.id)) {
-      const next = inbox.value?.needsYou[Math.min(Math.max(position, 0), (inbox.value?.needsYou.length ?? 1) - 1)]
+      const remaining = inbox.value?.needsYou ?? []
+      const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
       void router.replace(next ? `/inbox/${next.id}` : '/inbox')
     }
     return true
@@ -159,7 +193,7 @@ watchEffect(() => {
   }
   const position = inbox.value?.needsYou.findIndex(i => i.id === selectedId.value) ?? -1
   mobileHeader.value = {
-    title: planThread.value?.subject ?? selected.value?.taskRef ?? '',
+    title: selected.value?.type === 'plan_thread' ? selected.value.subject : selected.value?.taskRef ?? '',
     eyebrow: position >= 0 ? `Inbox · ${position + 1} of ${inbox.value!.needsYou.length}` : 'Inbox'
   }
 })
@@ -172,10 +206,13 @@ onBeforeUnmount(() => {
   <UDashboardPanel :ui="{ body: 'p-0' }">
     <!-- Phones get the list and the item as separate screens (design/mobile.md) -->
     <PlanConversation
-      v-if="device.isMobile.value && planThread"
-      :key="planThread.sessionId"
-      :session-id="planThread.sessionId"
+      v-if="device.isMobile.value && selected?.type === 'plan_thread'"
+      :key="selected.sessionId"
+      :session-id="selected.sessionId"
       inbox
+      @read="load"
+      @approved="nextAfterApproval"
+      @approving="setPlanApproving"
     />
     <InboxMobile
       v-else-if="device.isMobile.value"
@@ -188,7 +225,7 @@ onBeforeUnmount(() => {
       :error="error"
       :items="items"
       :selected-id="selectedId"
-      :selected="selected"
+      :selected="selected?.type === 'plan_thread' ? null : selected"
       :already-resolved="alreadyResolved"
       :task="task"
       :evidence="evidence"
@@ -213,7 +250,7 @@ onBeforeUnmount(() => {
           <UTabs
             v-model="tab"
             :items="[
-              { label: `Needs you (${inbox?.needsYou.length ?? 0})`, value: 'needsYou', icon: 'i-lucide-inbox' },
+              { label: `Needs you (${inbox?.count ?? 0})`, value: 'needsYou', icon: 'i-lucide-inbox' },
               { label: 'Activity', value: 'activity', icon: 'i-lucide-activity' },
               { label: `Resolved (${inbox?.resolved.length ?? 0})`, value: 'resolved', icon: 'i-lucide-circle-check' }
             ]"
@@ -262,32 +299,38 @@ onBeforeUnmount(() => {
               :class="['flex w-full gap-2 border-b border-default px-3 py-2 text-start', selectedId === item.id && 'bg-elevated']"
               @click="select(item)"
             >
-              <AgentAvatar
-                :name="item.sender.name"
-                size="xs"
+              <PlanThreadRow
+                v-if="item.type === 'plan_thread'"
+                :item="item"
               />
-              <span class="min-w-0 flex-1">
-                <span class="flex items-center gap-2 text-xs text-muted">
-                  <span class="font-medium text-default">{{ item.sender.name }}</span>
-                  <span class="ms-auto">{{ timeAgo(item.at) }}</span>
-                </span>
-                <span class="block truncate text-sm font-medium">{{ item.subject }}</span>
-                <span class="line-clamp-2 text-xs text-muted">{{ markdownToPlainText(item.preview) }}</span>
-                <span class="mt-1 flex items-center gap-2">
-                  <UBadge
-                    :label="typeBadge(item.type).label"
-                    :color="typeBadge(item.type).color"
-                    variant="subtle"
-                    size="xs"
-                  />
-                  <span class="flex items-center gap-1 text-xs text-muted">
-                    <span
-                      class="size-2 rounded-full"
-                      :style="{ background: item.project.thumbnailColor ?? '#64748b' }"
-                    />{{ item.project.name }}
+              <template v-else>
+                <AgentAvatar
+                  :name="item.sender.name"
+                  size="xs"
+                />
+                <span class="min-w-0 flex-1">
+                  <span class="flex items-center gap-2 text-xs text-muted">
+                    <span class="font-medium text-default">{{ item.sender.name }}</span>
+                    <span class="ms-auto">{{ timeAgo(item.at) }}</span>
+                  </span>
+                  <span class="block truncate text-sm font-medium">{{ item.subject }}</span>
+                  <span class="line-clamp-2 text-xs text-muted">{{ markdownToPlainText(item.preview) }}</span>
+                  <span class="mt-1 flex items-center gap-2">
+                    <UBadge
+                      :label="typeBadge(item.type).label"
+                      :color="typeBadge(item.type).color"
+                      variant="subtle"
+                      size="xs"
+                    />
+                    <span class="flex items-center gap-1 text-xs text-muted">
+                      <span
+                        class="size-2 rounded-full"
+                        :style="{ background: item.project.thumbnailColor ?? '#64748b' }"
+                      />{{ item.project.name }}
+                    </span>
                   </span>
                 </span>
-              </span>
+              </template>
             </button>
           </li>
           <li
@@ -299,7 +342,19 @@ onBeforeUnmount(() => {
         </ul>
       </div>
 
-      <div class="flex min-w-0 flex-1 flex-col">
+      <PlanConversation
+        v-if="selected?.type === 'plan_thread'"
+        :key="selected.sessionId"
+        :session-id="selected.sessionId"
+        inbox
+        @read="load"
+        @approved="nextAfterApproval"
+        @approving="setPlanApproving"
+      />
+      <div
+        v-else
+        class="flex min-w-0 flex-1 flex-col"
+      >
         <template v-if="selected">
           <header class="flex h-14 shrink-0 items-center gap-3 border-b border-default px-4">
             <AgentAvatar
@@ -439,7 +494,7 @@ onBeforeUnmount(() => {
           v-else
           class="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center text-sm text-muted"
         >
-          <template v-if="inbox && inbox.needsYou.length === 0">
+          <template v-if="inbox && inbox.count === 0">
             <UIcon
               name="i-lucide-circle-check"
               class="size-8 text-success"
@@ -450,7 +505,7 @@ onBeforeUnmount(() => {
           <span v-else>Pick an item.</span>
         </div>
       </div>
-      <TaskFlyout />
+      <TaskFlyout v-if="selected?.type !== 'plan_thread'" />
     </div>
   </UDashboardPanel>
 </template>

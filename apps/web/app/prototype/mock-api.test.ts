@@ -51,6 +51,7 @@ describe('prototype mock API', () => {
     })
     expect(threads.every(i => !('body' in i))).toBe(true)
     expect(inbox.needsYou.filter(i => i.type !== 'plan_thread').map(i => i.type).sort()).toEqual(['blocked', 'failed', 'human_review'])
+    expect(threads.some(i => i.sessionId === 's-idle')).toBe(false)
   })
 
   it('drops an unread-reply thread from the inbox once it is read', async () => {
@@ -64,6 +65,16 @@ describe('prototype mock API', () => {
     const session = await mockCall<PlanSessionDetail>('GET', '/plan/sessions/s-1')
     expect(session.messages.length).toBeGreaterThan(0)
     expect(session.plans.length).toBeGreaterThan(0)
+  })
+
+  it('marks an Inbox thread read and broadcasts the shared state', async () => {
+    const events: ServerEvent[] = []
+    const stop = onMockEvent(e => events.push(e))
+    await mockCall('POST', '/plan/sessions/s-1/read')
+    stop()
+    const inbox = await mockCall<Inbox>('GET', '/inbox')
+    expect(inbox.needsYou.find(i => i.id === 's-1')).toMatchObject({ unread: false, status: 'needs_approval' })
+    expect(events).toContainEqual(expect.objectContaining({ type: 'plan.session', session: expect.objectContaining({ id: 's-1', unread: false }) }))
   })
 
   it('keeps writes for the session and returns copies', async () => {
@@ -90,7 +101,7 @@ describe('prototype mock API', () => {
     vi.useRealTimers()
     pmReply('s-2', STOP_ASKING)
     stop()
-    expect(events).toEqual(['human:message', 'plan.session', 'pm:question', 'plan.session', 'plan.updated', 'pm:message', 'plan.session'])
+    expect(events).toEqual(['human:message', 'plan.session', 'run.events', 'run.events', 'run.events', 'pm:question', 'plan.session', 'plan.session', 'plan.updated', 'pm:message', 'plan.session'])
     const detail = await mockCall<PlanSessionDetail>('GET', '/plan/sessions/s-2')
     expect(detail.plans.at(-1)?.status).toBe('proposed')
     expect(detail.status).toBe('needs_approval')
@@ -107,9 +118,11 @@ describe('prototype mock API', () => {
     const stop = onMockEvent(e => events.push(e))
     await mockCall('POST', '/plan/plans/plan-3/approve', { to: 'backlog' })
     stop()
-    expect((await mockCall<Inbox>('GET', '/inbox')).needsYou.some(i => i.id === 's-3')).toBe(false)
     const drafts = events.find(e => e.type === 'plan.drafts')
     expect(drafts?.type === 'plan.drafts' && drafts.sessions.map(s => s.sessionId)).toEqual(['s-1'])
+    const inbox = await mockCall<Inbox>('GET', '/inbox')
+    expect(inbox.needsYou.some(i => i.id === 's-3')).toBe(false)
+    await expect(mockCall<PlanSessionDetail>('GET', '/plan/sessions/s-3')).resolves.toMatchObject({ closed: true, unread: false })
     await expect(mockCall<Task>('GET', '/tasks/COR-16')).resolves.toMatchObject({ status: 'backlog', planSessionId: null })
   })
   it('creates a Backlog task without reusing a draft number and makes it readable by ref', async () => {
@@ -123,5 +136,14 @@ describe('prototype mock API', () => {
     expect(task).toMatchObject({ title: 'New task', type: 'task', status: 'backlog', description: null })
     await expect(mockCall<Task>('GET', `/tasks/${task.ref}`)).resolves.toEqual(task)
     expect(events).toEqual([{ type: 'task.created', task }])
+  })
+
+  it('approves to the board, closes the thread and keeps it out of Resolved', async () => {
+    await mockCall('POST', '/plan/plans/plan-1/approve', { to: 'ready' })
+    const inbox = await mockCall<Inbox>('GET', '/inbox')
+    expect(inbox.needsYou.some(i => i.id === 's-1')).toBe(false)
+    expect(inbox.resolved.some(i => i.id === 's-1')).toBe(false)
+    await expect(mockCall<Task>('GET', '/tasks/COR-13')).resolves.toMatchObject({ status: 'ready' })
+    await expect(mockCall<PlanSessionDetail>('GET', '/plan/sessions/s-1')).resolves.toMatchObject({ closed: true })
   })
 })

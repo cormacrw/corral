@@ -55,7 +55,7 @@ const prLabel = computed(() => {
 const role = (r: InboxItem['sender']['role']) => r === 'system' ? 'System' : ROLE[r]
 const canAct = computed(() => props.selected !== null && props.selected.type !== 'activity' && !props.selected.resolution && !props.alreadyResolved)
 const tabs = computed(() => [
-  { label: 'Needs you', value: 'needsYou', icon: 'i-lucide-inbox', count: props.inbox?.needsYou.length ?? 0 },
+  { label: 'Needs you', value: 'needsYou', icon: 'i-lucide-inbox', count: props.inbox?.count ?? 0 },
   { label: 'Activity', value: 'activity', icon: 'i-lucide-activity', count: null },
   { label: 'Resolved', value: 'resolved', icon: 'i-lucide-circle-check', count: props.inbox?.resolved.length ?? 0 }
 ])
@@ -322,58 +322,39 @@ const tabs = computed(() => [
           :to="`/inbox/${item.id}`"
           class="flex gap-3 border-b border-default px-4 py-3 active:bg-elevated"
         >
-          <span
+          <PlanThreadRow
             v-if="item.type === 'plan_thread'"
-            class="flex size-10 shrink-0 items-center justify-center"
-            aria-hidden="true"
-          >
-            <span
-              class="size-3 rounded-full"
-              :style="{ background: item.project.thumbnailColor ?? 'var(--ui-primary)' }"
-            />
-          </span>
-          <AgentAvatar
-            v-else
-            :name="item.sender.name"
-            size="md"
+            :item="item"
           />
-          <span class="flex min-w-0 flex-1 flex-col gap-1">
-            <span class="flex items-center gap-2">
-              <span class="font-semibold text-highlighted">{{ item.type === 'plan_thread' ? item.project.name : item.sender.name }}</span>
-              <span class="ms-auto shrink-0 text-xs text-muted">{{ timeAgo(item.at) }}</span>
-            </span>
-            <span class="flex min-w-0 items-center gap-2 font-semibold text-highlighted">
-              <span
-                v-if="item.type === 'plan_thread' && item.unread"
-                class="size-2 shrink-0 rounded-full bg-primary"
-                aria-label="Unread"
-              />
-              <span class="min-w-0 break-words">{{ item.subject }}</span>
-            </span>
-            <span class="line-clamp-2 text-sm text-muted">{{ markdownToPlainText(item.preview) }}</span>
-            <span class="mt-0.5 flex items-center gap-2">
-              <UBadge
-                :label="item.type === 'plan_thread' ? 'Plan thread' : typeBadge(item.type).label"
-                :color="typeBadge(item.type).color"
-                variant="subtle"
-                size="sm"
-              />
-              <UBadge
-                v-if="item.type === 'plan_thread' && item.status !== 'none'"
-                :label="item.status === 'needs_approval' ? 'Needs approval' : 'Question'"
-                color="warning"
-                variant="subtle"
-                size="sm"
-              />
-              <span class="flex min-w-0 items-center gap-1 truncate text-xs text-muted">
-                <span
-                  class="size-2 shrink-0 rounded-full"
-                  :style="{ background: item.project.thumbnailColor ?? '#64748b' }"
-                  aria-hidden="true"
-                />{{ item.project.name }}{{ item.taskRef ? ` · ${item.taskRef}` : '' }}
+          <template v-else>
+            <AgentAvatar
+              :name="item.sender.name"
+              size="md"
+            />
+            <span class="flex min-w-0 flex-1 flex-col gap-1">
+              <span class="flex items-center gap-2">
+                <span class="font-semibold text-highlighted">{{ item.sender.name }}</span>
+                <span class="ms-auto shrink-0 text-xs text-muted">{{ timeAgo(item.at) }}</span>
+              </span>
+              <span class="font-semibold text-highlighted">{{ item.subject }}</span>
+              <span class="line-clamp-2 text-sm text-muted">{{ markdownToPlainText(item.preview) }}</span>
+              <span class="mt-0.5 flex items-center gap-2">
+                <UBadge
+                  :label="typeBadge(item.type).label"
+                  :color="typeBadge(item.type).color"
+                  variant="subtle"
+                  size="sm"
+                />
+                <span class="flex min-w-0 items-center gap-1 truncate text-xs text-muted">
+                  <span
+                    class="size-2 shrink-0 rounded-full"
+                    :style="{ background: item.project.thumbnailColor ?? '#64748b' }"
+                    aria-hidden="true"
+                  />{{ item.project.name }} · {{ item.taskRef }}
+                </span>
               </span>
             </span>
-          </span>
+          </template>
         </NuxtLink>
       </li>
       <li

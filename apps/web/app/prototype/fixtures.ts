@@ -7,6 +7,7 @@ import type {
   Evidence,
   GlobalStatus,
   Inbox,
+  InboxItem,
   PlanMessage,
   Plan,
   PlanSession,
@@ -417,6 +418,11 @@ export const pullRequests: PullRequestStatus[] = [
 
 export const planSessions: PlanSession[] = [
   {
+    id: 's-idle', projectId: 'p-corral', title: 'Explore keyboard shortcuts', runtime: 'codex',
+    preview: 'We can pick this up when you are ready.', unread: false, closed: false,
+    status: 'none', activeRunId: null, createdAt: ago(120), updatedAt: ago(90)
+  },
+  {
     id: 's-1', projectId: 'p-corral', title: 'Design tasks', runtime: 'claude-code',
     preview: 'Here is a plan with six tasks. Approve it to put them on the board.',
     unread: true, closed: false, status: 'needs_approval', activeRunId: null, createdAt: ago(60 * 26), updatedAt: ago(60 * 25)
@@ -444,6 +450,9 @@ export const planSessions: PlanSession[] = [
 ]
 
 export const planMessages: Record<string, PlanMessage[]> = {
+  's-idle': [
+    { id: 'm-idle', sessionId: 's-idle', role: 'pm', kind: 'message', text: 'We can pick this up when you are ready.', recommendation: null, options: null, planId: null, runId: null, createdAt: ago(90) }
+  ],
   's-1': [
     { id: 'm-1', sessionId: 's-1', role: 'human', kind: 'message', text: 'Plan design tasks: prototypes the human approves before the build.', recommendation: null, options: null, planId: null, runId: null, createdAt: ago(60 * 26) },
     { id: 'm-2', sessionId: 's-1', role: 'pm', kind: 'message', text: 'Here is a plan with six tasks. Approve it to put them on the board.', recommendation: null, options: null, planId: 'plan-1', runId: null, createdAt: ago(60 * 25) }
@@ -541,7 +550,7 @@ export const clis: CliStatus[] = [
 
 // The inbox is derived from the tasks above that need the human
 export function inbox(): Inbox {
-  const needsYou: Inbox['needsYou'] = tasks
+  const needsYou: InboxItem[] = tasks
     .filter(t => t.status === 'human_review' || t.status === 'blocked' || t.status === 'failed')
     .map((t) => {
       const project = projects.find(p => p.id === t.projectId)!
