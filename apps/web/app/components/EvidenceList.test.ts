@@ -2,6 +2,7 @@
 import type { Evidence, Review } from '@corral/contracts'
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
+import { defineComponent, h } from 'vue'
 import EvidenceList from './EvidenceList.vue'
 import MarkdownText from './MarkdownText.vue'
 
@@ -18,9 +19,11 @@ const review: Review = {
   author: { kind: 'agent', role: 'reviewer', runId: 'r' }, createdAt: new Date().toISOString(),
   criteria: [{ criterionId: 'c', met: true, note: 'Reviewer first' }]
 }
+// Nuxt UI is auto-imported in the app, so stand-ins are registered here
+const Stub = defineComponent({ props: { open: Boolean, title: String }, setup: p => () => h('div', { 'data-open': p.open, 'data-title': p.title }) })
 const render = (items = [...evidence('c'), ...evidence(null)]) => mount(EvidenceList, {
   props: { evidence: items, criteria: [{ id: 'c', text: 'Criterion', position: 0, met: true }], reviews: [review] },
-  global: { components: { MarkdownText }, stubs: { UIcon: true, UModal: true } }
+  global: { components: { MarkdownText, UIcon: Stub, UModal: Stub } }
 })
 
 describe('EvidenceList', () => {
@@ -49,7 +52,7 @@ describe('EvidenceList', () => {
     expect(html.indexOf('Reviewer first')).toBeLessThan(html.indexOf('screenshot.file'))
     expect(html.indexOf('request.file')).toBeLessThan(html.indexOf('Explained'))
     await humanButtons[0]!.trigger('click')
-    expect(wrapper.findAllComponents({ name: 'UModal' }).at(-1)!.attributes('open')).toBe('true')
+    expect(wrapper.get('[data-title="screenshot.file"]').attributes('data-open')).toBe('true')
   })
 
   it('leaves artifact-only main areas empty and distinguishes missing evidence', () => {
