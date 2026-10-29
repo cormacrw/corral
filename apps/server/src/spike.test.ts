@@ -204,7 +204,7 @@ describe('spikes deliver findings instead of a PR', () => {
     expect(row).toMatchObject({ status: 'ready_to_merge', mergedAt: null })
     expect((await commentsOf(project, task)).some(c => c.body.startsWith('## Findings'))).toBe(false)
     const transitions = await t.db.select().from(auditLog).where(and(eq(auditLog.taskId, task.id), eq(auditLog.action, 'task.transition')))
-    expect(transitions.map(e => e.detail.to)).toEqual(['ready', 'agent_review', 'ready_to_merge'])
+    expect(transitions.map(e => (e.detail as { to: string }).to)).toEqual(['ready', 'agent_review', 'ready_to_merge'])
     await pause(project)
   })
 })
