@@ -366,3 +366,22 @@ The UI specs are in [design/](design/README.md).
 **Consequences for the build:**
 - Anything new that starts work (a new kind of run, or server-side work the runner is involved in) must respect the hold and be counted in what `POST /api/update-hold` reports.
 - The hold endpoint sits on the same API as the rest of the app, behind Cloudflare Access. It needs proper auth when hosting arrives (D1).
+
+---
+
+## D17 — A mobile PWA layout, served by the same app
+
+**Status:** Accepted 2026-10-29. Brings into scope part of what PRD §3.2 lists as a non-goal ("Mobile applications").
+
+**Decision:** Corral gets a mobile UI for phones, as a layout of the existing web app (`apps/web`), not a separate app. The PRD's "Mobile applications or remote phone control" stays out of scope in every other sense.
+
+- **Same app, same server, same URLs:** the root (`app.vue`) decides whether the device is mobile or web and renders `layouts/mobile.vue` instead of the default layout. `/tasks/COR-1` is the same page in both. There is no separate mobile route tree, API or build.
+- **No native app:** it's installable as a PWA at most. No App Store or Play Store builds, and no push notifications in this decision.
+- **No new auth:** the phone reaches Corral the same way a laptop does, through Cloudflare Access (D12). Nothing is added for phones.
+- **Per device, not per user:** Auto / Desktop / Mobile is a browser preference in `localStorage`, like the sidebar state. It isn't stored on the server.
+
+**Why:** Most of what needs the human (Inbox items, approvals, Plan replies) is quick and happens away from the laptop. A layout of the same app keeps one codebase and one set of live state, and gets that without a second client to maintain.
+
+**Consequences for the build:**
+- Pages must work under both layouts. Use `useDevice()` to choose a mobile component; never fork a route.
+- The mobile screens arrive one group at a time (see [design/mobile.md](design/mobile.md)). Until then, a page reflows inside the mobile layout as well as it can.

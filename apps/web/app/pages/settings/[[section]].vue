@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Agent, CliStatus } from '@corral/contracts'
 import { api } from '~/composables/useApi'
+import { parseOverride } from '~/utils/device'
 import { ROLE, timeAgo } from '~/utils/labels'
 
 // Global settings (design/settings.md): profile, agents, runner, appearance
@@ -8,6 +9,7 @@ const route = useRoute()
 const live = useLive()
 const toast = useToast()
 const colorMode = useColorMode()
+const device = useDevice()
 const section = computed(() => (typeof route.params.section === 'string' ? route.params.section : 'profile'))
 useSeoMeta({ title: 'Settings · Corral' })
 
@@ -318,6 +320,22 @@ const items = [
               size="sm"
               :content="false"
               @update:model-value="colorMode.preference = String($event)"
+            />
+          </div>
+          <div class="mt-5 grid gap-2 sm:grid-cols-[1fr_320px]">
+            <div>
+              <span class="font-medium">Layout</span>
+              <p class="text-xs text-muted">
+                Auto uses the mobile layout on a phone or the installed app. Saved for this device only.
+              </p>
+            </div>
+            <UTabs
+              :model-value="device.override.value"
+              :items="[{ label: 'Auto', value: 'auto' }, { label: 'Desktop', value: 'desktop' }, { label: 'Mobile', value: 'mobile' }]"
+              size="sm"
+              :content="false"
+              data-testid="layout-override"
+              @update:model-value="device.setOverride(parseOverride($event))"
             />
           </div>
         </UCard>

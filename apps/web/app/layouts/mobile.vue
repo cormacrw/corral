@@ -1,0 +1,126 @@
+<script setup lang="ts">
+import { ROLE } from '~/utils/labels'
+
+// The mobile shell (D17, design/mobile.md): a header with the runner's
+// status, the page, and a five-tab bar. app.vue swaps it in for the
+// default layout on mobile; the URLs are the same as on the web.
+const live = useLive()
+const state = live.state
+const route = useRoute()
+
+// Pages read tasks from live state, as they do under the web shell
+watch(() => state.value.projects, (projects) => {
+  for (const project of projects) {
+    if (!state.value.tasks[project.id]) void live.loadTasks(project)
+  }
+}, { immediate: true })
+
+const planUnread = computed(() => state.value.planSessions.some(s => s.unread))
+const runnerColor = computed(() => !state.value.runner?.online ? 'error' : state.value.connection === 'open' ? 'success' : 'warning')
+
+const isActive = (...paths: string[]) => paths.some(path => route.path === path || route.path.startsWith(`${path}/`))
+
+const tabs = computed(() => [
+  { label: 'Home', icon: 'i-lucide-layout-grid', to: '/home', active: isActive('/home') || route.path === '/' },
+  { label: 'Plan', icon: 'i-lucide-message-square', to: '/plan', active: isActive('/plan'), dot: planUnread.value },
+  { label: 'Inbox', icon: 'i-lucide-inbox', to: '/inbox', active: isActive('/inbox'), badge: state.value.inboxCount },
+  // Tasks and epics belong to a project
+  { label: 'Projects', icon: 'i-lucide-folder', to: '/projects', active: isActive('/projects', '/tasks', '/epics') },
+  { label: 'Agents', icon: 'i-lucide-bot', to: '/agents', active: isActive('/agents') }
+])
+
+// The header names the page; later tasks give each screen its own header
+const title = computed(() => {
+  const [section, id] = route.path.split('/').filter(Boolean)
+  switch (section) {
+    case 'home': return 'Home'
+    case 'plan': return 'Plan'
+    case 'inbox': return 'Inbox'
+    case 'settings': return 'Settings'
+    case 'tasks': return id ?? 'Task'
+    case 'epics': return 'Epic'
+    case 'projects': return state.value.projects.find(p => p.slug === id)?.name ?? 'Projects'
+    case 'agents': {
+      const agent = state.value.agents.find(a => a.name.toLowerCase() === id)
+      return agent ? `${agent.name} · ${ROLE[agent.role]}` : 'Agents'
+    }
+    default: return 'Corral'
+  }
+})
+</script>
+
+<template>
+  <div class="flex h-svh flex-col bg-default text-default">
+    <header class="shrink-0 border-b border-default bg-default pt-[env(safe-area-inset-top)] ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]">
+      <div class="flex h-14 items-center gap-2 px-4">
+        <h1 class="min-w-0 flex-1 truncate text-xl font-semibold text-highlighted">
+          {{ title }}
+        </h1>
+        <span
+          class="flex shrink-0 items-center gap-1.5 text-xs text-muted"
+          data-testid="runner-status"
+        >
+          <span
+            :class="['size-2 rounded-full', runnerColor === 'success' ? 'bg-success' : runnerColor === 'warning' ? 'bg-warning' : 'bg-error']"
+            aria-hidden="true"
+          />
+          Runner {{ state.runner?.online ? 'online' : 'offline' }}
+        </span>
+        <UButton
+          to="/settings/profile"
+          icon="i-lucide-settings"
+          variant="ghost"
+          color="neutral"
+          aria-label="Settings"
+        />
+      </div>
+    </header>
+
+    <ShellBanners />
+
+    <!-- Pages without a mobile screen yet reflow in here as well as they can -->
+    <UDashboardGroup
+      class="relative inset-auto min-h-0 flex-1 overflow-x-auto *:min-h-0"
+      storage-key="mobile-dashboard"
+    >
+      <slot />
+    </UDashboardGroup>
+
+    <nav
+      aria-label="Main"
+      class="shrink-0 border-t border-default bg-default pb-[env(safe-area-inset-bottom)] ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]"
+    >
+      <ul class="grid grid-cols-5">
+        <li
+          v-for="tab in tabs"
+          :key="tab.to"
+        >
+          <NuxtLink
+            :to="tab.to"
+            :class="['flex h-14 flex-col items-center justify-center gap-0.5 text-xs', tab.active ? 'font-medium text-primary' : 'text-muted']"
+            :aria-current="tab.active ? 'page' : undefined"
+          >
+            <span class="relative">
+              <UIcon
+                :name="tab.icon"
+                class="size-6"
+              />
+              <span
+                v-if="tab.badge"
+                class="absolute -end-2.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-inverted"
+                :aria-label="`${tab.badge} open`"
+                data-testid="inbox-count"
+              >{{ tab.badge }}</span>
+              <span
+                v-else-if="tab.dot"
+                class="absolute -end-0.5 -top-0.5 size-2 rounded-full bg-primary"
+                aria-label="Unread"
+              />
+            </span>
+            {{ tab.label }}
+          </NuxtLink>
+        </li>
+      </ul>
+    </nav>
+  </div>
+</template>

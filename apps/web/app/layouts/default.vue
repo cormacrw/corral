@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { Project } from '@corral/contracts'
-import { api } from '~/composables/useApi'
 import { initials, isWorking, projectColor, ROLE, taskCounts } from '~/utils/labels'
 
 // The app shell (design/app-shell.md): global nav, projects, agents, runner
@@ -8,7 +7,6 @@ const live = useLive()
 const state = live.state
 const route = useRoute()
 const router = useRouter()
-const toast = useToast()
 
 const expanded = useLocalStorage<Record<string, boolean>>('corral.sidebar.projects', {})
 const toggle = (project: Project) => {
@@ -17,7 +15,6 @@ const toggle = (project: Project) => {
 const isExpanded = (project: Project) => expanded.value[project.id] ?? true
 
 const currentSlug = computed(() => typeof route.params.slug === 'string' ? route.params.slug : null)
-const currentProject = computed(() => state.value.projects.find(p => p.slug === currentSlug.value) ?? null)
 
 const counts = (project: Project) => taskCounts(state.value.tasks[project.id] ?? [])
 watch(() => state.value.projects, (projects) => {
@@ -28,21 +25,6 @@ watch(() => state.value.projects, (projects) => {
 
 const planUnread = computed(() => state.value.planSessions.some(s => s.unread))
 const runnerColor = computed(() => !state.value.runner?.online ? 'error' : state.value.connection === 'open' ? 'success' : 'warning')
-
-async function resume(project: Project) {
-  try {
-    await api.projects.patch(project.slug, { paused: false })
-  } catch (error) {
-    toast.add({ title: 'Could not resume', description: error instanceof Error ? error.message : String(error), color: 'error' })
-  }
-}
-async function resumeAll() {
-  try {
-    await api.resumeAll()
-  } catch (error) {
-    toast.add({ title: 'Could not resume', description: error instanceof Error ? error.message : String(error), color: 'error' })
-  }
-}
 
 const searchOpen = ref(false)
 const searchGroups = computed(() => [{
@@ -79,53 +61,7 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
 
 <template>
   <div class="flex h-svh flex-col bg-default text-default">
-    <UAlert
-      v-if="state.status.stopped"
-      color="error"
-      variant="solid"
-      icon="i-lucide-octagon-x"
-      title="Corral is stopped. No runs will start until you resume."
-      :ui="{ root: 'shrink-0 rounded-none py-2' }"
-      orientation="horizontal"
-      :actions="[{ label: 'Resume everything', color: 'neutral', variant: 'solid', onClick: resumeAll }]"
-    />
-    <UAlert
-      v-else-if="state.status.updating"
-      color="info"
-      variant="subtle"
-      icon="i-lucide-download"
-      title="Corral is updating. Running work will finish first; new runs start once the update is done."
-      :ui="{ root: 'shrink-0 rounded-none py-2' }"
-      orientation="horizontal"
-    />
-    <UAlert
-      v-else-if="currentProject?.paused"
-      color="warning"
-      variant="solid"
-      icon="i-lucide-pause"
-      :title="`${currentProject.name} is paused. No new runs will start; work already running will finish.`"
-      :ui="{ root: 'shrink-0 rounded-none py-2' }"
-      orientation="horizontal"
-      :actions="[{ label: 'Resume', color: 'neutral', variant: 'solid', onClick: () => resume(currentProject!) }]"
-    />
-    <UAlert
-      v-else-if="state.loaded && !state.runner?.online"
-      color="warning"
-      variant="subtle"
-      icon="i-lucide-server-off"
-      title="The runner is offline. Plan and live runs are unavailable until it reconnects."
-      :ui="{ root: 'shrink-0 rounded-none py-2' }"
-      orientation="horizontal"
-    />
-    <UAlert
-      v-else-if="state.connection === 'reconnecting'"
-      color="neutral"
-      variant="subtle"
-      icon="i-lucide-refresh-cw"
-      title="Reconnecting to Corral…"
-      :ui="{ root: 'shrink-0 rounded-none py-2' }"
-      orientation="horizontal"
-    />
+    <ShellBanners />
 
     <UDashboardGroup>
       <UDashboardSidebar
