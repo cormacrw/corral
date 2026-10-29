@@ -28,6 +28,11 @@ const outcomes: Record<AgentRole, readonly string[]> = {
   pm: []
 }
 
+interface ToolDefinition {
+  description: string
+  input: z.ZodRawShape
+}
+
 const toolDefinitions = {
   get_task: {
     description: 'The task you are working on: title, description, acceptance criteria with their IDs, comments and evidence attached so far.',
@@ -105,7 +110,20 @@ const toolDefinitions = {
     description: 'Create a documentation task when the wiki or CORRAL.md no longer matches the code.',
     input: { title: z.string().min(1), description: z.string().min(1) }
   }
-} satisfies Record<AgentTool, { description: string, input: z.ZodRawShape }>
+} satisfies Record<AgentTool, ToolDefinition>
+
+// Where a role's tool differs: the PM reads any task in the project by ref,
+// while developers and reviewers only ever read their own
+const roleToolDefinitions: Record<AgentRole, Partial<Record<AgentTool, ToolDefinition>>> = {
+  developer: {},
+  reviewer: {},
+  pm: {
+    get_task: {
+      description: 'Read any task in this project by ref: title, description, acceptance criteria with their IDs, status, epic, dependencies and comments.',
+      input: { taskRef: z.string().describe('e.g. COR-12') }
+    }
+  }
+}
 
 export const ROLE_TOOLS: Record<AgentRole, AgentTool[]> = {
   developer: ['get_task', 'add_comment', 'attach_evidence', 'report_outcome'],
@@ -158,7 +176,7 @@ export class ToolServer {
     // initialise again without a session clash
     const server = new McpServer({ name: 'corral', version: '1' })
     for (const name of ROLE_TOOLS[route.role]) {
-      const definition = toolDefinitions[name]
+      const definition = roleToolDefinitions[route.role][name] ?? toolDefinitions[name]
       server.registerTool(name, { description: definition.description, inputSchema: definition.input }, async (input: Record<string, unknown>) => {
         const outcome = await route.handler(name, input).catch((error: unknown): ToolOutcome => ({ ok: false, error: error instanceof Error ? error.message : String(error) }))
         return toContent(outcome)
