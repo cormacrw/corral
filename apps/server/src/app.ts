@@ -37,6 +37,7 @@ import { streamSSE } from 'hono/streaming'
 import type { ZodType } from 'zod'
 import { ApiFailure, fromDatabaseError } from './errors.ts'
 import { checkThumbnail, readThumbnail, THUMBNAIL_MAX_BYTES } from './thumbnails.ts'
+import { byteRange } from './byte-range.ts'
 import { createAttachment, readAttachment } from './attachments.ts'
 import { approveDesign, DESIGN_BUNDLE_HEADERS, listDesignVersions, readDesignFile, readDesignScreenshot } from './designs.ts'
 import { checkAvatar, getProfile, patchProfile, readAvatar, setAgentAvatar, setUserAvatar } from './avatars.ts'
@@ -405,16 +406,30 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     })
 
     .get('/evidence/:id/file', async (c) => {
+      c.header('accept-ranges', 'bytes')
       const [row] = await db.select().from(schema.evidence).where(eq(schema.evidence.id, c.req.param('id')))
       // A note has no file
       const data = row?.blob ? await blobs.get(row.blob) : null
       if (!row || !data) throw new ApiFailure(404, { code: 'not_found' })
-      return c.body(new Uint8Array(data), 200, {
+      const headers = {
         'content-type': row.contentType!,
         // Blobs are immutable, so they can be cached forever
         'cache-control': 'private, max-age=31536000, immutable',
         'content-disposition': `inline; filename="${row.fileName!.replace(/"/g, '')}"`
-      })
+      }
+      const range = byteRange(c.req.header('range'), data.byteLength)
+      if (range === 'unsatisfiable') {
+        return c.body(null, 416, { ...headers, 'content-range': `bytes */${data.byteLength}`, 'content-length': '0' })
+      }
+      if (range) {
+        const { start, end } = range
+        return c.body(new Uint8Array(data.subarray(start, end + 1)), 206, {
+          ...headers,
+          'content-range': `bytes ${start}-${end}/${data.byteLength}`,
+          'content-length': String(end - start + 1)
+        })
+      }
+      return c.body(new Uint8Array(data), 200, { ...headers, 'content-length': String(data.byteLength) })
     })
 
     .get('/agents', async c => c.json(await listAgents(db)))
