@@ -107,7 +107,9 @@ describe('orchestrator', () => {
     expect(job.prompt).toContain('## Attached images')
     expect(job.prompt).toContain(`- ${mockup.id}: "mockup.png" in the description, a comment by`)
     expect(job.prompt).toMatch(new RegExp(`- ${bug.id}: "bug.png" in a comment by \\S+`))
-    expect(job.prompt).not.toContain(foreign.id)
+    // The description keeps the human's raw attachment reference, but only
+    // this project's images may be advertised as available to the agent.
+    expect(job.prompt).not.toContain(`- ${foreign.id}:`)
     const read = await runner.call(job.runId, job.leaseEpoch, 'get_task', {})
     expect(read).toMatchObject({
       ok: true,
