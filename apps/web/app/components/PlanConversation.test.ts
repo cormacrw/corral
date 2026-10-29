@@ -154,6 +154,10 @@ describe('Inbox shared Plan conversation', () => {
   it('approves with one tap on phones and signals advancement', async () => {
     document.body.innerHTML = '<div id="mobile-header-actions"></div>'
     const wrapper = await open('s-1', true)
+    expect(flyout.openPlan).not.toHaveBeenCalled()
+    expect(wrapper.findAll('button').some(b => b.text() === 'Approve to board')).toBe(true)
+    await wrapper.get('[data-testid="plan-pill"]').trigger('click')
+    expect(flyout.openPlan).toHaveBeenCalledOnce()
     vi.mocked(api.plan.approve).mockResolvedValue({ ...detail().plans[0]!, status: 'approved' as const })
     await wrapper.findAll('button').find(b => b.text() === 'Approve to Backlog')!.trigger('click')
     await flushPromises()
