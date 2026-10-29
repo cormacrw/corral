@@ -103,6 +103,7 @@ const dotClass = (status: TaskStatus) => ({
           size="sm"
           class="font-mono"
         />
+        <DesignChangedBadge :design="props.task.design" />
       </span>
 
       <UTooltip

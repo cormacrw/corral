@@ -304,7 +304,8 @@ export class RunManager {
     const instructions = await readRoleInstructions(worktree, job.role)
     // Only the PM gets the brief; other roles' prompts are unchanged
     const brief = job.role === 'pm' ? await readProjectBrief(worktree) : ''
-    const systemPrompt = `${instructions}\n\n${brief ? `${brief}\n\n` : ''}${runnerNotes(run, job)}`
+    const design = job.designPinned ? await this.#savePinnedDesign(run) : null
+    const systemPrompt = `${instructions}\n\n${brief ? `${brief}\n\n` : ''}${runnerNotes(run, job, design)}`
 
     run.timeoutTimer = setTimeout(() => this.stop(job.runId, 'timed_out', `${job.timeoutSeconds} s`), job.timeoutSeconds * 1000)
 
@@ -629,6 +630,21 @@ export class RunManager {
     })
   }
 
+  // D20: a build task's developer and reviewer get the pinned design version
+  // as read-only files in the scratch folder, outside the worktree, before
+  // the agent starts. Returns the note naming them, or why they're missing.
+  async #savePinnedDesign(run: ActiveRun): Promise<string> {
+    const fetched = await this.#forward(run, 'get_design', { taskRef: run.job.taskRef })
+    const saved = fetched.ok ? await saveDesign(run.scratchDir, fetched.result as Parameters<typeof saveDesign>[1]) : fetched
+    if (!saved.ok) {
+      this.#note(run, `Could not save the pinned design: ${saved.error}`)
+      return `- The pinned design could not be saved (${saved.error}). Fetch it with get_design and taskRef "${run.job.taskRef}".`
+    }
+    const design = saved.result as { taskRef: string, version: number, branch: string, dir: string, specPath: string, bundle: { index: string } }
+    this.#note(run, `Saved design v${design.version} of ${design.taskRef} in ${design.dir}`)
+    return `- The pinned design, v${design.version} of ${design.taskRef}, is saved read-only in ${design.dir}, outside the repository: the spec at ${design.specPath}, the screenshots in ${join(design.dir, 'screenshots')} and the prototype's bundle at ${design.bundle.index}. It was built on branch ${design.branch}, for reference only.`
+  }
+
   // Reads the file the agent attached and sends it as base64. Files must
   // live outside the repository: the scratch folder is the usual place.
   async #readEvidence(run: ActiveRun, input: Record<string, unknown>): Promise<ToolOutcome> {
@@ -653,7 +669,7 @@ export class RunManager {
 }
 
 // Machine-specific details the agent needs, kept out of RunJob (PRD §8.5)
-function runnerNotes(run: ActiveRun, job: RunJob): string {
+function runnerNotes(run: ActiveRun, job: RunJob, design: string | null = null): string {
   return [
     '## Corral runner notes',
     '',
@@ -662,6 +678,7 @@ function runnerNotes(run: ActiveRun, job: RunJob): string {
     job.role === 'developer' && job.branch ? `- You are in a git worktree on branch ${job.branch}. Pushing is disabled; Corral pushes when you ${job.taskType === 'design' ? 'call submit_design' : 'report'}.` : '',
     // A spike (D19): findings, not commits
     job.role === 'developer' && !job.branch ? '- You are in a detached checkout of the default branch for a spike. Don\'t commit or push; report your findings.' : '',
+    design ?? '',
     `- This run has a time limit of ${Math.round(job.timeoutSeconds / 60)} minutes.`
   ].filter(Boolean).join('\n')
 }

@@ -155,9 +155,10 @@ const epicOptions = computed(() => epics.value.map(id => ({ id, label: epicLabel
                   @click="flyout.toggle(task.ref)"
                 >
                   <span class="flex items-center gap-2 text-xs">
-                    <span class="font-mono text-muted">{{ task.ref }}</span>
+                    <span class="shrink-0 font-mono text-muted">{{ task.ref }}</span>
                     <span :class="task.priority === 'urgent' ? 'text-error' : task.priority === 'high' ? 'text-warning' : 'text-muted'">{{ PRIORITY[task.priority].label }}</span>
                     <TaskTypeBadge :type="task.type" />
+                    <DesignChangedBadge :design="task.design" />
                     <a
                       v-if="task.prUrl"
                       :href="task.prUrl"

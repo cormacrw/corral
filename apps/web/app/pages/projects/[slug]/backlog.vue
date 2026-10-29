@@ -230,6 +230,7 @@ async function newTask() {
                 >
                   <span class="w-14 shrink-0 font-mono text-xs text-muted">{{ task.ref }}</span>
                   <TaskTypeBadge :type="task.type" />
+                  <DesignChangedBadge :design="task.design" />
                   <span class="min-w-0 flex-1 truncate">
                     {{ task.title }}
                     <UBadge

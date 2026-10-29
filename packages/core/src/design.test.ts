@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { approveDesignVersion, nextDesignVersion, type DesignVersionState } from './design.ts'
+import { approveDesignVersion, isDesignPinStale, nextDesignVersion, type DesignVersionState } from './design.ts'
 import { requiresHumanReview, TASK_TYPES } from './task.ts'
 
 const versions = (...statuses: DesignVersionState['status'][]): (DesignVersionState & { id: string })[] =>
@@ -60,5 +60,26 @@ describe('design task type (D20)', () => {
     expect(requiresHumanReview('design', true)).toBe(true)
     expect(requiresHumanReview('task', false)).toBe(false)
     expect(requiresHumanReview('bug', true)).toBe(true)
+  })
+})
+
+describe('isDesignPinStale (D20)', () => {
+  const pinnedToV1 = { version: 1, latestApproved: 2 }
+
+  it('flags Draft, Backlog and Ready tasks pinned to an older version than the approved one', () => {
+    for (const status of ['draft', 'backlog', 'ready']) expect(isDesignPinStale(pinnedToV1, { status, started: false })).toBe(true)
+  })
+
+  it('leaves tasks that have started alone, whatever their status', () => {
+    for (const status of ['in_progress', 'agent_review', 'human_review', 'ready_to_merge', 'merged', 'blocked', 'failed']) {
+      expect(isDesignPinStale(pinnedToV1, { status, started: true })).toBe(false)
+      expect(isDesignPinStale(pinnedToV1, { status, started: false })).toBe(false)
+    }
+    expect(isDesignPinStale(pinnedToV1, { status: 'ready', started: true })).toBe(false)
+  })
+
+  it('does not flag a pin to the approved version', () => {
+    expect(isDesignPinStale({ version: 2, latestApproved: 2 }, { status: 'ready', started: false })).toBe(false)
+    expect(isDesignPinStale({ version: 2, latestApproved: null }, { status: 'ready', started: false })).toBe(false)
   })
 })

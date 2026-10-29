@@ -5,6 +5,7 @@ import {
   createTask as createTaskState,
   DEPENDENCY_DELETED_REASON,
   deletionFor,
+  isDesignPinStale,
   requiresHumanReview,
   richTextToPlainText,
   taskRef,
@@ -16,11 +17,11 @@ import {
   type TaskStatus
 } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, max, ne, sql } from 'drizzle-orm'
 import { ApiFailure, notFound } from './errors.ts'
 import { toReview } from './runs.ts'
 
-const { acceptanceCriteria, auditLog, comments, designVersions, epics, projects, reviews, taskDependencies, taskDesignPins, tasks } = schema
+const { acceptanceCriteria, auditLog, comments, designVersions, epics, projects, reviews, runs, taskDependencies, taskDesignPins, tasks } = schema
 
 type TaskRow = typeof tasks.$inferSelect
 type ProjectRow = typeof projects.$inferSelect
@@ -55,18 +56,21 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
   // Newest first, so the first row per task is its latest review
   const reviewRows = await db.select().from(reviews).where(inArray(reviews.taskId, ids)).orderBy(desc(reviews.createdAt))
   const pins = await db
-    .select({ taskId: taskDesignPins.taskId, screens: taskDesignPins.screens, version: designVersions.version, number: tasks.number })
+    .select({ taskId: taskDesignPins.taskId, screens: taskDesignPins.screens, version: designVersions.version, designTaskId: designVersions.taskId, number: tasks.number })
     .from(taskDesignPins)
     .innerJoin(designVersions, eq(designVersions.id, taskDesignPins.designVersionId))
     .innerJoin(tasks, eq(tasks.id, designVersions.taskId))
     .where(inArray(taskDesignPins.taskId, ids))
+  const { latestApproved, started } = await pinStaleness(db, pins.map(p => p.designTaskId), ids)
 
   return rows.map((row) => {
     const latest = reviewRows.find(r => r.taskId === row.id) ?? null
     // A verdict only describes the commit it was given for
     const current = latest && latest.headSha === row.headSha ? latest : null
     const pin = pins.find(p => p.taskId === row.id)
-    const design = pin ? { taskRef: taskRef(project.prefix, pin.number), version: pin.version, screens: pin.screens } : null
+    const newest = pin ? latestApproved.get(pin.designTaskId) ?? null : null
+    const stale = pin && isDesignPinStale({ version: pin.version, latestApproved: newest }, { status: row.status, started: started.has(row.id) })
+    const design = pin ? { taskRef: taskRef(project.prefix, pin.number), version: pin.version, screens: pin.screens, newerVersion: stale ? newest : null } : null
     return toTask(project, row, criteria, dependencies, latest, current, design)
   })
 }
@@ -124,6 +128,20 @@ export async function loadTask(db: Executor, taskId: string): Promise<Task> {
     .where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt)))
   if (!found) throw notFound()
   return (await toTasks(db, found.project, [found.task]))[0]!
+}
+
+// What decides whether pins are stale (D20): each design's latest approved
+// version, and which of the tasks have had a run
+export async function pinStaleness(db: Executor, designTaskIds: string[], taskIds: string[]): Promise<{ latestApproved: Map<string, number>, started: Set<string> }> {
+  const latestApproved = new Map<string, number>()
+  const started = new Set<string>()
+  if (designTaskIds.length === 0) return { latestApproved, started }
+  const approved = await db.select({ taskId: designVersions.taskId, version: max(designVersions.version) }).from(designVersions)
+    .where(and(inArray(designVersions.taskId, [...new Set(designTaskIds)]), eq(designVersions.status, 'approved'))).groupBy(designVersions.taskId)
+  for (const a of approved) if (a.version !== null) latestApproved.set(a.taskId, a.version)
+  const ran = await db.selectDistinct({ taskId: runs.taskId }).from(runs).where(inArray(runs.taskId, taskIds))
+  for (const r of ran) if (r.taskId) started.add(r.taskId)
+  return { latestApproved, started }
 }
 
 // Pins a build task to a design version and its screens (D20), or unpins it

@@ -32,3 +32,13 @@ export function approveDesignVersion<V extends DesignVersionState>(versions: rea
     })
   }
 }
+
+// A build task's pin goes stale when a newer version of its design is
+// approved before the task has started (D20): it's Draft, Backlog or Ready
+// with no run yet. Tasks that have started keep the version they pinned.
+export const STALE_PIN_STATUSES = ['draft', 'backlog', 'ready'] as const
+
+export function isDesignPinStale(pin: { version: number, latestApproved: number | null }, task: { status: string, started: boolean }): boolean {
+  return pin.latestApproved !== null && pin.latestApproved > pin.version
+    && (STALE_PIN_STATUSES as readonly string[]).includes(task.status) && !task.started
+}

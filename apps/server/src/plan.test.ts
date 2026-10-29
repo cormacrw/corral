@@ -532,7 +532,7 @@ describe('plan sessions', () => {
     expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ title: 'Login form', design: pin }, { title: 'API' }]))).toMatchObject({ ok: true })
     const [v1] = (await session(created.id)).plans
     const [form, api] = v1!.tasks
-    expect((await getTask(form!.ref!)).design).toEqual({ taskRef: design.ref, version: 2, screens: ['login', 'login-error'] })
+    expect((await getTask(form!.ref!)).design).toEqual({ taskRef: design.ref, version: 2, screens: ['login', 'login-error'], newerVersion: null })
     expect((await getTask(api!.ref!)).design).toBeNull()
 
     // An unchanged revision keeps the pin and counts the task as unchanged
@@ -574,7 +574,7 @@ describe('plan sessions', () => {
     await endTurn(next, 'Proposed.')
     const [v1] = (await session(created.id)).plans
     expect(await t.request('POST', `/api/plan/plans/${v1!.id}/approve`, { to: 'backlog' }).then(r => r.status)).toBe(200)
-    expect((await getTask(target.ref)).design).toEqual({ taskRef: design.ref, version: 2, screens: ['login'] })
+    expect((await getTask(target.ref)).design).toEqual({ taskRef: design.ref, version: 2, screens: ['login'], newerVersion: null })
   })
 
   it('creates flag_stale_docs tasks with type task', async () => {

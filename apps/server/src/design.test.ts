@@ -10,7 +10,7 @@ import { bundleHasRootIndex } from './designs.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './test-runner.ts'
 
-const { agents, auditLog, designVersions, planMessages, planSessions, runs, tasks } = schema
+const { agents, auditLog, designVersions, planMessages, planSessions, runs, taskDesignPins, tasks } = schema
 
 // A tar of the files, as the runner packs a bundle
 function tarball(files: Record<string, string>): Buffer {
@@ -289,6 +289,111 @@ describe('design tasks submit versions instead of a PR', () => {
     expect(await t.db.select().from(planMessages).where(eq(planMessages.sessionId, session!.id))).toHaveLength(1)
     expect(await t.db.select().from(runs).where(and(eq(runs.planSessionId, session!.id), eq(runs.role, 'pm')))).toHaveLength(1)
     expect((await versionsOf(task))[0]).toMatchObject({ planSessionId: session!.id })
+  })
+
+  // D20: build tasks pinned to a design get its files and the instructions
+  // to compare their build with the prototype; a newer approved version
+  // flags the ones that haven't started
+  describe('build tasks pinned to a design', () => {
+    async function approvedV1() {
+      const { project, task } = await approved()
+      const developer = await nextJob(task, 'developer')
+      await submit(project, developer, task, 'd1')
+      await review(task)
+      await pause(project)
+      expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/designs/1/approve`)).status).toBe(200)
+      const [v1] = await versionsOf(task)
+      return { project, design: task, v1: v1! }
+    }
+
+    async function buildTask(project: Project, v1: { id: string }, title: string, status: Task['status'], ran: boolean) {
+      const created = await t.createTask(project.slug, { title, acceptanceCriteria: ['Matches the design'] })
+      await t.db.insert(taskDesignPins).values({ taskId: created.id, designVersionId: v1.id, screens: ['login', 'login-error'] })
+      await t.db.update(tasks).set({ status }).where(eq(tasks.id, created.id))
+      if (ran) {
+        const [agent] = await t.db.select().from(agents).where(eq(agents.role, 'developer')).limit(1)
+        await t.db.insert(runs).values({ agentId: agent!.id, projectId: project.id, taskId: created.id, role: 'developer', state: 'completed' })
+      }
+      return created
+    }
+
+    it('gives the developer and reviewer the pinned version, its branch and the side-by-side evidence instruction', async () => {
+      const { project, design, v1 } = await approvedV1()
+      const build = await buildTask(project, v1, 'Build the login screen', 'backlog', false)
+      expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${build.number}/transitions`, { type: 'approve' })).status).toBe(200)
+      await t.db.update(schema.projects).set({ paused: false }).where(eq(schema.projects.id, project.id))
+
+      const developer = await nextJob(build, 'developer')
+      expect(developer).toMatchObject({ designPinned: true, taskType: 'task' })
+      expect(developer.prompt).toContain(`design v1 of ${design.ref}`)
+      expect(developer.prompt).toContain('`login`, `login-error`')
+      expect(developer.prompt).toContain(`branch \`design/${design.ref}\` at commit d1`)
+      expect(developer.prompt).toContain('read-only files')
+      expect(developer.prompt).toContain('side by side')
+      // The runner fetches the pinned version by the build task's own ref
+      expect(await runner.call(developer.runId, developer.leaseEpoch, 'get_design', { taskRef: build.ref }))
+        .toMatchObject({ ok: true, result: { taskRef: design.ref, version: 1, branch: `design/${design.ref}`, pinnedScreens: ['login', 'login-error'], spec: SPEC.trim() } })
+
+      t.github.setBranch(project.repository, developer.branch!, 'b1')
+      for (const criterion of build.acceptanceCriteria) {
+        expect(await runner.call(developer.runId, developer.leaseEpoch, 'attach_evidence', {
+          criterionId: criterion.id, kind: 'screenshot', note: 'login: build beside prototype', fileName: 'login-side-by-side.png', contentType: 'image/png', dataBase64: Buffer.from('png').toString('base64')
+        })).toMatchObject({ ok: true })
+      }
+      expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', summary: 'Login screen', headSha: 'b1' })).toMatchObject({ ok: true })
+      await runner.next('run.stop', m => m.runId === developer.runId)
+      const reviewer = await nextJob(build, 'reviewer')
+      expect(reviewer).toMatchObject({ designPinned: true })
+      expect(reviewer.prompt).toContain(`design v1 of ${design.ref}`)
+      expect(reviewer.prompt).toContain('matching prototype screenshots')
+      await pause(project)
+
+      // Unpinned tasks get neither
+      const plain = await approved({ title: 'Plain', type: 'task', acceptanceCriteria: ['Works'] })
+      const job = await nextJob(plain.task, 'developer')
+      expect(job).toMatchObject({ designPinned: false })
+      expect(job.prompt).not.toContain('## Design')
+      await pause(plain.project)
+    })
+
+    it('approving v2 flags Draft, Backlog and Ready tasks pinned to v1 but not started or merged ones, and tells the PM', async () => {
+      const { project, design, v1 } = await approvedV1()
+      const ready = await buildTask(project, v1, 'Login form', 'ready', false)
+      const backlog = await buildTask(project, v1, 'Login error state', 'backlog', false)
+      const draft = await buildTask(project, v1, 'Forgot password link', 'draft', false)
+      const inProgress = await buildTask(project, v1, 'Login API wiring', 'in_progress', true)
+      const merged = await buildTask(project, v1, 'Login layout', 'merged', true)
+      // Ready again after a run, so it has started
+      const restarted = await buildTask(project, v1, 'Login copy', 'ready', true)
+
+      const pinOf = async (task: Task) => (await full(project, task)).design
+      expect(await pinOf(ready)).toEqual({ taskRef: design.ref, version: 1, screens: ['login', 'login-error'], newerVersion: null })
+
+      // The human reopens the design and v2 is submitted and reviewed
+      await t.db.update(tasks).set({ status: 'human_review' }).where(eq(tasks.id, design.id))
+      await t.db.insert(designVersions).values({ taskId: design.id, version: 2, bundleBlob: v1.bundleBlob, specBlob: v1.specBlob, screenshots: v1.screenshots, branch: v1.branch, commitSha: 'd2' })
+      expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${design.number}/designs/2/approve`)).status).toBe(200)
+      expect((await versionsOf(design)).map(v => v.status)).toEqual(['superseded', 'approved'])
+
+      // Unstarted tasks are flagged; started and merged ones keep v1 untouched
+      for (const task of [ready, backlog, draft]) expect(await pinOf(task)).toMatchObject({ version: 1, newerVersion: 2 })
+      for (const task of [inProgress, merged, restarted]) expect(await pinOf(task)).toMatchObject({ version: 1, newerVersion: null })
+      // The board shows the flag too
+      const board = await t.request('GET', `/api/projects/${project.slug}/tasks`).then(r => r.json()) as Task[]
+      expect(board.find(x => x.id === ready.id)?.design).toMatchObject({ newerVersion: 2 })
+
+      // The PM is told in v2's Plan session
+      const [v2] = (await versionsOf(design)).slice(1)
+      const [message] = await t.db.select().from(planMessages).where(eq(planMessages.sessionId, v2!.planSessionId!))
+      expect(message!.text).toContain(`design v2 of ${design.ref}`)
+      for (const task of [ready, backlog, draft]) expect(message!.text).toContain(`${task.ref} "${task.title}"`)
+      expect(message!.text).toContain('design changed: v1 → v2')
+      for (const task of [inProgress, merged, restarted]) expect(message!.text).not.toContain(task.ref)
+
+      // Repinning to v2 clears the flag
+      await t.db.update(taskDesignPins).set({ designVersionId: v2!.id }).where(eq(taskDesignPins.taskId, ready.id))
+      expect(await pinOf(ready)).toMatchObject({ version: 2, newerVersion: null })
+    })
   })
 
   it('refuses to approve while the runner is offline, so the build is never left unplanned', async () => {

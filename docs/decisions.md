@@ -506,6 +506,7 @@ The bundle, spec and screenshots are content-addressed blobs and the database st
 
 - **Approving a version starts a Plan session** for the build, in the task's project. The server opens it with a message that links the design task and the approved version. The message is the human's: the approval is what triggers it.
 - The PM reads the version with `get_design` and proposes the build with `propose_plan` as usual. It **may split the build across several epics**. Each build task **pins the design version and the screens it covers** (screen ids from `design.md`), and its developer reads them with `get_design`.
+- **Build tasks get the pinned version as files.** Before a pinned task's developer or reviewer starts, the runner fetches the version with `get_design` and saves its `design.md`, screenshots and extracted bundle **read-only in the run's scratch folder, outside the worktree**. The prompt names the design branch for reference only: it's never checked out or merged. The developer attaches, per screen it builds, a screenshot of the build **side by side with the matching prototype screenshot** as evidence, and the reviewer compares them.
 - The plan is approved by the human as any other plan (D9). Build tasks are normal `task`s, open PRs and merge.
 
 ### Changes after planning
