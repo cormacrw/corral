@@ -89,6 +89,7 @@ export async function listAgents(db: Executor): Promise<Agent[]> {
     runtime: a.runtime,
     concurrency: a.concurrency,
     paused: a.paused,
+    wakeIntervalSeconds: a.wakeIntervalSeconds,
     pausedUntil: a.pausedUntil?.toISOString() ?? null,
     activeRuns: active.find(x => x.agentId === a.id)?.n ?? 0,
     avatarUrl: avatarUrl(`agents/${a.id}`, a.avatarBlob)
@@ -120,14 +121,15 @@ export async function createAgent(db: Executor, input: CreateAgentInput, actor: 
   return (await listAgents(db)).find(a => a.id === row!.id)!
 }
 
-// Agent pause, concurrency and runtime (PRD §7.11 control panel, design/settings.md)
+// Agent pause, concurrency, wake interval and runtime (PRD §7.11 control panel, design/settings.md)
 export async function patchAgent(db: Executor, agentId: string, input: PatchAgentInput, actor: Actor): Promise<Agent> {
   await db.transaction(async (tx) => {
     // Locked like claimNextTask does, so no run starts while the runtime changes
     const [current] = await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')
     if (!current) throw notFound()
-    // PM turns are limited only to one per Plan session (D9, D13)
-    if (input.concurrency !== undefined && current.role === 'pm') throw new ApiFailure(400, { code: 'concurrency_not_applicable' })
+    // PM turns are limited only to one per Plan session (D9, D13), and start
+    // when the human writes, never on the tick
+    if ((input.concurrency !== undefined || input.wakeIntervalSeconds !== undefined) && current.role === 'pm') throw new ApiFailure(400, { code: 'concurrency_not_applicable' })
     if (input.runtime !== undefined && input.runtime !== current.runtime) {
       // A queued or running run was started for the old runtime
       const [active] = await tx.select({ n: count() }).from(runs)

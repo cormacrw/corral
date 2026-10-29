@@ -191,6 +191,9 @@ export const agents = pgTable('agents', {
   // Applies across all projects (D13)
   concurrency: integer().notNull().default(1),
   paused: boolean().notNull().default(false),
+  // The periodic tick starts work for this agent at most this often; events
+  // such as plan approval still start it right away. Null means every tick.
+  wakeIntervalSeconds: integer(),
   // Set when a usage limit is hit; the group resumes after it (D3)
   pausedUntil: timestamp({ withTimezone: true }),
   // Profile picture: a blob hash and its image type, or none
@@ -198,7 +201,10 @@ export const agents = pgTable('agents', {
   avatarContentType: text(),
   createdAt: createdAt(),
   updatedAt: updatedAt()
-}, t => [check('agents_concurrency_positive', sql`${t.concurrency} > 0`)])
+}, t => [
+  check('agents_concurrency_positive', sql`${t.concurrency} > 0`),
+  check('agents_wake_interval_positive', sql`${t.wakeIntervalSeconds} > 0`)
+])
 
 // One agent session (PRD §4.5). PM turns have no task.
 export const runs = pgTable('runs', {

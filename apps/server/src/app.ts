@@ -139,7 +139,7 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
         return null
     }
     const task = await publishTask(taskId)
-    orchestrator.poke()
+    orchestrator.poke([taskId])
     return task
   }
 
@@ -272,7 +272,7 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       const task = await loadTask(db, taskId)
       events.publish({ type: 'task.updated', task })
       // Approval triggers an immediate scheduler check (flows.md step 1)
-      orchestrator.poke()
+      orchestrator.poke([taskId])
       return c.json(task)
     })
 
@@ -298,7 +298,7 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       const project = await findProjectBySlug(db, c.req.param('slug'))
       const taskId = await findTaskId(db, project.id, taskNumber(c.req.param('number')))
       await orchestrator.merges.humanApprove(taskId, actor)
-      orchestrator.poke()
+      orchestrator.poke([taskId])
       return c.json(await publishTask(taskId))
     })
 
@@ -471,7 +471,7 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       const parsed = approvePlanInput.safeParse(await c.req.json().catch(() => ({})))
       if (!parsed.success) throw new ApiFailure(400, { code: 'invalid_input', issues: parsed.error.issues.map(i => ({ path: i.path.map(String), message: i.message })) })
       const plan = await plans.approve(c.req.param('id'), actor, parsed.data.to)
-      orchestrator.poke()
+      orchestrator.poke(plan.tasks.flatMap(t => t.taskId ? [t.taskId] : []))
       return c.json(plan)
     })
 

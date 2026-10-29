@@ -65,6 +65,11 @@ async function patchAgent(agent: Agent, input: Parameters<typeof api.agents.patc
     toast.add({ title: 'Not saved', description: e instanceof Error ? e.message : String(e), color: 'error' })
   }
 }
+// Shown in minutes; cleared means the agent wakes on every scheduler tick
+function patchWakeInterval(agent: Agent, minutes: number | null | undefined) {
+  const seconds = minutes ? Math.round(minutes * 60) : null
+  if (seconds !== agent.wakeIntervalSeconds) void patchAgent(agent, { wakeIntervalSeconds: seconds })
+}
 async function saveMyAvatar(image: Blob | null) {
   live.state.value.profile = image ? await api.me.setAvatar(image) : await api.me.clearAvatar()
 }
@@ -281,6 +286,22 @@ const items = [
                     size="xs"
                     class="w-28"
                     @update:model-value="$event && patchAgent(agent, { concurrency: $event })"
+                  />
+                </UFormField>
+                <UFormField
+                  v-if="agent.role !== 'pm'"
+                  label="Wake interval (min)"
+                  size="xs"
+                  help="Blank: every check"
+                >
+                  <UInputNumber
+                    :model-value="agent.wakeIntervalSeconds === null ? null : agent.wakeIntervalSeconds / 60"
+                    :min="1"
+                    placeholder="None"
+                    :aria-label="`Wake interval for ${agent.name} in minutes`"
+                    size="xs"
+                    class="w-28"
+                    @update:model-value="patchWakeInterval(agent, $event)"
                   />
                 </UFormField>
                 <UFormField

@@ -104,6 +104,9 @@ export class Orchestrator implements RunnerHandlers {
   #timer: NodeJS.Timeout | null = null
   #scheduling: Promise<void> | null = null
   #again = false
+  // Tasks an event made workable (approval, a pushed PR, a review): the
+  // next pass may start them even for an agent inside its wake interval
+  #urgent = new Set<string>()
   #stopped = false
   #updating = false
   readonly merges: MergeOrchestrator
@@ -263,12 +266,15 @@ export class Orchestrator implements RunnerHandlers {
     await this.schedule()
   }
 
-  // Asks for a scheduling pass soon; passes never overlap
-  poke(): void {
-    void this.schedule()
+  // Asks for a scheduling pass soon; passes never overlap. Passing the tasks
+  // an event is about lets them start right away despite a wake interval;
+  // anything else (a run ending, a settings change, a resume) waits for it
+  poke(taskIds: readonly string[] = []): void {
+    void this.schedule(taskIds)
   }
 
-  async schedule(): Promise<void> {
+  async schedule(taskIds: readonly string[] = []): Promise<void> {
+    for (const id of taskIds) this.#urgent.add(id)
     if (this.#scheduling) {
       this.#again = true
       return this.#scheduling
@@ -276,7 +282,9 @@ export class Orchestrator implements RunnerHandlers {
     this.#scheduling = (async () => {
       do {
         this.#again = false
-        await this.#schedulePass().catch(error => console.error('Scheduling failed', error))
+        const urgent = [...this.#urgent]
+        this.#urgent.clear()
+        await this.#schedulePass(urgent).catch(error => console.error('Scheduling failed', error))
       } while (this.#again)
     })().finally(() => {
       this.#scheduling = null
@@ -284,7 +292,7 @@ export class Orchestrator implements RunnerHandlers {
     return this.#scheduling
   }
 
-  async #schedulePass(): Promise<void> {
+  async #schedulePass(urgent: readonly string[]): Promise<void> {
     const { db, runner } = this.#d
     if (!runner.online || this.#stopped || this.#updating) return
     // PM turns aren't claimed; they run when the human writes (D9), and
@@ -292,11 +300,23 @@ export class Orchestrator implements RunnerHandlers {
     await this.#startPmTurns()
     const workers = await db.select().from(agents).where(ne(agents.role, 'pm')).orderBy(asc(agents.createdAt))
     for (const agent of workers) {
-      for (let claim = await claimNextTask(db, agent.id, this.#now()); claim; claim = await claimNextTask(db, agent.id, this.#now())) {
+      // An agent with a wake interval starts at most one task of its own
+      // choosing per interval, counted from its last run however that one
+      // started. Tasks an event is about start regardless.
+      let only = agent.wakeIntervalSeconds === null || (await this.#awake(agent)) ? undefined : urgent
+      for (let claim = await claimNextTask(db, agent.id, this.#now(), only); claim; claim = await claimNextTask(db, agent.id, this.#now(), only)) {
         await this.#assign(claim)
         if (this.#stopped || this.#updating) return
+        if (agent.wakeIntervalSeconds !== null) only = urgent
       }
     }
+  }
+
+  // Whether the agent's wake interval has passed since its last run started
+  async #awake(agent: AgentRow): Promise<boolean> {
+    const [last] = await this.#d.db.select({ queuedAt: runs.queuedAt }).from(runs)
+      .where(eq(runs.agentId, agent.id)).orderBy(desc(runs.queuedAt)).limit(1)
+    return !last || this.#now().getTime() - last.queuedAt.getTime() >= agent.wakeIntervalSeconds! * 1000
   }
 
   async #assign(claim: Claim): Promise<void> {
@@ -1058,7 +1078,7 @@ export class Orchestrator implements RunnerHandlers {
       await this.#endRunIn(tx, ctx, { state: 'completed', outcome: verdict, summary: report.summary, headSha })
       return state
     })
-    this.#finished(ctx, `Review recorded: ${verdict}`)
+    this.#finished(ctx, `Review recorded: ${verdict}`, { handoff: true })
     const spike = task.type === 'spike'
     // An approved spike without human review is finished: nothing to merge
     if (spike && verdict === 'approved' && !task.humanReview) void this.merges.cleanup(task.id)
@@ -1144,7 +1164,7 @@ export class Orchestrator implements RunnerHandlers {
       await tx.update(tasks).set({ headSha: report.headSha, prNumber: pr.number, prUrl: pr.url }).where(eq(tasks.id, task.id))
       await this.#endRunIn(tx, ctx, { state: 'completed', outcome: report.outcome as RunOutcome, summary: report.summary, headSha: report.headSha })
     })
-    this.#finished(ctx, 'Outcome accepted')
+    this.#finished(ctx, 'Outcome accepted', { handoff: true })
     return { ok: true, pr: pr.url, message: `PR #${pr.number} is ready for review. You can stop now.` }
   }
 
@@ -1176,7 +1196,7 @@ export class Orchestrator implements RunnerHandlers {
       return comment
     })
     this.#d.events.publish({ type: 'comment.created', comment })
-    this.#finished(ctx, 'Findings accepted for review')
+    this.#finished(ctx, 'Findings accepted for review', { handoff: true })
     return { ok: true, message: 'Your findings are on the task and go to the reviewer next. You can stop now.' }
   }
 
@@ -1253,7 +1273,7 @@ export class Orchestrator implements RunnerHandlers {
       await tx.update(tasks).set({ headSha: report.headSha }).where(eq(tasks.id, task.id))
       await this.#endRunIn(tx, ctx, { state: 'completed', outcome: 'design_submitted', summary: report.summary, headSha: report.headSha })
     })
-    this.#finished(ctx, `Design v${version!.version} submitted for review`)
+    this.#finished(ctx, `Design v${version!.version} submitted for review`, { handoff: true })
     return { ok: true, message: `Design v${version!.version} goes to the reviewer next, then to the human. You can stop now.` }
   }
 
@@ -1283,10 +1303,11 @@ export class Orchestrator implements RunnerHandlers {
     ].join('\n')
   }
 
-  // The outcome is recorded; the runner stops the agent's process tree
-  #finished(ctx: RunContext, reason: string): void {
+  // The outcome is recorded; the runner stops the agent's process tree. A
+  // handoff (a pushed PR, a verdict) lets the next agent start the task now.
+  #finished(ctx: RunContext, reason: string, { handoff = false } = {}): void {
     this.#d.runner.send({ type: 'run.stop', runId: ctx.run.id, reason })
-    void this.#publish(ctx).then(() => this.poke())
+    void this.#publish(ctx).then(() => this.poke(handoff && ctx.task ? [ctx.task.id] : []))
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
