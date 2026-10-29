@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import type { Task } from '@corral/contracts'
 import type { TaskStatus } from '@corral/core'
+import type { BoardFilters } from '~/utils/board'
 import { swipeStep } from '~/utils/board'
 import { PRIORITY, taskNote } from '~/utils/labels'
 
 // The Board on a phone (design/board.md, design/mobile.md): one column at a
 // time, picked from a row of tabs or by swiping sideways. Cards open the
-// task's page. The page owns the filtering, so it matches the web Board.
+// task's page. The page owns the filtering, so it matches the web Board,
+// and the Status filter hides tabs as it hides columns there.
 const props = defineProps<{
   columns: { key: string, label: string, statuses: TaskStatus[], hint: string, color: string, tasks: Task[] }[]
   epics: { id: string, label: string }[]
+  agents: { id: string, name: string }[]
   total: number
   all: Task[]
   reviewRoundCap: number
@@ -17,7 +20,7 @@ const props = defineProps<{
   error: string | null
 }>()
 const search = defineModel<string>('search', { required: true })
-const selectedEpics = defineModel<string[]>('selected', { required: true })
+const filters = defineModel<BoardFilters>('filters', { required: true })
 
 const live = useLive()
 const route = useRoute()
@@ -93,11 +96,15 @@ const note = (task: Task) => taskNote(task, props.all, props.reviewRoundCap)
         autofocus
         class="mx-4"
       />
-      <div class="flex items-center gap-2 px-4">
-        <EpicFilter
-          v-model="selectedEpics"
+      <div
+        class="flex flex-wrap items-center gap-2 px-4"
+        data-testid="board-filters"
+      >
+        <BoardFilters
+          v-model="filters"
           :epics="epics"
-          class="max-w-[70%] min-w-40"
+          :agents="agents"
+          item-class="w-[calc(50%-0.25rem)]"
         />
         <span class="ms-auto text-sm text-muted">{{ total }} tasks</span>
       </div>

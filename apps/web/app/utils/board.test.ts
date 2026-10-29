@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BOARD_COLUMNS, epicFilterLabel, matchesFilter, MERGED_WINDOW_DAYS, onBoard, sortColumn, swipeStep } from './board.ts'
+import { BOARD_COLUMNS, filterLabel, filtersFromQuery, filtersToQuery, hasFilters, matchesFilter, MERGED_WINDOW_DAYS, NO_FILTERS, onBoard, sortColumn, swipeStep, taskAgentIds } from './board.ts'
 
 const DAY = 24 * 60 * 60 * 1000
 const now = Date.parse('2026-10-29T12:00:00Z')
@@ -101,13 +101,15 @@ describe('sortColumn', () => {
 
 describe('matchesFilter', () => {
   const tasks = [
-    { ref: 'TA-1', title: 'Login form', epicId: 'auth' },
-    { ref: 'TA-2', title: 'Logout button', epicId: 'auth' },
-    { ref: 'TA-3', title: 'Billing page', epicId: 'billing' },
-    { ref: 'TA-4', title: 'Login audit log', epicId: 'audit' },
-    { ref: 'TA-5', title: 'Loose task', epicId: null }
+    { ref: 'TA-1', title: 'Login form', epicId: 'auth', status: 'ready' as const, priority: 'high' as const },
+    { ref: 'TA-2', title: 'Logout button', epicId: 'auth', status: 'in_progress' as const, priority: 'low' as const },
+    { ref: 'TA-3', title: 'Billing page', epicId: 'billing', status: 'blocked' as const, priority: 'urgent' as const },
+    { ref: 'TA-4', title: 'Login audit log', epicId: 'audit', status: 'failed' as const, priority: 'high' as const },
+    { ref: 'TA-5', title: 'Loose task', epicId: null, status: 'merged' as const, priority: 'medium' as const }
   ]
-  const refs = (epics: string[], search = '') => tasks.filter(t => matchesFilter(t, epics, search)).map(t => t.ref)
+  const refs = (epics: string[], search = '') => tasks.filter(t => matchesFilter(t, { ...NO_FILTERS, epics, search })).map(t => t.ref)
+  const match = (filters: Partial<typeof NO_FILTERS>, agentIds: Record<string, string[]> = {}) =>
+    tasks.filter(t => matchesFilter(t, { ...NO_FILTERS, ...filters }, agentIds[t.ref] ?? [])).map(t => t.ref)
 
   it('shows every task when no epic is selected', () => {
     expect(refs([])).toEqual(['TA-1', 'TA-2', 'TA-3', 'TA-4', 'TA-5'])
@@ -125,15 +127,77 @@ describe('matchesFilter', () => {
     expect(refs(['auth', 'audit'], 'login')).toEqual(['TA-1', 'TA-4'])
     expect(refs([], 'ta-3')).toEqual(['TA-3'])
   })
+
+  it('shows only the selected priorities', () => {
+    expect(match({ priorities: ['high'] })).toEqual(['TA-1', 'TA-4'])
+    expect(match({ priorities: ['urgent', 'low'] })).toEqual(['TA-2', 'TA-3'])
+  })
+
+  it('shows only the selected columns, with Blocked & failed covering both statuses', () => {
+    expect(match({ statuses: ['blocked'] })).toEqual(['TA-3', 'TA-4'])
+    expect(match({ statuses: ['ready', 'merged'] })).toEqual(['TA-1', 'TA-5'])
+  })
+
+  it('shows only tasks one of the selected agents holds or is assigned', () => {
+    const agentIds = { 'TA-1': ['dev'], 'TA-2': ['dev', 'rev'], 'TA-3': [] }
+    expect(match({ agents: ['rev'] }, agentIds)).toEqual(['TA-2'])
+    expect(match({ agents: ['dev', 'rev'] }, agentIds)).toEqual(['TA-1', 'TA-2'])
+  })
+
+  it('combines every filter with AND', () => {
+    expect(match({ priorities: ['high'], statuses: ['blocked'] })).toEqual(['TA-4'])
+    expect(match({ priorities: ['high'], epics: ['auth'], search: 'login' })).toEqual(['TA-1'])
+    expect(match({ priorities: ['high'], epics: ['billing'] })).toEqual([])
+  })
 })
 
-describe('epicFilterLabel', () => {
+describe('taskAgentIds', () => {
+  const agents = [
+    { id: 'dev', role: 'developer' as const },
+    { id: 'dev2', role: 'developer' as const },
+    { id: 'rev', role: 'reviewer' as const }
+  ]
+  const lease = (role: 'developer' | 'reviewer') => ({ runId: 'r', role, expiresAt: '' })
+
+  it('assigns the developer columns to the developer and Agent review to the reviewer', () => {
+    expect(taskAgentIds({ status: 'ready', lease: null }, agents)).toEqual(['dev'])
+    expect(taskAgentIds({ status: 'agent_review', lease: null }, agents)).toEqual(['rev'])
+    expect(taskAgentIds({ status: 'human_review', lease: null }, agents)).toEqual([])
+  })
+
+  it('adds the agent holding the lease', () => {
+    expect(taskAgentIds({ status: 'in_progress', lease: lease('developer') }, agents)).toEqual(['dev'])
+    expect(taskAgentIds({ status: 'in_progress', lease: lease('reviewer') }, agents)).toEqual(['rev', 'dev'])
+  })
+})
+
+describe('filters in the URL query', () => {
+  it('round-trips every filter and keeps other keys', () => {
+    const filters = { search: 'login', epics: ['e1', 'e2'], statuses: ['ready', 'blocked'], priorities: ['high' as const], agents: ['a1'] }
+    const query = filtersToQuery(filters, { column: 'ready' })
+    expect(query).toEqual({ column: 'ready', q: 'login', epics: 'e1,e2', status: 'ready,blocked', priority: 'high', agent: 'a1' })
+    expect(filtersFromQuery(query)).toEqual(filters)
+  })
+
+  it('drops empty filters from the query and ignores unknown values', () => {
+    expect(filtersToQuery(NO_FILTERS, { column: 'ready', status: 'ready' })).toEqual({ column: 'ready', q: undefined, epics: undefined, status: undefined, priority: undefined, agent: undefined })
+    expect(filtersFromQuery({ status: 'nope,merged', priority: 'huge,low' })).toEqual({ ...NO_FILTERS, statuses: ['merged'], priorities: ['low'] })
+  })
+
+  it('knows when anything is filtered', () => {
+    expect(hasFilters(NO_FILTERS)).toBe(false)
+    expect(hasFilters({ ...NO_FILTERS, agents: ['a1'] })).toBe(true)
+    expect(hasFilters({ ...NO_FILTERS, search: 'x' })).toBe(true)
+  })
+})
+
+describe('filterLabel', () => {
   const names: Record<string, string> = { auth: 'Auth', billing: 'Billing' }
   const label = (id: string) => names[id]!
 
   it('reads All epics, the epic name, or N epics', () => {
-    expect(epicFilterLabel([], label)).toBe('All epics')
-    expect(epicFilterLabel(['billing'], label)).toBe('Billing')
-    expect(epicFilterLabel(['auth', 'billing'], label)).toBe('2 epics')
+    expect(filterLabel([], label, 'All epics', 'epics')).toBe('All epics')
+    expect(filterLabel(['billing'], label, 'All epics', 'epics')).toBe('Billing')
+    expect(filterLabel(['auth', 'billing'], label, 'All epics', 'epics')).toBe('2 epics')
   })
 })

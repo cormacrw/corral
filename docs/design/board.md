@@ -11,7 +11,12 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
 
 1. **Toolbar** (bottom border):
    - a search input (240px, "Search tasks")
-   - an **epic filter**: a multi-select dropdown (`components/EpicFilter.vue`, `USelectMenu` with `multiple`) listing every epic on the Board, each with a tick when selected. "All epics" at the top of the menu clears the selection. The trigger reads "All epics" when nothing is selected, the epic's name when one is, and "N epics" when several are
+   - four **filters** (`components/BoardFilters.vue`), each a multi-select dropdown (`components/BoardFilter.vue`, `USelectMenu` with `multiple`) with a tick by each selected item. "All …" at the top of the menu clears the selection. The trigger reads "All epics" when nothing is selected, the item's name when one is, and "N epics" when several are:
+     - **Epic:** every epic on the Board
+     - **Status:** the columns
+     - **Priority:** Urgent, High, Medium, Low
+     - **Agent:** the developer and reviewer agents
+   - **Clear filters**, while any filter or the search is set: resets them all
    - **Epic details**, only when exactly one epic is selected: opens it in the flyout
    - "N tasks" on the right
 2. **Columns:** a horizontally scrolling row (`overflow: auto`, `role="region"`, focusable). Each column is 272px wide with a `bg-muted` background, a border and `rounded-lg`.
@@ -41,7 +46,10 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
 ## Interactions
 
 - Clicking a card opens it in the flyout; clicking it again closes the flyout.
-- The epic filter shows tasks in any of the selected epics; with nothing selected it shows every task. Search and the epic filter combine (`matchesFilter` in `apps/web/app/utils/board.ts`).
+- Each filter shows tasks matching any of its selected items; with nothing selected it doesn't filter. Search and the filters combine with AND (`matchesFilter` in `apps/web/app/utils/board.ts`).
+  - **Status** hides the columns that aren't selected (and their tabs on mobile).
+  - **Agent** matches the agent holding the task's lease, or the agent it's assigned to. Tasks have no per-agent assignee, so a task is assigned to the first agent of the role whose turn it is: the developer in Ready and In progress, the reviewer in Agent review (`taskAgentIds`).
+- The search and filters live in the URL query, so a filtered Board reloads and can be shared: `?q=`, and comma-separated `?epics=` (epic ids), `?status=` (column keys), `?priority=` and `?agent=` (agent ids). `?epic=` is taken by the epic flyout.
 - There's **no drag and drop.** Agents and the scheduler move tasks. Human moves (unblocking, sending back to Backlog) happen in the flyout's Status menu or the Inbox, limited to what D10 allows.
 
 ## Rules
@@ -54,14 +62,14 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
 ## Data
 
 - **Tasks** (status other than Backlog, and merged within the last 3 days): ref, title, type, status, priority, epic, PR, review round, assigned agent, working (lease), note.
-- **Epics** for the filter.
+- **Epics** and **agents** for the filters.
 - Live updates over SSE. Cards move between columns without a reload.
 
 ## Responsive
 
 - On the web layout, columns scroll sideways at every width.
 - On the mobile layout (D17, `components/BoardMobile.vue`), the Board shows **one column at a time**, from the `Board · one column at a time` frame:
-  - the same epic multi-select as the web Board, and "N tasks"; the header's search button shows the search input
+  - the same filters and Clear filters as the web Board, two to a row, and "N tasks"; the header's search button shows the search input
   - a row of pill tabs (`role="tablist"`), one per column, each with its status dot, name and count. The open tab is `primary` subtle and scrolls into view. Left and right arrow keys move between tabs
   - the open column: its name, "Whose turn: {hint}", and its cards, full width. "Nothing here" when empty
   - **swiping** left or right on the column moves to the next or previous column (at least 50px sideways, and more sideways than vertical)
