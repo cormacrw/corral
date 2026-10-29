@@ -149,6 +149,10 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
                     />
                   </UTooltip>
                 </NuxtLink>
+                <PlanCloseThread
+                  :session="thread"
+                  menu
+                />
                 <UButton
                   icon="i-lucide-x"
                   size="xs"

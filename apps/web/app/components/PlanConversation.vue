@@ -222,6 +222,11 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
           variant="ghost"
           color="neutral"
         />
+        <PlanCloseThread
+          v-if="session"
+          :session="session"
+          menu
+        />
         <UButton
           v-if="!props.inbox"
           to="/plan"
@@ -260,14 +265,19 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
             variant="subtle"
             size="xs"
           />
-          <UButton
-            :to="inbox ? `/plan/${id}` : '/plan'"
-            :label="inbox ? 'Open in Plan' : 'New session'"
-            variant="ghost"
-            color="neutral"
-            size="sm"
-            class="ms-auto"
-          />
+          <div class="ms-auto flex shrink-0 items-center gap-2">
+            <PlanCloseThread
+              v-if="session"
+              :session="session"
+            />
+            <UButton
+              :to="inbox ? `/plan/${id}` : '/plan'"
+              :label="inbox ? 'Open in Plan' : 'New session'"
+              variant="ghost"
+              color="neutral"
+              size="sm"
+            />
+          </div>
         </header>
 
         <UAlert
