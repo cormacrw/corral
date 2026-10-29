@@ -84,9 +84,9 @@ export interface Epic {
   projectId: string
   title: string
   description: string
-  // Tasks outside Draft and Backlog, and how many of them are merged
   dependsOn: string[]
   blocks: string[]
+  // Tasks outside Draft and Backlog, and how many of them are merged
   taskCount: number
   mergedCount: number
   createdAt: string

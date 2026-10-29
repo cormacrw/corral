@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { EpicDetail, PatchEpicInput } from '@corral/contracts'
+import type { Epic, EpicDetail, PatchEpicInput } from '@corral/contracts'
 import type { TaskStatus } from '@corral/core'
 import { api, ApiError } from '~/composables/useApi'
 import { PRIORITY, STATUS } from '~/utils/labels'
@@ -16,23 +16,61 @@ const toast = useToast()
 const epic = ref<EpicDetail | null>(null)
 const error = ref<string | null>(null)
 const saved = ref(false)
+const related = ref<Epic[]>([])
+const selectedDependency = ref('')
+const savingDependencies = ref(false)
+const dependencyError = ref<string | null>(null)
+const prerequisites = computed(() => related.value.filter(e => epic.value?.dependsOn.includes(e.id)))
+const blockedEpics = computed(() => related.value.filter(e => epic.value?.blocks.includes(e.id)))
+const waiting = computed(() => prerequisites.value.filter(e => e.mergedCount < e.taskCount))
+const choices = computed(() => related.value.filter(e => e.id !== epic.value?.id && !epic.value?.dependsOn.includes(e.id)).map(e => ({ label: e.title, value: e.id })))
+
+async function loadRelated() {
+  const p = live.state.value.projects.find(p => p.id === epic.value?.projectId)
+  if (p) related.value = await api.epics.list(p.slug)
+}
+
+async function setDependencies(ids: string[]) {
+  if (!epic.value || savingDependencies.value) return
+  savingDependencies.value = true
+  dependencyError.value = null
+  try {
+    const updated = await api.epics.setDependencies(epic.value.id, ids)
+    epic.value = { ...epic.value, ...updated }
+    selectedDependency.value = ''
+    await loadRelated()
+  } catch (e) {
+    dependencyError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    savingDependencies.value = false
+  }
+}
 const editingDescription = ref(false)
 const descriptionDraft = ref('')
 const tab = useLocalStorage<'tasks' | 'graph'>('corral.epic.tab', 'tasks')
 let savedTimer: ReturnType<typeof setTimeout> | null = null
 
 const project = computed(() => live.state.value.projects.find(p => p.id === epic.value?.projectId) ?? null)
+watch(() => project.value?.slug, () => {
+  void loadRelated().catch((e) => {
+    error.value = e instanceof Error ? e.message : String(e)
+  })
+})
 
 async function load() {
   error.value = null
   try {
     epic.value = await api.epics.get(props.epicId)
+    await loadRelated()
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   }
 }
 watch(() => props.epicId, () => {
   epic.value = null
+  related.value = []
+  selectedDependency.value = ''
+  dependencyError.value = null
   editingDescription.value = false
   void load()
 }, { immediate: true })
@@ -40,6 +78,7 @@ watch(() => props.epicId, () => {
 onMounted(() => {
   const stop = live.subscribe((event) => {
     if (!epic.value) return
+    if (event.type === 'epic.updated' || event.type.startsWith('task.')) void loadRelated()
     if (event.type === 'epic.updated' && event.epic.id === epic.value.id) epic.value = { ...epic.value, ...event.epic }
     if ((event.type === 'task.updated' || event.type === 'task.created') && (event.task.epicId === epic.value.id || epic.value.tasks.some(t => t.id === event.task.id))) void load()
     if (event.type === 'task.deleted' && epic.value.tasks.some(t => t.id === event.taskId)) void load()
@@ -206,6 +245,12 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
       :class="['flex min-h-0 flex-1', props.mode === 'page' ? 'max-[900px]:flex-col' : 'flex-col overflow-y-auto overscroll-contain']"
     >
       <div :class="['flex flex-col gap-5 p-4', props.mode === 'page' && 'w-[360px] shrink-0 overflow-y-auto overscroll-contain border-e border-default max-[900px]:w-full max-[900px]:border-e-0']">
+        <UAlert
+          v-if="waiting.length"
+          color="warning"
+          variant="subtle"
+          :title="`Waiting on ${waiting.map(e => e.title).join(', ')}`"
+        />
         <input
           :value="epic.title"
           class="w-full rounded-md bg-transparent px-1 py-0.5 text-lg font-semibold text-highlighted hover:bg-elevated focus:ring-2 focus:ring-primary focus:outline-none"
@@ -260,6 +305,75 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
               class="text-dimmed"
             >Add a description…</span>
           </div>
+        </section>
+
+        <section class="space-y-3">
+          <h3 class="text-sm font-medium">
+            Depends on
+          </h3>
+          <p
+            v-if="!prerequisites.length"
+            class="text-sm text-muted"
+          >
+            No dependencies.
+          </p>
+          <div
+            v-for="item in prerequisites"
+            :key="item.id"
+            class="flex items-center gap-2"
+          >
+            <NuxtLink
+              :to="`/epics/${item.id}`"
+              class="min-w-0 flex-1 text-sm text-primary hover:underline"
+            >
+              {{ item.title }} · {{ item.mergedCount }}/{{ item.taskCount }} merged
+            </NuxtLink>
+            <UButton
+              icon="i-lucide-x"
+              color="neutral"
+              variant="ghost"
+              :aria-label="`Remove dependency on ${item.title}`"
+              :disabled="savingDependencies"
+              @click="setDependencies(epic.dependsOn.filter(id => id !== item.id))"
+            />
+          </div>
+          <div class="flex gap-2">
+            <USelect
+              v-model="selectedDependency"
+              :items="choices"
+              placeholder="Choose an epic"
+              aria-label="Dependency epic"
+              class="min-w-0 flex-1"
+              :disabled="savingDependencies"
+            />
+            <UButton
+              label="Add"
+              :disabled="!selectedDependency || savingDependencies"
+              @click="setDependencies([...epic.dependsOn, selectedDependency])"
+            />
+          </div>
+          <UAlert
+            v-if="dependencyError"
+            color="error"
+            :title="dependencyError"
+          />
+          <h3 class="text-sm font-medium">
+            Blocks
+          </h3>
+          <p
+            v-if="!blockedEpics.length"
+            class="text-sm text-muted"
+          >
+            No blocked epics.
+          </p>
+          <NuxtLink
+            v-for="item in blockedEpics"
+            :key="item.id"
+            :to="`/epics/${item.id}`"
+            class="block text-sm text-primary hover:underline"
+          >
+            {{ item.title }} · {{ item.mergedCount }}/{{ item.taskCount }} merged
+          </NuxtLink>
         </section>
 
         <section>

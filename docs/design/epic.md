@@ -32,3 +32,10 @@ The tree is read-only: dependencies are edited on the tasks themselves. It follo
 - `GET /api/projects/:slug/epics`: the project's epics with task and merged counts (Drafts excluded).
 - `GET /api/epics/:id`: the epic and all its tasks, Drafts included.
 - `PATCH /api/epics/:id`: title and/or description. Publishes `epic.updated`.
+
+## Epic prerequisites (D22)
+
+The details show **Depends on** and **Blocks** lists, each linking to the epic with its board-only merged/total count (Draft and Backlog tasks excluded). A **Waiting on …** note names unfinished prerequisites at the top. Pick another project epic and **Add**, or remove a prerequisite with its labelled remove button. Changes apply immediately; cycle/deadlock errors name the involved epics and preserve the saved graph.
+
+- Epic responses include `dependsOn` and `blocks` as epic ID arrays.
+- `PUT /api/epics/:id/dependencies` replaces `{ dependsOn: string[] }`, validates the complete project graph with the core helper, and records `epic.updated`. It publishes updated project epics and wakes the edited epic's tasks.
