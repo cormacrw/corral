@@ -36,6 +36,16 @@ describe('pmPrompt', () => {
     expect(intro).toContain('Keep replies short and concrete')
   })
 
+  it('plans a design\'s build from the spec and the codebase, across epics, pinning screens (D20)', () => {
+    const intro = pmPrompt({ ...turn, fresh: true })
+    expect(intro).toContain('read it with get_design')
+    expect(intro).toContain('Plan from the spec and the real codebase')
+    expect(intro).toContain('a reference for the look, not code to copy')
+    expect(intro).toContain('split the build across several epics')
+    expect(intro).toContain('pin every task that builds UI to the approved version and the screen ids')
+    expect(intro).toContain('write its acceptance criteria from the spec')
+  })
+
   it('points at an attached task', () => {
     expect(pmPrompt({ ...turn, attachedTask: 'TA-3', fresh: false })).toBe('(About task TA-3; read it with get_task.)\n\nhi')
   })
