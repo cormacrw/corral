@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Evidence, Inbox, InboxActionInput, InboxItem, Review, Task, TaskInboxItem } from '@corral/contracts'
+import type { Evidence, Inbox, InboxActionInput, InboxItem, PlanThreadItem, Review, Task, TaskInboxItem } from '@corral/contracts'
 import { ROLE, timeAgo, type Color } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
 
@@ -8,6 +8,8 @@ import { markdownToPlainText } from '~/utils/markdown'
 // the data and the actions; this lays them out.
 type Action = InboxActionInput['action']
 const props = defineProps<{
+  planThread: PlanThreadItem | null
+  onRefresh: () => Promise<void>
   inbox: Inbox | null
   error: string | null
   items: InboxItem[]
@@ -62,9 +64,15 @@ const tabs = computed(() => [
 </script>
 
 <template>
-  <!-- The item: the message, its context, and the tray -->
+  <InboxMobilePlanThread
+    v-if="planThread"
+    :key="planThread.sessionId"
+    :item="planThread"
+    :on-refresh="onRefresh"
+  />
+  <!-- Task items keep their message, context and tray. -->
   <div
-    v-if="selectedId"
+    v-else-if="selectedId"
     class="flex h-full min-h-0 flex-col"
     data-testid="inbox-item"
   >

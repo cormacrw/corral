@@ -137,7 +137,7 @@ On the mobile layout ([mobile.md](mobile.md#inbox)), a Plan thread opens as its 
 - **Header:** "Inbox · n of m" above the session title, a back button to the list, **Open in Plan** in place of the Task button, and a **⋯** menu with **Close thread**. The tab bar is hidden, as on any item.
 - **Body:** only the question or the plan, full width, not the conversation. A question's answers are stacked, full-width buttons at least 44px tall, as in Plan on mobile, with the reply box ("Reply to Juno…") pinned below. A plan shows its title, summary and counts, with **View plan** (opens the plan in a bottom sheet; a task from it opens in a taller sheet over it) and **Approve to board** and **Approve to Backlog** side by side, full width.
 - **Close thread** confirms in a bottom sheet with the same text, then returns to `/inbox`.
-- Approving moves on to the next item that needs you; a failed approval keeps the screen and sheet open with the error.
+- Approving returns to `/inbox`; a failed approval keeps the screen and sheet open with the error.
 - **Row:** the project dot, session title, time, status badge and preview, in the same list as the other items.
 
 ## What each action does (D10)
@@ -181,4 +181,4 @@ On the mobile layout ([mobile.md](mobile.md#inbox)), a Plan thread opens as its 
 - Approve could be one click instead of select-then-send. Two steps are safer; decide after testing.
 - Should Activity items expire, or stay forever?
 
-Mobile Plan threads reuse Plan's `PlanQuestion`, composer and `PlanDetail` bottom sheet, without `PlanConversation`. The Inbox header keeps Back to Inbox and Open in Plan (the session route). A waiting plan has View plan and side-by-side approval destinations; either successful approval closes the sheet and moves on to the next item that needs you, as on desktop. Failed approvals keep the screen and sheet open.
+Mobile Plan threads reuse Plan's `PlanQuestion`, composer and `PlanDetail` bottom sheet, without `PlanConversation`. `InboxMobile` renders its focused Plan thread through `InboxMobilePlanThread`; the Inbox header keeps Back to Inbox and Open in Plan (the session route), with Close thread in the overflow menu. Closing confirms in a bottom sheet; Cancel preserves the thread, and a successful close refreshes the list and returns to `/inbox`. A failed close keeps the confirmation open with its error. A waiting plan has View plan and side-by-side approval destinations; either successful approval closes the sheet and returns to `/inbox`. Failed approvals keep the screen and sheet open.
