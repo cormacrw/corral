@@ -8,7 +8,7 @@ import type { RunnerConfig } from './config.ts'
 import type { ServerConnection } from './connection.ts'
 import { outcomesFor, ROLE_TOOLS, type ToolOutcome, type ToolServer } from './mcp.ts'
 import type { ParsedLine } from './stream-json.ts'
-import { headSha, prepareWorkspace, pushBranch, readRoleInstructions } from './workspace.ts'
+import { headSha, prepareWorkspace, pushBranch, readProjectBrief, readRoleInstructions } from './workspace.ts'
 
 // Runs on this runner (flows.md §2 steps 3–5, PRD §8.6). Each run gets a
 // worktree, a secret MCP path, and a `claude` process in its own process
@@ -186,7 +186,9 @@ export class RunManager {
     await writeFile(mcpConfigPath, JSON.stringify({ mcpServers: { corral: { type: 'http', url: this.#tools.url(secret) } } }))
 
     const instructions = await readRoleInstructions(run.worktree, job.role)
-    const systemPrompt = `${instructions}\n\n${runnerNotes(run, job)}`
+    // Only the PM gets the brief; other roles' prompts are unchanged
+    const brief = job.role === 'pm' ? await readProjectBrief(run.worktree) : ''
+    const systemPrompt = `${instructions}\n\n${brief ? `${brief}\n\n` : ''}${runnerNotes(run, job)}`
 
     run.timeoutTimer = setTimeout(() => this.stop(job.runId, 'timed_out', `${job.timeoutSeconds} s`), job.timeoutSeconds * 1000)
 
