@@ -79,8 +79,6 @@ export interface PlanDeps {
   db: Database
   events: EventBus
   runner: RunnerHub
-  // True while the update hold is on; no turn may start
-  updating(): boolean
   // Starts a PM run for a session; the orchestrator owns runs. The job
   // carries the session's runtime, not the PM agent's (D18).
   startRun(session: SessionRow, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'>): Promise<string>
@@ -196,10 +194,9 @@ export class PlanService {
     return updated
   }
 
-  // A turn needs the runner, and none starts during the update hold (D9)
+  // A turn needs the runner; update holds queue it in the orchestrator (D16)
   assertTurnPossible(): void {
     if (!this.#d.runner.online) throw new ApiFailure(503, { code: 'runner_offline' })
-    if (this.#d.updating()) throw new ApiFailure(503, { code: 'corral_updating' })
   }
 
   // Approving a design version opens a Plan session for its build, with the
