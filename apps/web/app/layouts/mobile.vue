@@ -73,17 +73,36 @@ const focused = computed(() => Boolean(planSession.value || inboxItem.value))
 // A screen below a tab's top level goes back up to it, and can swap the
 // Settings button for its own action
 const agentPage = computed(() => parts.value[0] === 'agents' && parts.value.length === 2)
+// Settings lists its sections at /settings, and each section is its own
+// screen that goes back to the list. Settings needs no Settings button.
+const SETTINGS_SECTIONS: Record<string, string> = { profile: 'Profile', agents: 'Agents', runner: 'Runner', appearance: 'Appearance' }
+const settingsPage = computed(() => parts.value[0] === 'settings')
+const settingsSection = computed(() => settingsPage.value ? SETTINGS_SECTIONS[parts.value[1] ?? ''] ?? null : null)
 const overviewPage = computed(() => parts.value[0] === 'projects' && parts.value.length === 2)
 const back = computed(() => subPage.value
   ? { to: subPage.value.back, label: subPage.value.backLabel }
   : agentPage.value
     ? { to: '/agents', label: 'Back' }
-    : overviewPage.value ? { to: '/projects', label: 'Back to Projects' } : null)
+    : overviewPage.value
+      ? { to: '/projects', label: 'Back to Projects' }
+      : settingsSection.value
+        ? { to: '/settings', label: 'Back to Settings' }
+        : settingsPage.value ? { to: '/home', label: 'Back to Home' } : null)
 const action = computed(() => agentPage.value
   ? { to: '/settings/agents', icon: 'i-lucide-sliders-horizontal', label: 'Agent settings' }
   : overviewPage.value
     ? { to: `/projects/${parts.value[1]}/settings`, icon: 'i-lucide-sliders-horizontal', label: 'Project settings' }
-    : { to: '/settings/profile', icon: 'i-lucide-settings', label: 'Settings' })
+    : settingsPage.value ? null : { to: '/settings', icon: 'i-lucide-settings', label: 'Settings' })
+
+// The full-screen Search (design/mobile.md), from the header on every screen
+// that has the shell's header
+const searchOpen = ref(false)
+// The Board, Backlog and Inbox list filter with their own search button instead
+const ownSearch = computed(() => (parts.value[0] === 'projects' && ['board', 'backlog'].includes(parts.value[2] ?? '') && parts.value.length === 3)
+  || (parts.value[0] === 'inbox' && parts.value.length === 1))
+watch(() => route.fullPath, () => {
+  searchOpen.value = false
+})
 
 // The header names the page
 const title = computed(() => {
@@ -93,7 +112,7 @@ const title = computed(() => {
     case 'home': return 'Home'
     case 'plan': return 'Plan'
     case 'inbox': return 'Inbox'
-    case 'settings': return 'Settings'
+    case 'settings': return settingsSection.value ?? 'Settings'
     case 'tasks': return id ?? 'Task'
     case 'epics': return 'Epic'
     case 'projects': return id ? 'Overview' : 'Projects'
@@ -145,7 +164,7 @@ const title = computed(() => {
         </div>
         <!-- Home shows the runner's status in the page instead -->
         <span
-          v-if="!focused && title !== 'Home'"
+          v-if="!focused && title !== 'Home' && !settingsPage"
           class="flex shrink-0 items-center gap-1.5 text-xs text-muted"
           data-testid="runner-status"
         >
@@ -161,7 +180,16 @@ const title = computed(() => {
           class="contents"
         />
         <UButton
-          v-if="!focused"
+          v-if="!focused && !ownSearch"
+          icon="i-lucide-search"
+          variant="ghost"
+          color="neutral"
+          aria-label="Search"
+          data-testid="open-search"
+          @click="searchOpen = true"
+        />
+        <UButton
+          v-if="!focused && action"
           :to="action.to"
           :icon="action.icon"
           variant="ghost"
@@ -218,5 +246,7 @@ const title = computed(() => {
         </li>
       </ul>
     </nav>
+
+    <MobileSearch v-model:open="searchOpen" />
   </div>
 </template>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Project } from '@corral/contracts'
 import { initials, isWorking, projectColor, ROLE, taskCounts } from '~/utils/labels'
+import { searchPages } from '~/utils/search'
 
 // The app shell (design/app-shell.md): global nav, projects, agents, runner
 const live = useLive()
@@ -33,18 +34,7 @@ const searchOpen = ref(false)
 const searchGroups = computed(() => [{
   id: 'pages',
   label: 'Go to',
-  items: [
-    { label: 'Plan', icon: 'i-lucide-message-square', to: '/plan' },
-    { label: 'Inbox', icon: 'i-lucide-inbox', to: '/inbox' },
-    { label: 'Settings', icon: 'i-lucide-settings', to: '/settings/profile' },
-    ...state.value.projects.flatMap(p => [
-      { label: `${p.name} · Overview`, icon: 'i-lucide-layout-dashboard', to: `/projects/${p.slug}` },
-      { label: `${p.name} · Board`, icon: 'i-lucide-kanban', to: `/projects/${p.slug}/board` },
-      { label: `${p.name} · Backlog`, icon: 'i-lucide-list', to: `/projects/${p.slug}/backlog` },
-      { label: `${p.name} · Pull requests`, icon: 'i-lucide-git-pull-request', to: `/projects/${p.slug}/pull-requests` }
-    ]),
-    ...state.value.agents.map(a => ({ label: `${a.name} · ${ROLE[a.role]}`, icon: 'i-lucide-bot', to: `/agents/${a.name.toLowerCase()}` }))
-  ]
+  items: searchPages(state.value.projects, state.value.agents)
 }, {
   id: 'tasks',
   label: 'Tasks',
