@@ -26,6 +26,7 @@ type RunJoin = {
 function toRun({ run, agentName, prefix, taskNumber, taskTitle }: RunJoin): Run {
   return {
     id: run.id,
+    runnerId: run.runnerId,
     number: run.number,
     agentId: run.agentId,
     agentName,

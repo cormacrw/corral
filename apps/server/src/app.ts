@@ -545,7 +545,7 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     })
 
     // The kill switch (PRD §7.11)
-    .get('/status', c => c.json(orchestrator.status))
+    .get('/status', c => c.json({ ...orchestrator.status, runners: runner.status().runners }))
 
     .post('/stop-all', async (c) => {
       await orchestrator.stopAll(actor)

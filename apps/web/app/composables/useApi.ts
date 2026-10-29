@@ -14,6 +14,7 @@ import type {
   EpicDetail,
   Evidence,
   GlobalStatus,
+  ServerStatus,
   HumanTransitionInput,
   Inbox,
   InboxActionInput,
@@ -104,7 +105,7 @@ export function describe(status: number, error: ApiErrorBody['error'] | null): s
 export const api = {
   health: () => call<{ ok: boolean }>('GET', '/health'),
   runner: () => call<RunnerStatus>('GET', '/runner'),
-  status: () => call<GlobalStatus>('GET', '/status'),
+  status: () => call<ServerStatus>('GET', '/status'),
   stopAll: () => call<GlobalStatus>('POST', '/stop-all'),
   resumeAll: () => call<GlobalStatus>('POST', '/resume-all'),
 

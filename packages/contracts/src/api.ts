@@ -21,7 +21,7 @@ import {
   type TransitionError
 } from '@corral/core'
 import { z } from 'zod'
-import type { CliId } from './runner.ts'
+import type { CliId, RunnerInfo } from './runner.ts'
 
 // HTTP API between apps/web and apps/server. Inputs are zod schemas the server
 // validates; outputs are plain types (JSON, so dates are ISO strings).
@@ -538,6 +538,10 @@ export interface GlobalStatus {
   updating: boolean
 }
 
+export interface ServerStatus extends GlobalStatus {
+  runners: RunnerInfo[]
+}
+
 // New agents. There is only one PM (D13), so only developers and reviewers.
 export const createAgentInput = z.object({
   name: z.string().trim().min(1).max(80),
@@ -682,6 +686,7 @@ export interface Attachment {
 }
 
 export interface Run {
+  runnerId: string | null
   id: string
   // Shown as #128
   number: number
