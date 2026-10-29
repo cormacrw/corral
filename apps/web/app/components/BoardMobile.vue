@@ -184,6 +184,7 @@ const note = (task: Task) => taskNote(task, props.all, props.reviewRoundCap)
                 <span class="font-mono text-muted">{{ task.ref }}</span>
                 <span :class="task.priority === 'urgent' ? 'text-error' : task.priority === 'high' ? 'text-warning' : 'text-muted'">{{ PRIORITY[task.priority].label }}</span>
                 <TaskTypeBadge :type="task.type" />
+                <DesignChangedBadge :design="task.design" />
                 <span
                   v-if="task.prNumber"
                   class="ms-auto flex items-center gap-0.5 text-muted"

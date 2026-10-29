@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -13,6 +13,7 @@ describe('saveDesign', () => {
   })
 
   afterEach(async () => {
+    await exec('chmod', ['-R', 'u+w', root])
     await rm(root, { recursive: true, force: true })
   })
 
@@ -46,6 +47,7 @@ describe('saveDesign', () => {
       taskRef: 'COR-7',
       version: 2,
       spec: '# Login\n\n## Screens\n- login\n',
+      dir,
       specPath: join(dir, 'design.md'),
       screenshots: [
         { fileName: 'login.png', contentType: 'image/png', path: join(dir, 'screenshots', '01-login.png') },
@@ -57,6 +59,19 @@ describe('saveDesign', () => {
     expect(await readFile(join(dir, 'screenshots', '02-login.png'), 'utf8')).toBe('png-2')
     expect(await readFile(join(dir, 'bundle', 'index.html'), 'utf8')).toBe('<h1>Login</h1>')
     expect(await readFile(join(dir, 'bundle', 'assets', 'app.js'), 'utf8')).toBe('console.log(1)')
+
+    // Everything is read-only: a reference, not the agent's to change
+    const entries = await readdir(dir, { recursive: true })
+    for (const path of [dir, ...entries.map(e => join(dir, e))]) expect((await stat(path)).mode & 0o222, path).toBe(0)
+  })
+
+  it('replaces an earlier read-only copy of the same version', async () => {
+    const scratch = join(root, 'scratch')
+    const design = (spec: string) => ({ taskRef: 'COR-7', version: 1, spec, screenshots: [], bundle: { dataBase64: '' } })
+    const archive = await bundle({ 'index.html': '<h1>Login</h1>' })
+    expect(await saveDesign(scratch, { ...design('first'), bundle: { dataBase64: archive } })).toMatchObject({ ok: true })
+    expect(await saveDesign(scratch, { ...design('second'), bundle: { dataBase64: archive } })).toMatchObject({ ok: true })
+    expect(await readFile(join(scratch, 'designs', 'COR-7-v1', 'design.md'), 'utf8')).toBe('second')
   })
 
   it('reports a bundle that isn\'t a tar', async () => {

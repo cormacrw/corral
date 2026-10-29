@@ -1,5 +1,5 @@
 import { askQuestionInput, type AgentRuntime, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type RunJob } from '@corral/contracts'
-import { checkPlan, designPinKey, diffPlans, markdownToRichText, REVISABLE_STATUSES, requiresHumanReview, richTextToMarkdown, TASK_TYPES, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
+import { checkPlan, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, REVISABLE_STATUSES, requiresHumanReview, richTextToMarkdown, TASK_TYPES, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
@@ -9,9 +9,9 @@ import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
 import { pmFallbackPrompt, pmPrompt, questionText } from './prompts.ts'
 import type { RunnerHub } from './runner-hub.ts'
-import { createTask, deleteTaskRows, findTaskId, loadTask, patchTask, setDesignPin, transitionTask, type ProjectRow } from './tasks.ts'
+import { createTask, deleteTaskRows, findTaskId, loadTask, patchTask, pinStaleness, setDesignPin, transitionTask, type ProjectRow } from './tasks.ts'
 
-const { acceptanceCriteria, agents, auditLog, designVersions, epics, planEpics, planMessages, planSessions, planTasks, plans, projects, runs, taskDependencies, tasks } = schema
+const { acceptanceCriteria, agents, auditLog, designVersions, epics, planEpics, planMessages, planSessions, planTasks, plans, projects, runs, taskDependencies, taskDesignPins, tasks } = schema
 
 const PM_TURN_TIMEOUT_SECONDS = 20 * 60
 
@@ -170,9 +170,23 @@ export class PlanService {
     const [sent] = await db.select({ id: planMessages.id }).from(planMessages).where(eq(planMessages.sessionId, sessionId)).limit(1)
     if (!sent) {
       const ref = taskRef(row.project.prefix, row.task.number)
-      await this.message(sessionId, { text: designBuildMessage(ref, row.task.title, row.version, note), taskRef: ref }, actor)
+      const stale = await this.#staleBuildTasks(row.project.prefix, row.task.id)
+      await this.message(sessionId, { text: designBuildMessage(ref, row.task.title, row.version, note, stale), taskRef: ref }, actor)
     }
     return sessionId
+  }
+
+  // The build tasks still pinned to an older version of the design that
+  // haven't started (D20): approving a newer version flags them
+  async #staleBuildTasks(prefix: string, designTaskId: string): Promise<{ ref: string, title: string, status: string, version: number }[]> {
+    const { db } = this.#d
+    const pinned = await db.select({ id: tasks.id, number: tasks.number, title: tasks.title, status: tasks.status, version: designVersions.version })
+      .from(taskDesignPins).innerJoin(designVersions, eq(designVersions.id, taskDesignPins.designVersionId)).innerJoin(tasks, eq(tasks.id, taskDesignPins.taskId))
+      .where(and(eq(designVersions.taskId, designTaskId), isNull(tasks.deletedAt))).orderBy(asc(tasks.number))
+    const { latestApproved, started } = await pinStaleness(db, [designTaskId], pinned.map(p => p.id))
+    return pinned
+      .filter(p => isDesignPinStale({ version: p.version, latestApproved: latestApproved.get(designTaskId) ?? null }, { status: p.status, started: started.has(p.id) }))
+      .map(p => ({ ref: taskRef(prefix, p.number), title: p.title, status: p.status, version: p.version }))
   }
 
   // A human message starts one PM turn (D9)
@@ -815,7 +829,14 @@ function titleFrom(text: string): string {
 }
 
 // The human's first message in a design's build session (D20)
-function designBuildMessage(ref: string, title: string, version: number, note: string | undefined): string {
+// A newer version also lists the unstarted build tasks pinned to an older
+// one, so the PM can propose revisions that repin them.
+function designBuildMessage(ref: string, title: string, version: number, note: string | undefined, stale: { ref: string, title: string, status: string, version: number }[] = []): string {
   const ask = `I approved design v${version} of ${ref} "${title}". Plan its build: read it with get_design (taskRef ${ref}, version ${version}) and propose the build tasks, each pinned to v${version} and the screens it covers.`
-  return note ? `${ask}\n\nApproval note: ${note}` : ask
+  const flagged = stale.length > 0
+    ? `These build tasks haven't started and are pinned to an older version, so they're flagged as design changed. Compare their screens with v${version} and propose revisions (include each with its \`ref\`) that repin them to v${version} and update what changed; don't create duplicates of them:\n${stale.map(t => `- ${t.ref} "${t.title}" (${STATUS_NAMES[t.status] ?? t.status}): pinned to v${t.version}, design changed: v${t.version} → v${version}`).join('\n')}`
+    : ''
+  return [ask, flagged, note ? `Approval note: ${note}` : ''].filter(Boolean).join('\n\n')
 }
+
+const STATUS_NAMES: Record<string, string> = { draft: 'Draft', backlog: 'Backlog', ready: 'Ready' }

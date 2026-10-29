@@ -20,7 +20,7 @@ import { ApiFailure } from './errors.ts'
 import type { EventBus } from './events.ts'
 import type { GitHubClient } from './github.ts'
 import { slugify } from './projects.ts'
-import { designRevisionPrompt, developerPrompt, reviewerPrompt } from './prompts.ts'
+import { designRevisionPrompt, developerPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
 import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
 import { MergeOrchestrator } from './merge.ts'
 import type { PlanService } from './plan.ts'
@@ -28,7 +28,7 @@ import { getRun, listAgents, listEvidence } from './runs.ts'
 import { addComment, applyTransition, deleteTaskRows, loadTask, lockTask, toTaskState, type ProjectRow, type TaskRow } from './tasks.ts'
 import type { Transcripts } from './transcripts.ts'
 
-const { acceptanceCriteria, agents, attachments, auditLog, comments, designVersions, evidence, projects, reviews, runs, settings, tasks } = schema
+const { acceptanceCriteria, agents, attachments, auditLog, comments, designVersions, evidence, projects, reviews, runs, settings, taskDesignPins, tasks } = schema
 type PlanSessionRow = typeof schema.planSessions.$inferSelect
 
 const server: Actor = { kind: 'system', component: 'server' }
@@ -328,6 +328,7 @@ export class Orchestrator implements RunnerHandlers {
       ? await db.select({ version: designVersions.version, createdAt: designVersions.createdAt }).from(designVersions)
           .where(eq(designVersions.taskId, task.id)).orderBy(desc(designVersions.version)).limit(1)
       : []
+    const pin = await this.#pinnedDesign(ctx.project.prefix, task.id)
     const promptTask = {
       ref,
       title: task.title,
@@ -335,6 +336,7 @@ export class Orchestrator implements RunnerHandlers {
       branch: spike ? null : task.branch,
       spike,
       design: design ? { version: latest?.version ?? null } : null,
+      pin,
       defaultBranch: ctx.project.defaultBranch,
       reviewRounds: task.reviewRounds,
       reviewRoundCap: ctx.project.reviewRoundCap,
@@ -359,6 +361,7 @@ export class Orchestrator implements RunnerHandlers {
       taskId: task.id,
       taskRef: ref,
       taskType: task.type,
+      designPinned: pin !== null,
       branch: spike ? null : task.branch,
       headSha: spike ? null : task.headSha,
       planSessionId: null,
@@ -368,6 +371,14 @@ export class Orchestrator implements RunnerHandlers {
       timeoutSeconds: RUN_TIMEOUT_SECONDS,
       prompt: resume && latest ? designRevisionPrompt(promptTask, notes.filter(c => c.createdAt > latest.createdAt)) : prompt
     }
+  }
+
+  // The design version a build task is pinned to (D20), for its prompt
+  async #pinnedDesign(prefix: string, taskId: string): Promise<PinnedDesign | null> {
+    const [pin] = await this.#d.db.select({ screens: taskDesignPins.screens, version: designVersions.version, branch: designVersions.branch, commitSha: designVersions.commitSha, number: tasks.number })
+      .from(taskDesignPins).innerJoin(designVersions, eq(designVersions.id, taskDesignPins.designVersionId)).innerJoin(tasks, eq(tasks.id, designVersions.taskId))
+      .where(eq(taskDesignPins.taskId, taskId))
+    return pin ? { designRef: taskRef(prefix, pin.number), version: pin.version, screens: pin.screens, branch: pin.branch, commitSha: pin.commitSha } : null
   }
 
   // The agent session of this agent's last developer run on the task, to resume
@@ -401,6 +412,7 @@ export class Orchestrator implements RunnerHandlers {
       ? await db.select().from(designVersions)
           .where(and(eq(designVersions.taskId, task.id), eq(designVersions.commitSha, task.headSha))).orderBy(desc(designVersions.version)).limit(1)
       : []
+    const pin = await this.#pinnedDesign(ctx.project.prefix, task.id)
     return {
       runId: ctx.run.id,
       runNumber: ctx.run.number,
@@ -413,6 +425,7 @@ export class Orchestrator implements RunnerHandlers {
       taskId: task.id,
       taskRef: ref,
       taskType: task.type,
+      designPinned: pin !== null,
       branch: spike ? null : task.branch,
       headSha: spike ? null : task.headSha,
       planSessionId: null,
@@ -428,6 +441,7 @@ export class Orchestrator implements RunnerHandlers {
         spike,
         findings: reported?.summary ?? null,
         design: design ? { version: version?.version ?? null } : null,
+        pin,
         underReview: version ? { version: version.version, commitSha: version.commitSha, screenshots: version.screenshots.map(s => s.fileName) } : null,
         defaultBranch: ctx.project.defaultBranch,
         reviewRounds: task.reviewRounds,

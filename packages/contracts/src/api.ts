@@ -242,6 +242,10 @@ export interface TaskDesignPin {
   taskRef: string
   version: number
   screens: string[]
+  // A newer approved version of the design, when the task hasn't started:
+  // the pin is stale and shows "design changed: v1 → v2" until it's
+  // repinned or revised (D20). Null otherwise.
+  newerVersion: number | null
 }
 
 // A design task's version as the design view shows it (D20). The bundle is

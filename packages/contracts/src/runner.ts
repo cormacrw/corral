@@ -65,6 +65,10 @@ export interface RunJob {
   // The task's type: a design task's developer gets submit_design (D20).
   // Absent on PM turns and from older servers.
   taskType?: TaskType | null | undefined
+  // A build task pinned to a design version (D20): the runner saves the
+  // version as read-only files in the scratch folder before the agent
+  // starts. Absent from older servers.
+  designPinned?: boolean | undefined
   branch: string | null
   // Reviewer runs check out this commit
   headSha: string | null

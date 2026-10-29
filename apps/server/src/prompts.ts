@@ -13,12 +13,24 @@ export interface PromptTask {
   // D20: a design task delivers a prototype and spec as a design version.
   // `version` is the latest one submitted, null before the first.
   design?: { version: number | null } | null
+  // D20: a build task pinned to an approved design version and its screens
+  pin?: PinnedDesign | null
   defaultBranch: string
   reviewRounds: number
   reviewRoundCap: number
   criteria: { id: string, text: string }[]
   comments: { author: string, body: string, pinned: boolean, createdAt: Date }[]
   attachments: { id: string, fileName: string, foundIn: string[] }[]
+}
+
+export interface PinnedDesign {
+  // The design task, e.g. COR-70
+  designRef: string
+  version: number
+  screens: string[]
+  // The design/<ref> branch the prototype was built on, for reference
+  branch: string
+  commitSha: string
 }
 
 function section(title: string, body: string): string {
@@ -40,6 +52,22 @@ function attachmentsSection(task: PromptTask): string {
   if (task.attachments.length === 0) return ''
   const list = task.attachments.map(a => `- ${a.id}: "${a.fileName}" in ${a.foundIn.join(', ')}`).join('\n')
   return section('Attached images', `Images attached by the human are part of the requirements; view each with \`get_attachment\` before you start.\n\n${list}`)
+}
+
+// D20: the design a build task builds. The runner saves the version as
+// read-only files in the scratch folder before the agent starts.
+function pinSection(task: PromptTask, role: 'developer' | 'reviewer'): string {
+  const pin = task.pin
+  if (!pin) return ''
+  const screens = pin.screens.length > 0 ? pin.screens.map(s => `\`${s}\``).join(', ') : '(none listed)'
+  return section('Design', `
+This task builds part of design v${pin.version} of ${pin.designRef}, the approved prototype and spec. It covers these screens from its \`design.md\`: ${screens}.
+
+- Corral has saved the version outside the repository as read-only files: \`design.md\` (the spec, the source of truth), the screenshots of each screen, and the prototype's static bundle, extracted. The runner notes give the folder. If they're missing, call \`get_design\` with taskRef "${task.ref}" to fetch them.
+- The prototype was built on branch \`${pin.branch}\` at commit ${pin.commitSha}, from the project's real components. It's there for reference: ${role === 'developer' ? 'don\'t check it out, merge it or copy its mock data and prototype shortcuts. Build the screens for real on your own branch.' : 'it is never merged.'}
+${role === 'developer'
+  ? '- For each screen you build, capture a screenshot of the built feature in the same state and at the same width as the matching prototype screenshot, and attach both to the criterion: either one image with the prototype and the build side by side, or the build\'s screenshot with the prototype\'s next to it. Say in the note which screen it is (its id) and anything that differs on purpose.'
+  : '- Compare the developer\'s screenshots of the build with the matching prototype screenshots, screen by screen. Request changes when the build differs from the design without a reason given, or a pinned screen has no side-by-side comparison.'}`)
 }
 
 export interface ReviewTask extends PromptTask {
@@ -72,6 +100,7 @@ export function reviewerPrompt(task: ReviewTask & { underReview?: DesignUnderRev
     task.previousFeedback ? section('Your feedback last round', task.previousFeedback) : '',
     commentsSection(task),
     attachmentsSection(task),
+    pinSection(task, 'reviewer'),
     section('How to review', `
 - You are in a read-only checkout of the commit under review. Do not edit, commit or push. Run \`git diff ${task.defaultBranch}...HEAD\` or \`git log\` to see the change; \`origin/${task.defaultBranch}\` is available locally.
 - Read \`.corral/CORRAL.md\` and the wiki if they exist, and check the wiki was updated where behaviour changed.
@@ -198,6 +227,7 @@ export function developerPrompt(task: PromptTask, agentName: string): string {
     section('Acceptance criteria', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
     commentsSection(task),
     attachmentsSection(task),
+    pinSection(task, 'developer'),
     section('How to work', `
 - You are in a git worktree on branch \`${task.branch}\`, based on \`${task.defaultBranch}\`. Commit your work on this branch.
 - Do not push and do not use \`gh\`. Corral pushes the branch and opens the PR when you report your outcome.

@@ -1,5 +1,5 @@
 import type { RunnerMessage } from '@corral/contracts'
-import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ServerConnection } from './connection.ts'
@@ -159,6 +159,47 @@ describe('RunManager PM turns', () => {
     const prompt = systemPrompt((await calls())[0]!)
     expect(prompt).not.toContain('## Project brief')
     expect(prompt).toMatch(new RegExp(`^${escape(DEFAULT_ROLE_INSTRUCTIONS.pm)}\\n\\n## Corral runner notes\\n`))
+  })
+
+  // D20: a build task's runs get the pinned design before the agent starts
+  it.each(['developer', 'reviewer'] as const)('saves the pinned design read-only outside the worktree for a %s run', async (role) => {
+    const sha = await commitToOrigin({ 'README.md': 'Hello\n' })
+    if (role === 'reviewer') await exec('git', ['fetch', '--quiet', 'origin'], { cwd: barePath(dataDir, TEST_REPOSITORY) })
+    const src = join(dirname(dataDir), 'bundle-src')
+    await mkdir(src, { recursive: true })
+    await writeFile(join(src, 'index.html'), '<h1>Login</h1>')
+    await exec('tar', ['-cf', join(dirname(dataDir), 'bundle.tar'), '-C', src, '.'])
+    const bundle = (await readFile(join(dirname(dataDir), 'bundle.tar'))).toString('base64')
+    const asked: unknown[] = []
+    // The server answers get_design with the pinned version
+    const send = (message: RunnerMessage) => {
+      sent.push(message)
+      if (message.type === 'tool.call' && message.tool === 'get_design') {
+        asked.push(message.input)
+        queueMicrotask(() => manager.handle({ type: 'tool.result', callId: message.callId, ok: true, result: {
+          taskRef: 'APP-1', title: 'Login', version: 1, status: 'approved', branch: 'design/APP-1', commitSha: 'd1', spec: '# Login', pinnedScreens: ['login'],
+          screenshots: [{ fileName: 'login.png', contentType: 'image/png', dataBase64: Buffer.from('png').toString('base64') }], bundle: { dataBase64: bundle }
+        } }))
+      }
+      return true
+    }
+    const tools = { register: () => () => {}, url: () => 'http://127.0.0.1:9/mcp' } as unknown as ToolServer
+    manager = new RunManager({ dataDir, claudeBin, codexBin: 'codex', name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds: 0 }, { send } as unknown as ServerConnection, tools)
+    manager.assign(pmJob({ runId: 'r1', role, planSessionId: null, taskId: 'task-2', taskRef: 'APP-2', designPinned: true, branch: 'corral/app-2', headSha: role === 'reviewer' ? sha : null }))
+    await finish('r1')
+
+    expect(asked).toEqual([{ taskRef: 'APP-2' }])
+    const call = (await calls())[0]!
+    const dir = join(dataDir, 'scratch', 'r1', 'designs', 'APP-1-v1')
+    expect(systemPrompt(call)).toContain(`The pinned design, v1 of APP-1, is saved read-only in ${dir}, outside the repository`)
+    expect(systemPrompt(call)).toContain('built on branch design/APP-1, for reference only')
+    expect(await readFile(join(dir, 'design.md'), 'utf8')).toBe('# Login')
+    expect(await readFile(join(dir, 'bundle', 'index.html'), 'utf8')).toBe('<h1>Login</h1>')
+    expect((await stat(join(dir, 'design.md'))).mode & 0o222).toBe(0)
+    // Not in the worktree the agent works in
+    expect(dir.startsWith(call.cwd)).toBe(false)
+    expect(await exec('git', ['status', '--porcelain'], { cwd: call.cwd })).toMatchObject({ stdout: '' })
+    await exec('chmod', ['-R', 'u+w', dirname(dataDir)])
   })
 
   it.each(['developer', 'reviewer'] as const)('leaves the %s system prompt without a brief', async (role) => {
