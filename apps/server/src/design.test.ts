@@ -12,7 +12,7 @@ import { FakeRunner } from './test-runner.ts'
 
 const { agents, auditLog, designVersions, runs, tasks } = schema
 
-// A gzipped tar of the files, as the runner packs a bundle
+// A tar of the files, as the runner packs a bundle
 function tarball(files: Record<string, string>): Buffer {
   const root = mkdtempSync(join(tmpdir(), 'corral-bundle-test-'))
   try {
@@ -21,8 +21,8 @@ function tarball(files: Record<string, string>): Buffer {
       mkdirSync(dirname(join(src, name)), { recursive: true })
       writeFileSync(join(src, name), text)
     }
-    execFileSync('tar', ['-czf', join(root, 'bundle.tar.gz'), '-C', src, '.'])
-    return readFileSync(join(root, 'bundle.tar.gz'))
+    execFileSync('tar', ['-cf', join(root, 'bundle.tar'), '-C', src, '.'])
+    return readFileSync(join(root, 'bundle.tar'))
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -165,6 +165,10 @@ describe('design tasks submit versions instead of a PR', () => {
     expect(v1!.screenshots.map(s => s.fileName)).toEqual(['login-desktop.png', 'login-mobile.png'])
     expect(Buffer.from((await t.blobs.get(v1!.specBlob))!).toString('utf8')).toBe(SPEC.trim())
     expect(bundleHasRootIndex((await t.blobs.get(v1!.bundleBlob))!)).toBe(true)
+    // The preview route serves the stored bundle as it was submitted
+    const preview = await t.request('GET', `/api/designs/${v1!.id}/files/`)
+    expect(preview.status).toBe(200)
+    expect(await preview.text()).toBe('<h1>Login</h1>')
     const [run] = await t.db.select().from(runs).where(eq(runs.id, developer.runId))
     expect(run).toMatchObject({ state: 'completed', outcome: 'design_submitted', headSha: 'd1' })
 

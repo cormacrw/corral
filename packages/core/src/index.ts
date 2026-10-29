@@ -1,6 +1,7 @@
 // Pure domain logic: task state machine, transitions, merge gates. No I/O.
 export * from './actor.ts'
 export * from './attachments.ts'
+export * from './bundle.ts'
 export * from './deletion.ts'
 export * from './dependencies.ts'
 export * from './design.ts'

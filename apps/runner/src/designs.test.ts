@@ -22,8 +22,8 @@ describe('saveDesign', () => {
       await mkdir(join(src, name, '..'), { recursive: true })
       await writeFile(join(src, name), text)
     }
-    const archive = join(root, 'bundle.tar.gz')
-    expect((await exec('tar', ['-czf', archive, '-C', src, '.'])).code).toBe(0)
+    const archive = join(root, 'bundle.tar')
+    expect((await exec('tar', ['-cf', archive, '-C', src, '.'])).code).toBe(0)
     return (await readFile(archive)).toString('base64')
   }
 
@@ -51,7 +51,7 @@ describe('saveDesign', () => {
         { fileName: 'login.png', contentType: 'image/png', path: join(dir, 'screenshots', '01-login.png') },
         { fileName: 'login.png', contentType: 'image/png', path: join(dir, 'screenshots', '02-login.png') }
       ],
-      bundle: { archive: join(dir, 'bundle.tar.gz'), dir: join(dir, 'bundle'), index: join(dir, 'bundle', 'index.html') }
+      bundle: { archive: join(dir, 'bundle.tar'), dir: join(dir, 'bundle'), index: join(dir, 'bundle', 'index.html') }
     })
     expect(await readFile(join(dir, 'design.md'), 'utf8')).toContain('## Screens')
     expect(await readFile(join(dir, 'screenshots', '02-login.png'), 'utf8')).toBe('png-2')
@@ -59,7 +59,7 @@ describe('saveDesign', () => {
     expect(await readFile(join(dir, 'bundle', 'assets', 'app.js'), 'utf8')).toBe('console.log(1)')
   })
 
-  it('reports a bundle that isn\'t a gzipped tar', async () => {
+  it('reports a bundle that isn\'t a tar', async () => {
     const saved = await saveDesign(join(root, 'scratch'), { taskRef: 'COR-7', version: 1, spec: '', screenshots: [], bundle: { dataBase64: Buffer.from('not a tar').toString('base64') } })
     expect(saved).toMatchObject({ ok: false, error: expect.stringContaining('could not extract the design bundle') })
   })
@@ -84,13 +84,13 @@ describe('packDesign', () => {
 
   const input = (over: Record<string, unknown> = {}) => ({ bundleDir: join(root, 'dist'), specPath: join(root, 'design.md'), screenshots: [join(root, 'login-desktop.png')], ...over })
 
-  it('packs the bundle as a gzipped tar with index.html at its root, with the spec and screenshots', async () => {
+  it('packs the bundle as a tar with index.html at its root, with the spec and screenshots', async () => {
     const packed = await packDesign(root, input())
     if (!packed.ok) throw new Error(packed.error)
     expect(packed.result).toMatchObject({ spec: '# Login\n', bundle: { files: 2 }, screenshots: [{ fileName: 'login-desktop.png', contentType: 'image/png', dataBase64: Buffer.from('png').toString('base64') }] })
-    const archive = join(root, 'out.tar.gz')
+    const archive = join(root, 'out.tar')
     await writeFile(archive, Buffer.from(packed.result.bundle.dataBase64, 'base64'))
-    const listed = await exec('tar', ['-tzf', archive])
+    const listed = await exec('tar', ['-tf', archive])
     expect(listed.stdout.split('\n')).toEqual(expect.arrayContaining(['./index.html', './assets/app.js']))
   })
 

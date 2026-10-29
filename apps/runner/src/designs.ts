@@ -33,16 +33,16 @@ export async function saveDesign(scratchDir: string, design: DesignFiles): Promi
     await writeFile(path, Buffer.from(shot.dataBase64, 'base64'))
     screenshots.push({ fileName: shot.fileName, contentType: shot.contentType, path })
   }
-  const archive = join(dir, 'bundle.tar.gz')
+  const archive = join(dir, 'bundle.tar')
   await writeFile(archive, Buffer.from(design.bundle.dataBase64, 'base64'))
   // GNU tar drops leading slashes and `..` members, so nothing lands outside
-  const untar = await exec('tar', ['-xzf', archive, '-C', bundleDir, '--no-same-owner', '--no-same-permissions'])
+  const untar = await exec('tar', ['-xf', archive, '-C', bundleDir, '--no-same-owner', '--no-same-permissions'])
   if (untar.code !== 0) return { ok: false, error: `Corral could not extract the design bundle: ${untar.stderr.trim() || 'tar is missing'}` }
 
   return { ok: true, result: { ...design, specPath, screenshots, bundle: { archive, dir: bundleDir, index: join(bundleDir, 'index.html') } } }
 }
 
-// What submit_design sends the server (D20): the bundle as a gzipped tar,
+// What submit_design sends the server (D20): the bundle as a tar,
 // design.md as text and the screenshots, all as base64
 export interface DesignSubmission {
   bundle: { dataBase64: string, files: number }
@@ -84,8 +84,8 @@ export async function packDesign(baseDir: string, input: Record<string, unknown>
 
   const scratch = await mkdtemp(join(tmpdir(), 'corral-bundle-'))
   try {
-    const archive = join(scratch, 'bundle.tar.gz')
-    const tar = await exec('tar', ['-czf', archive, '-C', bundleDir, '.'])
+    const archive = join(scratch, 'bundle.tar')
+    const tar = await exec('tar', ['-cf', archive, '-C', bundleDir, '.'])
     if (tar.code !== 0) return { ok: false, error: `Corral could not pack the bundle: ${tar.stderr.trim() || 'tar is missing'}` }
     const data = await readFile(archive)
     if (data.length > MAX_BUNDLE_BYTES) return { ok: false, error: 'Not submitted. The packed bundle is over 25 MB; leave out what the prototype doesn\'t need.' }
