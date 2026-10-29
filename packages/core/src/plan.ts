@@ -18,7 +18,8 @@ export interface ProposedTask {
   // The ref of an existing task this one revises (e.g. COR-4), instead of
   // creating a new one
   ref?: string | undefined
-  // The key of the epic it belongs to, if any. A task without one has no
+  // The key of the epic it belongs to (or its existing id when reconstructing
+  // edited Drafts for approval). A task without one has no
   // epic.
   epic?: string | undefined
   title: string
@@ -162,7 +163,7 @@ export function checkPlan(plan: ProposedPlan, refs: ReadonlyMap<string, PlanRef>
 // separately because Drafts may have been edited directly since proposing.
 export function checkPlanEpicDependencies(plan: ProposedPlan, context?: PlanDependencyContext): EpicDependencyProblem[] {
   const epicKeys = new Set(plan.epics.map(e => e.key))
-  const epicId = (key: string) => context?.epicIds.get(key) ?? `plan-epic:${key}`
+  const epicId = (key: string) => context?.epicIds.get(key) ?? (epicKeys.has(key) ? `plan-epic:${key}` : key)
   const taskId = (task: ProposedTask) => (task.ref ? context?.refIds.get(task.ref) : undefined) ?? context?.taskIds.get(task.key) ?? `plan-task:${task.key}`
   const epicGraph = new Map(context?.epics)
   const titles = new Map(context?.titles)

@@ -762,7 +762,7 @@ export class PlanService {
           design: pinOf(revision.design),
           key: item.key,
           ref: item.ref!,
-          epic: revision.epicId ? keyOf.get(revision.epicId) : undefined,
+          epic: revision.epicId ? keyOf.get(revision.epicId) ?? revision.epicId : undefined,
           dependsOn: revision.dependsOn.map(n => taskRef(project.prefix, n)).map(ref => keys.get(ref) ?? ref)
         })
         continue
@@ -771,7 +771,7 @@ export class PlanService {
       if (!task) continue
       result.push({
         key: item.key,
-        epic: task.epicId ? keyOf.get(task.epicId) : undefined,
+        epic: task.epicId ? keyOf.get(task.epicId) ?? task.epicId : undefined,
         title: task.title,
         description: richTextToMarkdown(task.description),
         type: task.type,

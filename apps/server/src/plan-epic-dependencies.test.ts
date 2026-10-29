@@ -93,6 +93,34 @@ describe('epic dependencies in plans', { timeout: 30_000 }, () => {
     expect((await latest()).tasks.map(t => t.status)).toEqual(['draft', 'draft'])
   })
 
+  it('rejects approval atomically when a Draft moved to an external epic creates a deadlock', async () => {
+    const { project, call, latest } = await setup()
+    const [existing] = await t.db.insert(schema.epics).values({ projectId: project.id, title: 'Existing foundation', createdBy: t.actor }).returning()
+    const input = proposal([])
+    input.epics[0]!.dependsOn = [existing!.id]
+    input.epics.splice(1, 1)
+    input.tasks[1]!.epic = 'e1'
+    input.tasks[0]!.dependsOn = ['t2']
+    expect(await call(input)).toMatchObject({ ok: true })
+    const plan = await latest()
+    const moved = await t.request('PATCH', `/api/projects/${project.slug}/tasks/${plan.tasks[0]!.ref!.split('-').at(-1)}`, { epicId: existing!.id })
+    expect(moved.status).toBe(200)
+    const before = {
+      tasks: await t.db.select().from(schema.tasks),
+      taskDependencies: await t.db.select().from(schema.taskDependencies),
+      epicDependencies: await t.db.select().from(schema.epicDependencies)
+    }
+    const response = await t.request('POST', `/api/plan/plans/${plan.id}/approve`, { to: 'ready' })
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ error: { code: 'invalid_dependencies', problems: [expect.objectContaining({
+      code: 'epic_task_deadlock', epics: expect.arrayContaining(['Mobile PWA', 'Existing foundation'])
+    })] } })
+    expect(await t.db.select().from(schema.tasks)).toEqual(before.tasks)
+    expect(await t.db.select().from(schema.taskDependencies)).toEqual(before.taskDependencies)
+    expect(await t.db.select().from(schema.epicDependencies)).toEqual(before.epicDependencies)
+    expect((await latest()).status).toBe('proposed')
+  })
+
   it('allows explicitly clearing inherited dependencies without changing an earlier version', async () => {
     const { call, latest } = await setup()
     expect(await call(proposal())).toMatchObject({ ok: true })
