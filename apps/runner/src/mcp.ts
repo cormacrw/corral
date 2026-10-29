@@ -23,7 +23,7 @@ interface ImageResult {
 }
 
 const outcomes: Record<AgentRole, readonly string[]> = {
-  developer: ['pr_opened', 'pr_updated', 'stuck', 'failed'],
+  developer: ['pr_opened', 'pr_updated', 'findings_reported', 'stuck', 'failed'],
   reviewer: ['approved', 'changes_requested', 'failed'],
   pm: []
 }

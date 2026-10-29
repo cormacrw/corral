@@ -121,3 +121,41 @@ describe('readProjectBrief', () => {
     expect(brief).toContain('[Brief truncated: it is longer than 20,000 characters. Read CORRAL.md for the rest if you need it.]')
   })
 })
+
+// D19: a spike's jobs have no branch and no commit
+describe('prepareWorkspace for spikes', () => {
+  let dataDir: string
+
+  beforeEach(async () => {
+    dataDir = await createTestDataDir()
+  })
+
+  afterEach(async () => {
+    await rm(dirname(dataDir), { recursive: true, force: true })
+  })
+
+  const spikeJob = (role: 'developer' | 'reviewer') => pmJob({ role, taskId: 'task-1', taskRef: 'TA-1', branch: null, headSha: null, planSessionId: null })
+
+  it('gives the developer a detached checkout of the default branch, kept between revisions', async () => {
+    const first = await prepareWorkspace(dataDir, spikeJob('developer'))
+    expect(first.error).toBeNull()
+    expect(first.workspace!.path).toBe(join(dataDir, 'worktrees', 'task-1'))
+    expect(await git(['symbolic-ref', '-q', 'HEAD'], { cwd: first.workspace!.path })).toMatchObject({ code: 1 })
+    expect(await readFile(join(first.workspace!.path, 'README.md'), 'utf8')).toBe('# App\n')
+    await writeFile(join(first.workspace!.path, 'notes.md'), 'kept\n')
+    const again = await prepareWorkspace(dataDir, spikeJob('developer'))
+    expect(again.workspace!.path).toBe(first.workspace!.path)
+    expect(await readFile(join(again.workspace!.path, 'notes.md'), 'utf8')).toBe('kept\n')
+  })
+
+  it('gives the reviewer its own detached checkout of the default branch', async () => {
+    const prepared = await prepareWorkspace(dataDir, spikeJob('reviewer'))
+    expect(prepared.error).toBeNull()
+    expect(prepared.workspace!.path).toBe(join(dataDir, 'worktrees', 'task-1-review'))
+    expect(await git(['symbolic-ref', '-q', 'HEAD'], { cwd: prepared.workspace!.path })).toMatchObject({ code: 1 })
+  })
+
+  it('still refuses a job without a task', async () => {
+    expect(await prepareWorkspace(dataDir, pmJob({ role: 'developer', taskId: null, planSessionId: null }))).toEqual({ workspace: null, error: 'The job has no task' })
+  })
+})

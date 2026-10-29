@@ -74,6 +74,7 @@ export function runBadge(run: Pick<Run, 'state' | 'outcome' | 'role'>): { label:
   switch (outcome) {
     case 'pr_opened': return { label: 'PR opened', color: 'primary' }
     case 'pr_updated': return { label: 'PR updated', color: 'primary' }
+    case 'findings_reported': return { label: 'Findings reported', color: 'primary' }
     case 'approved': return { label: 'Approved', color: 'success' }
     case 'changes_requested': return { label: 'Changes requested', color: 'warning' }
     case 'stuck': return { label: 'Stuck', color: 'error' }

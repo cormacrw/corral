@@ -302,7 +302,9 @@ export class Orchestrator implements RunnerHandlers {
     const { db } = this.#d
     let task = ctx.task!
     const ref = taskRef(ctx.project.prefix, task.number)
-    if (!task.branch) {
+    // A spike delivers findings, not a PR (D19), so it never gets a branch
+    const spike = task.type === 'spike'
+    if (!task.branch && !spike) {
       const branch = `corral/${ref.toLowerCase()}-${slugify(task.title).slice(0, 40).replace(/-+$/, '')}`
       ;[task] = await db.update(tasks).set({ branch }).where(eq(tasks.id, task.id)).returning() as [TaskRow]
     }
@@ -320,8 +322,8 @@ export class Orchestrator implements RunnerHandlers {
       defaultBranch: ctx.project.defaultBranch,
       taskId: task.id,
       taskRef: ref,
-      branch: task.branch,
-      headSha: task.headSha,
+      branch: spike ? null : task.branch,
+      headSha: spike ? null : task.headSha,
       planSessionId: null,
       agentSessionId: null,
       fallbackPrompt: null,
@@ -331,7 +333,8 @@ export class Orchestrator implements RunnerHandlers {
         ref,
         title: task.title,
         description: task.description,
-        branch: task.branch!,
+        branch: spike ? null : task.branch,
+        spike,
         defaultBranch: ctx.project.defaultBranch,
         reviewRounds: task.reviewRounds,
         reviewRoundCap: ctx.project.reviewRoundCap,
@@ -352,6 +355,13 @@ export class Orchestrator implements RunnerHandlers {
     const [previous] = await db.select().from(reviews).where(eq(reviews.taskId, task.id)).orderBy(desc(reviews.createdAt)).limit(1)
     const notes = await this.#comments(task.id)
     const attached = await listTaskAttachments(db, ctx.project.id, task.description, notes)
+    // A spike has no commit: the reviewer gets a checkout of the default
+    // branch and judges the findings the developer last reported (D19)
+    const spike = task.type === 'spike'
+    const [reported] = spike
+      ? await db.select({ summary: runs.summary }).from(runs)
+          .where(and(eq(runs.taskId, task.id), eq(runs.outcome, 'findings_reported'))).orderBy(desc(runs.number)).limit(1)
+      : []
     return {
       runId: ctx.run.id,
       runNumber: ctx.run.number,
@@ -363,8 +373,8 @@ export class Orchestrator implements RunnerHandlers {
       defaultBranch: ctx.project.defaultBranch,
       taskId: task.id,
       taskRef: ref,
-      branch: task.branch,
-      headSha: task.headSha,
+      branch: spike ? null : task.branch,
+      headSha: spike ? null : task.headSha,
       planSessionId: null,
       agentSessionId: null,
       fallbackPrompt: null,
@@ -374,7 +384,9 @@ export class Orchestrator implements RunnerHandlers {
         ref,
         title: task.title,
         description: task.description,
-        branch: task.branch!,
+        branch: spike ? null : task.branch,
+        spike,
+        findings: reported?.summary ?? null,
         defaultBranch: ctx.project.defaultBranch,
         reviewRounds: task.reviewRounds,
         reviewRoundCap: ctx.project.reviewRoundCap,
@@ -864,10 +876,15 @@ export class Orchestrator implements RunnerHandlers {
       throw new ToolError('A reviewer reports approved, changes_requested or failed')
     }
     if (ctx.run.role === 'developer') {
+      const spike = ctx.task!.type === 'spike'
       switch (report.outcome) {
         case 'pr_opened':
         case 'pr_updated':
+          if (spike) throw new ToolError('Not submitted. A spike opens no PR: report your findings with outcome findings_reported.')
           return this.#submit(ctx, report)
+        case 'findings_reported':
+          if (!spike) throw new ToolError('Not submitted. Only a spike reports findings; this task reports pr_opened or pr_updated.')
+          return this.#reportFindings(ctx, report)
         case 'stuck':
           return this.#stuck(ctx, report.summary)
         case 'failed':
@@ -875,7 +892,7 @@ export class Orchestrator implements RunnerHandlers {
           this.#finished(ctx, 'Reported failed')
           return { ok: true, message: 'Recorded. You can stop now.' }
       }
-      throw new ToolError('A developer reports pr_opened, pr_updated, stuck or failed')
+      throw new ToolError(spike ? 'A spike’s developer reports findings_reported, stuck or failed' : 'A developer reports pr_opened, pr_updated, stuck or failed')
     }
     throw new ToolError(`Outcomes for ${ctx.run.role} runs aren't supported yet`)
   }
@@ -922,11 +939,16 @@ export class Orchestrator implements RunnerHandlers {
       await this.#endRunIn(tx, ctx, { state: 'completed', outcome: verdict, summary: report.summary, headSha })
     })
     this.#finished(ctx, `Review recorded: ${verdict}`)
+    const spike = task.type === 'spike'
+    // An approved spike without human review is finished: nothing to merge
+    if (spike && verdict === 'approved' && !task.humanReview) void this.merges.cleanup(task.id)
     return {
       ok: true,
-      message: verdict === 'approved'
-        ? 'Approval recorded. Corral handles human review, CI and the merge from here. You can stop now.'
-        : 'Changes requested; your feedback was sent to the developer. You can stop now.'
+      message: verdict === 'changes_requested'
+        ? 'Changes requested; your feedback was sent to the developer. You can stop now.'
+        : spike
+          ? `Approval recorded. ${task.humanReview ? 'A human reviews the findings next.' : 'The spike is finished and its findings stay on the task.'} You can stop now.`
+          : 'Approval recorded. Corral handles human review, CI and the merge from here. You can stop now.'
     }
   }
 
@@ -988,6 +1010,38 @@ export class Orchestrator implements RunnerHandlers {
     })
     this.#finished(ctx, 'Outcome accepted')
     return { ok: true, pr: pr.url, message: `PR #${pr.number} is ready for review. You can stop now.` }
+  }
+
+  // D19: a spike's findings are its deliverable. Like a submission they
+  // need evidence for every criterion, but nothing is pushed or opened on
+  // GitHub: the findings go on the task as a comment and the reviewer judges
+  // them. The submission is marked by this run, in place of a commit, so
+  // each report gets its own review.
+  async #reportFindings(ctx: RunContext, report: OutcomeReport) {
+    const { db } = this.#d
+    const task = ctx.task!
+    const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
+    const attached = await db.select({ criterionId: evidence.criterionId }).from(evidence)
+      .where(and(eq(evidence.taskId, task.id), eq(evidence.round, task.reviewRounds)))
+    const missing = criteria.filter(c => !attached.some(e => e.criterionId === c.id))
+    if (missing.length > 0) {
+      throw new ToolError(`Not submitted. No evidence yet for: ${missing.map(c => `[${c.id}] ${c.text}`).join('; ')}. Attach it and report again.`)
+    }
+    const marker = findingsMarker(ctx.run.id)
+    const comment = await db.transaction(async (tx) => {
+      const locked = await lockTask(tx, task.id)
+      if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease while submitting. Stop working.')
+      await applyTransition(tx, locked.task, locked.project, {
+        type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true
+      }, server, { event: 'findings_reported', runId: ctx.run.id, headSha: marker })
+      await tx.update(tasks).set({ headSha: marker }).where(eq(tasks.id, task.id))
+      const comment = await addComment(tx, task.id, { body: `## Findings\n\n${report.summary.trim()}`, pinned: false }, this.#actor(ctx))
+      await this.#endRunIn(tx, ctx, { state: 'completed', outcome: 'findings_reported', summary: report.summary })
+      return comment
+    })
+    this.#d.events.publish({ type: 'comment.created', comment })
+    this.#finished(ctx, 'Findings accepted for review')
+    return { ok: true, message: 'Your findings are on the task and go to the reviewer next. You can stop now.' }
   }
 
   #prBody(ref: string, title: string, summary: string, criteria: { id: string, text: string }[], attached: { criterionId: string | null }[]): string {
@@ -1053,6 +1107,12 @@ export class Orchestrator implements RunnerHandlers {
     const task = ctx.task ? await loadTask(db, ctx.task.id).catch(() => null) : null
     if (task) events.publish({ type: 'task.updated', task })
   }
+}
+
+// What stands in for a commit on a spike's submission: reviews are kept per
+// submission, and a spike has no commits to tell them apart
+export function findingsMarker(runId: string): string {
+  return `findings-${runId}`
 }
 
 // The review as a comment the developer reads next round

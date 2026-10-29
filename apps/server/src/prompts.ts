@@ -7,7 +7,9 @@ export interface PromptTask {
   ref: string
   title: string
   description: unknown
-  branch: string
+  // Spikes have no branch: they deliver findings, not a PR (D19)
+  branch: string | null
+  spike?: boolean
   defaultBranch: string
   reviewRounds: number
   reviewRoundCap: number
@@ -42,12 +44,13 @@ export interface ReviewTask extends PromptTask {
   prUrl: string | null
   evidence: { id: string, criterionId: string | null, kind: string, note: string, fileName: string }[]
   previousFeedback: string | null
+  // A spike's latest findings, which are what's under review
+  findings?: string | null
 }
 
 export function reviewerPrompt(task: ReviewTask, agentName: string): string {
-  const evidence = task.evidence.length > 0
-    ? task.evidence.map(e => `- ${e.id}: ${e.kind} "${e.fileName}" for ${e.criterionId ? `[${e.criterionId}]` : 'the task as a whole'}${e.note ? ` — ${e.note}` : ''}`).join('\n')
-    : '(none attached)'
+  if (task.spike) return spikeReviewerPrompt(task, agentName)
+  const evidence = evidenceList(task)
   return [
     `You are ${agentName}, the reviewer agent in Corral. Review round ${task.reviewRounds + 1} of ${task.reviewRoundCap} for task ${task.ref}: ${task.title}.`,
     `You are checking commit ${task.headSha} on branch \`${task.branch}\`${task.prUrl ? ` (${task.prUrl})` : ''}, against \`${task.defaultBranch}\`.`,
@@ -65,6 +68,36 @@ export function reviewerPrompt(task: ReviewTask, agentName: string): string {
 - Check the project's lint, typecheck and tests pass on this commit.
 - Call \`report_outcome\` with outcome "approved" or "changes_requested" and a \`criteria\` verdict for every criterion ID above (met true/false with a note).
 - When you approve, keep it short: the summary is one or two sentences (what you checked and anything worth knowing), and each criterion note is a few words. Don't restate the task or the developer's summary.
+- When you request changes, the summary is posted to the developer as a comment: make every point specific and actionable.
+- Always finish by calling \`report_outcome\`.`)
+  ].join('\n')
+}
+
+function evidenceList(task: ReviewTask): string {
+  return task.evidence.length > 0
+    ? task.evidence.map(e => `- ${e.id}: ${e.kind} "${e.fileName}" for ${e.criterionId ? `[${e.criterionId}]` : 'the task as a whole'}${e.note ? ` — ${e.note}` : ''}`).join('\n')
+    : '(none attached)'
+}
+
+// D19: a spike's deliverable is its findings, so there is no diff to review
+function spikeReviewerPrompt(task: ReviewTask, agentName: string): string {
+  return [
+    `You are ${agentName}, the reviewer agent in Corral. Review round ${task.reviewRounds + 1} of ${task.reviewRoundCap} for spike ${task.ref}: ${task.title}.`,
+    `A spike answers a question: the developer investigated and reported findings instead of changing code. There is no branch, diff or PR; you are in a read-only checkout of \`${task.defaultBranch}\`.`,
+    '',
+    section('Task', richTextToMarkdown(task.description) || '(no description)'),
+    section('Acceptance criteria', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
+    section('Findings under review', task.findings?.trim() || '(no findings were reported)'),
+    section('Evidence the developer attached (this round)', evidenceList(task)),
+    task.previousFeedback ? section('Your feedback last round', task.previousFeedback) : '',
+    commentsSection(task),
+    attachmentsSection(task),
+    section('How to review', `
+- Do not edit, commit or push.
+- Judge every acceptance criterion: do the findings answer it, clearly and specifically, and is the answer backed by evidence? Use \`get_evidence\` to list items and fetch them by ID. Check at least one claim yourself against the code or by running something.
+- Good findings give an answer, the evidence for it, a recommendation and suggested follow-up tasks. Request changes when a criterion isn't answered, a claim isn't backed by evidence, or the recommendation doesn't follow from the evidence.
+- Call \`report_outcome\` with outcome "approved" or "changes_requested" and a \`criteria\` verdict for every criterion ID above (met true/false with a note). Approving finishes the spike: its findings stay on the task for the human and the PM.
+- When you approve, keep it short: the summary is one or two sentences, and each criterion note is a few words.
 - When you request changes, the summary is posted to the developer as a comment: make every point specific and actionable.
 - Always finish by calling \`report_outcome\`.`)
   ].join('\n')
@@ -108,7 +141,7 @@ const GRILL_INSTRUCTIONS = `(The human asked to be grilled. Follow the grill-me 
 // Each PM turn is one message; the session carries the rest (D9)
 export function pmPrompt(turn: PmTurn & { grilling?: boolean }): string {
   const intro = turn.fresh
-    ? `You are the product-manager agent for the project "${turn.projectName}" in Corral. Task IDs look like ${turn.prefix}-12. You are in a read-only checkout of the default branch. Answer greetings, status questions and anything you can answer from the board (list_tasks shows it live) straight away, without reading the repo. Read the code only when a request needs planning or code knowledge, and then only the parts that matter: start from the project docs (CORRAL.md or CLAUDE.md, and .corral/wiki/ if present) and don't go looking for files that aren't there. Propose work with propose_plan (group a multi-task feature into an epic and leave a lone small fix without one, small tasks, one PR each, descriptions in markdown, verifiable acceptance criteria, explicit dependencies, humanReview true for auth, data migrations, payments, deletions and security-sensitive code). Give each task a type: \`bug\` for a fix to wrong behaviour, \`spike\` for an investigation whose deliverable is written findings, and \`task\` for everything else (features, chores, refactors, docs). To refine an existing Backlog task, read it with get_task and include it in the plan with its \`ref\`, so the plan revises it instead of creating a duplicate. Ask with ask_question when requirements are ambiguous. The human approves plans: with the buttons, or by asking you in chat, and only then may you call approve_plan ("ready" for the board, "backlog" for later). Never approve on your own initiative. Keep replies short and concrete.\n\n`
+    ? `You are the product-manager agent for the project "${turn.projectName}" in Corral. Task IDs look like ${turn.prefix}-12. You are in a read-only checkout of the default branch. Answer greetings, status questions and anything you can answer from the board (list_tasks shows it live) straight away, without reading the repo. Read the code only when a request needs planning or code knowledge, and then only the parts that matter: start from the project docs (CORRAL.md or CLAUDE.md, and .corral/wiki/ if present) and don't go looking for files that aren't there. Propose work with propose_plan (group a multi-task feature into an epic and leave a lone small fix without one, small tasks, one PR each, descriptions in markdown, verifiable acceptance criteria, explicit dependencies, humanReview true for auth, data migrations, payments, deletions and security-sensitive code). Give each task a type: \`bug\` for a fix to wrong behaviour, \`spike\` for an investigation whose deliverable is written findings, and \`task\` for everything else (features, chores, refactors, docs). A spike opens no PR: its developer reports findings (answer, evidence, recommendation, suggested follow-up tasks), and once reviewed they're a comment on the task, which ends in Merged. When the human asks, read a finished spike's findings with get_task and turn them into a plan with propose_plan. To refine an existing Backlog task, read it with get_task and include it in the plan with its \`ref\`, so the plan revises it instead of creating a duplicate. Ask with ask_question when requirements are ambiguous. The human approves plans: with the buttons, or by asking you in chat, and only then may you call approve_plan ("ready" for the board, "backlog" for later). Never approve on your own initiative. Keep replies short and concrete.\n\n`
     : ''
   const attached = turn.attachedTask ? `(About task ${turn.attachedTask}; read it with get_task.)\n\n` : ''
   const ids = messageAttachmentIds(turn.text)
@@ -138,6 +171,7 @@ export function questionText(m: { text: string, recommendation: string | null, o
 }
 
 export function developerPrompt(task: PromptTask, agentName: string): string {
+  if (task.spike) return spikeDeveloperPrompt(task, agentName)
   const revision = task.reviewRounds > 0
   return [
     `You are ${agentName}, the developer agent in Corral. You are working on task ${task.ref}: ${task.title}.`,
@@ -158,6 +192,32 @@ export function developerPrompt(task: PromptTask, agentName: string): string {
 - Use \`get_task\` to re-read the task, comments and evidence at any time, and \`add_comment\` to leave notes for the human or reviewer.
 - When the work is committed and evidenced, call \`report_outcome\` with outcome "${revision ? 'pr_updated' : 'pr_opened'}" and a summary. If anything is missing, the call fails and tells you what to fix.
 - The summary becomes the pull request description, read by someone reviewing the code. Write it in markdown: one or two sentences on what changed and why, then a short bulleted list of how you verified it. Describe the change as a whole, not this run: don't mention comments, run numbers or earlier attempts, and don't list commit hashes.
+- If you cannot continue without a human decision, call \`report_outcome\` with outcome "stuck" and put the question in the summary.
+- Always finish by calling \`report_outcome\`.`)
+  ].join('\n')
+}
+
+// D19: a spike answers a question. The deliverable is written findings,
+// reported as the outcome; there's no branch or PR.
+function spikeDeveloperPrompt(task: PromptTask, agentName: string): string {
+  const revision = task.reviewRounds > 0
+  return [
+    `You are ${agentName}, the developer agent in Corral. You are working on spike ${task.ref}: ${task.title}.`,
+    revision
+      ? `This is a revision: review round ${task.reviewRounds} of ${task.reviewRoundCap} requested changes to your findings. Address every piece of feedback below.`
+      : 'A spike answers a question. Investigate it so that your findings answer every acceptance criterion.',
+    '',
+    section('Task', richTextToMarkdown(task.description) || '(no description)'),
+    section('Acceptance criteria', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
+    commentsSection(task),
+    attachmentsSection(task),
+    section('How to work', `
+- Investigate; don't change code. You are in a checkout of \`${task.defaultBranch}\` with no branch: don't commit or push, and no PR is opened. Put experiments and notes in your scratch folder, outside the repository.
+- Read \`.corral/CORRAL.md\` and the relevant \`.corral/wiki/\` pages first, if they exist.
+- Back your answer with evidence: attach it for every acceptance criterion with \`attach_evidence\`, using the criterion ID in brackets above (command output, logs, measurements, screenshots, short notes with file and line references).
+- Use \`get_task\` to re-read the task, comments and evidence at any time, and \`add_comment\` to leave notes for the human or reviewer.
+- When you're done, call \`report_outcome\` with outcome "findings_reported" and your findings as the summary. If anything is missing, the call fails and tells you what to fix.
+- Write the findings in markdown with these sections: **Answer** (the answer to the question, criterion by criterion), **Evidence** (what you checked and what it showed), **Recommendation**, and **Suggested follow-up tasks** (each with a title, a line on what it would do, and its acceptance criteria). They're posted on the task for the human, and the PM can turn them into a plan.${revision ? ' Report the complete findings again, not just what changed: they replace the earlier ones.' : ''}
 - If you cannot continue without a human decision, call \`report_outcome\` with outcome "stuck" and put the question in the summary.
 - Always finish by calling \`report_outcome\`.`)
   ].join('\n')

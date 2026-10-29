@@ -2,6 +2,7 @@ import { actorType, type Actor, type ActorType } from './actor.ts'
 import { failedMergeGates, type MergeGate, type MergeGateFacts } from './merge-gates.ts'
 import { checkDefinitionOfReady, type ReadyProblem, type TaskContent } from './ready.ts'
 import type { TaskStatus } from './status.ts'
+import type { TaskType } from './task.ts'
 
 // The task state machine (D10). Every status change in Corral goes through
 // `transition`; the server enforces it and rejects anything not listed here.
@@ -18,6 +19,9 @@ export interface TaskState {
   failedRuns: number
   // Why the task is Blocked or Failed; shown in the Inbox (D11)
   reason: string | null
+  // D19: a spike delivers findings, not a PR, so an approval ends it
+  // without a merge. Absent means a plain task.
+  type?: TaskType
 }
 
 export interface TaskLimits {
@@ -39,13 +43,15 @@ export type TaskEvent =
   | { type: 'send_back' }
   // Ready → In progress: the scheduler claims it
   | { type: 'claim', dependencyStatuses: readonly TaskStatus[] }
-  // In progress → Agent review: a pr_opened / pr_updated outcome
+  // In progress → Agent review: a pr_opened / pr_updated outcome, or a
+  // spike's findings_reported
   | { type: 'submit', branchAtExpectedCommit: boolean, evidenceComplete: boolean }
   // Agent review → In progress, or Blocked once the review-round cap is reached
   | { type: 'changes_requested' }
-  // Agent review → Human review for a flagged task, otherwise Ready to merge
+  // Agent review → Human review for a flagged task, otherwise Ready to
+  // merge (a spike: Merged, its findings accepted)
   | { type: 'review_approved' }
-  // Human review → Ready to merge
+  // Human review → Ready to merge (a spike: Merged)
   | { type: 'human_approve' }
   // Ready to merge → In progress: CI failed or the branch conflicts with the base
   | { type: 'ci_failed' }
@@ -172,12 +178,13 @@ export function transition(
     case 'human_request_changes':
       return ok({ ...task, status: 'in_progress' })
 
-    // D5: only the task's own flag sends it to a human
+    // D5: only the task's own flag sends it to a human. A spike has no PR
+    // to merge, so accepting its findings finishes it.
     case 'review_approved':
-      return ok({ ...task, status: task.humanReview ? 'human_review' : 'ready_to_merge' })
+      return ok({ ...task, status: task.humanReview ? 'human_review' : task.type === 'spike' ? 'merged' : 'ready_to_merge' })
 
     case 'human_approve':
-      return ok({ ...task, status: 'ready_to_merge' })
+      return ok({ ...task, status: task.type === 'spike' ? 'merged' : 'ready_to_merge' })
 
     case 'head_moved':
       return ok({ ...task, status: 'agent_review' })

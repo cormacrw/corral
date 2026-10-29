@@ -33,7 +33,8 @@ export function toTaskState(row: TaskRow): TaskState {
     humanReview: row.humanReview,
     reviewRounds: row.reviewRounds,
     failedRuns: row.failedRuns,
-    reason: row.statusReason
+    reason: row.statusReason,
+    type: row.type
   }
 }
 
@@ -240,6 +241,8 @@ export async function applyTransition(
     reviewRounds: next.reviewRounds,
     failedRuns: next.failedRuns,
     statusReason: next.reason,
+    // A spike finishes without a merge (D19); this is when it finished
+    ...(task.type === 'spike' && next.status === 'merged' && task.status !== 'merged' && { mergedAt: new Date() }),
     updatedAt: new Date()
   }).where(eq(tasks.id, task.id))
   await tx.insert(auditLog).values({

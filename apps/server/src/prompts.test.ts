@@ -158,3 +158,68 @@ describe('questionText', () => {
     expect(questionText({ text: 'Which format?', recommendation: 'CSV', options: ['CSV', 'Excel'] })).toBe('Which format?\n\nOptions:\n1. CSV\n2. Excel\n\nRecommended: CSV')
   })
 })
+
+// D19: a spike's agents work on findings, not a branch and a PR
+describe('spike prompts', () => {
+  const task: PromptTask = {
+    ref: 'TA-2',
+    title: 'Which queue?',
+    description: null,
+    branch: null,
+    spike: true,
+    defaultBranch: 'main',
+    reviewRounds: 0,
+    reviewRoundCap: 5,
+    criteria: [{ id: 'c1', text: 'Names a queue' }],
+    comments: [],
+    attachments: []
+  }
+  const review = { ...task, headSha: 'findings-r1', prUrl: null, evidence: [], previousFeedback: null, findings: '**Answer:** Use pg-boss.' }
+
+  it('tells the developer to investigate without changing code and report findings', () => {
+    const prompt = developerPrompt(task, 'Victor')
+    expect(prompt).toContain('spike TA-2: Which queue?')
+    expect(prompt).toContain('Investigate; don\'t change code')
+    expect(prompt).toContain('don\'t commit or push, and no PR is opened')
+    expect(prompt).toContain('outcome "findings_reported"')
+    expect(prompt).toContain('**Answer**')
+    expect(prompt).toContain('**Evidence**')
+    expect(prompt).toContain('**Recommendation**')
+    expect(prompt).toContain('**Suggested follow-up tasks**')
+    expect(prompt).toContain('- [c1] Names a queue')
+    expect(prompt).not.toContain('pr_opened')
+    expect(prompt).not.toContain('pull request')
+  })
+
+  it('asks a revision for the complete findings again', () => {
+    const prompt = developerPrompt({ ...task, reviewRounds: 1 }, 'Victor')
+    expect(prompt).toContain('requested changes to your findings')
+    expect(prompt).toContain('they replace the earlier ones')
+    expect(prompt).not.toContain('pr_updated')
+  })
+
+  it('tells the reviewer to check the findings against every criterion and the evidence, with no diff', () => {
+    const prompt = reviewerPrompt(review, 'Rita')
+    expect(prompt).toContain('spike TA-2')
+    expect(prompt).toContain('There is no branch, diff or PR')
+    expect(prompt).toContain('## Findings under review\n\n**Answer:** Use pg-boss.')
+    expect(prompt).toContain('do the findings answer it')
+    expect(prompt).toContain('backed by evidence')
+    expect(prompt).not.toContain('git diff')
+    expect(prompt).not.toContain('findings-r1')
+  })
+
+  it('leaves plain task prompts on the PR path', () => {
+    const plain = { ...task, branch: 'corral/ta-2-queue', spike: false }
+    expect(developerPrompt(plain, 'Victor')).toContain('outcome "pr_opened"')
+    expect(developerPrompt(plain, 'Victor')).not.toContain('findings_reported')
+    expect(reviewerPrompt({ ...review, ...plain, headSha: 'abc' }, 'Rita')).toContain('git diff main...HEAD')
+    expect(reviewerPrompt({ ...review, ...plain, headSha: 'abc' }, 'Rita')).not.toContain('Findings under review')
+  })
+
+  it('tells the PM a finished spike’s findings can become a plan', () => {
+    const intro = pmPrompt({ ...turn, fresh: true })
+    expect(intro).toContain('A spike opens no PR')
+    expect(intro).toContain('turn them into a plan with propose_plan')
+  })
+})
