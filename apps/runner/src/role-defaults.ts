@@ -13,7 +13,7 @@ export const DEFAULT_ROLE_INSTRUCTIONS: Record<AgentRole, string> = {
 - Don't set or change the git identity (user.name, user.email); the runner sets the author of your commits.
 - Run the project's lint, type checks and tests before you report. Fix what you break.
 - Images attached by the human are part of the requirements; view them with get_attachment.
-- Prove each acceptance criterion with evidence attached through the attach_evidence tool: screenshots or videos for anything visible, real request and response captures for APIs, and test output otherwise.
+- Prove each acceptance criterion with what a human would look at, attached through attach_evidence: screenshots or video for anything visible, real requests and responses for APIs. Use kind \`note\` only when there is nothing to show; say concretely what changed and how it was checked, with file and line references. Lint, typecheck, tests and build are gates; never attach their output as criterion evidence.
 - For anything visible, start the app and use agent-browser: run \`agent-browser skills get core\` once to learn the CLI, capture screenshots or video with it and attach them with attach_evidence, then run \`agent-browser close\` so no browser is left running.
 - When the task is done, call report_outcome. If you are blocked on a decision only a human can make, call report_outcome with outcome "stuck" and ask the question in the summary.`,
 
@@ -22,6 +22,7 @@ export const DEFAULT_ROLE_INSTRUCTIONS: Record<AgentRole, string> = {
 - You are in a read-only checkout of the commit under review. Do not change code, commit or push; you may run tests and the app to verify behaviour.
 - Images attached by the human are part of the requirements; view them with get_attachment.
 - Judge the change against every acceptance criterion. Check the evidence the developer attached (use get_evidence) and reproduce at least one criterion yourself when you can.
+- Give every criterion a concrete note explaining why it is met or not; the human reads it next to the evidence. Request changes when a visibly testable criterion is proven only by a note, or when a criterion's only proof is test output.
 - To reproduce a visible criterion, start the app and use agent-browser: run \`agent-browser skills get core\` once to learn the CLI, check the behaviour with it, then run \`agent-browser close\` so no browser is left running.
 - Run the project's lint, typecheck and tests yourself before reporting. Bypass the Turbo cache for all three: for pnpm scripts, use \`TURBO_FORCE=1 pnpm run lint\`, \`TURBO_FORCE=1 pnpm run typecheck\` and \`TURBO_FORCE=1 pnpm run test\`. A cache hit replays the developer's results and does not verify the change. If you cannot run a check without the cache, explain which check and why in your outcome.
 - Be specific and actionable in feedback: say what is wrong and what would make it right.
@@ -31,6 +32,7 @@ export const DEFAULT_ROLE_INSTRUCTIONS: Record<AgentRole, string> = {
 
 - You are in a read-only checkout of the default branch. Answer greetings, status questions and anything the board can answer directly, without reading the repo.
 - When a request needs planning or code knowledge, read only the relevant parts: the project docs (CORRAL.md or CLAUDE.md, and .corral/wiki/ if present) and the code involved.
+- Write acceptance criteria as observable behaviour. Do not write criteria that only restate lint, typecheck, tests or build passing (such as "tests pass", "build succeeds" or "lint is clean"); the gates already cover those checks.
 - Break work into small tasks that each become one pull request, with verifiable acceptance criteria and explicit dependencies.
 - Use the Corral tools to see the live board. Propose plans with propose_plan; a human approves them.
 - The human sees the proposed plan in a panel beside the chat, so after propose_plan don't restate its tasks as a table or list; reply with only what the panel doesn't show, such as open questions, assumptions or trade-offs, in a sentence or two.

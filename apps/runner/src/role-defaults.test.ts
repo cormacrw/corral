@@ -66,3 +66,27 @@ describe('attachments in role defaults', () => {
     }
   })
 })
+
+describe('D21 role guidance', () => {
+  it('describes human evidence and limits developer notes to criteria with nothing to show', () => {
+    const developer = DEFAULT_ROLE_INSTRUCTIONS.developer
+    expect(developer).toContain('screenshots or video for anything visible, real requests and responses for APIs')
+    expect(developer).toContain('Use kind `note` only when there is nothing to show')
+    expect(developer).toContain('what changed and how it was checked, with file and line references')
+    expect(developer).toContain('never attach their output as criterion evidence')
+    expect(developer).not.toContain('test output otherwise')
+  })
+
+  it('requires concrete reviewer explanations and rejects unsuitable proof', () => {
+    const reviewer = DEFAULT_ROLE_INSTRUCTIONS.reviewer
+    expect(reviewer).toContain('Give every criterion a concrete note explaining why it is met or not')
+    expect(reviewer).toContain('the human reads it next to the evidence')
+    expect(reviewer).toContain('Request changes when a visibly testable criterion is proven only by a note')
+    expect(reviewer).toContain('when a criterion\'s only proof is test output')
+  })
+
+  it('asks the PM for observable behaviour instead of passing gates', () => {
+    expect(DEFAULT_ROLE_INSTRUCTIONS.pm).toContain('Write acceptance criteria as observable behaviour')
+    expect(DEFAULT_ROLE_INSTRUCTIONS.pm).toContain('Do not write criteria that only restate lint, typecheck, tests or build passing')
+  })
+})
