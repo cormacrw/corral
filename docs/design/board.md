@@ -45,6 +45,7 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
 ## Rules
 
 - The Merged column only shows tasks merged in the last 3 days (`MERGED_WINDOW_DAYS` in `apps/web/app/utils/board.ts`). Older merged tasks stay on the Backlog, epic and task pages.
+- The Merged column lists the most recently merged task first (`sortColumn` in `apps/web/app/utils/board.ts`), on desktop and mobile; ties fall back to ref. Other columns keep the order the task list gives them.
 - Ready tasks with unmerged dependencies stay in Ready, with the note "Waiting on {ref}" (D10).
 - "Working" comes from an active lease, not from the status. A task in In progress waiting for a retry doesn't pulse.
 
