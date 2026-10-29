@@ -12,7 +12,7 @@ export interface RunnerConfig {
   name: string
   // The agent CLI binary comes from configuration (agent-runtime-and-auth.md rule 4)
   claudeBin: string
-  // Only detected for now (detect_clis); no agent runs on it yet
+  // Runs agents whose runtime is 'codex'
   codexBin: string
   // Author and committer of agent commits. No default (D12): unset leaves the
   // identity to whatever the agent's git finds, so startup warns about it

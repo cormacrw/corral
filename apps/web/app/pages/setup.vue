@@ -98,13 +98,13 @@ async function scan() {
     cliError.value = e instanceof Error ? e.message : String(e)
   }
 }
-// Agents run on Claude Code for now; Codex is only detected
+// Claude Code runs the default agents; Codex runs only agents set to it
 const cliReady = computed(() => clis.value?.some(c => c.id === 'claude' && c.signedIn) ?? false)
 function cliDetail(cli: CliStatus): string {
   const command = cli.id === 'codex' ? 'codex login' : 'claude'
   if (!cli.version) return `Install ${cli.name} in the runner container.`
   if (!cli.signedIn) return `${cli.version}. Sign in with: docker exec -it corral-runner ${command}`
-  return cli.id === 'claude' ? `${cli.version}. Signed in. Will run your PM, developer and reviewer agents.` : `${cli.version}. Signed in. Agents don’t run on it yet.`
+  return cli.id === 'claude' ? `${cli.version}. Signed in. Will run your PM, developer and reviewer agents.` : `${cli.version}. Signed in. Runs agents set to Codex.`
 }
 
 // Step 4
