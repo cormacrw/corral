@@ -19,6 +19,23 @@ describe('developer role defaults', () => {
   it('leaves the git identity to the runner', () => {
     expect(DEFAULT_ROLE_INSTRUCTIONS.developer).toContain('Don\'t set or change the git identity')
   })
+
+  it('captures visible evidence with agent-browser', () => {
+    const developer = DEFAULT_ROLE_INSTRUCTIONS.developer
+    expect(developer).toContain('use agent-browser')
+    expect(developer).toContain('run `agent-browser skills get core` once')
+    expect(developer).toContain('capture screenshots or video with it and attach them with attach_evidence')
+    expect(developer).toContain('run `agent-browser close`')
+  })
+})
+
+describe('reviewer role defaults', () => {
+  it('reproduces visible criteria with agent-browser', () => {
+    const reviewer = DEFAULT_ROLE_INSTRUCTIONS.reviewer
+    expect(reviewer).toContain('To reproduce a visible criterion, start the app and use agent-browser')
+    expect(reviewer).toContain('run `agent-browser skills get core` once')
+    expect(reviewer).toContain('run `agent-browser close`')
+  })
 })
 
 describe('attachments in role defaults', () => {
