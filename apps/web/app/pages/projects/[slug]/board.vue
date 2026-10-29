@@ -141,11 +141,15 @@ const epicLabel = (id: string) => epicTitle(live.state.value.epics[project.value
               />
               <span class="ms-auto text-xs text-muted">{{ column.hint }}</span>
             </header>
-            <div class="flex min-h-0 flex-col gap-2 overflow-y-auto px-2 pt-0.5 pb-2">
+            <!-- The padding matches the glow radius so the working glow and the
+                 selected ring fit inside the list: anything past it counts as
+                 overflow and makes the column scroll (and clips the glow) -->
+            <div class="flex min-h-0 flex-col gap-2 overflow-y-auto p-2">
               <BorderGlow
                 v-for="task in inColumn(column.statuses)"
                 :key="task.id"
                 :active="Boolean(task.lease)"
+                :glow-radius="8"
                 class="shrink-0"
               >
                 <button
@@ -196,7 +200,7 @@ const epicLabel = (id: string) => epicTitle(live.state.value.epics[project.value
               </BorderGlow>
               <p
                 v-if="inColumn(column.statuses).length === 0"
-                class="px-1 pt-1 pb-2 text-xs text-dimmed"
+                class="px-1 pb-2 text-xs text-dimmed"
               >
                 Nothing here
               </p>
