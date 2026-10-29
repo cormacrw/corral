@@ -1,11 +1,11 @@
 import type { Epic, EpicDetail, PatchEpicInput } from '@corral/contracts'
-import type { Actor } from '@corral/core'
+import { checkEpicDependencies, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, asc, eq, isNull } from 'drizzle-orm'
-import { notFound } from './errors.ts'
+import { and, asc, eq, isNull, or } from 'drizzle-orm'
+import { ApiFailure, notFound } from './errors.ts'
 import { toTasks, type ProjectRow } from './tasks.ts'
 
-const { auditLog, epics, projects, tasks } = schema
+const { auditLog, epics, epicDependencies, taskDependencies, projects, tasks } = schema
 
 type EpicRow = typeof epics.$inferSelect
 
@@ -15,14 +15,17 @@ export async function listEpics(db: Executor, project: ProjectRow): Promise<Epic
   const rows = await db.select().from(epics).where(eq(epics.projectId, project.id)).orderBy(asc(epics.createdAt))
   const counted = await db.select({ epicId: tasks.epicId, status: tasks.status }).from(tasks)
     .where(and(eq(tasks.projectId, project.id), isNull(tasks.deletedAt)))
-  return rows.map(row => toEpic(row, counted.filter(t => t.epicId === row.id)))
+  const edges = await db.select().from(epicDependencies)
+  return rows.map(row => toEpic(row, counted.filter(t => t.epicId === row.id), edges))
 }
 
 export async function getEpic(db: Executor, epicId: string): Promise<EpicDetail> {
   const { row, project } = await findEpic(db, epicId)
   const taskRows = await db.select().from(tasks)
     .where(and(eq(tasks.epicId, epicId), isNull(tasks.deletedAt))).orderBy(asc(tasks.number))
-  return { ...toEpic(row, taskRows), tasks: await toTasks(db, project, taskRows) }
+  const edges = await db.select().from(epicDependencies)
+    .where(or(eq(epicDependencies.epicId, epicId), eq(epicDependencies.dependsOnEpicId, epicId)))
+  return { ...toEpic(row, taskRows, edges), tasks: await toTasks(db, project, taskRows) }
 }
 
 export async function patchEpic(db: Executor, epicId: string, input: PatchEpicInput, actor: Actor): Promise<Epic> {
@@ -44,10 +47,12 @@ async function findEpic(db: Executor, epicId: string): Promise<{ row: EpicRow, p
   return found
 }
 
-function toEpic(row: EpicRow, taskStatuses: { status: string }[]): Epic {
+function toEpic(row: EpicRow, taskStatuses: { status: string }[], edges: { epicId: string, dependsOnEpicId: string }[]): Epic {
   const counted = taskStatuses.filter(t => t.status !== 'draft' && t.status !== 'backlog')
   return {
     id: row.id,
+    dependsOn: edges.filter(e => e.epicId === row.id).map(e => e.dependsOnEpicId),
+    blocks: edges.filter(e => e.dependsOnEpicId === row.id).map(e => e.epicId),
     projectId: row.projectId,
     title: row.title,
     description: row.description,
@@ -56,4 +61,28 @@ function toEpic(row: EpicRow, taskStatuses: { status: string }[]): Epic {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString()
   }
+}
+
+// Serialize graph edits within a project so concurrent requests cannot create a cycle.
+export async function setEpicDependencies(db: Executor, epicId: string, dependsOn: string[], actor: Actor): Promise<Epic[]> {
+  return db.transaction(async (tx) => {
+    const { project } = await findEpic(tx, epicId)
+    await tx.select().from(projects).where(eq(projects.id, project.id)).for('update')
+    const all = await listEpics(tx, project)
+    const graph = new Map(all.map(e => [e.id, e.dependsOn]))
+    graph.set(epicId, [...new Set(dependsOn)])
+    const rows = await tx.select().from(tasks).where(eq(tasks.projectId, project.id))
+    const edges = await tx.select().from(taskDependencies)
+    const problems = checkEpicDependencies(graph, rows.map(t => ({
+      ...t, deleted: t.deletedAt !== null, dependsOn: edges.filter(e => e.taskId === t.id).map(e => e.dependsOnId)
+    })), new Map(all.map(e => [e.id, e.title])))
+    if (problems.length) throw new ApiFailure(400, {
+      code: 'invalid_input', issues: problems.map(p => ({ message: `Dependency cycle or deadlock: ${p.epics.join(' → ')}` }))
+    })
+    await tx.delete(epicDependencies).where(eq(epicDependencies.epicId, epicId))
+    if (dependsOn.length) await tx.insert(epicDependencies).values([...new Set(dependsOn)].map(id => ({ epicId, dependsOnEpicId: id })))
+    await tx.update(epics).set({ updatedAt: new Date() }).where(eq(epics.id, epicId))
+    await tx.insert(auditLog).values({ projectId: project.id, actor, action: 'epic.updated', detail: { epicId, changed: ['dependsOn'], dependsOn } })
+    return listEpics(tx, project)
+  })
 }

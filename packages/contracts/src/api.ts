@@ -84,7 +84,9 @@ export interface Epic {
   projectId: string
   title: string
   description: string
-  // Tasks outside Draft, and how many of them are merged
+  dependsOn: string[]
+  blocks: string[]
+  // Tasks outside Draft and Backlog, and how many of them are merged
   taskCount: number
   mergedCount: number
   createdAt: string
@@ -95,6 +97,9 @@ export interface Epic {
 export interface EpicDetail extends Epic {
   tasks: Task[]
 }
+
+export const setEpicDependenciesInput = z.object({ dependsOn: z.array(z.uuid()) })
+export type SetEpicDependenciesInput = z.infer<typeof setEpicDependenciesInput>
 
 export const patchEpicInput = z.object({
   title: z.string().trim().min(1).optional(),

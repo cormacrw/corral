@@ -95,6 +95,8 @@ export const agents: Agent[] = [
 export const epics: Epic[] = [
   {
     id: 'e-design',
+    dependsOn: ['e-mobile'],
+    blocks: [],
     projectId: 'p-corral',
     title: 'Design tasks',
     description: 'Versioned, sandboxed prototypes the human approves before the build is planned (D20).',
@@ -105,6 +107,8 @@ export const epics: Epic[] = [
   },
   {
     id: 'e-mobile',
+    dependsOn: [],
+    blocks: ['e-design'],
     projectId: 'p-corral',
     title: 'Mobile app',
     description: 'The installable app for phones (D17).',

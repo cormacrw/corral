@@ -1,3 +1,4 @@
+import { checkEpicDependencies } from '@corral/core'
 import type { CreateTaskInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, RunEvent, ServerEvent, Task } from '@corral/contracts'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
@@ -101,6 +102,25 @@ route('GET', '/projects/:slug/pull-requests', ([slug]) => {
   return f.pullRequests.filter(pr => pr.taskRef.startsWith(`${p.prefix}-`))
 })
 route('GET', '/projects/:slug/epics', ([slug]) => f.epics.filter(e => e.projectId === project(slug!).id))
+route('PUT', '/epics/:id/dependencies', ([id], body) => {
+  const epic = f.epics.find(e => e.id === id) ?? notFound()
+  const all = f.epics.filter(e => e.projectId === epic.projectId)
+  const dependsOn = [...new Set((body as { dependsOn: string[] }).dependsOn)]
+  const graph = new Map(all.map(e => [e.id, e.id === id ? dependsOn : e.dependsOn]))
+  const problems = checkEpicDependencies(graph, f.tasks.filter(t => t.projectId === epic.projectId).map(t => ({
+    ...t, dependsOn: t.dependsOn.map(ref => f.tasks.find(x => x.ref === ref)?.id ?? ref)
+  })), new Map(all.map(e => [e.id, e.title])))
+  if (problems.length) {
+    const message = `Dependency cycle or deadlock: ${problems[0]!.epics.join(' → ')}`
+    throw new ApiError(400, { code: 'invalid_input', issues: [{ message }] }, message)
+  }
+  epic.dependsOn = dependsOn
+  for (const e of all) {
+    e.blocks = all.filter(x => x.dependsOn.includes(e.id)).map(x => x.id)
+    emit({ type: 'epic.updated', epic: e })
+  }
+  return epic
+})
 route('GET', '/epics/:id', ([id]) => {
   const epic = f.epics.find(e => e.id === id) ?? notFound()
   return { ...epic, tasks: f.tasks.filter(t => t.epicId === epic.id) }

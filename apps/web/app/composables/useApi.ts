@@ -181,6 +181,7 @@ export const api = {
   },
 
   epics: {
+    setDependencies: (id: string, dependsOn: string[]) => call<Epic>('PUT', `/epics/${id}/dependencies`, { dependsOn }),
     list: (slug: string) => call<Epic[]>('GET', `/projects/${slug}/epics`),
     get: (id: string) => call<EpicDetail>('GET', `/epics/${id}`),
     patch: (id: string, input: PatchEpicInput) => call<Epic>('PATCH', `/epics/${id}`, input)
