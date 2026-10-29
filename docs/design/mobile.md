@@ -44,7 +44,17 @@ From top to bottom:
 - The header and tab bar pad themselves with `env(safe-area-inset-*)`, and the viewport uses `viewport-fit=cover`, so nothing sits under a notch or the home indicator.
 - The runner status and Inbox count come from the app's one live connection (`useLive()`), so they update without a reload.
 
-`/home` is a placeholder for now (a short summary), so every tab has a target. On the web it renders in the normal shell, as does `/projects` (a plain project list) and `/agents`' simple list.
+On the web, `/projects` renders in the normal shell as a plain project list, as does `/agents`' simple list.
+
+## Home
+
+`/home` is the global dashboard, counted from the live task lists so it matches each project's Board and updates without a reload:
+
+- **Runner status** and a project filter (**All projects** or one project) · **Today**. The header hides its own runner status on Home.
+- **Tiles:** **To do** (Ready), **In progress** (In progress, Agent review, Human review and Ready to merge) and **Merged today** (merged since local midnight) with how many were first-pass (no changes requested).
+- **In progress by stage:** a bar and counts per stage, and a link to the Inbox with the blocked (Blocked and Failed) and waiting-for-your-review (Human review) counts.
+- **Agents:** each agent with Working, Idle or Paused; working agents first, with each active run's task, project, status, run number (PR number for reviews) and elapsed time. Active runs come from `GET /api/runs?active=1`, refetched on `run.updated`. Tapping an agent opens its agent page.
+- **By project:** To do, In progress and Merged today per project, with a Paused badge. Tapping a row opens the project's overview.
 
 ## Agents
 
@@ -100,7 +110,6 @@ Frames in the export, grouped by the task that will build them:
 
 | Task | Frames |
 |---|---|
-| Home | Home |
 | Settings | Settings, Settings · Runner |
 | Search | Search |
 | Onboarding | Setup · Your name, Setup · Repository, Setup · Agent CLIs, Setup · Name agents |
