@@ -58,6 +58,41 @@ describe('RunManager PM turns', () => {
     return log.trim().split('\n').map(line => JSON.parse(line) as { args: string[], cwd: string })
   }
 
+  function notes(messages: RunnerMessage[]): string[] {
+    return messages.flatMap(m => m.type === 'run.events' ? m.events : []).flatMap(e => e.type === 'system' ? [e.text] : [])
+  }
+
+  it('shows the worktree and session start notes on the first turn of a session', async () => {
+    manager.assign(pmJob({ runId: 'r1', planSessionId: 's1' }))
+    const shown = notes(await finish('r1'))
+
+    expect(shown.some(n => n.startsWith('Preparing a worktree'))).toBe(true)
+    expect(shown).toContain('Session started')
+  })
+
+  it('hides the worktree and session start notes on a follow-up turn that resumes', async () => {
+    manager.assign(pmJob({ runId: 'r1', planSessionId: 's1' }))
+    await finish('r1')
+    manager.assign(pmJob({ runId: 'r2', planSessionId: 's1', agentSessionId: 'fresh-session', fallbackPrompt: 'Summary' }))
+    const shown = notes(await finish('r2'))
+
+    expect(shown.some(n => n.startsWith('Preparing a worktree'))).toBe(false)
+    expect(shown).not.toContain('Session started')
+    expect((await calls())[1]!.args).toEqual(expect.arrayContaining(['--resume', 'fresh-session']))
+  })
+
+  it.each(['developer', 'reviewer'] as const)('keeps the worktree and session start notes for a %s run', async (role) => {
+    const sha = await commitToOrigin({ 'README.md': 'Hello\n' })
+    if (role === 'reviewer') {
+      await exec('git', ['fetch', '--quiet', 'origin'], { cwd: barePath(dataDir, TEST_REPOSITORY) })
+    }
+    manager.assign(pmJob({ runId: 'r1', role, planSessionId: null, taskId: 'task-1', taskRef: 'APP-1', branch: 'corral/app-1', headSha: role === 'reviewer' ? sha : null }))
+    const shown = notes(await finish('r1'))
+
+    expect(shown).toContain('Preparing a worktree for acme/app on corral/app-1')
+    expect(shown).toContain('Session started')
+  })
+
   it('falls back to a summary-seeded fresh start when a pre-existing session cannot be resumed', async () => {
     manager.assign(pmJob({ runId: 'r1', agentSessionId: 'made-in-the-old-checkout', prompt: 'Next message', fallbackPrompt: 'Summary of the conversation' }))
     const messages = await finish('r1')
@@ -68,8 +103,10 @@ describe('RunManager PM turns', () => {
     expect(resume!.args).toEqual(expect.arrayContaining(['--resume', 'made-in-the-old-checkout', '-p', 'Next message']))
     expect(fresh!.args).not.toContain('--resume')
     expect(fresh!.args).toEqual(expect.arrayContaining(['-p', 'Summary of the conversation']))
-    const notes = messages.flatMap(m => m.type === 'run.events' ? m.events : []).map(e => e.type === 'system' ? e.text : '')
-    expect(notes).toContain('The previous agent session could not be resumed; starting a fresh one from the saved conversation')
+    const shown = notes(messages)
+    expect(shown).toContain('The previous agent session could not be resumed; starting a fresh one from the saved conversation')
+    // The fresh session is new to the transcript, so it says so
+    expect(shown).toContain('Session started')
   })
 
   it('runs every turn of a session in the same checkout, so the next turn resumes', async () => {

@@ -17,6 +17,8 @@ export interface AgentOptions {
   mcpConfigPath: string
   model: string | null
   resumeSessionId: string | null
+  // Set on PM follow-up turns: resuming this session adds no "Session started" note
+  quietResume?: boolean
   gitAuthor: GitAuthor | null
   onLine(raw: string, parsed: ParsedLine): void
 }
@@ -75,7 +77,7 @@ export function agentEnv(base: NodeJS.ProcessEnv = process.env, gitAuthor: GitAu
 }
 
 export function spawnAgent(options: AgentOptions): AgentProcess {
-  const parser = new StreamJsonParser()
+  const parser = new StreamJsonParser({ quietResumeOf: options.quietResume ? options.resumeSessionId : null })
   const child = spawn(options.claudeBin, agentArgs(options), {
     cwd: options.cwd,
     env: agentEnv(process.env, options.gitAuthor),

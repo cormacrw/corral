@@ -55,6 +55,12 @@ export class StreamJsonParser {
   #inputTokens = 0
   #outputTokens = 0
   sessionId: string | null = null
+  // A follow-up turn that resumes this session gets no "Session started" note
+  #quietResumeOf: string | null
+
+  constructor(options: { quietResumeOf?: string | null } = {}) {
+    this.#quietResumeOf = options.quietResumeOf ?? null
+  }
 
   parse(line: string): ParsedLine {
     const out = empty()
@@ -77,6 +83,7 @@ export class StreamJsonParser {
       case 'system':
         if (data.subtype === 'init') {
           out.sessionId = data.session_id ?? null
+          if (this.#quietResumeOf && data.session_id === this.#quietResumeOf) return out
           out.events.push({ type: 'system', text: `Session started${data.model ? ` (${data.model})` : ''}` })
         }
         return out
