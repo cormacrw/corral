@@ -36,14 +36,15 @@ Corral runs as four containers on your own server (`docs/decisions.md` D12, D14)
 cp .env.docker.example .env        # set POSTGRES_PASSWORD and CORRAL_PUBLIC_URL
 docker compose up -d --build
 docker exec -it corral-runner claude            # sign in to Claude once
+docker exec -it corral-runner codex login --device-auth   # sign in to Codex once (not used by agents yet)
 docker exec -it corral-runner gh auth login     # sign in to GitHub once
 ```
 
-Both logins live on volumes that only the runner container mounts. Corral never reads, stores or relays them (D2).
+The logins live on volumes that only the runner container mounts. Corral never reads, stores or relays them (D2).
 
 - **State:** `server-data` (evidence and transcripts) and `postgres-data` hold everything worth backing up (`pg_dump` plus the blob folder). `runner-data` is a cache of clones, worktrees and spools.
 - **Config:** everything environment-specific is an environment variable; see `docker-compose.yml` and `.env.example`.
 - **Auto-deploy:** a systemd timer can redeploy whenever `main` moves and CI passes, waiting for agent runs to finish first; see `scripts/deploy/README.md`.
-- **Agents** run inside the runner container, which has `git`, `gh`, `claude`, a headless Chromium and Node/pnpm. Give it a memory limit sized for the concurrency you configure (`CORRAL_RUNNER_MEMORY`).
+- **Agents** run inside the runner container, which has `git`, `gh`, `claude`, `codex`, a headless Chromium and Node/pnpm. Give it a memory limit sized for the concurrency you configure (`CORRAL_RUNNER_MEMORY`).
 
 Stopping the stack sends `SIGTERM`: the runner gives agents a few seconds, reports their runs as interrupted, and the server closes its connections.

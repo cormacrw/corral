@@ -1,7 +1,7 @@
 # The runner (D12): git, gh, the claude CLI, a headless Chromium for D4
 # evidence, and Node/pnpm for the target projects. Agents run inside this
 # container, so it is "the user's machine" for D2. The user signs in to
-# claude and gh here once with `docker exec`; both configs live on volumes.
+# claude, codex and gh here once with `docker exec`; their configs live on volumes.
 FROM node:26-bookworm
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
@@ -17,8 +17,9 @@ RUN apt-get update \
   && apt-get update && apt-get install -y --no-install-recommends gh \
   && rm -rf /var/lib/apt/lists/*
 
-# The agent CLI (D2): installed here, logged in by the user, never configured by Corral
-RUN npm install -g @anthropic-ai/claude-code
+# The agent CLIs (D2): installed here, logged in by the user, never configured by Corral.
+# Codex is installed and signed in to but not yet used by the runner.
+RUN npm install -g @anthropic-ai/claude-code @openai/codex
 
 # The agent browser (D4) agents capture evidence with. It drives the Debian
 # Chromium above instead of downloading its own.
@@ -45,14 +46,14 @@ ENV CORRAL_CLAUDE_BIN=claude
 ENV CHROME_BIN=/usr/bin/chromium
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PUPPETEER_SKIP_DOWNLOAD=1
-# claude and gh keep their logins under HOME; both directories are volumes.
+# claude, codex and gh keep their logins under HOME; those directories are volumes.
 # They must exist owned by runner here, or Docker creates the mount points
 # as root and the logins can't be saved.
 ENV HOME=/home/runner
 RUN useradd --create-home --uid 1001 runner \
-  && mkdir -p /data/runner /home/runner/.claude /home/runner/.config/gh \
+  && mkdir -p /data/runner /home/runner/.claude /home/runner/.codex /home/runner/.config/gh \
   && chown -R runner:runner /data/runner /home/runner
-VOLUME ["/data/runner", "/home/runner/.claude", "/home/runner/.config/gh"]
+VOLUME ["/data/runner", "/home/runner/.claude", "/home/runner/.codex", "/home/runner/.config/gh"]
 USER runner
 WORKDIR /app/apps/runner
 CMD ["node", "src/index.ts"]
