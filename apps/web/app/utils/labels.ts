@@ -52,12 +52,13 @@ export function inboxTypeBadge(type: InboxItem['type']): { label: string, color:
 }
 
 export const TASK_TYPE: Record<Task['type'], string> = {
-  task: 'Task', bug: 'Bug', spike: 'Spike'
+  task: 'Task', bug: 'Bug', spike: 'Spike', design: 'Design'
 }
-// The badge on Board and Backlog cards (D19). Plain tasks get none.
+// The badge on Board and Backlog cards (D19, D20). Plain tasks get none.
 export function taskTypeBadge(type: Task['type']): { label: string, color: Color, icon: string } | null {
   if (type === 'bug') return { label: TASK_TYPE.bug, color: 'error', icon: 'i-lucide-bug' }
   if (type === 'spike') return { label: TASK_TYPE.spike, color: 'info', icon: 'i-lucide-flask-conical' }
+  if (type === 'design') return { label: TASK_TYPE.design, color: 'secondary', icon: 'i-lucide-palette' }
   return null
 }
 

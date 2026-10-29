@@ -1,5 +1,6 @@
 import {
   AGENT_ROLES,
+  DESIGN_VERSION_STATUSES,
   MERGE_METHODS,
   RUN_OUTCOMES,
   RUN_STATES,
@@ -405,3 +406,30 @@ export const attachments = pgTable('attachments', {
   createdBy: actor('created_by'),
   createdAt: createdAt()
 }, t => [index().on(t.projectId)])
+
+export const designVersionStatus = pgEnum('design_version_status', DESIGN_VERSION_STATUSES)
+
+// One submission to a design task (D20), numbered 1..n per task. The bundle,
+// spec and screenshots are immutable blobs (D8), so a version outlives
+// force-pushes and branch deletion; only its status and feedback change.
+export const designVersions = pgTable('design_versions', {
+  id: uuid().primaryKey().defaultRandom(),
+  taskId: uuid().notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  version: integer().notNull(),
+  status: designVersionStatus().notNull().default('submitted'),
+  // sha256s in the blob store: the static bundle as one archive, and design.md
+  bundleBlob: text().notNull(),
+  specBlob: text().notNull(),
+  // One or more per screen, in the order the developer gave them
+  screenshots: jsonb().$type<{ blob: string, fileName: string, contentType: string }[]>().notNull().default([]),
+  // The design/<ref> branch and the commit the version was built from
+  branch: text().notNull(),
+  commitSha: text().notNull(),
+  // The human's feedback when they requested changes
+  feedback: text(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt()
+}, t => [
+  unique('design_versions_task_version_unique').on(t.taskId, t.version),
+  check('design_versions_version_positive', sql`${t.version} > 0`)
+])

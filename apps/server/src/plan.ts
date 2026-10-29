@@ -1,5 +1,5 @@
 import { askQuestionInput, type AgentRuntime, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type RunJob } from '@corral/contracts'
-import { checkPlan, diffPlans, markdownToRichText, REVISABLE_STATUSES, richTextToMarkdown, TASK_TYPES, taskRef, type Actor, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
+import { checkPlan, diffPlans, markdownToRichText, REVISABLE_STATUSES, requiresHumanReview, richTextToMarkdown, TASK_TYPES, taskRef, type Actor, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
@@ -48,8 +48,9 @@ const proposedPlan = z.object({
   // A dependency that isn't a key is an existing task's ref, in any case
   const keys = new Set(plan.tasks.map(t => t.key))
   const dependency = (dep: string) => keys.has(dep) || !REF.test(dep) ? dep : dep.toUpperCase()
-  // A task without `epic` has no epic
-  return { ...plan, tasks: plan.tasks.map(t => ({ ...t, epic: t.epic || undefined, dependsOn: t.dependsOn.map(dependency) })) }
+  // A task without `epic` has no epic. A design task always gets human
+  // review, whatever the PM asked for (D20).
+  return { ...plan, tasks: plan.tasks.map(t => ({ ...t, epic: t.epic || undefined, humanReview: requiresHumanReview(t.type, t.humanReview), dependsOn: t.dependsOn.map(dependency) })) }
 })
 
 const REF = /^([A-Za-z]+)-(\d+)$/
