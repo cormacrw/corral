@@ -17,7 +17,7 @@ const props = defineProps<{
   error: string | null
 }>()
 const search = defineModel<string>('search', { required: true })
-const epic = defineModel<string | null>('epic', { required: true })
+const selectedEpics = defineModel<string[]>('selected', { required: true })
 
 const live = useLive()
 const route = useRoute()
@@ -63,14 +63,6 @@ function toggleSearch() {
   searching.value = !searching.value
   if (!searching.value) search.value = ''
 }
-const ALL = 'all'
-const epicItems = computed(() => [{ label: 'All epics', value: ALL }, ...props.epics.map(e => ({ label: e.label, value: e.id }))])
-const epicValue = computed({
-  get: () => epic.value ?? ALL,
-  set: (value: string) => {
-    epic.value = value === ALL ? null : value
-  }
-})
 const epicLabel = (id: string) => props.epics.find(e => e.id === id)?.label ?? ''
 const agentFor = (task: Task) => task.lease ? live.state.value.agents.find(a => a.role === task.lease!.role) : null
 const note = (task: Task) => taskNote(task, props.all, props.reviewRoundCap)
@@ -102,17 +94,11 @@ const note = (task: Task) => taskNote(task, props.all, props.reviewRoundCap)
         class="mx-4"
       />
       <div class="flex items-center gap-2 px-4">
-        <USelect
-          v-model="epicValue"
-          :items="epicItems"
-          aria-label="Epic"
-          :ui="{ base: 'ps-12', leading: 'ps-3' }"
+        <EpicFilter
+          v-model="selectedEpics"
+          :epics="epics"
           class="max-w-[70%] min-w-40"
-        >
-          <template #leading>
-            <span class="text-muted">Epic</span>
-          </template>
-        </USelect>
+        />
         <span class="ms-auto text-sm text-muted">{{ total }} tasks</span>
       </div>
       <div

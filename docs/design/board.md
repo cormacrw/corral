@@ -11,7 +11,8 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
 
 1. **Toolbar** (bottom border):
    - a search input (240px, "Search tasks")
-   - epic filter chips: a `radiogroup` with "All epics" plus each epic in the project; the selected chip uses a `primary` subtle style
+   - an **epic filter**: a multi-select dropdown (`components/EpicFilter.vue`, `USelectMenu` with `multiple`) listing every epic on the Board, each with a tick when selected. "All epics" at the top of the menu clears the selection. The trigger reads "All epics" when nothing is selected, the epic's name when one is, and "N epics" when several are
+   - **Epic details**, only when exactly one epic is selected: opens it in the flyout
    - "N tasks" on the right
 2. **Columns:** a horizontally scrolling row (`overflow: auto`, `role="region"`, focusable). Each column is 272px wide with a `bg-muted` background, a border and `rounded-lg`.
    - **Column header:** a status-colour dot, the name, a count pill, and a hint of whose turn it is on the right.
@@ -39,7 +40,7 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
 ## Interactions
 
 - Clicking a card opens it in the flyout; clicking it again closes the flyout.
-- Search and the epic filter combine.
+- The epic filter shows tasks in any of the selected epics; with nothing selected it shows every task. Search and the epic filter combine (`matchesFilter` in `apps/web/app/utils/board.ts`).
 - There's **no drag and drop.** Agents and the scheduler move tasks. Human moves (unblocking, sending back to Backlog) happen in the flyout's Status menu or the Inbox, limited to what D10 allows.
 
 ## Rules
@@ -59,7 +60,7 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
 
 - On the web layout, columns scroll sideways at every width.
 - On the mobile layout (D17, `components/BoardMobile.vue`), the Board shows **one column at a time**, from the `Board · one column at a time` frame:
-  - an **Epic** select ("All epics" or one epic) and "N tasks"; the header's search button shows the search input
+  - the same epic multi-select as the web Board, and "N tasks"; the header's search button shows the search input
   - a row of pill tabs (`role="tablist"`), one per column, each with its status dot, name and count. The open tab is `primary` subtle and scrolls into view. Left and right arrow keys move between tabs
   - the open column: its name, "Whose turn: {hint}", and its cards, full width. "Nothing here" when empty
   - **swiping** left or right on the column moves to the next or previous column (at least 50px sideways, and more sideways than vertical)

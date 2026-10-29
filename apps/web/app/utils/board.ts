@@ -44,3 +44,19 @@ export function sortColumn<T extends Pick<Task, 'ref' | 'mergedAt'>>(key: string
   const time = (t: T) => t.mergedAt === null ? -Infinity : new Date(t.mergedAt).getTime()
   return [...tasks].sort((a, b) => time(b) - time(a) || a.ref.localeCompare(b.ref, undefined, { numeric: true }))
 }
+
+// Whether a task passes the Board's filters: its epic is one of the selected
+// epics (none selected means all epics), and its ref or title matches the
+// search.
+export function matchesFilter(task: Pick<Task, 'ref' | 'title' | 'epicId'>, epics: string[], search: string): boolean {
+  if (epics.length > 0 && (!task.epicId || !epics.includes(task.epicId))) return false
+  return !search || `${task.ref} ${task.title}`.toLowerCase().includes(search.toLowerCase())
+}
+
+// What the epic filter's trigger reads: "All epics", the one epic's name, or
+// "N epics".
+export function epicFilterLabel(epics: string[], label: (id: string) => string): string {
+  if (epics.length === 0) return 'All epics'
+  if (epics.length === 1) return label(epics[0]!)
+  return `${epics.length} epics`
+}
