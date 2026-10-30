@@ -1,6 +1,6 @@
 import { appendAudit, auditEvent } from './audit.ts'
 import { EpicPullRequests, epicReviewContext } from './epic-prs.ts'
-import { pmActionTools, requiresPmConfirmation, RUNNER_HEARTBEAT_MS, epicReviewReportSchema, isPmDirectTool, pmDirectTools, evidenceKind, outcomeReportSchema, rebaseReviewReportSchema, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type PmRunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
+import { pmActionTools, requiresPmConfirmation, RUNNER_HEARTBEAT_MS, epicReviewReportSchema, isPmDirectTool, pmDirectTools, evidenceKind, outcomeReportSchema, rebaseReviewReportSchema, RUNTIMES_TAKING_MESSAGES, type InboxActionInput, type Task, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type PmRunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
 import {
   ACTIVE_RUN_STATES,
   LEASE_DURATION_MS,
@@ -22,7 +22,7 @@ import { listTaskAttachments, readProjectAttachment } from './attachments.ts'
 import type { BlobStore } from './blob-store.ts'
 import { claimNextTask, type Claim, type Place } from './claim.ts'
 import { publishDependents } from './dependent-tasks.ts'
-import { bundleProblem, DesignNotFound, readDesign } from './designs.ts'
+import { approveDesign, bundleProblem, DesignNotFound, readDesign } from './designs.ts'
 import { ApiFailure } from './errors.ts'
 import type { EventBus } from './events.ts'
 import type { GitHubClient, PullRequest } from './github.ts'
@@ -33,10 +33,12 @@ import { PmTools } from './pm-tools.ts'
 import { carryOverApproval, checkTrivialRebase, latestRebaseCheckFailures } from './rebase-review.ts'
 import { runExitError, withLastActivity } from './run-exit.ts'
 import { runEndValues, type RunEnd } from './run-lifecycle.ts'
+import { PmDecisions } from './pm-decisions.ts'
 import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
 import { MergeOrchestrator } from './merge.ts'
 import type { ReleaseNotes } from './deployments.ts'
 import { PmActions, type PreparedPmAction } from './pm-actions.ts'
+import { PmTools } from './pm-tools.ts'
 import type { PlanService } from './plan.ts'
 import { getRun, listAgents, listEvidence } from './runs.ts'
 import { createTask, patchTask, transitionTask, addComment, applyTransition, deleteTaskRows, findTaskByRef, loadTask, lockTask, toTaskState, type ProjectRow, type TaskContentEdit, type TaskRow } from './tasks.ts'
@@ -150,6 +152,7 @@ export class Orchestrator implements RunnerHandlers {
   #placing: Promise<unknown> = Promise.resolve()
   readonly pmActions: PmActions
   readonly pmTools: PmTools
+  readonly pmDecisions: PmDecisions
   readonly epicPrs: EpicPullRequests
   readonly pmTools: PmTools
   readonly merges: MergeOrchestrator
@@ -194,11 +197,16 @@ export class Orchestrator implements RunnerHandlers {
           this.poke([task.id])
           return tool === 'approve_task' ? `Approved ${task.ref}.` : `Moved ${task.ref} to ${task.status.replaceAll('_', ' ')}.`
         }
-        throw new ToolError(`Unknown confirm-required tool ${tool}`)
+        return this.pmDecisions.execute(tool as Parameters<PmDecisions['execute']>[0], prepared, actor)
       },
       sessionChanged: async sessionId => this.plans?.actionSessionChanged(sessionId)
     })
     this.pmTools = new PmTools({ db: deps.db, events: deps.events, runner: deps.runner, transcripts: deps.transcripts, orchestrator: this })
+    this.pmDecisions = new PmDecisions({
+      db: deps.db,
+      inboxAction: (taskId, input, actor) => this.inboxAction(taskId, input, actor),
+      approveDesign: (taskId, version, note, actor) => this.approveDesign(taskId, version, note, actor)
+    })
     this.epicPrs = new EpicPullRequests(deps)
     this.merges = new MergeOrchestrator({
       db: deps.db,
@@ -1185,6 +1193,67 @@ export class Orchestrator implements RunnerHandlers {
     }
   }
 
+  async taskChanged(taskId: string): Promise<void> {
+    await this.#publishTask(taskId)
+    this.poke([taskId])
+  }
+
+  async #publishTask(taskId: string) {
+    const task = await loadTask(this.#d.db, taskId)
+    this.#d.events.publish({ type: 'task.updated', task })
+    return task
+  }
+
+  // design/inbox.md: what the tray does, all through D10 transitions. A PM
+  // answer has its own transition (PmTools); everything here is the human's.
+  async inboxAction(taskId: string, input: InboxActionInput, actor: Actor): Promise<Task | null> {
+    const { db } = this.#d
+    switch (input.action) {
+      case 'clarify': {
+        await addComment(db, taskId, { body: input.text, pinned: true }, actor)
+        await transitionTask(db, taskId, { type: 'resolve', to: 'in_progress' }, actor)
+        break
+      }
+      case 'send_back': {
+        const [row] = await db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, taskId))
+        await transitionTask(db, taskId, row?.status === 'ready' ? { type: 'send_back' } : { type: 'resolve', to: 'backlog' }, actor)
+        break
+      }
+      case 'resolve':
+        if (input.text) await addComment(db, taskId, { body: input.text, pinned: true }, actor)
+        await transitionTask(db, taskId, { type: 'resolve', to: input.to }, actor)
+        break
+      case 'approve': {
+        const [row] = await db.select({ type: tasks.type }).from(tasks).where(eq(tasks.id, taskId))
+        if (row?.type === 'design') await this.approveDesign(taskId, undefined, input.text, actor)
+        else await this.merges.humanApprove(taskId, actor, input.text)
+        break
+      }
+      case 'request_changes':
+        await transitionTask(db, taskId, { type: 'human_request_changes', feedback: input.text }, actor)
+        break
+      case 'delete':
+        await this.deleteTask(taskId, actor, input.text ?? null)
+        return null
+    }
+    const task = await this.#publishTask(taskId)
+    this.poke([taskId])
+    return task
+  }
+
+  // Approve a design version (D20): it's approved, earlier ones superseded,
+  // and a Plan session opens for its build with the human's note. The
+  // approval is a PM message, so it needs the runner like any other.
+  async approveDesign(taskId: string, version: number | undefined, note: string | undefined, actor: Actor): Promise<void> {
+    if (!this.plans) throw new ApiFailure(503, { code: 'runner_offline' })
+    this.plans.assertTurnPossible()
+    await this.assertPmRunPossible()
+    const versionId = await approveDesign(this.#d.db, taskId, version, actor, note)
+    this.poke(await publishDependents(this.#d.db, this.#d.events, taskId))
+    await this.plans.startDesignBuild(versionId, note, actor)
+    await this.#publishTask(taskId)
+  }
+
   // ── Agent tools ────────────────────────────────────────────────────────────
 
   async onToolCall(message: Extract<RunnerMessage, { type: 'tool.call' }>, runnerId: string): Promise<unknown> {
@@ -1213,11 +1282,11 @@ export class Orchestrator implements RunnerHandlers {
       if (!ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
       return this.pmTools.call(tool, input, this.#actor(ctx), { sessionId: ctx.run.planSessionId, runId: ctx.run.id, projectId: ctx.project.id })
     }
-    if (role === 'pm' && requiresPmConfirmation(tool)) {
+    if (role === 'pm' && requiresPmConfirmation(tool, input)) {
       if (!this.plans || !ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
       return this.pmActions.propose(ctx.run.planSessionId, ctx.run.id, tool, input, this.#actor(ctx))
     }
-    if (role === 'pm' && isPmDirectTool(tool)) {
+    if (role === 'pm' && (isPmDirectTool(tool) || tool === 'act_on_inbox')) {
       if (!ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
       return this.pmTools.call(tool, input, this.#actor(ctx), { sessionId: ctx.run.planSessionId, runId: ctx.run.id, projectId: ctx.project.id })
     }
@@ -1328,7 +1397,8 @@ export class Orchestrator implements RunnerHandlers {
   }
 
   async #preparePmAction(sessionId: string, tool: string, input: unknown): Promise<PreparedPmAction> {
-    if (!requiresPmConfirmation(tool)) throw new ToolError(`Unknown confirm-required tool ${tool}`)
+    if (!requiresPmConfirmation(tool, input)) throw new ToolError(`Unknown confirm-required tool ${tool}`)
+    if (tool === 'act_on_inbox' || tool === 'approve_design' || tool === 'request_design_changes') return this.pmDecisions.prepare(tool, input)
     const { db } = this.#d
     const [session] = await db.select().from(schema.planSessions).where(eq(schema.planSessions.id, sessionId))
     if (!session) throw new ToolError('The conversation no longer exists')

@@ -28,7 +28,6 @@ import {
   taskListQuery,
   uploadAttachmentQuery,
   type ApiErrorBody,
-  type InboxActionInput,
   type ServerEvent
 } from '@corral/contracts'
 import type { Actor } from '@corral/core'
@@ -38,14 +37,13 @@ import { Hono, type Context, type ValidationTargets } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { streamSSE } from 'hono/streaming'
 import { z, type ZodType } from 'zod'
-import { publishDependents } from './dependent-tasks.ts'
 import { ApiFailure, fromDatabaseError } from './errors.ts'
 import { checkThumbnail, readThumbnail, THUMBNAIL_MAX_BYTES } from './thumbnails.ts'
 import { byteRange } from './byte-range.ts'
 import { createAttachment, readAttachment } from './attachments.ts'
 import { recordDeployment, updateDeploymentInbox, type ReleaseNotes } from './deployments.ts'
 import { flowMetrics } from './flow-metrics.ts'
-import { approveDesign, DESIGN_BUNDLE_HEADERS, listDesignVersions, readDesignFile, readDesignScreenshot } from './designs.ts'
+import { DESIGN_BUNDLE_HEADERS, listDesignVersions, readDesignFile, readDesignScreenshot } from './designs.ts'
 import { checkAvatar, getProfile, patchProfile, readAvatar, setAgentAvatar, setUserAvatar } from './avatars.ts'
 import { getEpic, listEpicHistory, listEpics, patchEpic, setEpicDependencies } from './epics.ts'
 import type { EventBus } from './events.ts'
@@ -111,14 +109,6 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     return task
   }
 
-  const approveDesignBuild = async (taskId: string, version?: number, note?: string) => {
-    plans.assertTurnPossible()
-    await orchestrator.assertPmRunPossible()
-    const versionId = await approveDesign(db, taskId, version, actor, note)
-    orchestrator.poke(await publishDependents(db, events, taskId))
-    await plans.startDesignBuild(versionId, note, actor)
-  }
-
   // A task by its ref, e.g. COR-29 (design/task.md page route)
   const findByRef = async (ref: string) => {
     const match = /^([A-Z]{2,5})-(\d+)$/i.exec(ref)
@@ -126,42 +116,6 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.prefix, match[1]!.toUpperCase()))
     if (!project) throw new ApiFailure(404, { code: 'not_found' })
     return { project, taskId: await findTaskId(db, project.id, Number(match[2])) }
-  }
-
-  // design/inbox.md: what the tray does, all through D10 transitions
-  const inboxAction = async (taskId: string, input: InboxActionInput) => {
-    switch (input.action) {
-      case 'clarify': {
-        await addComment(db, taskId, { body: input.text, pinned: true }, actor)
-        await transitionTask(db, taskId, { type: 'resolve', to: 'in_progress' }, actor)
-        break
-      }
-      case 'send_back': {
-        const [row] = await db.select({ status: schema.tasks.status }).from(schema.tasks).where(eq(schema.tasks.id, taskId))
-        await transitionTask(db, taskId, row?.status === 'ready' ? { type: 'send_back' } : { type: 'resolve', to: 'backlog' }, actor)
-        break
-      }
-      case 'resolve':
-        if (input.text) await addComment(db, taskId, { body: input.text, pinned: true }, actor)
-        await transitionTask(db, taskId, { type: 'resolve', to: input.to }, actor)
-        break
-      case 'approve': {
-        const [row] = await db.select({ type: schema.tasks.type }).from(schema.tasks).where(eq(schema.tasks.id, taskId))
-        if (row?.type === 'design') {
-          await approveDesignBuild(taskId, undefined, input.text)
-        } else await orchestrator.merges.humanApprove(taskId, actor, input.text)
-        break
-      }
-      case 'request_changes':
-        await transitionTask(db, taskId, { type: 'human_request_changes', feedback: input.text }, actor)
-        break
-      case 'delete':
-        await orchestrator.deleteTask(taskId, actor, input.text ?? null)
-        return null
-    }
-    const task = await publishTask(taskId)
-    orchestrator.poke([taskId])
-    return task
   }
 
   // The single human (D1 POC); hosting will take this from the session
@@ -403,16 +357,14 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       return c.json(await listDesignVersions(db, blobs, await findTaskId(db, project.id, taskNumber(c.req.param('number')))))
     })
 
-    // Approve a design version (D20): it's approved, earlier ones superseded,
-    // and a Plan session opens for its build with the human's note. The
-    // approval is a PM message, so it needs the runner like any other.
+    // Approve a design version (D20)
     .post('/projects/:slug/tasks/:number/designs/:version/approve', async (c) => {
       const parsed = approveDesignInput.safeParse(await c.req.json().catch(() => ({})))
       if (!parsed.success) throw new ApiFailure(400, { code: 'invalid_input', issues: parsed.error.issues.map(i => ({ path: i.path.map(String), message: i.message })) })
       const project = await findProjectBySlug(db, c.req.param('slug'))
       const taskId = await findTaskId(db, project.id, taskNumber(c.req.param('number')))
-      await approveDesignBuild(taskId, taskNumber(c.req.param('version')), parsed.data.note || undefined)
-      return c.json(await publishTask(taskId))
+      await orchestrator.approveDesign(taskId, taskNumber(c.req.param('version')), parsed.data.note || undefined, actor)
+      return c.json(await loadTask(db, taskId))
     })
 
     .get('/projects/:slug/tasks/:number/comments', async (c) => {
@@ -596,7 +548,7 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       const [row] = await db.select({ id: schema.tasks.id }).from(schema.tasks)
         .where(and(eq(schema.tasks.id, c.req.param('taskId')), isNull(schema.tasks.deletedAt)))
       if (!row) throw new ApiFailure(404, { code: 'not_found' })
-      const task = await inboxAction(row.id, c.req.valid('json'))
+      const task = await orchestrator.inboxAction(row.id, c.req.valid('json'), actor)
       return c.json({ task })
     })
 

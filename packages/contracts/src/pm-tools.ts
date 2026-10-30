@@ -1,10 +1,10 @@
 import { AGENT_ROLES, RUN_STATES } from '@corral/core'
 import { z } from 'zod'
-import { createProjectInput, createTaskInput, humanTransitionInput, patchEpicInput, patchProjectInput, patchTaskInput, runMessageInput } from './api.ts'
+import { createAgentInput, createProjectInput, createTaskInput, humanTransitionInput, patchAgentInput, patchEpicInput, patchProjectInput, patchTaskInput, runMessageInput } from './api.ts'
 import type { AgentTool } from './runner.ts'
 
 interface PmToolDefinition {
-  confirmRequired: boolean
+  confirmRequired: boolean | ((input: unknown) => boolean)
   description: string
   input: z.ZodRawShape
 }
@@ -16,9 +16,12 @@ export const PM_RUN_LIST_MAX = 50
 export const PM_PROJECT_LIST_MAX = 100
 export const PM_TRANSCRIPT_DEFAULT_CHARS = 4_000
 export const PM_TRANSCRIPT_MAX_CHARS = 20_000
+const version = z.number().int().positive()
 
 // Shared, authoritative policy: the runner's definition and the server's
 // dispatcher both read this flag. A caller cannot opt out of confirmation.
+// Where a tool's actions differ, it's decided from the input and anything
+// but a known direct action needs the human.
 export const pmActionTools = {
   create_task: {
     confirmRequired: false,
@@ -69,6 +72,26 @@ export const pmActionTools = {
     confirmRequired: true,
     description: 'Propose lifting the kill switch so runs start again. Nothing changes until the human clicks Confirm in the conversation.',
     input: {}
+  },
+  act_on_inbox: {
+    confirmRequired: (input: unknown) => (input as { action?: unknown } | null)?.action !== 'clarify',
+    description: 'Act on a task item from list_inbox, by its taskRef. `clarify` answers a Blocked task\'s question or adds information, and acts straight away: the text is pinned for the developer and the task goes back In progress. Every other action is a decision: it posts a confirm card and nothing happens until the human clicks Confirm. `approve` and `request_changes` (with text) are for Human review; `resolve` (with `to`) moves a Blocked or Failed task, as Retry does with in_progress; `send_back` returns it to the Backlog; `delete` deletes it. For a design, use approve_design to approve. Plan threads and epic reviews are not task items: this tool doesn\'t act on them.',
+    input: {
+      taskRef: z.string().trim().min(1),
+      action: z.enum(['clarify', 'send_back', 'resolve', 'approve', 'request_changes', 'delete']),
+      text: z.string().trim().min(1).optional().describe('Required for clarify and request_changes; an optional note for resolve, or the reason for delete'),
+      to: z.enum(['backlog', 'ready', 'in_progress']).optional().describe('Required for resolve: the status to move the task to')
+    }
+  },
+  approve_design: {
+    confirmRequired: true,
+    description: 'Propose approving a version of a design in Human review (D20). Nothing is approved until the human clicks Confirm; approving then opens a Plan session for its build.',
+    input: { taskRef: z.string().trim().min(1), version, note: z.string().trim().min(1).optional().describe('The human\'s message for the build\'s Plan session') }
+  },
+  request_design_changes: {
+    confirmRequired: true,
+    description: 'Propose sending the latest version of a design in Human review back to its developer with feedback. Nothing changes until the human clicks Confirm.',
+    input: { taskRef: z.string().trim().min(1), version, feedback: z.string().trim().min(1) }
   }
 } satisfies Partial<Record<AgentTool, PmToolDefinition>>
 
@@ -134,13 +157,39 @@ export const pmDirectTools = {
     confirmRequired: false,
     description: 'Lift the update hold so work starts again.',
     input: {}
+  },
+  list_inbox: {
+    confirmRequired: false,
+    description: 'The Needs you list of the Inbox, across all projects: the same items the Inbox page shows, newest first, each with its type, task and what is being asked.',
+    input: {}
+  },
+  list_agents: {
+    confirmRequired: false,
+    description: 'Every agent with its id, name, role, runtime, concurrency, paused state, wake interval and active runs.',
+    input: {}
+  },
+  update_agent: {
+    confirmRequired: false,
+    description: 'Change an agent\'s settings: name, runtime (only while it has no active runs), concurrency, paused or wake interval. Takes effect straight away; pass only what changes.',
+    input: { agentId: z.uuid().describe('The agent\'s id from list_agents'), ...patchAgentInput.shape }
+  },
+  create_agent: {
+    confirmRequired: false,
+    description: 'Add a developer or reviewer agent. Takes effect straight away: the agent can claim work as soon as it exists.',
+    input: createAgentInput.shape
   }
 } satisfies Partial<Record<AgentTool, PmToolDefinition>>
 
 export type PmDirectTool = keyof typeof pmDirectTools
 
-export function requiresPmConfirmation(tool: string): tool is keyof typeof pmActionTools {
-  return Object.hasOwn(pmActionTools, tool) && pmActionTools[tool as keyof typeof pmActionTools].confirmRequired
+export function isPmActionTool(tool: string): tool is keyof typeof pmActionTools {
+  return Object.hasOwn(pmActionTools, tool)
+}
+
+export function requiresPmConfirmation(tool: string, input: unknown): tool is keyof typeof pmActionTools {
+  if (!isPmActionTool(tool)) return false
+  const { confirmRequired } = pmActionTools[tool]
+  return typeof confirmRequired === 'function' ? confirmRequired(input) : confirmRequired
 }
 
 export function isPmDirectTool(tool: string): tool is PmDirectTool {

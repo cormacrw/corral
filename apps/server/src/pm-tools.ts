@@ -1,16 +1,18 @@
-import { pmDirectTools, PM_PROJECT_LIST_MAX, PM_RUN_LIST_MAX, type PmDirectTool, type RunEvent, type Run } from '@corral/contracts'
-import type { Actor } from '@corral/core'
+import { createAgentInput, pmActionTools, pmDirectTools, PM_PROJECT_LIST_MAX, PM_RUN_LIST_MAX, type InboxItem, type PmDirectTool, type RunEvent, type Run } from '@corral/contracts'
+import { taskRef, type Actor } from '@corral/core'
 import { schema, type Database } from '@corral/db'
 import { and, eq, isNull } from 'drizzle-orm'
 import { z } from 'zod'
 import { appendAudit, auditEvent } from './audit.ts'
 import { ApiFailure, fromDatabaseError } from './errors.ts'
 import type { EventBus } from './events.ts'
+import { loadInbox } from './inbox.ts'
 import type { Orchestrator } from './orchestrator.ts'
 import { createProject, findProjectBySlug, listProjects, patchProject, toProject } from './projects.ts'
 import type { RunnerHub } from './runner-hub.ts'
-import { findRun, getRun, listRuns } from './runs.ts'
-import { checkRepository } from './setup.ts'
+import { createAgent, findRun, getRun, listAgents, listRuns, patchAgent } from './runs.ts'
+import { checkRepository, requireRuntimeCli } from './setup.ts'
+import { addComment, applyTransition, lockTask } from './tasks.ts'
 import type { Transcripts } from './transcripts.ts'
 
 const { projects, runs, tasks } = schema
@@ -24,8 +26,11 @@ const TOOL_INPUT_MAX = 200
 const TOOL_OUTPUT_MAX = 500
 const ERROR_SUMMARY_MAX = 300
 
+// act_on_inbox is direct only for clarify; its other actions take a confirm card
+type PmToolName = PmDirectTool | 'act_on_inbox'
+
 // What each tool was trying to do, for the Activity line of a call that failed
-const TOOL_GOALS: Record<PmDirectTool, string> = {
+const TOOL_GOALS: Record<PmToolName, string> = {
   list_projects: 'list projects',
   get_project: 'read a project',
   update_project: 'change a project',
@@ -35,7 +40,12 @@ const TOOL_GOALS: Record<PmDirectTool, string> = {
   message_run: 'message a run',
   get_status: 'check Corral\'s status',
   set_update_hold: 'hold Corral for an update',
-  clear_update_hold: 'lift the update hold'
+  clear_update_hold: 'lift the update hold',
+  list_inbox: 'read the Inbox',
+  list_agents: 'list agents',
+  update_agent: 'change an agent',
+  create_agent: 'create an agent',
+  act_on_inbox: 'answer an Inbox item'
 }
 
 interface Deps {
@@ -43,7 +53,7 @@ interface Deps {
   events: EventBus
   runner: RunnerHub
   transcripts: Transcripts
-  orchestrator: Pick<Orchestrator, 'status' | 'holdForUpdate' | 'releaseUpdate' | 'messageRun' | 'poke'>
+  orchestrator: Pick<Orchestrator, 'status' | 'holdForUpdate' | 'releaseUpdate' | 'messageRun' | 'poke' | 'taskChanged'>
 }
 
 export interface PmToolContext {
@@ -56,6 +66,8 @@ export interface PmToolContext {
 interface ToolResult {
   result: unknown
   projectId?: string
+  // The task it acted on, so Activity can link to it
+  target?: { taskId: string, taskRef: string }
   // What the call did, in the words Activity shows
   summary: string
 }
@@ -114,12 +126,12 @@ export class PmTools {
   #d: Deps
   constructor(deps: Deps) { this.#d = deps }
 
-  async call(tool: PmDirectTool, input: unknown, actor: Actor, context: PmToolContext): Promise<unknown> {
-    const audit = (projectId: string | undefined, outcome: { ok: boolean, summary: string, error?: string }) =>
-      appendAudit(this.#d.db, { projectId: projectId ?? context.projectId, actor }, auditEvent('pm.tool_called', { sessionId: context.sessionId, runId: context.runId, tool, input, ...outcome }))
+  async call(tool: PmToolName, input: unknown, actor: Actor, context: PmToolContext): Promise<unknown> {
+    const audit = (projectId: string | undefined, outcome: { ok: boolean, summary: string, error?: string }, target?: ToolResult['target']) =>
+      appendAudit(this.#d.db, { projectId: projectId ?? context.projectId, taskId: target?.taskId, actor }, auditEvent('pm.tool_called', { sessionId: context.sessionId, runId: context.runId, tool, input: target ? { ...input as object, taskRef: target.taskRef } : input, targetId: target?.taskId ?? null, ...outcome }))
     try {
-      const { result, projectId, summary } = await this.#run(tool, input, actor)
-      await audit(projectId, { ok: true, summary })
+      const { result, projectId, target, summary } = await this.#run(tool, input, actor)
+      await audit(projectId, { ok: true, summary }, target)
       return result
     } catch (error) {
       const failure = toolFailure(error)
@@ -128,7 +140,7 @@ export class PmTools {
     }
   }
 
-  async #run(tool: PmDirectTool, input: unknown, actor: Actor): Promise<ToolResult> {
+  async #run(tool: PmToolName, input: unknown, actor: Actor): Promise<ToolResult> {
     const { db, events, orchestrator, runner, transcripts } = this.#d
     const strict = <T extends z.ZodRawShape>(shape: T) => z.object(shape).strict().parse(input)
     switch (tool) {
@@ -237,7 +249,61 @@ export class PmTools {
         orchestrator.releaseUpdate()
         return { result: orchestrator.status, summary: held ? 'Lifted the update hold' : 'Tried to lift the update hold, which was already off' }
       }
+
+      case 'list_inbox': {
+        strict(pmDirectTools.list_inbox.input)
+        const items = (await loadInbox(db)).needsYou
+        return { result: items.map(toolItem), summary: `Read the Inbox: ${items.length} ${items.length === 1 ? 'item' : 'items'}` }
+      }
+
+      case 'list_agents': {
+        strict(pmDirectTools.list_agents.input)
+        const agents = await listAgents(db)
+        return { result: agents, summary: `Listed ${agents.length} ${agents.length === 1 ? 'agent' : 'agents'}` }
+      }
+
+      case 'update_agent': {
+        const { agentId, ...changes } = strict(pmDirectTools.update_agent.input)
+        const fields = Object.entries(changes).filter(([, value]) => value !== undefined)
+        if (fields.length === 0) throw new Error('Nothing to change: pass at least one setting')
+        if (changes.runtime) await requireRuntimeCli(runner, changes.runtime)
+        const agent = await patchAgent(db, agentId, changes, actor)
+        events.publish({ type: 'agent.updated', agent })
+        orchestrator.poke()
+        return { result: agent, summary: `Updated ${agent.name}: ${fields.map(([key, value]) => `${key} ${String(value)}`).join(', ')}` }
+      }
+
+      case 'create_agent': {
+        const parsed = createAgentInput.strict().parse(input)
+        await requireRuntimeCli(runner, parsed.runtime)
+        const agent = await createAgent(db, parsed, actor)
+        events.publish({ type: 'agent.updated', agent })
+        orchestrator.poke()
+        return { result: agent, summary: `Created ${agent.name}: ${parsed.role} on ${parsed.runtime}` }
+      }
+
+      case 'act_on_inbox':
+        return this.#answer(input, actor)
     }
+  }
+
+  // A Blocked task's question, answered for the human: the same pinned
+  // comment as Clarify, by the PM's own transition (D27)
+  async #answer(input: unknown, actor: Actor): Promise<ToolResult> {
+    const { taskRef: ref, action, text } = z.object(pmActionTools.act_on_inbox.input).strict().parse(input)
+    if (action !== 'clarify' || !text) throw new Error('clarify needs text: your answer for the developer')
+    const { db, events, orchestrator } = this.#d
+    const taskId = await this.#taskIdByRef(ref)
+    const { comment, project, number } = await db.transaction(async (tx) => {
+      const { task, project } = await lockTask(tx, taskId)
+      const added = await addComment(tx, task.id, { body: text, pinned: true }, actor)
+      await applyTransition(tx, task, project, { type: 'answer' }, actor)
+      return { comment: added, project, number: task.number }
+    })
+    events.publish({ type: 'comment.created', comment })
+    await orchestrator.taskChanged(taskId)
+    const answered = taskRef(project.prefix, number)
+    return { result: { ref: answered, status: 'in_progress' }, projectId: project.id, target: { taskId, taskRef: answered }, summary: `Answered ${answered}: ${clip(text, LIST_TEXT_MAX)}` }
   }
 
   #capRun(run: Run, max: number): { run: Run, capped: boolean } {
@@ -253,5 +319,16 @@ export class PmTools {
       .where(and(eq(projects.prefix, match[1]!.toUpperCase()), eq(tasks.number, Number(match[2])), isNull(tasks.deletedAt)))
     if (!row) throw new Error(`Task ${ref} doesn't exist`)
     return row.id
+  }
+}
+
+// What the PM needs of an Inbox item: enough to tell the human and to act on it
+function toolItem(item: InboxItem) {
+  const common = { id: item.id, type: item.type, project: item.project.slug, taskRef: item.taskRef, subject: item.subject, from: item.sender.name, at: item.at, prUrl: item.prUrl }
+  switch (item.type) {
+    case 'plan_thread': return { ...common, sessionId: item.sessionId, status: item.status, asking: item.question?.text ?? item.plan?.title ?? item.reply ?? item.preview }
+    case 'release_notes': return { ...common, unread: item.unread, asking: item.preview }
+    case 'epic_review': return { ...common, epicId: item.epicId, asking: item.body }
+    default: return { ...common, asking: item.body || item.preview }
   }
 }
