@@ -19,9 +19,12 @@ the UI's Developer property therefore shows the designer. Live designers take
 human messages and task edit notices under the same runtime and lease rules as
 developers. The runner also gives designers streaming input and preserves and
 publishes their branch work. New design authoring runs go only to designers; normal developer prompts
-contain no design authoring instructions. Already-live developer-authored
-designs retain their existing submission tools so they can finish (D23). Build tasks pinned
-to approved designs still receive read-only reference context.
+contain no design authoring instructions. Only designers get `submit_design`
+and `design_submitted` (COR-158): the runner's tool server, its tool handler
+and the server all refuse a developer's call, naming the role, including on a
+task pinned to a design. Updates drain active runs first, so no
+developer-authored design is live when this applies. Build tasks pinned to
+approved designs still receive read-only reference context.
 
 Coverage: claim.test.ts exercises exclusive task types, paused designers and
 both dependency gates in Ready/In progress. design.test.ts exercises fresh
