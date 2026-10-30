@@ -1,4 +1,4 @@
-import { RUNNER_PATH } from '@corral/contracts'
+import { RUNNER_PATH, RUNNER_PROTOCOL_VERSION } from '@corral/contracts'
 import { serve, type ServerType } from '@hono/node-server'
 import { createNodeWebSocket } from '@hono/node-ws'
 import { Hono } from 'hono'
@@ -16,6 +16,12 @@ export function startServer(deps: AppDeps, options: { host: string, port: number
   if (options.runnerOnly && !options.runnerToken) throw new Error('CORRAL_RUNNER_TOKEN is required for CORRAL_RUNNER_LISTEN')
   const root = new Hono()
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app: root })
+
+  // Host updaters obtain the release target directly, independently of agent-writable files.
+  root.get(`${RUNNER_PATH}/version`, (context) => {
+    if (options.runnerToken && !tokenMatches(context.req.header('authorization'), options.runnerToken)) return context.json({ error: 'unauthorized' }, 401)
+    return context.json({ commit: deps.runner.commit, protocol: RUNNER_PROTOCOL_VERSION })
+  })
 
   root.get(RUNNER_PATH, upgradeWebSocket((context) => {
     const supplied = context.req.header('authorization')

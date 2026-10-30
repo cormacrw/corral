@@ -31,6 +31,8 @@ export class ServerConnection {
   #handlers: ConnectionHandlers
   #socket: WebSocket | null = null
   #heartbeat: NodeJS.Timeout | null = null
+  #lastUpdateSent = ''
+  #updatePoll: NodeJS.Timeout | null = null
   #retry: NodeJS.Timeout | null = null
   #backoff = 1000
   #closed = false
@@ -55,6 +57,14 @@ export class ServerConnection {
     this.#closed = false
     this.refreshUpdateStatus()
     this.#open()
+    this.#updatePoll = setInterval(() => {
+      this.refreshUpdateStatus()
+      const state = this.updateStatus
+      if (!state || !this.connected) return
+      const message: RunnerMessage = { type: 'runner.update-status', draining: state.draining, updateRequested: state.updateRequested, activeRunCount: this.#handlers.activeRunCount?.() ?? this.#handlers.activeRuns().length, updateState: state.updateState, updateError: state.updateError }
+      const json = JSON.stringify(message)
+      if (json !== this.#lastUpdateSent && this.send(message)) this.#lastUpdateSent = json
+    }, 1000)
   }
 
   refreshUpdateStatus(): void {
@@ -70,6 +80,7 @@ export class ServerConnection {
 
   close(): void {
     this.#closed = true
+    if (this.#updatePoll) clearInterval(this.#updatePoll)
     if (this.#retry) clearTimeout(this.#retry)
     this.#stopHeartbeat()
     this.#socket?.close()
@@ -81,9 +92,10 @@ export class ServerConnection {
 
     socket.on('open', async () => {
       this.#backoff = 1000
+      this.#lastUpdateSent = ''
       const capacity = await this.#handlers.capacity()
       if (this.#socket !== socket) return
-      this.send({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, commit: this.updateStatus?.commit || process.env.CORRAL_BUILD_SHA || 'development', draining: this.updateStatus?.draining ?? false, updateRequested: this.updateStatus?.updateRequested ?? false, autoUpdate: this.updateStatus?.autoUpdate ?? false, ...this.#identity, ...capacity, activeRuns: this.#handlers.activeRuns() })
+      this.send({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, commit: this.updateStatus?.commit || process.env.CORRAL_BUILD_SHA || 'development', draining: this.updateStatus?.draining ?? false, updateRequested: this.updateStatus?.updateRequested ?? false, autoUpdate: this.updateStatus?.autoUpdate ?? false, updateTarget: this.updateStatus?.serverCommit ?? '', updateState: this.updateStatus?.updateState ?? '', updateError: this.updateStatus?.updateError ?? '', ...this.#identity, ...capacity, activeRuns: this.#handlers.activeRuns() })
       this.#heartbeat = setInterval(() => {
         this.send({ type: 'heartbeat', sentAt: Date.now(), activeRuns: this.#handlers.activeRuns() })
         // Keeps proxies from dropping an idle socket (D12)

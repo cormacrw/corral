@@ -142,7 +142,7 @@ export class RunnerHub {
           this.#cliCache.delete(runnerId)
           const now = new Date().toISOString()
           const capacity = parseCapacity(message)
-          this.#runners.set(runnerId, { socket, status: { id: runnerId, name: message.name, online: false, slotsInUse: this.#inUse.get(runnerId) ?? 0, protocol: message.protocol, needsUpdate: false, connectedAt: now, lastHeartbeatAt: now, ...capacity, commit: message.commit || 'unknown', serverCommit: this.commit, behind: message.commit !== this.commit, draining: !!message.draining || (!!message.autoUpdate && message.commit !== this.commit), updateRequested: !!message.updateRequested } })
+          this.#runners.set(runnerId, { socket, status: { id: runnerId, name: message.name, online: false, slotsInUse: this.#inUse.get(runnerId) ?? 0, protocol: message.protocol, needsUpdate: false, connectedAt: now, lastHeartbeatAt: now, ...capacity, commit: message.commit || 'unknown', serverCommit: this.commit, behind: message.commit !== this.commit, draining: !!message.draining || (!!message.autoUpdate && message.commit !== this.commit && !(message.updateState === 'failed' && message.updateTarget === this.commit)), updateRequested: !!message.updateRequested, updateState: message.updateState ?? '', updateError: message.updateError ?? '', activeRunCount: message.activeRuns.length } })
           // Don't dispatch into this socket until its hello snapshot has been
           // reconciled: a newly assigned run isn't in that snapshot.
           await this.#handlers?.onConnected(message.activeRuns, runnerId).catch(error => console.error('Runner reconciliation failed', error))
@@ -280,6 +280,14 @@ export class RunnerHub {
 
   async #handle(message: RunnerMessage, runnerId: string): Promise<void> {
     switch (message.type) {
+      case 'runner.update-status': {
+        const runner = this.#runners.get(runnerId)!
+        const wasDraining = runner.status.draining
+        Object.assign(runner.status, { draining: message.updateState === 'failed' ? false : runner.status.draining || message.draining, updateRequested: message.updateState === 'failed' ? false : runner.status.updateRequested || message.updateRequested, activeRunCount: message.activeRunCount, updateState: message.updateState, updateError: message.updateError })
+        this.#publishStatus()
+        if (wasDraining && !runner.status.draining) this.#handlers?.onReady()
+        return
+      }
       case 'runner.draining':
         this.drain(runnerId, message.updateRequested)
         return

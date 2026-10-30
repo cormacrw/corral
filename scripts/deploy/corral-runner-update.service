@@ -1,0 +1,10 @@
+[Unit]
+Description=Build and update the remote Corral runner to the server commit
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+# Replace with the dedicated checkout path. Root reads the Docker data volume.
+ExecStart=/home/REPLACE_ME/corral/scripts/deploy/runner-update.sh
+TimeoutStartSec=infinity
