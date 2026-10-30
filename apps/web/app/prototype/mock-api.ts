@@ -1,3 +1,4 @@
+import { flowMetricsQuery } from '@corral/contracts'
 import { checkEpicDependencies } from '@corral/core'
 import type { CreateTaskInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
 import { ApiError } from '~/composables/useApi'
@@ -57,6 +58,12 @@ route('GET', '/setup/clis', () => f.clis)
 
 // Return the complete project, including its bundled thumbnailUrl, just like the API.
 route('GET', '/projects', () => f.projects)
+route('GET', '/projects/:slug/metrics/flow', ([slug], _, query) => {
+  project(slug!)
+  const parsed = flowMetricsQuery.safeParse({ window: query.get('window') ?? undefined })
+  if (!parsed.success) throw new ApiError(400, null, 'Invalid flow window')
+  return f.flowMetrics(slug!, parsed.data.window)
+})
 route('GET', '/projects/:slug', ([slug]) => project(slug!))
 route('PATCH', '/projects/:slug', ([slug], body) => {
   const p = Object.assign(project(slug!), body)

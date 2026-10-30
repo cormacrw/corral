@@ -14,6 +14,8 @@ import type {
   EpicDetail,
   Evidence,
   GlobalStatus,
+  FlowMetrics,
+  FlowMetricsQuery,
   ServerStatus,
   HumanTransitionInput,
   Inbox,
@@ -116,6 +118,7 @@ export const api = {
   },
 
   projects: {
+    flow: (slug: string, window: FlowMetricsQuery['window']) => call<FlowMetrics>('GET', `/projects/${slug}/metrics/flow?window=${window}`),
     list: () => call<Project[]>('GET', '/projects'),
     get: (slug: string) => call<Project>('GET', `/projects/${slug}`),
     create: (input: CreateProjectInput) => call<Project>('POST', '/projects', input),
