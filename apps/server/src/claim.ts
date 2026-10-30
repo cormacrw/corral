@@ -66,7 +66,7 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
       ? and(
           inArray(tasks.status, ['ready', 'in_progress']),
           agent.role === 'designer' ? eq(tasks.type, 'design') : ne(tasks.type, 'design'),
-          // Every dependency Merged (D10: Ready tasks wait on them)
+          // Every dependency finished for its type (D19/D20)
           notExists(tx.select({ one: sql`1` }).from(taskDependencies)
             .innerJoin(dependency, eq(dependency.id, taskDependencies.dependsOnId))
             .where(and(eq(taskDependencies.taskId, tasks.id), unfinishedTask(dependency)))),

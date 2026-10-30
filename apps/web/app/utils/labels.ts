@@ -59,9 +59,9 @@ export const EPIC_STATUS_TEXT: Record<Color, string> = {
 
 // The counts an epic should show, from live tasks: the server only sends an
 // epic again when the epic itself changes
-export function epicWithLiveCounts<E extends Epic>(epic: E, tasks: Pick<Task, 'epicId' | 'status'>[]): E {
+export function epicWithLiveCounts<E extends Epic>(epic: E, tasks: Pick<Task, 'epicId' | 'status' | 'type'>[]): E {
   const counted = tasks.filter(t => t.epicId === epic.id && t.status !== 'draft' && t.status !== 'backlog')
-  return { ...epic, taskCount: counted.length, mergedCount: counted.filter(t => t.status === 'merged').length }
+  return { ...epic, taskCount: counted.length, mergedCount: counted.filter(isTaskDone).length }
 }
 
 // An epic with work left: unmerged tasks, or an epic PR still to merge (D22, D27)

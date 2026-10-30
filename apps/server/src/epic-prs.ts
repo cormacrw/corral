@@ -1,5 +1,5 @@
 import type { EpicConflictItem, EpicReviewActionInput, EpicReviewItem, EpicReviewReport, RunJob } from '@corral/contracts'
-import { ACTIVE_RUN_STATES, feedbackFixTitle, feedbackPoints, LEASE_DURATION_MS, markdownToRichText, taskRef, type Actor } from '@corral/core'
+import { ACTIVE_RUN_STATES, feedbackFixTitle, feedbackPoints, isTaskDone, LEASE_DURATION_MS, markdownToRichText, taskRef, type Actor, type CompletionState } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
@@ -21,7 +21,7 @@ export async function epicBoard(db: Executor, epicId: string) {
   return rows.filter(t => t.status !== 'draft' && t.status !== 'backlog')
 }
 
-export const complete = (board: Awaited<ReturnType<typeof epicBoard>>) => board.length > 0 && board.every(t => t.status === 'merged')
+export const complete = (board: readonly CompletionState[]) => board.length > 0 && board.every(isTaskDone)
 
 export class EpicPullRequests {
   private d: OrchestratorDeps
@@ -71,7 +71,7 @@ export class EpicPullRequests {
     }
   }
 
-  private body(epic: EpicRow, board: Awaited<ReturnType<typeof epicBoard>>, project: ProjectRow) {
+  private body(epic: EpicRow, board: readonly CompletionState[], project: ProjectRow) {
     return [epic.description, '## Tasks and evidence', ...board.map((t) => {
       const ref = taskRef(project.prefix, t.number)
       return `- ${ref}: ${t.title}${t.prUrl ? ` ([PR](${t.prUrl}))` : ''} — [criteria and evidence](${this.d.publicUrl}/tasks/${ref})`

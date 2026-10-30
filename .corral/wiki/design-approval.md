@@ -6,7 +6,7 @@ Approval updates the version and task together through core. Reopening uses `hum
 
 ## Existing designs: review before repair
 
-Migration `0030_boring_magus.sql` only adds the enum value. It does not repair any task or version. Run the read-only inventory in `docs/operations/design-approval-inventory.sql` against the intended database and retain its complete output for human review. It lists every design task, including deleted tasks, its approved version/commit if any, and the policy applied to that row.
+Migration `0039_amusing_devos.sql` only adds the enum value. It does not repair any task or version. Run the read-only inventory in `docs/operations/design-approval-inventory.sql` against the intended database and retain its complete output for human review. It lists every design task, including deleted tasks, its approved version/commit if any, and the policy applied to that row.
 
 - Already Approved: leave unchanged.
 - No approved version: leave unchanged.
@@ -18,4 +18,4 @@ Any repair must be a separate, explicitly reviewed migration with the inventory,
 
 A legacy design already in `merged` counts as unfinished under the type-aware rule; its dependents wait until it is repaired through the reviewed migration policy above.
 
-Inbox design reviews link to the task's design panel for version approval and Plan creation. Type changes are locked in Approved, Ready to merge and Merged. Epic progress counts type-aware completion; Approved designs leave open-work counts.
+Inbox design reviews link to the task's design panel for version approval and Plan creation. Type changes are locked in Approved, Ready to merge and Merged. Epic PR readiness and live epic progress count type-aware completion; Approved designs leave open-work counts.

@@ -237,7 +237,7 @@ export async function createTask(db: Executor, project: ProjectRow, rawInput: Cr
   const input = createTaskInput.parse(rawInput)
   // D27 integration feedback creates Ready work without a separate plan approval.
   const created: ReturnType<typeof createTaskState> = options.epicFix
-    ? { ok: true, task: { status: 'ready', humanReview: input.humanReview ?? project.humanReviewDefault, reviewRounds: 0, failedRuns: 0, reason: null } }
+    ? { ok: true, task: { type: input.type, status: 'ready', humanReview: input.humanReview ?? project.humanReviewDefault, reviewRounds: 0, failedRuns: 0, reason: null } }
     : createTaskState(actor, requiresHumanReview(input.type, input.humanReview ?? project.humanReviewDefault), options.draft, input.type)
   if (!created.ok) throw new ApiFailure(409, { code: 'transition_rejected', reason: created.error })
 

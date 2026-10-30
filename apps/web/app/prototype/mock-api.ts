@@ -121,7 +121,7 @@ route('POST', '/projects/:slug/tasks', ([slug], body) => {
 })
 route('GET', '/projects/:slug/tasks/:number/designs', ([slug, number]) => {
   const task = taskIn(slug!, number!)
-  return task.ref === 'COR-4' ? [{ id: 'design-v1', version: 1, status: 'approved', branch: 'design/COR-4', commitSha: 'design-review-v1', spec: '# Review screen', screenshots: (f.designVersions[task.id] ?? []), previewUrl: '', feedback: null, planSessionId: 's-1', createdAt: f.ago(100) }] : (f.designVersions[task.id] ?? [])
+  return task.ref === 'COR-4' ? [{ id: 'design-v1', version: 1, status: 'approved', branch: 'design/COR-4', commitSha: 'design-review-v1', spec: '# Review screen', screenshots: [], previewUrl: '', feedback: null, planSessionId: 's-1', createdAt: f.ago(100) }] : (f.designVersions[task.id] ?? [])
 })
 route('GET', '/projects/:slug/tasks/:number', ([slug, number]) => taskIn(slug!, number!))
 // A real resume goes on to start a run, which the prototype has no use for

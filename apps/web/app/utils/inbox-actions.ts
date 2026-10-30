@@ -1,8 +1,8 @@
-import type { Task, TaskInboxItemType } from '@corral/contracts'
+import type { Task, InboxItem } from '@corral/contracts'
 
 // Design approval belongs to the version panel, which also starts the build Plan.
 // Without a task, approve stays disabled by the page and names what it waits for.
-export function inboxActions(type: TaskInboxItemType, task: Pick<Task, 'type'> | null, taskLoad: 'loading' | 'failed' | null = null) {
+export function inboxActions(type: InboxItem['type'], task: Pick<Task, 'type'> | null, taskLoad: 'loading' | 'failed' | null = null) {
   switch (type) {
     case 'human_review': {
       if (task?.type === 'design' || (!task && !taskLoad)) return []

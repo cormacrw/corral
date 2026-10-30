@@ -246,7 +246,7 @@ describe('design tasks submit versions instead of a PR', () => {
 
   it('rejects a corrupt bundle with an error naming where, not as a missing index.html', async () => {
     const { project, task } = await approved()
-    const developer = await nextJob(task, 'developer')
+    const developer = await nextJob(task, 'designer')
     t.github.setBranch(project.repository, developer.branch!, 'd1')
     const corrupt = tarball({ 'index.html': '<h1>Login</h1>' })
     corrupt[512 + 150] = corrupt[512 + 150]! ^ 1

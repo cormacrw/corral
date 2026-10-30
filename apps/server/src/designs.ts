@@ -249,7 +249,7 @@ export async function approveDesign(db: Database, taskId: string, version: numbe
       .from(designVersions).where(eq(designVersions.taskId, taskId)).orderBy(asc(designVersions.version))
     const result = approveDesignVersion(rows, version)
     if (!result.ok) throw new ApiFailure(409, { code: 'invalid_input', issues: [{ path: ['version'], message: result.error }] })
-    await applyTransition(tx, task, project, { type: 'human_approve' }, actor)
+    await applyTransition(tx, task, project, { type: 'human_approve' }, actor, { event: 'human_approve', headSha: null })
     for (const next of result.versions) {
       const before = rows.find(r => r.id === next.id)!
       if (before.status !== next.status) await tx.update(designVersions).set({ status: next.status, updatedAt: new Date() }).where(eq(designVersions.id, next.id))

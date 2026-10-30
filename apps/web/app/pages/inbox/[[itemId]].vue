@@ -170,14 +170,10 @@ function toggleTask() {
 }
 
 const actions = computed(() => selected.value && selected.value.type !== 'plan_thread' ? inboxActions(selected.value.type, task.value, taskLoading.value ? 'loading' : taskLoadFailed.value ? 'failed' : null) : [])
-// Reset only when the item or its type changes, not on live refreshes.
-watch([() => selected.value?.id, () => selected.value?.type], () => {
+// Reset when the item or its type changes, including when its task loads.
+watch([() => selected.value?.id, () => selected.value?.type, () => task.value?.type], () => {
   action.value = (actions.value[0]?.value as InboxActionInput['action'] | undefined) ?? null
 }, { immediate: true })
-// A loaded design has no generic approve, so that choice can't outlive the load.
-watch(actions, (list) => {
-  if (!list.some(a => a.value === action.value)) action.value = (list[0]?.value as InboxActionInput['action'] | undefined) ?? null
-})
 const needsText = computed(() => action.value === 'request_changes' || action.value === 'clarify')
 const placeholder = computed(() => {
   switch (action.value) {

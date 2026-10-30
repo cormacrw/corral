@@ -143,9 +143,9 @@ describe('epic review status', () => {
 
   it('counts live board tasks, leaving out Drafts and Backlog', () => {
     const counted = epicWithLiveCounts({ id: 'e', taskCount: 0, mergedCount: 0 } as Parameters<typeof epicWithLiveCounts>[0], [
-      { epicId: 'e', status: 'merged' }, { epicId: 'e', status: 'ready' }, { epicId: 'e', status: 'backlog' }, { epicId: 'e', status: 'draft' }, { epicId: 'other', status: 'merged' }
+      { type: 'task', epicId: 'e', status: 'merged' }, { type: 'task', epicId: 'e', status: 'ready' }, { type: 'design', epicId: 'e', status: 'approved' }, { type: 'design', epicId: 'e', status: 'merged' }, { type: 'task', epicId: 'e', status: 'backlog' }, { type: 'task', epicId: 'e', status: 'draft' }, { type: 'task', epicId: 'other', status: 'merged' }
     ])
-    expect(counted).toMatchObject({ taskCount: 2, mergedCount: 1 })
+    expect(counted).toMatchObject({ taskCount: 4, mergedCount: 2 })
   })
 })
 
