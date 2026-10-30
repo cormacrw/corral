@@ -619,7 +619,7 @@ export const releaseNotes: ReleaseNotesItem[] = [{
   id: 'release-demo', deploymentId: 'release-demo', type: 'release_notes',
   project: { id: projects[0]!.id, slug: projects[0]!.slug, name: projects[0]!.name, thumbnailColor: projects[0]!.thumbnailColor, thumbnailUrl: projects[0]!.thumbnailUrl },
   subject: 'Release notes', preview: 'A clearer board and faster task reviews.',
-  sender: { name: 'Juno', role: 'pm' }, at: ago(5),
+  sender: { name: agents.find(a => a.role === 'pm')?.name ?? 'PM', role: 'pm' }, at: ago(5),
   fromSha: '6a3b2c1', toSha: '9d8e7f6',
   notes: '## What shipped\n\n- **Clearer board:** COR-3 makes tasks easier to find.\n- Faster task reviews and a more useful Inbox.',
   notesStatus: 'ready', unread: true, taskId: null, taskRef: null, prUrl: null, resolution: null
