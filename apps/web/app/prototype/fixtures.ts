@@ -267,14 +267,13 @@ export const tasks: Task[] = [
     status: 'human_review',
     type: 'design',
     humanReview: true,
-    epicId: 'e-design',
     branch: 'design/COR-18',
     reviewRounds: 1,
     developer: { id: 'a-dev2', name: 'Dana' },
     reviewer: { id: 'a-rev', name: 'Rita' },
     acceptanceCriteria: criteria('Three layout options on desktop and mobile', 'Every agent state is shown', 'design.md lists the screen ids').map(c => ({ ...c, met: true }))
   }),
-  task(corral, 19, { title: 'Retry button on failed runs', status: 'in_progress', epicId: 'e-mobile', branch: 'corral/cor-19-retry', developer: { id: 'a-dev', name: 'Victor' } }),
+  task(corral, 19, { title: 'Retry button on failed runs', status: 'in_progress', branch: 'corral/cor-19-retry', developer: { id: 'a-dev', name: 'Victor' } }),
   task(site, 1, { title: 'New landing page hero', status: 'ready', type: 'design', epicId: 'e-site' }),
   task(site, 2, { title: 'Fix broken pricing link', status: 'merged', type: 'bug', epicId: 'e-shipped', mergedAt: ago(10) }),
   task(site, 3, {

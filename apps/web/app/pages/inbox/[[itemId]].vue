@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Evidence, Inbox, InboxActionInput, Review, Task, InboxItem, PlanThreadItem, TaskInboxItem } from '@corral/contracts'
+import { reactive } from 'vue'
 import { INBOX_PANEL_OPTIONS, actionNeedsText, type InboxPanelContext, type InboxPanelOption } from '~/composables/useInboxPanel'
 import { api } from '~/composables/useApi'
 import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
@@ -35,8 +36,9 @@ const reviews = ref<Review[]>([])
 // COR-190 design options for the message panel, in the prototype only
 // (?option=a…e). They take the full width, so the task flyout starts closed.
 const panelOption = computed<InboxPanelOption | null>(() => {
-  const value = route.query.option
-  return import.meta.prototype && INBOX_PANEL_OPTIONS.some(o => o.value === value) ? value as InboxPanelOption : null
+  if (!import.meta.prototype) return null
+  const value = route.query?.option
+  return INBOX_PANEL_OPTIONS.some(o => o.value === value) ? value as InboxPanelOption : null
 })
 const showTask = ref(panelOption.value === null)
 watch(panelOption, (value) => {
