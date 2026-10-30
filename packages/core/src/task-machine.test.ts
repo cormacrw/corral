@@ -36,6 +36,7 @@ const validEvents: Record<TaskEventType, TaskEvent> = {
   submit: { type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true },
   changes_requested: { type: 'changes_requested' },
   review_approved: { type: 'review_approved' },
+  approval_carried: { type: 'approval_carried' },
   human_approve: { type: 'human_approve' },
   require_human_check: { type: 'require_human_check' },
   ci_failed: { type: 'ci_failed' },
@@ -60,6 +61,7 @@ const d10: Record<TaskEventType, [TaskStatus[], Actor]> = {
   submit: [['in_progress'], server],
   changes_requested: [['agent_review'], server],
   review_approved: [['agent_review'], server],
+  approval_carried: [['in_progress', 'agent_review'], server],
   human_approve: [['human_review'], human],
   require_human_check: [['ready_to_merge'], server],
   ci_failed: [['ready_to_merge'], server],
@@ -340,12 +342,21 @@ describe('rebase-only rounds', () => {
   it.each([false, true])('finishes rebase-only mode on approval (humanReview=%s), including later failure recovery', (humanReview) => {
     let state = expectOk(transition(task('ready_to_merge', { humanReview, reviewRounds: 2 }), { type: 'base_conflict', approvedHeadSha: 'approved' }, server))
     state = expectOk(transition(state, { type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true }, server))
-    state = expectOk(transition(state, { type: 'review_approved' }, server))
-    expect(state).toMatchObject({ status: humanReview ? 'human_review' : 'ready_to_merge', rebaseOnly: false, approvedHeadSha: 'approved', reviewRounds: 2 })
-    if (humanReview) state = expectOk(transition(state, { type: 'human_approve' }, human))
+    state = expectOk(transition(state, { type: 'approval_carried' }, server))
+    expect(state).toMatchObject({ status: 'ready_to_merge', rebaseOnly: false, approvedHeadSha: 'approved', reviewRounds: 2 })
     state = expectOk(transition(state, { type: 'fail', reason: 'PR closed' }, server))
     state = expectOk(transition(state, { type: 'resolve', to: 'in_progress' }, human))
     expect(state).toMatchObject({ status: 'in_progress', rebaseOnly: false, approvedHeadSha: 'approved', reviewRounds: 2 })
+  })
+
+  it('carries an approval straight from the rebase round, before any review', () => {
+    const state = expectOk(transition(task('in_progress', { humanReview: true, rebaseOnly: true }), { type: 'approval_carried' }, server))
+    expect(state).toMatchObject({ status: 'ready_to_merge', rebaseOnly: false })
+  })
+
+  it('sends a carried approval to Human review while a human check is open', () => {
+    const state = expectOk(transition(task('agent_review', { rebaseOnly: true }), { type: 'approval_carried', humanCheckOpen: true }, server))
+    expect(state).toMatchObject({ status: 'human_review', rebaseOnly: false })
   })
 
   it('keeps an unfinished rebase-only round when stuck and resolved', () => {

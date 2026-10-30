@@ -375,6 +375,33 @@ describe('D21 evidence guidance', () => {
   })
 })
 
+describe('rebase review prompts', () => {
+  const rebase = {
+    ref: 'TA-2', title: 'Queue', description: null, branch: 'corral/ta-2', defaultBranch: 'main', rebaseOnly: true, approvedHeadSha: 'approved-head',
+    reviewRounds: 0, reviewRoundCap: 5, criteria: [], comments: [], attachments: [],
+    headSha: 'new-head', prUrl: null, evidence: [], previousFeedback: null, requiredChecks: ['ci']
+  }
+
+  it('gives the developer\'s choice and files, and says to block for a substantial change', () => {
+    const prompt = reviewerPrompt({ ...rebase, rebaseReport: { review: 'trivial', conflictedFiles: ['app.ts'] } }, 'Rita')
+    expect(prompt).toContain('Developer review choice: trivial.')
+    expect(prompt).toContain('Conflicted files: app.ts.')
+    expect(prompt).toContain('If the rebase changed something substantial, report outcome "blocked"')
+    expect(prompt).toContain('If a changed binding decision affects the criteria, report outcome "blocked"')
+    expect(prompt).not.toContain('Server check failed')
+  })
+
+  it('names each failed condition and its files', () => {
+    const prompt = reviewerPrompt({ ...rebase, rebaseCheckFailures: [
+      { condition: 'changes_outside_conflicts', files: ['billing.ts'] },
+      { condition: 'project_docs_changed', files: ['docs/decisions.md', 'CLAUDE.md'] }
+    ] }, 'Rita')
+    expect(prompt).toContain('## Server check failed')
+    expect(prompt).toContain('conflicted-file list: `billing.ts`')
+    expect(prompt).toContain('since approval: `docs/decisions.md`, `CLAUDE.md`')
+  })
+})
+
 describe('rebase-only developer prompts', () => {
   const task: PromptTask = {
     ref: 'TA-1',
