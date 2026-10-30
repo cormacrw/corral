@@ -50,7 +50,7 @@ Agents are told about images so they look at them: a PM turn whose message refer
 
 **Grilling.** A message that asks to be grilled ("grill me", `/grill-me`, or the Grill me button's message) gets the grill-me skill's instructions, adapted to Corral, put before it: work through the decisions in dependency order, one `ask_question` per decision, always with a `recommendation` and with `options` where the answer is one of a few; look up anything the code or board can answer instead of asking; and once the decisions are settled, or the human says to stop, call `propose_plan` straight away with the agreed decisions in its summary. Other messages don't get these instructions, so the PM never grills unless asked. A session rebuilt after it was lost keeps grilling if an earlier human message asked for it.
 
-The PM has **no** tools to merge, edit docs or change status. This is enforced by which tools it's given, not by its instructions.
+The PM has **no** tools to merge, edit docs or change status. This is enforced by which tools it's given, not by its instructions. D27 widens these tools: the PM gets typed tools for every area, and destructive or decision-making actions run only when the human clicks Confirm. It still gets none to merge or edit docs.
 
 ### Editing and approving a plan
 
