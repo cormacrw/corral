@@ -1389,8 +1389,6 @@ export class Orchestrator implements RunnerHandlers {
     })
     this.#finished(ctx, `Review recorded: ${verdict}`, { handoff: true })
     const spike = task.type === 'spike'
-    // An approved spike without human review is finished: nothing to merge
-    if (spike && verdict === 'approved' && !task.humanReview) void this.merges.cleanup(task.id)
     return {
       ok: true,
       message: verdict === 'changes_requested'

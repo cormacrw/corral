@@ -19,6 +19,7 @@ const props = defineProps<{
   selected: TaskInboxItem | ReleaseNotesItem | null
   alreadyResolved: boolean
   task: Task | null
+  isSpike: boolean
   evidence: Evidence[]
   reviews: Review[]
   actions: { value: string, label: string, icon: string }[]
@@ -153,7 +154,7 @@ const tabs = computed(() => [
             class="text-base"
           />
           <div
-            v-if="task?.type !== 'spike' && (selected.prUrl || (selected.type === 'human_review' && task?.gateChecks?.length))"
+            v-if="!isSpike && (selected.prUrl || (selected.type === 'human_review' && task?.gateChecks?.length))"
             class="flex flex-wrap gap-1.5"
           >
             <UButton
