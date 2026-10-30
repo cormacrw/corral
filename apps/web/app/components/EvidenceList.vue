@@ -94,12 +94,19 @@ watch(open, async (item) => {
           :alt="open.note || open.fileName || undefined"
           class="max-h-[70vh] w-full object-contain"
         >
-        <video
-          v-else-if="open && isVideo(open)"
-          :src="open.url ?? undefined"
-          controls
-          class="max-h-[70vh] w-full"
-        />
+        <template v-else-if="open && isVideo(open)">
+          <video
+            :src="open.url ?? undefined"
+            controls
+            playsinline
+            class="max-h-[70vh] w-full"
+          />
+          <a
+            :href="open.url ?? undefined"
+            :download="open.fileName ?? ''"
+            class="mt-2 inline-block text-sm text-primary hover:underline"
+          >Download</a>
+        </template>
         <template v-else-if="open && isText(open)">
           <UAlert
             v-if="textError"

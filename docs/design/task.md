@@ -107,7 +107,8 @@ Merged is final (D10). The task reads as it shipped: title, properties, dependen
 The shared evidence list on the task page and desktop and mobile Inbox shows
 the latest reviewer's criterion note first, followed by screenshot, video and
 request cards, then note evidence rendered inline as markdown without a file
-link. File cards still open the existing viewer.
+link. File cards still open the existing viewer. A video shows a **Download**
+link under its player, for a file the browser can't play.
 
 Test output, logs, text and other files sit under a native **Agent artifacts (n)**
 disclosure, closed by default for each criterion and for the task as a whole.
