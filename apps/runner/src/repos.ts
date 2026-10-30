@@ -45,3 +45,13 @@ async function cloneOrFetch(dataDir: string, path: string, repository: string): 
   const fetch = await git(['fetch', '--prune', 'origin'], { cwd: path, timeoutMs: 10 * 60_000 })
   return fetch.code === 0 ? null : fetch.stderr.trim() || 'git fetch failed'
 }
+
+// The files `branch` and `onto` both changed in ways git can't reconcile.
+// merge-tree needs no worktree and leaves the clone's refs alone.
+export async function conflictingFiles(bare: string, branch: string, onto: string): Promise<string[]> {
+  const result = await git(['-c', 'core.quotePath=false', 'merge-tree', '--write-tree', '--name-only', '--no-messages', `refs/remotes/origin/${onto}`, `refs/remotes/origin/${branch}`], { cwd: bare })
+  if (result.code === 0) return []
+  if (result.code !== 1) throw new Error(result.stderr.trim() || 'git merge-tree failed')
+  // The first line is the merged tree; the conflicted paths follow it
+  return result.stdout.split('\n').slice(1).filter(Boolean)
+}

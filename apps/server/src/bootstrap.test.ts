@@ -22,7 +22,7 @@ it('adds a Claude designer to existing agents and preserves it on restart', asyn
   } finally {
     await handle.close()
   }
-})
+}, 30_000) // Opening and migrating PGlite here, as in hooks (hookTimeout)
 
 it('labels a designer actor for run comments and audit context', () => {
   expect(actorLabel({ kind: 'agent', role: 'designer', runId: 'design-run' })).toBe('Designer')

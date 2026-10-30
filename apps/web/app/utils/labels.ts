@@ -87,6 +87,7 @@ export function inboxTypeBadge(type: InboxItem['type']): { label: string, color:
   return ({
     release_notes: { label: 'Release notes', color: 'neutral' as const },
     epic_review: { label: 'Epic PR', color: 'warning' as const },
+    epic_conflict: { label: 'Epic conflict', color: 'error' as const },
     human_review: { label: 'Human review', color: 'warning' as const },
     question: { label: 'Question', color: 'info' as const },
     blocked: { label: 'Blocked', color: 'error' as const },

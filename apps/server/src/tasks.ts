@@ -1,4 +1,4 @@
-import { invalidateEpicReview } from './epic-review-state.ts'
+import { holdsEpicOpen, invalidateEpicReview } from './epic-review-state.ts'
 import type { AuditEntry, Comment, CreateTaskInput, HumanTransitionInput, PatchTaskInput, Task, TaskAgent, TaskDesignPin } from '@corral/contracts'
 import { createTaskInput } from '@corral/contracts'
 import {
@@ -18,7 +18,7 @@ import {
   type TaskStatus
 } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, asc, desc, eq, inArray, isNull, max, ne, notInArray, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, max, ne, sql } from 'drizzle-orm'
 import { ApiFailure, notFound } from './errors.ts'
 import { toReview } from './runs.ts'
 
@@ -65,7 +65,7 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
     .from(epicDependencies)
     .innerJoin(epics, eq(epics.id, epicDependencies.dependsOnEpicId))
     .innerJoin(tasks, eq(tasks.epicId, epics.id))
-    .where(and(eq(epics.projectId, project.id), isNull(tasks.deletedAt), notInArray(tasks.status, ['draft', 'backlog', 'merged'])))
+    .where(and(eq(epics.projectId, project.id), holdsEpicOpen(tasks, epics)))
     .orderBy(asc(epics.title), asc(epics.id))
   // Newest first, so the first row per task is its latest review
   const reviewRows = await db.select().from(reviews).where(inArray(reviews.taskId, ids)).orderBy(desc(reviews.createdAt))
