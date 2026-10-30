@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useMutation } from '@tanstack/vue-query'
 import { patchEpic, setEpicDependencies } from '~/queries/epics'
-import type { EpicDetail, PatchEpicInput } from '@corral/contracts'
+import type { AuditEntry, EpicDetail, PatchEpicInput } from '@corral/contracts'
 import { isTaskDone, type EpicReviewMode, type TaskStatus } from '@corral/core'
 import { api, ApiError } from '~/composables/useApi'
 import { EPIC_REVIEW_MODE, EPIC_REVIEW_STATE, EPIC_STATUS_TEXT, epicReviewStatus, epicWithLiveCounts, PRIORITY, STATUS } from '~/utils/labels'
@@ -17,6 +17,7 @@ const flyout = useTaskFlyout()
 const toast = useToast()
 const patchMutation = useMutation(patchEpic)
 const dependenciesMutation = useMutation(setEpicDependencies)
+const history = ref<AuditEntry[]>([])
 const epic = ref<EpicDetail | null>(null)
 const error = ref<string | null>(null)
 const saved = ref(false)
@@ -40,6 +41,7 @@ async function setDependencies(ids: string[]) {
     const updated = await dependenciesMutation.mutateAsync({ id: epic.value.id, dependsOn: ids })
     epic.value = { ...epic.value, ...updated }
     selectedDependency.value = ''
+    history.value = await api.epics.history(props.epicId)
   } catch (e) {
     dependencyError.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -48,13 +50,14 @@ async function setDependencies(ids: string[]) {
 }
 const editingDescription = ref(false)
 const descriptionDraft = ref('')
-const tab = useLocalStorage<'tasks' | 'graph'>('corral.epic.tab', 'tasks')
+const tab = useLocalStorage<'tasks' | 'graph' | 'activity'>('corral.epic.tab', 'tasks')
 let savedTimer: ReturnType<typeof setTimeout> | null = null
 
 async function load() {
   error.value = null
   try {
     epic.value = await api.epics.get(props.epicId)
+    history.value = await api.epics.history(props.epicId)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   }
@@ -75,7 +78,7 @@ onMounted(() => {
       void load()
       return
     }
-    if (event.type === 'epic.updated' && event.epic.id === epic.value.id) epic.value = { ...epic.value, ...event.epic }
+    if (event.type === 'epic.updated' && event.epic.id === epic.value.id) void load()
     if ((event.type === 'task.updated' || event.type === 'task.created') && (event.task.epicId === epic.value.id || epic.value.tasks.some(t => t.id === event.task.id))) void load()
     if (event.type === 'task.deleted' && epic.value.tasks.some(t => t.id === event.taskId)) void load()
   })
@@ -256,6 +259,13 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
           aria-label="Epic title"
           @change="patch({ title: ($event.target as HTMLInputElement).value })"
         >
+
+        <p
+          class="text-sm text-muted"
+          :title="EPIC_REVIEW_MODE[epic.reviewMode].description"
+        >
+          Review: {{ EPIC_REVIEW_MODE[epic.reviewMode].label }}
+        </p>
 
         <section>
           <h3 class="mb-1 text-xs font-medium text-muted">
@@ -469,15 +479,32 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
       <section :class="['flex min-w-0 flex-col', props.mode === 'page' ? 'min-h-0 flex-1 max-[900px]:h-[560px]' : props.mode === 'mobile' ? 'shrink-0 px-4 pb-4' : 'min-h-0 px-4 pb-4']">
         <UTabs
           v-model="tab"
-          :items="[{ label: `Tasks (${epic.tasks.length})`, value: 'tasks', icon: 'i-lucide-list' }, { label: 'Graph', value: 'graph', icon: 'i-lucide-network' }]"
+          :items="[{ label: `Tasks (${epic.tasks.length})`, value: 'tasks', icon: 'i-lucide-list' }, { label: 'Graph', value: 'graph', icon: 'i-lucide-network' }, { label: 'Activity', value: 'activity', icon: 'i-lucide-activity' }]"
           :variant="props.mode === 'mobile' ? 'pill' : 'link'"
           :size="props.mode === 'mobile' ? 'md' : 'sm'"
           :content="false"
           :ui="props.mode === 'mobile' ? { indicator: 'bg-default shadow-xs', trigger: 'data-[state=active]:text-highlighted' } : undefined"
           :class="props.mode === 'page' && 'px-4 pt-2'"
         />
+        <div
+          v-if="tab === 'activity'"
+          class="flex min-h-0 flex-col gap-3 overflow-y-auto p-4"
+        >
+          <AuditActivity
+            v-for="entry in history"
+            :key="entry.id"
+            :entry="entry"
+            :text="entry.action === 'epic.updated' ? `edited ${(entry.detail.changed as string[] | undefined)?.join(', ') ?? 'the epic'}` : entry.action"
+          />
+          <p
+            v-if="!history.length"
+            class="text-sm text-muted"
+          >
+            No activity yet.
+          </p>
+        </div>
         <p
-          v-if="epic.tasks.length === 0"
+          v-else-if="epic.tasks.length === 0"
           class="p-6 text-center text-sm text-muted"
         >
           No tasks in this epic yet.

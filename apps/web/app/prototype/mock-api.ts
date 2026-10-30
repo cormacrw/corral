@@ -206,6 +206,7 @@ route('PUT', '/epics/:id/dependencies', ([id], body) => {
   }
   return epic
 })
+route('GET', '/epics/:id/history', () => [])
 route('GET', '/epics/:id', ([id]) => {
   const epic = f.epics.find(e => e.id === id) ?? notFound()
   return { ...epic, tasks: f.tasks.filter(t => t.epicId === epic.id) }

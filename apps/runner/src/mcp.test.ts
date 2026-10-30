@@ -100,6 +100,22 @@ describe('ToolServer', () => {
     await client.callTool({ name: 'list_tasks', arguments: { status: 'merged' } })
     expect(calls.at(-1)?.input).toEqual({ status: 'merged', includeMerged: false })
     expect((await client.callTool({ name: 'list_tasks', arguments: { status: 'done' } })).isError).toBe(true)
+  })
+
+  it('exposes typed PM mutations and forwards their inputs', async () => {
+    const { client, calls } = await connect('pm')
+    const listed = (await client.listTools()).tools
+    for (const name of ['create_task', 'update_task', 'move_task', 'approve_task', 'delete_task', 'update_epic']) {
+      expect(listed.some(t => t.name === name)).toBe(true)
+      expect(ROLE_TOOLS.developer).not.toContain(name)
+      expect(ROLE_TOOLS.reviewer).not.toContain(name)
+    }
+    const update = listed.find(t => t.name === 'update_task')!
+    expect(update.inputSchema).toMatchObject({ required: ['taskRef'], properties: { paused: { type: 'boolean' }, acceptanceCriteria: { type: 'array' } } })
+    const input = { taskRef: 'COR-4', title: 'New title', priority: 'high', paused: true }
+    expect((await client.callTool({ name: 'update_task', arguments: input })).isError).not.toBe(true)
+    expect(calls).toEqual([{ tool: 'update_task', input }])
+    expect(listed.find(t => t.name === 'approve_task')!.description).toContain('confirmation')
     await client.close()
   })
 
