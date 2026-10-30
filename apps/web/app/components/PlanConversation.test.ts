@@ -19,7 +19,7 @@ const pendingEntries = vue.ref<Record<string, { session: PlanSessionDetail, stat
 const retryStart = vi.fn()
 const restored = vue.ref(null)
 const state = vue.ref({
-  loaded: true, runner: { online: true }, agents, projects,
+  loaded: true, runner: { online: true }, agents, projects, planSessions,
   tasks: {}, runEvents: {} as Record<string, import('@corral/contracts').RunEvent[]>
 })
 const flyout = {
@@ -60,6 +60,7 @@ async function open(id = 's-1', mobile = false) {
         PlanSessionSwitcher: true, PlanGrillButton: true
       },
       components: {
+        NuxtLink: vue.defineComponent({ name: 'NuxtLink', props: ['to'], setup: (props, { slots }) => () => vue.h('a', { href: props.to }, slots.default?.()) }),
         UAlert: alertComponent,
         UButton: button,
         MarkdownText: vue.defineComponent({
@@ -98,6 +99,7 @@ beforeEach(() => {
   }))
   state.value.runner.online = true
   state.value.runEvents = {}
+  state.value.planSessions = structuredClone(planSessions)
   flyout.plan.value = false
   vi.mocked(api.plan.session).mockImplementation(async id => detail(id))
   vi.mocked(api.plan.read).mockResolvedValue({ ...planSessions[0]!, unread: false })
@@ -110,6 +112,26 @@ afterEach(() => {
 })
 
 describe('Inbox shared Plan conversation', () => {
+  it.each([false, true])('links related threads and labels agent input on mobile=%s', async (mobile) => {
+    const current = detail()
+    current.parentSessionId = 'parent-thread'
+    current.messages = [{ id: 'agent-message', sessionId: current.id, role: 'thread', senderSessionId: 'parent-thread', senderTitle: 'Coordinator', kind: 'message', text: 'Please check the entry point.', recommendation: null, options: null, planId: null, runId: null, createdAt: current.createdAt }]
+    state.value.planSessions = [
+      ...planSessions,
+      { ...planSessions[0]!, id: 'parent-thread', title: 'Coordinator' },
+      { ...planSessions[0]!, id: 'child-thread', parentSessionId: current.id, title: 'Routing check', closed: true }
+    ]
+    vi.mocked(api.plan.session).mockResolvedValue(current)
+    const wrapper = await open(current.id, mobile)
+    const nav = wrapper.get('[aria-label="Related threads"]')
+    expect(nav.get('a[href="/plan/parent-thread"]').text()).toBe('Parent: Coordinator')
+    expect(nav.get('a[href="/plan/child-thread"]').text()).toBe('Routing check (closed)')
+    const message = wrapper.get('[data-message-id="agent-message"]')
+    expect(message.get('a[href="/plan/parent-thread"]').text()).toBe('Coordinator · Thread')
+    expect(message.text()).toContain('Please check the entry point.')
+    expect(message.classes()).toContain('justify-start')
+  })
+
   it('renders a pending start without fetching a nonexistent session, including working and failure recovery', async () => {
     const initial = detail()
     initial.id = 'pending-session'

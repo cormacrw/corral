@@ -332,6 +332,7 @@ const agentRuntime = z.enum(Object.keys(AGENT_RUNTIMES) as [AgentRuntime, ...Age
 // ── Plan (D9, design/plan.md) ─────────────────────────────────────────────
 
 export interface PlanSession {
+  parentSessionId?: string | null
   id: string
   projectId: string | null
   title: string
@@ -340,7 +341,7 @@ export interface PlanSession {
   runtime: AgentRuntime
   preview: string
   unread: boolean
-  // True once its plan is approved, until the human sends another message
+  // True once approved or closed, until a human or agent sends another message
   closed: boolean
   // What the human has to do here, if anything
   status: 'needs_approval' | 'question' | 'none'
@@ -353,8 +354,10 @@ export interface PlanSession {
 export interface PlanMessage {
   id: string
   sessionId: string
-  role: 'human' | 'pm'
-  kind: 'message' | 'question' | 'error' | 'confirmation' | 'action_result'
+  role: 'human' | 'pm' | 'thread'
+  senderSessionId?: string | null
+  senderTitle?: string | null
+  kind: 'message' | 'question' | 'error' | 'confirmation' | 'action_result' | 'notification'
   pendingAction?: import('@corral/core').PmAction | null
   text: string
   // Set only on questions, and only when the PM gave them

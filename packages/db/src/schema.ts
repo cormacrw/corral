@@ -289,6 +289,7 @@ export const planChange = pgEnum('plan_change', ['added', 'changed', 'unchanged'
 // source of truth, and a lost session is reseeded from them.
 export const planSessions = pgTable('plan_sessions', {
   id: uuid().primaryKey().defaultRandom(),
+  parentSessionId: uuid().references((): AnyPgColumn => planSessions.id, { onDelete: 'set null' }),
   projectId: uuid().references(() => projects.id, { onDelete: 'cascade' }),
   title: text().notNull(),
   agentSessionId: text(),
@@ -308,8 +309,10 @@ export const planSessions = pgTable('plan_sessions', {
 
 export const planMessages = pgTable('plan_messages', {
   id: uuid().primaryKey().defaultRandom(),
+  senderSessionId: uuid().references(() => planSessions.id, { onDelete: 'set null' }),
+  senderTitle: text(),
   sessionId: uuid().notNull().references(() => planSessions.id, { onDelete: 'cascade' }),
-  // 'human' or 'pm'; questions are PM messages flagged as such
+  // 'human', 'pm', or 'thread'; thread input never authorizes human decisions
   role: text().notNull(),
   kind: text().notNull().default('message'),
   text: text().notNull(),

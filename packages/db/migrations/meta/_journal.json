@@ -260,6 +260,13 @@
       "when": 1793373363127,
       "tag": "0036_natural_santa_claus",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1793387187111,
+      "tag": "0037_brave_mandarin",
+      "breakpoints": true
     }
   ]
 }

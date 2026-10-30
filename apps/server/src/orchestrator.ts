@@ -41,7 +41,7 @@ import { getEpic, patchEpic, setEpicDependencies } from './epics.ts'
 import { humanTransitionInput } from '@corral/contracts'
 import type { Transcripts } from './transcripts.ts'
 
-const { acceptanceCriteria, agents, attachments, auditLog, comments, designVersions, evidence, projects, reviews, runs, settings, taskDesignPins, tasks } = schema
+const { acceptanceCriteria, agents, attachments, auditLog, comments, designVersions, evidence, planSessions, projects, reviews, runs, settings, taskDesignPins, tasks } = schema
 type PlanSessionRow = typeof schema.planSessions.$inferSelect
 
 const server: Actor = { kind: 'system', component: 'server' }
@@ -219,9 +219,16 @@ export class Orchestrator implements RunnerHandlers {
     const [pm] = await db.select().from(agents).where(eq(agents.role, 'pm')).orderBy(asc(agents.createdAt)).limit(1)
     if (!pm) throw new ApiFailure(409, { code: 'conflict', constraint: 'no_pm_agent' })
     if (pm.paused || (pm.pausedUntil && pm.pausedUntil > this.#now())) throw new ApiFailure(409, { code: 'conflict', constraint: 'pm_paused' })
-    const [run] = await db.insert(runs).values({
-      agentId: pm.id, projectId: job.projectId, taskId: null, role: 'pm', leaseEpoch: 1, planSessionId: session.id, pmJob: job, queuedAt: this.#now()
-    }).returning()
+    const run = await db.transaction(async (tx) => {
+      // A delayed initial turn must not start after close. Serialize its run
+      // insertion with the close transaction's session lock.
+      const [current] = await tx.select({ closedAt: planSessions.closedAt }).from(planSessions).where(eq(planSessions.id, session.id)).for('update')
+      if (!current || current.closedAt) throw new ApiFailure(409, { code: 'conflict', constraint: 'plan_session_closed' })
+      const [created] = await tx.insert(runs).values({
+        agentId: pm.id, projectId: job.projectId, taskId: null, role: 'pm', leaseEpoch: 1, planSessionId: session.id, pmJob: job, queuedAt: this.#now()
+      }).returning()
+      return created!
+    })
     const ctx = await this.#load(run!.id)
     if (!ctx) throw new Error('PM run vanished')
     await this.#publish(ctx)
@@ -943,6 +950,9 @@ export class Orchestrator implements RunnerHandlers {
 
   async #endRun(ctx: RunContext, fields: Partial<typeof runs.$inferInsert> & { state: RunState }): Promise<void> {
     await this.#d.db.transaction(tx => this.#endRunIn(tx, ctx, fields))
+    if (ctx.run.role === 'pm' && ctx.run.planSessionId && fields.state === 'interrupted') {
+      await this.plans?.notifyParent(ctx.run.planSessionId, ctx.run.id, true)
+    }
   }
 
   // Ends the run and releases its lease, if it still holds one
@@ -972,6 +982,7 @@ export class Orchestrator implements RunnerHandlers {
       if (ctx.task) await tx.update(tasks).set({ paused: true }).where(eq(tasks.id, ctx.task.id))
       await tx.insert(auditLog).values({ projectId: ctx.run.projectId, taskId: ctx.task?.id ?? null, actor, action: 'run.stopped', detail: { runId } })
     })
+    if (ctx.run.role === 'pm' && ctx.run.planSessionId) await this.plans?.notifyParent(ctx.run.planSessionId, runId, true)
     await this.#publish(ctx)
   }
 
