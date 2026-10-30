@@ -101,7 +101,7 @@ describe('get_agent_activity', () => {
     await t.db.insert(runs).values([
       ...Array.from({ length: 12 }, () => ({ ...base, state: 'queued' as const })),
       { ...base, state: 'running', startedAt: new Date() },
-      ...Array.from({ length: 25 }, () => ({ ...base, state: 'failed' as const, summary: 's'.repeat(5000), error: 'e'.repeat(5000) }))
+      ...Array.from({ length: 25 }, () => ({ ...base, state: 'failed' as const, endedAt: new Date(), summary: 's'.repeat(5000), error: 'e'.repeat(5000) }))
     ])
     const team = await named(developer.name)
     expect(team.activeRunCount).toBe(13)
