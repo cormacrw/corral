@@ -1,5 +1,7 @@
 # Request performance samples
 
+Compose forwards both slow-warning thresholds from `.env` to the server, defaulting to 500 ms for requests and 200 ms for queries. Migration `0038_chubby_mephisto` creates the complete performance table after main’s 0037; the earlier epic migrations were replaced during integration so deployed databases apply all columns together.
+
 The API timing middleware in `apps/server/src/performance.ts` measures handler time with the monotonic clock and sets `Server-Timing: total;dur=<milliseconds>, db;dur=<milliseconds>;desc="N queries"` on all API responses, including errors, health and SSE handshakes. This measures response preparation, not body transfer or the lifetime of a stream.
 
 Ordinary requests enqueue one `api` sample with the same duration, HTTP status and registered route pattern. Unknown routes use `/api/*`; raw paths and query strings are never persisted or logged by this middleware. Health, client performance beacons, SSE responses and WebSocket upgrades are excluded from samples and slow warnings. The runner WebSocket lives outside `/api`.

@@ -17,6 +17,16 @@ The page specs in this folder still set the behaviour. This page covers the shel
 
 Pages and components use `useDevice().isMobile` to choose a mobile component. Don't add mobile-only routes.
 
+## Page scale
+
+The app shell fixes mobile page scale at 1 with the viewport meta (including
+`viewport-fit=cover`). Root `touch-action: manipulation` prevents double-tap zoom
+while allowing vertical and horizontal scrolling. On iOS, including iPadOS with a
+desktop user agent, the shell cancels `gesturestart` and `gesturechange` once for
+its mounted lifetime. Touch devices use at least 16px text in inputs, textareas,
+selects and editable composers to avoid Safari focus zoom, including dialogs and
+the Desktop layout override. Desktop keyboard zoom remains available.
+
 ## Override
 
 **Settings → Appearance → Layout** is a segmented control: **Auto** (the rule above), **Desktop** or **Mobile**.
@@ -30,7 +40,7 @@ From top to bottom:
 
 - **Header:** On sub-pages, `MobilePageHeader` lives at the top of the scroll area and scrolls away with its content. Home, Plan, Inbox, Projects and Settings have no title row; their content starts at the top, with the mobile layout applying `env(safe-area-inset-top)`. Sub-pages keep their back link and accessible label: project Board, Backlog, Pull requests and Settings return to the overview with the project name and dot above the title; Overview returns to Projects with Project settings; Agent returns to Home with Agent settings; Settings sections return to Settings. Actions render directly in the row's `actions` slot: Board search, Backlog New task, Project settings Save and Add agent on the Agents settings screen. Inbox search sits on the right of the filter-tabs row; Projects keeps only the outlined Add project button after the cards. Phones have no Plan session switcher for now. There is no shell header or teleport target, and runner status appears only in Home.
 - **Focused header:** Plan conversations and Inbox items keep a slim, non-scrolling `MobilePageHeader` above their body (back, eyebrow, title and actions). Plan shows the project above the session title and returns to `/plan`; Inbox shows “Inbox · n of m” above the task ref and returns to `/inbox`. The body takes the remaining height with its composer/tray pinned at the bottom. Task, Epic and Run retain their own headers.
-- **Banners:** the same shell banners as the web layout (stopped, updating, project paused, runner offline, reconnecting), from `ShellBanners.vue`.
+- **Banners:** the same shell banners as the web layout (stopped, updating, project paused, runner offline, reconnecting). The runner-offline banner shows only when no runner is online; offline runners next to an online one show only in the runner list, from `ShellBanners.vue`.
 - **Page:** fills the space between, and scrolls.
 - **Tab bar:** five tabs, each an icon over a label. The active tab is `primary`. A Plan conversation and an Inbox item hide the tab bar, so the chat or the tray and its composer get the full height.
 
@@ -53,7 +63,7 @@ On the web, `/projects` renders in the normal shell as a plain project list.
 
 `/home` is the global dashboard, counted from the live task lists so it matches each project's Board and updates without a reload:
 
-- **Runner status** and a project filter (**All projects** or one project) · **Today**. Runner status is shown only here.
+- **Runner status** ("Runner online", or "{online} of {total} runners online" with several) and a project filter (**All projects** or one project) · **Today**. Runner status is shown only here.
 - **Tiles:** **To do** (Ready), **In progress** (In progress, Agent review, Human review and Ready to merge) and **Merged today** (merged since local midnight) with how many were first-pass (no changes requested).
 - **Today totals**, immediately after the count tiles: **Runs** and **Usage**, from `todayStats` (`utils/agents.ts`), counting today’s queued runs and their input plus output tokens. Both respect the project filter. The note reads "Usage is in tokens from your own subscription." Merged today already covers PRs merged.
 - **In progress by stage:** a bar and counts per stage, and a link to the Inbox with the blocked (Blocked and Failed) and waiting-for-your-review (Human review) counts.
@@ -71,6 +81,7 @@ Agent detail and run screens follow [agent.md](agent.md); the web and mobile pag
 ## Task and epic
 
 - **Task** (`/tasks/<ref>`, frames *Task · details* and *Task · criteria and activity*): `TaskDetail` in `mobile` mode, a full page with no shell header or tab bar. Its header has a back arrow, the epic (linking to it) over the ref, copy link, and a **⋯** menu with **Delete task**. Under the title, a "{agent} is working · Watch" strip while an agent holds the task, then two tabs:
+  - **Paused:** a paused task shows the same bar and **Resume** button as the other modes ([task.md](task.md)), above the tabs so it stays on both, with a 44px tap target.
   - **Details:** the property rows (label and value, divided), Depends on, and the description.
   - **Criteria and activity:** acceptance criteria, then Activity, Evidence and History with the composer. `?evidence=1` opens this tab on Evidence.
 - **Epic** (`/epics/<id>`, frame *Epic*): `EpicDetail` in `mobile` mode with its own header (back, an Epic badge and the project over the title, copy link) and the tab bar. The body is stacked like the flyout, with Tasks and Graph as a segmented control. Tapping a task, in the list or the graph, opens its page.
@@ -94,7 +105,7 @@ Built from the **Inbox · Needs you**, **Inbox · Human review**, **Inbox · Que
 
 - **List** (`/inbox`): the filter tabs (**Inbox**, the web's Needs you, and **Resolved** with counts), a Search the Inbox button on the right of the filter-tabs row that toggles the search box, and one row per item: the sender's avatar, name and time, the subject, a two-line preview, the type badge, and the project and task ref. Inbox lists items newest first, Plan threads among them with no group, and ends with "That's everything in your Inbox." Tapping a row opens the item.
 - **Item** (`/inbox/:itemId`): the header shows "Inbox · n of m" (its place in Needs you) above the task ref, a back button to the list, and a **Task** button that opens the task page; there's no task flyout. The body is the sender, subject, type badge, project and "{sender} · {role} · {time}", the agent's message, and on a human review the PR and passing-check chips and the criteria with their evidence.
-- **Plan threads** (open Plan sessions with a question or a plan needing approval): the row shows the project dot, session title, time, status badge and preview; the item shows only the question, or the plan with View plan, Approve to board and Approve to Backlog, not the conversation, with **Open in Plan** in place of the Task button and **Delete thread** in its menu. An unread reply shows Juno's latest reply with a reply box. Thread rows swipe left to **Delete**, with a 5-second Undo toast; task rows don't swipe. See [inbox.md](inbox.md#mobile).
+- **Plan threads** (open Plan sessions with a question or a plan needing approval): the row shows the sender's avatar, name and time, the session title, the preview, and the status badge beside the project tag; the item shows only the question, or the plan with View plan, Approve to board and Approve to Backlog, not the conversation, with **Open in Plan** in place of the Task button and **Delete thread** in its menu. An unread reply shows Juno's latest reply with a reply box. Thread rows swipe left to **Delete**, with a 5-second Undo toast; task rows don't swipe. See [inbox.md](inbox.md#mobile).
 - **Tray**, pinned to the bottom: the same quick actions and composer as the web. A question has no chips: the composer answers it (**Send answer**, which is Clarify and continue). Resolving an item moves on to the next one that needs you, as on the web; Back returns to the list.
 
 ## Install
@@ -107,7 +118,7 @@ Built from the **Install Corral** frame. Corral is an installable PWA, served by
   - Chrome and Android: when `beforeinstallprompt` has fired, **Install app** shows the browser's prompt. The plugin catches the event early and suppresses Chrome's own mini-bar.
   - iOS (iPadOS included), which has no prompt: the three Add to Home Screen steps.
   - Already running standalone, or a browser that can't install: no Settings entry, and the sheet closes.
-- Launched from the home screen, `(display-mode: standalone)` matches, so `useDevice()` picks the mobile layout whatever the window size.
+- Launched from the home screen, `(display-mode: standalone)` matches, so `useDevice()` picks the mobile layout whatever the window size. The setup middleware resolves this mode before redirecting: with a project, `/` and completed `/setup` open `/home` on mobile; desktop keeps the first project overview. With no projects, both layouts open onboarding, and `/setup?add=1` keeps the add-project flow.
 
 ## Setup
 
@@ -123,9 +134,9 @@ Built from the **Setup · Your name**, **Setup · Repository**, **Setup · Agent
 
 Built from the **Settings** and **Settings · Runner** frames. Behaviour follows [settings.md](settings.md).
 
-- **Settings** (`/settings`, `SettingsMobile.vue`): on mobile, `/settings` lists the sections instead of opening Profile. This is a top-level tab with no title row. From the top: your picture and name (opens Profile), **Profile** and **Runner** rows (the runner row shows its live status, "Online · {name}" with the dot), **Agents** (one row per agent with its role and runtime; developer and reviewer rows have a compact inline `ConcurrencyStepper` on the right, keeping 44px −/+ tap targets and saving in place without navigating; tapping the avatar, name or role opens `/settings/agents#agent-<id>` scrolled to that card; the PM keeps “one turn per session” and has no stepper), **Appearance** with the colour mode and the **Layout** override (Auto / Desktop / Mobile, see [Override](#override)) set in place, and **App → Install Corral** where the browser can install it.
+- **Settings** (`/settings`, `SettingsMobile.vue`): on mobile, `/settings` lists the sections instead of opening Profile. This is a top-level tab with no title row. From the top: your picture and name (opens Profile), **Profile** and **Runners** rows (the runners row shows the live status, "Online · {name}" for one runner or "Online · {online} of {total} online" for several, with the dot), **Agents** (one row per agent with its role and runtime; developer and reviewer rows have a compact inline `ConcurrencyStepper` on the right, keeping 44px −/+ tap targets and saving in place without navigating; tapping the avatar, name or role opens `/settings/agents#agent-<id>` scrolled to that card; the PM keeps “one turn per session” and has no stepper), **Appearance** with the colour mode and the **Layout** override (Auto / Desktop / Mobile, see [Override](#override)) set in place, and **App → Install Corral** where the browser can install it.
 - **Sections** (`/settings/<section>`): each its own screen, titled with the section, with a back button to `/settings`. Profile and Appearance show the web cards stacked, without the section menu.
-- **Runner** (`/settings/runner`, `SettingsRunnerMobile.vue`): the status card (dot, "Online · {name}", last heartbeat, live from `useLive()`) with **Reconnect**, which reloads the live state and scans the logins again; the data directory (`CORRAL_RUNNER_DATA_DIR`, read-only); **Logins inside the runner** with each CLI's version and Signed in / Not signed in; the sign-in commands with a copy button each; and the note that Corral never reads credentials.
+- **Runners** (`/settings/runner`, `SettingsRunnerMobile.vue`): the card with the runner list from [settings.md](settings.md) (name, state badge, slots in use, runtimes, roles, last heartbeat, live from `useLive()`) and **Reconnect**, which reloads the live state and scans the logins again; the data directory (`CORRAL_RUNNER_DATA_DIR`, read-only); **Logins inside the runner** with each CLI's version and Signed in / Not signed in; the sign-in commands with a copy button each; and the note that Corral never reads credentials.
 
 - **Agents** (`/settings/agents`, `SettingsAgentsMobile.vue`): header “Agents”, Back to Settings and **Add agent**, which opens the existing agent form as a bottom sheet. One full-width card per agent, with avatar, name, role, runtime and a Paused badge when paused. **Concurrency** comes first, using the large `ConcurrencyStepper`; the PM instead says “One turn per Plan session” and has no concurrency or wake interval control. A full-width **Paused** switch row has a 44px tap target. **More settings** starts collapsed and reveals full-width Name, Runtime (disabled with “Changes once its runs end” while active), Wake interval in minutes (blank means every check), and Picture Upload / Remove. Changes save through the same APIs as desktop. A bottom **Kill switch** card has a full-width **Stop everything** / **Resume everything** button. Links to `#agent-<id>` scroll that card into view, including after the agents load. The desktop section keeps its existing layout.
 

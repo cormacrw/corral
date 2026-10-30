@@ -36,6 +36,108 @@ describe('migrations', () => {
     for (const fn of cleanup.splice(0)) await fn()
   })
 
+  it.each([
+    { driver: 'pglite' as const, enabled: true },
+    { driver: 'postgres' as const, enabled: postgresAvailable }
+  ])('0038 creates the complete performance table after main 0037 on $driver', async ({ driver, enabled }) => {
+    if (!enabled) return
+    const before = await migrationsBefore('0038_chubby_mephisto')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db, migrate } = await open(driver)
+    await migrate(before)
+    const journal = JSON.parse(await readFile(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as { entries: { when: number }[] }
+    const previous = journal.entries.at(-2)!.when
+    const added = journal.entries.at(-1)!.when
+    expect(added).toBeGreaterThan(previous)
+    expect(Number((await db.execute(sql`select max(created_at) as latest from drizzle.__drizzle_migrations`)).rows[0]!.latest)).toBe(previous)
+    expect((await db.execute(sql`select table_name from information_schema.tables where table_name = 'perf_samples'`)).rows).toEqual([])
+    await migrate(migrationsFolder)
+    await db.execute(sql`insert into perf_samples (kind, name, duration_ms, metric, session_id, query_count, db_time_ms)
+      values ('page', '/tasks/[ref]', 120, 'navigation', '00000000-0000-4000-8000-000000000001', 3, 12.5)`)
+    expect((await db.execute(sql`select metric, session_id, query_count, db_time_ms from perf_samples`)).rows)
+      .toEqual([{ metric: 'navigation', session_id: '00000000-0000-4000-8000-000000000001', query_count: 3, db_time_ms: 12.5 }])
+    expect(Number((await db.execute(sql`select max(created_at) as latest from drizzle.__drizzle_migrations`)).rows[0]!.latest)).toBe(added)
+    await migrate(migrationsFolder)
+    expect((await db.execute(sql`select count(*)::int as count from perf_samples`)).rows).toEqual([{ count: 1 }])
+  }, 60_000)
+
+  it.each([
+    { driver: 'pglite' as const, enabled: true },
+    { driver: 'postgres' as const, enabled: postgresAvailable }
+  ])('0035 adds designer without changing existing agents or runs on $driver', async ({ driver, enabled }) => {
+    if (!enabled) return
+    const before = await migrationsBefore('0035_amused_bloodaxe')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db, migrate } = await open(driver)
+    await migrate(before)
+    await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('Test app', 'test-app', 'TA', 'cormacrw/test-app', 'main')`)
+    await db.execute(sql`insert into agents (name, role) values ('Juno', 'pm'), ('Atlas', 'developer'), ('Vera', 'reviewer')`)
+    await db.execute(sql`insert into tasks (project_id, number, title, type, created_by) select id, 1, 'Existing task', 'task', '{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb from projects`)
+    await db.execute(sql`insert into runs (project_id, agent_id, task_id, role, state) select p.id, a.id, t.id, a.role, 'completed' from projects p, agents a, tasks t`)
+    const agents = (await db.execute(sql`select * from agents order by name`)).rows
+    const runs = (await db.execute(sql`select * from runs order by id`)).rows
+    await migrate(migrationsFolder)
+    expect((await db.execute(sql`select * from agents order by name`)).rows).toEqual(agents)
+    expect((await db.execute(sql`select * from runs order by id`)).rows).toEqual(runs)
+    await db.execute(sql`insert into agents (name, role) values ('Iris', 'designer')`)
+    expect((await db.execute(sql`select role from agents where name = 'Iris'`)).rows).toEqual([{ role: 'designer' }])
+  }, 60_000)
+
+  it.each([
+    { driver: 'pglite' as const, enabled: true },
+    { driver: 'postgres' as const, enabled: postgresAvailable }
+  ])('upgrades historical runs and tasks after 0030 without data loss, on $driver', async ({ driver, enabled }) => {
+    if (!enabled) return
+    const before = await migrationsBefore('0031_omniscient_firedrake')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db, migrate } = await open(driver)
+    await migrate(before)
+    const journal = JSON.parse(await readFile(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as { entries: { tag: string, when: number }[] }
+    const main = journal.entries.find(e => e.tag === '0030_lumpy_wiccan')!
+    const added = journal.entries.find(e => e.tag === '0031_omniscient_firedrake')!
+    expect(added.when).toBeGreaterThan(main.when)
+    expect(Number((await db.execute(sql`select max(created_at) as latest from drizzle.__drizzle_migrations`)).rows[0]!.latest)).toBe(main.when)
+    expect((await db.execute(sql`select column_name from information_schema.columns where table_name = 'runs' and column_name = 'runner_name'`)).rows).toEqual([])
+    await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('Test app', 'test-app', 'TA', 'cormacrw/test-app', 'main')`)
+    await db.execute(sql`insert into agents (name, role) values ('Developer', 'developer')`)
+    await db.execute(sql`insert into tasks (project_id, number, title, type, created_by) select id, 1, 'Historical task', 'task', '{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb from projects`)
+    await db.execute(sql`insert into runs (project_id, agent_id, task_id, role, state)
+      select p.id, a.id, t.id, 'developer', 'completed' from projects p, agents a, tasks t`)
+
+    await migrate(migrationsFolder)
+    expect((await db.execute(sql`select data_type, is_nullable from information_schema.columns where table_name = 'runs' and column_name = 'runner_name'`)).rows).toEqual([{ data_type: 'text', is_nullable: 'YES' }])
+    expect((await db.execute(sql`select state, runner_name from runs`)).rows).toEqual([{ state: 'completed', runner_name: null }])
+    await db.execute(sql`update runs set runner_name = 'home-server'`)
+    expect((await db.execute(sql`select runner_name from runs`)).rows).toEqual([{ runner_name: 'home-server' }])
+    expect((await db.execute(sql`select rebase_only, approved_head_sha from tasks`)).rows).toEqual([{ rebase_only: false, approved_head_sha: null }])
+    await db.execute(sql`update tasks set rebase_only = true, approved_head_sha = 'approved-head'`)
+    await db.execute(sql`update runs set outcome = 'pr_rebased'`)
+    expect((await db.execute(sql`select outcome from runs`)).rows).toEqual([{ outcome: 'pr_rebased' }])
+    expect((await db.execute(sql`select rebase_only, approved_head_sha from tasks`)).rows).toEqual([{ rebase_only: true, approved_head_sha: 'approved-head' }])
+    expect(Number((await db.execute(sql`select max(created_at) as latest from drizzle.__drizzle_migrations`)).rows[0]!.latest)).toBe(journal.entries.at(-1)!.when)
+    await migrate(migrationsFolder)
+    expect((await db.execute(sql`select runner_name from runs`)).rows).toEqual([{ runner_name: 'home-server' }])
+  }, 60_000)
+
+  it.each([
+    { driver: 'pglite' as const, enabled: true },
+    { driver: 'postgres' as const, enabled: postgresAvailable }
+  ])('0034 adds dismissal without changing historical deployment notes or read state on $driver', async ({ driver, enabled }) => {
+    if (!enabled) return
+    const before = await migrationsBefore('0034_typical_prowler')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db, migrate } = await open(driver)
+    await migrate(before)
+    await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('Test app', 'test-app', 'TA', 'cormacrw/test-app', 'main')`)
+    await db.execute(sql`insert into deployments (project_id, to_sha, notes, notes_status, read_at)
+      select id, 'abc1234', 'Existing release notes', 'ready', '2026-10-01T12:00:00Z' from projects`)
+    await migrate(migrationsFolder)
+    expect((await db.execute(sql`select notes, notes_status, read_at is not null as read, dismissed_at from deployments`)).rows)
+      .toEqual([{ notes: 'Existing release notes', notes_status: 'ready', read: true, dismissed_at: null }])
+    await migrate(migrationsFolder)
+    expect((await db.execute(sql`select count(*)::int as count from deployments`)).rows).toEqual([{ count: 1 }])
+  }, 60_000)
+
   it('0028 preserves historical runs with null runner ownership', async () => {
     const before = await migrationsBefore('0028_complex_clint_barton')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
@@ -188,7 +290,7 @@ describe('migrations', () => {
   it.each([
     { driver: 'pglite' as const, enabled: true },
     { driver: 'postgres' as const, enabled: postgresAvailable }
-  ])('0027 makes epics already on the board direct and new ones take the project default, on $driver (D23)', async ({ driver, enabled }) => {
+  ])('0027 makes epics already on the board direct and new ones take the project default, on $driver (D27)', async ({ driver, enabled }) => {
     if (!enabled) return
     const before = await migrationsBefore('0027_epic_review_modes')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
@@ -235,7 +337,7 @@ describe('migrations', () => {
     await admin.connect()
     await admin.query(`create database ${name}`)
     cleanup.push(async () => {
-      await admin.query(`drop database if exists ${name} with (force)`)
+      await admin.query(`drop database if exists ${name}`)
       await admin.end()
     })
     const url = new URL(adminUrl)

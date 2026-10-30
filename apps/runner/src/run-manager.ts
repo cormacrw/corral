@@ -2,13 +2,15 @@ import type { AgentTool, RunEvent, RunExit, RunJob, RunnerMessage, ServerMessage
 import { randomBytes, randomUUID } from 'node:crypto'
 import { createWriteStream, type WriteStream } from 'node:fs'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { constants } from 'node:os'
 import { basename, extname, isAbsolute, join, resolve } from 'node:path'
 import { createRuntimeRegistry, STOP_GRACE_MS, type AgentExit, type AgentProcess, type AgentRuntime, type AgentSession, type ParsedLine, type RuntimeRegistry } from './agent-runtime.ts'
 import type { RunnerConfig } from './config.ts'
 import type { ServerConnection } from './connection.ts'
 import { packDesign, saveDesign } from './designs.ts'
-import { outcomesFor, toolsFor, type ToolOutcome, type ToolServer } from './mcp.ts'
-import { headSha, prepareWorkspace, pushBranch, readProjectBrief, readRoleInstructions } from './workspace.ts'
+import { convertToMp4 } from './evidence-video.ts'
+import { outcomesFor, toolRefusal, toolsFor, type ToolOutcome, type ToolServer } from './mcp.ts'
+import { headSha, prepareWorkspace, pushBranch, readProjectBrief, readRoleInstructions, saveStoppedWork } from './workspace.ts'
 
 // Runs on this runner (flows.md §2 steps 3–5, PRD §8.6). Each run gets a
 // worktree, a secret MCP path, and an agent process in its own process
@@ -19,6 +21,9 @@ import { headSha, prepareWorkspace, pushBranch, readProjectBrief, readRoleInstru
 // A Claude Code developer or reviewer run streams its input too, so a human
 // can message it mid-run (run.message); it still ends when the agent has
 // reported and finished its turn.
+// A developer run stopped before it reported saves its uncommitted work as a
+// WIP commit on the task branch, after the agent is gone and before the server
+// hears the run ended, so the retry continues from it.
 
 const EVENT_BATCH_MS = 500
 const TOOL_CALL_TIMEOUT_MS = 120_000
@@ -33,6 +38,11 @@ const CONTENT_TYPES: Record<string, string> = {
   '.webp': 'image/webp',
   '.webm': 'video/webm',
   '.mp4': 'video/mp4',
+  '.m4v': 'video/x-m4v',
+  '.mov': 'video/quicktime',
+  '.mkv': 'video/x-matroska',
+  '.avi': 'video/x-msvideo',
+  '.ogv': 'video/ogg',
   '.txt': 'text/plain',
   '.log': 'text/plain',
   '.md': 'text/markdown',
@@ -48,7 +58,7 @@ interface SpawnOptions {
   resume: string | null
 }
 
-type StopReason = Extract<RunExit, { kind: 'stopped' | 'timed_out' }>['kind']
+type StopReason = Extract<RunExit, { kind: 'stopped' | 'timed_out' | 'runner_shutdown' }>['kind']
 
 interface ActiveRun {
   job: RunJob
@@ -63,14 +73,29 @@ interface ActiveRun {
   outcomeAccepted: boolean
   // Settles when the server answers a report_outcome call that is still open
   reportingOutcome: Promise<unknown> | null
-  // Set when the server or the timeout asked for the process to die
+  // Set when the server, the timeout or a runner shutdown asked for the process
+  // to die. The first one wins: it's what cut the run off.
   stopping: StopReason | null
+  stopDetail: string
+  // The stop asked for uncommitted work to be saved
+  keepWork: boolean
+  leaseConfirmedUntil: number
+  leaseRevoked: boolean
+  // Corral signalled the process outside a stop, so its signal isn't a stranger's
+  signalledByCorral: boolean
+  // A signal Corral didn't send killed the agent, even if a resume came after
+  killedBy: string | null
+  lastActivityAt: string | null
   rateLimit: { resetsAt: string | null } | null
   resumed: boolean
   // The init line arrived, so the CLI really started (a failed --resume never gets there)
   sawInit: boolean
   resumeFailed: boolean
   ended: boolean
+  // Settles once the server has been told the run ended
+  closing: Promise<void>
+  // Resolves with the same moment, but exists from the start of the run
+  closed: PromiseWithResolvers<void>
   // The last agent exit code, or the turn's when a warm PM process answered it
   exitCode: number | null
   events: RunEvent[]
@@ -123,13 +148,22 @@ export class RunManager {
     return [...this.#runs.values()].filter(r => !r.ended).map(r => ({ runId: r.job.runId, leaseEpoch: r.job.leaseEpoch }))
   }
 
+  activeRunCount(): number {
+    return this.#runs.size
+  }
+
   handle(message: ServerMessage): void {
     switch (message.type) {
       case 'run.assign':
         this.assign(message.job)
         return
+      case 'run.lease': {
+        const run = this.#runs.get(message.runId)
+        if (run && !run.leaseRevoked && run.job.leaseEpoch === message.leaseEpoch) run.leaseConfirmedUntil = Date.parse(message.validUntil)
+        return
+      }
       case 'run.stop':
-        this.stop(message.runId, 'stopped', message.reason)
+        this.stop(message.runId, 'stopped', message.reason, message.keepWork === true)
         return
       case 'run.message':
         this.message(message.runId, message.leaseEpoch, message.text)
@@ -161,11 +195,20 @@ export class RunManager {
       outcomeAccepted: false,
       reportingOutcome: null,
       stopping: null,
+      stopDetail: '',
+      keepWork: false,
+      leaseConfirmedUntil: 0,
+      leaseRevoked: false,
+      signalledByCorral: false,
+      killedBy: null,
+      lastActivityAt: null,
       rateLimit: null,
       resumed: false,
       sawInit: false,
       resumeFailed: false,
       ended: false,
+      closing: Promise.resolve(),
+      closed: Promise.withResolvers<void>(),
       exitCode: null,
       events: [],
       flushTimer: null,
@@ -181,34 +224,48 @@ export class RunManager {
     })
   }
 
-  stop(runId: string, reason: StopReason, detail: string): void {
+  stop(runId: string, reason: StopReason, detail: string, keepWork = true): void {
     const run = this.#runs.get(runId)
-    if (!run || run.ended) return
-    this.#note(run, `${reason === 'timed_out' ? 'Time limit reached' : 'Stopping'}: ${detail}`)
-    if (!run.process) {
-      // Still setting up: the start path checks `stopping` before spawning
-      run.stopping = reason
-      return
+    if (!run) return
+    if (!keepWork) {
+      run.leaseRevoked = true
+      run.leaseConfirmedUntil = 0
     }
-    run.stopping ??= reason
+    if (run.ended) return
+    this.#note(run, `${reason === 'timed_out' ? 'Time limit reached' : 'Stopping'}: ${detail}`)
+    if (!run.stopping) {
+      run.stopping = reason
+      run.stopDetail = detail
+      run.keepWork = keepWork
+    }
+    // Still setting up: the start path checks `stopping` before spawning
+    if (!run.process) return
     // The server stops the run as it accepts report_outcome, so the stop can
     // arrive before the tool result: wait for the answer before signalling
     const process = run.process
     const reporting = run.reportingOutcome
-    if (reporting && reason === 'stopped') void reporting.then(() => this.#signal(run, process, reason))
+    if (reporting && reason !== 'timed_out') void reporting.then(() => this.#signal(run, process, reason))
     else this.#signal(run, process, reason)
   }
 
   #signal(run: ActiveRun, process: AgentProcess, reason: StopReason): void {
     // After an accepted outcome the agent is just finishing its last reply;
     // let it see the tool result and exit on its own before signalling
-    const delay = run.outcomeAccepted && reason === 'stopped' ? OUTCOME_EXIT_GRACE_MS : 0
+    const delay = run.outcomeAccepted && reason !== 'timed_out' ? OUTCOME_EXIT_GRACE_MS : 0
     const soft = setTimeout(() => process.kill('SIGTERM'), delay)
     const hard = setTimeout(() => process.kill('SIGKILL'), delay + STOP_GRACE_MS)
     void process.exited.then(() => {
       clearTimeout(soft)
       clearTimeout(hard)
     })
+  }
+
+  #stopExit(run: ActiveRun): RunExit {
+    switch (run.stopping) {
+      case 'timed_out': return { kind: 'timed_out', limitSeconds: run.job.timeoutSeconds }
+      case 'runner_shutdown': return { kind: 'runner_shutdown' }
+      default: return { kind: 'stopped', reason: run.stopDetail }
+    }
   }
 
   // A human's message for a live developer or reviewer run. A stale lease
@@ -231,13 +288,13 @@ export class RunManager {
     const { job } = run
     if (run.ended || run.stopping) return 'The run has ended'
     if (run.outcomeAccepted) return 'The agent has already reported its outcome'
-    if (job.role !== 'developer' && job.role !== 'reviewer') return `A ${job.role} run doesn't take messages`
+    if (job.role !== 'developer' && job.role !== 'designer' && job.role !== 'reviewer') return `A ${job.role} run doesn't take messages`
     if (!this.#takesMessages(job)) return `A ${job.runtime} run can't take input while it runs`
     return null
   }
 
   #takesMessages(job: RunJob): boolean {
-    return (job.role === 'developer' || job.role === 'reviewer') && this.#runtimes.get(job.runtime)?.spawnSession !== undefined
+    return (job.role === 'developer' || job.role === 'designer' || job.role === 'reviewer') && this.#runtimes.get(job.runtime)?.spawnSession !== undefined
   }
 
   #deliver(run: ActiveRun, text: string): void {
@@ -254,14 +311,16 @@ export class RunManager {
   // and tell the server the runs were interrupted
   async shutdown(): Promise<void> {
     const live = [...this.#runs.values()].filter(r => !r.ended)
-    for (const run of live) this.stop(run.job.runId, 'stopped', 'The runner is shutting down')
+    for (const run of live) this.stop(run.job.runId, 'runner_shutdown', 'The runner is shutting down')
     await Promise.all([
       ...live.map(run => run.process?.exited ?? Promise.resolve()),
       ...[...this.#warm.values()].map(warm => this.#killWarm(warm))
     ])
     for (const run of live) {
-      if (!run.ended) this.#end(run, { kind: 'stopped' })
+      if (!run.ended) this.#end(run, this.#stopExit(run))
     }
+    // The caller closes the connection next, and run.ended has to go out first
+    await Promise.all(live.map(run => run.closing))
   }
 
   async #start(run: ActiveRun): Promise<void> {
@@ -270,6 +329,8 @@ export class RunManager {
       this.#end(run, { kind: 'error', message: `This runner has no agent runtime "${job.runtime}". It knows: ${[...this.#runtimes.keys()].join(', ')}` })
       return
     }
+    // The worktree is shared: a stopped run on this task saves its work first
+    await Promise.all([...this.#runs.values()].filter(other => other !== run && other.keepWork && (other.job.role === 'developer' || other.job.role === 'designer') && other.job.taskId === job.taskId).map(other => other.closed.promise))
     await mkdir(join(this.#config.dataDir, 'spool'), { recursive: true })
     await mkdir(run.scratchDir, { recursive: true })
     run.spool = createWriteStream(join(this.#config.dataDir, 'spool', `${job.runId}.jsonl`), { flags: 'a' })
@@ -283,7 +344,7 @@ export class RunManager {
     }
     run.worktree = prepared.workspace.path
     if (run.stopping) {
-      this.#end(run, { kind: run.stopping })
+      this.#end(run, this.#stopExit(run))
       return
     }
 
@@ -294,15 +355,16 @@ export class RunManager {
       run.sessionId = warm.sessionId
       run.sawInit = true
       this.#started(run)
-      await this.#warmTurn(run, warm, job.prompt)
+      this.#noteExit(run, await this.#warmTurn(run, warm, job.prompt))
       this.#flush(run)
     } else {
       await this.#coldStart(run, prepared.workspace.path)
     }
 
     if (run.ended) return
-    if (run.stopping) this.#end(run, { kind: run.stopping })
+    if (run.stopping) this.#end(run, this.#stopExit(run))
     else if (run.rateLimit) this.#end(run, { kind: 'rate_limited', resetsAt: run.rateLimit.resetsAt })
+    else if (run.killedBy) this.#end(run, { kind: 'signalled', signal: run.killedBy })
     else this.#end(run, { kind: 'exited', code: run.exitCode })
   }
 
@@ -356,6 +418,7 @@ export class RunManager {
 
   async #spawn(run: ActiveRun, options: SpawnOptions): Promise<void> {
     if (run.stopping || run.ended) return
+    run.signalledByCorral = false
     const exit = this.#keepsWarm(run.job)
       ? await this.#warmTurn(run, await this.#spawnWarm(run, options), options.prompt)
       : this.#takesMessages(run.job)
@@ -365,7 +428,15 @@ export class RunManager {
     // A failed --resume waits: the fresh session that replaces it is the one
     // the server must record, or the next turn tries the dead one again
     if (!run.started && !(options.resume && !run.sawInit)) this.#started(run)
-    if (exit?.signal && !run.stopping && !run.outcomeAccepted) this.#note(run, `The agent was killed by ${exit.signal}`)
+    this.#noteExit(run, exit)
+  }
+
+  #noteExit(run: ActiveRun, exit: AgentExit | null): void {
+    const signal = exit && !run.stopping && !run.outcomeAccepted && !run.signalledByCorral ? exitSignal(exit) : null
+    if (signal) {
+      run.killedBy = signal
+      this.#note(run, `The agent was killed by ${signal}, which Corral did not send`)
+    }
   }
 
   async #spawnOnce(run: ActiveRun, options: SpawnOptions): Promise<AgentExit> {
@@ -409,7 +480,10 @@ export class RunManager {
     run.session = null
     session.close()
     // A CLI that doesn't exit once stdin closes is stopped as usual
-    const soft = setTimeout(() => session.kill('SIGTERM'), OUTCOME_EXIT_GRACE_MS)
+    const soft = setTimeout(() => {
+      run.signalledByCorral = true
+      session.kill('SIGTERM')
+    }, OUTCOME_EXIT_GRACE_MS)
     const hard = setTimeout(() => session.kill('SIGKILL'), OUTCOME_EXIT_GRACE_MS + STOP_GRACE_MS)
     const exit = await session.exited
     clearTimeout(soft)
@@ -498,6 +572,7 @@ export class RunManager {
   // Kills the process group, gracefully first (architecture.md, runner rule 2)
   async #killWarm(warm: WarmSession): Promise<void> {
     this.#dropWarm(warm)
+    if (warm.run) warm.run.signalledByCorral = true
     warm.session.kill('SIGTERM')
     const hard = setTimeout(() => warm.session.kill('SIGKILL'), STOP_GRACE_MS)
     await warm.session.exited
@@ -521,12 +596,13 @@ export class RunManager {
     }
     if (parsed.sessionId && !run.started) this.#started(run)
     if (parsed.rateLimit) run.rateLimit = parsed.rateLimit
+    if (raw || parsed.events.length > 0) run.lastActivityAt = new Date().toISOString()
     this.#queue(run, parsed.events)
   }
 
   #started(run: ActiveRun): void {
     run.started = true
-    this.#connection.send({ type: 'run.started', runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, agentSessionId: run.sessionId })
+    this.#connection.send({ type: 'run.started', sentAt: Date.now(), runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, agentSessionId: run.sessionId })
   }
 
   #note(run: ActiveRun, text: string): void {
@@ -559,19 +635,44 @@ export class RunManager {
     this.#flush(run)
     run.unregisterTools?.()
     run.spool?.end()
-    const finish = (sha: string | null) => {
-      this.#connection.send({ type: 'run.ended', runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, exit, headSha: sha })
+    const finish = (sha: string | null, wipSha: string | null = null) => {
+      this.#connection.send({ type: 'run.ended', runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, exit, headSha: sha, lastActivityAt: run.lastActivityAt, wipSha })
       this.#runs.delete(run.job.runId)
+      this.#connection.refreshUpdateStatus?.()
+      run.closed.resolve()
     }
-    if (run.worktree && run.job.role === 'developer') void headSha(run.worktree).then(finish, () => finish(null))
-    else finish(null)
+    const worktree = run.worktree
+    if (worktree && (run.job.role === 'developer' || run.job.role === 'designer')) {
+      run.closing = this.#saveWork(run, worktree, exit).then(wipSha => headSha(worktree).then(sha => finish(sha, wipSha)), () => finish(null))
+    } else {
+      finish(null)
+    }
+  }
+
+  // Returns the WIP commit once it's on the remote. An outcome in flight has
+  // already pushed what it reports, and a new commit would move the branch
+  // from under it.
+  async #saveWork(run: ActiveRun, worktree: string, exit: RunExit): Promise<string | null> {
+    const { job } = run
+    const stopped = run.keepWork || exit.kind === 'signalled'
+    if (!stopped || !job.branch || run.outcomeAccepted || run.reportingOutcome) return null
+    const saved = await saveStoppedWork(worktree, job.branch, wipMessage(job, exit, run.stopDetail), this.#config.gitAuthor, STOP_GRACE_MS, () => this.#connection.connected && run.leaseConfirmedUntil > Date.now() + STOP_GRACE_MS)
+    const short = saved.sha?.slice(0, 10)
+    const note = saved.pushed
+      ? `Saved the uncommitted work as WIP commit ${short} and pushed it to ${job.branch}`
+      : saved.sha
+        ? `Saved the uncommitted work as WIP commit ${short} in the worktree, but could not push it: ${saved.error}`
+        : saved.error ? `Could not save the uncommitted work: ${saved.error}` : null
+    // The run has ended, so this goes straight out, ahead of run.ended
+    if (note) this.#connection.send({ type: 'run.events', runId: job.runId, leaseEpoch: job.leaseEpoch, events: [{ type: 'system', text: note }] })
+    return saved.pushed ? saved.sha : null
   }
 
   // ── Agent tools ────────────────────────────────────────────────────────────
 
   async #toolCall(run: ActiveRun, tool: AgentTool, input: Record<string, unknown>): Promise<ToolOutcome> {
     if (run.ended || run.outcomeAccepted) return { ok: false, error: 'This run is over. Stop working.' }
-    if (!toolsFor(run.job).includes(tool)) return { ok: false, error: `The ${run.job.role} can't use ${tool}${tool === 'submit_design' ? ' on a task that isn\'t a design' : ''}` }
+    if (!toolsFor(run.job).includes(tool)) return { ok: false, error: toolRefusal(run.job.role, tool) }
 
     if (tool === 'attach_evidence') {
       // No path: a note on its own, which the server checks (D21)
@@ -603,7 +704,7 @@ export class RunManager {
         return { ok: false, error: `A ${run.job.role} reports one of: ${outcomesFor(run.job.role).join(', ')}` }
       }
       let payload: Record<string, unknown> = input
-      if (run.job.role === 'developer' && (outcome === 'pr_opened' || outcome === 'pr_updated' || outcome === 'design_submitted')) {
+      if ((run.job.role === 'developer' || run.job.role === 'designer') && (outcome === 'pr_opened' || outcome === 'pr_updated' || outcome === 'pr_rebased' || outcome === 'design_submitted')) {
         // A spike has no branch to push (D19)
         if (!run.job.branch) return { ok: false, error: 'A spike opens no PR: report your findings with outcome findings_reported.' }
         // The runner pushes, not the agent (D8); the commit goes with the report
@@ -666,25 +767,46 @@ export class RunManager {
 
   // Reads the file the agent attached and sends it as base64. Files must
   // live outside the repository: the scratch folder is the usual place.
+  // A video other than MP4 goes up as an H.264 MP4, which Safari can play; the
+  // size limit applies to that copy. If there's no usable copy the original
+  // goes up instead, with a note saying why, so evidence is never lost.
   async #readEvidence(run: ActiveRun, input: Record<string, unknown>): Promise<ToolOutcome> {
     const given = String(input.path ?? '')
     if (!given) return { ok: false, error: 'Pass the path of the file to attach, or leave out path and use kind "note" for a written explanation' }
     const path = isAbsolute(given) ? given : resolve(run.scratchDir, given)
     const info = await stat(path).catch(() => null)
     if (!info?.isFile()) return { ok: false, error: `No file at ${path}` }
-    if (info.size > MAX_EVIDENCE_BYTES) return { ok: false, error: 'Evidence files are limited to 25 MB' }
-    const data = await readFile(path)
-    const extension = extname(path).toLowerCase()
-    return {
-      ok: true,
-      result: {
-        fileName: basename(path),
-        contentType: CONTENT_TYPES[extension] ?? 'application/octet-stream',
-        dataBase64: data.toString('base64'),
-        path: undefined
-      }
+    const contentType = CONTENT_TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream'
+    if (contentType.startsWith('video/') && contentType !== 'video/mp4') {
+      const converted = await convertToMp4(path, run.scratchDir, MAX_EVIDENCE_BYTES)
+      if (converted.ok) return evidenceFile(converted.fileName, 'video/mp4', converted.data)
+      if (info.size > MAX_EVIDENCE_BYTES) return { ok: false, error: `Evidence files are limited to 25 MB, and ${basename(path)} could not be converted to fit: ${converted.error}` }
+      this.#note(run, `Attaching ${basename(path)} as it is, because it could not be converted to MP4: ${converted.error}`)
     }
+    if (info.size > MAX_EVIDENCE_BYTES) return { ok: false, error: 'Evidence files are limited to 25 MB' }
+    return evidenceFile(basename(path), contentType, await readFile(path))
   }
+}
+
+function evidenceFile(fileName: string, contentType: string, data: Buffer): ToolOutcome {
+  return { ok: true, result: { fileName, contentType, dataBase64: data.toString('base64'), path: undefined } }
+}
+
+// The signal that killed the agent. A CLI that handles the signal, or a shell
+// in front of it, exits with 128 + the signal number instead of dying by it.
+export function exitSignal(exit: AgentExit): string | null {
+  if (exit.signal) return exit.signal
+  if (exit.code === null || exit.code <= 128) return null
+  return Object.entries(constants.signals).find(([, number]) => number === exit.code! - 128)?.[0] ?? null
+}
+
+function wipMessage(job: RunJob, exit: RunExit, stopDetail: string): string {
+  const reason = exit.kind === 'timed_out'
+    ? 'Time limit reached'
+    : exit.kind === 'runner_shutdown'
+      ? 'The runner shut down'
+      : exit.kind === 'signalled' ? exit.signal : stopDetail
+  return `WIP: ${job.taskRef} run #${job.runNumber} stopped: ${reason}\n\nCorral saved this unfinished work when the run stopped. It may not build.`
 }
 
 // Machine-specific details the agent needs, kept out of RunJob (PRD §8.5)
@@ -694,7 +816,7 @@ function runnerNotes(run: ActiveRun, job: RunJob, design: string | null = null):
     '',
     `- Your Corral tools are on the MCP server "corral": ${toolsFor(job).join(', ')}.`,
     `- Save evidence files and other scratch output under ${run.scratchDir} (outside the repository), then attach them with attach_evidence using the absolute path.`,
-    job.role === 'developer' && job.branch ? `- You are in a git worktree on branch ${job.branch}. Pushing is disabled; Corral pushes when you ${job.taskType === 'design' ? 'call submit_design' : 'report'}.` : '',
+    (job.role === 'developer' || job.role === 'designer') && job.branch ? `- You are in a git worktree on branch ${job.branch}. Pushing is disabled; Corral pushes when you ${job.taskType === 'design' ? 'call submit_design' : 'report'}.` : '',
     // A spike (D19): findings, not commits
     job.role === 'developer' && !job.branch ? '- You are in a detached checkout of the default branch for a spike. Don\'t commit or push; report your findings.' : '',
     design ?? '',

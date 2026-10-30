@@ -55,6 +55,21 @@ describe('prepareWorkspace for PM turns', () => {
 })
 
 describe('epic task workspaces', () => {
+  it('checks out an epic integration review at its exact head without a task ID', async () => {
+    const dataDir = await createTestDataDir()
+    const origin = join(dirname(dataDir), 'origin')
+    try {
+      const sha = (await git(['rev-parse', 'HEAD'], { cwd: origin })).stdout.trim()
+      const result = await prepareWorkspace(dataDir, pmJob({ role: 'reviewer', taskId: null, epicId: 'epic-one', branch: 'corral/epic-one', headSha: sha }))
+      expect(result.error).toBeNull()
+      expect(result.workspace!.path).toBe(join(dataDir, 'worktrees', 'epic-epic-one-review'))
+      expect((await git(['rev-parse', 'HEAD'], { cwd: result.workspace!.path })).stdout.trim()).toBe(sha)
+      expect((await git(['symbolic-ref', '-q', 'HEAD'], { cwd: result.workspace!.path })).code).not.toBe(0)
+    } finally {
+      await rm(dirname(dataDir), { recursive: true, force: true })
+    }
+  })
+
   it('starts dependent work at the latest epic commit while develop stays unchanged', async () => {
     const dataDir = await createTestDataDir()
     const origin = join(dirname(dataDir), 'origin')

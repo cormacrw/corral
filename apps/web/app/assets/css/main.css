@@ -255,3 +255,19 @@ body {
   --ui-color-neutral-900: var(--color-taupe-900);
   --ui-color-neutral-950: var(--color-taupe-950);
 }
+
+/* Suppress double-tap zoom while preserving native panning in both axes. */
+html {
+  touch-action: manipulation;
+}
+
+/* Safari zooms focused controls below 16px, including teleported dialogs.
+   Use the physical device capability so the desktop layout override is safe too. */
+@media (any-pointer: coarse) {
+  input:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file'], [type='button'], [type='submit'], [type='reset'], [type='hidden']),
+  textarea,
+  select,
+  [contenteditable='true'] {
+    font-size: max(16px, 1em);
+  }
+}

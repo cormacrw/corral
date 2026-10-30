@@ -1,6 +1,7 @@
 # Corral on the home server (D12, D14): web, server, runner and postgres on a
-# private network. Only web is published, for the Cloudflare Tunnel; the
-# server API, the runner WebSocket and Postgres stay inside the network.
+# private network. Web is published for the Cloudflare Tunnel; the runner-only
+# listener defaults to loopback. Set its host binding to the Tailscale IP for
+# remote runners. The server API and Postgres stay inside the network.
 # No Docker socket is mounted anywhere.
 #
 # First start:
@@ -32,6 +33,8 @@ services:
     build:
       context: .
       dockerfile: apps/server/Dockerfile
+      args:
+        CORRAL_BUILD_SHA: ${CORRAL_BUILD_SHA:-development}
     container_name: corral-server
     depends_on:
       postgres:
@@ -39,9 +42,16 @@ services:
     environment:
       CORRAL_DATABASE_URL: postgres://corral:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/corral
       CORRAL_RUNNER_TOKEN: ${CORRAL_RUNNER_TOKEN:-}
+      # Only with a token: the server refuses to start this listener without one
+      CORRAL_RUNNER_LISTEN: ${CORRAL_RUNNER_TOKEN:+0.0.0.0:4200}
       # Where people open Corral; PR bodies link here
       CORRAL_PUBLIC_URL: ${CORRAL_PUBLIC_URL:-http://localhost:3000}
       CORRAL_SLOW_REQUEST_MS: ${CORRAL_SLOW_REQUEST_MS:-500}
+      CORRAL_SLOW_QUERY_MS: ${CORRAL_SLOW_QUERY_MS:-200}
+    ports:
+      # Bind the HOST to its Tailscale IPv4 address, never 0.0.0.0.
+      # 4100 (the HTTP API) is deliberately not published.
+      - "${CORRAL_RUNNER_BIND_ADDRESS:-127.0.0.1}:${CORRAL_RUNNER_PORT:-4200}:4200"
     volumes:
       - server-data:/data/server
     restart: unless-stopped
@@ -50,15 +60,22 @@ services:
     build:
       context: .
       dockerfile: apps/runner/Dockerfile
+      args:
+        CORRAL_BUILD_SHA: ${CORRAL_BUILD_SHA:-development}
     container_name: corral-runner
+    stop_grace_period: 20s
     depends_on:
       - server
     environment:
       CORRAL_SERVER_URL: http://server:4100
       CORRAL_RUNNER_TOKEN: ${CORRAL_RUNNER_TOKEN:-}
       CORRAL_RUNNER_NAME: ${CORRAL_RUNNER_NAME:-home-server}
+      # Opt in to draining when the server reports a newer build
+      CORRAL_RUNNER_AUTO_UPDATE: ${CORRAL_RUNNER_AUTO_UPDATE:-false}
       # Most agent runs at once on this machine, and the roles it takes
-      CORRAL_RUNNER_SLOTS: ${CORRAL_RUNNER_SLOTS:-4}
+      CORRAL_SLOT_CPUS: ${CORRAL_SLOT_CPUS:-2}
+      CORRAL_SLOT_MEMORY: ${CORRAL_SLOT_MEMORY:-2.5g}
+      CORRAL_RUNNER_SLOTS: ${CORRAL_RUNNER_SLOTS:-}
       CORRAL_RUNNER_ROLES: ${CORRAL_RUNNER_ROLES:-pm,developer,reviewer,design}
       # Author and committer of agent commits; unset makes the runner warn
       CORRAL_GIT_AUTHOR_NAME: ${CORRAL_GIT_AUTHOR_NAME:-}

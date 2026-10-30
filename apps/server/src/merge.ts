@@ -1,7 +1,8 @@
 import { failedMergeGates, type Actor, type MergeGateFacts } from '@corral/core'
 import { schema, type Database } from '@corral/db'
 import { and, asc, desc, eq, isNull } from 'drizzle-orm'
-import { taskBase } from './task-base.ts'
+import { EpicMerger } from './epic-merge.ts'
+import { isEpicRebaseTask, taskBase } from './task-base.ts'
 import { publishDependents } from './dependent-tasks.ts'
 import type { EventBus } from './events.ts'
 import type { CheckResult, GitHubClient, PullRequest } from './github.ts'
@@ -19,7 +20,7 @@ const MAX_MERGE_ATTEMPTS = 3
 // Developers always rebase; a merge of the base would put merge commits on
 // the branch (and Corral pushes with --force-with-lease, so rebases push)
 function rebaseInstruction(defaultBranch: string): string {
-  return `Rebase onto \`origin/${defaultBranch}\`, resolve the conflicts, and report pr_updated.`
+  return `Rebase onto \`origin/${defaultBranch}\`, resolve the conflicts, and report pr_rebased.`
 }
 
 export interface MergeDeps {
@@ -50,11 +51,13 @@ export class MergeOrchestrator {
   #attempts = new Map<string, number>()
   // Tasks being advanced right now: a tick and a human approval can overlap
   #busy = new Set<string>()
+  #epics: EpicMerger
   // Set by the Orchestrator while the kill switch or the update hold is on
   stopped = false
 
   constructor(deps: MergeDeps) {
     this.#d = deps
+    this.#epics = new EpicMerger(deps)
   }
 
   #now(): Date {
@@ -63,7 +66,7 @@ export class MergeOrchestrator {
 
   // Merges being advanced right now; a redeploy waits for these
   get inFlight(): number {
-    return this.#busy.size
+    return this.#busy.size + this.#epics.inFlight
   }
 
   // One pass over every task in Ready to merge
@@ -76,9 +79,23 @@ export class MergeOrchestrator {
       .orderBy(asc(tasks.updatedAt))
     for (const { task, project } of waiting) {
       if (this.stopped) return
-      if (!task.prNumber || !task.headSha) continue
-      await this.#advanceOnce(task, project)
+      if (await isEpicRebaseTask(this.#d.db, task)) await this.#settleEpicRebase(task)
+      else if (task.prNumber && task.headSha) await this.#advanceOnce(task, project)
     }
+    await this.#epics.tick(() => this.stopped)
+  }
+
+  // A rebase task's work reached the epic branch when the runner pushed it;
+  // nothing is left to merge, and the epic PR goes back to integration review
+  async #settleEpicRebase(task: TaskRow): Promise<void> {
+    await this.#d.db.transaction(async (tx) => {
+      const locked = await lockTask(tx, task.id)
+      if (locked.task.status !== 'ready_to_merge') return
+      await applyTransition(tx, locked.task, locked.project, { type: 'merged_outside' }, server, { event: 'merged', headSha: task.headSha })
+      await tx.update(tasks).set({ mergedAt: this.#now(), updatedAt: this.#now() }).where(eq(tasks.id, task.id))
+    })
+    await this.#publish(task.id)
+    await this.cleanup(task.id)
   }
 
   // Approvals recorded before Ready to merge existed left the task in Agent
@@ -122,7 +139,7 @@ export class MergeOrchestrator {
       .filter((c): c is CheckResult => Boolean(c))
       .map(c => ({ name: c.name, url: c.url }))
     const approval = await this.#approvalFor(task)
-    const criteria = await db.select({ id: acceptanceCriteria.id }).from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id))
+    const criteria = await db.select({ id: acceptanceCriteria.id, checkedByHuman: acceptanceCriteria.checkedByHuman }).from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id))
     const attached = await db.select({ criterionId: evidence.criterionId }).from(evidence)
       .where(and(eq(evidence.taskId, task.id), eq(evidence.round, task.reviewRounds)))
     return {
@@ -133,7 +150,7 @@ export class MergeOrchestrator {
       facts: {
         approvalIsForHeadCommit: approval !== null && approval.headSha === pr.headSha,
         requiredChecksPassed: requiredPassing.length === required.length,
-        evidenceComplete: criteria.every(c => attached.some(e => e.criterionId === c.id)),
+        evidenceComplete: criteria.every(c => c.checkedByHuman || attached.some(e => e.criterionId === c.id)),
         mergeable: pr.mergeable === true && pr.state === 'open'
       }
     }
@@ -180,13 +197,13 @@ export class MergeOrchestrator {
         await db.update(tasks).set({ branchUpdateRequested: true }).where(eq(tasks.id, task.id))
         await db.insert(auditLog).values({ projectId: project.id, taskId: task.id, actor: server, action: 'branch.update_requested', detail: { pr: pr.number, headSha: pr.headSha } })
       } else {
-        await this.#transition(task.id, { type: 'base_conflict' }, { event: 'base_conflict' },
+        await this.#transition(task.id, { type: 'base_conflict', approvedHeadSha: pr.headSha }, { event: 'base_conflict' },
           `The base branch \`${baseBranch}\` has moved and the update conflicts with this branch. ${rebaseInstruction(baseBranch)}`)
       }
       return
     }
     if (pr.mergeable === false) {
-      await this.#transition(task.id, { type: 'base_conflict' }, { event: 'base_conflict', mergeableState: pr.mergeableState },
+      await this.#transition(task.id, { type: 'base_conflict', approvedHeadSha: pr.headSha }, { event: 'base_conflict', mergeableState: pr.mergeableState },
         `GitHub reports this branch can’t be merged (${pr.mergeableState ?? 'conflict'}). ${rebaseInstruction(baseBranch)}`)
       return
     }

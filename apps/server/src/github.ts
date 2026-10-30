@@ -34,6 +34,8 @@ export interface GitHubClient {
   updatePullRequest(repository: string, number: number, input: { title?: string, body?: string }): Promise<void>
   getPullRequest(repository: string, number: number): Promise<PullRequest>
   checks(repository: string, sha: string): Promise<CheckResult[]>
+  // How many commits on `base` the commit `head` doesn't have
+  behindBy(repository: string, base: string, head: string): Promise<number>
   // Rebases the PR branch onto its base on GitHub (never merges the base
   // in); false on a conflict or when GitHub can't update it
   updateBranch(repository: string, pr: { number: number, nodeId: string }, expectedHeadSha: string): Promise<boolean>
@@ -158,6 +160,11 @@ export class RunnerGitHub implements GitHubClient {
         url: status.target_url
       }))
     ]
+  }
+
+  async behindBy(repository: string, base: string, head: string) {
+    const result = await this.#call('GET', `/repos/${repository}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`)
+    return (result.body as { behind_by: number }).behind_by
   }
 
   // GraphQL, because the REST endpoint can only merge the base in.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { developerPrompt, isGrillRequest, pmFallbackPrompt, pmPrompt, questionText, reviewerPrompt, type PromptTask } from './prompts.ts'
+import { designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, isGrillRequest, pmFallbackPrompt, pmPrompt, questionText, reviewerPrompt, type PromptTask } from './prompts.ts'
 
 const turn = { text: 'hi', attachedTask: null, projectName: 'Test app', prefix: 'TA' }
 
@@ -130,7 +130,7 @@ describe('developer and reviewer attachments', () => {
     comments: [],
     attachments: []
   }
-  const review = { ...task, headSha: 'abc', prUrl: null, evidence: [], previousFeedback: null }
+  const review = { ...task, headSha: 'abc', prUrl: null, evidence: [], previousFeedback: null, requiredChecks: ['ci'] }
   const attachments = [
     { id: '11111111-1111-4111-8111-111111111111', fileName: 'mockup.png', foundIn: ['the description'] },
     { id: '22222222-2222-4222-8222-222222222222', fileName: 'bug.jpg', foundIn: ['a comment by human (2026-10-01T00:00:00.000Z)'] }
@@ -192,7 +192,7 @@ describe('spike prompts', () => {
     comments: [],
     attachments: []
   }
-  const review = { ...task, headSha: 'findings-r1', prUrl: null, evidence: [], previousFeedback: null, findings: '**Answer:** Use pg-boss.' }
+  const review = { ...task, headSha: 'findings-r1', prUrl: null, evidence: [], previousFeedback: null, requiredChecks: ['ci'], findings: '**Answer:** Use pg-boss.' }
 
   it('tells the developer to investigate without changing code and report findings', () => {
     const prompt = developerPrompt(task, 'Victor')
@@ -256,7 +256,8 @@ describe('reviewer evidence list', () => {
     attachments: [],
     headSha: 'abc',
     prUrl: null,
-    previousFeedback: null
+    previousFeedback: null,
+    requiredChecks: ['ci']
   }
 
   it('shows the text of a note inline, and files by name (D21)', () => {
@@ -276,6 +277,54 @@ describe('reviewer evidence list', () => {
   })
 })
 
+describe('reviewer gates (D26)', () => {
+  const task = {
+    ref: 'TA-1',
+    title: 'Login',
+    description: null,
+    branch: 'corral/ta-1-login',
+    defaultBranch: 'main',
+    reviewRounds: 0,
+    reviewRoundCap: 3,
+    criteria: [{ id: 'c1', text: 'Works' }],
+    comments: [],
+    attachments: [],
+    headSha: 'abc',
+    prUrl: null,
+    evidence: [],
+    previousFeedback: null
+  }
+
+  it('leaves the gates to required CI and points the reviewer at the diff', () => {
+    const prompt = reviewerPrompt({ ...task, requiredChecks: ['ci', 'e2e'] }, 'Rita')
+    expect(prompt).toContain('This project has required CI checks: `ci`, `e2e`')
+    expect(prompt).toContain('don\'t rerun the project\'s lint, typecheck, tests or build')
+    expect(prompt).toContain('security, efficiency and logic problems')
+    expect(prompt).toContain('A cached result never counts as verification')
+    expect(prompt).not.toContain('TURBO_FORCE')
+    expect(prompt).not.toContain('Check the project\'s lint, typecheck and tests pass')
+  })
+
+  it('has the reviewer run the gates without the cache when nothing else does', () => {
+    const prompt = reviewerPrompt({ ...task, requiredChecks: [] }, 'Rita')
+    expect(prompt).toContain('This project has no required CI checks')
+    expect(prompt).toContain('Run the project\'s lint, typecheck, tests and build yourself before reporting, without the cache')
+    expect(prompt).toContain('pnpm run check --review')
+    expect(prompt).toContain('TURBO_FORCE=1 pnpm run build')
+    expect(prompt).toContain('Do not add concurrency, worker or timeout flags')
+    expect(prompt).toContain('cite the earlier check run and commit in your summary')
+    expect(prompt).toContain('If you cannot run a check without the cache, explain which check and why in your outcome')
+  })
+
+  it('stays out of spikes and designs, which have no diff to gate', () => {
+    for (const extra of [{ spike: true }, { design: { version: 1 } }]) {
+      const prompt = reviewerPrompt({ ...task, ...extra, requiredChecks: [] }, 'Rita')
+      expect(prompt).not.toContain('## Gates')
+      expect(prompt).not.toContain('TURBO_FORCE')
+    }
+  })
+})
+
 describe('D21 evidence guidance', () => {
   const task: PromptTask = {
     ref: 'TA-1', title: 'Refactor', description: null, branch: 'corral/ta-1',
@@ -285,7 +334,8 @@ describe('D21 evidence guidance', () => {
 
   it('keeps checks as gates and explains when a developer can use a note', () => {
     const prompt = developerPrompt(task, 'Tam')
-    expect(prompt).toContain('Run the project\'s lint, typecheck and tests before reporting')
+    expect(prompt).toContain('pnpm run check')
+    expect(prompt).toContain('Do not add concurrency, worker or timeout flags')
     expect(prompt).toContain('screenshots or video for anything visible, real requests and responses for APIs')
     expect(prompt).toContain('Use kind `note` only when there is nothing to show')
     expect(prompt).toContain('what changed and how it was checked, with file and line references')
@@ -296,7 +346,7 @@ describe('D21 evidence guidance', () => {
   it('requires concrete reviewer notes and rejects unsuitable proof on every review path', () => {
     for (const extra of [{}, { spike: true }, { design: { version: 1 } }]) {
       const prompt = reviewerPrompt({
-        ...task, ...extra, headSha: 'abc', prUrl: null, evidence: [], previousFeedback: null
+        ...task, ...extra, headSha: 'abc', prUrl: null, evidence: [], previousFeedback: null, requiredChecks: ['ci']
       }, 'Rita')
       expect(prompt).toContain('Give every criterion a concrete note explaining why it is met or not')
       expect(prompt).toContain('the human reads it next to the evidence')
@@ -316,5 +366,69 @@ describe('D21 evidence guidance', () => {
     expect(prompt).toContain('Write acceptance criteria as observable behaviour')
     expect(prompt).toContain('Do not write criteria that only restate lint, typecheck, tests or build passing')
     expect(prompt).toContain('the gates already cover those checks')
+  })
+})
+
+describe('rebase-only developer prompts', () => {
+  const task: PromptTask = {
+    ref: 'TA-1',
+    title: 'Login',
+    description: null,
+    branch: 'corral/ta-1-login',
+    defaultBranch: 'main',
+    reviewRounds: 0,
+    reviewRoundCap: 3,
+    criteria: [{ id: 'c1', text: 'Works' }],
+    comments: [],
+    attachments: []
+  }
+  it('limits both fresh and resumed sessions to the rebase, even after revision rounds', () => {
+    const rebase = { ...task, rebaseOnly: true, approvedHeadSha: 'approved-head', reviewRounds: 3, defaultBranch: 'epic/release' }
+    for (const prompt of [developerPrompt(rebase, 'Tam'), developerRevisionPrompt(rebase, [])]) {
+      expect(prompt).toContain('rebase-only round from approved head approved-head')
+      expect(prompt).toContain('origin/epic/release')
+      expect(prompt).toContain('Make no other changes')
+      expect(prompt).toContain('main\'s')
+      expect(prompt).toContain('pnpm run check')
+      expect(prompt).toContain('then the project\'s build')
+      expect(prompt).toContain('git merge-tree --write-tree HEAD origin/epic/release')
+      expect(prompt).toContain('pr_rebased')
+      expect(prompt).toContain('naming every conflicted file and how each was resolved')
+      expect(prompt).not.toContain('pr_updated')
+      expect(prompt).not.toContain('requested changes')
+    }
+  })
+})
+
+describe('continuing a stopped run', () => {
+  const task: PromptTask = {
+    ref: 'TA-1', title: 'Add login', description: null, branch: 'corral/ta-1', defaultBranch: 'main', reviewRounds: 0, reviewRoundCap: 3, criteria: [], comments: [], attachments: []
+  }
+  const stoppedRun = { number: 12, reason: 'The run hit its time limit of 60 minutes', wipSha: 'abc123def' }
+
+  it('says nothing after a run that reported', () => {
+    expect(developerPrompt(task, 'Dev')).not.toContain('stopped')
+    expect(developerRevisionPrompt(task, [])).not.toContain('stopped')
+  })
+
+  it('names the run, the stop reason and the WIP commit in every authoring prompt', () => {
+    const prompts = [
+      developerPrompt({ ...task, stoppedRun }, 'Dev'),
+      designerPrompt({ ...task, stoppedRun, design: { version: null } }, 'Dev'),
+      developerRevisionPrompt({ ...task, stoppedRun }, []),
+      designerRevisionPrompt({ ...task, stoppedRun, design: { version: 1 } }, [])
+    ]
+    for (const prompt of prompts) {
+      expect(prompt).toContain('## Continuing a stopped run')
+      expect(prompt).toContain('You are continuing run #12, which stopped before it reported an outcome. Stop reason: The run hit its time limit of 60 minutes')
+      expect(prompt).toContain('WIP commit `abc123def`')
+    }
+  })
+
+  it('names no commit when the stopped run saved none', () => {
+    const prompt = developerPrompt({ ...task, stoppedRun: { ...stoppedRun, wipSha: null } }, 'Dev')
+    expect(prompt).toContain('Stop reason: The run hit its time limit')
+    expect(prompt).toContain('No WIP commit is recorded yet')
+    expect(prompt).toContain('Check the branch log')
   })
 })

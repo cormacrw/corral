@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const live = { state: { value: { loaded: false, projects: [] as { slug: string }[] } } }
 let projects: unknown = []
 let reachable = true
+const mode = { value: 'web' as 'web' | 'mobile' }
+vi.stubGlobal('useDevice', () => ({ mode }))
 
 vi.stubGlobal('defineNuxtRouteMiddleware', (fn: unknown) => fn)
 vi.stubGlobal('useLive', () => live)
@@ -19,6 +21,7 @@ const visit = (path: string, query: Record<string, string> = {}) => middleware({
 beforeEach(() => {
   live.state.value = { loaded: false, projects: [] }
   reachable = true
+  mode.value = 'web'
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (!reachable) throw new TypeError('Failed to fetch')
     expect(url).toBe('/api/projects')
@@ -36,6 +39,13 @@ afterEach(() => {
 describe('setup middleware with a project on the server', () => {
   beforeEach(() => {
     projects = [{ slug: 'test-app' }]
+  })
+
+  it('opens Home immediately in mobile mode on a cold launch', async () => {
+    mode.value = 'mobile'
+    expect(await visit('/')).toEqual({ redirect: '/home' })
+    expect(await visit('/setup')).toEqual({ redirect: '/home' })
+    expect(await visit('/setup', { add: '1' })).toBeUndefined()
   })
 
   it('opens the project from / in a fresh browser', async () => {
@@ -64,7 +74,11 @@ describe('setup middleware with no projects', () => {
   })
 
   it('sends / to onboarding', async () => {
-    expect(await visit('/')).toEqual({ redirect: '/setup' })
+    for (const layout of ['web', 'mobile'] as const) {
+      mode.value = layout
+      expect(await visit('/')).toEqual({ redirect: '/setup' })
+      expect(await visit('/setup', { add: '1' })).toBeUndefined()
+    }
   })
 
   it('lets onboarding run to the end', async () => {

@@ -78,7 +78,7 @@ export const projects = pgTable('projects', {
   paused: boolean().notNull().default(false),
   // Default for each new task's human-review flag (D5)
   humanReviewDefault: boolean().notNull().default(false),
-  // The review mode of each new epic a plan doesn't give one (D23)
+  // The review mode of each new epic a plan doesn't give one (D27)
   epicReviewModeDefault: epicReviewMode().notNull().default('epic'),
   reviewRoundCap: integer().notNull().default(5),
   failedRunCap: integer().notNull().default(3),
@@ -95,15 +95,22 @@ export const epics = pgTable('epics', {
   title: text().notNull(),
   description: text().notNull().default(''),
   priority: taskPriority().notNull().default('medium'),
-  // Set from the plan or the project's default when the epic is created (D23).
+  // Set from the plan or the project's default when the epic is created (D27).
   // Epics that had board tasks before review modes existed are `direct`.
   reviewMode: epicReviewMode().notNull().default('epic'),
   // The epic branch and its PR into the target branch, in `epic` and
-  // `each_task` modes; null until Corral creates them (D23)
+  // `each_task` modes; null until Corral creates them (D27)
   branch: text(),
   prNumber: integer(),
   prHeadSha: text(),
   reviewState: epicReviewState(),
+  // Set after asking GitHub to rebase the epic PR, so the next head keeps the
+  // human's approval (D27: a clean rebase is a mechanical update)
+  rebaseRequested: boolean().notNull().default(false),
+  // The files a failed rebase conflicts on, while reviewState is `conflict`
+  conflictFiles: jsonb().$type<string[]>(),
+  // Recorded when GitHub confirmed the epic PR merged
+  mergeCommitSha: text(),
   createdBy: actor('created_by'),
   createdAt: createdAt(),
   updatedAt: updatedAt()
@@ -134,6 +141,8 @@ export const tasks = pgTable('tasks', {
   priority: taskPriority().notNull().default('medium'),
   type: taskType().notNull(),
   humanReview: boolean().notNull().default(false),
+  rebaseOnly: boolean().notNull().default(false),
+  approvedHeadSha: text(),
   reviewRounds: integer().notNull().default(0),
   failedRuns: integer().notNull().default(0),
   // Why the task is Blocked or Failed (D10, D11)
@@ -179,6 +188,7 @@ export const tasks = pgTable('tasks', {
 
 // Each criterion must be individually verifiable (PRD §4.3)
 export const acceptanceCriteria = pgTable('acceptance_criteria', {
+  checkedByHuman: boolean().notNull().default(false),
   id: uuid().primaryKey().defaultRandom(),
   taskId: uuid().notNull().references(() => tasks.id, { onDelete: 'cascade' }),
   position: integer().notNull(),
@@ -235,12 +245,17 @@ export const agents = pgTable('agents', {
 // One agent session (PRD §4.5). PM turns have no task.
 export const runs = pgTable('runs', {
   runnerId: text(),
+  // The runner's name when the run was placed on it, shown on the run
+  runnerName: text(),
   id: uuid().primaryKey().defaultRandom(),
   // Shown as #128 in the UI (D13)
   number: bigint({ mode: 'number' }).notNull().generatedAlwaysAsIdentity().unique(),
   agentId: uuid().notNull().references(() => agents.id),
   projectId: uuid().notNull().references(() => projects.id, { onDelete: 'cascade' }),
   taskId: uuid().references(() => tasks.id, { onDelete: 'cascade' }),
+  // Integration reviews belong to an epic, independently of task reviews.
+  epicId: uuid().references(() => epics.id, { onDelete: 'cascade' }),
+  leaseExpiresAt: timestamp({ withTimezone: true }),
   role: agentRole().notNull(),
   state: runState().notNull().default('queued'),
   outcome: runOutcome(),
@@ -269,8 +284,9 @@ export const runs = pgTable('runs', {
   endedAt: timestamp({ withTimezone: true })
 }, t => [
   index().on(t.taskId),
+  index().on(t.epicId),
   index().on(t.agentId, t.state),
-  check('runs_task_unless_pm', sql`${t.taskId} is not null or ${t.role} = 'pm'`)
+  check('runs_task_unless_pm', sql`${t.taskId} is not null or ${t.role} = 'pm' or (${t.epicId} is not null and ${t.role} = 'reviewer')`)
 ])
 
 export const planStatus = pgEnum('plan_status', ['proposed', 'approved', 'superseded', 'discarded'])
@@ -349,7 +365,7 @@ export interface PlanRevision {
   type: TaskType
   priority: 'urgent' | 'high' | 'medium' | 'low'
   humanReview: boolean
-  acceptanceCriteria: string[]
+  acceptanceCriteria: (string | { text: string, checkedByHuman?: boolean | undefined })[]
   // Null when the revised task has no epic
   epicId: string | null
   // Task numbers in the same project
@@ -404,7 +420,7 @@ export const reviews = pgTable('reviews', {
   headSha: text().notNull(),
   verdict: reviewVerdict().notNull(),
   summary: text().notNull(),
-  criteria: jsonb().$type<{ criterionId: string, met: boolean, note: string }[]>().notNull().default([]),
+  criteria: jsonb().$type<{ criterionId: string, met: boolean | null, note: string }[]>().notNull().default([]),
   // Who gave the verdict: the reviewer agent, or a human in Human review
   author: actor('author'),
   createdAt: createdAt()
@@ -495,7 +511,7 @@ export const deploymentNotesStatus = pgEnum('deployment_notes_status', ['pending
 // What a deploy of a project shipped, reported by scripts/deploy/auto-deploy.sh
 // after `docker compose up -d` (D16). One per deployed commit: posting the
 // same toSha again returns the existing row. The PM writes the release notes
-// later; they're an Inbox item until read (D11).
+// later; they're an Inbox item until dismissed (D11). Reading only clears unread.
 export const deployments = pgTable('deployments', {
   id: uuid().primaryKey().defaultRandom(),
   projectId: uuid().notNull().references(() => projects.id, { onDelete: 'cascade' }),
@@ -508,6 +524,7 @@ export const deployments = pgTable('deployments', {
   notes: text(),
   notesStatus: deploymentNotesStatus().notNull().default('pending'),
   readAt: timestamp('read_at', { withTimezone: true }),
+  dismissedAt: timestamp('dismissed_at', { withTimezone: true }),
   createdAt: createdAt()
 }, t => [unique('deployments_project_to_sha_unique').on(t.projectId, t.toSha)])
 

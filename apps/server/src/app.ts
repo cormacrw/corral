@@ -15,6 +15,7 @@ import {
   deleteProjectInput,
   humanTransitionInput,
   inboxActionInput,
+  epicReviewActionInput,
   patchAgentInput,
   patchEpicInput,
   setEpicDependenciesInput,
@@ -44,7 +45,7 @@ import { ApiFailure, fromDatabaseError } from './errors.ts'
 import { checkThumbnail, readThumbnail, THUMBNAIL_MAX_BYTES } from './thumbnails.ts'
 import { byteRange } from './byte-range.ts'
 import { createAttachment, readAttachment } from './attachments.ts'
-import { recordDeployment } from './deployments.ts'
+import { recordDeployment, updateDeploymentInbox, type ReleaseNotes } from './deployments.ts'
 import { approveDesign, DESIGN_BUNDLE_HEADERS, listDesignVersions, readDesignFile, readDesignScreenshot } from './designs.ts'
 import { checkAvatar, getProfile, patchProfile, readAvatar, setAgentAvatar, setUserAvatar } from './avatars.ts'
 import { getEpic, listEpics, patchEpic, setEpicDependencies } from './epics.ts'
@@ -85,6 +86,7 @@ export interface AppDeps {
   blobs: BlobStore
   transcripts: Transcripts
   plans: PlanService
+  releaseNotes: ReleaseNotes
 }
 
 // Validation failures get the same error shape as every other API error
@@ -102,7 +104,7 @@ const taskNumber = (value: string) => {
   return number
 }
 
-export function createApp({ db, events, actor, runner, orchestrator, blobs, transcripts, plans, performance }: AppDeps) {
+export function createApp({ db, events, actor, runner, orchestrator, blobs, transcripts, plans, releaseNotes, performance }: AppDeps) {
   const repos = new RepoCatalog(db, runner)
 
   const publishTask = async (taskId: string) => {
@@ -227,6 +229,7 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
 
     .get('/health', c => c.json({ ok: true }))
 
+    .post('/runners/:runnerId/update', c => c.json(runner.drain(c.req.param('runnerId'), true)))
     .get('/runner', c => c.json(runner.status()))
 
     .get('/setup/repos', async c => c.json(await repos.list(c.req.query('refresh') === '1')))
@@ -305,6 +308,8 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       return c.json(await plans.listDrafts(project.id))
     })
 
+    .post('/epics/:id/review', validate('json', epicReviewActionInput), async c => c.json(await orchestrator.epicPrs.humanAction(c.req.param('id'), c.req.valid('json'), actor)))
+
     .get('/epics/:id', async c => c.json(await getEpic(db, c.req.param('id'))))
 
     .put('/epics/:id/dependencies', validate('json', setEpicDependenciesInput), async (c) => {
@@ -382,6 +387,17 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       await orchestrator.merges.humanApprove(taskId, actor)
       orchestrator.poke([taskId])
       return c.json(await publishTask(taskId))
+    })
+
+    // Clears a stopped run's pause. The task is what this is about, so it
+    // starts right away even inside its agent's wake interval (flows.md §3)
+    .post('/projects/:slug/tasks/:number/resume', async (c) => {
+      const project = await findProjectBySlug(db, c.req.param('slug'))
+      const taskId = await findTaskId(db, project.id, taskNumber(c.req.param('number')))
+      await orchestrator.resumeTask(taskId, actor)
+      const task = await publishTask(taskId)
+      orchestrator.poke([taskId])
+      return c.json(task)
     })
 
     // A design task's versions (D20), newest first
@@ -611,8 +627,16 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     // answers. 201 when recorded, 200 when this toSha already was.
     .post('/deployments', validate('json', createDeploymentInput), async (c) => {
       const { deployment, created } = await recordDeployment(db, c.req.valid('json'))
+      // The response doesn't wait for the notes
+      if (created) {
+        events.publish({ type: 'deployment.updated', deployment })
+        setImmediate(() => void releaseNotes.sweep())
+      }
       return c.json(deployment, created ? 201 : 200)
     })
+
+    .post('/deployments/:id/read', async c => c.json(await updateDeploymentInbox(db, events, c.req.param('id'))))
+    .post('/deployments/:id/dismiss', async c => c.json(await updateDeploymentInbox(db, events, c.req.param('id'), true)))
 
     .get('/runs', async (c) => {
       const agentId = c.req.query('agentId')

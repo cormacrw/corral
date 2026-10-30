@@ -77,11 +77,13 @@ Open gaps to consider are in [open-recommendations.md](open-recommendations.md) 
 - **Flagged:** when the reviewer approves, the task waits in *Human review* until the human approves or requests changes.
 - **Not flagged:** the reviewer's approval moves it straight to *Ready to merge*.
 
-Only the flag sends a task to a human. A project with no required checks doesn't force human review: its unflagged tasks merge on the reviewer's approval alone (amended 2026-10-28; previously every task in such a project needed a human). Either way the task then sits in *Ready to merge* until it's merged, and all other merge gates in PRD §7.9 still apply.
+For ordinary tasks without the exceptions below, only the task flag sends a task to a human. A project with no required checks doesn't force human review: its unflagged tasks merge on the reviewer's approval alone (amended 2026-10-28; previously every task in such a project needed a human). Either way the task then sits in *Ready to merge* until it's merged, and all other merge gates in PRD §7.9 still apply.
 
 **Amended by D20:** Design tasks always go to *Human review*, whatever their flag, and never to *Ready to merge*.
 
-**Amended by D23:** in an `each_task` epic every task goes to *Human review*, whatever its flag; in an `epic` epic the flag works as above but tasks merge into the epic branch; and every epic PR goes to the human.
+**Amended by D27:** in an `each_task` epic every task goes to *Human review*, whatever its flag; in an `epic` epic the flag works as above but tasks merge into the epic branch; and every epic PR goes to the human.
+
+**Amended by D28 (COR-249):** any criterion marked **Checked by a human** sends an approved task to *Human review*, whatever the task flag or epic mode. Adding a human check while *Ready to merge* returns it to *Human review*.
 
 ---
 
@@ -167,7 +169,7 @@ Full table, disk layout, flows and the known POC push limitation are in [archite
 
 **Amended by D20:** design tasks end in a new **Approved** status instead of Merged, with their own transitions (see D20).
 
-**Amended by D23:** for a task in an `epic` or `each_task` epic, Ready to merge waits on the epic branch and Merged means merged into the epic branch; a task in another epic, or without one, that depends on it waits until that epic is done (see D23).
+**Amended by D27:** for a task in an `epic` or `each_task` epic, Ready to merge waits on the epic branch and Merged means merged into the epic branch; a task in another epic, or without one, that depends on it waits until that epic is done (see D27).
 
 There is no Testing status (add it when a tester agent exists), and no Cancelled or Archived status (see Deleting below).
 
@@ -192,12 +194,13 @@ A status says whose turn it is. Whether a run is actually active is shown by the
 | Draft, Backlog | Ready | Plan or task added to the board; title, description and verifiable acceptance criteria present | **Human only** |
 | Ready | Backlog | Sent back for rethinking | Human |
 | Ready | In progress | Scheduler claims it; all dependencies Merged | Scheduler |
-| In progress | Agent review | Valid `pr_opened` / `pr_updated` outcome (branch pushed at the expected commit, evidence for every criterion) | Server |
+| In progress | Agent review | Valid `pr_opened` / `pr_updated` outcome (branch pushed at the expected commit, evidence for every agent-checkable criterion; D28) | Server |
 | Agent review | In progress | Reviewer requests changes | Server |
-| Agent review | Human review | Reviewer approved; task flagged for human review | Server |
-| Agent review | Ready to merge | Reviewer approved; not flagged | Server |
+| Agent review | Human review | Reviewer approved; task flagged for human review or any criterion checked by a human (D28) | Server |
+| Agent review | Ready to merge | Reviewer approved; no human review required (D5, D20, D27, D28) | Server |
 | Human review | Ready to merge | Human approves | Human |
 | Human review, Ready to merge | In progress | Human requests changes | Human |
+| Ready to merge | Human review | Human adds a new human-check criterion (`require_human_check`, D28) | Server |
 | Ready to merge | In progress | CI fails; base-branch conflict | Server |
 | Ready to merge | Agent review | A new commit other than a clean base-branch update; it needs a fresh review | Server |
 | Ready to merge | Merged | All gates pass against live GitHub data; merge confirmed by GitHub | Server |
@@ -205,6 +208,8 @@ A status says whose turn it is. Whether a run is actually active is shown by the
 | Ready, In progress, Agent review, Human review, Ready to merge | Blocked | See causes below | Server |
 | In progress, Agent review, Ready to merge | Failed | See causes below | Server |
 | Blocked, Failed | Backlog, Ready or In progress | Human resolves it (In progress keeps the branch and PR) | **Human only** |
+
+**Amended by D28:** criteria reserved for a human require neither agent evidence nor an agent met/unmet verdict. Their recorded verdict is **Needs human check**. Reviewer approval and a newly added human check use the Human review routes above; human approval then follows the usual merge gates.
 
 All transitions go through `packages/core` and are enforced by the server. Anything not in this table is rejected.
 
@@ -238,7 +243,7 @@ Both appear in the Inbox (D11) with their reason. When a human resolves a Failed
 - **Needs you:** tasks in **Human review**, **Blocked** tasks (including an agent asking a question, which reports `stuck` and blocks the task with the question as its reason) and **Failed** tasks. Each item can be resolved from the Inbox itself, following the D10 transitions. An item stays until it's resolved; reading it doesn't clear it.
 - **Activity:** informational events from those runs (PR opened, changes requested, approved and merged). Nothing to act on.
 
-A design in Human review is a Needs-you item like any other (D20). An epic PR waiting on the human is a Needs-you item too, and epic PR events are Activity (D23).
+A design in Human review is a Needs-you item like any other (D20). An epic PR waiting on the human is a Needs-you item too, and epic PR events are Activity (D27).
 
 Nothing from the PM goes in the Inbox. *(Amended 2026-10-29, see below: Plan sessions with a question, a plan needing approval or an unread reply do.)* PM questions (`ask_question`), proposed plans and plan approval live in the **Plan** conversation. A PM turn only runs when the human sends a message or approves a design (D9, D20), so the human is already there. `flag_stale_docs` creates a task in Backlog.
 
@@ -261,10 +266,10 @@ There is no separate notifications feed or bell. System events (usage limits, ru
 
 **Amended 2026-10-29 (COR-127): the PM's release notes are an Inbox item.** After each deploy (D16) the server records a **deployment**: the commits it shipped since the last one. The PM writes release notes for it in markdown, and those notes appear in the Inbox as a **Release notes** item for the deployment's project.
 
-- **Not Needs you:** release notes are something to read, not something an agent is waiting on, so they don't count toward the Needs you count (badge and tab) and don't sit under Needs you. They're listed with Activity, unread until the human opens them (the deployment's `readAt`).
+- **Not Needs you:** release notes are something to read, not something an agent is waiting on, so they don't count toward the Needs you count (badge and tab). They are listed below the attention items in the Inbox's `needsYou` list (COR-129), newest first, and remain unread until the human opens them (the deployment's `readAt`). Reading keeps them in the Inbox; Dismiss moves them to Resolved.
 - **Unchanged:** nothing else from the PM goes in the Inbox; system events (including a deploy that failed, which records no deployment) stay out.
 
-**Why:** the notes are written in the background after a deploy the human didn't trigger, which is the kind of thing the Inbox is for. Keeping them out of Needs you keeps that count meaning what's waiting on the human.
+**Why:** the notes are written in the background after a deploy the human didn't trigger, which is the kind of thing the Inbox is for. Keeping them out of the Needs you count keeps that count meaning what's waiting on the human.
 
 ---
 
@@ -307,6 +312,8 @@ There is no separate notifications feed or bell. System events (usage limits, ru
 - **The Inbox is global**, and every item carries its project (D11). The same goes for runs on the agent pages.
 - **Task IDs are `PREFIX-NUMBER`**, e.g. `COR-29`. Each project has a 2–5 letter prefix that is unique across projects, and numbers count up per project. PRs keep `#41` and runs keep `#128`.
 - **Pause is per project.** Pausing stops new runs for that project only.
+
+**Amended by D23:** adds the designer role, its instructions fallback and fresh-install seed, and includes designers in global agent capacity and configuration.
 
 **Why:** A personal software factory (D12) runs more than one codebase. Planning, review and agent capacity are shared across all of them, while task state belongs to one repo.
 
@@ -372,6 +379,8 @@ The UI specs are in [design/](design/README.md).
   - Each run records its model, thinking level, Jev's reason and probabilities, and whether the fallback was used.
 - **Scheduling:** a free agent only claims tasks assigned to it, or unassigned tasks when routing is off. If the assigned agent stays paused, the chooser can re-route the task.
 
+**Amended by D23:** design authoring is routed only to designers; existing developer-authored design tasks switch agents and start a new session on their next authoring run.
+
 **D2 amendment:**
 - The Jev key is a `TYPESAFE_API_KEY` environment variable on the server container.
 - It's never stored in the database and never appears in logs, prompts, worktrees or the UI.
@@ -396,6 +405,7 @@ The UI specs are in [design/](design/README.md).
 
 **Decision:** A systemd timer on the home server runs `scripts/deploy/auto-deploy.sh` every 20 minutes, so merges close together share one deploy and one hold. When `main` has moved and the `ci` check on the new commit has passed, it builds the new images and redeploys with Docker Compose. A deploy never cuts off an agent run: if anything other than `web` would restart, the server first goes on an **update hold** and the deploy waits until nothing is running.
 
+- **Remote runners:** update by pulling from GitHub, after draining. Runners report their build commit and compare it with the server; an update request drains only that runner, letting its runs finish before the host updater replaces it.
 - **Pull, not push:** the server polls GitHub. Nothing new is exposed through the Cloudflare Tunnel, GitHub holds no credentials for the server, and no self-hosted GitHub Actions runner runs on it (the repo is public, so that would let fork PRs run code there).
 - **The update hold** (`POST /api/update-hold`, lifted with `DELETE`): two phases, both reported as `updating` by `GET /api/status` and shown in the app banner. **Draining:** no new developer, reviewer or design runs or merges start; PM turns still start as usual, including Inbox replies. **Finishing:** once no non-PM runs or merges are in flight, new PM turns are accepted and saved as `queued` runs holding their `pmJob`. Running PM turns finish. `POST` counts all active runs (including PM) and merges, excluding queued PM turns still holding their job; the deploy polls until zero. `DELETE` or a server restart clears both phases and starts queued turns.
 - **In memory only:** the redeployed server starts without the hold, so a deploy can't leave Corral stuck on hold. If the deploy fails, the script lifts it.
@@ -501,13 +511,13 @@ The UI specs are in [design/](design/README.md).
 
 ### Faithful prototypes
 
-- The developer builds the prototype in the project's own repo, **from its real components and styles**, so what the human approves is what the build will look like. No separate mockup tool, no restyled copies.
+- The designer builds the prototype (D23) in the project's own repo, **from its real components and styles**, so what the human approves is what the build will look like. No separate mockup tool, no restyled copies.
 - It's built on a **`design/<ref>` branch** (e.g. `design/COR-70`) off the default branch. The runner pushes it, as it pushes any leased branch (D8), but Corral **never opens a PR for it and never merges it**. The build happens in separate tasks (below).
 - The prototype uses **mock data and no live API**: no calls to the project's backend or any other service. It has to work as static files on their own.
 
 ### How a project builds a prototype
 
-The project's `CLAUDE.md` or `CORRAL.md` says how to produce a **static bundle** of the prototype: the command to run and the folder it writes (an `index.html` and its assets, with relative paths). Corral doesn't guess. If a project doesn't say, the developer reports `stuck` and asks.
+The project's `.corral/agents/designer.md` (D23), `CLAUDE.md` or `CORRAL.md` says how to produce a **static bundle** of the prototype: the command to run and the folder it writes (an `index.html` and its assets, with relative paths). Corral doesn't guess. If a project doesn't say, the designer reports `stuck` and asks.
 
 ### Design versions
 
@@ -522,13 +532,13 @@ The bundle, spec and screenshots are content-addressed blobs and the database st
 
 ### Tools
 
-- **`submit_design`** (developer, design tasks only): takes the bundle folder, the `design.md` path and the screenshot paths. The runner pushes the branch and uploads the files, and the server records a new version at the pushed commit. The run then ends with `report_outcome('design_submitted', summary)`, which the server accepts only when a version exists for the branch's current commit and every acceptance criterion has evidence (D19; the screenshots can be attached as that evidence).
-- **`get_design`** (developer, reviewer and PM): returns a version's spec, screen ids, screenshots, branch and commit, and the URL of its sandboxed preview. With no version given it returns the one that applies: a design task's latest version, or a build task's pinned version.
+- **`submit_design`** (designer, design tasks only; D23): takes the bundle folder, the `design.md` path and the screenshot paths. The runner pushes the branch and uploads the files, and the server records a new version at the pushed commit. The run then ends with `report_outcome('design_submitted', summary)`, which the server accepts only when a version exists for the branch's current commit and every acceptance criterion has evidence (D19; the screenshots can be attached as that evidence).
+- **`get_design`** (designer, developer, reviewer and PM; D23): returns a version's spec, screen ids, screenshots, branch and commit, and the URL of its sandboxed preview. With no version given it returns the one that applies: a design task's latest version, or a build task's pinned version.
 
 ### Review
 
 - **Design tasks always need human review**, whatever their human-review flag says. Valid `design_submitted` → **Agent review**: the reviewer checks the version with `get_design` against the criteria and the project's real components. Reviewer requests changes → In progress, as for any task. Reviewer approves → **Human review**, never Ready to merge.
-- **Request changes:** the human's feedback goes back to the developer (Human review → In progress), and the next submission is a **new version**. Earlier versions are kept unchanged.
+- **Request changes:** the human's feedback goes back to the designer (D23) (Human review → In progress), and the next submission is a **new version**. Earlier versions are kept unchanged.
 - **Approve:** marks that version **approved** and **supersedes** every earlier version. The task moves to **Approved** (a new status, below). There's nothing to merge, so no CI wait and no merge gates.
 
 ### Auto-planning
@@ -572,9 +582,11 @@ The bundle, spec and screenshots are content-addressed blobs and the database st
 
 **Status:** Accepted 2026-10-29. Amends D4 and D19 and overrides PRD §7.7's "test results" evidence.
 
+**Amended by D26:** reviewers rerun the gates only when the project has no required checks.
+
 **Decision:**
 
-- **Checks aren't evidence.** Lint, typecheck, tests and build are gates: the developer runs them, the reviewer reruns them without the cache, and the project's required CI checks gate merge. They are never attached as evidence for a criterion.
+- **Checks aren't evidence.** Lint, typecheck, tests and build are gates: the developer runs them and the project's required CI checks gate merge. The reviewer runs them without the cache only when the project has no required checks (D26). They are never attached as evidence for a criterion.
 - **Human evidence** is what a person would look at to judge a criterion: screenshots and video, real requests and responses, before/after metrics, and the reviewer's per-criterion note.
 - **Agent artifacts** are logs, test output and other raw files. They are kept for the reviewer and for debugging, and are collapsed in the UI.
 - **Note-only evidence:** a criterion with nothing visual to show (a refactor with no behaviour change, for example) can be covered by a written explanation without a file. The reviewer judges the explanation, and its verdict note is the proof.
@@ -589,65 +601,38 @@ The bundle, spec and screenshots are content-addressed blobs and the database st
 
 **Status:** Accepted 2026-10-29 (COR-133).
 
-An epic may depend on other epics. Developers can claim its tasks only when every prerequisite epic is done, in addition to satisfying task dependencies. Tasks without an epic are unaffected. An epic is done when its **epic PR has merged** (D23). In `direct` mode, which has no epic PR, it's done when all its non-deleted tasks outside Draft and Backlog are Merged, as before. An epic with no such tasks is done. *(Amended 2026-10-29 by D23; previously every epic was done once all those tasks were Merged.)* Progress counts the epic's Merged board tasks in every mode. In `direct` mode, completing the last board task wakes tasks in dependent epics immediately, bypassing agent wake intervals; in `epic` and `each_task` modes, merging the epic PR does. Deleting either epic cascades its dependency edges.
+An epic may depend on other epics. Developers can claim its tasks only when every prerequisite epic is done, in addition to satisfying task dependencies. Tasks without an epic are unaffected. An epic is done when its **epic PR has merged** (D27). In `direct` mode, which has no epic PR, it's done when all its non-deleted tasks outside Draft and Backlog are Merged, as before. An epic with no such tasks is done. *(Amended 2026-10-29 by D27; previously every epic was done once all those tasks were Merged.)* Progress counts the epic's Merged board tasks in every mode. In `direct` mode, completing the last board task wakes tasks in dependent epics immediately, bypassing agent wake intervals; in `epic` and `each_task` modes, merging the epic PR does. Deleting either epic cascades its dependency edges.
 
 The core helper validates epic dependency cycles and cycles in the combined task/epic wait graph, reporting the epics involved. Callers supply the complete proposed graph when validating dependency changes.
 
 ---
 
-## D23 — Epic review modes and epic branches
+## D23 — Designers own design tasks
 
-**Status:** Accepted 2026-10-29 (COR-163). Amends D5, D10, D11 and D22.
+**Status:** Accepted 2026-10-29 (COR-155). Amends D13, D15 and D20 as listed below.
 
-**Principle:** the project's **target branch**, `defaultBranch` in project settings, only receives approved work. Corral assumes nothing about the target branch's name or how the project releases from it. Docs, prompts and code say "target branch" and read it from the project, never a hard-coded name.
+**Decision:** There are four agent roles: `pm`, `developer`, `designer` and `reviewer`.
 
-**Decision:**
+| Role | Work it claims |
+|---|---|
+| `pm` | Plan turns (D9), not task execution or review |
+| `developer` | Implementation runs for `task`, `bug` and `spike` only |
+| `designer` | Creation and revision runs for `design` only |
+| `reviewer` | Agent review for `task`, `bug`, `spike` and `design`, including design versions as in D20 |
 
-### Review modes
-
-Each epic has a **review mode**. The PM can set it per epic in `propose_plan`; when the plan doesn't, the epic takes the project's **default review mode** (a project setting). The setting starts at `direct` for every project, so nothing changes until the human picks another mode.
-
-| Mode | Where task PRs merge | When a task goes to Human review |
-|---|---|---|
-| `epic` | The epic branch | Only when the task's own `humanReview` flag is set. Otherwise it merges on the reviewer's approval. |
-| `each_task` | The epic branch | Always, whatever the flag. |
-| `direct` | The target branch | Only when flagged (D5, today's behaviour). No epic branch and no epic PR. |
-
-Tasks without an epic are unchanged: they merge straight into the target branch, by D5. Changing an epic's mode is only allowed before any of its tasks has merged.
-
-### The epic branch
-
-- In `epic` and `each_task` modes, Corral creates the epic branch in its own branch namespace, `corral/epic-<epicId>-<slug>`, from the tip of the target branch when the epic's first task is claimed.
-- The epic's task branches are created from the epic branch, and their PRs use it as their base. Task PRs merge into it with the project's merge method (squash), so each task is one commit on the epic branch.
-- When the epic branch moves under an open task PR, Corral rebases the task PR onto it, exactly as it does for the target branch (D10, `flows.md` step 7c).
-- The target branch is **never merged into** the epic branch. Corral doesn't keep the epic branch up to date while the epic is in progress; the epic branch only meets newer target-branch work when it's rebased just before the epic PR merges (below).
-
-### The epic PR
-
-- When every board task of the epic has merged (non-deleted tasks outside Draft and Backlog; spikes and approved designs count as done, as in D22), Corral opens the **epic PR** from the epic branch into the target branch.
-- **Integration review:** the reviewer agent reviews the epic PR as an integration check. It judges the combined diff against the epic's goal and its tasks' criteria, looks for problems between tasks that each passed review alone, and runs the project's checks as gates (D21) without the cache. It doesn't re-judge each task's evidence.
-- **Human review:** after the reviewer approves, the epic PR always goes to the human, whatever the mode or the tasks' flags.
-- **Fix-task loop:** if the reviewer or the human requests changes, Corral creates a **fix task** in the epic, in Ready, with the feedback as its description and criteria. It goes through the epic's review mode like any other task and merges into the epic branch. When it has merged, and every other board task of the epic has too, the epic PR goes back to integration review and then to the human.
-- **Rebase before merge:** once the human approves, the epic PR waits for CI. Just before it merges, if the target branch has moved, Corral rebases the epic branch onto the target branch (GraphQL `updatePullRequestBranch` with `updateMethod: REBASE`, as for task PRs). A clean rebase keeps the approval and CI runs again on the new head.
-- **Rebase conflict:** a conflict creates a **conflict task** in the epic, in Ready, whose branch is the epic branch itself rather than a new task branch. Its developer rebases the epic branch onto `origin/<target branch>`, resolves the conflicts, runs the gates and reports `pr_updated`; the runner force-pushes the epic branch with `--force-with-lease`, and no separate task PR is opened. A conflict task goes to Agent review and, in `each_task` mode, Human review, like any task in the epic. Once it's approved, the epic PR goes back to integration review and then to the human, because a resolved conflict isn't a mechanical update.
-- **Merge:** the epic PR merges into the target branch with the project's merge method (squash), after the final gate check against live GitHub data (`flows.md` step 8). Corral then deletes the epic branch.
-- **New tasks while the epic PR is open:** a task added to the epic's board holds the epic PR back. The epic PR can't merge until that task has merged into the epic branch, and then it goes back to integration review.
-
-Epic PR review state is kept on the epic (open, agent review, human review, ready to merge, merged), not as a task status.
+Design-only authoring guidance goes only to designers: how to build the prototype, authoring `design.md`, using `submit_design` and working on `design/<ref>` branches. Developers do not receive that guidance or `submit_design`. D20's pinned build context is unchanged: developers and reviewers building or reviewing a pinned design still receive its `design.md`, screenshots and extracted bundle as read-only files outside the worktree, with the branch named for reference only. Reviewers still use `get_design` to review design versions; the PM still uses it to plan the build.
 
 ### Amendments to earlier decisions
 
-- **D5:** in `epic` mode the human-review flag works as before, but "merges" means merging into the epic branch. In `each_task` mode every task goes to Human review, whatever its flag. Every epic PR goes to Human review. Tasks without an epic and tasks in `direct` epics are unchanged.
-- **D10:** the statuses are unchanged. For a task in an `epic` or `each_task` epic, **Ready to merge** waits for CI and its base, the epic branch, and **Merged** means merged into the epic branch. A dependency on such a task is satisfied when it's Merged if the dependent task is in the same epic; otherwise only once that epic is done (D22), since the work isn't on the target branch until the epic PR merges. Agent review → Human review also fires on the reviewer's approval for every task in an `each_task` epic. The deletion rules gain one case: deleting the last board task of an epic whose PR is open leaves the epic PR to the human, who can close it.
-- **D11:** an epic PR in human review is a **Needs you** item, with the integration review's verdict and the combined diff, and approve and request-changes actions. "Epic PR opened", "epic PR approved", "epic PR conflict" and "epic PR merged" are Activity. Fix and conflict tasks reach the Inbox like any other task.
-- **D22:** an epic is done only when its epic PR has merged, except in `direct` mode (amended in place, see D22).
+- **D13 — global agents, instructions and seeding:** designers are global agents with concurrency, pause, runtime and usage-limit controls like developers and reviewers. More designers may be added in Settings. A fresh install seeds one Claude designer alongside Juno (PM), Atlas (developer) and Vera (reviewer). Designer instructions come from `.corral/agents/designer.md` on the project's default branch, falling back to Corral's built-in designer defaults when absent, following D13's per-role instructions convention. There is still only one PM.
+- **D15 — Jev's menu and session continuity:** for a design task's creation or revision run, the menu lists designers only; for `task`, `bug` and `spike` implementation runs it lists developers only. Agent review still lists reviewers for every task type. These role constraints also apply when routing is off and to human assignments. Eligible agents still follow D15's pause, usage-limit, model and thinking-level rules.
+- **D20 — Faithful prototypes, How a project builds a prototype, Tools and Review:** the designer replaces the developer as the prototype author, `submit_design` caller and recipient of design revision feedback. A project may document its prototype build command and output folder in `.corral/agents/designer.md` instead of `CLAUDE.md` or `CORRAL.md`. If no build instructions are supplied, the designer reports `stuck` and asks. Versioning, reviewer review, human approval, design branches and pinned build tasks otherwise work as D20 specifies.
 
-**Why:** Merging each reviewed task straight into the target branch lands half-built features there, which the project may release from at any time. Collecting an epic's tasks on its own branch keeps unfinished work off the target branch while still letting the reviewer approve tasks one by one. The human then reviews the feature as a whole, once, at the epic PR. Squash merges at both levels keep the target branch's history to one commit per epic, and rebasing instead of merging the target branch in keeps the epic branch's history linear and its PR diff to the epic's own work. `direct` keeps today's behaviour for projects or epics that don't need any of this.
+### In-flight design tasks
 
-**Consequences for the build:**
-- Projects gain a default review mode; epics gain a nullable review mode, an epic branch name and the epic PR's number and review state.
-- The runner creates task branches from `origin/<epic branch>` (or `origin/<target branch>` for tasks without an epic and in `direct` mode), and conflict-task runs check out the epic branch itself.
-- The server opens, reviews, rebases and merges epic PRs, creates fix and conflict tasks, and computes epic done-ness and cross-epic dependencies with the rules above.
+A design task whose earlier authoring runs used a developer moves to an eligible designer from its **next authoring run**, including retries, requested changes and reopened tasks. Start a **new session** for that designer; never resume the developer's session. Keep the task, existing design branch, versions and feedback so the designer can continue the work. An active run is not interrupted by this change. This is an exception to D15's usual rule that retries retain the same agent and session.
+
+**Why:** Prototype authoring and implementation need different instructions and tools. A separate role keeps each run's context focused while preserving the approved design as the contract for the build.
 
 ---
 
@@ -655,11 +640,13 @@ Epic PR review state is kept on the epic (open, agent review, human review, read
 
 **Status:** Accepted 2026-10-29 (COR-151). Amends D10's task-PR conflict path and review-round accounting.
 
+**Amended by D26:** rebase review leaves the gates to required CI, and runs them without the cache only when the project has no required checks.
+
 **Decision:** When an approved task PR conflicts with its moved base (`base_conflict`), **Ready to merge → In progress** starts a **rebase-only round**. This round, including its rebase review, does not count against `reviewRoundCap`.
 
 ### Developer mode
 
-The developer's prompt for this round is limited to fetching and rebasing onto `origin/<default>` (the project's configured `defaultBranch`), resolving conflicts while preserving **both sides' intent**, and re-running the project's gates (lint, typecheck, tests and build, D21). Never revert what main just merged to make the old task pass. Feature changes are not allowed. For a task PR based on an epic branch, use `origin/<base branch>` instead (D23); “main” here means the PR's actual base, not a hard-coded branch name. D23's separate epic-PR conflict-task flow is unchanged.
+The developer's prompt for this round is limited to fetching and rebasing onto `origin/<default>` (the project's configured `defaultBranch`), resolving conflicts while preserving **both sides' intent**, and re-running the project's gates (lint, typecheck, tests and build, D21). Never revert what main just merged to make the old task pass. Feature changes are not allowed. For a task PR based on an epic branch, use `origin/<base branch>` instead (D27); “main” here means the PR's actual base, not a hard-coded branch name. D27's separate epic-PR conflict-task flow is unchanged.
 
 The developer reports the new **`pr_rebased`** outcome, describing the conflicts and their resolutions. The runner pushes the rebased branch with `--force-with-lease`; the server moves **In progress → Agent review** in rebase-review mode. It retains the approved head, its previous criteria verdicts and the old and new base commits so the reviewer can compare the work before and after the rebase.
 
@@ -669,7 +656,7 @@ The reviewer:
 
 - Compares the approved head with the new head using `git range-diff` over the old and new commit ranges, so rewritten commits can be checked against the approved work.
 - Checks each conflicted hunk against main's change, verifying that the resolution preserves both sides' intent and introduces no feature changes.
-- Checks the branch against any binding documentation main changed, and independently re-runs the gates without the cache (D21).
+- Checks the branch against any binding documentation main changed, and follows D26 for the gates.
 
 If the resolution is clean, the reviewer approves the new head. The **previous criteria verdicts and approval carry over** to that head; a rebase review does not re-judge the feature or require a fresh human approval solely because of the rebase. The task returns to **Ready to merge**, where CI and the live merge gates must pass for the new head.
 
@@ -690,3 +677,96 @@ Corral supports runners on multiple machines over a private tailnet. The server 
 For the POC, all runners share `CORRAL_RUNNER_TOKEN`. Both runner endpoints require it when configured; the runner sends it in the WebSocket Authorization header, and the server compares it in constant time before registering the runner. The token is never logged. Without a token, only the existing internal endpoint is available; configuring the external listener fails at startup. Shared authentication is separate from runner identity and job scheduling: connections for distinct runner identities remain independent, and a newer authenticated connection replaces only the connection with the same runner identity.
 
 Per-runner pairing and revocation come later with hosting. Remote runners run under WSL2 or Linux and update themselves by pulling from GitHub (see the runner updater task), rather than receiving executable updates from the control plane.
+
+---
+
+## D26 — Reviewers review the code; required CI runs the gates
+
+**Status:** Accepted 2026-10-30 (COR-254). Amends D21 and D24's requirement that the reviewer reruns the gates without the cache, and the same requirement in D27's integration review.
+
+**Decision:**
+
+- **With required checks,** the reviewer doesn't rerun lint, typecheck, tests or build. The project's required checks run them on every push, and the merge gate won't merge without them. Corral's own `ci` workflow gained a build step for this: before it, `nuxt build` only ran at deploy, after merge.
+- **Without required checks,** nothing else verifies the gates, so the reviewer still runs all of them itself, without the cache. If a check can't be run without the cache, it explains which and why in its outcome. `requiredChecks` defaults to empty, so this is the default for a new project.
+- **The reviewer's prompt says which case applies**, naming the required checks or stating that there are none. The server builds this from the project's `requiredChecks`. Role instructions, including a repo's override (D13), defer to it.
+- **The review looks at the code.** The reviewer reads the diff for security, efficiency and logic problems and raises them as specific, actionable feedback. It may run a targeted test or the app when that's the best way to check a criterion or a suspected bug. A cached result never counts as verification.
+- **The same rule covers every review of a diff:** agent review, epic integration review (D27) and rebase review (D24). Spike and design reviews have no diff and no gates to run.
+- **Unchanged:** a verdict and concrete note for every criterion, and D21's evidence rules. Developers still run the gates before reporting.
+
+**Why:** The rerun duplicated CI and was slow: on COR-59 a reviewer's third full test run hit the background time limit. The reviewer's value is the judgement CI can't give, so its time goes on the diff.
+
+---
+
+## D27 — Epic review modes and epic branches
+
+**Status:** Accepted 2026-10-29 (COR-163). Amends D5, D10, D11 and D22.
+
+This decision was first numbered D23. Migration `0027_epic_review_modes.sql` still cites it by that number, and can't be edited (it has already run).
+
+**Amended by D26:** integration review leaves the gates to required CI, and runs them without the cache only when the project has no required checks.
+
+**Amended by COR-166:** a rebase conflict blocks the epic PR with a Needs-you item naming the conflicting files, and the conflict task exists only once the human hands the rebase over from that item. Epic PRs always squash, whatever the project's merge method.
+
+**Principle:** the project's **target branch**, `defaultBranch` in project settings, only receives approved work. Corral assumes nothing about the target branch's name or how the project releases from it. Docs, prompts and code say "target branch" and read it from the project, never a hard-coded name.
+
+**Decision:**
+
+### Review modes
+
+Each epic has a **review mode**. The PM can set it per epic in `propose_plan`; when the plan doesn't, the epic takes the project's **default review mode** (a project setting). The setting starts at `direct` for every project, so nothing changes until the human picks another mode.
+
+| Mode | Where task PRs merge | When a task goes to Human review |
+|---|---|---|
+| `epic` | The epic branch | Only when the task's own `humanReview` flag is set. Otherwise it merges on the reviewer's approval. |
+| `each_task` | The epic branch | Always, whatever the flag. |
+| `direct` | The target branch | Only when flagged (D5, today's behaviour). No epic branch and no epic PR. |
+
+Tasks without an epic are unchanged: they merge straight into the target branch, by D5. Changing an epic's mode is only allowed before any of its tasks has opened a PR or merged *(narrowed by COR-169; previously before any had merged)*.
+
+### The epic branch
+
+- In `epic` and `each_task` modes, Corral creates the epic branch in its own branch namespace, `corral/epic-<epicId>-<slug>`, from the tip of the target branch when the epic's first task is claimed.
+- The epic's task branches are created from the epic branch, and their PRs use it as their base. Task PRs merge into it with the project's merge method (squash), so each task is one commit on the epic branch.
+- When the epic branch moves under an open task PR, Corral rebases the task PR onto it, exactly as it does for the target branch (D10, `flows.md` step 7c).
+- The target branch is **never merged into** the epic branch. Corral doesn't keep the epic branch up to date while the epic is in progress; the epic branch only meets newer target-branch work when it's rebased just before the epic PR merges (below).
+
+### The epic PR
+
+- When every board task of the epic has merged (non-deleted tasks outside Draft and Backlog; spikes and approved designs count as done, as in D22), Corral opens the **epic PR** from the epic branch into the target branch.
+- **Integration review:** the reviewer agent reviews the epic PR as an integration check. It judges the combined diff against the epic's goal and its tasks' criteria, looks for problems between tasks that each passed review alone, and follows D26 for the gates. It doesn't re-judge each task's evidence.
+- **Human review:** after the reviewer approves, the epic PR always goes to the human, whatever the mode or the tasks' flags.
+- **Fix-task loop:** if the reviewer or the human requests changes, Corral creates a **fix task** in the epic, in Ready, titled from the feedback, with the feedback as its description and its points as criteria, and the epic PR's review state becomes changes requested. It goes through the epic's review mode like any other task and merges into the epic branch. When it has merged, and every other board task of the epic has too, the epic PR goes back to integration review and then to the human.
+- **Rebase before merge:** once the human approves, the epic PR waits for CI. Just before it merges, if the target branch has moved, Corral rebases the epic branch onto the target branch (GraphQL `updatePullRequestBranch` with `updateMethod: REBASE`, as for task PRs). A clean rebase keeps the approval and CI runs again on the new head.
+- **Rebase conflict:** a conflict leaves the target branch unchanged and blocks the epic PR (review state `conflict`) with a **Needs you** item naming the epic and the conflicting files. From that item the human can hand the rebase to a developer, which creates a **conflict task** in the epic, in Ready, whose branch is the epic branch itself rather than a new task branch. Its developer rebases the epic branch onto `origin/<target branch>`, resolves the conflicts, runs the gates and reports `pr_updated`; the runner force-pushes the epic branch with `--force-with-lease`, and no separate task PR is opened. A conflict task goes to Agent review and, in `each_task` mode, Human review, like any task in the epic. Once it's approved, the epic PR goes back to integration review and then to the human, because a resolved conflict isn't a mechanical update.
+- **Merge:** the epic PR squash-merges into the target branch, after the final gate check against live GitHub data (`flows.md` step 8). Corral then deletes the epic branch.
+- **New tasks while the epic PR is open:** a task added to the epic's board holds the epic PR back. The epic PR can't merge until that task has merged into the epic branch, and then it goes back to integration review.
+
+Epic PR review state is kept on the epic (open, agent review, human review, changes requested, ready to merge, conflict, merged), not as a task status. While the state is changes requested the epic PR can't be approved or merged.
+
+### Amendments to earlier decisions
+
+- **D5:** in `epic` mode the human-review flag works as before, but "merges" means merging into the epic branch. In `each_task` mode every task goes to Human review, whatever its flag. Every epic PR goes to Human review. Tasks without an epic and tasks in `direct` epics are unchanged.
+- **D10:** the statuses are unchanged. For a task in an `epic` or `each_task` epic, **Ready to merge** waits for CI and its base, the epic branch, and **Merged** means merged into the epic branch. A dependency on such a task is satisfied when it's Merged if the dependent task is in the same epic; otherwise only once that epic is done (D22), since the work isn't on the target branch until the epic PR merges. Agent review → Human review also fires on the reviewer's approval for every task in an `each_task` epic. The deletion rules gain one case: deleting the last board task of an epic whose PR is open leaves the epic PR to the human, who can close it.
+- **D11:** an epic PR in human review is a **Needs you** item, with the integration review's verdict and the combined diff, and approve and request-changes actions. A rebase conflict is a **Needs you** item too. "Epic PR opened", "epic PR approved", "epic PR conflict" and "epic PR merged" are Activity. Fix and conflict tasks reach the Inbox like any other task.
+- **D22:** an epic is done only when its epic PR has merged, except in `direct` mode (amended in place, see D22).
+
+**Why:** Merging each reviewed task straight into the target branch lands half-built features there, which the project may release from at any time. Collecting an epic's tasks on its own branch keeps unfinished work off the target branch while still letting the reviewer approve tasks one by one. The human then reviews the feature as a whole, once, at the epic PR. Squash merges at both levels keep the target branch's history to one commit per epic, and rebasing instead of merging the target branch in keeps the epic branch's history linear and its PR diff to the epic's own work. `direct` keeps today's behaviour for projects or epics that don't need any of this.
+
+**Consequences for the build:**
+- Projects gain a default review mode; epics gain a nullable review mode, an epic branch name and the epic PR's number and review state.
+- The runner creates task branches from `origin/<epic branch>` (or `origin/<target branch>` for tasks without an epic and in `direct` mode), and conflict-task runs check out the epic branch itself.
+- The server opens, reviews, rebases and merges epic PRs, creates fix and conflict tasks, and computes epic done-ness and cross-epic dependencies with the rules above.
+
+---
+
+## D28 — Criteria checked by a human
+
+**Status:** Accepted 2026-10-30 (COR-249). Amends D5, D10 and the per-criterion evidence and verdict requirements in D21 and D26.
+
+- Each acceptance criterion has a **Checked by a human** flag, false by default. The PM can set it in `propose_plan`, and the human can toggle it on the task page. Re-proposing matching text without an explicit flag preserves the existing choice; only an explicit `checkedByHuman` changes it.
+- Developers skip attempting these checks and producing evidence for them. Reviewers must not request changes over them or their missing evidence, and omit their verdicts. Corral records **Needs human check** (`met: null`), rather than met or unmet. Other criteria keep the usual evidence and verdict requirements.
+- **D5:** reviewer approval with any such criterion always goes to **Human review**, even with `humanReview: false` and in any epic review mode. The task's own flag is unchanged. Tasks with no human-check criteria keep their existing routing.
+- **D10:** reviewer approval takes **Agent review → Human review** when any criterion needs a human check. Adding a new human check after approval takes **Ready to merge → Human review** (`require_human_check`). Rebase-only approval carryover remains as in D24.
+- The Inbox lists the criteria with **Needs human check** and a checkbox per criterion. The human ticks each before approving; ticks are local to the selected item. Approval resolves the Inbox item and follows the existing human approval and merge gates, excluding these criteria from the agent-evidence gate. Requesting changes remains available.
+
+**Why:** checks requiring a person or a real device must reach the human, rather than trapping developers and reviewers in a loop over evidence no runner can produce.

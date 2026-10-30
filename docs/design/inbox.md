@@ -15,6 +15,8 @@ Items come from two places:
 
 There's no separate notifications feed.
 
+A criterion marked **Checked by a human** always sends an approved task here, even if its task-level human-review flag is off. Its evidence card says **Needs human check** and has a checkbox for the human. Tick every such criterion before **Approve and merge**; requesting changes remains available. These ticks are local to the selected item; approval uses the usual merge gates.
+
 ## Layout
 
 There are three columns. The list divider can be resized (280–560px, default 380px). The task flyout docks on the right and can be resized from its own edge.
@@ -32,7 +34,7 @@ There are three columns. The list divider can be resized (280–560px, default 3
   - the subject, which is the task title (bold when unread)
   - a two-line preview
   - a type badge and the project tag (a colour dot and project name)
-- **Plan thread rows** look different; see [Plan threads](#plan-threads).
+- **Plan thread rows** have the same layout with a status badge for the type badge; see [Plan threads](#plan-threads).
 - The selected row uses `bg-elevated`.
 - **Empty state:** "All clear. Nothing here right now."
 
@@ -54,18 +56,19 @@ There are three columns. The list divider can be resized (280–560px, default 3
   - Your replies, shown as "You → Atlas" bubbles.
 - **Tray**, pinned to the bottom with a top divider. This is the only place you act.
   - **Question:** "Suggested answers: Pick one, or write your own below" as radio cards in an auto-fit grid. Sending posts the chosen answer plus any note, resolves the item, and puts the task back In progress.
-  - **Quick actions** (a `radiogroup` of chips; see shared pattern):
+  - **Quick actions** (a `radiogroup` of chips; see shared pattern): exactly one is selected, starting with the first action whenever an item opens. Clicking the selected chip keeps it selected; another chip replaces the selection. Arrow keys wrap between chips and select the focused chip; only the selected chip is in the Tab order.
 
     | Item type | Actions | Needs text |
     |---|---|---|
     | Human review | ✓ Approve and merge · ✎ Request changes | Request changes only |
-    | Blocked | 💬 Clarify and continue · ↩ Send back to Backlog · 🗑 Delete task (`error`) | Clarify only |
+    | Blocked / Question | 💬 Clarify and continue · ↩ Send back to Backlog · 🗑 Delete task (`error`) | Clarify only |
+    | Failed | ↻ Retry · ↩ Send back to Backlog · 🗑 Delete task (`error`) | None |
 
   - **Composer:**
-    - The placeholder follows the selected action, e.g. "What should Atlas change?" or "Reason for deleting (optional)". With no action selected it's "Reply to {sender}…".
+    - The placeholder follows the selected action, e.g. "What should Atlas change?" or "Reason for deleting (optional)". Items without quick actions use "Reply to {sender}…".
     - The submit button becomes labelled with the action and turns `error` for Delete.
-    - Sending with no action is a plain reply to the agent.
-  - Switching items clears the draft and the selected action.
+    - Items without quick actions keep their plain reply behavior. Items with quick actions always send the selected action. Mobile questions have no chips and send the composer answer with Clarify and continue.
+  - Switching items clears the draft and selects the new item’s first action, including after a successful send advances to the next item.
 
 ### 3. Task flyout
 
@@ -90,16 +93,16 @@ An open Plan session (D9) that's waiting on you, shown as an Inbox item (D11). A
 
 One button, in the same list as the other items, with a **Delete thread** button (trash icon, `error`) that appears on hover or keyboard focus at its bottom-right corner:
 
-- the **project dot** (in place of the sender's avatar, with the project name in its tooltip and `aria-label`)
-- the **session title** (bold), and the **time** it started waiting
-- a **status badge**: "Needs approval" in `primary` or "Question" in `info`; an unread reply has the unread dot instead. While Juno is working (`activeRunId`), a spinner sits next to the time.
+- the **sender's avatar** and **name** (Juno, under the PM's current name), with the **time** it started waiting. While Juno is working (`activeRunId`), a spinner sits next to the time.
+- the **session title** (bold)
 - a two-line **preview**: Juno's question, the plan summary ("Plan v2 · 2 epics · 4 tasks"), or Juno's reply
+- a **status badge** beside the **project tag** (a thumbnail and the project name): "Needs approval" in `primary` or "Question" in `info`; an unread reply has the unread dot before the avatar and an "Unread reply" badge in `neutral`.
 
 ### Detail pane
 
 The selected message column shows only what needs you, **not the conversation**. The full conversation stays in Plan ([plan.md](plan.md#conversation)), one click away with **Open in Plan**.
 
-- **Header:** the project dot and name, the session title, the status badge, the runtime badge ("Claude" or "Codex"), **Open in Plan** and **Delete thread**. There's no Task details toggle; a plan's tasks open in the flyout instead.
+- **Header:** the sender's avatar, the session title, and below it the sender's name and role, the project tag, the status badge, the runtime badge ("Claude" or "Codex"), **Open in Plan** and **Delete thread**. There's no Task details toggle; a plan's tasks open in the flyout instead.
 - **Question:** Juno's question in its `info` card, with "Recommended: …" when Juno gave one, and the one-tap answers: **Accept recommendation**, one button per option, **Other…** (focuses the reply box) and **Stop and propose the plan**. Below it, a reply box ("Reply to Juno…") for a free-text answer. A tap or a sent reply sends the answer to the session and starts a PM turn, exactly as in Plan; the thread then leaves the list unless Juno asks again or proposes a plan.
 - **Plan:** the plan's title, its summary and counts ("Plan v2 · 2 epics · 4 tasks"), with **View plan**, **Approve to board**, **Approve to Backlog** and **Open in Plan**. **View plan** opens the plan flyout docked on the right ([plan.md](plan.md#plan-flyout)), and a task from it opens in the task flyout.
 - **Unread reply:** Juno's latest reply (`reply`), with **Open in Plan** under it and the reply box ("Reply to Juno…") below. Sending starts a PM turn, as for a question.
@@ -142,8 +145,15 @@ On the mobile layout ([mobile.md](mobile.md#inbox)), a Plan thread opens as its 
 - **Body:** only the question or the plan, full width, not the conversation. A question's answers are stacked, full-width buttons at least 44px tall, as in Plan on mobile, with the reply box ("Reply to Juno…") pinned below. An unread reply shows Juno's latest reply with the same reply box. A plan shows its title, summary and counts, with **View plan** (opens the plan in a bottom sheet; a task from it opens in a taller sheet over it) and **Approve to board** and **Approve to Backlog** side by side, full width.
 - **Delete thread** doesn't ask first. It returns to `/inbox` without the thread and offers **Undo**, as a swipe does (below).
 - Approving returns to `/inbox`; a failed approval keeps the screen and sheet open with the error.
-- **Row:** the project dot, session title, time, status badge and preview, in the same list as the other items. The first tab is named **Inbox** (the web's Needs you), newest first, with no group for threads.
+- **Row:** the sender's avatar, name and time, the session title, the preview, and the status badge beside the project tag, in the same list as the other items. The first tab is named **Inbox** (the web's Needs you), newest first, with no group for threads.
 - **Swipe to delete:** swiping a thread row left reveals a red **Delete** button; a full swipe deletes at once, and a short one snaps back. Task items don't swipe. Deleting removes the row immediately and shows a "Thread deleted · its drafts were discarded" toast with **Undo** for 5 seconds; only then is the thread closed (as [Delete thread](#delete-thread), discarding its drafts and unapproved plan). Undo puts the row back with nothing discarded. If the close fails, the row comes back with an error toast. `usePlanThreadDelete` holds the pending deletes, shared with desktop, so a delete started on the thread screen carries on after it returns to the list or the layout changes. Reloading or closing the tab during Undo sends the close immediately with a keepalive request.
+
+### Epic items (D27)
+
+An epic PR in human review and an epic PR rebase conflict have their own layout on desktop and mobile, `InboxEpicReview` and `InboxEpicConflict`, with the action bar pinned at the bottom. Both share `InboxEpicHeader`: the badge, the epic's name linking to it, and a button to the epic PR, which goes full width under the title on a phone.
+
+- **Review:** the integration review's verdict, then one collapsible row per task with its evidence, open on desktop and closed on a phone. Request changes needs the feedback box filled in. Approve and Request changes sit side by side on a phone.
+- **Conflict:** a bordered list of the conflicting files, wrapped rather than scrolled, or a note that Corral couldn't work them out. **Hand the rebase to a developer** is full width on a phone.
 
 ## What each action does (D10)
 
@@ -187,3 +197,9 @@ On the mobile layout ([mobile.md](mobile.md#inbox)), a Plan thread opens as its 
 - Should Activity items expire, or stay forever?
 
 Mobile Plan threads reuse Plan's `PlanQuestion`, composer and `PlanDetail` bottom sheet, without `PlanConversation`. `InboxMobile` renders its focused Plan thread through `InboxMobilePlanThread`; the Inbox header keeps Back to Inbox and Open in Plan (the session route), with Delete thread in the overflow menu. Deleting returns to `/inbox` at once and closes the session after the 5-second Undo toast (`usePlanThreadDelete`); list rows use `SwipeToDelete` for the same action. A waiting plan has View plan and side-by-side approval destinations. The thread provides `FLYOUT_SHEETS`, so `useTaskFlyout` keeps a task or epic opened from the plan sheet on the Inbox route (`?task=`/`?epic=`) in a taller sheet over the plan, and dismissing it goes back to the plan; either successful approval closes the sheet and returns to `/inbox`. Failed approvals keep the screen and sheet open.
+
+## Release notes (COR-129)
+
+The latest 20 deployments appear as Release notes from the configured PM, with its avatar, project, time and short commit range. Undismissed notes sit below the attention items, newest first. They do not add to the Needs you badge or tab count. An unread dot stays until the item is opened, on desktop or mobile. Reading keeps the item in the Inbox; Dismiss moves it to Resolved.
+
+The shared detail pane renders markdown with task references linking to `/tasks/:ref`, and shows the commit range (or the first-deploy commit). Pending notes show “Writing release notes…” and refresh on `deployment.updated`, without a reload. Mobile uses its regular back header and the same detail pane, without a task-details button or reply composer.

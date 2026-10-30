@@ -9,9 +9,9 @@ ENV PATH=$PNPM_HOME:$PATH
 RUN npm install -g pnpm@12.15.0
 
 # Tools agents and the runner need. Chromium comes from Debian so it runs
-# on arm64 and x64 alike.
+# on arm64 and x64 alike. ffmpeg converts evidence videos to H.264 MP4.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl git gnupg chromium fonts-liberation jq \
+  && apt-get install -y --no-install-recommends ca-certificates curl git gnupg chromium ffmpeg fonts-liberation jq \
   && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
   && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
   && apt-get update && apt-get install -y --no-install-recommends gh \
@@ -28,6 +28,7 @@ ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 
 WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY patches patches
 COPY packages/tsconfig/package.json packages/tsconfig/
 COPY packages/core/package.json packages/core/
 COPY packages/contracts/package.json packages/contracts/
@@ -40,6 +41,8 @@ COPY packages/contracts packages/contracts
 # codex skill directories at startup (they're on volumes, so it can't be baked in)
 COPY apps/runner apps/runner
 
+ARG CORRAL_BUILD_SHA=development
+ENV CORRAL_BUILD_SHA=$CORRAL_BUILD_SHA
 ENV NODE_ENV=production
 ENV CORRAL_RUNNER_DATA_DIR=/data/runner
 ENV CORRAL_RUNNER_NAME=home-server

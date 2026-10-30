@@ -289,6 +289,17 @@ describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
       expect(listed.find(x => x.id === created.id)?.developer).toEqual({ id: first!.id, name: first!.name })
     })
 
+    it('names the designer as the author of design tasks in detail and lists', async () => {
+      const project = await t.createProject({ prefix: 'DSN' })
+      const task = await t.createTask(project.slug, { type: 'design' })
+      const [designer] = await t.db.insert(schema.agents).values({ name: `Iris-${randomBytes(3).toString('hex')}`, role: 'designer' }).returning()
+      await t.db.insert(schema.runs).values({ agentId: designer!.id, projectId: project.id, taskId: task.id, role: 'designer', state: 'running' })
+      const detail = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}`).then(r => r.json()) as Task
+      const listed = await t.request('GET', `/api/projects/${project.slug}/tasks?view=all`).then(r => r.json()) as Task[]
+      expect(detail.developer).toEqual({ id: designer!.id, name: designer!.name })
+      expect(listed.find(t => t.id === task.id)?.developer).toEqual(detail.developer)
+    })
+
     it('takes the human-review default from the project (D5)', async () => {
       const project = await t.createProject({ humanReviewDefault: true })
       expect((await t.createTask(project.slug)).humanReview).toBe(true)
@@ -365,10 +376,20 @@ describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
       expect(audit).toMatchObject({ actor: t.actor, detail: { agentId: agent.id, role: 'developer', runtime: 'codex' } })
     })
 
+    it('creates and lists a designer', async () => {
+      runnerClis([...both])
+      const res = await t.request('POST', '/api/agents', { name: 'Design API', role: 'designer', runtime: 'claude-code', concurrency: 1 })
+      expect(res.status).toBe(201)
+      const agent = await res.json() as { id: string }
+      expect(agent).toMatchObject({ role: 'designer', runtime: 'claude-code' })
+      const listed = await t.request('GET', '/api/agents').then(r => r.json())
+      expect(listed).toEqual(expect.arrayContaining([expect.objectContaining({ id: agent.id, role: 'designer' })]))
+    })
+
     it('rejects a PM, an unknown runtime and a runtime whose CLI isn\'t installed, saying why', async () => {
       runnerClis([{ id: 'claude', version: '2.1.312' }, { id: 'codex', version: null }])
       const cases = [
-        [{ name: 'Second PM', role: 'pm', runtime: 'claude-code', concurrency: 1 }, 'Only one PM agent exists; the role must be developer or reviewer'],
+        [{ name: 'Second PM', role: 'pm', runtime: 'claude-code', concurrency: 1 }, 'Only one PM agent exists; the role must be developer, designer or reviewer'],
         [{ name: 'Gemini dev', role: 'developer', runtime: 'gemini', concurrency: 1 }, 'Unknown runtime; use one of claude-code, codex'],
         [{ name: 'Codex dev', role: 'developer', runtime: 'codex', concurrency: 1 }, 'Codex CLI isn’t installed on the runner, so the codex runtime can’t be used']
       ] as const
@@ -413,6 +434,19 @@ describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
       expect(await res.json()).toMatchObject({ id: created.id, runtime: 'codex' })
       expect(t.events).toMatchObject([{ type: 'agent.updated', agent: { id: created.id, runtime: 'codex' } }])
       expect((await t.request('PATCH', `/api/agents/${created.id}`, { runtime: 'gemini' })).status).toBe(400)
+    })
+
+    it('ends a usage-limit wait when the agent is resumed, and only then (D3)', async () => {
+      const [developer] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'developer')).orderBy(asc(schema.agents.createdAt)).limit(1)
+      const pausedUntil = new Date(Date.now() + 60 * 60 * 1000)
+      await t.db.update(schema.agents).set({ pausedUntil }).where(eq(schema.agents.id, developer!.id))
+
+      await t.request('PATCH', `/api/agents/${developer!.id}`, { paused: true })
+      await t.request('PATCH', `/api/agents/${developer!.id}`, { concurrency: developer!.concurrency })
+      expect((await t.db.select().from(schema.agents).where(eq(schema.agents.id, developer!.id)))[0]!.pausedUntil).toEqual(pausedUntil)
+
+      const res = await t.request('PATCH', `/api/agents/${developer!.id}`, { paused: false })
+      expect(await res.json()).toMatchObject({ paused: false, pausedUntil: null })
     })
 
     it('refuses concurrency for the PM, leaving it unchanged, and still sets it for a developer (D13)', async () => {

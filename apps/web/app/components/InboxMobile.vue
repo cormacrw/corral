@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import type { Evidence, Inbox, InboxActionInput, InboxItem, PlanThreadItem, Review, Task, TaskInboxItem } from '@corral/contracts'
+import { needsAttention } from '@corral/contracts'
+import type { Evidence, Inbox, InboxActionInput, InboxItem, PlanThreadItem, Review, Task, TaskInboxItem, ReleaseNotesItem } from '@corral/contracts'
 import { ROLE, timeAgo, type Color } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
+import { moveRadioSelection } from '~/utils/radio'
 
 // The Inbox on a phone (design/inbox.md, design/mobile.md): /inbox is the
 // list and /inbox/:itemId the item, each a screen of its own. The page owns
@@ -14,7 +16,7 @@ const props = defineProps<{
   error: string | null
   items: InboxItem[]
   selectedId: string | null
-  selected: TaskInboxItem | null
+  selected: TaskInboxItem | ReleaseNotesItem | null
   alreadyResolved: boolean
   task: Task | null
   evidence: Evidence[]
@@ -29,6 +31,7 @@ const props = defineProps<{
   onSubmit: (text: string) => Promise<boolean>
   onRetry: () => unknown
 }>()
+const checkedHumanCriteria = defineModel<string[]>('checkedHumanCriteria', { required: true })
 const tab = defineModel<'needsYou' | 'activity' | 'resolved'>('tab', { required: true })
 const search = defineModel<string>('search', { required: true })
 const action = defineModel<Action | null>('action', { required: true })
@@ -41,11 +44,7 @@ function toggleSearch() {
   if (!searching.value) search.value = ''
 }
 
-// A question is answered from the composer, so answering is already chosen
-// (the Question frame). Every other item starts with no action, as on the web.
-watch(() => props.selected, () => {
-  if (props.selected?.type === 'question') action.value = 'clarify'
-}, { immediate: true, flush: 'post' })
+// Questions keep their composer-only answer flow; the page selects clarify.
 const isQuestion = computed(() => props.selected?.type === 'question')
 const sender = computed(() => props.selected?.sender.name ?? 'the agent')
 const composerPlaceholder = computed(() => isQuestion.value && action.value === 'clarify' ? `Your answer for ${sender.value}` : props.placeholder)
@@ -55,14 +54,14 @@ const prLabel = computed(() => {
   return number ? `#${number}` : 'Open PR'
 })
 const role = (r: InboxItem['sender']['role']) => r === 'system' ? 'System' : ROLE[r]
-const canAct = computed(() => props.selected !== null && props.selected.type !== 'activity' && !props.selected.resolution && !props.alreadyResolved)
+const canAct = computed(() => props.selected !== null && props.selected.type !== 'activity' && props.selected.type !== 'release_notes' && !props.selected.resolution && !props.alreadyResolved)
 // A thread being deleted leaves the list at once, while its Undo toast shows
 const deleting = usePlanThreadDelete()
 const isHidden = (item: InboxItem) => item.type === 'plan_thread' && deleting.pending.value.includes(item.sessionId)
 const listed = computed(() => props.items.filter(i => !isHidden(i)))
 // Server order: newest first, task items and threads together (D11)
 const tabs = computed(() => [
-  { label: 'Inbox', value: 'needsYou', icon: 'i-lucide-inbox', count: (props.inbox?.needsYou ?? []).filter(i => !isHidden(i)).length },
+  { label: 'Inbox', value: 'needsYou', icon: 'i-lucide-inbox', count: (props.inbox?.needsYou ?? []).filter(i => !isHidden(i) && needsAttention(i)).length },
   { label: 'Activity', value: 'activity', icon: 'i-lucide-activity', count: null },
   { label: 'Resolved', value: 'resolved', icon: 'i-lucide-circle-check', count: props.inbox?.resolved.length ?? 0 }
 ])
@@ -75,6 +74,16 @@ const tabs = computed(() => [
     :item="planThread"
     :on-refresh="onRefresh"
   />
+  <div
+    v-else-if="selected?.type === 'release_notes'"
+    class="flex h-full min-h-0 flex-col"
+  >
+    <MobilePageHeader compact />
+    <InboxReleaseNotes
+      :item="selected"
+      @refresh="onRefresh"
+    />
+  </div>
   <!-- Task items keep their message, context and tray. -->
   <div
     v-else-if="selectedId"
@@ -170,7 +179,9 @@ const tabs = computed(() => [
           </div>
           <EvidenceList
             v-if="selected.type === 'human_review' && task"
+            v-model:checked="checkedHumanCriteria"
             :evidence="evidence"
+            human-checklist
             :criteria="task.acceptanceCriteria"
             :reviews="reviews.length > 0 ? reviews : task.latestReview ? [task.latestReview] : []"
           />
@@ -194,6 +205,7 @@ const tabs = computed(() => [
           role="radiogroup"
           aria-label="Quick actions"
           class="flex flex-wrap gap-2"
+          @keydown="moveRadioSelection"
         >
           <UButton
             v-for="a in actions"
@@ -204,9 +216,10 @@ const tabs = computed(() => [
             role="radio"
             class="rounded-full"
             :aria-checked="action === a.value"
+            :tabindex="action === a.value ? 0 : -1"
             :variant="action === a.value ? 'subtle' : 'outline'"
             :color="a.value === 'delete' && action === a.value ? 'error' : action === a.value ? 'primary' : 'neutral'"
-            @click="action = action === a.value ? null : (a.value as Action)"
+            @click="action = (a.value as Action)"
           />
           <USelectMenu
             v-if="action === 'resolve'"
@@ -338,7 +351,10 @@ const tabs = computed(() => [
             draggable="false"
             class="flex gap-3 border-b border-default px-4 py-3 active:bg-elevated"
           >
-            <PlanThreadRow :item="item" />
+            <PlanThreadRow
+              :item="item"
+              mobile
+            />
           </NuxtLink>
         </SwipeToDelete>
         <NuxtLink
@@ -346,6 +362,11 @@ const tabs = computed(() => [
           :to="`/inbox/${item.id}`"
           class="flex gap-3 border-b border-default px-4 py-3 active:bg-elevated"
         >
+          <span
+            v-if="item.type === 'release_notes' && item.unread"
+            class="mt-2 size-2 shrink-0 rounded-full bg-primary"
+            aria-label="Unread"
+          />
           <AgentAvatar
             :name="item.sender.name"
             size="md"
@@ -357,6 +378,10 @@ const tabs = computed(() => [
             </span>
             <span class="font-semibold text-highlighted">{{ item.subject }}</span>
             <span class="line-clamp-2 text-sm text-muted">{{ markdownToPlainText(item.preview) }}</span>
+            <span
+              v-if="item.type === 'release_notes'"
+              class="font-mono text-xs text-muted"
+            >{{ item.fromSha ? `${item.fromSha}…` : '' }}{{ item.toSha }}</span>
             <span class="mt-0.5 flex items-center gap-2">
               <UBadge
                 :label="typeBadge(item.type).label"

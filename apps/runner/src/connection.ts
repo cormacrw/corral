@@ -7,8 +7,11 @@ import {
   type ServerMessage
 } from '@corral/contracts'
 import WebSocket from 'ws'
+import type { UpdateStatus } from './update-status.ts'
 
 export interface ConnectionHandlers {
+  // Includes runs still flushing their terminal report.
+  activeRunCount?(): number
   activeRuns(): { runId: string, leaseEpoch: number }[]
   // Read on every connect, so a CLI signed in since then is advertised
   capacity(): Promise<RunnerCapacity>
@@ -28,11 +31,16 @@ export class ServerConnection {
   #handlers: ConnectionHandlers
   #socket: WebSocket | null = null
   #heartbeat: NodeJS.Timeout | null = null
+  #lastUpdateSent = ''
+  #updatePoll: NodeJS.Timeout | null = null
   #retry: NodeJS.Timeout | null = null
   #backoff = 1000
   #closed = false
 
-  constructor(serverUrl: URL, identity: { runnerId: string, name: string }, handlers: ConnectionHandlers, token?: string) {
+  readonly updateStatus: UpdateStatus | undefined
+
+  constructor(serverUrl: URL, identity: { runnerId: string, name: string }, handlers: ConnectionHandlers, token?: string, updateStatus?: UpdateStatus) {
+    this.updateStatus = updateStatus
     this.#token = token
     const url = new URL(RUNNER_PATH, serverUrl)
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -47,10 +55,24 @@ export class ServerConnection {
 
   start(): void {
     this.#closed = false
+    this.refreshUpdateStatus()
     this.#open()
+    this.#updatePoll = setInterval(() => {
+      this.refreshUpdateStatus()
+      const state = this.updateStatus
+      if (!state || !this.connected) return
+      const message: RunnerMessage = { type: 'runner.update-status', draining: state.draining, updateRequested: state.updateRequested, activeRunCount: this.#handlers.activeRunCount?.() ?? this.#handlers.activeRuns().length, updateState: state.updateState, updateError: state.updateError }
+      const json = JSON.stringify(message)
+      if (json !== this.#lastUpdateSent && this.send(message)) this.#lastUpdateSent = json
+    }, 1000)
+  }
+
+  refreshUpdateStatus(): void {
+    this.updateStatus?.write(this.#handlers.activeRunCount?.() ?? this.#handlers.activeRuns().length)
   }
 
   send(message: RunnerMessage): boolean {
+    this.refreshUpdateStatus()
     if (!this.connected) return false
     this.#socket!.send(JSON.stringify(message))
     return true
@@ -58,6 +80,7 @@ export class ServerConnection {
 
   close(): void {
     this.#closed = true
+    if (this.#updatePoll) clearInterval(this.#updatePoll)
     if (this.#retry) clearTimeout(this.#retry)
     this.#stopHeartbeat()
     this.#socket?.close()
@@ -69,11 +92,12 @@ export class ServerConnection {
 
     socket.on('open', async () => {
       this.#backoff = 1000
+      this.#lastUpdateSent = ''
       const capacity = await this.#handlers.capacity()
       if (this.#socket !== socket) return
-      this.send({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, ...this.#identity, ...capacity, activeRuns: this.#handlers.activeRuns() })
+      this.send({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, commit: this.updateStatus?.commit || process.env.CORRAL_BUILD_SHA || 'development', draining: this.updateStatus?.draining ?? false, updateRequested: this.updateStatus?.updateRequested ?? false, autoUpdate: this.updateStatus?.autoUpdate ?? false, updateTarget: this.updateStatus?.serverCommit ?? '', updateState: this.updateStatus?.updateState ?? '', updateError: this.updateStatus?.updateError ?? '', ...this.#identity, ...capacity, activeRuns: this.#handlers.activeRuns() })
       this.#heartbeat = setInterval(() => {
-        this.send({ type: 'heartbeat', activeRuns: this.#handlers.activeRuns() })
+        this.send({ type: 'heartbeat', sentAt: Date.now(), activeRuns: this.#handlers.activeRuns() })
         // Keeps proxies from dropping an idle socket (D12)
         socket.ping()
       }, RUNNER_HEARTBEAT_MS)
@@ -85,11 +109,25 @@ export class ServerConnection {
       } catch {
         return
       }
-      if (message.type === 'welcome') this.#handlers.onStatus('connected')
+      if (message.type === 'welcome') {
+        this.updateStatus?.server(message.commit)
+        if (message.draining) this.updateStatus?.drain(message.updateRequested)
+        if (this.updateStatus?.draining) this.send({ type: 'runner.draining', updateRequested: this.updateStatus.updateRequested })
+        this.#handlers.onStatus('connected')
+      }
+      if (message.type === 'runner.drain') this.updateStatus?.drain(message.updateRequested)
       this.#handlers.onMessage(message)
+      this.refreshUpdateStatus()
     })
     socket.on('close', (code, reason) => {
       this.#stopHeartbeat()
+      if (code === 4000) {
+        try {
+          const detail = JSON.parse(reason.toString()) as { commit?: string }
+          if (typeof detail.commit === 'string') this.updateStatus?.server(detail.commit)
+        } catch { /* Older servers may only send a readable protocol error. */ }
+      }
+      this.refreshUpdateStatus()
       if (this.#socket === socket) this.#socket = null
       this.#handlers.onStatus('disconnected', reason.toString() || `code ${code}`)
       this.#scheduleReconnect()

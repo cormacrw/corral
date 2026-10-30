@@ -39,29 +39,76 @@ describe('merge orchestrator and human controls', () => {
 
   // Approve, claim, submit with evidence, review and approve: the task waits
   // in Agent review with an approved verdict for 'abc123'
-  async function approved(options: { humanReview?: boolean, requiredChecks?: string[], task?: Parameters<TestApp['createTask']>[1], noteEvidence?: boolean } = {}) {
+  async function approved(options: { humanReview?: boolean, requiredChecks?: string[], task?: Parameters<TestApp['createTask']>[1], noteEvidence?: boolean, reviewRounds?: number } = {}) {
     const project = await t.createProject()
     await t.request('PATCH', `/api/projects/${project.slug}`, { requiredChecks: options.requiredChecks ?? ['lint'] })
     const created = await t.createTask(project.slug, { ...(options.humanReview !== undefined && { humanReview: options.humanReview }), ...options.task })
+    if (options.reviewRounds !== undefined) await t.db.update(tasks).set({ reviewRounds: options.reviewRounds }).where(eq(tasks.id, created.id))
     await t.request('POST', `/api/projects/${project.slug}/tasks/${created.number}/transitions`, { type: 'approve' })
     await t.orchestrator.schedule()
     const dev = (await runner.next('run.assign', m => m.job.taskId === created.id)).job
     const task = await getTask(project, created.number)
     t.github.setBranch(project.repository, dev.branch!, 'abc123')
-    for (const criterion of task.acceptanceCriteria) {
+    for (const criterion of task.acceptanceCriteria.filter(c => !c.checkedByHuman)) {
       await runner.call(dev.runId, dev.leaseEpoch, 'attach_evidence', options.noteEvidence
         ? { criterionId: criterion.id, kind: 'note', note: 'No behaviour change' }
         : { criterionId: criterion.id, kind: 'test_output', fileName: 't.txt', contentType: 'text/plain', dataBase64: Buffer.from('ok').toString('base64') })
     }
-    expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', summary: 'Done', headSha: 'abc123' })).toMatchObject({ ok: true })
+    expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', note: 'Did the work', summary: 'Done', headSha: 'abc123' })).toMatchObject({ ok: true })
     await t.orchestrator.schedule()
     const review = (await runner.next('run.assign', m => m.job.taskId === created.id && m.job.role === 'reviewer')).job
+    if (task.acceptanceCriteria.some(c => c.checkedByHuman)) expect(review.prompt).toContain('Do not request changes over them or their missing evidence')
     expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', {
-      outcome: 'approved', summary: 'Looks right', criteria: task.acceptanceCriteria.map(c => ({ criterionId: c.id, met: true, note: '' }))
+      outcome: 'approved', summary: 'Looks right', criteria: task.acceptanceCriteria.filter(c => !c.checkedByHuman).map(c => ({ criterionId: c.id, met: true, note: '' }))
     })).toMatchObject({ ok: true })
     const pr = [...t.github.pulls.values()].find(p => p.head === dev.branch)!
     return { project, task: await getTask(project, created.number), pr, dev }
   }
+
+  it.each([1, 2])('reserves flagged criteria for the human, without requiring agent evidence or verdicts, and merges after Inbox approval (%i human checks)', async (humanChecks) => {
+    const { project, task, pr, dev } = await approved({
+      humanReview: false, requiredChecks: [],
+      task: { acceptanceCriteria: ['Login works', ...Array.from({ length: humanChecks }, (_, i) => ({ text: `Playback works on real device ${i + 1}`, checkedByHuman: true }))] }
+    })
+    expect(dev.prompt).toContain('Do not attempt these checks or produce evidence for them')
+    expect(task).toMatchObject({ status: 'human_review', humanReview: false })
+    expect(task.latestReview?.criteria).toEqual([
+      expect.objectContaining({ met: true }),
+      ...Array.from({ length: humanChecks }, () => expect.objectContaining({ met: null, note: 'Needs human check' }))
+    ])
+    expect(task.acceptanceCriteria[1]).toMatchObject({ checkedByHuman: true, met: null })
+    const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
+    const item = inbox.needsYou.filter((i): i is TaskInboxItem => i.type !== 'plan_thread').find(i => i.taskId === task.id)!
+    expect(item.body).toBe(`Approved, 1 criterion met; ${humanChecks} ${humanChecks === 1 ? 'criterion needs' : 'criteria need'} a human check. These checks need your OK before the task merges.`)
+    await t.orchestrator.merges.tick()
+    expect(t.github.pulls.get(pr.number)?.merged).toBe(false)
+    const statuses = await t.request('GET', `/api/projects/${project.slug}/pull-requests`).then(r => r.json()) as { humanReviewOutstanding: boolean }[]
+    expect(statuses[0]?.humanReviewOutstanding).toBe(true)
+    const res = await t.request('POST', `/api/inbox/${item.id}/actions`, { action: 'approve' })
+    expect(res.status).toBe(200)
+    await t.orchestrator.merges.tick()
+    await vi.waitFor(async () => expect((await getTask(project, task.number)).status).toBe('merged'))
+    await pause(project)
+  })
+
+  it('returns to Human review when the human adds a check after agent approval', async () => {
+    const { project, task } = await approved({ humanReview: false })
+    expect(task.status).toBe('ready_to_merge')
+    const res = await t.request('PATCH', `/api/projects/${project.slug}/tasks/${task.number}`, {
+      acceptanceCriteria: task.acceptanceCriteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: true }))
+    })
+    expect(res.status).toBe(200)
+    expect(await getTask(project, task.number)).toMatchObject({ status: 'human_review', humanReview: false })
+    // Old clients editing text without the flag must preserve the human's choice.
+    await t.request('PATCH', `/api/projects/${project.slug}/tasks/${task.number}`, {
+      acceptanceCriteria: task.acceptanceCriteria.map(c => ({ id: c.id, text: c.text + ' on screen' }))
+    })
+    expect((await getTask(project, task.number)).acceptanceCriteria[0]?.checkedByHuman).toBe(true)
+    const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
+    const item = inbox.needsYou.filter((i): i is TaskInboxItem => i.type !== 'plan_thread').find(i => i.taskId === task.id)!
+    expect(item.body).toBe('Approved, 0 criteria met; 1 criterion needs a human check. These checks need your OK before the task merges.')
+    await pause(project)
+  })
 
   it('waits while required checks are pending, and sends CI failures back to the developer', async () => {
     const { project, task, pr } = await approved()
@@ -71,10 +118,15 @@ describe('merge orchestrator and human controls', () => {
 
     t.github.setChecks(pr.headSha, [{ name: 'lint', conclusion: 'failure', url: 'https://ci/1' }])
     await t.orchestrator.merges.tick()
-    expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', leaseRunId: null })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress' })
     const notes = await t.db.select().from(comments).where(eq(comments.taskId, task.id))
     expect(notes.at(-1)?.body).toContain('lint: failed (https://ci/1)')
     expect(notes.at(-1)?.body).toContain('pr_updated')
+    // The pass the reviewer's handoff poked may already have claimed the task,
+    // so wait for the developer's run rather than expecting a gap before it
+    await t.orchestrator.schedule()
+    const rework = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
+    expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', leaseRunId: rework.runId })
     await pause(project)
   })
 
@@ -90,8 +142,9 @@ describe('merge orchestrator and human controls', () => {
     t.github.setBranch(project.repository, pr.head, 'def456')
     await t.orchestrator.merges.tick()
     expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge', headSha: 'def456', branchUpdateRequested: false })
-    const reviews = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/reviews`).then(r => r.json()) as { headSha: string, verdict: string }[]
-    expect(reviews[0]).toMatchObject({ headSha: 'def456', verdict: 'approved' })
+    const reviews = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/reviews`).then(r => r.json()) as { headSha: string, verdict: string, round: number }[]
+    expect(reviews[0]).toMatchObject({ headSha: 'def456', verdict: 'approved', round: task.reviewRounds })
+    expect((await taskRow(task.id)).reviewRounds).toBe(task.reviewRounds)
     await t.orchestrator.schedule()
     expect(runner.received.filter(m => m.type === 'run.assign' && m.job.taskId === task.id)).toHaveLength(0)
 
@@ -134,16 +187,49 @@ describe('merge orchestrator and human controls', () => {
   })
 
   it('sends a conflicting branch back to the developer', async () => {
-    const { project, task, pr } = await approved()
+    const { project, task, pr } = await approved({ reviewRounds: 2 })
     t.github.setChecks('abc123', [{ name: 'lint', conclusion: 'success', url: null }])
     t.github.pulls.get(pr.number)!.mergeable = false
     t.github.pulls.get(pr.number)!.mergeableState = 'dirty'
     await t.orchestrator.merges.tick()
-    expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress' })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', rebaseOnly: true, approvedHeadSha: 'abc123', reviewRounds: task.reviewRounds })
     const notes = await t.db.select().from(comments).where(eq(comments.taskId, task.id))
     expect(notes.at(-1)?.body).toContain('can’t be merged')
-    expect(notes.at(-1)?.body).toContain('Rebase onto `origin/main`, resolve the conflicts, and report pr_updated.')
+    expect(notes.at(-1)?.body).toContain('Rebase onto `origin/main`, resolve the conflicts, and report pr_rebased.')
     expect(notes.at(-1)?.body).not.toContain('Merge')
+    await t.orchestrator.schedule()
+    const rebase = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
+    expect(rebase.prompt).toContain('rebase-only round')
+    expect(rebase.prompt).not.toContain('This is a revision')
+    expect(await getTask(project, task.number)).toMatchObject({ status: 'in_progress', reviewRounds: task.reviewRounds })
+    expect(await runner.call(rebase.runId, rebase.leaseEpoch, 'report_outcome', { outcome: 'pr_updated', note: 'Resolved conflicts', summary: 'Resolved', headSha: 'rebased' })).toMatchObject({ ok: false, error: expect.stringContaining('pr_rebased') })
+    t.github.setBranch(project.repository, rebase.branch!, 'rebased')
+    expect(await runner.call(rebase.runId, rebase.leaseEpoch, 'report_outcome', { outcome: 'pr_rebased', note: 'Resolved conflicts', summary: 'Kept both changes in app.ts', headSha: 'rebased' })).toMatchObject({ ok: true })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'agent_review', reviewRounds: task.reviewRounds, approvedHeadSha: 'abc123', headSha: 'rebased' })
+    expect(await getTask(project, task.number)).toMatchObject({ status: 'agent_review', reviewRounds: task.reviewRounds })
+    const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
+    expect(inbox.activity.find(i => i.taskId === task.id && i.preview === `Rebased PR #${pr.number}; on to the reviewer`))
+      .toMatchObject({ body: `Rebased PR #${pr.number}; on to the reviewer`, prUrl: pr.url, type: 'activity' })
+
+    await t.orchestrator.schedule()
+    const review = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'reviewer')).job
+    expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', {
+      outcome: 'approved', summary: 'Rebase preserves the approved work', criteria: task.acceptanceCriteria.map(c => ({ criterionId: c.id, met: true, note: '' }))
+    })).toMatchObject({ ok: true })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge', rebaseOnly: false, approvedHeadSha: 'abc123' })
+    t.github.pulls.get(pr.number)!.state = 'closed'
+    await t.orchestrator.merges.tick()
+    expect(await getTask(project, task.number)).toMatchObject({ status: 'failed' })
+    expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'resolve', to: 'in_progress' })).status).toBe(200)
+    await t.orchestrator.schedule()
+    const fix = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
+    expect(fix.prompt).not.toContain('rebase-only round')
+    expect(await runner.call(fix.runId, fix.leaseEpoch, 'report_outcome', { outcome: 'pr_rebased', note: 'Fixed merge failure', summary: 'Restored PR', headSha: 'fixed' }))
+      .toMatchObject({ ok: false, error: expect.stringContaining('pr_opened or pr_updated') })
+    t.github.setBranch(project.repository, fix.branch!, 'fixed')
+    expect(await runner.call(fix.runId, fix.leaseEpoch, 'report_outcome', { outcome: 'pr_updated', note: 'Fixed merge failure', summary: 'Restored PR', headSha: 'fixed' }))
+      .toMatchObject({ ok: true })
+    expect(await getTask(project, task.number)).toMatchObject({ status: 'agent_review', headSha: 'fixed', reviewRounds: task.reviewRounds })
     await pause(project)
   })
 
@@ -160,7 +246,7 @@ describe('merge orchestrator and human controls', () => {
     expect(t.github.calls.filter(c => c.method === 'updateBranch' && c.args[1] === pr.number)).toHaveLength(1)
     expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', branchUpdateRequested: false })
     const notes = await t.db.select().from(comments).where(eq(comments.taskId, task.id))
-    expect(notes.at(-1)?.body).toBe('The base branch `main` has moved and the update conflicts with this branch. Rebase onto `origin/main`, resolve the conflicts, and report pr_updated.')
+    expect(notes.at(-1)?.body).toBe('The base branch `main` has moved and the update conflicts with this branch. Rebase onto `origin/main`, resolve the conflicts, and report pr_rebased.')
     expect(notes.at(-1)?.body).not.toContain('Merge')
     const history = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/history`).then(r => r.json()) as { action: string, detail: Record<string, unknown> }[]
     expect(history.find(h => h.action === 'task.transition' && h.detail.event === 'base_conflict')).toBeDefined()
@@ -178,7 +264,7 @@ describe('merge orchestrator and human controls', () => {
     const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
     const item = inbox.needsYou.filter((i): i is TaskInboxItem => i.type !== 'plan_thread').find(i => i.taskId === task.id)
     expect(item).toMatchObject({ type: 'human_review', taskRef: task.ref, prUrl: pr.url, sender: { name: 'Vera', role: 'reviewer' } })
-    expect(item?.body).toBe('Approved, all 1 criteria met. This task is marked for human review, so it needs your OK before it merges.')
+    expect(item?.body).toBe('Approved, 1 criterion met. This task is marked for human review, so it needs your OK before it merges.')
     // It arrived when it entered Human review; an update that keeps the status, such as the PR head moving, doesn't move it
     const [entered] = await t.db.select().from(auditLog).where(and(eq(auditLog.taskId, task.id), eq(auditLog.action, 'task.transition'))).orderBy(desc(auditLog.createdAt)).limit(1)
     expect(item?.at).toBe(entered!.createdAt.toISOString())
@@ -225,7 +311,7 @@ describe('merge orchestrator and human controls', () => {
     const { project, task } = await approved({ humanReview: true })
     const res = await t.request('POST', `/api/inbox/${task.id}/actions`, { action: 'request_changes', text: 'Use the shared button' })
     expect(res.status).toBe(200)
-    expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress' })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', rebaseOnly: false })
     const notes = await t.db.select().from(comments).where(eq(comments.taskId, task.id))
     expect(notes.at(-1)).toMatchObject({ body: 'Use the shared button', pinned: true, author: { kind: 'human' } })
     await pause(project)

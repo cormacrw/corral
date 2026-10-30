@@ -3,7 +3,7 @@ import type { Task } from '@corral/contracts'
 import type { TaskStatus } from '@corral/core'
 import type { BoardFilters } from '~/utils/board'
 import { BOARD_COLUMNS, filtersFromQuery, filtersToQuery, matchesFilter, onBoard, sortColumn, taskAgentIds } from '~/utils/board'
-import { epicTitle, PRIORITY, STATUS, taskNote } from '~/utils/labels'
+import { epicInProgress, epicTitle, epicWithLiveCounts, PRIORITY, STATUS, taskNote } from '~/utils/labels'
 
 // The board (design/board.md): approved work by status, no drag and drop
 const route = useRoute()
@@ -66,6 +66,12 @@ const mobileColumns = computed(() => columns.value.map(c => ({ ...c, color: DOT[
 const agentFor = (task: Task) => task.lease ? live.state.value.agents.find(a => a.id === task.lease!.agentId) : null
 const epicLabel = (id: string) => epicTitle(live.state.value.epics[project.value?.id ?? ''], id, epics.value.indexOf(id))
 const epicOptions = computed(() => epics.value.map(id => ({ id, label: epicLabel(id) })))
+// Epics with work left or tasks on the Board, so one waiting on its epic PR
+// stays here after its tasks leave the Merged column. The Epic filter applies.
+const boardEpics = computed(() => (live.state.value.epics[project.value?.id ?? ''] ?? [])
+  .map(epic => epicWithLiveCounts(epic, all.value))
+  .filter(epic => epicInProgress(epic) || all.value.some(t => t.epicId === epic.id && onBoard(t)))
+  .filter(epic => filters.value.epics.length === 0 || filters.value.epics.includes(epic.id)))
 </script>
 
 <template>
@@ -77,6 +83,7 @@ const epicOptions = computed(() => epics.value.map(id => ({ id, label: epicLabel
       v-model:filters="filters"
       :columns="mobileColumns"
       :epics="epicOptions"
+      :board-epics="boardEpics"
       :agents="taskAgents"
       :total="visible.length"
       :all="all"
@@ -116,6 +123,12 @@ const epicOptions = computed(() => epics.value.map(id => ({ id, label: epicLabel
           />
           <span class="ms-auto text-sm text-muted">{{ visible.length }} tasks</span>
         </div>
+
+        <BoardEpics
+          v-if="boardEpics.length"
+          :epics="boardEpics"
+          class="border-b border-default px-4 py-2"
+        />
 
         <UAlert
           v-if="error"
@@ -215,7 +228,7 @@ const epicOptions = computed(() => epics.value.map(id => ({ id, label: epicLabel
                         working
                         size="xs"
                       />
-                      {{ agentFor(task)!.name }}
+                      {{ task.type === 'design' && agentFor(task)!.role === 'designer' ? 'Designer · ' : '' }}{{ agentFor(task)!.name }}
                     </span>
                   </span>
                 </button>

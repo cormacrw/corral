@@ -8,6 +8,7 @@ RUN npm install -g pnpm@12.15.0
 
 WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY patches patches
 COPY packages/tsconfig/package.json packages/tsconfig/
 COPY packages/core/package.json packages/core/
 COPY packages/contracts/package.json packages/contracts/
@@ -21,6 +22,8 @@ COPY packages/db packages/db
 COPY apps/server apps/server
 
 # Everything environment-specific is configuration (D12); see docker-compose.yml
+ARG CORRAL_BUILD_SHA=development
+ENV CORRAL_BUILD_SHA=$CORRAL_BUILD_SHA
 ENV NODE_ENV=production
 ENV CORRAL_SERVER_HOST=0.0.0.0
 ENV CORRAL_SERVER_PORT=4100

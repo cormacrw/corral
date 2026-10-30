@@ -12,6 +12,10 @@ export class FakeGitHub implements GitHubClient {
   calls: { method: string, args: unknown[] }[] = []
   mergeResult: { merged: boolean, sha: string | null, message: string } | Error = { merged: true, sha: 'merge-sha', message: 'Pull Request successfully merged' }
   updateBranchResult = true
+  // Runs inside updateBranch once GitHub has accepted the rebase, before it returns
+  onUpdateBranch: (() => Promise<void>) | null = null
+  // Commits the base has that a head doesn't, by head SHA
+  behind = new Map<string, number>()
   #nextNumber = 1
 
   #key(repository: string, branch: string): string {
@@ -92,12 +96,18 @@ export class FakeGitHub implements GitHubClient {
     return this.checkResults.get(sha) ?? []
   }
 
+  async behindBy(repository: string, base: string, head: string): Promise<number> {
+    this.#record('behindBy', repository, base, head)
+    return this.behind.get(head) ?? 0
+  }
+
   // Rebases onto the base: the head commit is rewritten, so the test pushes
   // the new head with `setBranch` the way GitHub would
   async updateBranch(repository: string, pull: { number: number, nodeId: string }, expectedHeadSha: string): Promise<boolean> {
     this.#record('updateBranch', repository, pull.number, expectedHeadSha)
     const pr = this.pulls.get(pull.number)
     if (!pr) throw new Error(`No PR #${pull.number}`)
+    if (this.onUpdateBranch) await this.onUpdateBranch()
     if (!this.updateBranchResult) return false
     pr.mergeableState = 'clean'
     return true

@@ -36,8 +36,9 @@ const validEvents: Record<TaskEventType, TaskEvent> = {
   changes_requested: { type: 'changes_requested' },
   review_approved: { type: 'review_approved' },
   human_approve: { type: 'human_approve' },
+  require_human_check: { type: 'require_human_check' },
   ci_failed: { type: 'ci_failed' },
-  base_conflict: { type: 'base_conflict' },
+  base_conflict: { type: 'base_conflict', approvedHeadSha: 'approved' },
   head_moved: { type: 'head_moved' },
   merged: { type: 'merged', gates: passingGates },
   merged_outside: { type: 'merged_outside' },
@@ -59,6 +60,7 @@ const d10: Record<TaskEventType, [TaskStatus[], Actor]> = {
   changes_requested: [['agent_review'], server],
   review_approved: [['agent_review'], server],
   human_approve: [['human_review'], human],
+  require_human_check: [['ready_to_merge'], server],
   ci_failed: [['ready_to_merge'], server],
   base_conflict: [['ready_to_merge'], server],
   head_moved: [['ready_to_merge'], server],
@@ -315,5 +317,37 @@ describe('availableEvents', () => {
 
   it('offers developer agents nothing', () => {
     expect(availableEvents(task('in_progress'), developer)).toEqual([])
+  })
+})
+
+describe('rebase-only rounds', () => {
+  it('retains approval and the review budget through conflict and resubmission', () => {
+    const rebasing = expectOk(transition(task('ready_to_merge', { reviewRounds: 4 }), { type: 'base_conflict', approvedHeadSha: 'approved' }, server))
+    expect(rebasing).toMatchObject({ status: 'in_progress', rebaseOnly: true, approvedHeadSha: 'approved', reviewRounds: 4 })
+    const submitted = expectOk(transition(rebasing, { type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true }, server))
+    expect(submitted).toMatchObject({ status: 'agent_review', rebaseOnly: true, reviewRounds: 4 })
+  })
+
+  it.each([false, true])('finishes rebase-only mode on approval (humanReview=%s), including later failure recovery', (humanReview) => {
+    let state = expectOk(transition(task('ready_to_merge', { humanReview, reviewRounds: 2 }), { type: 'base_conflict', approvedHeadSha: 'approved' }, server))
+    state = expectOk(transition(state, { type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true }, server))
+    state = expectOk(transition(state, { type: 'review_approved' }, server))
+    expect(state).toMatchObject({ status: humanReview ? 'human_review' : 'ready_to_merge', rebaseOnly: false, approvedHeadSha: 'approved', reviewRounds: 2 })
+    if (humanReview) state = expectOk(transition(state, { type: 'human_approve' }, human))
+    state = expectOk(transition(state, { type: 'fail', reason: 'PR closed' }, server))
+    state = expectOk(transition(state, { type: 'resolve', to: 'in_progress' }, human))
+    expect(state).toMatchObject({ status: 'in_progress', rebaseOnly: false, approvedHeadSha: 'approved', reviewRounds: 2 })
+  })
+
+  it('keeps an unfinished rebase-only round when stuck and resolved', () => {
+    let state = expectOk(transition(task('ready_to_merge'), { type: 'base_conflict', approvedHeadSha: 'approved' }, server))
+    state = expectOk(transition(state, { type: 'block', reason: 'Which resolution?' }, server))
+    state = expectOk(transition(state, { type: 'resolve', to: 'in_progress' }, human))
+    expect(state).toMatchObject({ status: 'in_progress', rebaseOnly: true, approvedHeadSha: 'approved' })
+  })
+
+  it('returns to a normal round when the rebase reviewer requests changes', () => {
+    const result = expectOk(transition(task('agent_review', { rebaseOnly: true, reviewRounds: 1 }), { type: 'changes_requested' }, server))
+    expect(result).toMatchObject({ status: 'in_progress', rebaseOnly: false, reviewRounds: 2 })
   })
 })

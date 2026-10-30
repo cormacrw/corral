@@ -28,6 +28,7 @@ Ready tasks whose epic has unfinished prerequisites show **Waiting on epic: <tit
 ### Body, in order (stacked; split mode moves the properties to the rail)
 
 1. **Title:** an inline-editable input, 18px semibold. A borderless field that shows a background on hover and a `primary` ring on focus.
+   - **Paused** (`task.paused`, after a human stopped a run): a `warning` bar under the title, in every mode, reads "Paused. Its run was stopped, so nothing picks it up until you resume it." with a **Resume** button. Resuming clears the pause and the scheduler starts the task right away, even inside its agent's wake interval. A task that isn't paused has no bar and no Resume action, and only a human can resume (403 `forbidden` otherwise).
 2. **Properties.** In stacked mode each row is a label (104px) and a value; in split mode the label sits above the value.
 
    | Property | Control | Editable |
@@ -60,9 +61,9 @@ Ready tasks whose epic has unfinished prerequisites show **Waiting on epic: <tit
    - Editing shows a toolbar: bold, italic, inline code | heading, bulleted list, numbered list, code block, link.
    - It also shows a `primary` focus ring, **Cancel** and **Save**.
    - Supported content: paragraphs, headings, lists, inline code, code blocks, links, bold and italic.
-5. **Acceptance criteria:** a count ("2 of 3 met") and one row per criterion, each with a met or open icon, an inline-editable text and a remove button. There's an **Add criterion** button and the note "The reviewer marks criteria met from evidence." Humans can't tick criteria.
+5. **Acceptance criteria:** a count ("2 of 3 met") and one row per criterion, each with a met or open icon, an expanding, inline-editable text area and a remove button. The **Checked by a human** toggle sits below the text so complete criteria remain readable on mobile. There's an **Add criterion** button and the note "The reviewer marks criteria met from evidence." Each row has a **Checked by a human** toggle. Those criteria are reserved for the human, excluded from agent evidence and verdict requirements, and show **Needs human check** alongside the evidence. The Inbox provides their checkboxes before approval.
 6. **Activity:**
-   - **Events:** a dot, the actor, the text and the time.
+   - **Events:** a dot, the actor, the text and the time. A run that ended with an error shows here with that error.
    - **Comments:** an avatar and a bubble.
    - **Composer** (shared pattern), with no recipient picker. The destination is implicit:
      - If an agent holds the task (In progress, Blocked, Agent review or Human review), messages go to the developer: "Atlas gets this on its next step."
@@ -106,7 +107,8 @@ Merged is final (D10). The task reads as it shipped: title, properties, dependen
 The shared evidence list on the task page and desktop and mobile Inbox shows
 the latest reviewer's criterion note first, followed by screenshot, video and
 request cards, then note evidence rendered inline as markdown without a file
-link. File cards still open the existing viewer.
+link. File cards still open the existing viewer. A video shows a **Download**
+link under its player, for a file the browser can't play.
 
 Test output, logs, text and other files sit under a native **Agent artifacts (n)**
 disclosure, closed by default for each criterion and for the task as a whole.

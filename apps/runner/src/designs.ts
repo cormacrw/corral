@@ -58,7 +58,7 @@ export interface DesignSubmission {
 export const MAX_BUNDLE_BYTES = 25 * 1024 * 1024
 const SCREENSHOT_TYPES: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' }
 
-// Reads what the developer passed to submit_design and packs the bundle.
+// Reads what the designer passed to submit_design and packs the bundle.
 // The bundle must have index.html at its root and no symlinks, so it works
 // as static files on their own and can't point outside itself when unpacked.
 export async function packDesign(baseDir: string, input: Record<string, unknown>): Promise<{ ok: true, result: DesignSubmission } | { ok: false, error: string }> {

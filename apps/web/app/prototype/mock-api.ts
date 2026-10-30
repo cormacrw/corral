@@ -1,5 +1,5 @@
 import { checkEpicDependencies } from '@corral/core'
-import type { CreateTaskInput, DraftSession, PerfWindow, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
+import type { CreateAgentInput, CreateTaskInput, EpicReviewActionInput, InboxActionInput, PatchEpicInput, DraftSession, PerfWindow, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
 import * as f from './fixtures'
@@ -37,6 +37,13 @@ function session(id: string): PlanSessionDetail {
 }
 
 route('GET', '/health', () => ({ ok: true }))
+route('POST', '/runners/:id/update', ([id]) => {
+  const runner = f.runner.runners.find(r => r.id === id)!
+  runner.draining = true
+  runner.updateRequested = true
+  runner.updateState = ''
+  return runner
+})
 route('GET', '/runner', () => f.runner)
 route('GET', '/status', () => ({ ...f.status, runners: f.runner.runners }))
 route('POST', '/stop-all', () => Object.assign(f.status, { stopped: true }))
@@ -99,7 +106,7 @@ route('POST', '/projects/:slug/tasks', ([slug], body) => {
     title: input.title, type: input.type, description: input.description ?? null,
     status: 'backlog', priority: input.priority ?? 'medium', epicId: input.epicId ?? null,
     humanReview: input.humanReview ?? p.humanReviewDefault,
-    acceptanceCriteria: (input.acceptanceCriteria ?? []).map((text, position) => ({ id: `mock-${number}-${position}`, text, position, met: null })),
+    acceptanceCriteria: (input.acceptanceCriteria ?? []).map((text, position) => ({ id: `mock-${number}-${position}`, ...(typeof text === 'string' ? { text } : text), position, met: null })),
     dependsOn: (input.dependsOn ?? []).map(n => `${p.prefix}-${n}`)
   })
   p.nextTaskNumber = number + 1
@@ -107,7 +114,18 @@ route('POST', '/projects/:slug/tasks', ([slug], body) => {
   emit({ type: 'task.created', task })
   return task
 })
+route('GET', '/projects/:slug/tasks/:number/designs', ([slug, number]) => {
+  const task = taskIn(slug!, number!)
+  return task.ref === 'COR-4' ? [{ id: 'design-v1', version: 1, status: 'approved', branch: 'design/COR-4', commitSha: 'design-review-v1', spec: '# Review screen', screenshots: [], previewUrl: '', feedback: null, planSessionId: 's-1', createdAt: f.ago(100) }] : []
+})
 route('GET', '/projects/:slug/tasks/:number', ([slug, number]) => taskIn(slug!, number!))
+// A real resume goes on to start a run, which the prototype has no use for
+route('POST', '/projects/:slug/tasks/:number/resume', ([slug, number]) => {
+  const task = taskIn(slug!, number!)
+  Object.assign(task, { paused: false, updatedAt: new Date().toISOString() })
+  emit({ type: 'task.updated', task })
+  return task
+})
 route('PATCH', '/projects/:slug/tasks/:number', ([slug, number], body) => {
   const task = taskIn(slug!, number!)
   const previousEpicId = task.epicId
@@ -146,6 +164,24 @@ route('GET', '/projects/:slug/pull-requests', ([slug]) => {
   return f.pullRequests.filter(pr => pr.taskRef.startsWith(`${p.prefix}-`))
 })
 route('GET', '/projects/:slug/epics', ([slug]) => f.epics.filter(e => e.projectId === project(slug!).id))
+route('POST', '/epics/:id/review', ([id], body) => {
+  const epic = f.epics.find(e => e.id === id) ?? notFound()
+  const { action } = body as EpicReviewActionInput
+  epic.reviewState = action === 'approve' ? 'ready_to_merge' : action === 'request_changes' ? 'changes_requested' : 'open'
+  emit({ type: 'epic.updated', epic })
+  return { ok: true }
+})
+route('PATCH', '/epics/:id', ([id], body) => {
+  const epic = f.epics.find(e => e.id === id) ?? notFound()
+  const input = body as PatchEpicInput
+  if (input.reviewMode && input.reviewMode !== epic.reviewMode && epic.reviewModeLocked) {
+    const message = 'The review mode can\'t change once a task in the epic has opened a PR'
+    throw new ApiError(409, { code: 'invalid_input', issues: [{ message }] }, message)
+  }
+  Object.assign(epic, input, { updatedAt: new Date().toISOString() })
+  emit({ type: 'epic.updated', epic })
+  return epic
+})
 route('PUT', '/epics/:id/dependencies', ([id], body) => {
   const epic = f.epics.find(e => e.id === id) ?? notFound()
   const all = f.epics.filter(e => e.projectId === epic.projectId)
@@ -171,7 +207,14 @@ route('GET', '/epics/:id', ([id]) => {
 })
 
 route('GET', '/agents', () => f.agents)
-route('PATCH', '/agents/:id', ([id], body) => Object.assign(f.agents.find(a => a.id === id) ?? notFound(), body))
+route('POST', '/agents', (_, body) => {
+  const input = body as CreateAgentInput
+  const agent = { ...input, id: `mock-agent-${f.agents.length}`, paused: false, pausedUntil: null, wakeIntervalSeconds: null, activeRuns: 0, avatarUrl: null }
+  f.agents.push(agent)
+  emit({ type: 'agent.updated', agent })
+  return agent
+})
+route('PATCH', '/agents/:id', ([id], body) => Object.assign(f.agents.find(a => a.id === id) ?? notFound(), body, (body as { paused?: boolean }).paused === false ? { pausedUntil: null } : {}))
 route('GET', '/me', () => f.profile)
 route('PATCH', '/me', (_, body) => Object.assign(f.profile, body))
 
@@ -199,7 +242,27 @@ route('POST', '/projects/:slug/runs/:runId/messages', ([slug, runId], body) => {
   return { runId: run.id, comment }
 })
 
+route('POST', '/deployments/:id/read', ([id]) => {
+  const item = f.releaseNotes.find(r => r.deploymentId === id)!
+  item.unread = false
+  return { ok: true }
+})
+route('POST', '/deployments/:id/dismiss', ([id]) => {
+  const item = f.releaseNotes.find(r => r.deploymentId === id)!
+  item.unread = false
+  item.resolution = 'You dismissed these release notes'
+  return { ok: true }
+})
 route('GET', '/inbox', () => f.inbox())
+// Let the static Inbox exercise send and auto-advance without a server.
+route('POST', '/inbox/:taskId/actions', ([taskId], body) => {
+  const task = f.tasks.find(t => t.id === taskId) ?? notFound()
+  const input = body as InboxActionInput
+  if (input.action === 'delete') f.tasks.splice(f.tasks.indexOf(task), 1)
+  else task.status = input.action === 'approve' ? 'merged' : input.action === 'send_back' ? 'backlog' : input.action === 'resolve' ? input.to : 'in_progress'
+  emit({ type: 'task.updated', task })
+  return { task: input.action === 'delete' ? null : task }
+})
 
 route('POST', '/plan/sessions', (_, body) => {
   const { id = crypto.randomUUID(), projectId, text, runtime = 'claude-code', taskRef } = body as StartPlanSessionInput

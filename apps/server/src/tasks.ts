@@ -1,3 +1,4 @@
+import { holdsEpicOpen, invalidateEpicReview } from './epic-review-state.ts'
 import type { AuditEntry, Comment, CreateTaskInput, HumanTransitionInput, PatchTaskInput, Task, TaskAgent, TaskDesignPin } from '@corral/contracts'
 import { createTaskInput } from '@corral/contracts'
 import {
@@ -17,7 +18,7 @@ import {
   type TaskStatus
 } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, asc, desc, eq, inArray, isNull, max, ne, notInArray, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, max, ne, sql } from 'drizzle-orm'
 import { ApiFailure, notFound } from './errors.ts'
 import { toReview } from './runs.ts'
 
@@ -33,6 +34,8 @@ export function toTaskState(row: TaskRow): TaskState {
   return {
     status: row.status,
     humanReview: row.humanReview,
+    rebaseOnly: row.rebaseOnly,
+    approvedHeadSha: row.approvedHeadSha,
     reviewRounds: row.reviewRounds,
     failedRuns: row.failedRuns,
     reason: row.statusReason,
@@ -62,7 +65,7 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
     .from(epicDependencies)
     .innerJoin(epics, eq(epics.id, epicDependencies.dependsOnEpicId))
     .innerJoin(tasks, eq(tasks.epicId, epics.id))
-    .where(and(eq(epics.projectId, project.id), isNull(tasks.deletedAt), notInArray(tasks.status, ['draft', 'backlog', 'merged'])))
+    .where(and(eq(epics.projectId, project.id), holdsEpicOpen(tasks, epics)))
     .orderBy(asc(epics.title), asc(epics.id))
   // Newest first, so the first row per task is its latest review
   const reviewRows = await db.select().from(reviews).where(inArray(reviews.taskId, ids)).orderBy(desc(reviews.createdAt))
@@ -74,15 +77,15 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
     .where(inArray(taskDesignPins.taskId, ids))
   const { latestApproved, started } = await pinStaleness(db, pins.map(p => p.designTaskId), ids)
   const owners = await draftSessions(db, rows.filter(r => r.status === 'draft').map(r => r.id))
-  // Newest first, so the first run per task and role names its agent (a retry
-  // keeps the same developer, D15)
+  // Newest first, so the first run per task and role names its agent.
+  // Designs use their designer in the API's Developer field (D23).
   const runAgents = await db
     .select({ taskId: runs.taskId, role: runs.role, id: agents.id, name: agents.name })
     .from(runs)
     .innerJoin(agents, eq(agents.id, runs.agentId))
-    .where(and(inArray(runs.taskId, ids), inArray(runs.role, ['developer', 'reviewer'])))
+    .where(and(inArray(runs.taskId, ids), inArray(runs.role, ['developer', 'designer', 'reviewer'])))
     .orderBy(desc(runs.queuedAt), desc(runs.number))
-  const agentOf = (taskId: string, role: 'developer' | 'reviewer'): TaskAgent | null => {
+  const agentOf = (taskId: string, role: 'developer' | 'designer' | 'reviewer'): TaskAgent | null => {
     const found = runAgents.find(r => r.taskId === taskId && r.role === role)
     return found ? { id: found.id, name: found.name } : null
   }
@@ -98,7 +101,7 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
     return {
       ...toTask(project, row, criteria, dependencies, latest, current, design, owners.get(row.id) ?? null, row.leaseRunId ? leaseAgents.get(row.leaseRunId) ?? null : null),
       waitingOnEpics: waitingEpics.filter(e => e.epicId === row.epicId).map(({ id, title }) => ({ id, title })),
-      developer: agentOf(row.id, 'developer'),
+      developer: agentOf(row.id, row.type === 'design' ? 'designer' : 'developer'),
       reviewer: agentOf(row.id, 'reviewer')
     }
   })
@@ -155,7 +158,7 @@ function toTask(
     prUrl: row.prUrl,
     acceptanceCriteria: criteria
       .filter(c => c.taskId === row.id)
-      .map(c => ({ id: c.id, position: c.position, text: c.text, met: current?.criteria.find(v => v.criterionId === c.id)?.met ?? null })),
+      .map(c => ({ id: c.id, position: c.position, text: c.text, checkedByHuman: c.checkedByHuman, met: c.checkedByHuman ? null : current?.criteria.find(v => v.criterionId === c.id)?.met ?? null })),
     dependsOn: dependencies.filter(d => d.taskId === row.id).map(d => taskRef(project.prefix, d.number)),
     lease: row.leaseRunId && row.leaseRole && row.leaseExpiresAt && leaseAgentId
       ? { agentId: leaseAgentId, runId: row.leaseRunId, role: row.leaseRole, expiresAt: row.leaseExpiresAt.toISOString() }
@@ -228,9 +231,12 @@ export async function listTasks(db: Executor, project: ProjectRow, view: TaskVie
 
 // New tasks start in Backlog, or as Drafts for the PM's plans (D10).
 // Returns the new task's ID.
-export async function createTask(db: Executor, project: ProjectRow, rawInput: CreateTaskInput, actor: Actor, options: { draft?: boolean } = {}): Promise<string> {
+export async function createTask(db: Executor, project: ProjectRow, rawInput: CreateTaskInput, actor: Actor, options: { draft?: boolean, epicFix?: boolean } = {}): Promise<string> {
   const input = createTaskInput.parse(rawInput)
-  const created = createTaskState(actor, requiresHumanReview(input.type, input.humanReview ?? project.humanReviewDefault), options.draft)
+  // D27 integration feedback creates Ready work without a separate plan approval.
+  const created: ReturnType<typeof createTaskState> = options.epicFix
+    ? { ok: true, task: { status: 'ready', humanReview: input.humanReview ?? project.humanReviewDefault, reviewRounds: 0, failedRuns: 0, reason: null } }
+    : createTaskState(actor, requiresHumanReview(input.type, input.humanReview ?? project.humanReviewDefault), options.draft)
   if (!created.ok) throw new ApiFailure(409, { code: 'transition_rejected', reason: created.error })
 
   return db.transaction(async (tx) => {
@@ -262,6 +268,7 @@ export async function createTask(db: Executor, project: ProjectRow, rawInput: Cr
     }
 
     const state = created.task
+    if (!['draft', 'backlog'].includes(state.status)) await invalidateEpicReview(tx, input.epicId)
     const [row] = await tx.insert(tasks).values({
       projectId: project.id,
       number: allocated!.number,
@@ -278,7 +285,7 @@ export async function createTask(db: Executor, project: ProjectRow, rawInput: Cr
 
     if (input.acceptanceCriteria.length > 0) {
       await tx.insert(acceptanceCriteria).values(
-        input.acceptanceCriteria.map((text, position) => ({ taskId, position, text }))
+        input.acceptanceCriteria.map((criterion, position) => ({ taskId, position, ...(typeof criterion === 'string' ? { text: criterion } : criterion) }))
       )
     }
     if (dependencies.length > 0) {
@@ -321,6 +328,11 @@ export async function applyTransition(
   detail: Record<string, unknown> = { event: event.type }
 ): Promise<TaskState> {
   const state = toTaskState(task)
+  if (event.type === 'review_approved') {
+    const humanCriteria = await tx.select({ id: acceptanceCriteria.id }).from(acceptanceCriteria)
+      .where(and(eq(acceptanceCriteria.taskId, task.id), eq(acceptanceCriteria.checkedByHuman, true))).limit(1)
+    if (humanCriteria.length) state.humanReview = true
+  }
   if (task.epicId) {
     const [epic] = await tx.select({ reviewMode: epics.reviewMode }).from(epics).where(eq(epics.id, task.epicId))
     if (epic?.reviewMode === 'each_task') state.humanReview = true
@@ -332,8 +344,11 @@ export async function applyTransition(
   if (!result.ok) throw new ApiFailure(409, { code: 'transition_rejected', reason: result.error })
 
   const next = result.task
+  if (['draft', 'backlog'].includes(task.status) && !['draft', 'backlog'].includes(next.status)) await invalidateEpicReview(tx, task.epicId)
   await tx.update(tasks).set({
     status: next.status,
+    rebaseOnly: next.rebaseOnly ?? false,
+    approvedHeadSha: next.approvedHeadSha ?? null,
     reviewRounds: next.reviewRounds,
     failedRuns: next.failedRuns,
     statusReason: next.reason,
@@ -384,25 +399,34 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
     }
     const descriptionChanged = fields.description !== undefined && JSON.stringify(fields.description) !== JSON.stringify(task.description)
     let criteriaChange: TaskContentEdit['criteria'] = null
+    if (fields.epicId !== undefined && fields.epicId !== task.epicId && !['draft', 'backlog'].includes(task.status)) {
+      await invalidateEpicReview(tx, task.epicId)
+      await invalidateEpicReview(tx, fields.epicId)
+    }
     if (Object.keys(fields).length > 0) {
       await tx.update(tasks).set({ ...fields, updatedAt: new Date() }).where(eq(tasks.id, taskId))
     }
+    let newHumanCheck = false
     if (criteriaInput) {
       const existing = await tx.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, taskId))
+      newHumanCheck = criteriaInput.some(c => c.checkedByHuman && !existing.some(e => e.id === c.id && e.checkedByHuman))
       const keep = new Set(criteriaInput.map(c => c.id).filter((id): id is string => Boolean(id)))
       const gone = existing.filter(c => !keep.has(c.id)).map(c => c.id)
       if (gone.length > 0) await tx.delete(acceptanceCriteria).where(inArray(acceptanceCriteria.id, gone))
       const added = criteriaInput.filter(c => !c.id || !existing.some(e => e.id === c.id)).length
-      const reworded = criteriaInput.filter(c => existing.some(e => e.id === c.id && e.text !== c.text)).length
+      const reworded = criteriaInput.filter(c => existing.some(e => e.id === c.id && (e.text !== c.text || e.checkedByHuman !== (c.checkedByHuman ?? e.checkedByHuman)))).length
       const reordered = criteriaInput.some((c, i) => c.id !== undefined && existing.find(e => e.id === c.id)?.position !== i)
       if (added + gone.length + reworded > 0 || reordered) criteriaChange = { added, removed: gone.length, reworded }
       for (const [position, criterion] of criteriaInput.entries()) {
         if (criterion.id && existing.some(c => c.id === criterion.id)) {
-          await tx.update(acceptanceCriteria).set({ position, text: criterion.text, updatedAt: new Date() }).where(eq(acceptanceCriteria.id, criterion.id))
+          await tx.update(acceptanceCriteria).set({ position, text: criterion.text, checkedByHuman: criterion.checkedByHuman, updatedAt: new Date() }).where(eq(acceptanceCriteria.id, criterion.id))
         } else {
-          await tx.insert(acceptanceCriteria).values({ taskId, position, text: criterion.text })
+          await tx.insert(acceptanceCriteria).values({ taskId, position, text: criterion.text, checkedByHuman: criterion.checkedByHuman })
         }
       }
+    }
+    if (task.status === 'ready_to_merge' && newHumanCheck) {
+      await applyTransition(tx, task, project, { type: 'require_human_check' }, { kind: 'system', component: 'server' })
     }
     if (dependsOn) await setDependencies(tx, project, task, dependsOn)
     await tx.insert(auditLog).values({ projectId: project.id, taskId, actor, action: 'task.updated', detail: { changed: Object.keys(input) } })
@@ -436,8 +460,10 @@ async function setDependencies(tx: Executor, project: ProjectRow, task: TaskRow,
   if (found.length > 0) await tx.insert(taskDependencies).values(found.map(d => ({ taskId: task.id, dependsOnId: d.id })))
 }
 
+// Stamped with the clock, not the transaction's start, so comments posted in
+// one transaction list in the order they were added
 export async function addComment(db: Executor, taskId: string, input: { body: string, pinned: boolean }, author: Actor): Promise<Comment> {
-  const [row] = await db.insert(comments).values({ taskId, author, body: input.body, pinned: input.pinned }).returning()
+  const [row] = await db.insert(comments).values({ taskId, author, body: input.body, pinned: input.pinned, createdAt: sql`clock_timestamp()` }).returning()
   return toComment(row!)
 }
 

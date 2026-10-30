@@ -1,10 +1,13 @@
-import { EVIDENCE_KINDS, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
+import { EpicPullRequests, epicReviewContext } from './epic-prs.ts'
+import { RUNNER_HEARTBEAT_MS, EVIDENCE_KINDS, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
 import {
   ACTIVE_RUN_STATES,
+  LEASE_DURATION_MS,
   feedbackSimilarity,
   nextDesignVersion,
   reviewFeedbackText,
   transition,
+  humanCheckTally,
   taskRef,
   richTextToMarkdown,
   type Actor,
@@ -12,7 +15,7 @@ import {
   type RunState
 } from '@corral/core'
 import { schema, type Database, type Executor } from '@corral/db'
-import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt, ne } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lt, ne } from 'drizzle-orm'
 import { z } from 'zod'
 import { listTaskAttachments, readProjectAttachment } from './attachments.ts'
 import type { BlobStore } from './blob-store.ts'
@@ -21,12 +24,14 @@ import { publishDependents } from './dependent-tasks.ts'
 import { bundleHasRootIndex, DesignNotFound, readDesign } from './designs.ts'
 import { ApiFailure } from './errors.ts'
 import type { EventBus } from './events.ts'
-import type { GitHubClient } from './github.ts'
-import { EpicBranchError, taskBase } from './task-base.ts'
+import type { GitHubClient, PullRequest } from './github.ts'
+import { EpicBranchError, isEpicRebaseTask, taskBase } from './task-base.ts'
 import { slugify } from './projects.ts'
-import { designRevisionPrompt, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
+import { designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
+import { runExitError, withLastActivity } from './run-exit.ts'
 import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
 import { MergeOrchestrator } from './merge.ts'
+import type { ReleaseNotes } from './deployments.ts'
 import type { PlanService } from './plan.ts'
 import { getRun, listAgents, listEvidence } from './runs.ts'
 import { addComment, applyTransition, deleteTaskRows, loadTask, lockTask, toTaskState, type ProjectRow, type TaskContentEdit, type TaskRow } from './tasks.ts'
@@ -36,6 +41,11 @@ const { acceptanceCriteria, agents, attachments, auditLog, comments, designVersi
 type PlanSessionRow = typeof schema.planSessions.$inferSelect
 
 const server: Actor = { kind: 'system', component: 'server' }
+
+// Stops the task is retried after, which ask the runner to keep the run's work
+const HUMAN_STOP = 'Stopped by a human'
+const KILL_SWITCH_STOP = 'Stopped: Corral was stopped'
+const KEEP_WORK_STOPS: ReadonlySet<string> = new Set([HUMAN_STOP, KILL_SWITCH_STOP])
 
 type RunRow = typeof runs.$inferSelect
 type AgentRow = typeof agents.$inferSelect
@@ -63,10 +73,14 @@ export interface OrchestratorDeps {
 const RATE_LIMIT_BACKOFF_MS = 30 * 60 * 1000
 const RUN_TIMEOUT_SECONDS = 60 * 60
 const MAX_EVIDENCE_BYTES = 25 * 1024 * 1024
+// The developer's one-line work note, posted as a comment on every outcome
+export const MAX_NOTE_LENGTH = 200
+const NOTE_EXAMPLE = 'Rebased onto 6e67d6f; resolved conflict in docs/architecture.md keeping main’s SSE wording'
 
 const reportSchema = z.object({
   outcome: z.string(),
   summary: z.string().trim().min(1, 'Add a summary'),
+  note: z.string().trim().optional(),
   criteria: z.array(z.object({ criterionId: z.string(), met: z.boolean(), note: z.string().default('') })).optional(),
   headSha: z.string().optional()
 })
@@ -126,12 +140,15 @@ export class Orchestrator implements RunnerHandlers {
   // Picking a runner and recording the run on it happen one at a time, so
   // PM turns and claims never both take a runner's last slot
   #placing: Promise<unknown> = Promise.resolve()
+  readonly epicPrs: EpicPullRequests
   readonly merges: MergeOrchestrator
   // Set once the plan service exists (it needs the orchestrator to start runs)
   plans: PlanService | null = null
+  releaseNotes: ReleaseNotes | null = null
 
   constructor(deps: OrchestratorDeps) {
     this.#d = deps
+    this.epicPrs = new EpicPullRequests(deps)
     this.merges = new MergeOrchestrator({
       db: deps.db,
       events: deps.events,
@@ -212,7 +229,7 @@ export class Orchestrator implements RunnerHandlers {
             job = { ...job, agentSessionId: null, prompt: job.fallbackPrompt ?? job.prompt, fallbackPrompt: null }
             note = `This session's earlier turns ran on ${this.#runnerName(previous.runnerId)}, which is offline: starting a fresh session on ${this.#runnerName(runnerId)} from the saved conversation`
           }
-          await tx.update(runs).set({ pmJob: null, runnerId }).where(eq(runs.id, w.id))
+          await tx.update(runs).set({ pmJob: null, runnerId, runnerName: this.#d.runner.name(runnerId) }).where(eq(runs.id, w.id))
           picked.push({ id: w.id, runnerId, note, job })
         }
       }
@@ -317,8 +334,8 @@ export class Orchestrator implements RunnerHandlers {
     for (const { id } of live) {
       const ctx = await this.#load(id)
       if (!ctx) continue
-      this.#d.runner.send({ type: 'run.stop', runId: id, reason: 'Corral was stopped' }, ctx.run.runnerId)
-      await this.#endRun(ctx, { state: 'interrupted', error: 'Stopped: Corral was stopped' })
+      this.#d.runner.send({ type: 'run.stop', runId: id, reason: 'Corral was stopped', keepWork: true }, ctx.run.runnerId)
+      await this.#endRun(ctx, { state: 'interrupted', error: KILL_SWITCH_STOP })
       await this.#publish(ctx)
     }
   }
@@ -357,7 +374,8 @@ export class Orchestrator implements RunnerHandlers {
 
   // Asks for a scheduling pass soon; passes never overlap. Passing the tasks
   // an event is about lets them start right away despite a wake interval;
-  // anything else (a run ending, a settings change, a resume) waits for it
+  // anything else (a run ending, a settings change, the kill switch's
+  // resume) waits for it
   poke(taskIds: readonly string[] = []): void {
     void this.schedule(taskIds)
   }
@@ -388,6 +406,8 @@ export class Orchestrator implements RunnerHandlers {
     // only wait here while the PM was paused or the runner was away
     await this.#startPmTurns()
     if (this.#updating) return
+    await this.epicPrs.reconcile()
+    if (this.#stopped || this.#updating) return
     const workers = await db.select().from(agents).where(ne(agents.role, 'pm')).orderBy(asc(agents.createdAt))
     // Tasks whose run couldn't start wait for the next pass rather than
     // burning their failed-run cap in a tight loop
@@ -396,10 +416,23 @@ export class Orchestrator implements RunnerHandlers {
       // An agent with a wake interval starts at most one task of its own
       // choosing per interval, counted from its last run however that one
       // started. Tasks an event is about start regardless.
+      if (agent.role === 'reviewer' && (agent.wakeIntervalSeconds === null || await this.#awake(agent))) {
+        const claimEpic = () => this.#exclusive(() => this.epicPrs.claim(agent.id, tx => this.#pickRunner(tx, 'reviewer', agent.runtime, null)))
+        for (let job = await claimEpic(); job; job = await claimEpic()) {
+          const ctx = await this.#load(job.runId)
+          if (!ctx) break
+          if (!runner.send({ type: 'run.assign', job }, ctx.run.runnerId)) {
+            await this.#endRun(ctx, { state: 'interrupted', error: 'The runner went offline before the run started' })
+            break
+          }
+          if (this.#stopped || this.#updating) return
+          if (agent.wakeIntervalSeconds !== null) break
+        }
+      }
       let only = agent.wakeIntervalSeconds === null || (await this.#awake(agent)) ? undefined : urgent
       const place: Place = async (tx, task) => {
-        const role: RunnerRole = agent.role === 'developer' && task.type === 'design' ? 'design' : agent.role
-        const previous = agent.role === 'developer' ? await this.#previousDeveloperRun(tx, task.id, agent.id) : null
+        const role: RunnerRole = agent.role === 'designer' ? 'design' : agent.role
+        const previous = agent.role !== 'reviewer' ? await this.#previousAuthorRun(tx, task.id, agent.id, agent.role) : null
         return this.#pickRunner(tx, role, agent.runtime, previous?.runnerId ?? null)
       }
       const claimNext = () => this.#exclusive(() => claimNextTask(db, agent.id, this.#now(), only, skip, place))
@@ -420,11 +453,12 @@ export class Orchestrator implements RunnerHandlers {
 
   // Whether the run was handed to the runner
   async #assign(claim: Claim): Promise<boolean> {
+    if (claim.runnerId) await this.#d.db.update(runs).set({ runnerName: this.#d.runner.name(claim.runnerId) }).where(eq(runs.id, claim.runId))
     const ctx = await this.#load(claim.runId)
     if (!ctx?.task) return false
     let job: RunJob
     try {
-      job = ctx.run.role === 'reviewer' ? await this.#reviewerJob(ctx) : await this.#developerJob(ctx)
+      job = ctx.run.role === 'reviewer' ? await this.#reviewerJob(ctx) : ctx.run.role === 'designer' ? await this.#designerJob(ctx) : await this.#developerJob(ctx)
     } catch (error) {
       // Preparing the epic branch calls GitHub; the run fails straight away
       // with the cause instead of holding its lease until it expires
@@ -442,6 +476,30 @@ export class Orchestrator implements RunnerHandlers {
   }
 
   async #developerJob(ctx: RunContext): Promise<RunJob> {
+    return this.#authorJob(ctx, {
+      branch: ref => `corral/${ref.toLowerCase()}-${slugify(ctx.task!.title).slice(0, 40).replace(/-+$/, '')}`,
+      prompt: developerPrompt,
+      revision: developerRevisionPrompt
+    })
+  }
+
+  async #designerJob(ctx: RunContext): Promise<RunJob> {
+    const [latest] = await this.#d.db.select({ version: designVersions.version, createdAt: designVersions.createdAt }).from(designVersions)
+      .where(eq(designVersions.taskId, ctx.task!.id)).orderBy(desc(designVersions.version)).limit(1)
+    return this.#authorJob(ctx, {
+      branch: ref => `design/${ref}`,
+      design: { version: latest?.version ?? null },
+      prompt: designerPrompt,
+      revision: task => latest ? designerRevisionPrompt(task, task.comments.filter(c => c.createdAt > latest.createdAt)) : designerPrompt(task, ctx.agent.name)
+    })
+  }
+
+  async #authorJob(ctx: RunContext, author: {
+    branch: (ref: string) => string
+    design?: { version: number | null }
+    prompt: typeof developerPrompt
+    revision: typeof developerRevisionPrompt
+  }): Promise<RunJob> {
     const { db } = this.#d
     let task = ctx.task!
     const ref = taskRef(ctx.project.prefix, task.number)
@@ -449,40 +507,44 @@ export class Orchestrator implements RunnerHandlers {
     // A design is built on design/<ref>, pushed but never merged (D20).
     const baseBranch = await taskBase(db, task, ctx.project, this.#d.github)
     const spike = task.type === 'spike'
-    const design = task.type === 'design'
     if (!task.branch && !spike) {
-      const branch = design ? `design/${ref}` : `corral/${ref.toLowerCase()}-${slugify(task.title).slice(0, 40).replace(/-+$/, '')}`
+      const branch = author.branch(ref)
       ;[task] = await db.update(tasks).set({ branch }).where(eq(tasks.id, task.id)).returning() as [TaskRow]
     }
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
     const notes = await this.#comments(task.id)
     const attached = await listTaskAttachments(db, ctx.project.id, task.description, notes)
-    const [latest] = design
-      ? await db.select({ version: designVersions.version, createdAt: designVersions.createdAt }).from(designVersions)
-          .where(eq(designVersions.taskId, task.id)).orderBy(desc(designVersions.version)).limit(1)
-      : []
     const pin = await this.#pinnedDesign(ctx.project.prefix, task.id)
+    const previous = await this.#previousAuthorRun(db, task.id, ctx.agent.id, ctx.run.role, ctx.run.id)
+    const [lastRun] = await db.select().from(runs)
+      .where(and(eq(runs.taskId, task.id), inArray(runs.role, ['developer', 'designer']), ne(runs.id, ctx.run.id)))
+      .orderBy(desc(runs.number)).limit(1)
+    const stoppedRun = lastRun && (lastRun.state === 'interrupted' || (lastRun.state === 'failed' && lastRun.summary === null))
+      ? { number: lastRun.number, reason: lastRun.error ?? 'Stopped', wipSha: lastRun.headSha }
+      : null
     const promptTask = {
       ref,
       title: task.title,
       description: task.description,
       branch: spike ? null : task.branch,
       spike,
-      design: design ? { version: latest?.version ?? null } : null,
+      design: author.design ?? null,
       pin,
       defaultBranch: baseBranch,
       reviewRounds: task.reviewRounds,
+      rebaseOnly: task.rebaseOnly,
+      approvedHeadSha: task.approvedHeadSha,
       reviewRoundCap: ctx.project.reviewRoundCap,
-      criteria: criteria.map(c => ({ id: c.id, text: c.text })),
+      criteria: criteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })),
       comments: notes,
-      attachments: attached
+      attachments: attached,
+      stoppedRun
     }
-    const prompt = developerPrompt(promptTask, ctx.agent.name)
-    // A revision continues the developer's own session (D20 for designs) with
+    const prompt = author.prompt(promptTask, ctx.agent.name)
+    // A revision continues the author's own session with
     // the feedback given since, when it runs where that session lives. The
     // full prompt is the fallback when the session can't be resumed, and the
     // prompt on another runner, which starts fresh from the pushed branch.
-    const previous = await this.#previousDeveloperRun(db, task.id, ctx.agent.id, ctx.run.id)
     const local = previous !== null && (previous.runnerId === null || previous.runnerId === ctx.run.runnerId)
     const resume = local ? previous.agentSessionId : null
     if (resume) {
@@ -496,7 +558,7 @@ export class Orchestrator implements RunnerHandlers {
       runId: ctx.run.id,
       runNumber: ctx.run.number,
       leaseEpoch: ctx.run.leaseEpoch!,
-      role: 'developer',
+      role: ctx.run.role,
       runtime: ctx.agent.runtime,
       projectId: ctx.project.id,
       repository: ctx.project.repository,
@@ -508,12 +570,13 @@ export class Orchestrator implements RunnerHandlers {
       designPinned: pin !== null,
       branch: spike ? null : task.branch,
       headSha: spike ? null : task.headSha,
+      continueFrom: stoppedRun?.wipSha ?? null,
       planSessionId: null,
       agentSessionId: resume,
       fallbackPrompt: resume ? prompt : null,
       model: null,
       timeoutSeconds: RUN_TIMEOUT_SECONDS,
-      prompt: !resume ? prompt : latest ? designRevisionPrompt(promptTask, notes.filter(c => c.createdAt > latest.createdAt)) : developerRevisionPrompt(promptTask, feedback)
+      prompt: !resume ? prompt : author.revision(promptTask, feedback)
     }
   }
 
@@ -525,11 +588,18 @@ export class Orchestrator implements RunnerHandlers {
     return pin ? { designRef: taskRef(prefix, pin.number), version: pin.version, screens: pin.screens, branch: pin.branch, commitSha: pin.commitSha } : null
   }
 
-  // This agent's last developer run on the task that started a session: its
+  // This agent's last run in the same authoring role on the task that started a session: its
   // runner holds the worktree and session a revision resumes
-  async #previousDeveloperRun(db: Executor, taskId: string, agentId: string, exclude?: string) {
+  async #previousAuthorRun(db: Executor, taskId: string, agentId: string, role: AgentRow['role'], exclude?: string) {
+    // A developer-authored design is a session boundary (D23), including
+    // when this agent had an older designer session before that developer run.
+    const [legacy] = role === 'designer'
+      ? await db.select({ number: runs.number }).from(runs)
+          .where(and(eq(runs.taskId, taskId), eq(runs.role, 'developer')))
+          .orderBy(desc(runs.number)).limit(1)
+      : []
     const [previous] = await db.select({ number: runs.number, runnerId: runs.runnerId, agentSessionId: runs.agentSessionId, queuedAt: runs.queuedAt }).from(runs)
-      .where(and(eq(runs.taskId, taskId), eq(runs.role, 'developer'), eq(runs.agentId, agentId), exclude ? ne(runs.id, exclude) : undefined, isNotNull(runs.agentSessionId)))
+      .where(and(eq(runs.taskId, taskId), eq(runs.role, role), eq(runs.agentId, agentId), legacy ? gt(runs.number, legacy.number) : undefined, exclude ? ne(runs.id, exclude) : undefined, isNotNull(runs.agentSessionId)))
       .orderBy(desc(runs.number)).limit(1)
     return previous ?? null
   }
@@ -591,14 +661,17 @@ export class Orchestrator implements RunnerHandlers {
         pin,
         underReview: version ? { version: version.version, commitSha: version.commitSha, screenshots: version.screenshots.map(s => s.fileName) } : null,
         defaultBranch: baseBranch,
+        rebaseOnly: task.rebaseOnly,
+        approvedHeadSha: task.approvedHeadSha,
         reviewRounds: task.reviewRounds,
         reviewRoundCap: ctx.project.reviewRoundCap,
-        criteria: criteria.map(c => ({ id: c.id, text: c.text })),
+        criteria: criteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })),
         comments: notes,
         attachments: attached,
         headSha: task.headSha!,
         prUrl: task.prUrl,
         evidence: items.map(e => ({ id: e.id, criterionId: e.criterionId, kind: e.kind, note: e.note, fileName: e.fileName })),
+        requiredChecks: ctx.project.requiredChecks,
         previousFeedback: previous ? feedbackComment(previous.summary, previous.criteria, criteria) : null
       }, ctx.agent.name)
     }
@@ -614,6 +687,14 @@ export class Orchestrator implements RunnerHandlers {
   // Expired leases: the runner stopped heartbeating (e.g. the laptop slept).
   // The run is Interrupted, not Failed, and the task waits for a retry (D10).
   async sweepLeases(): Promise<void> {
+    const expiredEpics = await this.#d.db.select().from(runs).where(and(isNotNull(runs.epicId), inArray(runs.state, [...ACTIVE_RUN_STATES]), lt(runs.leaseExpiresAt, this.#now())))
+    for (const run of expiredEpics) {
+      const ctx = await this.#load(run.id)
+      if (ctx) {
+        await this.#endRun(ctx, { state: 'interrupted', error: 'Epic review lease expired' })
+        this.#d.runner.send({ type: 'run.stop', runId: run.id, reason: 'Lease expired' }, run.runnerId)
+      }
+    }
     const expired = await this.#d.db.select({ runId: tasks.leaseRunId }).from(tasks)
       .where(and(isNotNull(tasks.leaseRunId), lt(tasks.leaseExpiresAt, this.#now())))
     for (const { runId } of expired) {
@@ -636,13 +717,15 @@ export class Orchestrator implements RunnerHandlers {
       if (activeRuns.some(a => a.runId === run.id && a.leaseEpoch === run.leaseEpoch)) continue
       const ctx = await this.#load(run.id)
       if (!ctx) continue
-      await this.#endRun(ctx, { state: 'interrupted', error: 'The runner restarted during the run' })
+      await this.#endRun(ctx, { state: 'interrupted', error: 'The runner restarted during the run: it shut down before it could report' })
       await this.#publish(ctx)
     }
+    await this.refreshLoad()
     // Runs the runner has but the server no longer recognises must stop
     for (const active of activeRuns) {
       const ctx = await this.#fenced(active.runId, active.leaseEpoch)
       if (!ctx || ctx.run.runnerId !== runnerId) {
+        if (await this.#savingWork(active.runId, active.leaseEpoch, runnerId)) continue
         runner.send({ type: 'run.stop', runId: active.runId, reason: 'The server no longer recognises this run' }, runnerId)
       }
     }
@@ -650,23 +733,45 @@ export class Orchestrator implements RunnerHandlers {
 
   onReady(): void {
     this.poke()
+    void this.releaseNotes?.sweep()
   }
 
-  async onHeartbeat(activeRuns: { runId: string, leaseEpoch: number }[], runnerId: string): Promise<void> {
+  async onHeartbeat(activeRuns: { runId: string, leaseEpoch: number }[], runnerId: string, sentAt?: number): Promise<void> {
     const now = this.#now()
     for (const active of activeRuns) {
       const ctx = await this.#fenced(active.runId, active.leaseEpoch)
-      if (!ctx || ctx.run.runnerId !== runnerId) {
+      if (!ctx || ctx.run.runnerId !== runnerId || (ctx.task?.leaseExpiresAt && ctx.task.leaseExpiresAt <= now)) {
+        if (await this.#savingWork(active.runId, active.leaseEpoch, runnerId)) continue
         this.#d.runner.send({ type: 'run.stop', runId: active.runId, reason: 'This run no longer holds its lease' }, runnerId)
         continue
       }
+      if (ctx.run.epicId) await this.#d.db.update(runs).set({ leaseExpiresAt: new Date(now.getTime() + LEASE_DURATION_MS) }).where(eq(runs.id, ctx.run.id))
       if (ctx.task) {
         await this.#d.db.update(tasks).set({
           leaseHeartbeatAt: now,
           leaseExpiresAt: new Date(now.getTime() + 15 * 60 * 1000)
         }).where(and(eq(tasks.id, ctx.task.id), eq(tasks.leaseRunId, ctx.run.id), eq(tasks.leaseEpoch, active.leaseEpoch)))
       }
+      this.#confirmLease(ctx, sentAt)
     }
+  }
+
+  // A human stop or the kill switch ends the run here at once, but the runner
+  // lists it until the agent has exited. It was told to keep its work, so a
+  // keepWork-less stop would wrongly revoke the push, unless the task moved on.
+  // A lost lease also leaves a run interrupted: only these two stops count.
+  async #savingWork(runId: string, leaseEpoch: number, runnerId: string): Promise<boolean> {
+    const ctx = await this.#load(runId)
+    if (!ctx?.task || ctx.task.deletedAt || ctx.task.leaseRunId !== null) return false
+    const { run } = ctx
+    return (run.role === 'developer' || run.role === 'designer') && run.state === 'interrupted' && run.leaseEpoch === leaseEpoch && run.runnerId === runnerId && KEEP_WORK_STOPS.has(run.error ?? '')
+  }
+
+  #confirmLease(ctx: RunContext, sentAt: number | undefined): void {
+    // Echo the runner's clock: delayed replies after sleep must already be expired,
+    // and runner/server wall clocks need not agree. Older runners need no ack.
+    if ((ctx.run.role !== 'developer' && ctx.run.role !== 'designer') || sentAt === undefined || !Number.isFinite(sentAt)) return
+    this.#d.runner.send({ type: 'run.lease', runId: ctx.run.id, leaseEpoch: ctx.run.leaseEpoch!, validUntil: new Date(sentAt + 2 * RUNNER_HEARTBEAT_MS).toISOString() }, ctx.run.runnerId)
   }
 
   async onDisconnected(): Promise<void> {
@@ -695,6 +800,7 @@ export class Orchestrator implements RunnerHandlers {
       if (!ctx) return
       await db.update(runs).set({ state: 'running', startedAt: this.#now(), agentSessionId: message.agentSessionId })
         .where(eq(runs.id, ctx.run.id))
+      this.#confirmLease(ctx, message.sentAt)
       if (ctx.run.role === 'pm' && ctx.run.planSessionId) await this.plans?.onRunStarted(ctx.run.planSessionId, message.agentSessionId)
       await this.#publish(ctx)
       return
@@ -704,8 +810,16 @@ export class Orchestrator implements RunnerHandlers {
     const ctx = await this.#load(message.runId)
     if (!ctx) return
     const live = (ACTIVE_RUN_STATES as readonly RunState[]).includes(ctx.run.state) && ctx.run.leaseEpoch === message.leaseEpoch
-    if (live && ctx.run.role === 'pm') await this.#pmExited(ctx, message.exit)
-    else if (live) await this.#runExited(ctx, message.exit)
+    if (live && ctx.run.role === 'pm') await this.#pmExited(ctx, message.exit, message.lastActivityAt)
+    else if (live) await this.#runExited(ctx, message.exit, message.lastActivityAt, message.wipSha ?? null)
+    // The server already ended a run it stopped; only the runner knows the agent's last activity
+    else if (ctx.run.state === 'interrupted' && ctx.run.error && ctx.run.leaseEpoch === message.leaseEpoch) {
+      await db.update(runs).set({ error: withLastActivity(ctx.run.error, message.lastActivityAt) }).where(eq(runs.id, ctx.run.id))
+    }
+    // The commit that saved a stopped run's work, for the retry's prompt
+    if (!live && message.wipSha && ctx.run.leaseEpoch === message.leaseEpoch) {
+      await db.update(runs).set({ headSha: message.wipSha }).where(eq(runs.id, ctx.run.id))
+    }
     const blob = await transcripts.finish(ctx.run.id)
     if (blob) await db.update(runs).set({ transcriptBlob: blob }).where(eq(runs.id, ctx.run.id))
     await this.#publish(ctx)
@@ -713,7 +827,7 @@ export class Orchestrator implements RunnerHandlers {
   }
 
   // A PM turn has no outcome to report: its reply is the last thing it said
-  async #pmExited(ctx: RunContext, exit: RunExit): Promise<void> {
+  async #pmExited(ctx: RunContext, exit: RunExit, lastActivityAt: string | null | undefined): Promise<void> {
     const events = await this.#d.transcripts.read(ctx.run.id, null)
     const reply = events.filter((e): e is Extract<RunEvent, { type: 'message' }> => e.type === 'message').at(-1)?.text ?? null
     let error: string | null = null
@@ -726,19 +840,21 @@ export class Orchestrator implements RunnerHandlers {
         break
       }
       case 'exited':
-        if (exit.code === 0 || reply) {
+      case 'signalled':
+        if ((exit.kind === 'exited' && exit.code === 0) || reply) {
           await this.#endRun(ctx, { state: 'completed', summary: reply })
         } else {
-          error = `The PM exited with code ${exit.code}`
+          error = exit.kind === 'exited' ? `The PM exited with code ${exit.code}` : runExitError(exit, lastActivityAt)
           await this.#endRun(ctx, { state: 'failed', outcome: 'failed', error })
         }
         break
       case 'stopped':
-        await this.#endRun(ctx, { state: 'interrupted', error: 'Stopped' })
+      case 'runner_shutdown':
+        await this.#endRun(ctx, { state: 'interrupted', error: runExitError(exit, lastActivityAt) })
         error = 'The turn was stopped'
         break
       case 'timed_out':
-        await this.#endRun(ctx, { state: 'failed', outcome: 'failed', error: 'The turn hit its time limit' })
+        await this.#endRun(ctx, { state: 'failed', outcome: 'failed', error: runExitError(exit, lastActivityAt) })
         error = 'The turn hit its time limit'
         break
       case 'error':
@@ -756,7 +872,7 @@ export class Orchestrator implements RunnerHandlers {
   }
 
   // The agent process ended without its outcome having been accepted
-  async #runExited(ctx: RunContext, exit: RunExit): Promise<void> {
+  async #runExited(ctx: RunContext, exit: RunExit, lastActivityAt: string | null | undefined, headSha: string | null): Promise<void> {
     const now = this.#now()
     switch (exit.kind) {
       case 'rate_limited': {
@@ -769,28 +885,34 @@ export class Orchestrator implements RunnerHandlers {
         return
       }
       case 'stopped':
-        await this.#endRun(ctx, { state: 'interrupted', error: 'Stopped' })
+      case 'runner_shutdown':
+        await this.#endRun(ctx, { state: 'interrupted', error: runExitError(exit, lastActivityAt), headSha })
         return
-      default: {
-        const error = exit.kind === 'timed_out'
-          ? 'The run hit its time limit'
-          : exit.kind === 'error' ? exit.message : `The agent exited (code ${exit.code}) without reporting an outcome`
-        await this.#failRun(ctx, error)
-      }
+      default:
+        await this.#failRun(ctx, runExitError(exit, lastActivityAt), { headSha })
     }
   }
 
   // A failed run counts towards the failed-run cap (D10); at the cap the task fails
-  async #failRun(ctx: RunContext, error: string): Promise<void> {
-    await this.#d.db.transaction(async (tx) => {
+  async #failRun(ctx: RunContext, error: string, fields: Partial<typeof runs.$inferInsert> = {}, note?: string): Promise<void> {
+    const comment = await this.#d.db.transaction(async (tx) => {
+      const comment = note && ctx.task ? await this.#postNote(tx, ctx, note) : null
       if (ctx.task) {
         const { task, project } = await lockTask(tx, ctx.task.id)
         if (task.leaseRunId === ctx.run.id && ['in_progress', 'agent_review'].includes(task.status)) {
           await applyTransition(tx, task, project, { type: 'run_failed' }, server, { event: 'run_failed', runId: ctx.run.id, error })
         }
       }
-      await this.#endRunIn(tx, ctx, { state: 'failed', outcome: 'failed', error })
+      await this.#endRunIn(tx, ctx, { ...fields, state: 'failed', outcome: 'failed', error })
+      return comment
     })
+    if (comment) this.#d.events.publish({ type: 'comment.created', comment })
+  }
+
+  // The developer's work note: what this run did, as a comment by its agent,
+  // so the task's history shows the developer's turns between reviews
+  async #postNote(tx: Executor, ctx: RunContext, note: string): Promise<Comment> {
+    return addComment(tx, ctx.task!.id, { body: note, pinned: false }, this.#actor(ctx))
   }
 
   async #endRun(ctx: RunContext, fields: Partial<typeof runs.$inferInsert> & { state: RunState }): Promise<void> {
@@ -818,16 +940,30 @@ export class Orchestrator implements RunnerHandlers {
   async stopRun(runId: string, actor: Actor): Promise<void> {
     const ctx = await this.#load(runId)
     if (!ctx || !(ACTIVE_RUN_STATES as readonly RunState[]).includes(ctx.run.state)) throw new ApiFailure(409, { code: 'conflict', constraint: 'run_not_active' })
-    this.#d.runner.send({ type: 'run.stop', runId, reason: 'Stopped by a human' }, ctx.run.runnerId)
+    this.#d.runner.send({ type: 'run.stop', runId, reason: 'Stopped by a human', keepWork: true }, ctx.run.runnerId)
     await this.#d.db.transaction(async (tx) => {
-      await this.#endRunIn(tx, ctx, { state: 'interrupted', error: 'Stopped by a human' })
+      await this.#endRunIn(tx, ctx, { state: 'interrupted', error: HUMAN_STOP })
       if (ctx.task) await tx.update(tasks).set({ paused: true }).where(eq(tasks.id, ctx.task.id))
       await tx.insert(auditLog).values({ projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor, action: 'run.stopped', detail: { runId } })
     })
     await this.#publish(ctx)
   }
 
-  // A human messages a live developer or reviewer run. It's kept as their
+  // A human lets a paused task be claimed again (flows.md §3). Only clears the
+  // flag: the caller pokes the scheduler once the task is published. Throws
+  // 409 task_not_paused, so a double click can't resume it twice.
+  async resumeTask(taskId: string, actor: Actor): Promise<void> {
+    if (actor.kind !== 'human') throw new ApiFailure(403, { code: 'forbidden' })
+    await this.#d.db.transaction(async (tx) => {
+      const [task] = await tx.update(tasks).set({ paused: false, updatedAt: this.#now() })
+        .where(and(eq(tasks.id, taskId), eq(tasks.paused, true), isNull(tasks.deletedAt)))
+        .returning({ projectId: tasks.projectId })
+      if (!task) throw new ApiFailure(409, { code: 'conflict', constraint: 'task_not_paused' })
+      await tx.insert(auditLog).values({ projectId: task.projectId, taskId, actor, action: 'task.resumed', detail: {} })
+    })
+  }
+
+  // A human messages a live developer, designer or reviewer run. It's kept as their
   // comment on the task, with an audit entry, and sent to the runner as
   // run.message. The runner may still turn it down (e.g. a Codex run); it
   // says so in the run's transcript. Throws 409 run_not_live when no runner
@@ -838,7 +974,7 @@ export class Orchestrator implements RunnerHandlers {
     if (!ctx || ctx.run.projectId !== projectId) throw new ApiFailure(404, { code: 'not_found' })
     const notLive = (reason: string) => new ApiFailure(409, { code: 'run_not_live', reason })
     const { run, task } = ctx
-    if (!task || (run.role !== 'developer' && run.role !== 'reviewer')) throw notLive(`Run #${run.number} is a ${run.role} run; only developer and reviewer runs take messages`)
+    if (!task || (run.role !== 'developer' && run.role !== 'designer' && run.role !== 'reviewer')) throw notLive(`Run #${run.number} is a ${run.role} run; only developer, designer and reviewer runs take messages`)
     if (run.state === 'queued') throw notLive(`Run #${run.number} hasn't started yet`)
     if (!(ACTIVE_RUN_STATES as readonly RunState[]).includes(run.state) || run.state === 'stopping') throw notLive(`Run #${run.number} has ended`)
     if (task.leaseRunId !== run.id || task.leaseEpoch !== run.leaseEpoch) throw notLive(`Run #${run.number} no longer holds ${taskRef(ctx.project.prefix, task.number)}`)
@@ -872,7 +1008,7 @@ export class Orchestrator implements RunnerHandlers {
   }
 
   // PRD §7.3: a human edited the description or criteria of a task a
-  // developer or reviewer run holds. A run that takes messages is told at
+  // developer, designer or reviewer run holds. A run that takes messages is told at
   // once; otherwise (Codex, not started yet, no runner) a pinned comment
   // carries the change to the agent through get_task and to the next run.
   async noticeTaskEdit(taskId: string, edit: TaskContentEdit, actor: Actor): Promise<void> {
@@ -882,7 +1018,7 @@ export class Orchestrator implements RunnerHandlers {
     const ctx = await this.#load(task.leaseRunId)
     if (!ctx || ctx.run.leaseEpoch !== task.leaseEpoch) return
     const { run, project } = ctx
-    if (run.role !== 'developer' && run.role !== 'reviewer') return
+    if (run.role !== 'developer' && run.role !== 'designer' && run.role !== 'reviewer') return
     if (!(ACTIVE_RUN_STATES as readonly RunState[]).includes(run.state) || run.state === 'stopping') return
 
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, taskId)).orderBy(asc(acceptanceCriteria.position))
@@ -894,7 +1030,7 @@ export class Orchestrator implements RunnerHandlers {
     const body = (lead: string) => [
       lead,
       edit.description ? `**Description**\n\n${richTextToMarkdown(task.description) || '(no description)'}` : null,
-      edit.criteria ? `**Acceptance criteria** (${counts})\n\n${criteria.map(c => `- [${c.id}] ${c.text}`).join('\n') || '(none)'}` : null
+      edit.criteria ? `**Acceptance criteria** (${counts})\n\n${criteria.map(c => `- [${c.id}] ${c.text}${c.checkedByHuman ? ' — checked by a human: skip evidence and verdict; do not request changes over it' : ''}`).join('\n') || '(none)'}` : null
     ].filter(Boolean).join('\n\n')
 
     if ((RUNTIMES_TAKING_MESSAGES as readonly string[]).includes(ctx.agent.runtime) && run.state !== 'queued') {
@@ -932,6 +1068,7 @@ export class Orchestrator implements RunnerHandlers {
         runner.send({ type: 'run.stop', runId: ctx.run.id, reason: 'The task was deleted' }, ctx.run.runnerId)
         await this.#endRun(ctx, { state: 'interrupted', error: 'The task was deleted' })
         this.#d.events.publish({ type: 'run.updated', run: await getRun(db, ctx.run.id) })
+        await this.refreshLoad()
       }
     }
     if (task.prNumber) {
@@ -967,6 +1104,7 @@ export class Orchestrator implements RunnerHandlers {
       await this.#endRun(ctx, { state: 'interrupted', error: 'The project was removed' })
       this.#d.events.publish({ type: 'run.updated', run: await getRun(db, id) })
     }
+    await this.refreshLoad()
     const worked = await db.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.projectId, projectId), ne(tasks.status, 'backlog')))
     const project = await db.transaction(async (tx) => {
       // Tasks, epics, plans, plan sessions and runs go with it (onDelete: cascade)
@@ -1003,7 +1141,8 @@ export class Orchestrator implements RunnerHandlers {
   async #tool(ctx: RunContext, tool: string, input: unknown): Promise<unknown> {
     const role = ctx.run.role
     const allowed: Record<string, readonly string[]> = {
-      developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'submit_design', 'report_outcome'],
+      developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'report_outcome'],
+      designer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'submit_design', 'report_outcome'],
       reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'get_design', 'report_outcome'],
       pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
     }
@@ -1020,6 +1159,20 @@ export class Orchestrator implements RunnerHandlers {
       return this.plans.tool(ctx.run.planSessionId, ctx.run.id, tool, input, this.#actor(ctx))
     }
 
+    if (ctx.run.epicId) {
+      if (tool === 'get_task') {
+        const [epic] = await this.#d.db.select().from(schema.epics).where(eq(schema.epics.id, ctx.run.epicId))
+        if (!epic) throw new ToolError('Epic no longer exists')
+        return epicReviewContext(this.#d.db, epic, ctx.project)
+      }
+      if (tool === 'get_evidence') return this.#getEvidence(ctx, z.object({ evidenceId: z.string().optional() }).parse(input))
+      if (tool === 'report_outcome') {
+        await this.epicPrs.report(ctx.run, reportSchema.parse(input) as OutcomeReport)
+        this.#finished(ctx, 'Epic integration review recorded')
+        return { ok: true }
+      }
+      throw new ToolError('Epic integration reviews use get_task, get_evidence and report_outcome')
+    }
     switch (tool) {
       case 'get_task':
         return this.#getTask(ctx)
@@ -1059,7 +1212,7 @@ export class Orchestrator implements RunnerHandlers {
       description: richTextToMarkdown(task.description),
       branch: task.branch,
       reviewRound: task.reviewRounds,
-      criteria: criteria.map(c => ({ id: c.id, text: c.text })),
+      criteria: criteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })),
       comments: notes.map(c => ({ ...c, createdAt: c.createdAt.toISOString() })),
       attachments: await listTaskAttachments(this.#d.db, ctx.project.id, task.description, notes),
       evidence: items.map(e => ({ id: e.id, criterionId: e.criterionId, kind: e.kind, note: e.note, fileName: e.fileName, round: e.round }))
@@ -1096,11 +1249,12 @@ export class Orchestrator implements RunnerHandlers {
   // Evidence for the reviewer: a listing, or one item with its content.
   // Images come back as MCP image content so the reviewer can look at them.
   async #getEvidence(ctx: RunContext, input: { evidenceId?: string | undefined }) {
-    const task = ctx.task!
-    const items = await listEvidence(this.#d.db, task.id)
+    const task = ctx.task
+    const board = ctx.run.epicId ? await this.#d.db.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.epicId, ctx.run.epicId), isNull(tasks.deletedAt))) : []
+    const items = task ? await listEvidence(this.#d.db, task.id) : (await Promise.all(board.map(t => listEvidence(this.#d.db, t.id)))).flat()
     if (!input.evidenceId) {
       return {
-        round: task.reviewRounds,
+        round: task?.reviewRounds ?? 0,
         evidence: items.map(e => ({ id: e.id, criterionId: e.criterionId, kind: e.kind, note: e.note, fileName: e.fileName, contentType: e.contentType, size: e.size, round: e.round }))
       }
     }
@@ -1137,19 +1291,27 @@ export class Orchestrator implements RunnerHandlers {
         case 'approved':
         case 'changes_requested':
           return this.#review(ctx, report, report.outcome)
+        case 'blocked':
+          if (!ctx.task?.rebaseOnly) throw new ToolError('Only a rebase review can report blocked.')
+          return this.#blockedRebaseReview(ctx, report.summary)
         case 'failed':
-          await this.#failRun(ctx, report.summary)
+          await this.#failRun(ctx, report.summary, { summary: report.summary })
           this.#finished(ctx, 'Reported failed')
           return { ok: true, message: 'Recorded. You can stop now.' }
       }
-      throw new ToolError('A reviewer reports approved, changes_requested or failed')
+      throw new ToolError('A reviewer reports approved, changes_requested, blocked (rebase review only) or failed')
     }
-    if (ctx.run.role === 'developer') {
+    if (ctx.run.role === 'developer' || ctx.run.role === 'designer') {
+      const problem = noteProblem(report.note)
+      if (problem) throw new ToolError(`Not reported. ${problem} Add \`note\`: one line of at most ${MAX_NOTE_LENGTH} characters saying what this run did, e.g. "${NOTE_EXAMPLE}". Then report again.`)
       const spike = ctx.task!.type === 'spike'
       const design = ctx.task!.type === 'design'
       switch (report.outcome) {
         case 'pr_opened':
         case 'pr_updated':
+        case 'pr_rebased':
+          if (ctx.task!.rebaseOnly && report.outcome !== 'pr_rebased') throw new ToolError('Not submitted. A rebase-only round expects pr_rebased.')
+          if (!ctx.task!.rebaseOnly && report.outcome === 'pr_rebased') throw new ToolError('Not submitted. This round expects pr_opened or pr_updated, not pr_rebased.')
           if (spike) throw new ToolError('Not submitted. A spike opens no PR: report your findings with outcome findings_reported.')
           if (design) throw new ToolError('Not submitted. A design task opens no PR: call submit_design, then report design_submitted.')
           return this.#submit(ctx, report)
@@ -1160,15 +1322,15 @@ export class Orchestrator implements RunnerHandlers {
           if (!design) throw new ToolError(`Not submitted. Only a design task reports design_submitted; this task reports ${spike ? 'findings_reported' : 'pr_opened or pr_updated'}.`)
           return this.#reportDesign(ctx, report)
         case 'stuck':
-          return this.#stuck(ctx, report.summary)
+          return this.#stuck(ctx, report.summary, report.note!)
         case 'failed':
-          await this.#failRun(ctx, report.summary)
+          await this.#failRun(ctx, report.summary, { summary: report.summary }, report.note)
           this.#finished(ctx, 'Reported failed')
           return { ok: true, message: 'Recorded. You can stop now.' }
       }
       throw new ToolError(spike
         ? 'A spike’s developer reports findings_reported, stuck or failed'
-        : design ? 'A design task’s developer reports design_submitted, stuck or failed' : 'A developer reports pr_opened, pr_updated, stuck or failed')
+        : design ? 'A design task’s designer reports design_submitted, stuck or failed' : 'A developer reports pr_opened, pr_updated, pr_rebased (rebase-only rounds), stuck or failed')
     }
     throw new ToolError(`Outcomes for ${ctx.run.role} runs aren't supported yet`)
   }
@@ -1181,21 +1343,28 @@ export class Orchestrator implements RunnerHandlers {
     const { db } = this.#d
     const task = ctx.task!
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
-    const verdicts = report.criteria ?? []
-    const missing = criteria.filter(c => !verdicts.some(v => v.criterionId === c.id))
+    const [approval] = task.rebaseOnly && verdict === 'approved'
+      ? await db.select().from(reviews).where(and(eq(reviews.taskId, task.id), eq(reviews.verdict, 'approved'), eq(reviews.headSha, task.approvedHeadSha!))).orderBy(desc(reviews.createdAt)).limit(1)
+      : []
+    if (task.rebaseOnly && verdict === 'approved' && !approval) throw new ToolError('Not recorded. No approval found for the previously approved head.')
+    const verdicts = approval ? approval.criteria : report.criteria ?? []
+    const missing = criteria.filter(c => !c.checkedByHuman && !verdicts.some(v => v.criterionId === c.id))
     if (missing.length > 0) {
       throw new ToolError(`Not recorded. Give a verdict for every criterion; missing: ${missing.map(c => `[${c.id}] ${c.text}`).join('; ')}.`)
     }
     const unknown = verdicts.filter(v => !criteria.some(c => c.id === v.criterionId))
     if (unknown.length > 0) throw new ToolError(`Not recorded. Unknown criterion IDs: ${unknown.map(v => v.criterionId).join(', ')}.`)
-    if (verdict === 'approved' && verdicts.some(v => !v.met)) {
+    if (verdict === 'approved' && verdicts.some(v => !v.met && !criteria.find(c => c.id === v.criterionId)?.checkedByHuman)) {
       throw new ToolError('Not recorded. An approval needs every criterion met; otherwise report changes_requested.')
     }
-    const kept = criteria.map(c => verdicts.find(v => v.criterionId === c.id)!).map(v => ({ criterionId: v.criterionId, met: v.met, note: v.note ?? '' }))
+    const kept = criteria.map(c => c.checkedByHuman
+      ? { criterionId: c.id, met: null, note: 'Needs human check' }
+      : { criterionId: c.id, met: verdicts.find(v => v.criterionId === c.id)!.met, note: verdicts.find(v => v.criterionId === c.id)!.note ?? '' })
     // An approval is a short note; the per-criterion notes are kept on the
     // review and shown next to the evidence. Changes requested spells out
-    // every criterion for the developer.
-    const feedback = verdict === 'approved' ? `Approved: all ${kept.length} criteria met. ${report.summary.trim()}`.trim() : feedbackComment(report.summary, kept, criteria)
+    // every criterion for the developer, except the narrow rebase comment.
+    const summary = approval ? `Approval carried over a reviewed rebase from ${task.approvedHeadSha} to ${task.headSha}. ${report.summary.trim()}` : report.summary
+    const feedback = task.rebaseOnly ? `Rebase review ${verdict === 'approved' ? 'approved' : 'changes requested'}: ${report.summary.trim()}` : verdict === 'approved' ? `Approved: ${kept.some(v => v.met === null) ? humanCheckTally(kept.filter(v => v.met).length, kept.filter(v => v.met === null).length) : `all ${kept.length} criteria met`}. ${report.summary.trim()}`.trim() : feedbackComment(report.summary, kept, criteria)
 
     const next = await db.transaction(async (tx) => {
       const locked = await lockTask(tx, task.id)
@@ -1205,7 +1374,7 @@ export class Orchestrator implements RunnerHandlers {
       // one requested changes too; near-identical feedback blocks the task
       const similarity = verdict === 'changes_requested' ? await this.#feedbackSimilarity(tx, task.id, locked.task.reviewRounds, report.summary, kept) : undefined
       await tx.insert(reviews).values({
-        taskId: task.id, runId: ctx.run.id, round: locked.task.reviewRounds, headSha, verdict, summary: report.summary, criteria: kept, author: this.#actor(ctx)
+        taskId: task.id, runId: ctx.run.id, round: locked.task.reviewRounds, headSha, verdict, summary, criteria: kept, author: this.#actor(ctx)
       })
       await tx.insert(comments).values({ taskId: task.id, author: this.#actor(ctx), body: feedback })
       await tx.insert(auditLog).values({
@@ -1239,7 +1408,7 @@ export class Orchestrator implements RunnerHandlers {
   // How alike this change request is to the previous round's (0 to 1);
   // undefined when the previous round didn't request changes
   // (the first round, or the first since the task was unblocked)
-  async #feedbackSimilarity(tx: Executor, taskId: string, round: number, summary: string, criteria: { met: boolean, note: string }[]): Promise<number | undefined> {
+  async #feedbackSimilarity(tx: Executor, taskId: string, round: number, summary: string, criteria: { met: boolean | null, note: string }[]): Promise<number | undefined> {
     if (round === 0) return undefined
     const [previous] = await tx.select({ summary: reviews.summary, criteria: reviews.criteria }).from(reviews)
       .where(and(eq(reviews.taskId, taskId), eq(reviews.round, round - 1), eq(reviews.verdict, 'changes_requested')))
@@ -1248,13 +1417,30 @@ export class Orchestrator implements RunnerHandlers {
     return feedbackSimilarity(reviewFeedbackText(previous.summary, previous.criteria), reviewFeedbackText(summary, criteria))
   }
 
-  // Asks a human: the task becomes Blocked with the question as its reason (D11)
-  async #stuck(ctx: RunContext, question: string) {
+  // D24: a changed binding decision must be settled by the human.
+  async #blockedRebaseReview(ctx: RunContext, reason: string) {
+    if (!reason.trim()) throw new ToolError('Explain the changed binding decision and affected criteria for the human.')
     await this.#d.db.transaction(async (tx) => {
       const { task, project } = await lockTask(tx, ctx.task!.id)
+      if (task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease. Stop working.')
+      await tx.insert(comments).values({ taskId: task.id, author: this.#actor(ctx), body: `Rebase review blocked: ${reason.trim()}` })
+      await applyTransition(tx, task, project, { type: 'block', reason }, server, { event: 'blocked', runId: ctx.run.id })
+      await this.#endRunIn(tx, ctx, { state: 'completed', outcome: 'blocked', summary: reason })
+    })
+    this.#finished(ctx, 'Rebase review blocked: waiting on a human')
+    return { ok: true, message: 'The task is Blocked for a human decision. You can stop now.' }
+  }
+
+  // Asks a human: the task becomes Blocked with the question as its reason (D11)
+  async #stuck(ctx: RunContext, question: string, note: string) {
+    const comment = await this.#d.db.transaction(async (tx) => {
+      const { task, project } = await lockTask(tx, ctx.task!.id)
+      const comment = await this.#postNote(tx, ctx, note)
       await applyTransition(tx, task, project, { type: 'block', reason: question }, server, { event: 'stuck', runId: ctx.run.id })
       await this.#endRunIn(tx, ctx, { state: 'completed', outcome: 'stuck', summary: question })
+      return comment
     })
+    this.#d.events.publish({ type: 'comment.created', comment })
     this.#finished(ctx, 'Stuck: waiting on a human')
     return { ok: true, message: 'The task is Blocked until a human answers. You can stop now.' }
   }
@@ -1270,7 +1456,7 @@ export class Orchestrator implements RunnerHandlers {
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
     const attached = await db.select({ criterionId: evidence.criterionId }).from(evidence)
       .where(and(eq(evidence.taskId, task.id), eq(evidence.round, task.reviewRounds)))
-    const missing = criteria.filter(c => !attached.some(e => e.criterionId === c.id))
+    const missing = criteria.filter(c => !c.checkedByHuman && !attached.some(e => e.criterionId === c.id))
 
     // Check with core before touching GitHub, so a rejected outcome leaves no trace
     const check = transition(toTaskState(task), {
@@ -1288,23 +1474,31 @@ export class Orchestrator implements RunnerHandlers {
 
     const ref = taskRef(ctx.project.prefix, task.number)
     const body = this.#prBody(ref, task.title, report.summary, criteria, attached)
-    const existing = task.prNumber
-      ? await github.getPullRequest(ctx.project.repository, task.prNumber)
-      : await github.findOpenPullRequest(ctx.project.repository, task.branch!)
-    let pr = existing && existing.state === 'open' ? existing : null
-    if (pr) await github.updatePullRequest(ctx.project.repository, pr.number, { body })
-    else pr = await github.openPullRequest(ctx.project.repository, { head: task.branch!, base: await taskBase(db, task, ctx.project, github), title: `${ref}: ${task.title}`, body })
+    // A rebase task's commits are already on the epic PR; it has no PR of its own
+    let pr: PullRequest | null = null
+    if (!await isEpicRebaseTask(db, task)) {
+      const existing = task.prNumber
+        ? await github.getPullRequest(ctx.project.repository, task.prNumber)
+        : await github.findOpenPullRequest(ctx.project.repository, task.branch!)
+      pr = existing && existing.state === 'open' ? existing : null
+      if (pr) await github.updatePullRequest(ctx.project.repository, pr.number, { body })
+      else pr = await github.openPullRequest(ctx.project.repository, { head: task.branch!, base: await taskBase(db, task, ctx.project, github), title: `${ref}: ${task.title}`, body })
+    }
 
-    await db.transaction(async (tx) => {
+    const comment = await db.transaction(async (tx) => {
       const locked = await lockTask(tx, task.id)
       if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease while submitting. Stop working.')
       await applyTransition(tx, locked.task, locked.project, {
         type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true
-      }, server, { event: report.outcome, runId: ctx.run.id, headSha: report.headSha, pr: pr.number })
-      await tx.update(tasks).set({ headSha: report.headSha, prNumber: pr.number, prUrl: pr.url }).where(eq(tasks.id, task.id))
+      }, server, { event: report.outcome, runId: ctx.run.id, headSha: report.headSha, pr: pr?.number ?? null })
+      await tx.update(tasks).set({ headSha: report.headSha, ...(pr && { prNumber: pr.number, prUrl: pr.url }) }).where(eq(tasks.id, task.id))
+      const comment = await this.#postNote(tx, ctx, report.note!)
       await this.#endRunIn(tx, ctx, { state: 'completed', outcome: report.outcome as RunOutcome, summary: report.summary, headSha: report.headSha })
+      return comment
     })
+    this.#d.events.publish({ type: 'comment.created', comment })
     this.#finished(ctx, 'Outcome accepted', { handoff: true })
+    if (!pr) return { ok: true, message: 'The rebased epic branch is ready for review. You can stop now.' }
     return { ok: true, pr: pr.url, message: `PR #${pr.number} is ready for review. You can stop now.` }
   }
 
@@ -1319,23 +1513,24 @@ export class Orchestrator implements RunnerHandlers {
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
     const attached = await db.select({ criterionId: evidence.criterionId }).from(evidence)
       .where(and(eq(evidence.taskId, task.id), eq(evidence.round, task.reviewRounds)))
-    const missing = criteria.filter(c => !attached.some(e => e.criterionId === c.id))
+    const missing = criteria.filter(c => !c.checkedByHuman && !attached.some(e => e.criterionId === c.id))
     if (missing.length > 0) {
       throw new ToolError(`Not submitted. No evidence yet for: ${missing.map(c => `[${c.id}] ${c.text}`).join('; ')}. Attach it and report again.`)
     }
     const marker = findingsMarker(ctx.run.id)
-    const comment = await db.transaction(async (tx) => {
+    const posted = await db.transaction(async (tx) => {
       const locked = await lockTask(tx, task.id)
       if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease while submitting. Stop working.')
       await applyTransition(tx, locked.task, locked.project, {
         type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true
       }, server, { event: 'findings_reported', runId: ctx.run.id, headSha: marker })
       await tx.update(tasks).set({ headSha: marker }).where(eq(tasks.id, task.id))
-      const comment = await addComment(tx, task.id, { body: `## Findings\n\n${report.summary.trim()}`, pinned: false }, this.#actor(ctx))
+      const note = await this.#postNote(tx, ctx, report.note!)
+      const findings = await addComment(tx, task.id, { body: `## Findings\n\n${report.summary.trim()}`, pinned: false }, this.#actor(ctx))
       await this.#endRunIn(tx, ctx, { state: 'completed', outcome: 'findings_reported', summary: report.summary })
-      return comment
+      return [note, findings]
     })
-    this.#d.events.publish({ type: 'comment.created', comment })
+    for (const comment of posted) this.#d.events.publish({ type: 'comment.created', comment })
     this.#finished(ctx, 'Findings accepted for review', { handoff: true })
     return { ok: true, message: 'Your findings are on the task and go to the reviewer next. You can stop now.' }
   }
@@ -1383,7 +1578,7 @@ export class Orchestrator implements RunnerHandlers {
     }
   }
 
-  // D20: the developer's outcome on a design task. Accepted only when a
+  // D20: the designer's outcome on a design task. Accepted only when a
   // version exists for the branch's current commit and every criterion has
   // evidence. Nothing is opened on GitHub.
   async #reportDesign(ctx: RunContext, report: OutcomeReport) {
@@ -1396,7 +1591,7 @@ export class Orchestrator implements RunnerHandlers {
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
     const attached = await db.select({ criterionId: evidence.criterionId }).from(evidence)
       .where(and(eq(evidence.taskId, task.id), eq(evidence.round, task.reviewRounds)))
-    const missing = criteria.filter(c => !attached.some(e => e.criterionId === c.id))
+    const missing = criteria.filter(c => !c.checkedByHuman && !attached.some(e => e.criterionId === c.id))
     const problems = [
       head !== report.headSha ? `The branch on GitHub is at ${head ?? 'nothing'}, not your commit ${report.headSha}.` : '',
       !version ? `No design version was submitted at your latest commit ${report.headSha}: call submit_design first.` : '',
@@ -1404,20 +1599,23 @@ export class Orchestrator implements RunnerHandlers {
     ].filter(Boolean)
     if (problems.length > 0) throw new ToolError(`Not submitted. ${problems.join(' ')} Fix this and report again.`)
 
-    await db.transaction(async (tx) => {
+    const comment = await db.transaction(async (tx) => {
       const locked = await lockTask(tx, task.id)
       if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease while submitting. Stop working.')
       await applyTransition(tx, locked.task, locked.project, {
         type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true
       }, server, { event: 'design_submitted', runId: ctx.run.id, headSha: report.headSha, version: version!.version })
       await tx.update(tasks).set({ headSha: report.headSha }).where(eq(tasks.id, task.id))
+      const comment = await this.#postNote(tx, ctx, report.note!)
       await this.#endRunIn(tx, ctx, { state: 'completed', outcome: 'design_submitted', summary: report.summary, headSha: report.headSha })
+      return comment
     })
+    this.#d.events.publish({ type: 'comment.created', comment })
     this.#finished(ctx, `Design v${version!.version} submitted for review`, { handoff: true })
     return { ok: true, message: `Design v${version!.version} goes to the reviewer next, then to the human. You can stop now.` }
   }
 
-  #prBody(ref: string, title: string, summary: string, criteria: { id: string, text: string }[], attached: { criterionId: string | null }[]): string {
+  #prBody(ref: string, title: string, summary: string, criteria: { id: string, text: string, checkedByHuman: boolean }[], attached: { criterionId: string | null }[]): string {
     const link = `${this.#d.publicUrl}/tasks/${ref}`
     // Table cells can't hold newlines or bare pipes
     const cell = (text: string) => text.replace(/\s*\n\s*/g, ' ').replaceAll('|', '\\|')
@@ -1432,7 +1630,7 @@ export class Orchestrator implements RunnerHandlers {
       '| --- | --- |',
       ...criteria.map((c) => {
         const n = attached.filter(e => e.criterionId === c.id).length
-        return `| ${cell(c.text)} | ${n} item${n === 1 ? '' : 's'} |`
+        return `| ${cell(c.text)} | ${c.checkedByHuman ? 'Needs human check' : `${n} item${n === 1 ? '' : 's'}`} |`
       }),
       '',
       `Screenshots, logs and the reviewer's verdicts are on the [evidence page](${link}?evidence=1).`,
@@ -1474,9 +1672,18 @@ export class Orchestrator implements RunnerHandlers {
     return ctx
   }
 
+  // Slots in use on each runner, for the runner list (design/settings.md)
+  async refreshLoad(): Promise<void> {
+    const busy = await this.#d.db.select({ runnerId: runs.runnerId, n: count() }).from(runs)
+      .where(and(inArray(runs.state, [...ACTIVE_RUN_STATES]), isNotNull(runs.runnerId)))
+      .groupBy(runs.runnerId)
+    this.#d.runner.setInUse(new Map(busy.map(b => [b.runnerId!, b.n])))
+  }
+
   async #publish(ctx: RunContext): Promise<void> {
     const { db, events } = this.#d
     events.publish({ type: 'run.updated', run: await getRun(db, ctx.run.id) })
+    await this.refreshLoad()
     // A soft-deleted task has nothing left to show
     const task = ctx.task ? await loadTask(db, ctx.task.id).catch(() => null) : null
     if (task) events.publish({ type: 'task.updated', task })
@@ -1490,11 +1697,19 @@ export function findingsMarker(runId: string): string {
   return `findings-${runId}`
 }
 
+// Why a developer's work note is not acceptable, if it isn't
+export function noteProblem(note: string | undefined): string | null {
+  if (!note) return 'The work note is missing.'
+  if (/[\r\n]/.test(note)) return 'The work note must be a single line.'
+  if (note.length > MAX_NOTE_LENGTH) return `The work note is ${note.length} characters; the limit is ${MAX_NOTE_LENGTH}.`
+  return null
+}
+
 // The review as a comment the developer reads next round
-export function feedbackComment(summary: string, verdicts: { criterionId: string, met: boolean, note: string }[], criteria: { id: string, text: string }[]): string {
+export function feedbackComment(summary: string, verdicts: { criterionId: string, met: boolean | null, note: string }[], criteria: { id: string, text: string }[]): string {
   const lines = verdicts.map((v) => {
     const text = criteria.find(c => c.id === v.criterionId)?.text ?? v.criterionId
-    return `- ${v.met ? '✅' : '❌'} ${text}${v.note ? ` — ${v.note}` : ''}`
+    return `- ${v.met === null ? 'Needs human check:' : v.met ? '✅' : '❌'} ${text}${v.note ? ` — ${v.note}` : ''}`
   })
   return [summary.trim(), '', ...lines].join('\n').trim()
 }
@@ -1502,7 +1717,7 @@ export function feedbackComment(summary: string, verdicts: { criterionId: string
 export function actorLabel(actor: Actor): string {
   switch (actor.kind) {
     case 'human': return 'Human'
-    case 'agent': return actor.role === 'pm' ? 'PM' : actor.role === 'developer' ? 'Developer' : 'Reviewer'
+    case 'agent': return actor.role === 'pm' ? 'PM' : actor.role === 'developer' ? 'Developer' : actor.role === 'designer' ? 'Designer' : 'Reviewer'
     case 'system': return 'Corral'
   }
 }

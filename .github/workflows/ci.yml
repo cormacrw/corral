@@ -48,6 +48,9 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
+      - name: Build
+        run: pnpm run build
+
       - name: Migrations match the schema
         run: |
           pnpm --filter @corral/db generate
@@ -68,6 +71,11 @@ jobs:
             echo "$changed"
             exit 1
           fi
+
+      - name: Test exit status regression probes
+        run: pnpm run test:exit-codes
+        env:
+          CORRAL_DATABASE_URL: postgres://corral:corral@localhost:5432/corral
 
       - name: Test
         run: pnpm run test

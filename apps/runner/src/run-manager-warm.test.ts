@@ -29,7 +29,10 @@ if (resume && resume !== 'fresh-session') {
 }
 function answer(content) {
   console.log(JSON.stringify({ type: 'system', subtype: 'init', session_id: 'fresh-session' }))
-  if (content === 'hang') return
+  if (content === 'hang') {
+    appendFileSync(__filename + '.hang', String(process.pid))
+    return
+  }
   console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Answered ' + content + ' in ' + process.pid }] } }))
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'Done', session_id: 'fresh-session' }))
 }
@@ -216,6 +219,19 @@ describe('RunManager warm PM sessions', () => {
     expect(replies(second)).toEqual([`Answered second in ${log[1]!.pid}`])
   })
 
+  it('reports an outside signal during a reused warm turn', async () => {
+    const first = await firstTurn()
+    manager.assign(followUp({ prompt: 'hang' }))
+    // Wait for the reused process to read the second prompt before killing it.
+    await expect.poll(() => readFile(`${claudeBin}.hang`, 'utf8').catch(() => null)).toBe(String(first.pid))
+    expect(await calls()).toHaveLength(1)
+    process.kill(first.pid, 'SIGTERM')
+    const second = await finish('r2')
+
+    expect(second.find(m => m.type === 'run.ended')).toMatchObject({ exit: { kind: 'signalled', signal: 'SIGTERM' } })
+    expect(notes(second)).toContain('The agent was killed by SIGTERM, which Corral did not send')
+  })
+
   it('kills the warm process when a turn is stopped', async () => {
     await firstTurn()
     manager.assign(followUp({ prompt: 'hang' }))
@@ -255,7 +271,7 @@ describe('RunManager warm PM sessions', () => {
     await manager.shutdown()
 
     expect(await processesLeft()).toEqual([])
-    expect(sent.find(m => m.type === 'run.ended' && m.runId === 'busy')).toMatchObject({ exit: { kind: 'stopped' } })
+    expect(sent.find(m => m.type === 'run.ended' && m.runId === 'busy')).toMatchObject({ exit: { kind: 'runner_shutdown' } })
   })
 
   it('reports no active run while warm, so a developer run can take the only slot', async () => {

@@ -118,7 +118,7 @@ describe('design tasks submit versions instead of a PR', () => {
     t.github.setBranch(project.repository, job.branch!, sha)
     expect(await runner.call(job.runId, job.leaseEpoch, 'submit_design', submission(sha))).toMatchObject({ ok: true })
     await attachAll(job, task)
-    expect(await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'design_submitted', summary: 'Login form and its error state', headSha: sha }))
+    expect(await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'design_submitted', note: 'Did the work', summary: 'Login form and its error state', headSha: sha }))
       .toMatchObject({ ok: true })
     await runner.next('run.stop', m => m.runId === job.runId)
   }
@@ -138,10 +138,36 @@ describe('design tasks submit versions instead of a PR', () => {
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
   }
 
+  it('starts a fresh designer session after a developer authored the design, preserving the branch and feedback', async () => {
+    const project = await t.createProject()
+    await pause(project)
+    const task = await t.createTask(project.slug, { type: 'design' })
+    // This is a historical developer run; the designer must not resume it,
+    // even if the agent has since been reconfigured as a designer.
+    const [designer] = await t.db.select().from(agents).where(eq(agents.role, 'designer')).limit(1)
+    await t.db.update(tasks).set({ status: 'in_progress', branch: `design/${task.ref}`, headSha: 'old-design' }).where(eq(tasks.id, task.id))
+    await t.db.insert(runs).values({
+      agentId: designer!.id, projectId: project.id, taskId: task.id, role: 'designer',
+      state: 'completed', agentSessionId: 'older-designer-session', runnerId: 'r1'
+    })
+    await t.db.insert(runs).values({
+      agentId: designer!.id, projectId: project.id, taskId: task.id, role: 'developer',
+      state: 'completed', agentSessionId: 'old-developer-session', runnerId: 'r1'
+    })
+    await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/comments`, { body: 'Keep the existing error screen' })
+    await t.request('PATCH', `/api/projects/${project.slug}`, { paused: false })
+    const job = await nextJob(task, 'designer')
+    expect(job).toMatchObject({ role: 'designer', branch: `design/${task.ref}`, headSha: 'old-design', agentSessionId: null, fallbackPrompt: null })
+    expect(job.prompt).toContain('the designer agent')
+    expect(job.prompt).toContain('Keep the existing error screen')
+    expect((await full(project, task)).developer).toEqual({ id: designer!.id, name: designer!.name })
+    await pause(project)
+  })
+
   it('runs a design end to end on design/<ref> and ends in Human review with v1 stored, without a PR', async () => {
     const { project, task } = await approved()
 
-    const developer = await nextJob(task, 'developer')
+    const developer = await nextJob(task, 'designer')
     expect(developer).toMatchObject({ branch: `design/${task.ref}`, taskType: 'design', agentSessionId: null })
     expect(developer.prompt).toContain(`design task ${task.ref}`)
     expect(developer.prompt).toContain('submit_design')
@@ -150,12 +176,12 @@ describe('design tasks submit versions instead of a PR', () => {
     expect(developer.prompt).not.toContain('pr_opened')
 
     // A design opens no PR
-    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', summary: 'Done', headSha: 'd1' }))
+    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', note: 'Did the work', summary: 'Done', headSha: 'd1' }))
       .toMatchObject({ ok: false, error: expect.stringContaining('submit_design') })
     // Reporting before a version exists at the commit is refused
     t.github.setBranch(project.repository, developer.branch!, 'd1')
     await attachAll(developer, task)
-    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'design_submitted', summary: 'Done', headSha: 'd1' }))
+    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'design_submitted', note: 'Did the work', summary: 'Done', headSha: 'd1' }))
       .toMatchObject({ ok: false, error: expect.stringContaining('call submit_design first') })
 
     await submit(project, developer, task, 'd1')
@@ -193,14 +219,14 @@ describe('design tasks submit versions instead of a PR', () => {
 
   it('accepts a design submission whose criteria are covered by notes alone (D21)', async () => {
     const { project, task } = await approved()
-    const developer = await nextJob(task, 'developer')
+    const developer = await nextJob(task, 'designer')
     t.github.setBranch(project.repository, developer.branch!, 'n1')
     expect(await runner.call(developer.runId, developer.leaseEpoch, 'submit_design', submission('n1'))).toMatchObject({ ok: true })
     for (const criterion of task.acceptanceCriteria) {
       expect(await runner.call(developer.runId, developer.leaseEpoch, 'attach_evidence', { criterionId: criterion.id, kind: 'note', note: 'See the screenshots in v1' }))
         .toMatchObject({ ok: true })
     }
-    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'design_submitted', summary: 'Login form', headSha: 'n1' }))
+    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'design_submitted', note: 'Did the work', summary: 'Login form', headSha: 'n1' }))
       .toMatchObject({ ok: true })
     expect(await taskRow(task.id)).toMatchObject({ status: 'agent_review' })
     await runner.next('run.stop', m => m.runId === developer.runId)
@@ -209,7 +235,7 @@ describe('design tasks submit versions instead of a PR', () => {
 
   it('rejects a bundle without index.html at its root with a clear error, and records nothing', async () => {
     const { project, task } = await approved()
-    const developer = await nextJob(task, 'developer')
+    const developer = await nextJob(task, 'designer')
     t.github.setBranch(project.repository, developer.branch!, 'd1')
     expect(await runner.call(developer.runId, developer.leaseEpoch, 'submit_design', submission('d1', tarball({ 'dist/index.html': '<h1>Login</h1>' }))))
       .toMatchObject({ ok: false, error: 'Not submitted. The bundle has no index.html at its root. Pass the folder that holds index.html and its assets, with relative paths.' })
@@ -219,7 +245,7 @@ describe('design tasks submit versions instead of a PR', () => {
 
   it('continues the same session on the same branch after the human requests changes, and submits v2', async () => {
     const { project, task } = await approved()
-    const developer = await nextJob(task, 'developer')
+    const developer = await nextJob(task, 'designer')
     await started(developer, 'sess-design-1')
     await submit(project, developer, task, 'd1')
     await review(task)
@@ -232,7 +258,7 @@ describe('design tasks submit versions instead of a PR', () => {
     expect((await versionsOf(task))[0]).toMatchObject({ version: 1, status: 'changes_requested', feedback: 'Make the error state red, and add a forgot-password link.' })
 
     // The same agent session resumes on the same branch, told about the feedback
-    const revision = await nextJob(task, 'developer')
+    const revision = await nextJob(task, 'designer')
     expect(revision).toMatchObject({ branch: developer.branch, agentSessionId: 'sess-design-1', taskType: 'design' })
     expect(revision.prompt).toContain('same session and the same branch')
     expect(revision.prompt).toContain('Make the error state red')
@@ -258,7 +284,7 @@ describe('design tasks submit versions instead of a PR', () => {
   // PM reads the version with get_design
   it('opens one Plan session for the build when a version is approved, and none when it is approved again', async () => {
     const { project, task } = await approved()
-    const developer = await nextJob(task, 'developer')
+    const developer = await nextJob(task, 'designer')
     await submit(project, developer, task, 'd1')
     await review(task)
     expect(await taskRow(task.id)).toMatchObject({ status: 'human_review' })
@@ -313,7 +339,7 @@ describe('design tasks submit versions instead of a PR', () => {
   describe('build tasks pinned to a design', () => {
     async function approvedV1() {
       const { project, task } = await approved()
-      const developer = await nextJob(task, 'developer')
+      const developer = await nextJob(task, 'designer')
       await submit(project, developer, task, 'd1')
       await review(task)
       await pause(project)
@@ -356,7 +382,7 @@ describe('design tasks submit versions instead of a PR', () => {
           criterionId: criterion.id, kind: 'screenshot', note: 'login: build beside prototype', fileName: 'login-side-by-side.png', contentType: 'image/png', dataBase64: Buffer.from('png').toString('base64')
         })).toMatchObject({ ok: true })
       }
-      expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', summary: 'Login screen', headSha: 'b1' })).toMatchObject({ ok: true })
+      expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', note: 'Did the work', summary: 'Login screen', headSha: 'b1' })).toMatchObject({ ok: true })
       await runner.next('run.stop', m => m.runId === developer.runId)
       const reviewer = await nextJob(build, 'reviewer')
       expect(reviewer).toMatchObject({ designPinned: true })
@@ -414,7 +440,7 @@ describe('design tasks submit versions instead of a PR', () => {
 
   it('refuses to approve while the runner is offline, so the build is never left unplanned', async () => {
     const { project, task } = await approved()
-    const developer = await nextJob(task, 'developer')
+    const developer = await nextJob(task, 'designer')
     await submit(project, developer, task, 'd1')
     await review(task)
     await pause(project)
@@ -437,12 +463,12 @@ describe('design tasks submit versions instead of a PR', () => {
     const developer = await nextJob(task, 'developer')
     expect(developer.branch).toMatch(new RegExp(`^corral/${task.ref.toLowerCase()}-`))
     expect(developer).toMatchObject({ taskType: 'task', agentSessionId: null, fallbackPrompt: null })
-    expect(developer.prompt).not.toContain('submit_design')
+    for (const guidance of ['prototype', 'design.md', 'submit_design']) expect(developer.prompt).not.toContain(guidance)
 
     t.github.setBranch(project.repository, developer.branch!, 'abc123')
     expect(await runner.call(developer.runId, developer.leaseEpoch, 'submit_design', submission('abc123')))
-      .toMatchObject({ ok: false, error: 'Only a design task submits a design' })
-    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'design_submitted', summary: 'Done', headSha: 'abc123' }))
+      .toMatchObject({ ok: false, error: 'The developer can’t use submit_design' })
+    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'design_submitted', note: 'Did the work', summary: 'Done', headSha: 'abc123' }))
       .toMatchObject({ ok: false, error: expect.stringContaining('Only a design task reports design_submitted') })
     expect(await versionsOf(task)).toHaveLength(0)
     await pause(project)

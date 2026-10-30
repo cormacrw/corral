@@ -2,11 +2,13 @@ import {
   RUNNER_HEARTBEAT_MS,
   RUNNER_PROTOCOL_VERSION,
   RUNNER_ROLES,
+  type RunnerCapacity,
   type RunnerInfo,
   type RunnerMessage,
   type RunnerStatus,
   type ServerMessage,
   type SetupJob,
+  type SlotSource,
   type SetupJobResult
 } from '@corral/contracts'
 import { randomUUID } from 'node:crypto'
@@ -24,7 +26,7 @@ type ActiveRuns = { runId: string, leaseEpoch: number }[]
 export interface RunnerHandlers {
   onConnected(activeRuns: ActiveRuns, runnerId: string): Promise<void>
   onReady(): void
-  onHeartbeat(activeRuns: ActiveRuns, runnerId: string): Promise<void>
+  onHeartbeat(activeRuns: ActiveRuns, runnerId: string, sentAt?: number): Promise<void>
   onDisconnected(): Promise<void>
   onRunMessage(message: Extract<RunnerMessage, { type: 'run.started' | 'run.events' | 'run.ended' }>, runnerId: string): Promise<void>
   // Returns the tool result, or throws to send an error back to the agent
@@ -32,6 +34,13 @@ export interface RunnerHandlers {
 }
 
 const JOB_TIMEOUT_MS = 60_000
+
+// A setup job lost with its connection, as opposed to one that failed
+export class RunnerDisconnected extends Error {
+  constructor() {
+    super('Runner disconnected')
+  }
+}
 
 // Connections are independent; only the same runner identity replaces a socket.
 export class RunnerHub {
@@ -44,8 +53,13 @@ export class RunnerHub {
   // on disk before run.ended reads the transcript. Tool calls and job
   // results stay unqueued: a tool call may wait on a job over this socket.
   #queues = new Map<string, Promise<void>>()
+  // Active runs per runner, as the orchestrator last counted them
+  #inUse = new Map<string, number>()
 
-  constructor(events: EventBus) {
+  readonly commit: string
+
+  constructor(events: EventBus, commit = process.env.CORRAL_BUILD_SHA || 'development') {
+    this.commit = commit
     this.#events = events
   }
 
@@ -56,7 +70,24 @@ export class RunnerHub {
   status(): RunnerStatus {
     const runners = [...this.#runners.values()].map(r => ({ ...r.status }))
     const first = runners.find(r => r.online)
-    return { online: !!first, runnerId: first?.id ?? null, name: first?.name ?? null, connectedAt: first?.connectedAt ?? null, lastHeartbeatAt: first?.lastHeartbeatAt ?? null, runners }
+    return { online: !!first, runnerId: first?.id ?? null, name: first?.name ?? null, connectedAt: first?.connectedAt ?? null, lastHeartbeatAt: first?.lastHeartbeatAt ?? null, protocol: RUNNER_PROTOCOL_VERSION, runners }
+  }
+
+  name(runnerId: string | null): string | null {
+    return runnerId ? this.#runners.get(runnerId)?.status.name ?? null : null
+  }
+
+  // The orchestrator's count of active runs per runner, after a run changes
+  setInUse(counts: Map<string, number>): void {
+    this.#inUse = counts
+    let changed = false
+    for (const [id, runner] of this.#runners) {
+      const n = counts.get(id) ?? 0
+      if (runner.status.slotsInUse === n) continue
+      runner.status.slotsInUse = n
+      changed = true
+    }
+    if (changed) this.#publishStatus()
   }
 
   get online(): boolean {
@@ -97,7 +128,8 @@ export class RunnerHub {
         }
         if (message.type === 'hello') {
           if (message.protocol !== RUNNER_PROTOCOL_VERSION) {
-            socket.close(4000, `Protocol ${message.protocol} not supported; server speaks ${RUNNER_PROTOCOL_VERSION}`)
+            this.#turnAway(message)
+            socket.close(4000, JSON.stringify({ protocol: RUNNER_PROTOCOL_VERSION, commit: this.commit }))
             return
           }
           if (runnerId) return
@@ -109,12 +141,8 @@ export class RunnerHub {
           }
           this.#cliCache.delete(runnerId)
           const now = new Date().toISOString()
-          const capacity = {
-            slots: Number.isInteger(message.slots) && message.slots > 0 ? message.slots : 1,
-            runtimes: Array.isArray(message.runtimes) ? message.runtimes.filter(r => typeof r === 'string') : [],
-            roles: Array.isArray(message.roles) ? message.roles.filter(r => (RUNNER_ROLES as readonly string[]).includes(r)) : []
-          }
-          this.#runners.set(runnerId, { socket, status: { id: runnerId, name: message.name, online: false, connectedAt: now, lastHeartbeatAt: now, ...capacity } })
+          const capacity = parseCapacity(message)
+          this.#runners.set(runnerId, { socket, status: { id: runnerId, name: message.name, online: false, slotsInUse: this.#inUse.get(runnerId) ?? 0, protocol: message.protocol, needsUpdate: false, connectedAt: now, lastHeartbeatAt: now, ...capacity, commit: message.commit || 'unknown', serverCommit: this.commit, behind: message.commit !== this.commit, draining: !!message.draining || (!!message.autoUpdate && message.commit !== this.commit && !(message.updateState === 'failed' && message.updateTarget === this.commit)), updateRequested: !!message.updateRequested, updateState: message.updateState ?? '', updateError: message.updateError ?? '', activeRunCount: message.activeRuns.length } })
           // Don't dispatch into this socket until its hello snapshot has been
           // reconciled: a newly assigned run isn't in that snapshot.
           await this.#handlers?.onConnected(message.activeRuns, runnerId).catch(error => console.error('Runner reconciliation failed', error))
@@ -122,7 +150,7 @@ export class RunnerHub {
           if (runner?.socket !== socket) return
           runner.status.online = true
           this.#publishStatus()
-          this.send({ type: 'welcome', runnerId }, runnerId)
+          this.send({ type: 'welcome', runnerId, commit: this.commit, draining: runner.status.draining, updateRequested: runner.status.updateRequested }, runnerId)
           void this.detectClis(true, runnerId).catch(error => console.error('Runner CLI detection failed', error))
           this.#handlers?.onReady()
           return
@@ -144,18 +172,49 @@ export class RunnerHub {
     }
   }
 
+  // A runner on another protocol stays in the list as needing an update,
+  // unless the same runner is connected on the right one
+  #turnAway(message: Extract<RunnerMessage, { type: 'hello' }>): void {
+    if (typeof message.runnerId !== 'string' || !message.runnerId) return
+    const old = this.#runners.get(message.runnerId)
+    if (old?.socket) return
+    const now = new Date().toISOString()
+    this.#runners.set(message.runnerId, {
+      socket: null,
+      status: {
+        id: message.runnerId,
+        name: typeof message.name === 'string' && message.name ? message.name : message.runnerId,
+        online: false,
+        slotsInUse: 0,
+        protocol: message.protocol,
+        needsUpdate: true,
+        commit: message.commit || 'unknown',
+        serverCommit: this.commit,
+        behind: message.commit !== this.commit,
+        draining: false,
+        updateRequested: false,
+        connectedAt: now,
+        lastHeartbeatAt: now,
+        // An older hello may not carry capacity; keep what it last said
+        ...parseCapacity(message, old?.status)
+      }
+    })
+    this.#publishStatus()
+  }
+
   // Server shutdown: the runner reconnects on its own with backoff
   disconnect(): void {
     for (const runner of this.#runners.values()) runner.socket?.close(1001, 'Server shutting down')
   }
 
-  pick(): string | null {
-    return [...this.#runners.entries()].filter(([, r]) => r.socket && r.status.online).sort((a, b) => a[1].status.connectedAt.localeCompare(b[1].status.connectedAt))[0]?.[0] ?? null
+  // With a runtime, only a runner that has it signed in
+  pick(runtime?: string): string | null {
+    return [...this.#runners.entries()].filter(([, r]) => r.socket && r.status.online && (!runtime || r.status.runtimes.includes(runtime))).sort((a, b) => Number(a[1].status.draining) - Number(b[1].status.draining) || a[1].status.connectedAt.localeCompare(b[1].status.connectedAt))[0]?.[0] ?? null
   }
 
   // Online runners ready for dispatch, longest connected first
   available(): RunnerInfo[] {
-    return [...this.#runners.values()].filter(r => r.socket && r.status.online).map(r => ({ ...r.status }))
+    return [...this.#runners.values()].filter(r => r.socket && r.status.online && !r.status.draining).map(r => ({ ...r.status }))
       .sort((a, b) => a.connectedAt.localeCompare(b.connectedAt))
   }
 
@@ -165,16 +224,27 @@ export class RunnerHub {
 
   send(message: ServerMessage, runnerId: string | null): boolean {
     const socket = runnerId ? this.#runners.get(runnerId)?.socket : null
-    if (!socket) return false
+    if (!socket || (message.type === 'run.assign' && runnerId && this.#runners.get(runnerId)?.status.draining)) return false
     socket.send(JSON.stringify(message))
     return true
+  }
+
+  drain(runnerId: string, updateRequested = false): RunnerInfo {
+    const runner = this.#runners.get(runnerId)
+    if (!runner?.socket || !runner.status.online) throw runnerOffline()
+    runner.status.draining = true
+    runner.status.updateRequested ||= updateRequested
+    this.send({ type: 'runner.drain', updateRequested: runner.status.updateRequested }, runnerId)
+    this.#publishStatus()
+    this.#handlers?.onReady()
+    return { ...runner.status }
   }
 
   #rejectJobs(runnerId: string): void {
     for (const [jobId, pending] of this.#pending) {
       if (pending.runnerId !== runnerId) continue
       clearTimeout(pending.timer)
-      pending.reject(new Error('Runner disconnected'))
+      pending.reject(new RunnerDisconnected())
       this.#pending.delete(jobId)
     }
   }
@@ -191,7 +261,7 @@ export class RunnerHub {
         kept: results.flatMap(r => r.kept)
       }) as Extract<SetupJobResult, { kind: K }>)
     }
-    const runnerId = this.pick()
+    const runnerId = this.pick(job.kind === 'release_notes' ? (job as Extract<SetupJob, { kind: 'release_notes' }>).runtime : undefined)
     if (!runnerId) return Promise.reject(runnerOffline())
     return this.#request(job, timeoutMs, runnerId)
   }
@@ -210,10 +280,21 @@ export class RunnerHub {
 
   async #handle(message: RunnerMessage, runnerId: string): Promise<void> {
     switch (message.type) {
+      case 'runner.update-status': {
+        const runner = this.#runners.get(runnerId)!
+        const wasDraining = runner.status.draining
+        Object.assign(runner.status, { draining: message.updateState === 'failed' ? false : runner.status.draining || message.draining, updateRequested: message.updateState === 'failed' ? false : runner.status.updateRequested || message.updateRequested, activeRunCount: message.activeRunCount, updateState: message.updateState, updateError: message.updateError })
+        this.#publishStatus()
+        if (wasDraining && !runner.status.draining) this.#handlers?.onReady()
+        return
+      }
+      case 'runner.draining':
+        this.drain(runnerId, message.updateRequested)
+        return
       case 'heartbeat':
         this.#runners.get(runnerId)!.status.lastHeartbeatAt = new Date().toISOString()
         this.#publishStatus()
-        await this.#handlers?.onHeartbeat(message.activeRuns, runnerId)
+        await this.#handlers?.onHeartbeat(message.activeRuns, runnerId, message.sentAt)
         return
       case 'job.result': {
         const pending = this.#pending.get(message.jobId)
@@ -257,6 +338,24 @@ export class RunnerHub {
   #publishStatus(): void {
     this.#events.publish({ type: 'runner.status', status: this.status() })
   }
+}
+
+// A hello's capacity, checked: anything missing falls back to `fallback`
+function parseCapacity(message: Extract<RunnerMessage, { type: 'hello' }>, fallback?: RunnerCapacity): RunnerCapacity {
+  return {
+    slotSource: parseSlotSource(message.slotSource),
+    slots: Number.isInteger(message.slots) && message.slots > 0 ? message.slots : fallback?.slots ?? 1,
+    runtimes: Array.isArray(message.runtimes) ? message.runtimes.filter(r => typeof r === 'string') : fallback?.runtimes ?? [],
+    roles: Array.isArray(message.roles) ? message.roles.filter(r => (RUNNER_ROLES as readonly string[]).includes(r)) : fallback?.roles ?? []
+  }
+}
+
+function parseSlotSource(source: SlotSource | undefined): SlotSource | undefined {
+  if (source?.kind === 'explicit') return { kind: 'explicit' }
+  if (source?.kind !== 'derived') return undefined
+  const { cpus, memoryBytes, slotCpus, slotMemoryBytes } = source
+  if (![cpus, memoryBytes, slotCpus, slotMemoryBytes].every(n => Number.isFinite(n) && n > 0)) return undefined
+  return { kind: 'derived', cpus, memoryBytes, slotCpus, slotMemoryBytes }
 }
 
 export function runnerOffline(): ApiFailure {

@@ -3,40 +3,49 @@ import type { PlanThreadItem } from '@corral/contracts'
 import { timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
 
-defineProps<{ item: PlanThreadItem }>()
+// Laid out like the other Inbox rows, which differ by layout
+defineProps<{ item: PlanThreadItem, mobile?: boolean }>()
 </script>
 
 <template>
-  <ProjectThumbnail
-    :project="item.project"
-    :size="20"
-    class="mt-1"
+  <span
+    v-if="item.unread"
+    class="mt-2 size-2 shrink-0 rounded-full bg-primary"
+    aria-label="Unread reply"
   />
-  <span class="flex min-w-0 flex-1 flex-col gap-1">
-    <span class="flex items-center gap-2">
-      <span class="truncate text-sm font-semibold">{{ item.subject }}</span>
-      <span
-        v-if="item.unread"
-        class="size-2 shrink-0 rounded-full bg-primary"
-        aria-label="Unread reply"
-      />
-      <UIcon
-        v-if="item.activeRunId"
-        name="i-lucide-loader-circle"
-        class="ms-auto size-3 shrink-0 animate-spin"
-        aria-label="PM working"
-      />
-      <span class="ms-auto shrink-0 text-xs text-muted">{{ timeAgo(item.at) }}</span>
+  <AgentAvatar
+    :name="item.sender.name"
+    :size="mobile ? 'md' : 'xs'"
+  />
+  <span :class="['min-w-0 flex-1', mobile && 'flex flex-col gap-1']">
+    <span :class="['flex items-center gap-2', !mobile && 'text-xs text-muted']">
+      <span :class="mobile ? 'font-semibold text-highlighted' : 'font-medium text-default'">{{ item.sender.name }}</span>
+      <span class="ms-auto flex shrink-0 items-center gap-2 text-xs text-muted">
+        <UIcon
+          v-if="item.activeRunId"
+          name="i-lucide-loader-circle"
+          class="size-3 animate-spin"
+          aria-label="PM working"
+        />
+        {{ timeAgo(item.at) }}
+      </span>
     </span>
-    <span class="text-xs text-muted">{{ item.project.name }}</span>
-    <span class="line-clamp-2 text-xs text-muted">{{ markdownToPlainText(item.preview) }}</span>
-    <UBadge
-      v-if="item.status !== 'none' || item.unread"
-      :label="item.status === 'needs_approval' ? 'Needs approval' : item.status === 'question' ? 'Question' : 'Unread reply'"
-      :color="item.status === 'needs_approval' ? 'primary' : item.status === 'question' ? 'info' : 'neutral'"
-      variant="subtle"
-      size="xs"
-      class="self-start"
-    />
+    <span :class="mobile ? 'font-semibold text-highlighted' : 'block truncate text-sm font-medium'">{{ item.subject }}</span>
+    <span :class="['line-clamp-2 text-muted', mobile ? 'text-sm' : 'text-xs']">{{ markdownToPlainText(item.preview) }}</span>
+    <span :class="['flex items-center gap-2', mobile ? 'mt-0.5' : 'mt-1']">
+      <UBadge
+        v-if="item.status !== 'none' || item.unread"
+        :label="item.status === 'needs_approval' ? 'Needs approval' : item.status === 'question' ? 'Question' : 'Unread reply'"
+        :color="item.status === 'needs_approval' ? 'primary' : item.status === 'question' ? 'info' : 'neutral'"
+        variant="subtle"
+        :size="mobile ? 'sm' : 'xs'"
+      />
+      <span class="flex min-w-0 items-center gap-1 truncate text-xs text-muted">
+        <ProjectThumbnail
+          :project="item.project"
+          :size="16"
+        />{{ item.project.name }}
+      </span>
+    </span>
   </span>
 </template>

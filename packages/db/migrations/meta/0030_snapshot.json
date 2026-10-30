@@ -1,5 +1,5 @@
 {
-  "id": "025cf57f-fd90-433b-ab27-d2d8205494aa",
+  "id": "8caed2c2-f7bb-42de-aad7-0d1dc0e0cd4f",
   "prevId": "51932ec1-d6a5-4d3d-a08f-71b784c64430",
   "version": "7",
   "dialect": "postgresql",
@@ -1108,79 +1108,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.perf_samples": {
-      "name": "perf_samples",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "duration_ms": {
-          "name": "duration_ms",
-          "type": "double precision",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "perf_samples_kind_created_at_idx": {
-          "name": "perf_samples_kind_created_at_idx",
-          "columns": [
-            {
-              "expression": "kind",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.plan_epics": {
       "name": "plan_epics",
       "schema": "",
@@ -2073,6 +2000,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "epic_id": {
+          "name": "epic_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lease_expires_at": {
+          "name": "lease_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "role": {
           "name": "role",
           "type": "agent_role",
@@ -2203,6 +2142,21 @@
           "method": "btree",
           "with": {}
         },
+        "runs_epic_id_index": {
+          "name": "runs_epic_id_index",
+          "columns": [
+            {
+              "expression": "epic_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "runs_agent_id_state_index": {
           "name": "runs_agent_id_state_index",
           "columns": [
@@ -2265,6 +2219,19 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
+        "runs_epic_id_epics_id_fk": {
+          "name": "runs_epic_id_epics_id_fk",
+          "tableFrom": "runs",
+          "tableTo": "epics",
+          "columnsFrom": [
+            "epic_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
         "runs_plan_session_id_plan_sessions_id_fk": {
           "name": "runs_plan_session_id_plan_sessions_id_fk",
           "tableFrom": "runs",
@@ -2293,7 +2260,7 @@
       "checkConstraints": {
         "runs_task_unless_pm": {
           "name": "runs_task_unless_pm",
-          "value": "\"runs\".\"task_id\" is not null or \"runs\".\"role\" = 'pm'"
+          "value": "\"runs\".\"task_id\" is not null or \"runs\".\"role\" = 'pm' or (\"runs\".\"epic_id\" is not null and \"runs\".\"role\" = 'reviewer')"
         }
       },
       "isRLSEnabled": false
@@ -2899,6 +2866,7 @@
         "in_review",
         "human_review",
         "changes_requested",
+        "ready_to_merge",
         "merged"
       ]
     },

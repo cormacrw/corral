@@ -12,7 +12,7 @@ export interface ProposedEpic {
   title: string
   summary: string
   dependsOn?: string[] | undefined
-  // How its tasks reach the target branch (D23); the project's default
+  // How its tasks reach the target branch (D27); the project's default
   // when left out
   reviewMode?: EpicReviewMode | undefined
 }
@@ -31,7 +31,7 @@ export interface ProposedTask {
   type: TaskType
   priority: TaskPriority
   humanReview: boolean
-  acceptanceCriteria: string[]
+  acceptanceCriteria: (string | { text: string, checkedByHuman?: boolean | undefined })[]
   dependsOn: string[]
   // The approved design version this task builds, and the screens (ids
   // from its design.md) it covers (D20)
@@ -130,7 +130,7 @@ export function checkPlan(plan: ProposedPlan, refs: ReadonlyMap<string, PlanRef>
     if (!task.title.trim()) problems.push({ code: 'missing_title', key: task.key })
     if (!task.description.trim()) problems.push({ code: 'missing_description', key: task.key })
     if (task.acceptanceCriteria.length === 0) problems.push({ code: 'missing_acceptance_criteria', key: task.key })
-    else if (task.acceptanceCriteria.some(c => !c.trim())) problems.push({ code: 'blank_acceptance_criterion', key: task.key })
+    else if (task.acceptanceCriteria.some(c => !(typeof c === 'string' ? c : c.text).trim())) problems.push({ code: 'blank_acceptance_criterion', key: task.key })
     if (task.ref) {
       const problem = refProblem(task.key, task.ref, refs.get(task.ref) ?? { kind: 'unknown' }, true)
       if (problem) problems.push(problem)
@@ -243,7 +243,7 @@ function sameTask(a: ProposedTask, b: ProposedTask): boolean {
     && a.priority === b.priority
     && a.humanReview === b.humanReview
     && a.acceptanceCriteria.length === b.acceptanceCriteria.length
-    && a.acceptanceCriteria.every((c, i) => c === b.acceptanceCriteria[i])
+    && a.acceptanceCriteria.every((c, i) => JSON.stringify(c) === JSON.stringify(b.acceptanceCriteria[i]))
     && a.dependsOn.length === b.dependsOn.length
     && a.dependsOn.every(d => b.dependsOn.includes(d))
     && samePin(a.design, b.design)

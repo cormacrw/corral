@@ -1,6 +1,6 @@
 import type { TaskStatus } from '@corral/core'
 import { describe, expect, it } from 'vitest'
-import { agentStatus, cliLoginCommand, detectedRuntimes, runtimeLabel, runTokens, taskCounts, taskTypeBadge, taskNote } from './labels.ts'
+import { agentStatus, cliLoginCommand, detectedRuntimes, epicInProgress, epicReviewStatus, epicWithLiveCounts, runtimeLabel, runBadge, runTokens, taskCounts, taskTypeBadge, taskNote } from './labels.ts'
 import { projects, task } from '../prototype/fixtures'
 
 const tasks = (...statuses: TaskStatus[]) => statuses.map(status => ({ status }))
@@ -94,6 +94,12 @@ describe('agentStatus', () => {
 })
 
 describe('Ready waiting notes', () => {
+  it('marks a paused task, ahead of its other notes', () => {
+    const paused = task(projects[0]!, 99, { title: 'Stopped', status: 'in_progress', reviewRounds: 1, paused: true })
+    expect(taskNote(paused, [paused], 5)).toEqual({ text: 'Paused', color: 'warning' })
+    expect(taskNote({ ...paused, paused: false }, [paused], 5)).toEqual({ text: 'Review round 1 of 5', color: 'neutral' })
+  })
+
   it('shows epic prerequisites and clears the note when they finish', () => {
     const ready = task(projects[0]!, 99, { title: 'Waiting', status: 'ready', waitingOnEpics: [{ id: 'foundation', title: 'Foundation' }] })
     expect(taskNote(ready, [ready], 5)).toEqual({ text: 'Waiting on epic: Foundation', color: 'neutral' })
@@ -104,5 +110,37 @@ describe('Ready waiting notes', () => {
   it('preserves task dependency notes for epics without prerequisites', () => {
     const ready = task(projects[0]!, 99, { title: 'Waiting', status: 'ready', dependsOn: ['COR-98'] })
     expect(taskNote(ready, [ready], 5)).toEqual({ text: 'Waiting on COR-98', color: 'neutral' })
+  })
+})
+
+it('labels completed rebase developer runs', () => {
+  expect(runBadge({ state: 'completed', role: 'developer', outcome: 'pr_rebased' })).toEqual({ label: 'PR rebased', color: 'primary' })
+})
+
+describe('epic review status', () => {
+  const epic = { reviewMode: 'epic' as const, branch: 'corral/epic-1', reviewState: null, taskCount: 2, mergedCount: 2 }
+
+  it('says all tasks merged and awaiting review for an epic PR with the human', () => {
+    expect(epicReviewStatus({ ...epic, reviewState: 'human_review' })?.label).toBe('All tasks merged, awaiting your review')
+  })
+
+  it('has nothing to say while tasks are going in, or in direct mode', () => {
+    expect(epicReviewStatus({ ...epic, mergedCount: 1 })).toBeNull()
+    expect(epicReviewStatus({ ...epic, reviewMode: 'direct' })).toBeNull()
+  })
+
+  it('keeps an epic in progress until its PR merges, and a direct one until its tasks do', () => {
+    expect(epicInProgress({ ...epic, reviewState: 'human_review' })).toBe(true)
+    expect(epicInProgress({ ...epic, reviewState: 'merged' })).toBe(false)
+    expect(epicInProgress({ ...epic, reviewMode: 'direct' })).toBe(false)
+    expect(epicInProgress({ ...epic, branch: null })).toBe(false)
+    expect(epicInProgress({ ...epic, taskCount: 0, mergedCount: 0 })).toBe(false)
+  })
+
+  it('counts live board tasks, leaving out Drafts and Backlog', () => {
+    const counted = epicWithLiveCounts({ id: 'e', taskCount: 0, mergedCount: 0 } as Parameters<typeof epicWithLiveCounts>[0], [
+      { epicId: 'e', status: 'merged' }, { epicId: 'e', status: 'ready' }, { epicId: 'e', status: 'backlog' }, { epicId: 'e', status: 'draft' }, { epicId: 'other', status: 'merged' }
+    ])
+    expect(counted).toMatchObject({ taskCount: 2, mergedCount: 1 })
   })
 })

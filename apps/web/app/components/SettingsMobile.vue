@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { parseOverride } from '~/utils/device'
-import { ROLE, runtimeLabel } from '~/utils/labels'
+import { ROLE, runnerSummary, runtimeLabel } from '~/utils/labels'
 
 // Settings on mobile (design/settings.md, design/mobile.md): one screen that
 // lists the sections, each opening its own screen, with Appearance (colour
@@ -58,8 +58,8 @@ const name = computed(() => state.value.profile?.name || 'You')
             class="size-5 shrink-0 text-muted"
           />
           <span class="min-w-0 flex-1">
-            <span class="block text-highlighted">Runner</span>
-            <span class="block truncate text-xs text-muted">{{ state.runner?.online ? 'Online' : 'Offline' }} · {{ state.runner?.name ?? 'no runner yet' }}</span>
+            <span class="block text-highlighted">Runners</span>
+            <span class="block truncate text-xs text-muted">{{ state.runner?.online ? 'Online' : 'Offline' }} · {{ runnerSummary(state.runner) }}</span>
           </span>
           <span
             :class="['size-2.5 shrink-0 rounded-full', state.runner?.online ? 'bg-success' : 'bg-error']"

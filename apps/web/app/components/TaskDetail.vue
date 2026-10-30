@@ -5,7 +5,7 @@ import type { EditorView } from '@tiptap/pm/view'
 import type { TaskPriority, TaskStatus } from '@corral/core'
 import { availableEvents } from '@corral/core'
 import { api, ApiError } from '~/composables/useApi'
-import { PRIORITY, STATUS, TASK_TYPE, timeAgo } from '~/utils/labels'
+import { PRIORITY, runBadge, STATUS, TASK_TYPE, timeAgo } from '~/utils/labels'
 import { attachmentProblem } from '~/utils/attachments'
 import { AttachmentImage, imageFiles, insertImages } from '~/utils/editor-image'
 
@@ -90,6 +90,7 @@ onMounted(() => {
     if (event.type === 'comment.created' && task.value && event.comment.taskId === task.value.id) {
       if (!comments.value.some(c => c.id === event.comment.id)) comments.value.push(event.comment)
     }
+    if (event.type === 'run.updated' && task.value && event.run.taskId === task.value.id) void loadSide()
   })
   onBeforeUnmount(stop)
 })
@@ -145,6 +146,20 @@ async function changeStatus(value: string) {
   }
 }
 
+const resuming = ref(false)
+async function resume() {
+  if (!task.value) return
+  resuming.value = true
+  try {
+    task.value = await api.tasks.resume(slug.value, number.value)
+    flashSaved()
+  } catch (e) {
+    fail(e)
+  } finally {
+    resuming.value = false
+  }
+}
+
 const priorityOptions = (Object.keys(PRIORITY) as TaskPriority[]).map(p => ({ label: PRIORITY[p].label, value: p }))
 const typeOptions = (Object.keys(TASK_TYPE) as Task['type'][]).map(t => ({ label: TASK_TYPE[t], value: t }))
 // Tasks aren't assigned ahead of time: these are the agents of the task's
@@ -152,19 +167,23 @@ const typeOptions = (Object.keys(TASK_TYPE) as Task['type'][]).map(t => ({ label
 const developer = computed(() => task.value?.developer ?? null)
 const reviewer = computed(() => task.value?.reviewer ?? null)
 
+async function toggleHumanCriterion(id: string, checked: boolean) {
+  if (!task.value) return
+  await patch({ acceptanceCriteria: task.value.acceptanceCriteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.id === id ? checked : c.checkedByHuman })) })
+}
 const metCount = computed(() => task.value?.acceptanceCriteria.filter(c => c.met).length ?? 0)
 async function saveCriterion(id: string, text: string) {
   if (!task.value) return
-  const list = task.value.acceptanceCriteria.map(c => ({ id: c.id, text: c.id === id ? text : c.text })).filter(c => c.text.trim())
+  const list = task.value.acceptanceCriteria.map(c => ({ id: c.id, text: c.id === id ? text : c.text, checkedByHuman: c.checkedByHuman })).filter(c => c.text.trim())
   await patch({ acceptanceCriteria: list })
 }
 async function removeCriterion(id: string) {
   if (!task.value) return
-  await patch({ acceptanceCriteria: task.value.acceptanceCriteria.filter(c => c.id !== id).map(c => ({ id: c.id, text: c.text })) })
+  await patch({ acceptanceCriteria: task.value.acceptanceCriteria.filter(c => c.id !== id).map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })) })
 }
 async function addCriterion() {
   if (!task.value || !newCriterion.value.trim()) return
-  await patch({ acceptanceCriteria: [...task.value.acceptanceCriteria.map(c => ({ id: c.id, text: c.text })), { text: newCriterion.value.trim() }] })
+  await patch({ acceptanceCriteria: [...task.value.acceptanceCriteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })), { text: newCriterion.value.trim() }] })
   newCriterion.value = ''
 }
 
@@ -288,7 +307,7 @@ async function place() {
 
 const agentHolds = computed(() => task.value && ['in_progress', 'blocked', 'agent_review', 'human_review'].includes(task.value.status))
 const composerHint = computed(() => agentHolds.value
-  ? `${developer.value?.name ?? 'The developer'} gets this on its next step.`
+  ? `${developer.value?.name ?? (task.value?.type === 'design' ? 'The designer' : 'The developer')} gets this on its next step.`
   : 'No agent is working on this task, so this is saved as a note.')
 // Resolves false when not sent, so the composer keeps its images
 async function sendComment(text: string): Promise<boolean> {
@@ -316,12 +335,18 @@ async function remove() {
   }
 }
 
+// Comments and the runs that ended with an error, oldest first
+const activity = computed(() => [
+  ...comments.value.map(comment => ({ id: comment.id, at: comment.createdAt, comment, run: null })),
+  ...runs.value.filter(run => run.error && run.endedAt).map(run => ({ id: run.id, at: run.endedAt!, comment: null, run }))
+].sort((a, b) => a.at.localeCompare(b.at)))
+
 function authorLabel(actor: Comment['author']): string {
   if (actor.kind === 'human') return 'You'
   if (actor.kind === 'agent') {
     const run = runs.value.find(r => r.id === actor.runId)
     if (run) return run.agentName
-    return actor.role === 'pm' ? (live.state.value.agents.find(a => a.role === 'pm')?.name ?? 'PM') : actor.role === 'developer' ? 'Developer' : 'Reviewer'
+    return actor.role === 'pm' ? (live.state.value.agents.find(a => a.role === 'pm')?.name ?? 'PM') : actor.role === 'developer' ? 'Developer' : actor.role === 'designer' ? 'Designer' : 'Reviewer'
   }
   return 'Corral'
 }
@@ -343,6 +368,7 @@ function historyText(entry: AuditEntry): string {
     case 'design.approved': return `approved design v${String(d.version)}`
     case 'task.deleted': return 'deleted the task'
     case 'run.stopped': return 'stopped the run'
+    case 'task.resumed': return 'resumed the task'
     default: return entry.action
   }
 }
@@ -521,6 +547,27 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
           aria-label="Title"
           @change="patch({ title: ($event.target as HTMLInputElement).value })"
         >
+
+        <!-- Above the mobile tabs, so it shows on both -->
+        <div
+          v-if="task.paused"
+          :class="['flex items-center gap-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2 text-sm', mobile && '-mt-2']"
+          data-testid="task-paused"
+        >
+          <UIcon
+            name="i-lucide-pause"
+            class="size-4 shrink-0 text-warning"
+          />
+          <span class="min-w-0 flex-1"><span class="font-medium">Paused.</span> <span class="text-muted">Its run was stopped, so nothing picks it up until you resume it.</span></span>
+          <UButton
+            label="Resume"
+            icon="i-lucide-play"
+            size="sm"
+            :class="mobile && 'min-h-11'"
+            :loading="resuming"
+            @click="resume"
+          />
+        </div>
 
         <template v-if="mobile">
           <div
@@ -743,7 +790,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
             v-if="agentHolds && task.lease"
             class="mt-1 text-xs text-muted"
           >
-            Changes and comments are sent to {{ developer?.name ?? 'the developer' }}.
+            Changes and comments are sent to {{ developer?.name ?? (task?.type === 'design' ? 'the designer' : 'the developer') }}.
           </p>
         </section>
 
@@ -764,18 +811,34 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
                 :class="['mt-1 size-4 shrink-0', criterion.met ? 'text-success' : criterion.met === false ? 'text-error' : 'text-dimmed']"
                 :aria-label="criterion.met ? 'Met' : criterion.met === false ? 'Not met' : 'Open'"
               />
-              <MarkdownText
-                v-if="readonly"
-                :text="criterion.text"
-                class="min-w-0 flex-1 px-1"
-              />
-              <input
-                v-else
-                :value="criterion.text"
-                class="min-w-0 flex-1 rounded bg-transparent px-1 hover:bg-elevated focus:ring-2 focus:ring-primary focus:outline-none"
-                :aria-label="`Criterion: ${criterion.text}`"
-                @change="saveCriterion(criterion.id, ($event.target as HTMLInputElement).value)"
-              >
+              <div class="min-w-0 flex-1">
+                <MarkdownText
+                  v-if="readonly"
+                  :text="criterion.text"
+                  class="px-1"
+                />
+                <UTextarea
+                  v-else
+                  :model-value="criterion.text"
+                  autoresize
+                  :rows="1"
+                  variant="none"
+                  size="sm"
+                  class="w-full"
+                  :ui="{ base: 'px-1 py-0 text-sm/6 hover:bg-elevated focus:ring-2 focus:ring-primary' }"
+                  :aria-label="`Criterion: ${criterion.text}`"
+                  @change="saveCriterion(criterion.id, ($event.target as HTMLTextAreaElement).value)"
+                />
+                <label class="mt-1 flex items-center gap-1 px-1 text-xs text-muted">
+                  <input
+                    type="checkbox"
+                    :checked="criterion.checkedByHuman"
+                    :disabled="readonly"
+                    @change="toggleHumanCriterion(criterion.id, ($event.target as HTMLInputElement).checked)"
+                  >
+                  Checked by a human
+                </label>
+              </div>
               <UButton
                 v-if="!readonly"
                 icon="i-lucide-x"
@@ -808,7 +871,9 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
             />
           </form>
           <p class="mt-1 text-xs text-muted">
-            The reviewer marks criteria met from evidence.
+            {{ task.acceptanceCriteria.some(c => c.checkedByHuman)
+              ? 'The reviewer checks other criteria from evidence. Human checks are completed in the Inbox.'
+              : 'The reviewer marks criteria met from evidence.' }}
           </p>
         </section>
 
@@ -827,31 +892,50 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
             v-if="tab === 'activity'"
             class="mt-3 flex flex-col gap-3"
           >
-            <div
-              v-for="comment in comments"
-              :key="comment.id"
-              class="flex gap-2"
+            <template
+              v-for="item in activity"
+              :key="item.id"
             >
-              <AgentAvatar
-                :name="authorLabel(comment.author)"
-                size="xs"
-              />
-              <div class="min-w-0 flex-1 rounded-lg bg-elevated px-3 py-2 text-sm">
-                <div class="mb-0.5 flex items-center gap-2 text-xs text-muted">
-                  <span class="font-medium text-default">{{ authorLabel(comment.author) }}</span>
-                  <span>{{ timeAgo(comment.createdAt) }}</span>
-                  <UBadge
-                    v-if="comment.pinned"
-                    label="Pinned"
-                    size="xs"
-                    variant="subtle"
-                  />
+              <div
+                v-if="item.comment"
+                class="flex gap-2"
+              >
+                <AgentAvatar
+                  :name="authorLabel(item.comment.author)"
+                  size="xs"
+                />
+                <div class="min-w-0 flex-1 rounded-lg bg-elevated px-3 py-2 text-sm">
+                  <div class="mb-0.5 flex items-center gap-2 text-xs text-muted">
+                    <span class="font-medium text-default">{{ authorLabel(item.comment.author) }}</span>
+                    <span>{{ timeAgo(item.comment.createdAt) }}</span>
+                    <UBadge
+                      v-if="item.comment.pinned"
+                      label="Pinned"
+                      size="xs"
+                      variant="subtle"
+                    />
+                  </div>
+                  <MarkdownText :text="item.comment.body" />
                 </div>
-                <MarkdownText :text="comment.body" />
               </div>
-            </div>
+              <div
+                v-else-if="item.run"
+                class="flex gap-2 text-sm"
+                data-testid="activity-run-error"
+              >
+                <span
+                  class="mx-1.5 mt-1.5 size-2 shrink-0 rounded-full bg-error"
+                  aria-hidden="true"
+                />
+                <p class="min-w-0 flex-1 text-muted">
+                  <span class="font-medium text-default">{{ item.run.agentName }}</span>
+                  run #{{ item.run.number }} ended {{ runBadge(item.run).label.toLowerCase() }}: {{ item.run.error }}
+                  <span class="text-xs">· {{ timeAgo(item.run.endedAt!) }}</span>
+                </p>
+              </div>
+            </template>
             <p
-              v-if="comments.length === 0"
+              v-if="activity.length === 0"
               class="text-sm text-muted"
             >
               No comments yet.

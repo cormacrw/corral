@@ -215,22 +215,64 @@
     {
       "idx": 30,
       "version": "7",
-      "when": 1793343906100,
-      "tag": "0030_charming_korath",
+      "when": 1793338508528,
+      "tag": "0030_lumpy_wiccan",
       "breakpoints": true
     },
     {
       "idx": 31,
       "version": "7",
-      "when": 1793373221039,
-      "tag": "0031_yielding_xavin",
+      "when": 1793342326573,
+      "tag": "0031_omniscient_firedrake",
       "breakpoints": true
     },
     {
       "idx": 32,
       "version": "7",
-      "when": 1793377449268,
-      "tag": "0032_special_loki",
+      "when": 1793346030236,
+      "tag": "0032_powerful_sunset_bain",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1793348132330,
+      "tag": "0033_famous_blue_marvel",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1793349410188,
+      "tag": "0034_typical_prowler",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1793373842763,
+      "tag": "0035_amused_bloodaxe",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1793376586267,
+      "tag": "0036_heavy_queen_noir",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1793384132657,
+      "tag": "0037_stale_photon",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1793385767356,
+      "tag": "0038_chubby_mephisto",
       "breakpoints": true
     }
   ]

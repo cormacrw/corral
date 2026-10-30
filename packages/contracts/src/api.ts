@@ -77,7 +77,7 @@ export interface Project {
   requiredChecks: string[]
   paused: boolean
   humanReviewDefault: boolean
-  // The review mode of new epics a plan doesn't give one (D23)
+  // The review mode of new epics a plan doesn't give one (D27)
   epicReviewModeDefault: EpicReviewMode
   reviewRoundCap: number
   failedRunCap: number
@@ -96,12 +96,16 @@ export interface Epic {
   dependsOn: string[]
   blocks: string[]
   reviewMode: EpicReviewMode
-  // The epic branch and its PR into the target branch (D23); null until
+  // The epic branch and its PR into the target branch (D27); null until
   // Corral creates them, and always in `direct` mode
   branch: string | null
   prNumber: number | null
+  prUrl: string | null
   prHeadSha: string | null
   reviewState: EpicReviewState | null
+  // True once a task has opened a PR or merged: its work already went to the
+  // mode's branch, so the review mode can't change any more
+  reviewModeLocked: boolean
   // Tasks outside Draft and Backlog, and how many of them are merged
   taskCount: number
   mergedCount: number
@@ -119,7 +123,8 @@ export type SetEpicDependenciesInput = z.infer<typeof setEpicDependenciesInput>
 
 export const patchEpicInput = z.object({
   title: z.string().trim().min(1).optional(),
-  description: z.string().optional()
+  description: z.string().optional(),
+  reviewMode: z.enum(EPIC_REVIEW_MODES).optional()
 })
 export type PatchEpicInput = z.infer<typeof patchEpicInput>
 
@@ -139,7 +144,7 @@ export const createTaskInput = z.object({
   epicId: z.uuid().nullable().default(null),
   // Defaults to the project's setting (D5)
   humanReview: z.boolean().optional(),
-  acceptanceCriteria: z.array(z.string().trim().min(1)).default([]),
+  acceptanceCriteria: z.array(z.union([z.string().trim().min(1), z.object({ text: z.string().trim().min(1), checkedByHuman: z.boolean().optional() })])).default([]),
   // Task numbers in the same project
   dependsOn: z.array(z.number().int().positive()).default([])
 })
@@ -154,7 +159,7 @@ export const patchTaskInput = z.object({
   epicId: z.uuid().nullable().optional(),
   humanReview: z.boolean().optional(),
   // Replaces the list; existing criteria keep their IDs when their text is unchanged
-  acceptanceCriteria: z.array(z.object({ id: z.uuid().optional(), text: z.string().trim().min(1) })).optional(),
+  acceptanceCriteria: z.array(z.object({ id: z.uuid().optional(), text: z.string().trim().min(1), checkedByHuman: z.boolean().optional() })).optional(),
   // Task numbers in the same project; replaces the list
   dependsOn: z.array(z.number().int().positive()).optional()
 })
@@ -250,13 +255,13 @@ export interface Task {
   prNumber: number | null
   prUrl: string | null
   // `met` comes from the latest review of the current commit (design/task.md)
-  acceptanceCriteria: { id: string, position: number, text: string, met: boolean | null }[]
+  acceptanceCriteria: { id: string, position: number, text: string, checkedByHuman?: boolean, met: boolean | null }[]
   // Refs of the tasks this one waits on
   dependsOn: string[]
   // Unfinished prerequisite epics, with titles for display and IDs for links.
   waitingOnEpics: { id: string, title: string }[]
   lease: Lease | null
-  // The agents of the task's latest developer and reviewer runs. Tasks aren't
+  // The agents of the task's latest authoring (designer for design tasks) and reviewer runs. Tasks aren't
   // assigned ahead of time: a free agent claims them (D15), so these are null
   // until a run of that role exists.
   developer: TaskAgent | null
@@ -463,7 +468,7 @@ export type ApprovePlanInput = z.input<typeof approvePlanInput>
 // ── Inbox (D11, design/inbox.md) ───────────────────────────────────────────
 
 export type TaskInboxItemType = 'human_review' | 'question' | 'blocked' | 'failed' | 'activity'
-export type InboxItemType = TaskInboxItemType | 'plan_thread'
+export type InboxItemType = TaskInboxItemType | 'plan_thread' | 'epic_review' | 'release_notes' | 'epic_conflict'
 
 interface InboxItemBase {
   project: { id: string, slug: string, name: string, thumbnailColor: string | null, thumbnailUrl: string | null }
@@ -475,6 +480,8 @@ interface InboxItemBase {
 
 // An item raised by a developer or reviewer run, about a task
 export interface TaskInboxItem extends InboxItemBase {
+  // Epic PR activity links to the epic while retaining task context.
+  epicId?: string
   body: string
   // The task ID for Needs-you items; the audit entry for Activity and Resolved
   id: string
@@ -511,15 +518,71 @@ export interface PlanThreadItem extends InboxItemBase {
   activeRunId: string | null
 }
 
-export type InboxItem = TaskInboxItem | PlanThreadItem
+export const epicReviewActionInput = z.object({
+  // `rebase` hands an epic PR conflict to a developer run
+  action: z.enum(['approve', 'request_changes', 'rebase']),
+  headSha: z.string().min(1),
+  text: z.string().trim().optional()
+}).refine(input => input.action !== 'request_changes' || Boolean(input.text), { message: 'Describe the changes needed', path: ['text'] })
+export type EpicReviewActionInput = z.input<typeof epicReviewActionInput>
+
+export interface EpicReviewItem extends InboxItemBase {
+  id: string
+  type: 'epic_review'
+  epicId: string
+  taskId: null
+  taskRef: null
+  prUrl: string
+  body: string
+  resolution: null
+  headSha: string
+  tasks: { task: Task, evidence: Evidence[] }[]
+}
+
+export interface ReleaseNotesItem extends InboxItemBase {
+  id: string
+  type: 'release_notes'
+  deploymentId: string
+  fromSha: string | null
+  toSha: string
+  notes: string | null
+  notesStatus: Deployment['notesStatus']
+  unread: boolean
+  taskId: null
+  taskRef: null
+  prUrl: null
+  resolution: string | null
+}
+
+export function needsAttention(item: InboxItem): boolean {
+  return item.type !== 'release_notes'
+}
+
+// An epic PR that couldn't rebase onto the target branch (D27)
+export interface EpicConflictItem extends InboxItemBase {
+  id: string
+  type: 'epic_conflict'
+  epicId: string
+  taskId: null
+  taskRef: null
+  prUrl: string
+  body: string
+  resolution: null
+  headSha: string
+  targetBranch: string
+  // Empty when the runner couldn't work them out
+  files: string[]
+}
+
+export type InboxItem = TaskInboxItem | PlanThreadItem | EpicReviewItem | ReleaseNotesItem | EpicConflictItem
 
 export interface Inbox {
-  // Task items and Plan threads waiting on the human, one list newest first by
-  // when each arrived (`at`)
+  // Attention items newest first, followed by undismissed release notes
+  // newest first. Release notes remain here after reading.
   needsYou: InboxItem[]
   activity: TaskInboxItem[]
-  resolved: TaskInboxItem[]
-  // The Needs you count (the Inbox badge): exactly the listed items
+  resolved: (TaskInboxItem | ReleaseNotesItem)[]
+  // The Needs you count excludes informational release notes
   count: number
 }
 
@@ -550,10 +613,10 @@ export interface ServerStatus extends GlobalStatus {
   runners: RunnerInfo[]
 }
 
-// New agents. There is only one PM (D13), so only developers and reviewers.
+// New agents. There is only one PM (D13), so only developers, designers and reviewers.
 export const createAgentInput = z.object({
   name: z.string().trim().min(1).max(80),
-  role: z.enum(['developer', 'reviewer'], { message: 'Only one PM agent exists; the role must be developer or reviewer' }),
+  role: z.enum(['developer', 'designer', 'reviewer'], { message: 'Only one PM agent exists; the role must be developer, designer or reviewer' }),
   runtime: agentRuntime,
   concurrency: z.number().int().positive().default(1)
 })
@@ -574,6 +637,8 @@ export type PatchAgentInput = z.infer<typeof patchAgentInput>
 
 export type ApiError =
   | { code: 'not_found' }
+  // A human-only action attempted by anyone else
+  | { code: 'forbidden' }
   | { code: 'invalid_input', issues: unknown }
   | { code: 'conflict', constraint: string | null }
   | { code: 'transition_rejected', reason: TransitionError }
@@ -695,6 +760,8 @@ export interface Attachment {
 
 export interface Run {
   runnerId: string | null
+  // The runner's name when the run was placed on it
+  runnerName: string | null
   id: string
   // Shown as #128
   number: number
@@ -746,7 +813,7 @@ export interface Review {
   headSha: string
   verdict: ReviewVerdict
   summary: string
-  criteria: { criterionId: string, met: boolean, note: string }[]
+  criteria: { criterionId: string, met: boolean | null, note: string }[]
   author: Actor
   createdAt: string
 }

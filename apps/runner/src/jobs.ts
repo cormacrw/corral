@@ -2,7 +2,7 @@ import { tmpdir } from 'node:os'
 import type { RepoSummary, SetupJob, SetupJobResult } from '@corral/contracts'
 import type { RunnerConfig } from './config.ts'
 import { exec } from './exec.ts'
-import { barePath, syncRepository } from './repos.ts'
+import { barePath, conflictingFiles, syncRepository } from './repos.ts'
 import { removeWorktree, worktreePath } from './workspace.ts'
 
 // Setup jobs from the server (architecture.md, "Setup jobs, not only agent
@@ -51,8 +51,17 @@ export async function runSetupJob(config: RunnerConfig, job: SetupJob): Promise<
       return { kind: 'cleanup_worktrees', removed, kept }
     }
 
+    case 'rebase_conflicts': {
+      const error = await syncRepository(config.dataDir, job.repository)
+      if (error) throw new Error(error)
+      return { kind: 'rebase_conflicts', files: await conflictingFiles(barePath(config.dataDir, job.repository), job.branch, job.onto) }
+    }
+
     case 'session_title':
       return { kind: 'session_title', title: await sessionTitle(config, job.prompt) }
+
+    case 'release_notes':
+      return { kind: 'release_notes', notes: await releaseNotes(config, job.runtime, job.prompt) }
   }
 }
 
@@ -68,6 +77,21 @@ async function sessionTitle(config: RunnerConfig, prompt: string): Promise<strin
   const title = result.stdout.trim()
   if (result.code !== 0 || !title) throw new Error(result.stderr.trim() || `claude exited with code ${result.code}`)
   return title
+}
+
+export const RELEASE_NOTES_TIMEOUT_MS = 120_000
+
+// One non-interactive call of the runtime's CLI with no tools and no saved
+// session, from a folder with no project docs. Like a title, it runs outside
+// the RunManager, so it never takes a PM slot (COR-128).
+async function releaseNotes(config: RunnerConfig, runtime: string, prompt: string): Promise<string> {
+  const [bin, args] = runtime === 'codex'
+    ? [config.codexBin, ['exec', '--skip-git-repo-check', '--ephemeral', '--sandbox', 'read-only', '-']]
+    : [config.claudeBin, ['-p', '--tools', '', '--strict-mcp-config', '--no-session-persistence', '--output-format', 'text']]
+  const result = await exec(bin, args, { cwd: tmpdir(), input: prompt, timeoutMs: RELEASE_NOTES_TIMEOUT_MS })
+  const notes = result.stdout.trim()
+  if (result.code !== 0 || !notes) throw new Error(result.stderr.trim() || `${bin} exited with code ${result.code}`)
+  return notes
 }
 
 // The runtime ids whose CLI is installed and signed in, for the runner's hello

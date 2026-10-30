@@ -12,6 +12,9 @@ export interface TaskState {
   status: TaskStatus
   // D5: flagged tasks wait in Human review instead of auto-merging
   humanReview: boolean
+  // D24: conflict repair retains the approved head through resubmission.
+  rebaseOnly?: boolean
+  approvedHeadSha?: string | null
   // Agent review rounds that ended in changes requested, since the task was
   // last unblocked
   reviewRounds: number
@@ -44,7 +47,7 @@ export type TaskEvent =
   | { type: 'send_back' }
   // Ready → In progress: the scheduler claims it
   | { type: 'claim', dependencyStatuses: readonly TaskStatus[] }
-  // In progress → Agent review: a pr_opened / pr_updated outcome, a
+  // In progress → Agent review: a pr_opened / pr_updated / pr_rebased outcome, a
   // spike's findings_reported or a design's design_submitted
   | { type: 'submit', branchAtExpectedCommit: boolean, evidenceComplete: boolean }
   // Agent review → In progress, or Blocked once the review-round cap is
@@ -57,9 +60,11 @@ export type TaskEvent =
   | { type: 'review_approved' }
   // Human review → Ready to merge (a spike: Merged)
   | { type: 'human_approve' }
+  // A human adds a new human-only check after agent approval.
+  | { type: 'require_human_check' }
   // Ready to merge → In progress: CI failed or the branch conflicts with the base
   | { type: 'ci_failed' }
-  | { type: 'base_conflict' }
+  | { type: 'base_conflict', approvedHeadSha: string }
   // Ready to merge → Agent review: a new commit (not a base update) needs a fresh review
   | { type: 'head_moved' }
   // Ready to merge → Merged: Corral merged and GitHub confirmed it
@@ -92,6 +97,7 @@ export const TRANSITION_RULES: Readonly<Record<TaskEventType, Rule>> = {
   changes_requested: { from: ['agent_review'], actors: ['server'] },
   review_approved: { from: ['agent_review'], actors: ['server'] },
   human_approve: { from: ['human_review'], actors: ['human'] },
+  require_human_check: { from: ['ready_to_merge'], actors: ['server'] },
   ci_failed: { from: ['ready_to_merge'], actors: ['server'] },
   base_conflict: { from: ['ready_to_merge'], actors: ['server'] },
   head_moved: { from: ['ready_to_merge'], actors: ['server'] },
@@ -171,6 +177,7 @@ export function transition(
 
     case 'changes_requested': {
       const reviewRounds = task.reviewRounds + 1
+      task = task.rebaseOnly ? { ...task, rebaseOnly: false } : task
       // Another round would go past the cap (flows.md step 7a)
       if (reviewRounds >= limits.reviewRoundCap) {
         return ok({ ...task, reviewRounds, status: 'blocked', reason: `Review-round cap reached (${limits.reviewRoundCap})` })
@@ -182,16 +189,22 @@ export function transition(
       return ok({ ...task, reviewRounds, status: 'in_progress' })
     }
 
-    case 'ci_failed':
     case 'base_conflict':
-    case 'human_request_changes':
-      return ok({ ...task, status: 'in_progress' })
+      return ok({ ...task, status: 'in_progress', rebaseOnly: true, approvedHeadSha: event.approvedHeadSha })
 
-    // D5: only the task's own flag sends it to a human, except that a design
-    // always goes to one (D20). A spike has no PR to merge, so accepting its
+    case 'ci_failed':
+    case 'human_request_changes':
+      return ok({ ...task, ...(task.rebaseOnly && { rebaseOnly: false }), status: 'in_progress' })
+
+    // D5: the task's flag sends it to a human, which the server also sets for
+    // an each_task epic (D23) or a human check (D27), and a design always goes
+    // to one (D20). A spike has no PR to merge, so accepting its
     // findings finishes it.
     case 'review_approved':
-      return ok({ ...task, status: requiresHumanReview(task.type ?? 'task', task.humanReview) ? 'human_review' : 'ready_to_merge' })
+      return ok({ ...task, ...(task.rebaseOnly && { rebaseOnly: false }), status: requiresHumanReview(task.type ?? 'task', task.humanReview) ? 'human_review' : 'ready_to_merge' })
+
+    case 'require_human_check':
+      return ok({ ...task, status: 'human_review' })
 
     case 'human_approve':
       return ok({ ...task, status: task.type === 'spike' ? 'merged' : 'ready_to_merge' })

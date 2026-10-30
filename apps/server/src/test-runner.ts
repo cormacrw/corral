@@ -13,7 +13,7 @@ export class FakeRunner {
   // Answers setup jobs the server sends (e.g. cleanup_worktrees). Both CLIs
   // are installed and signed in unless a test says otherwise. Throwing
   // answers with an error; session titles fail unless a test says otherwise,
-  // so the fallback title stays.
+  // so the fallback title stays. Release notes jobs are left to each test.
   onJob: (job: Extract<ServerMessage, { type: 'job.request' }>['job']) => SetupJobResult | null = (job) => {
     if (job.kind === 'cleanup_worktrees') return { kind: 'cleanup_worktrees', removed: [`worktrees/${job.taskId}`], kept: [] }
     if (job.kind === 'session_title') throw new Error('No title in tests')
@@ -40,11 +40,11 @@ export class FakeRunner {
   }
 
   // Takes every role and runtime with plenty of slots unless a test says otherwise
-  static async connect(url: string, activeRuns: { runId: string, leaseEpoch: number }[] = [], runnerId = 'r1', capacity: Partial<RunnerCapacity> = {}): Promise<FakeRunner> {
+  static async connect(url: string, activeRuns: { runId: string, leaseEpoch: number }[] = [], runnerId = 'r1', capacity: Partial<RunnerCapacity> & { commit?: string, updateTarget?: string, updateState?: string, updateError?: string, autoUpdate?: boolean, draining?: boolean, updateRequested?: boolean } = {}): Promise<FakeRunner> {
     const socket = new WebSocket(`${url.replace('http', 'ws')}/runner`)
     const runner = new FakeRunner(socket)
     await new Promise(resolve => socket.once('open', resolve))
-    runner.send({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, runnerId, name: runnerId, activeRuns, slots: 10, runtimes: ['claude-code', 'codex'], roles: [...RUNNER_ROLES], ...capacity })
+    runner.send({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, commit: 'development', runnerId, name: runnerId, activeRuns, slots: 10, runtimes: ['claude-code', 'codex'], roles: [...RUNNER_ROLES], ...capacity })
     await runner.next('welcome')
     return runner
   }

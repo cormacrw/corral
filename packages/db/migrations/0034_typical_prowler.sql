@@ -1,0 +1,1 @@
+ALTER TABLE "deployments" ADD COLUMN "dismissed_at" timestamp with time zone;

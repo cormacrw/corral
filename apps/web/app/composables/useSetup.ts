@@ -139,7 +139,7 @@ export function useSetup() {
       const project = await api.projects.create({ name, prefix: prefix.value, repository: picked.value.nameWithOwner, defaultBranch: defaultBranch.value, mergeMethod: mergeMethod.value })
       if (!adding.value) {
         for (const agent of live.state.value.agents.length ? live.state.value.agents : await api.agents.list()) {
-          const wanted = agentNames[agent.role]
+          const wanted = agent.role === 'designer' ? undefined : agentNames[agent.role]
           if (wanted && wanted !== agent.name) await api.agents.patch(agent.id, { name: wanted })
         }
       }

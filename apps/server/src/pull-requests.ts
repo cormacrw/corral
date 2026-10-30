@@ -49,7 +49,8 @@ export async function listPullRequests(db: Database, merges: MergeOrchestrator, 
           : pr.mergeable === false ? 'conflict' : 'not_needed'
       },
       evidenceComplete: report.facts.evidenceComplete,
-      humanReviewOutstanding: requiresHumanReview(task.type, task.humanReview) && task.status !== 'ready_to_merge',
+      // Human review also covers tasks a human check sent there (D27)
+      humanReviewOutstanding: task.status === 'human_review' || (requiresHumanReview(task.type, task.humanReview) && task.status !== 'ready_to_merge'),
       merge: { eligible: failed.length === 0, failingGate: failed[0] ?? null, failedGates: failed }
     }
   }))

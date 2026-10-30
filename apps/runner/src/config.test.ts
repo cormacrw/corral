@@ -5,7 +5,7 @@ import { gitAuthorWarning, loadConfig } from './config.ts'
 
 describe('loadConfig', () => {
   it('uses local development defaults when nothing is set', () => {
-    expect(loadConfig({})).toEqual({
+    expect(loadConfig({}, { cpus: 8, memoryBytes: 10 * 1024 ** 3 })).toEqual({
       dataDir: join(homedir(), '.corral', 'runner'),
       serverUrl: new URL('http://127.0.0.1:4100'),
       name: hostname(),
@@ -15,6 +15,7 @@ describe('loadConfig', () => {
       pmWarmSeconds: 300,
       titleModel: 'haiku',
       slots: 4,
+      slotSource: { kind: 'derived', cpus: 8, memoryBytes: 10 * 1024 ** 3, slotCpus: 2, slotMemoryBytes: 2.5 * 1024 ** 3 },
       roles: ['pm', 'developer', 'reviewer', 'design']
     })
   })
@@ -42,6 +43,7 @@ describe('loadConfig', () => {
       pmWarmSeconds: 0,
       titleModel: 'claude-haiku-5-5',
       slots: 2,
+      slotSource: { kind: 'explicit' },
       roles: ['developer', 'reviewer']
     })
   })

@@ -244,6 +244,10 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
                     :style="{ flex: epic.total - epic.merged }"
                   />
                 </div>
+                <EpicReviewLine
+                  v-if="epic.epic"
+                  :epic="epic.epic"
+                />
               </li>
               <li
                 v-if="epics.length === 0"

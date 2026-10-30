@@ -1,10 +1,11 @@
 import { ACTIVE_RUN_STATES, LEASE_DURATION_MS, transition, type Actor, type TaskStatus } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, asc, count, eq, inArray, isNotNull, isNull, ne, notInArray, notExists, sql } from 'drizzle-orm'
+import { and, asc, count, eq, gt, inArray, isNotNull, isNull, ne, notInArray, notExists, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
+import { holdsEpicOpen } from './epic-review-state.ts'
 import { toTaskState, type TaskRow } from './tasks.ts'
 
-const { agents, auditLog, projects, reviews, runs, epicDependencies, taskDependencies, tasks } = schema
+const { agents, auditLog, projects, reviews, runs, epics, epicDependencies, taskDependencies, tasks } = schema
 
 // How many candidate tasks a placing claim locks and tries at a time
 export const PLACE_BATCH = 50
@@ -26,9 +27,10 @@ export interface Claim {
 // Atomically gives an agent the next task to work on, or null if there's
 // nothing eligible or the agent is at capacity (flows.md step 2).
 //
-// Developer runs pick up Ready tasks (→ In progress) and In progress tasks
-// with no lease, e.g. after changes were requested (D10). Reviewer runs pick
-// up Agent review tasks whose current commit has no verdict yet (flows.md
+// Developer and designer runs pick up their own task types in Ready
+// (→ In progress) and In progress with no lease, e.g. after changes were requested (D10). Priority wins first,
+// then In progress before Ready, then oldest createdAt and id. Reviewer runs pick
+// up Agent review tasks with no verdict since their latest submission (flows.md
 // step 6). Two claims can't take the same task: the candidate row is locked
 // with SKIP LOCKED, so a parallel claim moves on to the next task instead of
 // waiting for this one. Locking the agent row first means its concurrency
@@ -57,24 +59,35 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
 
     const dependency = alias(tasks, 'dependency')
     const epicTask = alias(tasks, 'epic_task')
-    const eligible = agent.role === 'developer'
+    const author = agent.role === 'developer' || agent.role === 'designer'
+    const eligible = author
       ? and(
           inArray(tasks.status, ['ready', 'in_progress']),
+          agent.role === 'designer' ? eq(tasks.type, 'design') : ne(tasks.type, 'design'),
           // Every dependency Merged (D10: Ready tasks wait on them)
           notExists(tx.select({ one: sql`1` }).from(taskDependencies)
             .innerJoin(dependency, eq(dependency.id, taskDependencies.dependsOnId))
             .where(and(eq(taskDependencies.taskId, tasks.id), ne(dependency.status, 'merged')))),
           notExists(tx.select({ one: sql`1` }).from(epicDependencies)
-            .innerJoin(epicTask, eq(epicTask.epicId, epicDependencies.dependsOnEpicId))
-            .where(and(eq(epicDependencies.epicId, tasks.epicId), isNull(epicTask.deletedAt),
-              notInArray(epicTask.status, ['draft', 'backlog', 'merged']))))
+            .innerJoin(epics, eq(epics.id, epicDependencies.dependsOnEpicId))
+            .innerJoin(epicTask, eq(epicTask.epicId, epics.id))
+            .where(and(eq(epicDependencies.epicId, tasks.epicId), holdsEpicOpen(epicTask, epics))))
         )
       : and(
           eq(tasks.status, 'agent_review'),
           isNotNull(tasks.headSha),
-          // No verdict yet for the commit under review
+          // A human resolving Blocked resets the round counter (D10), so
+          // even this head and round may have a verdict from an older submission.
+          // Use existing history so already-stranded tasks recover too.
           notExists(tx.select({ one: sql`1` }).from(reviews)
-            .where(and(eq(reviews.taskId, tasks.id), eq(reviews.headSha, tasks.headSha))))
+            .where(and(eq(reviews.taskId, tasks.id), eq(reviews.headSha, tasks.headSha), eq(reviews.round, tasks.reviewRounds),
+              notExists(tx.select({ one: sql`1` }).from(auditLog).where(and(
+                eq(auditLog.taskId, tasks.id),
+                eq(auditLog.action, 'task.transition'),
+                sql`${auditLog.detail}->>'from' = 'in_progress'`,
+                sql`${auditLog.detail}->>'to' = 'agent_review'`,
+                gt(auditLog.createdAt, reviews.createdAt)
+              ))))))
         )
     const batch = (offset: number) => tx.select({ task: tasks })
       .from(tasks)
@@ -88,8 +101,11 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
         eq(tasks.paused, false),
         eq(projects.paused, false)
       ))
-      // Enum order: urgent first; id keeps the pages stable between batches
-      .orderBy(asc(tasks.priority), asc(tasks.createdAt), asc(tasks.id))
+      // Priority enum: urgent first. The explicit status rank avoids enum order;
+      // createdAt and id keep each status group stable across placement pages.
+      .orderBy(asc(tasks.priority), ...(author
+        ? [asc(sql`case when ${tasks.status} = 'in_progress' then 0 else 1 end`)]
+        : []), asc(tasks.createdAt), asc(tasks.id))
       .limit(place ? PLACE_BATCH : 1)
       .offset(offset)
       .for('update', { of: tasks, skipLocked: true })

@@ -32,7 +32,7 @@ const proposedTask = z.object({
   type: z.enum(TASK_TYPES),
   priority: z.enum(['urgent', 'high', 'medium', 'low']).default('medium'),
   humanReview: z.boolean().default(false),
-  acceptanceCriteria: z.array(z.string().trim()).default([]),
+  acceptanceCriteria: z.array(z.union([z.string().trim(), z.object({ text: z.string().trim(), checkedByHuman: z.boolean().optional() })])).default([]),
   dependsOn: z.array(z.string().trim()).default([]),
   // The approved design version a build task builds (D20)
   design: z.object({
@@ -54,7 +54,7 @@ const proposedPlan = z.object({
     title: z.string().trim(),
     summary: z.string().trim().default(''),
     dependsOn: z.array(z.string().trim()).optional(),
-    // The project's default when left out (D23)
+    // The project's default when left out (D27)
     reviewMode: z.enum(EPIC_REVIEW_MODES, { error: `reviewMode must be one of ${EPIC_REVIEW_MODES.join(', ')}` }).optional()
   })).default([]),
   tasks: z.array(proposedTask)
@@ -557,7 +557,7 @@ export class PlanService {
       for (const epic of proposed.epics) {
         const current = renamed ? [...previousEpics.values()][0] : previousEpics.get(epic.key)
         // A revision that leaves the mode out keeps the epic's; a new epic
-        // without one takes the project's default (D23)
+        // without one takes the project's default (D27)
         if (current) {
           await tx.update(epics).set({ title: epic.title, description: epic.summary, ...(epic.reviewMode && { reviewMode: epic.reviewMode }), updatedAt: new Date() }).where(eq(epics.id, current))
           epicIds.set(epic.key, current)
@@ -885,7 +885,7 @@ export class PlanService {
         type: task.type,
         priority: task.priority,
         humanReview: task.humanReview,
-        acceptanceCriteria: task.acceptanceCriteria.map(c => c.text),
+        acceptanceCriteria: task.acceptanceCriteria.map(c => c.checkedByHuman ? { text: c.text, checkedByHuman: true } : c.text),
         dependsOn: task.dependsOn.map(ref => keys.get(ref) ?? ref),
         design: task.design ?? undefined
       })
@@ -1075,12 +1075,14 @@ async function reviseTask(tx: Executor, project: ProjectRow, taskId: string, rev
 
 // A task's new criteria, each with the ID of an existing one that has the
 // same text, so evidence and verdicts stay attached to it
-async function keepCriterionIds(tx: Executor, taskId: string, texts: string[]): Promise<{ id?: string, text: string }[]> {
+async function keepCriterionIds(tx: Executor, taskId: string, texts: (string | { text: string, checkedByHuman?: boolean | undefined })[]): Promise<{ id?: string, text: string, checkedByHuman?: boolean | undefined }[]> {
   const unused = await tx.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, taskId)).orderBy(asc(acceptanceCriteria.position))
-  return texts.map((text) => {
+  return texts.map((criterion) => {
+    const { text, checkedByHuman } = typeof criterion === 'string' ? { text: criterion } : criterion
     const index = unused.findIndex(c => c.text === text)
-    if (index === -1) return { text }
-    return { id: unused.splice(index, 1)[0]!.id, text }
+    if (index === -1) return { text, checkedByHuman: checkedByHuman ?? false }
+    const matched = unused.splice(index, 1)[0]!
+    return { id: matched.id, text, checkedByHuman: checkedByHuman ?? matched.checkedByHuman }
   })
 }
 

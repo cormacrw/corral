@@ -27,6 +27,7 @@ function toRun({ run, agentName, prefix, taskNumber, taskTitle }: RunJoin): Run 
   return {
     id: run.id,
     runnerId: run.runnerId,
+    runnerName: run.runnerName,
     number: run.number,
     agentId: run.agentId,
     agentName,
@@ -76,9 +77,9 @@ export async function getRun(db: Executor, runId: string): Promise<Run> {
 }
 
 export async function listAgents(db: Executor): Promise<Agent[]> {
-  // PM, developer, reviewer, then by age: the default agents share one
+  // PM, developer, designer, reviewer, then by age: the default agents share one
   // creation time, so that alone would let them shuffle
-  const order = { pm: 0, developer: 1, reviewer: 2 } as const
+  const order = { pm: 0, developer: 1, designer: 2, reviewer: 3 } as const
   const rows = (await db.select().from(agents).orderBy(agents.createdAt, agents.name)).sort((a, b) => order[a.role] - order[b.role])
   const active = await db.select({ agentId: runs.agentId, n: count() }).from(runs)
     .where(inArray(runs.state, [...ACTIVE_RUN_STATES]))
@@ -137,7 +138,8 @@ export async function patchAgent(db: Executor, agentId: string, input: PatchAgen
         .where(and(eq(runs.agentId, agentId), inArray(runs.state, [...ACTIVE_RUN_STATES])))
       if (active!.n > 0) throw new ApiFailure(409, { code: 'conflict', constraint: 'agent_has_active_runs' })
     }
-    await tx.update(agents).set({ ...input, updatedAt: new Date() }).where(eq(agents.id, agentId))
+    // Resuming also ends a usage-limit wait, so the human can overrule it (D3)
+    await tx.update(agents).set({ ...input, ...(input.paused === false && { pausedUntil: null }), updatedAt: new Date() }).where(eq(agents.id, agentId))
     await tx.insert(auditLog).values({ actor, action: input.paused !== undefined ? (input.paused ? 'agent.paused' : 'agent.resumed') : 'agent.updated', detail: { agentId, changed: Object.keys(input) } })
   })
   return (await listAgents(db)).find(a => a.id === agentId)!

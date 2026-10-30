@@ -1,6 +1,7 @@
-import type { AuditEntry, Inbox, Run, Task } from '@corral/contracts'
+import type { AuditEntry, Epic, Inbox, Run, Task } from '@corral/contracts'
 import { api } from '~/composables/useApi'
-import { epicTitle } from '~/utils/labels'
+import { epicTitle, epicWithLiveCounts } from '~/utils/labels'
+import { projectNeedsYou } from '~/utils/projects'
 
 // Project overview data (design/project-overview.md), shared by the web page
 // and MobileProjectOverview. Loads and stays live while its caller is mounted.
@@ -47,7 +48,7 @@ export function useProjectOverview() {
 
   const DOT = { neutral: 'bg-neutral-400', info: 'bg-info', primary: 'bg-primary', warning: 'bg-warning', error: 'bg-error', success: 'bg-success', secondary: 'bg-secondary' } as const
   const count = (status: Task['status']) => tasks.value.filter(t => t.status === status).length
-  const needsYou = computed(() => inbox.value?.needsYou.filter(i => i.project.id === project.value?.id) ?? [])
+  const needsYou = computed(() => projectNeedsYou(inbox.value, project.value?.id))
   const weekAgo = Date.now() - 7 * 86_400_000
   const mergedThisWeek = computed(() => tasks.value.filter(t => t.mergedAt && new Date(t.mergedAt).getTime() > weekAgo))
   const firstPass = computed(() => {
@@ -66,10 +67,12 @@ export function useProjectOverview() {
   const reviewer = computed(() => activeAgents('reviewer'))
   const pmName = computed(() => live.state.value.agents.find(a => a.role === 'pm')?.name ?? 'the PM')
   const epics = computed(() => {
-    const groups = new Map<string, { id: string, title: string, merged: number, total: number }>()
+    const groups = new Map<string, { id: string, title: string, merged: number, total: number, epic?: Epic }>()
+    const list = live.state.value.epics[project.value?.id ?? ''] ?? []
     for (const task of tasks.value) {
       const id = task.epicId ?? 'none'
-      const group = groups.get(id) ?? { id, title: id === 'none' ? 'No epic' : epicTitle(live.state.value.epics[project.value?.id ?? ''], id, groups.size), merged: 0, total: 0 }
+      const found = list.find(e => e.id === id)
+      const group = groups.get(id) ?? { id, title: id === 'none' ? 'No epic' : epicTitle(list, id, groups.size), merged: 0, total: 0, epic: found && epicWithLiveCounts(found, tasks.value) }
       group.total++
       if (task.status === 'merged') group.merged++
       groups.set(id, group)
@@ -77,7 +80,7 @@ export function useProjectOverview() {
     return [...groups.values()]
   })
   const taskOf = (run: Run) => tasks.value.find(t => t.id === run.taskId)
-  const actorName = (entry: AuditEntry) => entry.actor.kind === 'human' ? 'You' : entry.actor.kind === 'agent' ? (entry.actor.role === 'pm' ? live.state.value.agents.find(a => a.role === 'pm')?.name ?? 'PM' : runAgents.value.get(entry.actor.runId) ?? (entry.actor.role === 'developer' ? 'Developer' : 'Reviewer')) : 'Corral'
+  const actorName = (entry: AuditEntry) => entry.actor.kind === 'human' ? 'You' : entry.actor.kind === 'agent' ? (entry.actor.role === 'pm' ? live.state.value.agents.find(a => a.role === 'pm')?.name ?? 'PM' : runAgents.value.get(entry.actor.runId) ?? (entry.actor.role === 'developer' ? 'Developer' : entry.actor.role === 'designer' ? 'Designer' : 'Reviewer')) : 'Corral'
   const taskRefOf = (entry: AuditEntry) => tasks.value.find(t => t.id === entry.taskId)?.ref ?? ''
   const activityText = (entry: AuditEntry) => {
     const d = entry.detail

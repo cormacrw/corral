@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { CliStatus } from '@corral/contracts'
-import { cliLoginCommand, timeAgo } from '~/utils/labels'
+import { cliLoginCommand } from '~/utils/labels'
 
-// Settings · Runner on mobile (design/settings.md, design/mobile.md): the
-// runner's live status, its data directory and the logins inside it
+// Settings · Runner on mobile (design/settings.md, design/mobile.md): every
+// runner's live status, the data directory and the logins inside it
 const props = defineProps<{ clis: CliStatus[] | null, cliError: string | null }>()
 const emit = defineEmits<{ scan: [] }>()
 const live = useLive()
@@ -40,34 +40,7 @@ async function copy(command: string) {
       class="flex flex-col gap-4 rounded-lg border border-default p-4"
       data-testid="runner-card"
     >
-      <p
-        v-if="!live.state.value.runner?.runners.length"
-        class="text-sm text-muted"
-      >
-        Offline · no runner yet
-      </p>
-      <div
-        v-for="runner in live.state.value.runner?.runners"
-        :key="runner.id"
-        class="flex items-start gap-3"
-      >
-        <UIcon
-          name="i-lucide-server"
-          class="mt-0.5 size-6 shrink-0 text-muted"
-        />
-        <div class="min-w-0 flex-1">
-          <p class="flex items-center gap-2 font-medium text-highlighted">
-            <span
-              :class="['size-2.5 shrink-0 rounded-full', runner?.online ? 'bg-success' : 'bg-error']"
-              aria-hidden="true"
-            />
-            {{ runner?.online ? 'Online' : 'Offline' }} · {{ runner?.name ?? 'no runner yet' }}
-          </p>
-          <p class="text-xs text-muted">
-            Runs agents for every project · last heartbeat {{ timeAgo(runner?.lastHeartbeatAt) }}
-          </p>
-        </div>
-      </div>
+      <RunnerList />
       <UButton
         label="Reconnect"
         icon="i-lucide-refresh-cw"

@@ -6,7 +6,8 @@ import { timeAgo } from '~/utils/labels'
 
 // Criteria next to their evidence (PRD §7.7, design/inbox.md), with the
 // reviewer's note per criterion from the latest review
-const props = defineProps<{ evidence: Evidence[], criteria: Task['acceptanceCriteria'], reviews: Review[] }>()
+const props = defineProps<{ evidence: Evidence[], criteria: Task['acceptanceCriteria'], reviews: Review[], humanChecklist?: boolean }>()
+const checked = defineModel<string[]>('checked', { default: () => [] })
 const open = ref<Evidence | null>(null)
 
 const latest = computed(() => props.reviews[0] ?? null)
@@ -49,8 +50,25 @@ watch(open, async (item) => {
             :text="criterion.text"
             class="font-medium"
           />
+          <p
+            v-if="criterion.checkedByHuman"
+            class="text-xs text-muted"
+          >
+            Needs human check
+          </p>
+          <label
+            v-if="humanChecklist && criterion.checkedByHuman"
+            class="mt-2 flex items-center gap-2"
+          >
+            <input
+              v-model="checked"
+              type="checkbox"
+              :value="criterion.id"
+            >
+            I checked this criterion
+          </label>
           <MarkdownText
-            v-if="note(criterion.id)"
+            v-if="!criterion.checkedByHuman && note(criterion.id)"
             :text="note(criterion.id)"
             class="text-xs text-muted"
           />
@@ -94,12 +112,19 @@ watch(open, async (item) => {
           :alt="open.note || open.fileName || undefined"
           class="max-h-[70vh] w-full object-contain"
         >
-        <video
-          v-else-if="open && isVideo(open)"
-          :src="open.url ?? undefined"
-          controls
-          class="max-h-[70vh] w-full"
-        />
+        <template v-else-if="open && isVideo(open)">
+          <video
+            :src="open.url ?? undefined"
+            controls
+            playsinline
+            class="max-h-[70vh] w-full"
+          />
+          <a
+            :href="open.url ?? undefined"
+            :download="open.fileName ?? ''"
+            class="mt-2 inline-block text-sm text-primary hover:underline"
+          >Download</a>
+        </template>
         <template v-else-if="open && isText(open)">
           <UAlert
             v-if="textError"

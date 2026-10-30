@@ -1,5 +1,8 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_ROLE_INSTRUCTIONS } from './role-defaults.ts'
+
+const corralReviewer = readFileSync(new URL('../../../.corral/agents/reviewer.md', import.meta.url), 'utf8')
 
 describe('pm role defaults', () => {
   const pm = DEFAULT_ROLE_INSTRUCTIONS.pm
@@ -27,6 +30,11 @@ describe('developer role defaults', () => {
     expect(DEFAULT_ROLE_INSTRUCTIONS.developer).not.toContain('if they exist')
   })
 
+  it('uses the shared check command without custom throttling', () => {
+    expect(DEFAULT_ROLE_INSTRUCTIONS.developer).toContain('pnpm run check')
+    expect(DEFAULT_ROLE_INSTRUCTIONS.developer).toContain('Do not add concurrency, worker or timeout flags')
+  })
+
   it('leaves the git identity to the runner', () => {
     expect(DEFAULT_ROLE_INSTRUCTIONS.developer).toContain('Don\'t set or change the git identity')
   })
@@ -40,15 +48,46 @@ describe('developer role defaults', () => {
   })
 })
 
+describe('designer role defaults', () => {
+  const designer = DEFAULT_ROLE_INSTRUCTIONS.designer
+
+  it.each([
+    ['the real components', 'from the project\'s real components and styles'],
+    ['mock data and no network', 'Use mock data only. The prototype makes no network calls'],
+    ['the static bundle', 'an `index.html` at its root and its assets, with relative paths'],
+    ['design.md', 'Write a `design.md` spec'],
+    ['screenshots as evidence', 'using the screenshots as evidence'],
+    ['the design branch', '`design/<ref>` branch'],
+    ['the design outcome', 'outcome "design_submitted"'],
+    ['the missing build command', 'report stuck and ask the human']
+  ])('covers %s', (_topic, text) => {
+    expect(designer).toContain(text)
+  })
+})
+
+describe('developer role keeps nothing design-specific', () => {
+  it.each(['submit_design', 'design_submitted', 'design.md', 'prototype', 'design/'])('leaves out %s', (text) => {
+    expect(DEFAULT_ROLE_INSTRUCTIONS.developer).not.toContain(text)
+  })
+})
+
 describe('reviewer role defaults', () => {
-  it('requires independent checks without the Turbo cache or an explanation', () => {
-    const reviewer = DEFAULT_ROLE_INSTRUCTIONS.reviewer
-    expect(reviewer).toContain('Run the project\'s lint, typecheck and tests yourself before reporting')
-    for (const check of ['lint', 'typecheck', 'test']) {
-      expect(reviewer).toContain(`TURBO_FORCE=1 pnpm run ${check}`)
-    }
-    expect(reviewer).toContain('A cache hit replays the developer\'s results and does not verify the change')
-    expect(reviewer).toContain('If you cannot run a check without the cache, explain which check and why in your outcome')
+  it.each([
+    ['built-in default', DEFAULT_ROLE_INSTRUCTIONS.reviewer],
+    ['Corral override', corralReviewer]
+  ])('%s reviews the diff and leaves the gates to required CI (D26)', (_name, reviewer) => {
+    expect(reviewer).not.toContain('TURBO_FORCE')
+    expect(reviewer).not.toContain('Run the project\'s lint')
+    expect(reviewer).toContain('Review the diff for security, efficiency and logic problems')
+    expect(reviewer).toContain('specific, actionable feedback')
+    expect(reviewer).toContain('so don\'t rerun them')
+    expect(reviewer).toContain('When it has none, the prompt tells you to run them yourself without the cache')
+    expect(reviewer).toContain('pnpm run check --review')
+    expect(reviewer).toContain('Do not add concurrency, worker or timeout flags')
+    expect(reviewer).toContain('You may run a targeted test or the app')
+    expect(reviewer).toContain('A cached result never counts as verification')
+    expect(reviewer).toContain('Give every criterion a concrete note explaining why it is met or not')
+    expect(reviewer).toContain('a verdict for every criterion')
   })
 
   it('reproduces visible criteria with agent-browser', () => {
@@ -59,9 +98,17 @@ describe('reviewer role defaults', () => {
   })
 })
 
+describe('Corral reviewer override', () => {
+  it('keeps the rules for reviewing Corral itself', () => {
+    expect(corralReviewer).toContain('Request changes if the diff edits, renames or deletes a migration already on main')
+    expect(corralReviewer).toContain('could stop the deployed Corral from fixing itself')
+    expect(corralReviewer).toContain('must use a dev-stack project for **`cormacrw/test-app`**')
+  })
+})
+
 describe('attachments in role defaults', () => {
   it('tells every role to view attached images', () => {
-    for (const role of ['developer', 'reviewer', 'pm'] as const) {
+    for (const role of ['designer', 'developer', 'reviewer', 'pm'] as const) {
       expect(DEFAULT_ROLE_INSTRUCTIONS[role]).toContain('Images attached by the human are part of the requirements; view them with get_attachment.')
     }
   })

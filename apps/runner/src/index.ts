@@ -1,13 +1,15 @@
+import { detectResources } from './resources.ts'
 import { printReady, shortenHome } from './banner.ts'
 import { gitAuthorWarning, loadConfig } from './config.ts'
 import { ServerConnection } from './connection.ts'
 import { loadRunnerId } from './identity.ts'
 import { runSetupJob, signedInRuntimes } from './jobs.ts'
 import { ToolServer } from './mcp.ts'
+import { UpdateStatus } from './update-status.ts'
 import { RunManager } from './run-manager.ts'
 import { installSkills, pinnedSkillsDir, skillTargets } from './skills.ts'
 
-const config = loadConfig()
+const config = loadConfig(process.env, await detectResources())
 const warning = gitAuthorWarning(config)
 if (warning) console.warn(`Warning: ${warning}`)
 await installSkills(pinnedSkillsDir, skillTargets())
@@ -18,7 +20,8 @@ await tools.start()
 let announced = false
 const connection: ServerConnection = new ServerConnection(config.serverUrl, { runnerId, name: config.name }, {
   activeRuns: () => runs.activeRuns(),
-  capacity: async () => ({ slots: config.slots, roles: config.roles, runtimes: await signedInRuntimes(config) }),
+  activeRunCount: () => runs.activeRunCount(),
+  capacity: async () => ({ slots: config.slots, slotSource: config.slotSource, roles: config.roles, runtimes: await signedInRuntimes(config) }),
   onStatus(status, detail) {
     if (status === 'connected') {
       printReady('Corral runner connected', {
@@ -43,7 +46,7 @@ const connection: ServerConnection = new ServerConnection(config.serverUrl, { ru
     }
     runs.handle(message)
   }
-}, config.runnerToken)
+}, config.runnerToken, new UpdateStatus(config.dataDir, process.env.CORRAL_BUILD_SHA || 'development', process.env.CORRAL_RUNNER_AUTO_UPDATE === 'true'))
 const runs = new RunManager(config, connection, tools)
 connection.start()
 

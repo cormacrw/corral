@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Inbox } from '@corral/contracts'
 import { api } from '~/composables/useApi'
-import { projectCardSummary } from '~/utils/projects'
+import { projectCardSummary, projectNeedsYou } from '~/utils/projects'
 
 // The mobile Projects tab (design/mobile.md, frame "Projects"): a card per
 // project that opens its overview, with shortcuts to Board, Backlog and Settings
@@ -25,7 +25,7 @@ onMounted(() => {
 })
 
 const cards = computed(() => state.value.projects.map((project) => {
-  const needsYou = inbox.value?.needsYou.filter(i => i.project.id === project.id).length ?? 0
+  const needsYou = projectNeedsYou(inbox.value, project.id).length
   return { project, loaded: Boolean(state.value.tasks[project.id]), ...projectCardSummary(project, state.value.tasks[project.id] ?? [], needsYou) }
 }))
 </script>

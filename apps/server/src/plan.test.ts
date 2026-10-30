@@ -53,6 +53,73 @@ describe('plan sessions', () => {
     return t.request('GET', `/api/plan/sessions/${id}`).then(r => r.json()) as Promise<PlanSessionDetail>
   }
 
+  it('proposes human checks, preserves them on approval, and lets the human toggle them without replacing IDs', async () => {
+    const project = await t.createProject()
+    await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
+    const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan device playback' }).then(r => r.json()) as PlanSessionDetail
+    const job = (await runner.next('run.assign', m => m.job.planSessionId === created.id)).job
+    expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', {
+      title: 'Device playback', tasks: [{ key: 'playback', title: 'Playback', description: 'Support playback', type: 'task', acceptanceCriteria: [{ text: 'Works on a real iPhone', checkedByHuman: true }, 'Shows playback controls'] }]
+    })).toMatchObject({ ok: true })
+    const detail = await session(created.id)
+    const proposed = detail.plans[0]!
+    const res = await t.request('POST', `/api/plan/plans/${proposed.id}/approve`, { to: 'backlog' })
+    expect(res.status).toBe(200)
+    const [row] = await t.db.select().from(tasks).where(eq(tasks.projectId, project.id))
+    const path = `/api/projects/${project.slug}/tasks/${row!.number}`
+    const task = await t.request('GET', path).then(r => r.json()) as Task
+    expect(task.acceptanceCriteria[0]).toMatchObject({ text: 'Works on a real iPhone', checkedByHuman: true })
+    const changed = await t.request('PATCH', path, { acceptanceCriteria: task.acceptanceCriteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: false })) }).then(r => r.json()) as Task
+    expect(changed.acceptanceCriteria[0]).toMatchObject({ id: task.acceptanceCriteria[0]!.id, checkedByHuman: false })
+  })
+
+  it.each(['draft', 'backlog'] as const)('preserves a human-set flag when re-proposing a %s with strings or omitted flags, but accepts an explicit false', async (status) => {
+    const project = await t.createProject()
+    await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
+    const start = async () => {
+      const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan device playback' }).then(r => r.json()) as PlanSessionDetail
+      return { id: created.id, job: (await runner.next('run.assign', m => m.job.planSessionId === created.id)).job }
+    }
+    let pm = await start()
+    const propose = async (criteria: (string | { text: string, checkedByHuman?: boolean })[], ref?: string) => {
+      expect(await runner.call(pm.job.runId, pm.job.leaseEpoch, 'propose_plan', {
+        title: 'Device playback', tasks: [{ key: 'playback', ...(ref && { ref }), title: 'Playback', description: 'Support playback', type: 'task', acceptanceCriteria: criteria }]
+      })).toMatchObject({ ok: true })
+    }
+    const approve = async () => {
+      const plans = (await session(pm.id)).plans
+      expect((await t.request('POST', `/api/plan/plans/${plans.at(-1)!.id}/approve`, { to: 'backlog' })).status).toBe(200)
+      await endTurn(pm.job, 'Plan approved')
+    }
+    await propose(['Works on a real iPhone', 'Shows playback controls'])
+    const [row] = await t.db.select().from(tasks).where(eq(tasks.projectId, project.id))
+    const path = `/api/projects/${project.slug}/tasks/${row!.number}`
+    const getTask = () => t.request('GET', path).then(r => r.json()) as Promise<Task>
+    const original = await getTask()
+    const criterion = original.acceptanceCriteria[0]!
+    await t.request('PATCH', path, { acceptanceCriteria: original.acceptanceCriteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.id === criterion.id })) })
+    if (status === 'backlog') {
+      await approve()
+      pm = await start()
+    }
+    const ref = status === 'backlog' ? original.ref : undefined
+    // Strings and objects with no flag must both retain the human's choice.
+    for (const input of [criterion.text, { text: criterion.text }]) {
+      await propose([input, 'Shows playback controls'], ref)
+      if (status === 'backlog') {
+        await approve()
+        pm = await start()
+      }
+      expect((await getTask()).acceptanceCriteria[0]).toMatchObject({ id: criterion.id, checkedByHuman: true })
+    }
+    await propose([{ text: criterion.text, checkedByHuman: false }, 'Shows playback controls', 'Shows elapsed time'], ref)
+    if (status === 'backlog') await approve()
+    const changed = await getTask()
+    expect(changed.acceptanceCriteria[0]).toMatchObject({ id: criterion.id, checkedByHuman: false })
+    expect(changed.acceptanceCriteria[2]).toMatchObject({ text: 'Shows elapsed time', checkedByHuman: false })
+    if (status === 'draft') await endTurn(pm.job, 'Plan proposed')
+  })
+
   it('starts a session with a PM turn, records questions and plans, and approves the plan', async () => {
     const project = await t.createProject()
     const res = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan a login feature' })
@@ -449,7 +516,7 @@ describe('plan sessions', () => {
     await endTurn(job, 'Proposed.')
   })
 
-  it('stores each epic\'s review mode from the plan or the project\'s default, and rejects an unknown one (D23)', async () => {
+  it('stores each epic\'s review mode from the plan or the project\'s default, and rejects an unknown one (D27)', async () => {
     const project = await t.createProject()
     expect(project.epicReviewModeDefault).toBe('epic')
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
@@ -805,7 +872,7 @@ describe('plan sessions', () => {
 
   it('names a renamed PM in the errors of turns that fail', async () => {
     const [pm] = await t.db.select().from(agents).where(eq(agents.role, 'pm'))
-    await t.db.update(agents).set({ name: 'Iris' }).where(eq(agents.id, pm!.id))
+    await t.db.update(agents).set({ name: 'Renamed PM' }).where(eq(agents.id, pm!.id))
     try {
       const project = await t.createProject()
       const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Hello' }).then(r => r.json()) as PlanSessionDetail
@@ -813,14 +880,14 @@ describe('plan sessions', () => {
       const resetsAt = '2030-01-01T00:00:00.000Z'
       runner.send({ type: 'run.ended', runId: first.runId, leaseEpoch: first.leaseEpoch, exit: { kind: 'rate_limited', resetsAt }, headSha: null })
       await sleep(150)
-      expect((await session(created.id)).messages.at(-1)).toMatchObject({ role: 'pm', kind: 'error', text: `Iris hit a usage limit; try again after ${resetsAt}` })
+      expect((await session(created.id)).messages.at(-1)).toMatchObject({ role: 'pm', kind: 'error', text: `Renamed PM hit a usage limit; try again after ${resetsAt}` })
 
       await t.db.update(agents).set({ pausedUntil: null }).where(eq(agents.id, pm!.id))
       await t.request('POST', `/api/plan/sessions/${created.id}/messages`, { text: 'Again' })
       const second = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.planSessionId === created.id)).job
       runner.send({ type: 'run.ended', runId: second.runId, leaseEpoch: second.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
       await sleep(150)
-      expect((await session(created.id)).messages.at(-1)).toMatchObject({ role: 'pm', kind: 'error', text: 'Iris finished without replying' })
+      expect((await session(created.id)).messages.at(-1)).toMatchObject({ role: 'pm', kind: 'error', text: 'Renamed PM finished without replying' })
     } finally {
       await t.db.update(agents).set({ name: pm!.name, pausedUntil: null }).where(eq(agents.id, pm!.id))
     }
@@ -961,7 +1028,7 @@ describe('plan sessions', () => {
     const task = await t.request('GET', `/api/tasks/${dev.taskRef}`).then(r => r.json()) as Task
     t.github.setBranch(project.repository, dev.branch!, 'abc123')
     await runner.call(dev.runId, dev.leaseEpoch, 'attach_evidence', { criterionId: task.acceptanceCriteria[0]!.id, kind: 'text', fileName: 'n.txt', contentType: 'text/plain', dataBase64: Buffer.from('x').toString('base64') })
-    await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', summary: 'Done', headSha: 'abc123' })
+    await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', note: 'Did the work', summary: 'Done', headSha: 'abc123' })
     await t.orchestrator.schedule()
     const review = (await runner.next('run.assign', m => m.job.role === 'reviewer' && m.job.taskId === task.id)).job
     await runner.call(review.runId, review.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Good', criteria: [{ criterionId: task.acceptanceCriteria[0]!.id, met: true, note: '' }] })

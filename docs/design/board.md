@@ -36,12 +36,13 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
    - **Cards:** buttons with a `bg-default` background, a 1px border and `rounded-md`.
      - **Line 1:** the ref, the priority (Urgent in `error`, High in `warning`, others muted), a type badge for Bug (`error`, bug icon), Spike (`info`, flask icon) and Design (D20) but not Task (D19), and the PR number with an icon.
      - **Line 2:** the title (medium, highlighted).
-     - **Optional note:** "Waiting on COR-31", "Review round 1 of 5", "Waiting for you", or "Review-round limit reached" (in `error` for blocked).
+     - **Optional note:** "Paused" (in `warning`, ahead of any other note, after a human stopped the task's run), "Waiting on COR-31", "Review round 1 of 5", "Waiting for you", or "Review-round limit reached" (in `error` for blocked).
      - **Line 3:** the epic tag, plus the agent avatar on the right when assigned. While the agent is working, the avatar has a status dot and the agent's name is shown.
      - **Working cards pulse** (shared working indicator): the outline breathes in `primary` and the avatar dot pings.
      - The selected card has a 2px `primary` outline.
    - **Empty column:** "Nothing here".
-3. **Task flyout:** docked on the right when a card is open. The columns area narrows and scrolls sideways.
+3. **Epics** (`components/BoardEpics.vue`): a row above the columns, scrolling sideways, with a 272px card for each epic that has tasks on the Board or work left, including an epic PR still to merge (D27). The Epic filter narrows it. A card shows the epic's name (linking to it), "N of M merged", the meter, "Review: <mode>", the **Epic PR #N** link, and the review status, such as "All tasks merged, awaiting your review". On mobile the same row sits above the column tabs.
+4. **Task flyout:** docked on the right when a card is open. The columns area narrows and scrolls sideways.
 
 ## Interactions
 

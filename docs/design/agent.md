@@ -14,7 +14,9 @@ See what an agent is doing right now, attach to its live run, and look back at p
 
 - the avatar, with a ping dot while working
 - the name and a status badge only for **Working** (`success`), **Paused** (neutral) or **Waiting on usage limit** (neutral). Idle agents have no marker. Explicit `paused` means Paused; only a future `pausedUntil` means Waiting on usage limit. Expired cooldowns are idle. All agent screens use `agentStatus` in `utils/labels.ts`
+- a role badge: PM, Developer, Designer or Reviewer (D23)
 - "{Role} · {runtime} · {summary}" (Claude Code or Codex, D18), e.g. "6 runs today"
+- **Resume now** (outline), only while Waiting on usage limit: clears the wait so the agent can run again. If the limit is real, its next run pauses it again
 - **Agent settings** (outline; goes to Settings › Agents)
 
 ### Info and stats (bottom border)
@@ -24,9 +26,11 @@ See what an agent is doing right now, attach to its live run, and look back at p
   | Role | Tiles |
   |---|---|
   | Developer | Runs this week · PRs merged · First-pass approval · Avg run · Usage today |
+  | Designer | Runs this week · Design versions submitted · Designs approved · Avg run · Usage today |
   | Reviewer | Reviews this week · Approved · Changes requested (avg rounds per task) · Avg review · Usage today |
   | PM | Turns this week · Plans approved · Tasks proposed · Avg turn · Usage today |
 
+- Designer tiles count authoring runs, submitted versions and design tasks whose version the human approved; they do not count PRs. The facts line shows a task worktree on `design/<ref>` and `.corral/agents/designer.md` (built-in defaults when absent; D23).
 - **Facts line:** group and concurrency (for the PM, "One turn per session" instead: it has no concurrency limit beyond one turn per Plan session; D13), where it runs (one worktree per task, a read-only task worktree, or a read-only checkout of main), its instructions file (mono, e.g. `.corral/agents/developer.md`), and its caps or limits.
 - Usage is in tokens, with no dollar cost on a subscription. Show it where available (agent-runtime-and-auth.md, rule 6).
 
@@ -34,10 +38,10 @@ See what an agent is doing right now, attach to its live run, and look back at p
 
 1. **Runs list** (320px):
    - **Current run:** pinned at the top, with the working pulse.
-   - **Previous runs:** each row shows the task ref, an outcome badge, when it ran, the title, and "{project dot} {project} · Run #128 · 18m".
+   - **Previous runs:** each row shows the task ref, an outcome badge, when it ran, the title, and "{project dot} {project} · Run #128 · 18m". A run that ended with an error shows it on a line below (`error` text, up to three lines).
    - **Outcome badges:** Live (`primary`), PR opened / PR updated / Plan proposed (`primary`), Approved / Answered (`success`), Changes requested (`warning`), Stuck / Failed (`error`), Rate limited / Stopped / Interrupted (neutral).
 2. **Run transcript:**
-   - **Run header:** "{ref} {title}", the outcome badge, and "Run #128 · branch · 18:42 elapsed · 12k in · 1.3M cache read · 4k out" (cache reads are shown apart from fresh input, which includes cache writes, because they cost about a tenth as much). On the right: **Open task** (opens the flyout) and, for live runs only, **Interrupt / Resume** (outline) and **Stop run** (`error` subtle).
+   - **Run header:** "{ref} {title}", the outcome badge, and "Run #128 · branch · 18:42 elapsed · 12k in · 1.3M cache read · 4k out · on {runner name}" (the runner the run was placed on, kept with the run) (cache reads are shown apart from fresh input, which includes cache writes, because they cost about a tenth as much). On the right: **Open task** (opens the flyout) and, for live runs only, **Interrupt / Resume** (outline) and **Stop run** (`error` subtle).
    - **Log** (`role="log"`, `aria-live="polite"`), up to 880px wide. Each entry is one of:
      - a **system divider**, e.g. "Run started in worktree …"
      - an **agent message** (highlighted text)

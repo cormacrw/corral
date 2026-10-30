@@ -1,19 +1,21 @@
+import { needsAttention, type ReleaseNotesItem } from '@corral/contracts'
+import { epicInboxItems } from './epic-prs.ts'
 import type { Inbox, InboxItem, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
-import { richTextToPlainText, taskRef, type Actor } from '@corral/core'
+import { humanCheckTally, richTextToPlainText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, count, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { actorLabel } from './orchestrator.ts'
 import { thumbnailUrl } from './projects.ts'
 import { sessionState } from './plan.ts'
 
-const { agents, auditLog, planMessages, planSessions, plans, planEpics, planTasks, projects, reviews, runs, tasks, comments } = schema
+const { deployments, agents, auditLog, planMessages, planSessions, plans, planEpics, planTasks, projects, reviews, runs, tasks, comments, epics } = schema
 
-const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'findings_reported', 'design_submitted', 'changes_requested', 'merged', 'ci_failed', 'base_conflict', 'head_moved']
+const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'pr_rebased', 'findings_reported', 'design_submitted', 'changes_requested', 'merged', 'ci_failed', 'base_conflict', 'head_moved']
 
 // The Inbox (D11, design/inbox.md): what developer and reviewer runs need
 // from the human, plus what they did, and Plan sessions waiting on the human as a Plan
 // thread (D11, amended). Items are derived from tasks, Plan sessions and the
-// audit log, so there's nothing to keep in sync.
+// audit log and deployments, so there's nothing to keep in sync.
 export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
   const open = await db.select({ task: tasks, project: projects }).from(tasks)
     .innerJoin(projects, eq(projects.id, tasks.projectId))
@@ -21,7 +23,21 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
   const taskItems = await Promise.all(open.map(({ task, project }) => needsYouItem(db, task, project)))
   const threads = await planThreads(db)
   // One list, newest first by when each item arrived (design/inbox.md)
-  const needsYou = [...taskItems, ...threads].sort((a: InboxItem, b: InboxItem) => b.at.localeCompare(a.at))
+  const needsYou: InboxItem[] = [...taskItems, ...threads, ...await epicInboxItems(db)].sort((a: InboxItem, b: InboxItem) => b.at.localeCompare(a.at))
+
+  const [pm] = await db.select().from(agents).where(eq(agents.role, 'pm')).limit(1)
+  const recent = await db.select({ deployment: deployments, project: projects }).from(deployments)
+    .innerJoin(projects, eq(projects.id, deployments.projectId))
+    .orderBy(desc(deployments.createdAt), desc(deployments.id)).limit(20)
+  const releases: ReleaseNotesItem[] = recent.map(({ deployment: d, project }) => ({
+    id: d.id, type: 'release_notes', deploymentId: d.id, project: projectTag(project),
+    subject: 'Release notes', preview: d.notesStatus === 'pending' ? 'Writing release notes…' : d.notes ?? '',
+    sender: { name: pm?.name ?? 'PM', role: 'pm' }, at: d.createdAt.toISOString(),
+    fromSha: d.fromSha?.slice(0, 7) ?? null, toSha: d.toSha.slice(0, 7), notes: d.notes,
+    notesStatus: d.notesStatus, unread: !d.readAt, taskId: null, taskRef: null, prUrl: null,
+    resolution: d.dismissedAt ? 'You dismissed these release notes' : null
+  }))
+  needsYou.push(...releases.filter(d => !d.resolution))
 
   const entries = await db.select({ entry: auditLog, task: tasks, project: projects }).from(auditLog)
     .innerJoin(tasks, eq(tasks.id, auditLog.taskId))
@@ -31,7 +47,7 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     .limit(limit * 3)
 
   const activity: TaskInboxItem[] = []
-  const resolved: TaskInboxItem[] = []
+  const resolved: (TaskInboxItem | ReleaseNotesItem)[] = []
   for (const { entry, task, project } of entries) {
     const detail = entry.detail as Record<string, unknown>
     const event = typeof detail.event === 'string' ? detail.event : typeof detail.event === 'object' && detail.event ? String((detail.event as { type?: string }).type) : null
@@ -45,7 +61,24 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     }
     if (activity.length >= limit && resolved.length >= limit) break
   }
-  return { needsYou, activity: activity.slice(0, limit), resolved: resolved.slice(0, limit), count: needsYou.length }
+  const epicEvents = await db.select({ entry: auditLog, epic: epics, project: projects }).from(auditLog)
+    .innerJoin(epics, sql`${auditLog.detail}->>'epicId' = ${epics.id}::text`)
+    .innerJoin(projects, eq(projects.id, epics.projectId))
+    .where(eq(auditLog.action, 'epic.pr')).orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(limit)
+  for (const { entry, epic, project } of epicEvents) {
+    const detail = entry.detail as { event: string, summary?: string }
+    const [task] = await db.select().from(tasks).where(and(eq(tasks.epicId, epic.id), isNull(tasks.deletedAt))).limit(1)
+    if (!task) continue
+    const labels: Record<string, string> = { opened: 'Epic PR opened', review_started: 'Epic integration review started', approved: 'Epic PR approved by reviewer', changes_requested: 'Epic integration changes requested', human_approved: 'You approved the epic PR', human_changes_requested: 'You requested changes on the epic PR', rebase_requested: 'Rebasing the epic PR onto the target branch', rebased: 'Epic PR rebased; CI runs again', conflict: 'Epic PR conflict', rebase_handed_off: 'You handed the epic PR rebase to a developer', ci_failed: 'CI failed on the epic PR', merge_refused: 'GitHub refused the epic PR merge', closed: 'Epic PR closed on GitHub', merged: 'Epic PR merged' }
+    const body = [labels[detail.event] ?? detail.event, detail.summary].filter(Boolean).join(': ')
+    const item: TaskInboxItem = { id: `epic-${entry.id}`, type: 'activity', epicId: epic.id, project: projectTag(project), taskId: task.id, taskRef: taskRef(project.prefix, task.number), subject: epic.title, preview: body, body, sender: senderOf(entry.actor), at: entry.createdAt.toISOString(), prUrl: epic.prNumber ? `https://github.com/${project.repository}/pull/${epic.prNumber}` : null, resolution: entry.actor.kind === 'human' ? body : null }
+    if (entry.actor.kind === 'human') resolved.push(item)
+    else activity.push(item)
+  }
+  resolved.push(...releases.filter(d => d.resolution))
+  activity.sort((a, b) => b.at.localeCompare(a.at))
+  resolved.sort((a, b) => b.at.localeCompare(a.at))
+  return { needsYou, activity: activity.slice(0, limit), resolved: resolved.slice(0, limit), count: needsYou.filter(needsAttention).length }
 }
 
 // Only open sessions waiting on the human belong in the Inbox: a question, a
@@ -146,7 +179,14 @@ async function humanReviewNote(db: Executor, task: typeof tasks.$inferSelect): P
   const [review] = await db.select({ criteria: reviews.criteria }).from(reviews)
     .where(and(eq(reviews.taskId, task.id), eq(reviews.verdict, 'approved')))
     .orderBy(desc(reviews.createdAt)).limit(1)
-  const met = review ? `, all ${review.criteria.length} criteria met` : ''
+  const humanCriteria = await db.select({ id: schema.acceptanceCriteria.id }).from(schema.acceptanceCriteria)
+    .where(and(eq(schema.acceptanceCriteria.taskId, task.id), eq(schema.acceptanceCriteria.checkedByHuman, true)))
+  const humanChecks = humanCriteria.length
+  if (humanChecks > 0) {
+    const met = review?.criteria.filter(c => c.met && !humanCriteria.some(h => h.id === c.criterionId)).length ?? 0
+    return `Approved, ${humanCheckTally(met, humanChecks)}. These checks need your OK before the task merges.`
+  }
+  const met = review ? `, ${review.criteria.length === 1 ? '1 criterion' : `all ${review.criteria.length} criteria`} met` : ''
   return `Approved${met}. This task is marked for human review, so it needs your OK before it merges.`
 }
 
@@ -169,6 +209,7 @@ function activityText(action: string, event: string | null, detail: Record<strin
   switch (event) {
     case 'pr_opened': return `Opened ${pr}`
     case 'pr_updated': return `Pushed a revision to ${pr}`
+    case 'pr_rebased': return `Rebased ${pr}; on to the reviewer`
     case 'findings_reported': return 'Reported findings; on to the reviewer'
     case 'design_submitted': return `Submitted design v${String(detail.version)}; on to the reviewer`
     case 'changes_requested': return detail.to === 'blocked' ? 'Changes requested; Blocked for you' : 'Changes requested; back to the developer'

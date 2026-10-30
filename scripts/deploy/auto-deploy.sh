@@ -125,6 +125,7 @@ log "building $remote_sha (deployed: ${deployed_sha:-nothing})"
 git fetch --quiet origin "$branch"
 # The deploy checkout has no local work; .env is untracked and survives this
 git checkout --quiet --detach "$remote_sha"
+export CORRAL_BUILD_SHA="$remote_sha"
 if ! docker compose build; then
   log "build failed for $remote_sha; not deploying"
   echo "$remote_sha" >"$state_dir/skipped"

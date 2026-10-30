@@ -1,4 +1,5 @@
-import type { DraftSession, EpicDetail, Inbox, PerfSummary, PlanSessionDetail, Project, PullRequestStatus, ServerEvent, Task } from '@corral/contracts'
+import { EPIC_REVIEW_STATES } from '@corral/core'
+import type { Agent, DraftSession, Epic, EpicDetail, Inbox, PerfSummary, PlanSessionDetail, Project, PullRequestStatus, ServerEvent, Task } from '@corral/contracts'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
@@ -9,6 +10,39 @@ describe('prototype mock API', () => {
     for (const path of ['/projects', '/agents', '/runner', '/status', '/inbox', '/plan/sessions', '/me']) {
       await expect(mockCall('GET', path), path).resolves.toBeTruthy()
     }
+  })
+
+  it('adds designers live and includes an assigned design task without duplicate task IDs', async () => {
+    const events: ServerEvent[] = []
+    const stop = onMockEvent(event => events.push(event))
+    try {
+      const added = await mockCall<Agent>('POST', '/agents', { name: 'Mira', role: 'designer', runtime: 'claude-code', concurrency: 1 })
+      expect(await mockCall<Agent[]>('GET', '/agents')).toContainEqual(added)
+      expect(events).toContainEqual({ type: 'agent.updated', agent: added })
+      const tasks = await mockCall<Task[]>('GET', '/projects/corral/tasks?view=all')
+      expect(new Set(tasks.map(t => t.id)).size).toBe(tasks.length)
+      expect(tasks.find(t => t.ref === 'COR-20')).toMatchObject({ type: 'design', status: 'in_progress', developer: { name: 'Iris' }, lease: { role: 'designer' } })
+    } finally {
+      stop()
+    }
+  })
+
+  it('changes an epic\'s review mode until a task has opened a PR', async () => {
+    const changed = await mockCall<EpicDetail>('PATCH', '/epics/e-exports', { reviewMode: 'each_task' })
+    expect(changed.reviewMode).toBe('each_task')
+    expect(await mockCall<EpicDetail>('GET', '/epics/e-exports')).toMatchObject({ reviewMode: 'each_task', reviewModeLocked: false })
+    await expect(mockCall('PATCH', '/epics/e-alerts', { reviewMode: 'direct' })).rejects.toThrow('opened a PR')
+    await expect(mockCall('PATCH', '/epics/e-alerts', { title: 'Renamed' })).resolves.toMatchObject({ title: 'Renamed', reviewMode: 'epic' })
+  })
+
+  it('has an epic in every epic PR review state, and an Inbox item for review and conflict', async () => {
+    const epics = await mockCall<Epic[]>('GET', '/projects/corral/epics')
+    expect(new Set(epics.map(e => e.reviewState))).toEqual(new Set([null, ...EPIC_REVIEW_STATES]))
+    for (const epic of epics.filter(e => e.prNumber)) expect(epic.prUrl).toContain(`/pull/${epic.prNumber}`)
+    const inbox = await mockCall<Inbox>('GET', '/inbox')
+    const review = inbox.needsYou.find(i => i.type === 'epic_review')
+    expect(review).toMatchObject({ epicId: 'e-alerts', prUrl: expect.stringContaining('/pull/214') })
+    expect(review?.type === 'epic_review' && review.tasks).toHaveLength(2)
   })
 
   it('serves a performance summary per window, slowest p95 first', async () => {
@@ -57,10 +91,12 @@ describe('prototype mock API', () => {
 
   it('derives the inbox from tasks that need the human', async () => {
     const inbox = await mockCall<Inbox>('GET', '/inbox')
-    expect(inbox.count).toBe(inbox.needsYou.length)
+    expect(inbox.count).toBe(inbox.needsYou.filter(i => i.type !== 'release_notes').length)
     const threads = inbox.needsYou.filter(i => i.type === 'plan_thread')
     expect(threads.map(i => i.sessionId).sort()).toEqual(['s-1', 's-2', 's-3', 's-5'])
-    expect(inbox.needsYou.map(i => i.at)).toEqual(inbox.needsYou.map(i => i.at).sort().reverse())
+    const attention = inbox.needsYou.filter(i => i.type !== 'release_notes')
+    expect(attention.map(i => i.at)).toEqual(attention.map(i => i.at).sort().reverse())
+    expect(inbox.needsYou.at(-1)?.type).toBe('release_notes')
     expect(threads.find(i => i.sessionId === 's-5')).toMatchObject({ status: 'none', unread: true, question: null, plan: null, reply: expect.stringContaining('SSE reconnect') })
     expect(threads.find(i => i.sessionId === 's-2')).toMatchObject({
       question: { text: 'Which push service should we use?', recommendation: 'Web Push', options: ['Web Push with VAPID keys', 'ntfy'] },
@@ -70,7 +106,7 @@ describe('prototype mock API', () => {
       question: null, plan: { id: 'plan-1', version: 1, epicCount: 1, taskCount: 3 }
     })
     expect(threads.every(i => !('body' in i))).toBe(true)
-    expect(inbox.needsYou.filter(i => i.type !== 'plan_thread').map(i => i.type).sort()).toEqual(['blocked', 'failed', 'human_review'])
+    expect(inbox.needsYou.filter(i => i.type !== 'plan_thread' && i.type !== 'release_notes').map(i => i.type).sort()).toEqual(['blocked', 'epic_conflict', 'epic_review', 'failed', 'human_review'])
     expect(threads.some(i => i.sessionId === 's-idle')).toBe(false)
   })
 
@@ -78,7 +114,7 @@ describe('prototype mock API', () => {
     await mockCall('POST', '/plan/sessions/s-5/read')
     const inbox = await mockCall<Inbox>('GET', '/inbox')
     expect(inbox.needsYou.some(i => i.id === 's-5')).toBe(false)
-    expect(inbox.count).toBe(inbox.needsYou.length)
+    expect(inbox.count).toBe(inbox.needsYou.filter(i => i.type !== 'release_notes').length)
   })
 
   it('opens a plan session with its messages and plans', async () => {
@@ -201,6 +237,12 @@ describe('prototype mock API', () => {
     await mockCall('POST', '/plan/sessions/s-3/close')
     await expect(mockCall<Task>('GET', '/tasks/COR-16')).resolves.toMatchObject({ status: 'backlog' })
   })
+  it('resumes a paused task', async () => {
+    await expect(mockCall('GET', '/tasks/COR-18')).resolves.toMatchObject({ status: 'agent_review', paused: true })
+    await expect(mockCall('POST', '/projects/corral/tasks/18/resume')).resolves.toMatchObject({ status: 'agent_review', paused: false })
+    await expect(mockCall('GET', '/tasks/COR-18')).resolves.toMatchObject({ paused: false })
+  })
+
   it('closes a thread: discards its drafts and plan, and drops it from the inbox', async () => {
     // Fresh fixtures: the tests above approved s-3's plan
     vi.resetModules()

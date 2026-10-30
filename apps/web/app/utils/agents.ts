@@ -1,4 +1,4 @@
-import type { Agent, Run, Task } from '@corral/contracts'
+import type { Agent, DesignVersion, Run, Task } from '@corral/contracts'
 import { isLiveRun, isWorking } from './labels.ts'
 
 export interface AgentRow {
@@ -39,6 +39,7 @@ export const agentLimit = (agent: Pick<Agent, 'role' | 'concurrency'>): string =
 
 const WHERE: Record<Agent['role'], string> = {
   developer: 'one worktree per task',
+  designer: 'one task worktree on design/<ref>',
   reviewer: 'a read-only task worktree',
   pm: 'a read-only checkout of the default branch'
 }
@@ -47,4 +48,19 @@ const WHERE: Record<Agent['role'], string> = {
 export function agentFacts(agent: Pick<Agent, 'role' | 'concurrency'>): string {
   const limit = agentLimit(agent)
   return `${limit[0]!.toUpperCase()}${limit.slice(1)} · ${WHERE[agent.role]} · .corral/agents/${agent.role}.md`
+}
+
+// Match immutable version commits to authoring runs, so another designer's
+// work and reviewer approvals never inflate this agent's totals. A superseded
+// approved version retains its Plan session, recording the human approval.
+export function designerStats(runs: Run[], designs: { taskId: string, versions: DesignVersion[] }[]): { submitted: number, approved: number } {
+  let submitted = 0
+  let approved = 0
+  for (const design of designs) {
+    const commits = new Set(runs.filter(r => r.role === 'designer' && r.taskId === design.taskId && r.headSha).map(r => r.headSha))
+    const own = design.versions.filter(v => commits.has(v.commitSha))
+    submitted += own.length
+    if (own.some(v => v.status === 'approved' || v.planSessionId !== null)) approved++
+  }
+  return { submitted, approved }
 }

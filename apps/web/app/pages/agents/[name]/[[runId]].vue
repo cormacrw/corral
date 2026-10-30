@@ -9,7 +9,7 @@ const router = useRouter()
 const flyout = useTaskFlyout()
 const device = useDevice()
 const view = useAgentRuns({ autoSelect: () => !device.isMobile.value })
-const { name, agent, runs, error, events, now, selected, load, today, tiles, facts, stop, projectName, sent } = view
+const { name, agent, runs, error, events, now, selected, load, today, tiles, facts, stop, resume, projectName, sent } = view
 useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
 </script>
 
@@ -53,6 +53,11 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
               {{ agent.name }}
             </h1>
             <UBadge
+              :label="ROLE[agent.role]"
+              color="neutral"
+              variant="subtle"
+            />
+            <UBadge
               v-if="agentStatus(agent, now)"
               v-bind="agentStatus(agent, now)"
               variant="subtle"
@@ -63,6 +68,14 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
             <span v-if="agentStatus(agent, now)?.label === 'Waiting on usage limit'"> · Waiting on usage limit until {{ new Date(agent.pausedUntil!).toLocaleTimeString() }}</span>
           </p>
         </div>
+        <UButton
+          v-if="agentStatus(agent, now)?.label === 'Waiting on usage limit'"
+          label="Resume now"
+          variant="outline"
+          color="neutral"
+          size="sm"
+          @click="resume"
+        />
         <UButton
           to="/settings/agents"
           label="Agent settings"
@@ -126,6 +139,11 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
                 </span>
                 <span class="truncate">{{ run.taskTitle ?? run.summary ?? 'PM turn' }}</span>
                 <span class="text-xs text-muted">{{ projectName(run) }} · Run #{{ run.number }} · {{ duration(run.startedAt, run.endedAt, now) }}</span>
+                <span
+                  v-if="run.error"
+                  class="line-clamp-3 text-xs text-error"
+                  :title="run.error"
+                >{{ run.error }}</span>
               </button>
             </li>
             <li
@@ -149,7 +167,7 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
                 variant="subtle"
                 size="xs"
               />
-              <span class="min-w-0 truncate text-xs text-muted">Run #{{ selected.number }} · {{ duration(selected.startedAt, selected.endedAt, now) }} · {{ runTokens(selected) }}</span>
+              <span class="min-w-0 truncate text-xs text-muted">Run #{{ selected.number }} · {{ duration(selected.startedAt, selected.endedAt, now) }} · {{ runTokens(selected) }}<template v-if="selected.runnerName"> · on <span data-testid="run-runner">{{ selected.runnerName }}</span></template></span>
               <div class="ms-auto flex shrink-0 gap-2">
                 <UButton
                   v-if="selected.taskRef"

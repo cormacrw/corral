@@ -1,5 +1,5 @@
-import { AGENT_RUNTIMES, type Agent, type AgentRuntime, type CliStatus, type InboxItem, type PlanStatus, type Project, type Run, type Task } from '@corral/contracts'
-import type { AgentRole, DesignVersionStatus, EpicReviewMode, RunOutcome, RunState, TaskPriority, TaskStatus } from '@corral/core'
+import { AGENT_RUNTIMES, type Agent, type AgentRuntime, type CliStatus, type Epic, type RunnerInfo, type RunnerRole, type RunnerStatus, type InboxItem, type PlanStatus, type Project, type Run, type Task } from '@corral/contracts'
+import type { AgentRole, DesignVersionStatus, EpicReviewMode, EpicReviewState, RunOutcome, RunState, TaskPriority, TaskStatus } from '@corral/core'
 
 export type Color = 'primary' | 'secondary' | 'success' | 'info' | 'warning' | 'error' | 'neutral'
 
@@ -33,11 +33,56 @@ export const PLAN_STATUS: Record<PlanStatus, { label: string, color: Color }> = 
   discarded: { label: 'Discarded', color: 'neutral' }
 }
 
-// An epic's review mode (D23)
+// An epic's review mode (D27)
 export const EPIC_REVIEW_MODE: Record<EpicReviewMode, { label: string, description: string }> = {
   epic: { label: 'Epic PR', description: 'Tasks merge into an epic branch on approval; you review the epic PR' },
   each_task: { label: 'Each task', description: 'You review every task, then the epic PR' },
   direct: { label: 'Direct', description: 'Each task merges straight into the target branch' }
+}
+
+// Where an epic PR is in its review (D27)
+export const EPIC_REVIEW_STATE: Record<EpicReviewState, { label: string, color: Color }> = {
+  open: { label: 'Open', color: 'neutral' },
+  in_review: { label: 'Agent review', color: 'info' },
+  human_review: { label: 'Awaiting your review', color: 'warning' },
+  changes_requested: { label: 'Changes requested', color: 'warning' },
+  ready_to_merge: { label: 'Ready to merge', color: 'success' },
+  conflict: { label: 'Rebase conflict', color: 'error' },
+  merged: { label: 'Merged', color: 'success' }
+}
+
+export const EPIC_STATUS_TEXT: Record<Color, string> = {
+  primary: 'text-primary', secondary: 'text-secondary', neutral: 'text-muted', info: 'text-info', warning: 'text-warning', success: 'text-success', error: 'text-error'
+}
+
+// The counts an epic should show, from live tasks: the server only sends an
+// epic again when the epic itself changes
+export function epicWithLiveCounts<E extends Epic>(epic: E, tasks: Pick<Task, 'epicId' | 'status'>[]): E {
+  const counted = tasks.filter(t => t.epicId === epic.id && t.status !== 'draft' && t.status !== 'backlog')
+  return { ...epic, taskCount: counted.length, mergedCount: counted.filter(t => t.status === 'merged').length }
+}
+
+// An epic with work left: unmerged tasks, or an epic PR still to merge (D22, D27)
+export function epicInProgress(epic: Pick<Epic, 'reviewMode' | 'branch' | 'reviewState' | 'taskCount' | 'mergedCount'>): boolean {
+  if (epic.taskCount === 0) return false
+  return epic.mergedCount < epic.taskCount || (epic.reviewMode !== 'direct' && epic.branch !== null && epic.reviewState !== 'merged')
+}
+
+// What the epic's review is waiting on, for its progress; null while its
+// tasks are still going in and in `direct` mode, which has no epic PR
+export function epicReviewStatus(epic: Pick<Epic, 'reviewMode' | 'branch' | 'reviewState' | 'taskCount' | 'mergedCount'>): { label: string, color: Color } | null {
+  if (epic.reviewMode === 'direct') return null
+  const allMerged = epic.taskCount > 0 && epic.mergedCount === epic.taskCount
+  switch (epic.reviewState) {
+    case null: return allMerged && epic.branch ? { label: 'All tasks merged, epic PR opening', color: 'neutral' } : null
+    case 'open': return allMerged ? { label: 'All tasks merged, waiting for agent review', color: 'neutral' } : { label: 'Epic PR open, tasks still to merge', color: 'neutral' }
+    case 'in_review': return { label: 'All tasks merged, agent reviewing', color: 'info' }
+    case 'human_review': return { label: 'All tasks merged, awaiting your review', color: 'warning' }
+    case 'changes_requested': return { label: 'Changes requested, fixes in progress', color: 'warning' }
+    case 'ready_to_merge': return { label: 'Approved, waiting to merge', color: 'success' }
+    case 'conflict': return { label: 'Rebase conflict, needs you', color: 'error' }
+    case 'merged': return { label: 'Epic PR merged', color: 'success' }
+  }
 }
 
 export const PRIORITY: Record<TaskPriority, { label: string, color: Color }> = {
@@ -47,13 +92,32 @@ export const PRIORITY: Record<TaskPriority, { label: string, color: Color }> = {
   low: { label: 'Low', color: 'neutral' }
 }
 
-export const ROLE: Record<AgentRole, string> = { pm: 'PM', developer: 'Developer', reviewer: 'Reviewer' }
+export const ROLE: Record<AgentRole, string> = { pm: 'PM', developer: 'Developer', designer: 'Designer', reviewer: 'Reviewer' }
 
 // Runtime names in the UI. Never "Claude Code" (agent-runtime-and-auth.md, branding).
 export const RUNTIME: Record<AgentRuntime, string> = { 'claude-code': 'Claude', 'codex': 'Codex' }
 export function runtimeLabel(runtime: string): string {
   return RUNTIME[runtime as AgentRuntime] ?? runtime
 }
+// Runners (design/settings.md, Runner): a runner turned away for an old
+// protocol needs updating; otherwise it's online or offline
+const RUNNER_ROLE: Record<RunnerRole, string> = { ...ROLE, design: 'Design' }
+export function runnerRoles(roles: RunnerRole[]): string {
+  return roles.map(r => RUNNER_ROLE[r]).join(', ')
+}
+export function runnerState(runner: Pick<RunnerInfo, 'online' | 'needsUpdate'>): { label: string, color: Color } {
+  if (runner.needsUpdate) return { label: 'Needs update', color: 'warning' }
+  return runner.online ? { label: 'Online', color: 'success' } : { label: 'Offline', color: 'error' }
+}
+// The shell's one-line summary: "home-server", "2 of 3 online", or why none is
+export function runnerSummary(status: RunnerStatus | null): string {
+  const runners = status?.runners ?? []
+  const online = runners.filter(r => r.online)
+  if (!runners.length) return 'not connected'
+  if (runners.length === 1) return runners[0]!.needsUpdate ? `${runners[0]!.name} needs an update` : runners[0]!.name
+  return `${online.length} of ${runners.length} online`
+}
+
 // The runtimes whose CLI the runner found installed, for the runtime menu (D18)
 export function detectedRuntimes(clis: Pick<CliStatus, 'id' | 'version'>[]): AgentRuntime[] {
   return (Object.keys(AGENT_RUNTIMES) as AgentRuntime[]).filter(r => clis.some(c => c.id === AGENT_RUNTIMES[r] && c.version))
@@ -66,6 +130,9 @@ export function cliLoginCommand(id: CliStatus['id']): string {
 // design/inbox.md item type badges
 export function inboxTypeBadge(type: InboxItem['type']): { label: string, color: Color } {
   return ({
+    release_notes: { label: 'Release notes', color: 'neutral' as const },
+    epic_review: { label: 'Epic PR', color: 'warning' as const },
+    epic_conflict: { label: 'Epic conflict', color: 'error' as const },
     human_review: { label: 'Human review', color: 'warning' as const },
     question: { label: 'Question', color: 'info' as const },
     blocked: { label: 'Blocked', color: 'error' as const },
@@ -102,11 +169,13 @@ export function runBadge(run: Pick<Run, 'state' | 'outcome' | 'role'>): { label:
   const outcome = run.outcome as RunOutcome | null
   switch (outcome) {
     case 'pr_opened': return { label: 'PR opened', color: 'primary' }
+    case 'pr_rebased': return { label: 'PR rebased', color: 'primary' }
     case 'pr_updated': return { label: 'PR updated', color: 'primary' }
     case 'findings_reported': return { label: 'Findings reported', color: 'primary' }
     case 'design_submitted': return { label: 'Design submitted', color: 'primary' }
     case 'approved': return { label: 'Approved', color: 'success' }
     case 'changes_requested': return { label: 'Changes requested', color: 'warning' }
+    case 'blocked': return { label: 'Blocked', color: 'error' }
     case 'stuck': return { label: 'Stuck', color: 'error' }
     case 'failed': return { label: 'Failed', color: 'error' }
     case 'rate_limited': return { label: 'Rate limited', color: 'neutral' }
@@ -190,6 +259,8 @@ export function epicTitle(epics: { id: string, title: string }[] | undefined, id
 }
 
 export function taskNote(task: Task, all: Task[], reviewRoundCap: number): { text: string, color: Color } | null {
+  // Takes the note's place: nothing else about the task moves until it's resumed
+  if (task.paused) return { text: 'Paused', color: 'warning' }
   if (task.status === 'ready' && task.waitingOnEpics.length > 0) return { text: `Waiting on epic: ${task.waitingOnEpics.map(e => e.title).join(', ')}`, color: 'neutral' }
   if (task.status === 'ready' && task.dependsOn.length > 0) {
     const waiting = task.dependsOn.filter(ref => all.find(t => t.ref === ref)?.status !== 'merged')

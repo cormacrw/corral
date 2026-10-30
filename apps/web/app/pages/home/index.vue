@@ -3,7 +3,7 @@ import type { Agent, Run } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { todayStats } from '~/utils/agents'
 import { dashboardCounts, elapsed, IN_PROGRESS_STAGES } from '~/utils/dashboard'
-import { agentStatus, isLiveRun, isWorking, projectColor, ROLE, STATUS, tokens } from '~/utils/labels'
+import { agentStatus, epicInProgress, epicWithLiveCounts, isLiveRun, isWorking, projectColor, ROLE, STATUS, tokens } from '~/utils/labels'
 
 // Home, the global dashboard (design/mobile.md). Counts come from the live
 // task lists the shell loads; runs come from /api/runs and are
@@ -21,8 +21,8 @@ const projectItems = computed(() => [
 const scope = computed(() => projectId.value === 'all' ? state.value.projects : state.value.projects.filter(p => p.id === projectId.value))
 
 const epics = computed(() => scope.value
-  .flatMap(project => (state.value.epics[project.id] ?? []).map(epic => ({ epic, project })))
-  .filter(({ epic }) => epic.taskCount > 0 && epic.mergedCount < epic.taskCount)
+  .flatMap(project => (state.value.epics[project.id] ?? []).map(epic => ({ epic: epicWithLiveCounts(epic, state.value.tasks[project.id] ?? []), project })))
+  .filter(({ epic }) => epicInProgress(epic))
   .sort((a, b) => Date.parse(b.epic.updatedAt) - Date.parse(a.epic.updatedAt)))
 
 // Re-render the "today" and elapsed numbers as time passes
@@ -107,7 +107,7 @@ const agents = computed(() => state.value.agents
           :class="['size-2 rounded-full', state.runner?.online ? 'bg-success' : 'bg-error']"
           aria-hidden="true"
         />
-        Runner {{ state.runner?.online ? 'online' : 'offline' }} ·
+        {{ (state.runner?.runners.length ?? 0) > 1 ? `${state.runner!.runners.filter(r => r.online).length} of ${state.runner!.runners.length} runners online` : `Runner ${state.runner?.online ? 'online' : 'offline'}` }} ·
         <UDropdownMenu :items="projectItems.map(item => ({ label: item.label, onSelect: () => { projectId = item.value } }))">
           <UButton
             :label="projectItems.find(item => item.value === projectId)?.label ?? 'All projects'"
@@ -326,6 +326,7 @@ const agents = computed(() => state.value.agents
               :title="epic.title"
               :merged="epic.mergedCount"
               :total="epic.taskCount"
+              :epic="epic"
             />
           </li>
         </ul>

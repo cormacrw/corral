@@ -44,6 +44,46 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
     return row!
   }
 
+  it('separates design authors from implementation authors, including paused designers', async () => {
+    const project = await projectWithReadyTasks(2)
+    const design = await taskRow(project, 1)
+    const normal = await taskRow(project, 2)
+    await t.db.update(tasks).set({ type: 'design' }).where(eq(tasks.id, design.id))
+    const dev = await developer(5)
+    const designer = await developer(5, { role: 'designer', paused: true })
+    expect(await claimNextTask(t.db, dev)).toMatchObject({ taskId: normal.id })
+    expect(await claimNextTask(t.db, dev)).toBeNull()
+    expect(await claimNextTask(t.db, designer)).toBeNull()
+    expect(await taskRow(project, 1)).toMatchObject({ status: 'ready', leaseRunId: null })
+    // Leave implementation work unleased while the designer is free.
+    const extra = await t.createTask(project.slug)
+    await t.request('POST', `/api/projects/${project.slug}/tasks/${extra.number}/transitions`, { type: 'approve' })
+    await t.db.update(agents).set({ paused: false }).where(eq(agents.id, designer))
+    expect(await claimNextTask(t.db, designer)).toMatchObject({ taskId: design.id })
+    expect(await claimNextTask(t.db, designer)).toBeNull()
+    const detail = await t.request('GET', `/api/projects/${project.slug}/tasks/1`).then(r => r.json())
+    expect(detail).toMatchObject({ developer: { id: designer }, lease: { agentId: designer, role: 'designer' } })
+  })
+
+  it.each(['ready', 'in_progress'] as const)('makes designers wait for task and epic dependencies in %s', async (status) => {
+    const project = await projectWithReadyTasks(2)
+    const dependency = await taskRow(project, 1)
+    const design = await taskRow(project, 2)
+    const [upstream] = await t.db.insert(schema.epics).values({ projectId: project.id, title: 'Upstream', createdBy: t.actor }).returning()
+    const [downstream] = await t.db.insert(schema.epics).values({ projectId: project.id, title: 'Downstream', createdBy: t.actor }).returning()
+    await t.db.update(tasks).set({ epicId: upstream!.id }).where(eq(tasks.id, dependency.id))
+    await t.db.update(tasks).set({ type: 'design', status, epicId: downstream!.id }).where(eq(tasks.id, design.id))
+    await t.db.insert(schema.taskDependencies).values({ taskId: design.id, dependsOnId: dependency.id })
+    await t.db.insert(schema.epicDependencies).values({ epicId: downstream!.id, dependsOnEpicId: upstream!.id })
+    const designer = await developer(5, { role: 'designer' })
+    expect(await claimNextTask(t.db, designer)).toBeNull()
+    // Remove the task dependency: the epic dependency still blocks it.
+    await t.db.delete(schema.taskDependencies).where(eq(schema.taskDependencies.taskId, design.id))
+    expect(await claimNextTask(t.db, designer)).toBeNull()
+    await t.db.update(tasks).set({ status: 'merged' }).where(eq(tasks.id, dependency.id))
+    expect(await claimNextTask(t.db, designer)).toMatchObject({ taskId: design.id, status: 'in_progress' })
+  })
+
   it('moves a Ready task to In progress with a lease, a run and an audit entry', async () => {
     const project = await projectWithReadyTasks(1)
     const agentId = await developer()
@@ -103,6 +143,91 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
     expect(await claimNextTask(t.db, agentId)).toBeNull()
   })
 
+  async function recordedReview(task: { id: string, projectId: string }, round: number, headSha: string, verdict: 'approved' | 'changes_requested') {
+    const agentId = await developer(2, { role: 'reviewer' })
+    const [run] = await t.db.insert(runs).values({ agentId, projectId: task.projectId, taskId: task.id, role: 'reviewer', state: 'completed', leaseEpoch: 1 }).returning()
+    await t.db.insert(schema.reviews).values({ taskId: task.id, runId: run!.id, round, headSha, verdict, summary: 'Recorded verdict', author: t.actor })
+    return agentId
+  }
+
+  it.each(['changes_requested', 'approved'] as const)('ignores an earlier-round %s verdict on the same commit, including already stranded tasks', async (verdict) => {
+    const project = await t.createProject()
+    const task = await t.createTask(project.slug)
+    // Persisted pre-fix state: no transition or resubmission is needed to recover.
+    await t.db.update(tasks).set({ status: 'agent_review', headSha: 'same-head', reviewRounds: 1 }).where(eq(tasks.id, task.id))
+    const reviewer = await recordedReview(task, 0, 'same-head', verdict)
+    expect(await claimNextTask(t.db, reviewer)).toMatchObject({ taskId: task.id, status: 'agent_review' })
+  })
+
+  it.each(['changes_requested', 'approved'] as const)('does not repeat a current-round %s verdict on the current commit', async (verdict) => {
+    const project = await t.createProject()
+    const task = await t.createTask(project.slug)
+    await t.db.update(tasks).set({ status: 'agent_review', headSha: 'same-head', reviewRounds: 2 }).where(eq(tasks.id, task.id))
+    const reviewer = await recordedReview(task, 2, 'same-head', verdict)
+
+    expect(await claimNextTask(t.db, reviewer)).toBeNull()
+    expect((await taskRow(project, task.number)).leaseRunId).toBeNull()
+  })
+
+  async function submission(task: { id: string, projectId: string }, createdAt: Date) {
+    await t.db.insert(auditLog).values({
+      taskId: task.id, projectId: task.projectId, actor: t.actor,
+      action: 'task.transition', detail: { event: 'pr_updated', from: 'in_progress', to: 'agent_review' }, createdAt
+    })
+  }
+
+  it.each(['changes_requested', 'approved'] as const)('claims persisted round-zero tasks resubmitted after an old %s verdict', async (verdict) => {
+    const project = await t.createProject()
+    const task = await t.createTask(project.slug)
+    const reviewer = await recordedReview(task, 0, 'same-head', verdict)
+    await t.db.update(schema.reviews).set({ createdAt: new Date('2026-10-28T12:00:00Z') }).where(eq(schema.reviews.taskId, task.id))
+    await submission(task, new Date('2026-10-28T11:00:00Z'))
+    await submission(task, new Date('2026-10-28T13:00:00Z'))
+    // Existing state after Blocked → resolved → resubmitted. No new writes
+    // or transition are needed between deployment and the scheduling pass.
+    await t.db.update(tasks).set({ status: 'agent_review', headSha: 'same-head', reviewRounds: 0 }).where(eq(tasks.id, task.id))
+    expect(await claimNextTask(t.db, reviewer)).toMatchObject({ taskId: task.id, status: 'agent_review' })
+  })
+
+  it.each(['changes_requested', 'approved'] as const)('suppresses a %s verdict since the latest submission, including equal timestamps', async (verdict) => {
+    const project = await t.createProject()
+    const task = await t.createTask(project.slug)
+    const reviewer = await recordedReview(task, 0, 'same-head', verdict)
+    const time = new Date('2026-10-28T12:00:00Z')
+    await t.db.update(schema.reviews).set({ createdAt: time }).where(eq(schema.reviews.taskId, task.id))
+    await submission(task, new Date('2026-10-28T11:00:00Z'))
+    await submission(task, time)
+    // Claims update updatedAt; unrelated audit entries must not reopen review.
+    await t.db.update(tasks).set({ status: 'agent_review', headSha: 'same-head', reviewRounds: 0, updatedAt: new Date('2026-10-28T14:00:00Z') }).where(eq(tasks.id, task.id))
+    await t.db.insert(auditLog).values({ taskId: task.id, projectId: project.id, actor: t.actor, action: 'task.transition', detail: { event: 'resolve' }, createdAt: new Date('2026-10-28T13:00:00Z') })
+    expect(await claimNextTask(t.db, reviewer)).toBeNull()
+  })
+
+  it('keeps a mechanical base-update approval effective on the new head', async () => {
+    const project = await t.createProject()
+    const task = await t.createTask(project.slug)
+    await submission(task, new Date('2026-10-28T11:00:00Z'))
+    const reviewer = await recordedReview(task, 0, 'old-head', 'approved')
+    const [approval] = await t.db.select().from(schema.reviews).where(eq(schema.reviews.taskId, task.id))
+    // merge.ts copies the approval onto the mechanical head, retaining its round.
+    await t.db.insert(schema.reviews).values({
+      taskId: task.id, runId: approval!.runId, round: approval!.round,
+      headSha: 'mechanical-head', verdict: 'approved', summary: 'Carried approval', author: t.actor,
+      createdAt: new Date('2026-10-28T12:00:00Z')
+    })
+    await t.db.update(tasks).set({ status: 'agent_review', headSha: 'mechanical-head', reviewRounds: 0 }).where(eq(tasks.id, task.id))
+    expect(await claimNextTask(t.db, reviewer)).toBeNull()
+  })
+
+  it('reviews a new commit even when the round already has a verdict on the old commit', async () => {
+    const project = await t.createProject()
+    const task = await t.createTask(project.slug)
+    await t.db.update(tasks).set({ status: 'agent_review', headSha: 'new-head', reviewRounds: 2 }).where(eq(tasks.id, task.id))
+    const reviewer = await recordedReview(task, 2, 'old-head', 'approved')
+
+    expect(await claimNextTask(t.db, reviewer)).toMatchObject({ taskId: task.id })
+  })
+
   it('finds nothing when only Backlog tasks exist', async () => {
     const project = await t.createProject()
     await t.createTask(project.slug)
@@ -135,6 +260,57 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
     expect(claim?.taskId).toBe((await taskRow(project, 2)).id)
   })
 
+  it('orders developer claims by priority, status, age and id', async () => {
+    const project = await projectWithReadyTasks(6, ['medium', 'medium', 'medium', 'medium', 'high', 'medium'])
+    const rows = await Promise.all([1, 2, 3, 4, 5, 6].map(n => taskRow(project, n)))
+    for (const [i, row] of rows.entries()) {
+      await t.db.update(tasks).set({
+        status: i === 1 || i === 2 || i === 5 ? 'in_progress' : 'ready',
+        createdAt: new Date(i === 3 || i === 5 ? '2026-10-02' : i === 1 || i === 2 ? '2026-10-03' : '2026-10-01')
+      }).where(eq(tasks.id, row.id))
+    }
+    const agentId = await developer(6)
+    const claimed: string[] = []
+    for (let i = 0; i < rows.length; i++) claimed.push((await claimNextTask(t.db, agentId))!.taskId)
+    const byId = (a: typeof rows[number], b: typeof rows[number]) => a.id.localeCompare(b.id)
+    expect(claimed).toEqual([
+      rows[4]!.id, rows[5]!.id,
+      ...[rows[1]!, rows[2]!].sort(byId).map(r => r.id),
+      rows[0]!.id, rows[3]!.id
+    ])
+  })
+
+  it('keeps reviewer claims ordered by priority, age and id', async () => {
+    const project = await projectWithReadyTasks(4, ['medium', 'medium', 'high', 'medium'])
+    const rows = await Promise.all([1, 2, 3, 4].map(n => taskRow(project, n)))
+    for (const [i, row] of rows.entries()) {
+      await t.db.update(tasks).set({
+        status: 'agent_review', headSha: 'review-head',
+        createdAt: new Date(i === 0 ? '2026-10-02' : '2026-10-01')
+      }).where(eq(tasks.id, row.id))
+    }
+    const reviewer = await developer(4, { role: 'reviewer' })
+    const claimed: string[] = []
+    for (let i = 0; i < rows.length; i++) claimed.push((await claimNextTask(t.db, reviewer))!.taskId)
+    expect(claimed).toEqual([
+      rows[2]!.id,
+      ...[rows[1]!, rows[3]!].sort((a, b) => a.id.localeCompare(b.id)).map(r => r.id),
+      rows[0]!.id
+    ])
+  })
+
+  it('skips an unleased In progress task with an unmerged dependency', async () => {
+    const project = await projectWithReadyTasks(2)
+    const blocked = await taskRow(project, 1)
+    const ready = await taskRow(project, 2)
+    const dependency = await t.createTask(project.slug)
+    await t.db.insert(schema.taskDependencies).values({ taskId: blocked.id, dependsOnId: dependency.id })
+    await t.db.update(tasks).set({ status: 'in_progress' }).where(eq(tasks.id, blocked.id))
+
+    expect(await claimNextTask(t.db, await developer())).toMatchObject({ taskId: ready.id })
+    expect((await taskRow(project, 1)).leaseRunId).toBeNull()
+  })
+
   it('stops at the agent’s concurrency limit', async () => {
     await projectWithReadyTasks(2)
     const agentId = await developer(1)
@@ -151,13 +327,13 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
   })
 
   it('keeps looking past a full batch of tasks no runner can take', async () => {
-    // The runnable task is low priority; more urgent tasks than one batch
-    // holds wait ahead of it for a runner that isn't there
-    const project = await projectWithReadyTasks(1, ['low'])
+    // Older Ready work follows more than a page of unplaceable In progress
+    // tasks at the same priority, including tied timestamps.
+    const project = await projectWithReadyTasks(1)
     const runnable = await taskRow(project, 1)
     const blocked = PLACE_BATCH + 3
     await t.db.insert(tasks).values(Array.from({ length: blocked }, (_, i) => ({
-      projectId: project.id, number: i + 2, title: `Waiting ${i + 2}`, type: runnable.type, status: 'ready' as const, priority: 'urgent' as const, createdBy: runnable.createdBy
+      projectId: project.id, number: i + 2, title: `Waiting ${i + 2}`, type: runnable.type, status: 'in_progress' as const, priority: 'medium' as const, createdBy: runnable.createdBy, createdAt: new Date('2099-01-01')
     })))
     const tried: string[] = []
     const place: Place = async (_tx, task) => {
@@ -167,6 +343,8 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
 
     const claim = await claimNextTask(t.db, await developer(), new Date(), undefined, [], place)
     expect(claim).toMatchObject({ taskId: runnable.id, runnerId: 'runner-b' })
+    const waiting = await t.db.select().from(tasks).where(and(eq(tasks.projectId, project.id), eq(tasks.status, 'in_progress')))
+    expect(tried).toEqual([...waiting.filter(r => r.id !== runnable.id).sort((a, b) => a.id.localeCompare(b.id)).map(r => r.id), runnable.id])
     expect(new Set(tried).size).toBe(blocked + 1)
     expect((await taskRow(project, 2)).leaseRunId).toBeNull()
   })

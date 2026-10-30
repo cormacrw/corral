@@ -2,6 +2,7 @@ import type { Database } from '@corral/db'
 import { join } from 'node:path'
 import type { AppDeps } from './app.ts'
 import { LocalBlobStore, type BlobStore } from './blob-store.ts'
+import { ReleaseNotes } from './deployments.ts'
 import type { EventBus } from './events.ts'
 import { RunnerGitHub, type GitHubClient } from './github.ts'
 import { Orchestrator } from './orchestrator.ts'
@@ -47,5 +48,7 @@ export function createServices(options: ServiceOptions): Services {
   runner.setHandlers(orchestrator)
   const plans = new PlanService({ db, events, runner, stopRun: (runId, actor) => orchestrator.stopRun(runId, actor), startRun: (session, job) => orchestrator.startPmRun(session, job) })
   orchestrator.plans = plans
-  return { runner, orchestrator, blobs, transcripts, github, plans, performance: new PerformanceSamples(db) }
+  const releaseNotes = new ReleaseNotes({ db, events, runner })
+  orchestrator.releaseNotes = releaseNotes
+  return { runner, orchestrator, blobs, transcripts, github, plans, releaseNotes, performance: new PerformanceSamples(db) }
 }

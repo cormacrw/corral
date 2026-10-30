@@ -16,11 +16,22 @@ export interface PromptTask {
   // D20: a build task pinned to an approved design version and its screens
   pin?: PinnedDesign | null
   defaultBranch: string
+  rebaseOnly?: boolean
+  approvedHeadSha?: string | null
   reviewRounds: number
   reviewRoundCap: number
-  criteria: { id: string, text: string }[]
+  criteria: { id: string, text: string, checkedByHuman?: boolean }[]
   comments: { author: string, body: string, pinned: boolean, createdAt: Date }[]
   attachments: { id: string, fileName: string, foundIn: string[] }[]
+  // The developer's last run, when it ended without reporting an outcome
+  stoppedRun?: StoppedRun | null
+}
+
+export interface StoppedRun {
+  number: number
+  reason: string
+  // The commit that saved its uncommitted work, if there was any
+  wipSha: string | null
 }
 
 export interface PinnedDesign {
@@ -45,6 +56,17 @@ function commentsSection(task: PromptTask): string {
     pinned.length > 0 ? section('Pinned comments (read these first)', pinned.map(format).join('\n')) : '',
     recent.length > 0 ? section('Recent comments and feedback', recent.map(format).join('\n')) : ''
   ].join('\n')
+}
+
+function stoppedRunSection(task: PromptTask): string {
+  const run = task.stoppedRun
+  if (!run) return ''
+  return section('Continuing a stopped run', `
+You are continuing run #${run.number}, which stopped before it reported an outcome. Stop reason: ${run.reason}
+
+${run.wipSha
+  ? `Corral saved its uncommitted work as WIP commit \`${run.wipSha}\`, and your branch includes it. That work is unfinished and may not build. Read it with \`git show ${run.wipSha}\` and carry on from it; don't start over.`
+  : 'No WIP commit is recorded yet. Check the branch log and what it left in your worktree and carry on from there; don\'t start over.'}`)
 }
 
 // Images the human attached to the task text, so the agent fetches them
@@ -77,6 +99,8 @@ export interface ReviewTask extends PromptTask {
   previousFeedback: string | null
   // A spike's latest findings, which are what's under review
   findings?: string | null
+  // The project's required CI checks: with none, the reviewer runs the gates
+  requiredChecks: string[]
 }
 
 // The design version under review (D20)
@@ -89,29 +113,65 @@ export interface DesignUnderReview {
 export function reviewerPrompt(task: ReviewTask & { underReview?: DesignUnderReview | null }, agentName: string): string {
   if (task.spike) return spikeReviewerPrompt(task, agentName)
   if (task.design) return designReviewerPrompt(task, task.underReview ?? null, agentName)
+  if (task.rebaseOnly) return rebaseReviewerPrompt(task, agentName)
   const evidence = evidenceList(task)
   return [
     `You are ${agentName}, the reviewer agent in Corral. Review round ${task.reviewRounds + 1} of ${task.reviewRoundCap} for task ${task.ref}: ${task.title}.`,
     `You are checking commit ${task.headSha} on branch \`${task.branch}\`${task.prUrl ? ` (${task.prUrl})` : ''}, against \`${task.defaultBranch}\`.`,
     '',
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
-    section('Acceptance criteria', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
+    section('Acceptance criteria', criteriaList(task)),
     section('Evidence the developer attached (this round)', evidence),
     task.previousFeedback ? section('Your feedback last round', task.previousFeedback) : '',
     commentsSection(task),
     attachmentsSection(task),
     pinSection(task, 'reviewer'),
+    gatesSection(task),
     section('How to review', `
 - You are in a read-only checkout of the commit under review. Do not edit, commit or push. Run \`git diff ${task.defaultBranch}...HEAD\` or \`git log\` to see the change; \`origin/${task.defaultBranch}\` is available locally.
 - Use the supplied project brief and wiki file list, and check the wiki was updated where behaviour changed.
-- Judge every acceptance criterion: is it implemented, and does the evidence actually show it? Use \`get_evidence\` to list items and fetch screenshots by ID. Reproduce at least one criterion yourself when you can (run the tests, start the app).
+- Judge every acceptance criterion: is it implemented, and does the evidence actually show it? Use \`get_evidence\` to list items and fetch screenshots by ID. Reproduce at least one criterion yourself when you can (a targeted test, the app).
+- Review the diff for security, efficiency and logic problems, and raise each one as specific, actionable feedback with the file and line. A cached result never counts as verification.
 - Give every criterion a concrete note explaining why it is met or not; the human reads it next to the evidence. Request changes when a visibly testable criterion is proven only by a note, or when a criterion's only proof is test output.
-- Check the project's lint, typecheck and tests pass on this commit.
 - Call \`report_outcome\` with outcome "approved" or "changes_requested" and a \`criteria\` verdict for every criterion ID above (met true/false with a note).
 - When you approve, keep it short: the summary is one or two sentences (what you checked and anything worth knowing), and each criterion note must explain concretely why it is met or not, because the human reads it next to the evidence. Don't restate the task or the developer's summary.
 - When you request changes, the summary is posted to the developer as a comment: make every point specific and actionable.
 - Always finish by calling \`report_outcome\`.`)
   ].join('\n')
+}
+
+// D24: review the resolution; the server carries the approved criteria forward.
+function rebaseReviewerPrompt(task: ReviewTask, agentName: string): string {
+  return [
+    `You are ${agentName}, the reviewer agent in Corral. Rebase review for ${task.ref}: ${task.title}.`,
+    section('Rebase under review', `Previously approved head: ${task.approvedHeadSha}. New head: ${task.headSha}. Base branch: origin/${task.defaultBranch}.
+This is a conflict check of approved work, excluded from the review-round cap.`),
+    section('Task', richTextToMarkdown(task.description) || '(no description)'),
+    section('Acceptance criteria (previously approved)', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
+    commentsSection(task),
+    attachmentsSection(task),
+    pinSection(task, 'reviewer'),
+    gatesSection(task),
+    section('How to review', `
+- You are in a read-only checkout of the new head. Do not edit, commit or push.
+- Identify old-base and new-base, the base commits of the approved and rebased work (use git merge-base against origin/${task.defaultBranch}; inspect history to confirm them). Run \`git range-diff <old-base>..<approved> <new-base>..<new-head>\`, substituting the approved and new head SHAs above. Compare rewritten commits with the approved work; no feature changes are allowed.
+- Read the developer's conflict report. Check each conflicted hunk against the specific main/base commit that caused it, preserving both sides' intent without reverting newly merged work.
+- Inspect binding docs changed on the base since approval and check this branch against them. If a changed binding decision affects the criteria, report outcome "blocked" with the changed decision, affected criteria and reason for the human. Do not choose a side or rewrite the criteria.
+- If the resolution holds, report "approved" without criteria verdicts: the server copies the earlier approval's verdicts and notes onto the new head.
+- If the resolution needs changes, report "changes_requested" with actionable feedback and a verdict for every criterion. This starts a normal counted revision.
+- Your summary becomes a short task comment: name the conflicted files and the verdict, explaining whether their resolutions hold. Do not repeat a per-criterion list in the summary or add_comment.
+- Always finish by calling \`report_outcome\`.`)
+  ].join('\n')
+}
+
+// Required CI verifies the gates on every push; without it nothing else does,
+// so the reviewer runs them (D26)
+function gatesSection(task: ReviewTask): string {
+  if (task.requiredChecks.length > 0) {
+    const checks = task.requiredChecks.map(c => `\`${c}\``).join(', ')
+    return section('Gates', `This project has required CI checks: ${checks}. They run on every push and the merge gate won't merge without them, so don't rerun the project's lint, typecheck, tests or build. Spend your time on the diff and the criteria.`)
+  }
+  return section('Gates', `This project has no required CI checks, so nothing else verifies its gates. Run the project's lint, typecheck, tests and build yourself before reporting, without the cache: when available, use \`pnpm run check --review\` (bypasses the Turbo cache) and \`TURBO_FORCE=1 pnpm run build\`. Do not add concurrency, worker or timeout flags; use the repository's shared CPU setting. If check reports a reused clean review check for this exact head, skip the full check rerun and cite the earlier check run and commit in your summary. Otherwise run the gates without the cache using the repository's commands. Request changes if one fails. If you cannot run a check without the cache, explain which check and why in your outcome.`)
 }
 
 // A note has no file (D21): its text is the evidence, so it goes in whole,
@@ -132,7 +192,7 @@ function spikeReviewerPrompt(task: ReviewTask, agentName: string): string {
     `A spike answers a question: the developer investigated and reported findings instead of changing code. There is no branch, diff or PR; you are in a read-only checkout of \`${task.defaultBranch}\`.`,
     '',
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
-    section('Acceptance criteria', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
+    section('Acceptance criteria', criteriaList(task)),
     section('Findings under review', task.findings?.trim() || '(no findings were reported)'),
     section('Evidence the developer attached (this round)', evidenceList(task)),
     task.previousFeedback ? section('Your feedback last round', task.previousFeedback) : '',
@@ -198,10 +258,21 @@ export function sessionTitlePrompt(input: { text: string, attachedTask: string |
   ].filter(Boolean).join('\n\n')
 }
 
+// A deployment's release notes (COR-128). `tasks` are the shipped tasks and
+// `commits` the subjects of commits that match no task.
+export function releaseNotesPrompt(input: { projectName: string, tasks: { ref: string, type: string, title: string, description: string }[], commits: string[] }): string {
+  const tasks = input.tasks.map(t => `- ${t.ref} (${t.type}): ${t.title}${t.description ? `\n  ${t.description.slice(0, 1000).replace(/\s*\n\s*/g, ' ')}` : ''}`)
+  return [
+    `Write short, user-facing release notes in markdown for a deployment of "${input.projectName}". Say what changed for someone using it, not how it was built. Use the headings "## Features", "## Fixes" and "## Other changes", leaving out any with nothing under it, with one bullet per change. End each bullet with the ref of its task, such as (${input.tasks[0]?.ref ?? 'ABC-12'}). Every task below gets a bullet. Every commit under "Commits with no task" gets a bullet under "## Other changes" with its subject exactly as written. Reply with the notes only, with no introduction.`,
+    tasks.length ? `Tasks:\n${tasks.join('\n')}` : '',
+    input.commits.length ? `Commits with no task:\n${input.commits.map(subject => `- ${subject}`).join('\n')}` : ''
+  ].filter(Boolean).join('\n\n')
+}
+
 // Each PM turn is one message; the session carries the rest (D9)
 export function pmPrompt(turn: PmTurn & { grilling?: boolean }): string {
   const intro = turn.fresh
-    ? `You are the product-manager agent for the project "${turn.projectName}" in Corral. Task IDs look like ${turn.prefix}-12. You are in a read-only checkout of the default branch. Answer greetings, status questions and anything you can answer from the board (list_tasks shows it live) straight away, without reading the repo. Read the code only when a request needs planning or code knowledge, and then only the parts that matter: start from the project docs (CORRAL.md or CLAUDE.md, and .corral/wiki/ if present) and don't go looking for files that aren't there. Propose work with propose_plan (group a multi-task feature into an epic and leave a lone small fix without one, small tasks, one PR each, descriptions in markdown, verifiable acceptance criteria, explicit dependencies, humanReview true for auth, data migrations, payments, deletions and security-sensitive code). Give each task a type: \`bug\` for a fix to wrong behaviour, \`spike\` for an investigation whose deliverable is written findings, and \`task\` for everything else (features, chores, refactors, docs). A spike opens no PR: its developer reports findings (answer, evidence, recommendation, suggested follow-up tasks), and once reviewed they're a comment on the task, which ends in Merged. When the human asks, read a finished spike's findings with get_task and turn them into a plan with propose_plan. To refine an existing Backlog task, read it with get_task and include it in the plan with its \`ref\`, so the plan revises it instead of creating a duplicate. Write acceptance criteria as observable behaviour. Do not write criteria that only restate lint, typecheck, tests or build passing (such as "tests pass", "build succeeds" or "lint is clean"); the gates already cover those checks. ${PM_DESIGN_GUIDANCE} Ask with ask_question when requirements are ambiguous. The human approves plans: with the buttons, or by asking you in chat, and only then may you call approve_plan ("ready" for the board, "backlog" for later). Never approve on your own initiative. Keep replies short and concrete. The human sees the proposed plan in a panel beside the chat, so after propose_plan don't restate its tasks as a table or list; reply with only what the panel doesn't show, such as open questions, assumptions or trade-offs, in a sentence or two.\n\n`
+    ? `You are the product-manager agent for the project "${turn.projectName}" in Corral. Task IDs look like ${turn.prefix}-12. You are in a read-only checkout of the default branch. Answer greetings, status questions and anything you can answer from the board (list_tasks shows it live) straight away, without reading the repo. Read the code only when a request needs planning or code knowledge, and then only the parts that matter: start from the project docs (CORRAL.md or CLAUDE.md, and .corral/wiki/ if present) and don't go looking for files that aren't there. Propose work with propose_plan (group a multi-task feature into an epic and leave a lone small fix without one, small tasks, one PR each, descriptions in markdown, verifiable acceptance criteria, explicit dependencies, humanReview true for auth, data migrations, payments, deletions and security-sensitive code). Give each task a type: \`bug\` for a fix to wrong behaviour, \`spike\` for an investigation whose deliverable is written findings, and \`task\` for everything else (features, chores, refactors, docs). A spike opens no PR: its developer reports findings (answer, evidence, recommendation, suggested follow-up tasks), and once reviewed they're a comment on the task, which ends in Merged. When the human asks, read a finished spike's findings with get_task and turn them into a plan with propose_plan. To refine an existing Backlog task, read it with get_task and include it in the plan with its \`ref\`, so the plan revises it instead of creating a duplicate. Write acceptance criteria as observable behaviour. For checks that require a person (such as playback on a real iPhone), use an object in acceptanceCriteria: { text: "Playback works on a real iPhone", checkedByHuman: true }; agents skip its evidence and verdict, and approval goes to Human review. Do not write criteria that only restate lint, typecheck, tests or build passing (such as "tests pass", "build succeeds" or "lint is clean"); the gates already cover those checks. ${PM_DESIGN_GUIDANCE} Ask with ask_question when requirements are ambiguous. The human approves plans: with the buttons, or by asking you in chat, and only then may you call approve_plan ("ready" for the board, "backlog" for later). Never approve on your own initiative. Keep replies short and concrete. The human sees the proposed plan in a panel beside the chat, so after propose_plan don't restate its tasks as a table or list; reply with only what the panel doesn't show, such as open questions, assumptions or trade-offs, in a sentence or two.\n\n`
     : ''
   const attached = turn.attachedTask ? `(About task ${turn.attachedTask}; read it with get_task.)\n\n` : ''
   const ids = messageAttachmentIds(turn.text)
@@ -230,9 +301,12 @@ export function questionText(m: { text: string, recommendation: string | null, o
   return [m.text, options && `Options:\n${options}`, m.recommendation && `Recommended: ${m.recommendation}`].filter(Boolean).join('\n\n')
 }
 
+// Every developer outcome carries a one-line note, posted as its comment
+const WORK_NOTE = '- Every `report_outcome` needs a `note` as well: one line of at most 200 characters saying what this run did, e.g. "Rebased onto 6e67d6f; resolved conflict in docs/architecture.md keeping main’s SSE wording". It\'s posted on the task as your comment, so the history shows your work between reviews.'
+
 export function developerPrompt(task: PromptTask, agentName: string): string {
+  if (task.rebaseOnly) return rebaseDeveloperPrompt(task, agentName)
   if (task.spike) return spikeDeveloperPrompt(task, agentName)
-  if (task.design) return designDeveloperPrompt(task, agentName)
   const revision = task.reviewRounds > 0
   return [
     `You are ${agentName}, the developer agent in Corral. You are working on task ${task.ref}: ${task.title}.`,
@@ -240,8 +314,9 @@ export function developerPrompt(task: PromptTask, agentName: string): string {
       ? `This is a revision: review round ${task.reviewRounds} of ${task.reviewRoundCap} requested changes. Address every piece of feedback below.`
       : 'Implement the task so that every acceptance criterion is met.',
     '',
+    stoppedRunSection(task),
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
-    section('Acceptance criteria', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
+    section('Acceptance criteria', criteriaList(task)),
     commentsSection(task),
     attachmentsSection(task),
     pinSection(task, 'developer'),
@@ -249,11 +324,12 @@ export function developerPrompt(task: PromptTask, agentName: string): string {
 - You are in a git worktree on branch \`${task.branch}\`, based on \`${task.defaultBranch}\`. Commit your work on this branch.
 - Do not push and do not use \`gh\`. Corral pushes the branch and opens the PR when you report your outcome.
 - Use the supplied project brief and open relevant pages from its wiki file list when needed. Update the wiki in the same branch when behaviour changes.
-- Run the project's lint, typecheck and tests before reporting.
+- Run \`pnpm run check\` when available for lint, typecheck and tests before reporting. Do not add concurrency, worker or timeout flags; use the repository's shared CPU setting.
 - Prove each acceptance criterion with what a human would look at, attached through \`attach_evidence\`: screenshots or video for anything visible, real requests and responses for APIs. Use kind \`note\` only when there is nothing to show; say concretely what changed and how it was checked, with file and line references. Lint, typecheck, tests and build are gates; never attach their output as criterion evidence.
 - Use \`get_task\` to re-read the task, comments and evidence at any time, and \`add_comment\` to leave notes for the human or reviewer.
 - When the work is committed and evidenced, call \`report_outcome\` with outcome "${revision ? 'pr_updated' : 'pr_opened'}" and a summary. If anything is missing, the call fails and tells you what to fix.
 - The summary becomes the pull request description, read by someone reviewing the code. Write it in markdown: one or two sentences on what changed and why, then a short bulleted list of how you verified it. Describe the change as a whole, not this run: don't mention comments, run numbers or earlier attempts, and don't list commit hashes.
+${WORK_NOTE}
 - If you cannot continue without a human decision, call \`report_outcome\` with outcome "stuck" and put the question in the summary.
 - Always finish by calling \`report_outcome\`.`)
   ].join('\n')
@@ -269,8 +345,9 @@ function spikeDeveloperPrompt(task: PromptTask, agentName: string): string {
       ? `This is a revision: review round ${task.reviewRounds} of ${task.reviewRoundCap} requested changes to your findings. Address every piece of feedback below.`
       : 'A spike answers a question. Investigate it so that your findings answer every acceptance criterion.',
     '',
+    stoppedRunSection(task),
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
-    section('Acceptance criteria', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
+    section('Acceptance criteria', criteriaList(task)),
     commentsSection(task),
     attachmentsSection(task),
     section('How to work', `
@@ -280,6 +357,7 @@ function spikeDeveloperPrompt(task: PromptTask, agentName: string): string {
 - Use \`get_task\` to re-read the task, comments and evidence at any time, and \`add_comment\` to leave notes for the human or reviewer.
 - When you're done, call \`report_outcome\` with outcome "findings_reported" and your findings as the summary. If anything is missing, the call fails and tells you what to fix.
 - Write the findings in markdown with these sections: **Answer** (the answer to the question, criterion by criterion), **Evidence** (what you checked and what it showed), **Recommendation**, and **Suggested follow-up tasks** (each with a title, a line on what it would do, and its acceptance criteria). They're posted on the task for the human, and the PM can turn them into a plan.${revision ? ' Report the complete findings again, not just what changed: they replace the earlier ones.' : ''}
+${WORK_NOTE}
 - If you cannot continue without a human decision, call \`report_outcome\` with outcome "stuck" and put the question in the summary.
 - Always finish by calling \`report_outcome\`.`)
   ].join('\n')
@@ -299,19 +377,21 @@ const DESIGN_HOW_TO = (task: PromptTask) => `
 - Attach evidence for every acceptance criterion with \`attach_evidence\`, using the criterion ID in brackets above. The screenshots can be that evidence.
 - Use \`get_task\` to re-read the task, comments and evidence at any time, \`get_design\` to read a version you submitted, and \`add_comment\` to leave notes for the human or reviewer.
 - When the version is submitted and evidenced, call \`report_outcome\` with outcome "design_submitted" and a summary of the design: the screens and the decisions worth the human's attention. If you committed after \`submit_design\`, submit again first: the outcome is accepted only for a version at your branch's latest commit.
+${WORK_NOTE}
 - If you cannot continue without a human decision, call \`report_outcome\` with outcome "stuck" and put the question in the summary.
 - Always finish by calling \`report_outcome\`.`
 
-function designDeveloperPrompt(task: PromptTask, agentName: string): string {
+export function designerPrompt(task: PromptTask, agentName: string): string {
   const version = task.design?.version ?? null
   return [
-    `You are ${agentName}, the developer agent in Corral. You are working on design task ${task.ref}: ${task.title}.`,
+    `You are ${agentName}, the designer agent in Corral. You are working on design task ${task.ref}: ${task.title}.`,
     version !== null
       ? `This is a revision: changes were requested on design v${version}. Address every piece of feedback below and submit the result as v${version + 1}.`
       : 'A design task agrees a UI or flow before it is built. Build a prototype and a spec that meet every acceptance criterion, and submit them as a design version for review.',
     '',
+    stoppedRunSection(task),
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
-    section('Acceptance criteria', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
+    section('Acceptance criteria', criteriaList(task)),
     commentsSection(task),
     attachmentsSection(task),
     section('How to work', DESIGN_HOW_TO(task))
@@ -322,6 +402,7 @@ function designDeveloperPrompt(task: PromptTask, agentName: string): string {
 // (changes requested, or a retry): the session already holds the task, the
 // working rules and the earlier work, so it gets only what's new
 export function developerRevisionPrompt(task: PromptTask, feedback: PromptTask['comments']): string {
+  if (task.rebaseOnly) return rebaseDeveloperPrompt({ ...task, comments: feedback }, 'the assigned developer')
   const format = (c: PromptTask['comments'][number]) => `- ${c.author} (${c.createdAt.toISOString()}): ${c.body}`
   const outcome = task.spike ? 'findings_reported' : task.reviewRounds > 0 ? 'pr_updated' : 'pr_opened'
   return [
@@ -329,6 +410,7 @@ export function developerRevisionPrompt(task: PromptTask, feedback: PromptTask['
       ? `Review round ${task.reviewRounds} of ${task.reviewRoundCap} on ${task.ref} requested changes. This is the same session${task.branch ? ` and the same branch, \`${task.branch}\`` : ''}: continue from your earlier work.`
       : `${task.ref} is back with you. This is the same session${task.branch ? ` and the same branch, \`${task.branch}\`` : ''}: continue from your earlier work.`,
     '',
+    stoppedRunSection(task),
     section('New comments', feedback.length > 0 ? feedback.map(format).join('\n') : '(none: re-read the task with `get_task`)'),
     section('What to do', `
 - Address every point of the feedback, and finish whatever the task still needs.
@@ -339,18 +421,19 @@ export function developerRevisionPrompt(task: PromptTask, feedback: PromptTask['
 
 // The message a resumed design session gets after changes were requested:
 // the session already holds the task and the earlier work (D20)
-export function designRevisionPrompt(task: PromptTask, feedback: PromptTask['comments']): string {
+export function designerRevisionPrompt(task: PromptTask, feedback: PromptTask['comments']): string {
   const version = task.design?.version ?? 0
   const format = (c: PromptTask['comments'][number]) => `- ${c.author} (${c.createdAt.toISOString()}): ${c.body}`
   return [
     `Changes were requested on design v${version} of ${task.ref}. This is the same session and the same branch, \`${task.branch}\`: continue from your earlier work.`,
     '',
+    stoppedRunSection(task),
     section('Feedback', feedback.length > 0 ? feedback.map(format).join('\n') : '(no written feedback: re-read the task with get_task)'),
     section('What to do', `
 - Address every point of the feedback in the prototype and in \`design.md\`.
 - Rebuild the bundle, capture fresh screenshots at desktop and mobile widths, commit, and call \`submit_design\` again. It records v${version + 1}; v${version} is kept unchanged.
 - Attach evidence for every acceptance criterion again with \`attach_evidence\` if the review round has moved on (\`get_task\` shows the round).
-- Then call \`report_outcome\` with outcome "design_submitted" and a summary of what changed.`)
+- Then call \`report_outcome\` with outcome "design_submitted" and a summary of what changed, and a one-line \`note\` of what this run did.`)
   ].join('\n')
 }
 
@@ -364,7 +447,7 @@ function designReviewerPrompt(task: ReviewTask, underReview: DesignUnderReview |
       : 'No design version was found for this submission; request changes and say so.',
     '',
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
-    section('Acceptance criteria', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
+    section('Acceptance criteria', criteriaList(task)),
     underReview ? section('Screenshots in this version', underReview.screenshots.map(s => `- ${s}`).join('\n') || '(none)') : '',
     section('Evidence the developer attached (this round)', evidenceList(task)),
     task.previousFeedback ? section('Your feedback last round', task.previousFeedback) : '',
@@ -382,4 +465,30 @@ function designReviewerPrompt(task: ReviewTask, underReview: DesignUnderReview |
 - When you request changes, the summary is posted to the developer as a comment: make every point specific and actionable.
 - Always finish by calling \`report_outcome\`.`)
   ].join('\n')
+}
+
+// Fresh and resumed sessions receive the same narrow scope after a conflict.
+function rebaseDeveloperPrompt(task: PromptTask, agentName: string): string {
+  return [
+    `You are ${agentName}, the developer agent in Corral, working on ${task.ref}: ${task.title}.`,
+    `This is a rebase-only round from approved head ${task.approvedHeadSha ?? '(unknown)'}. It does not consume a review round.`,
+    section('How to work', `
+- Fetch origin and rebase branch \`${task.branch}\` onto \`origin/${task.defaultBranch}\`.
+- Resolve conflicts keeping the base branch's (main's) changes and the approved branch's intent. Make no other changes; do not undo newly merged work.
+- Run \`pnpm run check\` when available for lint, typecheck and tests, then the project's build. Do not add concurrency, worker or timeout flags; use the repository's shared CPU setting.
+- Check that \`git merge-tree --write-tree HEAD origin/${task.defaultBranch}\` is clean.
+- Do not push or use gh. Corral pushes with --force-with-lease.
+${WORK_NOTE}
+- Report \`pr_rebased\` with a summary naming every conflicted file and how each was resolved, and a one-line note naming the conflicted files and their resolutions. If a human decision is needed, report stuck instead.
+- Always finish by calling \`report_outcome\`.`),
+    commentsSection(task)
+  ].join('\n')
+}
+
+// Human checks override the normal per-criterion evidence and verdict rules.
+function criteriaList(task: PromptTask): string {
+  const list = task.criteria.map(c => `- [${c.id}] ${c.text}${c.checkedByHuman ? ' — checked by a human' : ''}`).join('\n')
+  return task.criteria.some(c => c.checkedByHuman)
+    ? `${list}\n\nCriteria marked "checked by a human" are reserved for the human. Do not attempt these checks or produce evidence for them. Do not request changes over them or their missing evidence. Omit their verdicts; Corral records "needs human check" automatically. All instructions to evidence or judge every criterion apply only to the other criteria.`
+    : list
 }

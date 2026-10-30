@@ -3,6 +3,7 @@ import type { Evidence, Inbox, InboxActionInput, Review, Task, InboxItem, PlanTh
 import { api } from '~/composables/useApi'
 import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
+import { moveRadioSelection } from '~/utils/radio'
 
 // The Inbox (design/inbox.md, D11): list, selected item, action tray, task flyout
 const route = useRoute()
@@ -43,7 +44,7 @@ async function load() {
 onMounted(() => {
   void load()
   const stop = live.subscribe((event) => {
-    if (['task.updated', 'task.deleted', 'task.created', 'run.updated', 'plan.session'].includes(event.type)) void load()
+    if (['task.updated', 'task.deleted', 'task.created', 'run.updated', 'epic.updated', 'plan.session', 'deployment.updated', 'agent.updated'].includes(event.type)) void load()
   })
   onBeforeUnmount(stop)
 })
@@ -73,12 +74,11 @@ const selected = computed<InboxItem | null>(() => {
 })
 const alreadyResolved = computed(() => selected.value !== null && selected.value.type !== 'activity' && !inbox.value?.needsYou.some(i => i.id === selected.value!.id))
 watch(selected, async (item, previous) => {
-  action.value = null
   text.value = ''
   actionError.value = null
   // Nothing selected (e.g. the last item was just resolved): nothing to show beside it
   if (!item) flyout.close()
-  if (item?.type === 'plan_thread') {
+  if (item?.type === 'plan_thread' || item?.type === 'epic_review' || item?.type === 'release_notes' || item?.type === 'epic_conflict') {
     if (previous?.id !== item.id && (flyout.ref.value || flyout.epic.value)) await flyout.close()
     task.value = null
     return
@@ -148,6 +148,10 @@ const actions = computed(() => {
     default: return []
   }
 })
+// Reset only when the item or its type changes, not on live refreshes.
+watch([() => selected.value?.id, () => selected.value?.type], () => {
+  action.value = (actions.value[0]?.value as InboxActionInput['action'] | undefined) ?? null
+}, { immediate: true })
 const needsText = computed(() => action.value === 'request_changes' || action.value === 'clarify')
 const placeholder = computed(() => {
   switch (action.value) {
@@ -158,11 +162,19 @@ const placeholder = computed(() => {
     default: return 'Optional note'
   }
 })
+const checkedHumanCriteria = ref<string[]>([])
+watch(selectedId, () => {
+  checkedHumanCriteria.value = []
+})
 const submitLabel = computed(() => action.value ? (actions.value.find(a => a.value === action.value)?.label ?? 'Send') : '')
 
 // Resolves false when not sent, so the composer keeps its images
 async function submit(message: string): Promise<boolean> {
-  if (!selected.value || selected.value.type === 'plan_thread') return false
+  if (!selected.value || selected.value.type === 'plan_thread' || selected.value.type === 'epic_review' || selected.value.type === 'release_notes' || selected.value.type === 'epic_conflict') return false
+  if (action.value === 'approve' && task.value?.acceptanceCriteria.some(c => c.checkedByHuman && !checkedHumanCriteria.value.includes(c.id))) {
+    actionError.value = 'Check each human criterion before approving.'
+    return false
+  }
   busy.value = true
   actionError.value = null
   try {
@@ -184,7 +196,6 @@ async function submit(message: string): Promise<boolean> {
     const actedOn = selected.value
     const position = items.value.findIndex(i => i.id === actedOn.id)
     text.value = ''
-    action.value = null
     await load()
     // Resolved: move on to the next item that needs you, or to the empty
     // state when that was the last one
@@ -210,7 +221,7 @@ watchEffect(() => {
   }
   const position = inbox.value?.needsYou.findIndex(i => i.id === selectedId.value) ?? -1
   mobileHeader.value = {
-    title: selected.value?.type === 'plan_thread' ? selected.value.subject : selected.value?.taskRef ?? '',
+    title: selected.value?.type === 'plan_thread' || selected.value?.type === 'epic_review' || selected.value?.type === 'release_notes' || selected.value?.type === 'epic_conflict' ? selected.value.subject : selected.value?.taskRef ?? '',
     eyebrow: position >= 0 ? `Inbox · ${position + 1} of ${inbox.value!.needsYou.length}` : 'Inbox'
   }
 })
@@ -222,8 +233,21 @@ onBeforeUnmount(() => {
 <template>
   <UDashboardPanel :ui="{ body: 'p-0' }">
     <!-- Phones get the list and the item as separate screens (design/mobile.md) -->
+    <InboxEpicReview
+      v-if="device.isMobile.value && selected?.type === 'epic_review'"
+      :key="selected.id"
+      :item="selected"
+      @resolved="nextAfterPlanResolution"
+    />
+    <InboxEpicConflict
+      v-else-if="device.isMobile.value && selected?.type === 'epic_conflict'"
+      :key="selected.id"
+      :item="selected"
+      @resolved="nextAfterPlanResolution"
+    />
     <InboxMobile
-      v-if="device.isMobile.value"
+      v-else-if="device.isMobile.value"
+      v-model:checked-human-criteria="checkedHumanCriteria"
       v-model:tab="tab"
       v-model:search="search"
       v-model:action="action"
@@ -235,7 +259,7 @@ onBeforeUnmount(() => {
       :error="error"
       :items="items"
       :selected-id="selectedId"
-      :selected="selected?.type === 'plan_thread' ? null : selected"
+      :selected="selected?.type === 'plan_thread' || selected?.type === 'epic_review' || selected?.type === 'epic_conflict' ? null : selected"
       :already-resolved="alreadyResolved"
       :task="task"
       :evidence="evidence"
@@ -315,6 +339,11 @@ onBeforeUnmount(() => {
                 :item="item"
               />
               <template v-else>
+                <span
+                  v-if="item.type === 'release_notes' && item.unread"
+                  class="mt-2 size-2 shrink-0 rounded-full bg-primary"
+                  aria-label="Unread"
+                />
                 <AgentAvatar
                   :name="item.sender.name"
                   size="xs"
@@ -326,6 +355,10 @@ onBeforeUnmount(() => {
                   </span>
                   <span class="block truncate text-sm font-medium">{{ item.subject }}</span>
                   <span class="line-clamp-2 text-xs text-muted">{{ markdownToPlainText(item.preview) }}</span>
+                  <span
+                    v-if="item.type === 'release_notes'"
+                    class="block font-mono text-xs text-muted"
+                  >{{ item.fromSha ? `${item.fromSha}…` : '' }}{{ item.toSha }}</span>
                   <span class="mt-1 flex items-center gap-2">
                     <UBadge
                       :label="typeBadge(item.type).label"
@@ -364,8 +397,25 @@ onBeforeUnmount(() => {
         </ul>
       </div>
 
+      <InboxEpicReview
+        v-if="selected?.type === 'epic_review'"
+        :key="selected.id"
+        :item="selected"
+        @resolved="nextAfterPlanResolution"
+      />
+      <InboxReleaseNotes
+        v-else-if="selected?.type === 'release_notes'"
+        :item="selected"
+        @refresh="load"
+      />
+      <InboxEpicConflict
+        v-else-if="selected?.type === 'epic_conflict'"
+        :key="selected.id"
+        :item="selected"
+        @resolved="nextAfterPlanResolution"
+      />
       <InboxPlanThread
-        v-if="selected?.type === 'plan_thread'"
+        v-else-if="selected?.type === 'plan_thread'"
         :key="selected.sessionId"
         :item="selected"
         @read="load"
@@ -453,16 +503,18 @@ onBeforeUnmount(() => {
                   />
                 </div>
                 <EvidenceList
+                  v-model:checked="checkedHumanCriteria"
                   :evidence="evidence"
+                  human-checklist
                   :criteria="task.acceptanceCriteria"
                   :reviews="reviews.length > 0 ? reviews : task.latestReview ? [task.latestReview] : []"
                 />
               </template>
               <NuxtLink
                 v-if="selected.type === 'activity'"
-                :to="`/tasks/${selected.taskRef}`"
+                :to="selected.epicId ? `/epics/${selected.epicId}` : `/tasks/${selected.taskRef}`"
                 class="text-sm text-primary hover:underline"
-              >Open task</NuxtLink>
+              >{{ selected.epicId ? 'Open epic' : 'Open task' }}</NuxtLink>
             </div>
           </div>
           <div
@@ -474,6 +526,7 @@ onBeforeUnmount(() => {
                 role="radiogroup"
                 aria-label="Quick actions"
                 class="flex flex-wrap gap-1.5"
+                @keydown="moveRadioSelection"
               >
                 <UButton
                   v-for="a in actions"
@@ -483,9 +536,10 @@ onBeforeUnmount(() => {
                   size="xs"
                   role="radio"
                   :aria-checked="action === a.value"
+                  :tabindex="action === a.value ? 0 : -1"
                   :variant="action === a.value ? 'subtle' : 'outline'"
                   :color="a.value === 'delete' ? 'error' : action === a.value ? 'primary' : 'neutral'"
-                  @click="action = action === a.value ? null : (a.value as InboxActionInput['action'])"
+                  @click="action = (a.value as InboxActionInput['action'])"
                 />
                 <USelectMenu
                   v-if="action === 'resolve'"
