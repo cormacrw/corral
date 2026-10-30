@@ -1,6 +1,7 @@
-import { homedir, hostname } from 'node:os'
+import { availableParallelism, homedir, hostname, totalmem } from 'node:os'
 import { join, resolve } from 'node:path'
-import { RUNNER_ROLES, type RunnerRole } from '@corral/contracts'
+import { RUNNER_ROLES, type SlotSource, type RunnerRole } from '@corral/contracts'
+import type { Resources } from './resources.ts'
 
 // Everything environment-specific comes from env vars (D12). The defaults are
 // for local development only; the Docker images set every value explicitly.
@@ -26,6 +27,7 @@ export interface RunnerConfig {
   titleModel: string
   // Most agent runs this machine runs at once; the server never assigns more
   slots: number
+  slotSource?: SlotSource | undefined
   // The roles this runner takes runs for; 'design' is a design task's developer
   roles: RunnerRole[]
 }
@@ -35,7 +37,7 @@ export interface GitAuthor {
   email: string
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): RunnerConfig {
+export function loadConfig(env: NodeJS.ProcessEnv = process.env, resources: Resources = { cpus: availableParallelism(), memoryBytes: totalmem() }): RunnerConfig {
   return {
     runnerToken: env.CORRAL_RUNNER_TOKEN || undefined,
     dataDir: resolve(env.CORRAL_RUNNER_DATA_DIR || join(homedir(), '.corral', 'runner')),
@@ -48,7 +50,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RunnerConfig {
       : null,
     pmWarmSeconds: parseSeconds(env.CORRAL_PM_WARM_SECONDS, 300),
     titleModel: env.CORRAL_TITLE_MODEL || 'haiku',
-    slots: parseSlots(env.CORRAL_RUNNER_SLOTS),
+    ...slotCapacity(env, resources),
     roles: parseRoles(env.CORRAL_RUNNER_ROLES)
   }
 }
@@ -68,8 +70,7 @@ function parseSeconds(value: string | undefined, fallback: number): number {
   return seconds
 }
 
-function parseSlots(value: string | undefined): number {
-  if (value === undefined || value === '') return 4
+function parseSlots(value: string): number {
   const slots = Number(value)
   if (!Number.isInteger(slots) || slots < 1) {
     throw new Error(`CORRAL_RUNNER_SLOTS must be a whole number of at least 1, got "${value}"`)
@@ -93,4 +94,17 @@ function parseUrl(value: string): URL {
     throw new Error(`CORRAL_SERVER_URL must be a URL, got "${value}"`)
   }
   return new URL(value)
+}
+
+export function slotCapacity(env: NodeJS.ProcessEnv, resources: Resources): { slots: number, slotSource: SlotSource } {
+  if (env.CORRAL_RUNNER_SLOTS) return { slots: parseSlots(env.CORRAL_RUNNER_SLOTS), slotSource: { kind: 'explicit' } }
+  const slotCpus = Number(env.CORRAL_SLOT_CPUS || '2')
+  if (!Number.isFinite(slotCpus) || slotCpus <= 0) throw new Error('CORRAL_SLOT_CPUS must be a positive number')
+  const memory = (env.CORRAL_SLOT_MEMORY || '2.5g').match(/^(\d+(?:\.\d+)?)\s*([bkmgt]?)b?$/i)
+  const slotMemoryBytes = memory ? Number(memory[1]) * 1024 ** Math.max(0, 'bkmgt'.indexOf(memory[2]!.toLowerCase())) : NaN
+  if (!Number.isFinite(slotMemoryBytes) || slotMemoryBytes <= 0) throw new Error('CORRAL_SLOT_MEMORY must be a positive size, e.g. 2.5g or 512m')
+  return {
+    slots: Math.max(1, Math.floor(Math.min(resources.cpus / slotCpus, resources.memoryBytes / slotMemoryBytes))),
+    slotSource: { kind: 'derived', ...resources, slotCpus, slotMemoryBytes }
+  }
 }

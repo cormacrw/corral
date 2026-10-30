@@ -50,7 +50,9 @@ Each runner says in its `hello` (runner protocol 3) what it takes, and the serve
 
 | Env var (runner) | Default | Meaning |
 |---|---|---|
-| `CORRAL_RUNNER_SLOTS` | `4` | Most agent runs (developer, reviewer, design and PM turns) the machine runs at once. A whole number of at least 1. |
+| `CORRAL_RUNNER_SLOTS` | derived | Most agent runs (developer, reviewer, design and PM turns) the machine runs at once. A whole number of at least 1. |
+| `CORRAL_SLOT_CPUS` | `2` | CPU budget per slot; positive number, including fractional CPUs. |
+| `CORRAL_SLOT_MEMORY` | `2.5g` | Memory budget per slot; positive bytes or binary `k`, `m`, `g`, `t` units (optional `b`, case insensitive). |
 | `CORRAL_RUNNER_ROLES` | `pm,developer,reviewer,design` | Comma-separated roles it takes. `design` is a developer run on a design task (D20); a runner without it never gets one, and one without `pm` never gets a Plan turn. |
 
 Runtimes aren't configured: on every connect the runner runs the same checks as `detect_clis` and advertises `claude-code` and/or `codex` for each CLI that is installed and signed in. Settings (desktop) and `GET /api/status` show each runner's `slots`, `runtimes` and `roles`.
@@ -237,6 +239,10 @@ TypeScript is fine for performance: the runner is I/O-bound (model latency, git,
 4. **Distribution later:** if Corral is sold, compile the runner to a single executable (`bun build --compile` or Node single-executable apps). Not needed for the POC.
 
 ## Resource expectations
+
+Unless `CORRAL_RUNNER_SLOTS` is explicitly set, capacity is `max(1, floor(min(CPUs / CORRAL_SLOT_CPUS, memory / CORRAL_SLOT_MEMORY)))`. The default budget is **2 CPUs and 2.5 GiB per slot**. Linux runners use the smaller of host resources/CPU affinity and visible cgroup v2 or v1 limits, including ancestor quotas; other hosts use available CPUs and total memory. Limits are read at startup, not current free memory. Settings reports each runner's capacity, source, and (for derived capacity) detected resources and budget. Older runners report an unavailable source until updated.
+
+For example, 8 CPUs with 10 GiB gives 4 slots, 8 CPUs with 4 GiB gives 1, and 32 CPUs with 64 GiB gives 16. Explicit slots bypass budget derivation. This is a concurrency budget, not a reservation or an OOM guarantee: allow headroom for the daemon and large builds, and tune the budgets or override for the workload. Even a machine smaller than one budget gets one slot.
 
 Rough estimates, to be checked against real measurements once built.
 

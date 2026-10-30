@@ -56,6 +56,21 @@ const expected = computed(() => state.value.runner?.protocol)
           · {{ runner.runtimes.map(runtimeLabel).join(', ') || 'no signed-in CLI' }}
           · {{ runnerRoles(runner.roles) || 'no roles' }}
         </p>
+        <p
+          class="text-xs text-muted"
+          data-testid="runner-slot-source"
+        >
+          <template v-if="runner.slotSource?.kind === 'derived'">
+            Derived from {{ Number(runner.slotSource.cpus.toFixed(2)) }} CPUs and {{ Number((runner.slotSource.memoryBytes / 1024 ** 3).toFixed(2)) }} GiB memory
+            · {{ runner.slotSource.slotCpus }} CPUs / {{ Number((runner.slotSource.slotMemoryBytes / 1024 ** 3).toFixed(2)) }} GiB per slot
+          </template>
+          <template v-else-if="runner.slotSource?.kind === 'explicit'">
+            Set explicitly by CORRAL_RUNNER_SLOTS
+          </template>
+          <template v-else>
+            Slot source unavailable · update runner to report resources
+          </template>
+        </p>
         <p class="text-xs text-muted">
           {{ runner.needsUpdate ? 'Turned away' : 'Last heartbeat' }} {{ timeAgo(runner.lastHeartbeatAt) }}
         </p>
