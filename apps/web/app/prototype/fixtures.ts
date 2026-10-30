@@ -378,31 +378,31 @@ const at = (ref: string): Task => tasks.find(t => t.ref === ref)!
 export const runs: Run[] = [
   {
     runnerId: 'runner-1', runnerName: 'home-server', id: 'r-design', number: 140, agentId: 'a-design', agentName: 'Iris', role: 'designer', projectId: 'p-corral',
-    taskId: at('COR-20').id, taskRef: 'COR-20', taskTitle: at('COR-20').title, state: 'running', outcome: null, summary: null,
+    planSessionId: null, taskId: at('COR-20').id, taskRef: 'COR-20', taskTitle: at('COR-20').title, state: 'running', outcome: null, summary: null,
     error: null, headSha: null, inputTokens: 12000, cacheReadTokens: 80000, outputTokens: 3000, rateLimitResetAt: null,
     queuedAt: ago(12), startedAt: ago(11), endedAt: null, timings: null
   },
   {
     runnerId: 'runner-1', runnerName: 'home-server', id: 'r-design-done', number: 139, agentId: 'a-design', agentName: 'Iris', role: 'designer', projectId: 'p-corral',
-    taskId: at('COR-4').id, taskRef: 'COR-4', taskTitle: at('COR-4').title, state: 'completed', outcome: 'design_submitted', summary: 'Submitted the review screen prototype.',
+    planSessionId: null, taskId: at('COR-4').id, taskRef: 'COR-4', taskTitle: at('COR-4').title, state: 'completed', outcome: 'design_submitted', summary: 'Submitted the review screen prototype.',
     error: null, headSha: 'design-review-v1', inputTokens: 8000, cacheReadTokens: 60000, outputTokens: 2000, rateLimitResetAt: null,
     queuedAt: ago(120), startedAt: ago(119), endedAt: ago(100), timings: null
   },
   {
     runnerId: 'runner-1', runnerName: 'home-server', id: 'r-1', number: 128, agentId: 'a-dev2', agentName: 'Dana', role: 'developer', projectId: 'p-corral',
-    taskId: at('COR-3').id, taskRef: 'COR-3', taskTitle: at('COR-3').title, state: 'running', outcome: null, summary: null,
+    planSessionId: null, taskId: at('COR-3').id, taskRef: 'COR-3', taskTitle: at('COR-3').title, state: 'running', outcome: null, summary: null,
     error: null, headSha: null, inputTokens: 18_200, cacheReadTokens: 240_000, outputTokens: 6_100, rateLimitResetAt: null,
     queuedAt: ago(25), startedAt: ago(24), endedAt: null, timings: null
   },
   {
     runnerId: 'runner-1', runnerName: 'home-server', id: 'r-2', number: 129, agentId: 'a-rev', agentName: 'Rita', role: 'reviewer', projectId: 'p-corral',
-    taskId: at('COR-4').id, taskRef: 'COR-4', taskTitle: at('COR-4').title, state: 'running', outcome: null, summary: null,
+    planSessionId: null, taskId: at('COR-4').id, taskRef: 'COR-4', taskTitle: at('COR-4').title, state: 'running', outcome: null, summary: null,
     error: null, headSha: '9e71e28', inputTokens: 9_000, cacheReadTokens: 80_000, outputTokens: 1_200, rateLimitResetAt: null,
     queuedAt: ago(8), startedAt: ago(7), endedAt: null, timings: null
   },
   {
     runnerId: 'runner-1', runnerName: 'home-server', id: 'r-3', number: 127, agentId: 'a-dev', agentName: 'Victor', role: 'developer', projectId: 'p-corral',
-    taskId: at('COR-5').id, taskRef: 'COR-5', taskTitle: at('COR-5').title, state: 'completed', outcome: 'pr_opened',
+    planSessionId: null, taskId: at('COR-5').id, taskRef: 'COR-5', taskTitle: at('COR-5').title, state: 'completed', outcome: 'pr_opened',
     summary: 'Approving a version marks it approved and supersedes earlier ones.', error: null, headSha: '5b030d7',
     inputTokens: 30_000, cacheReadTokens: 400_000, outputTokens: 9_800, rateLimitResetAt: null,
     queuedAt: ago(140), startedAt: ago(139), endedAt: ago(95),
@@ -424,7 +424,7 @@ export const runs: Run[] = [
   },
   {
     runnerId: 'runner-2', runnerName: 'macbook', id: 'r-5', number: 126, agentId: 'a-rev', agentName: 'Rita', role: 'reviewer', projectId: 'p-corral',
-    taskId: at('COR-5').id, taskRef: 'COR-5', taskTitle: at('COR-5').title, state: 'completed', outcome: 'approved',
+    planSessionId: null, taskId: at('COR-5').id, taskRef: 'COR-5', taskTitle: at('COR-5').title, state: 'completed', outcome: 'approved',
     summary: 'Every criterion is met.', error: null, headSha: '5b030d7',
     inputTokens: 12_000, cacheReadTokens: 90_000, outputTokens: 2_000, rateLimitResetAt: null,
     queuedAt: ago(90), startedAt: ago(89), endedAt: ago(80), timings: null
@@ -437,7 +437,7 @@ export const runs: Run[] = [
     [124, 'failed', 'The agent was killed by SIGTERM, which came from outside Corral. Last transcript activity: 2026-10-30T11:02:55.000Z', 280]
   ] as const).map(([number, state, error, endedAgo]): Run => ({
     runnerId: null, runnerName: null, id: `r-cut-${number}`, number, agentId: 'a-dev2', agentName: 'Dana', role: 'developer', projectId: 'p-corral',
-    taskId: at('COR-3').id, taskRef: 'COR-3', taskTitle: at('COR-3').title, state, outcome: state === 'failed' ? 'failed' : null, summary: null,
+    planSessionId: null, taskId: at('COR-3').id, taskRef: 'COR-3', taskTitle: at('COR-3').title, state, outcome: state === 'failed' ? 'failed' : null, summary: null,
     error, headSha: null, inputTokens: 4_000, cacheReadTokens: 22_000, outputTokens: 900, rateLimitResetAt: null,
     queuedAt: ago(endedAgo + 22), startedAt: ago(endedAgo + 21), endedAt: ago(endedAgo), timings: null
   })),
@@ -447,14 +447,14 @@ export const runs: Run[] = [
     [120, 'interrupted', null, 'Stopped by a human', 500]
   ] as const).map(([number, state, summary, error, endedAgo]): Run => ({
     runnerId: 'runner-1', runnerName: 'home-server', id: `r-pm-${number}`, number, agentId: 'a-pm', agentName: 'Pam', role: 'pm', projectId: 'p-corral',
-    taskId: null, taskRef: null, taskTitle: null, state, outcome: null, summary,
+    planSessionId: null, taskId: null, taskRef: null, taskTitle: null, state, outcome: null, summary,
     error, headSha: null, inputTokens: 2_000, cacheReadTokens: 12_000, outputTokens: 400, rateLimitResetAt: null,
     queuedAt: ago(endedAgo + 3), startedAt: ago(endedAgo + 2), endedAt: ago(endedAgo), timings: null
   })),
   // A live Codex run, which can't take messages mid-run
   {
     runnerId: 'runner-1', runnerName: 'home-server', id: 'r-4', number: 130, agentId: 'a-dev', agentName: 'Victor', role: 'developer', projectId: 'p-site',
-    taskId: at('WEB-3').id, taskRef: 'WEB-3', taskTitle: at('WEB-3').title, state: 'running', outcome: null, summary: null,
+    planSessionId: null, taskId: at('WEB-3').id, taskRef: 'WEB-3', taskTitle: at('WEB-3').title, state: 'running', outcome: null, summary: null,
     error: null, headSha: null, inputTokens: 4_000, cacheReadTokens: 22_000, outputTokens: 900, rateLimitResetAt: null,
     queuedAt: ago(5), startedAt: ago(4), endedAt: null, timings: null
   }

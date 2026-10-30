@@ -58,6 +58,13 @@ describe('plan sessions', () => {
     await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
     const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan device playback' }).then(r => r.json()) as PlanSessionDetail
     const job = (await runner.next('run.assign', m => m.job.planSessionId === created.id)).job
+    // Mobile PM cards need the persisted session and project on run responses.
+    expect(await t.request('GET', `/api/runs/${job.runId}`).then(r => r.json())).toMatchObject({
+      planSessionId: created.id, projectId: project.id
+    })
+    expect(await t.request('GET', '/api/runs').then(r => r.json())).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: job.runId, planSessionId: created.id, projectId: project.id })])
+    )
     expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', {
       title: 'Device playback', tasks: [{ key: 'playback', title: 'Playback', description: 'Support playback', type: 'task', acceptanceCriteria: [{ text: 'Works on a real iPhone', checkedByHuman: true }, 'Shows playback controls'] }]
     })).toMatchObject({ ok: true })
