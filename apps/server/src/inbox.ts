@@ -179,7 +179,7 @@ async function humanReviewNote(db: Executor, task: typeof tasks.$inferSelect): P
   const [review] = await db.select({ criteria: reviews.criteria }).from(reviews)
     .where(and(eq(reviews.taskId, task.id), eq(reviews.verdict, 'approved')))
     .orderBy(desc(reviews.createdAt)).limit(1)
-  const met = review ? `, all ${review.criteria.length} criteria met` : ''
+  const met = review ? review.criteria.some(c => c.met === null) ? `, ${review.criteria.filter(c => c.met).length} criteria met; ${review.criteria.filter(c => c.met === null).length} need human check` : `, all ${review.criteria.length} criteria met` : ''
   return `Approved${met}. This task is marked for human review, so it needs your OK before it merges.`
 }
 

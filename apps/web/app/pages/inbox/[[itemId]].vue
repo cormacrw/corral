@@ -162,11 +162,19 @@ const placeholder = computed(() => {
     default: return 'Optional note'
   }
 })
+const checkedHumanCriteria = ref<string[]>([])
+watch(selectedId, () => {
+  checkedHumanCriteria.value = []
+})
 const submitLabel = computed(() => action.value ? (actions.value.find(a => a.value === action.value)?.label ?? 'Send') : '')
 
 // Resolves false when not sent, so the composer keeps its images
 async function submit(message: string): Promise<boolean> {
   if (!selected.value || selected.value.type === 'plan_thread' || selected.value.type === 'epic_review' || selected.value.type === 'release_notes' || selected.value.type === 'epic_conflict') return false
+  if (action.value === 'approve' && task.value?.acceptanceCriteria.some(c => c.checkedByHuman && !checkedHumanCriteria.value.includes(c.id))) {
+    actionError.value = 'Check each human criterion before approving.'
+    return false
+  }
   busy.value = true
   actionError.value = null
   try {
@@ -239,6 +247,7 @@ onBeforeUnmount(() => {
     />
     <InboxMobile
       v-else-if="device.isMobile.value"
+      v-model:checked-human-criteria="checkedHumanCriteria"
       v-model:tab="tab"
       v-model:search="search"
       v-model:action="action"
@@ -494,7 +503,9 @@ onBeforeUnmount(() => {
                   />
                 </div>
                 <EvidenceList
+                  v-model:checked="checkedHumanCriteria"
                   :evidence="evidence"
+                  human-checklist
                   :criteria="task.acceptanceCriteria"
                   :reviews="reviews.length > 0 ? reviews : task.latestReview ? [task.latestReview] : []"
                 />

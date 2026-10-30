@@ -167,19 +167,23 @@ const typeOptions = (Object.keys(TASK_TYPE) as Task['type'][]).map(t => ({ label
 const developer = computed(() => task.value?.developer ?? null)
 const reviewer = computed(() => task.value?.reviewer ?? null)
 
+async function toggleHumanCriterion(id: string, checked: boolean) {
+  if (!task.value) return
+  await patch({ acceptanceCriteria: task.value.acceptanceCriteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.id === id ? checked : c.checkedByHuman })) })
+}
 const metCount = computed(() => task.value?.acceptanceCriteria.filter(c => c.met).length ?? 0)
 async function saveCriterion(id: string, text: string) {
   if (!task.value) return
-  const list = task.value.acceptanceCriteria.map(c => ({ id: c.id, text: c.id === id ? text : c.text })).filter(c => c.text.trim())
+  const list = task.value.acceptanceCriteria.map(c => ({ id: c.id, text: c.id === id ? text : c.text, checkedByHuman: c.checkedByHuman })).filter(c => c.text.trim())
   await patch({ acceptanceCriteria: list })
 }
 async function removeCriterion(id: string) {
   if (!task.value) return
-  await patch({ acceptanceCriteria: task.value.acceptanceCriteria.filter(c => c.id !== id).map(c => ({ id: c.id, text: c.text })) })
+  await patch({ acceptanceCriteria: task.value.acceptanceCriteria.filter(c => c.id !== id).map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })) })
 }
 async function addCriterion() {
   if (!task.value || !newCriterion.value.trim()) return
-  await patch({ acceptanceCriteria: [...task.value.acceptanceCriteria.map(c => ({ id: c.id, text: c.text })), { text: newCriterion.value.trim() }] })
+  await patch({ acceptanceCriteria: [...task.value.acceptanceCriteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })), { text: newCriterion.value.trim() }] })
   newCriterion.value = ''
 }
 
@@ -819,6 +823,15 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
                 :aria-label="`Criterion: ${criterion.text}`"
                 @change="saveCriterion(criterion.id, ($event.target as HTMLInputElement).value)"
               >
+              <label class="flex shrink-0 items-center gap-1 text-xs text-muted">
+                <input
+                  type="checkbox"
+                  :checked="criterion.checkedByHuman"
+                  :disabled="readonly"
+                  @change="toggleHumanCriterion(criterion.id, ($event.target as HTMLInputElement).checked)"
+                >
+                Checked by a human
+              </label>
               <UButton
                 v-if="!readonly"
                 icon="i-lucide-x"
@@ -851,7 +864,9 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
             />
           </form>
           <p class="mt-1 text-xs text-muted">
-            The reviewer marks criteria met from evidence.
+            {{ task.acceptanceCriteria.some(c => c.checkedByHuman)
+              ? 'The reviewer checks other criteria from evidence. Human checks are completed in the Inbox.'
+              : 'The reviewer marks criteria met from evidence.' }}
           </p>
         </section>
 

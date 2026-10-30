@@ -104,7 +104,7 @@ route('POST', '/projects/:slug/tasks', ([slug], body) => {
     title: input.title, type: input.type, description: input.description ?? null,
     status: 'backlog', priority: input.priority ?? 'medium', epicId: input.epicId ?? null,
     humanReview: input.humanReview ?? p.humanReviewDefault,
-    acceptanceCriteria: (input.acceptanceCriteria ?? []).map((text, position) => ({ id: `mock-${number}-${position}`, text, position, met: null })),
+    acceptanceCriteria: (input.acceptanceCriteria ?? []).map((text, position) => ({ id: `mock-${number}-${position}`, ...(typeof text === 'string' ? { text } : text), position, met: null })),
     dependsOn: (input.dependsOn ?? []).map(n => `${p.prefix}-${n}`)
   })
   p.nextTaskNumber = number + 1

@@ -33,8 +33,8 @@ export function isRepeatedFeedback(similarity: number, threshold = REPEATED_FEED
 // The part of a changes-requested review that is the reviewer's own words:
 // the summary and the notes on unmet criteria. Criterion texts are left out;
 // they repeat every round whatever the feedback says.
-export function reviewFeedbackText(summary: string, criteria: readonly { met: boolean, note: string }[]): string {
-  return [summary, ...criteria.filter(c => !c.met).map(c => c.note)].map(s => s.trim()).filter(Boolean).join('\n')
+export function reviewFeedbackText(summary: string, criteria: readonly { met: boolean | null, note: string }[]): string {
+  return [summary, ...criteria.filter(c => c.met === false).map(c => c.note)].map(s => s.trim()).filter(Boolean).join('\n')
 }
 
 const LIST_ITEM = /^\s*(?:[-*+]|\d+[.)])\s+(.*)$/

@@ -260,6 +260,13 @@
       "when": 1793376586267,
       "tag": "0036_heavy_queen_noir",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1793384132657,
+      "tag": "0037_stale_photon",
+      "breakpoints": true
     }
   ]
 }

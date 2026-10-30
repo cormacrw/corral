@@ -49,7 +49,7 @@ describe('merge orchestrator and human controls', () => {
     const dev = (await runner.next('run.assign', m => m.job.taskId === created.id)).job
     const task = await getTask(project, created.number)
     t.github.setBranch(project.repository, dev.branch!, 'abc123')
-    for (const criterion of task.acceptanceCriteria) {
+    for (const criterion of task.acceptanceCriteria.filter(c => !c.checkedByHuman)) {
       await runner.call(dev.runId, dev.leaseEpoch, 'attach_evidence', options.noteEvidence
         ? { criterionId: criterion.id, kind: 'note', note: 'No behaviour change' }
         : { criterionId: criterion.id, kind: 'test_output', fileName: 't.txt', contentType: 'text/plain', dataBase64: Buffer.from('ok').toString('base64') })
@@ -57,12 +57,53 @@ describe('merge orchestrator and human controls', () => {
     expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', note: 'Did the work', summary: 'Done', headSha: 'abc123' })).toMatchObject({ ok: true })
     await t.orchestrator.schedule()
     const review = (await runner.next('run.assign', m => m.job.taskId === created.id && m.job.role === 'reviewer')).job
+    if (task.acceptanceCriteria.some(c => c.checkedByHuman)) expect(review.prompt).toContain('Do not request changes over them or their missing evidence')
     expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', {
-      outcome: 'approved', summary: 'Looks right', criteria: task.acceptanceCriteria.map(c => ({ criterionId: c.id, met: true, note: '' }))
+      outcome: 'approved', summary: 'Looks right', criteria: task.acceptanceCriteria.filter(c => !c.checkedByHuman).map(c => ({ criterionId: c.id, met: true, note: '' }))
     })).toMatchObject({ ok: true })
     const pr = [...t.github.pulls.values()].find(p => p.head === dev.branch)!
     return { project, task: await getTask(project, created.number), pr, dev }
   }
+
+  it('reserves flagged criteria for the human, without requiring agent evidence or verdicts, and merges after Inbox approval', async () => {
+    const { project, task, pr, dev } = await approved({
+      humanReview: false, requiredChecks: [],
+      task: { acceptanceCriteria: ['Login works', { text: 'Playback works on a real iPhone', checkedByHuman: true }] }
+    })
+    expect(dev.prompt).toContain('Do not attempt these checks or produce evidence for them')
+    expect(task).toMatchObject({ status: 'human_review', humanReview: false })
+    expect(task.latestReview?.criteria).toEqual([
+      expect.objectContaining({ met: true }),
+      expect.objectContaining({ met: null, note: 'Needs human check' })
+    ])
+    expect(task.acceptanceCriteria[1]).toMatchObject({ checkedByHuman: true, met: null })
+    const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
+    const item = inbox.needsYou.filter((i): i is TaskInboxItem => i.type !== 'plan_thread').find(i => i.taskId === task.id)!
+    expect(item.body).toContain('1 need human check')
+    await t.orchestrator.merges.tick()
+    expect(t.github.pulls.get(pr.number)?.merged).toBe(false)
+    const res = await t.request('POST', `/api/inbox/${item.id}/actions`, { action: 'approve' })
+    expect(res.status).toBe(200)
+    await t.orchestrator.merges.tick()
+    await vi.waitFor(async () => expect((await getTask(project, task.number)).status).toBe('merged'))
+    await pause(project)
+  })
+
+  it('returns to Human review when the human adds a check after agent approval', async () => {
+    const { project, task } = await approved({ humanReview: false })
+    expect(task.status).toBe('ready_to_merge')
+    const res = await t.request('PATCH', `/api/projects/${project.slug}/tasks/${task.number}`, {
+      acceptanceCriteria: task.acceptanceCriteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: true }))
+    })
+    expect(res.status).toBe(200)
+    expect(await getTask(project, task.number)).toMatchObject({ status: 'human_review', humanReview: false })
+    // Old clients editing text without the flag must preserve the human's choice.
+    await t.request('PATCH', `/api/projects/${project.slug}/tasks/${task.number}`, {
+      acceptanceCriteria: task.acceptanceCriteria.map(c => ({ id: c.id, text: c.text + ' on screen' }))
+    })
+    expect((await getTask(project, task.number)).acceptanceCriteria[0]?.checkedByHuman).toBe(true)
+    await pause(project)
+  })
 
   it('waits while required checks are pending, and sends CI failures back to the developer', async () => {
     const { project, task, pr } = await approved()

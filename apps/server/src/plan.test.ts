@@ -53,6 +53,26 @@ describe('plan sessions', () => {
     return t.request('GET', `/api/plan/sessions/${id}`).then(r => r.json()) as Promise<PlanSessionDetail>
   }
 
+  it('proposes human checks, preserves them on approval, and lets the human toggle them without replacing IDs', async () => {
+    const project = await t.createProject()
+    await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
+    const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan device playback' }).then(r => r.json()) as PlanSessionDetail
+    const job = (await runner.next('run.assign', m => m.job.planSessionId === created.id)).job
+    expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', {
+      title: 'Device playback', tasks: [{ key: 'playback', title: 'Playback', description: 'Support playback', type: 'task', acceptanceCriteria: [{ text: 'Works on a real iPhone', checkedByHuman: true }, 'Shows playback controls'] }]
+    })).toMatchObject({ ok: true })
+    const detail = await session(created.id)
+    const proposed = detail.plans[0]!
+    const res = await t.request('POST', `/api/plan/plans/${proposed.id}/approve`, { to: 'backlog' })
+    expect(res.status).toBe(200)
+    const [row] = await t.db.select().from(tasks).where(eq(tasks.projectId, project.id))
+    const path = `/api/projects/${project.slug}/tasks/${row!.number}`
+    const task = await t.request('GET', path).then(r => r.json()) as Task
+    expect(task.acceptanceCriteria[0]).toMatchObject({ text: 'Works on a real iPhone', checkedByHuman: true })
+    const changed = await t.request('PATCH', path, { acceptanceCriteria: task.acceptanceCriteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: false })) }).then(r => r.json()) as Task
+    expect(changed.acceptanceCriteria[0]).toMatchObject({ id: task.acceptanceCriteria[0]!.id, checkedByHuman: false })
+  })
+
   it('starts a session with a PM turn, records questions and plans, and approves the plan', async () => {
     const project = await t.createProject()
     const res = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan a login feature' })

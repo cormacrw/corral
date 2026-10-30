@@ -139,7 +139,7 @@ export class MergeOrchestrator {
       .filter((c): c is CheckResult => Boolean(c))
       .map(c => ({ name: c.name, url: c.url }))
     const approval = await this.#approvalFor(task)
-    const criteria = await db.select({ id: acceptanceCriteria.id }).from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id))
+    const criteria = await db.select({ id: acceptanceCriteria.id, checkedByHuman: acceptanceCriteria.checkedByHuman }).from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id))
     const attached = await db.select({ criterionId: evidence.criterionId }).from(evidence)
       .where(and(eq(evidence.taskId, task.id), eq(evidence.round, task.reviewRounds)))
     return {
@@ -150,7 +150,7 @@ export class MergeOrchestrator {
       facts: {
         approvalIsForHeadCommit: approval !== null && approval.headSha === pr.headSha,
         requiredChecksPassed: requiredPassing.length === required.length,
-        evidenceComplete: criteria.every(c => attached.some(e => e.criterionId === c.id)),
+        evidenceComplete: criteria.every(c => c.checkedByHuman || attached.some(e => e.criterionId === c.id)),
         mergeable: pr.mergeable === true && pr.state === 'open'
       }
     }

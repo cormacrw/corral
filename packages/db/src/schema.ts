@@ -187,6 +187,7 @@ export const tasks = pgTable('tasks', {
 
 // Each criterion must be individually verifiable (PRD §4.3)
 export const acceptanceCriteria = pgTable('acceptance_criteria', {
+  checkedByHuman: boolean().notNull().default(false),
   id: uuid().primaryKey().defaultRandom(),
   taskId: uuid().notNull().references(() => tasks.id, { onDelete: 'cascade' }),
   position: integer().notNull(),
@@ -363,7 +364,7 @@ export interface PlanRevision {
   type: TaskType
   priority: 'urgent' | 'high' | 'medium' | 'low'
   humanReview: boolean
-  acceptanceCriteria: string[]
+  acceptanceCriteria: (string | { text: string, checkedByHuman?: boolean | undefined })[]
   // Null when the revised task has no epic
   epicId: string | null
   // Task numbers in the same project
@@ -418,7 +419,7 @@ export const reviews = pgTable('reviews', {
   headSha: text().notNull(),
   verdict: reviewVerdict().notNull(),
   summary: text().notNull(),
-  criteria: jsonb().$type<{ criterionId: string, met: boolean, note: string }[]>().notNull().default([]),
+  criteria: jsonb().$type<{ criterionId: string, met: boolean | null, note: string }[]>().notNull().default([]),
   // Who gave the verdict: the reviewer agent, or a human in Human review
   author: actor('author'),
   createdAt: createdAt()
