@@ -621,7 +621,7 @@ export const releaseNotes: ReleaseNotesItem[] = [{
   subject: 'Release notes', preview: 'A clearer board and faster task reviews.',
   sender: { name: agents.find(a => a.role === 'pm')?.name ?? 'PM', role: 'pm' }, at: ago(5),
   fromSha: '6a3b2c1', toSha: '9d8e7f6',
-  notes: '## What shipped\n\n- **Clearer board:** COR-3 makes tasks easier to find.\n- Faster task reviews and a more useful Inbox.',
+  notes: '## What shipped\n\n- **Clearer board:** COR-3 makes tasks easier to find.\n- Faster task reviews and a more useful Inbox.\n- Attachments are now checked with SHA-256.',
   notesStatus: 'ready', unread: true, taskId: null, taskRef: null, prUrl: null, resolution: null
 }]
 
