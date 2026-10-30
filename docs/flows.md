@@ -29,6 +29,8 @@ web            server                          runner                     claude
 
 ### PM tools
 
+The PM can also call `attach_evidence` to attach a scratch file to the conversation, or pass `taskRef` to attach it to a task in this project. It shares the developer upload checks: the resolved path must stay inside scratch and the file must be at most 25 MB.
+
 | Tool | Purpose |
 |---|---|
 | `list_tasks`, `get_task`, `get_run_outcomes` | Live board state, so answers reflect current state, not only chat history (PRD §7.2) |

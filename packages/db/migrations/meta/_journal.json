@@ -246,6 +246,13 @@
       "when": 1793349410188,
       "tag": "0034_typical_prowler",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1793352776834,
+      "tag": "0035_early_natasha_romanoff",
+      "breakpoints": true
     }
   ]
 }
