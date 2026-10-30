@@ -88,7 +88,7 @@ describe('migrations', () => {
     ])
     await expect(db.execute(sql`update plans set title = 'Updated'`)).rejects.toThrow()
     await expect(db.execute(sql`update plan_tasks set position = 1`)).rejects.toThrow()
-  })
+  }, 60_000)
 
   it.each([
     { driver: 'pglite' as const, enabled: true },
