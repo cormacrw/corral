@@ -20,7 +20,10 @@ describe('PM task and epic tools', () => {
   const actor = () => ({ kind: 'agent', role: 'pm', runId: job.runId, sessionId: session.id })
 
   async function request(method: string, path: string, body?: unknown) {
-    const response = await t.request(method, path, body)
+    const response = await fetch(`${t.server!.url}${path}`, {
+      method,
+      ...(body !== undefined && { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    })
     const result: unknown = response.status === 204 ? null : await response.json()
     transcript.push({ request: { method, path, body }, response: { status: response.status, body: result } })
     if (method === 'GET') snapshots[path.replace('/api', '')] = result
@@ -246,6 +249,35 @@ describe('PM task and epic tools', () => {
     await action('approve_task', { taskRef: task.ref })
     const pendingDelete = await t.createTask(slug, { title: 'Old welcome page' })
     await action('delete_task', { taskRef: pendingDelete.ref })
+  })
+
+  it('locks epic review mode for both PM tools and human PATCH once PR work exists', async () => {
+    for (const state of ['open task PR', 'merged task', 'deleted task PR', 'epic PR'] as const) {
+      const [epic] = await t.db.insert(schema.epics).values({ projectId, title: state, reviewMode: 'epic', createdBy: t.actor }).returning()
+      const task = await t.createTask(slug, { title: state, description: null, epicId: epic!.id })
+      if (state === 'epic PR') {
+        await t.db.update(schema.epics).set({ prNumber: 301 }).where(eq(schema.epics.id, epic!.id))
+      } else {
+        await t.db.update(schema.tasks).set({
+          status: state === 'merged task' ? 'merged' : 'agent_review',
+          prNumber: state === 'merged task' ? null : 302,
+          deletedAt: state === 'deleted task PR' ? new Date() : null
+        }).where(eq(schema.tasks.id, task.id))
+      }
+      const activity = (await request('GET', `/api/epics/${epic!.id}/history`)).body
+      expect(await call('update_epic', { epicId: epic!.id, title: 'Rejected PM edit', reviewMode: 'each_task' })).toMatchObject({ ok: false })
+      expect(await request('PATCH', `/api/epics/${epic!.id}`, { title: 'Rejected human edit', reviewMode: 'direct' })).toMatchObject({
+        status: 409,
+        body: { error: { code: 'invalid_input', issues: [{ message: 'The review mode can\'t change once a task in the epic has opened a PR' }] } }
+      })
+      expect((await request('GET', `/api/epics/${epic!.id}`)).body).toMatchObject({ title: state, reviewMode: 'epic' })
+      expect((await request('GET', `/api/epics/${epic!.id}/history`)).body).toEqual(activity)
+      expect(await call('update_epic', { epicId: epic!.id, reviewMode: 'epic', title: 'Allowed PM metadata' })).toMatchObject({ ok: true, result: { reviewMode: 'epic', title: 'Allowed PM metadata' } })
+      expect(await request('PATCH', `/api/epics/${epic!.id}`, { reviewMode: 'epic', title: 'Allowed human metadata' })).toMatchObject({ status: 200, body: { reviewMode: 'epic', title: 'Allowed human metadata' } })
+    }
+    const [editable] = await t.db.insert(schema.epics).values({ projectId, title: 'Before PR work', createdBy: t.actor }).returning()
+    expect(await request('PATCH', `/api/epics/${editable!.id}`, { reviewMode: 'epic' })).toMatchObject({ status: 200, body: { reviewMode: 'epic' } })
+    expect(await call('update_epic', { epicId: editable!.id, reviewMode: 'each_task' })).toMatchObject({ ok: true, result: { reviewMode: 'each_task' } })
   })
 
   it('edits epic metadata and dependencies atomically, audits them and refuses foreign epics', async () => {

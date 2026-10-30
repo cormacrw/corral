@@ -6,7 +6,7 @@ import { z } from 'zod'
 import { appendAudit, auditEvent, auditText } from './audit.ts'
 import { agentActivity, UnknownAgent } from './agent-activity.ts'
 import { listTaskAttachments } from './attachments.ts'
-import { listEpics } from './epics.ts'
+import { listEpics, reviewModeLocked } from './epics.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
 import { loadInbox } from './inbox.ts'
@@ -371,7 +371,7 @@ export class PlanService {
     const turnText = results.length ? `${attributedText}\n\nRecorded tool results and thread notifications:\n${results.map(r => r.role === 'thread' ? threadText({ id: r.senderSessionId ?? 'removed', title: r.senderTitle ?? 'Removed thread' }, r.text) : r.text).join('\n')}` : attributedText
     await this.#turn(session, project, {
       prompt: pmPrompt({ text: turnText, attachedTask: attached, projectName: project?.name ?? null, prefix: project?.prefix ?? null, fresh: session.agentSessionId === null }),
-      fallbackPrompt: pmFallbackPrompt({ text, attachedTask: attached, projectName: project?.name ?? null, prefix: project?.prefix ?? null, history: await this.#history(sessionId) })
+      fallbackPrompt: pmFallbackPrompt({ text: attributedText, attachedTask: attached, projectName: project?.name ?? null, prefix: project?.prefix ?? null, history: await this.#history(sessionId) })
     })
     return toMessage(message!)
   }
@@ -639,6 +639,11 @@ export class PlanService {
         // A revision that leaves the mode out keeps the epic's; a new epic
         // without one takes the project's default (D27)
         if (current) {
+          const [row] = await tx.select().from(epics).where(eq(epics.id, current)).for('update')
+          if (epic.reviewMode && epic.reviewMode !== row!.reviewMode) {
+            const taskRows = await tx.select({ status: tasks.status, prNumber: tasks.prNumber }).from(tasks).where(eq(tasks.epicId, current))
+            if (reviewModeLocked(row!, taskRows)) throw new ToolError('The plan was not saved: the review mode can\'t change once a task in the epic has opened a PR.')
+          }
           await tx.update(epics).set({ title: epic.title, description: epic.summary, ...(epic.reviewMode && { reviewMode: epic.reviewMode }), updatedAt: new Date() }).where(eq(epics.id, current))
           epicIds.set(epic.key, current)
         } else {
