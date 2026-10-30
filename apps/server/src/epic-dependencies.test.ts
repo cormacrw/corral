@@ -1,6 +1,7 @@
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { complete, epicBoard } from './epic-prs.ts'
 import { claimNextTask } from './claim.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './test-runner.ts'
@@ -64,6 +65,22 @@ describe('epic scheduling', () => {
     expect(await get(second.number)).toMatchObject({ waitingOnEpics: [{ id: a.id, title: a.title }] })
     expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${first.number}/approve`)).status).toBe(200)
     expect(t.events).toContainEqual(expect.objectContaining({ type: 'task.updated', task: expect.objectContaining({ id: second.id, waitingOnEpics: [] }) }))
+  })
+
+  it('finishes an epic containing an Approved design and releases its dependent epic', async () => {
+    const { project, a, first, second } = await setup()
+    await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+    await t.db.update(tasks).set({ type: 'design', status: 'human_review' }).where(eq(tasks.id, first.id))
+    const blob = await t.blobs.put(Buffer.from('design'))
+    await t.db.insert(schema.designVersions).values({ taskId: first.id, version: 1, bundleBlob: blob, specBlob: blob, branch: `design/${first.ref}`, commitSha: 'design-head' })
+    runner = await FakeRunner.connect(t.server!.url)
+    expect(await t.request('GET', `/api/tasks/${second.ref}`).then(r => r.json())).toMatchObject({ waitingOnEpics: [{ id: a.id }] })
+    expect(complete(await epicBoard(t.db, a.id))).toBe(false)
+    expect((await t.request('POST', `/api/inbox/${first.id}/actions`, { action: 'approve' })).status).toBe(200)
+    expect(complete(await epicBoard(t.db, a.id))).toBe(true)
+    expect(await t.request('GET', `/api/tasks/${second.ref}`).then(r => r.json())).toMatchObject({ waitingOnEpics: [] })
+    expect(t.events).toContainEqual(expect.objectContaining({ type: 'task.updated', task: expect.objectContaining({ id: second.id, waitingOnEpics: [] }) }))
+    expect(await t.request('GET', `/api/epics/${a.id}`).then(r => r.json())).toMatchObject({ taskCount: 1, mergedCount: 1 })
   })
 
   it('changes the review mode until a task has opened a PR, and says so on the epic', async () => {

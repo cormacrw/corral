@@ -239,9 +239,15 @@ export async function approveDesign(db: Database, taskId: string, version: numbe
     }
     const rows = await tx.select({ id: designVersions.id, version: designVersions.version, status: designVersions.status })
       .from(designVersions).where(eq(designVersions.taskId, taskId)).orderBy(asc(designVersions.version))
-    version ??= rows.filter(row => row.status === 'submitted').at(-1)?.version
+    const submitted = rows.filter(row => row.status === 'submitted').at(-1)
+    const latest = rows.at(-1)
+    // Before Approved was a task status, task-page approvals left the task
+    // in Human review. Recover only its latest, already approved version,
+    // and never let it bypass a newer submission waiting for review.
+    const legacyApproval = !submitted && latest?.status === 'approved' ? latest : undefined
+    version ??= submitted?.version ?? legacyApproval?.version
     const target = rows.find(row => row.version === version)
-    if (!target || (task.status === 'approved' ? target.status !== 'approved' : target.status !== 'submitted')) {
+    if (!target || (task.status === 'approved' ? target.status !== 'approved' : target.status !== 'submitted' && target.id !== legacyApproval?.id)) {
       throw new ApiFailure(409, { code: 'invalid_input', issues: [{ path: ['version'], message: 'Choose a submitted design version' }] })
     }
     if (task.status === 'approved') return target.id

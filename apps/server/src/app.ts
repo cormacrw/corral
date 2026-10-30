@@ -374,7 +374,8 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       return c.body(null, 204)
     })
 
-    // Human review → Merged, after the gates are re-checked (design/inbox.md)
+    // Approve a mergeable task for the merge pass; spikes finish here.
+    // Designs must use version approval and are rejected by core.
     .post('/projects/:slug/tasks/:number/approve', async (c) => {
       const project = await findProjectBySlug(db, c.req.param('slug'))
       const taskId = await findTaskId(db, project.id, taskNumber(c.req.param('number')))

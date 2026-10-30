@@ -135,7 +135,7 @@ describe('design versions in the task view', () => {
   // Approving opens a Plan session, whose PM turn needs the runner
   beforeAll(async () => {
     t = await createTestApp('pglite', { listen: true })
-    runner = await FakeRunner.connect(t.server!.url)
+    runner = await FakeRunner.connect(t.server!.url, [], 'r1', { slots: 50 })
   })
 
   afterAll(async () => {
@@ -240,6 +240,48 @@ describe('design versions in the task view', () => {
     const res = await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/designs/5/approve`)
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({ status: 'approved' })
+  })
+
+  it.each(['inbox', 'version'] as const)('recovers a legacy approved version without a build session through %s', async (route) => {
+    const { project, task } = await designTask(1)
+    await t.db.update(schema.tasks).set({ status: 'human_review' }).where(eq(schema.tasks.id, task.id))
+    await t.db.update(schema.designVersions).set({ status: 'approved' }).where(eq(schema.designVersions.taskId, task.id))
+    const path = route === 'inbox' ? `/api/inbox/${task.id}/actions` : `/api/projects/${project.slug}/tasks/${task.number}/designs/1/approve`
+    expect((await t.request('POST', path, route === 'inbox' ? { action: 'approve' } : {})).status).toBe(200)
+    expect(await t.request('GET', `/api/tasks/${task.ref}`).then(r => r.json())).toMatchObject({ status: 'approved' })
+    const [version] = await t.db.select().from(schema.designVersions).where(eq(schema.designVersions.taskId, task.id))
+    expect(version).toMatchObject({ status: 'approved', planSessionId: expect.any(String) })
+    expect((await runner.next('run.assign', m => m.job.planSessionId === version!.planSessionId)).job.role).toBe('pm')
+    const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as { needsYou: { taskId?: string }[] }
+    expect(inbox.needsYou.some(item => item.taskId === task.id)).toBe(false)
+  })
+
+  it.each(['human_review', 'ready_to_merge'] as const)('reuses a legacy approved version’s build session from both approval routes in %s', async (status) => {
+    for (const route of ['inbox', 'version']) {
+      const { project, task } = await designTask(1)
+      await t.db.update(schema.tasks).set({ status: 'human_review' }).where(eq(schema.tasks.id, task.id))
+      const versionPath = `/api/projects/${project.slug}/tasks/${task.number}/designs/1/approve`
+      expect((await t.request('POST', versionPath)).status).toBe(200)
+      const [before] = await t.db.select().from(schema.designVersions).where(eq(schema.designVersions.taskId, task.id))
+      await t.db.update(schema.tasks).set({ status }).where(eq(schema.tasks.id, task.id))
+      expect((await t.request('POST', route === 'inbox' ? `/api/inbox/${task.id}/actions` : versionPath, route === 'inbox' ? { action: 'approve' } : {})).status).toBe(200)
+      expect(await t.request('GET', `/api/tasks/${task.ref}`).then(r => r.json())).toMatchObject({ status: 'approved' })
+      const [after] = await t.db.select().from(schema.designVersions).where(eq(schema.designVersions.taskId, task.id))
+      expect(after!.planSessionId).toBe(before!.planSessionId)
+      expect(await t.db.select().from(schema.planMessages).where(eq(schema.planMessages.sessionId, before!.planSessionId!))).toHaveLength(1)
+      expect(await t.db.select().from(schema.runs).where(eq(schema.runs.planSessionId, before!.planSessionId!))).toHaveLength(1)
+    }
+  })
+
+  it('does not recover an older approval over a newer submitted version', async () => {
+    const { project, task } = await designTask(2)
+    await t.db.update(schema.tasks).set({ status: 'human_review' }).where(eq(schema.tasks.id, task.id))
+    const versions = await t.db.select().from(schema.designVersions).where(eq(schema.designVersions.taskId, task.id)).orderBy(schema.designVersions.version)
+    await t.db.update(schema.designVersions).set({ status: 'approved' }).where(eq(schema.designVersions.id, versions[0]!.id))
+    expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/designs/1/approve`)).status).toBe(409)
+    expect(await t.request('GET', `/api/tasks/${task.ref}`).then(r => r.json())).toMatchObject({ status: 'human_review' })
+    expect((await t.request('POST', `/api/inbox/${task.id}/actions`, { action: 'approve' })).status).toBe(200)
+    expect((await t.db.select().from(schema.designVersions).where(eq(schema.designVersions.id, versions[1]!.id)))[0]).toMatchObject({ status: 'approved' })
   })
 
   it('rejects generic human_approve transitions without changing the task or version', async () => {

@@ -52,7 +52,7 @@ const size = computed(() => VIEWPORTS[viewport.value])
 const scale = computed(() => available.value > 0 ? Math.min(1, available.value / size.value.width) : 1)
 
 // Only the version waiting on the human can be decided
-const decidable = computed(() => ['human_review', 'ready_to_merge'].includes(props.task.status) && selected.value?.status === 'submitted')
+const decidable = computed(() => ['human_review', 'ready_to_merge'].includes(props.task.status) && (selected.value?.status === 'submitted' || (selected.value?.status === 'approved' && selected.value.id === versions.value[0]?.id && !versions.value.some(v => v.status === 'submitted'))))
 const reopenable = computed(() => props.task.status === 'approved')
 const requesting = ref(false)
 const feedback = ref('')

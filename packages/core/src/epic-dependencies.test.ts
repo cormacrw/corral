@@ -31,7 +31,7 @@ describe('epic dependency validation', () => {
 
   it('ignores deleted and merged tasks and excludes Draft and Backlog from completion', () => {
     const graph = new Map([['a', []], ['b', ['a']]])
-    for (const override of [{ status: 'draft' }, { status: 'backlog' }, { status: 'merged' }, { deleted: true }] as const) {
+    for (const override of [{ status: 'draft' }, { status: 'backlog' }, { status: 'merged' }, { type: 'design', status: 'approved' }, { deleted: true }] as const) {
       expect(checkEpicDependencies(graph, [{ ...task('one', 'a', ['two']), ...override }, task('two', 'b')])).toEqual([])
     }
     expect(checkEpicDependencies(graph, [task('two', 'b')])).toEqual([])
