@@ -57,7 +57,9 @@ export const users = pgTable('users', {
   avatarBlob: text(),
   avatarContentType: text(),
   createdAt: createdAt()
-})
+}, t => [
+  check('users_avatar_paired', sql`(${t.avatarBlob} is null) = (${t.avatarContentType} is null)`)
+])
 
 // One project per Git repository (PRD §4.1, D13)
 export const projects = pgTable('projects', {
@@ -253,6 +255,7 @@ export const agents = pgTable('agents', {
   createdAt: createdAt(),
   updatedAt: updatedAt()
 }, t => [
+  check('agents_avatar_paired', sql`(${t.avatarBlob} is null) = (${t.avatarContentType} is null)`),
   check('agents_concurrency_positive', sql`${t.concurrency} > 0`),
   check('agents_wake_interval_positive', sql`${t.wakeIntervalSeconds} > 0`)
 ])

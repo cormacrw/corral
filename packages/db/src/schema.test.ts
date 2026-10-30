@@ -2,7 +2,7 @@ import type { Actor } from '@corral/core'
 import { eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Database, DatabaseHandle } from './client.ts'
-import { agents, attachments, epicDependencies, epics, planMessages, planSessions, projects, runs, taskDependencies, tasks } from './schema.ts'
+import { agents, attachments, epicDependencies, epics, planMessages, planSessions, projects, runs, taskDependencies, tasks, users } from './schema.ts'
 import { createTestDatabase, postgresAvailable } from './testing.ts'
 
 const human: Actor = { kind: 'human', userId: '00000000-0000-4000-8000-000000000001' }
@@ -61,6 +61,21 @@ describe.each([
     const cause = (error as { cause?: { constraint?: string } }).cause
     expect(cause?.constraint ?? String(error)).toContain(constraint)
   }
+
+  it.skipIf(!enabled)('requires both avatar columns on inserts and updates for users and agents', async () => {
+    for (const table of [users, agents]) {
+      const base = { name: 'Avatar owner', role: 'developer' as const }
+      const constraint = table === users ? 'users_avatar_paired' : 'agents_avatar_paired'
+      await expectViolation(db.insert(table).values({ ...base, avatarBlob: 'image' }), constraint)
+      await expectViolation(db.insert(table).values({ ...base, avatarContentType: 'image/png' }), constraint)
+      const [row] = await db.insert(table).values(base).returning()
+      await db.update(table).set({ avatarBlob: 'image', avatarContentType: 'image/png' }).where(eq(table.id, row!.id))
+      await expectViolation(db.update(table).set({ avatarBlob: null }).where(eq(table.id, row!.id)), constraint)
+      await expectViolation(db.update(table).set({ avatarContentType: null }).where(eq(table.id, row!.id)), constraint)
+      await db.update(table).set({ avatarBlob: 'replacement', avatarContentType: 'image/jpeg' }).where(eq(table.id, row!.id))
+      await db.update(table).set({ avatarBlob: null, avatarContentType: null }).where(eq(table.id, row!.id))
+    }
+  })
 
   it.skipIf(!enabled)('keeps plan message roles, kinds and question fields consistent on new rows, without validating history', async () => {
     const project = await insertProject()
