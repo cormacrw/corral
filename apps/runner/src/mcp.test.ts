@@ -51,6 +51,18 @@ describe('ToolServer', () => {
     await client.close()
   })
 
+  it('gives the PM a list_tasks with optional filters and an unindented result', async () => {
+    const { client, calls } = await connect('pm')
+    const result = await client.callTool({ name: 'list_tasks', arguments: { status: ['ready', 'blocked'], query: 'login' } })
+    expect(calls).toEqual([{ tool: 'list_tasks', input: { status: ['ready', 'blocked'], query: 'login', includeMerged: false } }])
+    expect(result.content).toEqual([{ type: 'text', text: '{"ref":"own task"}' }])
+
+    await client.callTool({ name: 'list_tasks', arguments: { status: 'merged' } })
+    expect(calls.at(-1)?.input).toEqual({ status: 'merged', includeMerged: false })
+    expect((await client.callTool({ name: 'list_tasks', arguments: { status: 'done' } })).isError).toBe(true)
+    await client.close()
+  })
+
   it('gives the PM a get_task that takes a required taskRef and passes it through', async () => {
     const { client, calls } = await connect('pm')
     const { tools: listed } = await client.listTools()

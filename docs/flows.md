@@ -33,7 +33,7 @@ The PM can also call `attach_evidence` to attach a scratch file to the conversat
 
 | Tool | Purpose |
 |---|---|
-| `list_tasks`, `get_task`, `get_run_outcomes` | Live board state, so answers reflect current state, not only chat history (PRD §7.2) |
+| `list_tasks`, `get_task`, `get_run_outcomes` | Live board state, so answers reflect current state, not only chat history (PRD §7.2). `list_tasks` returns compact rows and every epic, leaves out Merged tasks unless `includeMerged` or `status` asks for them, and filters by `status`, `epic` and `query`; `get_task` has the full text |
 | `add_comment` | Leave a comment on any task in the project by ref, e.g. that a follow-up task changes its behaviour. Attributed to the PM agent; a ref outside the project is rejected. Developers and reviewers have it too, for their own task |
 | `get_attachment` | An image pasted into task text (`attachment:<id>`), returned as image content with its file name and mime type. Only attachments in the run's own project; developers, designers and reviewers have it too |
 | `ask_question` | A structured question, shown in the Plan conversation, and in the Inbox while it's pending (as its Plan thread, D11). Optionally with a `recommendation` (the PM's suggested answer) and `options` (2–5 short choices, each at most 120 characters). Both are stored on the message and shown, options numbered, in the history the PM sees on later turns |
