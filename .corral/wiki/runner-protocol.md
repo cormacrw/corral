@@ -27,10 +27,11 @@ strings before the runner forwards anything, and it hides `rate_limited`, which
 only comes from a run's exit.
 
 The server parses the report again with the schema for the kind of run. Task
-reviews use `outcomeReportSchema`, where approved and changes_requested need
+reviews use `outcomeReportSchema`, where every verdict in `REVIEW_VERDICTS` needs
 `criteria`. Rebase reviews use `rebaseReviewReportSchema`, where approved needs
-none because the earlier verdicts carry over (D24). A task whose criteria are
-all human checks needs none either: they take no verdict. Integration reviews use
+none because the earlier verdicts carry over (D24) and every other verdict still
+does. A task whose criteria are all human checks needs none either: they take no
+verdict. Integration reviews use
 `epicReviewReportSchema`, which takes verdicts only and no criteria (D23). A
 failed parse comes back as `Not reported. <field>: <problem>`. Whether the
 role and task type may report that outcome is still checked after parsing.
