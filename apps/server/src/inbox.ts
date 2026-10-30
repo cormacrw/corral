@@ -101,7 +101,7 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
 // started waiting.
 async function planThreads(db: Executor): Promise<PlanThreadItem[]> {
   const rows = await db.select({ session: planSessions, project: projects }).from(planSessions)
-    .innerJoin(projects, eq(projects.id, planSessions.projectId))
+    .leftJoin(projects, eq(projects.id, planSessions.projectId))
     .where(isNull(planSessions.closedAt))
   if (rows.length === 0) return []
   const [pm] = await db.select({ name: agents.name }).from(agents).where(eq(agents.role, 'pm')).limit(1)
@@ -127,7 +127,7 @@ async function planThreads(db: Executor): Promise<PlanThreadItem[]> {
     return {
       id: session.id,
       type: 'plan_thread' as const,
-      project: projectTag(project),
+      project: project ? projectTag(project) : null,
       sessionId: session.id,
       runtime: session.runtime,
       subject: session.title,

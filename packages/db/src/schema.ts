@@ -243,7 +243,7 @@ export const runs = pgTable('runs', {
   // Shown as #128 in the UI (D13)
   number: bigint({ mode: 'number' }).notNull().generatedAlwaysAsIdentity().unique(),
   agentId: uuid().notNull().references(() => agents.id),
-  projectId: uuid().notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  projectId: uuid().references(() => projects.id, { onDelete: 'cascade' }),
   taskId: uuid().references(() => tasks.id, { onDelete: 'cascade' }),
   // Integration reviews belong to an epic, independently of task reviews.
   epicId: uuid().references(() => epics.id, { onDelete: 'cascade' }),
@@ -289,7 +289,7 @@ export const planChange = pgEnum('plan_change', ['added', 'changed', 'unchanged'
 // source of truth, and a lost session is reseeded from them.
 export const planSessions = pgTable('plan_sessions', {
   id: uuid().primaryKey().defaultRandom(),
-  projectId: uuid().notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  projectId: uuid().references(() => projects.id, { onDelete: 'cascade' }),
   title: text().notNull(),
   agentSessionId: text(),
   // The PM's runtime for this session (D18), picked in the composer and

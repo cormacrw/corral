@@ -111,10 +111,11 @@ async function approve(to: 'ready' | 'backlog') {
     <div class="flex min-w-0 flex-1 flex-col">
       <header class="flex h-14 shrink-0 items-center gap-2 border-b border-default px-4 text-sm">
         <ProjectThumbnail
+          v-if="item.project"
           :project="item.project"
           :size="20"
         />
-        <span class="shrink-0 text-muted">{{ item.project.name }}</span>
+        <span class="shrink-0 text-muted">{{ item.project?.name ?? 'Global' }}</span>
         <h1 class="truncate font-medium">
           {{ item.subject }}
         </h1>
@@ -272,7 +273,7 @@ async function approve(to: 'ready' | 'backlog') {
             :placeholder="`Reply to ${pmName}…`"
             :disabled="runnerOffline || working"
             :busy="busy"
-            :project="item.project.slug"
+            :project="item.project?.slug"
             @submit="send"
           />
         </div>

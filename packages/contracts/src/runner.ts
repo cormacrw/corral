@@ -4,9 +4,10 @@ import type { AgentRole, RunOutcome, TaskType } from '@corral/core'
 // runner always dials out (D1), so the same messages work on localhost, the
 // Docker network (D12) and a hosted server later. Messages are JSON.
 
+// 4: global PM jobs have a null projectId and no repository checkout (COR-242)
 // 3: build identity and drain state (COR-187)
 // 2: hello carries the runner's slots, runtimes and roles (COR-184)
-export const RUNNER_PROTOCOL_VERSION = 3
+export const RUNNER_PROTOCOL_VERSION = 4
 export const RUNNER_HEARTBEAT_MS = 30_000
 export const RUNNER_PATH = '/runner'
 
@@ -67,7 +68,9 @@ export interface RunJob {
   // The agent's runtime id, e.g. 'claude-code': which adapter the runner
   // starts (D15). A neutral name, never an auth method.
   runtime: string
-  projectId: string
+  // Null only for global PM turns; repository and defaultBranch are empty
+  // and must not be used to fetch or create a checkout in that case.
+  projectId: string | null
   repository: string
   defaultBranch: string
   // Actual task PR base; absent for older servers and PM runs.

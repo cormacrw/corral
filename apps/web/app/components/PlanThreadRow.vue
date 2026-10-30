@@ -8,6 +8,7 @@ defineProps<{ item: PlanThreadItem }>()
 
 <template>
   <ProjectThumbnail
+    v-if="item.project"
     :project="item.project"
     :size="20"
     class="mt-1"
@@ -28,7 +29,7 @@ defineProps<{ item: PlanThreadItem }>()
       />
       <span class="ms-auto shrink-0 text-xs text-muted">{{ timeAgo(item.at) }}</span>
     </span>
-    <span class="text-xs text-muted">{{ item.project.name }}</span>
+    <span class="text-xs text-muted">{{ item.project?.name ?? 'Global' }}</span>
     <span class="line-clamp-2 text-xs text-muted">{{ markdownToPlainText(item.preview) }}</span>
     <UBadge
       v-if="item.status !== 'none' || item.unread"

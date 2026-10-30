@@ -333,7 +333,7 @@ const agentRuntime = z.enum(Object.keys(AGENT_RUNTIMES) as [AgentRuntime, ...Age
 
 export interface PlanSession {
   id: string
-  projectId: string
+  projectId: string | null
   title: string
   // The PM's runtime (D18), e.g. 'claude-code' or 'codex'. Locked once the
   // session has messages.
@@ -424,7 +424,7 @@ export interface PlanSessionDetail extends PlanSession {
 // A client UUID makes a start safe to retry within the same project.
 export const startPlanSessionInput = z.object({
   id: z.uuid().optional(),
-  projectId: z.uuid(),
+  projectId: z.uuid().nullable().default(null),
   // The PM's runtime for this session (D18); only a CLI the runner has
   runtime: agentRuntime.default('claude-code'),
   text: z.string().trim().default(''),
@@ -505,7 +505,8 @@ export interface PmActivityItem extends InboxItemBase {
 
 // An open Plan session waiting on the human (D11, amended): a question, a plan
 // needing approval or an unread PM reply
-export interface PlanThreadItem extends InboxItemBase {
+export interface PlanThreadItem extends Omit<InboxItemBase, 'project'> {
+  project: InboxItemBase['project'] | null
   // The session ID
   id: string
   type: 'plan_thread'
@@ -761,7 +762,7 @@ export interface Run {
   agentId: string
   agentName: string
   role: AgentRole
-  projectId: string
+  projectId: string | null
   taskId: string | null
   taskRef: string | null
   taskTitle: string | null

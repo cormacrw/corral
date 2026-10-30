@@ -105,10 +105,11 @@ export class EpicPullRequests {
   }
 
   async report(run: RunRow, report: OutcomeReport): Promise<void> {
+    if (!run.projectId) throw new Error('Epic reviews require a project')
     if (!['approved', 'changes_requested'].includes(report.outcome)) throw new Error('Epic review outcomes are approved or changes_requested')
     let fixId: string | null = null
     await this.d.db.transaction(async (tx) => {
-      const [project] = await tx.select().from(projects).where(eq(projects.id, run.projectId)).for('update')
+      const [project] = await tx.select().from(projects).where(eq(projects.id, run.projectId!)).for('update')
       const [epic] = await tx.select().from(epics).where(eq(epics.id, run.epicId!)).for('update')
       const [current] = await tx.select().from(runs).where(eq(runs.id, run.id)).for('update')
       if (!project || !epic || !current || !ACTIVE_RUN_STATES.includes(current.state as typeof ACTIVE_RUN_STATES[number]) || epic.reviewState !== 'in_review' || epic.prHeadSha !== run.headSha || !complete(await epicBoard(tx, epic.id))) throw new Error('Epic changed during review; this verdict is stale')

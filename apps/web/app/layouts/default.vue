@@ -33,7 +33,7 @@ watch(() => state.value.projects, (projects) => {
 const { active, sessions: threads, close: closeThread } = useOpenPlanSessions()
 const attention = (session: typeof threads.value[number]) => session.status === 'needs_approval' ? 'Needs approval' : session.status === 'question' ? 'Question' : session.unread ? 'Unread reply' : null
 const attentionCount = computed(() => threads.value.filter(s => attention(s)).length)
-const threadColor = (projectId: string) => {
+const threadColor = (projectId: string | null) => {
   const project = state.value.projects.find(p => p.id === projectId)
   return project ? projectColor(project) : undefined
 }
@@ -133,6 +133,10 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
                     aria-hidden="true"
                   />
                   <span :class="['min-w-0 flex-1 truncate', attention(thread) && 'font-semibold text-highlighted']">{{ thread.title }}</span>
+                  <span
+                    v-if="thread.projectId === null"
+                    class="shrink-0 text-xs text-muted"
+                  >Global</span>
                   <UIcon
                     v-if="thread.activeRunId"
                     name="i-lucide-loader-circle"
