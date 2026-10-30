@@ -1,8 +1,9 @@
+import { databaseFixture } from '@corral/db/testing'
 import type { Attachment, DraftSession, Epic, EpicDetail, Plan, PlanSession, PlanSessionDetail, RunJob, Task } from '@corral/contracts'
 import { richTextToMarkdown } from '@corral/core'
 import { schema } from '@corral/db'
 import { and, desc, eq, inArray, ne } from 'drizzle-orm'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner, sleep } from './test-runner.ts'
 
@@ -13,7 +14,7 @@ describe('plan sessions', () => {
   let t: TestApp
   let runner: FakeRunner
 
-  beforeAll(async () => {
+  databaseFixture('postgres', async () => {
     t = await createTestApp('postgres', { listen: true })
     await t.db.update(agents).set({ concurrency: 50 }).where(ne(agents.role, 'pm'))
     runner = await FakeRunner.connect(t.server!.url)

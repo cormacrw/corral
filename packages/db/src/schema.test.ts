@@ -1,23 +1,22 @@
 import type { Actor } from '@corral/core'
 import { eq, sql } from 'drizzle-orm'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import type { Database, DatabaseHandle } from './client.ts'
 import { agents, attachments, epicDependencies, epics, projects, runs, taskDependencies, tasks } from './schema.ts'
-import { createTestDatabase, postgresAvailable } from './testing.ts'
+import { createTestDatabase, databaseFixture } from './testing.ts'
 
 const human: Actor = { kind: 'human', userId: '00000000-0000-4000-8000-000000000001' }
 
 // The same checks run on PGlite everywhere and on Postgres when
 // CORRAL_DATABASE_URL is set (CI), so the two drivers can't drift apart (D14)
 describe.each([
-  { driver: 'pglite' as const, enabled: true },
-  { driver: 'postgres' as const, enabled: postgresAvailable }
-])('schema on $driver', ({ driver, enabled }) => {
+  { driver: 'pglite' as const },
+  { driver: 'postgres' as const }
+])('schema on $driver', ({ driver }) => {
   let handle: DatabaseHandle
   let db: Database
 
-  beforeAll(async () => {
-    if (!enabled) return
+  databaseFixture(driver, async () => {
     const opened = driver === 'pglite' ? await createTestDatabase('pglite') : await createTestDatabase('postgres')
     if (!opened) throw new Error('CORRAL_DATABASE_URL is set but no database was created')
     handle = opened
@@ -62,7 +61,7 @@ describe.each([
     expect(cause?.constraint ?? String(error)).toContain(constraint)
   }
 
-  it.skipIf(!enabled)('applies migrations to an empty database', async () => {
+  it('applies migrations to an empty database', async () => {
     // Both drivers return { rows }; the shared Database type can't say so
     const result = await db.execute(sql`
       select table_name from information_schema.tables
@@ -73,7 +72,7 @@ describe.each([
     ])
   })
 
-  it.skipIf(!enabled)('constrains epic dependencies and cascades deletion of either epic', async () => {
+  it('constrains epic dependencies and cascades deletion of either epic', async () => {
     const project = await insertProject()
     const [a, b, c] = await db.insert(epics).values(['A', 'B', 'C'].map(title => ({
       projectId: project.id, title, createdBy: human
@@ -89,7 +88,7 @@ describe.each([
     expect(await db.select().from(epicDependencies).where(eq(epicDependencies.dependsOnEpicId, c!.id))).toEqual([])
   })
 
-  it.skipIf(!enabled)('fills in project defaults', async () => {
+  it('fills in project defaults', async () => {
     const project = await insertProject()
     expect(project).toMatchObject({
       nextTaskNumber: 1,
@@ -102,19 +101,19 @@ describe.each([
     })
   })
 
-  it.skipIf(!enabled)('lets only one project use a repository (D13)', async () => {
+  it('lets only one project use a repository (D13)', async () => {
     await insertProject({ repository: 'owner/shared' })
     await expectViolation(insertProject({ repository: 'owner/shared' }), 'projects_repository_unique')
   })
 
-  it.skipIf(!enabled)('keeps task ID prefixes unique and 2–5 capital letters (D13)', async () => {
+  it('keeps task ID prefixes unique and 2–5 capital letters (D13)', async () => {
     await insertProject({ prefix: 'COR' })
     await expectViolation(insertProject({ prefix: 'COR' }), 'projects_prefix_unique')
     await expectViolation(insertProject({ prefix: 'cor' }), 'projects_prefix_format')
     await expectViolation(insertProject({ prefix: 'TOOLONG' }), 'projects_prefix_format')
   })
 
-  it.skipIf(!enabled)('numbers tasks per project', async () => {
+  it('numbers tasks per project', async () => {
     const a = await insertProject()
     const b = await insertProject()
     await insertTask(a.id, 1)
@@ -122,7 +121,7 @@ describe.each([
     await expectViolation(insertTask(a.id, 1), 'tasks_project_number_unique')
   })
 
-  it.skipIf(!enabled)('starts tasks in Backlog with no lease', async () => {
+  it('starts tasks in Backlog with no lease', async () => {
     const task = await insertTask((await insertProject()).id, 1)
     expect(task).toMatchObject({
       status: 'backlog',
@@ -135,7 +134,7 @@ describe.each([
     })
   })
 
-  it.skipIf(!enabled)('rejects a half-set lease', async () => {
+  it('rejects a half-set lease', async () => {
     const project = await insertProject()
     const task = await insertTask(project.id, 1)
     const [agent] = await db.insert(agents).values({ name: `Atlas ${project.id}`, role: 'developer' }).returning()
@@ -153,7 +152,7 @@ describe.each([
     expect(run!.number).toBeGreaterThan(0)
   })
 
-  it.skipIf(!enabled)('requires a task for every run except PM turns', async () => {
+  it('requires a task for every run except PM turns', async () => {
     const project = await insertProject()
     const [agent] = await db.insert(agents).values({ name: `Juno ${project.id}`, role: 'pm' }).returning()
     await db.insert(runs).values({ agentId: agent!.id, projectId: project.id, role: 'pm' })
@@ -163,7 +162,7 @@ describe.each([
     )
   })
 
-  it.skipIf(!enabled)('rejects a task depending on itself', async () => {
+  it('rejects a task depending on itself', async () => {
     const task = await insertTask((await insertProject()).id, 1)
     await expectViolation(
       db.insert(taskDependencies).values({ taskId: task.id, dependsOnId: task.id }),
@@ -171,7 +170,7 @@ describe.each([
     )
   })
 
-  it.skipIf(!enabled)('removes a project\'s attachments with the project', async () => {
+  it('removes a project\'s attachments with the project', async () => {
     const project = await insertProject()
     const other = await insertProject()
     const file = { blob: 'a'.repeat(64), mimeType: 'image/png', fileName: 'shot.png', byteSize: 10, createdBy: human }

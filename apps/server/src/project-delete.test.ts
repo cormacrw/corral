@@ -1,7 +1,8 @@
+import { databaseFixture } from '@corral/db/testing'
 import type { Project, ServerEvent } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq, ne } from 'drizzle-orm'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner, sleep } from './test-runner.ts'
 
@@ -13,7 +14,7 @@ describe('removing a project', () => {
   let t: TestApp
   let runner: FakeRunner
 
-  beforeAll(async () => {
+  databaseFixture('postgres', async () => {
     t = await createTestApp('postgres', { listen: true })
     await t.db.update(agents).set({ concurrency: 50 }).where(ne(agents.role, 'pm'))
     runner = await FakeRunner.connect(t.server!.url)
