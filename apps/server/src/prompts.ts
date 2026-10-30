@@ -1,4 +1,5 @@
 import { attachmentIdsInMarkdown, richTextToMarkdown } from '@corral/core'
+import type { RebaseCheckFailure } from './rebase-review.ts'
 
 // The task-specific part of each agent's prompt. Role instructions come
 // from the repo's .corral/agents/<role>.md, added by the runner (D13).
@@ -102,6 +103,8 @@ export interface ReviewTask extends PromptTask {
   rebaseReport?: { review: string | null, conflictedFiles: string[] | null } | null
   // The project's required CI checks: with none, the reviewer runs the gates
   requiredChecks: string[]
+  // The D24 conditions the server check found broken, when it ran
+  rebaseCheckFailures?: RebaseCheckFailure[]
 }
 
 // The design version under review (D20)
@@ -141,6 +144,17 @@ export function reviewerPrompt(task: ReviewTask & { underReview?: DesignUnderRev
   ].join('\n')
 }
 
+const REBASE_CHECK_CONDITIONS: Record<RebaseCheckFailure['condition'], string> = {
+  changes_outside_conflicts: 'The change in these files differs from the approved diff, but they are not in the developer\'s conflicted-file list',
+  project_docs_changed: 'These project docs changed on the base since approval'
+}
+
+function rebaseCheckSection(failures: RebaseCheckFailure[]): string {
+  if (failures.length === 0) return ''
+  return section('Server check failed', `The developer's choice didn't pass the server check, so this review decides. Look at these first:
+${failures.map(f => `- ${REBASE_CHECK_CONDITIONS[f.condition]}: ${f.files.map(file => `\`${file}\``).join(', ')}`).join('\n')}`)
+}
+
 // D24: review the resolution; the server carries the approved criteria forward.
 function rebaseReviewerPrompt(task: ReviewTask, agentName: string): string {
   return [
@@ -149,6 +163,7 @@ function rebaseReviewerPrompt(task: ReviewTask, agentName: string): string {
 Developer review choice: ${task.rebaseReport?.review ?? '(not recorded)'}.
 Conflicted files: ${task.rebaseReport?.conflictedFiles?.join(', ') ?? '(not recorded)'}.
 This is a conflict check of approved work, excluded from the review-round cap.`),
+    rebaseCheckSection(task.rebaseCheckFailures ?? []),
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
     section('Acceptance criteria (previously approved)', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
     commentsSection(task),
@@ -160,7 +175,8 @@ This is a conflict check of approved work, excluded from the review-round cap.`)
 - Identify old-base and new-base, the base commits of the approved and rebased work (use git merge-base against origin/${task.defaultBranch}; inspect history to confirm them). Run \`git range-diff <old-base>..<approved> <new-base>..<new-head>\`, substituting the approved and new head SHAs above. Compare rewritten commits with the approved work; no feature changes are allowed.
 - Read the developer's conflict report. Check each conflicted hunk against the specific main/base commit that caused it, preserving both sides' intent without reverting newly merged work.
 - Inspect binding docs changed on the base since approval and check this branch against them. If a changed binding decision affects the criteria, report outcome "blocked" with the changed decision, affected criteria and reason for the human. Do not choose a side or rewrite the criteria.
-- If the resolution holds, report "approved" without criteria verdicts: the server copies the earlier approval's verdicts and notes onto the new head.
+- If the rebase changed something substantial, report outcome "blocked", explaining the substantial change and the affected criteria for the human.
+- If the resolution holds, report "approved" without criteria verdicts: the server copies the earlier approval's verdicts and notes onto the new head and the task returns to Ready to merge, because the human approved before the conflict.
 - If the resolution needs changes, report "changes_requested" with actionable feedback and a verdict for every criterion. This starts a normal counted revision.
 - Your summary becomes a short task comment: name the conflicted files and the verdict, explaining whether their resolutions hold. Do not repeat a per-criterion list in the summary or add_comment.
 - Always finish by calling \`report_outcome\`.`)

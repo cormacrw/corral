@@ -666,7 +666,7 @@ The reviewer:
 - Checks each conflicted hunk against main's change, verifying that the resolution preserves both sides' intent and introduces no feature changes.
 - Checks the branch against any binding documentation main changed, and follows D26 for the gates.
 
-If the resolution is clean, the reviewer approves the new head. The **previous criteria verdicts and approval carry over** to that head; a rebase review does not re-judge the feature or require a fresh human approval solely because of the rebase. A carried-over approval, whether from the server check or an approved rebase review, returns the task to **Ready to merge** even when `humanReview` is set or its epic is `each_task`: the human approved before the conflict. CI and the live merge gates must still pass for the new head.
+If the resolution is clean, the reviewer approves the new head. The **previous criteria verdicts and approval carry over** to that head; a rebase review does not re-judge the feature or require a fresh human approval solely because of the rebase. A carried-over approval, whether from the server check or an approved rebase review, returns the task to **Ready to merge** even when `humanReview` is set or its epic is `each_task`: the human approved before the conflict. A criterion checked by a human stays open across the rebase, so a task with one goes to **Human review** instead (D28). CI and the live merge gates must still pass for the new head.
 
 If the resolution needs changes, the reviewer requests changes: **Agent review → In progress** starts a **normal developer round**, with normal review and `reviewRoundCap` accounting. The developer is no longer restricted to rebase-only work and reports `pr_updated` as usual.
 
