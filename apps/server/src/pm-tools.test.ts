@@ -163,7 +163,7 @@ describe('PM tools for projects, runs and the factory', () => {
     expect(read).toMatchObject({ taskRef: null, sender: { name: 'PM', role: 'pm' } })
     expect(read!.body).toContain(`/plan/${session.id}`)
     const failed = activity.find(a => a.preview.startsWith('Could not read a project'))
-    expect(failed!.preview).toContain('not_found')
+    expect(failed!.preview).toBe('Could not read a project: not found')
     expect(failed!.body).toContain(`/plan/${session.id}`)
   })
 

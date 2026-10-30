@@ -92,6 +92,14 @@ function toolFailure(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error))
 }
 
+// The same failure in plain words, for the Activity line
+function failureReason(error: unknown): string {
+  const failure = error instanceof ApiFailure ? error : fromDatabaseError(error)
+  if (!failure) return error instanceof Error ? error.message : String(error)
+  const { code, reason, constraint } = failure.body as { code: string, reason?: unknown, constraint?: unknown }
+  return typeof reason === 'string' ? reason : typeof constraint === 'string' ? `${code.replaceAll('_', ' ')}: ${constraint}` : code.replaceAll('_', ' ')
+}
+
 // The PM tools that act without a confirm card (D27). Each validates its typed
 // input and calls the service behind the matching route, and every call is
 // audited with the PM session as actor.
@@ -112,7 +120,7 @@ export class PmTools {
       return result
     } catch (error) {
       const failure = toolFailure(error)
-      await audit(undefined, { ok: false, error: failure.message, summary: `Could not ${TOOL_GOALS[tool]}: ${clip(failure.message, ERROR_SUMMARY_MAX)}` })
+      await audit(undefined, { ok: false, error: failure.message, summary: `Could not ${TOOL_GOALS[tool]}: ${clip(failureReason(error), ERROR_SUMMARY_MAX)}` })
       throw failure
     }
   }
