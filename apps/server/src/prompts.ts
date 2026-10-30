@@ -211,6 +211,17 @@ export function sessionTitlePrompt(input: { text: string, attachedTask: string |
   ].filter(Boolean).join('\n\n')
 }
 
+// A deployment's release notes (COR-128). `tasks` are the shipped tasks and
+// `commits` the subjects of commits that match no task.
+export function releaseNotesPrompt(input: { projectName: string, tasks: { ref: string, type: string, title: string, description: string }[], commits: string[] }): string {
+  const tasks = input.tasks.map(t => `- ${t.ref} (${t.type}): ${t.title}${t.description ? `\n  ${t.description.slice(0, 1000).replace(/\s*\n\s*/g, ' ')}` : ''}`)
+  return [
+    `Write short, user-facing release notes in markdown for a deployment of "${input.projectName}". Say what changed for someone using it, not how it was built. Use the headings "## Features", "## Fixes" and "## Other changes", leaving out any with nothing under it, with one bullet per change. End each bullet with the ref of its task, such as (${input.tasks[0]?.ref ?? 'ABC-12'}). Every task below gets a bullet. Every commit under "Commits with no task" gets a bullet under "## Other changes" with its subject exactly as written. Reply with the notes only, with no introduction.`,
+    tasks.length ? `Tasks:\n${tasks.join('\n')}` : '',
+    input.commits.length ? `Commits with no task:\n${input.commits.map(subject => `- ${subject}`).join('\n')}` : ''
+  ].filter(Boolean).join('\n\n')
+}
+
 // Each PM turn is one message; the session carries the rest (D9)
 export function pmPrompt(turn: PmTurn & { grilling?: boolean }): string {
   const intro = turn.fresh

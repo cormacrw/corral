@@ -179,7 +179,7 @@ export function useLive() {
     source = new EventSource('/api/events')
     const types: ServerEvent['type'][] = [
       'project.created', 'project.updated', 'project.deleted', 'task.created', 'task.updated', 'task.deleted', 'runner.status', 'run.updated',
-      'run.events', 'agent.updated', 'global.status', 'plan.session', 'plan.message', 'plan.updated', 'plan.drafts', 'epic.updated', 'profile.updated', 'comment.created'
+      'run.events', 'agent.updated', 'global.status', 'plan.session', 'plan.message', 'plan.updated', 'plan.drafts', 'epic.updated', 'profile.updated', 'comment.created', 'deployment.updated'
     ]
     for (const type of types) {
       source.addEventListener(type, (message) => {

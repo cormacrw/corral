@@ -30,6 +30,7 @@ import { designRevisionPrompt, developerPrompt, developerRevisionPrompt, reviewe
 import { runExitError, withLastActivity } from './run-exit.ts'
 import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
 import { MergeOrchestrator } from './merge.ts'
+import type { ReleaseNotes } from './deployments.ts'
 import type { PlanService } from './plan.ts'
 import { getRun, listAgents, listEvidence } from './runs.ts'
 import { addComment, applyTransition, deleteTaskRows, loadTask, lockTask, toTaskState, type ProjectRow, type TaskContentEdit, type TaskRow } from './tasks.ts'
@@ -137,6 +138,7 @@ export class Orchestrator implements RunnerHandlers {
   readonly merges: MergeOrchestrator
   // Set once the plan service exists (it needs the orchestrator to start runs)
   plans: PlanService | null = null
+  releaseNotes: ReleaseNotes | null = null
 
   constructor(deps: OrchestratorDeps) {
     this.#d = deps
@@ -686,6 +688,7 @@ export class Orchestrator implements RunnerHandlers {
 
   onReady(): void {
     this.poke()
+    void this.releaseNotes?.sweep()
   }
 
   async onHeartbeat(activeRuns: { runId: string, leaseEpoch: number }[], runnerId: string): Promise<void> {

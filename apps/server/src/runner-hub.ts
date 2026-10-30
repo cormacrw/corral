@@ -34,6 +34,13 @@ export interface RunnerHandlers {
 
 const JOB_TIMEOUT_MS = 60_000
 
+// A setup job lost with its connection, as opposed to one that failed
+export class RunnerDisconnected extends Error {
+  constructor() {
+    super('Runner disconnected')
+  }
+}
+
 // Connections are independent; only the same runner identity replaces a socket.
 export class RunnerHub {
   #runners = new Map<string, { socket: RunnerSocket | null, status: RunnerStatus['runners'][number] }>()
@@ -199,8 +206,9 @@ export class RunnerHub {
     for (const runner of this.#runners.values()) runner.socket?.close(1001, 'Server shutting down')
   }
 
-  pick(): string | null {
-    return [...this.#runners.entries()].filter(([, r]) => r.socket && r.status.online).sort((a, b) => Number(a[1].status.draining) - Number(b[1].status.draining) || a[1].status.connectedAt.localeCompare(b[1].status.connectedAt))[0]?.[0] ?? null
+  // With a runtime, only a runner that has it signed in
+  pick(runtime?: string): string | null {
+    return [...this.#runners.entries()].filter(([, r]) => r.socket && r.status.online && (!runtime || r.status.runtimes.includes(runtime))).sort((a, b) => Number(a[1].status.draining) - Number(b[1].status.draining) || a[1].status.connectedAt.localeCompare(b[1].status.connectedAt))[0]?.[0] ?? null
   }
 
   // Online runners ready for dispatch, longest connected first
@@ -235,7 +243,7 @@ export class RunnerHub {
     for (const [jobId, pending] of this.#pending) {
       if (pending.runnerId !== runnerId) continue
       clearTimeout(pending.timer)
-      pending.reject(new Error('Runner disconnected'))
+      pending.reject(new RunnerDisconnected())
       this.#pending.delete(jobId)
     }
   }
@@ -252,7 +260,7 @@ export class RunnerHub {
         kept: results.flatMap(r => r.kept)
       }) as Extract<SetupJobResult, { kind: K }>)
     }
-    const runnerId = this.pick()
+    const runnerId = this.pick(job.kind === 'release_notes' ? (job as Extract<SetupJob, { kind: 'release_notes' }>).runtime : undefined)
     if (!runnerId) return Promise.reject(runnerOffline())
     return this.#request(job, timeoutMs, runnerId)
   }
