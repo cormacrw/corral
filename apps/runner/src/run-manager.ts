@@ -1,9 +1,9 @@
 import type { AgentTool, RunEvent, RunExit, RunJob, RunnerMessage, ServerMessage } from '@corral/contracts'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { createWriteStream, type WriteStream } from 'node:fs'
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import { constants } from 'node:os'
-import { basename, extname, isAbsolute, join, resolve } from 'node:path'
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { createRuntimeRegistry, STOP_GRACE_MS, type AgentExit, type AgentProcess, type AgentRuntime, type AgentSession, type ParsedLine, type RuntimeRegistry } from './agent-runtime.ts'
 import type { RunnerConfig } from './config.ts'
 import type { ServerConnection } from './connection.ts'
@@ -778,7 +778,7 @@ export class RunManager {
   }
 
   // Reads the file the agent attached and sends it as base64. Files must
-  // live outside the repository: the scratch folder is the usual place.
+  // resolve inside this run's scratch folder, including symlink targets.
   // A video other than MP4 goes up as an H.264 MP4, which Safari can play; the
   // size limit applies to that copy. If there's no usable copy the original
   // goes up instead, with a note saying why, so evidence is never lost.
@@ -786,17 +786,25 @@ export class RunManager {
     const given = String(input.path ?? '')
     if (!given) return { ok: false, error: 'Pass the path of the file to attach, or leave out path and use kind "note" for a written explanation' }
     const path = isAbsolute(given) ? given : resolve(run.scratchDir, given)
-    const info = await stat(path).catch(() => null)
+    const root = await realpath(run.scratchDir)
+    const actual = await realpath(path).catch(() => null)
+    if (actual) {
+      const fromScratch = relative(root, actual)
+      if (fromScratch === '..' || fromScratch.startsWith(`..${sep}`) || isAbsolute(fromScratch)) return { ok: false, error: 'Evidence files must be inside your scratch directory' }
+    }
+    const info = actual ? await stat(actual).catch(() => null) : null
     if (!info?.isFile()) return { ok: false, error: `No file at ${path}` }
     const contentType = CONTENT_TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream'
     if (contentType.startsWith('video/') && contentType !== 'video/mp4') {
-      const converted = await convertToMp4(path, run.scratchDir, MAX_EVIDENCE_BYTES)
+      const converted = await convertToMp4(actual!, run.scratchDir, MAX_EVIDENCE_BYTES)
       if (converted.ok) return evidenceFile(converted.fileName, 'video/mp4', converted.data)
       if (info.size > MAX_EVIDENCE_BYTES) return { ok: false, error: `Evidence files are limited to 25 MB, and ${basename(path)} could not be converted to fit: ${converted.error}` }
       this.#note(run, `Attaching ${basename(path)} as it is, because it could not be converted to MP4: ${converted.error}`)
     }
     if (info.size > MAX_EVIDENCE_BYTES) return { ok: false, error: 'Evidence files are limited to 25 MB' }
-    return evidenceFile(basename(path), contentType, await readFile(path))
+    const data = await readFile(actual!)
+    if (data.length > MAX_EVIDENCE_BYTES) return { ok: false, error: 'Evidence files are limited to 25 MB' }
+    return evidenceFile(basename(path), contentType, data)
   }
 }
 

@@ -996,6 +996,12 @@ export class PlanService {
     return row
   }
 
+  async attachEvidence(sessionId: string, runId: string, text: string): Promise<void> {
+    const [message] = await this.#d.db.insert(planMessages).values({ sessionId, role: 'pm', kind: 'message', text, runId }).returning()
+    this.#d.events.publish({ type: 'plan.message', message: toMessage(message!) })
+    this.#d.events.publish({ type: 'plan.session', session: await this.#toSession(await this.#session(sessionId), runId) })
+  }
+
   async #taskIdByRef(project: ProjectRow, ref: string): Promise<string> {
     const match = new RegExp(`^${project.prefix}-(\\d+)$`, 'i').exec(ref.trim())
     if (!match) throw new ToolError(`No task ${ref} in this project (refs look like ${project.prefix}-12)`)
