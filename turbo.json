@@ -21,6 +21,7 @@
       "env": ["CORRAL_DATABASE_URL"]
     },
     "@corral/runner#test": {
+      "cache": false,
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/scripts/deploy/runner-update.sh", "$TURBO_ROOT$/scripts/deploy/runner-update-io.py"]
     }
   }
