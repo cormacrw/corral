@@ -1122,9 +1122,10 @@ describe('plan sessions', () => {
     const sent = await t.db.select().from(runs).where(inArray(runs.id, jobs.map(j => j.runId)))
     expect(sent.map(r => r.pmJob)).toEqual([null, null, null])
     for (const job of jobs) runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: `claude-${job.runId}` })
-    await sleep(150)
-    const rows = await t.db.select().from(runs).where(inArray(runs.id, jobs.map(j => j.runId)))
-    expect(rows.map(r => r.state)).toEqual(['running', 'running', 'running'])
+    await vi.waitFor(async () => {
+      const rows = await t.db.select().from(runs).where(inArray(runs.id, jobs.map(j => j.runId)))
+      expect(rows.map(r => r.state)).toEqual(['running', 'running', 'running'])
+    })
 
     // Still one turn at a time per session
     const again = await t.request('POST', `/api/plan/sessions/${sessions[1]!.id}/messages`, { text: 'Again' })

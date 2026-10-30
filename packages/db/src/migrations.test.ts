@@ -39,6 +39,30 @@ describe('migrations', () => {
   it.for([
     { driver: 'pglite' as const },
     { driver: 'postgres' as const }
+  ])('0040 checks future writes without rewriting approval or staged history on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+    requireDatabase(driver, context)
+    const before = await migrationsBefore('0040_plan_approval_tuples')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db, migrate } = await open(driver)
+    await migrate(before)
+    await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('Test app', 'test-app', 'TA', 'cormacrw/test-app', 'main')`)
+    await db.execute(sql`insert into plan_sessions (project_id, title, created_by) select id, 'History', '{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb from projects`)
+    await db.execute(sql`insert into plans (session_id, project_id, version, title, status) select id, project_id, 1, 'Legacy approval without attribution', 'approved' from plan_sessions`)
+    await db.execute(sql`insert into plan_tasks (plan_id, key, change, position, revision) select id, 'removed', 'removed', 0, '{"title":"Legacy revision"}'::jsonb from plans`)
+    await migrate(migrationsFolder)
+    expect((await db.execute(sql`select status, approved_by, approved_at from plans`)).rows).toEqual([{ status: 'approved', approved_by: null, approved_at: null }])
+    expect((await db.execute(sql`select task_id, change, revision from plan_tasks`)).rows).toEqual([{ task_id: null, change: 'removed', revision: { title: 'Legacy revision' } }])
+    expect((await db.execute(sql`select conname, convalidated from pg_constraint where conname in ('plans_approval_tuple', 'plan_tasks_revision_change') order by conname`)).rows).toEqual([
+      { conname: 'plan_tasks_revision_change', convalidated: false },
+      { conname: 'plans_approval_tuple', convalidated: false }
+    ])
+    await expect(db.execute(sql`update plans set title = 'Updated'`)).rejects.toThrow()
+    await expect(db.execute(sql`update plan_tasks set position = 1`)).rejects.toThrow()
+  })
+
+  it.for([
+    { driver: 'pglite' as const },
+    { driver: 'postgres' as const }
   ])('0039 reports all inconsistent avatars and preserves them on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
     requireDatabase(driver, context)
     const before = await migrationsBefore('0039_chunky_peter_parker')
