@@ -362,6 +362,26 @@ describe('plan sessions', () => {
     expect(await t.db.select().from(schema.auditLog).where(and(eq(schema.auditLog.taskId, target.id), eq(schema.auditLog.action, 'task.revised')))).toEqual([])
   })
 
+  it('rejects ref-shaped keys and resolves mixed-case dependencies to revised tasks', async () => {
+    const { target, job, created } = await backlogSetup()
+    const propose = (input: Parameters<typeof plan>[0]) => runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan(input))
+    expect(await propose([{ key: target.ref }, { dependsOn: [target.ref] }]))
+      .toMatchObject({ ok: false, error: expect.stringContaining('key_shaped_like_ref') })
+    expect(await propose([{ key: target.ref.toLowerCase() }]))
+      .toMatchObject({ ok: false, error: expect.stringContaining('looks like a task ref') })
+    expect(await propose([{ ref: target.ref.toLowerCase(), dependsOn: ['t2'] }, { dependsOn: [target.ref.toLowerCase()] }]))
+      .toMatchObject({ ok: false, error: expect.stringContaining('cycle') })
+    const result = await propose([{ ref: target.ref.toLowerCase() }, { dependsOn: [target.ref.toLowerCase()] }])
+    expect(result).toMatchObject({ ok: true, result: { tasks: [
+      { key: 't1', ref: target.ref, revises: true },
+      { key: 't2' }
+    ] } })
+    expect((await session(created.id)).plans.at(-1)!.tasks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 't2', dependsOn: [target.ref] })
+    ]))
+    await endTurn(job, 'Dependencies checked.')
+  })
+
   it('rejects a ref that is unknown, deleted, from another project or past the Backlog, saying why', async () => {
     const { project, target, job, count } = await backlogSetup()
     const deleted = await t.createTask(project.slug, { title: 'Old idea' })
