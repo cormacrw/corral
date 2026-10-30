@@ -8,11 +8,11 @@ const live = useLive()
 const device = useDevice()
 const flyout = useTaskFlyout()
 const options = [
-  { id: 'a', name: 'Refined', summary: 'Familiar structure. Clearer hierarchy and room for metadata.' },
-  { id: 'b', name: 'Dense', summary: 'Smaller type and tighter spacing. More tasks in view; full titles stay readable.' },
-  { id: 'c', name: 'Status first', summary: 'Activity leads. A labelled status strip makes interruptions easier to scan.' },
-  { id: 'd', name: 'People first', summary: 'Agent presence anchors the card. Unclaimed work has an explicit placeholder.' },
-  { id: 'e', name: 'Rich', summary: 'Criteria verdicts, review rounds and dependencies make readiness visible.' }
+  { id: 'a', name: 'Stacked', summary: 'Title, then epic, then a footer with the priority word and the assignee. Every field reads as words.' },
+  { id: 'b', name: 'Compact', summary: 'Title over a single line: priority bars, epic, assignee avatar. Most tasks in view.' },
+  { id: 'c', name: 'Priority edge', summary: 'Priority is a coloured left edge, not a label. The body holds only title, epic and assignee.' },
+  { id: 'd', name: 'Assignee first', summary: 'The assignee heads the card with priority opposite; title and epic sit below.' },
+  { id: 'e', name: 'Epic header', summary: 'The epic heads the card as a divided header; a larger title, then priority and assignee.' }
 ]
 const option = computed(() => options.find(o => o.id === route.query.option) ?? options[0]!)
 const all = computed(() => live.state.value.tasks['p-corral'] ?? [])
@@ -67,7 +67,7 @@ const colors: Record<string, string> = { neutral: 'bg-neutral-400', info: 'bg-in
           </p>
         </div>
         <p class="mt-1 text-xs text-dimmed">
-          Same tasks in every option · 272px desktop columns · COR-24 shows selection · click a card to inspect
+          Same tasks in every option · 272px desktop columns · “Preserve selection after reconnecting” shows selection · click a card to inspect
         </p>
       </header>
       <nav
@@ -112,7 +112,6 @@ const colors: Record<string, string> = { neutral: 'bg-neutral-400', info: 'bg-in
                 v-for="task in all.filter(t => column.statuses.includes(t.status))"
                 :key="task.id"
                 :task="task"
-                :all="all"
                 :option="option.id"
                 :selected="selected(task.ref)"
                 @open="open(task.ref)"

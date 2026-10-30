@@ -117,6 +117,18 @@ export const epics: Epic[] = [
     mergedCount: 1,
     createdAt: ago(60 * 24 * 7),
     updatedAt: ago(60 * 24)
+  },
+  {
+    id: 'e-board',
+    dependsOn: [],
+    blocks: [],
+    projectId: 'p-corral',
+    title: 'Board readability and task card clean-up across every column',
+    description: 'A long epic name, to show how each card direction handles it.',
+    taskCount: 1,
+    mergedCount: 0,
+    createdAt: ago(60 * 24),
+    updatedAt: ago(60)
   }
 ]
 
@@ -238,7 +250,7 @@ export const tasks: Task[] = [
 // COR-154: identical stress cases across every card direction.
 tasks.push(
   task(corral, 21, { title: 'Keep the board readable when a task has a very long title, multiple dependencies and an agent working on the implementation', status: 'ready', priority: 'urgent', type: 'bug', dependsOn: ['COR-3'], acceptanceCriteria: criteria('Wrap the title', 'Keep metadata visible') }),
-  task(corral, 22, { title: 'Explore a quieter board', status: 'ready', type: 'spike', priority: 'low' }),
+  task(corral, 22, { title: 'Explore a quieter board', status: 'ready', type: 'spike', priority: 'low', epicId: 'e-board' }),
   task(corral, 23, { title: 'Design the next task card', status: 'ready', type: 'design', priority: 'high', epicId: 'e-design', design: { taskRef: 'COR-4', version: 1, screens: ['card'], newerVersion: 2 } }),
   task(corral, 24, { title: 'Preserve selection after reconnecting', status: 'in_progress', priority: 'urgent', type: 'bug', reviewRounds: 2, acceptanceCriteria: criteria('Restore selection', 'Preserve scroll') }),
   task(corral, 25, { title: 'Check narrow column rendering', status: 'agent_review', priority: 'low', type: 'spike' })
@@ -290,6 +302,21 @@ for (const t of tasks) {
   const reviewer = latest('reviewer')
   t.developer = developer ? { id: developer.agentId, name: developer.agentName } : null
   t.reviewer = reviewer ? { id: reviewer.agentId, name: reviewer.agentName } : null
+}
+
+// COR-154: board cards name the developer, or the reviewer in Agent review.
+// COR-21 and COR-22 stay unclaimed, and COR-25 has a developer but no reviewer
+// yet, so each card direction shows Unassigned too.
+const DANA = { id: 'a-dev2', name: 'Dana' }
+const VICTOR = { id: 'a-dev', name: 'Victor' }
+const RITA = { id: 'a-rev', name: 'Rita' }
+for (const [ref, developer, reviewer] of [
+  ['COR-1', VICTOR, RITA], ['COR-2', DANA, RITA], ['COR-3', DANA, RITA], ['COR-4', VICTOR, RITA],
+  ['COR-6', VICTOR, null], ['COR-7', DANA, RITA], ['COR-8', VICTOR, null], ['COR-9', DANA, null],
+  ['COR-10', DANA, RITA], ['COR-23', DANA, null], ['COR-24', VICTOR, RITA], ['COR-25', DANA, null]
+] as const) {
+  at(ref).developer = developer
+  at(ref).reviewer = reviewer
 }
 
 // Unbreakable tokens that once widened the Plan conversation past a phone's screen
