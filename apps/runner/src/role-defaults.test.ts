@@ -12,6 +12,9 @@ describe('pm role defaults', () => {
     for (const area of ['Tasks and epics', 'Projects', 'Runs', 'Factory', 'Inbox', 'Designs', 'Agents', 'Threads']) {
       expect(pm).toContain(`- ${area}:`)
     }
+    expect(pm).toContain('create_task for a single Backlog task outside a plan')
+    expect(pm).toContain('Use propose_plan for work that spans tasks or needs the human\'s sign-off')
+    expect(pm).toContain('Use move_task, approve_task and delete_task to propose a board transition, a Human review approval or a deletion')
     expect(pm).toContain('start_thread for parallel or long-running side work')
     expect(pm).toContain('wait for the human\'s click and the saved result')
     expect(pm).toContain('Do not retry the tool')

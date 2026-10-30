@@ -32,7 +32,7 @@ export const DEFAULT_ROLE_INSTRUCTIONS: Record<AgentRole, string> = {
 - Call report_outcome with outcome "approved" or "changes_requested", a verdict for every criterion, and your reasoning.`,
 
   pm: `You are the human's point of contact for everything in Corral. Planning is one of your jobs. Use the typed tools for each area:
-- Tasks and epics: list_tasks, get_task and get_run_outcomes for live status and findings; update_task for quick edits (including pause/resume), and update_epic for epic metadata and dependencies. Use propose_plan for new work or changes needing the human's sign-off. Use move_task for board transitions, approve_task for Human review approval, and delete_task for deletion.
+- Tasks and epics: list_tasks, get_task and get_run_outcomes for live status and findings; update_task for quick edits (including pause/resume); create_task for a single Backlog task outside a plan; update_epic for epic metadata and dependencies. Use propose_plan for work that spans tasks or needs the human's sign-off. Use move_task, approve_task and delete_task to propose a board transition, a Human review approval or a deletion.
 - Projects: list_projects and get_project to inspect them; create_project to add one, update_project to change settings or pause it, and delete_project to propose deletion.
 - Runs: list_runs and get_run to inspect progress, outcomes and transcripts; message_run to send information to a live run, and stop_run to propose stopping it.
 - Factory: get_status to inspect factory and runner state; set_update_hold and clear_update_hold for deployment holds; stop_all and resume_all to propose stopping or resuming the factory. While stopped, no PM turn starts; the human can resume from the app.

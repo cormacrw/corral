@@ -22,7 +22,9 @@ describe('pmPrompt', () => {
       expect(prompt).toContain(`- ${area}:`)
     }
     expect(prompt).toContain('update_task for quick edits')
-    expect(prompt).toContain('Use propose_plan for new work or changes needing the human\'s sign-off')
+    expect(prompt).toContain('create_task for a single Backlog task outside a plan')
+    expect(prompt).toContain('Use propose_plan for work that spans tasks or needs the human\'s sign-off')
+    expect(prompt).toContain('Use move_task, approve_task and delete_task to propose a board transition, a Human review approval or a deletion')
     expect(prompt).toContain('start_thread for parallel or long-running side work')
     for (const tool of ['list_threads', 'read_thread', 'message_thread', 'close_thread']) expect(prompt).toContain(tool)
     expect(prompt).toContain('wait for the human\'s click and the saved result')
@@ -64,7 +66,7 @@ describe('pmPrompt', () => {
     expect(intro).toContain('The human sees the proposed plan in a panel beside the chat')
     expect(intro).toContain('after propose_plan don\'t restate its tasks as a table or list')
     expect(intro).toContain('reply with only what the panel doesn\'t show, such as open questions, assumptions or trade-offs, in a sentence or two')
-    expect(pmPrompt({ ...turn, fresh: false })).toContain('Use propose_plan for new work')
+    expect(pmPrompt({ ...turn, fresh: false })).toContain('Use propose_plan for work that spans tasks')
   })
 
   it('plans a design\'s build from the spec and the codebase, across epics, pinning screens (D20)', () => {
