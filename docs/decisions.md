@@ -716,7 +716,7 @@ Each epic has a **review mode**. The PM can set it per epic in `propose_plan`; w
 | `each_task` | The epic branch | Always, whatever the flag. |
 | `direct` | The target branch | Only when flagged (D5, today's behaviour). No epic branch and no epic PR. |
 
-Tasks without an epic are unchanged: they merge straight into the target branch, by D5. Changing an epic's mode is only allowed before any of its tasks has merged.
+Tasks without an epic are unchanged: they merge straight into the target branch, by D5. Changing an epic's mode is only allowed before any of its tasks has opened a PR or merged *(narrowed by COR-169; previously before any had merged)*.
 
 ### The epic branch
 

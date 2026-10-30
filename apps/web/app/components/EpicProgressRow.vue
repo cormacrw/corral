@@ -1,5 +1,8 @@
 <script setup lang="ts">
-defineProps<{ id: string, title: string, merged: number, total: number }>()
+import type { Epic } from '@corral/contracts'
+
+// With an epic, the row also shows its review mode, review state and PR
+defineProps<{ id: string, title: string, merged: number, total: number, epic?: Epic }>()
 </script>
 
 <template>
@@ -33,5 +36,9 @@ defineProps<{ id: string, title: string, merged: number, total: number }>()
         :style="{ flex: total - merged }"
       />
     </div>
+    <EpicReviewLine
+      v-if="epic"
+      :epic="epic"
+    />
   </div>
 </template>

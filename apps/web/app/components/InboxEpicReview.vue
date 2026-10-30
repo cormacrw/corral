@@ -4,6 +4,7 @@ import { api } from '~/composables/useApi'
 
 const props = defineProps<{ item: EpicReviewItem }>()
 const emit = defineEmits<{ resolved: [] }>()
+const device = useDevice()
 const feedback = ref('')
 const busy = ref(false)
 const error = ref<string | null>(null)
@@ -26,45 +27,60 @@ async function act(action: 'approve' | 'request_changes') {
     class="flex min-h-0 min-w-0 flex-1 flex-col"
     aria-label="Epic integration review"
   >
-    <header class="border-b border-default p-4">
-      <UBadge
-        label="Epic PR · Needs you"
-        color="warning"
-        variant="subtle"
-      />
-      <h1 class="mt-2 text-lg font-semibold">
-        {{ item.subject }}
-      </h1>
-      <p class="text-xs text-muted">
-        {{ item.project.name }} · {{ item.sender.name }} approved integration
-      </p>
-    </header>
-    <div class="min-h-0 flex-1 space-y-6 overflow-y-auto p-4">
-      <MarkdownText :text="item.body" />
-      <a
-        :href="item.prUrl"
-        target="_blank"
-        rel="noopener"
-        class="text-primary hover:underline"
-      >Open epic PR and combined diff</a>
-      <article
-        v-for="entry in item.tasks"
-        :key="entry.task.id"
-        class="rounded-lg border border-default p-4"
+    <InboxEpicHeader
+      badge="Epic PR · Needs you"
+      color="warning"
+      :title="item.subject"
+      :epic-id="item.epicId"
+      :pr-url="item.prUrl"
+      pr-label="Open epic PR and combined diff"
+    >
+      {{ item.project.name }} · {{ item.sender.name }} approved integration
+    </InboxEpicHeader>
+    <div class="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4">
+      <section
+        aria-label="Integration review"
+        class="rounded-lg bg-elevated p-3 break-words"
       >
-        <NuxtLink
-          :to="`/tasks/${entry.task.ref}`"
-          class="font-medium text-primary hover:underline"
-        >{{ entry.task.ref }}: {{ entry.task.title }}</NuxtLink>
-        <p class="my-2 text-xs text-muted">
-          Merged into the epic branch
-        </p>
-        <EvidenceList
-          :evidence="entry.evidence"
-          :criteria="entry.task.acceptanceCriteria"
-          :reviews="entry.task.latestReview ? [entry.task.latestReview] : []"
-        />
-      </article>
+        <h2 class="mb-1 text-xs font-medium text-muted">
+          Integration review
+        </h2>
+        <MarkdownText :text="item.body" />
+      </section>
+      <section
+        aria-label="Tasks in the epic"
+        class="space-y-2"
+      >
+        <h2 class="text-xs font-medium text-muted">
+          {{ item.tasks.length }} {{ item.tasks.length === 1 ? 'task' : 'tasks' }} merged into the epic branch
+        </h2>
+        <!-- Closed on a phone, where evidence would push the rest off screen -->
+        <details
+          v-for="entry in item.tasks"
+          :key="entry.task.id"
+          :open="!device.isMobile.value"
+          class="group min-w-0 rounded-lg border border-default"
+        >
+          <summary class="flex min-h-11 cursor-pointer items-center gap-2 px-3 py-2 text-sm">
+            <UIcon
+              name="i-lucide-chevron-right"
+              class="size-4 shrink-0 text-muted transition-transform group-open:rotate-90"
+            />
+            <span class="min-w-0 break-words"><span class="font-mono text-xs text-muted">{{ entry.task.ref }}</span> {{ entry.task.title }}</span>
+          </summary>
+          <div class="min-w-0 space-y-2 border-t border-default p-3">
+            <NuxtLink
+              :to="`/tasks/${entry.task.ref}`"
+              class="text-sm text-primary hover:underline"
+            >Open task</NuxtLink>
+            <EvidenceList
+              :evidence="entry.evidence"
+              :criteria="entry.task.acceptanceCriteria"
+              :reviews="entry.task.latestReview ? [entry.task.latestReview] : []"
+            />
+          </div>
+        </details>
+      </section>
     </div>
     <footer class="space-y-3 border-t border-default p-4">
       <UAlert
@@ -79,11 +95,12 @@ async function act(action: 'approve' | 'request_changes') {
         class="w-full"
         :disabled="busy"
       />
-      <div class="flex flex-wrap gap-2">
+      <div class="grid grid-cols-2 gap-2 sm:flex">
         <UButton
           label="Approve"
           icon="i-lucide-check"
           :loading="busy"
+          class="justify-center max-sm:min-h-11"
           @click="act('approve')"
         />
         <UButton
@@ -92,6 +109,7 @@ async function act(action: 'approve' | 'request_changes') {
           color="neutral"
           variant="outline"
           :disabled="busy || !feedback.trim()"
+          class="justify-center max-sm:min-h-11"
           @click="act('request_changes')"
         />
       </div>

@@ -146,6 +146,13 @@ On the mobile layout ([mobile.md](mobile.md#inbox)), a Plan thread opens as its 
 - **Row:** the sender's avatar, name and time, the session title, the preview, and the status badge beside the project tag, in the same list as the other items. The first tab is named **Inbox** (the web's Needs you), newest first, with no group for threads.
 - **Swipe to delete:** swiping a thread row left reveals a red **Delete** button; a full swipe deletes at once, and a short one snaps back. Task items don't swipe. Deleting removes the row immediately and shows a "Thread deleted · its drafts were discarded" toast with **Undo** for 5 seconds; only then is the thread closed (as [Delete thread](#delete-thread), discarding its drafts and unapproved plan). Undo puts the row back with nothing discarded. If the close fails, the row comes back with an error toast. `usePlanThreadDelete` holds the pending deletes, shared with desktop, so a delete started on the thread screen carries on after it returns to the list or the layout changes. Reloading or closing the tab during Undo sends the close immediately with a keepalive request.
 
+### Epic items (D27)
+
+An epic PR in human review and an epic PR rebase conflict have their own layout on desktop and mobile, `InboxEpicReview` and `InboxEpicConflict`, with the action bar pinned at the bottom. Both share `InboxEpicHeader`: the badge, the epic's name linking to it, and a button to the epic PR, which goes full width under the title on a phone.
+
+- **Review:** the integration review's verdict, then one collapsible row per task with its evidence, open on desktop and closed on a phone. Request changes needs the feedback box filled in. Approve and Request changes sit side by side on a phone.
+- **Conflict:** a bordered list of the conflicting files, wrapped rather than scrolled, or a note that Corral couldn't work them out. **Hand the rebase to a developer** is full width on a phone.
+
 ## What each action does (D10)
 
 | Action | Task moves to | Notes |

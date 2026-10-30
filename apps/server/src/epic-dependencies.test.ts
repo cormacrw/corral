@@ -54,6 +54,31 @@ describe('epic scheduling', () => {
     expect(t.events).toContainEqual(expect.objectContaining({ type: 'task.updated', task: expect.objectContaining({ id: second.id, waitingOnEpics: [] }) }))
   })
 
+  it('changes the review mode until a task has opened a PR, and says so on the epic', async () => {
+    const { a, first } = await setup()
+    await t.db.update(epics).set({ reviewMode: 'epic' }).where(eq(epics.id, a.id))
+    const patch = (input: object) => t.request('PATCH', `/api/epics/${a.id}`, input)
+    const saved = await patch({ reviewMode: 'each_task' })
+    expect(saved.status).toBe(200)
+    expect(await saved.json()).toMatchObject({ reviewMode: 'each_task', reviewModeLocked: false })
+    expect(await (await t.request('GET', `/api/epics/${a.id}`)).json()).toMatchObject({ reviewMode: 'each_task', reviewModeLocked: false })
+
+    await t.db.update(tasks).set({ prNumber: 7, prUrl: 'https://github.com/cormacrw/test-app/pull/7', deletedAt: new Date() }).where(eq(tasks.id, first.id))
+    expect(await (await t.request('GET', `/api/epics/${a.id}`)).json()).toMatchObject({ reviewModeLocked: true })
+    const rejected = await patch({ reviewMode: 'direct' })
+    expect(rejected.status).toBe(409)
+    expect(await rejected.json()).toMatchObject({ error: { code: 'invalid_input' } })
+    expect((await patch({ reviewMode: 'each_task', title: 'Renamed' })).status).toBe(200)
+    expect(await (await t.request('GET', `/api/epics/${a.id}`)).json()).toMatchObject({ reviewMode: 'each_task', title: 'Renamed' })
+  })
+
+  it('links the epic PR from the epic', async () => {
+    const { project, a } = await setup()
+    await t.db.update(epics).set({ reviewMode: 'epic', prNumber: 12 }).where(eq(epics.id, a.id))
+    const list = await (await t.request('GET', `/api/projects/${project.slug}/epics`)).json()
+    expect(list).toContainEqual(expect.objectContaining({ id: a.id, prUrl: 'https://github.com/cormacrw/test-app/pull/12', reviewModeLocked: true }))
+  })
+
   it('edits dependencies through the API, audits and rejects cycles and task deadlocks atomically', async () => {
     const { project, a, b, first, second, dev } = await setup()
     const put = (id: string, dependsOn: string[]) => t.request('PUT', `/api/epics/${id}/dependencies`, { dependsOn })

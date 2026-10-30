@@ -25,46 +25,48 @@ async function handOff() {
     class="flex min-h-0 min-w-0 flex-1 flex-col"
     aria-label="Epic PR conflict"
   >
-    <header class="border-b border-default p-4">
-      <UBadge
-        label="Epic conflict · Needs you"
-        color="error"
-        variant="subtle"
-      />
-      <h1 class="mt-2 text-lg font-semibold">
-        {{ item.subject }}
-      </h1>
-      <p class="text-xs text-muted">
-        {{ item.project.name }} · the target branch {{ item.targetBranch }} is unchanged
+    <InboxEpicHeader
+      badge="Epic conflict · Needs you"
+      color="error"
+      :title="item.subject"
+      :epic-id="item.epicId"
+      :pr-url="item.prUrl"
+      pr-label="Open epic PR"
+    >
+      {{ item.project.name }} · the target branch {{ item.targetBranch }} is unchanged
+    </InboxEpicHeader>
+    <div class="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4">
+      <p class="break-words">
+        The epic PR can't rebase onto {{ item.targetBranch }}.
       </p>
-    </header>
-    <div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-      <p>The epic PR can't rebase onto {{ item.targetBranch }}.</p>
-      <ul
+      <section
         v-if="item.files.length"
-        class="space-y-1"
         aria-label="Conflicting files"
+        class="rounded-lg border border-default"
       >
-        <li
-          v-for="file in item.files"
-          :key="file"
-          class="font-mono text-sm break-all"
-        >
-          {{ file }}
-        </li>
-      </ul>
+        <h2 class="border-b border-default px-3 py-2 text-xs font-medium text-muted">
+          {{ item.files.length }} conflicting {{ item.files.length === 1 ? 'file' : 'files' }}
+        </h2>
+        <ul class="divide-y divide-default">
+          <li
+            v-for="file in item.files"
+            :key="file"
+            class="flex gap-2 px-3 py-2 font-mono text-sm break-all"
+          >
+            <UIcon
+              name="i-lucide-file-warning"
+              class="mt-0.5 size-4 shrink-0 text-error"
+            />
+            {{ file }}
+          </li>
+        </ul>
+      </section>
       <p
         v-else
         class="text-muted"
       >
         Corral couldn't work out which files conflict; the PR on GitHub shows them.
       </p>
-      <a
-        :href="item.prUrl"
-        target="_blank"
-        rel="noopener"
-        class="text-primary hover:underline"
-      >Open epic PR</a>
     </div>
     <footer class="space-y-3 border-t border-default p-4">
       <UAlert
@@ -79,6 +81,7 @@ async function handOff() {
         label="Hand the rebase to a developer"
         icon="i-lucide-git-branch"
         :loading="busy"
+        class="justify-center max-sm:min-h-11 max-sm:w-full"
         @click="handOff"
       />
     </footer>
