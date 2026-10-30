@@ -19,6 +19,9 @@ export default async function setup(): Promise<(() => Promise<void>) | void> {
     user: 'postgres',
     password: 'postgres',
     persistent: false,
+    // Match the deployed database. Without a locale it recognises, initdb here
+    // falls back to SQL_ASCII, which rejects the U& escapes in task constraints.
+    initdbFlags: ['--encoding=UTF8', '--locale=C'],
     onLog: () => {},
     onError: () => {}
   })
