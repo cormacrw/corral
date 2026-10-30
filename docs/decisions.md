@@ -658,7 +658,7 @@ Epic PR review state is kept on the epic (open, agent review, human review, chan
 
 ## D24 — Rebase-only rounds preserve approved work
 
-**Status:** Accepted 2026-10-29 (COR-151). Amends D10's task-PR conflict path and review-round accounting.
+**Status:** Accepted 2026-10-29 (COR-151), amended 2026-10-30 (COR-230). Amends D10's task-PR conflict path and review-round accounting.
 
 **Amended by D26:** rebase review leaves the gates to required CI, and runs them without the cache only when the project has no required checks.
 
@@ -668,7 +668,15 @@ Epic PR review state is kept on the epic (open, agent review, human review, chan
 
 The developer's prompt for this round is limited to fetching and rebasing onto `origin/<default>` (the project's configured `defaultBranch`), resolving conflicts while preserving **both sides' intent**, and re-running the project's gates (lint, typecheck, tests and build, D21). Never revert what main just merged to make the old task pass. Feature changes are not allowed. For a task PR based on an epic branch, use `origin/<base branch>` instead (D23); “main” here means the PR's actual base, not a hard-coded branch name. D23's separate epic-PR conflict-task flow is unchanged.
 
-The developer reports the new **`pr_rebased`** outcome, describing the conflicts and their resolutions. The runner pushes the rebased branch with `--force-with-lease`; the server moves **In progress → Agent review** in rebase-review mode. It retains the approved head, its previous criteria verdicts and the old and new base commits so the reviewer can compare the work before and after the rebase.
+The developer reports **`pr_rebased`** with **`review: trivial | needs_review`**, the files it resolved conflicts in, and a description of the conflicts and their resolutions. The runner pushes the rebased branch with `--force-with-lease`. The server retains the approved head, its previous criteria verdicts and the old and new base commits so the work before and after the rebase can be compared.
+
+- **`trivial`:** the server, not an agent, verifies the developer's judgment. The check passes only when both conditions hold:
+  1. Every file whose change differs between the approved diff (**old base → approved head**) and the new diff (**new base → new head**) is in the developer's conflicted-file list.
+  2. No project doc (`CORRAL.md`, `CLAUDE.md`, `docs/**`, `.corral/wiki/**`) changed on the base between the old and new base commits.
+  If the check passes, the approval and previous criteria verdicts carry over to the new head and the task returns directly to **Ready to merge**. If it fails, the server moves **In progress → Agent review** for the rebase review below and tells the reviewer which condition or conditions failed.
+- **`needs_review`:** the task goes straight to **Agent review** for the rebase review below.
+
+**Why developer judgment with a server check:** The developer knows how big its conflict resolution was. The server check stops it from waving through a change outside the conflicted files or a moved binding decision.
 
 ### Rebase review
 
@@ -678,13 +686,13 @@ The reviewer:
 - Checks each conflicted hunk against main's change, verifying that the resolution preserves both sides' intent and introduces no feature changes.
 - Checks the branch against any binding documentation main changed, and follows D26 for the gates.
 
-If the resolution is clean, the reviewer approves the new head. The **previous criteria verdicts and approval carry over** to that head; a rebase review does not re-judge the feature or require a fresh human approval solely because of the rebase. The task returns to **Ready to merge**, where CI and the live merge gates must pass for the new head.
+If the resolution is clean, the reviewer approves the new head. The **previous criteria verdicts and approval carry over** to that head; a rebase review does not re-judge the feature or require a fresh human approval solely because of the rebase. A carried-over approval, whether from the server check or an approved rebase review, returns the task to **Ready to merge** even when `humanReview` is set or its epic is `each_task`: the human approved before the conflict. CI and the live merge gates must still pass for the new head.
 
 If the resolution needs changes, the reviewer requests changes: **Agent review → In progress** starts a **normal developer round**, with normal review and `reviewRoundCap` accounting. The developer is no longer restricted to rebase-only work and reports `pr_updated` as usual.
 
-If main changed a **binding decision that the task's criteria rely on**, the reviewer instead **blocks the task for the human**, explaining the changed decision and the affected criteria. It must not pick a side or silently rewrite the criteria, even if the textual conflicts are easy to resolve. COR-118 changing the binding decision under COR-106 is the motivating example.
+If the rebase changed something substantial, the reviewer instead **blocks the task for the human**, explaining the substantial change and the affected criteria. This includes main changing a **binding decision that the task's criteria rely on**. It must not pick a side or silently rewrite the criteria, even if the textual conflicts are easy to resolve. COR-118 changing the binding decision under COR-106 is the motivating example.
 
-**Why existing roles:** This is a mode of the existing developer and reviewer roles, not a third agent role. The developer still changes the branch and the reviewer independently judges those changes; only their scope and the review's accounting differ. A third role would duplicate those responsibilities without adding an independent check. Explicit modes keep a mechanical conflict repair from consuming feature-review rounds or becoming an excuse to undo newly merged work.
+**Why existing roles:** This is a mode of the existing developer and reviewer roles, not a third agent role. The developer still changes the branch and, when rebase review is needed, the reviewer independently judges those changes; only their scope and the review's accounting differ. A third role would duplicate those responsibilities without adding an independent check. Explicit modes keep a mechanical conflict repair from consuming feature-review rounds or becoming an excuse to undo newly merged work.
 
 ---
 
