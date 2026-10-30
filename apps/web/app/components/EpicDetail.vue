@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import type { Epic, EpicDetail, PatchEpicInput } from '@corral/contracts'
+import type { AuditEntry, Epic, EpicDetail, PatchEpicInput } from '@corral/contracts'
 import type { TaskStatus } from '@corral/core'
 import { api, ApiError } from '~/composables/useApi'
-import { PRIORITY, STATUS } from '~/utils/labels'
+import { EPIC_REVIEW_MODE, PRIORITY, STATUS } from '~/utils/labels'
 
 // An epic: its title, description and progress, and the dependency tree of
 // its tasks. Docked in the flyout, as a page with room for a big tree, or
@@ -13,6 +13,7 @@ const emit = defineEmits<{ close: [] }>()
 const live = useLive()
 const flyout = useTaskFlyout()
 const toast = useToast()
+const history = ref<AuditEntry[]>([])
 const epic = ref<EpicDetail | null>(null)
 const error = ref<string | null>(null)
 const saved = ref(false)
@@ -39,6 +40,7 @@ async function setDependencies(ids: string[]) {
     epic.value = { ...epic.value, ...updated }
     selectedDependency.value = ''
     await loadRelated()
+    history.value = await api.epics.history(props.epicId)
   } catch (e) {
     dependencyError.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -47,7 +49,7 @@ async function setDependencies(ids: string[]) {
 }
 const editingDescription = ref(false)
 const descriptionDraft = ref('')
-const tab = useLocalStorage<'tasks' | 'graph'>('corral.epic.tab', 'tasks')
+const tab = useLocalStorage<'tasks' | 'graph' | 'activity'>('corral.epic.tab', 'tasks')
 let savedTimer: ReturnType<typeof setTimeout> | null = null
 
 const project = computed(() => live.state.value.projects.find(p => p.id === epic.value?.projectId) ?? null)
@@ -62,6 +64,7 @@ async function load() {
   try {
     epic.value = await api.epics.get(props.epicId)
     await loadRelated()
+    history.value = await api.epics.history(props.epicId)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   }
@@ -79,7 +82,7 @@ onMounted(() => {
   const stop = live.subscribe((event) => {
     if (!epic.value) return
     if (event.type === 'epic.updated' || event.type.startsWith('task.')) void loadRelated()
-    if (event.type === 'epic.updated' && event.epic.id === epic.value.id) epic.value = { ...epic.value, ...event.epic }
+    if (event.type === 'epic.updated' && event.epic.id === epic.value.id) void load()
     if ((event.type === 'task.updated' || event.type === 'task.created') && (event.task.epicId === epic.value.id || epic.value.tasks.some(t => t.id === event.task.id))) void load()
     if (event.type === 'task.deleted' && epic.value.tasks.some(t => t.id === event.taskId)) void load()
   })
@@ -258,6 +261,13 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
           @change="patch({ title: ($event.target as HTMLInputElement).value })"
         >
 
+        <p
+          class="text-sm text-muted"
+          :title="EPIC_REVIEW_MODE[epic.reviewMode].description"
+        >
+          Review: {{ EPIC_REVIEW_MODE[epic.reviewMode].label }}
+        </p>
+
         <section>
           <h3 class="mb-1 text-xs font-medium text-muted">
             Description
@@ -411,15 +421,32 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
       <section :class="['flex min-w-0 flex-col', props.mode === 'page' ? 'min-h-0 flex-1 max-[900px]:h-[560px]' : props.mode === 'mobile' ? 'shrink-0 px-4 pb-4' : 'min-h-0 px-4 pb-4']">
         <UTabs
           v-model="tab"
-          :items="[{ label: `Tasks (${epic.tasks.length})`, value: 'tasks', icon: 'i-lucide-list' }, { label: 'Graph', value: 'graph', icon: 'i-lucide-network' }]"
+          :items="[{ label: `Tasks (${epic.tasks.length})`, value: 'tasks', icon: 'i-lucide-list' }, { label: 'Graph', value: 'graph', icon: 'i-lucide-network' }, { label: 'Activity', value: 'activity', icon: 'i-lucide-activity' }]"
           :variant="props.mode === 'mobile' ? 'pill' : 'link'"
           :size="props.mode === 'mobile' ? 'md' : 'sm'"
           :content="false"
           :ui="props.mode === 'mobile' ? { indicator: 'bg-default shadow-xs', trigger: 'data-[state=active]:text-highlighted' } : undefined"
           :class="props.mode === 'page' && 'px-4 pt-2'"
         />
+        <div
+          v-if="tab === 'activity'"
+          class="flex min-h-0 flex-col gap-3 overflow-y-auto p-4"
+        >
+          <AuditActivity
+            v-for="entry in history"
+            :key="entry.id"
+            :entry="entry"
+            :text="entry.action === 'epic.updated' ? `edited ${(entry.detail.changed as string[] | undefined)?.join(', ') ?? 'the epic'}` : entry.action"
+          />
+          <p
+            v-if="!history.length"
+            class="text-sm text-muted"
+          >
+            No activity yet.
+          </p>
+        </div>
         <p
-          v-if="epic.tasks.length === 0"
+          v-else-if="epic.tasks.length === 0"
           class="p-6 text-center text-sm text-muted"
         >
           No tasks in this epic yet.
