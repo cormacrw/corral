@@ -341,6 +341,11 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
                     :title="message.text"
                     :actions="[{ label: 'Retry', onClick: () => send('Please continue.') }]"
                   />
+                  <PlanConfirmAction
+                    v-else-if="message.pendingAction"
+                    :message="message"
+                    @resolved="load"
+                  />
                   <PlanQuestion
                     v-else-if="message.kind === 'question'"
                     :message="message"

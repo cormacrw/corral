@@ -534,6 +534,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <UButton
+              v-if="task"
               label="Task details"
               variant="outline"
               color="neutral"
@@ -598,7 +599,7 @@ onBeforeUnmount(() => {
                 />
               </template>
               <NuxtLink
-                v-if="selected.type === 'activity'"
+                v-if="selected.type === 'activity' && task"
                 :to="selected.epicId ? `/epics/${selected.epicId}` : `/tasks/${selected.taskRef}`"
                 class="text-sm text-primary hover:underline"
               >{{ selected.epicId ? 'Open epic' : 'Open task' }}</NuxtLink>

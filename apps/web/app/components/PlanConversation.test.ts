@@ -58,7 +58,7 @@ async function open(id = 's-1', mobile = false) {
     global: {
       plugins: [[VueQueryPlugin, { queryClient: client }]],
       stubs: {
-        PromptComposer: true, PlanQuestion: true,
+        PromptComposer: true, PlanQuestion: true, PlanConfirmAction: true,
         AgentAvatar: true, PlanTurnSteps: true, PlanDetail: true,
         TaskFlyout: true, UDrawer: true, UBadge: true, UIcon: true,
         USkeleton: true, UTooltip: true, USelectMenu: true,

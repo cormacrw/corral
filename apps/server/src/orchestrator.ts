@@ -1,6 +1,6 @@
 import { appendAudit, auditEvent } from './audit.ts'
 import { EpicPullRequests, epicReviewContext } from './epic-prs.ts'
-import { RUNNER_HEARTBEAT_MS, epicReviewReportSchema, isPmDirectTool, pmDirectTools, evidenceKind, outcomeReportSchema, rebaseReviewReportSchema, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type PmRunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
+import { pmActionTools, requiresPmConfirmation, RUNNER_HEARTBEAT_MS, epicReviewReportSchema, isPmDirectTool, pmDirectTools, evidenceKind, outcomeReportSchema, rebaseReviewReportSchema, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type PmRunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
 import {
   ACTIVE_RUN_STATES,
   LEASE_DURATION_MS,
@@ -35,6 +35,7 @@ import { runEndValues, type RunEnd } from './run-lifecycle.ts'
 import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
 import { MergeOrchestrator } from './merge.ts'
 import type { ReleaseNotes } from './deployments.ts'
+import { PmActions, type PreparedPmAction } from './pm-actions.ts'
 import type { PlanService } from './plan.ts'
 import { getRun, listAgents, listEvidence } from './runs.ts'
 import { addComment, applyTransition, deleteTaskRows, findTaskByRef, loadTask, lockTask, toTaskState, type ProjectRow, type TaskContentEdit, type TaskRow } from './tasks.ts'
@@ -144,6 +145,7 @@ export class Orchestrator implements RunnerHandlers {
   // Picking a runner and recording the run on it happen one at a time, so
   // PM turns and claims never both take a runner's last slot
   #placing: Promise<unknown> = Promise.resolve()
+  readonly pmActions: PmActions
   readonly epicPrs: EpicPullRequests
   readonly pmTools: PmTools
   readonly merges: MergeOrchestrator
@@ -154,6 +156,19 @@ export class Orchestrator implements RunnerHandlers {
 
   constructor(deps: OrchestratorDeps) {
     this.#d = deps
+    this.pmActions = new PmActions({
+      db: deps.db,
+      events: deps.events,
+      prepare: (sessionId, tool, input) => this.#preparePmAction(sessionId, tool, input),
+      execute: async (_sessionId, tool, prepared, actor) => {
+        if (tool === 'delete_task' && prepared.taskId) {
+          await this.deleteTask(prepared.taskId, actor, prepared.input.reason as string | undefined ?? null)
+          return `Deleted ${String(prepared.input.taskRef)}.`
+        }
+        throw new ToolError(`Unknown confirm-required tool ${tool}`)
+      },
+      sessionChanged: async sessionId => this.plans?.actionSessionChanged(sessionId)
+    })
     this.epicPrs = new EpicPullRequests(deps)
     this.pmTools = new PmTools({ db: deps.db, transcripts: deps.transcripts })
     this.merges = new MergeOrchestrator({
@@ -299,6 +314,7 @@ export class Orchestrator implements RunnerHandlers {
 
   // Reads the kill switch; called once at startup
   async init(): Promise<void> {
+    await this.pmActions.recoverInterrupted()
     const [row] = await this.#d.db.select().from(settings).where(eq(settings.key, 'stopped'))
     this.#stopped = row?.value === true
     this.merges.stopped = this.#stopped
@@ -1153,12 +1169,16 @@ export class Orchestrator implements RunnerHandlers {
       developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'report_outcome'],
       designer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'submit_design', 'report_outcome'],
       reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'get_design', 'report_outcome'],
-      pm: ['attach_evidence', 'list_tasks', 'get_task', 'add_comment', 'get_run_outcomes', 'get_agent_activity', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs', ...Object.keys(pmDirectTools)]
+      pm: ['attach_evidence', 'list_tasks', 'get_task', 'add_comment', 'get_run_outcomes', 'get_agent_activity', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs', 'delete_task', ...Object.keys(pmDirectTools)]
     }
     if (!allowed[role]?.includes(tool)) throw new ToolError(`The ${role} can’t use ${tool}`)
     if (role === 'pm' && isPmDirectTool(tool)) {
       if (!ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
       return this.pmTools.call(tool, input, this.#actor(ctx), { sessionId: ctx.run.planSessionId, runId: ctx.run.id, projectId: ctx.project.id })
+    }
+    if (role === 'pm' && requiresPmConfirmation(tool)) {
+      if (!this.plans || !ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
+      return this.pmActions.propose(ctx.run.planSessionId, ctx.run.id, tool, input, this.#actor(ctx))
     }
     if (tool === 'get_attachment') return this.#getAttachment(ctx, z.object({ attachmentId: z.string() }).parse(input))
     if (tool === 'get_design') {
@@ -1219,6 +1239,25 @@ export class Orchestrator implements RunnerHandlers {
         return this.#reportOutcome(ctx, ctx.task?.rebaseOnly ? parseReport(rebaseReviewReportSchema, input) : parseReport(outcomeReportSchema, input))
     }
     throw new ToolError(`Unknown tool ${tool}`)
+  }
+
+  async #preparePmAction(sessionId: string, tool: string, input: unknown): Promise<PreparedPmAction> {
+    if (!requiresPmConfirmation(tool)) throw new ToolError(`Unknown confirm-required tool ${tool}`)
+    const parsed = z.object(pmActionTools[tool].input).strict().parse(input)
+    const { db } = this.#d
+    const [session] = await db.select().from(schema.planSessions).where(eq(schema.planSessions.id, sessionId))
+    if (!session) throw new ToolError('The conversation no longer exists')
+    const [project] = await db.select().from(projects).where(eq(projects.id, session.projectId))
+    if (!project) throw new ToolError('The project no longer exists')
+    if (tool === 'delete_task') {
+      const match = /^([A-Za-z]+)-(\d+)$/.exec(parsed.taskRef)
+      if (!match || match[1]!.toUpperCase() !== project.prefix.toUpperCase()) throw new ToolError('Use a task ref from this conversation’s project')
+      const [task] = await db.select().from(tasks).where(and(eq(tasks.projectId, project.id), eq(tasks.number, Number(match[2])), isNull(tasks.deletedAt)))
+      if (!task) throw new ToolError(`Task ${parsed.taskRef} no longer exists`)
+      if (task.status === 'merged') throw new ToolError('Merged tasks cannot be deleted')
+      return { input: { ...parsed, taskRef: taskRef(project.prefix, task.number) }, summary: `Delete ${taskRef(project.prefix, task.number)}: ${task.title}`, taskId: task.id, projectId: project.id }
+    }
+    throw new ToolError(`Unknown confirm-required tool ${tool}`)
   }
 
   #actor(ctx: RunContext): Actor {

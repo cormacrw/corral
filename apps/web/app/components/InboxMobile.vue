@@ -101,7 +101,7 @@ const tabs = computed(() => [
     <MobilePageHeader compact>
       <template #actions>
         <UButton
-          v-if="selected"
+          v-if="selected && task"
           :to="`/tasks/${selected.taskRef}`"
           label="Task"
           icon="i-lucide-list"
@@ -199,7 +199,7 @@ const tabs = computed(() => [
             :reviews="reviews.length > 0 ? reviews : task.latestReview ? [task.latestReview] : []"
           />
           <UButton
-            v-if="selected.type === 'activity'"
+            v-if="selected.type === 'activity' && task"
             :to="`/tasks/${selected.taskRef}`"
             label="Open task"
             color="neutral"
