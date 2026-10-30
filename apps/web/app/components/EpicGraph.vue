@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { isTaskDone } from '@corral/core'
+
 import type { Task } from '@corral/contracts'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -88,7 +90,8 @@ const layout = computed(() => {
     connectable: false
   }))
   const edges: Edge[] = props.tasks.flatMap(task => task.dependsOn.map((dep) => {
-    const done = byRef.get(dep)?.status === 'merged'
+    const dependency = byRef.get(dep)
+    const done = dependency ? isTaskDone(dependency) : false
     return {
       id: `${dep}->${task.ref}`,
       source: dep,

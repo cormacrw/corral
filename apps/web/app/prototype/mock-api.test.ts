@@ -107,7 +107,7 @@ describe('prototype mock API', () => {
       }))
       await mockCall('PATCH', '/projects/corral/tasks/6', { status: 'merged' })
       expect(events).toContainEqual(expect.objectContaining({
-        type: 'epic.updated', epic: expect.objectContaining({ id: 'e-design', taskCount: 7, mergedCount: 3 })
+        type: 'epic.updated', epic: expect.objectContaining({ id: 'e-design', taskCount: 8, mergedCount: 3 })
       }))
     } finally {
       await mockCall('PATCH', '/projects/corral/tasks/8', { status: 'blocked' })

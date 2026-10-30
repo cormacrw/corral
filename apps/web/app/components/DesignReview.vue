@@ -53,6 +53,7 @@ const scale = computed(() => available.value > 0 ? Math.min(1, available.value /
 
 // Only the version waiting on the human can be decided
 const decidable = computed(() => props.task.status === 'human_review' && selected.value?.status === 'submitted')
+const reopenable = computed(() => props.task.status === 'approved')
 const requesting = ref(false)
 const feedback = ref('')
 const approving = ref(false)
@@ -79,8 +80,12 @@ async function approve() {
 // version too, and the task goes back to In progress (D20)
 async function requestChanges(text: string): Promise<boolean> {
   try {
-    const { task } = await api.inbox.act(props.task.id, { action: 'request_changes', text })
-    if (task) emit('updated', task)
+    if (reopenable.value) {
+      emit('updated', await api.tasks.transition(props.slug, props.task.number, { type: 'human_request_changes', feedback: text }))
+    } else {
+      const { task } = await api.inbox.act(props.task.id, { action: 'request_changes', text })
+      if (task) emit('updated', task)
+    }
     feedback.value = ''
     requesting.value = false
     toast.add({ title: 'Changes requested', description: 'The developer picks it up on the next run.', color: 'success' })
@@ -206,13 +211,13 @@ async function requestChanges(text: string): Promise<boolean> {
       </div>
 
       <div
-        v-if="decidable"
+        v-if="decidable || reopenable"
         class="flex flex-col gap-2 rounded-lg border border-warning/40 bg-warning/5 p-3"
       >
         <div class="flex flex-wrap items-center gap-2">
-          <span class="me-auto text-sm">v{{ selected.version }} is waiting on your review.</span>
+          <span class="me-auto text-sm">{{ reopenable ? 'Design approved. Reopen with feedback to request a new version.' : `v${selected.version} is waiting on your review.` }}</span>
           <UButton
-            label="Request changes"
+            :label="reopenable ? 'Reopen design' : 'Request changes'"
             icon="i-lucide-pencil"
             variant="outline"
             color="neutral"
@@ -220,6 +225,7 @@ async function requestChanges(text: string): Promise<boolean> {
             @click="requesting = !requesting"
           />
           <UButton
+            v-if="decidable"
             :label="`Approve v${selected.version}`"
             icon="i-lucide-check"
             size="sm"
@@ -228,7 +234,7 @@ async function requestChanges(text: string): Promise<boolean> {
           />
         </div>
         <UInput
-          v-if="!requesting"
+          v-if="decidable && !requesting"
           v-model="note"
           placeholder="Note for the build plan (optional)"
           aria-label="Approval note for the PM"

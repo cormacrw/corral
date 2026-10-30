@@ -105,6 +105,7 @@ route('POST', '/projects/:slug/tasks', ([slug], body) => {
   emit({ type: 'task.created', task })
   return task
 })
+route('GET', '/projects/:slug/tasks/:number/designs', ([slug, number]) => f.designVersions[taskIn(slug!, number!).id] ?? [])
 route('GET', '/projects/:slug/tasks/:number', ([slug, number]) => taskIn(slug!, number!))
 route('PATCH', '/projects/:slug/tasks/:number', ([slug, number], body) => {
   const task = taskIn(slug!, number!)

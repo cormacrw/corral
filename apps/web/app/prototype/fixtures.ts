@@ -4,6 +4,7 @@ import type {
   AuditEntry,
   CliStatus,
   Comment,
+  DesignVersion,
   Epic,
   Evidence,
   GlobalStatus,
@@ -206,6 +207,7 @@ function criteria(...texts: string[]): Task['acceptanceCriteria'] {
 const [corral, site] = projects as [Project, Project]
 
 export const tasks: Task[] = [
+  task(corral, 19, { title: 'Approved navigation prototype', type: 'design', status: 'approved', epicId: 'e-design', branch: 'design/COR-19', humanReview: true }),
   task(corral, 1, { title: 'Design task type and versions', status: 'merged', epicId: 'e-design', prNumber: 60, prUrl: 'https://github.com/cormacrw/corral/pull/60', mergedAt: ago(60 * 20), mergeCommitSha: 'da0ebe6' }),
   task(corral, 2, { title: 'Serve design bundles sandboxed', status: 'merged', epicId: 'e-design', dependsOn: ['COR-1'], prNumber: 62, prUrl: 'https://github.com/cormacrw/corral/pull/62', mergedAt: ago(60 * 3), mergeCommitSha: 'e5e8457' }),
   task(corral, 3, {
@@ -633,4 +635,13 @@ export function inbox(): Inbox {
   }
   needsYou.sort((a, b) => b.at.localeCompare(a.at))
   return { needsYou, activity: [], resolved: [], count: needsYou.length }
+}
+
+// The Approved column's design also exercises the reopening panel.
+export const designVersions: Record<string, DesignVersion[]> = {
+  't-cor-19': [{
+    id: 'design-cor-19-v1', version: 1, status: 'approved', branch: 'design/COR-19', commitSha: 'prototype-navigation',
+    spec: '# Navigation prototype\n\n## Screens\n- navigation: project links and board states',
+    screenshots: [], previewUrl: 'about:blank', feedback: null, planSessionId: null, createdAt: ago(30)
+  }]
 }
