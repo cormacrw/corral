@@ -2,6 +2,7 @@
 // nothing here assumes there is only one user.
 export type Actor =
   | { kind: 'human', userId: string, viaPm?: { sessionId: string, runId: string } }
+  // A PM turn also carries its Plan session
   | { kind: 'agent', role: AgentRole, runId: string, sessionId?: string }
   | { kind: 'system', component: SystemComponent }
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { needsAttention } from '@corral/contracts'
-import type { Evidence, Inbox, InboxActionInput, InboxItem, PlanThreadItem, Review, Task, TaskInboxItem, ReleaseNotesItem } from '@corral/contracts'
-import { ROLE, timeAgo, type Color } from '~/utils/labels'
+import type { Evidence, Inbox, InboxActionInput, InboxItem, PlanThreadItem, Review, Task, PmActivityItem, TaskInboxItem, ReleaseNotesItem } from '@corral/contracts'
+import { inboxProjectLine, ROLE, timeAgo, type Color } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
 import { moveRadioSelection } from '~/utils/radio'
 
@@ -17,7 +17,7 @@ const props = defineProps<{
   error: string | null
   items: InboxItem[]
   selectedId: string | null
-  selected: TaskInboxItem | ReleaseNotesItem | null
+  selected: TaskInboxItem | PmActivityItem | ReleaseNotesItem | null
   alreadyResolved: boolean
   task: Task | null
   isSpike: boolean
@@ -410,7 +410,7 @@ const tabs = computed(() => [
                 <ProjectThumbnail
                   :project="item.project"
                   :size="16"
-                />{{ item.project.name }} · {{ item.taskRef }}
+                />{{ inboxProjectLine(item) }}
               </span>
             </span>
           </span>

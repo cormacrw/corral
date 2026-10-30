@@ -2,7 +2,7 @@ import { needsAttention, type InboxArtifact, type InboxSince, type ReleaseNotesI
 import { auditText, readAudit, type AuditView } from './audit.ts'
 import { epicInboxItems } from './epic-prs.ts'
 import { fileArtifacts, isNew, workNotes } from './inbox-changes.ts'
-import type { Inbox, InboxItem, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
+import type { Inbox, InboxItem, PlanThreadItem, PmActivityItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
 import { withMessage } from './inbox-message.ts'
 import { designPreviewUrl, humanCheckTally, richTextToPlainText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
@@ -50,7 +50,7 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     .orderBy(desc(auditLog.createdAt), desc(auditLog.id))
     .limit(limit * 3)
 
-  const activity: TaskInboxItem[] = []
+  const activity: (TaskInboxItem | PmActivityItem)[] = []
   const resolved: (TaskInboxItem | ReleaseNotesItem)[] = []
   for (const { entry, task, project } of entries) {
     const detail = readAudit(entry.detail)
@@ -80,16 +80,20 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     if (entry.actor.kind === 'human') resolved.push(item)
     else activity.push(item)
   }
-  // Read confirmed actions independently of tasks: deleting a Backlog task
-  // removes its row, but its PM attribution and conversation must survive.
-  const pmActions = await db.select({ entry: auditLog, project: projects }).from(auditLog)
-    .innerJoin(projects, eq(projects.id, auditLog.projectId))
-    .where(eq(auditLog.action, 'pm.action_confirmed')).orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(limit)
-  for (const { entry, project } of pmActions) {
-    const detail = entry.detail as { targetId: string | null, summary: string, sessionId: string, input: { taskRef?: string } }
-    if (!detail.targetId || !detail.input.taskRef) continue
-    const body = `${detail.summary}, confirmed by you. [PM conversation](/plan/${detail.sessionId})`
-    activity.push({ id: `pm-${entry.id}`, type: 'activity', project: projectTag(project), taskId: detail.targetId, taskRef: detail.input.taskRef, subject: detail.summary, preview: `${detail.summary}, confirmed by you`, body, sender: { name: 'PM', role: 'pm' }, at: entry.createdAt.toISOString(), prUrl: null, resolution: null })
+  // Read PM calls independently of tasks: deleting a Backlog task removes its
+  // row, but its PM attribution and conversation must survive. Removing a
+  // project clears the entry's project, so that join is a left join.
+  const pmCalls = await db.select({ entry: auditLog, project: projects }).from(auditLog)
+    .leftJoin(projects, eq(projects.id, auditLog.projectId))
+    .where(inArray(auditLog.action, [...PM_ACTIVITY]))
+    .orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(limit)
+  for (const { entry, project } of pmCalls) {
+    const detail = entry.detail as { targetId?: string | null, summary?: string, sessionId: string, input?: { taskRef?: string } }
+    const text = pmActivityText(entry.action, detail.summary ?? 'A PM action')
+    const base = { id: `pm-${entry.id}`, type: 'activity' as const, subject: text, preview: text, body: project ? `${text}. [PM conversation](/plan/${detail.sessionId})` : `${text}.`, sender: { name: 'PM', role: 'pm' as const }, at: entry.createdAt.toISOString(), prUrl: null, resolution: null }
+    const tag = project ? projectTag(project) : { id: '', slug: '', name: 'Removed project', thumbnailColor: null, thumbnailUrl: null }
+    if (project && detail.targetId && detail.input?.taskRef) activity.push({ ...base, project: tag, taskId: detail.targetId, taskRef: detail.input.taskRef })
+    else activity.push({ ...base, project: tag, taskId: null, taskRef: null })
   }
   resolved.push(...releases.filter(d => d.resolution))
   activity.sort((a, b) => b.at.localeCompare(a.at))
@@ -241,6 +245,18 @@ async function humanReviewNote(db: Executor, task: typeof tasks.$inferSelect): P
   }
   const met = review ? `, ${review.criteria.length === 1 ? '1 criterion' : `all ${review.criteria.length} criteria`} met` : ''
   return `Approved${met}. This task is marked for human review, so it needs your OK before it merges.`
+}
+
+const PM_ACTIVITY = ['pm.tool_called', 'pm.action_proposed', 'pm.action_confirmed', 'pm.action_cancelled', 'pm.action_failed'] as const
+
+function pmActivityText(action: string, summary: string): string {
+  switch (action) {
+    case 'pm.action_proposed': return `Proposed: ${summary}`
+    case 'pm.action_confirmed': return `${summary}, confirmed by you`
+    case 'pm.action_cancelled': return `${summary}, cancelled by you`
+    case 'pm.action_failed': return `Could not confirm: ${summary}`
+    default: return summary
+  }
 }
 
 function projectTag(project: typeof projects.$inferSelect) {

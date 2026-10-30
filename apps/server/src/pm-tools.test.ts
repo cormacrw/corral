@@ -1,57 +1,59 @@
-import { pmDirectTools, type RunEvent, type RunJob } from '@corral/contracts'
+import type { Inbox, PlanMessage, PlanSessionDetail, Project, RunEvent, RunJob } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { z } from 'zod'
 import { transcriptExcerpt } from './pm-tools.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './test-runner.ts'
 
-const { agents, auditLog, epics, runs, tasks } = schema
+const { auditLog, runs, tasks } = schema
 
-const transcriptOf = (events: RunEvent[]) => new TextEncoder().encode(events.map(e => JSON.stringify(e)).join('\n') + '\n')
+describe('transcriptExcerpt', () => {
+  const events: RunEvent[] = [
+    { type: 'system', text: 'started' },
+    { type: 'thinking', text: 'hidden' },
+    { type: 'tool_call', id: '1', tool: 'Bash', input: { command: 'ls' } },
+    { type: 'tool_result', id: '1', output: 'a.txt', isError: false },
+    { type: 'usage', inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 },
+    { type: 'message', text: 'All done' }
+  ]
 
-// Read through the runner protocol like a real PM turn
-describe('list_runs and get_run', () => {
+  it('keeps a short transcript whole and leaves reasoning and usage out', () => {
+    const { excerpt, truncated } = transcriptExcerpt(events, 1000)
+    expect(truncated).toBe(false)
+    expect(excerpt).toContain('[tool] Bash {"command":"ls"}')
+    expect(excerpt).toContain('All done')
+    expect(excerpt).not.toContain('hidden')
+  })
+
+  it('cuts to the end of the transcript, no longer than the limit, and says so', () => {
+    const result = transcriptExcerpt(events, 10)
+    expect(result.excerpt).toHaveLength(10)
+    expect(result.excerpt.endsWith('All done')).toBe(true)
+    expect(result).toMatchObject({ truncated: true, note: expect.stringContaining('last 10 of') })
+  })
+})
+
+describe('PM tools for projects, runs and the factory', () => {
   let t: TestApp
   let runner: FakeRunner
-  let pm: RunJob
-  let reviewer: typeof agents.$inferSelect
-  let developer: typeof agents.$inferSelect
-  let failedReview: typeof runs.$inferSelect
-  let taskReview: typeof runs.$inferSelect
+  let job: RunJob
+  let session: PlanSessionDetail
+  let project: Project
 
-  const call = (tool: 'list_runs' | 'get_run', input: unknown) => runner.call(pm.runId, pm.leaseEpoch, tool, input)
-  const result = async (tool: 'list_runs' | 'get_run', input: unknown) => {
-    const reply = await call(tool, input)
-    if (!reply.ok) throw new Error(reply.error)
-    return reply.result as Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
+  async function startSession(target: Project, text: string) {
+    const created = await (await t.request('POST', '/api/plan/sessions', { projectId: target.id, text })).json() as PlanSessionDetail
+    const assigned = (await runner.next('run.assign', m => m.job.planSessionId === created.id)).job
+    runner.send({ type: 'run.started', runId: assigned.runId, leaseEpoch: assigned.leaseEpoch, agentSessionId: `session-${created.id}` })
+    return { session: created, job: assigned }
   }
 
   beforeAll(async () => {
     t = await createTestApp('pglite', { listen: true })
-    await t.db.update(agents).set({ concurrency: 50 })
     runner = await FakeRunner.connect(t.server!.url)
-    const all = await t.db.select().from(agents)
-    reviewer = all.find(a => a.role === 'reviewer')!
-    developer = all.find(a => a.role === 'developer')!
-    const home = await t.createProject({ name: 'Planning project' })
-    const res = await t.request('POST', '/api/plan/sessions', { projectId: home.id, text: 'Why did the review fail?' })
-    expect(res.status).toBe(201)
-    pm = (await runner.next('run.assign', m => m.job.role === 'pm')).job
-    runner.send({ type: 'run.started', runId: pm.runId, leaseEpoch: pm.leaseEpoch, agentSessionId: 'sess' })
-    await vi.waitFor(async () => expect((await t.db.select().from(runs).where(eq(runs.id, pm.runId)))[0]?.state).toBe('running'))
-
-    // A failed epic review in another project: it has no task to search from
-    const other = await t.createProject({ name: 'Another project' })
-    const task = await t.createTask(other.slug)
-    const [epic] = await t.db.insert(epics).values({ projectId: other.id, title: 'Saved searches', createdBy: t.actor }).returning()
-    const ended = { state: 'failed' as const, startedAt: new Date(), endedAt: new Date() }
-    const [review] = await t.db.insert(runs).values({ agentId: reviewer.id, projectId: other.id, epicId: epic!.id, role: 'reviewer', runnerName: 'home-server', error: 'spawn E2BIG', ...ended }).returning()
-    const [onTask] = await t.db.insert(runs).values({ agentId: reviewer.id, projectId: other.id, taskId: task.id, role: 'reviewer', error: 'e'.repeat(5000), transcriptBlob: await t.blobs.put(transcriptOf([{ type: 'message', text: 'x'.repeat(500) }, { type: 'message', text: 'the end' }])), ...ended }).returning()
-    await t.db.insert(runs).values({ agentId: developer.id, projectId: other.id, taskId: task.id, role: 'developer', ...ended })
-    failedReview = review!
-    taskReview = onTask!
+    project = await t.createProject()
+    await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
+    ;({ session, job } = await startSession(project, 'Look after the factory'))
   })
 
   afterAll(async () => {
@@ -59,121 +61,180 @@ describe('list_runs and get_run', () => {
     await t?.close()
   })
 
-  it('retrieves a failed epic review by its displayed number, with no task reference', async () => {
-    expect(await result('get_run', { runNumber: failedReview.number })).toMatchObject({
-      id: failedReview.id,
-      number: failedReview.number,
-      taskRef: null,
-      epicId: failedReview.epicId,
-      epicTitle: 'Saved searches',
-      agentName: reviewer.name,
-      agentRuntime: 'claude-code',
-      runnerName: 'home-server',
-      role: 'reviewer',
-      state: 'failed',
-      outcome: null,
-      error: 'spawn E2BIG',
-      startedAt: failedReview.startedAt!.toISOString(),
-      endedAt: failedReview.endedAt!.toISOString()
-    })
+  const call = (tool: Parameters<FakeRunner['call']>[2], input: unknown = {}, via = job) => runner.call(via.runId, via.leaseEpoch, tool, input)
+  const result = async <T>(tool: Parameters<FakeRunner['call']>[2], input: unknown = {}, via = job) => {
+    const response = await call(tool, input, via) as { ok: boolean, result: T, error?: string }
+    expect(response, response.error).toMatchObject({ ok: true })
+    return response.result
+  }
+  const resolve = (sessionId: string, id: string, decision: 'confirm' | 'cancel') => t.request('POST', `/api/plan/sessions/${sessionId}/actions/${id}`, { decision })
+  const inbox = async () => (await t.request('GET', '/api/inbox')).json() as Promise<Inbox>
+  async function liveRun(status: 'running' | 'interrupted' = 'running') {
+    const task = await t.createTask(project.slug, { title: `Work ${crypto.randomUUID()}` })
+    const [pm] = await t.db.select().from(runs).where(eq(runs.id, job.runId))
+    const [run] = await t.db.insert(runs).values({ agentId: pm!.agentId, projectId: project.id, taskId: task.id, role: 'developer', state: status, leaseEpoch: 1, runnerId: pm!.runnerId, summary: 'x'.repeat(5000), outcome: status === 'running' ? null : 'pr_opened' }).returning()
+    await t.db.update(tasks).set({ leaseRunId: run!.id, leaseEpoch: 1, leaseRole: 'developer', leaseExpiresAt: new Date(Date.now() + 60_000) }).where(eq(tasks.id, task.id))
+    return { task, run: run! }
+  }
+
+  it('reads projects, and refuses unknown fields', async () => {
+    expect(await result('list_projects')).toMatchObject({ projects: [expect.objectContaining({ slug: project.slug })] })
+    expect(await result('get_project', { project: project.slug })).toMatchObject({ id: project.id })
+    expect(await call('get_project', { project: 'nope' })).toMatchObject({ ok: false, error: expect.stringContaining('not_found') })
+    expect(await call('get_project', { project: project.slug, extra: 1 })).toMatchObject({ ok: false })
   })
 
-  it('still looks a run up by its id', async () => {
-    expect(await result('get_run', { runId: failedReview.id })).toMatchObject({ number: failedReview.number })
+  it('update_project changes a setting and attributes it to the PM session in Activity', async () => {
+    expect(await call('update_project', { project: project.slug })).toMatchObject({ ok: false, error: expect.stringContaining('Nothing to change') })
+    await result('update_project', { project: project.slug, reviewRoundCap: 9, requiredChecks: ['ci'] })
+    expect(await (await t.request('GET', `/api/projects/${project.slug}`)).json()).toMatchObject({ reviewRoundCap: 9, requiredChecks: ['ci'] })
+    const [updated] = await t.db.select().from(auditLog).where(eq(auditLog.action, 'project.updated'))
+    expect(updated).toMatchObject({ actor: { kind: 'agent', role: 'pm', runId: job.runId, sessionId: session.id } })
+    const item = (await inbox()).activity.find(a => a.preview.includes('reviewRoundCap'))
+    expect(item).toMatchObject({ type: 'activity', taskRef: null, sender: { name: 'PM', role: 'pm' }, project: { id: project.id } })
+    expect(item!.body).toContain(`/plan/${session.id}`)
   })
 
-  it('says so when a run does not exist, and asks for exactly one identifier', async () => {
-    expect(await call('get_run', { runNumber: 99_999_999 })).toMatchObject({ ok: false, error: 'Run #99999999 doesn\'t exist' })
-    const id = '00000000-0000-4000-8000-000000000000'
-    expect(await call('get_run', { runId: id })).toMatchObject({ ok: false, error: `Run ${id} doesn't exist` })
-    expect(await call('get_run', {})).toMatchObject({ ok: false, error: 'Pass runNumber or runId, not both' })
-    expect(await call('get_run', { runId: id, runNumber: 1 })).toMatchObject({ ok: false, error: 'Pass runNumber or runId, not both' })
+  it('create_project needs every repository check to pass', async () => {
+    const check = { kind: 'check_repo' } as const
+    const reply = (found: boolean) => void runner.next('job.request', m => m.job.kind === check.kind).then(m => runner.send({ type: 'job.result', jobId: m.jobId, ok: true, result: { kind: 'check_repo', signedIn: true, found, canPush: found, cloned: found, defaultBranch: found ? 'trunk' : null, error: null } as never }))
+    reply(false)
+    expect(await call('create_project', { name: 'Nope', prefix: 'NOP', repository: 'acme/nope' })).toMatchObject({ ok: false, error: expect.stringContaining('was not created') })
+    expect((await (await t.request('GET', '/api/projects')).json() as Project[]).some(p => p.name === 'Nope')).toBe(false)
+    reply(true)
+    const created = await result<Project>('create_project', { name: 'Yes', prefix: 'YES', repository: 'acme/yes' })
+    expect(created).toMatchObject({ defaultBranch: 'trunk' })
+    await t.request('PATCH', `/api/projects/${created.slug}`, { paused: true })
   })
 
-  it('says explicitly when the agent failed before producing a transcript', async () => {
-    expect((await result('get_run', { runNumber: failedReview.number })).transcript).toEqual({
-      excerpt: '',
-      truncated: false,
-      empty: true,
-      note: 'This run has no agent transcript: the agent produced nothing before the run ended.'
-    })
+  it('lists a task\'s runs with outcomes, filters and notes a cap; get_run caps its excerpt', async () => {
+    const { task, run } = await liveRun('interrupted')
+    await liveRun('interrupted')
+    await t.transcripts.append(run.id, [{ type: 'message', text: 'y'.repeat(500) }])
+    const listed = await result<{ runs: { id: string, outcome: string, summary: string }[], note: string }>('list_runs', { taskRef: task.ref })
+    expect(listed.runs).toHaveLength(1)
+    expect(listed.runs[0]).toMatchObject({ id: run.id, outcome: 'pr_opened' })
+    expect(listed.runs[0]!.summary.length).toBeLessThan(400)
+    expect(listed.note).toContain('cut to')
+    const limited = await result<{ runs: unknown[], note: string }>('list_runs', { project: project.slug, status: 'interrupted', limit: 1 })
+    expect(limited.runs).toHaveLength(1)
+    expect(limited.note).toContain('there are more')
+    const got = await result<{ outcome: string, transcript: { excerpt: string, truncated: boolean, note: string } }>('get_run', { runId: run.id, transcriptLimit: 100 })
+    expect(got.outcome).toBe('pr_opened')
+    expect(got.transcript.excerpt).toHaveLength(100)
+    expect(got.transcript).toMatchObject({ truncated: true, note: expect.stringContaining('100') })
   })
 
-  it('bounds the transcript to its end and says when it was cut', async () => {
-    const short = await result('get_run', { runNumber: taskReview.number, transcriptLimit: 10 })
-    expect(short.transcript).toMatchObject({ truncated: true, empty: false, excerpt: 'x\n\nthe end'.slice(-10), note: expect.stringContaining('last 10 of ') })
-    expect(short.error).toHaveLength(2001)
-    expect(short.note).toContain('cut to 2000')
-    const whole = await result('get_run', { runNumber: taskReview.number, transcriptLimit: 20_000 })
-    expect(whole.transcript).toMatchObject({ truncated: false, empty: false })
-    expect(whole.transcript.excerpt).toHaveLength(509)
+  it('message_run reaches the live run and refuses one that has ended', async () => {
+    const { task, run } = await liveRun()
+    const delivered = runner.next('run.message', m => m.runId === run.id)
+    await result('message_run', { runId: run.id, text: 'Use the new endpoint' })
+    expect((await delivered).text).toBe('From the PM: Use the new endpoint')
+    const comments = await (await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/comments`)).json() as { body: string, author: unknown }[]
+    expect(comments).toContainEqual(expect.objectContaining({ author: expect.objectContaining({ kind: 'agent', role: 'pm' }), body: expect.stringContaining('new endpoint') }))
+    expect((await inbox()).activity.some(a => a.preview.includes('Use the new endpoint'))).toBe(true)
+    const { run: ended } = await liveRun('interrupted')
+    expect(await call('message_run', { runId: ended.id, text: 'Hello?' })).toMatchObject({ ok: false, error: expect.stringContaining('run_not_live') })
   })
 
-  it('refuses a transcript limit over the maximum', async () => {
-    expect(await call('get_run', { runNumber: taskReview.number, transcriptLimit: 20_001 })).toMatchObject({ ok: false })
+  it('get_status matches the status and runner routes', async () => {
+    const status = await (await t.request('GET', '/api/status')).json() as Record<string, unknown>
+    const hub = await (await t.request('GET', '/api/runner')).json() as Record<string, unknown>
+    expect(await result('get_status')).toMatchObject({ stopped: status.stopped, updating: status.updating, online: hub.online, protocol: hub.protocol, runners: [expect.objectContaining({ id: (status.runners as { id: string }[])[0]!.id })] })
   })
 
-  it('lists failed reviewer runs across projects, epic reviews included', async () => {
-    const { runs: listed } = await result('list_runs', { role: 'reviewer', status: 'failed' })
-    expect(listed.map((r: { number: number }) => r.number)).toEqual([taskReview.number, failedReview.number])
-    expect(listed[1]).toMatchObject({ epicTitle: 'Saved searches', taskRef: null, error: 'spawn E2BIG', agentRuntime: 'claude-code' })
+  it('sets and clears the update hold, and shows a call that changed nothing', async () => {
+    expect(await result('set_update_hold')).toMatchObject({ updating: true })
+    expect(await result('clear_update_hold')).toMatchObject({ updating: false })
+    await result('clear_update_hold')
+    const activity = (await inbox()).activity
+    expect(activity.filter(a => a.preview === 'Held Corral for an update')).toHaveLength(1)
+    expect(activity.filter(a => a.preview === 'Lifted the update hold')).toHaveLength(1)
+    expect(activity.filter(a => a.preview.includes('already off'))).toHaveLength(1)
   })
 
-  it('caps the list, with a note when there is more', async () => {
-    const capped = await result('list_runs', { role: 'reviewer', status: 'failed', limit: 1 })
-    expect(capped.runs).toHaveLength(1)
-    expect(capped.runs[0].error).toHaveLength(301)
-    expect(capped.note).toContain('Showing the newest 1 matching runs')
+  it('audits every call with the PM session and shows reads and failures in Activity', async () => {
+    await result('get_status')
+    await call('get_project', { project: 'no-such-project' })
+    const rows = await t.db.select().from(auditLog).where(eq(auditLog.action, 'pm.tool_called'))
+    expect(rows.find(r => (r.detail as { tool: string }).tool === 'get_status')).toMatchObject({ actor: { sessionId: session.id }, detail: { sessionId: session.id, runId: job.runId, ok: true } })
+    const activity = (await inbox()).activity
+    const read = activity.find(a => a.preview === 'Checked Corral\'s status')
+    expect(read).toMatchObject({ taskRef: null, sender: { name: 'PM', role: 'pm' } })
+    expect(read!.body).toContain(`/plan/${session.id}`)
+    const failed = activity.find(a => a.preview.startsWith('Could not read a project'))
+    expect(failed!.preview).toBe('Could not read a project: not found')
+    expect(failed!.body).toContain(`/plan/${session.id}`)
   })
 
-  it('filters by project and status, and lists active runs', async () => {
-    const { runs: active } = await result('list_runs', { status: 'active' })
-    expect(active.map((r: { id: string }) => r.id)).toEqual([pm.runId])
-    const { runs: none } = await result('list_runs', { project: (await t.createProject()).slug })
-    expect(none).toEqual([])
-    expect(await call('list_runs', { taskRef: 'NOPE-1' })).toMatchObject({ ok: false, error: 'Task NOPE-1 doesn\'t exist' })
+  async function propose(tool: Parameters<FakeRunner['call']>[2], input: unknown = {}, via = job) {
+    return (await result<{ confirmationPending: boolean, actionId: string }>(tool, input, via)).actionId
+  }
+
+  it('stop_run acts only after Confirm, and fails if the run has already ended', async () => {
+    const { run } = await liveRun()
+    const id = await propose('stop_run', { runId: run.id })
+    expect((await t.db.select().from(runs).where(eq(runs.id, run.id)))[0]!.state).toBe('running')
+    expect((await inbox()).activity.some(a => a.preview.startsWith(`Proposed: Stop run #${run.number}`))).toBe(true)
+    expect(await (await resolve(session.id, id, 'cancel')).json()).toMatchObject({ pendingAction: { status: 'cancelled' } })
+    expect((await t.db.select().from(runs).where(eq(runs.id, run.id)))[0]!.state).toBe('running')
+    expect((await inbox()).activity.some(a => a.preview.startsWith(`Stop run #${run.number}`) && a.preview.endsWith('cancelled by you'))).toBe(true)
+    const again = await propose('stop_run', { runId: run.id })
+    expect(await (await resolve(session.id, again, 'confirm')).json()).toMatchObject({ pendingAction: { status: 'confirmed' } })
+    expect((await t.db.select().from(runs).where(eq(runs.id, run.id)))[0]!.state).toBe('interrupted')
+    const [stopped] = await t.db.select().from(auditLog).where(eq(auditLog.action, 'run.stopped'))
+    expect(stopped!.actor).toMatchObject({ kind: 'human', viaPm: { sessionId: session.id, runId: job.runId } })
+    expect((await inbox()).activity.some(a => a.preview.startsWith(`Stop run #${run.number}`) && a.preview.endsWith('confirmed by you'))).toBe(true)
+    expect(await call('stop_run', { runId: run.id })).toMatchObject({ ok: false, error: expect.stringContaining('isn\'t live') })
+
+    const { run: raced } = await liveRun()
+    const stale = await propose('stop_run', { runId: raced.id })
+    await t.db.update(runs).set({ state: 'failed' }).where(eq(runs.id, raced.id))
+    expect(await (await resolve(session.id, stale, 'confirm')).json()).toMatchObject({ pendingAction: { status: 'failed' } })
+    expect((await inbox()).activity.some(a => a.preview.startsWith(`Could not confirm: Stop run #${raced.number}`))).toBe(true)
   })
 
-  it('audits calls that worked and calls that failed, against the run\'s project', async () => {
-    await result('get_run', { runNumber: failedReview.number })
-    await call('get_run', { runNumber: 99_999_998 })
-    const entries = await t.db.select().from(auditLog).where(eq(auditLog.action, 'pm.tool_called'))
-    const read = entries.find(e => (e.detail as { summary: string }).summary === `Read run #${failedReview.number} on epic Saved searches`)
-    expect(read).toMatchObject({ projectId: failedReview.projectId, actor: { kind: 'agent', role: 'pm', runId: pm.runId } })
-    expect(entries.some(e => (e.detail as { ok: boolean, error?: string }).error === 'Run #99999998 doesn\'t exist')).toBe(true)
+  it('delete_project binds the card to the project, not its slug', async () => {
+    const other = await t.createProject()
+    const id = await propose('delete_project', { project: other.slug })
+    const { messages } = await (await t.request('GET', `/api/plan/sessions/${session.id}`)).json() as { messages: PlanMessage[] }
+    expect(messages.find(m => m.id === id)?.pendingAction).toMatchObject({ status: 'pending', targetId: other.id, summary: expect.stringContaining(`Remove project ${other.name}`) })
+    expect((await t.request('GET', `/api/projects/${other.slug}`)).status).toBe(200)
+    await t.request('DELETE', `/api/projects/${other.slug}`, { confirm: other.name })
+    const replacement = await t.createProject({ slug: other.slug, name: 'Replacement' })
+    await t.request('PATCH', `/api/projects/${replacement.slug}`, { paused: true })
+    expect(await (await resolve(session.id, id, 'confirm')).json()).toMatchObject({ pendingAction: { status: 'failed', error: expect.stringContaining('changed') } })
+    expect((await t.request('GET', `/api/projects/${replacement.slug}`)).status).toBe(200)
   })
 
-  it('refuses these tools to developer, designer and reviewer runs', async () => {
-    const project = await t.createProject()
-    const task = await t.createTask(project.slug)
-    const [{ runnerId }] = await t.db.select({ runnerId: runs.runnerId }).from(runs).where(eq(runs.id, pm.runId)) as [{ runnerId: string }]
-    for (const role of ['developer', 'designer', 'reviewer'] as const) {
-      const agent = (await t.db.select().from(agents)).find(a => a.role === role)!
-      const [row] = await t.db.insert(runs).values({ agentId: agent.id, projectId: project.id, taskId: task.id, role, state: 'running', startedAt: new Date(), leaseEpoch: 7, runnerId, leaseExpiresAt: new Date(Date.now() + 60_000) }).returning()
-      // The lease a claim gives it, so the role is what gets refused
-      await t.db.update(tasks).set({ leaseRunId: row!.id, leaseRole: role, leaseEpoch: 7, leaseExpiresAt: new Date(Date.now() + 60_000) }).where(eq(tasks.id, task.id))
-      for (const tool of ['list_runs', 'get_run', 'get_agent_activity'] as const) {
-        expect(await runner.call(row!.id, 7, tool, {})).toMatchObject({ ok: false, error: `The ${role} can’t use ${tool}` })
-      }
-    }
-  })
-})
-
-describe('transcriptExcerpt', () => {
-  it('leaves out thinking and usage, and treats a transcript of only those as empty', () => {
-    const silent: RunEvent[] = [{ type: 'thinking', text: 'hmm' }]
-    expect(transcriptExcerpt(silent, 100, true)).toMatchObject({ excerpt: '', empty: true })
+  it('delete_project can remove the conversation\'s own project and still records it', async () => {
+    const doomed = await t.createProject({ name: 'Doomed' })
+    await t.request('PATCH', `/api/projects/${doomed.slug}`, { paused: true })
+    const own = await startSession(doomed, 'Remove this project')
+    const id = await propose('delete_project', { project: doomed.slug }, own.job)
+    const response = await resolve(own.session.id, id, 'confirm')
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ pendingAction: { status: 'confirmed' } })
+    expect((await t.request('GET', `/api/projects/${doomed.slug}`)).status).toBe(404)
+    const deleted = (await t.db.select().from(auditLog).where(eq(auditLog.action, 'project.deleted'))).at(-1)
+    expect(deleted!.actor).toMatchObject({ kind: 'human', viaPm: { sessionId: own.session.id } })
+    const item = (await inbox()).activity.find(a => a.preview.startsWith('Remove project Doomed'))
+    expect(item).toMatchObject({ project: { name: 'Removed project' }, taskRef: null })
+    expect(item!.body).not.toContain('/plan/')
   })
 
-  it('tells a live run with no output yet from one that ended without any', () => {
-    expect(transcriptExcerpt([], 100, false).note).toBe('This run has no agent transcript yet.')
-  })
-
-  it('counts a transcript of only the runner\'s notes as empty, and keeps the notes', () => {
-    expect(transcriptExcerpt([{ type: 'system', text: 'Preparing a worktree' }], 100, true)).toMatchObject({ excerpt: '[system] Preparing a worktree', truncated: false, empty: true })
-  })
-
-  it('keeps the defaults within the schema\'s limits', () => {
-    expect(z.object(pmDirectTools.get_run.input).parse({ runNumber: 1 }).transcriptLimit).toBe(4_000)
+  it('stop_all and resume_all act only after Confirm', async () => {
+    const stop = await propose('stop_all')
+    const resume = await propose('resume_all')
+    expect((await (await t.request('GET', '/api/status')).json() as { stopped: boolean }).stopped).toBe(false)
+    await resolve(session.id, stop, 'cancel')
+    expect((await (await t.request('GET', '/api/status')).json() as { stopped: boolean }).stopped).toBe(false)
+    const confirmStop = await propose('stop_all')
+    expect(await (await resolve(session.id, confirmStop, 'confirm')).json()).toMatchObject({ pendingAction: { status: 'confirmed' } })
+    expect((await (await t.request('GET', '/api/status')).json() as { stopped: boolean }).stopped).toBe(true)
+    // The stop ended this PM turn, and the earlier card still works
+    await vi.waitFor(async () => expect((await t.db.select().from(runs).where(eq(runs.id, job.runId)))[0]!.state).toBe('interrupted'))
+    expect(await (await resolve(session.id, resume, 'confirm')).json()).toMatchObject({ pendingAction: { status: 'confirmed' } })
+    expect((await (await t.request('GET', '/api/status')).json() as { stopped: boolean }).stopped).toBe(false)
   })
 })

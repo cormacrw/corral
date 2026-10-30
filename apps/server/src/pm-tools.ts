@@ -1,31 +1,49 @@
-import { pmDirectTools, PM_RUN_LIST_MAX, type PmDirectTool, type Run, type RunEvent } from '@corral/contracts'
+import { pmDirectTools, PM_PROJECT_LIST_MAX, PM_RUN_LIST_MAX, type PmDirectTool, type RunEvent, type Run } from '@corral/contracts'
 import type { Actor } from '@corral/core'
 import { schema, type Database } from '@corral/db'
 import { and, eq, isNull } from 'drizzle-orm'
 import { z } from 'zod'
 import { appendAudit, auditEvent } from './audit.ts'
 import { ApiFailure, fromDatabaseError } from './errors.ts'
-import { findProjectBySlug } from './projects.ts'
-import { findRun, listRuns } from './runs.ts'
+import type { EventBus } from './events.ts'
+import type { Orchestrator } from './orchestrator.ts'
+import { createProject, findProjectBySlug, listProjects, patchProject, toProject } from './projects.ts'
+import type { RunnerHub } from './runner-hub.ts'
+import { findRun, getRun, listRuns } from './runs.ts'
+import { checkRepository } from './setup.ts'
 import type { Transcripts } from './transcripts.ts'
 
 const { projects, runs, tasks } = schema
 
+// A tool call fails after two minutes on the runner (TOOL_CALL_TIMEOUT_MS), so
+// the check gives up first: a project is never created behind a timed-out call
+const CHECK_REPO_TIMEOUT_MS = 100_000
 const RUN_TEXT_MAX = 2_000
 const LIST_TEXT_MAX = 300
 const TOOL_INPUT_MAX = 200
 const TOOL_OUTPUT_MAX = 500
 const ERROR_SUMMARY_MAX = 300
 
-// What each tool was trying to do, for the audit of a call that failed
+// What each tool was trying to do, for the Activity line of a call that failed
 const TOOL_GOALS: Record<PmDirectTool, string> = {
+  list_projects: 'list projects',
+  get_project: 'read a project',
+  update_project: 'change a project',
+  create_project: 'create a project',
   list_runs: 'list runs',
-  get_run: 'read a run'
+  get_run: 'read a run',
+  message_run: 'message a run',
+  get_status: 'check Corral\'s status',
+  set_update_hold: 'hold Corral for an update',
+  clear_update_hold: 'lift the update hold'
 }
 
 interface Deps {
   db: Database
+  events: EventBus
+  runner: RunnerHub
   transcripts: Transcripts
+  orchestrator: Pick<Orchestrator, 'status' | 'holdForUpdate' | 'releaseUpdate' | 'messageRun' | 'poke'>
 }
 
 export interface PmToolContext {
@@ -38,6 +56,7 @@ export interface PmToolContext {
 interface ToolResult {
   result: unknown
   projectId?: string
+  // What the call did, in the words Activity shows
   summary: string
 }
 
@@ -62,7 +81,7 @@ function eventLine(event: RunEvent): string | null {
 
 // The end of a transcript as text, never longer than the limit. It's empty
 // when the agent produced nothing, even if the runner noted what it was doing.
-export function transcriptExcerpt(events: RunEvent[], limit: number, ended: boolean) {
+export function transcriptExcerpt(events: RunEvent[], limit: number, ended = false) {
   const text = events.map(eventLine).filter(line => line !== null).join('\n\n')
   const truncated = text.length > limit
   const empty = !events.some(event => event.type === 'message' || event.type === 'tool_call' || event.type === 'tool_result')
@@ -80,10 +99,17 @@ function toolFailure(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error))
 }
 
-// The PM's direct tools. Each validates its typed input and calls the service
-// behind the matching route, and every call is audited with the PM run as
-// actor. Runs are global like the agents that do them (D13), so these reads
-// aren't limited to the conversation's project.
+// The same failure in plain words, for the Activity line
+function failureReason(error: unknown): string {
+  const failure = error instanceof ApiFailure ? error : fromDatabaseError(error)
+  if (!failure) return error instanceof Error ? error.message : String(error)
+  const { code, reason, constraint } = failure.body as { code: string, reason?: unknown, constraint?: unknown }
+  return typeof reason === 'string' ? reason : typeof constraint === 'string' ? `${code.replaceAll('_', ' ')}: ${constraint}` : code.replaceAll('_', ' ')
+}
+
+// The PM tools that act without a confirm card (D27). Each validates its typed
+// input and calls the service behind the matching route, and every call is
+// audited with the PM session as actor.
 export class PmTools {
   #d: Deps
   constructor(deps: Deps) { this.#d = deps }
@@ -92,20 +118,61 @@ export class PmTools {
     const audit = (projectId: string | undefined, outcome: { ok: boolean, summary: string, error?: string }) =>
       appendAudit(this.#d.db, { projectId: projectId ?? context.projectId, actor }, auditEvent('pm.tool_called', { sessionId: context.sessionId, runId: context.runId, tool, input, ...outcome }))
     try {
-      const { result, projectId, summary } = await this.#run(tool, input)
+      const { result, projectId, summary } = await this.#run(tool, input, actor)
       await audit(projectId, { ok: true, summary })
       return result
     } catch (error) {
       const failure = toolFailure(error)
-      await audit(undefined, { ok: false, error: failure.message, summary: `Could not ${TOOL_GOALS[tool]}: ${clip(failure.message, ERROR_SUMMARY_MAX)}` })
+      await audit(undefined, { ok: false, error: failure.message, summary: `Could not ${TOOL_GOALS[tool]}: ${clip(failureReason(error), ERROR_SUMMARY_MAX)}` })
       throw failure
     }
   }
 
-  async #run(tool: PmDirectTool, input: unknown): Promise<ToolResult> {
-    const { db, transcripts } = this.#d
+  async #run(tool: PmDirectTool, input: unknown, actor: Actor): Promise<ToolResult> {
+    const { db, events, orchestrator, runner, transcripts } = this.#d
     const strict = <T extends z.ZodRawShape>(shape: T) => z.object(shape).strict().parse(input)
     switch (tool) {
+      case 'list_projects': {
+        strict(pmDirectTools.list_projects.input)
+        const all = await listProjects(db)
+        return {
+          result: {
+            projects: all.slice(0, PM_PROJECT_LIST_MAX),
+            ...(all.length > PM_PROJECT_LIST_MAX && { note: `Showing the first ${PM_PROJECT_LIST_MAX} of ${all.length} projects.` })
+          },
+          summary: `Listed ${all.length} ${all.length === 1 ? 'project' : 'projects'}`
+        }
+      }
+
+      case 'get_project': {
+        const { project } = strict(pmDirectTools.get_project.input)
+        const row = await findProjectBySlug(db, project)
+        return { result: toProject(row), projectId: row.id, summary: `Read project ${row.name}` }
+      }
+
+      case 'update_project': {
+        const { project: slug, ...changes } = strict(pmDirectTools.update_project.input)
+        const fields = Object.entries(changes).filter(([, value]) => value !== undefined)
+        if (fields.length === 0) throw new Error('Nothing to change: pass at least one setting')
+        const project = await findProjectBySlug(db, slug)
+        const updated = await patchProject(db, project, changes, actor)
+        events.publish({ type: 'project.updated', project: updated })
+        orchestrator.poke()
+        const list = fields.map(([key, value]) => `${key} to ${JSON.stringify(value)}`).join(', ')
+        return { result: updated, projectId: project.id, summary: `Set ${list} on ${updated.name}` }
+      }
+
+      case 'create_project': {
+        const { defaultBranch, ...parsed } = strict(pmDirectTools.create_project.input)
+        const check = await checkRepository(db, runner, parsed.repository, CHECK_REPO_TIMEOUT_MS)
+        if (!check.ready) throw new Error(`The project was not created: ${check.checks.filter(c => !c.ok).map(c => `${c.title}: ${c.detail}`).join(' ')}`)
+        const branch = defaultBranch ?? check.defaultBranch
+        if (!branch) throw new Error('The project was not created: the repository has no default branch; pass defaultBranch')
+        const project = await createProject(db, { ...parsed, defaultBranch: branch }, actor)
+        events.publish({ type: 'project.created', project })
+        return { result: project, projectId: project.id, summary: `Created project ${project.name} for ${project.repository}` }
+      }
+
       case 'list_runs': {
         const { project, taskRef, role, status, limit } = strict(pmDirectTools.list_runs.input)
         const projectId = project ? (await findProjectBySlug(db, project)).id : undefined
@@ -145,6 +212,30 @@ export class PmTools {
           projectId: found.projectId,
           summary: `Read run #${found.number}${found.taskRef ? ` on ${found.taskRef}` : found.epicTitle ? ` on epic ${found.epicTitle}` : ''}`
         }
+      }
+      case 'message_run': {
+        const { runId, text } = strict(pmDirectTools.message_run.input)
+        const run = await getRun(db, runId)
+        const sent = await orchestrator.messageRun(run.projectId, runId, { text: `From the PM: ${text}`, attachments: [] }, actor)
+        return { result: { ok: true, runId: sent.runId, commentId: sent.comment.id }, projectId: run.projectId, summary: `Messaged run #${run.number}${run.taskRef ? ` on ${run.taskRef}` : ''}: ${clip(text, LIST_TEXT_MAX)}` }
+      }
+
+      case 'get_status':
+        strict(pmDirectTools.get_status.input)
+        return { result: { ...orchestrator.status, ...runner.status() }, summary: 'Checked Corral\'s status' }
+
+      case 'set_update_hold': {
+        strict(pmDirectTools.set_update_hold.input)
+        const held = orchestrator.status.updating
+        const busy = await orchestrator.holdForUpdate()
+        return { result: { ...orchestrator.status, busy }, summary: held ? 'Checked the update hold, which was already on' : 'Held Corral for an update' }
+      }
+
+      case 'clear_update_hold': {
+        strict(pmDirectTools.clear_update_hold.input)
+        const held = orchestrator.status.updating
+        orchestrator.releaseUpdate()
+        return { result: orchestrator.status, summary: held ? 'Lifted the update hold' : 'Tried to lift the update hold, which was already off' }
       }
     }
   }

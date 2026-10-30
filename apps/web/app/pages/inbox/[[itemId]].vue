@@ -2,7 +2,7 @@
 import type { Evidence, Inbox, InboxActionInput, Review, Task, TaskInboxItem, InboxItem, PlanThreadItem } from '@corral/contracts'
 import { inboxActions } from '~/utils/inbox-actions'
 import { api } from '~/composables/useApi'
-import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
+import { inboxProjectLine as projectLine, inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
 import { moveRadioSelection } from '~/utils/radio'
 
@@ -72,7 +72,7 @@ onMounted(() => {
   void load()
   const stop = live.subscribe((event) => {
     if ((event.type === 'plan.session' || event.type === 'deployment.updated') && event.markedRead) markRead(event.type === 'plan.session' ? event.session.id : event.deployment.id)
-    else if (['task.updated', 'task.deleted', 'task.created', 'run.updated', 'epic.updated', 'plan.session', 'deployment.updated', 'agent.updated'].includes(event.type)) void load()
+    else if (['task.updated', 'task.deleted', 'task.created', 'run.updated', 'epic.updated', 'plan.session', 'deployment.updated', 'agent.updated', 'project.updated', 'project.deleted'].includes(event.type)) void load()
   })
   onBeforeUnmount(stop)
 })
@@ -529,7 +529,7 @@ onBeforeUnmount(() => {
                 <span class="flex items-center gap-1"><ProjectThumbnail
                   :project="selected.project"
                   :size="16"
-                />{{ selected.project.name }} · {{ selected.taskRef }}</span>
+                />{{ projectLine(selected) }}</span>
                 <span>{{ selected.sender.name }} · {{ selected.sender.role }} · {{ timeAgo(selected.at) }}</span>
               </div>
             </div>

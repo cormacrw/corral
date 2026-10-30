@@ -11,6 +11,8 @@ const { planMessages, planSessions, auditLog, tasks } = schema
 export interface PreparedPmAction {
   input: Record<string, unknown>
   summary: string
+  // What the action is bound to: a confirmation can't move to another target
+  targetId: string | null
   taskId: string | null
   projectId: string
 }
@@ -47,7 +49,7 @@ export class PmActions {
   async propose(sessionId: string, runId: string, tool: string, input: unknown, actor: Actor) {
     if (!requiresPmConfirmation(tool)) throw new Error(`Not a confirm-required tool: ${tool}`)
     const prepared = await this.#d.prepare(sessionId, tool, input)
-    const action: PmAction = { tool, input: prepared.input, summary: prepared.summary.replace(/\s+/g, ' ').trim(), status: 'pending', targetId: prepared.taskId, error: null, result: null }
+    const action: PmAction = { tool, input: prepared.input, summary: prepared.summary.replace(/\s+/g, ' ').trim(), status: 'pending', targetId: prepared.targetId, error: null, result: null }
     const message = await this.#d.db.transaction(async (tx) => {
       const [session] = await tx.select().from(planSessions).where(eq(planSessions.id, sessionId)).for('update')
       if (!session || session.closedAt) throw new Error('This conversation is closed or no longer exists')
@@ -88,7 +90,7 @@ export class PmActions {
         if (session.closedAt) throw new Error('This conversation is closed')
         if (!requiresPmConfirmation(action.tool)) throw new Error('This tool is no longer available for confirmation')
         const prepared = await this.#d.prepare(sessionId, action.tool, action.input)
-        if (prepared.taskId !== action.targetId) throw new Error('The target of this action has changed')
+        if (prepared.targetId !== action.targetId) throw new Error('The target of this action has changed')
         action.result = await this.#d.execute(sessionId, action.tool, prepared, { ...actor, viaPm: { sessionId, runId: row.runId } })
         action.status = 'confirmed'
       } catch (error) {
@@ -102,13 +104,19 @@ export class PmActions {
         ? `Could not confirm: ${action.summary}. ${action.error}`
         : `Confirmed: ${action.summary}. ${typeof action.result === 'string' ? action.result : JSON.stringify(action.result)}`
     const resolved = await db.transaction(async (tx) => {
+      const [target] = action.targetId ? await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, action.targetId)) : []
+      // Removing the conversation's own project took the conversation with it
+      const [alive] = await tx.select({ id: planSessions.id }).from(planSessions).where(eq(planSessions.id, sessionId))
+      const projectId = alive ? session.projectId : null
+      const audit = { projectId, taskId: target?.id ?? null, actor, action: decision === 'cancel' ? 'pm.action_cancelled' : action.status === 'confirmed' ? 'pm.action_confirmed' : 'pm.action_failed', detail: { actionId, sessionId, runId: row.runId, targetId: action.targetId, proposer, tool: action.tool, input: action.input, summary: action.summary, result: action.result, error: action.error } }
+      await tx.insert(auditLog).values(audit)
+      if (!alive) return null
       const [message] = await tx.update(planMessages).set({ pendingAction: action }).where(eq(planMessages.id, actionId)).returning()
       const [result] = await tx.insert(planMessages).values({ sessionId, role: 'pm', kind: 'action_result', text }).returning()
-      const [target] = action.targetId ? await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, action.targetId)) : []
-      await tx.insert(auditLog).values({ projectId: session.projectId, taskId: target?.id ?? null, actor, action: decision === 'cancel' ? 'pm.action_cancelled' : action.status === 'confirmed' ? 'pm.action_confirmed' : 'pm.action_failed', detail: { actionId, sessionId, runId: row.runId, targetId: action.targetId, proposer, tool: action.tool, input: action.input, summary: action.summary, result: action.result, error: action.error } })
       await tx.update(planSessions).set({ unread: true, updatedAt: new Date() }).where(eq(planSessions.id, sessionId))
       return { message: message!, result: result! }
     })
+    if (!resolved) return toMessage({ ...row, pendingAction: action })
     events.publish({ type: 'plan.message', message: toMessage(resolved.message) })
     if (resolved.result) events.publish({ type: 'plan.message', message: toMessage(resolved.result) })
     await this.#d.sessionChanged(sessionId)
