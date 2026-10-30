@@ -2,7 +2,7 @@ import type { Actor } from '@corral/core'
 import { eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Database, DatabaseHandle } from './client.ts'
-import { agents, attachments, epicDependencies, epics, projects, runs, taskDependencies, tasks } from './schema.ts'
+import { agents, attachments, epicDependencies, epics, planMessages, planSessions, projects, runs, taskDependencies, tasks } from './schema.ts'
 import { createTestDatabase, postgresAvailable } from './testing.ts'
 
 const human: Actor = { kind: 'human', userId: '00000000-0000-4000-8000-000000000001' }
@@ -61,6 +61,30 @@ describe.each([
     const cause = (error as { cause?: { constraint?: string } }).cause
     expect(cause?.constraint ?? String(error)).toContain(constraint)
   }
+
+  it.skipIf(!enabled)('keeps plan message roles, kinds and question fields consistent on new rows, without validating history', async () => {
+    const project = await insertProject()
+    const [session] = await db.insert(planSessions).values({ projectId: project.id, title: 'Plan', createdBy: human }).returning()
+    const message = (values: Partial<typeof planMessages.$inferInsert>) => db.insert(planMessages).values({ sessionId: session!.id, role: 'pm', text: 'Hello', ...values })
+
+    await message({ role: 'human' })
+    await message({ kind: 'error' })
+    await message({ kind: 'question', recommendation: 'Yes', options: ['Yes', 'No'] })
+    await expectViolation(message({ role: 'system' as 'pm' }), 'plan_messages_role_kind')
+    await expectViolation(message({ kind: 'note' as 'message' }), 'plan_messages_role_kind')
+    await expectViolation(message({ role: 'human', kind: 'question' }), 'plan_messages_role_kind')
+    await expectViolation(message({ role: 'human', recommendation: 'Yes' }), 'plan_messages_question_fields')
+    await expectViolation(message({ role: 'human', options: ['Yes', 'No'] }), 'plan_messages_question_fields')
+    await expectViolation(message({ kind: 'error', recommendation: 'Yes' }), 'plan_messages_question_fields')
+
+    const constraints = await db.execute(sql`
+      select conname, convalidated from pg_constraint
+      where conrelid = 'plan_messages'::regclass and contype = 'c' order by conname`) as unknown as { rows: { conname: string, convalidated: boolean }[] }
+    expect(constraints.rows).toEqual([
+      { conname: 'plan_messages_question_fields', convalidated: false },
+      { conname: 'plan_messages_role_kind', convalidated: false }
+    ])
+  })
 
   it.skipIf(!enabled)('applies migrations to an empty database', async () => {
     // Both drivers return { rows }; the shared Database type can't say so

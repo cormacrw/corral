@@ -349,19 +349,34 @@ export interface PlanSession {
   updatedAt: string
 }
 
-export interface PlanMessage {
+// What a plan message says, by role and kind. Only PM questions carry a
+// recommendation or options, and only when the PM gave them.
+const plainPlanMessage = { text: z.string(), recommendation: z.null().default(null), options: z.null().default(null) }
+export const planMessageFields = z.discriminatedUnion('role', [
+  z.strictObject({ role: z.literal('human'), kind: z.literal('message'), ...plainPlanMessage }),
+  z.discriminatedUnion('kind', [
+    z.strictObject({ role: z.literal('pm'), kind: z.literal('message'), ...plainPlanMessage }),
+    z.strictObject({ role: z.literal('pm'), kind: z.literal('error'), ...plainPlanMessage }),
+    z.strictObject({
+      role: z.literal('pm'),
+      kind: z.literal('question'),
+      text: z.string().min(1),
+      recommendation: z.string().nullable().default(null),
+      options: z.array(z.string()).nullable().default(null)
+    })
+  ])
+])
+export type PlanMessageFields = z.output<typeof planMessageFields>
+export type NewPlanMessageFields = z.input<typeof planMessageFields>
+
+export type PlanMessage = PlanMessageFields & {
   id: string
   sessionId: string
-  role: 'human' | 'pm'
-  kind: 'message' | 'question' | 'error'
-  text: string
-  // Set only on questions, and only when the PM gave them
-  recommendation: string | null
-  options: string[] | null
   planId: string | null
   runId: string | null
   createdAt: string
 }
+export type PlanQuestion = Extract<PlanMessageFields, { kind: 'question' }>
 
 export type PlanStatus = 'proposed' | 'approved' | 'superseded' | 'discarded'
 
@@ -420,7 +435,7 @@ export interface PlanSessionDetail extends PlanSession {
 }
 
 // A client UUID makes a start safe to retry within the same project.
-export const startPlanSessionInput = z.object({
+export const startPlanSessionInput = z.strictObject({
   id: z.uuid().optional(),
   projectId: z.uuid(),
   // The PM's runtime for this session (D18); only a CLI the runner has
@@ -431,7 +446,8 @@ export const startPlanSessionInput = z.object({
 }).refine(input => input.text.length > 0 || input.taskRef, { message: 'Write a message or attach a task' })
 export type StartPlanSessionInput = z.infer<typeof startPlanSessionInput>
 
-export const planMessageInput = z.object({
+// Strict: a human message is only text, so question fields are rejected
+export const planMessageInput = z.strictObject({
   text: z.string().trim().default(''),
   taskRef: z.string().trim().optional()
 }).refine(input => input.text.length > 0 || input.taskRef, { message: 'Write a message or attach a task' })
@@ -490,7 +506,7 @@ export interface TaskInboxItem extends InboxItemBase {
 
 // An open Plan session waiting on the human (D11, amended): a question, a plan
 // needing approval or an unread PM reply
-export interface PlanThreadItem extends InboxItemBase {
+interface PlanThreadBase extends InboxItemBase {
   // The session ID
   id: string
   type: 'plan_thread'
@@ -501,17 +517,22 @@ export interface PlanThreadItem extends InboxItemBase {
   resolution: null
   sessionId: string
   runtime: AgentRuntime
-  status: PlanSession['status']
-  question: Pick<PlanMessage, 'text' | 'recommendation' | 'options'> | null
-  // The latest PM message, when the thread is listed only for an unread reply
-  reply: string | null
-  plan: (Pick<Plan, 'id' | 'version' | 'title' | 'summary'> & { epicCount: number, taskCount: number }) | null
   unread: boolean
-  // The plan waiting for approval, when status is needs_approval
-  planId: string | null
   // Set while a PM turn is running
   activeRunId: string | null
 }
+
+export type PlanThreadPlan = Pick<Plan, 'id' | 'version' | 'title' | 'summary'> & { epicCount: number, taskCount: number }
+
+// What the thread waits on: its status always comes with what that status
+// needs. 'none' is a thread listed only for an unread reply, the latest PM
+// message.
+export type PlanThreadAttention =
+  | { status: 'question', question: Pick<PlanQuestion, 'text' | 'recommendation' | 'options'>, plan: null, planId: null, reply: null }
+  | { status: 'needs_approval', question: null, plan: PlanThreadPlan, planId: string, reply: null }
+  | { status: 'none', question: null, plan: null, planId: null, reply: string }
+
+export type PlanThreadItem = PlanThreadBase & PlanThreadAttention
 
 export const epicReviewActionInput = z.object({
   action: z.enum(['approve', 'request_changes']),

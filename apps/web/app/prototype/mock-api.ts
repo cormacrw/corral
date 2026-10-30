@@ -1,5 +1,6 @@
 import { checkEpicDependencies } from '@corral/core'
-import type { CreateTaskInput, InboxActionInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
+import { planMessageFields } from '@corral/contracts'
+import type { CreateTaskInput, InboxActionInput, DraftSession, NewPlanMessageFields, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
 import * as f from './fixtures'
@@ -313,8 +314,8 @@ function emit(event: ServerEvent): void {
 }
 
 let nextId = 0
-function postMessage(sessionId: string, message: Omit<PlanMessage, 'id' | 'sessionId' | 'createdAt' | 'runId' | 'planId' | 'recommendation' | 'options'> & Partial<PlanMessage>): PlanMessage {
-  const m: PlanMessage = { recommendation: null, options: null, planId: null, runId: null, ...message, id: `mock-m-${++nextId}`, sessionId, createdAt: new Date().toISOString() }
+function postMessage(sessionId: string, message: NewPlanMessageFields, links: { planId?: string, runId?: string } = {}): PlanMessage {
+  const m: PlanMessage = { planId: null, runId: null, ...links, ...planMessageFields.parse(message), id: `mock-m-${++nextId}`, sessionId, createdAt: new Date().toISOString() }
   ;(f.planMessages[sessionId] ??= []).push(m)
   emit({ type: 'plan.message', message: m })
   return m
@@ -339,7 +340,7 @@ export function pmReply(sessionId: string, text: string): void {
     ;(f.plans[sessionId] ??= []).push(plan)
     emit({ type: 'plan.updated', plan })
     const summary = `Here is a plan with ${plan.tasks.length} tasks. Approve it to put them on the board.`
-    postMessage(sessionId, { role: 'pm', kind: 'message', text: summary, planId: plan.id })
+    postMessage(sessionId, { role: 'pm', kind: 'message', text: summary }, { planId: plan.id })
     Object.assign(s, { status: 'needs_approval', preview: summary, updatedAt: new Date().toISOString() })
   }
   emit({ type: 'plan.session', session: s })
@@ -371,7 +372,7 @@ route('POST', '/plan/sessions/:id/messages', ([id], body) => {
   setTimeout(() => {
     if (f.grilling[s.id]) pmReply(s.id, text)
     else {
-      postMessage(s.id, { role: 'pm', kind: 'message', text: reply, runId })
+      postMessage(s.id, { role: 'pm', kind: 'message', text: reply }, { runId })
       Object.assign(s, { preview: reply, status: f.plans[s.id]?.at(-1)?.status === 'proposed' ? 'needs_approval' : 'none' })
     }
     Object.assign(s, { activeRunId: null, unread: true, updatedAt: new Date().toISOString() })

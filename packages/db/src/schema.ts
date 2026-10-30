@@ -308,9 +308,9 @@ export const planSessions = pgTable('plan_sessions', {
 export const planMessages = pgTable('plan_messages', {
   id: uuid().primaryKey().defaultRandom(),
   sessionId: uuid().notNull().references(() => planSessions.id, { onDelete: 'cascade' }),
-  // 'human' or 'pm'; questions are PM messages flagged as such
-  role: text().notNull(),
-  kind: text().notNull().default('message'),
+  // Questions are PM messages flagged as such
+  role: text().$type<'human' | 'pm'>().notNull(),
+  kind: text().$type<'message' | 'question' | 'error'>().notNull().default('message'),
   text: text().notNull(),
   // A question's suggested answer and answer choices (ask_question)
   recommendation: text(),
@@ -318,7 +318,13 @@ export const planMessages = pgTable('plan_messages', {
   planId: uuid().references((): AnyPgColumn => plans.id, { onDelete: 'set null' }),
   runId: uuid().references(() => runs.id, { onDelete: 'set null' }),
   createdAt: createdAt()
-}, t => [index().on(t.sessionId, t.createdAt)])
+}, t => [
+  index().on(t.sessionId, t.createdAt),
+  // Only new and updated rows are checked: the migration adds these NOT VALID,
+  // so history stays as written and toMessage reads it
+  check('plan_messages_role_kind', sql`(${t.role} = 'human' and ${t.kind} = 'message') or (${t.role} = 'pm' and ${t.kind} in ('message', 'question', 'error'))`),
+  check('plan_messages_question_fields', sql`${t.kind} = 'question' or (${t.recommendation} is null and ${t.options} is null)`)
+])
 
 // A versioned plan from propose_plan; its tasks live in Backlog until a
 // human approves the plan (D9, D10)
