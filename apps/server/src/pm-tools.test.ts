@@ -151,7 +151,7 @@ describe('list_runs and get_run', () => {
       const agent = (await t.db.select().from(agents)).find(a => a.role === role)!
       const [row] = await t.db.insert(runs).values({ agentId: agent.id, projectId: project.id, taskId: task.id, role, state: 'running', startedAt: new Date(), leaseEpoch: 7, runnerId, leaseExpiresAt: new Date(Date.now() + 60_000) }).returning()
       // The lease a claim gives it, so the role is what gets refused
-      await t.db.update(tasks).set({ leaseRunId: row!.id, leaseEpoch: 7 }).where(eq(tasks.id, task.id))
+      await t.db.update(tasks).set({ leaseRunId: row!.id, leaseRole: role, leaseEpoch: 7, leaseExpiresAt: new Date(Date.now() + 60_000) }).where(eq(tasks.id, task.id))
       for (const tool of ['list_runs', 'get_run', 'get_agent_activity'] as const) {
         expect(await runner.call(row!.id, 7, tool, {})).toMatchObject({ ok: false, error: `The ${role} can’t use ${tool}` })
       }
