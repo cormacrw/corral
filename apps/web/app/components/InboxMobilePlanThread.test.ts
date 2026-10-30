@@ -16,7 +16,7 @@ vi.mock('~/composables/useApi', () => ({ api: { plan: mocks } }))
 
 const question: PlanThreadItem = {
   id: 's-2', sessionId: 's-2', type: 'plan_thread', taskId: null, taskRef: null, prUrl: null, resolution: null,
-  project: { id: 'p', name: 'Test app', slug: 'test-app', thumbnailColor: null },
+  project: { id: 'p', name: 'Test app', slug: 'test-app', thumbnailColor: null, thumbnailUrl: null },
   sender: { name: 'Juno', role: 'pm' }, at: '', subject: 'Push notifications', preview: '', runtime: 'claude-code',
   status: 'question', question: { text: 'Which service?', recommendation: 'Web Push', options: ['ntfy'] },
   plan: null, planId: null, unread: false, activeRunId: null, reply: null

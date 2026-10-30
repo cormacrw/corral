@@ -135,16 +135,19 @@ export const epics: Epic[] = [
   {
     id: 'e-site', projectId: 'p-site', title: 'Website refresh',
     description: 'Refresh the landing page and navigation.', dependsOn: [], blocks: [],
+    reviewMode: 'direct', branch: null, prNumber: null, prHeadSha: null, reviewState: null,
     taskCount: 2, mergedCount: 0, createdAt: ago(60 * 24), updatedAt: ago(30)
   },
   {
     id: 'e-shipped', projectId: 'p-site', title: 'Pricing fixes',
     description: 'Completed fixes.', dependsOn: [], blocks: [],
+    reviewMode: 'direct', branch: null, prNumber: null, prHeadSha: null, reviewState: null,
     taskCount: 1, mergedCount: 1, createdAt: ago(60 * 24), updatedAt: ago(10)
   },
   {
     id: 'e-empty', projectId: 'p-site', title: 'Future campaigns',
     description: 'Planning only.', dependsOn: [], blocks: [],
+    reviewMode: 'direct', branch: null, prNumber: null, prHeadSha: null, reviewState: null,
     taskCount: 0, mergedCount: 0, createdAt: ago(60), updatedAt: ago(5)
   }
 ]
