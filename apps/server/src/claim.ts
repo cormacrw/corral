@@ -27,7 +27,8 @@ export interface Claim {
 // nothing eligible or the agent is at capacity (flows.md step 2).
 //
 // Developer runs pick up Ready tasks (→ In progress) and In progress tasks
-// with no lease, e.g. after changes were requested (D10). Reviewer runs pick
+// with no lease, e.g. after changes were requested (D10). Priority wins first,
+// then In progress before Ready, then oldest createdAt and id. Reviewer runs pick
 // up Agent review tasks with no verdict since their latest submission (flows.md
 // step 6). Two claims can't take the same task: the candidate row is locked
 // with SKIP LOCKED, so a parallel claim moves on to the next task instead of
@@ -97,8 +98,11 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
         eq(tasks.paused, false),
         eq(projects.paused, false)
       ))
-      // Enum order: urgent first; id keeps the pages stable between batches
-      .orderBy(asc(tasks.priority), asc(tasks.createdAt), asc(tasks.id))
+      // Priority enum: urgent first. The explicit status rank avoids enum order;
+      // createdAt and id keep each status group stable across placement pages.
+      .orderBy(asc(tasks.priority), ...(agent.role === 'developer'
+        ? [asc(sql`case when ${tasks.status} = 'in_progress' then 0 else 1 end`)]
+        : []), asc(tasks.createdAt), asc(tasks.id))
       .limit(place ? PLACE_BATCH : 1)
       .offset(offset)
       .for('update', { of: tasks, skipLocked: true })

@@ -220,6 +220,57 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
     expect(claim?.taskId).toBe((await taskRow(project, 2)).id)
   })
 
+  it('orders developer claims by priority, status, age and id', async () => {
+    const project = await projectWithReadyTasks(6, ['medium', 'medium', 'medium', 'medium', 'high', 'medium'])
+    const rows = await Promise.all([1, 2, 3, 4, 5, 6].map(n => taskRow(project, n)))
+    for (const [i, row] of rows.entries()) {
+      await t.db.update(tasks).set({
+        status: i === 1 || i === 2 || i === 5 ? 'in_progress' : 'ready',
+        createdAt: new Date(i === 3 || i === 5 ? '2026-10-02' : i === 1 || i === 2 ? '2026-10-03' : '2026-10-01')
+      }).where(eq(tasks.id, row.id))
+    }
+    const agentId = await developer(6)
+    const claimed: string[] = []
+    for (let i = 0; i < rows.length; i++) claimed.push((await claimNextTask(t.db, agentId))!.taskId)
+    const byId = (a: typeof rows[number], b: typeof rows[number]) => a.id.localeCompare(b.id)
+    expect(claimed).toEqual([
+      rows[4]!.id, rows[5]!.id,
+      ...[rows[1]!, rows[2]!].sort(byId).map(r => r.id),
+      rows[0]!.id, rows[3]!.id
+    ])
+  })
+
+  it('keeps reviewer claims ordered by priority, age and id', async () => {
+    const project = await projectWithReadyTasks(4, ['medium', 'medium', 'high', 'medium'])
+    const rows = await Promise.all([1, 2, 3, 4].map(n => taskRow(project, n)))
+    for (const [i, row] of rows.entries()) {
+      await t.db.update(tasks).set({
+        status: 'agent_review', headSha: 'review-head',
+        createdAt: new Date(i === 0 ? '2026-10-02' : '2026-10-01')
+      }).where(eq(tasks.id, row.id))
+    }
+    const reviewer = await developer(4, { role: 'reviewer' })
+    const claimed: string[] = []
+    for (let i = 0; i < rows.length; i++) claimed.push((await claimNextTask(t.db, reviewer))!.taskId)
+    expect(claimed).toEqual([
+      rows[2]!.id,
+      ...[rows[1]!, rows[3]!].sort((a, b) => a.id.localeCompare(b.id)).map(r => r.id),
+      rows[0]!.id
+    ])
+  })
+
+  it('skips an unleased In progress task with an unmerged dependency', async () => {
+    const project = await projectWithReadyTasks(2)
+    const blocked = await taskRow(project, 1)
+    const ready = await taskRow(project, 2)
+    const dependency = await t.createTask(project.slug)
+    await t.db.insert(schema.taskDependencies).values({ taskId: blocked.id, dependsOnId: dependency.id })
+    await t.db.update(tasks).set({ status: 'in_progress' }).where(eq(tasks.id, blocked.id))
+
+    expect(await claimNextTask(t.db, await developer())).toMatchObject({ taskId: ready.id })
+    expect((await taskRow(project, 1)).leaseRunId).toBeNull()
+  })
+
   it('stops at the agent’s concurrency limit', async () => {
     await projectWithReadyTasks(2)
     const agentId = await developer(1)
@@ -236,13 +287,13 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
   })
 
   it('keeps looking past a full batch of tasks no runner can take', async () => {
-    // The runnable task is low priority; more urgent tasks than one batch
-    // holds wait ahead of it for a runner that isn't there
-    const project = await projectWithReadyTasks(1, ['low'])
+    // Older Ready work follows more than a page of unplaceable In progress
+    // tasks at the same priority, including tied timestamps.
+    const project = await projectWithReadyTasks(1)
     const runnable = await taskRow(project, 1)
     const blocked = PLACE_BATCH + 3
     await t.db.insert(tasks).values(Array.from({ length: blocked }, (_, i) => ({
-      projectId: project.id, number: i + 2, title: `Waiting ${i + 2}`, type: runnable.type, status: 'ready' as const, priority: 'urgent' as const, createdBy: runnable.createdBy
+      projectId: project.id, number: i + 2, title: `Waiting ${i + 2}`, type: runnable.type, status: 'in_progress' as const, priority: 'medium' as const, createdBy: runnable.createdBy, createdAt: new Date('2099-01-01')
     })))
     const tried: string[] = []
     const place: Place = async (_tx, task) => {
@@ -252,6 +303,8 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
 
     const claim = await claimNextTask(t.db, await developer(), new Date(), undefined, [], place)
     expect(claim).toMatchObject({ taskId: runnable.id, runnerId: 'runner-b' })
+    const waiting = await t.db.select().from(tasks).where(and(eq(tasks.projectId, project.id), eq(tasks.status, 'in_progress')))
+    expect(tried).toEqual([...waiting.filter(r => r.id !== runnable.id).sort((a, b) => a.id.localeCompare(b.id)).map(r => r.id), runnable.id])
     expect(new Set(tried).size).toBe(blocked + 1)
     expect((await taskRow(project, 2)).leaseRunId).toBeNull()
   })
