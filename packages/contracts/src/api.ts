@@ -591,10 +591,10 @@ export interface ServerStatus extends GlobalStatus {
   runners: RunnerInfo[]
 }
 
-// New agents. There is only one PM (D13), so only developers and reviewers.
+// New agents. There is only one PM (D13), so only developers, designers and reviewers.
 export const createAgentInput = z.object({
   name: z.string().trim().min(1).max(80),
-  role: z.enum(['developer', 'reviewer'], { message: 'Only one PM agent exists; the role must be developer or reviewer' }),
+  role: z.enum(['developer', 'designer', 'reviewer'], { message: 'Only one PM agent exists; the role must be developer, designer or reviewer' }),
   runtime: agentRuntime,
   concurrency: z.number().int().positive().default(1)
 })

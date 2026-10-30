@@ -1682,7 +1682,7 @@ export function feedbackComment(summary: string, verdicts: { criterionId: string
 export function actorLabel(actor: Actor): string {
   switch (actor.kind) {
     case 'human': return 'Human'
-    case 'agent': return actor.role === 'pm' ? 'PM' : actor.role === 'developer' ? 'Developer' : 'Reviewer'
+    case 'agent': return actor.role === 'pm' ? 'PM' : actor.role === 'developer' ? 'Developer' : actor.role === 'designer' ? 'Designer' : 'Reviewer'
     case 'system': return 'Corral'
   }
 }

@@ -17,7 +17,7 @@ export function projectNeedsYou(inbox: Inbox | null, projectId: string | undefin
   return inbox?.needsYou.filter(i => i.project.id === projectId && needsAttention(i)) ?? []
 }
 
-const VERB: Record<Agent['role'], string> = { pm: 'planning', developer: 'building', reviewer: 'reviewing' }
+const VERB: Record<Agent['role'], string> = { pm: 'planning', developer: 'building', designer: 'designing', reviewer: 'reviewing' }
 
 export function projectCardSummary(
   project: { paused: boolean },

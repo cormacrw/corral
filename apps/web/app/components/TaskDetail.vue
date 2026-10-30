@@ -342,7 +342,7 @@ function authorLabel(actor: Comment['author']): string {
   if (actor.kind === 'agent') {
     const run = runs.value.find(r => r.id === actor.runId)
     if (run) return run.agentName
-    return actor.role === 'pm' ? (live.state.value.agents.find(a => a.role === 'pm')?.name ?? 'PM') : actor.role === 'developer' ? 'Developer' : 'Reviewer'
+    return actor.role === 'pm' ? (live.state.value.agents.find(a => a.role === 'pm')?.name ?? 'PM') : actor.role === 'developer' ? 'Developer' : actor.role === 'designer' ? 'Designer' : 'Reviewer'
   }
   return 'Corral'
 }

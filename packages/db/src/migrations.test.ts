@@ -39,6 +39,28 @@ describe('migrations', () => {
   it.for([
     { driver: 'pglite' as const },
     { driver: 'postgres' as const }
+  ])('0035 adds designer without changing existing agents or runs on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+    requireDatabase(driver, context)
+    const before = await migrationsBefore('0035_amused_bloodaxe')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db, migrate } = await open(driver)
+    await migrate(before)
+    await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('Test app', 'test-app', 'TA', 'cormacrw/test-app', 'main')`)
+    await db.execute(sql`insert into agents (name, role) values ('Juno', 'pm'), ('Atlas', 'developer'), ('Vera', 'reviewer')`)
+    await db.execute(sql`insert into tasks (project_id, number, title, type, created_by) select id, 1, 'Existing task', 'task', '{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb from projects`)
+    await db.execute(sql`insert into runs (project_id, agent_id, task_id, role, state) select p.id, a.id, t.id, a.role, 'completed' from projects p, agents a, tasks t`)
+    const agents = (await db.execute(sql`select * from agents order by name`)).rows
+    const runs = (await db.execute(sql`select * from runs order by id`)).rows
+    await migrate(migrationsFolder)
+    expect((await db.execute(sql`select * from agents order by name`)).rows).toEqual(agents)
+    expect((await db.execute(sql`select * from runs order by id`)).rows).toEqual(runs)
+    await db.execute(sql`insert into agents (name, role) values ('Iris', 'designer')`)
+    expect((await db.execute(sql`select role from agents where name = 'Iris'`)).rows).toEqual([{ role: 'designer' }])
+  })
+
+  it.for([
+    { driver: 'pglite' as const },
+    { driver: 'postgres' as const }
   ])('upgrades historical runs and tasks after 0030 without data loss, on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
     requireDatabase(driver, context)
     const before = await migrationsBefore('0031_omniscient_firedrake')
