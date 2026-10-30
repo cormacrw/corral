@@ -36,6 +36,10 @@ export type SetupJob =
   // After a merge or deletion: remove the task's worktrees unless they hold
   // uncommitted work (flows.md step 10, PRD §7.4)
   | { kind: 'cleanup_worktrees', repository: string, taskId: string }
+  // Remove every worktree outside this keep set, which covers all projects.
+  // Developer worktrees with uncommitted work stay (PRD §7.4), and so does the
+  // checkout of a PM turn running on the runner.
+  | { kind: 'sweep_worktrees', keepTaskIds: string[], keepPlanSessionIds: string[] }
   // A Plan session's short title: the runner's `claude` CLI answers the
   // prompt with its smallest model and no tools (COR-40). Never a PM slot.
   | { kind: 'session_title', prompt: string }
@@ -47,6 +51,8 @@ export type SetupJobResult =
   | { kind: 'detect_clis', clis: { id: CliId, version: string | null, signedIn: boolean }[] }
   | { kind: 'github', status: number, body: unknown }
   | { kind: 'cleanup_worktrees', removed: string[], kept: string[] }
+  // `kept` is only what stayed because it holds uncommitted changes
+  | { kind: 'sweep_worktrees', removed: string[], kept: string[] }
   // The model's raw answer; the server cleans it up
   | { kind: 'session_title', title: string }
 
