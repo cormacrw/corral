@@ -4,6 +4,13 @@
 project-isolated data and CLI config volumes. Its `.env.example` defaults to
 `gaming-pc`, four slots and `developer,reviewer,design`. Use the explicit
 `--env-file deploy/runner/.env` when invoking Compose from the checkout root.
+Export `CORRAL_BUILD_SHA=$(git rev-parse HEAD)` before building: the runner-only
+Compose passes it to the image, just like the home-server Compose. It also passes
+`CORRAL_RUNNER_AUTO_UPDATE`, defaulting to `false`. Leave that off until the
+COR-188 updater timer is installed, or a behind runner drains without anything
+to rebuild it. For manual updates, pause projects and wait for active runs, update the
+checkout to the server commit, export the SHA again and rebuild; exact commands
+are in the WSL2 guide. The future updater must export the same build variable.
 
 The home-server Compose passes a shared `CORRAL_RUNNER_TOKEN` to server and local
 runner. With the token set it enables the separate runner-only listener on

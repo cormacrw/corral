@@ -1,4 +1,5 @@
 # Run from the checkout root with:
+# export CORRAL_BUILD_SHA=$(git rev-parse HEAD)
 # docker compose --env-file deploy/runner/.env -f deploy/runner/docker-compose.yml up -d --build
 # Separate project name keeps these volumes independent of the home-server stack.
 name: corral-remote-runner
@@ -8,11 +9,14 @@ services:
     build:
       context: ../..
       dockerfile: apps/runner/Dockerfile
+      args:
+        CORRAL_BUILD_SHA: ${CORRAL_BUILD_SHA:-development}
     container_name: corral-remote-runner
     environment:
       CORRAL_SERVER_URL: ${CORRAL_SERVER_URL:?set the home server tailnet URL and runner port}
       CORRAL_RUNNER_TOKEN: ${CORRAL_RUNNER_TOKEN:?set the shared runner token}
       CORRAL_RUNNER_NAME: ${CORRAL_RUNNER_NAME:-gaming-pc}
+      CORRAL_RUNNER_AUTO_UPDATE: ${CORRAL_RUNNER_AUTO_UPDATE:-false}
       CORRAL_RUNNER_SLOTS: ${CORRAL_RUNNER_SLOTS:-4}
       CORRAL_RUNNER_ROLES: ${CORRAL_RUNNER_ROLES:-developer,reviewer,design}
       CORRAL_GIT_AUTHOR_NAME: ${CORRAL_GIT_AUTHOR_NAME:?set the git author name}
