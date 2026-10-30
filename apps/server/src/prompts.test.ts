@@ -309,9 +309,10 @@ describe('reviewer gates (D26)', () => {
     const prompt = reviewerPrompt({ ...task, requiredChecks: [] }, 'Rita')
     expect(prompt).toContain('This project has no required CI checks')
     expect(prompt).toContain('Run the project\'s lint, typecheck, tests and build yourself before reporting, without the cache')
-    for (const check of ['lint', 'typecheck', 'test', 'build']) {
-      expect(prompt).toContain(`TURBO_FORCE=1 pnpm run ${check}`)
-    }
+    expect(prompt).toContain('pnpm run check --review')
+    expect(prompt).toContain('TURBO_FORCE=1 pnpm run build')
+    expect(prompt).toContain('Do not add concurrency, worker or timeout flags')
+    expect(prompt).toContain('cite the earlier check run and commit in your summary')
     expect(prompt).toContain('If you cannot run a check without the cache, explain which check and why in your outcome')
   })
 
@@ -333,7 +334,8 @@ describe('D21 evidence guidance', () => {
 
   it('keeps checks as gates and explains when a developer can use a note', () => {
     const prompt = developerPrompt(task, 'Tam')
-    expect(prompt).toContain('Run the project\'s lint, typecheck and tests before reporting')
+    expect(prompt).toContain('pnpm run check')
+    expect(prompt).toContain('Do not add concurrency, worker or timeout flags')
     expect(prompt).toContain('screenshots or video for anything visible, real requests and responses for APIs')
     expect(prompt).toContain('Use kind `note` only when there is nothing to show')
     expect(prompt).toContain('what changed and how it was checked, with file and line references')
@@ -387,7 +389,8 @@ describe('rebase-only developer prompts', () => {
       expect(prompt).toContain('origin/epic/release')
       expect(prompt).toContain('Make no other changes')
       expect(prompt).toContain('main\'s')
-      expect(prompt).toContain('lint, typecheck, tests and build')
+      expect(prompt).toContain('pnpm run check')
+      expect(prompt).toContain('then the project\'s build')
       expect(prompt).toContain('git merge-tree --write-tree HEAD origin/epic/release')
       expect(prompt).toContain('pr_rebased')
       expect(prompt).toContain('naming every conflicted file and how each was resolved')

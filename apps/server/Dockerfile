@@ -8,6 +8,7 @@ RUN npm install -g pnpm@12.15.0
 
 WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY patches patches
 COPY packages/tsconfig/package.json packages/tsconfig/
 COPY packages/core/package.json packages/core/
 COPY packages/contracts/package.json packages/contracts/

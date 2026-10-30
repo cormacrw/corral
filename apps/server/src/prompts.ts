@@ -171,7 +171,7 @@ function gatesSection(task: ReviewTask): string {
     const checks = task.requiredChecks.map(c => `\`${c}\``).join(', ')
     return section('Gates', `This project has required CI checks: ${checks}. They run on every push and the merge gate won't merge without them, so don't rerun the project's lint, typecheck, tests or build. Spend your time on the diff and the criteria.`)
   }
-  return section('Gates', `This project has no required CI checks, so nothing else verifies its gates. Run the project's lint, typecheck, tests and build yourself before reporting, without the cache: for Turbo projects, use \`TURBO_FORCE=1 pnpm run lint\`, \`TURBO_FORCE=1 pnpm run typecheck\`, \`TURBO_FORCE=1 pnpm run test\` and \`TURBO_FORCE=1 pnpm run build\`. Request changes if one fails. If you cannot run a check without the cache, explain which check and why in your outcome.`)
+  return section('Gates', `This project has no required CI checks, so nothing else verifies its gates. Run the project's lint, typecheck, tests and build yourself before reporting, without the cache: when available, use \`pnpm run check --review\` (bypasses the Turbo cache) and \`TURBO_FORCE=1 pnpm run build\`. Do not add concurrency, worker or timeout flags; use the repository's shared CPU setting. If check reports a reused clean review check for this exact head, skip the full check rerun and cite the earlier check run and commit in your summary. Otherwise run the gates without the cache using the repository's commands. Request changes if one fails. If you cannot run a check without the cache, explain which check and why in your outcome.`)
 }
 
 // A note has no file (D21): its text is the evidence, so it goes in whole,
@@ -325,7 +325,7 @@ export function developerPrompt(task: PromptTask, agentName: string): string {
 - You are in a git worktree on branch \`${task.branch}\`, based on \`${task.defaultBranch}\`. Commit your work on this branch.
 - Do not push and do not use \`gh\`. Corral pushes the branch and opens the PR when you report your outcome.
 - Use the supplied project brief and open relevant pages from its wiki file list when needed. Update the wiki in the same branch when behaviour changes.
-- Run the project's lint, typecheck and tests before reporting.
+- Run \`pnpm run check\` when available for lint, typecheck and tests before reporting. Do not add concurrency, worker or timeout flags; use the repository's shared CPU setting.
 - Prove each acceptance criterion with what a human would look at, attached through \`attach_evidence\`: screenshots or video for anything visible, real requests and responses for APIs. Use kind \`note\` only when there is nothing to show; say concretely what changed and how it was checked, with file and line references. Lint, typecheck, tests and build are gates; never attach their output as criterion evidence.
 - Use \`get_task\` to re-read the task, comments and evidence at any time, and \`add_comment\` to leave notes for the human or reviewer.
 - When the work is committed and evidenced, call \`report_outcome\` with outcome "${revision ? 'pr_updated' : 'pr_opened'}" and a summary. If anything is missing, the call fails and tells you what to fix.
@@ -476,7 +476,7 @@ function rebaseDeveloperPrompt(task: PromptTask, agentName: string): string {
     section('How to work', `
 - Fetch origin and rebase branch \`${task.branch}\` onto \`origin/${task.defaultBranch}\`.
 - Resolve conflicts keeping the base branch's (main's) changes and the approved branch's intent. Make no other changes; do not undo newly merged work.
-- Run the project's lint, typecheck, tests and build.
+- Run \`pnpm run check\` when available for lint, typecheck and tests, then the project's build. Do not add concurrency, worker or timeout flags; use the repository's shared CPU setting.
 - Check that \`git merge-tree --write-tree HEAD origin/${task.defaultBranch}\` is clean.
 - Do not push or use gh. Corral pushes with --force-with-lease.
 ${WORK_NOTE}
