@@ -86,7 +86,7 @@ An open Plan session (D9) that's waiting on you, shown as an Inbox item (D11). A
   - an **unread reply**: Juno finished a turn you haven't seen, with no question or plan pending (`reply` holds that message's text). Reading the thread, here or in Plan, takes it out of the list.
 - Idle sessions, with none of the three, aren't Inbox items. They stay in Plan and its side nav threads ([plan.md](plan.md#side-nav-threads)). There's no "Open in Plan" divider or group.
 - **Order:** Needs you is one list of task items, threads, epic items and release notes, **newest first** by when each arrived (`at`), with no grouping or divider. The page shows it in the server's order. A task arrives when it enters Human review, Blocked or Failed (its latest transition into that status), so an update that keeps its status, such as its PR head moving, doesn't move it. A thread arrives when it started waiting: when the question was asked, the plan was proposed or the unread reply came in. A release note arrives at its deployment time.
-- The **Needs you** count is exactly the number of listed items: the task items and the threads.
+- The **Needs you** count includes task items, threads and epic items, and excludes release notes.
 - `plan.session` events add, re-sort and remove threads live: a question, a new plan version or a finished Juno turn adds or moves a thread up; answering its question (until Juno asks again), approving its plan, reading its reply or closing it, here or in Plan, removes it at once.
 
 ### Row

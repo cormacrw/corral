@@ -101,12 +101,22 @@ describe('prototype mock API', () => {
 
   it('places release notes among the other items by deployment time, read or not', async () => {
     const ids = async () => (await mockCall<Inbox>('GET', '/inbox')).needsYou.map(i => i.id)
+    const inbox = await mockCall<Inbox>('GET', '/inbox')
+    expect(inbox.needsYou.find(i => i.id === 'release-demo')).toMatchObject({ unread: true })
     const before = await ids()
     const position = before.indexOf('release-demo')
     expect(position).toBeGreaterThan(0)
     expect(position).toBeLessThan(before.length - 1)
     await mockCall('POST', '/deployments/release-demo/read')
     expect(await ids()).toEqual(before)
+    const read = await mockCall<Inbox>('GET', '/inbox')
+    expect(read.needsYou.find(i => i.id === 'release-demo')).toMatchObject({ unread: false })
+    expect(read.count).toBe(inbox.count)
+    await mockCall('POST', '/deployments/release-demo/dismiss')
+    const dismissed = await mockCall<Inbox>('GET', '/inbox')
+    expect(dismissed.needsYou.some(i => i.id === 'release-demo')).toBe(false)
+    expect(dismissed.resolved.find(i => i.id === 'release-demo')).toMatchObject({ unread: false, resolution: 'You dismissed these release notes' })
+    expect(dismissed.count).toBe(inbox.count)
   })
 
   it('drops an unread-reply thread from the inbox once it is read', async () => {
