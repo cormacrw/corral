@@ -52,7 +52,7 @@ const expected = computed(() => state.value.runner?.protocol)
           class="text-xs text-muted"
           data-testid="runner-slots"
         >
-          {{ runner.online ? `${runner.slotsInUse} of ${runner.slots} slots in use` : `${runner.slots} slots` }}
+          {{ runner.online ? `${runner.slotsInUse} of ${runner.slots} slots in use` : `${runner.slots} ${runner.slots === 1 ? 'slot' : 'slots'}` }}
           · {{ runner.runtimes.map(runtimeLabel).join(', ') || 'no signed-in CLI' }}
           · {{ runnerRoles(runner.roles) || 'no roles' }}
         </p>
