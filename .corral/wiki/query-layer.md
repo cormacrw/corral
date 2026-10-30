@@ -38,7 +38,9 @@ A new `ServerEvent` type doesn't compile until it has an entry in `eventDependen
 
 ## Coalescing
 
-`live.ts` queues event invalidations and flushes once events pause for `QUIET_MS` (300 ms), or after `MAX_WAIT_MS` (2 s) of constant traffic. Each flush fetches a query once, however many keys cover it. So a burst with no pause over 300 ms is one refetch; a pause longer than that starts a second. Derived data can lag events by up to `QUIET_MS` when idle.
+`live.ts` queues event invalidations and flushes after `QUIET_MS` (1 s) without an event, or `MAX_WAIT_MS` (2 s) after the first queued event under constant traffic. Each flush fetches a query once, however many keys cover it. Any burst inside one second is therefore one refetch, whatever its pauses, unless earlier events had already started the 2 s clock: traffic that never pauses for a second refetches every 2 s, and that bound can fall inside a burst.
+
+Derived data lags events by 1 to 2 s. Entity writes and mutation invalidations don't go through the queue, so they apply at once.
 
 On SSE reconnect, everything is invalidated and active queries refetch. Inactive ones refetch when next shown.
 

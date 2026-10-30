@@ -103,6 +103,22 @@ describe('query layer', () => {
     for (const q of [inbox, history, list, unrelated]) q.wrapper.unmount()
   })
 
+  it.each([
+    ['two groups with a long pause', [...Array(10).keys()].flatMap(i => [i * 10, 600 + i * 10])],
+    ['the first and last event a second apart', [0, ...Array(19).fill(999)]]
+  ])('keeps an interrupted burst to one refetch: %s', async (_name, times: number[]) => {
+    const inbox = onScreen(client, keys.inbox(), () => ({ count: 0 }))
+    await vi.advanceTimersByTimeAsync(0)
+    const start = Date.now()
+    for (const at of times.toSorted((a, b) => a - b)) {
+      await vi.advanceTimersByTimeAsync(start + at - Date.now())
+      FakeEventSource.last.emit('task.updated', { type: 'task.updated', task: task() })
+    }
+    await vi.advanceTimersByTimeAsync(MAX_WAIT_MS)
+    expect(inbox.queryFn).toHaveBeenCalledTimes(2)
+    inbox.wrapper.unmount()
+  })
+
   it('refetches once when overlapping keys cover the same query', async () => {
     const comments = onScreen(client, keys.tasks.comments('COR-1'), () => [])
     await vi.advanceTimersByTimeAsync(0)

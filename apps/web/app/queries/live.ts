@@ -3,9 +3,11 @@ import { hashKey } from '@tanstack/vue-query'
 import { subscribeLive, subscribeReconnect } from '~/composables/useLive'
 import { applyEvent, invalidateKeys } from './dependencies'
 
-// Events arrive in bursts. Refetch once a burst goes quiet, and at the latest
-// after MAX_WAIT_MS so constant traffic can't hold a refetch back forever.
-export const QUIET_MS = 300
+// Events arrive in bursts, with pauses inside them. Refetch after a full second
+// without an event, so any gap within a one-second burst keeps it together, and
+// at the latest after MAX_WAIT_MS so constant traffic can't hold a refetch back
+// forever. MAX_WAIT_MS must exceed QUIET_MS: it's what a burst fits inside.
+export const QUIET_MS = 1000
 export const MAX_WAIT_MS = 2000
 
 export interface InvalidationQueue {
