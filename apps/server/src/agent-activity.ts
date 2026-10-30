@@ -3,7 +3,7 @@ import { schema, type Executor } from '@corral/db'
 import { and, desc, eq, inArray, notInArray, sql, type SQL } from 'drizzle-orm'
 import { listAgents } from './runs.ts'
 
-const { agents, epics, projects, runs, tasks } = schema
+const { epics, projects, runs, tasks } = schema
 
 // The tool's answer has to fit in one tool response, so runs are capped per
 // agent and long text is cut. Asking for one agent gets more of both.
