@@ -261,10 +261,10 @@ There is no separate notifications feed or bell. System events (usage limits, ru
 
 **Amended 2026-10-29 (COR-127): the PM's release notes are an Inbox item.** After each deploy (D16) the server records a **deployment**: the commits it shipped since the last one. The PM writes release notes for it in markdown, and those notes appear in the Inbox as a **Release notes** item for the deployment's project.
 
-- **Not Needs you:** release notes are something to read, not something an agent is waiting on, so they don't count toward the Needs you count (badge and tab) and don't sit under Needs you. They're listed with Activity, unread until the human opens them (the deployment's `readAt`).
+- **Not Needs you:** release notes are something to read, not something an agent is waiting on, so they don't count toward the Needs you count (badge and tab). They are listed below the attention items in the Inbox's `needsYou` list (COR-129), newest first, and remain unread until the human opens them (the deployment's `readAt`). Reading keeps them in the Inbox; Dismiss moves them to Resolved.
 - **Unchanged:** nothing else from the PM goes in the Inbox; system events (including a deploy that failed, which records no deployment) stay out.
 
-**Why:** the notes are written in the background after a deploy the human didn't trigger, which is the kind of thing the Inbox is for. Keeping them out of Needs you keeps that count meaning what's waiting on the human.
+**Why:** the notes are written in the background after a deploy the human didn't trigger, which is the kind of thing the Inbox is for. Keeping them out of the Needs you count keeps that count meaning what's waiting on the human.
 
 ---
 
