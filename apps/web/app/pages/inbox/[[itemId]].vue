@@ -141,7 +141,7 @@ function toggleTask() {
 const actions = computed(() => {
   if (!selected.value) return []
   switch (selected.value.type) {
-    case 'human_review': return [{ value: 'approve', label: 'Approve and merge', icon: 'i-lucide-check' }, { value: 'request_changes', label: 'Request changes', icon: 'i-lucide-pencil' }]
+    case 'human_review': return [{ value: 'approve', label: task.value?.type === 'spike' ? 'Accept findings' : 'Approve and merge', icon: 'i-lucide-check' }, { value: 'request_changes', label: 'Request changes', icon: 'i-lucide-pencil' }]
     case 'question':
     case 'blocked': return [{ value: 'clarify', label: 'Clarify and continue', icon: 'i-lucide-message-circle' }, { value: 'send_back', label: 'Send back to Backlog', icon: 'i-lucide-undo-2' }, { value: 'delete', label: 'Delete task', icon: 'i-lucide-trash-2' }]
     case 'failed': return [{ value: 'resolve', label: 'Retry', icon: 'i-lucide-rotate-ccw' }, { value: 'send_back', label: 'Send back to Backlog', icon: 'i-lucide-undo-2' }, { value: 'delete', label: 'Delete task', icon: 'i-lucide-trash-2' }]
@@ -175,6 +175,9 @@ async function submit(message: string): Promise<boolean> {
     actionError.value = 'Check each human criterion before approving.'
     return false
   }
+  // A live task update may remove this item before the action response arrives.
+  const actedOn = selected.value
+  const position = items.value.findIndex(i => i.id === actedOn.id)
   busy.value = true
   actionError.value = null
   try {
@@ -190,11 +193,10 @@ async function submit(message: string): Promise<boolean> {
             : action.value === 'delete'
               ? { action: 'delete', ...(message && { text: message }) }
               : action.value === 'send_back' ? { action: 'send_back' } : { action: 'approve' }
-      await api.inbox.act(selected.value.taskId, input)
-      toast.add({ title: 'Done', description: submitLabel.value, color: 'success' })
+      const description = action.value === 'approve' && task.value?.type === 'spike' ? 'You accepted the findings' : submitLabel.value
+      await api.inbox.act(actedOn.taskId, input)
+      toast.add({ title: 'Done', description, color: 'success' })
     }
-    const actedOn = selected.value
-    const position = items.value.findIndex(i => i.id === actedOn.id)
     text.value = ''
     await load()
     // Resolved: move on to the next item that needs you, or to the empty
@@ -482,7 +484,7 @@ onBeforeUnmount(() => {
                 class="text-sm"
               />
               <a
-                v-if="selected.prUrl"
+                v-if="task?.type !== 'spike' && selected.prUrl"
                 :href="selected.prUrl"
                 target="_blank"
                 rel="noopener"
@@ -490,7 +492,7 @@ onBeforeUnmount(() => {
               >Open PR</a>
               <template v-if="selected.type === 'human_review' && task">
                 <div
-                  v-if="task.gateChecks?.length"
+                  v-if="task.type !== 'spike' && task.gateChecks?.length"
                   class="flex flex-wrap gap-1"
                 >
                   <UBadge

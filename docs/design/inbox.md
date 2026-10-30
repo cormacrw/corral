@@ -49,7 +49,7 @@ There are three columns. The list divider can be resized (280–560px, default 3
   - The agent's message in plain English.
   - Type-specific context:
     - **Human review:** the PR link (`#41`), passing-check badges, and a card of acceptance criteria. Each criterion shows a met icon, the reviewer’s note, screenshot/video/request cards, then inline markdown notes. Agent artifacts are collapsed separately; see [Evidence review](task.md#evidence-review-d21).
-    - **Spikes always stop in Human review**, whatever their human-review flag says. They appear under Needs you and add one to its count. The message body is the latest `## Findings` comment, and the preview is the start of that comment. Approval finishes the spike in Merged; requesting changes returns it to the developer with the feedback.
+    - **Spikes always stop in Human review**, whatever their human-review flag says. They appear under Needs you and add one to its count. The message body renders the latest `## Findings` comment as markdown above the criteria verdicts and evidence. Desktop and mobile label approval **Accept findings**, keep **Request changes**, and hide PR links and check badges. The success toast and Resolved entry say **You accepted the findings**. The preview is the start of that comment; approval finishes the spike in Merged; requesting changes returns it to the developer with the feedback.
     - **Blocked:** the reviewer's and developer's positions side by side (2 columns, `bg-muted`).
     - **Question:** the question itself. The answers live in the tray.
     - **Activity:** one link button (Open PR, Open task…).
@@ -60,7 +60,7 @@ There are three columns. The list divider can be resized (280–560px, default 3
 
     | Item type | Actions | Needs text |
     |---|---|---|
-    | Human review | ✓ Approve and merge · ✎ Request changes | Request changes only |
+    | Human review | ✓ Approve and merge (Accept findings for spikes) · ✎ Request changes | Request changes only |
     | Blocked / Question | 💬 Clarify and continue · ↩ Send back to Backlog · 🗑 Delete task (`error`) | Clarify only |
     | Failed | ↻ Retry · ↩ Send back to Backlog · 🗑 Delete task (`error`) | None |
 
@@ -160,7 +160,7 @@ An epic PR in human review and an epic PR rebase conflict have their own layout 
 | Action | Task moves to | Notes |
 |---|---|---|
 | Answer (question) | In progress | The answer is added to the task's acceptance criteria and sent to the developer |
-| Approve and merge | Merged (after gates are re-checked) | Only on Human review |
+| Approve and merge / Accept findings | Merged (PR gates are re-checked for non-spikes) | Only on Human review; spikes finish without a merge |
 | Request changes | In progress | The text becomes the change request for the developer |
 | Clarify and continue | In progress | The guidance is added to the task; the review-round counter resets |
 | Send back to Backlog | Backlog | Leaves the board |

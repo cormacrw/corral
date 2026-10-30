@@ -259,14 +259,30 @@ route('POST', '/deployments/:id/dismiss', ([id]) => {
   return { ok: true }
 })
 route('GET', '/inbox', () => f.inbox())
-// Let the static Inbox exercise send and auto-advance without a server.
 route('POST', '/inbox/:taskId/actions', ([taskId], body) => {
   const task = f.tasks.find(t => t.id === taskId) ?? notFound()
   const input = body as InboxActionInput
-  if (input.action === 'delete') f.tasks.splice(f.tasks.indexOf(task), 1)
-  else task.status = input.action === 'approve' ? 'merged' : input.action === 'send_back' ? 'backlog' : input.action === 'resolve' ? input.to : 'in_progress'
+  if (input.action !== 'approve' && input.action !== 'request_changes') {
+    if (input.action === 'delete') f.tasks.splice(f.tasks.indexOf(task), 1)
+    else task.status = input.action === 'send_back' ? 'backlog' : input.action === 'resolve' ? input.to : 'in_progress'
+    emit({ type: 'task.updated', task })
+    return { task: input.action === 'delete' ? null : task }
+  }
+  const item = f.inbox().needsYou.find(i => i.taskId === taskId)
+  if (!item || item.type === 'plan_thread' || item.type === 'epic_review' || item.type === 'epic_conflict' || item.type === 'release_notes' || task.status !== 'human_review' || !['approve', 'request_changes'].includes(input.action)) {
+    throw new ApiError(409, { code: 'conflict', constraint: null }, 'This review is no longer actionable')
+  }
+  const accepted = input.action === 'approve'
+  const now = new Date().toISOString()
+  Object.assign(task, { status: accepted ? 'merged' : 'in_progress', mergedAt: accepted ? now : null, updatedAt: now })
+  if (input.action === 'request_changes') {
+    ;(f.comments[task.id] ??= []).push({ id: `cm-${Date.now()}`, taskId: task.id, author: { kind: 'human', userId: f.profile.id }, body: input.text, pinned: false, createdAt: now })
+    task.statusReason = input.text
+  }
+  const resolution = accepted ? (task.type === 'spike' ? 'You accepted the findings' : 'You approved the merge') : 'You requested changes'
+  f.resolvedInbox.unshift({ ...item, id: `resolved-${task.id}-${Date.now()}`, type: 'activity', sender: { name: 'You', role: 'system' }, body: resolution, preview: resolution, resolution, at: now })
   emit({ type: 'task.updated', task })
-  return { task: input.action === 'delete' ? null : task }
+  return { task }
 })
 
 route('POST', '/plan/sessions', (_, body) => {

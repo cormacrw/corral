@@ -119,12 +119,15 @@ describe('spikes deliver findings instead of a PR', () => {
     expect(result).toMatchObject({ ok: true, result: { message: expect.stringContaining('A human reviews the findings next.') } })
 
     expect(await taskRow(task.id)).toMatchObject({ status: 'human_review', humanReview: false, mergedAt: null })
-    expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/approve`)).status).toBe(200)
+    expect((await t.request('POST', `/api/inbox/${task.id}/actions`, { action: 'approve' })).status).toBe(200)
 
     // Merged, the final column, without GitHub: nothing pushed, opened or merged
     row = await taskRow(task.id)
     expect(row).toMatchObject({ status: 'merged', branch: null, prNumber: null })
     expect(row.mergedAt).not.toBeNull()
+    const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
+    expect(inbox.needsYou.some(i => i.taskId === task.id)).toBe(false)
+    expect(inbox.resolved.find(i => i.taskId === task.id)?.resolution).toBe('You accepted the findings')
     expect(t.github.pulls.size).toBe(0)
     expect(runner.received.filter(m => m.type === 'job.request' && m.job.kind === 'github')).toHaveLength(0)
     await runner.next('job.request', m => m.job.kind === 'cleanup_worktrees' && m.job.taskId === task.id)
