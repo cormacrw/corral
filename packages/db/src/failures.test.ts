@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import pg from 'pg'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { openDatabase } from './client.ts'
-import { createTestDatabase } from './testing.ts'
+import { createTestDatabase, requireDatabase } from './testing.ts'
 
 const migrationFailure = vi.hoisted(() => ({ error: null as Error | null }))
 
@@ -77,17 +77,19 @@ beforeEach(() => {
 })
 afterEach(() => {
   vi.restoreAllMocks()
-  process.env.CORRAL_DATABASE_URL = realUrl
+  if (realUrl === undefined) delete process.env.CORRAL_DATABASE_URL
+  else process.env.CORRAL_DATABASE_URL = realUrl
 })
 
 describe('openDatabase failures', () => {
-  it.each([
+  it.for([
     { driver: 'postgres' as const, location: { driver: 'postgres' as const, url: realUrl }, close: () => vi.spyOn(pg.Pool.prototype, 'end') },
     { driver: 'pglite' as const, location: { driver: 'pglite' as const, dataDir: null }, close: async () => {
       const { PGlite } = await import('@electric-sql/pglite')
       return vi.spyOn(PGlite.prototype, 'close')
     } }
-  ])('keeps the $driver migration failure as the cause when closing also fails', async ({ location, close }) => {
+  ])('keeps the $driver migration failure as the cause when closing also fails', async ({ driver, location, close }, context) => {
+    requireDatabase(driver, context)
     const migration = new Error('relation already exists')
     migrationFailure.error = migration
     const closeFailure = new Error('close failed')
@@ -118,6 +120,7 @@ describe('openDatabase failures', () => {
 
 // Creating databases is slow while other test files do the same
 describe('createTestDatabase failures', { timeout: 60_000 }, () => {
+  beforeEach(({ skip }) => requireDatabase('postgres', { skip }))
   it('drops only its generated database when initialisation fails', async () => {
     const bystander = `corral_test_bystander_${randomUUID().replaceAll('-', '')}`
     await adminQuery(`create database ${bystander}`)

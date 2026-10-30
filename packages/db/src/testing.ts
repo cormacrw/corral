@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import pg from 'pg'
+import { beforeAll, beforeEach, type TestContext } from 'vitest'
 import { openDatabase, type DatabaseHandle } from './client.ts'
 import { attemptAll, operationError, runAll } from './failures.ts'
 
@@ -50,8 +51,23 @@ export async function createTestDatabase(driver: 'pglite' | 'postgres'): Promise
   }
 }
 
-// Whether the Postgres-only tests can run here
-export const postgresAvailable = Boolean(process.env.CORRAL_DATABASE_URL)
+// Read at hook/test execution, never at import time. A configured but broken
+// database must fail, rather than silently skip (D14).
+export function requireDatabase(driver: 'pglite' | 'postgres', context: Pick<TestContext, 'skip'>): void {
+  if (driver === 'postgres' && !process.env.CORRAL_DATABASE_URL) {
+    context.skip('Postgres requires CORRAL_DATABASE_URL (D14)')
+  }
+}
+
+// Suite setup stays once per suite; skipping happens in a test hook so Vitest
+// reports each unavailable test as skipped rather than passed or failed.
+export function databaseFixture(driver: 'pglite' | 'postgres', setup: () => Promise<void>): void {
+  beforeAll(async () => {
+    if (driver === 'postgres' && !process.env.CORRAL_DATABASE_URL) return
+    await setup()
+  })
+  beforeEach(({ skip }) => requireDatabase(driver, { skip }))
+}
 
 async function withAdmin(url: string, operation: string, fn: (client: pg.Client) => Promise<unknown>): Promise<void> {
   const client = new pg.Client({ connectionString: url })

@@ -38,7 +38,7 @@ export async function createTestApp(driver: 'pglite' | 'postgres', options: { li
   const handle: DatabaseHandle | null = driver === 'pglite'
     ? await createTestDatabase('pglite')
     : await createTestDatabase('postgres')
-  if (!handle) throw new Error('Postgres tests need CORRAL_DATABASE_URL; the vitest global setup normally provides it')
+  if (!handle) throw new Error('Postgres tests need CORRAL_DATABASE_URL')
 
   const bus = new EventBus()
   const events: ServerEvent[] = []
