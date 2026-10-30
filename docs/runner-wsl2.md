@@ -112,7 +112,7 @@ chmod 600 deploy/runner/.env
 Edit `deploy/runner/.env`: set `CORRAL_SERVER_URL` to
 `http://<home-server-tailnet-name>:4200` (use the configured host port), copy the
 shared `CORRAL_RUNNER_TOKEN`, and set the git author name/email. Choose a unique
-`CORRAL_RUNNER_NAME` such as `gaming-pc`. Defaults are four slots and roles
+`CORRAL_RUNNER_NAME` such as `gaming-pc`. Slots default to the smaller CPU/memory budget count (2 CPUs and 2.5 GiB per slot, at least one); `CORRAL_RUNNER_SLOTS` overrides it. Default roles are
 `developer,reviewer,design`; the home-server runner continues handling PM work.
 Never put model-provider tokens or GitHub credentials in either env or Compose
 file. Only the human signs in to the CLIs; their configs persist on separate

@@ -63,3 +63,18 @@ it('lists a runner on an older protocol as needing an update until it reconnects
   hub.setInUse(new Map([['M', 1]]))
   expect(hub.status().runners[0]).toMatchObject({ slotsInUse: 1 })
 })
+
+it('keeps capacity provenance in runner status, tolerating older and malformed hellos', async () => {
+  const hub = new RunnerHub(new EventBus())
+  const derived = { kind: 'derived', cpus: 8, memoryBytes: 10 * 1024 ** 3, slotCpus: 2, slotMemoryBytes: 2.5 * 1024 ** 3 }
+  for (const [id, slots, slotSource] of [['derived', 4, derived], ['explicit', 7, { kind: 'explicit' }], ['old', 2, undefined], ['invalid', 1, { ...derived, cpus: -1 }]] as const) {
+    const peer = hub.connect({ send: () => {}, close: () => {} })
+    await peer.onMessage(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, commit: 'development', runnerId: id, name: id, activeRuns: [], slots, slotSource, runtimes: [], roles: ['developer'] }))
+  }
+  expect(hub.status().runners).toMatchObject([
+    { id: 'derived', slots: 4, slotSource: derived },
+    { id: 'explicit', slots: 7, slotSource: { kind: 'explicit' } },
+    { id: 'old', slots: 2, slotSource: undefined },
+    { id: 'invalid', slots: 1, slotSource: undefined }
+  ])
+})

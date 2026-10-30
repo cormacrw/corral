@@ -2,7 +2,7 @@
 
 `deploy/runner/docker-compose.yml` builds only the existing runner image, with
 project-isolated data and CLI config volumes. Its `.env.example` defaults to
-`gaming-pc`, four slots and `developer,reviewer,design`. Use the explicit
+`gaming-pc`, resource-derived slots and `developer,reviewer,design`. Use the explicit
 `--env-file deploy/runner/.env` when invoking Compose from the checkout root.
 Export `CORRAL_BUILD_SHA=$(git rev-parse HEAD)` before building: the runner-only
 Compose passes it to the image, just like the home-server Compose. It also passes
@@ -63,3 +63,14 @@ and are excluded from the stopped-run prompt.
 Outside signals are classified for both newly spawned agents and a PM process
 reused for a later warm turn. A process that exits before replying ends that
 turn with the signal name, rather than an unexplained null or 128+n exit code.
+
+## Resource-derived capacity (COR-253)
+
+Leave `CORRAL_RUNNER_SLOTS` unset (or empty) to derive slots at startup from
+available CPU affinity, host memory and visible Linux cgroup v1/v2 quotas,
+including parent limits. Defaults are 2 CPUs and 2.5 GiB per slot, configurable
+with `CORRAL_SLOT_CPUS` and `CORRAL_SLOT_MEMORY`. Both Compose files pass these
+budgets without forcing a slot override. An existing explicit slot setting
+continues to win. Settings shows the source, detected resources and budgets;
+older runner versions show an unavailable source. See architecture resource
+expectations for sizing and headroom.
