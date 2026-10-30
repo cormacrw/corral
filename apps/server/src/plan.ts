@@ -79,6 +79,29 @@ interface RefTarget {
 type SessionRow = typeof planSessions.$inferSelect
 type PlanRow = typeof plans.$inferSelect
 
+// Commands describe new writes, independently of nullable historical reads.
+export interface ApprovePlanCommand {
+  approvedBy: Extract<Actor, { kind: 'human' }>
+  approvedAt: Date
+}
+
+export type PlanTaskWrite = {
+  planId: string
+  key: string
+  position: number
+} & (
+  | { change: 'added' | 'changed' | 'unchanged', taskId: string, revision: PlanRevision | null }
+  | { change: 'removed', taskId: string | null, revision?: null }
+)
+
+async function recordApproval(tx: Executor, planId: string, command: ApprovePlanCommand) {
+  await tx.update(plans).set({ status: 'approved', ...command }).where(eq(plans.id, planId))
+}
+
+async function insertPlanTasks(tx: Executor, items: PlanTaskWrite[]) {
+  await tx.insert(planTasks).values(items)
+}
+
 export interface PlanDeps {
   db: Database
   events: EventBus
@@ -671,8 +694,12 @@ export class PlanService {
         if (!left) await tx.delete(epics).where(eq(epics.id, epicId))
       }
       const dropped = previousItems.filter(r => !ids.has(r.key) && !(r.taskId && kept.has(r.taskId)))
-      await tx.insert(planTasks).values([
-        ...proposed.tasks.map((task, position) => ({ planId, key: task.key, taskId: ids.get(task.key)!, change: changes.get(task.key) ?? 'added', position, revision: revisions.get(task.key) ?? null })),
+      await insertPlanTasks(tx, [
+        ...proposed.tasks.map((task, position): PlanTaskWrite => {
+          const change = changes.get(task.key) ?? 'added'
+          if (change === 'removed') throw new Error('A proposed task cannot be removed')
+          return { planId, key: task.key, taskId: ids.get(task.key)!, change, position, revision: revisions.get(task.key) ?? null }
+        }),
         ...dropped.map((r, i) => ({ planId, key: r.key, taskId: r.revision ? r.taskId : null, change: 'removed' as const, position: proposed.tasks.length + i }))
       ])
       await insertMessage(tx, session.id, { role: 'pm', kind: 'message', text: proposed.summary || `Proposed plan v${row!.version}: ${proposed.title}` }, { planId, runId })
@@ -738,7 +765,7 @@ export class PlanService {
       }
       // Approving the plan closes its session
       const now = new Date()
-      await tx.update(plans).set({ status: 'approved', approvedBy: actor, approvedAt: now }).where(eq(plans.id, planId))
+      await recordApproval(tx, planId, { approvedBy: actor, approvedAt: now })
       await tx.update(planSessions).set({ closedAt: now }).where(eq(planSessions.id, plan.sessionId))
     })
     await db.insert(auditLog).values({ projectId: plan.projectId, actor, action: 'plan.approved', detail: { planId, version: plan.version, to, ...(via && { viaPmRun: via.runId }) } })
