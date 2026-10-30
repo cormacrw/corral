@@ -247,6 +247,37 @@ describe('orchestrator', () => {
     await pause(project)
   })
 
+  it('says on the run and in the task history what cut the run off', async () => {
+    const lastActivityAt = '2026-10-30T11:02:55.000Z'
+    const cases = [
+      { exit: { kind: 'timed_out', limitSeconds: 3600 }, state: 'failed', error: 'The run hit its time limit of 60 minutes' },
+      { exit: { kind: 'stopped', reason: 'The server no longer recognises this run' }, state: 'interrupted', error: 'Stopped by the server: The server no longer recognises this run' },
+      { exit: { kind: 'runner_shutdown' }, state: 'interrupted', error: 'The runner shut down' },
+      { exit: { kind: 'signalled', signal: 'SIGTERM' }, state: 'failed', error: 'The agent was killed by SIGTERM, which came from outside Corral' }
+    ] as const
+    for (const { exit, state, error } of cases) {
+      const { project, task, job } = await assigned()
+      runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit, headSha: null, lastActivityAt })
+      await sleep(200)
+      const run = await runRow(job.runId)
+      expect(run.state).toBe(state)
+      expect(run.error).toContain(error)
+      expect(run.error).toContain(lastActivityAt)
+      const history = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/history`).then(r => r.json()) as { action: string, detail: { error?: string } }[]
+      expect(history.find(e => e.action === 'run.ended')?.detail.error).toBe(run.error)
+      await pause(project)
+    }
+  })
+
+  it('adds the last transcript activity to a run the server already stopped', async () => {
+    const { project, job } = await assigned()
+    await t.orchestrator.stopRun(job.runId, { kind: 'human', userId: 'cormac' })
+    runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'stopped', reason: 'Stopped by a human' }, headSha: null, lastActivityAt: '2026-10-30T11:02:55.000Z' })
+    await sleep(200)
+    expect(await runRow(job.runId)).toMatchObject({ state: 'interrupted', error: 'Stopped by a human. Last transcript activity: 2026-10-30T11:02:55.000Z' })
+    await pause(project)
+  })
+
   it('counts failed runs and fails the task at the cap', async () => {
     const { project, task, job: first } = await assigned()
     let job = first

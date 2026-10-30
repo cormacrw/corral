@@ -126,6 +126,11 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
                 </span>
                 <span class="truncate">{{ run.taskTitle ?? run.summary ?? 'PM turn' }}</span>
                 <span class="text-xs text-muted">{{ projectName(run) }} · Run #{{ run.number }} · {{ duration(run.startedAt, run.endedAt, now) }}</span>
+                <span
+                  v-if="run.error"
+                  class="line-clamp-3 text-xs text-error"
+                  :title="run.error"
+                >{{ run.error }}</span>
               </button>
             </li>
             <li

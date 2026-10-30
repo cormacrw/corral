@@ -5,7 +5,7 @@ import type { EditorView } from '@tiptap/pm/view'
 import type { TaskPriority, TaskStatus } from '@corral/core'
 import { availableEvents } from '@corral/core'
 import { api, ApiError } from '~/composables/useApi'
-import { PRIORITY, STATUS, TASK_TYPE, timeAgo } from '~/utils/labels'
+import { PRIORITY, runBadge, STATUS, TASK_TYPE, timeAgo } from '~/utils/labels'
 import { attachmentProblem } from '~/utils/attachments'
 import { AttachmentImage, imageFiles, insertImages } from '~/utils/editor-image'
 
@@ -90,6 +90,7 @@ onMounted(() => {
     if (event.type === 'comment.created' && task.value && event.comment.taskId === task.value.id) {
       if (!comments.value.some(c => c.id === event.comment.id)) comments.value.push(event.comment)
     }
+    if (event.type === 'run.updated' && task.value && event.run.taskId === task.value.id) void loadSide()
   })
   onBeforeUnmount(stop)
 })
@@ -315,6 +316,12 @@ async function remove() {
     fail(e)
   }
 }
+
+// Comments and the runs that ended with an error, oldest first
+const activity = computed(() => [
+  ...comments.value.map(comment => ({ id: comment.id, at: comment.createdAt, comment, run: null })),
+  ...runs.value.filter(run => run.error && run.endedAt).map(run => ({ id: run.id, at: run.endedAt!, comment: null, run }))
+].sort((a, b) => a.at.localeCompare(b.at)))
 
 function authorLabel(actor: Comment['author']): string {
   if (actor.kind === 'human') return 'You'
@@ -827,31 +834,50 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
             v-if="tab === 'activity'"
             class="mt-3 flex flex-col gap-3"
           >
-            <div
-              v-for="comment in comments"
-              :key="comment.id"
-              class="flex gap-2"
+            <template
+              v-for="item in activity"
+              :key="item.id"
             >
-              <AgentAvatar
-                :name="authorLabel(comment.author)"
-                size="xs"
-              />
-              <div class="min-w-0 flex-1 rounded-lg bg-elevated px-3 py-2 text-sm">
-                <div class="mb-0.5 flex items-center gap-2 text-xs text-muted">
-                  <span class="font-medium text-default">{{ authorLabel(comment.author) }}</span>
-                  <span>{{ timeAgo(comment.createdAt) }}</span>
-                  <UBadge
-                    v-if="comment.pinned"
-                    label="Pinned"
-                    size="xs"
-                    variant="subtle"
-                  />
+              <div
+                v-if="item.comment"
+                class="flex gap-2"
+              >
+                <AgentAvatar
+                  :name="authorLabel(item.comment.author)"
+                  size="xs"
+                />
+                <div class="min-w-0 flex-1 rounded-lg bg-elevated px-3 py-2 text-sm">
+                  <div class="mb-0.5 flex items-center gap-2 text-xs text-muted">
+                    <span class="font-medium text-default">{{ authorLabel(item.comment.author) }}</span>
+                    <span>{{ timeAgo(item.comment.createdAt) }}</span>
+                    <UBadge
+                      v-if="item.comment.pinned"
+                      label="Pinned"
+                      size="xs"
+                      variant="subtle"
+                    />
+                  </div>
+                  <MarkdownText :text="item.comment.body" />
                 </div>
-                <MarkdownText :text="comment.body" />
               </div>
-            </div>
+              <div
+                v-else-if="item.run"
+                class="flex gap-2 text-sm"
+                data-testid="activity-run-error"
+              >
+                <span
+                  class="mx-1.5 mt-1.5 size-2 shrink-0 rounded-full bg-error"
+                  aria-hidden="true"
+                />
+                <p class="min-w-0 flex-1 text-muted">
+                  <span class="font-medium text-default">{{ item.run.agentName }}</span>
+                  run #{{ item.run.number }} ended {{ runBadge(item.run).label.toLowerCase() }}: {{ item.run.error }}
+                  <span class="text-xs">· {{ timeAgo(item.run.endedAt!) }}</span>
+                </p>
+              </div>
+            </template>
             <p
-              v-if="comments.length === 0"
+              v-if="activity.length === 0"
               class="text-sm text-muted"
             >
               No comments yet.

@@ -181,6 +181,10 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
               />
               {{ meta(run) }}
             </span>
+            <span
+              v-if="run.error"
+              class="line-clamp-3 text-xs text-error"
+            >{{ run.error }}</span>
           </NuxtLink>
         </li>
       </ul>

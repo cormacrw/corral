@@ -255,7 +255,7 @@ describe('RunManager warm PM sessions', () => {
     await manager.shutdown()
 
     expect(await processesLeft()).toEqual([])
-    expect(sent.find(m => m.type === 'run.ended' && m.runId === 'busy')).toMatchObject({ exit: { kind: 'stopped' } })
+    expect(sent.find(m => m.type === 'run.ended' && m.runId === 'busy')).toMatchObject({ exit: { kind: 'runner_shutdown' } })
   })
 
   it('reports no active run while warm, so a developer run can take the only slot', async () => {

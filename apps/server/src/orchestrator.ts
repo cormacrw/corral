@@ -27,6 +27,7 @@ import type { GitHubClient } from './github.ts'
 import { EpicBranchError, taskBase } from './task-base.ts'
 import { slugify } from './projects.ts'
 import { designRevisionPrompt, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
+import { runExitError, withLastActivity } from './run-exit.ts'
 import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
 import { MergeOrchestrator } from './merge.ts'
 import type { PlanService } from './plan.ts'
@@ -664,7 +665,7 @@ export class Orchestrator implements RunnerHandlers {
       if (activeRuns.some(a => a.runId === run.id && a.leaseEpoch === run.leaseEpoch)) continue
       const ctx = await this.#load(run.id)
       if (!ctx) continue
-      await this.#endRun(ctx, { state: 'interrupted', error: 'The runner restarted during the run' })
+      await this.#endRun(ctx, { state: 'interrupted', error: 'The runner restarted during the run: it shut down before it could report' })
       await this.#publish(ctx)
     }
     // Runs the runner has but the server no longer recognises must stop
@@ -733,8 +734,12 @@ export class Orchestrator implements RunnerHandlers {
     const ctx = await this.#load(message.runId)
     if (!ctx) return
     const live = (ACTIVE_RUN_STATES as readonly RunState[]).includes(ctx.run.state) && ctx.run.leaseEpoch === message.leaseEpoch
-    if (live && ctx.run.role === 'pm') await this.#pmExited(ctx, message.exit)
-    else if (live) await this.#runExited(ctx, message.exit)
+    if (live && ctx.run.role === 'pm') await this.#pmExited(ctx, message.exit, message.lastActivityAt)
+    else if (live) await this.#runExited(ctx, message.exit, message.lastActivityAt)
+    // The server already ended a run it stopped; only the runner knows the agent's last activity
+    else if (ctx.run.state === 'interrupted' && ctx.run.error && ctx.run.leaseEpoch === message.leaseEpoch) {
+      await db.update(runs).set({ error: withLastActivity(ctx.run.error, message.lastActivityAt) }).where(eq(runs.id, ctx.run.id))
+    }
     const blob = await transcripts.finish(ctx.run.id)
     if (blob) await db.update(runs).set({ transcriptBlob: blob }).where(eq(runs.id, ctx.run.id))
     await this.#publish(ctx)
@@ -742,7 +747,7 @@ export class Orchestrator implements RunnerHandlers {
   }
 
   // A PM turn has no outcome to report: its reply is the last thing it said
-  async #pmExited(ctx: RunContext, exit: RunExit): Promise<void> {
+  async #pmExited(ctx: RunContext, exit: RunExit, lastActivityAt: string | null | undefined): Promise<void> {
     const events = await this.#d.transcripts.read(ctx.run.id, null)
     const reply = events.filter((e): e is Extract<RunEvent, { type: 'message' }> => e.type === 'message').at(-1)?.text ?? null
     let error: string | null = null
@@ -755,19 +760,21 @@ export class Orchestrator implements RunnerHandlers {
         break
       }
       case 'exited':
-        if (exit.code === 0 || reply) {
+      case 'signalled':
+        if ((exit.kind === 'exited' && exit.code === 0) || reply) {
           await this.#endRun(ctx, { state: 'completed', summary: reply })
         } else {
-          error = `The PM exited with code ${exit.code}`
+          error = exit.kind === 'exited' ? `The PM exited with code ${exit.code}` : runExitError(exit, lastActivityAt)
           await this.#endRun(ctx, { state: 'failed', outcome: 'failed', error })
         }
         break
       case 'stopped':
-        await this.#endRun(ctx, { state: 'interrupted', error: 'Stopped' })
+      case 'runner_shutdown':
+        await this.#endRun(ctx, { state: 'interrupted', error: runExitError(exit, lastActivityAt) })
         error = 'The turn was stopped'
         break
       case 'timed_out':
-        await this.#endRun(ctx, { state: 'failed', outcome: 'failed', error: 'The turn hit its time limit' })
+        await this.#endRun(ctx, { state: 'failed', outcome: 'failed', error: runExitError(exit, lastActivityAt) })
         error = 'The turn hit its time limit'
         break
       case 'error':
@@ -785,7 +792,7 @@ export class Orchestrator implements RunnerHandlers {
   }
 
   // The agent process ended without its outcome having been accepted
-  async #runExited(ctx: RunContext, exit: RunExit): Promise<void> {
+  async #runExited(ctx: RunContext, exit: RunExit, lastActivityAt: string | null | undefined): Promise<void> {
     const now = this.#now()
     switch (exit.kind) {
       case 'rate_limited': {
@@ -798,14 +805,11 @@ export class Orchestrator implements RunnerHandlers {
         return
       }
       case 'stopped':
-        await this.#endRun(ctx, { state: 'interrupted', error: 'Stopped' })
+      case 'runner_shutdown':
+        await this.#endRun(ctx, { state: 'interrupted', error: runExitError(exit, lastActivityAt) })
         return
-      default: {
-        const error = exit.kind === 'timed_out'
-          ? 'The run hit its time limit'
-          : exit.kind === 'error' ? exit.message : `The agent exited (code ${exit.code}) without reporting an outcome`
-        await this.#failRun(ctx, error)
-      }
+      default:
+        await this.#failRun(ctx, runExitError(exit, lastActivityAt))
     }
   }
 
