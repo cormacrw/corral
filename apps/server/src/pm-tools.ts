@@ -70,7 +70,7 @@ export interface PmToolContext {
 
 interface ToolResult {
   result: unknown
-  projectId?: string
+  projectId?: string | null
   // The task it acted on, so Activity can link to it
   target?: { taskId: string, taskRef: string }
   // What the call did, in the words Activity shows
@@ -126,8 +126,8 @@ export class PmTools {
   constructor(deps: Deps) { this.#d = deps }
 
   async call(tool: PmToolName, input: unknown, actor: Actor, context: PmToolContext): Promise<unknown> {
-    const audit = (projectId: string | undefined, outcome: Record<string, unknown>, target?: ToolResult['target']) => this.#d.db.insert(auditLog).values({
-      projectId: projectId ?? context.projectId,
+    const audit = (projectId: string | null | undefined, outcome: Record<string, unknown>, target?: ToolResult['target']) => this.#d.db.insert(auditLog).values({
+      projectId: projectId === undefined ? context.projectId : projectId,
       taskId: target?.taskId ?? null,
       actor,
       action: 'pm.tool_called',
@@ -153,7 +153,7 @@ export class PmTools {
         if (!orchestrator.plans) throw new Error('Planning is unavailable')
         const projectId = project ? (await findProjectBySlug(db, project)).id : null
         const result = await orchestrator.plans.start(projectId, { text: message, title, parentSessionId: context.sessionId, ...(runtime && { runtime }) }, actor)
-        return { result, summary: `Started thread ${title}` }
+        return { result, projectId: result.projectId, summary: `Started thread ${title}` }
       }
       case 'list_threads': {
         strict(pmDirectTools.list_threads.input)
@@ -166,19 +166,20 @@ export class PmTools {
         const { threadId, limit } = strict(pmDirectTools.read_thread.input)
         if (!orchestrator.plans) throw new Error('Planning is unavailable')
         const { messages, ...session } = await orchestrator.plans.getSession(threadId)
-        return { result: { ...session, messages: messages.slice(-limit).reverse() }, summary: `Read thread ${session.title}` }
+        return { result: { ...session, messages: messages.slice(-limit).reverse() }, projectId: session.projectId, summary: `Read thread ${session.title}` }
       }
       case 'message_thread': {
         const { threadId, message } = strict(pmDirectTools.message_thread.input)
         if (!orchestrator.plans) throw new Error('Planning is unavailable')
+        const target = await orchestrator.plans.getSession(threadId)
         const result = await orchestrator.plans.message(threadId, { text: message, senderSessionId: context.sessionId }, actor)
-        return { result, summary: `Messaged thread ${threadId}` }
+        return { result, projectId: target.projectId, summary: `Messaged thread ${threadId}` }
       }
       case 'close_thread': {
         const { threadId } = strict(pmDirectTools.close_thread.input)
         if (!orchestrator.plans) throw new Error('Planning is unavailable')
         const result = await orchestrator.plans.close(threadId, actor)
-        return { result, summary: `Closed thread ${result.title}` }
+        return { result, projectId: result.projectId, summary: `Closed thread ${result.title}` }
       }
       case 'list_projects': {
         strict(pmDirectTools.list_projects.input)

@@ -395,6 +395,7 @@ export class Orchestrator implements RunnerHandlers {
       if (!ctx) continue
       this.#d.runner.send({ type: 'run.stop', runId: id, reason: 'Corral was stopped', keepWork: true }, ctx.run.runnerId)
       await this.#endRun(ctx, { state: 'interrupted', error: KILL_SWITCH_STOP })
+      if (ctx.run.role === 'pm' && ctx.run.planSessionId) await this.plans?.notifyParent(ctx.run.planSessionId, id, true)
       await this.#publish(ctx)
     }
   }
@@ -979,6 +980,7 @@ export class Orchestrator implements RunnerHandlers {
       if (ctx.task) await tx.update(tasks).set({ paused: true }).where(eq(tasks.id, ctx.task.id))
       await tx.insert(auditLog).values({ projectId: ctx.run.projectId, taskId: ctx.task?.id ?? null, actor, action: 'run.stopped', detail: { runId } })
     })
+    if (ctx.run.role === 'pm' && ctx.run.planSessionId) await this.plans?.notifyParent(ctx.run.planSessionId, runId, true)
     await this.#publish(ctx)
   }
 

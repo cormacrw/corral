@@ -120,7 +120,7 @@ export const pmDirectTools = {
   },
   close_thread: {
     confirmRequired: false,
-    description: 'Close a PM thread, stop its turn and discard its pending plan and Drafts. A new human or agent message reopens it.',
+    description: 'Close a PM thread and stop its turn only when it has no proposed plan or owned Drafts. Otherwise ask the human to use Close thread and confirm the discard. A new human or agent message reopens it.',
     input: { threadId: z.uuid() }
   },
   list_projects: {
