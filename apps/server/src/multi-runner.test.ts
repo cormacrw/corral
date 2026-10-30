@@ -79,7 +79,7 @@ describe('multiple runners', () => {
     a.onJob = () => null
     b.onJob = () => null
     const pendingA = t.runner.request({ kind: 'detect_clis' }).catch(e => e.message)
-    const requestA = await a.next('job.request')
+    const requestA = await a.next('job.request', m => m.job.kind === 'detect_clis')
     const cleanup = t.runner.request({ kind: 'cleanup_worktrees', repository: 'cormacrw/test-app', taskId: 'task' }).catch(e => e.message)
     await a.next('job.request', m => m.job.kind === 'cleanup_worktrees')
     const cleanupB = await b.next('job.request', m => m.job.kind === 'cleanup_worktrees')

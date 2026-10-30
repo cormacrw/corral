@@ -31,6 +31,7 @@ import type { PlanService } from './plan.ts'
 import { getRun, listAgents, listEvidence } from './runs.ts'
 import { addComment, applyTransition, deleteTaskRows, loadTask, lockTask, toTaskState, type ProjectRow, type TaskContentEdit, type TaskRow } from './tasks.ts'
 import type { Transcripts } from './transcripts.ts'
+import { WorktreeSweep } from './worktree-sweep.ts'
 
 const { acceptanceCriteria, agents, attachments, auditLog, comments, designVersions, evidence, projects, reviews, runs, settings, taskDesignPins, tasks } = schema
 type PlanSessionRow = typeof schema.planSessions.$inferSelect
@@ -127,6 +128,7 @@ export class Orchestrator implements RunnerHandlers {
   // PM turns and claims never both take a runner's last slot
   #placing: Promise<unknown> = Promise.resolve()
   readonly merges: MergeOrchestrator
+  readonly sweep: WorktreeSweep
   // Set once the plan service exists (it needs the orchestrator to start runs)
   plans: PlanService | null = null
 
@@ -140,6 +142,7 @@ export class Orchestrator implements RunnerHandlers {
       wake: ids => this.poke(ids),
       ...(deps.now && { now: deps.now })
     })
+    this.sweep = new WorktreeSweep({ db: deps.db, runner: deps.runner, ...(deps.now && { now: deps.now }) })
   }
 
   // A PM turn (D9): a run with no task and no lease, fenced by its own epoch.
@@ -342,11 +345,13 @@ export class Orchestrator implements RunnerHandlers {
 
   start(intervalMs = 15_000): void {
     this.#timer = setInterval(() => void this.tick(), intervalMs)
+    this.sweep.start()
   }
 
   stop(): void {
     if (this.#timer) clearInterval(this.#timer)
     this.#timer = null
+    this.sweep.stop()
   }
 
   async tick(): Promise<void> {
@@ -650,6 +655,7 @@ export class Orchestrator implements RunnerHandlers {
 
   onReady(): void {
     this.poke()
+    void this.sweep.run()
   }
 
   async onHeartbeat(activeRuns: { runId: string, leaseEpoch: number }[], runnerId: string): Promise<void> {

@@ -44,6 +44,8 @@ The server keeps connections keyed by runner ID. A connection becomes available 
 
 A `sweep_worktrees` setup job removes every folder under `worktrees/` whose task or Plan session isn't in the job's keep list, through its bare clone (or `rm -rf` for a folder no clone knows). Developer worktrees and orphans with uncommitted changes stay and are returned in `kept`, review and PM worktrees are force-removed, the checkout of a PM turn running on that runner is never touched, and names that aren't `<uuid>`, `<uuid>-review` or `pm-<uuid>-<uuid>` are left alone.
 
+The server broadcasts that job to every online runner each time a runner connects and then hourly, and skips it with none online (`apps/server/src/worktree-sweep.ts`). The keep list is every task that isn't merged or deleted, plus every Plan session with a PM turn active or `updatedAt` within `PM_WORKTREE_TTL` (24 hours). Each sweep is one `worktrees.swept` audit entry with `removed` and `kept`, and it posts no task comments. This also retries a merge-time `cleanup_worktrees` that found no runner online.
+
 Setup jobs use the online runner connected longest. Worktree cleanup is broadcast to every online runner. With any runner online, dispatch and setup remain available; with none online, setup returns `503 runner_offline` and PM turns wait. `GET /api/status` includes `runners`, and `/api/runner` and `runner.status` SSE include the same list (`id`, `name`, `online`, `connectedAt`, `lastHeartbeatAt`) alongside aggregate compatibility fields. Disconnected runners remain listed as offline until server restart. Settings shows each known runner.
 
 ### Runner capacity, runtimes and roles
