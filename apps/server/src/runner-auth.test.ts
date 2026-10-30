@@ -41,6 +41,18 @@ describe('runner listener authentication', () => {
         })
         expect(await t!.runner.request({ kind: 'detect_clis' })).toEqual({ kind: 'detect_clis', clis: [] })
       })
+      it('provides the host update target only to an authenticated caller', async () => {
+        const url = t!.server!.url + '/runner/version'
+        for (const token of [undefined, 'wrong']) {
+          const response = await fetch(url, { headers: token ? { authorization: `Bearer ${token}` } : {} })
+          expect(response.status).toBe(401)
+          expect(await response.json()).toEqual({ error: 'unauthorized' })
+        }
+        const response = await fetch(url, { headers: { authorization: 'Bearer correct' } })
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ commit: 'development', protocol: RUNNER_PROTOCOL_VERSION })
+        expect(t!.runner.online).toBe(false)
+      })
       for (const token of [undefined, 'incorrect', 'correct-but-longer']) {
         it(`rejects ${token ? 'wrong' : 'missing'} credentials before going online (runnerOnly=${runnerOnly})`, async () => {
           const log = vi.spyOn(console, 'warn').mockImplementation(() => {})

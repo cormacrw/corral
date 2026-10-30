@@ -227,5 +227,52 @@ Disable automatic sleep while you want the PC to work. If it sleeps mid-run,
 heartbeats stop; when the lease expires the run is interrupted and its work is
 redone. On wake the runner reconnects, but the old lease cannot submit results.
 Windows shutdown and `wsl --shutdown` also interrupt work. This setup does not
-wake a sleeping PC. Automatic code/image updates are covered by the separate
-runner updater task; this guide configures startup and persistent authentication.
+wake a sleeping PC. The host updater below handles code and image updates.
+
+## Enable the host updater
+
+The checkout is dedicated to deployment: do not edit tracked files there. The
+updater obtains the server's exact SHA directly from the authenticated
+`/runner/version` endpoint, using the server URL and token in Docker's host-owned
+container configuration. It does not trust a target supplied by agent-writable
+volume files. Before checkout it fetches only `origin/main` and requires the
+server SHA to be an ancestor of that reviewed branch. An unmerged task-branch
+server build is deliberately refused; the existing runner keeps running.
+The SHA need not be the newest commit on main. GitHub checkout authentication
+must work unattended for root (the system service user); for a public repo HTTPS needs no credentials. Runner
+CLI authentication remains separate. Keep this deployment checkout and its
+`.git`/`.env` configuration outside all container mounts and writable only by
+trusted host administrators. Never bind-mount the checkout into agent containers.
+The default runner-data Docker volume path must have real directory components;
+symlinked mount paths are refused. Feedback uses an exclusively created temporary
+file and a pinned directory handle, so malicious volume symlinks cannot redirect
+root writes or chmods to host files. No registry or image publishing is used.
+
+Install Python 3, `jq` and the timer inside Ubuntu, adjusting the service's checkout path:
+
+```sh
+sudo apt-get install -y jq python3
+sudo cp scripts/deploy/corral-runner-update.{service,timer} /etc/systemd/system/
+sudo systemctl edit --full corral-runner-update.service
+# Set ExecStart to the absolute path of scripts/deploy/runner-update.sh in this checkout.
+sudo git config --global --add safe.directory "$PWD"
+sudo systemctl daemon-reload
+sudo systemctl enable --now corral-runner-update.timer
+systemctl list-timers corral-runner-update.timer
+```
+
+After installing the timer, set `CORRAL_RUNNER_AUTO_UPDATE=true` in
+`deploy/runner/.env` and recreate the runner to enable automatic updates. Keep
+the default false for manual-only updates. Settings → Runner →
+**Update now** requests a drain; the next minute's timer builds while existing
+runs finish, then replaces only the idle runner. Status shows the old and server
+commits, draining runs, waiting, offline during replacement, and the new commit
+on reconnect. Build failures release the drain and show **Update failed**; retry
+with Update now after fixing the host problem. Inspect host logs with
+`sudo journalctl -u corral-runner-update.service`. The lock prevents overlap.
+
+The enabled timer starts on every distro boot. The Windows startup task above
+starts and keeps that distro alive after a PC reboot; systemd alone cannot start
+WSL. Verify both the enabled timer and the Windows task, then reboot and observe
+the runner returning in Settings without opening a WSL shell. A sleeping or
+powered-off PC cannot update. Never mount the Docker socket into any container.

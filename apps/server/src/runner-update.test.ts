@@ -59,6 +59,25 @@ describe('runner updates', () => {
     expect(t.runner.available().map(r => r.id)).toContain('A')
   }, 60000)
 
+  it('returns a failed build runner to placement and keeps the failure visible across reconnect', async () => {
+    t = await createTestApp('pglite', { listen: true })
+    const peer = await connect('failed', { commit: 'old', autoUpdate: true })
+    expect(t.runner.available()).toEqual([])
+    peer.send({ type: 'runner.update-status', draining: false, updateRequested: false, activeRunCount: 1, updateState: 'failed', updateError: 'Image build failed' })
+    await vi.waitFor(() => expect(t.runner.available().map(r => r.id)).toContain('failed'))
+    expect(await status()).toContainEqual(expect.objectContaining({ id: 'failed', draining: false, updateState: 'failed', activeRunCount: 1 }))
+    peer.close()
+    await vi.waitFor(() => expect(t.runner.isOnline('failed')).toBe(false))
+    const retry = await connect('failed', { commit: 'old', autoUpdate: true, updateTarget: 'development', updateState: 'failed', updateError: 'Image build failed' })
+    expect(t.runner.available().map(r => r.id)).toContain('failed')
+    await t.request('POST', '/api/runners/failed/update')
+    expect(await retry.next('runner.drain')).toMatchObject({ updateRequested: true })
+    retry.close()
+    await vi.waitFor(() => expect(t.runner.isOnline('failed')).toBe(false))
+    await connect('failed', { commit: 'old', autoUpdate: true, updateTarget: 'previous-server', updateState: 'failed' })
+    expect(t.runner.available()).toEqual([]) // A new server commit gets a fresh automatic attempt.
+  }, 60000)
+
   it('only automatically drains behind runners that opted in, retaining setup fallback', async () => {
     t = await createTestApp('pglite', { listen: true })
     await connect('auto', { commit: 'old', autoUpdate: true })

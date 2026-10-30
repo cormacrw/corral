@@ -13,3 +13,6 @@ dist
 !.corral/agents/
 !.corral/CORRAL.md
 !.corral/wiki/
+
+# Host updater serialization lock
+deploy/runner/.update.lock
