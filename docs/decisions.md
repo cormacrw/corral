@@ -206,6 +206,7 @@ A status says whose turn it is. Whether a run is actually active is shown by the
 | Agent review, Human review, Ready to merge | Merged | GitHub shows the PR merged outside Corral | Server |
 | Ready, In progress, Agent review, Human review, Ready to merge | Blocked | See causes below | Server |
 | In progress, Agent review, Ready to merge | Failed | See causes below | Server |
+| Blocked | In progress | The PM answers a question or adds information (D27) | PM |
 | Blocked, Failed | Backlog, Ready or In progress | Human resolves it (In progress keeps the branch and PR) | **Human only** |
 
 All transitions go through `packages/core` and are enforced by the server. Anything not in this table is rejected.
@@ -781,6 +782,7 @@ Sessions can be **global** as well as tied to a project. A global session has **
 
 - **D9:** the PM's tools are no longer the short list there, and `propose_plan` is no longer the only way for the PM to change the board: it can create and edit tasks with its task tools. Plans stay the way to propose a body of work. Only a session tied to a project has a read-only checkout. **Unchanged:** the PM has no tool to merge or edit docs, its checkout stays read-only, and a turn runs only when the human sends a message or approves a design.
 - **D10:** the PM can create tasks in Backlog of any kind, not only documentation tasks. The **Human only** transitions stay human: the PM can propose them on a confirm card, and the transition runs on the human's click with the human as its actor.
+- **D10 (COR-246):** the one exception is the PM's `answer` transition, Blocked → In progress, for answering a question or adding information. It keeps the review-round and failed-run counters, so it can't lift a cap, and `resolve` stays **Human only**.
 - **D11:** "the PM stays in Plan" no longer holds. The PM can read and act on the Inbox, with decisions on a confirm card, and its actions appear in Activity. **Unchanged:** it raises no Needs-you items of its own.
 - **D13:** "Plan sessions belong to one project" and "every PM session has a `projectId`" no longer hold, because global sessions have none. A project session's project is still locked once it has messages.
 - **D20:** design approval stays **Human only**. The PM can propose it on a confirm card, and the rest of D20's approval flow follows from the human's click as usual.

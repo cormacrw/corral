@@ -29,7 +29,7 @@ const outcomes: Record<AgentRole, readonly string[]> = {
 }
 
 interface ToolDefinition {
-  confirmRequired?: boolean
+  confirmRequired?: boolean | ((input: unknown) => boolean)
   description: string
   input: z.ZodRawShape
 }
@@ -158,7 +158,7 @@ const roleToolDefinitions: Record<AgentRole, Partial<Record<AgentTool, ToolDefin
   }
 }
 
-const PM_AREA_TOOLS = [...Object.keys(pmDirectTools), 'delete_project', 'stop_run', 'stop_all', 'resume_all'] as AgentTool[]
+const PM_AREA_TOOLS = [...Object.keys(pmDirectTools), 'delete_project', 'stop_run', 'stop_all', 'resume_all', 'act_on_inbox', 'approve_design', 'request_design_changes'] as AgentTool[]
 
 export const ROLE_TOOLS: Record<AgentRole, AgentTool[]> = {
   developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'report_outcome'],

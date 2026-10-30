@@ -25,6 +25,10 @@ interface Deps {
   sessionChanged(sessionId: string): Promise<void>
 }
 
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, ' ').trim()
+}
+
 // Every confirm-required tool uses this lifecycle. Its message is also the
 // durable pending-action record, so the card survives reloads and restarts.
 export class PmActions {
@@ -47,9 +51,9 @@ export class PmActions {
   }
 
   async propose(sessionId: string, runId: string, tool: string, input: unknown, actor: Actor) {
-    if (!requiresPmConfirmation(tool)) throw new Error(`Not a confirm-required tool: ${tool}`)
+    if (!requiresPmConfirmation(tool, input)) throw new Error(`Not a confirm-required tool: ${tool}`)
     const prepared = await this.#d.prepare(sessionId, tool, input)
-    const action: PmAction = { tool, input: prepared.input, summary: prepared.summary.replace(/\s+/g, ' ').trim(), status: 'pending', targetId: prepared.targetId, error: null, result: null }
+    const action: PmAction = { tool, input: prepared.input, summary: oneLine(prepared.summary), status: 'pending', targetId: prepared.targetId, error: null, result: null }
     const message = await this.#d.db.transaction(async (tx) => {
       const [session] = await tx.select().from(planSessions).where(eq(planSessions.id, sessionId)).for('update')
       if (!session || session.closedAt) throw new Error('This conversation is closed or no longer exists')
@@ -88,9 +92,11 @@ export class PmActions {
     } else {
       try {
         if (session.closedAt) throw new Error('This conversation is closed')
-        if (!requiresPmConfirmation(action.tool)) throw new Error('This tool is no longer available for confirmation')
+        if (!requiresPmConfirmation(action.tool, action.input)) throw new Error('This tool is no longer available for confirmation')
         const prepared = await this.#d.prepare(sessionId, action.tool, action.input)
-        if (prepared.targetId !== action.targetId) throw new Error('The target of this action has changed')
+        // The summary is what the human agreed to, so it also catches a task
+        // that moved on and came back, such as a new head on a reviewed PR.
+        if (prepared.targetId !== action.targetId || oneLine(prepared.summary) !== action.summary) throw new Error('The target of this action has changed')
         action.result = await this.#d.execute(sessionId, action.tool, prepared, { ...actor, viaPm: { sessionId, runId: row.runId } })
         action.status = 'confirmed'
       } catch (error) {
@@ -104,10 +110,10 @@ export class PmActions {
         ? `Could not confirm: ${action.summary}. ${action.error}`
         : `Confirmed: ${action.summary}. ${typeof action.result === 'string' ? action.result : JSON.stringify(action.result)}`
     const resolved = await db.transaction(async (tx) => {
-      const [target] = action.targetId ? await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, action.targetId)) : []
+      const [target] = action.targetId ? await tx.select({ id: tasks.id, projectId: tasks.projectId }).from(tasks).where(eq(tasks.id, action.targetId)) : []
       // Removing the conversation's own project took the conversation with it
       const [alive] = await tx.select({ id: planSessions.id }).from(planSessions).where(eq(planSessions.id, sessionId))
-      const projectId = alive ? session.projectId : null
+      const projectId = alive ? target?.projectId ?? session.projectId : null
       const audit = { projectId, taskId: target?.id ?? null, actor, action: decision === 'cancel' ? 'pm.action_cancelled' : action.status === 'confirmed' ? 'pm.action_confirmed' : 'pm.action_failed', detail: { actionId, sessionId, runId: row.runId, targetId: action.targetId, proposer, tool: action.tool, input: action.input, summary: action.summary, result: action.result, error: action.error } }
       await tx.insert(auditLog).values(audit)
       if (!alive) return null
