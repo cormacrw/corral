@@ -2,7 +2,7 @@ import type { Project, PullRequestStatus, Task } from '@corral/contracts'
 import { failedMergeGates, type TaskStatus } from '@corral/core'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 
 const { agents, evidence, reviews, runs, tasks } = schema
@@ -100,6 +100,19 @@ describe('project pull requests', () => {
     const status = (await list()).find(p => p.taskTitle === 'Moved')!
     expect(status.review).toMatchObject({ headSha: 'sha-old', forHeadCommit: false })
     expect(status.merge.failedGates).toContain('approvalIsForHeadCommit')
+  })
+
+  it('leads with the first failed gate in core order however the facts were built', async () => {
+    await withPr('Reordered', 'sha-reordered', { approved: false, evidence: false })
+    const gates = t.orchestrator.merges.gates.bind(t.orchestrator.merges)
+    const spy = vi.spyOn(t.orchestrator.merges, 'gates').mockImplementation(async (task, row) => {
+      const report = await gates(task, row)
+      return { ...report, facts: Object.fromEntries(Object.entries(report.facts).reverse()) as typeof report.facts }
+    })
+    const status = (await list()).find(p => p.taskTitle === 'Reordered')!
+    spy.mockRestore()
+    expect(status.merge.failingGate).toBe('approvalIsForHeadCommit')
+    expect(status.merge.failedGates).toEqual(['approvalIsForHeadCommit', 'requiredChecksPassed', 'evidenceComplete'])
   })
 
   it('is a 404 for an unknown project', async () => {
