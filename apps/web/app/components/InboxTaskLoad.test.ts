@@ -29,9 +29,9 @@ const alertStub = vue.defineComponent({
   setup: props => () => vue.h('div', { 'data-alert': true }, [props.title, ...(props.actions ?? []).map((a: { label: string, onClick: () => void }) => vue.h('button', { onClick: a.onClick }, a.label))])
 })
 
-async function mountInbox(type: 'human_review' | 'failed') {
+async function mountInbox(type: 'human_review' | 'failed', taskRef?: string) {
   for (const name of ['ref', 'shallowRef', 'computed', 'watch', 'watchEffect', 'onMounted', 'onBeforeUnmount'] as const) vi.stubGlobal(name, vue[name])
-  const item = inbox().needsYou.find(i => i.type === type)!
+  const item = inbox().needsYou.find(i => i.type === type && (taskRef ? i.taskRef === taskRef : tasks.find(t => t.id === i.taskId)?.type !== 'design'))!
   const params = vue.reactive({ itemId: item.id })
   vi.stubGlobal('useRoute', () => ({ params }))
   vi.stubGlobal('useRouter', () => ({ replace: vi.fn(), push: vi.fn() }))
@@ -51,7 +51,9 @@ async function mountInbox(type: 'human_review' | 'failed') {
   }))
   vi.mocked(api.inbox.get).mockImplementation(async () => structuredClone(inbox()))
   vi.mocked(api.inbox.act).mockReset().mockResolvedValue({ task: null })
-  vi.mocked(api.tasks.byRef).mockReset().mockRejectedValue(new Error('Server unavailable'))
+  const byRef = vi.mocked(api.tasks.byRef).mockReset()
+  if (taskRef) byRef.mockResolvedValue(tasks.find(t => t.ref === taskRef)!)
+  else byRef.mockRejectedValue(new Error('Server unavailable'))
   vi.mocked(api.tasks.evidence).mockResolvedValue([])
   vi.mocked(api.tasks.reviews).mockResolvedValue([])
   const wrapper = mount(InboxPage, { global: {
@@ -91,6 +93,17 @@ it('leaves the actions that do not need the task available after a failed load',
     expect(composer().props('disabled')).toBe(false)
     expect(await submit()).toBe(true)
     expect(api.inbox.act).toHaveBeenCalledWith((item as { taskId: string }).taskId, expect.objectContaining({ action: 'resolve' }))
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('drops the approve choice once the loaded task is a design', async () => {
+  const { wrapper, composer, submit } = await mountInbox('human_review', 'COR-41')
+  try {
+    expect(composer().props('submitLabel')).toBe('')
+    await submit()
+    expect(api.inbox.act).not.toHaveBeenCalled()
   } finally {
     wrapper.unmount()
   }

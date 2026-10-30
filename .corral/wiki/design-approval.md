@@ -6,7 +6,7 @@ Approval updates the version and task together through core. Reopening uses `hum
 
 ## Existing designs: review before repair
 
-Migration `0039_amusing_devos.sql` only adds the enum value. It does not repair any task or version. Run the read-only inventory in `docs/operations/design-approval-inventory.sql` against the intended database and retain its complete output for human review. It lists every design task, including deleted tasks, its approved version/commit if any, and the policy applied to that row.
+Migration `0040_late_colossus.sql` only adds the enum value. It does not repair any task or version. Run the read-only inventory in `docs/operations/design-approval-inventory.sql` against the intended database and retain its complete output for human review. It lists every design task, including deleted tasks, its approved version/commit if any, and the policy applied to that row.
 
 - Already Approved: leave unchanged.
 - No approved version: leave unchanged.
