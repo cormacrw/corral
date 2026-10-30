@@ -203,7 +203,7 @@ describe('plan epic dependency validation', () => {
     const context = {
       epics: new Map([['existing', [] as string[]]]), titles: new Map([['existing', 'Existing foundation']]),
       epicIds: new Map<string, string>(), taskIds: new Map<string, string>(), refIds: new Map([['COR-1', 'existing-task']]),
-      tasks: [{ id: 'existing-task', epicId: 'existing', status: 'ready' as const, dependsOn: [] as string[] }]
+      tasks: [{ type: 'task' as const, id: 'existing-task', epicId: 'existing', status: 'ready' as const, dependsOn: [] as string[] }]
     }
     const plan = { ...proposal, epics: [{ ...proposal.epics[0]!, dependsOn: ['existing'] }, proposal.epics[1]!] }
     expect(checkPlan(plan, new Map(), new Map(), context)).toEqual([])

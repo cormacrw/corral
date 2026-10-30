@@ -1,7 +1,8 @@
 import { ACTIVE_RUN_STATES, LEASE_DURATION_MS, transition, type Actor, type TaskStatus } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, asc, count, eq, inArray, isNotNull, isNull, ne, notInArray, notExists, sql } from 'drizzle-orm'
+import { and, asc, count, eq, inArray, isNotNull, isNull, notInArray, notExists, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
+import { unfinishedTask } from './completion.ts'
 import { toTaskState } from './tasks.ts'
 
 const { agents, auditLog, projects, reviews, runs, epicDependencies, taskDependencies, tasks } = schema
@@ -50,14 +51,14 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
     const eligible = agent.role === 'developer'
       ? and(
           inArray(tasks.status, ['ready', 'in_progress']),
-          // Every dependency Merged (D10: Ready tasks wait on them)
+          // Every dependency finished for its type (D19/D20)
           notExists(tx.select({ one: sql`1` }).from(taskDependencies)
             .innerJoin(dependency, eq(dependency.id, taskDependencies.dependsOnId))
-            .where(and(eq(taskDependencies.taskId, tasks.id), ne(dependency.status, 'merged')))),
+            .where(and(eq(taskDependencies.taskId, tasks.id), unfinishedTask(dependency)))),
           notExists(tx.select({ one: sql`1` }).from(epicDependencies)
             .innerJoin(epicTask, eq(epicTask.epicId, epicDependencies.dependsOnEpicId))
             .where(and(eq(epicDependencies.epicId, tasks.epicId), isNull(epicTask.deletedAt),
-              notInArray(epicTask.status, ['draft', 'backlog', 'merged']))))
+              and(notInArray(epicTask.status, ['draft', 'backlog']), unfinishedTask(epicTask)))))
         )
       : and(
           eq(tasks.status, 'agent_review'),
@@ -89,8 +90,8 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
     // In progress or Agent review task keeps its status and just gets a lease
     let status = task.status
     if (task.status === 'ready') {
-      // The query only returns tasks whose dependencies are all Merged
-      const result = transition(toTaskState(task), { type: 'claim', dependencyStatuses: [] }, scheduler)
+      // The query only returns tasks whose dependencies are all finished
+      const result = transition(toTaskState(task), { type: 'claim', dependencies: [] }, scheduler)
       if (!result.ok) throw new Error(`Claim rejected by core: ${result.error.code}`)
       status = result.task.status
     }

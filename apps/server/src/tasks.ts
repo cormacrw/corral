@@ -18,6 +18,7 @@ import {
 } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, max, ne, notInArray, sql } from 'drizzle-orm'
+import { unfinishedTask } from './completion.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import { toReview } from './runs.ts'
 
@@ -62,7 +63,7 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
     .from(epicDependencies)
     .innerJoin(epics, eq(epics.id, epicDependencies.dependsOnEpicId))
     .innerJoin(tasks, eq(tasks.epicId, epics.id))
-    .where(and(eq(epics.projectId, project.id), isNull(tasks.deletedAt), notInArray(tasks.status, ['draft', 'backlog', 'merged'])))
+    .where(and(eq(epics.projectId, project.id), isNull(tasks.deletedAt), and(notInArray(tasks.status, ['draft', 'backlog']), unfinishedTask(tasks))))
     .orderBy(asc(epics.title), asc(epics.id))
   // Newest first, so the first row per task is its latest review
   const reviewRows = await db.select().from(reviews).where(inArray(reviews.taskId, ids)).orderBy(desc(reviews.createdAt))
@@ -230,7 +231,7 @@ export async function listTasks(db: Executor, project: ProjectRow, view: TaskVie
 // Returns the new task's ID.
 export async function createTask(db: Executor, project: ProjectRow, rawInput: CreateTaskInput, actor: Actor, options: { draft?: boolean } = {}): Promise<string> {
   const input = createTaskInput.parse(rawInput)
-  const created = createTaskState(actor, requiresHumanReview(input.type, input.humanReview ?? project.humanReviewDefault), options.draft)
+  const created = createTaskState(actor, requiresHumanReview(input.type, input.humanReview ?? project.humanReviewDefault), options.draft, input.type)
   if (!created.ok) throw new ApiFailure(409, { code: 'transition_rejected', reason: created.error })
 
   return db.transaction(async (tx) => {
@@ -351,12 +352,15 @@ export async function applyTransition(
         .where(eq(designVersions.id, latest.id))
     }
   }
+  if (event.type === 'human_request_changes' && event.feedback?.trim()) {
+    await tx.insert(comments).values({ taskId: task.id, author: actor, body: event.feedback!, pinned: true })
+  }
   await tx.insert(auditLog).values({
     projectId: project.id,
     taskId: task.id,
     actor,
     action: 'task.transition',
-    detail: { ...detail, from: task.status, to: next.status satisfies TaskStatus }
+    detail: { ...detail, ...(event.type === 'human_request_changes' && { feedback: event.feedback }), from: task.status, to: next.status satisfies TaskStatus }
   })
   return next
 }
@@ -468,7 +472,7 @@ export async function listHistory(db: Executor, taskId: string): Promise<AuditEn
 export async function deleteTaskRows(db: Executor, taskId: string, actor: Actor, reason: string | null, options: { soft?: boolean, detachDependents?: boolean } = {}): Promise<string[]> {
   return db.transaction(async (tx) => {
     const { task, project } = await lockTask(tx, taskId)
-    const mode = options.soft && task.status === 'draft' ? 'soft' : deletionFor(task.status)
+    const mode = options.soft && task.status === 'draft' ? 'soft' : deletionFor(task)
     if (mode === 'not_allowed') throw new ApiFailure(409, { code: 'conflict', constraint: 'merged_tasks_are_immutable' })
     const dependents = await tx.select({ task: tasks }).from(taskDependencies)
       .innerJoin(tasks, eq(tasks.id, taskDependencies.taskId))

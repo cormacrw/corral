@@ -1,10 +1,9 @@
 import { checkDependencies, findCycle, type DependencyProblem } from './dependencies.ts'
-import type { TaskStatus } from './status.ts'
+import { isTaskDone, isUnfinishedBoardTask, type CompletionState } from './completion.ts'
 
-export interface EpicDependencyTask {
+export interface EpicDependencyTask extends CompletionState {
   id: string
   epicId: string | null
-  status: TaskStatus
   deleted?: boolean
   dependsOn: readonly string[]
 }
@@ -38,14 +37,14 @@ export function checkEpicDependencies(
   // incorrectly treating every cross-epic task edge as an epic dependency.
   const graph = new Map<string, string[]>()
   for (const id of epicGraph.keys()) graph.set(`epic:${id}`, [])
-  const unfinished = tasks.filter(t => !t.deleted && t.status !== 'merged')
+  const unfinished = tasks.filter(t => !t.deleted && !isTaskDone(t))
   const ids = new Set(unfinished.map(t => t.id))
   for (const task of unfinished) {
     graph.set(`task:${task.id}`, [
       ...task.dependsOn.filter(id => ids.has(id)).map(id => `task:${id}`),
       ...(task.epicId ? epicGraph.get(task.epicId) ?? [] : []).map(id => `epic:${id}`)
     ])
-    if (task.epicId && task.status !== 'draft' && task.status !== 'backlog') {
+    if (task.epicId && isUnfinishedBoardTask(task)) {
       graph.get(`epic:${task.epicId}`)?.push(`task:${task.id}`)
     }
   }

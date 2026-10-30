@@ -4,7 +4,7 @@ import { schema, type Database, type Executor } from '@corral/db'
 import { and, asc, desc, eq, isNull } from 'drizzle-orm'
 import type { BlobStore } from './blob-store.ts'
 import { ApiFailure } from './errors.ts'
-import { lockTask } from './tasks.ts'
+import { applyTransition, lockTask } from './tasks.ts'
 
 const { auditLog, designVersions, taskDesignPins, tasks } = schema
 
@@ -233,6 +233,11 @@ export async function readDesignScreenshot(db: Executor, blobs: BlobStore, versi
 export async function approveDesign(db: Database, taskId: string, version: number, actor: Actor): Promise<string> {
   return db.transaction(async (tx) => {
     const { task, project } = await lockTask(tx, taskId)
+    if (task.type === 'design' && task.status === 'approved' && actor.kind === 'human') {
+      const [approved] = await tx.select({ id: designVersions.id }).from(designVersions)
+        .where(and(eq(designVersions.taskId, taskId), eq(designVersions.version, version), eq(designVersions.status, 'approved')))
+      if (approved) return approved.id
+    }
     if (task.type !== 'design' || task.status !== 'human_review') {
       throw new ApiFailure(409, { code: 'transition_rejected', reason: { code: 'invalid_transition', status: task.status, event: 'human_approve' } })
     }
@@ -240,6 +245,7 @@ export async function approveDesign(db: Database, taskId: string, version: numbe
       .from(designVersions).where(eq(designVersions.taskId, taskId)).orderBy(asc(designVersions.version))
     const result = approveDesignVersion(rows, version)
     if (!result.ok) throw new ApiFailure(409, { code: 'invalid_input', issues: [{ path: ['version'], message: result.error }] })
+    await applyTransition(tx, task, project, { type: 'human_approve' }, actor)
     for (const next of result.versions) {
       const before = rows.find(r => r.id === next.id)!
       if (before.status !== next.status) await tx.update(designVersions).set({ status: next.status, updatedAt: new Date() }).where(eq(designVersions.id, next.id))

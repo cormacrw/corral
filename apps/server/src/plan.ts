@@ -989,7 +989,7 @@ export class PlanService {
       taskIds,
       refIds: new Map(rows.map(t => [taskRef(project.prefix, t.number), t.id])),
       tasks: rows.filter(t => t.status !== 'draft' || !removedDrafts.has(t.id)).map(t => ({
-        id: t.id, epicId: t.epicId, status: t.status,
+        id: t.id, type: t.type, epicId: t.epicId, status: t.status,
         dependsOn: deps.filter(d => d.task_dependencies.taskId === t.id).map(d => d.task_dependencies.dependsOnId)
       }))
     }

@@ -181,7 +181,7 @@ export function checkPlanEpicDependencies(plan: ProposedPlan, context?: PlanDepe
   for (const task of plan.tasks) {
     const id = taskId(task)
     effectiveTasks.set(id, {
-      id, epicId: task.epic ? epicId(task.epic) : null,
+      id, type: task.type, epicId: task.epic ? epicId(task.epic) : null,
       // Validate as board work even though proposed tasks are stored as Drafts.
       status: 'ready',
       dependsOn: task.dependsOn.map(dep => proposedIds.get(dep) ?? proposedRefs.get(dep) ?? context?.refIds.get(dep) ?? dep)

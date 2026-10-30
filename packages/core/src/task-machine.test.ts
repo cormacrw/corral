@@ -31,7 +31,7 @@ const validEvents: Record<TaskEventType, TaskEvent> = {
   approve: { type: 'approve', content },
   accept: { type: 'accept' },
   send_back: { type: 'send_back' },
-  claim: { type: 'claim', dependencyStatuses: ['merged'] },
+  claim: { type: 'claim', dependencies: [{ type: 'task', status: 'merged' }] },
   submit: { type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true },
   changes_requested: { type: 'changes_requested' },
   review_approved: { type: 'review_approved' },
@@ -76,7 +76,7 @@ const stateFor: Partial<Record<TaskEventType, Partial<TaskState>>> = {}
 
 function task(status: TaskStatus, overrides: Partial<TaskState> = {}): TaskState {
   // Flagged tasks are the only ones that may reach Human review
-  return { status, humanReview: status === 'human_review', reviewRounds: 0, failedRuns: 0, reason: null, ...overrides }
+  return { type: 'task', status, humanReview: status === 'human_review', reviewRounds: 0, failedRuns: 0, reason: null, ...overrides }
 }
 
 function expectOk(result: ReturnType<typeof transition>): TaskState {
@@ -154,12 +154,12 @@ describe('drafts', () => {
 
 describe('claim', () => {
   it('waits until every dependency is Merged', () => {
-    const result = transition(task('ready'), { type: 'claim', dependencyStatuses: ['merged', 'agent_review'] }, scheduler)
+    const result = transition(task('ready'), { type: 'claim', dependencies: [{ type: 'task', status: 'merged' }, { type: 'task', status: 'agent_review' }] }, scheduler)
     expect(result).toEqual({ ok: false, error: { code: 'dependencies_not_merged' } })
   })
 
   it('claims a task with no dependencies', () => {
-    expect(expectOk(transition(task('ready'), { type: 'claim', dependencyStatuses: [] }, scheduler)).status).toBe('in_progress')
+    expect(expectOk(transition(task('ready'), { type: 'claim', dependencies: [] }, scheduler)).status).toBe('in_progress')
   })
 })
 
