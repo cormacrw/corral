@@ -48,6 +48,8 @@ web            server                          runner                     claude
 | `flag_stale_docs` | Create a documentation task (PRD §7.10) |
 | `get_design` | A design version's `design.md` spec, screen ids, screenshots, branch and commit, and its sandboxed preview URL (D20). Takes a design task's ref (its latest version by default, or a given `version`) or a build task's ref (its pinned version and screens). The runner saves the spec and screenshots in the agent's scratch folder and extracts the bundle (a tar) there, and returns the paths. Developers and reviewers have it too |
 
+The PM can delegate work with `start_thread` (title, message, optional project slug and runtime). The new session stores its parent and starts on an agent-attributed first message; omitting project creates a Global thread. `list_threads` includes sessions across all projects, with parent, status, closed state and running turn. `read_thread` returns recent messages latest first (default 20, maximum 100). `message_thread` starts a turn on an idle thread and reopens it if closed. `close_thread` uses the same stop/discard/close lifecycle as the human route. A message to an already running thread is refused, as in the human route. When a child finishes a turn, its parent receives a saved notification naming it, without starting a turn or reopening the parent. The next parent turn sees those notifications even with a warm CLI session. Plan shows linked parents, children and message senders; agent messages never count as human plan approval.
+
 ### Developer and reviewer design tools (D20)
 
 | Tool | Who | Purpose |

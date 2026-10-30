@@ -193,7 +193,7 @@ export class PlanService {
   }
 
   // design/plan.md: the project and runtime are locked once the session has messages
-  async start(projectId: string | null, input: { id?: string | undefined, text: string, taskRef?: string | undefined, runtime?: AgentRuntime }, actor: Actor): Promise<PlanSessionDetail> {
+  async start(projectId: string | null, input: { id?: string | undefined, text: string, taskRef?: string | undefined, runtime?: AgentRuntime, title?: string, parentSessionId?: string }, actor: Actor): Promise<PlanSessionDetail> {
     this.assertTurnPossible()
     const { db, events } = this.#d
     // A retry returns the original thread without interpreting a new message.
@@ -212,13 +212,14 @@ export class PlanService {
       attached = `${task.ref} ${task.title}`
     }
     const text = input.text || `Refine ${attached}`
-    const fallback = titleFrom(input.text || `Refine ${input.taskRef}`)
+    const sender = input.parentSessionId ? await this.#session(input.parentSessionId) : null
+    const fallback = input.title ?? titleFrom(input.text || `Refine ${input.taskRef}`)
     const created = await db.transaction(async (tx) => {
       this.assertTurnPossible()
-      const [session] = await tx.insert(planSessions).values({ ...(input.id ? { id: input.id } : {}), projectId, title: fallback, runtime: input.runtime ?? 'claude-code', createdBy: actor })
+      const [session] = await tx.insert(planSessions).values({ ...(input.id ? { id: input.id } : {}), projectId, title: fallback, parentSessionId: sender?.id ?? null, runtime: input.runtime ?? 'claude-code', createdBy: actor })
         .onConflictDoNothing({ target: planSessions.id }).returning()
       if (!session) return null
-      const [message] = await tx.insert(planMessages).values({ sessionId: session.id, role: 'human', text, runId: null }).returning()
+      const [message] = await tx.insert(planMessages).values({ sessionId: session.id, role: sender ? 'thread' : 'human', senderSessionId: sender?.id ?? null, senderTitle: sender?.title ?? null, text, runId: null }).returning()
       await tx.insert(auditLog).values({ projectId, actor, action: 'plan.message', detail: { sessionId: session.id, messageId: message!.id } })
       return { session, message: message! }
     })
@@ -231,8 +232,8 @@ export class PlanService {
     // Leave the response independent of runner/orchestrator work, including
     // synchronous failures. The durable message remains the turn's record.
     setImmediate(() => {
-      void this.#queueInitialTurn(session, project, text, attached).catch(error => console.error(`Recording failed PM turn for ${session.id} failed`, error)).finally(() => this.#pendingTurns.delete(session.id))
-      void this.#generateTitle(session.id, fallback, { text, attachedTask: attached })
+      void this.#queueInitialTurn(session, project, sender ? threadText(sender, text) : text, attached).catch(error => console.error(`Recording failed PM turn for ${session.id} failed`, error)).finally(() => this.#pendingTurns.delete(session.id))
+      if (!input.title) void this.#generateTitle(session.id, fallback, { text, attachedTask: attached })
     })
     return detail
   }
@@ -342,7 +343,7 @@ export class PlanService {
   }
 
   // A human message starts one PM turn (D9)
-  async message(sessionId: string, input: { text: string, taskRef?: string | undefined }, actor: Actor): Promise<PlanMessage> {
+  async message(sessionId: string, input: { text: string, taskRef?: string | undefined, senderSessionId?: string }, actor: Actor): Promise<PlanMessage> {
     const { db } = this.#d
     const session = await this.#session(sessionId)
     const [project] = session.projectId ? await db.select().from(projects).where(eq(projects.id, session.projectId)) : []
@@ -361,7 +362,8 @@ export class PlanService {
       attached = `${task.ref} ${task.title}`
     }
     const text = input.text || `Refine ${attached}`
-    const [message] = await db.insert(planMessages).values({ sessionId, role: 'human', text, runId: null }).returning()
+    const sender = input.senderSessionId ? await this.#session(input.senderSessionId) : null
+    const [message] = await db.insert(planMessages).values({ sessionId, role: sender ? 'thread' : 'human', senderSessionId: sender?.id ?? null, senderTitle: sender?.title ?? null, text, runId: null }).returning()
     // A new message reopens a session closed by approving its plan
     await db.update(planSessions).set({ updatedAt: new Date(), unread: false, closedAt: null }).where(eq(planSessions.id, sessionId))
     await db.insert(auditLog).values({ projectId: session.projectId, actor, action: 'plan.message', detail: { sessionId, messageId: message!.id } })
@@ -370,10 +372,11 @@ export class PlanService {
     // Warm agent sessions do not replay database history. Include the saved
     // confirmation ledger explicitly, as well as in cold-start history.
     // Replaying it also prevents a result racing a turn start from being lost.
-    const results = await db.select({ text: planMessages.text }).from(planMessages)
-      .where(and(eq(planMessages.sessionId, sessionId), eq(planMessages.kind, 'action_result')))
+    const results = await db.select().from(planMessages)
+      .where(and(eq(planMessages.sessionId, sessionId), inArray(planMessages.kind, ['action_result', 'notification'])))
       .orderBy(asc(planMessages.createdAt))
-    const turnText = results.length ? `${text}\n\nRecorded tool confirmation results:\n${results.map(r => r.text).join('\n')}` : text
+    const attributedText = sender ? threadText(sender, text) : text
+    const turnText = results.length ? `${attributedText}\n\nRecorded tool results and thread notifications:\n${results.map(r => r.role === 'thread' ? threadText({ id: r.senderSessionId ?? 'removed', title: r.senderTitle ?? 'Removed thread' }, r.text) : r.text).join('\n')}` : attributedText
     await this.#turn(session, project, {
       prompt: pmPrompt({ text: turnText, attachedTask: attached, projectName: project?.name ?? null, prefix: project?.prefix ?? null, fresh: session.agentSessionId === null }),
       fallbackPrompt: pmFallbackPrompt({ text, attachedTask: attached, projectName: project?.name ?? null, prefix: project?.prefix ?? null, history: await this.#history(sessionId) })
@@ -421,6 +424,17 @@ export class PlanService {
     // Every finished turn (reply, question or plan) waits for the human to read it
     await db.update(planSessions).set({ updatedAt: new Date(), unread: true }).where(eq(planSessions.id, sessionId))
     events.publish({ type: 'plan.session', session: await this.#toSession(await this.#session(sessionId), null) })
+    const child = await this.#session(sessionId)
+    if (child.parentSessionId) {
+      const [notification] = await db.insert(planMessages).values({
+        sessionId: child.parentSessionId, role: 'thread', kind: 'notification',
+        senderSessionId: child.id, senderTitle: child.title,
+        text: `Thread “${child.title}” finished its turn${error ? ' with an error' : ''}.`, runId
+      }).returning()
+      await db.update(planSessions).set({ updatedAt: new Date(), unread: true }).where(eq(planSessions.id, child.parentSessionId))
+      events.publish({ type: 'plan.message', message: toMessage(notification!) })
+      events.publish({ type: 'plan.session', session: await this.#toSession(await this.#session(child.parentSessionId)) })
+    }
   }
 
   // ── PM tools (flows.md §1) ─────────────────────────────────────────────────
@@ -1044,7 +1058,7 @@ export class PlanService {
   // The conversation so far, for reseeding a lost session (D9)
   async #history(sessionId: string): Promise<{ role: string, text: string }[]> {
     const rows = await this.#d.db.select().from(planMessages).where(eq(planMessages.sessionId, sessionId)).orderBy(asc(planMessages.createdAt))
-    return rows.map(m => ({ role: m.role === 'human' ? 'Human' : m.kind === 'question' ? 'PM (question)' : 'PM', text: m.kind === 'question' ? questionText(m) : m.text }))
+    return rows.map(m => ({ role: m.role === 'thread' ? `Thread ${m.senderTitle ?? 'Removed thread'} (${m.senderSessionId ?? 'removed'})` : m.role === 'human' ? 'Human' : m.kind === 'question' ? 'PM (question)' : 'PM', text: m.kind === 'question' ? questionText(m) : m.text }))
   }
 
   async #toSession(row: SessionRow, activeRunId?: string | null): Promise<PlanSession> {
@@ -1065,6 +1079,7 @@ export async function sessionState(db: Executor, row: SessionRow, activeRunId?: 
   }
   const session: PlanSession = {
     id: row.id,
+    parentSessionId: row.parentSessionId,
     projectId: row.projectId,
     title: row.title,
     runtime: row.runtime as AgentRuntime,
@@ -1112,7 +1127,9 @@ export function toMessage(row: typeof planMessages.$inferSelect): PlanMessage {
   return {
     id: row.id,
     sessionId: row.sessionId,
-    role: row.role as 'human' | 'pm',
+    role: row.role as PlanMessage['role'],
+    senderSessionId: row.senderSessionId,
+    senderTitle: row.senderTitle,
     kind: row.kind as PlanMessage['kind'],
     text: row.text,
     pendingAction: row.pendingAction,
@@ -1157,3 +1174,7 @@ function designBuildMessage(ref: string, title: string, version: number, note: s
 }
 
 const STATUS_NAMES: Record<string, string> = { draft: 'Draft', backlog: 'Backlog', ready: 'Ready' }
+
+function threadText(sender: { id: string, title: string }, text: string): string {
+  return `Message from PM thread “${sender.title}” (${sender.id}), not from the human:\n${text}`
+}
