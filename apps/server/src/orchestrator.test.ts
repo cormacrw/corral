@@ -501,13 +501,20 @@ describe('orchestrator', () => {
 
   // A reviewer requests changes, the developer pushes a new commit, and a
   // second reviewer run starts on it
-  async function secondReview(first: { summary: string, note: string }, headSha = 'def456') {
+  async function secondReview(first: { summary: string, note: string }, headSha = 'def456', unblock = false) {
     const { project, task, review } = await underReview()
     const criterion = task.acceptanceCriteria[0]!
+    if (unblock) await t.request('PATCH', `/api/projects/${project.slug}`, { reviewRoundCap: 1 })
     await runner.call(review.runId, review.leaseEpoch, 'report_outcome', {
       outcome: 'changes_requested', summary: first.summary, criteria: [{ criterionId: criterion.id, met: false, note: first.note }]
     })
     await runner.next('run.stop', m => m.runId === review.runId)
+    if (unblock) {
+      expect(await taskRow(task.id)).toMatchObject({ status: 'blocked', reviewRounds: 1 })
+      const resolved = await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'resolve', to: 'in_progress' })
+      expect(resolved.status).toBe(200)
+      expect(await taskRow(task.id)).toMatchObject({ reviewRounds: 0 })
+    }
     const developer = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
     t.github.setBranch(project.repository, developer.branch!, headSha)
     await runner.call(developer.runId, developer.leaseEpoch, 'attach_evidence', {
@@ -532,6 +539,17 @@ describe('orchestrator', () => {
     })
     expect(review.prompt).toContain(current.id)
     expect(review.prompt).not.toContain(allEvidence[0]!.id)
+    await pause(project)
+  })
+
+  it('starts a reviewer after human resolution and same-head resubmission with the round cap reset', async () => {
+    const { project, task, criterion, review } = await secondReview({ summary: 'Needs evidence', note: 'Show the page' }, 'abc123', true)
+    expect(review).toMatchObject({ role: 'reviewer', headSha: 'abc123' })
+    expect(await taskRow(task.id)).toMatchObject({ reviewRounds: 0, leaseRunId: review.runId })
+    await runner.call(review.runId, review.leaseEpoch, 'report_outcome', {
+      outcome: 'changes_requested', summary: 'A different issue', criteria: [{ criterionId: criterion.id, met: false, note: 'Fix the label' }]
+    })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'blocked', reviewRounds: 1, statusReason: 'Review-round cap reached (1)' })
     await pause(project)
   })
 

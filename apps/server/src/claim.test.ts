@@ -129,6 +129,56 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
     expect((await taskRow(project, task.number)).leaseRunId).toBeNull()
   })
 
+  async function submission(task: { id: string, projectId: string }, createdAt: Date) {
+    await t.db.insert(auditLog).values({
+      taskId: task.id, projectId: task.projectId, actor: t.actor,
+      action: 'task.transition', detail: { event: 'pr_updated', from: 'in_progress', to: 'agent_review' }, createdAt
+    })
+  }
+
+  it.each(['changes_requested', 'approved'] as const)('claims persisted round-zero tasks resubmitted after an old %s verdict', async (verdict) => {
+    const project = await t.createProject()
+    const task = await t.createTask(project.slug)
+    const reviewer = await recordedReview(task, 0, 'same-head', verdict)
+    await t.db.update(schema.reviews).set({ createdAt: new Date('2026-10-28T12:00:00Z') }).where(eq(schema.reviews.taskId, task.id))
+    await submission(task, new Date('2026-10-28T11:00:00Z'))
+    await submission(task, new Date('2026-10-28T13:00:00Z'))
+    // Existing state after Blocked → resolved → resubmitted. No new writes
+    // or transition are needed between deployment and the scheduling pass.
+    await t.db.update(tasks).set({ status: 'agent_review', headSha: 'same-head', reviewRounds: 0 }).where(eq(tasks.id, task.id))
+    expect(await claimNextTask(t.db, reviewer)).toMatchObject({ taskId: task.id, status: 'agent_review' })
+  })
+
+  it.each(['changes_requested', 'approved'] as const)('suppresses a %s verdict since the latest submission, including equal timestamps', async (verdict) => {
+    const project = await t.createProject()
+    const task = await t.createTask(project.slug)
+    const reviewer = await recordedReview(task, 0, 'same-head', verdict)
+    const time = new Date('2026-10-28T12:00:00Z')
+    await t.db.update(schema.reviews).set({ createdAt: time }).where(eq(schema.reviews.taskId, task.id))
+    await submission(task, new Date('2026-10-28T11:00:00Z'))
+    await submission(task, time)
+    // Claims update updatedAt; unrelated audit entries must not reopen review.
+    await t.db.update(tasks).set({ status: 'agent_review', headSha: 'same-head', reviewRounds: 0, updatedAt: new Date('2026-10-28T14:00:00Z') }).where(eq(tasks.id, task.id))
+    await t.db.insert(auditLog).values({ taskId: task.id, projectId: project.id, actor: t.actor, action: 'task.transition', detail: { event: 'resolve' }, createdAt: new Date('2026-10-28T13:00:00Z') })
+    expect(await claimNextTask(t.db, reviewer)).toBeNull()
+  })
+
+  it('keeps a mechanical base-update approval effective on the new head', async () => {
+    const project = await t.createProject()
+    const task = await t.createTask(project.slug)
+    await submission(task, new Date('2026-10-28T11:00:00Z'))
+    const reviewer = await recordedReview(task, 0, 'old-head', 'approved')
+    const [approval] = await t.db.select().from(schema.reviews).where(eq(schema.reviews.taskId, task.id))
+    // merge.ts copies the approval onto the mechanical head, retaining its round.
+    await t.db.insert(schema.reviews).values({
+      taskId: task.id, runId: approval!.runId, round: approval!.round,
+      headSha: 'mechanical-head', verdict: 'approved', summary: 'Carried approval', author: t.actor,
+      createdAt: new Date('2026-10-28T12:00:00Z')
+    })
+    await t.db.update(tasks).set({ status: 'agent_review', headSha: 'mechanical-head', reviewRounds: 0 }).where(eq(tasks.id, task.id))
+    expect(await claimNextTask(t.db, reviewer)).toBeNull()
+  })
+
   it('reviews a new commit even when the round already has a verdict on the old commit', async () => {
     const project = await t.createProject()
     const task = await t.createTask(project.slug)
