@@ -97,7 +97,7 @@ describe('ToolServer', () => {
     await client.close()
   })
 
-  it('takes an optional review mode per epic in propose_plan and names the allowed values for an unknown one (D23)', async () => {
+  it('takes an optional review mode per epic in propose_plan and names the allowed values for an unknown one (D27)', async () => {
     const { client, calls } = await connect('pm')
     const propose = (await client.listTools()).tools.find(t => t.name === 'propose_plan')!
     expect(propose.inputSchema).toMatchObject({ properties: { epics: { items: { properties: { reviewMode: { enum: ['epic', 'each_task', 'direct'] } } } } } })

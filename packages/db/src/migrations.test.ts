@@ -243,7 +243,7 @@ describe('migrations', () => {
   it.each([
     { driver: 'pglite' as const, enabled: true },
     { driver: 'postgres' as const, enabled: postgresAvailable }
-  ])('0027 makes epics already on the board direct and new ones take the project default, on $driver (D23)', async ({ driver, enabled }) => {
+  ])('0027 makes epics already on the board direct and new ones take the project default, on $driver (D27)', async ({ driver, enabled }) => {
     if (!enabled) return
     const before = await migrationsBefore('0027_epic_review_modes')
     cleanup.push(() => rm(before, { recursive: true, force: true }))

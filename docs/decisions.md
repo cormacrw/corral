@@ -696,6 +696,8 @@ Per-runner pairing and revocation come later with hosting. Remote runners run un
 
 **Status:** Accepted 2026-10-29 (COR-163). Amends D5, D10, D11 and D22.
 
+This decision was first numbered D23. Migration `0027_epic_review_modes.sql` still cites it by that number, and can't be edited (it has already run).
+
 **Amended by D26:** integration review leaves the gates to required CI, and runs them without the cache only when the project has no required checks.
 
 **Principle:** the project's **target branch**, `defaultBranch` in project settings, only receives approved work. Corral assumes nothing about the target branch's name or how the project releases from it. Docs, prompts and code say "target branch" and read it from the project, never a hard-coded name.

@@ -54,7 +54,7 @@ const proposedPlan = z.object({
     title: z.string().trim(),
     summary: z.string().trim().default(''),
     dependsOn: z.array(z.string().trim()).optional(),
-    // The project's default when left out (D23)
+    // The project's default when left out (D27)
     reviewMode: z.enum(EPIC_REVIEW_MODES, { error: `reviewMode must be one of ${EPIC_REVIEW_MODES.join(', ')}` }).optional()
   })).default([]),
   tasks: z.array(proposedTask)
@@ -557,7 +557,7 @@ export class PlanService {
       for (const epic of proposed.epics) {
         const current = renamed ? [...previousEpics.values()][0] : previousEpics.get(epic.key)
         // A revision that leaves the mode out keeps the epic's; a new epic
-        // without one takes the project's default (D23)
+        // without one takes the project's default (D27)
         if (current) {
           await tx.update(epics).set({ title: epic.title, description: epic.summary, ...(epic.reviewMode && { reviewMode: epic.reviewMode }), updatedAt: new Date() }).where(eq(epics.id, current))
           epicIds.set(epic.key, current)

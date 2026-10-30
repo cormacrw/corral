@@ -77,7 +77,7 @@ export const projects = pgTable('projects', {
   paused: boolean().notNull().default(false),
   // Default for each new task's human-review flag (D5)
   humanReviewDefault: boolean().notNull().default(false),
-  // The review mode of each new epic a plan doesn't give one (D23)
+  // The review mode of each new epic a plan doesn't give one (D27)
   epicReviewModeDefault: epicReviewMode().notNull().default('epic'),
   reviewRoundCap: integer().notNull().default(5),
   failedRunCap: integer().notNull().default(3),
@@ -94,11 +94,11 @@ export const epics = pgTable('epics', {
   title: text().notNull(),
   description: text().notNull().default(''),
   priority: taskPriority().notNull().default('medium'),
-  // Set from the plan or the project's default when the epic is created (D23).
+  // Set from the plan or the project's default when the epic is created (D27).
   // Epics that had board tasks before review modes existed are `direct`.
   reviewMode: epicReviewMode().notNull().default('epic'),
   // The epic branch and its PR into the target branch, in `epic` and
-  // `each_task` modes; null until Corral creates them (D23)
+  // `each_task` modes; null until Corral creates them (D27)
   branch: text(),
   prNumber: integer(),
   prHeadSha: text(),

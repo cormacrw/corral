@@ -449,7 +449,7 @@ describe('plan sessions', () => {
     await endTurn(job, 'Proposed.')
   })
 
-  it('stores each epic\'s review mode from the plan or the project\'s default, and rejects an unknown one (D23)', async () => {
+  it('stores each epic\'s review mode from the plan or the project\'s default, and rejects an unknown one (D27)', async () => {
     const project = await t.createProject()
     expect(project.epicReviewModeDefault).toBe('epic')
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))

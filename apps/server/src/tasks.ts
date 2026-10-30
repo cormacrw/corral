@@ -233,7 +233,7 @@ export async function listTasks(db: Executor, project: ProjectRow, view: TaskVie
 // Returns the new task's ID.
 export async function createTask(db: Executor, project: ProjectRow, rawInput: CreateTaskInput, actor: Actor, options: { draft?: boolean, epicFix?: boolean } = {}): Promise<string> {
   const input = createTaskInput.parse(rawInput)
-  // D23 integration feedback creates Ready work without a separate plan approval.
+  // D27 integration feedback creates Ready work without a separate plan approval.
   const created: ReturnType<typeof createTaskState> = options.epicFix
     ? { ok: true, task: { status: 'ready', humanReview: input.humanReview ?? project.humanReviewDefault, reviewRounds: 0, failedRuns: 0, reason: null } }
     : createTaskState(actor, requiresHumanReview(input.type, input.humanReview ?? project.humanReviewDefault), options.draft)
