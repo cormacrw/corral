@@ -1,5 +1,7 @@
 import {
   RUNNER_HEARTBEAT_MS,
+  serverMessageSchema,
+  protocolMessageType,
   RUNNER_PATH,
   RUNNER_PROTOCOL_VERSION,
   type RunnerCapacity,
@@ -91,12 +93,19 @@ export class ServerConnection {
       }, RUNNER_HEARTBEAT_MS)
     })
     socket.on('message', (data) => {
-      let message: ServerMessage
+      let decoded: unknown
       try {
-        message = JSON.parse(String(data)) as ServerMessage
+        decoded = JSON.parse(String(data))
       } catch {
+        console.warn('Runner protocol error (server → runner, <invalid JSON>): Invalid JSON syntax')
         return
       }
+      const parsed = serverMessageSchema.safeParse(decoded)
+      if (!parsed.success) {
+        console.warn(`Runner protocol error (server → runner, ${protocolMessageType(decoded)}): ${parsed.error.message}`)
+        return
+      }
+      const message = parsed.data
       if (message.type === 'welcome') {
         this.updateStatus?.server(message.commit)
         if (message.draining) this.updateStatus?.drain(message.updateRequested)

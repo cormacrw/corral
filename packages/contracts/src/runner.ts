@@ -1,4 +1,5 @@
-import type { AgentRole, RunOutcome, TaskType } from '@corral/core'
+import { TASK_TYPES, type AgentRole, type RunOutcome } from '@corral/core'
+import { z } from 'zod'
 
 // The protocol between apps/server and apps/runner over WebSocket (D7). The
 // runner always dials out (D1), so the same messages work on localhost, the
@@ -27,119 +28,61 @@ export interface RepoSummary {
 // The agent CLIs detect_clis looks for in the runner
 export type CliId = 'claude' | 'codex'
 
-export type SetupJob =
-  | { kind: 'list_repos' }
-  | { kind: 'check_repo', repository: string }
-  | { kind: 'detect_clis' }
-  // The server's GitHub API calls, made with the runner's `gh` login so the
-  // token never leaves the runner (see open-recommendations.md R15)
-  | { kind: 'github', method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown }
-  // After a merge or deletion: remove the task's worktrees unless they hold
-  // uncommitted work (flows.md step 10, PRD §7.4)
-  | { kind: 'cleanup_worktrees', repository: string, taskId: string }
-  // A Plan session's short title: the runner's `claude` CLI answers the
-  // prompt with its smallest model and no tools (COR-40). Never a PM slot.
-  | { kind: 'session_title', prompt: string }
-  // A deployment's release notes: the `runtime` CLI answers the prompt once,
-  // with no tools (COR-128). Never a PM slot.
-  | { kind: 'release_notes', runtime: string, prompt: string }
+export type SetupJob = z.infer<typeof setupJobSchema>
 
-export type SetupJobResult =
-  | { kind: 'list_repos', signedIn: false }
-  | { kind: 'list_repos', signedIn: true, repos: RepoSummary[] }
-  | { kind: 'check_repo', signedIn: boolean, found: boolean, canPush: boolean, defaultBranch: string | null, cloned: boolean, error: string | null }
-  | { kind: 'detect_clis', clis: { id: CliId, version: string | null, signedIn: boolean }[] }
-  | { kind: 'github', status: number, body: unknown }
-  | { kind: 'cleanup_worktrees', removed: string[], kept: string[] }
-  // The model's raw answer; the server cleans it up
-  | { kind: 'session_title', title: string }
-  | { kind: 'release_notes', notes: string }
+export type SetupJobResult = z.infer<typeof setupJobResultSchema>
 
 // ── Runs ─────────────────────────────────────────────────────────────────────
 
 // Everything a runner needs to start a run. No machine paths and no auth
 // method (PRD §8.5, agent-runtime-and-auth.md rule 2).
-export interface RunJob {
-  runId: string
-  runNumber: number
-  leaseEpoch: number
-  role: AgentRole
-  // The agent's runtime id, e.g. 'claude-code': which adapter the runner
-  // starts (D15). A neutral name, never an auth method.
-  runtime: string
-  projectId: string
-  repository: string
-  defaultBranch: string
-  // Actual task PR base; absent for older servers and PM runs.
-  baseBranch?: string
-  // Developer and reviewer runs
-  taskId: string | null
-  // Integration review: the epic instead of an individual task.
-  epicId?: string
-  taskRef: string | null
-  // The task's type: a design task's developer gets submit_design (D20).
-  // Absent on PM turns and from older servers.
-  taskType?: TaskType | null | undefined
-  // A build task pinned to a design version (D20): the runner saves the
-  // version as read-only files in the scratch folder before the agent
-  // starts. Absent from older servers.
-  designPinned?: boolean | undefined
-  branch: string | null
-  // Reviewer runs check out this commit
-  headSha: string | null
-  // PM turns: the Plan session, which gets its own checkout on the runner
-  planSessionId: string | null
-  // PM turns resume this agent session when the runner still has it
-  agentSessionId: string | null
-  prompt: string
-  // Used instead of `prompt` when the session can't be resumed (D9: the
-  // database is the source of truth; this carries a summary of it)
-  fallbackPrompt: string | null
-  model: string | null
-  timeoutSeconds: number
+const runJobCommon = {
+  runId: z.string(), runNumber: z.number(), leaseEpoch: z.number(),
+  runtime: z.string(), projectId: z.string(), repository: z.string(),
+  defaultBranch: z.string(), agentSessionId: z.string().nullable(),
+  prompt: z.string(), fallbackPrompt: z.string().nullable(), model: z.string().nullable(),
+  timeoutSeconds: z.number()
 }
+const taskJobContext = {
+  baseBranch: z.string().optional(), taskId: z.string().min(1), taskRef: z.string().min(1),
+  // Older servers omit taskType and designPinned; preserve absence.
+  epicId: z.string().optional(), taskType: z.enum(TASK_TYPES).nullish(),
+  designPinned: z.boolean().optional(), branch: z.string().nullable(),
+  headSha: z.string().nullable(), planSessionId: z.null()
+}
+export const pmRunJobSchema = z.object({
+  ...runJobCommon, role: z.literal('pm'), planSessionId: z.string().min(1),
+  taskId: z.null(), taskRef: z.null(), branch: z.null(), headSha: z.null(),
+  baseBranch: z.never().optional(), epicId: z.never().optional(),
+  taskType: z.null().optional(), designPinned: z.never().optional()
+})
+export const developerRunJobSchema = z.object({ ...runJobCommon, ...taskJobContext, role: z.literal('developer') })
+export const reviewerRunJobSchema = z.object({ ...runJobCommon, ...taskJobContext, role: z.literal('reviewer') })
+// D20 designers are developer runs with taskType=design, not a new agent role.
+export const designerRunJobSchema = developerRunJobSchema.extend({ taskType: z.literal('design') })
+// D23 integration reviews target an epic rather than pretending it is a task.
+export const epicReviewerRunJobSchema = z.object({
+  ...runJobCommon, role: z.literal('reviewer'), taskId: z.null(), taskRef: z.null(),
+  epicId: z.string().min(1), branch: z.string().min(1), headSha: z.string().min(1),
+  baseBranch: z.string().optional(), planSessionId: z.null(),
+  taskType: z.never().optional(), designPinned: z.never().optional()
+})
+export const runJobSchema = z.union([
+  z.discriminatedUnion('role', [pmRunJobSchema, developerRunJobSchema, reviewerRunJobSchema]),
+  epicReviewerRunJobSchema
+])
+export type RunJob = z.infer<typeof runJobSchema>
+export type PmRunJob = z.infer<typeof pmRunJobSchema>
+export type DesignerRunJob = z.infer<typeof designerRunJobSchema>
 
 // Structured run events, in the runtime-neutral shape web shows (rule 7)
-export type RunEvent =
-  | { type: 'system', text: string }
-  | { type: 'message', text: string }
-  // The agent's reasoning. Text can be empty when the CLI only marks that it thought.
-  | { type: 'thinking', text: string }
-  | { type: 'tool_call', id: string, tool: string, input: unknown }
-  | { type: 'tool_result', id: string, output: string, isError: boolean }
-  // inputTokens is fresh input (including cache writes); cache reads are counted apart
-  | { type: 'usage', inputTokens: number, cacheReadTokens: number, outputTokens: number }
+export type RunEvent = z.infer<typeof runEventSchema>
 
-export type RunExit =
-  | { kind: 'exited', code: number | null }
-  // Asked to stop by the server, with its reason. The optional fields here and
-  // on run.ended are missing from a runner that hasn't been updated yet.
-  | { kind: 'stopped', reason?: string }
-  | { kind: 'timed_out', limitSeconds?: number }
-  // The runner process itself was told to stop (container stop or redeploy)
-  | { kind: 'runner_shutdown' }
-  // Killed by a signal Corral didn't send
-  | { kind: 'signalled', signal: string }
-  | { kind: 'rate_limited', resetsAt: string | null }
-  | { kind: 'error', message: string }
+export type RunExit = z.infer<typeof runExitSchema>
 
 // Tools an agent can call. The runner forwards each one with the run's lease
 // epoch, so a stale run's calls are rejected (stale-runners-and-fencing.md).
-export type AgentTool =
-  | 'get_task'
-  | 'add_comment'
-  | 'attach_evidence'
-  | 'get_evidence'
-  | 'get_attachment'
-  | 'get_design'
-  | 'submit_design'
-  | 'report_outcome'
-  | 'list_tasks'
-  | 'get_run_outcomes'
-  | 'ask_question'
-  | 'propose_plan'
-  | 'approve_plan'
-  | 'flag_stale_docs'
+export type AgentTool = z.infer<typeof agentToolSchema>
 
 export interface OutcomeReport {
   outcome: RunOutcome
@@ -154,32 +97,9 @@ export interface OutcomeReport {
 
 // ── Messages ─────────────────────────────────────────────────────────────────
 
-export type RunnerMessage =
-  | { type: 'hello', protocol: number, commit: string, draining?: boolean, updateRequested?: boolean, autoUpdate?: boolean, runnerId: string, name: string, activeRuns: { runId: string, leaseEpoch: number }[] } & RunnerCapacity
-  | { type: 'runner.draining', updateRequested: boolean }
-  | { type: 'heartbeat', activeRuns: { runId: string, leaseEpoch: number }[] }
-  | { type: 'job.result', jobId: string, ok: true, result: SetupJobResult }
-  | { type: 'job.result', jobId: string, ok: false, error: string }
-  | { type: 'run.started', runId: string, leaseEpoch: number, agentSessionId: string | null }
-  | { type: 'run.events', runId: string, leaseEpoch: number, events: RunEvent[] }
-  // lastActivityAt: when the agent last wrote to its transcript
-  | { type: 'run.ended', runId: string, leaseEpoch: number, exit: RunExit, headSha: string | null, lastActivityAt?: string | null }
-  | { type: 'tool.call', callId: string, runId: string, leaseEpoch: number, tool: AgentTool, input: unknown }
-  // A run.message the runner could not deliver: a Codex or PM run, or a run
-  // that has ended. Messages with a stale lease epoch get no answer (fencing).
-  | { type: 'run.message.rejected', runId: string, leaseEpoch: number, text: string, error: string }
+export type RunnerMessage = z.infer<typeof runnerMessageSchema>
 
-export type ServerMessage =
-  | { type: 'welcome', runnerId: string, commit: string, draining: boolean, updateRequested: boolean }
-  | { type: 'runner.drain', updateRequested: boolean }
-  | { type: 'job.request', jobId: string, job: SetupJob }
-  | { type: 'run.assign', job: RunJob }
-  | { type: 'run.stop', runId: string, reason: string }
-  // A human's message for a live Claude Code developer or reviewer run. The
-  // runner writes it to the agent's stdin and records it as a message event.
-  | { type: 'run.message', runId: string, leaseEpoch: number, text: string }
-  | { type: 'tool.result', callId: string, ok: true, result: unknown }
-  | { type: 'tool.result', callId: string, ok: false, error: string }
+export type ServerMessage = z.infer<typeof serverMessageSchema>
 
 // What a runner takes on, sent in its hello. The server only assigns a run
 // to a runner that takes its role, has its runtime and has a free slot.
@@ -225,4 +145,99 @@ export interface RunnerStatus {
   name: string | null
   connectedAt: string | null
   lastHeartbeatAt: string | null
+}
+
+// Runtime boundaries: unknown fields are ignored for forward compatibility.
+export const repoSummarySchema = z.object({ nameWithOwner: z.string(), description: z.union([z.string(), z.null()]), isPrivate: z.boolean(), updatedAt: z.string(), defaultBranch: z.string(), canPush: z.boolean() })
+
+export const setupJobSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('list_repos') }),
+  z.object({ kind: z.literal('check_repo'), repository: z.string() }),
+  z.object({ kind: z.literal('detect_clis') }),
+  z.object({ kind: z.literal('github'), method: z.union([z.literal('GET'), z.literal('POST'), z.literal('PUT'), z.literal('PATCH'), z.literal('DELETE')]), path: z.string(), body: z.unknown().optional() }),
+  z.object({ kind: z.literal('cleanup_worktrees'), repository: z.string(), taskId: z.string() }),
+  z.object({ kind: z.literal('session_title'), prompt: z.string() }),
+  z.object({ kind: z.literal('release_notes'), runtime: z.string(), prompt: z.string() })
+])
+
+export const setupJobResultSchema = z.discriminatedUnion('kind', [
+  z.discriminatedUnion('signedIn', [
+    z.object({ kind: z.literal('list_repos'), signedIn: z.literal(false) }),
+    z.object({ kind: z.literal('list_repos'), signedIn: z.literal(true), repos: z.array(repoSummarySchema) })
+  ]),
+  z.object({ kind: z.literal('check_repo'), signedIn: z.boolean(), found: z.boolean(), canPush: z.boolean(), defaultBranch: z.string().nullable(), cloned: z.boolean(), error: z.string().nullable() }),
+  z.object({ kind: z.literal('detect_clis'), clis: z.array(z.object({ id: z.enum(['claude', 'codex']), version: z.string().nullable(), signedIn: z.boolean() })) }),
+  z.object({ kind: z.literal('github'), status: z.number(), body: z.unknown() }),
+  z.object({ kind: z.literal('cleanup_worktrees'), removed: z.array(z.string()), kept: z.array(z.string()) }),
+  z.object({ kind: z.literal('session_title'), title: z.string() }),
+  z.object({ kind: z.literal('release_notes'), notes: z.string() })
+])
+
+export const runEventSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('system'), text: z.string() }),
+  z.object({ type: z.literal('message'), text: z.string() }),
+  z.object({ type: z.literal('thinking'), text: z.string() }),
+  // Tool inputs are runtime-specific JSON, validated by the tool boundary.
+  z.object({ type: z.literal('tool_call'), id: z.string(), tool: z.string(), input: z.unknown() }),
+  z.object({ type: z.literal('tool_result'), id: z.string(), output: z.string(), isError: z.boolean() }),
+  z.object({ type: z.literal('usage'), inputTokens: z.number(), cacheReadTokens: z.number(), outputTokens: z.number() })
+])
+
+export const runExitSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('exited'), code: z.union([z.number(), z.null()]) }),
+  z.object({ kind: z.literal('stopped'), reason: z.string().optional() }),
+  z.object({ kind: z.literal('timed_out'), limitSeconds: z.number().optional() }),
+  z.object({ kind: z.literal('runner_shutdown') }),
+  z.object({ kind: z.literal('signalled'), signal: z.string() }),
+  z.object({ kind: z.literal('rate_limited'), resetsAt: z.union([z.string(), z.null()]) }),
+  z.object({ kind: z.literal('error'), message: z.string() })
+])
+
+export const agentToolSchema = z.enum([
+  'get_task', 'add_comment', 'attach_evidence', 'get_evidence', 'get_attachment',
+  'get_design', 'submit_design', 'report_outcome', 'list_tasks', 'get_run_outcomes',
+  'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs'
+])
+
+export const runnerHelloSchema = z.object({ type: z.literal('hello'), protocol: z.number(), commit: z.string().default('unknown'), draining: z.boolean().optional(), updateRequested: z.boolean().optional(), autoUpdate: z.boolean().optional(), runnerId: z.string(), name: z.string(), activeRuns: z.array(z.object({ runId: z.string(), leaseEpoch: z.number() })), slots: z.number().optional(), runtimes: z.array(z.string()).optional(), roles: z.array(z.enum(RUNNER_ROLES)).optional() })
+
+// Pre-capacity/build hello packets must still get the protocol-version refusal.
+// This schema is used only for rejecting a different version, never admission.
+export const legacyRunnerHelloSchema = runnerHelloSchema.extend({
+  name: z.string().default(''), activeRuns: z.array(z.object({ runId: z.string(), leaseEpoch: z.number() })).default([])
+})
+
+export const runnerMessageSchema = z.discriminatedUnion('type', [
+  runnerHelloSchema,
+  z.object({ type: z.literal('runner.draining'), updateRequested: z.boolean() }),
+  z.object({ type: z.literal('heartbeat'), activeRuns: z.array(z.object({ runId: z.string(), leaseEpoch: z.number() })) }),
+  z.discriminatedUnion('ok', [
+    z.object({ type: z.literal('job.result'), jobId: z.string(), ok: z.literal(true), result: setupJobResultSchema }),
+    z.object({ type: z.literal('job.result'), jobId: z.string(), ok: z.literal(false), error: z.string() })
+  ]),
+  z.object({ type: z.literal('run.started'), runId: z.string(), leaseEpoch: z.number(), agentSessionId: z.union([z.string(), z.null()]) }),
+  z.object({ type: z.literal('run.events'), runId: z.string(), leaseEpoch: z.number(), events: z.array(runEventSchema) }),
+  z.object({ type: z.literal('run.ended'), runId: z.string(), leaseEpoch: z.number(), exit: runExitSchema, headSha: z.union([z.string(), z.null()]), lastActivityAt: z.union([z.string(), z.null()]).optional() }),
+  z.object({ type: z.literal('tool.call'), callId: z.string(), runId: z.string(), leaseEpoch: z.number(), tool: agentToolSchema, input: z.unknown() }),
+  z.object({ type: z.literal('run.message.rejected'), runId: z.string(), leaseEpoch: z.number(), text: z.string(), error: z.string() })
+])
+
+export const serverMessageSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('welcome'), runnerId: z.string(), commit: z.string(), draining: z.boolean(), updateRequested: z.boolean() }),
+  z.object({ type: z.literal('runner.drain'), updateRequested: z.boolean() }),
+  z.object({ type: z.literal('job.request'), jobId: z.string(), job: setupJobSchema }),
+  z.object({ type: z.literal('run.assign'), job: runJobSchema }),
+  z.object({ type: z.literal('run.stop'), runId: z.string(), reason: z.string() }),
+  z.object({ type: z.literal('run.message'), runId: z.string(), leaseEpoch: z.number(), text: z.string() }),
+  z.discriminatedUnion('ok', [
+    z.object({ type: z.literal('tool.result'), callId: z.string(), ok: z.literal(true), result: z.unknown() }),
+    z.object({ type: z.literal('tool.result'), callId: z.string(), ok: z.literal(false), error: z.string() })
+  ])
+])
+
+// Deliberately omit payloads: tool inputs and prompts can contain private data.
+export function protocolMessageType(value: unknown): string {
+  return value !== null && typeof value === 'object' && 'type' in value && typeof value.type === 'string'
+    ? value.type
+    : '<unknown>'
 }

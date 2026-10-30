@@ -51,6 +51,26 @@ describe('runner update status on the wire', () => {
     return JSON.parse(await readFile(join(dataDir, 'update-status.json'), 'utf8'))
   }
 
+  it('logs malformed server messages and dispatches only valid traffic', async () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      await start(false, (socket) => {
+        for (const raw of ['null', '{', JSON.stringify({ type: 'run.assign', job: {} }), JSON.stringify({ type: 'welcome', commit: 42 })]) socket.send(raw)
+        socket.send(JSON.stringify({ type: 'welcome', runnerId: 'r1', commit: 'valid', draining: false, updateRequested: false }))
+      })
+      await vi.waitFor(async () => expect(await status()).toMatchObject({ serverCommit: 'valid', activeRunCount: 0 }))
+      expect(warnings).toHaveBeenCalledTimes(4)
+      const messages = warnings.mock.calls.map(args => args.join(' '))
+      expect(messages[0]).toContain('<unknown>')
+      expect(messages[1]).toContain('<invalid JSON>')
+      expect(messages[2]).toContain('run.assign')
+      expect(messages[3]).toContain('welcome')
+      expect(messages.every(m => m.includes('protocol error') && m.includes('server → runner'))).toBe(true)
+    } finally {
+      warnings.mockRestore()
+    }
+  })
+
   it('learns the server commit even when refused before welcome', async () => {
     await start(false, (socket, hello) => {
       expect(hello.protocol).toBe(RUNNER_PROTOCOL_VERSION)
