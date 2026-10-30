@@ -1,5 +1,5 @@
 import { runLifecycleSchema, type Agent, type CreateAgentInput, type Evidence, type PatchAgentInput, type Review, type Run, type RunTimings } from '@corral/contracts'
-import { ACTIVE_RUN_STATES, taskRef, type Actor } from '@corral/core'
+import { ACTIVE_RUN_STATES, taskRef, type Actor, type AgentRole, type RunState } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, count, desc, eq, inArray, type SQL } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
@@ -11,6 +11,7 @@ const { agents, epics, evidence, projects, reviews, runs, tasks } = schema
 const runColumns = {
   run: runs,
   agentName: agents.name,
+  agentRuntime: agents.runtime,
   prefix: projects.prefix,
   taskNumber: tasks.number,
   taskTitle: tasks.title,
@@ -20,13 +21,14 @@ const runColumns = {
 type RunJoin = {
   run: typeof runs.$inferSelect
   agentName: string
+  agentRuntime: Run['agentRuntime']
   prefix: string
   taskNumber: number | null
   taskTitle: string | null
   epicTitle: string | null
 }
 
-function toRun({ run, agentName, prefix, taskNumber, taskTitle, epicTitle }: RunJoin): Run {
+function toRun({ run, agentName, agentRuntime, prefix, taskNumber, taskTitle, epicTitle }: RunJoin): Run {
   return {
     id: run.id,
     runnerId: run.runnerId,
@@ -34,6 +36,7 @@ function toRun({ run, agentName, prefix, taskNumber, taskTitle, epicTitle }: Run
     number: run.number,
     agentId: run.agentId,
     agentName,
+    agentRuntime,
     projectId: run.projectId,
     planSessionId: run.planSessionId,
     taskId: run.taskId,
@@ -56,10 +59,13 @@ function toRun({ run, agentName, prefix, taskNumber, taskTitle, epicTitle }: Run
   }
 }
 
-export async function listRuns(db: Executor, filter: { agentId?: string, taskId?: string, active?: boolean }, limit = 50): Promise<Run[]> {
+export async function listRuns(db: Executor, filter: { agentId?: string, taskId?: string, projectId?: string, role?: AgentRole, state?: RunState, active?: boolean }, limit = 50): Promise<Run[]> {
   const where: SQL[] = []
   if (filter.agentId) where.push(eq(runs.agentId, filter.agentId))
   if (filter.taskId) where.push(eq(runs.taskId, filter.taskId))
+  if (filter.projectId) where.push(eq(runs.projectId, filter.projectId))
+  if (filter.role) where.push(eq(runs.role, filter.role))
+  if (filter.state) where.push(eq(runs.state, filter.state))
   if (filter.active) where.push(inArray(runs.state, [...ACTIVE_RUN_STATES]))
   const rows = await db.select(runColumns).from(runs)
     .innerJoin(agents, eq(agents.id, runs.agentId))
@@ -72,15 +78,20 @@ export async function listRuns(db: Executor, filter: { agentId?: string, taskId?
   return rows.map(toRun)
 }
 
-export async function getRun(db: Executor, runId: string): Promise<Run> {
+export async function findRun(db: Executor, where: SQL): Promise<Run | null> {
   const [row] = await db.select(runColumns).from(runs)
     .innerJoin(agents, eq(agents.id, runs.agentId))
     .innerJoin(projects, eq(projects.id, runs.projectId))
     .leftJoin(tasks, eq(tasks.id, runs.taskId))
     .leftJoin(epics, eq(epics.id, runs.epicId))
-    .where(eq(runs.id, runId))
-  if (!row) throw notFound()
-  return toRun(row)
+    .where(where)
+  return row ? toRun(row) : null
+}
+
+export async function getRun(db: Executor, runId: string): Promise<Run> {
+  const run = await findRun(db, eq(runs.id, runId))
+  if (!run) throw notFound()
+  return run
 }
 
 export async function listAgents(db: Executor): Promise<Agent[]> {

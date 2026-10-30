@@ -49,6 +49,12 @@ describe('transcriptEntries', () => {
     expect(entries[1]).toMatchObject({ type: 'thinking', text: 'The tests failed, so check the config.' })
   })
 
+  it('labels the PM\'s run lookups', () => {
+    const step = (tool: string, input: Record<string, unknown>) => transcriptEntries([{ type: 'tool_call', id: 'a', tool: `mcp__corral__${tool}`, input }])[0]
+    expect(step('get_run', { runNumber: 2857 })).toMatchObject({ steps: [{ verb: 'Read a run', target: '#2857' }] })
+    expect(step('list_runs', { role: 'reviewer', status: 'failed' })).toMatchObject({ steps: [{ verb: 'Listed runs', target: 'reviewer failed' }] })
+  })
+
   it('labels the PM\'s team status check', () => {
     const steps = (agent?: string) => transcriptEntries([{ type: 'tool_call', id: 'a', tool: 'mcp__corral__get_agent_activity', input: agent ? { agent } : {} }])
     expect(steps()[0]).toMatchObject({ steps: [{ verb: 'Checked what the team is doing', target: '' }] })

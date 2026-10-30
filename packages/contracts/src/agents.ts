@@ -8,7 +8,7 @@ import {
   type AgentRole
 } from '@corral/core'
 import { z } from 'zod'
-import { agentRuntime } from './agent-runtimes.ts'
+import { agentRuntime, type AgentRuntime } from './agent-runtimes.ts'
 import type { RunnerInfo, RunTimings } from './runner.ts'
 import type { Comment } from './tasks.ts'
 
@@ -109,6 +109,8 @@ interface RunFields {
   number: number
   agentId: string
   agentName: string
+  // The agent's runtime now; a run doesn't record its own
+  agentRuntime: AgentRuntime
   projectId: string
   planSessionId: string | null
   taskId: string | null
