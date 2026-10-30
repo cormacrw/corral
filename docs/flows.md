@@ -32,21 +32,21 @@ web            server                          runner                     claude
 | Tool | Purpose |
 |---|---|
 | `list_tasks`, `get_task`, `get_run_outcomes` | Live board state, so answers reflect current state, not only chat history (PRD §7.2) |
-| `get_attachment` | An image pasted into task text (`attachment:<id>`), returned as image content with its file name and mime type. Only attachments in the run's own project; developers and reviewers have it too |
+| `get_attachment` | An image pasted into task text (`attachment:<id>`), returned as image content with its file name and mime type. Only attachments in the run's own project; developers, designers and reviewers have it too |
 | `ask_question` | A structured question, shown in the Plan conversation, and in the Inbox while it's pending (as its Plan thread, D11). Optionally with a `recommendation` (the PM's suggested answer) and `options` (2–5 short choices, each at most 120 characters). Both are stored on the message and shown, options numbered, in the history the PM sees on later turns |
 | `propose_plan` | Create or revise a draft plan: epics, tasks, acceptance criteria, dependencies, priority, task type (`task`, `bug`, `spike` or `design`, D19, D20), human-review flag, and for build tasks the design version and screens they pin (D20) |
 | `approve_plan` | Approve the current plan (to the board or the Backlog) when the human asks in chat. Recorded as the human's approval; refused unless the human has written since the plan was proposed |
 | `flag_stale_docs` | Create a documentation task (PRD §7.10) |
-| `get_design` | A design version's `design.md` spec, screen ids, screenshots, branch and commit, and its sandboxed preview URL (D20). Takes a design task's ref (its latest version by default, or a given `version`) or a build task's ref (its pinned version and screens). The runner saves the spec and screenshots in the agent's scratch folder and extracts the bundle (a tar) there, and returns the paths. Developers and reviewers have it too |
+| `get_design` | A design version's `design.md` spec, screen ids, screenshots, branch and commit, and its sandboxed preview URL (D20). Takes a design task's ref (its latest version by default, or a given `version`) or a build task's ref (its pinned version and screens). The runner saves the spec and screenshots in the agent's scratch folder and extracts the bundle (a tar) there, and returns the paths. Developers, designers and reviewers have it too |
 
-### Developer and reviewer design tools (D20)
+### Design tools (D20, D23)
 
 | Tool | Who | Purpose |
 |---|---|---|
-| `submit_design` | Developer, design tasks only | Submit the static bundle folder, `design.md` and screenshots. The runner pushes the `design/<ref>` branch and uploads the files; the server records a new immutable version at that commit. The run then ends with `report_outcome('design_submitted')` |
-| `get_design` | Developer, reviewer, PM | Read a design version (above). The reviewer uses it to check a submission; a build task's developer uses it to read its pinned screens |
+| `submit_design` | Designer, design tasks only | Submit the static bundle folder, `design.md` and screenshots. The runner pushes the `design/<ref>` branch and uploads the files; the server records a new immutable version at that commit. The run then ends with `report_outcome('design_submitted')` |
+| `get_design` | Designer, developer, reviewer, PM | Read a design version (above). The designer uses it to read existing versions; the reviewer uses it to check a submission; a build task's developer uses it to read its pinned screens |
 
-Agents are told about images so they look at them: a PM turn whose message references `attachment:<id>` lists the ids and asks the PM to fetch them first; developer and reviewer prompts have an "Attached images" section (id, file name, and whether each is in the description or which comment); and `get_task` returns an `attachments` list of the same, for every role.
+Agents are told about images so they look at them: a PM turn whose message references `attachment:<id>` lists the ids and asks the PM to fetch them first; developer, designer and reviewer prompts have an "Attached images" section (id, file name, and whether each is in the description or which comment); and `get_task` returns an `attachments` list of the same, for every role.
 
 **Grilling.** A message that asks to be grilled ("grill me", `/grill-me`, or the Grill me button's message) gets the grill-me skill's instructions, adapted to Corral, put before it: work through the decisions in dependency order, one `ask_question` per decision, always with a `recommendation` and with `options` where the answer is one of a few; look up anything the code or board can answer instead of asking; and once the decisions are settled, or the human says to stop, call `propose_plan` straight away with the agreed decisions in its summary. Other messages don't get these instructions, so the PM never grills unless asked. A session rebuilt after it was lost keeps grilling if an earlier human message asked for it.
 
@@ -190,14 +190,15 @@ When every gate passes → step 9.
 
 ---
 
-### Design tasks (D20)
+### Design tasks (D20, D23)
 
-A design task follows steps 1–7 with these differences: the developer builds a prototype from the project's real components with mock data, produces the static bundle the way the project's `CLAUDE.md`/`CORRAL.md` says, calls `submit_design` and reports `design_submitted`. No PR is opened. After Agent review it always goes to **Human review**. Request changes → In progress, and the next submission is a new version. Approve → **Approved**: the version is approved, earlier ones are superseded, and a Plan session for the build starts. Steps 7c–10 don't apply.
+A design task follows steps 1–7 with these differences: the designer builds a prototype from the project's real components with mock data, produces the static bundle using the build command and output folder documented in `.corral/agents/designer.md` or the project's `CLAUDE.md`/`CORRAL.md`, calls `submit_design` and reports `design_submitted`. No PR is opened. After Agent review it always goes to **Human review**. Request changes → In progress, and the next submission is a new version. Approve → **Approved**: the version is approved, earlier ones are superseded, and a Plan session for the build starts. Steps 7c–10 don't apply.
 
-- **Step 3:** the branch is `design/<ref>`, and the job carries the task type so the developer's MCP server offers `submit_design`.
-- **Steps 4–5:** the developer commits the prototype, writes `design.md` and takes desktop and mobile screenshots with agent-browser, then calls `submit_design`. The runner checks the bundle folder has an `index.html` at its root (and no symlinks), packs it as a tar, pushes the branch and sends the files; the server checks the tar again, checks the branch is at the pushed commit and records the next version. `report_outcome('design_submitted')` is accepted only when a version exists at the branch's current commit and every criterion has evidence; it moves **In progress → Agent review**.
+- **Step 2:** only designers may claim design authoring runs; developers claim only `task`, `bug` and `spike` implementation runs (D23).
+- **Step 3:** the branch is `design/<ref>`, and the job carries the task type so the designer's MCP server offers `submit_design`.
+- **Steps 4–5:** design-only authoring guidance goes only to the designer, whose instructions come from `.corral/agents/designer.md` with built-in defaults when absent (D13, D23). If no prototype build instructions are supplied, the designer reports `stuck` and asks. Developers still receive pinned design files when building them (D20). The designer commits the prototype, writes `design.md` and takes desktop and mobile screenshots with agent-browser, then calls `submit_design`. The runner checks the bundle folder has an `index.html` at its root (and no symlinks), packs it as a tar, pushes the branch and sends the files; the server checks the tar again, checks the branch is at the pushed commit and records the next version. `report_outcome('design_submitted')` is accepted only when a version exists at the branch's current commit and every criterion has evidence; it moves **In progress → Agent review**.
 - **Step 6:** the reviewer checks out the version's commit and reads it with `get_design`. It judges the spec and screenshots against the criteria; there is no diff.
-- **Step 7a, rework:** changes requested by the reviewer or the human mark the version *changes requested* (with the human's feedback). The next developer run **resumes the same agent session** on the same branch with the feedback given since that version; if the session can't be resumed, it starts fresh with the full prompt. Its submission is the next version.
+- **Step 7a, rework:** changes requested by the reviewer or the human mark the version *changes requested* (with the human's feedback). The next designer run **resumes the same designer session** on the same branch with the feedback given since that version; if the session can't be resumed, it starts fresh with the full prompt. If earlier authoring runs used a developer, the next authoring run (including retries, requested changes and reopened tasks) goes to an eligible designer in a **new session**, never resuming the developer session. The task, branch, versions and feedback are retained, and an active run is not interrupted (D23). Its submission is the next version.
 
 ---
 
