@@ -291,7 +291,22 @@ export const runs: Run[] = [
     taskId: at('COR-5').id, taskRef: 'COR-5', taskTitle: at('COR-5').title, state: 'completed', outcome: 'pr_opened',
     summary: 'Approving a version marks it approved and supersedes earlier ones.', error: null, headSha: '5b030d7',
     inputTokens: 30_000, cacheReadTokens: 400_000, outputTokens: 9_800, rateLimitResetAt: null,
-    queuedAt: ago(140), startedAt: ago(139), endedAt: ago(95), timings: null
+    queuedAt: ago(140), startedAt: ago(139), endedAt: ago(95),
+    timings: {
+      totalMs: 2_700_000,
+      phases: [
+        { phase: 'worktree_prepare', durationMs: 40_000 },
+        { phase: 'session_setup', durationMs: 20_000 },
+        { phase: 'agent_cold_start', durationMs: 2_520_000 },
+        { phase: 'push', durationMs: 90_000 },
+        { phase: 'finish', durationMs: 30_000 }
+      ],
+      tools: [
+        { tool: 'get_task', count: 2, totalMs: 800, maxMs: 500 },
+        { tool: 'exec_command', count: 36, totalMs: 1_080_000, maxMs: 240_000 },
+        { tool: 'apply_patch', count: 12, totalMs: 6_000, maxMs: 1_200 }
+      ]
+    }
   },
   {
     runnerId: null, id: 'r-5', number: 126, agentId: 'a-rev', agentName: 'Rita', role: 'reviewer', projectId: 'p-corral',
