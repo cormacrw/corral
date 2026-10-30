@@ -1,5 +1,5 @@
 import { EpicPullRequests, epicReviewContext } from './epic-prs.ts'
-import { RUNNER_HEARTBEAT_MS, EVIDENCE_KINDS, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
+import { pmActionTools, requiresPmConfirmation, RUNNER_HEARTBEAT_MS, EVIDENCE_KINDS, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
 import {
   ACTIVE_RUN_STATES,
   LEASE_DURATION_MS,
@@ -31,6 +31,7 @@ import { runExitError, withLastActivity } from './run-exit.ts'
 import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
 import { MergeOrchestrator } from './merge.ts'
 import type { ReleaseNotes } from './deployments.ts'
+import { PmActions, type PreparedPmAction } from './pm-actions.ts'
 import type { PlanService } from './plan.ts'
 import { getRun, listAgents, listEvidence } from './runs.ts'
 import { addComment, applyTransition, deleteTaskRows, loadTask, lockTask, toTaskState, type ProjectRow, type TaskContentEdit, type TaskRow } from './tasks.ts'
@@ -139,6 +140,7 @@ export class Orchestrator implements RunnerHandlers {
   // Picking a runner and recording the run on it happen one at a time, so
   // PM turns and claims never both take a runner's last slot
   #placing: Promise<unknown> = Promise.resolve()
+  readonly pmActions: PmActions
   readonly epicPrs: EpicPullRequests
   readonly merges: MergeOrchestrator
   // Set once the plan service exists (it needs the orchestrator to start runs)
@@ -147,6 +149,19 @@ export class Orchestrator implements RunnerHandlers {
 
   constructor(deps: OrchestratorDeps) {
     this.#d = deps
+    this.pmActions = new PmActions({
+      db: deps.db,
+      events: deps.events,
+      prepare: (sessionId, tool, input) => this.#preparePmAction(sessionId, tool, input),
+      execute: async (_sessionId, tool, prepared, actor) => {
+        if (tool === 'delete_task' && prepared.taskId) {
+          await this.deleteTask(prepared.taskId, actor, prepared.input.reason as string | undefined ?? null)
+          return `Deleted ${String(prepared.input.taskRef)}.`
+        }
+        throw new ToolError(`Unknown confirm-required tool ${tool}`)
+      },
+      sessionChanged: async sessionId => this.plans?.actionSessionChanged(sessionId)
+    })
     this.epicPrs = new EpicPullRequests(deps)
     this.merges = new MergeOrchestrator({
       db: deps.db,
@@ -284,6 +299,7 @@ export class Orchestrator implements RunnerHandlers {
 
   // Reads the kill switch; called once at startup
   async init(): Promise<void> {
+    await this.pmActions.recoverInterrupted()
     const [row] = await this.#d.db.select().from(settings).where(eq(settings.key, 'stopped'))
     this.#stopped = row?.value === true
     this.merges.stopped = this.#stopped
@@ -1116,9 +1132,13 @@ export class Orchestrator implements RunnerHandlers {
     const allowed: Record<string, readonly string[]> = {
       developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'submit_design', 'report_outcome'],
       reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'get_design', 'report_outcome'],
-      pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
+      pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs', 'delete_task']
     }
     if (!allowed[role]?.includes(tool)) throw new ToolError(`The ${role} can’t use ${tool}`)
+    if (role === 'pm' && requiresPmConfirmation(tool)) {
+      if (!this.plans || !ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
+      return this.pmActions.propose(ctx.run.planSessionId, ctx.run.id, tool, input, this.#actor(ctx))
+    }
     if (tool === 'get_attachment') return this.#getAttachment(ctx, z.object({ attachmentId: z.string() }).parse(input))
     if (tool === 'get_design') {
       const { taskRef: ref, version } = z.object({ taskRef: z.string(), version: z.number().int().positive().optional() }).parse(input)
@@ -1166,6 +1186,25 @@ export class Orchestrator implements RunnerHandlers {
         return this.#reportOutcome(ctx, reportSchema.parse(input) as OutcomeReport & { outcome: string })
     }
     throw new ToolError(`Unknown tool ${tool}`)
+  }
+
+  async #preparePmAction(sessionId: string, tool: string, input: unknown): Promise<PreparedPmAction> {
+    if (!requiresPmConfirmation(tool)) throw new ToolError(`Unknown confirm-required tool ${tool}`)
+    const parsed = z.object(pmActionTools[tool].input).strict().parse(input)
+    const { db } = this.#d
+    const [session] = await db.select().from(schema.planSessions).where(eq(schema.planSessions.id, sessionId))
+    if (!session) throw new ToolError('The conversation no longer exists')
+    const [project] = await db.select().from(projects).where(eq(projects.id, session.projectId))
+    if (!project) throw new ToolError('The project no longer exists')
+    if (tool === 'delete_task') {
+      const match = /^([A-Za-z]+)-(\d+)$/.exec(parsed.taskRef)
+      if (!match || match[1]!.toUpperCase() !== project.prefix.toUpperCase()) throw new ToolError('Use a task ref from this conversation’s project')
+      const [task] = await db.select().from(tasks).where(and(eq(tasks.projectId, project.id), eq(tasks.number, Number(match[2])), isNull(tasks.deletedAt)))
+      if (!task) throw new ToolError(`Task ${parsed.taskRef} no longer exists`)
+      if (task.status === 'merged') throw new ToolError('Merged tasks cannot be deleted')
+      return { input: { ...parsed, taskRef: taskRef(project.prefix, task.number) }, summary: `Delete ${taskRef(project.prefix, task.number)}: ${task.title}`, taskId: task.id, projectId: project.id }
+    }
+    throw new ToolError(`Unknown confirm-required tool ${tool}`)
   }
 
   #actor(ctx: RunContext): Actor {

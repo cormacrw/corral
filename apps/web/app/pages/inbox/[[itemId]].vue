@@ -100,7 +100,8 @@ watch(selected, async (item, previous) => {
   // Following the selection, not a click of its own: no extra history entry.
   // Phones open the task as its own page instead.
   if (selected.value?.id !== item?.id) return
-  if (item && showTask.value && !device.isMobile.value) flyout.open(item.taskRef, { replace: true })
+  if (item && loadedTask && showTask.value && !device.isMobile.value) flyout.open(item.taskRef, { replace: true })
+  else if (!loadedTask) await flyout.close()
 }, { immediate: true })
 // Capture before the request: plan.session can remove the row before it resolves.
 // Hold refreshes through both the request and flyout close, as for approval.
@@ -431,6 +432,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <UButton
+              v-if="task"
               label="Task details"
               variant="outline"
               color="neutral"
@@ -488,7 +490,7 @@ onBeforeUnmount(() => {
                 />
               </template>
               <NuxtLink
-                v-if="selected.type === 'activity'"
+                v-if="selected.type === 'activity' && task"
                 :to="selected.epicId ? `/epics/${selected.epicId}` : `/tasks/${selected.taskRef}`"
                 class="text-sm text-primary hover:underline"
               >{{ selected.epicId ? 'Open epic' : 'Open task' }}</NuxtLink>

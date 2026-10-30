@@ -10,6 +10,7 @@ import {
   TASK_STATUSES,
   TASK_TYPES,
   type Actor,
+  type PmAction,
   type TaskType
 } from '@corral/core'
 import { sql } from 'drizzle-orm'
@@ -312,6 +313,8 @@ export const planMessages = pgTable('plan_messages', {
   role: text().notNull(),
   kind: text().notNull().default('message'),
   text: text().notNull(),
+  // Confirm-required PM calls are durable action records as well as cards.
+  pendingAction: jsonb().$type<PmAction>(),
   // A question's suggested answer and answer choices (ask_question)
   recommendation: text(),
   options: jsonb().$type<string[]>(),
