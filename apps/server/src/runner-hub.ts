@@ -35,6 +35,7 @@ const JOB_TIMEOUT_MS = 60_000
 export class RunnerHub {
   #runners = new Map<string, { socket: RunnerSocket | null, status: RunnerStatus['runners'][number] }>()
   #pending = new Map<string, { resolve: (r: SetupJobResult) => void, reject: (e: Error) => void, timer: NodeJS.Timeout, runnerId: string }>()
+  #cliCache = new Map<string, { result?: Extract<SetupJobResult, { kind: 'detect_clis' }>, detecting?: Promise<Extract<SetupJobResult, { kind: 'detect_clis' }>> }>()
   #handlers: RunnerHandlers | null = null
   #events: EventBus
   // Run messages are handled in order per run, so the last events batch is
@@ -60,6 +61,27 @@ export class RunnerHub {
     return !!this.pick()
   }
 
+  // Detection is cached per connection and shared by requests during setup.
+  detectClis(refresh = false, runnerId = this.pick()): Promise<Extract<SetupJobResult, { kind: 'detect_clis' }>> {
+    if (!this.isOnline(runnerId) || !runnerId) return Promise.reject(runnerOffline())
+    let cache = this.#cliCache.get(runnerId)
+    if (!cache) {
+      cache = {}
+      this.#cliCache.set(runnerId, cache)
+    }
+    if (!refresh && cache.result) return Promise.resolve(cache.result)
+    if (cache.detecting) return cache.detecting
+    const entry = cache
+    const detecting = this.#request({ kind: 'detect_clis' }, JOB_TIMEOUT_MS, runnerId).then((result) => {
+      entry.result = result
+      return result
+    }).finally(() => {
+      if (entry.detecting === detecting) delete entry.detecting
+    })
+    entry.detecting = detecting
+    return detecting
+  }
+
   // Called by the WebSocket route for each new connection
   connect(socket: RunnerSocket) {
     let runnerId: string | null = null
@@ -83,6 +105,7 @@ export class RunnerHub {
             this.#rejectJobs(runnerId)
             old.socket.close(4001, 'Replaced by a newer runner connection')
           }
+          this.#cliCache.delete(runnerId)
           const now = new Date().toISOString()
           this.#runners.set(runnerId, { socket, status: { id: runnerId, name: message.name, online: false, connectedAt: now, lastHeartbeatAt: now } })
           // Don't dispatch into this socket until its hello snapshot has been
@@ -93,6 +116,7 @@ export class RunnerHub {
           runner.status.online = true
           this.#publishStatus()
           this.send({ type: 'welcome', runnerId }, runnerId)
+          void this.detectClis(true, runnerId).catch(error => console.error('Runner CLI detection failed', error))
           this.#handlers?.onReady()
           return
         }

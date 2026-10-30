@@ -27,6 +27,8 @@ it('reconciles the hello snapshot before accepting new assignments', async () =>
   reconciled()
   await hello
   expect(hub.pick()).toBe('B')
-  expect(sent).toEqual([{ type: 'welcome', runnerId: 'B' }])
+  expect(sent).toEqual([{ type: 'welcome', runnerId: 'B' }, { type: 'job.request', jobId: expect.any(String), job: { kind: 'detect_clis' } }])
+  const detection = sent[1] as Extract<ServerMessage, { type: 'job.request' }>
+  await connection.onMessage(JSON.stringify({ type: 'job.result', jobId: detection.jobId, ok: true, result: { kind: 'detect_clis', clis: [] } }))
   expect(ready).toHaveBeenCalledOnce()
 })

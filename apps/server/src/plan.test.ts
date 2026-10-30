@@ -59,7 +59,7 @@ describe('plan sessions', () => {
     expect(res.status).toBe(201)
     const created = await res.json() as PlanSessionDetail
     expect(created).toMatchObject({ title: 'Plan a login feature', status: 'none', messages: [{ role: 'human', text: 'Plan a login feature' }] })
-    expect(created.activeRunId).not.toBeNull()
+    expect(created.activeRunId).toBeNull()
 
     const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
     expect(job).toMatchObject({ role: 'pm', runtime: 'claude-code', taskId: null, planSessionId: created.id, agentSessionId: null, repository: project.repository })

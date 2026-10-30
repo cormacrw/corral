@@ -103,11 +103,13 @@ describe('plan session runtime', () => {
     const onJob = runner.onJob
     runner.onJob = job => job.kind === 'detect_clis' ? { kind: 'detect_clis', clis: [{ id: 'claude', version: '2.0.0', signedIn: true }, { id: 'codex', version: null, signedIn: false }] } : onJob(job)
     try {
+      await t.request('GET', '/api/setup/clis')
       const res = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Hi', runtime: 'codex' })
       expect(res.status).toBe(400)
       expect(JSON.stringify(await res.json())).toContain('Codex CLI isn’t installed')
     } finally {
       runner.onJob = onJob
+      await t.request('GET', '/api/setup/clis')
     }
     expect(await t.db.select().from(planSessions).where(eq(planSessions.projectId, project.id))).toEqual([])
   })

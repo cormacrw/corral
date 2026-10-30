@@ -9,6 +9,7 @@ import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
 import { pmFallbackPrompt, pmPrompt, questionText, sessionTitlePrompt } from './prompts.ts'
 import type { RunnerHub } from './runner-hub.ts'
+import { requireRuntimeCli } from './setup.ts'
 import { createTask, deleteTaskRows, draftSessions, findTaskId, loadTask, patchTask, pinStaleness, setDesignPin, transitionTask, type ProjectRow } from './tasks.ts'
 
 const { acceptanceCriteria, agents, auditLog, designVersions, epicDependencies, epics, planEpics, planMessages, planSessions, planTasks, plans, projects, runs, taskDependencies, taskDesignPins, tasks } = schema
@@ -93,6 +94,7 @@ export interface PlanDeps {
 // none of them approve, merge or change status.
 export class PlanService {
   #d: PlanDeps
+  #pendingTurns = new Set<string>()
 
   constructor(deps: PlanDeps) {
     this.#d = deps
@@ -190,17 +192,67 @@ export class PlanService {
   }
 
   // design/plan.md: the project and runtime are locked once the session has messages
-  async start(projectId: string, input: { text: string, taskRef?: string | undefined, runtime?: AgentRuntime }, actor: Actor): Promise<PlanSessionDetail> {
-    const [project] = await this.#d.db.select().from(projects).where(eq(projects.id, projectId))
+  async start(projectId: string, input: { id?: string | undefined, text: string, taskRef?: string | undefined, runtime?: AgentRuntime }, actor: Actor): Promise<PlanSessionDetail> {
+    this.assertTurnPossible()
+    const { db, events } = this.#d
+    // A retry returns the original thread without interpreting a new message.
+    if (input.id) {
+      const [existing] = await db.select().from(planSessions).where(eq(planSessions.id, input.id))
+      if (existing) return this.#retryStart(existing, projectId)
+    }
+    const [project] = await db.select().from(projects).where(eq(projects.id, projectId))
     if (!project) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['projectId'], message: 'Unknown project' }] })
-    const text = input.text || (input.taskRef ? `Refine ${input.taskRef}` : '')
-    const fallback = titleFrom(text)
-    const [session] = await this.#d.db.insert(planSessions).values({ projectId, title: fallback, runtime: input.runtime ?? 'claude-code', createdBy: actor }).returning()
-    await this.message(session!.id, input, actor)
-    const attached = input.taskRef ? await loadTask(this.#d.db, await this.#taskIdByRef(project, input.taskRef)) : null
-    // Not awaited: the PM turn is already queued and doesn't wait for it
-    void this.#generateTitle(session!.id, fallback, { text, attachedTask: attached && `${attached.ref} ${attached.title}` })
-    return this.getSession(session!.id)
+    let attached: string | null = null
+    await requireRuntimeCli(this.#d.runner, input.runtime ?? 'claude-code')
+    this.assertTurnPossible()
+    if (input.taskRef) {
+      const task = await loadTask(db, await this.#taskIdByRef(project, input.taskRef))
+      attached = `${task.ref} ${task.title}`
+    }
+    const text = input.text || `Refine ${attached}`
+    const fallback = titleFrom(input.text || `Refine ${input.taskRef}`)
+    const created = await db.transaction(async (tx) => {
+      this.assertTurnPossible()
+      const [session] = await tx.insert(planSessions).values({ ...(input.id ? { id: input.id } : {}), projectId, title: fallback, runtime: input.runtime ?? 'claude-code', createdBy: actor })
+        .onConflictDoNothing({ target: planSessions.id }).returning()
+      if (!session) return null
+      const [message] = await tx.insert(planMessages).values({ sessionId: session.id, role: 'human', text, runId: null }).returning()
+      await tx.insert(auditLog).values({ projectId, actor, action: 'plan.message', detail: { sessionId: session.id, messageId: message!.id } })
+      return { session, message: message! }
+    })
+    if (!created) return this.#retryStart(await this.#session(input.id!), projectId)
+    const { session, message } = created
+    this.#pendingTurns.add(session.id)
+    const detail = await this.getSession(session.id)
+    events.publish({ type: 'plan.session', session: detail })
+    events.publish({ type: 'plan.message', message: toMessage(message) })
+    // Leave the response independent of runner/orchestrator work, including
+    // synchronous failures. The durable message remains the turn's record.
+    setImmediate(() => {
+      void this.#queueInitialTurn(session, project, text, attached).catch(error => console.error(`Recording failed PM turn for ${session.id} failed`, error)).finally(() => this.#pendingTurns.delete(session.id))
+      void this.#generateTitle(session.id, fallback, { text, attachedTask: attached })
+    })
+    return detail
+  }
+
+  async #retryStart(session: SessionRow, projectId: string): Promise<PlanSessionDetail> {
+    if (session.projectId !== projectId) throw new ApiFailure(409, { code: 'conflict', constraint: 'plan_session_project' })
+    return this.getSession(session.id)
+  }
+
+  async #queueInitialTurn(session: SessionRow, project: ProjectRow, text: string, attached: string | null): Promise<void> {
+    try {
+      await this.#turn(session, project, {
+        prompt: pmPrompt({ text, attachedTask: attached, projectName: project.name, prefix: project.prefix, fresh: true }),
+        fallbackPrompt: pmFallbackPrompt({ text, attachedTask: attached, projectName: project.name, prefix: project.prefix, history: await this.#history(session.id) })
+      })
+    } catch (error) {
+      const { db, events } = this.#d
+      const [message] = await db.insert(planMessages).values({ sessionId: session.id, role: 'pm', kind: 'error', text: `Could not queue the PM turn: ${error instanceof Error ? error.message : String(error)}`, runId: null }).returning()
+      await db.update(planSessions).set({ updatedAt: new Date(), unread: true }).where(eq(planSessions.id, session.id))
+      events.publish({ type: 'plan.message', message: toMessage(message!) })
+      events.publish({ type: 'plan.session', session: await this.#toSession(await this.#session(session.id)) })
+    }
   }
 
   // Replaces the fallback title with one from the runner's smallest model
@@ -294,7 +346,7 @@ export class PlanService {
     // another, aren't held back, since the PM has no concurrency (D9, D13)
     const [active] = await db.select({ id: runs.id }).from(runs)
       .where(and(eq(runs.role, 'pm'), eq(runs.planSessionId, sessionId), inArray(runs.state, ['queued', 'starting', 'running'])))
-    if (active) throw new ApiFailure(409, { code: 'conflict', constraint: 'pm_turn_in_progress' })
+    if (active || this.#pendingTurns.has(sessionId)) throw new ApiFailure(409, { code: 'conflict', constraint: 'pm_turn_in_progress' })
 
     let attached: string | null = null
     if (input.taskRef) {
