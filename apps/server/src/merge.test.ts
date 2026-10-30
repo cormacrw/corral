@@ -53,7 +53,7 @@ describe('merge orchestrator and human controls', () => {
         ? { criterionId: criterion.id, kind: 'note', note: 'No behaviour change' }
         : { criterionId: criterion.id, kind: 'test_output', fileName: 't.txt', contentType: 'text/plain', dataBase64: Buffer.from('ok').toString('base64') })
     }
-    expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', summary: 'Done', headSha: 'abc123' })).toMatchObject({ ok: true })
+    expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', note: 'Did the work', summary: 'Done', headSha: 'abc123' })).toMatchObject({ ok: true })
     await t.orchestrator.schedule()
     const review = (await runner.next('run.assign', m => m.job.taskId === created.id && m.job.role === 'reviewer')).job
     expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', {

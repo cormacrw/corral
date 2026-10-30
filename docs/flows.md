@@ -115,7 +115,7 @@ Run: Starting → Running. A heartbeat every 2 minutes renews the lease, and eve
 2. Implements the task; runs lint, typecheck, tests and build as gates (D21). Checks are never attached as criterion evidence.
 3. Produces human evidence per criterion: screenshots/video of the running app with the agent browser, real requests and responses, or before/after metrics. Calls `attach_evidence` for files. A criterion with nothing visual to show can instead use a written explanation without a file (`attach_evidence` with `kind: "note"` and no path) (for example, a refactor with no behaviour change); the reviewer judges it and its verdict note is the proof (D21).
 4. Updates the wiki; commits.
-5. Calls `report_outcome('pr_opened', summary)`, or `pr_updated` on a revision.
+5. Calls `report_outcome('pr_opened', summary, note)`, or `pr_updated` on a revision. Every developer outcome (`pr_opened`, `pr_updated`, `findings_reported`, `design_submitted`, `stuck`, `failed`) carries a required `note`: one line of at most 200 characters saying what the run did, e.g. "Addressed review: dropped idle-thread fixture". The server posts it as a comment by the developer agent in the same transaction as the outcome, so the task's comments read developer → reviewer → system in the order things happened. An outcome without a note, or with one over the limit or on several lines, is rejected with what to fix.
 
 ### Step 5 — Submit (runner → server)
 

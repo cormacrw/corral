@@ -446,8 +446,10 @@ async function setDependencies(tx: Executor, project: ProjectRow, task: TaskRow,
   if (found.length > 0) await tx.insert(taskDependencies).values(found.map(d => ({ taskId: task.id, dependsOnId: d.id })))
 }
 
+// Stamped with the clock, not the transaction's start, so comments posted in
+// one transaction list in the order they were added
 export async function addComment(db: Executor, taskId: string, input: { body: string, pinned: boolean }, author: Actor): Promise<Comment> {
-  const [row] = await db.insert(comments).values({ taskId, author, body: input.body, pinned: input.pinned }).returning()
+  const [row] = await db.insert(comments).values({ taskId, author, body: input.body, pinned: input.pinned, createdAt: sql`clock_timestamp()` }).returning()
   return toComment(row!)
 }
 

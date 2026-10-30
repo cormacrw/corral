@@ -34,7 +34,7 @@ it('uses the epic base throughout claim, review, merge and dependent claims on d
   expect(dev.prompt).toContain(`based on \`${dev.baseBranch}\``)
   t.github.setBranch(project.repository, dev.branch!, 'task-head')
   for (const c of first.acceptanceCriteria) await runner.call(dev.runId, dev.leaseEpoch, 'attach_evidence', { criterionId: c.id, kind: 'note', note: 'Backend change' })
-  expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', summary: 'Feature', headSha: 'task-head' })).toMatchObject({ ok: true })
+  expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', note: 'Implemented the feature', summary: 'Feature', headSha: 'task-head' })).toMatchObject({ ok: true })
   const pr = [...t.github.pulls.values()].find(p => p.head === dev.branch)!
   expect(pr.base).toBe(dev.baseBranch)
   await t.orchestrator.schedule()
@@ -53,7 +53,7 @@ it('uses the epic base throughout claim, review, merge and dependent claims on d
   // epic PR; no human action or separate "open epic" endpoint is involved.
   t.github.setBranch(project.repository, next.branch!, 'second-head')
   for (const c of second.acceptanceCriteria) await runner.call(next.runId, next.leaseEpoch, 'attach_evidence', { criterionId: c.id, kind: 'note', note: 'Second backend change' })
-  expect(await runner.call(next.runId, next.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', summary: 'Second feature', headSha: 'second-head' })).toMatchObject({ ok: true })
+  expect(await runner.call(next.runId, next.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', note: 'Implemented the feature', summary: 'Second feature', headSha: 'second-head' })).toMatchObject({ ok: true })
   await t.orchestrator.schedule()
   const secondReview = (await runner.next('run.assign', m => m.job.taskId === second.id && m.job.role === 'reviewer')).job
   expect(await runner.call(secondReview.runId, secondReview.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Approved', criteria: second.acceptanceCriteria.map(c => ({ criterionId: c.id, met: true, note: 'Checked' })) })).toMatchObject({ ok: true })
@@ -78,7 +78,7 @@ it.each(['each_task', 'epic', 'direct', null] as const)('routes review and confl
   const dev = (await runner.next('run.assign', m => m.job.taskId === task.id)).job
   t.github.setBranch(project.repository, dev.branch!, `head-${task.id}`)
   for (const c of task.acceptanceCriteria) await runner.call(dev.runId, dev.leaseEpoch, 'attach_evidence', { criterionId: c.id, kind: 'note', note: 'Backend change' })
-  expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', summary: 'Done', headSha: `head-${task.id}` })).toMatchObject({ ok: true })
+  expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', note: 'Implemented the feature', summary: 'Done', headSha: `head-${task.id}` })).toMatchObject({ ok: true })
   await t.orchestrator.schedule()
   const review = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'reviewer')).job
   expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Approved', criteria: task.acceptanceCriteria.map(c => ({ criterionId: c.id, met: true, note: '' })) })).toMatchObject({ ok: true })

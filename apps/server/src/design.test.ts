@@ -118,7 +118,7 @@ describe('design tasks submit versions instead of a PR', () => {
     t.github.setBranch(project.repository, job.branch!, sha)
     expect(await runner.call(job.runId, job.leaseEpoch, 'submit_design', submission(sha))).toMatchObject({ ok: true })
     await attachAll(job, task)
-    expect(await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'design_submitted', summary: 'Login form and its error state', headSha: sha }))
+    expect(await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'design_submitted', note: 'Did the work', summary: 'Login form and its error state', headSha: sha }))
       .toMatchObject({ ok: true })
     await runner.next('run.stop', m => m.runId === job.runId)
   }
@@ -150,12 +150,12 @@ describe('design tasks submit versions instead of a PR', () => {
     expect(developer.prompt).not.toContain('pr_opened')
 
     // A design opens no PR
-    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', summary: 'Done', headSha: 'd1' }))
+    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', note: 'Did the work', summary: 'Done', headSha: 'd1' }))
       .toMatchObject({ ok: false, error: expect.stringContaining('submit_design') })
     // Reporting before a version exists at the commit is refused
     t.github.setBranch(project.repository, developer.branch!, 'd1')
     await attachAll(developer, task)
-    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'design_submitted', summary: 'Done', headSha: 'd1' }))
+    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'design_submitted', note: 'Did the work', summary: 'Done', headSha: 'd1' }))
       .toMatchObject({ ok: false, error: expect.stringContaining('call submit_design first') })
 
     await submit(project, developer, task, 'd1')
@@ -200,7 +200,7 @@ describe('design tasks submit versions instead of a PR', () => {
       expect(await runner.call(developer.runId, developer.leaseEpoch, 'attach_evidence', { criterionId: criterion.id, kind: 'note', note: 'See the screenshots in v1' }))
         .toMatchObject({ ok: true })
     }
-    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'design_submitted', summary: 'Login form', headSha: 'n1' }))
+    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'design_submitted', note: 'Did the work', summary: 'Login form', headSha: 'n1' }))
       .toMatchObject({ ok: true })
     expect(await taskRow(task.id)).toMatchObject({ status: 'agent_review' })
     await runner.next('run.stop', m => m.runId === developer.runId)
@@ -356,7 +356,7 @@ describe('design tasks submit versions instead of a PR', () => {
           criterionId: criterion.id, kind: 'screenshot', note: 'login: build beside prototype', fileName: 'login-side-by-side.png', contentType: 'image/png', dataBase64: Buffer.from('png').toString('base64')
         })).toMatchObject({ ok: true })
       }
-      expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', summary: 'Login screen', headSha: 'b1' })).toMatchObject({ ok: true })
+      expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', note: 'Did the work', summary: 'Login screen', headSha: 'b1' })).toMatchObject({ ok: true })
       await runner.next('run.stop', m => m.runId === developer.runId)
       const reviewer = await nextJob(build, 'reviewer')
       expect(reviewer).toMatchObject({ designPinned: true })
@@ -442,7 +442,7 @@ describe('design tasks submit versions instead of a PR', () => {
     t.github.setBranch(project.repository, developer.branch!, 'abc123')
     expect(await runner.call(developer.runId, developer.leaseEpoch, 'submit_design', submission('abc123')))
       .toMatchObject({ ok: false, error: 'Only a design task submits a design' })
-    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'design_submitted', summary: 'Done', headSha: 'abc123' }))
+    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'design_submitted', note: 'Did the work', summary: 'Done', headSha: 'abc123' }))
       .toMatchObject({ ok: false, error: expect.stringContaining('Only a design task reports design_submitted') })
     expect(await versionsOf(task)).toHaveLength(0)
     await pause(project)

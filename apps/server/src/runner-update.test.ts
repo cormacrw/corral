@@ -48,7 +48,7 @@ describe('runner updates', () => {
     await t.request('POST', `/api/projects/${project.slug}/tasks/${second.number}/transitions`, { type: 'approve' })
     await t.orchestrator.schedule()
     expect((await b.next('run.assign')).job.taskId).toBe(second.id)
-    expect(await a.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'stuck', summary: 'Which copy should I use?' })).toMatchObject({ ok: true })
+    expect(await a.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'stuck', note: 'Need a decision on copy', summary: 'Which copy should I use?' })).toMatchObject({ ok: true })
     a.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'stopped' }, headSha: null })
     await sleep(100)
     expect(a.received.some(m => m.type === 'run.assign')).toBe(false)

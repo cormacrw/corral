@@ -79,6 +79,7 @@ const toolDefinitions = {
     input: {
       outcome: z.string().describe('One of the outcomes listed for your role'),
       summary: z.string().min(1).describe('Plain-English summary of what you did, or your question when stuck'),
+      note: z.string().optional().describe('Developer only, required: one line of at most 200 characters saying what this run did, posted as a comment on the task, e.g. "Addressed review: dropped idle-thread fixture"'),
       criteria: z.array(z.object({
         criterionId: z.string(),
         met: z.boolean(),

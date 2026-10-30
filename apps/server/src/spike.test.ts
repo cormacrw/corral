@@ -67,7 +67,7 @@ describe('spikes deliver findings instead of a PR', () => {
 
   async function reportFindings(job: RunJob, task: Task, findings = FINDINGS) {
     await attachAll(job, task)
-    const result = await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'findings_reported', summary: findings })
+    const result = await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'findings_reported', note: 'Did the work', summary: findings })
     expect(result).toMatchObject({ ok: true })
     await runner.next('run.stop', m => m.runId === job.runId)
   }
@@ -97,9 +97,9 @@ describe('spikes deliver findings instead of a PR', () => {
     expect(developer.prompt).not.toContain('pr_opened')
 
     // A spike can't open a PR, and still needs evidence for every criterion
-    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', summary: 'Done', headSha: 'abc' }))
+    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', note: 'Did the work', summary: 'Done', headSha: 'abc' }))
       .toMatchObject({ ok: false, error: expect.stringContaining('findings_reported') })
-    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'findings_reported', summary: FINDINGS }))
+    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'findings_reported', note: 'Did the work', summary: FINDINGS }))
       .toMatchObject({ ok: false, error: expect.stringContaining('No evidence yet for') })
     await reportFindings(developer, task)
 
@@ -152,7 +152,7 @@ describe('spikes deliver findings instead of a PR', () => {
       expect(await runner.call(developer.runId, developer.leaseEpoch, 'attach_evidence', { criterionId: criterion.id, kind: 'note', note: 'Read the locking code in src/claim.ts' }))
         .toMatchObject({ ok: true })
     }
-    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'findings_reported', summary: FINDINGS })).toMatchObject({ ok: true })
+    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'findings_reported', note: 'Did the work', summary: FINDINGS })).toMatchObject({ ok: true })
     expect(await taskRow(task.id)).toMatchObject({ status: 'agent_review' })
     await runner.next('run.stop', m => m.runId === developer.runId)
     await pause(project)
@@ -220,12 +220,12 @@ describe('spikes deliver findings instead of a PR', () => {
     expect(developer.prompt).not.toContain('findings_reported')
 
     // Findings are only for spikes
-    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'findings_reported', summary: 'Here is what I found' }))
+    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'findings_reported', note: 'Did the work', summary: 'Here is what I found' }))
       .toMatchObject({ ok: false, error: expect.stringContaining('Only a spike reports findings') })
 
     t.github.setBranch(project.repository, developer.branch!, 'abc123')
     await attachAll(developer, task)
-    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', summary: 'Added login', headSha: 'abc123' }))
+    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', note: 'Did the work', summary: 'Added login', headSha: 'abc123' }))
       .toMatchObject({ ok: true })
     expect(await taskRow(task.id)).toMatchObject({ status: 'agent_review', prNumber: 1, headSha: 'abc123' })
     await runner.next('run.stop', m => m.runId === developer.runId)
