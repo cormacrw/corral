@@ -82,7 +82,9 @@ onMounted(() => {
     if (!session.value) return
     if (event.type === 'plan.message' && event.message.sessionId === session.value.id) {
       if (event.message.role === 'human') session.value.messages = session.value.messages.filter(m => !m.id.startsWith('pending-'))
-      if (!session.value.messages.some(m => m.id === event.message.id)) session.value.messages.push(event.message)
+      const index = session.value.messages.findIndex(m => m.id === event.message.id)
+      if (index < 0) session.value.messages.push(event.message)
+      else session.value.messages.splice(index, 1, event.message)
     }
     if (event.type === 'plan.updated' && event.plan.sessionId === session.value.id) {
       const i = session.value.plans.findIndex(p => p.id === event.plan.id)
@@ -368,6 +370,11 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
                     variant="subtle"
                     :title="message.text"
                     :actions="[{ label: 'Retry', onClick: () => send('Please continue.') }]"
+                  />
+                  <PlanConfirmAction
+                    v-else-if="message.pendingAction"
+                    :message="message"
+                    @resolved="load"
                   />
                   <PlanQuestion
                     v-else-if="message.kind === 'question'"

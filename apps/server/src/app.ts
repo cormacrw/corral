@@ -36,7 +36,7 @@ import { zValidator } from '@hono/zod-validator'
 import { Hono, type Context, type ValidationTargets } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { streamSSE } from 'hono/streaming'
-import type { ZodType } from 'zod'
+import { z, type ZodType } from 'zod'
 import { ApiFailure, fromDatabaseError } from './errors.ts'
 import { checkThumbnail, readThumbnail, THUMBNAIL_MAX_BYTES } from './thumbnails.ts'
 import { byteRange } from './byte-range.ts'
@@ -550,6 +550,9 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       const input = c.req.valid('json')
       return c.json(await plans.message(c.req.param('id'), { text: input.text, taskRef: input.taskRef }, actor), 201)
     })
+
+    .post('/plan/sessions/:id/actions/:actionId', validate('json', z.object({ decision: z.enum(['confirm', 'cancel']) })), async c =>
+      c.json(await orchestrator.pmActions.resolve(c.req.param('id'), c.req.param('actionId'), c.req.valid('json').decision, actor)))
 
     .post('/plan/sessions/:id/close', async c => c.json(await plans.close(c.req.param('id'), actor)))
 

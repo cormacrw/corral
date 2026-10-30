@@ -52,7 +52,7 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     const detail = entry.detail as Record<string, unknown>
     const event = typeof detail.event === 'string' ? detail.event : typeof detail.event === 'object' && detail.event ? String((detail.event as { type?: string }).type) : null
     const base = { id: String(entry.id), project: projectTag(project), taskId: task.id, taskRef: taskRef(project.prefix, task.number), subject: task.title, prUrl: task.prUrl, at: entry.createdAt.toISOString() }
-    if (entry.actor.kind === 'human' && (entry.action === 'task.deleted' || ['resolve', 'human_approve', 'human_request_changes', 'send_back'].includes(event ?? ''))) {
+    if (entry.actor.kind === 'human' && !entry.actor.viaPm && (entry.action === 'task.deleted' || ['resolve', 'human_approve', 'human_request_changes', 'send_back'].includes(event ?? ''))) {
       const resolution = resolutionText(entry.action, event, detail)
       resolved.push({ ...base, type: 'activity', preview: resolution, body: resolution, sender: { name: 'You', role: 'system' }, resolution })
     } else if (entry.action === 'review.recorded' || (entry.action === 'task.transition' && ACTIVITY_EVENTS.includes(event ?? ''))) {
@@ -74,6 +74,17 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     const item: TaskInboxItem = { id: `epic-${entry.id}`, type: 'activity', epicId: epic.id, project: projectTag(project), taskId: task.id, taskRef: taskRef(project.prefix, task.number), subject: epic.title, preview: body, body, sender: senderOf(entry.actor), at: entry.createdAt.toISOString(), prUrl: epic.prNumber ? `https://github.com/${project.repository}/pull/${epic.prNumber}` : null, resolution: entry.actor.kind === 'human' ? body : null }
     if (entry.actor.kind === 'human') resolved.push(item)
     else activity.push(item)
+  }
+  // Read confirmed actions independently of tasks: deleting a Backlog task
+  // removes its row, but its PM attribution and conversation must survive.
+  const pmActions = await db.select({ entry: auditLog, project: projects }).from(auditLog)
+    .innerJoin(projects, eq(projects.id, auditLog.projectId))
+    .where(eq(auditLog.action, 'pm.action_confirmed')).orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(limit)
+  for (const { entry, project } of pmActions) {
+    const detail = entry.detail as { targetId: string | null, summary: string, sessionId: string, input: { taskRef?: string } }
+    if (!detail.targetId || !detail.input.taskRef) continue
+    const body = `${detail.summary}, confirmed by you. [PM conversation](/plan/${detail.sessionId})`
+    activity.push({ id: `pm-${entry.id}`, type: 'activity', project: projectTag(project), taskId: detail.targetId, taskRef: detail.input.taskRef, subject: detail.summary, preview: `${detail.summary}, confirmed by you`, body, sender: { name: 'PM', role: 'pm' }, at: entry.createdAt.toISOString(), prUrl: null, resolution: null })
   }
   resolved.push(...releases.filter(d => d.resolution))
   activity.sort((a, b) => b.at.localeCompare(a.at))
@@ -188,6 +199,7 @@ function projectTag(project: typeof projects.$inferSelect) {
 }
 
 function senderOf(actor: Actor): TaskInboxItem['sender'] {
+  if (actor.kind === 'human' && actor.viaPm) return { name: 'PM', role: 'pm' }
   if (actor.kind === 'agent') return { name: actorLabel(actor), role: actor.role }
   return { name: actorLabel(actor), role: 'system' }
 }
