@@ -101,13 +101,13 @@ describe.each([
     const [a, b, c] = await db.insert(epics).values(['A', 'B', 'C'].map(title => ({
       projectId: project.id, title, createdBy: human
     }))).returning()
-    const edge = { epicId: b!.id, dependsOnEpicId: a!.id }
+    const edge = { projectId: project.id, epicId: b!.id, dependsOnEpicId: a!.id }
     await db.insert(epicDependencies).values(edge)
     await expectViolation(db.insert(epicDependencies).values(edge), 'epic_dependencies_epic_id_depends_on_epic_id_pk')
-    await expectViolation(db.insert(epicDependencies).values({ epicId: a!.id, dependsOnEpicId: a!.id }), 'epic_dependencies_not_self')
+    await expectViolation(db.insert(epicDependencies).values({ projectId: project.id, epicId: a!.id, dependsOnEpicId: a!.id }), 'epic_dependencies_not_self')
     await db.delete(epics).where(eq(epics.id, a!.id))
     expect(await db.select().from(epicDependencies).where(eq(epicDependencies.epicId, b!.id))).toEqual([])
-    await db.insert(epicDependencies).values({ epicId: b!.id, dependsOnEpicId: c!.id })
+    await db.insert(epicDependencies).values({ projectId: project.id, epicId: b!.id, dependsOnEpicId: c!.id })
     await db.delete(epics).where(eq(epics.id, b!.id))
     expect(await db.select().from(epicDependencies).where(eq(epicDependencies.dependsOnEpicId, c!.id))).toEqual([])
   })
@@ -256,9 +256,62 @@ describe.each([
   it('rejects a task depending on itself', async () => {
     const task = await insertTask((await insertProject()).id, 1)
     await expectViolation(
-      db.insert(taskDependencies).values({ taskId: task.id, dependsOnId: task.id }),
+      db.insert(taskDependencies).values({ projectId: task.projectId, taskId: task.id, dependsOnId: task.id }),
       'task_dependencies_not_self'
     )
+  })
+
+  it('keeps epic membership and dependency edges inside one project', async () => {
+    const [a, b] = [await insertProject(), await insertProject()]
+    const [epicA, otherEpicA] = await db.insert(epics).values(['A1', 'A2'].map(title => ({ projectId: a.id, title, createdBy: human }))).returning()
+    const [epicB] = await db.insert(epics).values({ projectId: b.id, title: 'B', createdBy: human }).returning()
+    const [taskA, otherTaskA, taskB] = [await insertTask(a.id, 1), await insertTask(a.id, 2), await insertTask(b.id, 1)]
+
+    await expectViolation(db.update(tasks).set({ epicId: epicB!.id }).where(eq(tasks.id, taskA.id)), 'tasks_epic_same_project_fk')
+    await expectViolation(db.insert(tasks).values({ projectId: a.id, number: 3, epicId: epicB!.id, title: 'T', type: 'task', createdBy: human }), 'tasks_epic_same_project_fk')
+    // Whichever project an edge claims, one of its ends is outside it
+    for (const projectId of [a.id, b.id]) {
+      await expectViolation(db.insert(taskDependencies).values({ projectId, taskId: taskA.id, dependsOnId: taskB.id }), projectId === a.id ? 'task_dependencies_depends_on_same_project_fk' : 'task_dependencies_task_same_project_fk')
+      await expectViolation(db.insert(epicDependencies).values({ projectId, epicId: epicA!.id, dependsOnEpicId: epicB!.id }), projectId === a.id ? 'epic_dependencies_depends_on_same_project_fk' : 'epic_dependencies_epic_same_project_fk')
+    }
+    // A task can't leave for another project with its epic or edges behind
+    await db.update(tasks).set({ epicId: epicA!.id }).where(eq(tasks.id, taskA.id))
+    await expectViolation(db.update(tasks).set({ projectId: b.id, number: 9 }).where(eq(tasks.id, taskA.id)), 'tasks_epic_same_project_fk')
+
+    // Tasks in different epics of one project can depend on each other
+    await db.update(tasks).set({ epicId: otherEpicA!.id }).where(eq(tasks.id, otherTaskA.id))
+    await db.insert(taskDependencies).values({ projectId: a.id, taskId: taskA.id, dependsOnId: otherTaskA.id })
+    await db.insert(epicDependencies).values({ projectId: a.id, epicId: epicA!.id, dependsOnEpicId: otherEpicA!.id })
+  })
+
+  it('nulls only the epic when an epic goes, and cascades edges and projects', async () => {
+    const project = await insertProject()
+    const [epic] = await db.insert(epics).values({ projectId: project.id, title: 'E', createdBy: human }).returning()
+    const [first, second, third] = [await insertTask(project.id, 1), await insertTask(project.id, 2), await insertTask(project.id, 3)]
+    await db.update(tasks).set({ epicId: epic!.id }).where(eq(tasks.id, first.id))
+    await db.insert(taskDependencies).values([
+      { projectId: project.id, taskId: first.id, dependsOnId: second.id },
+      { projectId: project.id, taskId: second.id, dependsOnId: third.id }
+    ])
+
+    await db.delete(epics).where(eq(epics.id, epic!.id))
+    const [kept] = await db.select().from(tasks).where(eq(tasks.id, first.id))
+    expect(kept).toMatchObject({ epicId: null, projectId: project.id })
+
+    // Either end of an edge
+    await db.delete(tasks).where(eq(tasks.id, third.id))
+    expect(await db.select().from(taskDependencies).where(eq(taskDependencies.taskId, second.id))).toEqual([])
+    await db.delete(tasks).where(eq(tasks.id, first.id))
+    expect(await db.select().from(taskDependencies).where(eq(taskDependencies.projectId, project.id))).toEqual([])
+
+    // A whole project, with an epic that still holds a task and an edge
+    const [left, right] = await db.insert(epics).values(['L', 'R'].map(title => ({ projectId: project.id, title, createdBy: human }))).returning()
+    await db.insert(epicDependencies).values({ projectId: project.id, epicId: left!.id, dependsOnEpicId: right!.id })
+    await db.update(tasks).set({ epicId: left!.id }).where(eq(tasks.id, second.id))
+    await db.delete(projects).where(eq(projects.id, project.id))
+    expect(await db.select().from(tasks).where(eq(tasks.projectId, project.id))).toEqual([])
+    expect(await db.select().from(epics).where(eq(epics.projectId, project.id))).toEqual([])
+    expect(await db.select().from(epicDependencies).where(eq(epicDependencies.projectId, project.id))).toEqual([])
   })
 
   it('removes a project\'s attachments with the project', async () => {

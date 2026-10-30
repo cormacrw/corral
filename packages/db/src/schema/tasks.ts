@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm'
 import {
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -28,7 +29,7 @@ export const tasks = pgTable('tasks', {
   projectId: uuid().notNull().references(() => projects.id, { onDelete: 'cascade' }),
   // Per-project number; the ref is `${project.prefix}-${number}` (D13)
   number: integer().notNull(),
-  epicId: uuid().references(() => epics.id, { onDelete: 'set null' }),
+  epicId: uuid(),
   title: text().notNull(),
   // Rich-text document from the editor (design/task.md)
   description: jsonb(),
@@ -74,6 +75,9 @@ export const tasks = pgTable('tasks', {
   deletedAt: timestamp({ withTimezone: true })
 }, t => [
   unique('tasks_project_number_unique').on(t.projectId, t.number),
+  unique('tasks_project_id_unique').on(t.projectId, t.id),
+  // Migration uses SET NULL (epic_id) to preserve the required project.
+  foreignKey({ name: 'tasks_epic_same_project_fk', columns: [t.projectId, t.epicId], foreignColumns: [epics.projectId, epics.id] }).onDelete('set null'),
   index().on(t.projectId, t.status),
   check('tasks_counters_non_negative', sql`${t.reviewRounds} >= 0 and ${t.failedRuns} >= 0 and ${t.leaseEpoch} >= 0`),
   // A lease is either fully held or fully released
@@ -93,13 +97,17 @@ export const acceptanceCriteria = pgTable('acceptance_criteria', {
 }, t => [index().on(t.taskId, t.position)])
 
 // `taskId` depends on `dependsOnId`. Cycles are rejected by core before writing.
+// Both ends are keyed through projectId, so an edge can't cross projects.
 export const taskDependencies = pgTable('task_dependencies', {
-  taskId: uuid().notNull().references(() => tasks.id, { onDelete: 'cascade' }),
-  dependsOnId: uuid().notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  projectId: uuid().notNull(),
+  taskId: uuid().notNull(),
+  dependsOnId: uuid().notNull(),
   createdAt: createdAt()
 }, t => [
   primaryKey({ columns: [t.taskId, t.dependsOnId] }),
   index().on(t.dependsOnId),
+  foreignKey({ name: 'task_dependencies_task_same_project_fk', columns: [t.projectId, t.taskId], foreignColumns: [tasks.projectId, tasks.id] }).onDelete('cascade'),
+  foreignKey({ name: 'task_dependencies_depends_on_same_project_fk', columns: [t.projectId, t.dependsOnId], foreignColumns: [tasks.projectId, tasks.id] }).onDelete('cascade'),
   check('task_dependencies_not_self', sql`${t.taskId} <> ${t.dependsOnId}`)
 ])
 

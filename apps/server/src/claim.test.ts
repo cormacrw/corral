@@ -306,7 +306,7 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
     const blocked = await taskRow(project, 1)
     const ready = await taskRow(project, 2)
     const dependency = await t.createTask(project.slug)
-    await t.db.insert(schema.taskDependencies).values({ taskId: blocked.id, dependsOnId: dependency.id })
+    await t.db.insert(schema.taskDependencies).values({ projectId: project.id, taskId: blocked.id, dependsOnId: dependency.id })
     await t.db.update(tasks).set({ status: 'in_progress' }).where(eq(tasks.id, blocked.id))
 
     expect(await claimNextTask(t.db, await developer())).toMatchObject({ taskId: ready.id })

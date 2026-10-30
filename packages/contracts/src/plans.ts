@@ -23,19 +23,34 @@ export interface PlanSession {
   updatedAt: string
 }
 
-export interface PlanMessage {
+// What a plan message says, by role and kind. Only PM questions carry a
+// recommendation or options, and only when the PM gave them.
+const plainPlanMessage = { text: z.string(), recommendation: z.null().default(null), options: z.null().default(null) }
+export const planMessageFields = z.discriminatedUnion('role', [
+  z.strictObject({ role: z.literal('human'), kind: z.literal('message'), ...plainPlanMessage }),
+  z.discriminatedUnion('kind', [
+    z.strictObject({ role: z.literal('pm'), kind: z.literal('message'), ...plainPlanMessage }),
+    z.strictObject({ role: z.literal('pm'), kind: z.literal('error'), ...plainPlanMessage }),
+    z.strictObject({
+      role: z.literal('pm'),
+      kind: z.literal('question'),
+      text: z.string().min(1),
+      recommendation: z.string().nullable().default(null),
+      options: z.array(z.string()).nullable().default(null)
+    })
+  ])
+])
+export type PlanMessageFields = z.output<typeof planMessageFields>
+export type NewPlanMessageFields = z.input<typeof planMessageFields>
+
+export type PlanMessage = PlanMessageFields & {
   id: string
   sessionId: string
-  role: 'human' | 'pm'
-  kind: 'message' | 'question' | 'error'
-  text: string
-  // Set only on questions, and only when the PM gave them
-  recommendation: string | null
-  options: string[] | null
   planId: string | null
   runId: string | null
   createdAt: string
 }
+export type PlanQuestion = Extract<PlanMessageFields, { kind: 'question' }>
 
 export const planStatus = z.enum(PLAN_STATUSES)
 

@@ -303,7 +303,7 @@ export async function createTask(db: Executor, project: ProjectRow, rawInput: Cr
       )
     }
     if (dependencies.length > 0) {
-      await tx.insert(taskDependencies).values(dependencies.map(d => ({ taskId, dependsOnId: d.id })))
+      await tx.insert(taskDependencies).values(dependencies.map(d => ({ projectId: project.id, taskId, dependsOnId: d.id })))
     }
     await appendAudit(tx, { projectId: project.id, taskId, actor }, auditEvent('task.created', { number: row!.number }))
     return taskId
@@ -470,8 +470,8 @@ async function setDependencies(tx: Executor, project: ProjectRow, task: TaskRow,
   graph.set(task.id, found.map(d => d.id))
   const problems = checkDependencies(graph)
   if (problems.length > 0) throw new ApiFailure(400, { code: 'invalid_dependencies', problems })
-  await tx.delete(taskDependencies).where(eq(taskDependencies.taskId, task.id))
-  if (found.length > 0) await tx.insert(taskDependencies).values(found.map(d => ({ taskId: task.id, dependsOnId: d.id })))
+  await tx.delete(taskDependencies).where(and(eq(taskDependencies.projectId, project.id), eq(taskDependencies.taskId, task.id)))
+  if (found.length > 0) await tx.insert(taskDependencies).values(found.map(d => ({ projectId: project.id, taskId: task.id, dependsOnId: d.id })))
 }
 
 // Stamped with the clock, not the transaction's start, so comments posted in
