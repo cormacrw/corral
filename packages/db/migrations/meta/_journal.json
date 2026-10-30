@@ -365,6 +365,13 @@
       "when": 1793467812312,
       "tag": "0051_premium_chameleon",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1793467876130,
+      "tag": "0052_organic_deathbird",
+      "breakpoints": true
     }
   ]
 }

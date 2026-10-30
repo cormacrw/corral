@@ -10,7 +10,7 @@ import type { ServerConnection } from './connection.ts'
 import { packDesign, saveDesign } from './designs.ts'
 import { convertToMp4 } from './evidence-video.ts'
 import { outcomesFor, toolRefusal, toolsFor, type ToolOutcome, type ToolServer } from './mcp.ts'
-import { headSha, prepareWorkspace, pushBranch, readProjectBrief, readRoleInstructions, saveStoppedWork } from './workspace.ts'
+import { headSha, mergeBase, prepareWorkspace, pushBranch, readProjectBrief, readRoleInstructions, saveStoppedWork } from './workspace.ts'
 import { RunTimer } from './run-timings.ts'
 
 // Runs on this runner (flows.md §2 steps 3–5, PRD §8.6). Each run gets a
@@ -715,13 +715,21 @@ export class RunManager {
         return { ok: false, error: `A ${run.job.role} reports one of: ${outcomesFor(run.job.role).join(', ')}` }
       }
       let payload: Record<string, unknown> = input
-      if ((run.job.role === 'developer' || run.job.role === 'designer') && (outcome === 'pr_opened' || outcome === 'pr_updated' || outcome === 'pr_rebased' || outcome === 'design_submitted')) {
+      if ((run.job.role === 'developer' || run.job.role === 'designer') && (outcome === 'pr_opened' || outcome === 'pr_updated' || outcome === 'pr_rebased' || outcome === 'commit_submitted' || outcome === 'design_submitted')) {
         // A spike has no branch to push (D19)
         if (!run.job.branch) return { ok: false, error: 'A spike opens no PR: report your findings with outcome findings_reported.' }
         // The runner pushes, not the agent (D8); the commit goes with the report
         const pushed = await this.#push(run)
         if (!pushed.ok) return pushed
         payload = { ...input, headSha: pushed.result }
+        if (outcome === 'commit_submitted') {
+          const baseSha = await mergeBase(run.worktree!, `origin/${run.job.baseBranch ?? run.job.defaultBranch}`)
+          if (!baseSha) return { ok: false, error: `Corral could not find where your branch forked from ${run.job.baseBranch ?? run.job.defaultBranch}. Rebase onto it and try again.` }
+          payload = { ...payload, baseSha }
+        }
+      } else if (run.job.role === 'reviewer' && run.job.headSha) {
+        // What the verdict actually judged, so the server can refuse a moved head
+        payload = { ...input, headSha: await headSha(run.worktree!) ?? 'unknown' }
       }
       const reporting = this.#forward(run, tool, payload).then((result) => {
         if (result.ok) run.outcomeAccepted = true

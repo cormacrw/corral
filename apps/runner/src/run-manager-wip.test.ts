@@ -6,7 +6,7 @@ import type { AgentExit, AgentRuntime } from './agent-runtime.ts'
 import type { RunnerConfig } from './config.ts'
 import type { ServerConnection } from './connection.ts'
 import { git } from './exec.ts'
-import type { ToolServer } from './mcp.ts'
+import type { ToolHandler, ToolServer } from './mcp.ts'
 import { RunManager } from './run-manager.ts'
 import { createTestDataDir, pmJob } from './test-repo.ts'
 import { prepareWorkspace, saveStoppedWork, worktreePath } from './workspace.ts'
@@ -24,7 +24,8 @@ describe('a stopped run keeps its work', () => {
   let cwds: string[]
   let exit: (value: AgentExit) => void
   const connection = { connected: true, send: (message: RunnerMessage) => sent.push(message) > 0 } as unknown as ServerConnection
-  const tools = { register: () => () => {}, url: () => 'http://127.0.0.1:9/mcp' } as unknown as ToolServer
+  let callTool: ToolHandler
+  const tools = { register: (_secret: string, _role: string, handler: ToolHandler) => (callTool = handler, () => {}), url: () => 'http://127.0.0.1:9/mcp' } as unknown as ToolServer
 
   const runtime: AgentRuntime = {
     id: 'fake',
@@ -146,6 +147,33 @@ describe('a stopped run keeps its work', () => {
 
     expect((await ended()).wipSha).toBeNull()
     expect(await onOrigin(BRANCH)).toBeNull()
+  })
+
+  it('pushes a submitted commit and reports it with where it forked from its epic branch', async () => {
+    const base = await onOrigin('main')
+    await git(['branch', 'corral/epic-feature'], { cwd: origin })
+    await start(developer({ baseBranch: 'corral/epic-feature' }))
+    const worktree = worktreePath(dataDir, 'task-1', 'developer')
+    await git(['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '--allow-empty', '-m', 'The change'], { cwd: worktree })
+    const head = (await git(['rev-parse', 'HEAD'], { cwd: worktree })).stdout.trim()
+
+    void callTool('report_outcome', { outcome: 'commit_submitted', summary: 'Done', note: 'Done' })
+    await expect.poll(() => sent.some(m => m.type === 'tool.call')).toBe(true)
+    expect(sent.find(m => m.type === 'tool.call')).toMatchObject({ tool: 'report_outcome', input: { outcome: 'commit_submitted', headSha: head, baseSha: base } })
+    expect(await onOrigin(BRANCH)).toBe(head)
+    expect(await onOrigin('corral/epic-feature')).toBe(base)
+  })
+
+  it('tells the server which commit a reviewer\'s checkout is at, over anything the agent passes', async () => {
+    const head = await onOrigin('main')
+    await start(developer({ role: 'reviewer', headSha: head }))
+    const worktree = worktreePath(dataDir, 'task-1', 'reviewer')
+    await git(['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '--allow-empty', '-m', 'A stray edit'], { cwd: worktree })
+    const moved = (await git(['rev-parse', 'HEAD'], { cwd: worktree })).stdout.trim()
+
+    void callTool('report_outcome', { outcome: 'approved', summary: 'Fine', criteria: [], headSha: head })
+    await expect.poll(() => sent.some(m => m.type === 'tool.call')).toBe(true)
+    expect(sent.find(m => m.type === 'tool.call')).toMatchObject({ input: { outcome: 'approved', headSha: moved } })
   })
 
   it('leaves a reviewer run alone', async () => {

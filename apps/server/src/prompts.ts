@@ -17,6 +17,8 @@ export interface PromptTask {
   // D20: a build task pinned to an approved design version and its screens
   pin?: PinnedDesign | null
   defaultBranch: string
+  // D27: submits commits on its own branch for integration, with no task PR
+  prFree?: boolean
   rebaseOnly?: boolean
   approvedHeadSha?: string | null
   reviewRounds: number
@@ -98,6 +100,8 @@ export interface ReviewTask extends PromptTask {
   prUrl: string | null
   evidence: { id: string, criterionId: string | null, kind: string, note: string, fileName: string | null }[]
   previousFeedback: string | null
+  // PR-free submissions, oldest first; the last is the one under review (D27)
+  submissions?: TaskSubmission[]
   // A spike's latest findings, which are what's under review
   findings?: string | null
   rebaseReport?: { review: string | null, conflictedFiles: string[] | null } | null
@@ -105,6 +109,14 @@ export interface ReviewTask extends PromptTask {
   requiredChecks: string[]
   // The D24 conditions the server check found broken, when it ran
   rebaseCheckFailures?: RebaseCheckFailure[]
+}
+
+export interface TaskSubmission {
+  sequence: number
+  headSha: string
+  baseSha: string
+  targetBranch: string
+  createdAt: Date
 }
 
 // The design version under review (D20)
@@ -119,20 +131,26 @@ export function reviewerPrompt(task: ReviewTask & { underReview?: DesignUnderRev
   if (task.design) return designReviewerPrompt(task, task.underReview ?? null, agentName)
   if (task.rebaseOnly) return rebaseReviewerPrompt(task, agentName)
   const evidence = evidenceList(task)
+  const submission = task.prFree ? task.submissions?.at(-1) ?? null : null
   return [
     `You are ${agentName}, the reviewer agent in Corral. Review round ${task.reviewRounds + 1} of ${task.reviewRoundCap} for task ${task.ref}: ${task.title}.`,
-    `You are checking commit ${task.headSha} on branch \`${task.branch}\`${task.prUrl ? ` (${task.prUrl})` : ''}, against \`${task.defaultBranch}\`.`,
+    submission
+      ? `You are checking submitted commit ${submission.headSha} on task branch \`${task.branch}\`. Its recorded base is commit ${submission.baseSha} of epic branch \`${submission.targetBranch}\`. There is no task PR.`
+      : `You are checking commit ${task.headSha} on branch \`${task.branch}\`${task.prUrl ? ` (${task.prUrl})` : ''}, against \`${task.defaultBranch}\`.`,
     '',
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
     section('Acceptance criteria', criteriaList(task)),
     section('Evidence the developer attached (this round)', evidence),
     task.previousFeedback ? section('Your feedback last round', task.previousFeedback) : '',
+    submissionHistory(task),
     commentsSection(task),
     attachmentsSection(task),
     pinSection(task, 'reviewer'),
     gatesSection(task),
     section('How to review', `
-- You are in a read-only checkout of the commit under review. Do not edit, commit or push. Run \`git diff ${task.defaultBranch}...HEAD\` or \`git log\` to see the change; \`origin/${task.defaultBranch}\` is available locally.
+- You are in a read-only checkout of the commit under review. Do not edit, commit or push. ${submission
+  ? `Run \`git diff ${submission.baseSha}...HEAD\` or \`git log ${submission.baseSha}..HEAD\` to see the change. Your verdict applies to exactly this commit: Corral rejects it if your checkout or the task branch has moved.`
+  : `Run \`git diff ${task.defaultBranch}...HEAD\` or \`git log\` to see the change; \`origin/${task.defaultBranch}\` is available locally.`}
 - Use the supplied project brief and wiki file list, and check the wiki was updated where behaviour changed.
 - Judge every acceptance criterion: is it implemented, and does the evidence actually show it? Use \`get_evidence\` to list items and fetch screenshots by ID. Reproduce at least one criterion yourself when you can (a targeted test, the app).
 - Review the diff for security, efficiency and logic problems, and raise each one as specific, actionable feedback with the file and line. A cached result never counts as verification.
@@ -155,14 +173,23 @@ function rebaseCheckSection(failures: RebaseCheckFailure[]): string {
 ${failures.map(f => `- ${REBASE_CHECK_CONDITIONS[f.condition]}: ${f.files.map(file => `\`${file}\``).join(', ')}`).join('\n')}`)
 }
 
+// Revisions stack on the same branch, so earlier commits stay comparable
+function submissionHistory(task: ReviewTask): string {
+  const earlier = task.prFree ? task.submissions?.slice(0, -1) ?? [] : []
+  if (earlier.length === 0) return ''
+  return section('Earlier submissions', earlier.map(s => `- Submission ${s.sequence}: commit ${s.headSha} on base ${s.baseSha} (${s.createdAt.toISOString()})`).join('\n'))
+}
+
 // D24: review the resolution; the server carries the approved criteria forward.
 function rebaseReviewerPrompt(task: ReviewTask, agentName: string): string {
   return [
     `You are ${agentName}, the reviewer agent in Corral. Rebase review for ${task.ref}: ${task.title}.`,
     section('Rebase under review', `Previously approved head: ${task.approvedHeadSha}. New head: ${task.headSha}. Base branch: origin/${task.defaultBranch}.
-Developer review choice: ${task.rebaseReport?.review ?? '(not recorded)'}.
+${task.prFree
+  ? ''
+  : `Developer review choice: ${task.rebaseReport?.review ?? '(not recorded)'}.
 Conflicted files: ${task.rebaseReport?.conflictedFiles?.join(', ') ?? '(not recorded)'}.
-This is a conflict check of approved work, excluded from the review-round cap.`),
+`}This is a conflict check of approved work, excluded from the review-round cap.`),
     rebaseCheckSection(task.rebaseCheckFailures ?? []),
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
     section('Acceptance criteria (previously approved)', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
@@ -188,7 +215,10 @@ This is a conflict check of approved work, excluded from the review-round cap.`)
 function gatesSection(task: ReviewTask): string {
   if (task.requiredChecks.length > 0) {
     const checks = task.requiredChecks.map(c => `\`${c}\``).join(', ')
-    return section('Gates', `This project has required CI checks: ${checks}. They run on every push and the merge gate won't merge without them, so don't rerun the project's lint, typecheck, tests or build. Spend your time on the diff and the criteria.`)
+    const gate = task.prFree
+      ? 'They run on every push, including this commit. No merge gate applies to the commit itself; the epic PR\'s CI is the merge gate for this work'
+      : 'They run on every push and the merge gate won\'t merge without them'
+    return section('Gates', `This project has required CI checks: ${checks}. ${gate}, so don't rerun the project's lint, typecheck, tests or build. Spend your time on the diff and the criteria.`)
   }
   return section('Gates', `This project has no required CI checks, so nothing else verifies its gates. Run the project's lint, typecheck, tests and build yourself before reporting, without the cache: when available, use \`pnpm run check --review\` (bypasses the Turbo cache) and \`TURBO_FORCE=1 pnpm run build\`. Do not add concurrency, worker or timeout flags; use the repository's shared CPU setting. If check reports a reused clean review check for this exact head, skip the full check rerun and cite the earlier check run and commit in your summary. Otherwise run the gates without the cache using the repository's commands. Request changes if one fails. If you cannot run a check without the cache, explain which check and why in your outcome.`)
 }
@@ -341,13 +371,15 @@ export function developerPrompt(task: PromptTask, agentName: string): string {
     pinSection(task, 'developer'),
     section('How to work', `
 - You are in a git worktree on branch \`${task.branch}\`, based on \`${task.defaultBranch}\`. Commit your work on this branch.
-- Do not push and do not use \`gh\`. Corral pushes the branch and opens the PR when you report your outcome.
+- ${task.prFree
+  ? `This is an epic task with no task PR. Stay on this branch: only Corral writes to the shared epic branch. Do not push and do not use \`gh\`. Corral pushes your branch and starts review of your commit when you report your outcome.`
+  : 'Do not push and do not use `gh`. Corral pushes the branch and opens the PR when you report your outcome.'}
 - Use the supplied project brief and open relevant pages from its wiki file list when needed. Update the wiki in the same branch when behaviour changes.
 - Run \`pnpm run check\` when available for lint, typecheck and tests before reporting. Do not add concurrency, worker or timeout flags; use the repository's shared CPU setting.
 - Prove each acceptance criterion with what a human would look at, attached through \`attach_evidence\`: screenshots or video for anything visible, real requests and responses for APIs. Use kind \`note\` only when there is nothing to show; say concretely what changed and how it was checked, with file and line references. Lint, typecheck, tests and build are gates; never attach their output as criterion evidence.
 - Use \`get_task\` to re-read the task, comments and evidence at any time, and \`add_comment\` to leave notes for the human or reviewer.
-- When the work is committed and evidenced, call \`report_outcome\` with outcome "${revision ? 'pr_updated' : 'pr_opened'}" and a summary. If anything is missing, the call fails and tells you what to fix.
-- The summary becomes the pull request description, read by someone reviewing the code. Write it in markdown: one or two sentences on what changed and why, then a short bulleted list of how you verified it. Describe the change as a whole, not this run: don't mention comments, run numbers or earlier attempts, and don't list commit hashes.
+- When the work is committed and evidenced, call \`report_outcome\` with outcome "${task.prFree ? 'commit_submitted' : revision ? 'pr_updated' : 'pr_opened'}" and a summary. If anything is missing, the call fails and tells you what to fix.
+- The summary ${task.prFree ? 'describes your commits for' : 'becomes the pull request description, read by'} someone reviewing the code. Write it in markdown: one or two sentences on what changed and why, then a short bulleted list of how you verified it. Describe the change as a whole, not this run: don't mention comments, run numbers or earlier attempts, and don't list commit hashes.
 ${WORK_NOTE}
 - If you cannot continue without a human decision, call \`report_outcome\` with outcome "stuck" and put the question in the summary.
 - Always finish by calling \`report_outcome\`.`)
@@ -423,7 +455,7 @@ export function designerPrompt(task: PromptTask, agentName: string): string {
 export function developerRevisionPrompt(task: PromptTask, feedback: PromptTask['comments']): string {
   if (task.rebaseOnly) return rebaseDeveloperPrompt({ ...task, comments: feedback }, 'the assigned developer')
   const format = (c: PromptTask['comments'][number]) => `- ${c.author} (${c.createdAt.toISOString()}): ${c.body}`
-  const outcome = task.spike ? 'findings_reported' : task.reviewRounds > 0 ? 'pr_updated' : 'pr_opened'
+  const outcome = task.spike ? 'findings_reported' : task.prFree ? 'commit_submitted' : task.reviewRounds > 0 ? 'pr_updated' : 'pr_opened'
   return [
     task.reviewRounds > 0
       ? `Review round ${task.reviewRounds} of ${task.reviewRoundCap} on ${task.ref} requested changes. This is the same session${task.branch ? ` and the same branch, \`${task.branch}\`` : ''}: continue from your earlier work.`
@@ -498,7 +530,9 @@ function rebaseDeveloperPrompt(task: PromptTask, agentName: string): string {
 - Check that \`git merge-tree --write-tree HEAD origin/${task.defaultBranch}\` is clean.
 - Do not push or use gh. Corral pushes with --force-with-lease.
 ${WORK_NOTE}
-- Report \`pr_rebased\` with \`conflictedFiles\`: a non-empty list of every file in which you resolved a conflict, and \`review\`: \`trivial\` only if the resolution just combines both sides with no new logic, renames or behaviour changes; otherwise choose \`needs_review\`. The server checks a \`trivial\` choice: if only the conflicted files changed and no project doc moved on the base, the approval carries over without a review. Anything else goes to Agent review. Include a summary naming every conflicted file and how each was resolved, and a one-line note naming the conflicted files and their resolutions. If a human decision is needed, report stuck instead.
+- ${task.prFree
+  ? 'Report `commit_submitted` with a summary naming every conflicted file and how each was resolved, and a one-line note naming the conflicted files and their resolutions. If a human decision is needed, report stuck instead.'
+  : 'Report `pr_rebased` with `conflictedFiles`: a non-empty list of every file in which you resolved a conflict, and `review`: `trivial` only if the resolution just combines both sides with no new logic, renames or behaviour changes; otherwise choose `needs_review`. The server checks a `trivial` choice: if only the conflicted files changed and no project doc moved on the base, the approval carries over without a review. Anything else goes to Agent review. Include a summary naming every conflicted file and how each was resolved, and a one-line note naming the conflicted files and their resolutions. If a human decision is needed, report stuck instead.'}
 - Always finish by calling \`report_outcome\`.`),
     commentsSection(task)
   ].join('\n')

@@ -17,7 +17,7 @@ const { deployments, agents, auditLog, planMessages, planSessions, planEpics, pl
 
 // A request for changes, or an answer: a clarify is a resolve with a pinned comment
 const HUMAN_ACTIONS = ['human_request_changes', 'resolve']
-const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'pr_rebased', 'findings_reported', 'design_submitted', 'changes_requested', 'merged', 'ci_failed', 'base_conflict', 'head_moved']
+const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'pr_rebased', 'commit_submitted', 'findings_reported', 'design_submitted', 'changes_requested', 'merged', 'ci_failed', 'base_conflict', 'head_moved']
 
 // The Inbox (D11, design/inbox.md): what developer and reviewer runs need
 // from the human, plus what they did, and Plan sessions waiting on the human as a Plan
@@ -256,8 +256,8 @@ function activityText(action: string, event: string | null, detail: AuditView, p
   const pr = prNumber ? `PR #${prNumber}` : 'the PR'
   if (action === 'rebase.verified') return `Verified the rebase of ${pr} without review`
   if (action === 'review.recorded') {
-    // A spike's findings (D19) and a design (D20) are reviewed without a PR
-    const reviewed = prNumber ? pr : type === 'design' ? 'the design' : 'the findings'
+    // A spike's findings (D19), a design (D20) and an epic task's commit (D27) are reviewed without a PR
+    const reviewed = prNumber ? pr : type === 'design' ? 'the design' : type === 'spike' ? 'the findings' : 'the commit'
     return detail.verdict === 'approved' ? `Approved ${reviewed} (${String(detail.met)} of ${String(detail.of)} criteria met)` : `Requested changes on ${reviewed} (${String(detail.met)} of ${String(detail.of)} criteria met)`
   }
   switch (event) {
@@ -265,6 +265,7 @@ function activityText(action: string, event: string | null, detail: AuditView, p
     case 'pr_opened': return `Opened ${pr}`
     case 'pr_updated': return `Pushed a revision to ${pr}`
     case 'pr_rebased': return `Rebased ${pr}; on to the reviewer`
+    case 'commit_submitted': return 'Submitted a commit; on to the reviewer'
     case 'findings_reported': return 'Reported findings; on to the reviewer'
     case 'design_submitted': return `Submitted design v${String(detail.version)}; on to the reviewer`
     case 'changes_requested': return detail.to === 'blocked' ? 'Changes requested; Blocked for you' : 'Changes requested; back to the developer'
