@@ -62,7 +62,7 @@ type AgentRow = typeof agents.$inferSelect
 interface RunContext {
   run: RunRow
   agent: AgentRow
-  project: ProjectRow
+  project: ProjectRow | null
   task: TaskRow | null
 }
 
@@ -571,10 +571,10 @@ export class Orchestrator implements RunnerHandlers {
   }): Promise<RunJob> {
     const { db } = this.#d
     let task = ctx.task!
-    const ref = taskRef(ctx.project.prefix, task.number)
+    const ref = taskRef(ctx.project!.prefix, task.number)
     // A spike delivers findings, not a PR (D19), so it never gets a branch.
     // A design is built on design/<ref>, pushed but never merged (D20).
-    const baseBranch = await taskBase(db, task, ctx.project, this.#d.github)
+    const baseBranch = await taskBase(db, task, ctx.project!, this.#d.github)
     const spike = task.type === 'spike'
     if (!task.branch && !spike) {
       const branch = author.branch(ref)
@@ -582,8 +582,8 @@ export class Orchestrator implements RunnerHandlers {
     }
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
     const notes = await this.#comments(task.id)
-    const attached = await listTaskAttachments(db, ctx.project.id, task.description, notes)
-    const pin = await this.#pinnedDesign(ctx.project.prefix, task.id)
+    const attached = await listTaskAttachments(db, ctx.project!.id, task.description, notes)
+    const pin = await this.#pinnedDesign(ctx.project!.prefix, task.id)
     const previous = await this.#previousAuthorRun(db, task.id, ctx.agent.id, ctx.run.role, ctx.run.id)
     const [lastRun] = await db.select().from(runs)
       .where(and(eq(runs.taskId, task.id), inArray(runs.role, ['developer', 'designer']), ne(runs.id, ctx.run.id)))
@@ -603,7 +603,7 @@ export class Orchestrator implements RunnerHandlers {
       reviewRounds: task.reviewRounds,
       rebaseOnly: task.rebaseOnly,
       approvedHeadSha: task.approvedHeadSha,
-      reviewRoundCap: ctx.project.reviewRoundCap,
+      reviewRoundCap: ctx.project!.reviewRoundCap,
       criteria: criteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })),
       comments: notes,
       attachments: attached,
@@ -629,9 +629,9 @@ export class Orchestrator implements RunnerHandlers {
       leaseEpoch: ctx.run.leaseEpoch!,
       role: ctx.run.role,
       runtime: ctx.agent.runtime,
-      projectId: ctx.project.id,
-      repository: ctx.project.repository,
-      defaultBranch: ctx.project.defaultBranch,
+      projectId: ctx.run.projectId,
+      repository: ctx.project!.repository,
+      defaultBranch: ctx.project!.defaultBranch,
       baseBranch,
       taskId: task.id,
       taskRef: ref,
@@ -677,15 +677,15 @@ export class Orchestrator implements RunnerHandlers {
   async #reviewerJob(ctx: RunContext): Promise<RunJob> {
     const { db } = this.#d
     const task = ctx.task!
-    const ref = taskRef(ctx.project.prefix, task.number)
+    const ref = taskRef(ctx.project!.prefix, task.number)
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
     const items = (await listEvidence(db, task.id)).filter(e => e.round === task.reviewRounds)
     const [previous] = await db.select().from(reviews).where(eq(reviews.taskId, task.id)).orderBy(desc(reviews.createdAt)).limit(1)
     const notes = await this.#comments(task.id)
-    const attached = await listTaskAttachments(db, ctx.project.id, task.description, notes)
+    const attached = await listTaskAttachments(db, ctx.project!.id, task.description, notes)
     // A spike has no commit: the reviewer gets a checkout of the default
     // branch and judges the findings the developer last reported (D19)
-    const baseBranch = await taskBase(db, task, ctx.project)
+    const baseBranch = await taskBase(db, task, ctx.project!)
     const spike = task.type === 'spike'
     const [reported] = spike
       ? await db.select({ summary: runs.summary }).from(runs)
@@ -697,16 +697,16 @@ export class Orchestrator implements RunnerHandlers {
       ? await db.select().from(designVersions)
           .where(and(eq(designVersions.taskId, task.id), eq(designVersions.commitSha, task.headSha))).orderBy(desc(designVersions.version)).limit(1)
       : []
-    const pin = await this.#pinnedDesign(ctx.project.prefix, task.id)
+    const pin = await this.#pinnedDesign(ctx.project!.prefix, task.id)
     return {
       runId: ctx.run.id,
       runNumber: ctx.run.number,
       leaseEpoch: ctx.run.leaseEpoch!,
       role: 'reviewer',
       runtime: ctx.agent.runtime,
-      projectId: ctx.project.id,
-      repository: ctx.project.repository,
-      defaultBranch: ctx.project.defaultBranch,
+      projectId: ctx.run.projectId,
+      repository: ctx.project!.repository,
+      defaultBranch: ctx.project!.defaultBranch,
       baseBranch,
       taskId: task.id,
       taskRef: ref,
@@ -733,14 +733,14 @@ export class Orchestrator implements RunnerHandlers {
         rebaseOnly: task.rebaseOnly,
         approvedHeadSha: task.approvedHeadSha,
         reviewRounds: task.reviewRounds,
-        reviewRoundCap: ctx.project.reviewRoundCap,
+        reviewRoundCap: ctx.project!.reviewRoundCap,
         criteria: criteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })),
         comments: notes,
         attachments: attached,
         headSha: task.headSha!,
         prUrl: task.prUrl,
         evidence: items.map(e => ({ id: e.id, criterionId: e.criterionId, kind: e.kind, note: e.note, fileName: e.fileName })),
-        requiredChecks: ctx.project.requiredChecks,
+        requiredChecks: ctx.project!.requiredChecks,
         previousFeedback: previous ? feedbackComment(previous.summary, previous.criteria, criteria) : null
       }, ctx.agent.name)
     }
@@ -999,7 +999,7 @@ export class Orchestrator implements RunnerHandlers {
       await tx.update(tasks).set({ leaseRunId: null, leaseRole: null, leaseExpiresAt: null, leaseHeartbeatAt: null, updatedAt: this.#now() })
         .where(and(eq(tasks.id, ctx.task.id), eq(tasks.leaseRunId, ctx.run.id)))
     }
-    await appendAudit(tx, { projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor: server }, auditEvent('run.ended', { runId: ctx.run.id, runNumber: ctx.run.number, state: end.state, outcome: end.outcome ?? null, error: 'error' in end ? end.error : null }))
+    await appendAudit(tx, { projectId: ctx.run.projectId, taskId: ctx.task?.id ?? null, actor: server }, auditEvent('run.ended', { runId: ctx.run.id, runNumber: ctx.run.number, state: end.state, outcome: end.outcome ?? null, error: 'error' in end ? end.error : null }))
   }
 
   // A human stops a run: the process tree is killed, the run is Interrupted
@@ -1011,7 +1011,7 @@ export class Orchestrator implements RunnerHandlers {
     await this.#d.db.transaction(async (tx) => {
       await this.#endRunIn(tx, ctx, { state: 'interrupted', error: HUMAN_STOP })
       if (ctx.task) await tx.update(tasks).set({ paused: true }).where(eq(tasks.id, ctx.task.id))
-      await appendAudit(tx, { projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor }, auditEvent('run.stopped', { runId }))
+      await appendAudit(tx, { projectId: ctx.run.projectId, taskId: ctx.task?.id ?? null, actor }, auditEvent('run.stopped', { runId }))
     })
     await this.#publish(ctx)
   }
@@ -1044,7 +1044,7 @@ export class Orchestrator implements RunnerHandlers {
     if (!task || (run.role !== 'developer' && run.role !== 'designer' && run.role !== 'reviewer')) throw notLive(`Run #${run.number} is a ${run.role} run; only developer, designer and reviewer runs take messages`)
     if (run.state === 'queued') throw notLive(`Run #${run.number} hasn't started yet`)
     if (!(ACTIVE_RUN_STATES as readonly RunState[]).includes(run.state) || run.state === 'stopping') throw notLive(`Run #${run.number} has ended`)
-    if (task.leaseRunId !== run.id || task.leaseEpoch !== run.leaseEpoch) throw notLive(`Run #${run.number} no longer holds ${taskRef(ctx.project.prefix, task.number)}`)
+    if (task.leaseRunId !== run.id || task.leaseEpoch !== run.leaseEpoch) throw notLive(`Run #${run.number} no longer holds ${taskRef(ctx.project!.prefix, task.number)}`)
     if (!runner.isOnline(run.runnerId)) throw notLive('No runner is connected to deliver the message')
 
     const found = input.attachments.length === 0
@@ -1082,7 +1082,7 @@ export class Orchestrator implements RunnerHandlers {
     const ctx = await this.#load(task.leaseRunId)
     if (!ctx || ctx.run.leaseEpoch !== task.leaseEpoch) return
     const { run, project } = ctx
-    if (run.role !== 'developer' && run.role !== 'designer' && run.role !== 'reviewer') return
+    if (!project || (run.role !== 'developer' && run.role !== 'designer' && run.role !== 'reviewer')) return
     if (!(ACTIVE_RUN_STATES as readonly RunState[]).includes(run.state) || run.state === 'stopping') return
 
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, taskId)).orderBy(asc(acceptanceCriteria.position))
@@ -1281,12 +1281,16 @@ export class Orchestrator implements RunnerHandlers {
     }
     if (role === 'pm' && (isPmDirectTool(tool) || tool === 'act_on_inbox')) {
       if (!ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
-      return this.pmTools.call(tool, input, this.#actor(ctx), { sessionId: ctx.run.planSessionId, runId: ctx.run.id, projectId: ctx.project.id })
+      return this.pmTools.call(tool, input, this.#actor(ctx), { sessionId: ctx.run.planSessionId, runId: ctx.run.id, projectId: ctx.project?.id ?? null })
     }
-    if (tool === 'get_attachment') return this.#getAttachment(ctx, z.object({ attachmentId: z.string() }).parse(input))
-    if (tool === 'get_design') {
+    if (tool === 'get_attachment' || tool === 'get_design') {
+      const project = role === 'pm' && ctx.run.planSessionId && this.plans
+        ? await this.plans.toolProject(ctx.run.planSessionId, input)
+        : ctx.project
+      if (!project) throw new ToolError('Provide a project slug in the project argument.')
+      if (tool === 'get_attachment') return this.#getAttachment({ ...ctx, project }, z.object({ attachmentId: z.string() }).parse(input))
       const { taskRef: ref, version } = z.object({ taskRef: z.string(), version: z.number().int().positive().optional() }).parse(input)
-      return readDesign(this.#d.db, this.#d.blobs, ctx.project, ref, version).catch((error: unknown) => {
+      return readDesign(this.#d.db, this.#d.blobs, project, ref, version).catch((error: unknown) => {
         throw error instanceof DesignNotFound ? new ToolError(error.message) : error
       })
     }
@@ -1315,7 +1319,7 @@ export class Orchestrator implements RunnerHandlers {
       if (tool === 'get_task') {
         const [epic] = await this.#d.db.select().from(schema.epics).where(eq(schema.epics.id, ctx.run.epicId))
         if (!epic) throw new ToolError('Epic no longer exists')
-        return epicReviewContext(this.#d.db, epic, ctx.project)
+        return epicReviewContext(this.#d.db, epic, ctx.project!)
       }
       if (tool === 'get_evidence') return this.#getEvidence(ctx, z.object({ evidenceId: z.string().optional() }).parse(input))
       if (tool === 'report_outcome') {
@@ -1348,10 +1352,13 @@ export class Orchestrator implements RunnerHandlers {
   async #editPmEntity(ctx: RunContext, tool: 'create_task' | 'update_task' | 'update_epic', input: unknown): Promise<unknown> {
     const { db, events } = this.#d
     const actor = this.#actor(ctx)
+    const project = await this.plans!.toolProject(ctx.run.planSessionId!, input)
+    const scopedInput = z.record(z.string(), z.unknown()).parse(input)
+    delete scopedInput.project
     if (tool === 'update_epic') {
-      const { epicId, dependsOn, summary, ...fields } = z.object(pmActionTools.update_epic.input).strict().parse(input)
+      const { epicId, dependsOn, summary, ...fields } = z.object(pmActionTools.update_epic.input).strict().parse(scopedInput)
       const current = await getEpic(db, epicId)
-      if (current.projectId !== ctx.project.id) throw new ToolError('Use an epic from this conversation’s project')
+      if (current.projectId !== project.id) throw new ToolError('Use an epic from this conversation’s project')
       await db.transaction(async (tx) => {
         await patchEpic(tx, epicId, { ...fields, ...(summary !== undefined && { description: summary }) }, actor)
         if (dependsOn !== undefined) await setEpicDependencies(tx, epicId, dependsOn, actor)
@@ -1363,24 +1370,24 @@ export class Orchestrator implements RunnerHandlers {
       return epic
     }
     if (tool === 'create_task') {
-      const parsed = z.object(pmActionTools.create_task.input).strict().parse(input)
-      const task = await loadTask(db, await createTask(db, ctx.project, parsed, actor))
+      const parsed = z.object(pmActionTools.create_task.input).strict().parse(scopedInput)
+      const task = await loadTask(db, await createTask(db, project, parsed, actor))
       events.publish({ type: 'task.created', task })
       return task
     }
-    const { taskRef: ref, paused, ...fields } = z.object(pmActionTools.update_task.input).strict().parse(input)
+    const { taskRef: ref, paused, ...fields } = z.object(pmActionTools.update_task.input).strict().parse(scopedInput)
     const match = /^([A-Za-z]+)-(\d+)$/.exec(ref)
-    if (!match || match[1]!.toUpperCase() !== ctx.project.prefix.toUpperCase()) throw new ToolError('Use a task ref from this conversation’s project')
-    const [row] = await db.select().from(tasks).where(and(eq(tasks.projectId, ctx.project.id), eq(tasks.number, Number(match[2])), isNull(tasks.deletedAt)))
+    if (!match || match[1]!.toUpperCase() !== project.prefix.toUpperCase()) throw new ToolError('Use a task ref from this conversation’s project')
+    const [row] = await db.select().from(tasks).where(and(eq(tasks.projectId, project.id), eq(tasks.number, Number(match[2])), isNull(tasks.deletedAt)))
     if (!row) throw new ToolError('Task no longer exists')
-    const edit = await patchTask(db, ctx.project, row.id, fields, actor)
+    const edit = await patchTask(db, project, row.id, fields, actor)
     if (edit) await this.noticeTaskEdit(row.id, edit, actor).catch(error => console.error('Telling the run about the PM edit failed', error))
     if (paused !== undefined) {
       if (paused && row.leaseRunId) await this.stopRun(row.leaseRunId, actor)
       await db.transaction(async (tx) => {
         await lockTask(tx, row.id)
         await tx.update(tasks).set({ paused, updatedAt: this.#now() }).where(eq(tasks.id, row.id))
-        await tx.insert(auditLog).values({ projectId: ctx.project.id, taskId: row.id, actor, action: paused ? 'task.paused' : 'task.resumed', detail: {} })
+        await tx.insert(auditLog).values({ projectId: project.id, taskId: row.id, actor, action: paused ? 'task.paused' : 'task.resumed', detail: {} })
       })
     }
     const task = await loadTask(db, row.id)
@@ -1392,16 +1399,16 @@ export class Orchestrator implements RunnerHandlers {
   async #preparePmAction(sessionId: string, tool: string, input: unknown): Promise<PreparedPmAction> {
     if (!requiresPmConfirmation(tool, input)) throw new ToolError(`Unknown confirm-required tool ${tool}`)
     if (tool === 'act_on_inbox' || tool === 'approve_design' || tool === 'request_design_changes') return this.pmDecisions.prepare(tool, input)
+    if (!this.plans) throw new ToolError('Planning is unavailable')
     const { db } = this.#d
     const [session] = await db.select().from(schema.planSessions).where(eq(schema.planSessions.id, sessionId))
     if (!session) throw new ToolError('The conversation no longer exists')
-    const [project] = await db.select().from(projects).where(eq(projects.id, session.projectId))
-    if (!project) throw new ToolError('The project no longer exists')
     const strict = <T extends z.ZodRawShape>(shape: T) => z.object(shape).strict().parse(input)
     if (tool === 'delete_task' || tool === 'approve_task' || tool === 'move_task') {
-      const parsed = z.object({ taskRef: z.string().trim().min(1), reason: z.string().optional(), transition: humanTransitionInput.optional() }).strict().parse(strict(pmActionTools[tool].input))
+      const project = await this.plans.toolProject(sessionId, input)
+      const parsed = z.object({ taskRef: z.string().trim().min(1), reason: z.string().optional(), transition: humanTransitionInput.optional(), project: z.string().optional() }).strict().parse(strict({ ...pmActionTools[tool].input, project: z.string().trim().min(1).optional() }))
       const match = /^([A-Za-z]+)-(\d+)$/.exec(parsed.taskRef)
-      if (!match || match[1]!.toUpperCase() !== project.prefix.toUpperCase()) throw new ToolError('Use a task ref from this conversation’s project')
+      if (!match || match[1]!.toUpperCase() !== project.prefix.toUpperCase()) throw new ToolError(`Use a task ref from ${project.name}`)
       const [task] = await db.select().from(tasks).where(and(eq(tasks.projectId, project.id), eq(tasks.number, Number(match[2])), isNull(tasks.deletedAt)))
       if (!task) throw new ToolError(`Task ${parsed.taskRef} no longer exists`)
       if (tool === 'delete_task' && task.status === 'merged') throw new ToolError('Merged tasks cannot be deleted')
@@ -1410,7 +1417,7 @@ export class Orchestrator implements RunnerHandlers {
       const destination = event?.type === 'resolve' ? event.to : event?.type === 'approve' ? 'ready' : event?.type === 'human_request_changes' ? 'in_progress' : 'backlog'
       const verb = tool === 'delete_task' ? 'Delete' : tool === 'approve_task' ? 'Approve' : 'Move'
       const summary = `${verb} ${taskRef(project.prefix, task.number)}${tool === 'move_task' ? ` to ${destination.replaceAll('_', ' ')}` : ''}: ${task.title}`
-      return { input: { ...parsed, taskRef: taskRef(project.prefix, task.number) }, summary: parsed.reason ? `${summary} — ${parsed.reason}` : summary, targetId: task.id, taskId: task.id, projectId: project.id }
+      return { input: { ...parsed, project: project.slug, taskRef: taskRef(project.prefix, task.number) }, summary: parsed.reason ? `${summary} — ${parsed.reason}` : summary, targetId: task.id, taskId: task.id, projectId: project.id }
     }
     switch (tool) {
       case 'delete_project': {
@@ -1424,13 +1431,13 @@ export class Orchestrator implements RunnerHandlers {
         const ctx = await this.#load(parsed.runId)
         if (!ctx) throw new ToolError('This run no longer exists')
         if (!(ACTIVE_RUN_STATES as readonly RunState[]).includes(ctx.run.state)) throw new ToolError(`Run #${ctx.run.number} isn't live: it's ${ctx.run.state}`)
-        const about = ctx.task ? ` on ${taskRef(ctx.project.prefix, ctx.task.number)}: ${ctx.task.title}` : ` in ${ctx.project.name}`
-        return { input: parsed, summary: `Stop run #${ctx.run.number}, the ${ctx.run.role} run${about}`, targetId: ctx.run.id, taskId: ctx.task?.id ?? null, projectId: ctx.project.id }
+        const about = ctx.task ? ` on ${taskRef(ctx.project!.prefix, ctx.task.number)}: ${ctx.task.title}` : ctx.project ? ` in ${ctx.project.name}` : ' in a global conversation'
+        return { input: parsed, summary: `Stop run #${ctx.run.number}, the ${ctx.run.role} run${about}`, targetId: ctx.run.id, taskId: ctx.task?.id ?? null, projectId: ctx.project?.id ?? null }
       }
       case 'stop_all':
-        return { input: strict(pmActionTools.stop_all.input), summary: 'Stop every run in Corral and start no new ones', targetId: null, taskId: null, projectId: project.id }
+        return { input: strict(pmActionTools.stop_all.input), summary: 'Stop every run in Corral and start no new ones', targetId: null, taskId: null, projectId: session.projectId }
       case 'resume_all':
-        return { input: strict(pmActionTools.resume_all.input), summary: 'Resume Corral so runs start again', targetId: null, taskId: null, projectId: project.id }
+        return { input: strict(pmActionTools.resume_all.input), summary: 'Resume Corral so runs start again', targetId: null, taskId: null, projectId: session.projectId }
     }
     throw new ToolError(`Unknown confirm-required tool ${tool}`)
   }
@@ -1445,7 +1452,7 @@ export class Orchestrator implements RunnerHandlers {
     const items = await listEvidence(this.#d.db, task.id)
     const notes = await this.#comments(task.id)
     return {
-      ref: taskRef(ctx.project.prefix, task.number),
+      ref: taskRef(ctx.project!.prefix, task.number),
       title: task.title,
       status: task.status,
       description: richTextToMarkdown(task.description),
@@ -1453,7 +1460,7 @@ export class Orchestrator implements RunnerHandlers {
       reviewRound: task.reviewRounds,
       criteria: criteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })),
       comments: notes.map(c => ({ ...c, createdAt: c.createdAt.toISOString() })),
-      attachments: await listTaskAttachments(this.#d.db, ctx.project.id, task.description, notes),
+      attachments: await listTaskAttachments(this.#d.db, ctx.project!.id, task.description, notes),
       evidence: items.map(e => ({ id: e.id, criterionId: e.criterionId, kind: e.kind, note: e.note, fileName: e.fileName, round: e.round }))
     }
   }
@@ -1515,10 +1522,10 @@ export class Orchestrator implements RunnerHandlers {
     return { ...meta, note: `${item.note} (binary ${item.contentType}; view it in Corral at ${this.#d.publicUrl}${item.url})`.trim() }
   }
 
-  // An image from the task text, for any role, as MCP image content. Only
-  // the run's own project: another project's id reads as unknown.
+  // An image as MCP content, scoped to the run's project for task agents
+  // or to the explicitly resolved project for PM calls.
   async #getAttachment(ctx: RunContext, input: { attachmentId: string }) {
-    const file = await readProjectAttachment(this.#d.db, this.#d.blobs, ctx.project.id, input.attachmentId)
+    const file = await readProjectAttachment(this.#d.db, this.#d.blobs, ctx.project!.id, input.attachmentId)
     if (!file) throw new ToolError(`${input.attachmentId} isn't an attachment in this project`)
     const { data, ...meta } = file
     return { ...meta, images: [{ mimeType: meta.mimeType, dataBase64: Buffer.from(data).toString('base64') }] }
@@ -1621,7 +1628,7 @@ export class Orchestrator implements RunnerHandlers {
         taskId: task.id, runId: ctx.run.id, round: locked.task.reviewRounds, headSha, verdict, summary, criteria: kept, author: this.#actor(ctx)
       })
       await tx.insert(comments).values({ taskId: task.id, author: this.#actor(ctx), body: feedback })
-      await appendAudit(tx, { projectId: ctx.project.id, taskId: task.id, actor: this.#actor(ctx) }, auditEvent('review.recorded', { runId: ctx.run.id, verdict, headSha, round: locked.task.reviewRounds, met: kept.filter(v => v.met).length, of: kept.length, ...(similarity !== undefined && { similarity }) }))
+      await appendAudit(tx, { projectId: ctx.run.projectId, taskId: task.id, actor: this.#actor(ctx) }, auditEvent('review.recorded', { runId: ctx.run.id, verdict, headSha, round: locked.task.reviewRounds, met: kept.filter(v => v.met).length, of: kept.length, ...(similarity !== undefined && { similarity }) }))
       // Changes requested → the developer; approved → Human review when
       // flagged, otherwise Ready to merge (D10)
       const state = await applyTransition(tx, locked.task, locked.project, verdict === 'approved' ? { type: 'review_approved' } : { type: 'changes_requested', similarity }, server, { event: verdict === 'approved' ? 'review_approved' : 'changes_requested', runId: ctx.run.id, headSha, ...(similarity !== undefined && { similarity }) })
@@ -1691,7 +1698,7 @@ export class Orchestrator implements RunnerHandlers {
     const task = ctx.task!
     if (!report.headSha) throw new ToolError('There is no commit to submit. Commit your work, then report again.')
 
-    const head = await github.branchHead(ctx.project.repository, task.branch!)
+    const head = await github.branchHead(ctx.project!.repository, task.branch!)
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
     const attached = await db.select({ criterionId: evidence.criterionId }).from(evidence)
       .where(and(eq(evidence.taskId, task.id), eq(evidence.round, task.reviewRounds)))
@@ -1711,17 +1718,17 @@ export class Orchestrator implements RunnerHandlers {
       throw new ToolError(`Not submitted. ${problems.join(' ') || JSON.stringify(check.error)} Fix this and report again.`)
     }
 
-    const ref = taskRef(ctx.project.prefix, task.number)
+    const ref = taskRef(ctx.project!.prefix, task.number)
     const body = this.#prBody(ref, task.title, report.summary, criteria, attached)
     // A rebase task's commits are already on the epic PR; it has no PR of its own
     let pr: PullRequest | null = null
     if (!await isEpicRebaseTask(db, task)) {
       const existing = task.prNumber
-        ? await github.getPullRequest(ctx.project.repository, task.prNumber)
-        : await github.findOpenPullRequest(ctx.project.repository, task.branch!)
+        ? await github.getPullRequest(ctx.project!.repository, task.prNumber)
+        : await github.findOpenPullRequest(ctx.project!.repository, task.branch!)
       pr = existing && existing.state === 'open' ? existing : null
-      if (pr) await github.updatePullRequest(ctx.project.repository, pr.number, { body })
-      else pr = await github.openPullRequest(ctx.project.repository, { head: task.branch!, base: await taskBase(db, task, ctx.project, github), title: `${ref}: ${task.title}`, body })
+      if (pr) await github.updatePullRequest(ctx.project!.repository, pr.number, { body })
+      else pr = await github.openPullRequest(ctx.project!.repository, { head: task.branch!, base: await taskBase(db, task, ctx.project!, github), title: `${ref}: ${task.title}`, body })
     }
 
     const comment = await db.transaction(async (tx) => {
@@ -1789,7 +1796,7 @@ export class Orchestrator implements RunnerHandlers {
     if (bundle.length + shots.reduce((n, s) => n + s.data.length, 0) > MAX_DESIGN_BYTES) throw new ToolError('Not submitted. A design version is limited to 25 MB.')
     const problem = bundleProblem(bundle)
     if (problem) throw new ToolError(`Not submitted. ${problem}`)
-    const head = await github.branchHead(ctx.project.repository, task.branch!)
+    const head = await github.branchHead(ctx.project!.repository, task.branch!)
     if (head !== submission.headSha) throw new ToolError(`Not submitted. The branch on GitHub is at ${head ?? 'nothing'}, not your commit ${submission.headSha}. Try again.`)
 
     const bundleBlob = await blobs.put(bundle)
@@ -1803,7 +1810,7 @@ export class Orchestrator implements RunnerHandlers {
       const [row] = await tx.insert(designVersions).values({
         taskId: task.id, version: nextDesignVersion(existing), bundleBlob, specBlob, screenshots, branch: task.branch!, commitSha: submission.headSha
       }).returning()
-      await appendAudit(tx, { projectId: ctx.project.id, taskId: task.id, actor: this.#actor(ctx) }, auditEvent('design.submitted', { runId: ctx.run.id, version: row!.version, headSha: submission.headSha, screenshots: screenshots.length }))
+      await appendAudit(tx, { projectId: ctx.run.projectId, taskId: task.id, actor: this.#actor(ctx) }, auditEvent('design.submitted', { runId: ctx.run.id, version: row!.version, headSha: submission.headSha, screenshots: screenshots.length }))
       return row!
     })
     return {
@@ -1821,7 +1828,7 @@ export class Orchestrator implements RunnerHandlers {
     const { db, github } = this.#d
     const task = ctx.task!
     if (!report.headSha) throw new ToolError('There is no commit to submit. Commit your work, call submit_design, then report again.')
-    const head = await github.branchHead(ctx.project.repository, task.branch!)
+    const head = await github.branchHead(ctx.project!.repository, task.branch!)
     const [version] = await db.select().from(designVersions)
       .where(and(eq(designVersions.taskId, task.id), eq(designVersions.commitSha, report.headSha))).orderBy(desc(designVersions.version)).limit(1)
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
@@ -1892,9 +1899,11 @@ export class Orchestrator implements RunnerHandlers {
     const [row] = await this.#d.db.select({ run: runs, agent: agents, project: projects, task: tasks })
       .from(runs)
       .innerJoin(agents, eq(agents.id, runs.agentId))
-      .innerJoin(projects, eq(projects.id, runs.projectId))
+      .leftJoin(projects, eq(projects.id, runs.projectId))
       .leftJoin(tasks, eq(tasks.id, runs.taskId))
       .where(eq(runs.id, runId))
+    // Task and epic runs always have a project; only PM turns may be global.
+    if (row && row.run.role !== 'pm' && !row.project) return null
     return row ?? null
   }
 

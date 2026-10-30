@@ -161,6 +161,23 @@ describe('ToolServer', () => {
       expect((await client.callTool({ name: 'attach_evidence', arguments: input })).isError).not.toBe(true)
       expect(calls.at(-1)).toEqual({ tool: 'attach_evidence', input })
     }
+  })
+
+  it('passes project slugs through every project-scoped PM tool', async () => {
+    const { client, calls } = await connect('pm')
+    const tools = (await client.listTools()).tools
+    for (const name of ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'propose_plan', 'flag_stale_docs', 'create_task', 'update_task', 'move_task', 'approve_task', 'delete_task', 'update_epic']) {
+      expect(tools.find(t => t.name === name)?.inputSchema.properties).toHaveProperty('project')
+    }
+    expect(tools.find(t => t.name === 'ask_question')?.inputSchema.properties).not.toHaveProperty('project')
+    expect((tools.find(t => t.name === 'delete_project')?.inputSchema as { required?: string[] }).required).toContain('project')
+    expect(tools.find(t => t.name === 'list_projects')?.inputSchema.properties).not.toHaveProperty('project')
+    await client.callTool({ name: 'list_tasks', arguments: { project: 'another-project' } })
+    await client.callTool({ name: 'get_task', arguments: { project: 'another-project', taskRef: 'OTH-1' } })
+    expect(calls).toEqual([
+      { tool: 'list_tasks', input: { project: 'another-project' } },
+      { tool: 'get_task', input: { project: 'another-project', taskRef: 'OTH-1' } }
+    ])
     await client.close()
   })
 

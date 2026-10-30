@@ -18,9 +18,9 @@ useSeoMeta({ title: 'Plan · Corral' })
 
 const lastProject = useLocalStorage<string | null>('corral.plan.project', null)
 const projectId = ref<string | null>(typeof route.query.project === 'string' ? route.query.project : lastProject.value)
-const project = computed(() => live.state.value.projects.find(p => p.id === projectId.value) ?? live.state.value.projects[0] ?? null)
+const project = computed(() => live.state.value.projects.find(p => p.id === projectId.value) ?? null)
 watch(project, (p) => {
-  if (p) lastProject.value = p.id
+  lastProject.value = p?.id ?? null
 }, { immediate: true })
 // The PM's runtime for the new session (D18): only CLIs the runner has.
 // Until the runner answers, Claude is the one on offer.
@@ -52,6 +52,9 @@ const restoredImages = [...(restored?.message ?? '').matchAll(/!\[([^\]]*)\]\(at
 const text = ref((restored?.message ?? '').replace(/!\[[^\]]*\]\(attachment:[^)]*\)/g, '').trim())
 const composer = ref<{ send: (message: string) => Promise<void> } | null>(null)
 const taskRef = ref<string | null>(restored?.taskRef ?? null)
+watch(projectId, () => {
+  taskRef.value = null
+})
 const busy = ref(false)
 const runnerOffline = computed(() => live.state.value.loaded && !live.state.value.runner?.online)
 const reconnecting = ref(false)
@@ -74,10 +77,9 @@ const draftsQuery = useQuery(computed(() => ({ ...planDraftsQuery(project.value?
 const drafts = computed(() => draftsQuery.data.value ?? [])
 // Resolves false when not started, so the composer keeps its images
 async function start(message: string): Promise<boolean> {
-  if (!project.value) return false
   if (busy.value) return false
   busy.value = true
-  const id = pending.seed(project.value.id, message, runtime.value, taskRef.value ?? undefined)
+  const id = pending.seed(project.value?.id ?? null, message, runtime.value, taskRef.value ?? undefined)
   usePlanThreads().add(id)
   await router.push(`/plan/${id}`)
   void pending.start(id)
@@ -123,7 +125,7 @@ async function start(message: string): Promise<boolean> {
           v-model="text"
           :initial-images="restoredImages"
           :placeholder="runnerOffline && device.isMobile.value ? `${pm?.name ?? 'The PM'} is unavailable while the runner is offline` : 'Describe what you want to build…'"
-          :disabled="runnerOffline || !project"
+          :disabled="runnerOffline"
           :busy="busy"
           :allow-empty="taskRef !== null"
           :rows="3"
@@ -156,18 +158,19 @@ async function start(message: string): Promise<boolean> {
           </template>
           <template #tools>
             <USelectMenu
-              :model-value="project?.id"
-              :items="live.state.value.projects.map(p => ({ label: p.name, value: p.id, project: p }))"
+              :model-value="project?.id ?? 'global'"
+              :items="[{ label: 'Global', value: 'global', project: null }, ...live.state.value.projects.map(p => ({ label: p.name, value: p.id, project: p }))]"
               value-key="value"
               size="xs"
               variant="ghost"
               :search-input="false"
               aria-label="Project"
               :ui="{ content: 'w-80 max-w-[calc(100vw-2rem)]', base: 'max-w-56' }"
-              @update:model-value="projectId = $event as string"
+              @update:model-value="projectId = $event === 'global' ? null : $event as string"
             >
               <template #item-leading="{ item }">
                 <ProjectThumbnail
+                  v-if="item.project"
                   :project="item.project"
                   :size="20"
                 />
@@ -193,6 +196,7 @@ async function start(message: string): Promise<boolean> {
               @update:model-value="lastRuntime = $event as AgentRuntime"
             />
             <USelectMenu
+              v-if="project"
               :model-value="taskRef ?? undefined"
               :items="backlog.map(t => ({ label: `${t.ref} ${t.title}`, value: t.ref }))"
               value-key="value"
@@ -208,13 +212,13 @@ async function start(message: string): Promise<boolean> {
             <!-- First on phones, so it's in reach without scrolling the toolbar -->
             <PlanGrillButton
               :draft="text"
-              :disabled="busy || runnerOffline || !project"
+              :disabled="busy || runnerOffline"
               :class="device.isMobile.value && 'order-first'"
               @send="composer?.send($event)"
             />
             <USelectMenu
               v-if="!device.isMobile.value"
-              :items="(sessions ?? []).map(s => ({ label: s.title, value: s.id }))"
+              :items="(sessions ?? []).map(s => ({ label: `${s.title} · ${live.state.value.projects.find(p => p.id === s.projectId)?.name ?? 'Global'}`, value: s.id }))"
               value-key="value"
               size="xs"
               variant="ghost"

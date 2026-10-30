@@ -59,8 +59,9 @@ interface Deps {
 export interface PmToolContext {
   sessionId: string
   runId: string
-  // The conversation's project, for the audit of calls with no project of their own
-  projectId: string
+  // The conversation's project, for the audit of calls with no project of their own.
+  // A global conversation has none.
+  projectId: string | null
 }
 
 interface ToolResult {
@@ -221,13 +222,14 @@ export class PmTools {
             transcript: transcriptExcerpt(await transcripts.read(found.id, row?.blob ?? null), transcriptLimit, found.endedAt !== null),
             ...(capped && { note: `The summary and error are cut to ${RUN_TEXT_MAX} characters.` })
           },
-          projectId: found.projectId,
+          ...(found.projectId && { projectId: found.projectId }),
           summary: `Read run #${found.number}${found.taskRef ? ` on ${found.taskRef}` : found.epicTitle ? ` on epic ${found.epicTitle}` : ''}`
         }
       }
       case 'message_run': {
         const { runId, text } = strict(pmDirectTools.message_run.input)
         const run = await getRun(db, runId)
+        if (!run.projectId) throw new Error(`Run #${run.number} is a ${run.role} run; only developer and reviewer runs take messages`)
         const sent = await orchestrator.messageRun(run.projectId, runId, { text: `From the PM: ${text}`, attachments: [] }, actor)
         return { result: { ok: true, runId: sent.runId, commentId: sent.comment.id }, projectId: run.projectId, summary: `Messaged run #${run.number}${run.taskRef ? ` on ${run.taskRef}` : ''}: ${clip(text, LIST_TEXT_MAX)}` }
       }
@@ -324,7 +326,7 @@ export class PmTools {
 
 // What the PM needs of an Inbox item: enough to tell the human and to act on it
 function toolItem(item: InboxItem) {
-  const common = { id: item.id, type: item.type, project: item.project.slug, taskRef: item.taskRef, subject: item.subject, from: item.sender.name, at: item.at, prUrl: item.prUrl }
+  const common = { id: item.id, type: item.type, project: item.project?.slug ?? null, taskRef: item.taskRef, subject: item.subject, from: item.sender.name, at: item.at, prUrl: item.prUrl }
   switch (item.type) {
     case 'plan_thread': return { ...common, sessionId: item.sessionId, status: item.status, asking: item.question?.text ?? item.plan?.title ?? item.reply ?? item.preview }
     case 'release_notes': return { ...common, unread: item.unread, asking: item.preview }

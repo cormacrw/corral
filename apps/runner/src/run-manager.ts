@@ -10,6 +10,7 @@ import type { ServerConnection } from './connection.ts'
 import { packDesign, saveDesign } from './designs.ts'
 import { convertToMp4 } from './evidence-video.ts'
 import { outcomesFor, toolRefusal, toolsFor, type ToolOutcome, type ToolServer } from './mcp.ts'
+import { DEFAULT_ROLE_INSTRUCTIONS } from './role-defaults.ts'
 import { headSha, prepareWorkspace, pushBranch, readProjectBrief, readRoleInstructions, saveStoppedWork } from './workspace.ts'
 import { RunTimer } from './run-timings.ts'
 
@@ -344,7 +345,7 @@ export class RunManager {
     run.spool = createWriteStream(join(this.#config.dataDir, 'spool', `${job.runId}.jsonl`), { flags: 'a' })
 
     // A PM follow-up turn reuses its session's checkout; the note is noise there
-    if (!(job.role === 'pm' && job.agentSessionId)) this.#note(run, `Preparing a worktree for ${job.repository}${job.branch ? ` on ${job.branch}` : ''}`)
+    if (!(job.role === 'pm' && job.agentSessionId)) this.#note(run, job.role === 'pm' && job.projectId === null ? 'Preparing a global session without a repository checkout' : `Preparing a worktree for ${job.repository}${job.branch ? ` on ${job.branch}` : ''}`)
     const prepared = await run.timer.during('worktree_prepare', () => prepareWorkspace(this.#config.dataDir, job))
     if (prepared.workspace === null) {
       this.#end(run, { kind: 'error', message: prepared.error })
@@ -382,7 +383,7 @@ export class RunManager {
     const { instructions, brief } = await run.timer.during('session_setup', async () => {
       // A warm process registers its own tools, since it outlives this run
       if (!this.#keepsWarm(job)) run.unregisterTools = await this.#registerTools(mcpConfigPath, job, (tool, input) => this.#toolCall(run, tool, input))
-      return { instructions: await readRoleInstructions(worktree, job.role), brief: await readProjectBrief(worktree) }
+      return { instructions: job.role === 'pm' && job.projectId === null ? DEFAULT_ROLE_INSTRUCTIONS.pm : await readRoleInstructions(worktree, job.role), brief: job.role === 'pm' && job.projectId === null ? null : await readProjectBrief(worktree) }
     })
     const design = job.designPinned ? await run.timer.during('design_save', () => this.#savePinnedDesign(run)) : null
     const systemPrompt = `${instructions}\n\n${brief ? `${brief}\n\n` : ''}${runnerNotes(run, job, design)}`
@@ -836,6 +837,7 @@ function runnerNotes(run: ActiveRun, job: RunJob, design: string | null = null):
     '',
     `- Your Corral tools are on the MCP server "corral": ${toolsFor(job).join(', ')}.`,
     `- Save evidence files and other scratch output under ${run.scratchDir} (outside the repository), then attach them with attach_evidence using the absolute path.`,
+    job.role === 'pm' && job.projectId === null ? '- This is a global session with no repository checkout or worktree. Start a project thread when you need to read code.' : '',
     (job.role === 'developer' || job.role === 'designer') && job.branch ? `- You are in a git worktree on branch ${job.branch}. Pushing is disabled; Corral pushes when you ${job.taskType === 'design' ? 'call submit_design' : 'report'}.` : '',
     // A spike (D19): findings, not commits
     job.role === 'developer' && !job.branch ? '- You are in a detached checkout of the default branch for a spike. Don\'t commit or push; report your findings.' : '',

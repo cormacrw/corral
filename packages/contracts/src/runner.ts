@@ -5,9 +5,10 @@ import { z } from 'zod'
 // runner always dials out (D1), so the same messages work on localhost, the
 // Docker network (D12) and a hosted server later. Messages are JSON.
 
+// 4: global PM jobs have a null projectId and no repository checkout (COR-242)
 // 3: build identity and drain state (COR-187)
 // 2: hello carries the runner's slots, runtimes and roles (COR-184)
-export const RUNNER_PROTOCOL_VERSION = 3
+export const RUNNER_PROTOCOL_VERSION = 4
 export const RUNNER_HEARTBEAT_MS = 30_000
 export const RUNNER_PATH = '/runner'
 

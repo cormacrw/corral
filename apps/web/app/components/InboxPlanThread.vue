@@ -249,7 +249,7 @@ async function approve(to: 'ready' | 'backlog') {
             :placeholder="`Reply to ${item.sender.name}…`"
             :disabled="runnerOffline || working"
             :busy="busy"
-            :project="item.project.slug"
+            :project="item.project?.slug"
             @submit="send"
           />
         </div>

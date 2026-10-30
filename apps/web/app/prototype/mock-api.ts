@@ -290,7 +290,7 @@ route('POST', '/inbox/:taskId/actions', ([taskId], body) => {
 })
 
 route('POST', '/plan/sessions', (_, body) => {
-  const { id = crypto.randomUUID(), projectId, text, runtime = 'claude-code', taskRef } = body as StartPlanSessionInput
+  const { id = crypto.randomUUID(), projectId = null, text, runtime = 'claude-code', taskRef } = body as StartPlanSessionInput
   const existing = f.planSessions.find(s => s.id === id)
   if (existing) {
     if (existing.projectId !== projectId) throw new ApiError(409, { code: 'conflict', constraint: 'plan_session_project' }, 'Session belongs to another project')
@@ -356,7 +356,7 @@ route('POST', '/plan/sessions/:id/close', ([id]) => {
   }
   Object.assign(s, { closed: true, unread: false, status: 'none', activeRunId: null })
   emit({ type: 'plan.session', session: s })
-  emit({ type: 'plan.drafts', projectId: s.projectId, sessions: drafts(s.projectId) })
+  if (s.projectId) emit({ type: 'plan.drafts', projectId: s.projectId, sessions: drafts(s.projectId) })
   return s
 })
 route('POST', '/plan/sessions/:id/read', ([id]) => {
@@ -388,7 +388,7 @@ function postMessage(sessionId: string, message: Omit<PlanMessage, 'id' | 'sessi
 export function pmReply(sessionId: string, text: string): void {
   const s = f.planSessions.find(x => x.id === sessionId)
   const script = f.grilling[sessionId]
-  if (!s || !script) return
+  if (!s || !script || !s.projectId) return
   const question = text === STOP_ASKING ? undefined : script.questions.shift()
   if (question) {
     postMessage(sessionId, { role: 'pm', kind: 'question', ...question })

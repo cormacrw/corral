@@ -6,7 +6,7 @@ import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
 import { toMessage } from './plan.ts'
 
-const { planMessages, planSessions, auditLog, tasks } = schema
+const { planMessages, planSessions, auditLog, projects, tasks } = schema
 
 export interface PreparedPmAction {
   input: Record<string, unknown>
@@ -14,7 +14,7 @@ export interface PreparedPmAction {
   // What the action is bound to: a confirmation can't move to another target
   targetId: string | null
   taskId: string | null
-  projectId: string
+  projectId: string | null
 }
 
 interface Deps {
@@ -87,6 +87,9 @@ export class PmActions {
     const [session] = await db.select().from(planSessions).where(eq(planSessions.id, sessionId))
     if (!session) throw notFound()
     const proposer: Actor = { kind: 'agent', role: 'pm', runId: row.runId }
+    // A hard-deleted target can't name its project afterwards, and a global
+    // session has none of its own
+    let actionProjectId = session.projectId
     if (decision === 'cancel') {
       action.status = 'cancelled'
     } else {
@@ -94,6 +97,7 @@ export class PmActions {
         if (session.closedAt) throw new Error('This conversation is closed')
         if (!requiresPmConfirmation(action.tool, action.input)) throw new Error('This tool is no longer available for confirmation')
         const prepared = await this.#d.prepare(sessionId, action.tool, action.input)
+        actionProjectId = prepared.projectId
         // The summary is what the human agreed to, so it also catches a task
         // that moved on and came back, such as a new head on a reviewed PR.
         if (prepared.targetId !== action.targetId || oneLine(prepared.summary) !== action.summary) throw new Error('The target of this action has changed')
@@ -113,7 +117,8 @@ export class PmActions {
       const [target] = action.targetId ? await tx.select({ id: tasks.id, projectId: tasks.projectId }).from(tasks).where(eq(tasks.id, action.targetId)) : []
       // Removing the conversation's own project took the conversation with it
       const [alive] = await tx.select({ id: planSessions.id }).from(planSessions).where(eq(planSessions.id, sessionId))
-      const projectId = alive ? target?.projectId ?? session.projectId : null
+      const [owner] = actionProjectId ? await tx.select({ id: projects.id }).from(projects).where(eq(projects.id, actionProjectId)) : []
+      const projectId = target?.projectId ?? owner?.id ?? (alive ? session.projectId : null)
       const audit = { projectId, taskId: target?.id ?? null, actor, action: decision === 'cancel' ? 'pm.action_cancelled' : action.status === 'confirmed' ? 'pm.action_confirmed' : 'pm.action_failed', detail: { actionId, sessionId, runId: row.runId, targetId: action.targetId, proposer, tool: action.tool, input: action.input, summary: action.summary, result: action.result, error: action.error } }
       await tx.insert(auditLog).values(audit)
       if (!alive) return null

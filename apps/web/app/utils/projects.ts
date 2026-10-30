@@ -14,7 +14,7 @@ export interface ProjectCardSummary {
 // A project's items that need the human. Release notes are in the Inbox but
 // never count as waiting on someone (D11)
 export function projectNeedsYou(inbox: Inbox | null, projectId: string | undefined) {
-  return inbox?.needsYou.filter(i => i.project.id === projectId && needsAttention(i)) ?? []
+  return inbox?.needsYou.filter(i => i.project?.id === projectId && needsAttention(i)) ?? []
 }
 
 const VERB: Record<Agent['role'], string> = { pm: 'planning', developer: 'building', designer: 'designing', reviewer: 'reviewing' }
