@@ -240,6 +240,7 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
               :title="epic.title"
               :merged="epic.merged"
               :total="epic.total"
+              :epic="epic.epic"
             />
           </li>
           <li

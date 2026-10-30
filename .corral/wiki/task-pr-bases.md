@@ -27,6 +27,15 @@ claims and conflicts. Runner workspace tests use real local git commits to check
 that a new task starts at the epic tip. These tests use a simulated GitHub; they
 do not create remote branches or PRs.
 
+## Changing the review mode
+
+`PATCH /api/epics/:id` takes `reviewMode` until `reviewModeLocked`: the epic has a
+PR, or any of its tasks, deleted ones included, has a PR or is Merged. It's a 409
+after that. Plan revisions set `reviewMode` directly and aren't checked here.
+Because `taskBase` resolves at every boundary, a task already running follows the
+new mode when it opens its PR; `#submit` prepares the epic branch if there's none,
+and an epic branch left by moving to `direct` stays on GitHub, unused.
+
 ## Epic PR integration review
 
 Once every non-deleted board task is Merged, the scheduler opens (or recovers)

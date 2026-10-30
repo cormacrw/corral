@@ -133,8 +133,10 @@ export const epics: Epic[] = [
     reviewMode: 'epic',
     branch: 'corral/epic-e-searches-saved-searches',
     prNumber: 212,
+    prUrl: 'https://github.com/cormacrw/corral/pull/212',
     prHeadSha: '6f1c2ab94d',
     reviewState: 'conflict',
+    reviewModeLocked: true,
     taskCount: 3,
     mergedCount: 3,
     createdAt: ago(60 * 24 * 3),
@@ -150,8 +152,10 @@ export const epics: Epic[] = [
     reviewMode: 'each_task',
     branch: null,
     prNumber: null,
+    prUrl: null,
     prHeadSha: null,
     reviewState: null,
+    reviewModeLocked: true,
     taskCount: 7,
     mergedCount: 2,
     createdAt: ago(60 * 24 * 2),
@@ -167,8 +171,10 @@ export const epics: Epic[] = [
     reviewMode: 'direct',
     branch: null,
     prNumber: null,
+    prUrl: null,
     prHeadSha: null,
     reviewState: null,
+    reviewModeLocked: true,
     taskCount: 3,
     mergedCount: 1,
     createdAt: ago(60 * 24 * 7),
@@ -177,22 +183,47 @@ export const epics: Epic[] = [
   {
     id: 'e-site', projectId: 'p-site', title: 'Website refresh',
     description: 'Refresh the landing page and navigation.', dependsOn: [], blocks: [],
-    reviewMode: 'direct', branch: null, prNumber: null, prHeadSha: null, reviewState: null,
+    reviewMode: 'direct', branch: null, prNumber: null, prUrl: null, prHeadSha: null, reviewState: null, reviewModeLocked: false,
     taskCount: 2, mergedCount: 0, createdAt: ago(60 * 24), updatedAt: ago(30)
   },
   {
     id: 'e-shipped', projectId: 'p-site', title: 'Pricing fixes',
     description: 'Completed fixes.', dependsOn: [], blocks: [],
-    reviewMode: 'direct', branch: null, prNumber: null, prHeadSha: null, reviewState: null,
+    reviewMode: 'direct', branch: null, prNumber: null, prUrl: null, prHeadSha: null, reviewState: null, reviewModeLocked: false,
     taskCount: 1, mergedCount: 1, createdAt: ago(60 * 24), updatedAt: ago(10)
   },
   {
     id: 'e-empty', projectId: 'p-site', title: 'Future campaigns',
     description: 'Planning only.', dependsOn: [], blocks: [],
-    reviewMode: 'direct', branch: null, prNumber: null, prHeadSha: null, reviewState: null,
+    reviewMode: 'direct', branch: null, prNumber: null, prUrl: null, prHeadSha: null, reviewState: null, reviewModeLocked: false,
     taskCount: 0, mergedCount: 0, createdAt: ago(60), updatedAt: ago(5)
-  }
+  },
+  // Nothing has opened a PR, so its review mode can still change
+  {
+    id: 'e-exports', projectId: 'p-corral', title: 'CSV exports',
+    description: 'Export the board and run history as CSV.', dependsOn: [], blocks: [],
+    reviewMode: 'epic', branch: 'corral/epic-e-exports-csv-exports', prNumber: null, prUrl: null, prHeadSha: null, reviewState: null, reviewModeLocked: false,
+    taskCount: 2, mergedCount: 0, createdAt: ago(60 * 5), updatedAt: ago(40)
+  },
+  // One epic in each other epic PR review state (D27), its tasks all merged
+  // but for the fix still open under changes requested
+  epicInReview('e-alerts', 'Failure alerts', 'human_review', 214),
+  epicInReview('e-webhooks', 'Webhook retries', 'open', 215),
+  epicInReview('e-audit', 'Audit trail', 'in_review', 216),
+  epicInReview('e-themes', 'Project themes', 'changes_requested', 217),
+  epicInReview('e-digest', 'Weekly digest', 'ready_to_merge', 218),
+  epicInReview('e-tags', 'Task tags', 'merged', 219)
 ]
+
+function epicInReview(id: string, title: string, reviewState: Epic['reviewState'], prNumber: number): Epic {
+  const fixing = reviewState === 'changes_requested'
+  return {
+    id, projectId: 'p-corral', title, description: `${title}, reviewed as one epic PR.`, dependsOn: [], blocks: [],
+    reviewMode: 'epic', branch: `corral/epic-${id}`, prNumber, prUrl: `https://github.com/cormacrw/corral/pull/${prNumber}`,
+    prHeadSha: `${prNumber}c2ab94d`, reviewState, reviewModeLocked: true,
+    taskCount: fixing ? 3 : 2, mergedCount: 2, createdAt: ago(60 * 24 * 2), updatedAt: ago(prNumber - 200)
+  }
+}
 
 // A paragraph of task text, as the editor stores it
 function doc(...paragraphs: string[]): Task['description'] {
@@ -310,6 +341,16 @@ export const tasks: Task[] = [
     acceptanceCriteria: criteria('Undelivered webhooks are sent again after a restart')
   }),
   task(corral, 19, { title: 'Keep the run log open across reloads', status: 'in_progress', paused: true, branch: 'corral/cor-19-run-log' }),
+  ...epicTasks('e-searches', 36, ['Save a board search', 'List saved searches', 'Share a saved search']),
+  task(corral, 21, { title: 'Export the board as CSV', status: 'ready', epicId: 'e-exports' }),
+  task(corral, 22, { title: 'Export run history as CSV', status: 'ready', epicId: 'e-exports', dependsOn: ['COR-21'] }),
+  ...epicTasks('e-alerts', 23, ['Alert when a run fails', 'Alert when a runner disconnects']),
+  ...epicTasks('e-webhooks', 25, ['Queue failed webhooks', 'Back off between retries']),
+  ...epicTasks('e-audit', 27, ['Record every status change', 'Show the trail on a task']),
+  ...epicTasks('e-themes', 29, ['Pick a project colour', 'Theme the board header']),
+  task(corral, 31, { title: 'Fix: theme contrast on the board header', status: 'in_progress', epicId: 'e-themes' }),
+  ...epicTasks('e-digest', 32, ['Collect the week\'s merges', 'Send the digest']),
+  ...epicTasks('e-tags', 34, ['Add tags to tasks', 'Filter the Board by tag'], 60),
   task(site, 1, { title: 'New landing page hero', status: 'ready', type: 'design', epicId: 'e-site' }),
   task(site, 2, { title: 'Fix broken pricing link', status: 'merged', type: 'bug', epicId: 'e-shipped', mergedAt: ago(10) }),
   task(site, 3, {
@@ -322,6 +363,13 @@ export const tasks: Task[] = [
     acceptanceCriteria: criteria('Footer links open in the same tab')
   })
 ]
+
+function epicTasks(epicId: string, first: number, titles: string[], mergedMinutesAgo = 60 * 24 * 5): Task[] {
+  return titles.map((title, i) => task(corral, first + i, {
+    title, status: 'merged', epicId, prNumber: first + 100 + i, prUrl: `https://github.com/cormacrw/corral/pull/${first + 100 + i}`,
+    mergedAt: ago(mergedMinutesAgo), mergeCommitSha: `${first + i}e8457`
+  }))
+}
 
 const at = (ref: string): Task => tasks.find(t => t.ref === ref)!
 
@@ -478,6 +526,13 @@ export const evidence: Record<string, Evidence[]> = {
     fileEvidence('ev-other', null, 'other', 'debug.json', 'application/json', 'data:application/json,%7B%22version%22%3A1%7D')
   ]
 }
+
+// A long file name and link, to keep the Inbox's epic review honest at phone width
+const alertTask = at('COR-23')
+evidence[alertTask.id] = [
+  fileEvidence('ev-alert-log', null, 'log', 'failed-run-alert-delivered-to-every-open-browser-session.log', 'text/plain', logUrl),
+  { ...fileEvidence('ev-alert-note', null, 'note', '', '', ''), fileName: null, contentType: null, url: null, size: 0, note: 'Checked with https://github.com/cormacrw/corral/blob/main/apps/server/src/notifications/failed-run-alerts.test.ts and a stopped runner.' }
+]
 
 export const reviews: Record<string, Review[]> = {
   [reviewTask.id]: [{
@@ -717,16 +772,28 @@ export function inbox(): Inbox {
       planId: plan?.id ?? null
     })
   }
+  const review = epics.find(e => e.reviewState === 'human_review')
+  if (review) {
+    const project = projects.find(p => p.id === review.projectId)!
+    const body = 'The combined diff matches the epic\'s goal. Failed runs and runner disconnects share one alert path, and the tasks agree on its payload.'
+    needsYou.push({
+      id: review.id, type: 'epic_review', epicId: review.id, taskId: null, taskRef: null, subject: review.title,
+      project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
+      preview: body, body, sender: { name: 'Rita', role: 'reviewer' }, at: review.updatedAt,
+      prUrl: review.prUrl!, resolution: null, headSha: review.prHeadSha!,
+      tasks: tasks.filter(t => t.epicId === review.id).map(task => ({ task, evidence: evidence[task.id] ?? [] }))
+    })
+  }
   const conflict = epics.find(e => e.reviewState === 'conflict')
   if (conflict) {
     const project = projects.find(p => p.id === conflict.projectId)!
-    const files = ['apps/server/src/routes/search.ts', 'apps/web/app/pages/search.vue']
+    const files = ['apps/server/src/routes/search.ts', 'apps/web/app/pages/search.vue', 'apps/web/app/components/saved-searches/SavedSearchShareDialogWithExpiryOptions.vue']
     const body = `The epic PR can't rebase onto main. Conflicting files: ${files.join(', ')}.`
     needsYou.push({
       id: conflict.id, type: 'epic_conflict', epicId: conflict.id, taskId: null, taskRef: null, subject: conflict.title,
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
       preview: body, body, sender: { name: 'Corral', role: 'system' }, at: conflict.updatedAt,
-      prUrl: `https://github.com/cormacrw/corral/pull/${conflict.prNumber}`, resolution: null, headSha: conflict.prHeadSha!, targetBranch: 'main', files
+      prUrl: conflict.prUrl!, resolution: null, headSha: conflict.prHeadSha!, targetBranch: 'main', files
     })
   }
   needsYou.sort((a, b) => b.at.localeCompare(a.at))

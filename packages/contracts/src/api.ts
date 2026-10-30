@@ -100,8 +100,12 @@ export interface Epic {
   // Corral creates them, and always in `direct` mode
   branch: string | null
   prNumber: number | null
+  prUrl: string | null
   prHeadSha: string | null
   reviewState: EpicReviewState | null
+  // True once a task has opened a PR or merged: its work already went to the
+  // mode's branch, so the review mode can't change any more
+  reviewModeLocked: boolean
   // Tasks outside Draft and Backlog, and how many of them are merged
   taskCount: number
   mergedCount: number
@@ -119,7 +123,8 @@ export type SetEpicDependenciesInput = z.infer<typeof setEpicDependenciesInput>
 
 export const patchEpicInput = z.object({
   title: z.string().trim().min(1).optional(),
-  description: z.string().optional()
+  description: z.string().optional(),
+  reviewMode: z.enum(EPIC_REVIEW_MODES).optional()
 })
 export type PatchEpicInput = z.infer<typeof patchEpicInput>
 

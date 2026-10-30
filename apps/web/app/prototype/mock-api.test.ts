@@ -1,4 +1,5 @@
-import type { Agent, DraftSession, EpicDetail, Inbox, PlanSessionDetail, Project, PullRequestStatus, ServerEvent, Task } from '@corral/contracts'
+import { EPIC_REVIEW_STATES } from '@corral/core'
+import type { Agent, DraftSession, Epic, EpicDetail, Inbox, PlanSessionDetail, Project, PullRequestStatus, ServerEvent, Task } from '@corral/contracts'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
@@ -24,6 +25,24 @@ describe('prototype mock API', () => {
     } finally {
       stop()
     }
+  })
+
+  it('changes an epic\'s review mode until a task has opened a PR', async () => {
+    const changed = await mockCall<EpicDetail>('PATCH', '/epics/e-exports', { reviewMode: 'each_task' })
+    expect(changed.reviewMode).toBe('each_task')
+    expect(await mockCall<EpicDetail>('GET', '/epics/e-exports')).toMatchObject({ reviewMode: 'each_task', reviewModeLocked: false })
+    await expect(mockCall('PATCH', '/epics/e-alerts', { reviewMode: 'direct' })).rejects.toThrow('opened a PR')
+    await expect(mockCall('PATCH', '/epics/e-alerts', { title: 'Renamed' })).resolves.toMatchObject({ title: 'Renamed', reviewMode: 'epic' })
+  })
+
+  it('has an epic in every epic PR review state, and an Inbox item for review and conflict', async () => {
+    const epics = await mockCall<Epic[]>('GET', '/projects/corral/epics')
+    expect(new Set(epics.map(e => e.reviewState))).toEqual(new Set([null, ...EPIC_REVIEW_STATES]))
+    for (const epic of epics.filter(e => e.prNumber)) expect(epic.prUrl).toContain(`/pull/${epic.prNumber}`)
+    const inbox = await mockCall<Inbox>('GET', '/inbox')
+    const review = inbox.needsYou.find(i => i.type === 'epic_review')
+    expect(review).toMatchObject({ epicId: 'e-alerts', prUrl: expect.stringContaining('/pull/214') })
+    expect(review?.type === 'epic_review' && review.tasks).toHaveLength(2)
   })
 
   it('includes thumbnails on project and inbox responses', async () => {
@@ -78,7 +97,7 @@ describe('prototype mock API', () => {
       question: null, plan: { id: 'plan-1', version: 1, epicCount: 1, taskCount: 3 }
     })
     expect(threads.every(i => !('body' in i))).toBe(true)
-    expect(inbox.needsYou.filter(i => i.type !== 'plan_thread' && i.type !== 'release_notes').map(i => i.type).sort()).toEqual(['blocked', 'epic_conflict', 'failed', 'human_review'])
+    expect(inbox.needsYou.filter(i => i.type !== 'plan_thread' && i.type !== 'release_notes').map(i => i.type).sort()).toEqual(['blocked', 'epic_conflict', 'epic_review', 'failed', 'human_review'])
     expect(threads.some(i => i.sessionId === 's-idle')).toBe(false)
   })
 

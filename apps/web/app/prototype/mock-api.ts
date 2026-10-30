@@ -1,5 +1,5 @@
 import { checkEpicDependencies } from '@corral/core'
-import type { CreateAgentInput, CreateTaskInput, InboxActionInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
+import type { CreateAgentInput, CreateTaskInput, EpicReviewActionInput, InboxActionInput, PatchEpicInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
 import * as f from './fixtures'
@@ -162,10 +162,23 @@ route('GET', '/projects/:slug/pull-requests', ([slug]) => {
   return f.pullRequests.filter(pr => pr.taskRef.startsWith(`${p.prefix}-`))
 })
 route('GET', '/projects/:slug/epics', ([slug]) => f.epics.filter(e => e.projectId === project(slug!).id))
-route('POST', '/epics/:id/review', ([id]) => {
-  const epic = f.epics.find(e => e.id === id)
-  if (epic) epic.reviewState = 'open'
+route('POST', '/epics/:id/review', ([id], body) => {
+  const epic = f.epics.find(e => e.id === id) ?? notFound()
+  const { action } = body as EpicReviewActionInput
+  epic.reviewState = action === 'approve' ? 'ready_to_merge' : action === 'request_changes' ? 'changes_requested' : 'open'
+  emit({ type: 'epic.updated', epic })
   return { ok: true }
+})
+route('PATCH', '/epics/:id', ([id], body) => {
+  const epic = f.epics.find(e => e.id === id) ?? notFound()
+  const input = body as PatchEpicInput
+  if (input.reviewMode && input.reviewMode !== epic.reviewMode && epic.reviewModeLocked) {
+    const message = 'The review mode can\'t change once a task in the epic has opened a PR'
+    throw new ApiError(409, { code: 'invalid_input', issues: [{ message }] }, message)
+  }
+  Object.assign(epic, input, { updatedAt: new Date().toISOString() })
+  emit({ type: 'epic.updated', epic })
+  return epic
 })
 route('PUT', '/epics/:id/dependencies', ([id], body) => {
   const epic = f.epics.find(e => e.id === id) ?? notFound()

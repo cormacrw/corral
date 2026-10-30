@@ -41,7 +41,8 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
      - **Working cards pulse** (shared working indicator): the outline breathes in `primary` and the avatar dot pings.
      - The selected card has a 2px `primary` outline.
    - **Empty column:** "Nothing here".
-3. **Task flyout:** docked on the right when a card is open. The columns area narrows and scrolls sideways.
+3. **Epics** (`components/BoardEpics.vue`): a row above the columns, scrolling sideways, with a 272px card for each epic that has tasks on the Board or work left, including an epic PR still to merge (D27). The Epic filter narrows it. A card shows the epic's name (linking to it), "N of M merged", the meter, "Review: <mode>", the **Epic PR #N** link, and the review status, such as "All tasks merged, awaiting your review". On mobile the same row sits above the column tabs.
+4. **Task flyout:** docked on the right when a card is open. The columns area narrows and scrolls sideways.
 
 ## Interactions
 

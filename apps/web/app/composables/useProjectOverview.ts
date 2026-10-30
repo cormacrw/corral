@@ -1,6 +1,6 @@
-import type { AuditEntry, Inbox, Run, Task } from '@corral/contracts'
+import type { AuditEntry, Epic, Inbox, Run, Task } from '@corral/contracts'
 import { api } from '~/composables/useApi'
-import { epicTitle } from '~/utils/labels'
+import { epicTitle, epicWithLiveCounts } from '~/utils/labels'
 import { projectNeedsYou } from '~/utils/projects'
 
 // Project overview data (design/project-overview.md), shared by the web page
@@ -67,10 +67,12 @@ export function useProjectOverview() {
   const reviewer = computed(() => activeAgents('reviewer'))
   const pmName = computed(() => live.state.value.agents.find(a => a.role === 'pm')?.name ?? 'the PM')
   const epics = computed(() => {
-    const groups = new Map<string, { id: string, title: string, merged: number, total: number }>()
+    const groups = new Map<string, { id: string, title: string, merged: number, total: number, epic?: Epic }>()
+    const list = live.state.value.epics[project.value?.id ?? ''] ?? []
     for (const task of tasks.value) {
       const id = task.epicId ?? 'none'
-      const group = groups.get(id) ?? { id, title: id === 'none' ? 'No epic' : epicTitle(live.state.value.epics[project.value?.id ?? ''], id, groups.size), merged: 0, total: 0 }
+      const found = list.find(e => e.id === id)
+      const group = groups.get(id) ?? { id, title: id === 'none' ? 'No epic' : epicTitle(list, id, groups.size), merged: 0, total: 0, epic: found && epicWithLiveCounts(found, tasks.value) }
       group.total++
       if (task.status === 'merged') group.merged++
       groups.set(id, group)

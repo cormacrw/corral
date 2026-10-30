@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import type { Epic, EpicDetail, PatchEpicInput } from '@corral/contracts'
-import type { TaskStatus } from '@corral/core'
+import type { EpicReviewMode, TaskStatus } from '@corral/core'
 import { api, ApiError } from '~/composables/useApi'
-import { PRIORITY, STATUS } from '~/utils/labels'
+import { EPIC_REVIEW_MODE, EPIC_REVIEW_STATE, EPIC_STATUS_TEXT, epicReviewStatus, epicWithLiveCounts, PRIORITY, STATUS } from '~/utils/labels'
 
 // An epic: its title, description and progress, and the dependency tree of
 // its tasks. Docked in the flyout, as a page with room for a big tree, or
@@ -121,6 +121,9 @@ const byStatus = computed(() => {
   for (const t of epic.value?.tasks ?? []) counts.set(t.status, (counts.get(t.status) ?? 0) + 1)
   return (Object.keys(STATUS) as TaskStatus[]).filter(s => counts.has(s)).map(s => ({ status: s, count: counts.get(s)! }))
 })
+
+const reviewModes = Object.entries(EPIC_REVIEW_MODE).map(([value, mode]) => ({ value, label: mode.label }))
+const reviewStatus = computed(() => epic.value && epicReviewStatus(epicWithLiveCounts(epic.value, epic.value.tasks)))
 
 // Mobile has no flyout, so a task opens as its own page
 const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/${ref}`) : flyout.open(ref)
@@ -307,6 +310,59 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
           </div>
         </section>
 
+        <section class="space-y-2">
+          <h3 class="text-sm font-medium">
+            Review
+          </h3>
+          <USelect
+            :model-value="epic.reviewMode"
+            :items="reviewModes"
+            :disabled="epic.reviewModeLocked"
+            aria-label="Epic review mode"
+            :aria-describedby="epic.reviewModeLocked ? 'epic-review-mode-note' : undefined"
+            class="w-full"
+            @update:model-value="patch({ reviewMode: $event as EpicReviewMode })"
+          />
+          <p
+            v-if="epic.reviewModeLocked"
+            id="epic-review-mode-note"
+            class="text-xs text-muted"
+          >
+            Locked because a task in this epic has opened a PR.
+          </p>
+          <p
+            v-else
+            class="text-xs text-muted"
+          >
+            {{ EPIC_REVIEW_MODE[epic.reviewMode].description }}. You can change this until a task opens a PR.
+          </p>
+          <div
+            v-if="epic.prUrl"
+            class="flex flex-wrap items-center gap-2 text-sm"
+            data-testid="epic-pr"
+          >
+            <a
+              :href="epic.prUrl"
+              target="_blank"
+              rel="noopener"
+              class="text-primary hover:underline"
+            >Epic PR #{{ epic.prNumber }}</a>
+            <UBadge
+              v-if="epic.reviewState"
+              :label="EPIC_REVIEW_STATE[epic.reviewState].label"
+              :color="EPIC_REVIEW_STATE[epic.reviewState].color"
+              variant="subtle"
+              size="sm"
+            />
+          </div>
+          <p
+            v-else-if="epic.reviewMode !== 'direct'"
+            class="text-xs text-muted"
+          >
+            The epic PR opens once every task has merged.
+          </p>
+        </section>
+
         <section class="space-y-3">
           <h3 class="text-sm font-medium">
             Depends on
@@ -403,6 +459,12 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
               size="xs"
             />
           </div>
+          <p
+            v-if="reviewStatus"
+            :class="['mt-2 text-sm font-medium', EPIC_STATUS_TEXT[reviewStatus.color]]"
+          >
+            {{ reviewStatus.label }}
+          </p>
         </section>
       </div>
 

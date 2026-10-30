@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Task } from '@corral/contracts'
+import type { Epic, Task } from '@corral/contracts'
 import type { TaskStatus } from '@corral/core'
 import type { BoardFilters } from '~/utils/board'
 import { swipeStep } from '~/utils/board'
@@ -12,6 +12,7 @@ import { PRIORITY, taskNote } from '~/utils/labels'
 const props = defineProps<{
   columns: { key: string, label: string, statuses: TaskStatus[], hint: string, color: string, tasks: Task[] }[]
   epics: { id: string, label: string }[]
+  boardEpics: Epic[]
   agents: { id: string, name: string }[]
   total: number
   all: Task[]
@@ -136,6 +137,11 @@ const note = (task: Task) => taskNote(task, props.all, props.reviewRoundCap)
         />
         <span class="ms-auto text-sm text-muted">{{ total }} tasks</span>
       </div>
+      <BoardEpics
+        v-if="boardEpics.length"
+        :epics="boardEpics"
+        class="px-4"
+      />
       <div
         role="tablist"
         aria-label="Board columns"
