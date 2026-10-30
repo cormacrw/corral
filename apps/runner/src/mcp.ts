@@ -1,4 +1,4 @@
-import { askQuestionInput, EVIDENCE_KINDS, type AgentTool, type RunJob } from '@corral/contracts'
+import { askQuestionInput, EVIDENCE_KINDS, listTasksInput, type AgentTool, type RunJob } from '@corral/contracts'
 import { EPIC_REVIEW_MODES, TASK_TYPES, type AgentRole } from '@corral/core'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -88,8 +88,8 @@ const toolDefinitions = {
     }
   },
   list_tasks: {
-    description: 'The project’s tasks with their status, and epics with dependsOn epic ids, so plans reflect the live board.',
-    input: {}
+    description: 'The live board: one compact row per task (ref, title, status, type, priority, epicId, dependsOn refs), and every epic with its dependsOn epic ids. Merged tasks are left out unless you set includeMerged or ask for that status. Filters combine. Read a task’s description and acceptance criteria with get_task.',
+    input: listTasksInput.shape
   },
   get_run_outcomes: {
     description: 'Recent run outcomes for a task.',
@@ -229,7 +229,7 @@ export class ToolServer {
       const definition = roleToolDefinitions[route.role][name] ?? toolDefinitions[name]
       server.registerTool(name, { description: definition.description, inputSchema: definition.input }, async (input: Record<string, unknown>) => {
         const outcome = await route.handler(name, input).catch((error: unknown): ToolOutcome => ({ ok: false, error: error instanceof Error ? error.message : String(error) }))
-        return toContent(outcome)
+        return toContent(outcome, name === 'list_tasks' ? undefined : 2)
       })
     }
     const transport = new StreamableHTTPServerTransport({ enableJsonResponse: true })
@@ -246,11 +246,12 @@ export class ToolServer {
   }
 }
 
-function toContent(outcome: ToolOutcome) {
+// A board is read as data and can be long, so it goes out without indentation
+function toContent(outcome: ToolOutcome, indent: number | undefined) {
   if (!outcome.ok) return { content: [{ type: 'text' as const, text: outcome.error }], isError: true }
   const images = (outcome.result as ImageResult | null)?.images ?? []
   const rest = images.length > 0 ? { ...(outcome.result as object), images: undefined } : outcome.result
-  const text = typeof rest === 'string' ? rest : JSON.stringify(rest, null, 2)
+  const text = typeof rest === 'string' ? rest : JSON.stringify(rest, null, indent)
   return {
     content: [
       { type: 'text' as const, text },
