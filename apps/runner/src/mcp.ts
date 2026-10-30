@@ -1,4 +1,4 @@
-import { pmActionTools, pmDirectTools, askQuestionInput, EVIDENCE_KINDS, type AgentTool, type RunJob } from '@corral/contracts'
+import { PM_TOOL_NAMES, pmActionTools, pmDirectTools, askQuestionInput, EVIDENCE_KINDS, type AgentTool, type RunJob } from '@corral/contracts'
 import { EPIC_REVIEW_MODES, TASK_TYPES, type AgentRole } from '@corral/core'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -163,7 +163,7 @@ const PM_AREA_TOOLS = [...Object.keys(pmDirectTools), 'delete_project', 'stop_ru
 export const ROLE_TOOLS: Record<AgentRole, AgentTool[]> = {
   developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'report_outcome'],
   reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'get_design', 'report_outcome'],
-  pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs', 'delete_task', 'create_task', 'update_task', 'move_task', 'approve_task', 'update_epic', ...PM_AREA_TOOLS]
+  pm: PM_TOOL_NAMES
 }
 
 // PM tools that act on the conversation or on Corral as a whole. The rest take
