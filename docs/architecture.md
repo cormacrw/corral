@@ -73,7 +73,7 @@ The WSL host runs `scripts/deploy/runner-update.sh` from a systemd timer. It rea
 that status from the Docker data mount, fetches the exact server commit and builds
 locally while the old container runs, then replaces only an idle, draining runner.
 No image registry or Docker socket mount is involved. Host feedback is atomically
-written to `updater-result.json` (target, state, error); the runner polls it and
+written to `updater-result.json` (target, state, error, attempt); the runner polls it and
 sends `runner.update-status` with active count, drain/request flags and build/error
 state. Build failures release the drain on the old process. Settings shows these
 states and requests updates through the existing runner update endpoint.

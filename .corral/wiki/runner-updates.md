@@ -14,7 +14,7 @@ builds locally with that SHA, then waits for draining + idle + zero active runs
 overlap. Current runners log and exit without Git or Compose mutations. The
 runner-only compose defaults auto-update on; manual-only policy remains supported.
 
-The host atomically writes `updater-result.json` (target, state, error). The runner
+The host atomically writes `updater-result.json` (target, state, error, attempt). The runner
 polls it even while disconnected and publishes `runner.update-status` to Settings;
 a failed build clears draining and updateRequested so the old process takes work.
 The files have separate writers. A new process ignores results for its own commit.

@@ -18,8 +18,9 @@ main() {
     exit 0
   fi
   jq -e '.draining or .updateRequested' "$status" >/dev/null || { echo 'Behind; automatic updates disabled'; exit 0; }
+  attempt="$(date +%s%N)-$$"
   feedback() {
-    jq -n --arg target "$target" --arg state "$1" --arg error "${2:-}" '{target:$target,state:$state,error:$error}' > "$data/updater-result.json.tmp"
+    jq -n --arg target "$target" --arg state "$1" --arg error "${2:-}" --arg attempt "$attempt" '{target:$target,state:$state,error:$error,attempt:$attempt}' > "$data/updater-result.json.tmp"
     chmod 644 "$data/updater-result.json.tmp"
     mv "$data/updater-result.json.tmp" "$data/updater-result.json"
   }
