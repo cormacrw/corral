@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkPlan, designPinKey, diffPlans, type DesignPinTarget, type PlanRef, type ProposedTask } from './plan.ts'
+import { approvedPlanSummary, checkPlan, designPinKey, diffPlans, type DesignPinTarget, type PlanChange, type PlanRef, type ProposedTask } from './plan.ts'
 
 const task = (key: string, overrides: Partial<ProposedTask> = {}): ProposedTask => ({
   key,
@@ -218,5 +218,22 @@ describe('plan epic dependency validation', () => {
     expect(checkPlan(plan, new Map(), new Map(), context)).toEqual([])
     context.tasks[0]!.dependsOn = ['plan-task:b']
     expect(checkPlan(plan, new Map(), new Map(), context)).toContainEqual(expect.objectContaining({ code: 'epic_task_deadlock', epics: expect.arrayContaining(['Existing foundation', 'Mobile PWA', 'Offline']) }))
+  })
+})
+
+describe('approvedPlanSummary', () => {
+  const item = (status: string | null, change: PlanChange = 'added') => ({ change, status })
+
+  it('says where the tasks are', () => {
+    expect(approvedPlanSummary([item('ready'), item('ready')])).toBe('2 tasks on the board')
+    expect(approvedPlanSummary([item('backlog')])).toBe('1 task in the Backlog')
+  })
+
+  it("doesn't report a revised Ready task as moved to the Backlog", () => {
+    expect(approvedPlanSummary([item('backlog'), item('backlog'), item('backlog'), item('ready', 'changed')])).toBe('3 tasks in the Backlog, 1 on the board')
+  })
+
+  it('leaves out removed and deleted tasks', () => {
+    expect(approvedPlanSummary([item('ready'), item('ready', 'removed'), item(null)])).toBe('1 task on the board')
   })
 })

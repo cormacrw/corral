@@ -547,6 +547,17 @@ describe('plan sessions', () => {
     await endTurn(next, 'Not approved.')
   })
 
+  it("doesn't tell the PM a revised Ready task went to the Backlog", async () => {
+    const { target, created, job, revise } = await backlogSetup()
+    await t.db.update(tasks).set({ status: 'ready' }).where(eq(tasks.id, target.id))
+    expect(await revise()).toMatchObject({ ok: true })
+    await endTurn(job, 'Revised.')
+    expect((await t.request('POST', `/api/plan/sessions/${created.id}/messages`, { text: 'Looks good, add it to the backlog' })).status).toBeLessThan(300)
+    const next = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.planSessionId === created.id)).job
+    expect(await runner.call(next.runId, next.leaseEpoch, 'approve_plan', { to: 'backlog' })).toMatchObject({ ok: true, result: { message: expect.stringContaining('1 task in the Backlog, 1 on the board') } })
+    await endTurn(next, 'Approved.')
+  })
+
   it('revises a task an approved version of the same session put on the board', async () => {
     const { project, job, created, getTask } = await backlogSetup()
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Plan, Task } from '@corral/contracts'
+import { approvedPlanSummary } from '@corral/core'
 import { api } from '~/composables/useApi'
 import { EPIC_REVIEW_MODE, PLAN_STATUS, PRIORITY } from '~/utils/labels'
 
@@ -18,9 +19,8 @@ const tasks = computed(() => props.plan.tasks.filter(t => t.change !== 'removed'
 // Removed Drafts are deleted (D10), so only their count is left to show
 const changed = computed(() => tasks.value.filter(t => t.change !== 'unchanged'))
 const removed = computed(() => props.plan.tasks.length - tasks.value.length)
-// Where an approved plan's tasks went: the board, the Backlog, or some of each
-const kept = computed(() => tasks.value.filter(t => t.status))
-const toBacklog = computed(() => kept.value.length > 0 && kept.value.every(t => t.status === 'backlog'))
+// A revised Ready task stays in Ready with either button
+const revisesReady = computed(() => tasks.value.some(t => t.revises && t.status === 'ready'))
 // The plan's tasks under each of its epics, in the order the PM gave them.
 // Tasks without an epic, or a Draft moved to another epic by hand, are
 // listed last, under Other tasks (just Tasks when the plan has no epics).
@@ -288,12 +288,12 @@ watch(() => props.plan.id, () => {
             @click="emit('approve', 'backlog')"
           />
         </div>
-        <span class="text-xs text-muted">New tasks stay Drafts, and revised ones unchanged, until you choose. The board schedules them now; the Backlog keeps them for later or for refining.</span>
+        <span class="text-xs text-muted">New tasks stay Drafts, and revised ones unchanged, until you choose. The board schedules them now; the Backlog keeps them for later or for refining.<template v-if="revisesReady"> A revised Ready task stays in Ready either way.</template></span>
       </template>
       <span
         v-else-if="props.plan.status === 'approved'"
         class="text-success"
-      >✓ {{ tasks.length }} tasks added to the {{ toBacklog ? 'Backlog' : 'board' }}.</span>
+      >✓ {{ approvedPlanSummary(props.plan.tasks) }}.</span>
       <span
         v-else
         class="text-muted"

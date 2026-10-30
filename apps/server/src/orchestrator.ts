@@ -34,7 +34,7 @@ import { MergeOrchestrator } from './merge.ts'
 import type { ReleaseNotes } from './deployments.ts'
 import type { PlanService } from './plan.ts'
 import { getRun, listAgents, listEvidence } from './runs.ts'
-import { addComment, applyTransition, deleteTaskRows, loadTask, lockTask, toTaskState, type ProjectRow, type TaskContentEdit, type TaskRow } from './tasks.ts'
+import { addComment, applyTransition, deleteTaskRows, findTaskByRef, loadTask, lockTask, toTaskState, type ProjectRow, type TaskContentEdit, type TaskRow } from './tasks.ts'
 import type { Transcripts } from './transcripts.ts'
 
 const { acceptanceCriteria, agents, attachments, auditLog, comments, designVersions, evidence, projects, reviews, runs, settings, taskDesignPins, tasks } = schema
@@ -1160,12 +1160,7 @@ export class Orchestrator implements RunnerHandlers {
       if (role === 'pm') {
         if (!this.plans || !ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
         const { taskRef: ref } = z.object({ taskRef: z.string().optional() }).parse(input)
-        if (ref) {
-          const match = new RegExp(`^${ctx.project.prefix}-(\\d+)$`, 'i').exec(ref.trim())
-          const [task] = match ? await this.#d.db.select().from(tasks).where(and(eq(tasks.projectId, ctx.project.id), eq(tasks.number, Number(match[1])), isNull(tasks.deletedAt))) : []
-          if (!task) throw new ToolError(`${ref} isn't a task in this project`)
-          return this.#attachEvidence({ ...ctx, task }, parsed.data)
-        }
+        if (ref) return this.#attachEvidence({ ...ctx, task: await findTaskByRef(this.#d.db, ctx.project, ref) }, parsed.data)
         if (parsed.data.criterionId) throw new ToolError('Pass taskRef to attach evidence for a criterion')
         const attached = await this.#attachEvidence(ctx, parsed.data)
         const label = (parsed.data.fileName ?? 'Evidence').replace(/[[\]\\]/g, '')

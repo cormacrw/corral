@@ -1,10 +1,10 @@
 import type { DesignVersion } from '@corral/contracts'
 import { approveDesignVersion, bundlePath, designPreviewUrl, taskRef, unpackBundle, type Actor } from '@corral/core'
 import { schema, type Database, type Executor } from '@corral/db'
-import { and, asc, desc, eq, isNull } from 'drizzle-orm'
+import { and, asc, desc, eq } from 'drizzle-orm'
 import type { BlobStore } from './blob-store.ts'
 import { ApiFailure } from './errors.ts'
-import { lockTask } from './tasks.ts'
+import { findTaskByRef, lockTask } from './tasks.ts'
 
 const { auditLog, designVersions, taskDesignPins, tasks } = schema
 
@@ -145,11 +145,7 @@ export class DesignNotFound extends Error {}
 // pinned to one. With no version, a design task gives its latest version and
 // a build task its pinned one. Only this project's tasks are read.
 export async function readDesign(db: Executor, blobs: BlobStore, project: { id: string, prefix: string }, ref: string, version?: number): Promise<DesignForAgent> {
-  const match = new RegExp(`^${project.prefix}-(\\d+)$`, 'i').exec(ref.trim())
-  const [task] = match
-    ? await db.select().from(tasks).where(and(eq(tasks.projectId, project.id), eq(tasks.number, Number(match[1])), isNull(tasks.deletedAt)))
-    : []
-  if (!task) throw new DesignNotFound(`No task ${ref} in this project (refs look like ${project.prefix}-12)`)
+  const task = await findTaskByRef(db, project, ref)
 
   let designTaskId = task.id
   let pinnedScreens: string[] | null = null

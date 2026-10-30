@@ -230,6 +230,17 @@ function designProblem(key: string, pin: DesignPin, found: DesignPinTarget): Pla
 
 export type PlanChange = 'added' | 'changed' | 'unchanged' | 'removed'
 
+// Where an approved plan's tasks are, not where they were sent: a revised
+// Ready task stays in Ready even when the plan goes to the Backlog
+export function approvedPlanSummary(tasks: readonly { change: PlanChange, status: string | null }[]): string {
+  const kept = tasks.filter(t => t.change !== 'removed' && t.status)
+  const backlog = kept.filter(t => t.status === 'backlog').length
+  const board = kept.length - backlog
+  const count = (n: number) => `${n} task${n === 1 ? '' : 's'}`
+  if (backlog === 0) return `${count(board)} on the board`
+  return board === 0 ? `${count(backlog)} in the Backlog` : `${count(backlog)} in the Backlog, ${board} on the board`
+}
+
 // How a revised plan differs from the previous version, by key (design/plan.md)
 export function diffPlans(previous: readonly ProposedTask[], next: readonly ProposedTask[]): { key: string, change: PlanChange }[] {
   const before = new Map(previous.map(t => [t.key, t]))

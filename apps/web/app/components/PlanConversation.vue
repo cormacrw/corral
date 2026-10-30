@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { Plan, PlanMessage, PlanSessionDetail } from '@corral/contracts'
+import { approvedPlanSummary } from '@corral/core'
 import { api } from '~/composables/useApi'
 import { projectColor, runtimeLabel } from '~/utils/labels'
-import { approvedMessage, approvePlan } from '~/utils/plan-approval'
+import { approvePlan } from '~/utils/plan-approval'
 import { answerTo, openQuestionId, STOP_ASKING } from '~/utils/plan-questions'
 import { withoutMessages } from '~/utils/tool-steps'
 
@@ -155,7 +156,7 @@ async function approve(plan: Plan, to: 'ready' | 'backlog') {
   try {
     if (props.inbox) {
       const approved = await api.plan.approve(plan.id, to)
-      toast.add({ title: 'Resolved', description: approvedMessage(approved, to), color: 'success' })
+      toast.add({ title: 'Resolved', description: approvedPlanSummary(approved.tasks), color: 'success' })
       await flyout.close()
       emit('approved')
       return true

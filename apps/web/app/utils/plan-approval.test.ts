@@ -1,6 +1,6 @@
 import type { Plan } from '@corral/contracts'
 import { describe, expect, it, vi } from 'vitest'
-import { approvedMessage, approvePlan } from './plan-approval.ts'
+import { approvePlan } from './plan-approval.ts'
 
 const item = (key: string, change: Plan['tasks'][number]['change'] = 'added'): Plan['tasks'][number] =>
   ({ key, change, revises: false, taskId: null, epicId: null, ref: null, title: key, status: 'draft', priority: 'medium', humanReview: false, dependsOn: [] })
@@ -19,13 +19,6 @@ function deps(mobile: boolean, approve = vi.fn(async (_id: string, to: 'ready' |
   }
 }
 
-describe('approvedMessage', () => {
-  it('counts the tasks added and says where', () => {
-    expect(approvedMessage(plan(), 'ready')).toBe('2 tasks added to the board')
-    expect(approvedMessage(plan([item('a')]), 'backlog')).toBe('1 task added to the Backlog')
-  })
-})
-
 describe('approvePlan', () => {
   it.each(['ready', 'backlog'] as const)('on a phone, approving to %s closes the sheet, goes to a new Plan thread and confirms', async (to) => {
     const d = deps(true)
@@ -34,7 +27,7 @@ describe('approvePlan', () => {
     expect(d.calls).toEqual(['close', 'push /plan'])
     expect(d.toast.add).toHaveBeenCalledWith({
       title: 'Plan approved',
-      description: `2 tasks added to the ${to === 'ready' ? 'board' : 'Backlog'}`,
+      description: to === 'ready' ? '2 tasks on the board' : '2 tasks in the Backlog',
       color: 'success'
     })
   })
