@@ -194,6 +194,25 @@ describe('PM task and epic tools', () => {
     expect((await get(task)).status).toBe('human_review')
   })
 
+  it('refuses a type change that would take a task out of its D19 or D20 flow', async () => {
+    const design = await t.createTask(slug, { title: 'Retyped design', type: 'design' })
+    await t.db.update(schema.tasks).set({ status: 'human_review' }).where(eq(schema.tasks.id, design.id))
+    expect(await call('update_task', { taskRef: design.ref, type: 'task', title: 'Must not save' })).toMatchObject({ ok: false, error: expect.stringContaining('left Draft or Backlog') })
+    expect(await get(design)).toMatchObject({ type: 'design', title: 'Retyped design', status: 'human_review' })
+    expect(await call('approve_task', { taskRef: design.ref })).toMatchObject({ ok: false, error: expect.stringContaining('Use approve_design') })
+    expect(await request('PATCH', `/api/projects/${slug}/tasks/${design.number}`, { type: 'task' })).toMatchObject({ status: 409 })
+    // A spike's approval ends in Merged with no merge, so a PR can't turn into one
+    const task = await t.createTask(slug)
+    await t.db.update(schema.tasks).set({ status: 'human_review', prNumber: 43, headSha: 'c'.repeat(40) }).where(eq(schema.tasks.id, task.id))
+    for (const type of ['design', 'spike']) {
+      expect(await call('update_task', { taskRef: task.ref, type })).toMatchObject({ ok: false, error: expect.stringContaining('left Draft or Backlog') })
+    }
+    expect(await call('update_task', { taskRef: task.ref, type: 'bug' })).toMatchObject({ ok: true, result: { type: 'bug' } })
+    // Unstarted work can still be retyped, which is what plan revisions rely on
+    const unstarted = await t.createTask(slug, { type: 'design' })
+    expect(await call('update_task', { taskRef: unstarted.ref, type: 'task' })).toMatchObject({ ok: true, result: { type: 'task' } })
+  })
+
   it('keeps human Merged edits read-only while permitting PM metadata edits', async () => {
     const task = await t.createTask(slug)
     await t.db.update(schema.tasks).set({ status: 'merged' }).where(eq(schema.tasks.id, task.id))

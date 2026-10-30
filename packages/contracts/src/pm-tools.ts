@@ -30,7 +30,7 @@ export const pmActionTools = {
   },
   update_task: {
     confirmRequired: false,
-    description: 'Edit a task in any status. Criteria and dependencies replace the lists; preserve criterion IDs. paused pauses unleased tasks or resumes work; use stop_run with human confirmation for a leased task.',
+    description: 'Edit a task in any status, except that a spike or design type is fixed once the task leaves Draft or Backlog. Criteria and dependencies replace the lists; preserve criterion IDs. paused pauses unleased tasks or resumes work; use stop_run with human confirmation for a leased task.',
     input: { taskRef: z.string().trim().min(1), ...patchTaskInput.shape, paused: z.boolean().optional() }
   },
   move_task: {
