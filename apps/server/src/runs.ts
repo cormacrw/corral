@@ -6,14 +6,15 @@ import { appendAudit, auditEvent } from './audit.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import { avatarUrl } from './avatars.ts'
 
-const { agents, evidence, projects, reviews, runs, tasks } = schema
+const { agents, epics, evidence, projects, reviews, runs, tasks } = schema
 
 const runColumns = {
   run: runs,
   agentName: agents.name,
   prefix: projects.prefix,
   taskNumber: tasks.number,
-  taskTitle: tasks.title
+  taskTitle: tasks.title,
+  epicTitle: epics.title
 }
 
 type RunJoin = {
@@ -22,9 +23,10 @@ type RunJoin = {
   prefix: string
   taskNumber: number | null
   taskTitle: string | null
+  epicTitle: string | null
 }
 
-function toRun({ run, agentName, prefix, taskNumber, taskTitle }: RunJoin): Run {
+function toRun({ run, agentName, prefix, taskNumber, taskTitle, epicTitle }: RunJoin): Run {
   return {
     id: run.id,
     runnerId: run.runnerId,
@@ -36,6 +38,8 @@ function toRun({ run, agentName, prefix, taskNumber, taskTitle }: RunJoin): Run 
     taskId: run.taskId,
     taskRef: taskNumber === null ? null : taskRef(prefix, taskNumber),
     taskTitle,
+    epicId: run.epicId,
+    epicTitle,
     summary: run.summary,
     error: run.error,
     headSha: run.headSha,
@@ -60,6 +64,7 @@ export async function listRuns(db: Executor, filter: { agentId?: string, taskId?
     .innerJoin(agents, eq(agents.id, runs.agentId))
     .innerJoin(projects, eq(projects.id, runs.projectId))
     .leftJoin(tasks, eq(tasks.id, runs.taskId))
+    .leftJoin(epics, eq(epics.id, runs.epicId))
     .where(and(...where))
     .orderBy(desc(runs.number))
     .limit(limit)
@@ -71,6 +76,7 @@ export async function getRun(db: Executor, runId: string): Promise<Run> {
     .innerJoin(agents, eq(agents.id, runs.agentId))
     .innerJoin(projects, eq(projects.id, runs.projectId))
     .leftJoin(tasks, eq(tasks.id, runs.taskId))
+    .leftJoin(epics, eq(epics.id, runs.epicId))
     .where(eq(runs.id, runId))
   if (!row) throw notFound()
   return toRun(row)

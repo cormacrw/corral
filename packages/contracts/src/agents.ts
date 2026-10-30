@@ -113,6 +113,9 @@ interface RunFields {
   taskId: string | null
   taskRef: string | null
   taskTitle: string | null
+  // Set on an epic's integration review, which has no task (D27)
+  epicId: string | null
+  epicTitle: string | null
   summary: string | null
   error: string | null
   headSha: string | null
