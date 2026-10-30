@@ -45,7 +45,9 @@ The acknowledgement echoes the runner's request timestamp, so delayed replies
 expire even if the hosts' clocks differ. After sleep or disconnection the commit stays local, even if the socket still
 looks open. A no-keepWork stop revokes that acknowledgement, including during
 a save. This bounds stale pushes but cannot fence a revocation still in transit
-at GitHub. A worktree that isn't on the task branch (mid-rebase) is left alone.
+at GitHub. A run a human or the kill switch stopped stays listed in heartbeats
+until its agent exits; the server doesn't revoke it then, unless a newer run
+holds the task or the task was deleted. A worktree that isn't on the task branch (mid-rebase) is left alone.
 The run's `headSha` records the pushed commit and the job's `continueFrom`
 carries it to the retry; a kept worktree on another runner fast-forwards to it
 and fails the run if it has diverged. After a human stop or the kill switch the

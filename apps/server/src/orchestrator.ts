@@ -41,6 +41,11 @@ type PlanSessionRow = typeof schema.planSessions.$inferSelect
 
 const server: Actor = { kind: 'system', component: 'server' }
 
+// Stops the task is retried after, which ask the runner to keep the run's work
+const HUMAN_STOP = 'Stopped by a human'
+const KILL_SWITCH_STOP = 'Stopped: Corral was stopped'
+const KEEP_WORK_STOPS: ReadonlySet<string> = new Set([HUMAN_STOP, KILL_SWITCH_STOP])
+
 type RunRow = typeof runs.$inferSelect
 type AgentRow = typeof agents.$inferSelect
 
@@ -329,7 +334,7 @@ export class Orchestrator implements RunnerHandlers {
       const ctx = await this.#load(id)
       if (!ctx) continue
       this.#d.runner.send({ type: 'run.stop', runId: id, reason: 'Corral was stopped', keepWork: true }, ctx.run.runnerId)
-      await this.#endRun(ctx, { state: 'interrupted', error: 'Stopped: Corral was stopped' })
+      await this.#endRun(ctx, { state: 'interrupted', error: KILL_SWITCH_STOP })
       await this.#publish(ctx)
     }
   }
@@ -566,7 +571,7 @@ export class Orchestrator implements RunnerHandlers {
   // This agent's last developer run on the task that started a session: its
   // runner holds the worktree and session a revision resumes
   async #previousDeveloperRun(db: Executor, taskId: string, agentId: string, exclude?: string) {
-    const [previous] = await db.select({ number: runs.number, runnerId: runs.runnerId, agentSessionId: runs.agentSessionId, queuedAt: runs.queuedAt, state: runs.state, error: runs.error, headSha: runs.headSha }).from(runs)
+    const [previous] = await db.select({ number: runs.number, runnerId: runs.runnerId, agentSessionId: runs.agentSessionId, queuedAt: runs.queuedAt }).from(runs)
       .where(and(eq(runs.taskId, taskId), eq(runs.role, 'developer'), eq(runs.agentId, agentId), exclude ? ne(runs.id, exclude) : undefined, isNotNull(runs.agentSessionId)))
       .orderBy(desc(runs.number)).limit(1)
     return previous ?? null
@@ -693,6 +698,7 @@ export class Orchestrator implements RunnerHandlers {
     for (const active of activeRuns) {
       const ctx = await this.#fenced(active.runId, active.leaseEpoch)
       if (!ctx || ctx.run.runnerId !== runnerId) {
+        if (await this.#savingWork(active.runId, active.leaseEpoch, runnerId)) continue
         runner.send({ type: 'run.stop', runId: active.runId, reason: 'The server no longer recognises this run' }, runnerId)
       }
     }
@@ -708,6 +714,7 @@ export class Orchestrator implements RunnerHandlers {
     for (const active of activeRuns) {
       const ctx = await this.#fenced(active.runId, active.leaseEpoch)
       if (!ctx || ctx.run.runnerId !== runnerId || (ctx.task?.leaseExpiresAt && ctx.task.leaseExpiresAt <= now)) {
+        if (await this.#savingWork(active.runId, active.leaseEpoch, runnerId)) continue
         this.#d.runner.send({ type: 'run.stop', runId: active.runId, reason: 'This run no longer holds its lease' }, runnerId)
         continue
       }
@@ -720,6 +727,17 @@ export class Orchestrator implements RunnerHandlers {
       }
       this.#confirmLease(ctx, sentAt)
     }
+  }
+
+  // A human stop or the kill switch ends the run here at once, but the runner
+  // lists it until the agent has exited. It was told to keep its work, so a
+  // keepWork-less stop would wrongly revoke the push, unless the task moved on.
+  // A lost lease also leaves a run interrupted: only these two stops count.
+  async #savingWork(runId: string, leaseEpoch: number, runnerId: string): Promise<boolean> {
+    const ctx = await this.#load(runId)
+    if (!ctx?.task || ctx.task.deletedAt || ctx.task.leaseRunId !== null) return false
+    const { run } = ctx
+    return run.role === 'developer' && run.state === 'interrupted' && run.leaseEpoch === leaseEpoch && run.runnerId === runnerId && KEEP_WORK_STOPS.has(run.error ?? '')
   }
 
   #confirmLease(ctx: RunContext, sentAt: number | undefined): void {
@@ -897,7 +915,7 @@ export class Orchestrator implements RunnerHandlers {
     if (!ctx || !(ACTIVE_RUN_STATES as readonly RunState[]).includes(ctx.run.state)) throw new ApiFailure(409, { code: 'conflict', constraint: 'run_not_active' })
     this.#d.runner.send({ type: 'run.stop', runId, reason: 'Stopped by a human', keepWork: true }, ctx.run.runnerId)
     await this.#d.db.transaction(async (tx) => {
-      await this.#endRunIn(tx, ctx, { state: 'interrupted', error: 'Stopped by a human' })
+      await this.#endRunIn(tx, ctx, { state: 'interrupted', error: HUMAN_STOP })
       if (ctx.task) await tx.update(tasks).set({ paused: true }).where(eq(tasks.id, ctx.task.id))
       await tx.insert(auditLog).values({ projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor, action: 'run.stopped', detail: { runId } })
     })

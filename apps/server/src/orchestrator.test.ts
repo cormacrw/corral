@@ -329,7 +329,7 @@ describe('orchestrator', () => {
 
   it('does not describe an agent-reported failure as a stopped run', async () => {
     const { project, task, job } = await assigned()
-    expect(await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'failed', summary: 'Cannot implement this' })).toMatchObject({ ok: true })
+    expect(await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'failed', summary: 'Cannot implement this', note: 'Gave up' })).toMatchObject({ ok: true })
     const retry = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.runId !== job.runId)).job
     expect(retry.prompt).not.toContain('Continuing a stopped run')
     expect(retry.continueFrom).toBeNull()
@@ -349,6 +349,37 @@ describe('orchestrator', () => {
     expect(await runner.next('run.stop', m => m.runId === job.runId)).toMatchObject({ reason: 'This run no longer holds its lease' })
     expect((await taskRow(task.id)).leaseExpiresAt!.getTime()).toBeLessThan(t.clock.now.getTime())
     await finish(project, job)
+  })
+
+  it('lets a human-stopped run finish saving through a heartbeat, until the task moves on', async () => {
+    const { project, task, job } = await assigned()
+    runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'session-1' })
+    await sleep(100)
+    await t.request('POST', `/api/runs/${job.runId}/stop`)
+    await runner.next('run.stop', m => m.runId === job.runId)
+    const active = [{ runId: job.runId, leaseEpoch: job.leaseEpoch }]
+
+    // The agent is still exiting, so the runner still lists the run
+    await t.orchestrator.onHeartbeat(active, 'r1')
+    await sleep(100)
+    expect(runner.received.filter(m => m.type === 'run.stop' && m.runId === job.runId)).toEqual([])
+
+    // A retry holds the lease now: the stopped run may no longer push
+    expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/resume`)).status).toBe(200)
+    const retry = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.runId !== job.runId)).job
+    await t.orchestrator.onHeartbeat(active, 'r1')
+    expect((await runner.next('run.stop', m => m.runId === job.runId)).keepWork).toBeUndefined()
+    await finish(project, retry)
+  })
+
+  it('still revokes a run interrupted by an expired lease', async () => {
+    const { project, task, job } = await assigned()
+    await t.db.update(tasks).set({ leaseExpiresAt: new Date(Date.now() - 1000) }).where(eq(tasks.id, task.id))
+    await t.orchestrator.sweepLeases()
+    await runner.next('run.stop', m => m.runId === job.runId)
+    await t.orchestrator.onHeartbeat([{ runId: job.runId, leaseEpoch: job.leaseEpoch }], 'r1')
+    expect((await runner.next('run.stop', m => m.runId === job.runId)).reason).toBe('This run no longer holds its lease')
+    await pause(project)
   })
 
   it('ignores a WIP commit from a stale lease epoch', async () => {
