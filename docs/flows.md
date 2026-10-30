@@ -160,7 +160,7 @@ A `spike` follows steps 1–7 with these differences, and never reaches step 7c:
 - **Steps 4–5:** the developer investigates without changing code, attaches evidence per criterion, and reports `findings_reported` with its findings (answer, evidence, recommendation, suggested follow-up tasks). The server checks the evidence, posts the findings on the task as a `## Findings` comment, and moves **In progress → Agent review**. Nothing is pushed and no PR is opened.
 - **Step 6:** the reviewer judges the latest findings, which are in its prompt, against every criterion and the evidence. There is no diff.
 - **Step 7a:** changes requested works exactly as for any task.
-- **Step 7b:** approved → **Merged** (via Human review when flagged). The worktrees are cleaned up as in step 10.
+- **Step 7b:** approved → **Human review**, whatever the flag. The Inbox shows the latest findings. Human approval → **Merged** with `mergedAt` set, and dependent tasks unblock; requesting changes → In progress with the feedback for the developer. The worktrees are cleaned up after completion as in step 10.
 
 ### Step 8 — Final gate check
 
