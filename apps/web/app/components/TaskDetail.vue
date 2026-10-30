@@ -303,7 +303,7 @@ async function place() {
 
 const agentHolds = computed(() => task.value && ['in_progress', 'blocked', 'agent_review', 'human_review'].includes(task.value.status))
 const composerHint = computed(() => agentHolds.value
-  ? `${developer.value?.name ?? 'The developer'} gets this on its next step.`
+  ? `${developer.value?.name ?? (task.value?.type === 'design' ? 'The designer' : 'The developer')} gets this on its next step.`
   : 'No agent is working on this task, so this is saved as a note.')
 // Resolves false when not sent, so the composer keeps its images
 async function sendComment(text: string): Promise<boolean> {
@@ -786,7 +786,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
             v-if="agentHolds && task.lease"
             class="mt-1 text-xs text-muted"
           >
-            Changes and comments are sent to {{ developer?.name ?? 'the developer' }}.
+            Changes and comments are sent to {{ developer?.name ?? (task?.type === 'design' ? 'the designer' : 'the developer') }}.
           </p>
         </section>
 

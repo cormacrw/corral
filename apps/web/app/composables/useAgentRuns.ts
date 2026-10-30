@@ -1,6 +1,6 @@
-import type { Run, RunEvent } from '@corral/contracts'
+import type { DesignVersion, Run, RunEvent } from '@corral/contracts'
 import { api } from '~/composables/useApi'
-import { agentFacts } from '~/utils/agents'
+import { agentFacts, designerStats } from '~/utils/agents'
 import { isLiveRun, tokens } from '~/utils/labels'
 
 // An agent's page (design/agent.md): the agent from the route, its runs,
@@ -27,11 +27,26 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
     return current.value ?? runs.value[0] ?? null
   })
 
+  const designs = ref<{ taskId: string, versions: DesignVersion[] }[]>([])
+  async function loadDesigns() {
+    if (agent.value?.role !== 'designer') return
+    const agentId = agent.value.id
+    const authored = runs.value.filter(r => r.role === 'designer' && r.taskId && r.taskRef)
+    const unique = [...new Map(authored.map(r => [r.taskId!, r])).values()]
+    const loaded = await Promise.all(unique.map(async (run) => {
+      const project = live.state.value.projects.find(p => p.id === run.projectId)
+      if (!project) throw new Error('Design project not found')
+      return { taskId: run.taskId!, versions: await api.tasks.designs(project.slug, Number(run.taskRef!.split('-').at(-1))) }
+    }))
+    if (agent.value?.id === agentId) designs.value = loaded
+  }
   async function load() {
     if (!agent.value) return
     error.value = null
     try {
       runs.value = await api.runs.list({ agentId: agent.value.id })
+      designs.value = []
+      await loadDesigns()
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
     }
@@ -52,10 +67,21 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
       now.value = Date.now()
     }, 1000)
     const stop = live.subscribe((event) => {
+      if (event.type === 'task.updated' && designs.value.some(d => d.taskId === event.task.id)) {
+        void loadDesigns().catch((e) => {
+          error.value = String(e)
+        })
+      }
       if (event.type === 'run.updated' && event.run.agentId === agent.value?.id) {
         const i = runs.value.findIndex(r => r.id === event.run.id)
+        const previous = runs.value[i]
         if (i >= 0) runs.value.splice(i, 1, event.run)
         else runs.value.unshift(event.run)
+        if (!previous || previous.headSha !== event.run.headSha || previous.outcome !== event.run.outcome) {
+          void loadDesigns().catch((e) => {
+            error.value = String(e)
+          })
+        }
       }
     })
     onBeforeUnmount(() => {
@@ -82,6 +108,13 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
         { label: 'Runs this week', value: String(thisWeek.value.length), sub: `${today.value.length} today` },
         { label: 'PRs opened', value: String(count('pr_opened') + count('pr_updated')), sub: 'incl. revisions' },
         { label: 'Stuck', value: String(count('stuck')), sub: 'asked you' },
+        { label: 'Avg run', value: avgRun.value, sub: 'this week' },
+        { label: 'Usage today', value: usageToday.value, sub: 'tokens' }
+      ]
+      case 'designer': return [
+        { label: 'Runs this week', value: String(thisWeek.value.filter(r => r.role === 'designer').length), sub: `${today.value.length} today` },
+        { label: 'Design versions submitted', value: error.value ? '—' : String(designerStats(runs.value, designs.value).submitted), sub: 'recent authoring runs' },
+        { label: 'Designs approved', value: error.value ? '—' : String(designerStats(runs.value, designs.value).approved), sub: 'tasks · recent runs' },
         { label: 'Avg run', value: avgRun.value, sub: 'this week' },
         { label: 'Usage today', value: usageToday.value, sub: 'tokens' }
       ]

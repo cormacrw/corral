@@ -13,7 +13,7 @@ const device = useDevice()
 const UDrawer = resolveComponent('UDrawer')
 const UModal = resolveComponent('UModal')
 
-const roles = [{ label: 'Developer', value: 'developer' }, { label: 'Reviewer', value: 'reviewer' }]
+const roles = [{ label: 'Developer', value: 'developer' }, { label: 'Designer', value: 'designer' }, { label: 'Reviewer', value: 'reviewer' }]
 const runtimes = computed(() => detectedRuntimes(props.clis ?? []).map(value => ({ label: RUNTIME[value], value })))
 const form = reactive<{ name: string, role: CreateAgentInput['role'], runtime: AgentRuntime | undefined, concurrency: number }>({
   name: '', role: 'developer', runtime: undefined, concurrency: 1
@@ -46,7 +46,7 @@ async function save() {
     :is="device.isMobile.value ? UDrawer : UModal"
     v-model:open="open"
     title="Add agent"
-    description="A developer or reviewer shared by every project. It runs through the CLI you pick, with your own login."
+    description="A developer, designer or reviewer shared by every project. It runs through the CLI you pick, with your own login."
   >
     <template #body>
       <form

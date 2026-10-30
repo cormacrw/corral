@@ -41,7 +41,7 @@ const dotClass = (status: TaskStatus) => ({
       { key: 'status', label: 'Status' },
       { key: 'priority', label: 'Priority' },
       { key: 'type', label: 'Type' },
-      { key: 'developer', label: 'Developer' },
+      { key: 'developer', label: props.task.type === 'design' ? 'Designer' : 'Developer' },
       { key: 'reviewer', label: 'Reviewer' },
       { key: 'humanReview', label: 'Human review' },
       { key: 'branch', label: 'Branch' },
@@ -189,9 +189,9 @@ const dotClass = (status: TaskStatus) => ({
           v-if="(row.key === 'developer' ? props.developer : props.reviewer)"
           :name="(row.key === 'developer' ? props.developer : props.reviewer)!.name"
           size="xs"
-          :working="Boolean(props.task.lease && props.task.lease.role === row.key)"
+          :working="Boolean(props.task.lease && props.task.lease.role === (row.key === 'developer' && props.task.type === 'design' ? 'designer' : row.key))"
         />
-        <span>{{ (row.key === 'developer' ? props.developer : props.reviewer)?.name ?? `Any available ${row.key}` }}</span>
+        <span>{{ (row.key === 'developer' ? props.developer : props.reviewer)?.name ?? `Any available ${row.key === 'developer' && props.task.type === 'design' ? 'designer' : row.key}` }}</span>
       </span>
 
       <USwitch

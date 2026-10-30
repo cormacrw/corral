@@ -113,6 +113,7 @@ export const projects: Project[] = [
 ]
 
 export const agents: Agent[] = [
+  { id: 'a-design', name: 'Iris', role: 'designer', runtime: 'claude-code', concurrency: 1, paused: false, wakeIntervalSeconds: null, pausedUntil: null, activeRuns: 1, avatarUrl: null },
   { id: 'a-paused', name: 'Pax', role: 'developer', runtime: 'codex', concurrency: 1, paused: true, wakeIntervalSeconds: null, pausedUntil: null, activeRuns: 0, avatarUrl: null },
   { id: 'a-limited', name: 'Uma', role: 'reviewer', runtime: 'codex', concurrency: 1, paused: false, wakeIntervalSeconds: null, pausedUntil: ago(-120), activeRuns: 0, avatarUrl: null },
   { id: 'a-pm', name: 'Pam', role: 'pm', runtime: 'claude-code', concurrency: 1, paused: false, wakeIntervalSeconds: null, pausedUntil: ago(60), activeRuns: 0, avatarUrl: null },
@@ -228,6 +229,7 @@ function criteria(...texts: string[]): Task['acceptanceCriteria'] {
 const [corral, site] = projects as [Project, Project]
 
 export const tasks: Task[] = [
+  task(corral, 20, { title: 'Design the agent settings experience', type: 'design', status: 'in_progress', branch: 'design/COR-20', humanReview: true, lease: { agentId: 'a-design', runId: 'r-design', role: 'designer', expiresAt: ago(-10) }, acceptanceCriteria: criteria('Agent settings work on desktop and mobile') }),
   task(corral, 1, { title: 'Design task type and versions', status: 'merged', epicId: 'e-design', prNumber: 60, prUrl: 'https://github.com/cormacrw/corral/pull/60', mergedAt: ago(60 * 20), mergeCommitSha: 'da0ebe6' }),
   task(corral, 2, { title: 'Serve design bundles sandboxed', status: 'merged', epicId: 'e-design', dependsOn: ['COR-1'], prNumber: 62, prUrl: 'https://github.com/cormacrw/corral/pull/62', mergedAt: ago(60 * 3), mergeCommitSha: 'e5e8457' }),
   task(corral, 3, {
@@ -308,6 +310,18 @@ const at = (ref: string): Task => tasks.find(t => t.ref === ref)!
 
 export const runs: Run[] = [
   {
+    runnerId: 'runner-1', runnerName: 'home-server', id: 'r-design', number: 140, agentId: 'a-design', agentName: 'Iris', role: 'designer', projectId: 'p-corral',
+    taskId: at('COR-20').id, taskRef: 'COR-20', taskTitle: at('COR-20').title, state: 'running', outcome: null, summary: null,
+    error: null, headSha: null, inputTokens: 12000, cacheReadTokens: 80000, outputTokens: 3000, rateLimitResetAt: null,
+    queuedAt: ago(12), startedAt: ago(11), endedAt: null
+  },
+  {
+    runnerId: 'runner-1', runnerName: 'home-server', id: 'r-design-done', number: 139, agentId: 'a-design', agentName: 'Iris', role: 'designer', projectId: 'p-corral',
+    taskId: at('COR-4').id, taskRef: 'COR-4', taskTitle: at('COR-4').title, state: 'completed', outcome: 'design_submitted', summary: 'Submitted the review screen prototype.',
+    error: null, headSha: 'design-review-v1', inputTokens: 8000, cacheReadTokens: 60000, outputTokens: 2000, rateLimitResetAt: null,
+    queuedAt: ago(120), startedAt: ago(119), endedAt: ago(100)
+  },
+  {
     runnerId: 'runner-1', runnerName: 'home-server', id: 'r-1', number: 128, agentId: 'a-dev2', agentName: 'Dana', role: 'developer', projectId: 'p-corral',
     taskId: at('COR-3').id, taskRef: 'COR-3', taskTitle: at('COR-3').title, state: 'running', outcome: null, summary: null,
     error: null, headSha: null, inputTokens: 18_200, cacheReadTokens: 240_000, outputTokens: 6_100, rateLimitResetAt: null,
@@ -354,11 +368,11 @@ export const runs: Run[] = [
   }
 ]
 
-// A task's developer and reviewer are the agents of its latest run of each
+// A task's author and reviewer are the agents of its latest run of each
 // role, as the server fills them; tasks with no run stay "Any available"
 for (const t of tasks) {
-  const latest = (role: 'developer' | 'reviewer') => runs.filter(r => r.taskId === t.id && r.role === role).sort((a, b) => b.queuedAt.localeCompare(a.queuedAt))[0]
-  const developer = latest('developer')
+  const latest = (role: 'developer' | 'designer' | 'reviewer') => runs.filter(r => r.taskId === t.id && r.role === role).sort((a, b) => b.queuedAt.localeCompare(a.queuedAt))[0]
+  const developer = latest(t.type === 'design' ? 'designer' : 'developer')
   const reviewer = latest('reviewer')
   t.developer = developer ? { id: developer.agentId, name: developer.agentName } : null
   t.reviewer = reviewer ? { id: reviewer.agentId, name: reviewer.agentName } : null
