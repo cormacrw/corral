@@ -30,7 +30,7 @@ export const pmActionTools = {
   },
   update_task: {
     confirmRequired: false,
-    description: 'Edit a task in any status. Criteria and dependencies replace the lists; preserve criterion IDs. paused stops or resumes work.',
+    description: 'Edit a task in any status. Criteria and dependencies replace the lists; preserve criterion IDs. paused pauses unleased tasks or resumes work; use stop_run with human confirmation for a leased task.',
     input: { taskRef: z.string().trim().min(1), ...patchTaskInput.shape, paused: z.boolean().optional() }
   },
   move_task: {
@@ -40,7 +40,7 @@ export const pmActionTools = {
   },
   approve_task: {
     confirmRequired: true,
-    description: 'Propose approving a task in Human review. Runs only after human confirmation.',
+    description: 'Propose approving a task in Human review. Use approve_design for designs. Runs only after human confirmation.',
     input: { taskRef: z.string().trim().min(1) }
   },
   update_epic: {

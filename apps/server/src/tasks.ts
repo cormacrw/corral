@@ -384,6 +384,7 @@ export interface TaskContentEdit {
 export async function patchTask(db: Executor, project: ProjectRow, taskId: string, input: PatchTaskInput, actor: Actor): Promise<TaskContentEdit | null> {
   return db.transaction(async (tx) => {
     const { task } = await lockTask(tx, taskId)
+    if (task.status === 'merged' && actor.kind === 'human') throw new ApiFailure(409, { code: 'conflict', constraint: 'task_merged' })
     const { acceptanceCriteria: criteriaInput, dependsOn, ...fields } = input
     // D20: a design task's flag can't be turned off, by the human or a plan
     if ((fields.type ?? task.type) === 'design') fields.humanReview = true

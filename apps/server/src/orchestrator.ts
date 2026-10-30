@@ -1335,16 +1335,17 @@ export class Orchestrator implements RunnerHandlers {
     if (!match || match[1]!.toUpperCase() !== project.prefix.toUpperCase()) throw new ToolError('Use a task ref from this conversation’s project')
     const [row] = await db.select().from(tasks).where(and(eq(tasks.projectId, project.id), eq(tasks.number, Number(match[2])), isNull(tasks.deletedAt)))
     if (!row) throw new ToolError('Task no longer exists')
-    const edit = await patchTask(db, project, row.id, fields, actor)
-    if (edit) await this.noticeTaskEdit(row.id, edit, actor).catch(error => console.error('Telling the run about the PM edit failed', error))
-    if (paused !== undefined) {
-      if (paused && row.leaseRunId) await this.stopRun(row.leaseRunId, actor)
-      await db.transaction(async (tx) => {
-        await lockTask(tx, row.id)
+    const edit = await db.transaction(async (tx) => {
+      const { task } = await lockTask(tx, row.id)
+      if (paused && task.leaseRunId) throw new ToolError('Use stop_run to stop a leased task with human confirmation')
+      const edit = await patchTask(tx, project, row.id, fields, actor)
+      if (paused !== undefined) {
         await tx.update(tasks).set({ paused, updatedAt: this.#now() }).where(eq(tasks.id, row.id))
         await tx.insert(auditLog).values({ projectId: project.id, taskId: row.id, actor, action: paused ? 'task.paused' : 'task.resumed', detail: {} })
-      })
-    }
+      }
+      return edit
+    })
+    if (edit) await this.noticeTaskEdit(row.id, edit, actor).catch(error => console.error('Telling the run about the PM edit failed', error))
     const task = await loadTask(db, row.id)
     events.publish({ type: 'task.updated', task })
     this.poke([row.id])
@@ -1367,11 +1368,12 @@ export class Orchestrator implements RunnerHandlers {
       const [task] = await db.select().from(tasks).where(and(eq(tasks.projectId, project.id), eq(tasks.number, Number(match[2])), isNull(tasks.deletedAt)))
       if (!task) throw new ToolError(`Task ${parsed.taskRef} no longer exists`)
       if (tool === 'delete_task' && task.status === 'merged') throw new ToolError('Merged tasks cannot be deleted')
+      if (tool === 'approve_task' && task.type === 'design') throw new ToolError('Use approve_design to approve a design')
       if (tool === 'approve_task' && task.status !== 'human_review') throw new ToolError('Task must be in Human review')
       const event = parsed.transition
       const destination = event?.type === 'resolve' ? event.to : event?.type === 'approve' ? 'ready' : event?.type === 'human_request_changes' ? 'in_progress' : 'backlog'
       const verb = tool === 'delete_task' ? 'Delete' : tool === 'approve_task' ? 'Approve' : 'Move'
-      const summary = `${verb} ${taskRef(project.prefix, task.number)}${tool === 'move_task' ? ` to ${destination.replaceAll('_', ' ')}` : ''}: ${task.title}`
+      const summary = `${verb} ${taskRef(project.prefix, task.number)}${tool === 'move_task' ? ` to ${destination.replaceAll('_', ' ')}` : ''}: ${task.title}${tool === 'approve_task' ? ` (${task.prNumber ? `PR #${task.prNumber} at ` : 'head: '}${task.headSha ?? 'none'})` : ''}${event?.type === 'human_request_changes' && event.feedback ? ` — Feedback: ${event.feedback}` : ''}`
       return { input: { ...parsed, project: project.slug, taskRef: taskRef(project.prefix, task.number) }, summary: parsed.reason ? `${summary} — ${parsed.reason}` : summary, targetId: task.id, taskId: task.id, projectId: project.id }
     }
     switch (tool) {

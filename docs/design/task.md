@@ -100,7 +100,7 @@ Ready tasks whose epic has unfinished prerequisites show **Waiting on epic: <tit
 
 ## Merged tasks
 
-Merged is final (D10). The task reads as it shipped: title, properties, dependencies, description and criteria are shown but not editable (a lock note says "Merged, so read-only. You can still comment."), and the server rejects edits with `409 task_merged`. Comments still work.
+Merged is final for workflow and shipped code (D10, amended by D27). The PM may edit Merged metadata through update_task; the human task page remains read-only. The task reads as it shipped: title, properties, dependencies, description and criteria are shown but not editable (a lock note says "Merged, so read-only. You can still comment."), and the server rejects edits with `409 task_merged`. Comments still work.
 
 ## Evidence review (D21)
 
