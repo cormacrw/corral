@@ -33,6 +33,7 @@ let retryMs = 1000
 
 export function useLive() {
   const route = useRoute()
+  const pending = usePendingPlan()
   const state = useState<LiveState>('live', () => ({
     loaded: false,
     error: null,
@@ -88,6 +89,7 @@ export function useLive() {
 
   function apply(event: ServerEvent): void {
     const s = state.value
+    pending.apply(event)
     switch (event.type) {
       case 'project.created':
         s.projects.push(event.project)

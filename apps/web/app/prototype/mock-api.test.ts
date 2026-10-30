@@ -208,4 +208,23 @@ describe('prototype mock API', () => {
     expect(detail.plans.every(p => p.status === 'discarded')).toBe(true)
     expect(events.map(e => e.type)).toEqual(expect.arrayContaining(['task.deleted', 'plan.updated', 'plan.session', 'plan.drafts']))
   })
+  it('starts and retries a client UUID as one session with one human message', async () => {
+    vi.useFakeTimers()
+    try {
+      const [project] = await mockCall<Project[]>('GET', '/projects')
+      const id = '1568b7db-293e-4fc2-a670-b62dc0088e17'
+      const body = { id, projectId: project!.id, text: 'Plan a small change', runtime: 'codex' }
+      const first = await mockCall<PlanSessionDetail>('POST', '/plan/sessions', body)
+      const retry = await mockCall<PlanSessionDetail>('POST', '/plan/sessions', body)
+      expect(first.id).toBe(id)
+      expect(retry.messages).toEqual(first.messages)
+      expect(retry.messages.filter(m => m.role === 'human')).toHaveLength(1)
+      expect(await mockCall('GET', `/plan/sessions/${id}`)).toEqual(retry)
+      await vi.runAllTimersAsync()
+      const replied = await mockCall<PlanSessionDetail>('GET', `/plan/sessions/${id}`)
+      expect(replied.messages.filter(m => m.role === 'pm')).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

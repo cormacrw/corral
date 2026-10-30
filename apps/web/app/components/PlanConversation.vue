@@ -18,7 +18,19 @@ const flyout = useTaskFlyout()
 const toast = useToast()
 const device = useDevice()
 const id = computed(() => props.sessionId)
-const session = ref<PlanSessionDetail | null>(null)
+const pending = usePendingPlan()
+const starting = computed(() => pending.entries.value[id.value])
+const loadedSession = ref<PlanSessionDetail | null>(null)
+const session = computed({
+  get: () => starting.value?.session ?? loadedSession.value,
+  set: (value) => { loadedSession.value = value }
+})
+const waitingForStart = computed(() => Boolean(starting.value && starting.value.state !== 'failed' && !session.value?.activeRunId && !session.value?.messages.some(m => m.role === 'pm')))
+async function backToPrompt() {
+  if (!starting.value) return
+  pending.restored.value = starting.value
+  await router.push('/plan')
+}
 const error = ref<string | null>(null)
 const text = ref('')
 const taskRef = ref<string | null>(null)
@@ -46,6 +58,7 @@ async function load() {
     const loaded = await api.plan.session(requested)
     if (requested !== id.value) return
     session.value = loaded
+    if (starting.value) starting.value.session = loaded
     if (session.value.unread) {
       await api.plan.read(requested)
       if (session.value?.id !== requested) return
@@ -59,14 +72,16 @@ async function load() {
 }
 watch(id, () => {
   session.value = null
+  error.value = null
   text.value = ''
   approvalTarget.value = null
-  void load()
+  if (!starting.value || starting.value.state === 'accepted') void load()
 }, { immediate: true })
 onMounted(() => {
   const stop = live.subscribe((event) => {
     if (!session.value) return
     if (event.type === 'plan.message' && event.message.sessionId === session.value.id) {
+      if (event.message.role === 'human') session.value.messages = session.value.messages.filter(m => !m.id.startsWith('pending-'))
       if (!session.value.messages.some(m => m.id === event.message.id)) session.value.messages.push(event.message)
     }
     if (event.type === 'plan.updated' && event.plan.sessionId === session.value.id) {
@@ -117,7 +132,7 @@ async function send(message: string): Promise<boolean> {
 // draft and attached task alone; Grill me sends the draft.
 const composer = ref<{ focus: () => void } | null>(null)
 const openQuestion = computed(() => session.value ? openQuestionId(session.value.messages) : null)
-const cantApprove = computed(() => busy.value || approving.value !== null || Boolean(session.value?.activeRunId))
+const cantApprove = computed(() => Boolean(starting.value && (starting.value.state !== 'accepted' || waitingForStart.value)) || busy.value || approving.value !== null || Boolean(session.value?.activeRunId))
 const cantSend = computed(() => cantApprove.value || runnerOffline.value)
 async function submit(message: string): Promise<boolean> {
   if (props.inbox && approvalTarget.value && latest.value) return approve(latest.value, approvalTarget.value)
@@ -215,6 +230,7 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
       compact
     >
       <template #actions>
+        <PlanSessionSwitcher v-if="!props.inbox" />
         <UButton
           v-if="props.inbox"
           :to="`/plan/${id}`"
@@ -223,7 +239,7 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
           color="neutral"
         />
         <PlanCloseThread
-          v-if="session"
+          v-if="session && (!starting || starting.state === 'accepted')"
           :session="session"
           menu
         />
@@ -267,7 +283,7 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
           />
           <div class="ms-auto flex shrink-0 items-center gap-2">
             <PlanCloseThread
-              v-if="session"
+              v-if="session && (!starting || starting.state === 'accepted')"
               :session="session"
             />
             <UButton
@@ -317,6 +333,17 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
                   :text="message.text"
                   breaks
                 />
+                <UBadge
+                  v-if="starting?.taskRef && message.id === session.messages[0]?.id"
+                  variant="subtle"
+                  class="mt-2"
+                >
+                  Refining {{ starting.taskRef }}
+                </UBadge>
+                <span
+                  v-if="starting?.state === 'failed' && message.id.startsWith('pending-')"
+                  class="block text-xs text-error"
+                >Not sent</span>
               </div>
               <!-- Full width on phones, so a question's answers span the screen -->
               <div
@@ -377,8 +404,15 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
                 </div>
               </div>
             </div>
+            <UAlert
+              v-if="starting?.state === 'failed'"
+              color="error"
+              title="Message not sent"
+              :description="starting.error ?? undefined"
+              :actions="[{ label: 'Retry', onClick: () => pending.start(id) }, { label: 'Back to prompt', onClick: backToPrompt }]"
+            />
             <div
-              v-if="activeRunId"
+              v-if="activeRunId || waitingForStart"
               class="flex max-w-full min-w-0 gap-2"
             >
               <AgentAvatar
