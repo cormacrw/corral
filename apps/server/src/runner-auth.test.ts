@@ -1,3 +1,4 @@
+import { RUNNER_PROTOCOL_VERSION } from '@corral/contracts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import WebSocket from 'ws'
 import { createTestApp, type TestApp } from './test-app.ts'
@@ -14,7 +15,7 @@ function dial(url: string, token?: string): WebSocket {
   const ws = new WebSocket(`${url.replace('http', 'ws')}/runner`, {
     headers: token ? { authorization: `Bearer ${token}` } : {}
   })
-  ws.on('open', () => ws.send(JSON.stringify({ type: 'hello', protocol: 2, runnerId: 'auth-test', name: 'auth-test', activeRuns: [], slots: 1, runtimes: ['claude-code'], roles: ['developer'] })))
+  ws.on('open', () => ws.send(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, commit: 'development', runnerId: 'auth-test', name: 'auth-test', activeRuns: [], slots: 1, runtimes: ['claude-code'], roles: ['developer'] })))
   socket = ws
   return ws
 }
@@ -28,7 +29,7 @@ describe('runner listener authentication', () => {
       it(`accepts an authenticated runner (runnerOnly=${runnerOnly})`, async () => {
         const ws = dial(t!.server!.url, 'correct')
         const message = await new Promise<string>(resolve => ws.once('message', data => resolve(String(data))))
-        expect(JSON.parse(message)).toEqual({ type: 'welcome', runnerId: 'auth-test' })
+        expect(JSON.parse(message)).toEqual({ type: 'welcome', runnerId: 'auth-test', commit: 'development', draining: false, updateRequested: false })
         expect(t!.runner.online).toBe(true)
         for (const path of ['/api/runner', '/api/projects', '/api/anything']) {
           expect((await fetch(t!.server!.url + path)).status).toBe(runnerOnly ? 404 : path === '/api/anything' ? 404 : 200)

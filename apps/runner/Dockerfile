@@ -40,6 +40,8 @@ COPY packages/contracts packages/contracts
 # codex skill directories at startup (they're on volumes, so it can't be baked in)
 COPY apps/runner apps/runner
 
+ARG CORRAL_BUILD_SHA=development
+ENV CORRAL_BUILD_SHA=$CORRAL_BUILD_SHA
 ENV NODE_ENV=production
 ENV CORRAL_RUNNER_DATA_DIR=/data/runner
 ENV CORRAL_RUNNER_NAME=home-server

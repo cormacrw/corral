@@ -33,6 +33,8 @@ services:
     build:
       context: .
       dockerfile: apps/server/Dockerfile
+      args:
+        CORRAL_BUILD_SHA: ${CORRAL_BUILD_SHA:-development}
     container_name: corral-server
     depends_on:
       postgres:
@@ -56,6 +58,8 @@ services:
     build:
       context: .
       dockerfile: apps/runner/Dockerfile
+      args:
+        CORRAL_BUILD_SHA: ${CORRAL_BUILD_SHA:-development}
     container_name: corral-runner
     depends_on:
       - server
@@ -63,6 +67,8 @@ services:
       CORRAL_SERVER_URL: http://server:4100
       CORRAL_RUNNER_TOKEN: ${CORRAL_RUNNER_TOKEN:-}
       CORRAL_RUNNER_NAME: ${CORRAL_RUNNER_NAME:-home-server}
+      # Opt in to draining when the server reports a newer build
+      CORRAL_RUNNER_AUTO_UPDATE: ${CORRAL_RUNNER_AUTO_UPDATE:-false}
       # Most agent runs at once on this machine, and the roles it takes
       CORRAL_RUNNER_SLOTS: ${CORRAL_RUNNER_SLOTS:-4}
       CORRAL_RUNNER_ROLES: ${CORRAL_RUNNER_ROLES:-pm,developer,reviewer,design}

@@ -203,6 +203,7 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
 
     .get('/health', c => c.json({ ok: true }))
 
+    .post('/runners/:runnerId/update', c => c.json(runner.drain(c.req.param('runnerId'), true)))
     .get('/runner', c => c.json(runner.status()))
 
     .get('/setup/repos', async c => c.json(await repos.list(c.req.query('refresh') === '1')))

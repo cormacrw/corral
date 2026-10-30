@@ -40,11 +40,11 @@ export class FakeRunner {
   }
 
   // Takes every role and runtime with plenty of slots unless a test says otherwise
-  static async connect(url: string, activeRuns: { runId: string, leaseEpoch: number }[] = [], runnerId = 'r1', capacity: Partial<RunnerCapacity> = {}): Promise<FakeRunner> {
+  static async connect(url: string, activeRuns: { runId: string, leaseEpoch: number }[] = [], runnerId = 'r1', capacity: Partial<RunnerCapacity> & { commit?: string, autoUpdate?: boolean, draining?: boolean, updateRequested?: boolean } = {}): Promise<FakeRunner> {
     const socket = new WebSocket(`${url.replace('http', 'ws')}/runner`)
     const runner = new FakeRunner(socket)
     await new Promise(resolve => socket.once('open', resolve))
-    runner.send({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, runnerId, name: runnerId, activeRuns, slots: 10, runtimes: ['claude-code', 'codex'], roles: [...RUNNER_ROLES], ...capacity })
+    runner.send({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, commit: 'development', runnerId, name: runnerId, activeRuns, slots: 10, runtimes: ['claude-code', 'codex'], roles: [...RUNNER_ROLES], ...capacity })
     await runner.next('welcome')
     return runner
   }

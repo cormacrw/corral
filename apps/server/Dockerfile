@@ -21,6 +21,8 @@ COPY packages/db packages/db
 COPY apps/server apps/server
 
 # Everything environment-specific is configuration (D12); see docker-compose.yml
+ARG CORRAL_BUILD_SHA=development
+ENV CORRAL_BUILD_SHA=$CORRAL_BUILD_SHA
 ENV NODE_ENV=production
 ENV CORRAL_SERVER_HOST=0.0.0.0
 ENV CORRAL_SERVER_PORT=4100

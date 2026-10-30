@@ -37,7 +37,7 @@ export function ago(minutes: number): string {
 export const profile: Profile = { id: 'user-1', name: 'Cormac', avatarUrl: null }
 
 export const runner: RunnerStatus = {
-  runners: [{ id: 'runner-1', name: 'home-server', online: true, connectedAt: ago(600), lastHeartbeatAt: ago(0), slots: 4, runtimes: ['claude-code', 'codex'], roles: ['pm', 'developer', 'reviewer', 'design'] }],
+  runners: [{ commit: 'prototype', serverCommit: 'prototype', behind: false, draining: false, updateRequested: false, id: 'runner-1', name: 'home-server', online: true, connectedAt: ago(600), lastHeartbeatAt: ago(0), slots: 4, runtimes: ['claude-code', 'codex'], roles: ['pm', 'developer', 'reviewer', 'design'] }],
   online: true,
   runnerId: 'runner-1',
   name: 'home-server',

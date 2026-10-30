@@ -4,8 +4,9 @@ import type { AgentRole, RunOutcome, TaskType } from '@corral/core'
 // runner always dials out (D1), so the same messages work on localhost, the
 // Docker network (D12) and a hosted server later. Messages are JSON.
 
+// 3: build identity and drain state (COR-187)
 // 2: hello carries the runner's slots, runtimes and roles (COR-184)
-export const RUNNER_PROTOCOL_VERSION = 2
+export const RUNNER_PROTOCOL_VERSION = 3
 export const RUNNER_HEARTBEAT_MS = 30_000
 export const RUNNER_PATH = '/runner'
 
@@ -142,7 +143,8 @@ export interface OutcomeReport {
 // ── Messages ─────────────────────────────────────────────────────────────────
 
 export type RunnerMessage =
-  | { type: 'hello', protocol: number, runnerId: string, name: string, activeRuns: { runId: string, leaseEpoch: number }[] } & RunnerCapacity
+  | { type: 'hello', protocol: number, commit: string, draining?: boolean, updateRequested?: boolean, autoUpdate?: boolean, runnerId: string, name: string, activeRuns: { runId: string, leaseEpoch: number }[] } & RunnerCapacity
+  | { type: 'runner.draining', updateRequested: boolean }
   | { type: 'heartbeat', activeRuns: { runId: string, leaseEpoch: number }[] }
   | { type: 'job.result', jobId: string, ok: true, result: SetupJobResult }
   | { type: 'job.result', jobId: string, ok: false, error: string }
@@ -155,7 +157,8 @@ export type RunnerMessage =
   | { type: 'run.message.rejected', runId: string, leaseEpoch: number, text: string, error: string }
 
 export type ServerMessage =
-  | { type: 'welcome', runnerId: string }
+  | { type: 'welcome', runnerId: string, commit: string, draining: boolean, updateRequested: boolean }
+  | { type: 'runner.drain', updateRequested: boolean }
   | { type: 'job.request', jobId: string, job: SetupJob }
   | { type: 'run.assign', job: RunJob }
   | { type: 'run.stop', runId: string, reason: string }
@@ -181,6 +184,11 @@ export type RunnerRole = AgentRole | 'design'
 export const RUNNER_ROLES: readonly RunnerRole[] = ['pm', 'developer', 'reviewer', 'design']
 
 export interface RunnerInfo extends RunnerCapacity {
+  commit: string
+  serverCommit: string
+  behind: boolean
+  draining: boolean
+  updateRequested: boolean
   id: string
   name: string
   online: boolean
