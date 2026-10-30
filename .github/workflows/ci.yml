@@ -48,6 +48,9 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
+      - name: Build
+        run: pnpm run build
+
       - name: Migrations match the schema
         run: |
           pnpm --filter @corral/db generate

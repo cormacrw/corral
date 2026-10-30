@@ -705,7 +705,7 @@ Per-runner pairing and revocation come later with hosting. Remote runners run un
 
 **Decision:**
 
-- **With required checks,** the reviewer doesn't rerun lint, typecheck, tests or build. The project's required checks run them on every push, and the merge gate won't merge without them.
+- **With required checks,** the reviewer doesn't rerun lint, typecheck, tests or build. The project's required checks run them on every push, and the merge gate won't merge without them. Corral's own `ci` workflow gained a build step for this: before it, `nuxt build` only ran at deploy, after merge.
 - **Without required checks,** nothing else verifies the gates, so the reviewer still runs all of them itself, without the cache. If a check can't be run without the cache, it explains which and why in its outcome. `requiredChecks` defaults to empty, so this is the default for a new project.
 - **The reviewer's prompt says which case applies**, naming the required checks or stating that there are none. The server builds this from the project's `requiredChecks`. Role instructions, including a repo's override (D13), defer to it.
 - **The review looks at the code.** The reviewer reads the diff for security, efficiency and logic problems and raises them as specific, actionable feedback. It may run a targeted test or the app when that's the best way to check a criterion or a suspected bug. A cached result never counts as verification.
