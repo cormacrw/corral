@@ -93,6 +93,10 @@ describe('agentStatus', () => {
   })
 })
 
+it('excludes Approved designs from open board work', () => {
+  expect(taskCounts([{ status: 'approved' }, { status: 'merged' }, { status: 'ready' }, { status: 'backlog' }])).toEqual({ board: 1, backlog: 1 })
+})
+
 describe('Ready waiting notes', () => {
   it('marks a paused task, ahead of its other notes', () => {
     const paused = task(projects[0]!, 99, { title: 'Stopped', status: 'in_progress', reviewRounds: 1, paused: true })
@@ -139,9 +143,9 @@ describe('epic review status', () => {
 
   it('counts live board tasks, leaving out Drafts and Backlog', () => {
     const counted = epicWithLiveCounts({ id: 'e', taskCount: 0, mergedCount: 0 } as Parameters<typeof epicWithLiveCounts>[0], [
-      { epicId: 'e', status: 'merged' }, { epicId: 'e', status: 'ready' }, { epicId: 'e', status: 'backlog' }, { epicId: 'e', status: 'draft' }, { epicId: 'other', status: 'merged' }
+      { type: 'task', epicId: 'e', status: 'merged' }, { type: 'task', epicId: 'e', status: 'ready' }, { type: 'design', epicId: 'e', status: 'approved' }, { type: 'design', epicId: 'e', status: 'merged' }, { type: 'task', epicId: 'e', status: 'backlog' }, { type: 'task', epicId: 'e', status: 'draft' }, { type: 'task', epicId: 'other', status: 'merged' }
     ])
-    expect(counted).toMatchObject({ taskCount: 2, mergedCount: 1 })
+    expect(counted).toMatchObject({ taskCount: 4, mergedCount: 2 })
   })
 })
 

@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './test-runner.ts'
+import { complete } from './epic-prs.ts'
 
 let t: TestApp
 let runner: FakeRunner
@@ -243,4 +244,11 @@ it('starts no integration review until a reviewer runner has a free slot, then r
   const { job } = await runner.next('run.assign', m => m.job.epicId === epic.id)
   const [run] = await t.db.select().from(schema.runs).where(eq(schema.runs.id, job.runId))
   expect(run!.runnerId).toBe('r1')
+})
+
+it('completes epic boards with Approved designs and Merged implementation tasks', () => {
+  expect(complete([])).toBe(false)
+  expect(complete([{ type: 'design', status: 'approved' }, { type: 'task', status: 'merged' }])).toBe(true)
+  expect(complete([{ type: 'design', status: 'merged' }])).toBe(false)
+  expect(complete([{ type: 'task', status: 'approved' }])).toBe(false)
 })

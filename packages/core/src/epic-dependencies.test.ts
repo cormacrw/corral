@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { checkEpicDependencies, type EpicDependencyTask } from './epic-dependencies.ts'
 
 const titles = new Map([['a', 'Foundation'], ['b', 'Application'], ['c', 'Release']])
-const task = (id: string, epicId: string | null, dependsOn: string[] = []): EpicDependencyTask => ({ id, epicId, dependsOn, status: 'ready' })
+const task = (id: string, epicId: string | null, dependsOn: string[] = []): EpicDependencyTask => ({ type: 'task', id, epicId, dependsOn, status: 'ready' })
 
 describe('epic dependency validation', () => {
   it('names epics in cycles and self dependencies', () => {

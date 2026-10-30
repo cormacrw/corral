@@ -1,11 +1,11 @@
 import type { DesignVersion } from '@corral/contracts'
-import { approveDesignVersion, bundlePath, designPreviewUrl, taskRef, unpackBundle, type Actor, type DesignVersionStatus } from '@corral/core'
+import { approveDesignVersion, BundleError, bundlePath, designPreviewUrl, taskRef, unpackBundle, type Actor, type DesignVersionStatus } from '@corral/core'
 import { schema, type Database, type Executor } from '@corral/db'
 import { and, asc, desc, eq, isNull } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
 import type { BlobStore } from './blob-store.ts'
 import { ApiFailure } from './errors.ts'
-import { lockTask } from './tasks.ts'
+import { applyTransition, lockTask } from './tasks.ts'
 
 const { designVersions, taskDesignPins, tasks } = schema
 
@@ -189,13 +189,16 @@ export async function readDesign(db: Executor, blobs: BlobStore, project: { id: 
   }
 }
 
-// Whether a tar has index.html at its root (D20), so the preview can serve
-// it on its own. The bundle is untrusted, so this reads it in memory.
-export function bundleHasRootIndex(archive: Uint8Array): boolean {
+// Why a tar can't be a design bundle, or null when it can: it must be a sound
+// archive with index.html at its root (D20), so the preview can serve it on
+// its own. The bundle is untrusted, so this reads it in memory.
+export function bundleProblem(archive: Uint8Array): string | null {
   try {
-    return unpackBundle(archive).has('index.html')
-  } catch {
-    return false
+    if (unpackBundle(archive).has('index.html')) return null
+    return 'The bundle has no index.html at its root. Pass the folder that holds index.html and its assets, with relative paths.'
+  } catch (error) {
+    if (error instanceof BundleError) return `The bundle is not a valid tar archive. ${error.message}.`
+    throw error
   }
 }
 
@@ -234,6 +237,11 @@ export async function readDesignScreenshot(db: Executor, blobs: BlobStore, versi
 export async function approveDesign(db: Database, taskId: string, version: number, actor: Actor): Promise<string> {
   return db.transaction(async (tx) => {
     const { task, project } = await lockTask(tx, taskId)
+    if (task.type === 'design' && task.status === 'approved' && actor.kind === 'human') {
+      const [approved] = await tx.select({ id: designVersions.id }).from(designVersions)
+        .where(and(eq(designVersions.taskId, taskId), eq(designVersions.version, version), eq(designVersions.status, 'approved')))
+      if (approved) return approved.id
+    }
     if (task.type !== 'design' || task.status !== 'human_review') {
       throw new ApiFailure(409, { code: 'transition_rejected', reason: { code: 'invalid_transition', status: task.status, event: 'human_approve' } })
     }
@@ -241,6 +249,7 @@ export async function approveDesign(db: Database, taskId: string, version: numbe
       .from(designVersions).where(eq(designVersions.taskId, taskId)).orderBy(asc(designVersions.version))
     const result = approveDesignVersion(rows, version)
     if (!result.ok) throw new ApiFailure(409, { code: 'invalid_input', issues: [{ path: ['version'], message: result.error }] })
+    await applyTransition(tx, task, project, { type: 'human_approve' }, actor, { event: 'human_approve', headSha: null })
     for (const next of result.versions) {
       const before = rows.find(r => r.id === next.id)!
       if (before.status !== next.status) await tx.update(designVersions).set({ status: next.status, updatedAt: new Date() }).where(eq(designVersions.id, next.id))

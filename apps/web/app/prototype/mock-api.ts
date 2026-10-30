@@ -1,5 +1,5 @@
 import { flowMetricsQuery } from '@corral/contracts'
-import { checkEpicDependencies } from '@corral/core'
+import { checkEpicDependencies, isTaskDone } from '@corral/core'
 import type { CreateAgentInput, CreateTaskInput, EpicReviewActionInput, InboxActionInput, PatchEpicInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
@@ -121,7 +121,7 @@ route('POST', '/projects/:slug/tasks', ([slug], body) => {
 })
 route('GET', '/projects/:slug/tasks/:number/designs', ([slug, number]) => {
   const task = taskIn(slug!, number!)
-  return task.ref === 'COR-4' ? [{ id: 'design-v1', version: 1, status: 'approved', branch: 'design/COR-4', commitSha: 'design-review-v1', spec: '# Review screen', screenshots: [], previewUrl: '', feedback: null, planSessionId: 's-1', createdAt: f.ago(100) }] : []
+  return task.ref === 'COR-4' ? [{ id: 'design-v1', version: 1, status: 'approved', branch: 'design/COR-4', commitSha: 'design-review-v1', spec: '# Review screen', screenshots: [], previewUrl: '', feedback: null, planSessionId: 's-1', createdAt: f.ago(100) }] : (f.designVersions[task.id] ?? [])
 })
 route('GET', '/projects/:slug/tasks/:number', ([slug, number]) => taskIn(slug!, number!))
 // A real resume goes on to start a run, which the prototype has no use for
@@ -144,7 +144,7 @@ route('PATCH', '/projects/:slug/tasks/:number', ([slug, number], body) => {
     const tasks = f.tasks.filter(t => t.epicId === id && t.status !== 'draft')
     Object.assign(epic, {
       taskCount: tasks.length,
-      mergedCount: tasks.filter(t => t.status === 'merged').length,
+      mergedCount: tasks.filter(isTaskDone).length,
       updatedAt: task.updatedAt
     })
     emit({ type: 'epic.updated', epic })
@@ -275,12 +275,13 @@ route('POST', '/inbox/:taskId/actions', ([taskId], body) => {
   }
   const accepted = input.action === 'approve'
   const now = new Date().toISOString()
-  Object.assign(task, { status: accepted ? 'merged' : 'in_progress', mergedAt: accepted ? now : null, updatedAt: now })
+  const approvedDesign = accepted && task.type === 'design'
+  Object.assign(task, { status: approvedDesign ? 'approved' : accepted ? 'merged' : 'in_progress', mergedAt: accepted && !approvedDesign ? now : null, updatedAt: now })
   if (input.action === 'request_changes') {
     ;(f.comments[task.id] ??= []).push({ id: `cm-${Date.now()}`, taskId: task.id, author: { kind: 'human', userId: f.profile.id }, body: input.text, pinned: false, createdAt: now })
     task.statusReason = input.text
   }
-  const resolution = accepted ? (task.type === 'spike' ? 'You accepted the findings' : 'You approved the merge') : 'You requested changes'
+  const resolution = approvedDesign ? 'You approved the design' : accepted ? (task.type === 'spike' ? 'You accepted the findings' : 'You approved the merge') : 'You requested changes'
   f.resolvedInbox.unshift({ ...item, id: `resolved-${task.id}-${Date.now()}`, type: 'activity', sender: { name: 'You', role: 'system' }, body: resolution, preview: resolution, resolution, at: now })
   emit({ type: 'task.updated', task })
   return { task }

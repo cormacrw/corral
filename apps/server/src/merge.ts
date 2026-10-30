@@ -4,6 +4,7 @@ import { and, asc, desc, eq, isNull } from 'drizzle-orm'
 import { EpicMerger } from './epic-merge.ts'
 import { appendAudit, auditEvent, type TransitionDetail } from './audit.ts'
 import { isEpicRebaseTask, taskBase } from './task-base.ts'
+import { ApiFailure } from './errors.ts'
 import { publishDependents } from './dependent-tasks.ts'
 import type { EventBus } from './events.ts'
 import type { CheckResult, GitHubClient, PullRequest } from './github.ts'
@@ -332,6 +333,7 @@ export class MergeOrchestrator {
     const { db } = this.#d
     await db.transaction(async (tx) => {
       const { task, project } = await lockTask(tx, taskId)
+      if (task.type === 'design') throw new ApiFailure(409, { code: 'conflict', constraint: 'approve_design_version' })
       await applyTransition(tx, task, project, { type: 'human_approve' }, actor, { event: 'human_approve', headSha: task.headSha })
     })
     await this.#publish(taskId)

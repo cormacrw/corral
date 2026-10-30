@@ -281,6 +281,13 @@
       "when": 1793390073396,
       "tag": "0039_moaning_ironclad",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1793397372445,
+      "tag": "0040_late_colossus",
+      "breakpoints": true
     }
   ]
 }

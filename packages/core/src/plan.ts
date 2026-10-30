@@ -2,6 +2,7 @@ import { checkEpicDependencies, type EpicDependencyProblem, type EpicDependencyT
 import { checkDependencies, type DependencyProblem } from './dependencies.ts'
 import type { DesignVersionStatus } from './design.ts'
 import type { EpicReviewMode } from './project.ts'
+import { checkDefinitionOfReady, type ReadyProblem } from './ready.ts'
 import type { TaskStatus } from './status.ts'
 import type { TaskPriority, TaskType } from './task.ts'
 
@@ -68,10 +69,8 @@ export type PlanProblem =
   | { code: 'empty_epic', key: string }
   | { code: 'unknown_epic', key: string, epic: string }
   | { code: 'duplicate_key', key: string }
-  | { code: 'missing_title', key: string }
-  | { code: 'missing_description', key: string }
-  | { code: 'missing_acceptance_criteria', key: string }
-  | { code: 'blank_acceptance_criterion', key: string }
+  | { code: 'key_shaped_like_ref', key: string, message: string }
+  | { code: ReadyProblem, key: string }
   | { code: 'dependency', problem: DependencyProblem }
   | { code: 'duplicate_ref', key: string, ref: string }
   | { code: 'unknown_ref', key: string, ref: string, message: string }
@@ -122,6 +121,7 @@ export interface PlanDependencyContext {
 // target by designPinKey; a task may pin only an approved version (D20).
 export function checkPlan(plan: ProposedPlan, refs: ReadonlyMap<string, PlanRef> = new Map(), designs: ReadonlyMap<string, DesignPinTarget> = new Map(), context?: PlanDependencyContext): PlanProblem[] {
   const problems: PlanProblem[] = []
+  const normalizedRefs = caseInsensitiveRefs(refs)
   if (plan.tasks.length === 0) return [{ code: 'no_tasks' }]
   const epicKeys = new Set<string>()
   for (const epic of plan.epics) {
@@ -135,14 +135,15 @@ export function checkPlan(plan: ProposedPlan, refs: ReadonlyMap<string, PlanRef>
     if (task.epic && !epicKeys.has(task.epic)) problems.push({ code: 'unknown_epic', key: task.key, epic: task.epic })
     if (seen.has(task.key)) problems.push({ code: 'duplicate_key', key: task.key })
     seen.add(task.key)
-    if (!task.title.trim()) problems.push({ code: 'missing_title', key: task.key })
-    if (!task.description.trim()) problems.push({ code: 'missing_description', key: task.key })
-    if (task.acceptanceCriteria.length === 0) problems.push({ code: 'missing_acceptance_criteria', key: task.key })
-    else if (task.acceptanceCriteria.some(c => !(typeof c === 'string' ? c : c.text).trim())) problems.push({ code: 'blank_acceptance_criterion', key: task.key })
+    if (/^[a-z]+-\d+$/i.test(task.key)) problems.push({
+      code: 'key_shaped_like_ref', key: task.key,
+      message: `Task key "${task.key}" looks like a task ref. Choose a key such as "task-setup" so dependencies on existing tasks stay unambiguous.`
+    })
+    for (const code of checkDefinitionOfReady({ ...task, acceptanceCriteria: task.acceptanceCriteria.map(c => typeof c === 'string' ? c : c.text) })) problems.push({ code, key: task.key })
     if (task.ref) {
-      const problem = refProblem(task.key, task.ref, refs.get(task.ref) ?? { kind: 'unknown' }, true)
+      const problem = refProblem(task.key, task.ref, normalizedRefs.get(task.ref.toUpperCase()) ?? { kind: 'unknown' }, true)
       if (problem) problems.push(problem)
-      if (plan.tasks.some(t => t !== task && t.ref === task.ref) && !problems.some(p => p.code === 'duplicate_ref' && p.ref === task.ref)) {
+      if (plan.tasks.some(t => t !== task && t.ref?.toUpperCase() === task.ref!.toUpperCase()) && !problems.some(p => p.code === 'duplicate_ref' && p.ref.toUpperCase() === task.ref!.toUpperCase())) {
         problems.push({ code: 'duplicate_ref', key: task.key, ref: task.ref })
       }
     }
@@ -153,13 +154,13 @@ export function checkPlan(plan: ProposedPlan, refs: ReadonlyMap<string, PlanRef>
   }
   // A dependency names a key in the plan, the ref of a task the plan
   // revises (the same node), or any other existing task (outside the graph)
-  const keyOfRef = new Map(plan.tasks.filter(t => t.ref).map(t => [t.ref!, t.key]))
+  const keyOfRef = new Map(plan.tasks.filter(t => t.ref).map(t => [t.ref!.toUpperCase(), t.key]))
   const keys = new Set(plan.tasks.map(t => t.key))
   const graph = new Map(plan.tasks.map(t => [t.key, t.dependsOn.flatMap((dep) => {
     if (keys.has(dep)) return [dep]
-    const key = keyOfRef.get(dep)
+    const key = keyOfRef.get(dep.toUpperCase())
     if (key) return [key]
-    const found = refs.get(dep)
+    const found = normalizedRefs.get(dep.toUpperCase())
     if (!found) return [dep]
     const problem = refProblem(t.key, dep, found, false)
     if (problem) problems.push(problem)
@@ -174,9 +175,10 @@ export function checkPlan(plan: ProposedPlan, refs: ReadonlyMap<string, PlanRef>
 // Overlay the proposal on the complete project graph. Approval uses this
 // separately because Drafts may have been edited directly since proposing.
 export function checkPlanEpicDependencies(plan: ProposedPlan, context?: PlanDependencyContext): EpicDependencyProblem[] {
+  const refIds = caseInsensitiveRefs(context?.refIds ?? new Map<string, string>())
   const epicKeys = new Set(plan.epics.map(e => e.key))
   const epicId = (key: string) => context?.epicIds.get(key) ?? (epicKeys.has(key) ? `plan-epic:${key}` : key)
-  const taskId = (task: ProposedTask) => (task.ref ? context?.refIds.get(task.ref) : undefined) ?? context?.taskIds.get(task.key) ?? `plan-task:${task.key}`
+  const taskId = (task: ProposedTask) => (task.ref ? refIds.get(task.ref.toUpperCase()) : undefined) ?? context?.taskIds.get(task.key) ?? `plan-task:${task.key}`
   const epicGraph = new Map(context?.epics)
   const titles = new Map(context?.titles)
   for (const epic of plan.epics) {
@@ -184,18 +186,23 @@ export function checkPlanEpicDependencies(plan: ProposedPlan, context?: PlanDepe
     epicGraph.set(epicId(epic.key), (epic.dependsOn ?? []).map(dep => epicKeys.has(dep) ? epicId(dep) : dep))
   }
   const proposedIds = new Map(plan.tasks.map(t => [t.key, taskId(t)]))
-  const proposedRefs = new Map(plan.tasks.filter(t => t.ref).map(t => [t.ref!, taskId(t)]))
+  const proposedRefs = new Map(plan.tasks.filter(t => t.ref).map(t => [t.ref!.toUpperCase(), taskId(t)]))
   const effectiveTasks = new Map((context?.tasks ?? []).map(t => [t.id, t]))
   for (const task of plan.tasks) {
     const id = taskId(task)
     effectiveTasks.set(id, {
-      id, epicId: task.epic ? epicId(task.epic) : null,
+      id, type: task.type, epicId: task.epic ? epicId(task.epic) : null,
       // Validate as board work even though proposed tasks are stored as Drafts.
       status: 'ready',
-      dependsOn: task.dependsOn.map(dep => proposedIds.get(dep) ?? proposedRefs.get(dep) ?? context?.refIds.get(dep) ?? dep)
+      dependsOn: task.dependsOn.map(dep => proposedIds.get(dep) ?? proposedRefs.get(dep.toUpperCase()) ?? refIds.get(dep.toUpperCase()) ?? dep)
     })
   }
   return checkEpicDependencies(epicGraph, [...effectiveTasks.values()], titles).filter(p => p.code !== 'epic_task_deadlock' || p.epics.length > 0)
+}
+
+// Core callers need not pre-normalize either map keys or proposed refs.
+function caseInsensitiveRefs<T>(refs: ReadonlyMap<string, T>): Map<string, T> {
+  return new Map([...refs].map(([ref, target]) => [ref.toUpperCase(), target]))
 }
 
 function refProblem(key: string, ref: string, found: PlanRef, revising: boolean): PlanProblem | null {
@@ -243,22 +250,36 @@ export function diffPlans(previous: readonly ProposedTask[], next: readonly Prop
   return result
 }
 
+// Required even for optional fields: extending ProposedTask must add an equality
+// rule here. Keys are compared too, though diffPlans uses them for identity.
+const taskComparisons: { [K in keyof ProposedTask]-?: (a: ProposedTask, b: ProposedTask) => boolean } = {
+  key: (a, b) => a.key === b.key,
+  ref: (a, b) => a.ref === b.ref,
+  epic: (a, b) => (a.epic || undefined) === (b.epic || undefined),
+  title: (a, b) => a.title === b.title,
+  description: (a, b) => a.description === b.description,
+  type: (a, b) => a.type === b.type,
+  priority: (a, b) => a.priority === b.priority,
+  humanReview: (a, b) => a.humanReview === b.humanReview,
+  acceptanceCriteria: (a, b) => a.acceptanceCriteria.length === b.acceptanceCriteria.length && a.acceptanceCriteria.every((c, i) => JSON.stringify(c) === JSON.stringify(b.acceptanceCriteria[i])),
+  dependsOn: (a, b) => sameMembers(a.dependsOn, b.dependsOn),
+  design: (a, b) => samePin(a.design, b.design)
+}
+
 function sameTask(a: ProposedTask, b: ProposedTask): boolean {
-  return a.title === b.title
-    && a.ref === b.ref
-    && (a.epic || undefined) === (b.epic || undefined)
-    && a.description === b.description
-    && a.type === b.type
-    && a.priority === b.priority
-    && a.humanReview === b.humanReview
-    && a.acceptanceCriteria.length === b.acceptanceCriteria.length
-    && a.acceptanceCriteria.every((c, i) => JSON.stringify(c) === JSON.stringify(b.acceptanceCriteria[i]))
-    && a.dependsOn.length === b.dependsOn.length
-    && a.dependsOn.every(d => b.dependsOn.includes(d))
-    && samePin(a.design, b.design)
+  return Object.values(taskComparisons).every(compare => compare(a, b))
+}
+
+// Dependencies and screens are unordered multisets: preserve duplicate counts
+// so edits to duplicate entries remain visible, while reordering is a no-op.
+function sameMembers(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false
+  const sortedA = [...a].sort()
+  const sortedB = [...b].sort()
+  return sortedA.every((value, i) => value === sortedB[i])
 }
 
 function samePin(a: DesignPin | undefined, b: DesignPin | undefined): boolean {
   if (!a || !b) return !a && !b
-  return designPinKey(a) === designPinKey(b) && a.screens.length === b.screens.length && a.screens.every(s => b.screens.includes(s))
+  return designPinKey(a) === designPinKey(b) && sameMembers(a.screens, b.screens)
 }

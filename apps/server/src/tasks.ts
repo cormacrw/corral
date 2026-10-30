@@ -3,6 +3,7 @@ import { holdsEpicOpen, invalidateEpicReview } from './epic-review-state.ts'
 import type { AuditEntry, Comment, CreateTaskInput, HumanTransitionInput, PatchTaskInput, Task, TaskAgent, TaskDesignPin } from '@corral/contracts'
 import { createTaskInput } from '@corral/contracts'
 import {
+  canChangeTaskType,
   checkDependencies,
   createTask as createTaskState,
   DEPENDENCY_DELETED_REASON,
@@ -236,8 +237,8 @@ export async function createTask(db: Executor, project: ProjectRow, rawInput: Cr
   const input = createTaskInput.parse(rawInput)
   // D27 integration feedback creates Ready work without a separate plan approval.
   const created: ReturnType<typeof createTaskState> = options.epicFix
-    ? { ok: true, task: { status: 'ready', humanReview: input.humanReview ?? project.humanReviewDefault, reviewRounds: 0, failedRuns: 0, reason: null } }
-    : createTaskState(actor, requiresHumanReview(input.type, input.humanReview ?? project.humanReviewDefault), options.draft)
+    ? { ok: true, task: { type: input.type, status: 'ready', humanReview: input.humanReview ?? project.humanReviewDefault, reviewRounds: 0, failedRuns: 0, reason: null } }
+    : createTaskState(actor, requiresHumanReview(input.type, input.humanReview ?? project.humanReviewDefault), options.draft, input.type)
   if (!created.ok) throw new ApiFailure(409, { code: 'transition_rejected', reason: created.error })
 
   return db.transaction(async (tx) => {
@@ -367,6 +368,9 @@ export async function applyTransition(
         .where(eq(designVersions.id, latest.id))
     }
   }
+  if (event.type === 'human_request_changes' && event.feedback?.trim()) {
+    await tx.insert(comments).values({ taskId: task.id, author: actor, body: event.feedback!, pinned: true })
+  }
   await appendAudit(tx, { projectId: project.id, taskId: task.id, actor }, auditEvent('task.transition', { ...detail, from: task.status, to: next.status satisfies TaskStatus }))
   return next
 }
@@ -385,6 +389,9 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
     const { task } = await lockTask(tx, taskId)
     // Merged is final (D10): the record stays as it shipped; comments still work
     if (task.status === 'merged') throw new ApiFailure(409, { code: 'conflict', constraint: 'task_merged' })
+    if (input.type && input.type !== task.type && !canChangeTaskType(task)) {
+      throw new ApiFailure(409, { code: 'conflict', constraint: 'task_type_locked' })
+    }
     const { acceptanceCriteria: criteriaInput, dependsOn, ...fields } = input
     // D20: a design task's flag can't be turned off, by the human or a plan
     if ((fields.type ?? task.type) === 'design') fields.humanReview = true
@@ -489,7 +496,7 @@ export async function listHistory(db: Executor, taskId: string): Promise<AuditEn
 export async function deleteTaskRows(db: Executor, taskId: string, actor: Actor, reason: string | null, options: { soft?: boolean, detachDependents?: boolean } = {}): Promise<string[]> {
   return db.transaction(async (tx) => {
     const { task, project } = await lockTask(tx, taskId)
-    const mode = options.soft && task.status === 'draft' ? 'soft' : deletionFor(task.status)
+    const mode = options.soft && task.status === 'draft' ? 'soft' : deletionFor(task)
     if (mode === 'not_allowed') throw new ApiFailure(409, { code: 'conflict', constraint: 'merged_tasks_are_immutable' })
     const dependents = await tx.select({ task: tasks }).from(taskDependencies)
       .innerJoin(tasks, eq(tasks.id, taskDependencies.taskId))

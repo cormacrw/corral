@@ -22,7 +22,7 @@ import { listTaskAttachments, readProjectAttachment } from './attachments.ts'
 import type { BlobStore } from './blob-store.ts'
 import { claimNextTask, type Claim, type Place } from './claim.ts'
 import { publishDependents } from './dependent-tasks.ts'
-import { bundleHasRootIndex, DesignNotFound, readDesign } from './designs.ts'
+import { bundleProblem, DesignNotFound, readDesign } from './designs.ts'
 import { ApiFailure } from './errors.ts'
 import type { EventBus } from './events.ts'
 import type { GitHubClient, PullRequest } from './github.ts'
@@ -1545,7 +1545,8 @@ export class Orchestrator implements RunnerHandlers {
   }
 
   // D20: a new design version at the commit the runner just pushed. The
-  // bundle must have index.html at its root so the preview can serve it.
+  // bundle must be a sound archive with index.html at its root so the
+  // preview can serve it.
   async #submitDesign(ctx: RunContext, input: unknown) {
     const { db, github, blobs } = this.#d
     const task = ctx.task!
@@ -1556,9 +1557,8 @@ export class Orchestrator implements RunnerHandlers {
     const bundle = Buffer.from(submission.bundle.dataBase64, 'base64')
     const shots = submission.screenshots.map(s => ({ ...s, data: Buffer.from(s.dataBase64, 'base64') }))
     if (bundle.length + shots.reduce((n, s) => n + s.data.length, 0) > MAX_DESIGN_BYTES) throw new ToolError('Not submitted. A design version is limited to 25 MB.')
-    if (!bundleHasRootIndex(bundle)) {
-      throw new ToolError('Not submitted. The bundle has no index.html at its root. Pass the folder that holds index.html and its assets, with relative paths.')
-    }
+    const problem = bundleProblem(bundle)
+    if (problem) throw new ToolError(`Not submitted. ${problem}`)
     const head = await github.branchHead(ctx.project.repository, task.branch!)
     if (head !== submission.headSha) throw new ToolError(`Not submitted. The branch on GitHub is at ${head ?? 'nothing'}, not your commit ${submission.headSha}. Try again.`)
 

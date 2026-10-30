@@ -6,7 +6,7 @@ import { loadTask } from './tasks.ts'
 
 const { epics, epicDependencies, taskDependencies, tasks } = schema
 
-// Called after a merge commits, including spikes that complete without a PR.
+// Called after completion commits, including designs and spikes without a PR.
 // Return IDs as well as publishing, so the scheduler bypasses wake intervals.
 export async function publishDependents(db: Executor, events: EventBus, taskId: string): Promise<string[]> {
   const ids = (await db.select({ id: taskDependencies.taskId }).from(taskDependencies)

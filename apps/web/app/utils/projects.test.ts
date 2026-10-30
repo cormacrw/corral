@@ -4,7 +4,7 @@ import { releaseNotes } from '../prototype/fixtures.ts'
 import { projectCardSummary, projectNeedsYou } from './projects.ts'
 
 const now = Date.parse('2026-10-29T12:00:00Z')
-type Status = 'backlog' | 'ready' | 'in_progress' | 'agent_review' | 'human_review' | 'ready_to_merge' | 'blocked' | 'failed' | 'merged'
+type Status = 'approved' | 'backlog' | 'ready' | 'in_progress' | 'agent_review' | 'human_review' | 'ready_to_merge' | 'blocked' | 'failed' | 'merged'
 const task = (ref: string, status: Status, lease: 'developer' | 'reviewer' | null = null) => ({
   ref, status, mergedAt: status === 'merged' ? new Date(now - 60 * 60 * 1000).toISOString() : null,
   lease: lease ? { agentId: lease === 'developer' ? 'bolt' : 'vera', runId: 'r', role: lease, expiresAt: '' } : null,
@@ -32,7 +32,7 @@ describe('projectNeedsYou', () => {
 
 describe('projectCardSummary', () => {
   it('counts board and backlog tasks', () => {
-    const s = projectCardSummary({ paused: false }, [task('A-1', 'backlog'), task('A-2', 'backlog'), task('A-3', 'ready'), task('A-4', 'merged')], 0, now)
+    const s = projectCardSummary({ paused: false }, [task('A-1', 'backlog'), task('A-2', 'backlog'), task('A-3', 'ready'), task('A-4', 'merged'), task('A-5', 'approved')], 0, now)
     expect(s.board).toBe(1)
     expect(s.backlog).toBe(2)
   })

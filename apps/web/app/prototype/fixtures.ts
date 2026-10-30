@@ -5,6 +5,7 @@ import type {
   AuditEntry,
   CliStatus,
   Comment,
+  DesignVersion,
   Epic,
   Evidence,
   GlobalStatus,
@@ -158,8 +159,8 @@ export const epics: Epic[] = [
     prHeadSha: null,
     reviewState: null,
     reviewModeLocked: true,
-    taskCount: 7,
-    mergedCount: 2,
+    taskCount: 9,
+    mergedCount: 3,
     createdAt: ago(60 * 24 * 2),
     updatedAt: ago(60)
   },
@@ -280,6 +281,8 @@ const [corral, site] = projects as [Project, Project]
 
 export const tasks: Task[] = [
   task(corral, 20, { title: 'Design the agent settings experience', type: 'design', status: 'in_progress', branch: 'design/COR-20', humanReview: true, lease: { agentId: 'a-design', runId: 'r-design', role: 'designer', expiresAt: ago(-10) }, acceptanceCriteria: criteria('Agent settings work on desktop and mobile') }),
+  task(corral, 41, { title: 'Navigation design', type: 'design', status: 'human_review', epicId: 'e-design', branch: 'design/COR-41', humanReview: true }),
+  task(corral, 40, { title: 'Approved navigation prototype', type: 'design', status: 'approved', epicId: 'e-design', branch: 'design/COR-40', humanReview: true }),
   task(corral, 1, { title: 'Design task type and versions', status: 'merged', epicId: 'e-design', prNumber: 60, prUrl: 'https://github.com/cormacrw/corral/pull/60', mergedAt: ago(60 * 20), mergeCommitSha: 'da0ebe6' }),
   task(corral, 2, { title: 'Serve design bundles sandboxed', status: 'merged', epicId: 'e-design', dependsOn: ['COR-1'], prNumber: 62, prUrl: 'https://github.com/cormacrw/corral/pull/62', mergedAt: ago(60 * 3), mergeCommitSha: 'e5e8457' }),
   task(corral, 3, {
@@ -916,4 +919,18 @@ export function flowMetrics(slug: string, window: FlowMetricsQuery['window']): F
           ref, leadTimeMs: (72 - i * 12) * scale * 3_600_000, dominantStatus: 'backlog'
         }))
   }
+}
+
+// The Approved column's design also exercises the reopening panel.
+export const designVersions: Record<string, DesignVersion[]> = {
+  't-cor-41': [{
+    id: 'design-cor-41-v1', version: 1, status: 'submitted', branch: 'design/COR-41', commitSha: 'prototype-navigation-review',
+    spec: '# Navigation prototype\n\n## Screens\n- navigation: project links and board states',
+    screenshots: [], previewUrl: 'about:blank', feedback: null, planSessionId: null, createdAt: ago(10)
+  }],
+  't-cor-40': [{
+    id: 'design-cor-40-v1', version: 1, status: 'approved', branch: 'design/COR-40', commitSha: 'prototype-navigation',
+    spec: '# Navigation prototype\n\n## Screens\n- navigation: project links and board states',
+    screenshots: [], previewUrl: 'about:blank', feedback: null, planSessionId: null, createdAt: ago(30)
+  }]
 }

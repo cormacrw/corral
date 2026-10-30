@@ -1,3 +1,4 @@
+import { isTaskDone } from '@corral/core'
 import type { AuditEntry, Epic, Inbox, Run, Task } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { epicTitle, epicWithLiveCounts } from '~/utils/labels'
@@ -56,7 +57,7 @@ export function useProjectOverview() {
     if (merged.length === 0) return null
     return Math.round(100 * merged.filter(t => t.reviewRounds === 0).length / merged.length)
   })
-  const waitingOnDependency = computed(() => tasks.value.filter(t => t.status === 'ready' && (t.waitingOnEpics.length > 0 || t.dependsOn.some(ref => tasks.value.find(x => x.ref === ref)?.status !== 'merged'))).length)
+  const waitingOnDependency = computed(() => tasks.value.filter(t => t.status === 'ready' && (t.waitingOnEpics.length > 0 || t.dependsOn.some(ref => !tasks.value.some(x => x.ref === ref && isTaskDone(x))))).length)
   // The agents of the active runs, e.g. "Atlas working" or "Atlas and Bolt
   // reviewing"; tasks aren't assigned ahead of time (D15)
   const activeAgents = (role: 'developer' | 'reviewer') => {
@@ -74,7 +75,7 @@ export function useProjectOverview() {
       const found = list.find(e => e.id === id)
       const group = groups.get(id) ?? { id, title: id === 'none' ? 'No epic' : epicTitle(list, id, groups.size), merged: 0, total: 0, epic: found && epicWithLiveCounts(found, tasks.value) }
       group.total++
-      if (task.status === 'merged') group.merged++
+      if (isTaskDone(task)) group.merged++
       groups.set(id, group)
     }
     return [...groups.values()]

@@ -31,7 +31,7 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
      | Ready to merge | Ready to merge | Corral |
      | Blocked & failed | Blocked, Failed | You |
      | Merged | Merged | Last 3 days |
-     | Approved | Approved | Designs (D20; not built yet) |
+     | Approved | Approved | Designs with an approved prototype (D20) |
 
    - **Cards:** buttons with a `bg-default` background, a 1px border and `rounded-md`.
      - **Line 1:** the ref, the priority (Urgent in `error`, High in `warning`, others muted), a type badge for Bug (`error`, bug icon), Spike (`info`, flask icon) and Design (D20) but not Task (D19), and the PR number with an icon.

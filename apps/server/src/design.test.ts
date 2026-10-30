@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { bundleHasRootIndex } from './designs.ts'
+import { bundleProblem } from './designs.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './test-runner.ts'
 
@@ -28,12 +28,13 @@ function tarball(files: Record<string, string>): Buffer {
   }
 }
 
-describe('bundleHasRootIndex', () => {
+describe('bundleProblem', () => {
   it('finds index.html at the root of the bundle, and only there', () => {
-    expect(bundleHasRootIndex(tarball({ 'index.html': '<h1>Hi</h1>', 'assets/app.js': '1' }))).toBe(true)
-    expect(bundleHasRootIndex(tarball({ 'dist/index.html': '<h1>Hi</h1>' }))).toBe(false)
-    expect(bundleHasRootIndex(tarball({ 'main.html': '<h1>Hi</h1>' }))).toBe(false)
-    expect(bundleHasRootIndex(Buffer.from('not a tarball'))).toBe(false)
+    const noIndex = 'The bundle has no index.html at its root. Pass the folder that holds index.html and its assets, with relative paths.'
+    expect(bundleProblem(tarball({ 'index.html': '<h1>Hi</h1>', 'assets/app.js': '1' }))).toBeNull()
+    expect(bundleProblem(tarball({ 'dist/index.html': '<h1>Hi</h1>' }))).toBe(noIndex)
+    expect(bundleProblem(tarball({ 'main.html': '<h1>Hi</h1>' }))).toBe(noIndex)
+    expect(bundleProblem(Buffer.from('not a tarball'))).toBe('The bundle is not a valid tar archive. Truncated tar archive: entry 1 at offset 0 has 13 of 512 header bytes.')
   })
 })
 
@@ -45,8 +46,9 @@ describe('design tasks submit versions instead of a PR', () => {
 
   beforeAll(async () => {
     t = await createTestApp('pglite', { listen: true })
+    // Shared scenarios leave fake author and PM runs active; match their capacity.
     await t.db.update(agents).set({ concurrency: 50 })
-    runner = await FakeRunner.connect(t.server!.url)
+    runner = await FakeRunner.connect(t.server!.url, [], 'r1', { slots: 50 })
   })
 
   afterAll(async () => {
@@ -190,7 +192,7 @@ describe('design tasks submit versions instead of a PR', () => {
     expect(v1).toMatchObject({ version: 1, status: 'submitted', branch: `design/${task.ref}`, commitSha: 'd1' })
     expect(v1!.screenshots.map(s => s.fileName)).toEqual(['login-desktop.png', 'login-mobile.png'])
     expect(Buffer.from((await t.blobs.get(v1!.specBlob))!).toString('utf8')).toBe(SPEC.trim())
-    expect(bundleHasRootIndex((await t.blobs.get(v1!.bundleBlob))!)).toBe(true)
+    expect(bundleProblem((await t.blobs.get(v1!.bundleBlob))!)).toBeNull()
     // The preview route serves the stored bundle as it was submitted
     const preview = await t.request('GET', `/api/designs/${v1!.id}/files/`)
     expect(preview.status).toBe(200)
@@ -239,6 +241,18 @@ describe('design tasks submit versions instead of a PR', () => {
     t.github.setBranch(project.repository, developer.branch!, 'd1')
     expect(await runner.call(developer.runId, developer.leaseEpoch, 'submit_design', submission('d1', tarball({ 'dist/index.html': '<h1>Login</h1>' }))))
       .toMatchObject({ ok: false, error: 'Not submitted. The bundle has no index.html at its root. Pass the folder that holds index.html and its assets, with relative paths.' })
+    expect(await versionsOf(task)).toHaveLength(0)
+    await pause(project)
+  })
+
+  it('rejects a corrupt bundle with an error naming where, not as a missing index.html', async () => {
+    const { project, task } = await approved()
+    const developer = await nextJob(task, 'designer')
+    t.github.setBranch(project.repository, developer.branch!, 'd1')
+    const corrupt = tarball({ 'index.html': '<h1>Login</h1>' })
+    corrupt[512 + 150] = corrupt[512 + 150]! ^ 1
+    expect(await runner.call(developer.runId, developer.leaseEpoch, 'submit_design', submission('d1', corrupt)))
+      .toMatchObject({ ok: false, error: expect.stringMatching(/^Not submitted\. The bundle is not a valid tar archive\. .*offset 512/) })
     expect(await versionsOf(task)).toHaveLength(0)
     await pause(project)
   })
@@ -292,6 +306,8 @@ describe('design tasks submit versions instead of a PR', () => {
 
     const path = `/api/projects/${project.slug}/tasks/${task.number}/designs/1/approve`
     expect((await t.request('POST', path, { note: 'Ship the desktop layout first.' })).status).toBe(200)
+    expect(await taskRow(task.id)).toMatchObject({ status: 'approved', prNumber: null, mergedAt: null })
+    expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/approve`)).status).toBe(409)
     const sessions = async () => t.db.select().from(planSessions).where(eq(planSessions.projectId, project.id))
     const [session] = await sessions()
     expect(session).toMatchObject({ title: 'Build: Login screen' })
@@ -412,6 +428,12 @@ describe('design tasks submit versions instead of a PR', () => {
       expect(await pinOf(ready)).toEqual({ taskRef: design.ref, version: 1, screens: ['login', 'login-error'], newerVersion: null })
 
       // The human reopens the design and v2 is submitted and reviewed
+      const reopened = await t.request('POST', `/api/projects/${project.slug}/tasks/${design.number}/transitions`, { type: 'human_request_changes', feedback: 'Revise the design for v2' })
+      expect(reopened.status).toBe(200)
+      expect(await taskRow(design.id)).toMatchObject({ status: 'in_progress' })
+      expect((await versionsOf(design))[0]).toMatchObject({ status: 'approved' })
+      const feedback = await t.request('GET', `/api/projects/${project.slug}/tasks/${design.number}/comments`).then(r => r.json())
+      expect(feedback).toContainEqual(expect.objectContaining({ body: 'Revise the design for v2', pinned: true }))
       await t.db.update(tasks).set({ status: 'human_review' }).where(eq(tasks.id, design.id))
       await t.db.insert(designVersions).values({ taskId: design.id, version: 2, bundleBlob: v1.bundleBlob, specBlob: v1.specBlob, screenshots: v1.screenshots, branch: v1.branch, commitSha: 'd2' })
       expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${design.number}/designs/2/approve`)).status).toBe(200)
@@ -453,7 +475,7 @@ describe('design tasks submit versions instead of a PR', () => {
       expect((await versionsOf(task))[0]).toMatchObject({ status: 'submitted', planSessionId: null })
       expect(await t.db.select().from(planSessions).where(eq(planSessions.projectId, project.id))).toHaveLength(0)
     } finally {
-      runner = await FakeRunner.connect(t.server!.url)
+      runner = await FakeRunner.connect(t.server!.url, [], 'r1', { slots: 50 })
       await expect.poll(() => t.runner.online).toBe(true)
     }
   })
