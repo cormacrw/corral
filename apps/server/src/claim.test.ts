@@ -44,6 +44,46 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
     return row!
   }
 
+  it('separates design authors from implementation authors, including paused designers', async () => {
+    const project = await projectWithReadyTasks(2)
+    const design = await taskRow(project, 1)
+    const normal = await taskRow(project, 2)
+    await t.db.update(tasks).set({ type: 'design' }).where(eq(tasks.id, design.id))
+    const dev = await developer(5)
+    const designer = await developer(5, { role: 'designer', paused: true })
+    expect(await claimNextTask(t.db, dev)).toMatchObject({ taskId: normal.id })
+    expect(await claimNextTask(t.db, dev)).toBeNull()
+    expect(await claimNextTask(t.db, designer)).toBeNull()
+    expect(await taskRow(project, 1)).toMatchObject({ status: 'ready', leaseRunId: null })
+    // Leave implementation work unleased while the designer is free.
+    const extra = await t.createTask(project.slug)
+    await t.request('POST', `/api/projects/${project.slug}/tasks/${extra.number}/transitions`, { type: 'approve' })
+    await t.db.update(agents).set({ paused: false }).where(eq(agents.id, designer))
+    expect(await claimNextTask(t.db, designer)).toMatchObject({ taskId: design.id })
+    expect(await claimNextTask(t.db, designer)).toBeNull()
+    const detail = await t.request('GET', `/api/projects/${project.slug}/tasks/1`).then(r => r.json())
+    expect(detail).toMatchObject({ developer: { id: designer }, lease: { agentId: designer, role: 'designer' } })
+  })
+
+  it.each(['ready', 'in_progress'] as const)('makes designers wait for task and epic dependencies in %s', async (status) => {
+    const project = await projectWithReadyTasks(2)
+    const dependency = await taskRow(project, 1)
+    const design = await taskRow(project, 2)
+    const [upstream] = await t.db.insert(schema.epics).values({ projectId: project.id, title: 'Upstream', createdBy: t.actor }).returning()
+    const [downstream] = await t.db.insert(schema.epics).values({ projectId: project.id, title: 'Downstream', createdBy: t.actor }).returning()
+    await t.db.update(tasks).set({ epicId: upstream!.id }).where(eq(tasks.id, dependency.id))
+    await t.db.update(tasks).set({ type: 'design', status, epicId: downstream!.id }).where(eq(tasks.id, design.id))
+    await t.db.insert(schema.taskDependencies).values({ taskId: design.id, dependsOnId: dependency.id })
+    await t.db.insert(schema.epicDependencies).values({ epicId: downstream!.id, dependsOnEpicId: upstream!.id })
+    const designer = await developer(5, { role: 'designer' })
+    expect(await claimNextTask(t.db, designer)).toBeNull()
+    // Remove the task dependency: the epic dependency still blocks it.
+    await t.db.delete(schema.taskDependencies).where(eq(schema.taskDependencies.taskId, design.id))
+    expect(await claimNextTask(t.db, designer)).toBeNull()
+    await t.db.update(tasks).set({ status: 'merged' }).where(eq(tasks.id, dependency.id))
+    expect(await claimNextTask(t.db, designer)).toMatchObject({ taskId: design.id, status: 'in_progress' })
+  })
+
   it('moves a Ready task to In progress with a lease, a run and an audit entry', async () => {
     const project = await projectWithReadyTasks(1)
     const agentId = await developer()

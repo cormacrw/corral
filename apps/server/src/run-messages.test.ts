@@ -23,9 +23,9 @@ describe('messages to a live run', () => {
   })
 
   // An approved task the developer has claimed, with its run started
-  async function liveRun() {
+  async function liveRun(type: 'task' | 'design' = 'task') {
     const project = await t.createProject()
-    const task = await t.createTask(project.slug)
+    const task = await t.createTask(project.slug, { type })
     await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'approve' })
     await t.orchestrator.schedule()
     const { job } = await runner.next('run.assign', m => m.job.taskId === task.id)
@@ -36,8 +36,8 @@ describe('messages to a live run', () => {
 
   const post = (slug: string, runId: string, body: unknown) => t.request('POST', `/api/projects/${slug}/runs/${runId}/messages`, body)
 
-  it('forwards the message to the runner, keeps it as a comment and audits it', async () => {
-    const { project, task, job } = await liveRun()
+  it.each(['task', 'design'] as const)('forwards a %s message to the runner, keeps it as a comment and audits it', async (type) => {
+    const { project, task, job } = await liveRun(type)
     const res = await post(project.slug, job.runId, { text: '  Use the existing login form  ' })
     expect(res.status).toBe(202)
     const body = await res.json() as RunMessageAccepted
@@ -119,9 +119,9 @@ describe('edits to a task with a live run', () => {
     await t?.close()
   })
 
-  async function liveRun() {
+  async function liveRun(type: 'task' | 'design' = 'task') {
     const project = await t.createProject()
-    const task = await t.createTask(project.slug)
+    const task = await t.createTask(project.slug, { type })
     await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'approve' })
     await t.orchestrator.schedule()
     const { job } = await runner.next('run.assign', m => m.job.taskId === task.id)
@@ -134,8 +134,8 @@ describe('edits to a task with a live run', () => {
   const comments = (slug: string, number: number) => t.request('GET', `/api/projects/${slug}/tasks/${number}/comments`).then(r => r.json()) as Promise<Comment[]>
   const messagesFor = (runId: string) => runner.received.filter(m => m.type === 'run.message' && m.runId === runId)
 
-  it('sends a Claude run the new acceptance criteria', async () => {
-    const { project, task, job } = await liveRun()
+  it.each(['task', 'design'] as const)('sends a Claude %s run the new acceptance criteria', async (type) => {
+    const { project, task, job } = await liveRun(type)
     const kept = task.acceptanceCriteria[0]!
     const res = await patch(project.slug, task.number, { acceptanceCriteria: [{ id: kept.id, text: kept.text }, { text: 'Locks the account after five tries' }] })
     expect(res.status).toBe(200)
