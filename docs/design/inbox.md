@@ -187,3 +187,9 @@ On the mobile layout ([mobile.md](mobile.md#inbox)), a Plan thread opens as its 
 - Should Activity items expire, or stay forever?
 
 Mobile Plan threads reuse Plan's `PlanQuestion`, composer and `PlanDetail` bottom sheet, without `PlanConversation`. `InboxMobile` renders its focused Plan thread through `InboxMobilePlanThread`; the Inbox header keeps Back to Inbox and Open in Plan (the session route), with Delete thread in the overflow menu. Deleting returns to `/inbox` at once and closes the session after the 5-second Undo toast (`usePlanThreadDelete`); list rows use `SwipeToDelete` for the same action. A waiting plan has View plan and side-by-side approval destinations. The thread provides `FLYOUT_SHEETS`, so `useTaskFlyout` keeps a task or epic opened from the plan sheet on the Inbox route (`?task=`/`?epic=`) in a taller sheet over the plan, and dismissing it goes back to the plan; either successful approval closes the sheet and returns to `/inbox`. Failed approvals keep the screen and sheet open.
+
+## Release notes (COR-129)
+
+The latest 20 deployments appear as Release notes from the configured PM, with its avatar, project, time and short commit range. Undismissed notes sit below the attention items, newest first. They do not add to the Needs you badge or tab count. An unread dot stays until the item is opened, on desktop or mobile. Reading keeps the item in the Inbox; Dismiss moves it to Resolved.
+
+The shared detail pane renders markdown with task references linking to `/tasks/:ref`, and shows the commit range (or the first-deploy commit). Pending notes show “Writing release notes…” and refresh on `deployment.updated`, without a reload. Mobile uses its regular back header and the same detail pane, without a task-details button or reply composer.

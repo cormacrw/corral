@@ -1,5 +1,7 @@
+import type { Inbox } from '@corral/contracts'
 import { describe, expect, it } from 'vitest'
-import { projectCardSummary } from './projects.ts'
+import { releaseNotes } from '../prototype/fixtures.ts'
+import { projectCardSummary, projectNeedsYou } from './projects.ts'
 
 const now = Date.parse('2026-10-29T12:00:00Z')
 type Status = 'backlog' | 'ready' | 'in_progress' | 'agent_review' | 'human_review' | 'ready_to_merge' | 'blocked' | 'failed' | 'merged'
@@ -8,6 +10,24 @@ const task = (ref: string, status: Status, lease: 'developer' | 'reviewer' | nul
   lease: lease ? { agentId: lease === 'developer' ? 'bolt' : 'vera', runId: 'r', role: lease, expiresAt: '' } : null,
   developer: lease ? { id: 'bolt', name: 'Bolt' } : null,
   reviewer: lease === 'reviewer' ? { id: 'vera', name: 'Vera' } : null
+})
+
+describe('projectNeedsYou', () => {
+  const notes = releaseNotes[0]!
+  const blocked = { ...notes, id: 'task', type: 'blocked' } as unknown as Inbox['needsYou'][number]
+  const inbox = (needsYou: Inbox['needsYou']): Inbox => ({ needsYou, activity: [], resolved: [], count: 0 })
+
+  it('leaves release notes out of the count, however many there are', () => {
+    const many = Array.from({ length: 20 }, (_, i) => ({ ...notes, id: `release-${i}` }))
+    expect(projectNeedsYou(inbox(many), notes.project.id)).toEqual([])
+    expect(projectNeedsYou(inbox([...many, blocked]), notes.project.id)).toEqual([blocked])
+    expect(projectCardSummary({ paused: false }, [], projectNeedsYou(inbox(many), notes.project.id).length, now).line).toBe('Nothing running.')
+  })
+
+  it('counts only the given project', () => {
+    expect(projectNeedsYou(inbox([blocked]), 'another-project')).toEqual([])
+    expect(projectNeedsYou(null, notes.project.id)).toEqual([])
+  })
 })
 
 describe('projectCardSummary', () => {

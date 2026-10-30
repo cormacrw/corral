@@ -187,6 +187,11 @@ export const api = {
     message: (slug: string, id: string, text: string) => call<RunMessageAccepted>('POST', `/projects/${slug}/runs/${id}/messages`, { text })
   },
 
+  deployments: {
+    read: (id: string) => call('POST', `/deployments/${id}/read`),
+    dismiss: (id: string) => call('POST', `/deployments/${id}/dismiss`)
+  },
+
   inbox: {
     get: () => call<Inbox>('GET', '/inbox'),
     act: (taskId: string, input: InboxActionInput) => call<{ task: Task | null }>('POST', `/inbox/${taskId}/actions`, input)

@@ -204,6 +204,17 @@ route('POST', '/projects/:slug/runs/:runId/messages', ([slug, runId], body) => {
   return { runId: run.id, comment }
 })
 
+route('POST', '/deployments/:id/read', ([id]) => {
+  const item = f.releaseNotes.find(r => r.deploymentId === id)!
+  item.unread = false
+  return { ok: true }
+})
+route('POST', '/deployments/:id/dismiss', ([id]) => {
+  const item = f.releaseNotes.find(r => r.deploymentId === id)!
+  item.unread = false
+  item.resolution = 'You dismissed these release notes'
+  return { ok: true }
+})
 route('GET', '/inbox', () => f.inbox())
 
 route('POST', '/plan/sessions', (_, body) => {

@@ -72,6 +72,25 @@ describe('migrations', () => {
     expect((await db.execute(sql`select runner_name from runs`)).rows).toEqual([{ runner_name: 'home-server' }])
   })
 
+  it.each([
+    { driver: 'pglite' as const, enabled: true },
+    { driver: 'postgres' as const, enabled: postgresAvailable }
+  ])('0034 adds dismissal without changing historical deployment notes or read state on $driver', async ({ driver, enabled }) => {
+    if (!enabled) return
+    const before = await migrationsBefore('0034_typical_prowler')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db, migrate } = await open(driver)
+    await migrate(before)
+    await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('Test app', 'test-app', 'TA', 'cormacrw/test-app', 'main')`)
+    await db.execute(sql`insert into deployments (project_id, to_sha, notes, notes_status, read_at)
+      select id, 'abc1234', 'Existing release notes', 'ready', '2026-10-01T12:00:00Z' from projects`)
+    await migrate(migrationsFolder)
+    expect((await db.execute(sql`select notes, notes_status, read_at is not null as read, dismissed_at from deployments`)).rows)
+      .toEqual([{ notes: 'Existing release notes', notes_status: 'ready', read: true, dismissed_at: null }])
+    await migrate(migrationsFolder)
+    expect((await db.execute(sql`select count(*)::int as count from deployments`)).rows).toEqual([{ count: 1 }])
+  }, 60_000)
+
   it('0028 preserves historical runs with null runner ownership', async () => {
     const before = await migrationsBefore('0028_complex_clint_barton')
     cleanup.push(() => rm(before, { recursive: true, force: true }))

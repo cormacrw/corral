@@ -60,6 +60,16 @@ export async function recordDeployment(db: Executor, input: CreateDeploymentInpu
   return { deployment: toDeployment(existing!), created: false }
 }
 
+export async function updateDeploymentInbox(db: Executor, events: EventBus, id: string, dismiss = false): Promise<Deployment> {
+  const [row] = await db.update(deployments).set(dismiss
+    ? { dismissedAt: new Date(), readAt: sql`coalesce(${deployments.readAt}, now())` }
+    : { readAt: sql`coalesce(${deployments.readAt}, now())` }).where(eq(deployments.id, id)).returning()
+  if (!row) throw new ApiFailure(404, { code: 'not_found' })
+  const deployment = toDeployment(row)
+  events.publish({ type: 'deployment.updated', deployment })
+  return deployment
+}
+
 export interface ReleaseNotesDeps {
   db: Database
   events: EventBus

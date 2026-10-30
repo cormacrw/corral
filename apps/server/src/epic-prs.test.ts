@@ -150,14 +150,14 @@ it('human changes requested create a fix, hold the PR, and bring the same PR bac
   expect(requested.status).toBe(200)
   const after = await inbox()
   expect(after.needsYou.some(i => i.id === epic.id)).toBe(false)
-  expect(after.resolved.some(i => i.epicId === epic.id && i.preview.includes('You requested changes'))).toBe(true)
+  expect(after.resolved.some(i => 'epicId' in i && i.epicId === epic.id && i.preview.includes('You requested changes'))).toBe(true)
   expect(await reviewState(epic.id)).toBe('changes_requested')
   const fix = await fixOf(epic.id)
   expect(fix).toMatchObject({ status: 'ready', epicId: epic.id, title: 'Fix integration: Deleting a saved search does not ask for confirmation' })
   expect(JSON.stringify(fix.description)).toContain('does not ask for confirmation')
   const criteria = await t.db.select().from(schema.acceptanceCriteria).where(eq(schema.acceptanceCriteria.taskId, fix.id)).orderBy(schema.acceptanceCriteria.position)
   expect(criteria.map(c => c.text)).toEqual(['Deleting a saved search does not ask for confirmation.', 'The empty state still says "No results"'])
-  await capture('human-changes-requested.json', { request: { method: 'POST', path, body: { action: 'request_changes', headSha: job.headSha, text: feedback } }, status: requested.status, epicReviewState: await reviewState(epic.id), fixTask: { ...fix, acceptanceCriteria: criteria.map(c => c.text) }, inboxNeedsYou: after.needsYou.filter(i => i.id === epic.id), inboxResolved: after.resolved.filter(i => i.epicId === epic.id) })
+  await capture('human-changes-requested.json', { request: { method: 'POST', path, body: { action: 'request_changes', headSha: job.headSha, text: feedback } }, status: requested.status, epicReviewState: await reviewState(epic.id), fixTask: { ...fix, acceptanceCriteria: criteria.map(c => c.text) }, inboxNeedsYou: after.needsYou.filter(i => i.id === epic.id), inboxResolved: after.resolved.filter(i => 'epicId' in i && i.epicId === epic.id) })
 
   // Nothing can approve or merge the PR while the changes are outstanding,
   // and new board work doesn't clear the state.
