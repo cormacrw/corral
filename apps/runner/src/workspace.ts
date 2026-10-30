@@ -1,6 +1,6 @@
 import type { RunJob } from '@corral/contracts'
 import type { AgentRole } from '@corral/core'
-import { readdir, readFile, rm, stat } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rm, stat } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import type { GitAuthor } from './config.ts'
 import { git } from './exec.ts'
@@ -26,12 +26,18 @@ async function exists(path: string): Promise<boolean> {
 
 export interface Workspace {
   path: string
-  bare: string
+  bare: string | null
 }
 
 // Fetches the bare clone and creates or reuses the worktree for this run.
 // Returns an error message instead of throwing, so the run can fail cleanly.
 export async function prepareWorkspace(dataDir: string, job: RunJob): Promise<{ workspace: Workspace, error: null } | { workspace: null, error: string }> {
+  if (job.role === 'pm' && job.projectId === null) {
+    if (!job.planSessionId) return { workspace: null, error: 'The job has no plan session' }
+    const path = join(dataDir, 'sessions', job.planSessionId)
+    await mkdir(path, { recursive: true })
+    return { workspace: { path, bare: null }, error: null }
+  }
   const syncError = await syncRepository(dataDir, job.repository)
   if (syncError) return { workspace: null, error: `Could not fetch ${job.repository}: ${syncError}` }
   const bare = barePath(dataDir, job.repository)
@@ -46,7 +52,7 @@ async function checkOut(dataDir: string, bare: string, job: RunJob): Promise<{ w
   if (job.role === 'pm') {
     // A read-only checkout of the default branch (D9), one per Plan session
     if (!job.planSessionId) return { workspace: null, error: 'The job has no plan session' }
-    const path = pmWorktreePath(dataDir, job.projectId, job.planSessionId)
+    const path = pmWorktreePath(dataDir, job.projectId!, job.planSessionId)
     const result = await exists(path)
       ? await git(['checkout', '--detach', '--force', `origin/${job.defaultBranch}`], { cwd: path })
       : await git(['worktree', 'add', '--detach', path, `origin/${job.defaultBranch}`], { cwd: bare })

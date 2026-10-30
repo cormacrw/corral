@@ -6,7 +6,7 @@ Confirmation can depend on the input: `confirmRequired` may be a function, and `
 
 `clarify` is a direct tool: it runs through `PmTools.call` with the `pm.tool_called` audit, linked to its task. It can't use `resolve`, which is human-only, so it uses the PM's `answer` transition, which keeps the review-round and failed-run counters.
 
-`delete_task`, `approve_task` and `move_task` use confirmation cards (see [PM task tools](pm-task-tools.md)). `delete_task` was the first confirm-required tool. It is scoped to the conversation's project and uses the existing human task-deletion service. It refuses merged tasks. The human actor carries `viaPm` with the proposing session and run; confirmed actions appear in Inbox Activity with a link to that conversation, including when deletion removes a Backlog task outright.
+`delete_task`, `approve_task` and `move_task` use confirmation cards (see [PM task tools](pm-task-tools.md)). `delete_task` was the first confirm-required tool. Like every project-scoped PM tool, these tools accept a `project` slug: required globally, defaulting to the session's project otherwise. The resolved slug is saved in the pending action so Confirm uses the same project. Each tool validates its target in that project and uses the matching human service. Deletion refuses merged tasks. The human actor carries `viaPm` with the proposing session and run; confirmed actions appear in Inbox Activity with a link to that conversation, including when deletion removes a Backlog task outright.
 
 A `plan_messages` row of kind `confirmation` is the durable pending-action record: its id is the action id; its session/run identify the proposal; `pending_action` holds tool, validated inputs, summary, target id, state, result and error. This additive JSONB column requires migration 0035. Reloading the conversation restores cards. SSE updates replace messages by id.
 
@@ -16,7 +16,7 @@ Decisions append an `action_result` conversation message without starting a PM t
 
 `request_design_changes` accepts only the latest submitted design version, matching the Inbox feedback service. Preparation and Confirm both check this: a newer submission makes the saved card fail without applying feedback or moving the task. The human can request a new card for the newer version.
 
-`delete_project`, `stop_run`, `stop_all` and `resume_all` use the same lifecycle. `PmAction.targetId` is what a card is bound to: the task, project or run id (`PreparedPmAction.taskId` is separate, for the audit entry). A project card therefore can't fire on a new project that reused its slug. Deleting the conversation's own project cascades away the session and its messages, so `resolve` writes the `pm.action_confirmed` entry with no project, publishes no message events, and returns the card from memory.
+`delete_project`, `stop_run`, `stop_all` and `resume_all` use the same lifecycle. `PmAction.targetId` is what a card is bound to: the task, project or run id (`PreparedPmAction.taskId` is separate, for the audit entry). A project card therefore can't fire on a new project that reused its slug. Deleting the conversation's own project cascades away the session and its messages, so `resolve` writes the `pm.action_confirmed` entry with no project (it records the action's own project when that still exists, which is how a global session's entries get one), publishes no message events, and returns the card from memory.
 
 ## Direct PM tools
 

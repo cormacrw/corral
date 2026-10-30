@@ -61,7 +61,7 @@ Runtimes aren't configured: on every connect the runner runs the same checks as 
 
 ### Runner updates (COR-187)
 
-Protocol 3 hello reports `commit` (`CORRAL_BUILD_SHA`, baked into both images using the build argument), `autoUpdate`, `draining` and `updateRequested`. Welcome returns the server commit and drain state; a protocol refusal closes with code 4000 and JSON `{protocol, commit}` so even a refused runner can compare versions. Different commits mean `behind`, regardless of ancestry. Development defaults to `development`.
+Protocol 4 adds global PM jobs (`projectId: null`, no repository checkout); older runners must update before connecting. The hello fields introduced in protocol 3 report `commit` (`CORRAL_BUILD_SHA`, baked into both images using the build argument), `autoUpdate`, `draining` and `updateRequested`. Welcome returns the server commit and drain state; a protocol refusal closes with code 4000 and JSON `{protocol, commit}` so even a refused runner can compare versions. Different commits mean `behind`, regardless of ancestry. Development defaults to `development`.
 
 `POST /api/runners/:runnerId/update` sets `draining` and `updateRequested` and sends `runner.drain`. Draining runners stay online for current run traffic, but no new runs are dispatched there; affinity can move to another eligible runner. Setup jobs prefer a runner that is not draining, falling back to a draining one when necessary. Cleanup still reaches all online runners. A behind runner with `CORRAL_RUNNER_AUTO_UPDATE=true` drains automatically at hello, before dispatch can start. Without it, being behind does not stop work.
 

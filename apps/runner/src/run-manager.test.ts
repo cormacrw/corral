@@ -1,5 +1,5 @@
 import type { RunnerMessage } from '@corral/contracts'
-import { chmod, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ServerConnection } from './connection.ts'
@@ -61,6 +61,19 @@ describe('RunManager PM turns', () => {
   function notes(messages: RunnerMessage[]): string[] {
     return messages.flatMap(m => m.type === 'run.events' ? m.events : []).flatMap(e => e.type === 'system' ? [e.text] : [])
   }
+
+  it('runs global PM turns without a checkout and explains how to read code', async () => {
+    manager.assign(pmJob({ runId: 'global', projectId: null, repository: '', defaultBranch: '', planSessionId: 'global-thread' }))
+    await finish('global')
+    const [call] = await calls()
+    expect(call!.cwd).toBe(join(dataDir, 'sessions', 'global-thread'))
+    const gitStatus = await exec('git', ['rev-parse', '--is-inside-work-tree'], { cwd: call!.cwd })
+    expect(gitStatus.code).not.toBe(0)
+    const prompt = call!.args[call!.args.indexOf('--append-system-prompt') + 1]
+    expect(prompt).toContain('no repository checkout or worktree')
+    expect(prompt).toContain('Start a project thread when you need to read code')
+    if (process.env.CORRAL_GLOBAL_RUNNER_EVIDENCE) await writeFile(process.env.CORRAL_GLOBAL_RUNNER_EVIDENCE, JSON.stringify({ job: { role: 'pm', projectId: null, repository: '', defaultBranch: '' }, launchedProcess: call, directoryEntries: await readdir(call!.cwd), gitStatus, runnerMessages: sent }, null, 2))
+  })
 
   it('shows the worktree and session start notes on the first turn of a session', async () => {
     manager.assign(pmJob({ runId: 'r1', planSessionId: 's1' }))

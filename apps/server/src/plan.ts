@@ -165,8 +165,9 @@ export class PlanService {
     const deleted = await db.transaction(async (tx) => {
       const [locked] = await tx.select().from(planSessions).where(eq(planSessions.id, sessionId)).for('update')
       if (locked!.closedAt) return null
-      const drafts = await tx.select({ id: tasks.id }).from(tasks)
-        .where(and(eq(tasks.projectId, session.projectId), eq(tasks.status, 'draft'), isNull(tasks.deletedAt))).for('update')
+      const drafts = await tx.select({ id: tasks.id, projectId: tasks.projectId }).from(tasks)
+        .where(and(eq(tasks.status, 'draft'), isNull(tasks.deletedAt), inArray(tasks.id, tx.select({ id: planTasks.taskId }).from(planTasks)
+          .innerJoin(plans, eq(plans.id, planTasks.planId)).where(eq(plans.sessionId, sessionId))))).for('update')
       const owners = await draftSessions(tx, drafts.map(t => t.id))
       const owned = drafts.filter(t => owners.get(t.id)?.id === sessionId)
       const detached = new Set<string>()
@@ -181,18 +182,18 @@ export class PlanService {
     })
     const closed = await this.#toSession(await this.#session(sessionId))
     if (deleted) {
-      for (const task of deleted.owned) events.publish({ type: 'task.deleted', taskId: task.id, projectId: session.projectId })
+      for (const task of deleted.owned) events.publish({ type: 'task.deleted', taskId: task.id, projectId: task.projectId })
       for (const id of deleted.detached) events.publish({ type: 'task.updated', task: await loadTask(db, id) })
       const discarded = await db.select().from(plans).where(and(eq(plans.sessionId, sessionId), eq(plans.status, 'discarded')))
       for (const plan of discarded) events.publish({ type: 'plan.updated', plan: await this.toPlan(plan) })
       events.publish({ type: 'plan.session', session: closed })
-      await this.#publishDrafts(session.projectId)
+      for (const projectId of new Set(deleted.owned.map(t => t.projectId))) await this.#publishDrafts(projectId)
     }
     return closed
   }
 
   // design/plan.md: the project and runtime are locked once the session has messages
-  async start(projectId: string, input: { id?: string | undefined, text: string, taskRef?: string | undefined, runtime?: AgentRuntime }, actor: Actor): Promise<PlanSessionDetail> {
+  async start(projectId: string | null, input: { id?: string | undefined, text: string, taskRef?: string | undefined, runtime?: AgentRuntime }, actor: Actor): Promise<PlanSessionDetail> {
     this.assertTurnPossible()
     const { db, events } = this.#d
     // A retry returns the original thread without interpreting a new message.
@@ -200,12 +201,13 @@ export class PlanService {
       const [existing] = await db.select().from(planSessions).where(eq(planSessions.id, input.id))
       if (existing) return this.#retryStart(existing, projectId)
     }
-    const [project] = await db.select().from(projects).where(eq(projects.id, projectId))
-    if (!project) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['projectId'], message: 'Unknown project' }] })
+    const [project] = projectId ? await db.select().from(projects).where(eq(projects.id, projectId)) : []
+    if (projectId && !project) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['projectId'], message: 'Unknown project' }] })
     let attached: string | null = null
     await requireRuntimeCli(this.#d.runner, input.runtime ?? 'claude-code')
     this.assertTurnPossible()
     if (input.taskRef) {
+      if (!project) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['taskRef'], message: 'Choose a project to attach a task' }] })
       const task = await loadTask(db, await this.#taskIdByRef(project, input.taskRef))
       attached = `${task.ref} ${task.title}`
     }
@@ -235,16 +237,16 @@ export class PlanService {
     return detail
   }
 
-  async #retryStart(session: SessionRow, projectId: string): Promise<PlanSessionDetail> {
+  async #retryStart(session: SessionRow, projectId: string | null): Promise<PlanSessionDetail> {
     if (session.projectId !== projectId) throw new ApiFailure(409, { code: 'conflict', constraint: 'plan_session_project' })
     return this.getSession(session.id)
   }
 
-  async #queueInitialTurn(session: SessionRow, project: ProjectRow, text: string, attached: string | null): Promise<void> {
+  async #queueInitialTurn(session: SessionRow, project: ProjectRow | undefined, text: string, attached: string | null): Promise<void> {
     try {
       await this.#turn(session, project, {
-        prompt: pmPrompt({ text, attachedTask: attached, projectName: project.name, prefix: project.prefix, fresh: true }),
-        fallbackPrompt: pmFallbackPrompt({ text, attachedTask: attached, projectName: project.name, prefix: project.prefix, history: await this.#history(session.id) })
+        prompt: pmPrompt({ text, attachedTask: attached, projectName: project?.name ?? null, prefix: project?.prefix ?? null, fresh: true }),
+        fallbackPrompt: pmFallbackPrompt({ text, attachedTask: attached, projectName: project?.name ?? null, prefix: project?.prefix ?? null, history: await this.#history(session.id) })
       })
     } catch (error) {
       const { db, events } = this.#d
@@ -343,8 +345,8 @@ export class PlanService {
   async message(sessionId: string, input: { text: string, taskRef?: string | undefined }, actor: Actor): Promise<PlanMessage> {
     const { db } = this.#d
     const session = await this.#session(sessionId)
-    const [project] = await db.select().from(projects).where(eq(projects.id, session.projectId))
-    if (!project) throw notFound()
+    const [project] = session.projectId ? await db.select().from(projects).where(eq(projects.id, session.projectId)) : []
+    if (session.projectId && !project) throw notFound()
     this.assertTurnPossible()
     // One turn at a time per session; other sessions, in this project or
     // another, aren't held back, since the PM has no concurrency (D9, D13)
@@ -354,6 +356,7 @@ export class PlanService {
 
     let attached: string | null = null
     if (input.taskRef) {
+      if (!project) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['taskRef'], message: 'Choose a project to attach a task' }] })
       const task = await loadTask(db, await this.#taskIdByRef(project, input.taskRef))
       attached = `${task.ref} ${task.title}`
     }
@@ -361,7 +364,7 @@ export class PlanService {
     const [message] = await db.insert(planMessages).values({ sessionId, role: 'human', text, runId: null }).returning()
     // A new message reopens a session closed by approving its plan
     await db.update(planSessions).set({ updatedAt: new Date(), unread: false, closedAt: null }).where(eq(planSessions.id, sessionId))
-    await db.insert(auditLog).values({ projectId: project.id, actor, action: 'plan.message', detail: { sessionId, messageId: message!.id } })
+    await db.insert(auditLog).values({ projectId: session.projectId, actor, action: 'plan.message', detail: { sessionId, messageId: message!.id } })
     this.#d.events.publish({ type: 'plan.message', message: toMessage(message!) })
 
     // Warm agent sessions do not replay database history. Include the saved
@@ -372,18 +375,18 @@ export class PlanService {
       .orderBy(asc(planMessages.createdAt))
     const turnText = results.length ? `${text}\n\nRecorded tool confirmation results:\n${results.map(r => r.text).join('\n')}` : text
     await this.#turn(session, project, {
-      prompt: pmPrompt({ text: turnText, attachedTask: attached, projectName: project.name, prefix: project.prefix, fresh: session.agentSessionId === null }),
-      fallbackPrompt: pmFallbackPrompt({ text, attachedTask: attached, projectName: project.name, prefix: project.prefix, history: await this.#history(sessionId) })
+      prompt: pmPrompt({ text: turnText, attachedTask: attached, projectName: project?.name ?? null, prefix: project?.prefix ?? null, fresh: session.agentSessionId === null }),
+      fallbackPrompt: pmFallbackPrompt({ text, attachedTask: attached, projectName: project?.name ?? null, prefix: project?.prefix ?? null, history: await this.#history(sessionId) })
     })
     return toMessage(message!)
   }
 
-  async #turn(session: SessionRow, project: ProjectRow, prompts: { prompt: string, fallbackPrompt: string }): Promise<void> {
+  async #turn(session: SessionRow, project: ProjectRow | undefined, prompts: { prompt: string, fallbackPrompt: string }): Promise<void> {
     const runId = await this.#d.startRun(session, {
       role: 'pm',
-      projectId: project.id,
-      repository: project.repository,
-      defaultBranch: project.defaultBranch,
+      projectId: project?.id ?? null,
+      repository: project?.repository ?? '',
+      defaultBranch: project?.defaultBranch ?? '',
       taskId: null,
       taskRef: null,
       branch: null,
@@ -422,24 +425,33 @@ export class PlanService {
 
   // ── PM tools (flows.md §1) ─────────────────────────────────────────────────
 
+  async toolProject(sessionId: string, input: unknown): Promise<ProjectRow> {
+    const session = await this.#session(sessionId)
+    const { project: slug } = z.object({ project: z.string().trim().min(1).optional() }).parse(input ?? {})
+    if (!slug && !session.projectId) throw new ToolError('Provide a project slug in the project argument for this global session.')
+    const [project] = await this.#d.db.select().from(projects).where(slug ? eq(projects.slug, slug) : eq(projects.id, session.projectId!))
+    if (!project) throw new ToolError(slug ? `Unknown project: ${slug}` : 'The project no longer exists')
+    return project
+  }
+
   async tool(sessionId: string, runId: string, tool: string, input: unknown, actor: Actor): Promise<unknown> {
     const { db } = this.#d
     const session = await this.#session(sessionId)
-    const [project] = await db.select().from(projects).where(eq(projects.id, session.projectId))
-    if (!project) throw new ToolError('The project no longer exists')
+    const scoped = !['ask_question', 'approve_plan'].includes(tool)
+    const project = scoped ? await this.toolProject(sessionId, input) : undefined
 
     switch (tool) {
       case 'list_tasks': {
-        const rows = await db.select().from(tasks).where(and(eq(tasks.projectId, project.id), isNull(tasks.deletedAt))).orderBy(asc(tasks.number))
+        const rows = await db.select().from(tasks).where(and(eq(tasks.projectId, project!.id), isNull(tasks.deletedAt))).orderBy(asc(tasks.number))
         const deps = await db.select({ taskId: taskDependencies.taskId, number: tasks.number }).from(taskDependencies)
           .innerJoin(tasks, eq(tasks.id, taskDependencies.dependsOnId))
-        const epicRows = await db.select().from(epics).where(eq(epics.projectId, project.id))
-        const epicDeps = await db.select().from(epicDependencies).innerJoin(epics, eq(epics.id, epicDependencies.epicId)).where(eq(epics.projectId, project.id))
+        const epicRows = await db.select().from(epics).where(eq(epics.projectId, project!.id))
+        const epicDeps = await db.select().from(epicDependencies).innerJoin(epics, eq(epics.id, epicDependencies.epicId)).where(eq(epics.projectId, project!.id))
         return {
-          project: { name: project.name, prefix: project.prefix, defaultBranch: project.defaultBranch, epicReviewModeDefault: project.epicReviewModeDefault },
+          project: { name: project!.name, prefix: project!.prefix, defaultBranch: project!.defaultBranch, epicReviewModeDefault: project!.epicReviewModeDefault },
           epics: epicRows.map(e => ({ id: e.id, title: e.title, reviewMode: e.reviewMode, dependsOn: epicDeps.filter(d => d.epic_dependencies.epicId === e.id).map(d => d.epic_dependencies.dependsOnEpicId) })),
           tasks: rows.map(t => ({
-            ref: taskRef(project.prefix, t.number),
+            ref: taskRef(project!.prefix, t.number),
             title: t.title,
             status: t.status,
             priority: t.priority,
@@ -448,14 +460,14 @@ export class PlanService {
             humanReview: t.humanReview,
             statusReason: t.statusReason,
             pr: t.prUrl,
-            dependsOn: deps.filter(d => d.taskId === t.id).map(d => taskRef(project.prefix, d.number))
+            dependsOn: deps.filter(d => d.taskId === t.id).map(d => taskRef(project!.prefix, d.number))
           }))
         }
       }
 
       case 'get_task': {
         const { taskRef: ref } = z.object({ taskRef: z.string() }).parse(input)
-        const task = await loadTask(db, await this.#taskIdByRef(project, ref))
+        const task = await loadTask(db, await this.#taskIdByRef(project!, ref))
         const notes = await db.select().from(schema.comments).where(eq(schema.comments.taskId, task.id)).orderBy(asc(schema.comments.createdAt))
         const [epic] = task.epicId ? await db.select({ id: epics.id, title: epics.title }).from(epics).where(eq(epics.id, task.epicId)) : []
         return {
@@ -463,13 +475,13 @@ export class PlanService {
           description: richTextToMarkdown(task.description),
           epic: epic ?? null,
           comments: notes.map(c => ({ author: c.author.kind, body: c.body, pinned: c.pinned, at: c.createdAt.toISOString() })),
-          attachments: await listTaskAttachments(db, project.id, task.description, notes.map(c => ({ author: c.author.kind, body: c.body, createdAt: c.createdAt })))
+          attachments: await listTaskAttachments(db, project!.id, task.description, notes.map(c => ({ author: c.author.kind, body: c.body, createdAt: c.createdAt })))
         }
       }
 
       case 'get_run_outcomes': {
         const { taskRef: ref } = z.object({ taskRef: z.string() }).parse(input)
-        const taskId = await this.#taskIdByRef(project, ref)
+        const taskId = await this.#taskIdByRef(project!, ref)
         const rows = await db.select({ run: runs, agent: agents.name }).from(runs).innerJoin(agents, eq(agents.id, runs.agentId))
           .where(eq(runs.taskId, taskId)).orderBy(desc(runs.number)).limit(20)
         return rows.map(({ run, agent }) => ({
@@ -492,7 +504,7 @@ export class PlanService {
       case 'propose_plan': {
         const parsed = proposedPlan.safeParse(input)
         if (!parsed.success) throw new ToolError(`The plan was not saved: ${z.prettifyError(parsed.error)}`)
-        return this.#propose(session, project, runId, parsed.data, actor)
+        return this.#propose(session, project!, runId, parsed.data, actor)
       }
 
       // The human's approval, given in chat and carried out by the PM. It's
@@ -515,7 +527,7 @@ export class PlanService {
 
       case 'flag_stale_docs': {
         const { title, description } = z.object({ title: z.string().trim().min(1), description: z.string().trim().min(1) }).parse(input)
-        const taskId = await createTask(db, project, {
+        const taskId = await createTask(db, project!, {
           title,
           type: 'task',
           description: markdownToRichText(description),
@@ -540,8 +552,9 @@ export class PlanService {
     const { found: designs, versionIds } = await this.#lookupDesigns(project, proposed)
 
     const [latest] = await db.select().from(plans).where(eq(plans.sessionId, session.id)).orderBy(desc(plans.version)).limit(1)
+    if (latest?.status === 'proposed' && latest.projectId !== project.id) throw new ToolError('Approve or discard the current plan before proposing a plan for another project.')
     // A discarded plan's Drafts are gone, so the next version starts afresh
-    const previous = latest?.status === 'discarded' ? undefined : latest
+    const previous = latest?.status === 'discarded' || latest?.projectId !== project.id ? undefined : latest
     const previousEpics = previous ? await this.#epicsOf(previous) : new Map<string, string>()
     // A lone epic that was renamed is the same epic, so its tasks aren't changed
     const renamed = proposed.epics.length === 1 && previousEpics.size === 1

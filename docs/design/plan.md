@@ -2,7 +2,7 @@
 
 **Canvas frames:** `App shell · Plan`, `Plan (component)` (the canvas still shows the plan as a card in the log; this spec moves it to the flyout)
 **Route:** `/plan` (new session) and `/plan/:sessionId`
-**Scope:** global. Each session belongs to one project.
+**Scope:** global. Sessions can be Global or belong to one project (D27).
 
 ## Purpose
 
@@ -29,17 +29,17 @@ Everything is centred vertically and horizontally, in a column up to 720px wide:
 1. **Greeting:** the PM’s avatar (a `primary`-tinted circle) and "What should we plan?".
 2. **Composer** (large; see shared pattern): a 3-row minimum and 15px text, with a soft shadow. Toolbar, left to right:
    - **Attach** (paperclip).
-   - **Project picker:** the project's colour dot, name and a chevron. Opens a listbox of projects, each with thumbnail, name, prefix and a check on the current one. It defaults to the project you were last in. It's locked once a session has messages, because a session belongs to one project.
+   - **Project picker:** the project's colour dot, name and a chevron. Opens a listbox of projects, each with thumbnail, name, prefix and a check on the current one. It includes **Global**, which has no repository checkout. It remembers the last scope picked, defaulting to Global. The scope is locked once a session has messages.
    - **Runtime picker** (D18): which CLI Juno runs on for this session, "Claude" or "Codex". It lists only the CLIs the runner has, and remembers the last one picked (Claude until the runner answers). Like the project, it's locked once the session has messages, because an agent session only resumes on the vendor that made it: the conversation's composer shows it as a disabled button with a lock, and `PATCH /plan/sessions/:id` refuses to change it (409 `plan_session_runtime_locked`).
    - **Refine a task:** opens a searchable popover listing that project's Backlog (ref, title, epic). Picking a task attaches it as a chip at the top of the composer: "Refining COR-18 Billing settings page". The task name is a link that opens the task flyout, and an × removes the chip. With a task attached you can send without typing, and the placeholder becomes "What should change about COR-18? (optional)".
    - **Grill me:** asks Juno to question you. With an empty composer it sends "Grill me"; with a draft it sends "Grill me on this: {draft}". It's on the conversation's composer too, and is disabled while Juno is working.
-   - **Resume:** opens a searchable popover of all past sessions (title and time). Picking one opens it.
+   - **Resume:** opens a searchable popover of all past sessions (title, project name or **Global**, and time). Picking one opens it.
    - The Enter hint and the Send button.
 3. **Drafts:** shown only when the project has Drafts (`GET /projects/:slug/drafts`), in the same bordered list style. Drafts are grouped by the Plan session they belong to: a header row with the session title, "Needs approval" in `primary` while its plan waits, and the time, then one row per draft with its ref, type icon, title and priority. The header opens the session; a draft opens the session with that task in the flyout (`/plan/:id?task=COR-13`), or the task sheet on phones, where every row is full width and at least 48px tall. `plan.drafts` keeps it current, so approving a plan to the board or the Backlog takes its drafts out straight away. A Draft's task detail banner has an **Open plan session** link back to its session.
 
 ### Conversation
 
-- **Header** (48px): the project dot and name, the session title, a neutral badge naming the session's runtime ("Claude" or "Codex"), **Close thread** (ghost) and a **New session** ghost button.
+- **Header** (48px): the project dot and name (or **Global**), the session title, a neutral badge naming the session's runtime ("Claude" or "Codex"), **Close thread** (ghost) and a **New session** ghost button.
 - **Close thread:** asks for confirmation ("Close this thread?", with **Close thread** in `error` and **Cancel**), then discards the session's Draft tasks and its unapproved plan, stops a running Juno turn and closes the session, the same action as in the Inbox ([inbox.md](inbox.md#close-thread)). The thread leaves the side nav and the Inbox at once; closing the current session navigates to `/plan` (the new-session view). Closing another session from its side nav menu keeps the current page open. Sending a message to a closed session reopens it, without the discarded drafts and plan. Tasks already added to the board or Backlog are left as they are; any dependency they had on a discarded draft is dropped rather than blocking them. It's hidden on a session that's already closed.
 - **Message log** (`UChatMessages`, `role="log"`), centred and up to 768px wide:
   - **Your messages:** right-aligned, in a `bg-elevated` bubble.

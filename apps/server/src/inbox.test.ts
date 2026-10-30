@@ -72,7 +72,7 @@ describe('plan threads in the inbox', () => {
 
     const order = ['Needs approval', 'Review task', 'Blocked task', 'Question', 'Unread reply']
     const before = await inbox()
-    const mine = before.needsYou.filter(i => i.project.id === project.id)
+    const mine = before.needsYou.filter(i => i.project?.id === project.id)
     expect(mine.map(i => i.subject)).toEqual(order)
     expect(before.needsYou.map(i => i.at)).toEqual([...before.needsYou.map(i => i.at)].sort().reverse())
     expect(mine.map(i => i.at)).toEqual([at(10), at(15), at(20), at(30), at(40)].map(d => d.toISOString()))
@@ -89,7 +89,7 @@ describe('plan threads in the inbox', () => {
     const after = await inbox()
     expect(after.count).toBe(before.count - 1)
     expect(after.count).toBe(after.needsYou.length)
-    expect(after.needsYou.filter(i => i.project.id === project.id).map(i => i.subject)).toEqual(order.slice(0, -1))
+    expect(after.needsYou.filter(i => i.project?.id === project.id).map(i => i.subject)).toEqual(order.slice(0, -1))
     await t.db.delete(planSessions).where(eq(planSessions.id, idleOld.id))
   })
 

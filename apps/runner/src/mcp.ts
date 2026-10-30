@@ -166,6 +166,10 @@ export const ROLE_TOOLS: Record<AgentRole, AgentTool[]> = {
   pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs', 'delete_task', 'create_task', 'update_task', 'move_task', 'approve_task', 'update_epic', ...PM_AREA_TOOLS]
 }
 
+// PM tools that act on the conversation or on Corral as a whole. The rest take
+// a `project` slug (or name one themselves, like delete_project and list_runs).
+const PM_UNSCOPED_TOOLS: readonly AgentTool[] = ['ask_question', 'approve_plan', ...PM_AREA_TOOLS]
+
 // The tools a run gets: its role's, plus submit_design for a design task's
 // developer (D20)
 export function toolsFor(job: Pick<RunJob, 'role' | 'taskType'>): AgentTool[] {
@@ -222,7 +226,7 @@ export class ToolServer {
     const server = new McpServer({ name: 'corral', version: '1' })
     for (const name of route.tools) {
       const definition = roleToolDefinitions[route.role][name] ?? toolDefinitions[name]
-      server.registerTool(name, { description: definition.description, inputSchema: definition.input }, async (input: Record<string, unknown>) => {
+      server.registerTool(name, { description: definition.description, inputSchema: route.role === 'pm' && !PM_UNSCOPED_TOOLS.includes(name) ? { ...definition.input, project: z.string().min(1).optional().describe('Project slug. Required in global sessions; defaults to the session project in project sessions. Name another project to act there.') } : definition.input }, async (input: Record<string, unknown>) => {
         const outcome = await route.handler(name, input).catch((error: unknown): ToolOutcome => ({ ok: false, error: error instanceof Error ? error.message : String(error) }))
         return toContent(outcome)
       })

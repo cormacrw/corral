@@ -71,11 +71,11 @@ onMounted(() => {
   })
 })
 
-const taskOf = (run: Run) => run.taskId ? state.value.tasks[run.projectId]?.find(t => t.id === run.taskId) : undefined
-const projectOf = (id: string) => state.value.projects.find(p => p.id === id)
+const taskOf = (run: Run) => run.taskId && run.projectId ? state.value.tasks[run.projectId]?.find(t => t.id === run.taskId) : undefined
+const projectOf = (id: string | null) => state.value.projects.find(p => p.id === id)
 // One line per active run: what it's on, where, and for how long
 const runLines = (agent: Agent) => runs.value
-  .filter(r => isLiveRun(r) && r.agentId === agent.id && scope.value.some(p => p.id === r.projectId))
+  .filter(r => isLiveRun(r) && r.agentId === agent.id && (r.projectId === null || scope.value.some(p => p.id === r.projectId)))
   .map((run) => {
     const task = taskOf(run)
     const session = run.taskId ? null : state.value.planSessions.find(s => s.activeRunId === run.id)
