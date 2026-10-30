@@ -145,11 +145,11 @@ describe('migrations', () => {
     expect((await db.execute(sql`select count(*)::int as count from deployments`)).rows).toEqual([{ count: 1 }])
   }, 60_000)
 
-  describe('0039 project-scoped edges', () => {
+  describe('0036 project-scoped edges', () => {
     const actor = sql`'{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb`
     // Two projects, each with two epics and two tasks, in the old shape
     async function seed(driver: 'pglite' | 'postgres') {
-      const before = await migrationsBefore('0039_robust_jackpot')
+      const before = await migrationsBefore('0036_robust_jackpot')
       cleanup.push(() => rm(before, { recursive: true, force: true }))
       const { db, migrate } = await open(driver)
       await migrate(before)
