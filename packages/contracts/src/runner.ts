@@ -163,6 +163,13 @@ export type AgentTool =
   | 'get_status'
   | 'set_update_hold'
   | 'clear_update_hold'
+  | 'list_inbox'
+  | 'act_on_inbox'
+  | 'approve_design'
+  | 'request_design_changes'
+  | 'list_agents'
+  | 'update_agent'
+  | 'create_agent'
 
 export interface OutcomeReport {
   outcome: RunOutcome
