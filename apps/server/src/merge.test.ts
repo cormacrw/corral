@@ -72,10 +72,15 @@ describe('merge orchestrator and human controls', () => {
 
     t.github.setChecks(pr.headSha, [{ name: 'lint', conclusion: 'failure', url: 'https://ci/1' }])
     await t.orchestrator.merges.tick()
-    expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', leaseRunId: null })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress' })
     const notes = await t.db.select().from(comments).where(eq(comments.taskId, task.id))
     expect(notes.at(-1)?.body).toContain('lint: failed (https://ci/1)')
     expect(notes.at(-1)?.body).toContain('pr_updated')
+    // The pass the reviewer's handoff poked may already have claimed the task,
+    // so wait for the developer's run rather than expecting a gap before it
+    await t.orchestrator.schedule()
+    const rework = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
+    expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', leaseRunId: rework.runId })
     await pause(project)
   })
 
