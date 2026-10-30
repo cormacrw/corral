@@ -811,27 +811,34 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
                 :class="['mt-1 size-4 shrink-0', criterion.met ? 'text-success' : criterion.met === false ? 'text-error' : 'text-dimmed']"
                 :aria-label="criterion.met ? 'Met' : criterion.met === false ? 'Not met' : 'Open'"
               />
-              <MarkdownText
-                v-if="readonly"
-                :text="criterion.text"
-                class="min-w-0 flex-1 px-1"
-              />
-              <input
-                v-else
-                :value="criterion.text"
-                class="min-w-0 flex-1 rounded bg-transparent px-1 hover:bg-elevated focus:ring-2 focus:ring-primary focus:outline-none"
-                :aria-label="`Criterion: ${criterion.text}`"
-                @change="saveCriterion(criterion.id, ($event.target as HTMLInputElement).value)"
-              >
-              <label class="flex shrink-0 items-center gap-1 text-xs text-muted">
-                <input
-                  type="checkbox"
-                  :checked="criterion.checkedByHuman"
-                  :disabled="readonly"
-                  @change="toggleHumanCriterion(criterion.id, ($event.target as HTMLInputElement).checked)"
-                >
-                Checked by a human
-              </label>
+              <div class="min-w-0 flex-1">
+                <MarkdownText
+                  v-if="readonly"
+                  :text="criterion.text"
+                  class="px-1"
+                />
+                <UTextarea
+                  v-else
+                  :model-value="criterion.text"
+                  autoresize
+                  :rows="1"
+                  variant="none"
+                  size="sm"
+                  class="w-full"
+                  :ui="{ base: 'px-1 py-0 text-sm/6 hover:bg-elevated focus:ring-2 focus:ring-primary' }"
+                  :aria-label="`Criterion: ${criterion.text}`"
+                  @change="saveCriterion(criterion.id, ($event.target as HTMLTextAreaElement).value)"
+                />
+                <label class="mt-1 flex items-center gap-1 px-1 text-xs text-muted">
+                  <input
+                    type="checkbox"
+                    :checked="criterion.checkedByHuman"
+                    :disabled="readonly"
+                    @change="toggleHumanCriterion(criterion.id, ($event.target as HTMLInputElement).checked)"
+                  >
+                  Checked by a human
+                </label>
+              </div>
               <UButton
                 v-if="!readonly"
                 icon="i-lucide-x"

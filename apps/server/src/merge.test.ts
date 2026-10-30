@@ -65,21 +65,21 @@ describe('merge orchestrator and human controls', () => {
     return { project, task: await getTask(project, created.number), pr, dev }
   }
 
-  it('reserves flagged criteria for the human, without requiring agent evidence or verdicts, and merges after Inbox approval', async () => {
+  it.each([1, 2])('reserves flagged criteria for the human, without requiring agent evidence or verdicts, and merges after Inbox approval (%i human checks)', async (humanChecks) => {
     const { project, task, pr, dev } = await approved({
       humanReview: false, requiredChecks: [],
-      task: { acceptanceCriteria: ['Login works', { text: 'Playback works on a real iPhone', checkedByHuman: true }] }
+      task: { acceptanceCriteria: ['Login works', ...Array.from({ length: humanChecks }, (_, i) => ({ text: `Playback works on real device ${i + 1}`, checkedByHuman: true }))] }
     })
     expect(dev.prompt).toContain('Do not attempt these checks or produce evidence for them')
     expect(task).toMatchObject({ status: 'human_review', humanReview: false })
     expect(task.latestReview?.criteria).toEqual([
       expect.objectContaining({ met: true }),
-      expect.objectContaining({ met: null, note: 'Needs human check' })
+      ...Array.from({ length: humanChecks }, () => expect.objectContaining({ met: null, note: 'Needs human check' }))
     ])
     expect(task.acceptanceCriteria[1]).toMatchObject({ checkedByHuman: true, met: null })
     const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
     const item = inbox.needsYou.filter((i): i is TaskInboxItem => i.type !== 'plan_thread').find(i => i.taskId === task.id)!
-    expect(item.body).toContain('1 need human check')
+    expect(item.body).toBe(`Approved, 1 criterion met; ${humanChecks} ${humanChecks === 1 ? 'criterion needs' : 'criteria need'} a human check. These checks need your OK before the task merges.`)
     await t.orchestrator.merges.tick()
     expect(t.github.pulls.get(pr.number)?.merged).toBe(false)
     const res = await t.request('POST', `/api/inbox/${item.id}/actions`, { action: 'approve' })
@@ -102,6 +102,9 @@ describe('merge orchestrator and human controls', () => {
       acceptanceCriteria: task.acceptanceCriteria.map(c => ({ id: c.id, text: c.text + ' on screen' }))
     })
     expect((await getTask(project, task.number)).acceptanceCriteria[0]?.checkedByHuman).toBe(true)
+    const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
+    const item = inbox.needsYou.filter((i): i is TaskInboxItem => i.type !== 'plan_thread').find(i => i.taskId === task.id)!
+    expect(item.body).toBe('Approved, 0 criteria met; 1 criterion needs a human check. These checks need your OK before the task merges.')
     await pause(project)
   })
 
@@ -259,7 +262,7 @@ describe('merge orchestrator and human controls', () => {
     const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
     const item = inbox.needsYou.filter((i): i is TaskInboxItem => i.type !== 'plan_thread').find(i => i.taskId === task.id)
     expect(item).toMatchObject({ type: 'human_review', taskRef: task.ref, prUrl: pr.url, sender: { name: 'Vera', role: 'reviewer' } })
-    expect(item?.body).toBe('Approved, all 1 criteria met. This task is marked for human review, so it needs your OK before it merges.')
+    expect(item?.body).toBe('Approved, 1 criterion met. This task is marked for human review, so it needs your OK before it merges.')
     // It arrived when it entered Human review; an update that keeps the status, such as the PR head moving, doesn't move it
     const [entered] = await t.db.select().from(auditLog).where(and(eq(auditLog.taskId, task.id), eq(auditLog.action, 'task.transition'))).orderBy(desc(auditLog.createdAt)).limit(1)
     expect(item?.at).toBe(entered!.createdAt.toISOString())

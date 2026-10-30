@@ -77,11 +77,13 @@ Open gaps to consider are in [open-recommendations.md](open-recommendations.md) 
 - **Flagged:** when the reviewer approves, the task waits in *Human review* until the human approves or requests changes.
 - **Not flagged:** the reviewer's approval moves it straight to *Ready to merge*.
 
-Only the flag sends a task to a human. A project with no required checks doesn't force human review: its unflagged tasks merge on the reviewer's approval alone (amended 2026-10-28; previously every task in such a project needed a human). Either way the task then sits in *Ready to merge* until it's merged, and all other merge gates in PRD §7.9 still apply.
+For ordinary tasks without the exceptions below, only the task flag sends a task to a human. A project with no required checks doesn't force human review: its unflagged tasks merge on the reviewer's approval alone (amended 2026-10-28; previously every task in such a project needed a human). Either way the task then sits in *Ready to merge* until it's merged, and all other merge gates in PRD §7.9 still apply.
 
 **Amended by D20:** Design tasks always go to *Human review*, whatever their flag, and never to *Ready to merge*.
 
 **Amended by D27:** in an `each_task` epic every task goes to *Human review*, whatever its flag; in an `epic` epic the flag works as above but tasks merge into the epic branch; and every epic PR goes to the human.
+
+**Amended by D28 (COR-249):** any criterion marked **Checked by a human** sends an approved task to *Human review*, whatever the task flag or epic mode. Adding a human check while *Ready to merge* returns it to *Human review*.
 
 ---
 
@@ -192,12 +194,13 @@ A status says whose turn it is. Whether a run is actually active is shown by the
 | Draft, Backlog | Ready | Plan or task added to the board; title, description and verifiable acceptance criteria present | **Human only** |
 | Ready | Backlog | Sent back for rethinking | Human |
 | Ready | In progress | Scheduler claims it; all dependencies Merged | Scheduler |
-| In progress | Agent review | Valid `pr_opened` / `pr_updated` outcome (branch pushed at the expected commit, evidence for every criterion) | Server |
+| In progress | Agent review | Valid `pr_opened` / `pr_updated` outcome (branch pushed at the expected commit, evidence for every agent-checkable criterion; D28) | Server |
 | Agent review | In progress | Reviewer requests changes | Server |
-| Agent review | Human review | Reviewer approved; task flagged for human review | Server |
-| Agent review | Ready to merge | Reviewer approved; not flagged | Server |
+| Agent review | Human review | Reviewer approved; task flagged for human review or any criterion checked by a human (D28) | Server |
+| Agent review | Ready to merge | Reviewer approved; no human review required (D5, D20, D27, D28) | Server |
 | Human review | Ready to merge | Human approves | Human |
 | Human review, Ready to merge | In progress | Human requests changes | Human |
+| Ready to merge | Human review | Human adds a new human-check criterion (`require_human_check`, D28) | Server |
 | Ready to merge | In progress | CI fails; base-branch conflict | Server |
 | Ready to merge | Agent review | A new commit other than a clean base-branch update; it needs a fresh review | Server |
 | Ready to merge | Merged | All gates pass against live GitHub data; merge confirmed by GitHub | Server |
@@ -205,6 +208,8 @@ A status says whose turn it is. Whether a run is actually active is shown by the
 | Ready, In progress, Agent review, Human review, Ready to merge | Blocked | See causes below | Server |
 | In progress, Agent review, Ready to merge | Failed | See causes below | Server |
 | Blocked, Failed | Backlog, Ready or In progress | Human resolves it (In progress keeps the branch and PR) | **Human only** |
+
+**Amended by D28:** criteria reserved for a human require neither agent evidence nor an agent met/unmet verdict. Their recorded verdict is **Needs human check**. Reviewer approval and a newly added human check use the Human review routes above; human approval then follows the usual merge gates.
 
 All transitions go through `packages/core` and are enforced by the server. Anything not in this table is rejected.
 
@@ -753,3 +758,15 @@ Epic PR review state is kept on the epic (open, agent review, human review, chan
 - The server opens, reviews, rebases and merges epic PRs, creates fix and conflict tasks, and computes epic done-ness and cross-epic dependencies with the rules above.
 
 ---
+
+## D28 — Criteria checked by a human
+
+**Status:** Accepted 2026-10-30 (COR-249). Amends D5, D10 and the per-criterion evidence and verdict requirements in D21 and D26.
+
+- Each acceptance criterion has a **Checked by a human** flag, false by default. The PM can set it in `propose_plan`, and the human can toggle it on the task page. Re-proposing matching text without an explicit flag preserves the existing choice; only an explicit `checkedByHuman` changes it.
+- Developers skip attempting these checks and producing evidence for them. Reviewers must not request changes over them or their missing evidence, and omit their verdicts. Corral records **Needs human check** (`met: null`), rather than met or unmet. Other criteria keep the usual evidence and verdict requirements.
+- **D5:** reviewer approval with any such criterion always goes to **Human review**, even with `humanReview: false` and in any epic review mode. The task's own flag is unchanged. Tasks with no human-check criteria keep their existing routing.
+- **D10:** reviewer approval takes **Agent review → Human review** when any criterion needs a human check. Adding a new human check after approval takes **Ready to merge → Human review** (`require_human_check`). Rebase-only approval carryover remains as in D24.
+- The Inbox lists the criteria with **Needs human check** and a checkbox per criterion. The human ticks each before approving; ticks are local to the selected item. Approval resolves the Inbox item and follows the existing human approval and merge gates, excluding these criteria from the agent-evidence gate. Requesting changes remains available.
+
+**Why:** checks requiring a person or a real device must reach the human, rather than trapping developers and reviewers in a loop over evidence no runner can produce.

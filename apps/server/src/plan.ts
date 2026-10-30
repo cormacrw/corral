@@ -1078,10 +1078,11 @@ async function reviseTask(tx: Executor, project: ProjectRow, taskId: string, rev
 async function keepCriterionIds(tx: Executor, taskId: string, texts: (string | { text: string, checkedByHuman?: boolean | undefined })[]): Promise<{ id?: string, text: string, checkedByHuman?: boolean | undefined }[]> {
   const unused = await tx.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, taskId)).orderBy(asc(acceptanceCriteria.position))
   return texts.map((criterion) => {
-    const { text, checkedByHuman = false } = typeof criterion === 'string' ? { text: criterion } : criterion
+    const { text, checkedByHuman } = typeof criterion === 'string' ? { text: criterion } : criterion
     const index = unused.findIndex(c => c.text === text)
-    if (index === -1) return { text, checkedByHuman }
-    return { id: unused.splice(index, 1)[0]!.id, text, checkedByHuman }
+    if (index === -1) return { text, checkedByHuman: checkedByHuman ?? false }
+    const matched = unused.splice(index, 1)[0]!
+    return { id: matched.id, text, checkedByHuman: checkedByHuman ?? matched.checkedByHuman }
   })
 }
 
