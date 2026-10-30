@@ -26,6 +26,58 @@ describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
     expect(await res.json()).toEqual({ ok: true })
   })
 
+  describe('rich-text descriptions', () => {
+    it('rejects malformed creates and patches before storing anything', async () => {
+      const project = await t.createProject()
+      const base = `/api/projects/${project.slug}/tasks`
+      const task = await t.createTask(project.slug)
+      const before = await t.db.select().from(schema.tasks).where(eq(schema.tasks.projectId, project.id))
+      for (const child of [null, 42, 'text', [], {}]) {
+        const description = { type: 'doc', content: [{ type: 'paragraph', content: [child] }] }
+        for (const [method, path, body] of [
+          ['POST', base, { title: 'Invalid', type: 'task', description }],
+          ['PATCH', `${base}/${task.number}`, { title: 'Must not change', description }]
+        ] as const) {
+          const res = await t.request(method, path, body)
+          expect(res.status).toBe(400)
+          const error = await res.json() as { error: { issues: { path: unknown[] }[] } }
+          expect(error.error.issues[0]!.path.slice(0, 5)).toEqual(['description', 'content', 0, 'content', 0])
+          expect(await t.db.select().from(schema.tasks).where(eq(schema.tasks.projectId, project.id))).toEqual(before)
+        }
+      }
+    })
+
+    it('preserves editor extensions and their metadata on create, edit and read', async () => {
+      const project = await t.createProject()
+      const description = { type: 'doc' as const, custom: { version: 1 }, content: [
+        { type: 'image', attrs: { src: 'attachment:test', alt: null, title: null, width: 200 } },
+        { type: 'paragraph', content: [
+          { type: 'mention', attrs: { id: 'person', label: 'Tam' } },
+          { type: 'text', text: 'hello', marks: [{ type: 'link', attrs: { href: 'https://example.com', target: '_blank' } }, { type: 'highlight', attrs: { color: 'red' } }] },
+          { type: 'hardBreak' }
+        ] },
+        { type: 'codeBlock', attrs: { language: null }, content: [{ type: 'text', text: 'const x = 1' }] },
+        { type: 'heading', attrs: { level: 3 }, content: [{ type: 'text', text: 'Heading' }] },
+        { type: 'taskList', content: [{ type: 'taskItem', attrs: { checked: true }, content: [{ type: 'paragraph' }] }] }
+      ] }
+      const task = await t.createTask(project.slug, { description })
+      const path = `/api/projects/${project.slug}/tasks/${task.number}`
+      expect(task.description).toEqual(description)
+      const edited = await t.request('PATCH', path, { description })
+      expect(edited.status).toBe(200)
+      expect((await edited.json() as Task).description).toEqual(description)
+      expect((await t.request('GET', path).then(r => r.json()) as Task).description).toEqual(description)
+    })
+
+    it('still rejects an image-only description at Ready', async () => {
+      const project = await t.createProject()
+      const task = await t.createTask(project.slug, { description: { type: 'doc', content: [{ type: 'image', attrs: { src: 'attachment:test' } }] } })
+      const res = await transition(project.slug, task.number, { type: 'approve' })
+      expect(res.status).toBe(409)
+      expect(await res.json()).toMatchObject({ error: { code: 'transition_rejected', reason: { code: 'not_ready', problems: ['missing_description'] } } })
+    })
+  })
+
   describe('profile name', () => {
     it('stores the trimmed name and returns it from GET /me', async () => {
       const res = await t.request('PATCH', '/api/me', { name: '  Cormac  ' })

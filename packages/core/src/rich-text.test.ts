@@ -47,6 +47,13 @@ describe('markdownToRichText', () => {
     expect(richTextToMarkdown(markdownToRichText(markdown))).toBe(markdown)
   })
 
+  it('does not interpret extension metadata as an ordered-list start on bullet lists', () => {
+    expect(richTextToMarkdown({ type: 'doc', content: [{
+      type: 'bulletList', attrs: { start: { toString: null } },
+      content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Item' }] }] }]
+    }] })).toBe('- Item')
+  })
+
   it('writes images as markdown images', () => {
     const doc = { type: 'doc', content: [{ type: 'image', attrs: { src: 'attachment:0d6f7c2e-5b1a-4c3d-9e8f-1a2b3c4d5e6f', alt: 'the [login] page' } }] }
     expect(richTextToMarkdown(doc)).toBe('![the  login  page](attachment:0d6f7c2e-5b1a-4c3d-9e8f-1a2b3c4d5e6f)')
@@ -66,5 +73,35 @@ describe('upgradePlainMarkdown', () => {
     const formatted = markdownToRichText('## Already **rich**')
     expect(upgradePlainMarkdown(formatted)).toBe(formatted)
     expect(upgradePlainMarkdown(null)).toBe(null)
+  })
+})
+
+describe('malformed stored rich text', () => {
+  it.each([
+    [null, 'content[0]'],
+    [42, 'content[0]'],
+    [[], 'content[0]'],
+    [{}, 'content[0].type'],
+    [{ type: 'paragraph', content: {} }, 'content[0].content'],
+    [{ type: 'text', text: 7 }, 'content[0].text'],
+    [{ type: 'text' }, 'content[0].text'],
+    [{ type: 'text', text: 'x', marks: {} }, 'content[0].marks'],
+    [{ type: 'text', text: 'x', marks: [null] }, 'content[0].marks[0]'],
+    [{ type: 'text', text: 'x', marks: [{ type: 'link', attrs: { href: {} } }] }, 'content[0].marks[0].attrs.href'],
+    [{ type: 'image', attrs: { src: {} } }, 'content[0].attrs.src'],
+    [{ type: 'codeBlock', attrs: { language: [] } }, 'content[0].attrs.language'],
+    [{ type: 'heading', attrs: { level: -1 } }, 'content[0].attrs.level'],
+    [{ type: 'orderedList', attrs: { start: '2' } }, 'content[0].attrs.start'],
+    [{ type: 'paragraph', attrs: [] }, 'content[0].attrs']
+  ])('reports a contextual path for %j', (child, path) => {
+    const doc = { type: 'doc', content: [child] }
+    for (const reader of [richTextToMarkdown, richTextToPlainText, upgradePlainMarkdown]) {
+      expect(() => reader(doc)).toThrow(`invalid rich text at description.${path}`)
+      try {
+        reader(doc)
+      } catch (error) {
+        expect(error).not.toBeInstanceOf(TypeError)
+      }
+    }
   })
 })
