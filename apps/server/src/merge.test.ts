@@ -156,6 +156,29 @@ describe('merge orchestrator and human controls', () => {
     expect(await runner.call(rebase.runId, rebase.leaseEpoch, 'report_outcome', { outcome: 'pr_rebased', note: 'Resolved conflicts', summary: 'Kept both changes in app.ts', headSha: 'rebased' })).toMatchObject({ ok: true })
     expect(await taskRow(task.id)).toMatchObject({ status: 'agent_review', reviewRounds: task.reviewRounds, approvedHeadSha: 'abc123', headSha: 'rebased' })
     expect(await getTask(project, task.number)).toMatchObject({ status: 'agent_review', reviewRounds: task.reviewRounds })
+    const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
+    expect(inbox.activity.find(i => i.taskId === task.id && i.preview === `Rebased PR #${pr.number}; on to the reviewer`))
+      .toMatchObject({ body: `Rebased PR #${pr.number}; on to the reviewer`, prUrl: pr.url, type: 'activity' })
+
+    await t.orchestrator.schedule()
+    const review = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'reviewer')).job
+    expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', {
+      outcome: 'approved', summary: 'Rebase preserves the approved work', criteria: task.acceptanceCriteria.map(c => ({ criterionId: c.id, met: true, note: '' }))
+    })).toMatchObject({ ok: true })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge', rebaseOnly: false, approvedHeadSha: 'abc123' })
+    t.github.pulls.get(pr.number)!.state = 'closed'
+    await t.orchestrator.merges.tick()
+    expect(await getTask(project, task.number)).toMatchObject({ status: 'failed' })
+    expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'resolve', to: 'in_progress' })).status).toBe(200)
+    await t.orchestrator.schedule()
+    const fix = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
+    expect(fix.prompt).not.toContain('rebase-only round')
+    expect(await runner.call(fix.runId, fix.leaseEpoch, 'report_outcome', { outcome: 'pr_rebased', note: 'Fixed merge failure', summary: 'Restored PR', headSha: 'fixed' }))
+      .toMatchObject({ ok: false, error: expect.stringContaining('pr_opened or pr_updated') })
+    t.github.setBranch(project.repository, fix.branch!, 'fixed')
+    expect(await runner.call(fix.runId, fix.leaseEpoch, 'report_outcome', { outcome: 'pr_updated', note: 'Fixed merge failure', summary: 'Restored PR', headSha: 'fixed' }))
+      .toMatchObject({ ok: true })
+    expect(await getTask(project, task.number)).toMatchObject({ status: 'agent_review', headSha: 'fixed', reviewRounds: task.reviewRounds })
     await pause(project)
   })
 

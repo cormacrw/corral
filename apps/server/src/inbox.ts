@@ -9,7 +9,7 @@ import { sessionState } from './plan.ts'
 
 const { agents, auditLog, planMessages, planSessions, plans, planEpics, planTasks, projects, reviews, runs, tasks, comments, epics } = schema
 
-const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'findings_reported', 'design_submitted', 'changes_requested', 'merged', 'ci_failed', 'base_conflict', 'head_moved']
+const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'pr_rebased', 'findings_reported', 'design_submitted', 'changes_requested', 'merged', 'ci_failed', 'base_conflict', 'head_moved']
 
 // The Inbox (D11, design/inbox.md): what developer and reviewer runs need
 // from the human, plus what they did, and Plan sessions waiting on the human as a Plan
@@ -186,6 +186,7 @@ function activityText(action: string, event: string | null, detail: Record<strin
   switch (event) {
     case 'pr_opened': return `Opened ${pr}`
     case 'pr_updated': return `Pushed a revision to ${pr}`
+    case 'pr_rebased': return `Rebased ${pr}; on to the reviewer`
     case 'findings_reported': return 'Reported findings; on to the reviewer'
     case 'design_submitted': return `Submitted design v${String(detail.version)}; on to the reviewer`
     case 'changes_requested': return detail.to === 'blocked' ? 'Changes requested; Blocked for you' : 'Changes requested; back to the developer'

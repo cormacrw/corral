@@ -1255,7 +1255,7 @@ export class Orchestrator implements RunnerHandlers {
       }
       throw new ToolError(spike
         ? 'A spike’s developer reports findings_reported, stuck or failed'
-        : design ? 'A design task’s developer reports design_submitted, stuck or failed' : 'A developer reports pr_opened, pr_updated, stuck or failed')
+        : design ? 'A design task’s developer reports design_submitted, stuck or failed' : 'A developer reports pr_opened, pr_updated, pr_rebased (rebase-only rounds), stuck or failed')
     }
     throw new ToolError(`Outcomes for ${ctx.run.role} runs aren't supported yet`)
   }

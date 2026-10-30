@@ -326,6 +326,24 @@ describe('rebase-only rounds', () => {
     expect(submitted).toMatchObject({ status: 'agent_review', rebaseOnly: true, reviewRounds: 4 })
   })
 
+  it.each([false, true])('finishes rebase-only mode on approval (humanReview=%s), including later failure recovery', (humanReview) => {
+    let state = expectOk(transition(task('ready_to_merge', { humanReview, reviewRounds: 2 }), { type: 'base_conflict', approvedHeadSha: 'approved' }, server))
+    state = expectOk(transition(state, { type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true }, server))
+    state = expectOk(transition(state, { type: 'review_approved' }, server))
+    expect(state).toMatchObject({ status: humanReview ? 'human_review' : 'ready_to_merge', rebaseOnly: false, approvedHeadSha: 'approved', reviewRounds: 2 })
+    if (humanReview) state = expectOk(transition(state, { type: 'human_approve' }, human))
+    state = expectOk(transition(state, { type: 'fail', reason: 'PR closed' }, server))
+    state = expectOk(transition(state, { type: 'resolve', to: 'in_progress' }, human))
+    expect(state).toMatchObject({ status: 'in_progress', rebaseOnly: false, approvedHeadSha: 'approved', reviewRounds: 2 })
+  })
+
+  it('keeps an unfinished rebase-only round when stuck and resolved', () => {
+    let state = expectOk(transition(task('ready_to_merge'), { type: 'base_conflict', approvedHeadSha: 'approved' }, server))
+    state = expectOk(transition(state, { type: 'block', reason: 'Which resolution?' }, server))
+    state = expectOk(transition(state, { type: 'resolve', to: 'in_progress' }, human))
+    expect(state).toMatchObject({ status: 'in_progress', rebaseOnly: true, approvedHeadSha: 'approved' })
+  })
+
   it('returns to a normal round when the rebase reviewer requests changes', () => {
     const result = expectOk(transition(task('agent_review', { rebaseOnly: true, reviewRounds: 1 }), { type: 'changes_requested' }, server))
     expect(result).toMatchObject({ status: 'in_progress', rebaseOnly: false, reviewRounds: 2 })

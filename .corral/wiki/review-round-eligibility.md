@@ -39,3 +39,9 @@ Conflict and resubmission leave `reviewRounds` unchanged and retain the
 approved head for rebase review. Changes requested clears rebase-only mode
 and starts a normal counted revision, reported with `pr_updated`.
 Run history displays the outcome as “PR rebased”.
+
+Rebase review approval clears `rebaseOnly` before Ready to merge or Human
+review, while retaining `approvedHeadSha`. Later merge failures resolved to
+In progress therefore start ordinary developer rounds. Blocking an unfinished
+rebase and resolving it to In progress preserves rebase-only mode. The Inbox
+activity feed records `pr_rebased` as a rebase handed to the reviewer.
