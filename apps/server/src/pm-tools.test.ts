@@ -1,6 +1,6 @@
 import type { Inbox, PlanMessage, PlanSessionDetail, Project, RunEvent, RunJob } from '@corral/contracts'
 import { schema } from '@corral/db'
-import { and, eq } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { transcriptExcerpt } from './pm-tools.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
@@ -143,20 +143,28 @@ describe('PM tools for projects, runs and the factory', () => {
     expect(await result('get_status')).toMatchObject({ stopped: status.stopped, updating: status.updating, online: hub.online, protocol: hub.protocol, runners: [expect.objectContaining({ id: (status.runners as { id: string }[])[0]!.id })] })
   })
 
-  it('sets and clears the update hold, in Activity only when it changes', async () => {
+  it('sets and clears the update hold, and shows a call that changed nothing', async () => {
     expect(await result('set_update_hold')).toMatchObject({ updating: true })
     expect(await result('clear_update_hold')).toMatchObject({ updating: false })
     await result('clear_update_hold')
     const activity = (await inbox()).activity
     expect(activity.filter(a => a.preview === 'Held Corral for an update')).toHaveLength(1)
     expect(activity.filter(a => a.preview === 'Lifted the update hold')).toHaveLength(1)
+    expect(activity.filter(a => a.preview.includes('already off'))).toHaveLength(1)
   })
 
-  it('audits reads with the PM session but keeps them out of Activity', async () => {
+  it('audits every call with the PM session and shows reads and failures in Activity', async () => {
     await result('get_status')
-    const rows = await t.db.select().from(auditLog).where(and(eq(auditLog.action, 'pm.tool_called')))
+    await call('get_project', { project: 'no-such-project' })
+    const rows = await t.db.select().from(auditLog).where(eq(auditLog.action, 'pm.tool_called'))
     expect(rows.find(r => (r.detail as { tool: string }).tool === 'get_status')).toMatchObject({ actor: { sessionId: session.id }, detail: { sessionId: session.id, runId: job.runId, ok: true } })
-    expect((await inbox()).activity.some(a => a.preview.includes('get_status'))).toBe(false)
+    const activity = (await inbox()).activity
+    const read = activity.find(a => a.preview === 'Checked Corral\'s status')
+    expect(read).toMatchObject({ taskRef: null, sender: { name: 'PM', role: 'pm' } })
+    expect(read!.body).toContain(`/plan/${session.id}`)
+    const failed = activity.find(a => a.preview.startsWith('Could not read a project'))
+    expect(failed!.preview).toContain('not_found')
+    expect(failed!.body).toContain(`/plan/${session.id}`)
   })
 
   async function propose(tool: Parameters<FakeRunner['call']>[2], input: unknown = {}, via = job) {
@@ -167,8 +175,10 @@ describe('PM tools for projects, runs and the factory', () => {
     const { run } = await liveRun()
     const id = await propose('stop_run', { runId: run.id })
     expect((await t.db.select().from(runs).where(eq(runs.id, run.id)))[0]!.state).toBe('running')
+    expect((await inbox()).activity.some(a => a.preview.startsWith(`Proposed: Stop run #${run.number}`))).toBe(true)
     expect(await (await resolve(session.id, id, 'cancel')).json()).toMatchObject({ pendingAction: { status: 'cancelled' } })
     expect((await t.db.select().from(runs).where(eq(runs.id, run.id)))[0]!.state).toBe('running')
+    expect((await inbox()).activity.some(a => a.preview.startsWith(`Stop run #${run.number}`) && a.preview.endsWith('cancelled by you'))).toBe(true)
     const again = await propose('stop_run', { runId: run.id })
     expect(await (await resolve(session.id, again, 'confirm')).json()).toMatchObject({ pendingAction: { status: 'confirmed' } })
     expect((await t.db.select().from(runs).where(eq(runs.id, run.id)))[0]!.state).toBe('interrupted')
@@ -181,6 +191,7 @@ describe('PM tools for projects, runs and the factory', () => {
     const stale = await propose('stop_run', { runId: raced.id })
     await t.db.update(runs).set({ state: 'failed' }).where(eq(runs.id, raced.id))
     expect(await (await resolve(session.id, stale, 'confirm')).json()).toMatchObject({ pendingAction: { status: 'failed' } })
+    expect((await inbox()).activity.some(a => a.preview.startsWith(`Could not confirm: Stop run #${raced.number}`))).toBe(true)
   })
 
   it('delete_project binds the card to the project, not its slug', async () => {

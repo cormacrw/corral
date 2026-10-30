@@ -21,6 +21,21 @@ const RUN_TEXT_MAX = 2_000
 const LIST_TEXT_MAX = 300
 const TOOL_INPUT_MAX = 200
 const TOOL_OUTPUT_MAX = 500
+const ERROR_SUMMARY_MAX = 300
+
+// What each tool was trying to do, for the Activity line of a call that failed
+const TOOL_GOALS: Record<PmDirectTool, string> = {
+  list_projects: 'list projects',
+  get_project: 'read a project',
+  update_project: 'change a project',
+  create_project: 'create a project',
+  list_runs: 'list runs',
+  get_run: 'read a run',
+  message_run: 'message a run',
+  get_status: 'check Corral\'s status',
+  set_update_hold: 'hold Corral for an update',
+  clear_update_hold: 'lift the update hold'
+}
 
 interface Deps {
   db: Database
@@ -40,8 +55,8 @@ export interface PmToolContext {
 interface ToolResult {
   result: unknown
   projectId?: string
-  // Set when the call changed something: what shows in Activity
-  changed?: string
+  // What the call did, in the words Activity shows
+  summary: string
 }
 
 function capText(text: string | null, max: number): { text: string | null, capped: boolean } {
@@ -92,12 +107,12 @@ export class PmTools {
       detail: { sessionId: context.sessionId, runId: context.runId, tool, input, ...outcome }
     })
     try {
-      const { result, projectId, changed } = await this.#run(tool, input, actor)
-      await audit(projectId, changed ? { ok: true, changed: true, summary: changed } : { ok: true })
+      const { result, projectId, summary } = await this.#run(tool, input, actor)
+      await audit(projectId, { ok: true, summary })
       return result
     } catch (error) {
       const failure = toolFailure(error)
-      await audit(undefined, { ok: false, error: failure.message })
+      await audit(undefined, { ok: false, error: failure.message, summary: `Could not ${TOOL_GOALS[tool]}: ${clip(failure.message, ERROR_SUMMARY_MAX)}` })
       throw failure
     }
   }
@@ -113,13 +128,15 @@ export class PmTools {
           result: {
             projects: all.slice(0, PM_PROJECT_LIST_MAX),
             ...(all.length > PM_PROJECT_LIST_MAX && { note: `Showing the first ${PM_PROJECT_LIST_MAX} of ${all.length} projects.` })
-          }
+          },
+          summary: `Listed ${all.length} ${all.length === 1 ? 'project' : 'projects'}`
         }
       }
 
       case 'get_project': {
         const { project } = strict(pmDirectTools.get_project.input)
-        return { result: toProject(await findProjectBySlug(db, project)) }
+        const row = await findProjectBySlug(db, project)
+        return { result: toProject(row), projectId: row.id, summary: `Read project ${row.name}` }
       }
 
       case 'update_project': {
@@ -131,7 +148,7 @@ export class PmTools {
         events.publish({ type: 'project.updated', project: updated })
         orchestrator.poke()
         const list = fields.map(([key, value]) => `${key} to ${JSON.stringify(value)}`).join(', ')
-        return { result: updated, projectId: project.id, changed: `Set ${list} on ${updated.name}` }
+        return { result: updated, projectId: project.id, summary: `Set ${list} on ${updated.name}` }
       }
 
       case 'create_project': {
@@ -142,7 +159,7 @@ export class PmTools {
         if (!branch) throw new Error('The project was not created: the repository has no default branch; pass defaultBranch')
         const project = await createProject(db, { ...parsed, defaultBranch: branch }, actor)
         events.publish({ type: 'project.created', project })
-        return { result: project, projectId: project.id, changed: `Created project ${project.name} for ${project.repository}` }
+        return { result: project, projectId: project.id, summary: `Created project ${project.name} for ${project.repository}` }
       }
 
       case 'list_runs': {
@@ -159,7 +176,12 @@ export class PmTools {
           ...(rows.length > limit ? [`Showing the newest ${limit} matching runs; there are more. ${limit < PM_RUN_LIST_MAX ? 'Raise limit or narrow' : 'Narrow'} the filters to see the rest.`] : []),
           ...(capped.some(c => c.capped) ? [`Summaries and errors are cut to ${LIST_TEXT_MAX} characters; get_run has more.`] : [])
         ]
-        return { result: { runs: capped.map(c => c.run), ...(notes.length > 0 && { note: notes.join(' ') }) } }
+        const filters = [project && `in ${project}`, taskRef && `on ${taskRef}`, status && `with status ${status}`].filter(Boolean).join(' ')
+        return {
+          result: { runs: capped.map(c => c.run), ...(notes.length > 0 && { note: notes.join(' ') }) },
+          ...(projectId && { projectId }),
+          summary: `Listed ${capped.length} ${capped.length === 1 ? 'run' : 'runs'}${filters && ` ${filters}`}`
+        }
       }
 
       case 'get_run': {
@@ -172,7 +194,9 @@ export class PmTools {
             ...shown,
             transcript: transcriptExcerpt(await this.#d.transcripts.read(runId, row?.blob ?? null), transcriptLimit),
             ...(capped && { note: `The summary and error are cut to ${RUN_TEXT_MAX} characters.` })
-          }
+          },
+          projectId: run.projectId,
+          summary: `Read run #${run.number}${run.taskRef ? ` on ${run.taskRef}` : ''}`
         }
       }
 
@@ -180,25 +204,25 @@ export class PmTools {
         const { runId, text } = strict(pmDirectTools.message_run.input)
         const run = await getRun(db, runId)
         const sent = await orchestrator.messageRun(run.projectId, runId, { text: `From the PM: ${text}`, attachments: [] }, actor)
-        return { result: { ok: true, runId: sent.runId, commentId: sent.comment.id }, projectId: run.projectId, changed: `Messaged run #${run.number}${run.taskRef ? ` on ${run.taskRef}` : ''}: ${clip(text, LIST_TEXT_MAX)}` }
+        return { result: { ok: true, runId: sent.runId, commentId: sent.comment.id }, projectId: run.projectId, summary: `Messaged run #${run.number}${run.taskRef ? ` on ${run.taskRef}` : ''}: ${clip(text, LIST_TEXT_MAX)}` }
       }
 
       case 'get_status':
         strict(pmDirectTools.get_status.input)
-        return { result: { ...orchestrator.status, ...runner.status() } }
+        return { result: { ...orchestrator.status, ...runner.status() }, summary: 'Checked Corral\'s status' }
 
       case 'set_update_hold': {
         strict(pmDirectTools.set_update_hold.input)
         const held = orchestrator.status.updating
         const busy = await orchestrator.holdForUpdate()
-        return { result: { ...orchestrator.status, busy }, ...(!held && { changed: 'Held Corral for an update' }) }
+        return { result: { ...orchestrator.status, busy }, summary: held ? 'Checked the update hold, which was already on' : 'Held Corral for an update' }
       }
 
       case 'clear_update_hold': {
         strict(pmDirectTools.clear_update_hold.input)
         const held = orchestrator.status.updating
         orchestrator.releaseUpdate()
-        return { result: orchestrator.status, ...(held && { changed: 'Lifted the update hold' }) }
+        return { result: orchestrator.status, summary: held ? 'Lifted the update hold' : 'Tried to lift the update hold, which was already off' }
       }
     }
   }

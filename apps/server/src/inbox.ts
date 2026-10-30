@@ -3,7 +3,7 @@ import { epicInboxItems } from './epic-prs.ts'
 import type { Inbox, InboxItem, PlanThreadItem, PmActivityItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
 import { richTextToPlainText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, count, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm'
+import { and, count, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { actorLabel } from './orchestrator.ts'
 import { thumbnailUrl } from './projects.ts'
 import { sessionState } from './plan.ts'
@@ -75,20 +75,19 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     if (entry.actor.kind === 'human') resolved.push(item)
     else activity.push(item)
   }
-  // Read PM actions independently of tasks: deleting a Backlog task removes
-  // its row, but its PM attribution and conversation must survive. Removing a
+  // Read PM calls independently of tasks: deleting a Backlog task removes its
+  // row, but its PM attribution and conversation must survive. Removing a
   // project clears the entry's project, so that join is a left join.
-  const pmActions = await db.select({ entry: auditLog, project: projects }).from(auditLog)
+  const pmCalls = await db.select({ entry: auditLog, project: projects }).from(auditLog)
     .leftJoin(projects, eq(projects.id, auditLog.projectId))
-    .where(or(eq(auditLog.action, 'pm.action_confirmed'), and(eq(auditLog.action, 'pm.tool_called'), sql`${auditLog.detail}->>'changed' = 'true'`)))
+    .where(inArray(auditLog.action, [...PM_ACTIVITY]))
     .orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(limit)
-  for (const { entry, project } of pmActions) {
-    const detail = entry.detail as { targetId?: string | null, summary: string, sessionId: string, input: { taskRef?: string } }
-    const confirmed = entry.action === 'pm.action_confirmed'
-    const text = confirmed ? `${detail.summary}, confirmed by you` : detail.summary
-    const base = { id: `pm-${entry.id}`, type: 'activity' as const, subject: detail.summary, preview: text, body: project ? `${text}. [PM conversation](/plan/${detail.sessionId})` : `${text}.`, sender: { name: 'PM', role: 'pm' as const }, at: entry.createdAt.toISOString(), prUrl: null, resolution: null }
+  for (const { entry, project } of pmCalls) {
+    const detail = entry.detail as { targetId?: string | null, summary?: string, sessionId: string, input?: { taskRef?: string } }
+    const text = pmActivityText(entry.action, detail.summary ?? 'A PM action')
+    const base = { id: `pm-${entry.id}`, type: 'activity' as const, subject: text, preview: text, body: project ? `${text}. [PM conversation](/plan/${detail.sessionId})` : `${text}.`, sender: { name: 'PM', role: 'pm' as const }, at: entry.createdAt.toISOString(), prUrl: null, resolution: null }
     const tag = project ? projectTag(project) : { id: '', slug: '', name: 'Removed project', thumbnailColor: null, thumbnailUrl: null }
-    if (project && detail.targetId && detail.input.taskRef) activity.push({ ...base, project: tag, taskId: detail.targetId, taskRef: detail.input.taskRef })
+    if (project && detail.targetId && detail.input?.taskRef) activity.push({ ...base, project: tag, taskId: detail.targetId, taskRef: detail.input.taskRef })
     else activity.push({ ...base, project: tag, taskId: null, taskRef: null })
   }
   resolved.push(...releases.filter(d => d.resolution))
@@ -197,6 +196,18 @@ async function humanReviewNote(db: Executor, task: typeof tasks.$inferSelect): P
     .orderBy(desc(reviews.createdAt)).limit(1)
   const met = review ? `, all ${review.criteria.length} criteria met` : ''
   return `Approved${met}. This task is marked for human review, so it needs your OK before it merges.`
+}
+
+const PM_ACTIVITY = ['pm.tool_called', 'pm.action_proposed', 'pm.action_confirmed', 'pm.action_cancelled', 'pm.action_failed'] as const
+
+function pmActivityText(action: string, summary: string): string {
+  switch (action) {
+    case 'pm.action_proposed': return `Proposed: ${summary}`
+    case 'pm.action_confirmed': return `${summary}, confirmed by you`
+    case 'pm.action_cancelled': return `${summary}, cancelled by you`
+    case 'pm.action_failed': return `Could not confirm: ${summary}`
+    default: return summary
+  }
 }
 
 function projectTag(project: typeof projects.$inferSelect) {

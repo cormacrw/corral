@@ -73,7 +73,7 @@ export const pmActionTools = {
 } satisfies Partial<Record<AgentTool, PmToolDefinition>>
 
 // Tools that act as soon as the PM calls them. Each call is audited with the
-// PM session as actor; the ones that change something show in Activity.
+// PM session as actor and shows in Activity.
 export const pmDirectTools = {
   list_projects: {
     confirmRequired: false,
