@@ -33,6 +33,11 @@ export class FakeGitHub implements GitHubClient {
     this.calls.push({ method, args })
   }
 
+  async createBranch(repository: string, branch: string, sha: string): Promise<void> {
+    this.#record('createBranch', repository, branch, sha)
+    if (!this.branches.has(this.#key(repository, branch))) this.setBranch(repository, branch, sha)
+  }
+
   async branchHead(repository: string, branch: string): Promise<string | null> {
     this.#record('branchHead', repository, branch)
     return this.branches.get(this.#key(repository, branch)) ?? null
@@ -108,6 +113,7 @@ export class FakeGitHub implements GitHubClient {
       pr.state = 'closed'
       pr.merged = true
       pr.mergeCommitSha = this.mergeResult.sha
+      if (this.mergeResult.sha) this.setBranch(repository, pr.base, this.mergeResult.sha)
     }
     return { ...this.mergeResult }
   }

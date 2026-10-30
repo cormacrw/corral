@@ -86,7 +86,9 @@ export async function createTestApp(driver: 'pglite' | 'postgres', options: { li
         ...overrides
       })
       if (res.status !== 201) throw new Error(`createProject: ${res.status} ${await res.text()}`)
-      return res.json() as Promise<Project>
+      const project = await res.json() as Project
+      github.setBranch(project.repository, project.defaultBranch, 'target-tip')
+      return project
     },
     async createTask(slug, input = {}) {
       const res = await request('POST', `/api/projects/${slug}/tasks`, {

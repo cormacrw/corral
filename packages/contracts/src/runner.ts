@@ -64,6 +64,8 @@ export interface RunJob {
   projectId: string
   repository: string
   defaultBranch: string
+  // Actual task PR base; absent for older servers and PM runs.
+  baseBranch?: string
   // Developer and reviewer runs
   taskId: string | null
   taskRef: string | null

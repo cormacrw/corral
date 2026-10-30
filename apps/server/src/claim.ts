@@ -31,8 +31,9 @@ export interface Claim {
 // runs one transaction at a time (D14).
 //
 // `only` limits the claim to those tasks, for an agent still inside its
-// wake interval that an event about them may start anyway.
-export async function claimNextTask(db: Executor, agentId: string, now = new Date(), only?: readonly string[]): Promise<Claim | null> {
+// wake interval that an event about them may start anyway. `skip` leaves
+// those tasks out, e.g. ones whose run couldn't start earlier in the pass.
+export async function claimNextTask(db: Executor, agentId: string, now = new Date(), only?: readonly string[], skip: readonly string[] = []): Promise<Claim | null> {
   if (only?.length === 0) return null
   return db.transaction(async (tx) => {
     const [agent] = await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')
@@ -71,6 +72,7 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
       .where(and(
         eligible,
         only && inArray(tasks.id, [...only]),
+        skip.length > 0 ? notInArray(tasks.id, [...skip]) : undefined,
         isNull(tasks.leaseRunId),
         isNull(tasks.deletedAt),
         eq(tasks.paused, false),

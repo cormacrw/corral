@@ -1,6 +1,7 @@
 import { failedMergeGates, type Actor, type MergeGateFacts } from '@corral/core'
 import { schema, type Database } from '@corral/db'
 import { and, asc, desc, eq, isNull } from 'drizzle-orm'
+import { taskBase } from './task-base.ts'
 import { publishDependents } from './dependent-tasks.ts'
 import type { EventBus } from './events.ts'
 import type { CheckResult, GitHubClient, PullRequest } from './github.ts'
@@ -140,6 +141,7 @@ export class MergeOrchestrator {
 
   async #advance(task: TaskRow, project: ProjectRow): Promise<void> {
     const { db, github } = this.#d
+    const baseBranch = await taskBase(db, task, project)
     const pr = await github.getPullRequest(project.repository, task.prNumber!)
 
     if (pr.merged) {
@@ -179,13 +181,13 @@ export class MergeOrchestrator {
         await db.insert(auditLog).values({ projectId: project.id, taskId: task.id, actor: server, action: 'branch.update_requested', detail: { pr: pr.number, headSha: pr.headSha } })
       } else {
         await this.#transition(task.id, { type: 'base_conflict' }, { event: 'base_conflict' },
-          `The base branch \`${project.defaultBranch}\` has moved and the update conflicts with this branch. ${rebaseInstruction(project.defaultBranch)}`)
+          `The base branch \`${baseBranch}\` has moved and the update conflicts with this branch. ${rebaseInstruction(baseBranch)}`)
       }
       return
     }
     if (pr.mergeable === false) {
       await this.#transition(task.id, { type: 'base_conflict' }, { event: 'base_conflict', mergeableState: pr.mergeableState },
-        `GitHub reports this branch can’t be merged (${pr.mergeableState ?? 'conflict'}). ${rebaseInstruction(project.defaultBranch)}`)
+        `GitHub reports this branch can’t be merged (${pr.mergeableState ?? 'conflict'}). ${rebaseInstruction(baseBranch)}`)
       return
     }
 

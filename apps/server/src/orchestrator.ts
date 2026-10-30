@@ -22,6 +22,7 @@ import { bundleHasRootIndex, DesignNotFound, readDesign } from './designs.ts'
 import { ApiFailure } from './errors.ts'
 import type { EventBus } from './events.ts'
 import type { GitHubClient } from './github.ts'
+import { EpicBranchError, taskBase } from './task-base.ts'
 import { slugify } from './projects.ts'
 import { designRevisionPrompt, developerPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
 import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
@@ -334,13 +335,16 @@ export class Orchestrator implements RunnerHandlers {
     await this.#startPmTurns()
     if (this.#updating) return
     const workers = await db.select().from(agents).where(ne(agents.role, 'pm')).orderBy(asc(agents.createdAt))
+    // Tasks whose run couldn't start wait for the next pass rather than
+    // burning their failed-run cap in a tight loop
+    const skip: string[] = []
     for (const agent of workers) {
       // An agent with a wake interval starts at most one task of its own
       // choosing per interval, counted from its last run however that one
       // started. Tasks an event is about start regardless.
       let only = agent.wakeIntervalSeconds === null || (await this.#awake(agent)) ? undefined : urgent
-      for (let claim = await claimNextTask(db, agent.id, this.#now(), only); claim; claim = await claimNextTask(db, agent.id, this.#now(), only)) {
-        await this.#assign(claim)
+      for (let claim = await claimNextTask(db, agent.id, this.#now(), only, skip); claim; claim = await claimNextTask(db, agent.id, this.#now(), only, skip)) {
+        if (!await this.#assign(claim)) skip.push(claim.taskId)
         if (this.#stopped || this.#updating) return
         if (agent.wakeIntervalSeconds !== null) only = urgent
       }
@@ -354,16 +358,29 @@ export class Orchestrator implements RunnerHandlers {
     return !last || this.#now().getTime() - last.queuedAt.getTime() >= agent.wakeIntervalSeconds! * 1000
   }
 
-  async #assign(claim: Claim): Promise<void> {
+  // Whether the run was handed to the runner
+  async #assign(claim: Claim): Promise<boolean> {
     const ctx = await this.#load(claim.runId)
-    if (!ctx?.task) return
-    const job = ctx.run.role === 'reviewer' ? await this.#reviewerJob(ctx) : await this.#developerJob(ctx)
+    if (!ctx?.task) return false
+    let job: RunJob
+    try {
+      job = ctx.run.role === 'reviewer' ? await this.#reviewerJob(ctx) : await this.#developerJob(ctx)
+    } catch (error) {
+      // Preparing the epic branch calls GitHub; the run fails straight away
+      // with the cause instead of holding its lease until it expires
+      if (!(error instanceof EpicBranchError)) throw error
+      await this.#failRun(ctx, error.message)
+      await this.#publish(ctx)
+      return false
+    }
     const runnerId = this.#d.runner.pick()
     await this.#d.db.update(runs).set({ runnerId }).where(eq(runs.id, ctx.run.id))
-    if (!this.#d.runner.send({ type: 'run.assign', job }, runnerId)) {
+    const sent = this.#d.runner.send({ type: 'run.assign', job }, runnerId)
+    if (!sent) {
       await this.#endRun(ctx, { state: 'interrupted', error: 'The runner went offline before the run started' })
     }
     await this.#publish(ctx)
+    return sent
   }
 
   async #developerJob(ctx: RunContext): Promise<RunJob> {
@@ -372,6 +389,7 @@ export class Orchestrator implements RunnerHandlers {
     const ref = taskRef(ctx.project.prefix, task.number)
     // A spike delivers findings, not a PR (D19), so it never gets a branch.
     // A design is built on design/<ref>, pushed but never merged (D20).
+    const baseBranch = await taskBase(db, task, ctx.project, this.#d.github)
     const spike = task.type === 'spike'
     const design = task.type === 'design'
     if (!task.branch && !spike) {
@@ -394,7 +412,7 @@ export class Orchestrator implements RunnerHandlers {
       spike,
       design: design ? { version: latest?.version ?? null } : null,
       pin,
-      defaultBranch: ctx.project.defaultBranch,
+      defaultBranch: baseBranch,
       reviewRounds: task.reviewRounds,
       reviewRoundCap: ctx.project.reviewRoundCap,
       criteria: criteria.map(c => ({ id: c.id, text: c.text })),
@@ -415,6 +433,7 @@ export class Orchestrator implements RunnerHandlers {
       projectId: ctx.project.id,
       repository: ctx.project.repository,
       defaultBranch: ctx.project.defaultBranch,
+      baseBranch,
       taskId: task.id,
       taskRef: ref,
       taskType: task.type,
@@ -458,6 +477,7 @@ export class Orchestrator implements RunnerHandlers {
     const attached = await listTaskAttachments(db, ctx.project.id, task.description, notes)
     // A spike has no commit: the reviewer gets a checkout of the default
     // branch and judges the findings the developer last reported (D19)
+    const baseBranch = await taskBase(db, task, ctx.project)
     const spike = task.type === 'spike'
     const [reported] = spike
       ? await db.select({ summary: runs.summary }).from(runs)
@@ -479,6 +499,7 @@ export class Orchestrator implements RunnerHandlers {
       projectId: ctx.project.id,
       repository: ctx.project.repository,
       defaultBranch: ctx.project.defaultBranch,
+      baseBranch,
       taskId: task.id,
       taskRef: ref,
       taskType: task.type,
@@ -500,7 +521,7 @@ export class Orchestrator implements RunnerHandlers {
         design: design ? { version: version?.version ?? null } : null,
         pin,
         underReview: version ? { version: version.version, commitSha: version.commitSha, screenshots: version.screenshots.map(s => s.fileName) } : null,
-        defaultBranch: ctx.project.defaultBranch,
+        defaultBranch: baseBranch,
         reviewRounds: task.reviewRounds,
         reviewRoundCap: ctx.project.reviewRoundCap,
         criteria: criteria.map(c => ({ id: c.id, text: c.text })),
@@ -1203,7 +1224,7 @@ export class Orchestrator implements RunnerHandlers {
       : await github.findOpenPullRequest(ctx.project.repository, task.branch!)
     let pr = existing && existing.state === 'open' ? existing : null
     if (pr) await github.updatePullRequest(ctx.project.repository, pr.number, { body })
-    else pr = await github.openPullRequest(ctx.project.repository, { head: task.branch!, base: ctx.project.defaultBranch, title: `${ref}: ${task.title}`, body })
+    else pr = await github.openPullRequest(ctx.project.repository, { head: task.branch!, base: await taskBase(db, task, ctx.project, github), title: `${ref}: ${task.title}`, body })
 
     await db.transaction(async (tx) => {
       const locked = await lockTask(tx, task.id)
