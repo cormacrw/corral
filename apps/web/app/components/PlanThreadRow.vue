@@ -42,9 +42,10 @@ defineProps<{ item: PlanThreadItem, mobile?: boolean }>()
       />
       <span class="flex min-w-0 items-center gap-1 truncate text-xs text-muted">
         <ProjectThumbnail
-          :project="item.project"
+          v-if="item.project"
+              :project="item.project"
           :size="16"
-        />{{ item.project.name }}
+        />{{ item.project?.name ?? 'Global' }}
       </span>
     </span>
   </span>

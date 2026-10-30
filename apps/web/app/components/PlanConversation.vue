@@ -52,6 +52,8 @@ const busy = ref(false)
 const approving = ref<string | null>(null)
 const approvalTarget = ref<'ready' | 'backlog' | null>(null)
 const project = computed(() => live.state.value.projects.find(p => p.id === session.value?.projectId) ?? null)
+const parent = computed(() => live.state.value.planSessions.find(s => s.id === session.value?.parentSessionId))
+const children = computed(() => live.state.value.planSessions.filter(s => s.parentSessionId === id.value))
 const runnerOffline = computed(() => live.state.value.loaded && !live.state.value.runner?.online)
 const reconnecting = ref(false)
 // Re-reads the runner's status, in case its live update was missed
@@ -268,6 +270,27 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
           </div>
         </header>
 
+        <nav
+          v-if="parent || children.length"
+          aria-label="Related threads"
+          class="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-default px-4 py-2 text-sm"
+        >
+          <NuxtLink
+            v-if="parent"
+            :to="`/plan/${parent.id}`"
+            class="text-primary hover:underline"
+          >Parent: {{ parent.title }}</NuxtLink>
+          <span
+            v-if="children.length"
+            class="text-muted"
+          >Child threads:</span>
+          <NuxtLink
+            v-for="child in children"
+            :key="child.id"
+            :to="`/plan/${child.id}`"
+            class="text-primary hover:underline"
+          >{{ child.title }}{{ child.closed ? ' (closed)' : '' }}</NuxtLink>
+        </nav>
         <UAlert
           v-if="error && !session"
           color="error"
@@ -327,7 +350,15 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
                   size="sm"
                 />
                 <div :class="['flex min-w-0 flex-col gap-2', device.isMobile.value && 'flex-1']">
-                  <span class="text-xs text-muted">{{ pm?.name ?? 'PM' }} · PM</span>
+                  <NuxtLink
+                    v-if="message.role === 'thread' && message.senderSessionId"
+                    :to="`/plan/${message.senderSessionId}`"
+                    class="text-xs text-primary hover:underline"
+                  >{{ message.senderTitle ?? 'Removed thread' }} · Thread{{ message.kind === 'notification' ? ' notification' : '' }}</NuxtLink>
+                  <span
+                    v-else
+                    class="text-xs text-muted"
+                  >{{ message.role === 'thread' ? `${message.senderTitle ?? 'Removed thread'} · Thread` : `${pm?.name ?? 'PM'} · PM` }}</span>
                   <PlanTurnSteps
                     v-if="firstOfTurn(message)"
                     :run-id="message.runId!"
