@@ -1,9 +1,214 @@
 {
+<<<<<<< HEAD
   "id": "f62a5505-6508-44ba-9908-2930aeea80c5",
   "prevId": "0f84ff72-c6f6-4226-9a22-270dde665c49",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
+=======
+  "id": "e9fb3cfe-7a70-4127-9bbc-3148133a210d",
+  "prevId": "f537c50c-ef98-4209-806a-215fb84d85ce",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.acceptance_criteria": {
+      "name": "acceptance_criteria",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "acceptance_criteria_task_id_position_index": {
+          "name": "acceptance_criteria_task_id_position_index",
+          "columns": [
+            {
+              "expression": "task_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "position",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "acceptance_criteria_task_id_tasks_id_fk": {
+          "name": "acceptance_criteria_task_id_tasks_id_fk",
+          "tableFrom": "acceptance_criteria",
+          "tableTo": "tasks",
+          "columnsFrom": [
+            "task_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.agents": {
+      "name": "agents",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "agent_role",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "runtime": {
+          "name": "runtime",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'claude-code'"
+        },
+        "concurrency": {
+          "name": "concurrency",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "paused": {
+          "name": "paused",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "wake_interval_seconds": {
+          "name": "wake_interval_seconds",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "paused_until": {
+          "name": "paused_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "avatar_blob": {
+          "name": "avatar_blob",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "avatar_content_type": {
+          "name": "avatar_content_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "agents_name_unique": {
+          "name": "agents_name_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "name"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "agents_concurrency_positive": {
+          "name": "agents_concurrency_positive",
+          "value": "\"agents\".\"concurrency\" > 0"
+        },
+        "agents_wake_interval_positive": {
+          "name": "agents_wake_interval_positive",
+          "value": "\"agents\".\"wake_interval_seconds\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
     "public.attachments": {
       "name": "attachments",
       "schema": "",
@@ -97,6 +302,223 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+<<<<<<< HEAD
+=======
+    "public.audit_log": {
+      "name": "audit_log",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "audit_log_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "actor": {
+          "name": "actor",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "action": {
+          "name": "action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "detail": {
+          "name": "detail",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "audit_log_task_id_index": {
+          "name": "audit_log_task_id_index",
+          "columns": [
+            {
+              "expression": "task_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "audit_log_project_id_created_at_index": {
+          "name": "audit_log_project_id_created_at_index",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "audit_log_project_id_projects_id_fk": {
+          "name": "audit_log_project_id_projects_id_fk",
+          "tableFrom": "audit_log",
+          "tableTo": "projects",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "audit_log_task_id_tasks_id_fk": {
+          "name": "audit_log_task_id_tasks_id_fk",
+          "tableFrom": "audit_log",
+          "tableTo": "tasks",
+          "columnsFrom": [
+            "task_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.comments": {
+      "name": "comments",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "author": {
+          "name": "author",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pinned": {
+          "name": "pinned",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "comments_task_id_index": {
+          "name": "comments_task_id_index",
+          "columns": [
+            {
+              "expression": "task_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "comments_task_id_tasks_id_fk": {
+          "name": "comments_task_id_tasks_id_fk",
+          "tableFrom": "comments",
+          "tableTo": "tasks",
+          "columnsFrom": [
+            "task_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
     "public.deployments": {
       "name": "deployments",
       "schema": "",
@@ -336,6 +758,7 @@
       },
       "isRLSEnabled": false
     },
+<<<<<<< HEAD
     "public.task_design_pins": {
       "name": "task_design_pins",
       "schema": "",
@@ -425,10 +848,21 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+=======
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
     "public.epic_dependencies": {
       "name": "epic_dependencies",
       "schema": "",
       "columns": {
+<<<<<<< HEAD
+=======
+        "project_id": {
+          "name": "project_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
         "epic_id": {
           "name": "epic_id",
           "type": "uuid",
@@ -460,6 +894,7 @@
         }
       },
       "foreignKeys": {
+<<<<<<< HEAD
         "epic_dependencies_epic_id_epics_id_fk": {
           "name": "epic_dependencies_epic_id_epics_id_fk",
           "tableFrom": "epic_dependencies",
@@ -468,11 +903,24 @@
             "epic_id"
           ],
           "columnsTo": [
+=======
+        "epic_dependencies_epic_same_project_fk": {
+          "name": "epic_dependencies_epic_same_project_fk",
+          "tableFrom": "epic_dependencies",
+          "tableTo": "epics",
+          "columnsFrom": [
+            "project_id",
+            "epic_id"
+          ],
+          "columnsTo": [
+            "project_id",
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
             "id"
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
+<<<<<<< HEAD
         "epic_dependencies_depends_on_epic_id_epics_id_fk": {
           "name": "epic_dependencies_depends_on_epic_id_epics_id_fk",
           "tableFrom": "epic_dependencies",
@@ -481,6 +929,18 @@
             "depends_on_epic_id"
           ],
           "columnsTo": [
+=======
+        "epic_dependencies_depends_on_same_project_fk": {
+          "name": "epic_dependencies_depends_on_same_project_fk",
+          "tableFrom": "epic_dependencies",
+          "tableTo": "epics",
+          "columnsFrom": [
+            "project_id",
+            "depends_on_epic_id"
+          ],
+          "columnsTo": [
+            "project_id",
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
             "id"
           ],
           "onDelete": "cascade",
@@ -577,6 +1037,7 @@
           "primaryKey": false,
           "notNull": false
         },
+<<<<<<< HEAD
         "rebase_requested": {
           "name": "rebase_requested",
           "type": "boolean",
@@ -596,6 +1057,8 @@
           "primaryKey": false,
           "notNull": false
         },
+=======
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
         "created_by": {
           "name": "created_by",
           "type": "jsonb",
@@ -650,11 +1113,183 @@
         }
       },
       "compositePrimaryKeys": {},
+<<<<<<< HEAD
       "uniqueConstraints": {},
+=======
+      "uniqueConstraints": {
+        "epics_project_id_unique": {
+          "name": "epics_project_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "project_id",
+            "id"
+          ]
+        }
+      },
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+<<<<<<< HEAD
+=======
+    "public.evidence": {
+      "name": "evidence",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "criterion_id": {
+          "name": "criterion_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "round": {
+          "name": "round",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "evidence_kind",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "blob": {
+          "name": "blob",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "file_name": {
+          "name": "file_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "content_type": {
+          "name": "content_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "size": {
+          "name": "size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "evidence_task_id_round_index": {
+          "name": "evidence_task_id_round_index",
+          "columns": [
+            {
+              "expression": "task_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "round",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "evidence_task_id_tasks_id_fk": {
+          "name": "evidence_task_id_tasks_id_fk",
+          "tableFrom": "evidence",
+          "tableTo": "tasks",
+          "columnsFrom": [
+            "task_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "evidence_criterion_id_acceptance_criteria_id_fk": {
+          "name": "evidence_criterion_id_acceptance_criteria_id_fk",
+          "tableFrom": "evidence",
+          "tableTo": "acceptance_criteria",
+          "columnsFrom": [
+            "criterion_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "evidence_run_id_runs_id_fk": {
+          "name": "evidence_run_id_runs_id_fk",
+          "tableFrom": "evidence",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "evidence_note_or_file": {
+          "name": "evidence_note_or_file",
+          "value": "(\n    (\"evidence\".\"kind\"::text = 'note' and \"evidence\".\"note\" ~ '[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]' and \"evidence\".\"blob\" is null and \"evidence\".\"file_name\" is null and \"evidence\".\"content_type\" is null and \"evidence\".\"size\" = 0)\n    or (\"evidence\".\"kind\"::text <> 'note' and \"evidence\".\"blob\" is not null and \"evidence\".\"blob\" ~ '[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]' and \"evidence\".\"file_name\" is not null and \"evidence\".\"file_name\" ~ '[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]' and \"evidence\".\"content_type\" is not null and \"evidence\".\"content_type\" ~ '[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]' and \"evidence\".\"size\" >= 0)\n  )"
+        }
+      },
+      "isRLSEnabled": false
+    },
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
     "public.plan_epics": {
       "name": "plan_epics",
       "schema": "",
@@ -869,7 +1504,20 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
+<<<<<<< HEAD
       "checkConstraints": {},
+=======
+      "checkConstraints": {
+        "plan_messages_role_kind": {
+          "name": "plan_messages_role_kind",
+          "value": "(\"plan_messages\".\"role\" = 'human' and \"plan_messages\".\"kind\" = 'message') or (\"plan_messages\".\"role\" = 'pm' and \"plan_messages\".\"kind\" in ('message', 'question', 'error'))"
+        },
+        "plan_messages_question_fields": {
+          "name": "plan_messages_question_fields",
+          "value": "\"plan_messages\".\"kind\" = 'question' or (\"plan_messages\".\"recommendation\" is null and \"plan_messages\".\"options\" is null)"
+        }
+      },
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
       "isRLSEnabled": false
     },
     "public.plan_sessions": {
@@ -1369,6 +2017,7 @@
       },
       "isRLSEnabled": false
     },
+<<<<<<< HEAD
     "public.evidence": {
       "name": "evidence",
       "schema": "",
@@ -1525,6 +2174,8 @@
       },
       "isRLSEnabled": false
     },
+=======
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
     "public.reviews": {
       "name": "reviews",
       "schema": "",
@@ -1651,6 +2302,7 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+<<<<<<< HEAD
     "public.agents": {
       "name": "agents",
       "schema": "",
@@ -1760,6 +2412,8 @@
       },
       "isRLSEnabled": false
     },
+=======
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
     "public.runs": {
       "name": "runs",
       "schema": "",
@@ -2079,6 +2733,7 @@
         "runs_task_unless_pm": {
           "name": "runs_task_unless_pm",
           "value": "\"runs\".\"task_id\" is not null or \"runs\".\"role\" = 'pm' or (\"runs\".\"epic_id\" is not null and \"runs\".\"role\" = 'reviewer')"
+<<<<<<< HEAD
         },
         "runs_role_context": {
           "name": "runs_role_context",
@@ -2095,10 +2750,13 @@
         "runs_outcome_matches_role": {
           "name": "runs_outcome_matches_role",
           "value": "\"runs\".\"outcome\" is null or case \"runs\".\"role\"::text\n    when 'developer' then \"runs\".\"outcome\"::text in ('pr_opened', 'pr_updated', 'pr_rebased', 'findings_reported', 'design_submitted', 'stuck', 'failed', 'rate_limited')\n    when 'designer' then \"runs\".\"outcome\"::text in ('design_submitted', 'stuck', 'failed', 'rate_limited')\n    when 'reviewer' then \"runs\".\"outcome\"::text in ('approved', 'changes_requested', 'blocked', 'failed', 'rate_limited')\n    else \"runs\".\"outcome\"::text in ('failed', 'rate_limited')\n  end"
+=======
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
         }
       },
       "isRLSEnabled": false
     },
+<<<<<<< HEAD
     "public.audit_log": {
       "name": "audit_log",
       "schema": "",
@@ -2231,6 +2889,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+=======
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
     "public.settings": {
       "name": "settings",
       "schema": "",
@@ -2263,6 +2923,7 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+<<<<<<< HEAD
     "public.acceptance_criteria": {
       "name": "acceptance_criteria",
       "schema": "",
@@ -2440,10 +3101,21 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+=======
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
     "public.task_dependencies": {
       "name": "task_dependencies",
       "schema": "",
       "columns": {
+<<<<<<< HEAD
+=======
+        "project_id": {
+          "name": "project_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
         "task_id": {
           "name": "task_id",
           "type": "uuid",
@@ -2482,6 +3154,7 @@
         }
       },
       "foreignKeys": {
+<<<<<<< HEAD
         "task_dependencies_task_id_tasks_id_fk": {
           "name": "task_dependencies_task_id_tasks_id_fk",
           "tableFrom": "task_dependencies",
@@ -2490,11 +3163,24 @@
             "task_id"
           ],
           "columnsTo": [
+=======
+        "task_dependencies_task_same_project_fk": {
+          "name": "task_dependencies_task_same_project_fk",
+          "tableFrom": "task_dependencies",
+          "tableTo": "tasks",
+          "columnsFrom": [
+            "project_id",
+            "task_id"
+          ],
+          "columnsTo": [
+            "project_id",
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
             "id"
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
+<<<<<<< HEAD
         "task_dependencies_depends_on_id_tasks_id_fk": {
           "name": "task_dependencies_depends_on_id_tasks_id_fk",
           "tableFrom": "task_dependencies",
@@ -2503,6 +3189,18 @@
             "depends_on_id"
           ],
           "columnsTo": [
+=======
+        "task_dependencies_depends_on_same_project_fk": {
+          "name": "task_dependencies_depends_on_same_project_fk",
+          "tableFrom": "task_dependencies",
+          "tableTo": "tasks",
+          "columnsFrom": [
+            "project_id",
+            "depends_on_id"
+          ],
+          "columnsTo": [
+            "project_id",
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
             "id"
           ],
           "onDelete": "cascade",
@@ -2528,6 +3226,98 @@
       },
       "isRLSEnabled": false
     },
+<<<<<<< HEAD
+=======
+    "public.task_design_pins": {
+      "name": "task_design_pins",
+      "schema": "",
+      "columns": {
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "design_version_id": {
+          "name": "design_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "screens": {
+          "name": "screens",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "task_design_pins_design_version_id_index": {
+          "name": "task_design_pins_design_version_id_index",
+          "columns": [
+            {
+              "expression": "design_version_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "task_design_pins_task_id_tasks_id_fk": {
+          "name": "task_design_pins_task_id_tasks_id_fk",
+          "tableFrom": "task_design_pins",
+          "tableTo": "tasks",
+          "columnsFrom": [
+            "task_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "task_design_pins_design_version_id_design_versions_id_fk": {
+          "name": "task_design_pins_design_version_id_design_versions_id_fk",
+          "tableFrom": "task_design_pins",
+          "tableTo": "design_versions",
+          "columnsFrom": [
+            "design_version_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
     "public.tasks": {
       "name": "tasks",
       "schema": "",
@@ -2790,6 +3580,7 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
+<<<<<<< HEAD
         "tasks_epic_id_epics_id_fk": {
           "name": "tasks_epic_id_epics_id_fk",
           "tableFrom": "tasks",
@@ -2803,6 +3594,8 @@
           "onDelete": "set null",
           "onUpdate": "no action"
         },
+=======
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
         "tasks_lease_run_id_runs_id_fk": {
           "name": "tasks_lease_run_id_runs_id_fk",
           "tableFrom": "tasks",
@@ -2815,6 +3608,24 @@
           ],
           "onDelete": "set null",
           "onUpdate": "no action"
+<<<<<<< HEAD
+=======
+        },
+        "tasks_epic_same_project_fk": {
+          "name": "tasks_epic_same_project_fk",
+          "tableFrom": "tasks",
+          "tableTo": "epics",
+          "columnsFrom": [
+            "project_id",
+            "epic_id"
+          ],
+          "columnsTo": [
+            "project_id",
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
         }
       },
       "compositePrimaryKeys": {},
@@ -2826,10 +3637,32 @@
             "project_id",
             "number"
           ]
+<<<<<<< HEAD
+=======
+        },
+        "tasks_project_id_unique": {
+          "name": "tasks_project_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "project_id",
+            "id"
+          ]
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
         }
       },
       "policies": {},
       "checkConstraints": {
+<<<<<<< HEAD
+=======
+        "tasks_status_reason": {
+          "name": "tasks_status_reason",
+          "value": "case when \"tasks\".\"status\" in ('blocked', 'failed')\n    then \"tasks\".\"status_reason\" is not null and btrim(\"tasks\".\"status_reason\", U&'\\0009\\000A\\000B\\000C\\000D\\0020\\00A0\\1680\\2000\\2001\\2002\\2003\\2004\\2005\\2006\\2007\\2008\\2009\\200A\\2028\\2029\\202F\\205F\\3000\\FEFF') <> ''\n    else \"tasks\".\"status_reason\" is null end"
+        },
+        "tasks_pr_complete": {
+          "name": "tasks_pr_complete",
+          "value": "(\"tasks\".\"pr_number\" is null) = (\"tasks\".\"pr_url\" is null)"
+        },
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
         "tasks_counters_non_negative": {
           "name": "tasks_counters_non_negative",
           "value": "\"tasks\".\"review_rounds\" >= 0 and \"tasks\".\"failed_runs\" >= 0 and \"tasks\".\"lease_epoch\" >= 0"
@@ -2894,7 +3727,10 @@
       "values": [
         "pm",
         "developer",
+<<<<<<< HEAD
         "designer",
+=======
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
         "reviewer"
       ]
     },
@@ -2935,7 +3771,10 @@
         "human_review",
         "changes_requested",
         "ready_to_merge",
+<<<<<<< HEAD
         "conflict",
+=======
+>>>>>>> 2d6f629 (Enforce separate note and file evidence shapes (#219))
         "merged"
       ]
     },

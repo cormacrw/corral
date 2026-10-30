@@ -45,5 +45,9 @@ export const evidence = pgTable('evidence', {
   createdAt: createdAt()
 }, t => [
   index().on(t.taskId, t.round),
-  check('evidence_file_unless_note', sql`${t.kind}::text = 'note' or (${t.blob} is not null and ${t.fileName} is not null and ${t.contentType} is not null)`)
+  // ECMAScript trim whitespace, including NBSP and BOM, matches the API.
+  check('evidence_note_or_file', sql`(
+    (${t.kind}::text = 'note' and ${t.note} ~ '[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]' and ${t.blob} is null and ${t.fileName} is null and ${t.contentType} is null and ${t.size} = 0)
+    or (${t.kind}::text <> 'note' and ${t.blob} is not null and ${t.blob} ~ '[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]' and ${t.fileName} is not null and ${t.fileName} ~ '[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]' and ${t.contentType} is not null and ${t.contentType} ~ '[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]' and ${t.size} >= 0)
+  )`)
 ])
