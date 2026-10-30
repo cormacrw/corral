@@ -6,6 +6,9 @@ import { toTaskState, type TaskRow } from './tasks.ts'
 
 const { agents, auditLog, projects, reviews, runs, epicDependencies, taskDependencies, tasks } = schema
 
+// How many candidate tasks a placing claim locks and tries at a time
+export const PLACE_BATCH = 50
+
 const scheduler: Actor = { kind: 'system', component: 'scheduler' }
 
 export interface Claim {
@@ -73,7 +76,7 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
           notExists(tx.select({ one: sql`1` }).from(reviews)
             .where(and(eq(reviews.taskId, tasks.id), eq(reviews.headSha, tasks.headSha))))
         )
-    const candidates = await tx.select({ task: tasks })
+    const batch = (offset: number) => tx.select({ task: tasks })
       .from(tasks)
       .innerJoin(projects, eq(projects.id, tasks.projectId))
       .where(and(
@@ -85,17 +88,27 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
         eq(tasks.paused, false),
         eq(projects.paused, false)
       ))
-      // Enum order: urgent first
-      .orderBy(asc(tasks.priority), asc(tasks.createdAt))
-      .limit(place ? 50 : 1)
+      // Enum order: urgent first; id keeps the pages stable between batches
+      .orderBy(asc(tasks.priority), asc(tasks.createdAt), asc(tasks.id))
+      .limit(place ? PLACE_BATCH : 1)
+      .offset(offset)
       .for('update', { of: tasks, skipLocked: true })
     let task: TaskRow | null = null
     let runnerId: string | null = null
-    for (const candidate of candidates) {
-      runnerId = place ? await place(tx, candidate.task) : null
-      if (place && !runnerId) continue
-      task = candidate.task
-      break
+    // Without placement the first candidate wins. With it, tasks no runner
+    // can take now are skipped, and the scan carries on past them batch by
+    // batch so that a long line of waiting tasks can't hide placeable work.
+    // Rows this transaction already locked stay visible to it, so the offset
+    // walks the same ordering.
+    for (let offset = 0; !task; offset += PLACE_BATCH) {
+      const candidates = await batch(offset)
+      for (const candidate of candidates) {
+        runnerId = place ? await place(tx, candidate.task) : null
+        if (place && !runnerId) continue
+        task = candidate.task
+        break
+      }
+      if (!place || candidates.length < PLACE_BATCH) break
     }
     if (!task) return null
 

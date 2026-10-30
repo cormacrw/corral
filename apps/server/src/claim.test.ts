@@ -3,7 +3,7 @@ import type { TaskPriority } from '@corral/core'
 import { schema } from '@corral/db'
 import { and, eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { claimNextTask } from './claim.ts'
+import { claimNextTask, PLACE_BATCH, type Place } from './claim.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 
 const { agents, auditLog, runs, tasks } = schema
@@ -148,6 +148,27 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
     expect(await claimNextTask(t.db, await developer(1, { paused: true }), now)).toBeNull()
     expect(await claimNextTask(t.db, await developer(1, { pausedUntil: new Date('2026-10-27T15:00:00Z') }), now)).toBeNull()
     expect(await claimNextTask(t.db, await developer(1, { pausedUntil: new Date('2026-10-27T11:00:00Z') }), now)).not.toBeNull()
+  })
+
+  it('keeps looking past a full batch of tasks no runner can take', async () => {
+    // The runnable task is low priority; more urgent tasks than one batch
+    // holds wait ahead of it for a runner that isn't there
+    const project = await projectWithReadyTasks(1, ['low'])
+    const runnable = await taskRow(project, 1)
+    const blocked = PLACE_BATCH + 3
+    await t.db.insert(tasks).values(Array.from({ length: blocked }, (_, i) => ({
+      projectId: project.id, number: i + 2, title: `Waiting ${i + 2}`, type: runnable.type, status: 'ready' as const, priority: 'urgent' as const, createdBy: runnable.createdBy
+    })))
+    const tried: string[] = []
+    const place: Place = async (_tx, task) => {
+      tried.push(task.id)
+      return task.id === runnable.id ? 'runner-b' : null
+    }
+
+    const claim = await claimNextTask(t.db, await developer(), new Date(), undefined, place)
+    expect(claim).toMatchObject({ taskId: runnable.id, runnerId: 'runner-b' })
+    expect(new Set(tried).size).toBe(blocked + 1)
+    expect((await taskRow(project, 2)).leaseRunId).toBeNull()
   })
 
   it('gives an In progress task with no lease a new lease and a higher epoch', async () => {
