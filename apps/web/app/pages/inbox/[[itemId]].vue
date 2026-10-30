@@ -24,7 +24,7 @@ const resolveTo = ref<'backlog' | 'ready' | 'in_progress'>('in_progress')
 const text = ref('')
 const busy = ref(false)
 const actionError = ref<string | null>(null)
-const task = ref<Task | null>(null)
+const loadedTask = ref<Task | null>(null)
 const evidence = ref<Evidence[]>([])
 const reviews = ref<Review[]>([])
 const showTask = ref(true)
@@ -72,6 +72,10 @@ const selected = computed<InboxItem | null>(() => {
   return [...inbox.value.needsYou, ...inbox.value.activity, ...inbox.value.resolved].find(i => i.id === selectedId.value)
     ?? (openThread.value?.id === selectedId.value ? openThread.value : null)
 })
+// Task details may arrive after the selection changes. Never reuse the previous item's data.
+const task = computed(() => loadedTask.value?.id === selected.value?.taskId ? loadedTask.value : null)
+const isSpike = computed(() => task.value?.type === 'spike')
+const taskLoading = computed(() => Boolean(selected.value?.taskId) && !task.value)
 const alreadyResolved = computed(() => selected.value !== null && selected.value.type !== 'activity' && !inbox.value?.needsYou.some(i => i.id === selected.value!.id))
 watch(selected, async (item, previous) => {
   text.value = ''
@@ -80,12 +84,12 @@ watch(selected, async (item, previous) => {
   if (!item) flyout.close()
   if (item?.type === 'plan_thread' || item?.type === 'epic_review' || item?.type === 'release_notes' || item?.type === 'epic_conflict') {
     if (previous?.id !== item.id && (flyout.ref.value || flyout.epic.value)) await flyout.close()
-    task.value = null
+    loadedTask.value = null
     return
   }
-  const loadedTask = item ? await api.tasks.byRef(item.taskRef).catch(() => null) : null
+  const fetchedTask = item ? await api.tasks.byRef(item.taskRef).catch(() => null) : null
   if (selected.value?.id !== item?.id) return
-  task.value = loadedTask
+  loadedTask.value = fetchedTask
   // A human review carries its evidence in the message (design/inbox.md)
   const slug = live.state.value.projects.find(p => p.id === task.value?.projectId)?.slug
   if (item?.type === 'human_review' && task.value && slug) {
@@ -141,7 +145,7 @@ function toggleTask() {
 const actions = computed(() => {
   if (!selected.value) return []
   switch (selected.value.type) {
-    case 'human_review': return [{ value: 'approve', label: task.value?.type === 'spike' ? 'Accept findings' : 'Approve and merge', icon: 'i-lucide-check' }, { value: 'request_changes', label: 'Request changes', icon: 'i-lucide-pencil' }]
+    case 'human_review': return [{ value: 'approve', label: taskLoading.value ? 'Loading task…' : isSpike.value ? 'Accept findings' : 'Approve and merge', icon: 'i-lucide-check' }, { value: 'request_changes', label: 'Request changes', icon: 'i-lucide-pencil' }]
     case 'question':
     case 'blocked': return [{ value: 'clarify', label: 'Clarify and continue', icon: 'i-lucide-message-circle' }, { value: 'send_back', label: 'Send back to Backlog', icon: 'i-lucide-undo-2' }, { value: 'delete', label: 'Delete task', icon: 'i-lucide-trash-2' }]
     case 'failed': return [{ value: 'resolve', label: 'Retry', icon: 'i-lucide-rotate-ccw' }, { value: 'send_back', label: 'Send back to Backlog', icon: 'i-lucide-undo-2' }, { value: 'delete', label: 'Delete task', icon: 'i-lucide-trash-2' }]
@@ -171,6 +175,7 @@ const submitLabel = computed(() => action.value ? (actions.value.find(a => a.val
 // Resolves false when not sent, so the composer keeps its images
 async function submit(message: string): Promise<boolean> {
   if (!selected.value || selected.value.type === 'plan_thread' || selected.value.type === 'epic_review' || selected.value.type === 'release_notes' || selected.value.type === 'epic_conflict') return false
+  if (taskLoading.value) return false
   if (action.value === 'approve' && task.value?.acceptanceCriteria.some(c => c.checkedByHuman && !checkedHumanCriteria.value.includes(c.id))) {
     actionError.value = 'Check each human criterion before approving.'
     return false
@@ -193,7 +198,7 @@ async function submit(message: string): Promise<boolean> {
             : action.value === 'delete'
               ? { action: 'delete', ...(message && { text: message }) }
               : action.value === 'send_back' ? { action: 'send_back' } : { action: 'approve' }
-      const description = action.value === 'approve' && task.value?.type === 'spike' ? 'You accepted the findings' : submitLabel.value
+      const description = action.value === 'approve' && isSpike.value ? 'You accepted the findings' : submitLabel.value
       await api.inbox.act(actedOn.taskId, input)
       toast.add({ title: 'Done', description, color: 'success' })
     }
@@ -264,13 +269,14 @@ onBeforeUnmount(() => {
       :selected="selected?.type === 'plan_thread' || selected?.type === 'epic_review' || selected?.type === 'epic_conflict' ? null : selected"
       :already-resolved="alreadyResolved"
       :task="task"
+      :is-spike="isSpike"
       :evidence="evidence"
       :reviews="reviews"
       :actions="actions"
       :placeholder="placeholder"
       :submit-label="submitLabel"
       :needs-text="needsText"
-      :busy="busy"
+      :busy="busy || taskLoading"
       :action-error="actionError"
       :type-badge="typeBadge"
       :on-submit="submit"
@@ -484,7 +490,7 @@ onBeforeUnmount(() => {
                 class="text-sm"
               />
               <a
-                v-if="task?.type !== 'spike' && selected.prUrl"
+                v-if="!isSpike && selected.prUrl"
                 :href="selected.prUrl"
                 target="_blank"
                 rel="noopener"
@@ -492,7 +498,7 @@ onBeforeUnmount(() => {
               >Open PR</a>
               <template v-if="selected.type === 'human_review' && task">
                 <div
-                  v-if="task.type !== 'spike' && task.gateChecks?.length"
+                  v-if="!isSpike && task.gateChecks?.length"
                   class="flex flex-wrap gap-1"
                 >
                   <UBadge
@@ -564,7 +570,7 @@ onBeforeUnmount(() => {
                 :submit-label="submitLabel"
                 :submit-color="action === 'delete' ? 'error' : 'primary'"
                 :allow-empty="action !== null && !needsText"
-                :busy="busy"
+                :busy="busy || taskLoading"
                 :project="selected.project.slug"
                 @submit="submit"
               />

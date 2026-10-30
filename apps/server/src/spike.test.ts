@@ -80,8 +80,8 @@ describe('spikes deliver findings instead of a PR', () => {
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
   }
 
-  it('runs a spike end to end with no branch or PR, and ends in Merged with the findings on the task', async () => {
-    const { project, task } = await approved()
+  it.each([false, true])('runs a spike end to end with no branch or PR (humanReview=%s), and ends in Merged with the findings on the task', async (humanReview) => {
+    const { project, task } = await approved({ humanReview })
 
     const dependent = await t.createTask(project.slug, { title: 'Implement locking', dependsOn: [task.number] })
     expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${dependent.number}/transitions`, { type: 'approve' })).status).toBe(200)
@@ -118,7 +118,8 @@ describe('spikes deliver findings instead of a PR', () => {
     const result = await runner.call(reviewer.runId, reviewer.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Answers both.', criteria: verdicts(task, [true, true]) })
     expect(result).toMatchObject({ ok: true, result: { message: expect.stringContaining('A human reviews the findings next.') } })
 
-    expect(await taskRow(task.id)).toMatchObject({ status: 'human_review', humanReview: false, mergedAt: null })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'human_review', humanReview, mergedAt: null })
+    expect(runner.received.filter(m => m.type === 'job.request' && m.job.kind === 'cleanup_worktrees' && m.job.taskId === task.id)).toHaveLength(0)
     expect((await t.request('POST', `/api/inbox/${task.id}/actions`, { action: 'approve' })).status).toBe(200)
 
     // Merged, the final column, without GitHub: nothing pushed, opened or merged
@@ -130,6 +131,7 @@ describe('spikes deliver findings instead of a PR', () => {
     expect(inbox.resolved.find(i => i.taskId === task.id)?.resolution).toBe('You accepted the findings')
     expect(t.github.pulls.size).toBe(0)
     expect(runner.received.filter(m => m.type === 'job.request' && m.job.kind === 'github')).toHaveLength(0)
+    await expect.poll(() => runner.received.filter(m => m.type === 'job.request' && m.job.kind === 'cleanup_worktrees' && m.job.taskId === task.id).length).toBe(1)
     await runner.next('job.request', m => m.job.kind === 'cleanup_worktrees' && m.job.taskId === task.id)
 
     // The findings are a comment on the task, which task detail shows
