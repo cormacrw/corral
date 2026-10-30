@@ -16,8 +16,8 @@ const button = vue.defineComponent({
   setup: props => () => vue.h('button', { disabled: props.disabled }, props.label)
 })
 const wrappers: ReturnType<typeof mount>[] = []
-function open(status = message.pendingAction!.status, error: string | null = null) {
-  const wrapper = mount(PlanConfirmAction, { props: { message: { ...message, pendingAction: { ...message.pendingAction!, status, error } } }, global: { components: { UButton: button } } })
+function open(status = message.pendingAction!.status, error: string | null = null, onResolved = vi.fn()) {
+  const wrapper = mount(PlanConfirmAction, { props: { onResolved, message: { ...message, pendingAction: { ...message.pendingAction!, status, error } } }, global: { components: { UButton: button } } })
   wrappers.push(wrapper)
   return wrapper
 }
@@ -34,7 +34,14 @@ afterEach(() => {
 
 describe('PM confirm card', () => {
   it.each(['confirm', 'cancel'] as const)('sends %s only on a click, scoped to its session and action', async (decision) => {
-    const wrapper = open()
+    // Like the parent conversation, observe the event through its listener.
+    // wrapper.emitted() depends on devtools hooks disabled in production.
+    const onResolved = vi.fn()
+    let finish!: (result: PlanMessage) => void
+    vi.mocked(api.plan.resolveAction).mockImplementationOnce(() => new Promise((resolve) => {
+      finish = resolve
+    }))
+    const wrapper = open('pending', null, onResolved)
     expect(wrapper.text()).toContain('Nothing changes until you confirm.')
     expect(api.plan.resolveAction).not.toHaveBeenCalled()
     const buttons = wrapper.findAll('button')
@@ -42,7 +49,12 @@ describe('PM confirm card', () => {
     await buttons[decision === 'confirm' ? 0 : 1]!.trigger('click')
     await flushPromises()
     expect(api.plan.resolveAction).toHaveBeenCalledExactlyOnceWith('session-1', 'action-1', decision)
-    expect(wrapper.emitted('resolved')).toHaveLength(1)
+    expect(onResolved).not.toHaveBeenCalled()
+    expect(buttons.every(b => b.element.disabled)).toBe(true)
+    finish(message)
+    await flushPromises()
+    expect(onResolved).toHaveBeenCalledExactlyOnceWith()
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
   })
   it.each(['confirmed', 'cancelled', 'failed', 'executing'] as const)('keeps %s cards disabled and shows durable errors', (status) => {
     const wrapper = open(status, status === 'failed' ? 'Task TA-1 no longer exists' : null)
@@ -51,11 +63,12 @@ describe('PM confirm card', () => {
   })
   it('shows a network error while keeping a pending card available for a safe retry', async () => {
     vi.mocked(api.plan.resolveAction).mockRejectedValueOnce(new Error('Connection lost'))
-    const wrapper = open()
+    const onResolved = vi.fn()
+    const wrapper = open('pending', null, onResolved)
     await wrapper.get('button').trigger('click')
     await flushPromises()
     expect(wrapper.get('[role="alert"]').text()).toBe('Connection lost')
     expect(wrapper.get('button').element.disabled).toBe(false)
-    expect(wrapper.emitted('resolved')).toBeUndefined()
+    expect(onResolved).not.toHaveBeenCalled()
   })
 })
