@@ -259,6 +259,7 @@ route('POST', '/deployments/:id/dismiss', ([id]) => {
   return { ok: true }
 })
 route('GET', '/inbox', () => f.inbox())
+// Let the static Inbox exercise send and auto-advance without a server.
 route('POST', '/inbox/:taskId/actions', ([taskId], body) => {
   const task = f.tasks.find(t => t.id === taskId) ?? notFound()
   const input = body as InboxActionInput
@@ -269,7 +270,7 @@ route('POST', '/inbox/:taskId/actions', ([taskId], body) => {
     return { task: input.action === 'delete' ? null : task }
   }
   const item = f.inbox().needsYou.find(i => i.taskId === taskId)
-  if (!item || item.type === 'plan_thread' || item.type === 'epic_review' || item.type === 'epic_conflict' || item.type === 'release_notes' || task.status !== 'human_review' || !['approve', 'request_changes'].includes(input.action)) {
+  if (!item || item.type === 'plan_thread' || item.type === 'epic_review' || item.type === 'epic_conflict' || item.type === 'release_notes' || task.status !== 'human_review') {
     throw new ApiError(409, { code: 'conflict', constraint: null }, 'This review is no longer actionable')
   }
   const accepted = input.action === 'approve'

@@ -177,6 +177,7 @@ An epic PR in human review and an epic PR rebase conflict have their own layout 
 
 - **Loading:** skeleton rows.
 - **An action fails:** an inline error in the tray. The draft and selected action are kept.
+- **The task fails to load:** an inline error in the tray with **Retry**, instead of a spinner. Approval stays blocked, because its human-criteria check needs the task, and its action reads **Task not loaded**. The other actions still work.
 - **A task changed status elsewhere:** the item shows "Already resolved" and the tray is disabled.
 
 ## Responsive

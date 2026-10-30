@@ -27,10 +27,13 @@ const props = defineProps<{
   submitLabel: string
   needsText: boolean
   busy: boolean
+  approveBlocked: boolean
+  taskLoadFailed: boolean
   actionError: string | null
   typeBadge: (type: InboxItem['type']) => { label: string, color: Color }
   onSubmit: (text: string) => Promise<boolean>
   onRetry: () => unknown
+  onRetryTask: () => unknown
 }>()
 const checkedHumanCriteria = defineModel<string[]>('checkedHumanCriteria', { required: true })
 const tab = defineModel<'needsYou' | 'activity' | 'resolved'>('tab', { required: true })
@@ -235,6 +238,7 @@ const tabs = computed(() => [
           color="error"
           variant="subtle"
           :title="actionError"
+          :actions="taskLoadFailed ? [{ label: 'Retry', onClick: onRetryTask }] : []"
         />
         <PromptComposer
           v-model="text"
@@ -243,6 +247,7 @@ const tabs = computed(() => [
           :submit-color="action === 'delete' ? 'error' : 'primary'"
           :allow-empty="action !== null && !needsText"
           :busy="busy"
+          :disabled="approveBlocked"
           :project="selected.project.slug"
           @submit="onSubmit"
         />
