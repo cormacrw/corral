@@ -22,7 +22,7 @@ import {
   type TransitionError
 } from '@corral/core'
 import { z } from 'zod'
-import type { CliId, RunnerInfo } from './runner.ts'
+import type { CliId, RunnerInfo, RunTimings } from './runner.ts'
 
 // HTTP API between apps/web and apps/server. Inputs are zod schemas the server
 // validates; outputs are plain types (JSON, so dates are ISO strings).
@@ -717,6 +717,8 @@ export interface Run {
   queuedAt: string
   startedAt: string | null
   endedAt: string | null
+  // Null until the run ends, and for runs from older runners
+  timings: RunTimings | null
 }
 
 export interface Evidence {

@@ -263,6 +263,8 @@ export const runs = pgTable('runs', {
   inputTokens: integer(),
   cacheReadTokens: integer(),
   outputTokens: integer(),
+  // Phase and tool timings from the runner (RunTimings); null from older runners
+  timings: jsonb(),
   queuedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   startedAt: timestamp({ withTimezone: true }),
   endedAt: timestamp({ withTimezone: true })

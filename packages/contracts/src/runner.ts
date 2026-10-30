@@ -103,6 +103,30 @@ export type RunEvent =
   // inputTokens is fresh input (including cache writes); cache reads are counted apart
   | { type: 'usage', inputTokens: number, cacheReadTokens: number, outputTokens: number }
 
+// Where a run's time went. An `agent_*` phase is one agent process or turn,
+// less any phase nested in it: a push or design pack inside a tool call
+// pauses the agent's clock. `other` is everything unnamed.
+export type RunPhase =
+  | 'worktree_prepare'
+  | 'session_setup'
+  | 'design_save'
+  | 'agent_cold_start'
+  | 'agent_resume'
+  | 'agent_warm_turn'
+  | 'design_pack'
+  | 'push'
+  | 'finish'
+  | 'other'
+
+// Measured by the runner from assignment to run.ended, so totalMs starts
+// before the run's startedAt and can end after its endedAt.
+export interface RunTimings {
+  totalMs: number
+  // In the order the run first entered them; they add up to totalMs
+  phases: { phase: RunPhase, durationMs: number }[]
+  tools: { tool: string, count: number, totalMs: number, maxMs: number }[]
+}
+
 export type RunExit =
   | { kind: 'exited', code: number | null }
   | { kind: 'stopped' }
@@ -146,7 +170,8 @@ export type RunnerMessage =
   | { type: 'job.result', jobId: string, ok: false, error: string }
   | { type: 'run.started', runId: string, leaseEpoch: number, agentSessionId: string | null }
   | { type: 'run.events', runId: string, leaseEpoch: number, events: RunEvent[] }
-  | { type: 'run.ended', runId: string, leaseEpoch: number, exit: RunExit, headSha: string | null }
+  // timings: absent from older runners
+  | { type: 'run.ended', runId: string, leaseEpoch: number, exit: RunExit, headSha: string | null, timings?: RunTimings }
   | { type: 'tool.call', callId: string, runId: string, leaseEpoch: number, tool: AgentTool, input: unknown }
   // A run.message the runner could not deliver: a Codex or PM run, or a run
   // that has ended. Messages with a stale lease epoch get no answer (fencing).
