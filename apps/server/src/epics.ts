@@ -29,13 +29,21 @@ export async function getEpic(db: Executor, epicId: string): Promise<EpicDetail>
 }
 
 export async function patchEpic(db: Executor, epicId: string, input: PatchEpicInput, actor: Actor): Promise<Epic> {
-  const { row, project } = await findEpic(db, epicId)
-  const changed = (Object.keys(input) as (keyof PatchEpicInput)[]).filter(k => input[k] !== undefined && input[k] !== row[k])
-  if (changed.length > 0) {
-    await db.update(epics).set({ ...input, updatedAt: new Date() }).where(eq(epics.id, epicId))
-    await db.insert(auditLog).values({ projectId: row.projectId, actor, action: 'epic.updated', detail: { epicId, changed } })
-  }
-  return (await listEpics(db, project)).find(e => e.id === epicId)!
+  return db.transaction(async (tx) => {
+    // Read the current mode under the same lock used by epic PR reconciliation.
+    const { row, project } = await findEpic(tx, epicId)
+    const [epic] = await tx.select().from(epics).where(eq(epics.id, epicId)).for('update')
+    const changed = (Object.keys(input) as (keyof PatchEpicInput)[]).filter(k => input[k] !== undefined && input[k] !== epic![k])
+    if (changed.includes('reviewMode')) {
+      const taskRows = await tx.select({ status: tasks.status, prNumber: tasks.prNumber }).from(tasks).where(eq(tasks.epicId, epicId))
+      if (reviewModeLocked(epic!, taskRows)) throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: 'The review mode can\'t change once a task in the epic has opened a PR' }] })
+    }
+    if (changed.length > 0) {
+      await tx.update(epics).set({ ...input, updatedAt: new Date() }).where(eq(epics.id, epicId))
+      await tx.insert(auditLog).values({ projectId: row.projectId, actor, action: 'epic.updated', detail: { epicId, changed } })
+    }
+    return (await listEpics(tx, project)).find(e => e.id === epicId)!
+  })
 }
 
 async function findEpic(db: Executor, epicId: string): Promise<{ row: EpicRow, project: ProjectRow }> {
@@ -45,6 +53,11 @@ async function findEpic(db: Executor, epicId: string): Promise<{ row: EpicRow, p
     .innerJoin(projects, eq(projects.id, epics.projectId)).where(eq(epics.id, epicId))
   if (!found) throw notFound()
   return found
+}
+
+// A deleted task counts here: its PR may already have merged into the epic branch.
+function reviewModeLocked(epic: { prNumber: number | null }, taskRows: { status: string, prNumber: number | null }[]): boolean {
+  return epic.prNumber !== null || taskRows.some(t => t.prNumber !== null || t.status === 'merged')
 }
 
 function toEpic(row: EpicRow, taskStatuses: { status: string }[], edges: { epicId: string, dependsOnEpicId: string }[]): Epic {
