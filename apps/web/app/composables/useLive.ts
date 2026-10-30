@@ -1,4 +1,5 @@
 import type { Agent, Epic, GlobalStatus, PlanSession, Profile, Project, RunEvent, RunnerStatus, ServerEvent, Task } from '@corral/contracts'
+import { serverEventTypes } from '~/queries/dependencies'
 import { api } from './useApi'
 
 // Everything the shell and pages show live. Loaded once, then kept current
@@ -27,9 +28,23 @@ export interface LiveState {
 type Listener = (event: ServerEvent) => void
 
 const listeners = new Set<Listener>()
+const reconnectListeners = new Set<() => void>()
 let source: EventSource | null = null
 let retryTimer: ReturnType<typeof setTimeout> | null = null
 let retryMs = 1000
+
+// Every event on the stream, real or mock. Needs no component, for the query
+// layer's plugin.
+export function subscribeLive(listener: Listener): () => void {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
+// Called when the stream comes back after a drop
+export function subscribeReconnect(listener: () => void): () => void {
+  reconnectListeners.add(listener)
+  return () => reconnectListeners.delete(listener)
+}
 
 export function useLive() {
   const route = useRoute()
@@ -167,7 +182,7 @@ export function useLive() {
   }
 
   function connect(): void {
-    if (source || !import.meta.client) return
+    if (source || typeof window === 'undefined') return
     // The static prototype has no server to stream from; its mock API sends
     // the events a write would have caused
     if (import.meta.prototype) {
@@ -177,11 +192,7 @@ export function useLive() {
     }
     state.value.connection = source ? 'open' : state.value.connection
     source = new EventSource('/api/events')
-    const types: ServerEvent['type'][] = [
-      'project.created', 'project.updated', 'project.deleted', 'task.created', 'task.updated', 'task.deleted', 'runner.status', 'run.updated',
-      'run.events', 'agent.updated', 'global.status', 'plan.session', 'plan.message', 'plan.updated', 'plan.drafts', 'epic.updated', 'profile.updated', 'comment.created', 'deployment.updated'
-    ]
-    for (const type of types) {
+    for (const type of serverEventTypes) {
       source.addEventListener(type, (message) => {
         apply(JSON.parse((message as MessageEvent).data) as ServerEvent)
       })
@@ -191,7 +202,10 @@ export function useLive() {
       state.value.connection = 'open'
       retryMs = 1000
       // Anything missed while disconnected
-      if (wasReconnecting) void load()
+      if (wasReconnecting) {
+        void load()
+        for (const listener of reconnectListeners) listener()
+      }
     })
     source.onerror = () => {
       source?.close()
@@ -204,14 +218,9 @@ export function useLive() {
   }
 
   // Pages subscribe for events they render themselves (plan messages, comments)
-  function subscribe(listener: Listener): () => void {
-    listeners.add(listener)
-    return () => listeners.delete(listener)
-  }
-
   function watchRun(runId: string, initial: RunEvent[]): void {
     state.value.runEvents[runId] = initial
   }
 
-  return { state, load, loadTasks, connect, subscribe, watchRun }
+  return { state, load, loadTasks, connect, subscribe: subscribeLive, watchRun }
 }
