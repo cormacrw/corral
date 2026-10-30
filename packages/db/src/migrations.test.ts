@@ -243,7 +243,7 @@ describe('migrations', () => {
   it.for([
     { driver: 'pglite' as const },
     { driver: 'postgres' as const }
-  ])('0027 makes epics already on the board direct and new ones take the project default, on $driver (D23)', { timeout: 60_000 }, async ({ driver }, context) => {
+  ])('0027 makes epics already on the board direct and new ones take the project default, on $driver (D27)', { timeout: 60_000 }, async ({ driver }, context) => {
     requireDatabase(driver, context)
     const before = await migrationsBefore('0027_epic_review_modes')
     cleanup.push(() => rm(before, { recursive: true, force: true }))

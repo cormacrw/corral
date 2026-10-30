@@ -77,7 +77,7 @@ export interface Project {
   requiredChecks: string[]
   paused: boolean
   humanReviewDefault: boolean
-  // The review mode of new epics a plan doesn't give one (D23)
+  // The review mode of new epics a plan doesn't give one (D27)
   epicReviewModeDefault: EpicReviewMode
   reviewRoundCap: number
   failedRunCap: number
@@ -96,7 +96,7 @@ export interface Epic {
   dependsOn: string[]
   blocks: string[]
   reviewMode: EpicReviewMode
-  // The epic branch and its PR into the target branch (D23); null until
+  // The epic branch and its PR into the target branch (D27); null until
   // Corral creates them, and always in `direct` mode
   branch: string | null
   prNumber: number | null

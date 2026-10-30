@@ -29,7 +29,7 @@ These specs describe the UI only. Behaviour rules come from [decisions.md](../de
 
 - **Global:** Plan, Inbox, Agents, Settings. They work across every project and always show which project a thing belongs to.
 - **Per project:** Overview, Board, Backlog, Pull requests, Settings. Reached from the project's entry in the sidebar.
-- **Agents are global.** Juno (PM), Atlas (developer) and Vera (reviewer) serve every project. They are configured in Settings, not per project.
+- **Agents are global.** Juno (PM), Atlas (developer), Vera (reviewer) and the designer serve every project (D23). They are configured in Settings, not per project.
 - **Planning happens in Plan.** The PM never creates Inbox items of its own; open Plan sessions with a question or a plan needing approval appear in the Inbox as Plan threads, where the question can be answered or the plan approved too (D11, amended).
 
 Multiple projects, global agents and per-project task prefixes are decided in **D13**.
