@@ -23,6 +23,15 @@ export interface PromptTask {
   criteria: { id: string, text: string }[]
   comments: { author: string, body: string, pinned: boolean, createdAt: Date }[]
   attachments: { id: string, fileName: string, foundIn: string[] }[]
+  // The developer's last run, when it ended without reporting an outcome
+  stoppedRun?: StoppedRun | null
+}
+
+export interface StoppedRun {
+  number: number
+  reason: string
+  // The commit that saved its uncommitted work, if there was any
+  wipSha: string | null
 }
 
 export interface PinnedDesign {
@@ -47,6 +56,17 @@ function commentsSection(task: PromptTask): string {
     pinned.length > 0 ? section('Pinned comments (read these first)', pinned.map(format).join('\n')) : '',
     recent.length > 0 ? section('Recent comments and feedback', recent.map(format).join('\n')) : ''
   ].join('\n')
+}
+
+function stoppedRunSection(task: PromptTask): string {
+  const run = task.stoppedRun
+  if (!run) return ''
+  return section('Continuing a stopped run', `
+You are continuing run #${run.number}, which stopped before it reported an outcome. Stop reason: ${run.reason}
+
+${run.wipSha
+  ? `Corral saved its uncommitted work as WIP commit \`${run.wipSha}\`, and your branch includes it. That work is unfinished and may not build. Read it with \`git show ${run.wipSha}\` and carry on from it; don't start over.`
+  : 'No WIP commit was saved. Check what it left in your worktree and carry on from there; don\'t start over.'}`)
 }
 
 // Images the human attached to the task text, so the agent fetches them
@@ -295,6 +315,7 @@ export function developerPrompt(task: PromptTask, agentName: string): string {
       ? `This is a revision: review round ${task.reviewRounds} of ${task.reviewRoundCap} requested changes. Address every piece of feedback below.`
       : 'Implement the task so that every acceptance criterion is met.',
     '',
+    stoppedRunSection(task),
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
     section('Acceptance criteria', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
     commentsSection(task),
@@ -325,6 +346,7 @@ function spikeDeveloperPrompt(task: PromptTask, agentName: string): string {
       ? `This is a revision: review round ${task.reviewRounds} of ${task.reviewRoundCap} requested changes to your findings. Address every piece of feedback below.`
       : 'A spike answers a question. Investigate it so that your findings answer every acceptance criterion.',
     '',
+    stoppedRunSection(task),
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
     section('Acceptance criteria', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
     commentsSection(task),
@@ -368,6 +390,7 @@ function designDeveloperPrompt(task: PromptTask, agentName: string): string {
       ? `This is a revision: changes were requested on design v${version}. Address every piece of feedback below and submit the result as v${version + 1}.`
       : 'A design task agrees a UI or flow before it is built. Build a prototype and a spec that meet every acceptance criterion, and submit them as a design version for review.',
     '',
+    stoppedRunSection(task),
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
     section('Acceptance criteria', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
     commentsSection(task),
@@ -388,6 +411,7 @@ export function developerRevisionPrompt(task: PromptTask, feedback: PromptTask['
       ? `Review round ${task.reviewRounds} of ${task.reviewRoundCap} on ${task.ref} requested changes. This is the same session${task.branch ? ` and the same branch, \`${task.branch}\`` : ''}: continue from your earlier work.`
       : `${task.ref} is back with you. This is the same session${task.branch ? ` and the same branch, \`${task.branch}\`` : ''}: continue from your earlier work.`,
     '',
+    stoppedRunSection(task),
     section('New comments', feedback.length > 0 ? feedback.map(format).join('\n') : '(none: re-read the task with `get_task`)'),
     section('What to do', `
 - Address every point of the feedback, and finish whatever the task still needs.
@@ -404,6 +428,7 @@ export function designRevisionPrompt(task: PromptTask, feedback: PromptTask['com
   return [
     `Changes were requested on design v${version} of ${task.ref}. This is the same session and the same branch, \`${task.branch}\`: continue from your earlier work.`,
     '',
+    stoppedRunSection(task),
     section('Feedback', feedback.length > 0 ? feedback.map(format).join('\n') : '(no written feedback: re-read the task with get_task)'),
     section('What to do', `
 - Address every point of the feedback in the prototype and in \`design.md\`.

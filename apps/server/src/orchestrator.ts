@@ -328,7 +328,7 @@ export class Orchestrator implements RunnerHandlers {
     for (const { id } of live) {
       const ctx = await this.#load(id)
       if (!ctx) continue
-      this.#d.runner.send({ type: 'run.stop', runId: id, reason: 'Corral was stopped' }, ctx.run.runnerId)
+      this.#d.runner.send({ type: 'run.stop', runId: id, reason: 'Corral was stopped', keepWork: true }, ctx.run.runnerId)
       await this.#endRun(ctx, { state: 'interrupted', error: 'Stopped: Corral was stopped' })
       await this.#publish(ctx)
     }
@@ -490,6 +490,10 @@ export class Orchestrator implements RunnerHandlers {
           .where(eq(designVersions.taskId, task.id)).orderBy(desc(designVersions.version)).limit(1)
       : []
     const pin = await this.#pinnedDesign(ctx.project.prefix, task.id)
+    const previous = await this.#previousDeveloperRun(db, task.id, ctx.agent.id, ctx.run.id)
+    const stoppedRun = previous && (previous.state === 'interrupted' || previous.state === 'failed')
+      ? { number: previous.number, reason: previous.error ?? 'Stopped', wipSha: previous.headSha }
+      : null
     const promptTask = {
       ref,
       title: task.title,
@@ -505,14 +509,14 @@ export class Orchestrator implements RunnerHandlers {
       reviewRoundCap: ctx.project.reviewRoundCap,
       criteria: criteria.map(c => ({ id: c.id, text: c.text })),
       comments: notes,
-      attachments: attached
+      attachments: attached,
+      stoppedRun
     }
     const prompt = developerPrompt(promptTask, ctx.agent.name)
     // A revision continues the developer's own session (D20 for designs) with
     // the feedback given since, when it runs where that session lives. The
     // full prompt is the fallback when the session can't be resumed, and the
     // prompt on another runner, which starts fresh from the pushed branch.
-    const previous = await this.#previousDeveloperRun(db, task.id, ctx.agent.id, ctx.run.id)
     const local = previous !== null && (previous.runnerId === null || previous.runnerId === ctx.run.runnerId)
     const resume = local ? previous.agentSessionId : null
     if (resume) {
@@ -538,6 +542,7 @@ export class Orchestrator implements RunnerHandlers {
       designPinned: pin !== null,
       branch: spike ? null : task.branch,
       headSha: spike ? null : task.headSha,
+      continueFrom: stoppedRun?.wipSha ?? null,
       planSessionId: null,
       agentSessionId: resume,
       fallbackPrompt: resume ? prompt : null,
@@ -558,7 +563,7 @@ export class Orchestrator implements RunnerHandlers {
   // This agent's last developer run on the task that started a session: its
   // runner holds the worktree and session a revision resumes
   async #previousDeveloperRun(db: Executor, taskId: string, agentId: string, exclude?: string) {
-    const [previous] = await db.select({ number: runs.number, runnerId: runs.runnerId, agentSessionId: runs.agentSessionId, queuedAt: runs.queuedAt }).from(runs)
+    const [previous] = await db.select({ number: runs.number, runnerId: runs.runnerId, agentSessionId: runs.agentSessionId, queuedAt: runs.queuedAt, state: runs.state, error: runs.error, headSha: runs.headSha }).from(runs)
       .where(and(eq(runs.taskId, taskId), eq(runs.role, 'developer'), eq(runs.agentId, agentId), exclude ? ne(runs.id, exclude) : undefined, isNotNull(runs.agentSessionId)))
       .orderBy(desc(runs.number)).limit(1)
     return previous ?? null
@@ -754,6 +759,10 @@ export class Orchestrator implements RunnerHandlers {
     else if (ctx.run.state === 'interrupted' && ctx.run.error && ctx.run.leaseEpoch === message.leaseEpoch) {
       await db.update(runs).set({ error: withLastActivity(ctx.run.error, message.lastActivityAt) }).where(eq(runs.id, ctx.run.id))
     }
+    // The commit that saved a stopped run's work, for the retry's prompt
+    if (message.wipSha && ctx.run.leaseEpoch === message.leaseEpoch) {
+      await db.update(runs).set({ headSha: message.wipSha }).where(eq(runs.id, ctx.run.id))
+    }
     const blob = await transcripts.finish(ctx.run.id)
     if (blob) await db.update(runs).set({ transcriptBlob: blob }).where(eq(runs.id, ctx.run.id))
     await this.#publish(ctx)
@@ -874,7 +883,7 @@ export class Orchestrator implements RunnerHandlers {
   async stopRun(runId: string, actor: Actor): Promise<void> {
     const ctx = await this.#load(runId)
     if (!ctx || !(ACTIVE_RUN_STATES as readonly RunState[]).includes(ctx.run.state)) throw new ApiFailure(409, { code: 'conflict', constraint: 'run_not_active' })
-    this.#d.runner.send({ type: 'run.stop', runId, reason: 'Stopped by a human' }, ctx.run.runnerId)
+    this.#d.runner.send({ type: 'run.stop', runId, reason: 'Stopped by a human', keepWork: true }, ctx.run.runnerId)
     await this.#d.db.transaction(async (tx) => {
       await this.#endRunIn(tx, ctx, { state: 'interrupted', error: 'Stopped by a human' })
       if (ctx.task) await tx.update(tasks).set({ paused: true }).where(eq(tasks.id, ctx.task.id))

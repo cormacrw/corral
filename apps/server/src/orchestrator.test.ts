@@ -1,4 +1,4 @@
-import type { Inbox, Project, Task } from '@corral/contracts'
+import type { Inbox, Project, RunJob, Task } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { and, asc, eq, ne } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -269,6 +269,55 @@ describe('orchestrator', () => {
       expect(history.find(e => e.action === 'run.ended')?.detail.error).toBe(run.error)
       await pause(project)
     }
+  })
+
+  // Frees the developer's slot for the next test
+  async function finish(project: Project, job: RunJob) {
+    await pause(project)
+    await t.request('POST', `/api/runs/${job.runId}/stop`)
+  }
+
+  it('asks a human stop to keep the work, and gives the retry the WIP commit and the stop reason', async () => {
+    const { project, task, job } = await assigned()
+    runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'session-1' })
+    await sleep(100)
+    const res = await t.request('POST', `/api/runs/${job.runId}/stop`)
+    expect(res.status).toBeLessThan(300)
+    expect(await runner.next('run.stop', m => m.runId === job.runId)).toMatchObject({ keepWork: true })
+
+    runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'stopped', reason: 'Stopped by a human' }, headSha: 'wip123', wipSha: 'wip123' })
+    await expect.poll(async () => (await runRow(job.runId)).headSha).toBe('wip123')
+    expect(await runRow(job.runId)).toMatchObject({ state: 'interrupted', error: 'Stopped by a human' })
+
+    expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/resume`)).status).toBe(200)
+    const retry = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.runId !== job.runId)).job
+    expect(retry.continueFrom).toBe('wip123')
+    for (const prompt of [retry.prompt, retry.fallbackPrompt!]) {
+      expect(prompt).toContain(`You are continuing run #${job.runNumber}, which stopped before it reported an outcome. Stop reason: Stopped by a human`)
+      expect(prompt).toContain('WIP commit `wip123`')
+    }
+    await finish(project, retry)
+  })
+
+  it('gives the retry of a timed-out run its reason, and no commit when there was nothing to save', async () => {
+    const { project, task, job } = await assigned()
+    runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'session-1' })
+    await sleep(100)
+    runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'timed_out', limitSeconds: 3600 }, headSha: 'base', wipSha: null })
+
+    const retry = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.runId !== job.runId)).job
+    expect(retry.continueFrom).toBeNull()
+    expect(retry.prompt).toContain('Stop reason: The run hit its time limit of 60 minutes')
+    expect(retry.prompt).toContain('No WIP commit was saved')
+    await finish(project, retry)
+  })
+
+  it('ignores a WIP commit from a stale lease epoch', async () => {
+    const { project, job } = await assigned()
+    runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch - 1, exit: { kind: 'stopped' }, headSha: 'wip123', wipSha: 'wip123' })
+    await sleep(200)
+    expect((await runRow(job.runId)).headSha).toBeNull()
+    await finish(project, job)
   })
 
   it('adds the last transcript activity to a run the server already stopped', async () => {

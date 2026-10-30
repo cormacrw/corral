@@ -9,7 +9,7 @@ import type { RunnerConfig } from './config.ts'
 import type { ServerConnection } from './connection.ts'
 import { packDesign, saveDesign } from './designs.ts'
 import { outcomesFor, toolsFor, type ToolOutcome, type ToolServer } from './mcp.ts'
-import { headSha, prepareWorkspace, pushBranch, readProjectBrief, readRoleInstructions } from './workspace.ts'
+import { headSha, prepareWorkspace, pushBranch, readProjectBrief, readRoleInstructions, saveStoppedWork } from './workspace.ts'
 
 // Runs on this runner (flows.md §2 steps 3–5, PRD §8.6). Each run gets a
 // worktree, a secret MCP path, and an agent process in its own process
@@ -20,6 +20,9 @@ import { headSha, prepareWorkspace, pushBranch, readProjectBrief, readRoleInstru
 // A Claude Code developer or reviewer run streams its input too, so a human
 // can message it mid-run (run.message); it still ends when the agent has
 // reported and finished its turn.
+// A developer run stopped before it reported saves its uncommitted work as a
+// WIP commit on the task branch, after the agent is gone and before the server
+// hears the run ended, so the retry continues from it.
 
 const EVENT_BATCH_MS = 500
 const TOOL_CALL_TIMEOUT_MS = 120_000
@@ -68,6 +71,8 @@ interface ActiveRun {
   // to die. The first one wins: it's what cut the run off.
   stopping: StopReason | null
   stopDetail: string
+  // The stop asked for uncommitted work to be saved
+  keepWork: boolean
   // Corral signalled the process outside a stop, so its signal isn't a stranger's
   signalledByCorral: boolean
   // A signal Corral didn't send killed the agent, even if a resume came after
@@ -81,6 +86,8 @@ interface ActiveRun {
   ended: boolean
   // Settles once the server has been told the run ended
   closing: Promise<void>
+  // Resolves with the same moment, but exists from the start of the run
+  closed: PromiseWithResolvers<void>
   // The last agent exit code, or the turn's when a warm PM process answered it
   exitCode: number | null
   events: RunEvent[]
@@ -143,7 +150,7 @@ export class RunManager {
         this.assign(message.job)
         return
       case 'run.stop':
-        this.stop(message.runId, 'stopped', message.reason)
+        this.stop(message.runId, 'stopped', message.reason, message.keepWork === true)
         return
       case 'run.message':
         this.message(message.runId, message.leaseEpoch, message.text)
@@ -176,6 +183,7 @@ export class RunManager {
       reportingOutcome: null,
       stopping: null,
       stopDetail: '',
+      keepWork: false,
       signalledByCorral: false,
       killedBy: null,
       lastActivityAt: null,
@@ -185,6 +193,7 @@ export class RunManager {
       resumeFailed: false,
       ended: false,
       closing: Promise.resolve(),
+      closed: Promise.withResolvers<void>(),
       exitCode: null,
       events: [],
       flushTimer: null,
@@ -200,13 +209,14 @@ export class RunManager {
     })
   }
 
-  stop(runId: string, reason: StopReason, detail: string): void {
+  stop(runId: string, reason: StopReason, detail: string, keepWork = true): void {
     const run = this.#runs.get(runId)
     if (!run || run.ended) return
     this.#note(run, `${reason === 'timed_out' ? 'Time limit reached' : 'Stopping'}: ${detail}`)
     if (!run.stopping) {
       run.stopping = reason
       run.stopDetail = detail
+      run.keepWork = keepWork
     }
     // Still setting up: the start path checks `stopping` before spawning
     if (!run.process) return
@@ -299,6 +309,8 @@ export class RunManager {
       this.#end(run, { kind: 'error', message: `This runner has no agent runtime "${job.runtime}". It knows: ${[...this.#runtimes.keys()].join(', ')}` })
       return
     }
+    // The worktree is shared: a stopped run on this task saves its work first
+    await Promise.all([...this.#runs.values()].filter(other => other !== run && other.keepWork && other.job.role === 'developer' && other.job.taskId === job.taskId).map(other => other.closed.promise))
     await mkdir(join(this.#config.dataDir, 'spool'), { recursive: true })
     await mkdir(run.scratchDir, { recursive: true })
     run.spool = createWriteStream(join(this.#config.dataDir, 'spool', `${job.runId}.jsonl`), { flags: 'a' })
@@ -603,13 +615,37 @@ export class RunManager {
     this.#flush(run)
     run.unregisterTools?.()
     run.spool?.end()
-    const finish = (sha: string | null) => {
-      this.#connection.send({ type: 'run.ended', runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, exit, headSha: sha, lastActivityAt: run.lastActivityAt })
+    const finish = (sha: string | null, wipSha: string | null = null) => {
+      this.#connection.send({ type: 'run.ended', runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, exit, headSha: sha, lastActivityAt: run.lastActivityAt, wipSha })
       this.#runs.delete(run.job.runId)
       this.#connection.refreshUpdateStatus?.()
+      run.closed.resolve()
     }
-    if (run.worktree && run.job.role === 'developer') run.closing = headSha(run.worktree).then(finish, () => finish(null))
-    else finish(null)
+    const worktree = run.worktree
+    if (worktree && run.job.role === 'developer') {
+      run.closing = this.#saveWork(run, worktree, exit).then(wipSha => headSha(worktree).then(sha => finish(sha, wipSha)), () => finish(null))
+    } else {
+      finish(null)
+    }
+  }
+
+  // Returns the WIP commit once it's on the remote. An outcome in flight has
+  // already pushed what it reports, and a new commit would move the branch
+  // from under it.
+  async #saveWork(run: ActiveRun, worktree: string, exit: RunExit): Promise<string | null> {
+    const { job } = run
+    const stopped = run.keepWork || exit.kind === 'signalled'
+    if (!stopped || !job.branch || run.outcomeAccepted || run.reportingOutcome) return null
+    const saved = await saveStoppedWork(worktree, job.branch, wipMessage(job, exit, run.stopDetail), this.#config.gitAuthor, STOP_GRACE_MS)
+    const short = saved.sha?.slice(0, 10)
+    const note = saved.pushed
+      ? `Saved the uncommitted work as WIP commit ${short} and pushed it to ${job.branch}`
+      : saved.sha
+        ? `Saved the uncommitted work as WIP commit ${short} in the worktree, but could not push it: ${saved.error}`
+        : saved.error ? `Could not save the uncommitted work: ${saved.error}` : null
+    // The run has ended, so this goes straight out, ahead of run.ended
+    if (note) this.#connection.send({ type: 'run.events', runId: job.runId, leaseEpoch: job.leaseEpoch, events: [{ type: 'system', text: note }] })
+    return saved.pushed ? saved.sha : null
   }
 
   // ── Agent tools ────────────────────────────────────────────────────────────
@@ -738,6 +774,15 @@ export function exitSignal(exit: AgentExit): string | null {
   if (exit.signal) return exit.signal
   if (exit.code === null || exit.code <= 128) return null
   return Object.entries(constants.signals).find(([, number]) => number === exit.code! - 128)?.[0] ?? null
+}
+
+function wipMessage(job: RunJob, exit: RunExit, stopDetail: string): string {
+  const reason = exit.kind === 'timed_out'
+    ? 'the time limit'
+    : exit.kind === 'runner_shutdown'
+      ? 'a runner shutdown'
+      : exit.kind === 'signalled' ? exit.signal : stopDetail
+  return `WIP: ${job.taskRef} run #${job.runNumber} stopped by ${reason}\n\nCorral saved this unfinished work when the run stopped. It may not build.`
 }
 
 // Machine-specific details the agent needs, kept out of RunJob (PRD §8.5)

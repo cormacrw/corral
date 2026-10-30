@@ -87,6 +87,9 @@ export interface RunJob {
   branch: string | null
   // Reviewer runs check out this commit
   headSha: string | null
+  // Developer runs after a stopped one: the WIP commit it pushed, which the
+  // worktree must contain. Absent from older servers.
+  continueFrom?: string | null | undefined
   // PM turns: the Plan session, which gets its own checkout on the runner
   planSessionId: string | null
   // PM turns resume this agent session when the runner still has it
@@ -163,7 +166,8 @@ export type RunnerMessage =
   | { type: 'run.started', runId: string, leaseEpoch: number, agentSessionId: string | null }
   | { type: 'run.events', runId: string, leaseEpoch: number, events: RunEvent[] }
   // lastActivityAt: when the agent last wrote to its transcript
-  | { type: 'run.ended', runId: string, leaseEpoch: number, exit: RunExit, headSha: string | null, lastActivityAt?: string | null }
+  // wipSha: the commit that saved a stopped developer run's work, once pushed
+  | { type: 'run.ended', runId: string, leaseEpoch: number, exit: RunExit, headSha: string | null, lastActivityAt?: string | null, wipSha?: string | null }
   | { type: 'tool.call', callId: string, runId: string, leaseEpoch: number, tool: AgentTool, input: unknown }
   // A run.message the runner could not deliver: a Codex or PM run, or a run
   // that has ended. Messages with a stale lease epoch get no answer (fencing).
@@ -174,7 +178,10 @@ export type ServerMessage =
   | { type: 'runner.drain', updateRequested: boolean }
   | { type: 'job.request', jobId: string, job: SetupJob }
   | { type: 'run.assign', job: RunJob }
-  | { type: 'run.stop', runId: string, reason: string }
+  // keepWork: a developer run saves and pushes its uncommitted work. Only for
+  // a stop the task will be retried after: without it nothing is pushed, so a
+  // run that lost its lease or task never touches the branch.
+  | { type: 'run.stop', runId: string, reason: string, keepWork?: boolean }
   // A human's message for a live Claude Code developer or reviewer run. The
   // runner writes it to the agent's stdin and records it as a message event.
   | { type: 'run.message', runId: string, leaseEpoch: number, text: string }
