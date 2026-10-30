@@ -8,9 +8,9 @@ export type TaskPriority = typeof TASK_PRIORITIES[number]
 export const TASK_TYPES = ['task', 'bug', 'spike', 'design'] as const
 export type TaskType = typeof TASK_TYPES[number]
 
-// D20: design tasks always go to Human review, whatever their flag says
+// D19/D20: spikes and designs always go to Human review, whatever their flag says
 export function requiresHumanReview(type: TaskType, humanReview: boolean): boolean {
-  return type === 'design' || humanReview
+  return type === 'spike' || type === 'design' || humanReview
 }
 
 // Task IDs are PREFIX-NUMBER, e.g. COR-29 (D13)

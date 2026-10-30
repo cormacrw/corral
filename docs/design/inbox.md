@@ -47,6 +47,7 @@ There are three columns. The list divider can be resized (280–560px, default 3
   - The agent's message in plain English.
   - Type-specific context:
     - **Human review:** the PR link (`#41`), passing-check badges, and a card of acceptance criteria. Each criterion shows a met icon, the reviewer’s note, screenshot/video/request cards, then inline markdown notes. Agent artifacts are collapsed separately; see [Evidence review](task.md#evidence-review-d21).
+    - **Spikes always stop in Human review**, whatever their human-review flag says. They appear under Needs you and add one to its count. The message body is the latest `## Findings` comment, and the preview is the start of that comment. Approval finishes the spike in Merged; requesting changes returns it to the developer with the feedback.
     - **Blocked:** the reviewer's and developer's positions side by side (2 columns, `bg-muted`).
     - **Question:** the question itself. The answers live in the tray.
     - **Activity:** one link button (Open PR, Open task…).
