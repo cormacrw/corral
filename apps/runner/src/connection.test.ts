@@ -79,7 +79,9 @@ describe('runner update status on the wire', () => {
     await start(autoUpdate, socket => socket.send(JSON.stringify({ type: 'welcome', runnerId: 'r1', commit: 'new', draining: false, updateRequested: false } satisfies ServerMessage)))
     await vi.waitFor(async () => expect(await status()).toMatchObject({ behind: true, draining: autoUpdate, activeRunCount: 1, idle: false, updateRequested: false }))
     expect(received.find(m => m.type === 'hello')).toMatchObject({ commit: 'old', autoUpdate })
-    expect(received.some(m => m.type === 'runner.draining')).toBe(autoUpdate)
+    // The status file is written locally before the drain message arrives at
+    // the server. Wait for delivery rather than racing the WebSocket.
+    await vi.waitFor(() => expect(received.some(m => m.type === 'runner.draining')).toBe(autoUpdate))
     active = []
     connection.send({ type: 'run.ended', runId: 'run-1', leaseEpoch: 1, exit: { kind: 'exited', code: 0 }, headSha: null })
     expect(await status()).toMatchObject({ behind: true, draining: autoUpdate, idle: true })
