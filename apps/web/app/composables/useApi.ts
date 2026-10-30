@@ -99,6 +99,7 @@ export function describe(status: number, error: ApiErrorBody['error'] | null): s
     case 'conflict': return error.constraint ? `Conflict: ${error.constraint.replaceAll('_', ' ')}` : 'Conflict'
     case 'transition_rejected': return `Not allowed: ${JSON.stringify(error.reason)}`
     case 'invalid_dependencies': return `Invalid dependencies: ${JSON.stringify(error.problems)}`
+    case 'plan_not_approvable': return error.problems.map(p => p.message).join(' ')
     default: return `Request failed (${status})`
   }
 }
