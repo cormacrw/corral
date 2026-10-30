@@ -1,4 +1,4 @@
-import type { Actor, TaskPriority, TaskType } from '@corral/core'
+import type { Actor, PlanTaskContent } from '@corral/core'
 import {
   boolean,
   index,
@@ -86,14 +86,7 @@ export const planTasks = pgTable('plan_tasks', {
   revision: jsonb().$type<PlanRevision>()
 }, t => [primaryKey({ columns: [t.planId, t.key] })])
 
-export interface PlanRevision {
-  title: string
-  // Markdown, as the PM wrote it
-  description: string
-  type: TaskType
-  priority: TaskPriority
-  humanReview: boolean
-  acceptanceCriteria: (string | { text: string, checkedByHuman?: boolean | undefined })[]
+export interface PlanRevision extends PlanTaskContent {
   // Null when the revised task has no epic
   epicId: string | null
   // Task numbers in the same project

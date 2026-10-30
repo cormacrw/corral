@@ -1,4 +1,4 @@
-import type { AgentTool } from '@corral/contracts'
+import { proposedPlanInput, type AgentTool } from '@corral/contracts'
 import { TASK_TYPES, type AgentRole } from '@corral/core'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
@@ -32,6 +32,26 @@ describe('ToolServer', () => {
     await client.connect(new StreamableHTTPClientTransport(new URL(tools.url(secret))))
     return { client, calls }
   }
+
+  it('uses the shared plan schema, including defaults, metadata and field errors', async () => {
+    const { client, calls } = await connect('pm')
+    const input = { title: ' Plan ', tasks: [{ key: 't', title: ' Task ', description: '', type: 'task', design: { taskRef: ' cor-8 ', version: 2 } }] }
+    const result = await client.callTool({ name: 'propose_plan', arguments: input })
+    expect(result.isError).not.toBe(true)
+    expect(calls).toEqual([{ tool: 'propose_plan', input: proposedPlanInput.parse(input) }])
+    const listed = (await client.listTools()).tools.find(t => t.name === 'propose_plan')!
+    expect(JSON.stringify(listed.inputSchema)).toContain('The design task, e.g. COR-70')
+    const invalid = { ...input, tasks: [{ ...input.tasks[0], design: { taskRef: 'COR-8', version: 0 } }] }
+    const parsed = proposedPlanInput.safeParse(invalid)
+    expect(parsed.success).toBe(false)
+    if (parsed.success) throw new Error('Expected invalid version')
+    const rejected = await client.callTool({ name: 'propose_plan', arguments: invalid })
+    expect(rejected.isError).toBe(true)
+    expect(JSON.stringify(rejected.content)).toContain(parsed.error.issues[0]!.message)
+    expect(JSON.stringify(rejected.content)).toContain('tasks[0].design.version')
+    expect(calls).toHaveLength(1)
+    await client.close()
+  })
 
   it('exposes pr_rebased to developers and forwards it over MCP', async () => {
     const { client, calls } = await connect('developer')
@@ -84,17 +104,17 @@ describe('ToolServer', () => {
   it('lets propose_plan pin a task to a design version and its screens (D20)', async () => {
     const { client, calls } = await connect('pm')
     const propose = (await client.listTools()).tools.find(t => t.name === 'propose_plan')!
-    expect(propose.inputSchema).toMatchObject({ properties: { tasks: { items: { properties: { design: { type: 'object', required: ['taskRef', 'version', 'screens'] } } } } } })
+    expect(propose.inputSchema).toMatchObject({ properties: { tasks: { items: { properties: { design: { type: 'object', required: ['taskRef', 'version'] } } } } } })
 
     const task = { key: 't1', title: 'Login', description: 'Build it', type: 'task', acceptanceCriteria: ['It works'] }
     const pin = { taskRef: 'COR-7', version: 2, screens: ['login'] }
     await client.callTool({ name: 'propose_plan', arguments: { title: 'Login', tasks: [{ ...task, design: pin }] } })
     expect(calls).toEqual([{ tool: 'propose_plan', input: expect.objectContaining({ tasks: [expect.objectContaining({ design: pin })] }) }])
 
-    // A pin without screens is refused before it reaches Corral
+    // Structural validation matches the server; core rejects empty screen coverage.
     const empty = await client.callTool({ name: 'propose_plan', arguments: { title: 'Login', tasks: [{ ...task, design: { ...pin, screens: [] } }] } })
-    expect(empty.isError).toBe(true)
-    expect(calls).toHaveLength(1)
+    expect(empty.isError).not.toBe(true)
+    expect(calls).toHaveLength(2)
     await client.close()
   })
 
