@@ -86,11 +86,14 @@ Approval writes the status change and an audit entry, then triggers an immediate
 
 ### Step 2 — Claim (server, no model call)
 
-The scheduler checks: project and group not paused, the task not paused, developer group under its concurrency limit, runner online, and the task is Ready with all dependencies Merged. An agent with a wake interval starts at most one task of its own choosing per interval, counted from when its last run started. Only the task an event is about skips that wait: a task the human approved or acted on, the tasks of an approved plan, and a task handed on by a pushed PR or a review verdict. Other passes, such as a run ending, a runner reconnecting, a settings change or the kill switch's Resume everything, leave the agent's waiting work for the interval. Resuming a paused task counts as acting on that task, so it skips the wait. Then it claims in one statement:
+The scheduler checks: project and group not paused, the task not paused, developer group under its concurrency limit, runner online, and the task is Ready or unleased In progress with all dependencies Merged. An agent with a wake interval starts at most one task of its own choosing per interval, counted from when its last run started. Only the task an event is about skips that wait: a task the human approved or acted on, the tasks of an approved plan, and a task handed on by a pushed PR or a review verdict. Other passes, such as a run ending, a runner reconnecting, a settings change or the kill switch's Resume everything, leave the agent's waiting work for the interval. Resuming a paused task counts as acting on that task, so it skips the wait.
+
+Developer claims sort by priority (urgent first), then In progress before Ready within that priority, then oldest creation time and id. Placement skips tasks no runner can take and continues through this same stable order across candidate pages. Reviewer claims remain priority, creation time, then id. Then it claims in one statement:
 
 ```sql
 UPDATE tasks SET status = 'in_progress', lease_epoch = lease_epoch + 1, ...
-WHERE id = (SELECT id FROM tasks WHERE <eligible> ORDER BY priority
+WHERE id = (SELECT id FROM tasks WHERE <eligible> ORDER BY priority,
+            CASE WHEN status = 'in_progress' THEN 0 ELSE 1 END, created_at, id
             LIMIT 1 FOR UPDATE SKIP LOCKED)
 RETURNING id, lease_epoch;
 ```
