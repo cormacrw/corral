@@ -27,8 +27,8 @@ describe('other inbox items', () => {
   })
 })
 
-it('never offers the generic approve endpoint for designs or while task type is loading', () => {
-  expect(inboxActions('human_review', { type: 'design' })).toEqual([])
+it('offers version approval for designs, and nothing generic while task type is loading', () => {
+  expect(inboxActions('human_review', { type: 'design' }).map(a => a.label)).toEqual(['Approve design', 'Request changes'])
   expect(inboxActions('human_review', null)).toEqual([])
   expect(inboxActions('human_review', { type: 'task' }).map(a => a.value)).toEqual(['approve', 'request_changes'])
   expect(inboxActions('human_review', { type: 'spike' })[0]?.label).toBe('Accept findings')

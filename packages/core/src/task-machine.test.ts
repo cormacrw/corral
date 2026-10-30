@@ -161,6 +161,10 @@ describe('claim', () => {
     expect(result).toEqual({ ok: false, error: { code: 'dependencies_not_merged' } })
   })
 
+  it('claims a build whose design dependency is Approved (D20)', () => {
+    expect(expectOk(transition(task('ready'), { type: 'claim', dependencies: [{ type: 'task', status: 'merged' }, { type: 'design', status: 'approved' }] }, scheduler)).status).toBe('in_progress')
+  })
+
   it('claims a task with no dependencies', () => {
     expect(expectOk(transition(task('ready'), { type: 'claim', dependencies: [] }, scheduler)).status).toBe('in_progress')
   })
@@ -239,6 +243,10 @@ describe('approval and merging', () => {
 
   it('sends an unflagged spike to Human review when the reviewer approves', () => {
     expect(expectOk(transition(task('agent_review', { type: 'spike' }), validEvents.review_approved, server)).status).toBe('human_review')
+  })
+
+  it('does not offer generic approval on a design, which needs a version', () => {
+    expect(availableEvents(task('human_review', { type: 'design' }), human)).toEqual(['human_request_changes'])
   })
 
   it('always sends an approved design to Human review, whatever its flag (D20)', () => {
