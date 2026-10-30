@@ -1,5 +1,5 @@
 import type { DesignVersion } from '@corral/contracts'
-import { approveDesignVersion, bundlePath, designPreviewUrl, taskRef, unpackBundle, type Actor } from '@corral/core'
+import { approveDesignVersion, bundlePath, designPreviewUrl, taskRef, unpackBundle, type Actor, type DesignVersionStatus } from '@corral/core'
 import { schema, type Database, type Executor } from '@corral/db'
 import { and, asc, desc, eq, isNull } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
@@ -128,7 +128,7 @@ export interface DesignForAgent {
   taskRef: string
   title: string
   version: number
-  status: string
+  status: DesignVersionStatus
   branch: string
   commitSha: string
   // design.md, as the developer wrote it

@@ -1,6 +1,6 @@
 import { appendAudit, auditEvent } from './audit.ts'
 import { EpicPullRequests, epicReviewContext } from './epic-prs.ts'
-import { EVIDENCE_KINDS, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type PmRunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
+import { evidenceKind, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type PmRunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
 import {
   ACTIVE_RUN_STATES,
   LEASE_DURATION_MS,
@@ -8,6 +8,7 @@ import {
   nextDesignVersion,
   reviewFeedbackText,
   transition,
+  type ReviewVerdict,
   taskRef,
   richTextToMarkdown,
   type Actor,
@@ -97,7 +98,7 @@ const MAX_INLINE_TEXT = 64 * 1024
 // nothing to show (D21)
 const evidenceSchema = z.object({
   criterionId: z.string().uuid().nullable().default(null),
-  kind: z.enum(EVIDENCE_KINDS),
+  kind: evidenceKind,
   note: z.string().default(''),
   fileName: z.string().min(1).optional(),
   contentType: z.string().min(1).optional(),
@@ -1261,7 +1262,7 @@ export class Orchestrator implements RunnerHandlers {
   // requested goes through core (round cap → Blocked) and the feedback is
   // posted as a comment; an approval moves the task to Human review or
   // Ready to merge, where the merge orchestrator takes over.
-  async #review(ctx: RunContext, report: OutcomeReport, verdict: 'approved' | 'changes_requested') {
+  async #review(ctx: RunContext, report: OutcomeReport, verdict: ReviewVerdict) {
     const { db } = this.#d
     const task = ctx.task!
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))

@@ -4,6 +4,7 @@ import type { MergeGateFacts } from './merge-gates.ts'
 import { TASK_STATUSES, type TaskStatus } from './status.ts'
 import {
   availableEvents,
+  DEFAULT_LIMITS,
   createTask,
   transition,
   type TaskEvent,
@@ -347,5 +348,16 @@ describe('rebase-only rounds', () => {
   it('returns to a normal round when the rebase reviewer requests changes', () => {
     const result = expectOk(transition(task('agent_review', { rebaseOnly: true, reviewRounds: 1 }), { type: 'changes_requested' }, server))
     expect(result).toMatchObject({ status: 'in_progress', rebaseOnly: false, reviewRounds: 2 })
+  })
+})
+
+describe('DEFAULT_LIMITS', () => {
+  it('holds the PRD defaults and cannot be changed', () => {
+    expect(DEFAULT_LIMITS).toEqual({ reviewRoundCap: 5, failedRunCap: 3 })
+    expect(() => {
+      // @ts-expect-error the limits are read-only
+      DEFAULT_LIMITS.reviewRoundCap = 1
+    }).toThrow(TypeError)
+    expect(DEFAULT_LIMITS.reviewRoundCap).toBe(5)
   })
 })

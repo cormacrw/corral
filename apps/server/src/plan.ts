@@ -1,5 +1,5 @@
 import { askQuestionInput, type AgentRuntime, type DraftSession, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type PmRunJob } from '@corral/contracts'
-import { checkPlan, EPIC_REVIEW_MODES, checkPlanEpicDependencies, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, REVISABLE_STATUSES, requiresHumanReview, richTextToMarkdown, TASK_TYPES, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
+import { checkPlan, EPIC_REVIEW_MODES, checkPlanEpicDependencies, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, REVISABLE_STATUSES, requiresHumanReview, richTextToMarkdown, TASK_PRIORITIES, TASK_TYPES, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
@@ -31,7 +31,7 @@ const proposedTask = z.object({
   title: z.string().trim().min(1),
   description: z.string().trim(),
   type: z.enum(TASK_TYPES),
-  priority: z.enum(['urgent', 'high', 'medium', 'low']).default('medium'),
+  priority: z.enum(TASK_PRIORITIES).default('medium'),
   humanReview: z.boolean().default(false),
   acceptanceCriteria: z.array(z.string().trim()).default([]),
   dependsOn: z.array(z.string().trim()).default([]),

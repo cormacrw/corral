@@ -1,3 +1,5 @@
+import type { TaskStatus } from './status.ts'
+
 // Design versions (D20). Each submission to a design task is a new,
 // immutable version, numbered 1..n per task. Only its status changes.
 export const DESIGN_VERSION_STATUSES = ['submitted', 'changes_requested', 'approved', 'superseded'] as const
@@ -36,9 +38,9 @@ export function approveDesignVersion<V extends DesignVersionState>(versions: rea
 // A build task's pin goes stale when a newer version of its design is
 // approved before the task has started (D20): it's Draft, Backlog or Ready
 // with no run yet. Tasks that have started keep the version they pinned.
-export const STALE_PIN_STATUSES = ['draft', 'backlog', 'ready'] as const
+export const STALE_PIN_STATUSES = ['draft', 'backlog', 'ready'] as const satisfies readonly TaskStatus[]
 
-export function isDesignPinStale(pin: { version: number, latestApproved: number | null }, task: { status: string, started: boolean }): boolean {
+export function isDesignPinStale(pin: { version: number, latestApproved: number | null }, task: { status: TaskStatus, started: boolean }): boolean {
   return pin.latestApproved !== null && pin.latestApproved > pin.version
-    && (STALE_PIN_STATUSES as readonly string[]).includes(task.status) && !task.started
+    && (STALE_PIN_STATUSES as readonly TaskStatus[]).includes(task.status) && !task.started
 }
