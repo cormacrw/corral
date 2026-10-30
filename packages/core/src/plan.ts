@@ -82,9 +82,9 @@ export type PlanProblem =
   | { code: 'design_without_screens', key: string, design: string, message: string }
 
 // What an existing task's ref points at, looked up by the server before
-// checkPlan runs
+// checkPlan runs. `pickedUp` means it holds a lease or has had a run.
 export type PlanRef =
-  | { kind: 'task', status: TaskStatus }
+  | { kind: 'task', status: TaskStatus, pickedUp: boolean }
   | { kind: 'unknown' }
   | { kind: 'deleted' }
   | { kind: 'other_project', project: string }
@@ -100,8 +100,9 @@ export function designPinKey(pin: Pick<DesignPin, 'taskRef' | 'version'>): strin
   return `${pin.taskRef.toUpperCase()}@v${pin.version}`
 }
 
-// Only tasks nobody has started can be revised by a plan
-export const REVISABLE_STATUSES: readonly TaskStatus[] = ['backlog', 'draft']
+// Only tasks nobody has started can be revised by a plan, so a Ready task
+// also has to be unclaimed
+const REVISABLE_STATUSES: readonly TaskStatus[] = ['backlog', 'draft', 'ready']
 
 // Identity maps match proposed keys to rows reused by a revision.
 export interface PlanDependencyContext {
@@ -116,9 +117,10 @@ export interface PlanDependencyContext {
 // D9: a plan is saved only if the dependencies form a DAG and every task
 // has acceptance criteria. Returns every problem, so the PM can fix them all.
 // `refs` holds every existing-task ref the plan names, in `ref` or
-// `dependsOn`; a task may revise only a Backlog task or a Draft, but may
-// depend on any task in the project. `designs` holds every design pin's
-// target by designPinKey; a task may pin only an approved version (D20).
+// `dependsOn`; a task may revise only a Backlog task, an unclaimed Ready task
+// or a Draft, but may depend on any task in the project. `designs` holds
+// every design pin's target by designPinKey; a task may pin only an approved
+// version (D20).
 export function checkPlan(plan: ProposedPlan, refs: ReadonlyMap<string, PlanRef> = new Map(), designs: ReadonlyMap<string, DesignPinTarget> = new Map(), context?: PlanDependencyContext): PlanProblem[] {
   const problems: PlanProblem[] = []
   const normalizedRefs = caseInsensitiveRefs(refs)
@@ -141,7 +143,7 @@ export function checkPlan(plan: ProposedPlan, refs: ReadonlyMap<string, PlanRef>
     })
     for (const code of checkDefinitionOfReady({ ...task, acceptanceCriteria: task.acceptanceCriteria.map(c => typeof c === 'string' ? c : c.text) })) problems.push({ code, key: task.key })
     if (task.ref) {
-      const problem = refProblem(task.key, task.ref, normalizedRefs.get(task.ref.toUpperCase()) ?? { kind: 'unknown' }, true)
+      const problem = revisionProblem(task.key, task.ref, normalizedRefs.get(task.ref.toUpperCase()) ?? { kind: 'unknown' })
       if (problem) problems.push(problem)
       if (plan.tasks.some(t => t !== task && t.ref?.toUpperCase() === task.ref!.toUpperCase()) && !problems.some(p => p.code === 'duplicate_ref' && p.ref.toUpperCase() === task.ref!.toUpperCase())) {
         problems.push({ code: 'duplicate_ref', key: task.key, ref: task.ref })
@@ -205,6 +207,12 @@ function caseInsensitiveRefs<T>(refs: ReadonlyMap<string, T>): Map<string, T> {
   return new Map([...refs].map(([ref, target]) => [ref.toUpperCase(), target]))
 }
 
+// Why a plan can't revise what `ref` points at, if so. Approval asks again,
+// since the task may have moved on since the plan was proposed.
+export function revisionProblem(key: string, ref: string, found: PlanRef): PlanProblem | null {
+  return refProblem(key, ref, found, true)
+}
+
 function refProblem(key: string, ref: string, found: PlanRef, revising: boolean): PlanProblem | null {
   switch (found.kind) {
     case 'unknown':
@@ -214,8 +222,10 @@ function refProblem(key: string, ref: string, found: PlanRef, revising: boolean)
     case 'other_project':
       return { code: 'ref_in_other_project', key, ref, project: found.project, message: `${ref} belongs to the project "${found.project}", not this one.` }
     case 'task':
-      if (!revising || REVISABLE_STATUSES.includes(found.status)) return null
-      return { code: 'ref_not_revisable', key, ref, status: found.status, message: `${ref} is ${found.status}; only Backlog tasks can be revised by a plan. Leave out its ref to propose a new task, or depend on it instead.` }
+      if (!revising) return null
+      if (found.status === 'ready' && found.pickedUp) return { code: 'ref_not_revisable', key, ref, status: found.status, message: `${ref} has already been picked up, so a plan can't revise it. Use update_task to edit it directly, or depend on it instead.` }
+      if (REVISABLE_STATUSES.includes(found.status)) return null
+      return { code: 'ref_not_revisable', key, ref, status: found.status, message: `${ref} is ${found.status}; only Backlog and unclaimed Ready tasks can be revised by a plan. Leave out its ref to propose a new task, or depend on it instead.` }
   }
 }
 
@@ -235,6 +245,17 @@ function designProblem(key: string, pin: DesignPin, found: DesignPinTarget): Pla
 
 export const PLAN_CHANGES = ['added', 'changed', 'unchanged', 'removed'] as const
 export type PlanChange = typeof PLAN_CHANGES[number]
+
+// Where an approved plan's tasks are, not where they were sent: a revised
+// Ready task stays in Ready even when the plan goes to the Backlog
+export function approvedPlanSummary(tasks: readonly { change: PlanChange, status: string | null }[]): string {
+  const kept = tasks.filter(t => t.change !== 'removed' && t.status)
+  const backlog = kept.filter(t => t.status === 'backlog').length
+  const board = kept.length - backlog
+  const count = (n: number) => `${n} task${n === 1 ? '' : 's'}`
+  if (backlog === 0) return `${count(board)} on the board`
+  return board === 0 ? `${count(backlog)} in the Backlog` : `${count(backlog)} in the Backlog, ${board} on the board`
+}
 
 // How a revised plan differs from the previous version, by key (design/plan.md)
 export function diffPlans(previous: readonly ProposedTask[], next: readonly ProposedTask[]): { key: string, change: PlanChange }[] {

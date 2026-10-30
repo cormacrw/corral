@@ -1,9 +1,9 @@
 import type { RunnerMessage } from '@corral/contracts'
-import { chmod, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, rm, stat, symlink, truncate, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ServerConnection } from './connection.ts'
-import type { ToolServer } from './mcp.ts'
+import type { ToolHandler, ToolServer } from './mcp.ts'
 import { RunManager } from './run-manager.ts'
 import { DEFAULT_ROLE_INSTRUCTIONS } from './role-defaults.ts'
 import { createTestDataDir, pmJob, TEST_REPOSITORY } from './test-repo.ts'
@@ -32,6 +32,7 @@ describe('RunManager PM turns', () => {
   let claudeBin: string
   let sent: RunnerMessage[]
   let manager: RunManager
+  let handler: ToolHandler | undefined
 
   beforeEach(async () => {
     dataDir = await createTestDataDir()
@@ -40,11 +41,15 @@ describe('RunManager PM turns', () => {
     await chmod(claudeBin, 0o755)
     sent = []
     const connection = { send: (message: RunnerMessage) => sent.push(message) > 0 } as unknown as ServerConnection
-    const tools = { register: () => () => {}, url: () => 'http://127.0.0.1:9/mcp' } as unknown as ToolServer
+    const tools = { register: (_secret: string, _role: string, call: ToolHandler) => {
+      handler = call
+      return () => {}
+    }, url: () => 'http://127.0.0.1:9/mcp' } as unknown as ToolServer
     manager = new RunManager({ dataDir, claudeBin, codexBin: 'codex', name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds: 0, titleModel: 'haiku', slots: 4, roles: ['pm', 'developer', 'reviewer', 'design'] }, connection, tools)
   })
 
   afterEach(async () => {
+    await manager.shutdown()
     await rm(dirname(dataDir), { recursive: true, force: true })
   })
 
@@ -61,6 +66,37 @@ describe('RunManager PM turns', () => {
   function notes(messages: RunnerMessage[]): string[] {
     return messages.flatMap(m => m.type === 'run.events' ? m.events : []).flatMap(e => e.type === 'system' ? [e.text] : [])
   }
+
+  it.each(['pm', 'developer'] as const)('checks scratch paths and size for %s evidence', async (role) => {
+    await writeFile(claudeBin, '#!/bin/sh\nsleep 600\n')
+    handler = undefined
+    manager.assign(pmJob({ runId: 'r1', role, ...(role === 'developer' && { planSessionId: null, taskId: 'task-1', taskRef: 'APP-1', branch: 'corral/app-1' }) }))
+    await expect.poll(() => handler).toBeDefined()
+    const scratch = join(dataDir, 'scratch', 'r1')
+    const outside = join(dataDir, 'outside.txt')
+    await writeFile(outside, 'private')
+    await symlink(outside, join(scratch, 'escape.txt'))
+    for (const path of [outside, '../../outside.txt', 'escape.txt']) {
+      expect(await handler!('attach_evidence', { kind: 'text', path })).toEqual({ ok: false, error: 'Evidence files must be inside your scratch directory' })
+    }
+    const large = join(scratch, 'large.txt')
+    await writeFile(large, '')
+    await truncate(large, 25 * 1024 * 1024 + 1)
+    expect(await handler!('attach_evidence', { kind: 'text', path: large })).toEqual({ ok: false, error: 'Evidence files are limited to 25 MB' })
+    expect(sent.some(m => m.type === 'tool.call')).toBe(false)
+    const allowed = join(scratch, 'notes.txt')
+    await writeFile(allowed, 'PM notes')
+    for (const path of ['notes.txt', allowed]) {
+      const attaching = handler!('attach_evidence', { kind: 'text', path })
+      await expect.poll(() => sent.find(m => m.type === 'tool.call')).toBeDefined()
+      const index = sent.findIndex(m => m.type === 'tool.call')
+      const call = sent.splice(index, 1)[0]!
+      if (call.type !== 'tool.call') throw new Error('Expected an upload')
+      expect(call.input).toMatchObject({ fileName: 'notes.txt', contentType: 'text/plain', dataBase64: Buffer.from('PM notes').toString('base64') })
+      manager.handle({ type: 'tool.result', callId: call.callId, ok: true, result: { id: 'saved' } })
+      expect(await attaching).toEqual({ ok: true, result: { id: 'saved' } })
+    }
+  })
 
   it('shows the worktree and session start notes on the first turn of a session', async () => {
     manager.assign(pmJob({ runId: 'r1', planSessionId: 's1' }))

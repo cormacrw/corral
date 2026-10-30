@@ -120,7 +120,7 @@ The selected message column shows only what needs you, **not the conversation**.
 | **Delete thread** | Always, in the header and on the row | Removes the thread at once with an Undo toast, then closes the session (below). |
 
 - Only a human can approve (D9).
-- After approving, the pane shows a green "Resolved" `UAlert` ("✓ 4 tasks added to the board.") and selection moves to the next item that needs you.
+- After approving, the pane shows a green "Resolved" `UAlert` ("✓ 4 tasks on the board.") and selection moves to the next item that needs you.
 
 ### Delete thread
 

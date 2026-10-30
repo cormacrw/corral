@@ -91,6 +91,18 @@ describe('ToolServer', () => {
     await client.close()
   })
 
+  it('gives the PM a list_tasks with optional filters and an unindented result', async () => {
+    const { client, calls } = await connect('pm')
+    const result = await client.callTool({ name: 'list_tasks', arguments: { status: ['ready', 'blocked'], query: 'login' } })
+    expect(calls).toEqual([{ tool: 'list_tasks', input: { status: ['ready', 'blocked'], query: 'login', includeMerged: false } }])
+    expect(result.content).toEqual([{ type: 'text', text: '{"ref":"own task"}' }])
+
+    await client.callTool({ name: 'list_tasks', arguments: { status: 'merged' } })
+    expect(calls.at(-1)?.input).toEqual({ status: 'merged', includeMerged: false })
+    expect((await client.callTool({ name: 'list_tasks', arguments: { status: 'done' } })).isError).toBe(true)
+    await client.close()
+  })
+
   it('gives the PM a get_task that takes a required taskRef and passes it through', async () => {
     const { client, calls } = await connect('pm')
     const { tools: listed } = await client.listTools()
@@ -109,10 +121,37 @@ describe('ToolServer', () => {
     await client.close()
   })
 
+  it('gives the PM an add_comment that takes a required taskRef and body and passes them through', async () => {
+    const { client, calls } = await connect('pm')
+    const addComment = (await client.listTools()).tools.find(t => t.name === 'add_comment')!
+    expect(addComment.inputSchema).toMatchObject({ type: 'object', properties: { taskRef: { type: 'string' }, body: { type: 'string' } }, required: ['taskRef', 'body'] })
+
+    await client.callTool({ name: 'add_comment', arguments: { taskRef: 'COR-4', body: 'COR-9 changes this' } })
+    expect(calls).toEqual([{ tool: 'add_comment', input: { taskRef: 'COR-4', body: 'COR-9 changes this' } }])
+
+    // Without a ref the call is refused before it reaches Corral
+    const missing = await client.callTool({ name: 'add_comment', arguments: { body: 'Where?' } })
+    expect(missing.isError).toBe(true)
+    expect(calls).toHaveLength(1)
+    await client.close()
+  })
+
+  it('gives the PM evidence uploads with an optional task ref', async () => {
+    const { client, calls } = await connect('pm')
+    const definition = (await client.listTools()).tools.find(t => t.name === 'attach_evidence')!
+    expect(definition.inputSchema).toMatchObject({ properties: { taskRef: { type: 'string' }, path: { type: 'string' } } })
+    for (const taskRef of [undefined, 'COR-4']) {
+      const input = { kind: 'text', path: '/scratch/notes.txt', ...(taskRef && { taskRef }) }
+      expect((await client.callTool({ name: 'attach_evidence', arguments: input })).isError).not.toBe(true)
+      expect(calls.at(-1)).toEqual({ tool: 'attach_evidence', input })
+    }
+    await client.close()
+  })
+
   it('tells the PM to refine a Backlog task by ref in propose_plan, and passes the ref through', async () => {
     const { client, calls } = await connect('pm')
     const propose = (await client.listTools()).tools.find(t => t.name === 'propose_plan')!
-    expect(propose.description).toContain('To refine an existing Backlog task, read it with get_task and include it in the plan with its `ref`')
+    expect(propose.description).toContain('To refine an existing Backlog task or an unclaimed Ready task (one no developer has picked up), read it with get_task and include it in the plan with its `ref`')
     expect(propose.inputSchema).toMatchObject({ properties: { tasks: { items: { properties: { ref: { type: 'string' } } } } } })
 
     const task = { key: 't1', ref: 'COR-4', title: 'Login', description: 'Build it', type: 'task', acceptanceCriteria: ['It works'], dependsOn: ['COR-2'] }

@@ -37,7 +37,7 @@ import { MergeOrchestrator } from './merge.ts'
 import type { ReleaseNotes } from './deployments.ts'
 import type { PlanService } from './plan.ts'
 import { getRun, listAgents, listEvidence } from './runs.ts'
-import { addComment, applyTransition, deleteTaskRows, loadTask, lockTask, toTaskState, type ProjectRow, type TaskContentEdit, type TaskRow } from './tasks.ts'
+import { addComment, applyTransition, deleteTaskRows, findTaskByRef, loadTask, lockTask, toTaskState, type ProjectRow, type TaskContentEdit, type TaskRow } from './tasks.ts'
 import type { Transcripts } from './transcripts.ts'
 import { WorktreeSweep } from './worktree-sweep.ts'
 
@@ -1147,7 +1147,7 @@ export class Orchestrator implements RunnerHandlers {
       developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'report_outcome'],
       designer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'submit_design', 'report_outcome'],
       reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'get_design', 'report_outcome'],
-      pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_agent_activity', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs', ...Object.keys(pmDirectTools)]
+      pm: ['attach_evidence', 'list_tasks', 'get_task', 'add_comment', 'get_run_outcomes', 'get_agent_activity', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs', ...Object.keys(pmDirectTools)]
     }
     if (!allowed[role]?.includes(tool)) throw new ToolError(`The ${role} can’t use ${tool}`)
     if (role === 'pm' && isPmDirectTool(tool)) {
@@ -1160,6 +1160,21 @@ export class Orchestrator implements RunnerHandlers {
       return readDesign(this.#d.db, this.#d.blobs, ctx.project, ref, version).catch((error: unknown) => {
         throw error instanceof DesignNotFound ? new ToolError(error.message) : error
       })
+    }
+    if (tool === 'attach_evidence') {
+      const parsed = evidenceSchema.safeParse(input)
+      if (!parsed.success) throw new ToolError(`Not attached. ${parsed.error.issues.map(i => i.message).join('. ')}.`)
+      if (role === 'pm') {
+        if (!this.plans || !ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
+        const { taskRef: ref } = z.object({ taskRef: z.string().optional() }).parse(input)
+        if (ref) return this.#attachEvidence({ ...ctx, task: await findTaskByRef(this.#d.db, ctx.project, ref) }, parsed.data)
+        if (parsed.data.criterionId) throw new ToolError('Pass taskRef to attach evidence for a criterion')
+        const attached = await this.#attachEvidence(ctx, parsed.data)
+        const label = (parsed.data.fileName ?? 'Evidence').replace(/[[\]\\]/g, '')
+        await this.plans.attachEvidence(ctx.run.planSessionId, ctx.run.id, parsed.data.dataBase64 === undefined ? parsed.data.note : `${parsed.data.note}\n\n[${label}](/api/evidence/${attached.id}/file)`)
+        return attached
+      }
+      return this.#attachEvidence(ctx, parsed.data)
     }
     if (role === 'pm') {
       if (!this.plans || !ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
@@ -1187,11 +1202,6 @@ export class Orchestrator implements RunnerHandlers {
         const { body } = z.object({ body: z.string().trim().min(1) }).parse(input)
         await this.#d.db.insert(comments).values({ taskId: ctx.task!.id, author: this.#actor(ctx), body })
         return { ok: true }
-      }
-      case 'attach_evidence': {
-        const parsed = evidenceSchema.safeParse(input)
-        if (!parsed.success) throw new ToolError(`Not attached. ${parsed.error.issues.map(i => i.message).join('. ')}.`)
-        return this.#attachEvidence(ctx, parsed.data)
       }
       case 'get_evidence':
         return this.#getEvidence(ctx, z.object({ evidenceId: z.string().optional() }).parse(input))
@@ -1229,13 +1239,13 @@ export class Orchestrator implements RunnerHandlers {
   }
 
   async #attachEvidence(ctx: RunContext, input: z.infer<typeof evidenceSchema>) {
-    const task = ctx.task!
+    const task = ctx.task
     if (input.criterionId) {
       const [criterion] = await this.#d.db.select({ id: acceptanceCriteria.id }).from(acceptanceCriteria)
-        .where(and(eq(acceptanceCriteria.id, input.criterionId), eq(acceptanceCriteria.taskId, task.id)))
+        .where(and(eq(acceptanceCriteria.id, input.criterionId), eq(acceptanceCriteria.taskId, task!.id)))
       if (!criterion) throw new ToolError(`${input.criterionId} isn't one of this task's acceptance criteria`)
     }
-    const row = { taskId: task.id, criterionId: input.criterionId, runId: ctx.run.id, round: task.reviewRounds, kind: input.kind }
+    const row = { taskId: task?.id ?? null, criterionId: input.criterionId, runId: ctx.run.id, round: task?.reviewRounds ?? 0, kind: input.kind }
     if (input.dataBase64 === undefined) {
       // A note: no blob, the text is the evidence
       const [note] = await this.#d.db.insert(evidence).values({ ...row, note: input.note.trim(), size: 0 }).returning()

@@ -1,4 +1,4 @@
-import { askQuestionInput, pmDirectTools, proposedPlanInput, EVIDENCE_KINDS, reportOutcomeInput, type AgentTool, type PmDirectTool, type RunJob } from '@corral/contracts'
+import { askQuestionInput, listTasksInput, pmDirectTools, proposedPlanInput, EVIDENCE_KINDS, reportOutcomeInput, type AgentTool, type PmDirectTool, type RunJob } from '@corral/contracts'
 import { DESIGNER_RUN_OUTCOMES, DEVELOPER_RUN_OUTCOMES, REVIEWER_RUN_OUTCOMES, type AgentRole } from '@corral/core'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -82,8 +82,8 @@ const toolDefinitions = {
     input: reportOutcomeInput.shape
   },
   list_tasks: {
-    description: 'The project’s tasks with their status, and epics with dependsOn epic ids, so plans reflect the live board.',
-    input: {}
+    description: 'The live board: one compact row per task (ref, title, status, type, priority, epicId, dependsOn refs), and every epic with its dependsOn epic ids. Merged tasks are left out unless you set includeMerged or ask for that status. Filters combine. Read a task’s description and acceptance criteria with get_task.',
+    input: listTasksInput.shape
   },
   get_run_outcomes: {
     description: 'Recent run outcomes for a task.',
@@ -98,11 +98,11 @@ const toolDefinitions = {
     input: askQuestionInput.shape
   },
   propose_plan: {
-    description: 'Propose a plan: epics and tasks with acceptance criteria and dependencies. Corral validates it and shows it to the human for approval. Use `epics` to group the tasks of a feature, and put each of those tasks in one with `epic`. A task without `epic` gets no epic, and a plan without `epics` creates none: leave them out for a lone small fix. A revision keeps the epic and task keys it reuses. To refine an existing Backlog task, read it with get_task and include it in the plan with its `ref`: the plan then revises that task instead of creating a new one, and the edits are applied when the human approves. Set each epic’s dependsOn to epic keys in this plan or existing epic ids from list_tasks; omit it on revision to preserve dependencies, or use [] to clear them. Pin a task that builds part of an approved design with `design`; only an approved version can be pinned.',
+    description: 'Propose a plan: epics and tasks with acceptance criteria and dependencies. Corral validates it and shows it to the human for approval. Use `epics` to group the tasks of a feature, and put each of those tasks in one with `epic`. A task without `epic` gets no epic, and a plan without `epics` creates none: leave them out for a lone small fix. A revision keeps the epic and task keys it reuses. To refine an existing Backlog task or an unclaimed Ready task (one no developer has picked up), read it with get_task and include it in the plan with its `ref`: the plan then revises that task instead of creating a new one, and the edits are applied when the human approves; a revised Ready task stays in Ready. Set each epic’s dependsOn to epic keys in this plan or existing epic ids from list_tasks; omit it on revision to preserve dependencies, or use [] to clear them. Pin a task that builds part of an approved design with `design`; only an approved version can be pinned.',
     input: proposedPlanInput.shape
   },
   approve_plan: {
-    description: 'Approve the current plan on the human\'s behalf, only when their latest message explicitly asks you to (e.g. "looks good, add it to the board"). Never approve on your own initiative. "ready" adds the tasks to the board; "backlog" keeps them for later.',
+    description: 'Approve the current plan on the human\'s behalf, only when their latest message explicitly asks you to (e.g. "looks good, add it to the board"). Never approve on your own initiative. "ready" adds the tasks to the board; "backlog" keeps them for later. A revised Ready task stays in Ready either way.',
     input: { to: z.enum(['ready', 'backlog']).describe('ready = add to the board; backlog = add to the Backlog') }
   },
   flag_stale_docs: {
@@ -111,16 +111,27 @@ const toolDefinitions = {
   }
 } satisfies Record<AgentTool, ToolDefinition>
 
-// Where a role's tool differs: the PM reads any task in the project by ref,
-// while developers and reviewers only ever read their own
+// Where a role's tool differs: the PM reads and comments on any task in the
+// project by ref, while developers and reviewers only ever touch their own
 const roleToolDefinitions: Record<AgentRole, Partial<Record<AgentTool, ToolDefinition>>> = {
   designer: {},
   developer: {},
   reviewer: {},
   pm: {
+    attach_evidence: {
+      description: 'Attach a file from your scratch directory to this chat, or to a task in this project when taskRef is given. Files are limited to 25 MB.',
+      input: { ...toolDefinitions.attach_evidence.input, taskRef: z.string().optional().describe('Task ref, e.g. COR-12; omit to attach to this chat') }
+    },
     get_task: {
       description: 'Read any task in this project by ref: title, description, acceptance criteria with their IDs, status, epic, dependencies and comments.',
       input: { taskRef: z.string().describe('e.g. COR-12') }
+    },
+    add_comment: {
+      description: 'Leave a note on any task in this project, for the human and the other agents, e.g. that a follow-up task changes its behaviour.',
+      input: {
+        taskRef: z.string().describe('e.g. COR-12'),
+        body: z.string().min(1).describe('Markdown text')
+      }
     }
   }
 }
@@ -129,7 +140,7 @@ export const ROLE_TOOLS: Record<AgentRole, AgentTool[]> = {
   designer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'submit_design', 'report_outcome'],
   developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'report_outcome'],
   reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'get_design', 'report_outcome'],
-  pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_agent_activity', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs', ...Object.keys(pmDirectTools) as PmDirectTool[]]
+  pm: ['attach_evidence', 'list_tasks', 'get_task', 'add_comment', 'get_run_outcomes', 'get_agent_activity', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs', ...Object.keys(pmDirectTools) as PmDirectTool[]]
 }
 
 // The tools a run gets: its role's alone. Only a designer submits designs (D23)
@@ -204,7 +215,7 @@ export class ToolServer {
     const name = call?.method === 'tools/call' ? String(call.params?.name) : null
     if (name && name in toolDefinitions && !route.tools.includes(name as AgentTool)) {
       res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ jsonrpc: '2.0', id: call!.id, result: toContent({ ok: false, error: toolRefusal(route.role, name) }) }))
+      res.end(JSON.stringify({ jsonrpc: '2.0', id: call!.id, result: toContent({ ok: false, error: toolRefusal(route.role, name) }, 2) }))
       return
     }
     // Stateless: a fresh server per request, so a resumed agent process can
@@ -214,7 +225,7 @@ export class ToolServer {
       const definition = roleToolDefinitions[route.role][name] ?? toolDefinitions[name]
       server.registerTool(name, { description: definition.description, inputSchema: definition.input }, async (input: Record<string, unknown>) => {
         const outcome = await route.handler(name, input).catch((error: unknown): ToolOutcome => ({ ok: false, error: error instanceof Error ? error.message : String(error) }))
-        return toContent(outcome)
+        return toContent(outcome, name === 'list_tasks' ? undefined : 2)
       })
     }
     const transport = new StreamableHTTPServerTransport({ enableJsonResponse: true })
@@ -238,11 +249,12 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   }
 }
 
-function toContent(outcome: ToolOutcome) {
+// A board is read as data and can be long, so it goes out without indentation
+function toContent(outcome: ToolOutcome, indent: number | undefined) {
   if (!outcome.ok) return { content: [{ type: 'text' as const, text: outcome.error }], isError: true }
   const images = (outcome.result as ImageResult | null)?.images ?? []
   const rest = images.length > 0 ? { ...(outcome.result as object), images: undefined } : outcome.result
-  const text = typeof rest === 'string' ? rest : JSON.stringify(rest, null, 2)
+  const text = typeof rest === 'string' ? rest : JSON.stringify(rest, null, indent)
   return {
     content: [
       { type: 'text' as const, text },
