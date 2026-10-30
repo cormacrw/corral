@@ -72,10 +72,15 @@ describe('merge orchestrator and human controls', () => {
 
     t.github.setChecks(pr.headSha, [{ name: 'lint', conclusion: 'failure', url: 'https://ci/1' }])
     await t.orchestrator.merges.tick()
-    expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', leaseRunId: null })
+    // Background scheduling can already have claimed the revision; check the
+    // developer's new lease below rather than the transient unleased state.
+    expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress' })
     const notes = await t.db.select().from(comments).where(eq(comments.taskId, task.id))
     expect(notes.at(-1)?.body).toContain('lint: failed (https://ci/1)')
     expect(notes.at(-1)?.body).toContain('pr_updated')
+    await t.orchestrator.schedule()
+    const revision = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
+    expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', leaseRunId: revision.runId })
     await pause(project)
   })
 
