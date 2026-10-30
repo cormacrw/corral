@@ -78,15 +78,16 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
   // Read PM calls independently of tasks: deleting a Backlog task removes its
   // row, but its PM attribution and conversation must survive. Removing a
   // project clears the entry's project, so that join is a left join.
-  const pmCalls = await db.select({ entry: auditLog, project: projects }).from(auditLog)
+  const pmCalls = await db.select({ entry: auditLog, project: projects, session: planSessions }).from(auditLog)
     .leftJoin(projects, eq(projects.id, auditLog.projectId))
+    .leftJoin(planSessions, sql`${planSessions.id}::text = ${auditLog.detail}->>'sessionId'`)
     .where(inArray(auditLog.action, [...PM_ACTIVITY]))
     .orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(limit)
-  for (const { entry, project } of pmCalls) {
+  for (const { entry, project, session } of pmCalls) {
     const detail = entry.detail as { targetId?: string | null, summary?: string, sessionId: string, input?: { taskRef?: string } }
     const text = pmActivityText(entry.action, detail.summary ?? 'A PM action')
-    const base = { id: `pm-${entry.id}`, type: 'activity' as const, subject: text, preview: text, body: project ? `${text}. [PM conversation](/plan/${detail.sessionId})` : `${text}.`, sender: { name: 'PM', role: 'pm' as const }, at: entry.createdAt.toISOString(), prUrl: null, resolution: null }
-    const tag = project ? projectTag(project) : { id: '', slug: '', name: 'Removed project', thumbnailColor: null, thumbnailUrl: null }
+    const base = { id: `pm-${entry.id}`, type: 'activity' as const, subject: text, preview: text, body: session ? `${text}. [PM conversation](/plan/${session.id})` : `${text}.`, sender: { name: 'PM', role: 'pm' as const }, at: entry.createdAt.toISOString(), prUrl: null, resolution: null }
+    const tag = project ? projectTag(project) : { id: '', slug: '', name: session && session.projectId === null ? 'Global' : 'Removed project', thumbnailColor: null, thumbnailUrl: null }
     if (project && detail.targetId && detail.input?.taskRef) activity.push({ ...base, project: tag, taskId: detail.targetId, taskRef: detail.input.taskRef })
     else activity.push({ ...base, project: tag, taskId: null, taskRef: null })
   }

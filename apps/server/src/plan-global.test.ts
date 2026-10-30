@@ -1,4 +1,4 @@
-import type { PlanSessionDetail, RunJob, Task } from '@corral/contracts'
+import type { Inbox, PlanSessionDetail, RunJob, Task } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq, sql } from 'drizzle-orm'
 import { readFile, writeFile } from 'node:fs/promises'
@@ -147,6 +147,22 @@ describe('global and project Plan sessions', () => {
     await finish(job, 'Waiting for your confirmation.')
     expect(await request('POST', `/plan/sessions/${session.id}/actions/${actionId}`, { decision: 'confirm' })).toMatchObject({ pendingAction: { status: 'confirmed' } })
     expect((await t.request('GET', `/api/projects/${project.slug}`)).status).toBe(404)
+  })
+
+  it('labels factory activity from surviving global sessions and keeps the conversation link', async () => {
+    const session = await request('POST', '/plan/sessions', { text: 'Check the factory' }) as PlanSessionDetail
+    const job = (await runner.next('run.assign', m => m.job.planSessionId === session.id)).job
+    for (const tool of ['get_status', 'list_projects', 'list_inbox'] as const) {
+      expect(await call(job, tool, {})).toMatchObject({ ok: true })
+    }
+    const inbox = await request('GET', '/inbox') as Inbox
+    const activity = inbox.activity.filter(item => item.body?.includes(`/plan/${session.id}`))
+    expect(activity).toHaveLength(3)
+    for (const item of activity) {
+      expect(item).toMatchObject({ project: { name: 'Global', slug: '' }, sender: { role: 'pm' }, taskRef: null })
+      expect(item.body).toContain(`[PM conversation](/plan/${session.id})`)
+    }
+    await finish(job, 'The factory status is available.')
   })
 
   it('requires explicit projects globally, defaults project threads, and preserves history', async () => {
