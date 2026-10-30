@@ -36,6 +36,12 @@ describe('pmPrompt', () => {
     expect(intro).toContain('Keep replies short and concrete')
   })
 
+  it('sends team status questions to get_agent_activity', () => {
+    const intro = pmPrompt({ ...turn, fresh: true })
+    expect(intro).toContain('call get_agent_activity')
+    expect(intro).toContain('say the agent is idle or paused and what it last did')
+  })
+
   it('tells the PM not to restate a proposed plan the panel already shows', () => {
     const intro = pmPrompt({ ...turn, fresh: true })
     expect(intro).toContain('The human sees the proposed plan in a panel beside the chat')
