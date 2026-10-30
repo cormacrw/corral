@@ -1,6 +1,6 @@
 import type { RunJob } from '@corral/contracts'
 import type { AgentRole } from '@corral/core'
-import { readdir, readFile, rm, stat } from 'node:fs/promises'
+import { readdir, readFile, realpath, rm, stat } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 import { git } from './exec.ts'
 import { barePath, syncRepository, withRepoLock } from './repos.ts'
@@ -179,4 +179,69 @@ export function removeWorktree(bare: string, path: string, force = false): Promi
     await git(['worktree', 'prune'], { cwd: bare })
     return true
   })
+}
+
+// Ids are database UUIDs, so anything else under worktrees/ isn't ours
+const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+const TASK_FOLDER = new RegExp(`^(${UUID})(-review)?$`)
+const PM_FOLDER = new RegExp(`^pm-${UUID}-(${UUID})$`)
+
+// Removes every worktree outside the keep lists. A developer worktree or an
+// orphan with uncommitted changes stays (PRD §7.4); review and PM checkouts
+// are read-only by contract, so theirs are discarded.
+export async function sweepWorktrees(
+  dataDir: string,
+  keep: { keepTaskIds: string[], keepPlanSessionIds: string[] },
+  pmTurnRunning: (planSessionId: string) => boolean
+): Promise<{ removed: string[], kept: string[] }> {
+  const root = join(dataDir, 'worktrees')
+  const folders = await readdir(root, { withFileTypes: true }).catch(() => [])
+  const registered = await registeredWorktrees(dataDir)
+  const removed: string[] = []
+  const kept: string[] = []
+  for (const folder of folders) {
+    if (!folder.isDirectory()) continue
+    const task = TASK_FOLDER.exec(folder.name)
+    const planSessionId = PM_FOLDER.exec(folder.name)?.[1]
+    if (!task && !planSessionId) continue
+    if (task ? keep.keepTaskIds.includes(task[1]!) : keep.keepPlanSessionIds.includes(planSessionId!)) continue
+
+    const path = join(root, folder.name)
+    const bare = registered.get(await realpath(path))
+    // Nothing awaits between this check and removeWorktree taking its place
+    // in the repo queue, so a turn starting later checks out after the removal
+    if (planSessionId && pmTurnRunning(planSessionId)) continue
+    const force = planSessionId !== undefined || task?.[2] !== undefined
+    const gone = bare ? await removeWorktree(bare, path, force) : await removeOrphan(path)
+    ;(gone ? removed : kept).push(path)
+  }
+  return { removed, kept }
+}
+
+// Each worktree's real path and its bare clone, as barePath spells it so
+// removeWorktree takes the same lock as the runs. Throws when a clone can't
+// answer: its worktrees would otherwise look like orphans.
+async function registeredWorktrees(dataDir: string): Promise<Map<string, string>> {
+  const repos = join(dataDir, 'repos')
+  const clones = await readdir(repos).catch(() => [])
+  const registered = new Map<string, string>()
+  for (const clone of clones.filter(name => name.endsWith('.git'))) {
+    const bare = join(repos, clone)
+    const list = await git(['worktree', 'list', '--porcelain'], { cwd: bare })
+    if (list.code !== 0) throw new Error(`git worktree list failed in ${clone}: ${list.stderr.trim()}`)
+    for (const [, path] of list.stdout.matchAll(/^worktree (.+)$/gm)) {
+      registered.set(await realpath(path!).catch(() => path!), bare)
+    }
+  }
+  return registered
+}
+
+// Status only runs where the folder has its own working .git: git would
+// otherwise answer for a repository above it, or fail on a dangling .git file
+// that can't report changes at all
+async function removeOrphan(path: string): Promise<boolean> {
+  const hasRepository = await exists(join(path, '.git')) && (await git(['rev-parse', '--git-dir'], { cwd: path })).code === 0
+  if (hasRepository && await hasUncommittedChanges(path)) return false
+  await rm(path, { recursive: true, force: true })
+  return true
 }
