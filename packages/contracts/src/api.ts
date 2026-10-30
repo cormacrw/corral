@@ -118,6 +118,7 @@ export const setEpicDependenciesInput = z.object({ dependsOn: z.array(z.uuid()) 
 export type SetEpicDependenciesInput = z.infer<typeof setEpicDependenciesInput>
 
 export const patchEpicInput = z.object({
+  reviewMode: z.enum(EPIC_REVIEW_MODES).optional(),
   title: z.string().trim().min(1).optional(),
   description: z.string().optional()
 })

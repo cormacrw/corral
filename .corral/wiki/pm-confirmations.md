@@ -2,7 +2,7 @@
 
 Confirm-required tool definitions are shared in `packages/contracts/src/pm-tools.ts` and included in `apps/runner/src/mcp.ts`. `confirmRequired` is server policy, not caller input. The orchestrator checks it before dispatching a PM tool, validates its inputs and target, and passes the proposal to `PmActions`. New tools supply preparation (validation and a one-line summary) and execution through the same lifecycle. `approve_plan` retains its separate D9 consent rule.
 
-`delete_task` is the first confirm-required tool. It is scoped to the conversation's project and uses the existing human task-deletion service. It refuses merged tasks. The human actor carries `viaPm` with the proposing session and run; confirmed actions appear in Inbox Activity with a link to that conversation, including when deletion removes a Backlog task outright.
+`delete_task`, `approve_task` and `move_task` use confirmation cards (see [PM task tools](pm-task-tools.md)). `delete_task` was the first confirm-required tool. It is scoped to the conversation's project and uses the existing human task-deletion service. It refuses merged tasks. The human actor carries `viaPm` with the proposing session and run; confirmed actions appear in Inbox Activity with a link to that conversation, including when deletion removes a Backlog task outright.
 
 A `plan_messages` row of kind `confirmation` is the durable pending-action record: its id is the action id; its session/run identify the proposal; `pending_action` holds tool, validated inputs, summary, target id, state, result and error. This additive JSONB column requires migration 0035. Reloading the conversation restores cards. SSE updates replace messages by id.
 

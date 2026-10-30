@@ -1,9 +1,9 @@
 import type { Epic, EpicDetail, PatchEpicInput } from '@corral/contracts'
 import { checkEpicDependencies, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, asc, eq, isNull, or } from 'drizzle-orm'
+import { and, asc, eq, isNull, or, sql } from 'drizzle-orm'
 import { ApiFailure, notFound } from './errors.ts'
-import { toTasks, type ProjectRow } from './tasks.ts'
+import { toAuditEntry, toTasks, type ProjectRow } from './tasks.ts'
 
 const { auditLog, epics, epicDependencies, taskDependencies, projects, tasks } = schema
 
@@ -90,4 +90,13 @@ export async function setEpicDependencies(db: Executor, epicId: string, dependsO
     await tx.insert(auditLog).values({ projectId: project.id, actor, action: 'epic.updated', detail: { epicId, changed: ['dependsOn'], dependsOn } })
     return listEpics(tx, project)
   })
+}
+
+// Epic audit entries store the epic id in detail, including dependency edits.
+export async function listEpicHistory(db: Executor, epicId: string) {
+  await findEpic(db, epicId)
+  const rows = await db.select().from(auditLog)
+    .where(sql`${auditLog.detail}->>'epicId' = ${epicId}`)
+    .orderBy(asc(auditLog.createdAt), asc(auditLog.id))
+  return rows.map(toAuditEntry)
 }

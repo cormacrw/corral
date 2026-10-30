@@ -198,6 +198,7 @@ export const api = {
   },
 
   epics: {
+    history: (id: string) => call<AuditEntry[]>('GET', `/epics/${id}/history`),
     review: (id: string, input: EpicReviewActionInput) => call<{ ok: boolean }>('POST', `/epics/${id}/review`, input),
     setDependencies: (id: string, dependsOn: string[]) => call<Epic>('PUT', `/epics/${id}/dependencies`, { dependsOn }),
     list: (slug: string) => call<Epic[]>('GET', `/projects/${slug}/epics`),
