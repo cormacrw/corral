@@ -233,6 +233,7 @@ export const agents = pgTable('agents', {
 
 // One agent session (PRD §4.5). PM turns have no task.
 export const runs = pgTable('runs', {
+  runnerId: text(),
   id: uuid().primaryKey().defaultRandom(),
   // Shown as #128 in the UI (D13)
   number: bigint({ mode: 'number' }).notNull().generatedAlwaysAsIdentity().unique(),

@@ -79,7 +79,7 @@ describe('two-phase update hold', () => {
     await t.orchestrator.schedule()
     expect(await hold()).toEqual({ busy: 0 })
     expect(runner.received.filter(m => m.type === 'run.assign' && ids.includes(m.job.runId))).toHaveLength(0)
-    expect(await t.request('GET', '/api/status').then(r => r.json())).toEqual({ stopped: false, updating: true })
+    expect(await t.request('GET', '/api/status').then(r => r.json())).toMatchObject({ stopped: false, updating: true })
     if (resume === 'release') {
       await t.request('DELETE', '/api/update-hold')
     } else {
@@ -89,7 +89,7 @@ describe('two-phase update hold', () => {
       restarted.plans = t.plans
       await restarted.init()
       expect(restarted.status).toEqual({ stopped: false, updating: false })
-      await restarted.onConnected([])
+      await restarted.onConnected([], 'r1')
       await restarted.schedule()
       restarted.stop()
     }

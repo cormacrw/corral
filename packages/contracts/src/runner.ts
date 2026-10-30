@@ -160,7 +160,17 @@ export type ServerMessage =
   | { type: 'tool.result', callId: string, ok: true, result: unknown }
   | { type: 'tool.result', callId: string, ok: false, error: string }
 
+export interface RunnerInfo {
+  id: string
+  name: string
+  online: boolean
+  connectedAt: string
+  lastHeartbeatAt: string
+}
+
 export interface RunnerStatus {
+  runners: RunnerInfo[]
+  // Aggregate compatibility fields for the shell: online means any runner.
   online: boolean
   runnerId: string | null
   name: string | null

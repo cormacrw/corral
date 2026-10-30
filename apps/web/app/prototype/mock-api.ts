@@ -38,7 +38,7 @@ function session(id: string): PlanSessionDetail {
 
 route('GET', '/health', () => ({ ok: true }))
 route('GET', '/runner', () => f.runner)
-route('GET', '/status', () => f.status)
+route('GET', '/status', () => ({ ...f.status, runners: f.runner.runners }))
 route('POST', '/stop-all', () => Object.assign(f.status, { stopped: true }))
 route('POST', '/resume-all', () => Object.assign(f.status, { stopped: false }))
 

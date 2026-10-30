@@ -39,11 +39,11 @@ export class FakeRunner {
     })
   }
 
-  static async connect(url: string, activeRuns: { runId: string, leaseEpoch: number }[] = []): Promise<FakeRunner> {
+  static async connect(url: string, activeRuns: { runId: string, leaseEpoch: number }[] = [], runnerId = 'r1'): Promise<FakeRunner> {
     const socket = new WebSocket(`${url.replace('http', 'ws')}/runner`)
     const runner = new FakeRunner(socket)
     await new Promise(resolve => socket.once('open', resolve))
-    runner.send({ type: 'hello', protocol: 1, runnerId: 'r1', name: 'fake', activeRuns })
+    runner.send({ type: 'hello', protocol: 1, runnerId, name: runnerId, activeRuns })
     await runner.next('welcome')
     return runner
   }

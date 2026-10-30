@@ -321,7 +321,7 @@ describe('merge orchestrator and human controls', () => {
     await runner.next('run.stop', m => m.runId === run.runId)
     expect((await t.db.select().from(runs).where(eq(runs.id, run.runId)))[0]).toMatchObject({ state: 'interrupted' })
     expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', leaseRunId: null, failedRuns: 0 })
-    expect(await t.request('GET', '/api/status').then(r => r.json())).toEqual({ stopped: true, updating: false })
+    expect(await t.request('GET', '/api/status').then(r => r.json())).toMatchObject({ stopped: true, updating: false })
     await t.orchestrator.schedule()
     expect(runner.received.filter(m => m.type === 'run.assign' && m.job.taskId === task.id)).toHaveLength(0)
 
@@ -340,7 +340,7 @@ describe('merge orchestrator and human controls', () => {
 
     const { busy } = await t.request('POST', '/api/update-hold').then(r => r.json()) as { busy: number }
     expect(busy).toBeGreaterThan(0)
-    expect(await t.request('GET', '/api/status').then(r => r.json())).toEqual({ stopped: false, updating: true })
+    expect(await t.request('GET', '/api/status').then(r => r.json())).toMatchObject({ stopped: false, updating: true })
     expect(runner.received.some(m => m.type === 'run.stop' && m.runId === run.runId)).toBe(false)
 
     // A task approved during the hold waits
