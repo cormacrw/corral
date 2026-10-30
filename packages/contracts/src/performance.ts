@@ -19,3 +19,40 @@ export const clientPerfInput = z.strictObject({
   })).min(1).max(50)
 })
 export type ClientPerfSample = z.infer<typeof clientPerfInput>['samples'][number]
+
+export const PERF_WINDOWS = ['1h', '24h', '7d'] as const
+export type PerfWindow = (typeof PERF_WINDOWS)[number]
+export const perfSummaryQuery = z.object({ window: z.enum(PERF_WINDOWS).default('24h') })
+
+export interface PerfRouteSummary {
+  name: string
+  count: number
+  p50Ms: number
+  p95Ms: number
+  maxMs: number
+  // Null when every sample predates query timing
+  avgDbTimeMs: number | null
+  avgQueries: number | null
+}
+
+export interface PerfPageSummary {
+  name: string
+  count: number
+  p50Ms: number
+  p95Ms: number
+}
+
+// CLS is a unitless score; LCP and INP are milliseconds. Null means no samples.
+export interface PerfVitals {
+  LCP: number | null
+  INP: number | null
+  CLS: number | null
+}
+
+export interface PerfSummary {
+  window: PerfWindow
+  slowThresholdMs: number
+  routes: PerfRouteSummary[]
+  pages: PerfPageSummary[]
+  vitals: PerfVitals
+}

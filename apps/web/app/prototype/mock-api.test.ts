@@ -1,5 +1,5 @@
 import { EPIC_REVIEW_STATES } from '@corral/core'
-import type { Agent, DraftSession, Epic, EpicDetail, Inbox, PlanSessionDetail, Project, PullRequestStatus, ServerEvent, Task } from '@corral/contracts'
+import type { Agent, DraftSession, Epic, EpicDetail, Inbox, PerfSummary, PlanSessionDetail, Project, PullRequestStatus, ServerEvent, Task } from '@corral/contracts'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
@@ -43,6 +43,15 @@ describe('prototype mock API', () => {
     const review = inbox.needsYou.find(i => i.type === 'epic_review')
     expect(review).toMatchObject({ epicId: 'e-alerts', prUrl: expect.stringContaining('/pull/214') })
     expect(review?.type === 'epic_review' && review.tasks).toHaveLength(2)
+  })
+
+  it('serves a performance summary per window, slowest p95 first', async () => {
+    for (const window of ['1h', '24h', '7d']) {
+      const summary = await mockCall<PerfSummary>('GET', `/perf/summary?window=${window}`)
+      expect(summary.window).toBe(window)
+      expect(summary.routes.map(r => r.p95Ms)).toEqual(summary.routes.map(r => r.p95Ms).toSorted((a, b) => b - a))
+      expect(summary.pages.map(p => p.p95Ms)).toEqual(summary.pages.map(p => p.p95Ms).toSorted((a, b) => b - a))
+    }
   })
 
   it('includes thumbnails on project and inbox responses', async () => {

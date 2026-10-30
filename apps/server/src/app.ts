@@ -2,6 +2,7 @@ import {
   addCommentInput,
   clientPerfInput,
   CLIENT_PERF_MAX_BYTES,
+  perfSummaryQuery,
   ATTACHMENT_MAX_BYTES,
   AVATAR_MAX_BYTES,
   approveDesignInput,
@@ -224,6 +225,9 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       }
       return c.body(null, 204)
     })
+
+    .get('/perf/summary', validate('query', perfSummaryQuery), async c =>
+      c.json(await performance.summary(c.req.valid('query').window)))
 
     .get('/health', c => c.json({ ok: true }))
 

@@ -1,6 +1,6 @@
 import { flowMetricsQuery } from '@corral/contracts'
 import { checkEpicDependencies, isTaskDone } from '@corral/core'
-import type { CreateAgentInput, CreateTaskInput, EpicReviewActionInput, InboxActionInput, PatchEpicInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
+import type { CreateAgentInput, PerfWindow, CreateTaskInput, EpicReviewActionInput, InboxActionInput, PatchEpicInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
 import * as f from './fixtures'
@@ -49,6 +49,8 @@ route('GET', '/runner', () => f.runner)
 route('GET', '/status', () => ({ ...f.status, runners: f.runner.runners }))
 route('POST', '/stop-all', () => Object.assign(f.status, { stopped: true }))
 route('POST', '/resume-all', () => Object.assign(f.status, { stopped: false }))
+
+route('GET', '/perf/summary', (_, __, query) => f.perfSummaries[(query.get('window') ?? '24h') as PerfWindow])
 
 route('GET', '/setup/repos', () => f.repos)
 route('POST', '/setup/check-repo', (_, body) => ({

@@ -27,6 +27,8 @@ import type {
   PatchProfileInput,
   PatchProjectInput,
   PatchTaskInput,
+  PerfSummary,
+  PerfWindow,
   Plan,
   PlanMessage,
   PlanSession,
@@ -114,6 +116,8 @@ export const api = {
   status: () => call<ServerStatus>('GET', '/status'),
   stopAll: () => call<GlobalStatus>('POST', '/stop-all'),
   resumeAll: () => call<GlobalStatus>('POST', '/resume-all'),
+
+  perfSummary: (window: PerfWindow) => call<PerfSummary>('GET', `/perf/summary?window=${window}`),
 
   setup: {
     repos: (refresh = false) => call<RepoList>('GET', `/setup/repos${refresh ? '?refresh=1' : ''}`),

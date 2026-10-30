@@ -1,5 +1,6 @@
 import { requestQueryTiming, schema, type Database } from '@corral/db'
-import { lt } from 'drizzle-orm'
+import type { PerfSummary, PerfVitals, PerfWindow } from '@corral/contracts'
+import { and, asc, desc, eq, gte, inArray, isNotNull, lt, sql } from 'drizzle-orm'
 import type { MiddlewareHandler } from 'hono'
 import { matchedRoutes } from 'hono/route'
 
@@ -12,6 +13,8 @@ declare module 'hono' {
 
 const RETENTION_MS = 7 * 24 * 60 * 60 * 1000
 const BATCH_SIZE = 1000
+const WINDOW_MS: Record<PerfWindow, number> = { '1h': 60 * 60 * 1000, '24h': 24 * 60 * 60 * 1000, '7d': RETENTION_MS }
+const VITALS = ['LCP', 'INP', 'CLS'] as const
 
 type Sample = typeof schema.perfSamples.$inferInsert
 
@@ -66,6 +69,52 @@ export class PerformanceSamples {
       .then(() => {}, (error) => { console.error('Pruning performance samples failed', error) })
       .finally(() => { this.pruning = undefined })
     return this.pruning
+  }
+
+  async summary(window: PerfWindow): Promise<PerfSummary> {
+    const { perfSamples: t } = schema
+    const since = new Date(Date.now() - WINDOW_MS[window])
+    const percentile = (fraction: number) => sql<number>`percentile_cont(${sql.raw(String(fraction))}) within group (order by ${t.durationMs})`
+    const p95 = percentile(0.95)
+    const [routes, pages, vitals] = await Promise.all([
+      this.db.select({
+        name: t.name,
+        count: sql<number>`count(*)::int`,
+        p50Ms: percentile(0.5),
+        p95Ms: p95,
+        maxMs: sql<number>`max(${t.durationMs})`,
+        // avg of an integer is numeric, which the driver returns as a string
+        avgDbTimeMs: sql<number | null>`avg(${t.dbTimeMs})::double precision`,
+        avgQueries: sql<number | null>`avg(${t.queryCount})::double precision`
+      }).from(t)
+        .where(and(eq(t.kind, 'api'), gte(t.createdAt, since)))
+        .groupBy(t.name).orderBy(desc(p95), asc(t.name)),
+      this.db.select({
+        name: t.name,
+        count: sql<number>`count(*)::int`,
+        p50Ms: percentile(0.5),
+        p95Ms: p95
+      }).from(t)
+        .where(and(eq(t.kind, 'page'), eq(t.metric, 'navigation'), gte(t.createdAt, since)))
+        .groupBy(t.name).orderBy(desc(p95), asc(t.name)),
+      this.vitals(since)
+    ])
+    return { window, slowThresholdMs: this.slowRequestMs, routes, pages, vitals }
+  }
+
+  // A document reports growing snapshots of each vital, so only its latest counts
+  private async vitals(since: Date): Promise<PerfVitals> {
+    const { perfSamples: t } = schema
+    const latest = this.db.selectDistinctOn([t.sessionId, t.metric], { metric: t.metric, value: t.durationMs }).from(t)
+      .where(and(eq(t.kind, 'page'), inArray(t.metric, [...VITALS]), isNotNull(t.sessionId), gte(t.createdAt, since)))
+      .orderBy(t.sessionId, t.metric, desc(t.createdAt))
+      .as('latest')
+    const rows = await this.db.select({
+      metric: latest.metric,
+      p75: sql<number>`percentile_cont(0.75) within group (order by ${latest.value})`
+    }).from(latest).groupBy(latest.metric)
+    const p75 = (metric: keyof PerfVitals) => rows.find(row => row.metric === metric)?.p75 ?? null
+    return { LCP: p75('LCP'), INP: p75('INP'), CLS: p75('CLS') }
   }
 
   async stop(): Promise<void> {
