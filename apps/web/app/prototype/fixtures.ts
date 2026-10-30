@@ -452,7 +452,7 @@ export const runs: Run[] = [
     [120, 'interrupted', null, 'Stopped by a human', 500]
   ] as const).map(([number, state, summary, error, endedAgo]): Run => ({
     runnerId: 'runner-1', runnerName: 'home-server', id: `r-pm-${number}`, number, agentId: 'a-pm', agentName: 'Pam', role: 'pm', projectId: 'p-corral',
-    planSessionId: null, taskId: null, taskRef: null, taskTitle: null, state, outcome: null, summary,
+    planSessionId: null, taskId: null, taskRef: null, taskTitle: null, epicId: null, epicTitle: null, state, outcome: null, summary,
     error, headSha: null, inputTokens: 2_000, cacheReadTokens: 12_000, outputTokens: 400, rateLimitResetAt: null,
     queuedAt: ago(endedAgo + 3), startedAt: ago(endedAgo + 2), endedAt: ago(endedAgo), timings: null
   })),
