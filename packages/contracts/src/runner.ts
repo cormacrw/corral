@@ -1,4 +1,4 @@
-import { RUN_OUTCOMES, REVIEW_VERDICTS, TASK_TYPES, type AgentRole } from '@corral/core'
+import { RUN_OUTCOMES, REVIEW_VERDICTS, TASK_TYPES, type AgentRole, type ReviewVerdict } from '@corral/core'
 import { z } from 'zod'
 
 // The protocol between apps/server and apps/runner over WebSocket (D7). The
@@ -88,6 +88,7 @@ export type AgentTool = z.infer<typeof agentToolSchema>
 // the agent.
 const REPORTED_OUTCOMES = z.enum(RUN_OUTCOMES).exclude(['rate_limited'])
 const NON_REVIEW_OUTCOMES = REPORTED_OUTCOMES.exclude([...REVIEW_VERDICTS])
+const REVIEW_OUTCOMES = z.enum(REVIEW_VERDICTS)
 const unknownOutcome = `must be one of ${REPORTED_OUTCOMES.options.join(', ')}`
 const criterionVerdict = z.object({ criterionId: z.string(), met: z.boolean(), note: z.string().default('') })
 const missingCriteria = 'Give a verdict for every acceptance criterion'
@@ -104,18 +105,18 @@ export const reportOutcomeInput = z.object({
 
 // Developer: the commit the runner pushed
 const reportFields = { summary: reportOutcomeInput.shape.summary, note: reportOutcomeInput.shape.note, headSha: z.string().optional() }
-const taskReview = (outcome: z.ZodType<'approved' | 'changes_requested'>) => z.object({ ...reportFields, outcome, criteria: z.array(criterionVerdict, { error: missingCriteria }) })
+const taskReview = <Outcome extends z.ZodType<ReviewVerdict>>(outcome: Outcome) => z.object({ ...reportFields, outcome, criteria: z.array(criterionVerdict, { error: missingCriteria }) })
 const nonReview = z.object({ ...reportFields, outcome: NON_REVIEW_OUTCOMES })
 
 export const outcomeReportSchema = z.discriminatedUnion('outcome', [
-  taskReview(z.literal('approved')), taskReview(z.literal('changes_requested')), nonReview
+  taskReview(REVIEW_OUTCOMES), nonReview
 ], { error: unknownOutcome })
 
 // D24: an approved rebase review carries the earlier approval's verdicts over,
 // so it needs none of its own
 export const rebaseReviewReportSchema = z.discriminatedUnion('outcome', [
   z.object({ ...reportFields, outcome: z.literal('approved'), criteria: z.array(criterionVerdict).optional() }),
-  taskReview(z.literal('changes_requested')), nonReview
+  taskReview(REVIEW_OUTCOMES.exclude(['approved'])), nonReview
 ], { error: unknownOutcome })
 
 // D23: an integration review judges the whole epic, not one task's criteria
