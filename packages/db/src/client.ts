@@ -8,6 +8,7 @@ import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import pg from 'pg'
 import * as schema from './schema.ts'
+import { timedDriver } from './query-timing.ts'
 
 // Postgres when deployed and in CI; PGlite in development and tests (D14)
 export type DatabaseLocation =
@@ -34,7 +35,7 @@ const casing = 'snake_case'
 export async function openDatabase(location: DatabaseLocation): Promise<DatabaseHandle> {
   if (location.driver === 'postgres') {
     const pool = new pg.Pool({ connectionString: location.url })
-    const db = drizzleNodePg(pool, { schema, casing })
+    const db = drizzleNodePg(timedDriver(pool), { schema, casing })
     try {
       await migrateNodePg(db, { migrationsFolder })
     } catch (error) {
@@ -47,7 +48,7 @@ export async function openDatabase(location: DatabaseLocation): Promise<Database
   // PGlite creates its own folder but not missing parents
   if (location.dataDir !== null) await mkdir(location.dataDir, { recursive: true })
   const client = location.dataDir === null ? new PGlite() : new PGlite(location.dataDir)
-  const db = drizzlePglite(client, { schema, casing })
+  const db = drizzlePglite(timedDriver(client), { schema, casing })
   try {
     await migratePglite(db, { migrationsFolder })
   } catch (error) {
