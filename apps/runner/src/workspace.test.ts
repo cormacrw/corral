@@ -54,6 +54,29 @@ describe('prepareWorkspace for PM turns', () => {
   })
 })
 
+describe('epic task workspaces', () => {
+  it('starts dependent work at the latest epic commit while develop stays unchanged', async () => {
+    const dataDir = await createTestDataDir()
+    const origin = join(dirname(dataDir), 'origin')
+    try {
+      expect((await git(['branch', 'develop'], { cwd: origin })).code).toBe(0)
+      expect((await git(['checkout', '-b', 'corral/epic-feature'], { cwd: origin })).code).toBe(0)
+      await writeFile(join(origin, 'first.txt'), 'First task squashed into the epic\n')
+      await git(['add', '.'], { cwd: origin })
+      // Test identity is scoped to this fixture commit, never the worktree config.
+      expect((await git(['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'First task'], { cwd: origin })).code).toBe(0)
+      const tip = (await git(['rev-parse', 'HEAD'], { cwd: origin })).stdout.trim()
+      const prepared = await prepareWorkspace(dataDir, pmJob({ role: 'developer', taskId: 'dependent', branch: 'corral/task-two', defaultBranch: 'develop', baseBranch: 'corral/epic-feature' }))
+      expect(prepared.error).toBeNull()
+      expect((await git(['rev-parse', 'HEAD'], { cwd: prepared.workspace!.path })).stdout.trim()).toBe(tip)
+      expect(await readFile(join(prepared.workspace!.path, 'first.txt'), 'utf8')).toContain('First task')
+      expect((await git(['rev-list', '--count', 'develop..corral/epic-feature'], { cwd: origin })).stdout.trim()).toBe('1')
+    } finally {
+      await rm(dirname(dataDir), { recursive: true, force: true })
+    }
+  })
+})
+
 describe('readProjectBrief', () => {
   let worktree: string
 

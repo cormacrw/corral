@@ -313,7 +313,12 @@ export async function applyTransition(
   actor: Actor,
   detail: Record<string, unknown> = { event: event.type }
 ): Promise<TaskState> {
-  const result = transition(toTaskState(task), event, actor, {
+  const state = toTaskState(task)
+  if (task.epicId) {
+    const [epic] = await tx.select({ reviewMode: epics.reviewMode }).from(epics).where(eq(epics.id, task.epicId))
+    if (epic?.reviewMode === 'each_task') state.humanReview = true
+  }
+  const result = transition(state, event, actor, {
     reviewRoundCap: project.reviewRoundCap,
     failedRunCap: project.failedRunCap
   })

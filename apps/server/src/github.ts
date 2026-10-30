@@ -27,6 +27,7 @@ export interface CheckResult {
 // actions). The real implementation sends each call through the runner's
 // `gh` (R15); tests use FakeGitHub.
 export interface GitHubClient {
+  createBranch(repository: string, branch: string, sha: string): Promise<void>
   branchHead(repository: string, branch: string): Promise<string | null>
   findOpenPullRequest(repository: string, branch: string): Promise<PullRequest | null>
   openPullRequest(repository: string, input: { head: string, base: string, title: string, body: string }): Promise<PullRequest>
@@ -101,6 +102,15 @@ export class RunnerGitHub implements GitHubClient {
       throw new GitHubError(result.status, message)
     }
     return result
+  }
+
+  async createBranch(repository: string, branch: string, sha: string): Promise<void> {
+    try {
+      await this.#call('POST', `/repos/${repository}/git/refs`, { ref: `refs/heads/${branch}`, sha })
+    } catch (error) {
+      // Another claim may have created the same epic branch first.
+      if (!(error instanceof GitHubError) || error.status !== 422 || !await this.branchHead(repository, branch)) throw error
+    }
   }
 
   async branchHead(repository: string, branch: string) {

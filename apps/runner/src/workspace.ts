@@ -83,7 +83,7 @@ async function checkOut(dataDir: string, bare: string, job: RunJob): Promise<{ w
   // work is never lost; otherwise start the branch from origin
   if (await exists(path)) return { workspace: { path, bare }, error: null }
   const remote = await git(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${job.branch}`], { cwd: bare })
-  const start = remote.code === 0 ? `origin/${job.branch}` : `origin/${job.defaultBranch}`
+  const start = remote.code === 0 ? `origin/${job.branch}` : `origin/${job.baseBranch ?? job.defaultBranch}`
   const result = await git(['worktree', 'add', path, '-B', job.branch, start], { cwd: bare })
   if (result.code !== 0) return { workspace: null, error: result.stderr.trim() || 'git worktree add failed' }
   return { workspace: { path, bare }, error: null }

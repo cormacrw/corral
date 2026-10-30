@@ -51,3 +51,19 @@ describe('RunnerGitHub.updateBranch', () => {
     await expect(down.github.updateBranch('owner/repo', pr, 'abc123')).rejects.toThrow('Bad gateway')
   })
 })
+
+describe('RunnerGitHub.createBranch', () => {
+  it('creates a ref at the configured target tip', async () => {
+    const { github, jobs } = stub(() => ({ status: 201, body: {} }))
+    await github.createBranch('owner/repo', 'corral/epic-feature', 'develop-tip')
+    expect(jobs).toEqual([{ kind: 'github', method: 'POST', path: '/repos/owner/repo/git/refs', body: { ref: 'refs/heads/corral/epic-feature', sha: 'develop-tip' } }])
+  })
+
+  it('accepts a concurrent creation without resetting the branch', async () => {
+    const { github, jobs } = stub(job => job.method === 'POST'
+      ? { status: 422, body: { message: 'Reference already exists' } }
+      : { status: 200, body: { object: { sha: 'existing-tip' } } })
+    await github.createBranch('owner/repo', 'corral/epic-feature', 'develop-tip')
+    expect(jobs.map(j => j.method)).toEqual(['POST', 'GET'])
+  })
+})
