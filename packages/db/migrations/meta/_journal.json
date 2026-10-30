@@ -372,6 +372,13 @@
       "when": 1793467876130,
       "tag": "0052_organic_deathbird",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1793467887371,
+      "tag": "0053_sloppy_whistler",
+      "breakpoints": true
     }
   ]
 }

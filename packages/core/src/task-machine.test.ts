@@ -44,6 +44,7 @@ const validEvents: Record<TaskEventType, TaskEvent> = {
   base_conflict: { type: 'base_conflict', approvedHeadSha: 'approved' },
   head_moved: { type: 'head_moved' },
   merged: { type: 'merged', gates: passingGates },
+  integrated: { type: 'integrated', confirmedOnEpicBranch: true },
   merged_outside: { type: 'merged_outside' },
   human_request_changes: { type: 'human_request_changes' },
   block: { type: 'block', reason: 'Requirements contradict each other' },
@@ -69,6 +70,7 @@ const d10: Record<TaskEventType, [TaskStatus[], Actor]> = {
   base_conflict: [['ready_to_merge'], server],
   head_moved: [['ready_to_merge'], server],
   merged: [['ready_to_merge'], server],
+  integrated: [['ready_to_merge'], server],
   merged_outside: [['agent_review', 'human_review', 'ready_to_merge'], server],
   human_request_changes: [['human_review', 'ready_to_merge'], human],
   block: [['ready', 'in_progress', 'agent_review', 'human_review', 'ready_to_merge'], server],
@@ -398,5 +400,14 @@ describe('DEFAULT_LIMITS', () => {
       DEFAULT_LIMITS.reviewRoundCap = 1
     }).toThrow(TypeError)
     expect(DEFAULT_LIMITS.reviewRoundCap).toBe(5)
+  })
+})
+
+describe('integrated', () => {
+  const ready: TaskState = { status: 'ready_to_merge', humanReview: false, reviewRounds: 0, failedRuns: 0, type: 'task', reason: null }
+
+  it('is Merged only once the epic branch is confirmed to hold the work', () => {
+    expect(transition(ready, { type: 'integrated', confirmedOnEpicBranch: false }, server)).toEqual({ ok: false, error: { code: 'integration_unconfirmed' } })
+    expect(transition(ready, { type: 'integrated', confirmedOnEpicBranch: true }, server)).toMatchObject({ ok: true, task: { status: 'merged' } })
   })
 })

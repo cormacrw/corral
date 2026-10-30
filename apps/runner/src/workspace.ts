@@ -182,7 +182,7 @@ export async function pushBranch(worktree: string, branch: string, timeoutMs = 5
   return { sha, error: null }
 }
 
-const WIP_AUTHOR: GitAuthor = { name: 'Corral', email: 'corral@localhost' }
+export const WIP_AUTHOR: GitAuthor = { name: 'Corral', email: 'corral@localhost' }
 
 export interface SavedWork {
   // The WIP commit; null when there was nothing to save or it couldn't be made

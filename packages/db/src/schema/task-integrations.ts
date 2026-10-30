@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm'
 import { check, index, integer, pgTable, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 import { createdAt, updatedAt } from './columns.ts'
+import { epics } from './epics.ts'
 import { tasks } from './tasks.ts'
 
 // Immutable identity per submission. Revisions insert another row; reviewed and
@@ -32,6 +33,8 @@ export const taskSubmissions = pgTable('task_submissions', {
 export const taskIntegrationOperations = pgTable('task_integration_operations', {
   id: uuid().primaryKey().defaultRandom(),
   submissionId: uuid().notNull().references(() => taskSubmissions.id, { onDelete: 'cascade' }),
+  // The shared branch being advanced: one operation at a time per epic
+  epicId: uuid().notNull().references(() => epics.id, { onDelete: 'cascade' }),
   kind: text({ enum: ['integrate', 'rebase'] }).notNull(),
   state: text({ enum: ['pending', 'running', 'reconciling', 'succeeded', 'failed'] }).notNull().default('pending'),
   expectedTargetSha: text().notNull(),
@@ -44,6 +47,7 @@ export const taskIntegrationOperations = pgTable('task_integration_operations', 
 }, t => [
   index().on(t.submissionId),
   uniqueIndex('task_integration_one_active_operation').on(t.submissionId).where(sql`${t.state} in ('pending', 'running', 'reconciling')`),
+  uniqueIndex('task_integration_one_active_per_epic').on(t.epicId).where(sql`${t.state} in ('pending', 'running', 'reconciling')`),
   check('task_integration_operation_kind', sql`${t.kind} in ('integrate', 'rebase')`),
   check('task_integration_operation_state', sql`${t.state} in ('pending', 'running', 'reconciling', 'succeeded', 'failed')`),
   check('task_integration_operation_epoch', sql`${t.leaseEpoch} >= 0`),

@@ -1252,7 +1252,7 @@ export class Orchestrator implements RunnerHandlers {
       status: task.status,
       description: richTextToMarkdown(task.description),
       branch: task.branch,
-      submissions: (await listTaskSubmissions(this.#d.db, task.id)).map(s => ({ sequence: s.sequence, headSha: s.submittedHeadSha, baseSha: s.baseSha, targetBranch: s.targetBranch, agentApprovedHeadSha: s.agentApprovedHeadSha, createdAt: s.createdAt.toISOString() })),
+      submissions: (await listTaskSubmissions(this.#d.db, task.id)).map(s => ({ sequence: s.sequence, headSha: s.submittedHeadSha, baseSha: s.baseSha, targetBranch: s.targetBranch, agentApprovedHeadSha: s.agentApprovedHeadSha, integratedCommitSha: s.integratedCommitSha, integratedAt: s.integratedAt?.toISOString() ?? null, createdAt: s.createdAt.toISOString() })),
       reviewRound: task.reviewRounds,
       criteria: criteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })),
       comments: notes.map(c => ({ ...c, createdAt: c.createdAt.toISOString() })),

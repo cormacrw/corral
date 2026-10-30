@@ -32,7 +32,7 @@ it('persists submitted, agent-approved and integrated commits without a PR, reta
   await expect(t.db.update(schema.taskSubmissions).set({ agentApprovedHeadSha: 'wrong-head' }).where(eq(schema.taskSubmissions.id, second.id))).rejects.toThrow()
   await expect(t.db.update(schema.taskSubmissions).set({ integratedCommitSha: 'integrated', integratedAt: new Date() }).where(eq(schema.taskSubmissions.id, second.id))).rejects.toThrow()
   await t.db.update(schema.taskSubmissions).set({ agentApprovedHeadSha: 'head-2' }).where(eq(schema.taskSubmissions.id, second.id))
-  const operation = { submissionId: second.id, kind: 'integrate' as const, expectedTargetSha: 'epic-head', runnerId: 'r1', leaseEpoch: 2 }
+  const operation = { submissionId: second.id, epicId: epic.id, kind: 'integrate' as const, expectedTargetSha: 'epic-head', runnerId: 'r1', leaseEpoch: 2 }
   const [op] = await t.db.insert(schema.taskIntegrationOperations).values(operation).returning()
   await expect(t.db.insert(schema.taskIntegrationOperations).values(operation)).rejects.toThrow()
   await t.db.update(schema.taskIntegrationOperations).set({ state: 'reconciling' }).where(eq(schema.taskIntegrationOperations.id, op!.id))

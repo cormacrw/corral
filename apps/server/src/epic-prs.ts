@@ -76,7 +76,7 @@ export class EpicPullRequests {
   private body(epic: EpicRow, board: Awaited<ReturnType<typeof epicBoard>>, project: ProjectRow) {
     return [epic.description, '## Tasks and evidence', ...board.map((t) => {
       const ref = taskRef(project.prefix, t.number)
-      return `- ${ref}: ${t.title}${t.prUrl ? ` ([PR](${t.prUrl}))` : ''} — [criteria and evidence](${this.d.publicUrl}/tasks/${ref})`
+      return `- ${ref}: ${t.title}${t.prUrl ? ` ([PR](${t.prUrl}))` : t.mergeCommitSha ? ` (${t.mergeCommitSha.slice(0, 10)})` : ''} — [criteria and evidence](${this.d.publicUrl}/tasks/${ref})`
     })].join('\n\n')
   }
 

@@ -87,6 +87,9 @@ export type TaskEvent =
   | { type: 'head_moved' }
   // Ready to merge → Merged: Corral merged and GitHub confirmed it
   | { type: 'merged', gates: MergeGateFacts }
+  // Ready to merge → Merged: a PR-free task, once the remote epic branch was
+  // read back and contains its integrated commit (D27)
+  | { type: 'integrated', confirmedOnEpicBranch: boolean }
   // → Merged: GitHub shows the PR merged outside Corral. A fact, not a request.
   | { type: 'merged_outside' }
   // Human review, Ready to merge or Approved → In progress. A design keeps the
@@ -121,6 +124,7 @@ export const TRANSITION_RULES: Readonly<Record<TaskEventType, Rule>> = {
   base_conflict: { from: ['ready_to_merge'], actors: ['server'] },
   head_moved: { from: ['ready_to_merge'], actors: ['server'] },
   merged: { from: ['ready_to_merge'], actors: ['server'] },
+  integrated: { from: ['ready_to_merge'], actors: ['server'] },
   merged_outside: { from: ['agent_review', 'human_review', 'ready_to_merge'], actors: ['server'] },
   human_request_changes: { from: ['human_review', 'ready_to_merge', 'approved'], actors: ['human'] },
   block: { from: ['ready', 'in_progress', 'agent_review', 'human_review', 'ready_to_merge'], actors: ['server'] },
@@ -136,6 +140,7 @@ export type TransitionError =
   | { code: 'dependencies_not_merged' }
   | { code: 'invalid_outcome', problems: ('branch_not_at_expected_commit' | 'evidence_incomplete')[] }
   | { code: 'gates_failed', gates: MergeGate[] }
+  | { code: 'integration_unconfirmed' }
   | { code: 'reason_required' }
 
 export type TransitionResult =
@@ -246,6 +251,10 @@ export function transition(
       if (gates.length > 0) return fail({ code: 'gates_failed', gates })
       return ok({ ...task, status: 'merged' })
     }
+
+    case 'integrated':
+      if (!event.confirmedOnEpicBranch) return fail({ code: 'integration_unconfirmed' })
+      return ok({ ...task, status: 'merged' })
 
     case 'merged_outside':
       return ok({ ...task, status: 'merged', reason: null })
