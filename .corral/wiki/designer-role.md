@@ -48,3 +48,27 @@ including the unassigned fallback and working avatar. Board cards name the
 active designer, and design revision feedback addresses the designer. The
 static prototype includes Iris, an active design task (COR-20), a completed
 submission and an approved version; Add agent updates its in-memory live list.
+
+## Corral's own designer instructions (COR-160)
+
+Corral's repository overrides the built-in designer defaults with
+`.corral/agents/designer.md`, which replaces them entirely, so it repeats their
+workflow. It holds the prototype build notes that used to be in `CLAUDE.md`, so
+only designers get them; `CLAUDE.md` keeps a one-line pointer.
+
+Verified end to end in a local `pnpm dev` stack using only a
+`cormacrw/test-app` project, with Corral's sources and unchanged designer
+instructions staged in its local checkout. Iris built the prototype with
+`pnpm --filter web prototype`, wrote `design.md`, captured desktop and mobile
+screenshots, committed on `design/TA-2`, and called `submit_design` successfully.
+The server recorded v1 with ten screenshots; `report_outcome(design_submitted)`
+succeeded and the sandboxed preview rendered in the task's Design panel.
+The project was paused after claiming the designer run; no PR or merge was
+created. Submission responses and the rendered version are attached to COR-160.
+
+For this nested dev-stack check, Turbo's strict environment mode stripped the
+existing runner-provided git author variables. Start `pnpm dev --env-mode=loose`
+with the existing author environment, but without the outer developer shell's
+`GIT_CONFIG_*` push guard: Corral's runner needs to push the test design branch,
+while it adds its own push guard to the designer's shell. Do not configure a
+new git identity or remove the guard from the designer itself.
