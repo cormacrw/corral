@@ -149,6 +149,20 @@ export type AgentTool =
   | 'move_task'
   | 'approve_task'
   | 'update_epic'
+  | 'delete_project'
+  | 'stop_run'
+  | 'stop_all'
+  | 'resume_all'
+  | 'list_projects'
+  | 'get_project'
+  | 'update_project'
+  | 'create_project'
+  | 'list_runs'
+  | 'get_run'
+  | 'message_run'
+  | 'get_status'
+  | 'set_update_hold'
+  | 'clear_update_hold'
 
 export interface OutcomeReport {
   outcome: RunOutcome

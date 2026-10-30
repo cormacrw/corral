@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Evidence, Inbox, InboxActionInput, Review, Task, InboxItem, PlanThreadItem } from '@corral/contracts'
 import { api } from '~/composables/useApi'
-import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
+import { inboxProjectLine as projectLine, inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
 import { moveRadioSelection } from '~/utils/radio'
 
@@ -44,7 +44,7 @@ async function load() {
 onMounted(() => {
   void load()
   const stop = live.subscribe((event) => {
-    if (['task.updated', 'task.deleted', 'task.created', 'run.updated', 'epic.updated', 'plan.session', 'deployment.updated'].includes(event.type)) void load()
+    if (['task.updated', 'task.deleted', 'task.created', 'run.updated', 'epic.updated', 'plan.session', 'deployment.updated', 'project.updated', 'project.deleted'].includes(event.type)) void load()
   })
   onBeforeUnmount(stop)
 })
@@ -83,7 +83,7 @@ watch(selected, async (item, previous) => {
     task.value = null
     return
   }
-  const loadedTask = item ? await api.tasks.byRef(item.taskRef).catch(() => null) : null
+  const loadedTask = item?.taskRef ? await api.tasks.byRef(item.taskRef).catch(() => null) : null
   if (selected.value?.id !== item?.id) return
   task.value = loadedTask
   // A human review carries its evidence in the message (design/inbox.md)
@@ -100,7 +100,7 @@ watch(selected, async (item, previous) => {
   // Following the selection, not a click of its own: no extra history entry.
   // Phones open the task as its own page instead.
   if (selected.value?.id !== item?.id) return
-  if (item && loadedTask && showTask.value && !device.isMobile.value) flyout.open(item.taskRef, { replace: true })
+  if (item?.taskRef && loadedTask && showTask.value && !device.isMobile.value) flyout.open(item.taskRef, { replace: true })
   else if (!loadedTask) await flyout.close()
 }, { immediate: true })
 // Capture before the request: plan.session can remove the row before it resolves.
@@ -183,7 +183,7 @@ async function submit(message: string): Promise<boolean> {
             : action.value === 'delete'
               ? { action: 'delete', ...(message && { text: message }) }
               : action.value === 'send_back' ? { action: 'send_back' } : { action: 'approve' }
-      await api.inbox.act(selected.value.taskId, input)
+      await api.inbox.act(selected.value.taskId!, input)
       toast.add({ title: 'Done', description: submitLabel.value, color: 'success' })
     }
     const actedOn = selected.value
@@ -427,7 +427,7 @@ onBeforeUnmount(() => {
                 <span class="flex items-center gap-1"><ProjectThumbnail
                   :project="selected.project"
                   :size="16"
-                />{{ selected.project.name }} · {{ selected.taskRef }}</span>
+                />{{ projectLine(selected) }}</span>
                 <span>{{ selected.sender.name }} · {{ selected.sender.role }} · {{ timeAgo(selected.at) }}</span>
               </div>
             </div>

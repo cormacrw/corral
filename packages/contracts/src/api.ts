@@ -490,6 +490,19 @@ export interface TaskInboxItem extends InboxItemBase {
   resolution: string | null
 }
 
+// Something the PM did that isn't about one task, such as changing a project's
+// settings. Its body links to the PM conversation that did it.
+export interface PmActivityItem extends InboxItemBase {
+  id: string
+  type: 'activity'
+  epicId?: undefined
+  body: string
+  taskId: null
+  taskRef: null
+  prUrl: null
+  resolution: null
+}
+
 // An open Plan session waiting on the human (D11, amended): a question, a plan
 // needing approval or an unread PM reply
 export interface PlanThreadItem extends InboxItemBase {
@@ -554,13 +567,13 @@ export function needsAttention(item: InboxItem): boolean {
   return item.type !== 'release_notes'
 }
 
-export type InboxItem = TaskInboxItem | PlanThreadItem | EpicReviewItem | ReleaseNotesItem
+export type InboxItem = TaskInboxItem | PmActivityItem | PlanThreadItem | EpicReviewItem | ReleaseNotesItem
 
 export interface Inbox {
   // Attention items newest first, followed by undismissed release notes
   // newest first. Release notes remain here after reading.
   needsYou: InboxItem[]
-  activity: TaskInboxItem[]
+  activity: (TaskInboxItem | PmActivityItem)[]
   resolved: (TaskInboxItem | ReleaseNotesItem)[]
   // The Needs you count excludes informational release notes
   count: number
