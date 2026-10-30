@@ -145,7 +145,7 @@ export function reviewerPrompt(task: ReviewTask & { underReview?: DesignUnderRev
 }
 
 const REBASE_CHECK_CONDITIONS: Record<RebaseCheckFailure['condition'], string> = {
-  changes_outside_conflicts: 'The change in these files differs from the approved diff, but they are not in the developer\'s conflicted-file list',
+  changes_outside_conflicts: 'The change in these files differs from the approved diff, or GitHub gave no patch to compare it by, but they are not in the developer\'s conflicted-file list',
   project_docs_changed: 'These project docs changed on the base since approval'
 }
 

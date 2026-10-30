@@ -80,8 +80,10 @@ readable without these fields. The additive migration leaves existing data intac
 transaction, using GitHub's three-dot compare. Old and new base are the merge
 bases of the approved and new heads with the base branch's current head; nothing
 stores them. File changes are compared without hunk headers, so a change that
-only moved down the file doesn't count as different, and a file with no patch
-falls back to its blob SHA. A base-side rename counts both paths as changed.
+only moved down the file doesn't count as different. A file with no patch
+(binary or very large) can't be compared, because its head blob doesn't say what
+it replaced, so it counts as different; only an added file with the same blob
+on both sides counts as unchanged. A base-side rename counts both paths as changed.
 Passing carries the approval over as the `server` actor with the developer's run
 id, writes a `rebase.verified` audit entry and posts a Corral comment, which is
 what the task's Activity tab shows; no `pr_rebased` transition is written, so the

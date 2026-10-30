@@ -186,9 +186,9 @@ const file = (filename: string, patch: string): ChangedFile => ({ filename, stat
 const approvedDiff = [file('app.ts', '@@ -1,2 +1,3 @@\n a\n+feature'), file('billing.ts', '@@ -9,2 +9,2 @@ tax\n-old\n+new')]
 // The same billing.ts change further down, under a new base
 const rebasedDiff = [file('app.ts', '@@ -1,3 +1,4 @@\n a\n+main\n+feature'), file('billing.ts', '@@ -40,2 +40,2 @@ invoice\n-old\n+new')]
-function stubCompare(base: string, options: { newDiff?: ChangedFile[], onBase?: ChangedFile[] } = {}) {
+function stubCompare(base: string, options: { oldDiff?: ChangedFile[], newDiff?: ChangedFile[], onBase?: ChangedFile[] } = {}) {
   t.github.setBranch(project.repository, base, 'new-base')
-  t.github.setComparison('new-base', 'approved-head', { mergeBase: 'old-base', files: approvedDiff })
+  t.github.setComparison('new-base', 'approved-head', { mergeBase: 'old-base', files: options.oldDiff ?? approvedDiff })
   t.github.setComparison('new-base', 'new-head', { mergeBase: 'new-base', files: options.newDiff ?? rebasedDiff })
   t.github.setComparison('old-base', 'new-base', { mergeBase: 'old-base', files: options.onBase ?? [file('lib/queue.ts', '+main')] })
 }
@@ -254,6 +254,44 @@ it('sends a trivial rebase that changed an undeclared file to the reviewer, nami
   expect(review.prompt).toContain('not in the developer\'s conflicted-file list: `billing.ts`, `extra.ts`')
   await capture('failed-outside-conflicts.json', { report, status: row!.status, reviewerAssignment: review })
   await closeReview(review)
+})
+
+// GitHub leaves the patch out, and the head blob is the same either side: this
+// was A → C before the rebase and B → C after it, which overwrites the base's B
+const binary = (filename: string, status: string): ChangedFile => ({ filename, status, sha: 'blob-c' })
+
+it.each([
+  ['a modified binary', 'modified'],
+  ['a binary renamed with changes', 'renamed']
+])('sends %s without a patch to the reviewer, naming it', async (_, status) => {
+  const { task, dev } = await rebaseRound(false, {})
+  stubCompare('main', { oldDiff: [...approvedDiff, binary('logo.png', status)], newDiff: [...rebasedDiff, binary('logo.png', status)] })
+  const { report } = await reportRebase(dev)
+  const review = await nextReview(task)
+  const [row] = await t.db.select().from(schema.tasks).where(eq(schema.tasks.id, task.id))
+  expect(row!.status).toBe('agent_review')
+  expect(review.prompt).toContain('not in the developer\'s conflicted-file list: `logo.png`')
+  await capture(`failed-no-patch-${status}.json`, { report, status: row!.status, reviewerAssignment: review })
+  await closeReview(review)
+})
+
+it('still verifies a binary the task added, unchanged by the rebase', async () => {
+  const { task, dev } = await rebaseRound(false, {})
+  stubCompare('main', { oldDiff: [...approvedDiff, binary('logo.png', 'added')], newDiff: [...rebasedDiff, binary('logo.png', 'added')] })
+  await reportRebase(dev)
+  const [row] = await t.db.select().from(schema.tasks).where(eq(schema.tasks.id, task.id))
+  expect(row!.status).toBe('ready_to_merge')
+  await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
+})
+
+it('accepts a binary without a patch when the developer declared it', async () => {
+  const { task, dev } = await rebaseRound(false, {})
+  const declared = { ...binary('app.ts', 'modified') }
+  stubCompare('main', { oldDiff: [declared, approvedDiff[1]!], newDiff: [declared, rebasedDiff[1]!] })
+  await reportRebase(dev)
+  const [row] = await t.db.select().from(schema.tasks).where(eq(schema.tasks.id, task.id))
+  expect(row!.status).toBe('ready_to_merge')
+  await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
 })
 
 it.each(['docs/decisions.md', '.corral/wiki/claim-order.md', 'CORRAL.md', 'CLAUDE.md'])('sends a trivial rebase to the reviewer when the base changed %s', async (doc) => {

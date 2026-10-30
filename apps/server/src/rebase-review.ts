@@ -16,11 +16,14 @@ function isProjectDoc(path: string): boolean {
   return path === 'CORRAL.md' || path === 'CLAUDE.md' || path.startsWith('docs/') || path.startsWith('.corral/wiki/')
 }
 
-// What a file's entry in a diff changes. The base moving shifts line numbers
-// without changing the change, so hunk headers don't count. Without a patch
-// (binary or very large files) the blob on the head side stands in for it.
-function changeOf(file: ChangedFile): string {
-  return JSON.stringify([file.status, file.previousFilename ?? null, file.patch?.replace(/^@@ .*$/gm, '@@') ?? file.sha])
+// What a file's entry in a diff changes, or null when that can't be told. The
+// base moving shifts line numbers without changing the change, so hunk headers
+// don't count. Binary and very large files have no patch, and the blob on the
+// head side says nothing about what it replaced: A → C and B → C share it. Only
+// an added file replaced nothing, so only there does the blob identify the change.
+function changeOf(file: ChangedFile): string | null {
+  const change = file.patch?.replace(/^@@ .*$/gm, '@@') ?? (file.status === 'added' ? file.sha : null)
+  return change === null ? null : JSON.stringify([file.status, file.previousFilename ?? null, change])
 }
 
 export interface TrivialRebaseCheck {
@@ -47,7 +50,10 @@ export async function checkTrivialRebase(
     const before = new Map(approved.files.map(f => [f.filename, changeOf(f)]))
     const after = new Map(rebased.files.map(f => [f.filename, changeOf(f)]))
     const outside = [...new Set([...before.keys(), ...after.keys()])]
-      .filter(file => before.get(file) !== after.get(file) && !input.conflictedFiles.includes(file))
+      .filter((file) => {
+        const change = before.get(file)
+        return (change === null || change !== after.get(file)) && !input.conflictedFiles.includes(file)
+      })
     const docs = [...new Set(onBase.files.flatMap(f => [f.filename, f.previousFilename ?? f.filename]))].filter(isProjectDoc)
 
     const failures: RebaseCheckFailure[] = []
