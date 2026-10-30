@@ -1,12 +1,14 @@
 # COR-191 — Desktop Home directions
 
+**v2.** The layouts are unchanged from v1. v2 fixes the singular labels, gives the busy and blocked fixtures separate projects (adding Companion app) and gives each epic its own description.
+
 A global landing page for checking progress and deciding where human attention will help. Three alternatives use the real Corral shell, tokens, fonts and shared components. These are reviewable alternatives, not three modes proposed for the shipped product.
 
 ## Screens and routes
 
 | Stable screen id | URL in the static bundle | Direction |
 | --- | --- | --- |
-| home-desktop-option-a | `index.html#/home?option=a` | Projects first: three project cards, a compact attention strip, then open and completed epics in parallel columns. |
+| home-desktop-option-a | `index.html#/home?option=a` | Projects first: a row of project cards (four in the fixtures), a compact attention strip, then open and completed epics in parallel columns. |
 | home-desktop-option-b | `index.html#/home?option=b` | Epics first: a wide work column and a narrow project rail. Recent completions follow the open epics in the main column. |
 | home-desktop-option-c | `index.html#/home?option=c` | Attention first: a full-width decision strip with the epic PR to review; projects sit left of a combined epic activity timeline. |
 
@@ -14,7 +16,7 @@ A global landing page for checking progress and deciding where human attention w
 
 ## Shared information and behaviour
 
-- Every project appears, including quiet projects. The entire project card links to `/projects/:slug/board`. Project colour, name, in-progress total, all four stage counts, blocked/failed count, human-review count, Backlog size and merged-today activity are visible. Zeroes are intentional; they distinguish a quiet project from missing data.
+- Every project appears, including quiet projects. The entire project card links to `/projects/:slug/board`. Project colour, name, in-progress total, all four stage counts, blocked/failed count, items to review (task reviews plus epic PR reviews, so the cards add up to the Needs you figure), Backlog size and merged-today activity are visible. Zeroes are intentional; they distinguish a quiet project from missing data.
 - Needs you links to `/inbox`, with the real Inbox count. Human reviews count task reviews and epic PR reviews. Blocked and failed link directly to the task when exactly one qualifies, otherwise to Inbox. These counts overlap with Inbox; they are not an additive total. Plan questions and unread threads remain included in the Inbox count.
 - Every open epic shows project, title, merged/total board tasks, an accessible progress meter, in-flight work or a waiting message, blocked/failed and human-review attention, review mode and elapsed time since last update. Titles and attention lines open `/epics/:id`; the real epic detail page opens, rather than a placeholder.
 - An epic with all tasks merged into its epic branch remains open while its epic PR awaits the human. The 4/4 Runner updates fixture explicitly demonstrates this D23 distinction. Draft-only and empty epics do not count as open work.
@@ -29,7 +31,7 @@ The prototype-only **Preview state** selector preserves `option`. States also wo
 
 | Query state | Content and interaction |
 | --- | --- |
-| default | Three projects, four open epics and four recent completions. |
+| default | Four projects, four open epics and four recent completions. |
 | empty | Both empty lists: “No open epics” with a caught-up explanation; “Nothing completed recently” with the 14-day explanation. Project and task summaries remain populated to isolate the epic-list states. C retains both messages in its timeline. |
 | loading | Skeleton blocks replace all Home data, with an accessible busy state. No fake zero totals are presented as loaded results. Normal loading also waits for each project's task list. |
 | no-projects | Home content becomes “A home for your projects” and an Add project link to `/setup?step=repo&add=1`. This is an isolated page-content preview; the sidebar retains fixture projects. In the shipped first-run flow, real zero-project installations still go to onboarding. |
@@ -54,11 +56,12 @@ Typed contract fixtures live in `app/prototype/fixtures.ts`; existing mock route
 
 | Fixture | Purpose |
 | --- | --- |
-| Corral | Busy project: all four in-progress stages, Backlog work, merged-today activity, one blocked and one failed task. |
+| Corral | Busy project: all four in-progress stages, Backlog work, merged-today activity and an epic PR to review. Nothing blocked or failed. |
 | Marketing site | A smaller, paused project with active website work and a recent completion. |
+| Companion app | Blocked/failed project: one blocked and one failed task, its own Mobile app epic, Backlog work. Added in v2 so busy and blocked are different projects. |
 | Notebook | Quiet project: zero in-progress work and no human attention; historical completions still visible. |
 | Design tasks | 2/7 merged, work in flight, a human review, review-each-task mode. |
-| Mobile app | 1/3 merged, blocked and failed work, direct mode. |
+| Mobile app | Companion app. 1/3 merged, blocked and failed work, direct mode. |
 | Website refresh | 0/2 merged, work starting, direct mode. |
 | Runner updates | 4/4 merged into its epic branch, epic review mode, PR #82 in human review. Still open. |
 | Pricing fixes | Completed minutes ago; 1 task. |
@@ -68,7 +71,7 @@ Typed contract fixtures live in `app/prototype/fixtures.ts`; existing mock route
 | Legacy import | Completed 30 days ago; 2 tasks. Available by epic route but excluded from all Home options. |
 | Future campaigns | Zero board tasks; omitted from open and completed lists. |
 
-Times use the shared `ago(minutes)` helper, anchored when the fixture module loads. Epic counts are recomputed from non-Draft/non-Backlog task fixtures so opening a detail page preserves the progress shown on Home. Generated fixture tasks use the shared typed `task()` helper. No new contract fields or migrations are introduced.
+Times use the shared `ago(minutes)` helper, anchored when the fixture module loads. Epic counts are recomputed from non-Draft/non-Backlog task fixtures so opening a detail page preserves the progress shown on Home. Generated fixture tasks use the shared typed `task()` helper. Every Home epic has its own description. Design tasks now depends on Runner updates, because an epic dependency stays within a project. No new contract fields or migrations are introduced.
 
 ## Data gaps to settle before building
 
@@ -88,6 +91,8 @@ Times use the shared `ago(minutes)` helper, anchored when the fixture module loa
 A is the most balanced default to discuss first; B favours delivery monitoring, C favours the human's next intervention. Selecting one should remove the other alternatives rather than preserve extra navigation controls.
 
 ## Review and verification
+
+Counts and durations in every option use the shared `plural()` and `timeAgo()` helpers (“1 human review”, “1 to review”, “Updated 1h ago”).
 
 Screenshots are captured with agent-browser from the built static bundle, served under `/prototype-dist/`, at 1440×900 for each option and empty state. Additional captures cover each option at 1280px, 1920px and 390px. The 390px option captures use the supported Desktop layout override so each proposed desktop screen can be inspected narrow; a separate mobile capture demonstrates the existing mobile Home remains available. The evidence also records board and epic destinations after real clicks. Lint, typecheck and tests are gates, not visual acceptance evidence.
 

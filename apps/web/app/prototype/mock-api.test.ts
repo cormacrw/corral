@@ -101,7 +101,7 @@ describe('prototype mock API', () => {
     const events: ServerEvent[] = []
     const stop = onMockEvent(event => events.push(event))
     try {
-      await mockCall('PATCH', '/projects/corral/tasks/8', { status: 'merged' })
+      await mockCall('PATCH', '/projects/companion-app/tasks/1', { status: 'merged' })
       expect(events).toContainEqual(expect.objectContaining({
         type: 'epic.updated', epic: expect.objectContaining({ id: 'e-mobile', taskCount: 3, mergedCount: 2 })
       }))
@@ -110,7 +110,7 @@ describe('prototype mock API', () => {
         type: 'epic.updated', epic: expect.objectContaining({ id: 'e-design', taskCount: 7, mergedCount: 3 })
       }))
     } finally {
-      await mockCall('PATCH', '/projects/corral/tasks/8', { status: 'blocked' })
+      await mockCall('PATCH', '/projects/companion-app/tasks/1', { status: 'blocked' })
       await mockCall('PATCH', '/projects/corral/tasks/6', { status: 'ready' })
       stop()
     }

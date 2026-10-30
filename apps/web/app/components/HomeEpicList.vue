@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { Epic, Project, Task } from '@corral/contracts'
-import { elapsed } from '~/utils/dashboard'
-import { projectColor } from '~/utils/labels'
+import { plural, projectColor, timeAgo } from '~/utils/labels'
 
 const props = defineProps<{ entries: { epic: Epic, project: Project, tasks: Task[] }[], completed?: boolean }>()
 const mode = { direct: 'Direct review', epic: 'Epic review', each_task: 'Review each task' }
@@ -10,7 +9,7 @@ function detail(epic: Epic, tasks: Task[]) {
   const blocked = tasks.filter(t => ['blocked', 'failed'].includes(t.status)).length
   const review = tasks.filter(t => t.status === 'human_review').length
   const flight = tasks.filter(t => ['in_progress', 'agent_review', 'ready_to_merge'].includes(t.status)).length
-  return [blocked ? `${blocked} blocked / failed` : null, review ? `${review} need review` : null, flight ? `${flight} in flight` : null].filter(Boolean).join(' · ') || 'Ready for the next task'
+  return [blocked ? `${blocked} blocked / failed` : null, review ? `${review} to review` : null, flight ? `${flight} in flight` : null].filter(Boolean).join(' · ') || 'Ready for the next task'
 }
 function completion(tasks: Task[], epic: Epic) {
   const times = tasks.flatMap(t => t.mergedAt ? [Date.parse(t.mergedAt)] : [])
@@ -32,7 +31,7 @@ function completion(tasks: Task[], epic: Epic) {
           aria-hidden="true"
         />
         {{ project.name }}
-        <span class="ms-auto">{{ completed ? `Completed ${completion(tasks, epic)}` : `Updated ${elapsed(epic.updatedAt)} ago` }}</span>
+        <span class="ms-auto">{{ completed ? `Completed ${completion(tasks, epic)}` : `Updated ${timeAgo(epic.updatedAt)}` }}</span>
       </div>
       <NuxtLink
         v-if="completed"
@@ -43,7 +42,7 @@ function completion(tasks: Task[], epic: Epic) {
           name="i-lucide-check"
           class="size-4 text-success"
         />{{ epic.title }}</span>
-        <span class="shrink-0 text-xs font-normal text-muted">{{ epic.taskCount }} {{ epic.taskCount === 1 ? 'task' : 'tasks' }}</span>
+        <span class="shrink-0 text-xs font-normal text-muted">{{ plural(epic.taskCount, 'task') }}</span>
       </NuxtLink>
       <template v-else>
         <EpicProgressRow

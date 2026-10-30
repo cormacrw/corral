@@ -154,6 +154,10 @@ export function projectColor(project: Pick<Project, 'thumbnailColor' | 'name'>):
   return palette[hash % palette.length]!
 }
 
+export function plural(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? '' : 's'}`
+}
+
 export function timeAgo(iso: string | null | undefined, now = Date.now()): string {
   if (!iso) return ''
   const seconds = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000))

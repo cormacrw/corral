@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import type { Project, Task } from '@corral/contracts'
 import { dashboardCounts } from '~/utils/dashboard'
-import { projectColor } from '~/utils/labels'
+import { plural, projectColor } from '~/utils/labels'
 
-const props = defineProps<{ project: Project, tasks: Task[] }>()
+const props = defineProps<{ project: Project, tasks: Task[], epicReviews: number }>()
 const counts = computed(() => dashboardCounts(props.tasks))
+const reviews = computed(() => counts.value.waitingForReview + props.epicReviews)
 const backlog = computed(() => props.tasks.filter(t => t.status === 'backlog').length)
 </script>
 
@@ -26,10 +27,10 @@ const backlog = computed(() => props.tasks.filter(t => t.status === 'backlog').l
       />
     </h3>
     <p class="mt-2 text-sm"><strong class="text-xl font-semibold text-highlighted">{{ counts.inProgress }}</strong> <span class="text-muted">in progress</span></p>
-    <p class="mt-1 text-xs text-muted">{{ counts.stages.in_progress }} building · {{ counts.stages.agent_review }} agent review<br>{{ counts.stages.human_review }} human review · {{ counts.stages.ready_to_merge }} to merge</p>
+    <p class="mt-1 text-xs text-muted">{{ counts.stages.in_progress }} building · {{ plural(counts.stages.agent_review, 'agent review') }}<br>{{ plural(counts.stages.human_review, 'human review') }} · {{ counts.stages.ready_to_merge }} to merge</p>
     <p class="mt-2 text-sm">
       <span :class="counts.blocked ? 'text-error' : 'text-muted'">{{ counts.blocked }} blocked / failed</span> ·
-      <span :class="counts.waitingForReview ? 'text-warning' : 'text-muted'">{{ counts.waitingForReview }} need review</span>
+      <span :class="reviews ? 'text-warning' : 'text-muted'">{{ reviews }} to review</span>
     </p>
     <p class="mt-1 text-xs text-muted">{{ backlog }} backlog · {{ counts.mergedToday }} merged today</p>
   </NuxtLink>

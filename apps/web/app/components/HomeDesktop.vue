@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { RunnerStatus } from '@corral/contracts'
 import { dashboardCounts } from '~/utils/dashboard'
+import { plural } from '~/utils/labels'
 
 const isPrototype = import.meta.prototype
 const { state } = useLive()
@@ -137,7 +138,7 @@ function change(key: string, value: string) {
             >Open Inbox · {{ state.inboxCount }} →</NuxtLink>
           </div>
           <div class="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-sm">
-            <NuxtLink to="/inbox">{{ counts.waitingForReview + epicReviews }} human reviews</NuxtLink>
+            <NuxtLink to="/inbox">{{ plural(counts.waitingForReview + epicReviews, 'human review') }}</NuxtLink>
             <NuxtLink
               :to="counts.blocked - failed === 1 ? `/tasks/${tasks.find(t => t.status === 'blocked')?.ref}` : '/inbox'"
               class="text-error"
@@ -172,6 +173,7 @@ function change(key: string, value: string) {
               :key="project.id"
               :project="project"
               :tasks="state.tasks[project.id] ?? []"
+              :epic-reviews="entries.filter(e => e.project.id === project.id && e.epic.reviewState === 'human_review').length"
             />
           </div>
         </section>
@@ -241,7 +243,7 @@ function change(key: string, value: string) {
 [data-home="home-heading"] { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px; margin-bottom: 24px; }
 [data-home="home-layout"] { display: grid; gap: 24px; }
 [data-home="section-title"] { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 6px; font-size: 14px; font-weight: 600; color: var(--ui-text-highlighted); }
-[data-home="project-cards"] { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+[data-home="project-cards"] { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 [data-option="a"] [data-home="home-layout"] { gap: 20px; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); }
 [data-option="a"] [data-home="attention-section"], [data-option="a"] [data-home="projects-section"], [data-home="home-footer"] { grid-column: 1 / -1; }
 [data-option="a"] [data-home="projects-section"] { grid-row: 1; }

@@ -94,6 +94,27 @@ export const projects: Project[] = [
     failedRunCap: 3,
     createdAt: ago(60 * 24 * 3),
     updatedAt: ago(60 * 5)
+  },
+  // COR-191: the project with blocked and failed work, so Corral reads as busy
+  {
+    id: 'p-companion',
+    name: 'Companion app',
+    slug: 'companion-app',
+    prefix: 'APP',
+    thumbnailUrl: null,
+    thumbnailColor: '#ef4444',
+    nextTaskNumber: 5,
+    repository: 'cormacrw/companion',
+    defaultBranch: 'main',
+    mergeMethod: 'squash',
+    requiredChecks: ['test'],
+    paused: false,
+    humanReviewDefault: false,
+    epicReviewModeDefault: 'direct',
+    reviewRoundCap: 3,
+    failedRunCap: 3,
+    createdAt: ago(60 * 24 * 10),
+    updatedAt: ago(60 * 2)
   }
 ]
 
@@ -109,7 +130,7 @@ export const agents: Agent[] = [
 export const epics: Epic[] = [
   {
     id: 'e-design',
-    dependsOn: ['e-mobile'],
+    dependsOn: ['e-release'],
     blocks: [],
     projectId: 'p-corral',
     title: 'Design tasks',
@@ -127,8 +148,8 @@ export const epics: Epic[] = [
   {
     id: 'e-mobile',
     dependsOn: [],
-    blocks: ['e-design'],
-    projectId: 'p-corral',
+    blocks: [],
+    projectId: 'p-companion',
     title: 'Mobile app',
     description: 'The installable app for phones (D17).',
     reviewMode: 'direct',
@@ -149,7 +170,7 @@ export const epics: Epic[] = [
   },
   {
     id: 'e-shipped', projectId: 'p-site', title: 'Pricing fixes',
-    description: 'Completed fixes.', dependsOn: [], blocks: [],
+    description: 'Correct the prices and links on the pricing page.', dependsOn: [], blocks: [],
     reviewMode: 'direct', branch: null, prNumber: null, prHeadSha: null, reviewState: null,
     taskCount: 1, mergedCount: 1, createdAt: ago(60 * 24), updatedAt: ago(10)
   },
@@ -210,7 +231,7 @@ function criteria(...texts: string[]): Task['acceptanceCriteria'] {
   return texts.map((text, position) => ({ id: `c-${position + 1}-${text.length}`, position, text, met: null }))
 }
 
-const [corral, site] = projects as [Project, Project]
+const [corral, site, companion] = projects as [Project, Project, Project]
 
 export const tasks: Task[] = [
   task(corral, 1, { title: 'Design task type and versions', status: 'merged', epicId: 'e-design', prNumber: 60, prUrl: 'https://github.com/cormacrw/corral/pull/60', mergedAt: ago(60 * 20), mergeCommitSha: 'da0ebe6' }),
@@ -254,9 +275,10 @@ export const tasks: Task[] = [
   // Pinned to v1 of the design after v2 was approved, so it's flagged (D20)
   task(corral, 6, { title: 'Pin build tasks to a design', status: 'ready', epicId: 'e-design', dependsOn: ['COR-5'], design: { taskRef: 'COR-4', version: 1, screens: ['review', 'review-empty'], newerVersion: 2 } }),
   task(corral, 7, { title: 'PM drafts tasks from an approved design', status: 'ready_to_merge', epicId: 'e-design', prNumber: 65, prUrl: 'https://github.com/cormacrw/corral/pull/65' }),
-  task(corral, 8, { title: 'Push notifications for Needs you', status: 'blocked', epicId: 'e-mobile', statusReason: 'Which push service should the server use: Web Push with VAPID keys, or ntfy?' }),
-  task(corral, 9, { title: 'Offline board', status: 'failed', type: 'bug', priority: 'urgent', epicId: 'e-mobile', failedRuns: 3, statusReason: 'The runner lost its worktree three times in a row.' }),
-  task(corral, 10, { title: 'Install sheet on iOS', status: 'merged', epicId: 'e-mobile', mergedAt: ago(60 * 30) }),
+  task(companion, 1, { title: 'Push notifications for Needs you', status: 'blocked', epicId: 'e-mobile', statusReason: 'Which push service should the server use: Web Push with VAPID keys, or ntfy?' }),
+  task(companion, 2, { title: 'Offline board', status: 'failed', type: 'bug', priority: 'urgent', epicId: 'e-mobile', failedRuns: 3, statusReason: 'The runner lost its worktree three times in a row.' }),
+  task(companion, 3, { title: 'Install sheet on iOS', status: 'merged', epicId: 'e-mobile', mergedAt: ago(60 * 30) }),
+  task(companion, 4, { title: 'Share a task to the app', status: 'backlog', priority: 'low' }),
   task(corral, 11, { title: 'Dark mode for the epic graph', status: 'backlog', priority: 'low' }),
   task(corral, 12, { title: 'Spike: Codex reasoning effort', status: 'backlog', type: 'spike' }),
   // Drafts from the proposed plans in planSessions s-1 and s-3
@@ -494,7 +516,7 @@ export const planSessions: PlanSession[] = [
     unread: true, closed: false, status: 'needs_approval', activeRunId: null, createdAt: ago(60 * 26), updatedAt: ago(60 * 25)
   },
   {
-    id: 's-2', projectId: 'p-corral', title: 'Mobile push', runtime: 'claude-code',
+    id: 's-2', projectId: 'p-companion', title: 'Mobile push', runtime: 'claude-code',
     preview: 'Which push service should we use?', unread: false, closed: false, status: 'question', activeRunId: null,
     createdAt: ago(60 * 4), updatedAt: ago(60 * 3)
   },
@@ -676,16 +698,21 @@ export function inbox(): Inbox {
 // COR-191: a quiet third project and a range of epic outcomes.
 const notebook: Project = { ...projects[1]!, id: 'p-notes', name: 'Notebook', slug: 'notebook', prefix: 'NOTE', repository: 'cormacrw/notebook', thumbnailColor: '#f59e0b', paused: false, nextTaskNumber: 10 }
 projects.push(notebook)
-const completedTitles = ['Keyboard navigation', 'Search foundations', 'Release checklist', 'Legacy import']
-for (const [index, title] of completedTitles.entries()) {
+const completedEpics = [
+  ['Keyboard navigation', 'Move around the board and the Inbox without a mouse.'],
+  ['Search foundations', 'Full-text search across notes and their titles.'],
+  ['Release checklist', 'The steps every release follows, from tag to deployment.'],
+  ['Legacy import', 'Bring notes across from the old export format.']
+] as const
+for (const [index, [title, description]] of completedEpics.entries()) {
   const project = index % 2 ? notebook : projects[0]!
   const minutes = [1440, 4320, 8640, 43200][index]!
   const id = `e-complete-${index}`
-  epics.push({ ...epics[3]!, id, projectId: project.id, title, taskCount: 2, mergedCount: 2, createdAt: ago(minutes + 1440), updatedAt: ago(minutes) })
+  epics.push({ ...epics[3]!, id, projectId: project.id, title, description, taskCount: 2, mergedCount: 2, createdAt: ago(minutes + 1440), updatedAt: ago(minutes) })
   tasks.push(task(project, 70 + index * 2, { title: `${title}: implementation`, status: 'merged', epicId: id, mergedAt: ago(minutes), updatedAt: ago(minutes) }), task(project, 71 + index * 2, { title: `${title}: polish`, status: 'merged', epicId: id, mergedAt: ago(minutes + 60), updatedAt: ago(minutes) }))
 }
 // All four tasks merged into the epic branch; the epic PR still needs the human.
-epics.push({ ...epics[0]!, id: 'e-release', title: 'Runner updates', dependsOn: [], blocks: [], reviewMode: 'epic', branch: 'corral/epic-runner-updates', prNumber: 82, reviewState: 'human_review', prHeadSha: 'abc123', taskCount: 4, mergedCount: 4, updatedAt: ago(12) })
+epics.push({ ...epics[0]!, id: 'e-release', title: 'Runner updates', description: 'Runners drain, update and report their version without losing a run.', dependsOn: [], blocks: ['e-design'], reviewMode: 'epic', branch: 'corral/epic-runner-updates', prNumber: 82, reviewState: 'human_review', prHeadSha: 'abc123', taskCount: 4, mergedCount: 4, updatedAt: ago(12) })
 for (let i = 0; i < 4; i++) tasks.push(task(projects[0]!, 90 + i, { title: `Runner updates: ${['drain safely', 'update runner', 'report version', 'release verification'][i]}`, status: 'merged', epicId: 'e-release', mergedAt: ago(60), updatedAt: ago(12) }))
 // Keep fixture progress consistent with the task lists used on the epic detail page.
 for (const epic of epics) {
