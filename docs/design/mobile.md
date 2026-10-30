@@ -58,6 +58,8 @@ On the web, `/projects` renders in the normal shell as a plain project list.
 - **In progress by stage:** a bar and counts per stage, and a link to the Inbox with the blocked (Blocked and Failed) and waiting-for-your-review (Human review) counts.
 - **Agents:** each agent with small muted text only for Paused or Waiting on usage limit; working agents first, indicated by their border, ring and animated avatar, with each active run's task, project, status, run number (PR number for reviews) and elapsed time. Runs come from `GET /api/runs`, refetched on `run.updated`; the cards show only active runs. Tapping an agent opens its agent page.
 
+- **Epics**, below Agents: live epics with at least one non-Draft task and fewer merged tasks than total tasks, newest updated first. Rows link to the epic and show “N of M merged” with an accessible two-segment meter. All projects shows the project name and colour dot; selecting one project hides those labels. When none qualify, show “No epics in progress.”
+
 ## Agents
 
 Agent detail and run screens follow [agent.md](agent.md); the web and mobile pages share `useAgentRuns()`. The former Agents list is retired: `/agents` redirects to `/home` on both layouts. Home’s Agents cards and the web sidebar open individual agents.

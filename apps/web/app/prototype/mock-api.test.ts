@@ -86,6 +86,25 @@ describe('prototype mock API', () => {
     expect((await mockCall<Project>('GET', '/projects/corral')).paused).toBe(true)
   })
 
+  it('broadcasts updated epic progress when a task merges, excluding Drafts', async () => {
+    const events: ServerEvent[] = []
+    const stop = onMockEvent(event => events.push(event))
+    try {
+      await mockCall('PATCH', '/projects/corral/tasks/8', { status: 'merged' })
+      expect(events).toContainEqual(expect.objectContaining({
+        type: 'epic.updated', epic: expect.objectContaining({ id: 'e-mobile', taskCount: 3, mergedCount: 2 })
+      }))
+      await mockCall('PATCH', '/projects/corral/tasks/6', { status: 'merged' })
+      expect(events).toContainEqual(expect.objectContaining({
+        type: 'epic.updated', epic: expect.objectContaining({ id: 'e-design', taskCount: 7, mergedCount: 3 })
+      }))
+    } finally {
+      await mockCall('PATCH', '/projects/corral/tasks/8', { status: 'blocked' })
+      await mockCall('PATCH', '/projects/corral/tasks/6', { status: 'ready' })
+      stop()
+    }
+  })
+
   it('is a 404 for anything it does not handle, as on the server', async () => {
     await expect(mockCall('GET', '/projects/nope')).rejects.toBeInstanceOf(ApiError)
     await expect(mockCall('DELETE', '/agents/a-dev')).rejects.toMatchObject({ status: 404, body: { code: 'not_found' } })
