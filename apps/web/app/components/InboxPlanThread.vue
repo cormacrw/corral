@@ -9,7 +9,7 @@ import { STOP_ASKING } from '~/utils/plan-questions'
 // you, the question or the plan, never the conversation. The full
 // conversation is one click away with Open in Plan.
 const props = defineProps<{ item: PlanThreadItem }>()
-const emit = defineEmits<{ read: [], approved: [], approving: [value: boolean], closed: [], closing: [value: boolean] }>()
+const emit = defineEmits<{ read: [], approved: [], approving: [value: boolean], delete: [] }>()
 const live = useLive()
 const flyout = useTaskFlyout()
 const toast = useToast()
@@ -104,29 +104,6 @@ async function approve(to: 'ready' | 'backlog') {
     emit('approving', false)
   }
 }
-
-// Close thread discards the drafts and the unapproved plan (design/inbox.md#close-thread)
-const confirmClose = ref(false)
-const closing = ref(false)
-const closeError = ref<string | null>(null)
-async function close() {
-  closing.value = true
-  emit('closing', true)
-  closeError.value = null
-  try {
-    await api.plan.close(props.item.sessionId)
-    threads.remove(props.item.sessionId)
-    confirmClose.value = false
-    await flyout.close()
-    emit('closed')
-  } catch (e) {
-    confirmClose.value = false
-    closeError.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    closing.value = false
-    emit('closing', false)
-  }
-}
 </script>
 
 <template>
@@ -162,25 +139,19 @@ async function close() {
           size="sm"
           class="ms-auto"
         />
+        <!-- Deletes at once, with Undo in a toast (design/inbox.md#delete-thread) -->
         <UButton
-          label="Close thread"
-          icon="i-lucide-archive-x"
+          label="Delete thread"
+          icon="i-lucide-trash-2"
           variant="ghost"
           color="error"
           size="sm"
-          @click="confirmClose = true"
+          @click="emit('delete')"
         />
       </header>
 
       <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
         <div class="mx-auto flex w-full max-w-[720px] flex-col gap-4">
-          <UAlert
-            v-if="closeError"
-            color="error"
-            variant="subtle"
-            title="Could not close the thread"
-            :description="closeError"
-          />
           <div class="flex items-center gap-2 text-xs text-muted">
             <AgentAvatar
               :name="pmName"
@@ -248,11 +219,25 @@ async function close() {
             </div>
           </section>
 
-          <MarkdownText
+          <section
             v-else-if="item.reply"
-            :text="item.reply"
-            class="text-sm"
-          />
+            class="flex flex-col gap-3"
+            data-testid="inbox-plan-reply"
+          >
+            <MarkdownText
+              :text="item.reply"
+              class="text-sm"
+            />
+            <UButton
+              :to="`/plan/${item.sessionId}`"
+              label="Open in Plan"
+              icon="i-lucide-messages-square"
+              variant="outline"
+              color="neutral"
+              size="sm"
+              class="self-start"
+            />
+          </section>
 
           <div
             v-if="working"
@@ -308,26 +293,5 @@ async function close() {
         />
       </template>
     </TaskFlyout>
-
-    <UModal
-      v-model:open="confirmClose"
-      title="Close this thread?"
-      :description="`${pmName}'s draft tasks and the unapproved plan will be discarded. You can reopen the thread later by sending it a message from Plan.${item.activeRunId ? ` ${pmName}'s current turn will be stopped.` : ''}`"
-    >
-      <template #footer>
-        <UButton
-          label="Cancel"
-          variant="outline"
-          color="neutral"
-          @click="confirmClose = false"
-        />
-        <UButton
-          label="Close thread"
-          color="error"
-          :loading="closing"
-          @click="close"
-        />
-      </template>
-    </UModal>
   </div>
 </template>

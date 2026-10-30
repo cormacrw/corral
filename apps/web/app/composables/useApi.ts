@@ -52,7 +52,7 @@ export class ApiError extends Error {
   }
 }
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function call<T>(method: string, path: string, body?: unknown, options?: { keepalive?: boolean }): Promise<T> {
   // The static prototype answers from fixtures instead (app/prototype)
   if (import.meta.prototype) {
     const { mockCall } = await import('~/prototype/mock-api')
@@ -62,7 +62,9 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   const res = await fetch(`/api${path}`, {
     method,
     headers: body === undefined ? {} : { 'content-type': body instanceof Blob ? body.type : 'application/json' },
-    body: body === undefined ? undefined : body instanceof Blob ? body : JSON.stringify(body)
+    body: body === undefined ? undefined : body instanceof Blob ? body : JSON.stringify(body),
+    // Outlives the page, for a request sent as it unloads
+    keepalive: options?.keepalive
   })
   if (res.status === 204) return undefined as T
   const text = await res.text()
@@ -191,7 +193,7 @@ export const api = {
     session: (id: string) => call<PlanSessionDetail>('GET', `/plan/sessions/${id}`),
     start: (projectId: string, text: string, taskRef?: string, runtime?: AgentRuntime) => call<PlanSessionDetail>('POST', '/plan/sessions', { projectId, text, ...(taskRef && { taskRef }), ...(runtime && { runtime }) }),
     message: (id: string, text: string, taskRef?: string) => call<PlanMessage>('POST', `/plan/sessions/${id}/messages`, { text, ...(taskRef && { taskRef }) }),
-    close: (id: string) => call<PlanSession>('POST', `/plan/sessions/${id}/close`),
+    close: (id: string, options?: { keepalive?: boolean }) => call<PlanSession>('POST', `/plan/sessions/${id}/close`, undefined, options),
     read: (id: string) => call<PlanSession>('POST', `/plan/sessions/${id}/read`),
     approve: (planId: string, to: 'ready' | 'backlog') => call<Plan>('POST', `/plan/plans/${planId}/approve`, { to }),
     discard: (planId: string) => call<Plan>('POST', `/plan/plans/${planId}/discard`),
