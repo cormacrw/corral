@@ -1,4 +1,4 @@
-import type { DraftSession, EpicDetail, Inbox, PlanSessionDetail, Project, PullRequestStatus, ServerEvent, Task } from '@corral/contracts'
+import type { DraftSession, EpicDetail, Inbox, PlanSessionDetail, Project, PullRequestDetail, PullRequestStatus, ServerEvent, Task } from '@corral/contracts'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
@@ -225,5 +225,13 @@ describe('prototype mock API', () => {
     const detail = await mockCall<PlanSessionDetail>('GET', '/plan/sessions/s-3')
     expect(detail.plans.every(p => p.status === 'discarded')).toBe(true)
     expect(events.map(e => e.type)).toEqual(expect.arrayContaining(['task.deleted', 'plan.updated', 'plan.session', 'plan.drafts']))
+  })
+
+  it('serves a code review PR description and diff, and 404s for a design task', async () => {
+    const pr = await mockCall<PullRequestDetail>('GET', '/projects/corral/tasks/5/pull-request')
+    expect(pr).toMatchObject({ number: 64, baseBranch: 'main', body: expect.stringContaining('## What') })
+    expect(pr.files.map(f => f.path)).toContain('apps/server/src/designs.ts')
+    expect(pr.files.every(f => f.patch.startsWith('@@'))).toBe(true)
+    await expect(mockCall('GET', '/projects/corral/tasks/18/pull-request')).rejects.toBeInstanceOf(ApiError)
   })
 })

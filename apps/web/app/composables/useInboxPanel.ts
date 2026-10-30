@@ -1,4 +1,4 @@
-import type { DesignVersion, Evidence, InboxActionInput, Review, Task, TaskInboxItem } from '@corral/contracts'
+import type { DesignVersion, PullRequestDetail, Evidence, InboxActionInput, Review, Task, TaskInboxItem } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { markdownToPlainText } from '~/utils/markdown'
 
@@ -10,7 +10,7 @@ export const INBOX_PANEL_OPTIONS: { value: InboxPanelOption, label: string, name
   { value: 'a', label: 'A', name: 'Verdict card' },
   { value: 'b', label: 'B', name: 'Artifacts first' },
   { value: 'c', label: 'C', name: 'Checklist' },
-  { value: 'd', label: 'D', name: 'TL;DR + tabs' },
+  { value: 'd', label: 'D', name: 'TL;DR + tabs · chosen (v3)' },
   { value: 'e', label: 'E', name: 'Triage' }
 ]
 
@@ -118,6 +118,18 @@ export function useInboxPanel(ctx: InboxPanelContext) {
     designs.value = await api.tasks.designs(slug, t.number).catch(() => [])
   }, { immediate: true })
   const design = computed(() => designs.value.at(-1) ?? null)
+  // A code review's PR description and diff (proposed endpoint, design.md)
+  const prDetail = ref<PullRequestDetail | null>(null)
+  const prLoading = ref(false)
+  watch(() => [task.value?.id, item.value.prUrl], async () => {
+    prDetail.value = null
+    const t = task.value
+    const slug = live.state.value.projects.find(p => p.id === t?.projectId)?.slug
+    if (!t || !item.value.prUrl || isDesign.value || !slug) return
+    prLoading.value = true
+    prDetail.value = await api.tasks.pullRequest(slug, t.number).catch(() => null)
+    if (task.value?.id === t.id) prLoading.value = false
+  }, { immediate: true })
   const preview = computed(() => design.value ? { url: router.resolve(`/designs/${design.value.id}`).href, label: `Preview v${design.value.version}` } : null)
 
   const primary = computed(() => canAct.value ? ctx.actions[0] ?? null : null)
@@ -133,6 +145,6 @@ export function useInboxPanel(ctx: InboxPanelContext) {
     viewing.value = e
   }
 
-  return { item, task, isDesign, canAct, kind, ask, tldr, bodyIsLong, latestReview, history, criteria, met, gates, images, files, hasVerdict, pr, design, preview, primary, secondary, primaryLabel, viewing, view }
+  return { item, task, isDesign, canAct, kind, ask, tldr, bodyIsLong, latestReview, history, criteria, met, gates, images, files, hasVerdict, pr, prDetail, prLoading, design, preview, primary, secondary, primaryLabel, viewing, view }
 }
 export type InboxPanel = ReturnType<typeof useInboxPanel>

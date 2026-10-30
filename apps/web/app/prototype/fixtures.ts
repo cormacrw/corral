@@ -15,6 +15,7 @@ import type {
   PlanSession,
   Profile,
   Project,
+  PullRequestDetail,
   PullRequestStatus,
   RepoList,
   Review,
@@ -478,6 +479,93 @@ reviews[allMetTask.id] = reviews[reviewTask.id]!.map((r, i) => ({
   criteria: allMetTask.acceptanceCriteria.map(c => ({ criterionId: c.id, met: i === 0, note: 'Checked the confirmation and next-item flow in the static prototype.' }))
 }))
 allMetTask.latestReview = reviews[allMetTask.id]![0]!
+
+// A code review's PR description and diff (COR-190's proposed endpoint),
+// for the PR description and Code diff tabs
+const approvePatch = [
+  '@@ -41,12 +41,24 @@ export async function approveDesignVersion(db: Db, taskId: string, version: number) {',
+  '-  const row = await db.update(designVersions)',
+  '-    .set({ status: \'approved\' })',
+  '-    .where(and(eq(designVersions.taskId, taskId), eq(designVersions.version, version)))',
+  '-    .returning()',
+  '-  return row[0]',
+  '+  return db.transaction(async (tx) => {',
+  '+    // Earlier versions are superseded in the same transaction (D20)',
+  '+    await tx.update(designVersions)',
+  '+      .set({ status: \'superseded\' })',
+  '+      .where(and(eq(designVersions.taskId, taskId), lt(designVersions.version, version)))',
+  '+    const [row] = await tx.update(designVersions)',
+  '+      .set({ status: \'approved\', approvedAt: new Date() })',
+  '+      .where(and(eq(designVersions.taskId, taskId), eq(designVersions.version, version)))',
+  '+      .returning()',
+  '+    if (!row) throw new NotFoundError(`Design version ${version}`)',
+  '+    return row',
+  '+  })',
+  ' }'
+].join('\n')
+const routePatch = [
+  '@@ -88,6 +88,11 @@ app.post(\'/projects/:slug/tasks/:number/designs/:version/approve\', async (c) => {',
+  '   const task = await taskBySlug(c)',
+  '-  await approveDesignVersion(db, task.id, Number(c.req.param(\'version\')))',
+  '-  return c.json(task)',
+  '+  const approved = await approveDesignVersion(db, task.id, Number(c.req.param(\'version\')))',
+  '+  await audit(db, task, \'design.approved\', { version: approved.version })',
+  '+  // The response identifies the version that was approved',
+  '+  return c.json({ ...task, approvedVersion: approved.version })',
+  ' })'
+].join('\n')
+const testPatch = [
+  '@@ -0,0 +1,14 @@',
+  '+import { describe, expect, it } from \'vitest\'',
+  '+import { approveDesignVersion } from \'./designs\'',
+  '+',
+  '+describe(\'approveDesignVersion\', () => {',
+  '+  it(\'supersedes earlier versions in the same transaction\', async () => {',
+  '+    const db = await testDb()',
+  '+    await seedVersions(db, \'t-1\', [1, 2])',
+  '+    await approveDesignVersion(db, \'t-1\', 2)',
+  '+    expect(await statuses(db, \'t-1\')).toEqual({ 1: \'superseded\', 2: \'approved\' })',
+  '+  })',
+  '+})'
+].join('\n')
+function prDetail(t: Task, body: string): PullRequestDetail {
+  return {
+    number: t.prNumber!, url: t.prUrl!, title: t.title, body, baseBranch: 'main', headBranch: t.branch!,
+    files: [
+      { path: 'apps/server/src/designs.ts', status: 'modified', additions: 12, deletions: 5, patch: approvePatch },
+      { path: 'apps/server/src/routes/designs.ts', status: 'modified', additions: 4, deletions: 2, patch: routePatch },
+      { path: 'apps/server/src/designs.test.ts', status: 'added', additions: 11, deletions: 0, patch: testPatch }
+    ]
+  }
+}
+export const pullRequestDetails: Record<string, PullRequestDetail> = {
+  [reviewTask.id]: prDetail(reviewTask, [
+    '## What',
+    '',
+    'Approving a design version now supersedes earlier versions in the same transaction, and the response says which version was approved.',
+    '',
+    '## Why',
+    '',
+    'COR-5: before this, approving v2 left v1 approved too, so build tasks could pin either.',
+    '',
+    '## How it was checked',
+    '',
+    '- New `designs.test.ts` covers supersede-on-approve',
+    '- Walked the flow in a dev stack against test-app, approving twice concurrently',
+    '',
+    'Not done: a toast after approving (criterion 5). The status changes in place.'
+  ].join('\n')),
+  [allMetTask.id]: prDetail(allMetTask, [
+    '## What',
+    '',
+    'Approving shows a confirmation toast and the Inbox moves on to the next item.',
+    '',
+    '## How it was checked',
+    '',
+    '- Unit tests for the approval transaction',
+    '- Checked the toast and next-item flow in the static prototype'
+  ].join('\n'))
+}
 
 // A design task's submitted versions (D20); the preview itself is served by the server
 export const designs: Record<string, DesignVersion[]> = {

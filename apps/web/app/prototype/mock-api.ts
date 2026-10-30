@@ -198,6 +198,7 @@ route('POST', '/inbox/:taskId/actions', ([taskId], body) => {
   emit({ type: 'task.updated', task })
   return { task }
 })
+route('GET', '/projects/:slug/tasks/:number/pull-request', ([slug, number]) => f.pullRequestDetails[taskIn(slug!, number!).id] ?? notFound())
 route('GET', '/projects/:slug/tasks/:number/designs', ([slug, number]) => f.designs[taskIn(slug!, number!).id] ?? [])
 function approveDesign(task: Task, version: number): Task {
   const versions = f.designs[task.id] ?? []

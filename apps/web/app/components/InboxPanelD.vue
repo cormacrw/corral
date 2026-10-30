@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { useInboxPanel, type InboxPanelContext } from '~/composables/useInboxPanel'
 
-// Option D, TL;DR + tabs (COR-190, inbox-panel-option-d): a one-to-two line
-// summary, the actions and the verdict on top, then tabs. The first tab is an
-// overview of the artifacts; the criteria with notes, the review history and
-// the full message each have a tab of their own.
+// Option D, TL;DR + tabs (COR-190, inbox-panel-option-d), the chosen
+// direction: a one-to-two line summary, the verdict and the actions on top,
+// then tabs. The first tab is an overview of the artifacts; the criteria with
+// notes, the review history, the PR description, the code diff and the full
+// message each have a tab of their own. On a phone the actions move to a
+// bar of large touch targets at the bottom of the screen.
 const props = defineProps<{ ctx: InboxPanelContext, mobile?: boolean }>()
 const p = useInboxPanel(props.ctx)
 const tab = ref('overview')
@@ -15,8 +17,18 @@ const tabs = computed(() => [
   { label: 'Overview', value: 'overview' },
   ...(p.criteria.value.length ? [{ label: `Criteria ${p.met.value}/${p.criteria.value.length}`, value: 'criteria' }] : []),
   ...(p.history.value.length ? [{ label: 'Review', value: 'review' }] : []),
+  ...(p.prDetail.value
+    ? [
+        { label: 'PR description', value: 'pr' },
+        { label: `Code diff ${p.prDetail.value.files.length}`, value: 'diff' }
+      ]
+    : []),
   { label: 'Message', value: 'message' }
 ])
+// A tab can go away under the open item (e.g. its PR detail is still loading)
+watch(tabs, (list) => {
+  if (!list.some(t => t.value === tab.value)) tab.value = 'overview'
+})
 const explain: Record<string, string> = {
   approve: 'Merges the PR once the checks pass.',
   request_changes: 'Sends it back to the developer with your note.',
@@ -58,11 +70,12 @@ const explain: Record<string, string> = {
         <span class="font-medium">TL;DR</span> <span class="text-muted">{{ p.tldr.value }}</span>
       </p>
       <InboxPanelVerdict :p="p" />
-      <div :class="['flex gap-2', mobile ? 'flex-col' : 'flex-wrap items-center justify-between']">
+      <div class="flex flex-wrap items-center justify-between gap-2">
         <InboxPanelActions
+          v-if="!mobile"
           :ctx="ctx"
           :p="p"
-          :size="mobile ? 'md' : 'sm'"
+          size="sm"
         />
         <InboxPanelArtifacts
           :p="p"
@@ -78,6 +91,7 @@ const explain: Record<string, string> = {
       :content="false"
       variant="link"
       size="sm"
+      :ui="{ list: 'overflow-x-auto', trigger: 'shrink-0' }"
       :class="['shrink-0', mobile ? 'px-1' : 'px-3']"
       data-testid="inbox-details-toggle"
     />
@@ -147,6 +161,28 @@ const explain: Record<string, string> = {
         :p="p"
         section="history"
       />
+      <div
+        v-else-if="tab === 'pr' && p.prDetail.value"
+        class="flex flex-col gap-3"
+        data-testid="inbox-pr-description"
+      >
+        <p class="flex flex-wrap items-center gap-x-2 text-sm text-muted">
+          <UIcon
+            name="i-lucide-git-pull-request"
+            class="size-4"
+          />
+          <span class="font-medium text-default">#{{ p.prDetail.value.number }} {{ p.prDetail.value.title }}</span>
+          <span>{{ p.prDetail.value.headBranch }} → {{ p.prDetail.value.baseBranch }}</span>
+        </p>
+        <MarkdownText
+          :text="p.prDetail.value.body"
+          class="text-sm"
+        />
+      </div>
+      <InboxPanelDiff
+        v-else-if="tab === 'diff' && p.prDetail.value"
+        :pr="p.prDetail.value"
+      />
       <InboxPanelDetails
         v-else
         :ctx="ctx"
@@ -154,8 +190,13 @@ const explain: Record<string, string> = {
         section="message"
       />
     </div>
+    <InboxPanelThumbBar
+      v-if="p.canAct.value && mobile"
+      :ctx="ctx"
+      :p="p"
+    />
     <div
-      v-if="p.canAct.value"
+      v-else-if="p.canAct.value"
       class="shrink-0 border-t border-default p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
     >
       <InboxPanelTray :ctx="ctx" />

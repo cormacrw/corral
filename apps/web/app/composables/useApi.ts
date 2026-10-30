@@ -29,6 +29,7 @@ import type {
   PlanSessionDetail,
   Profile,
   Project,
+  PullRequestDetail,
   PullRequestStatus,
   RepoCheck,
   RepoList,
@@ -128,6 +129,8 @@ export const api = {
     list: (slug: string, view: 'board' | 'backlog' | 'all' = 'all') => call<Task[]>('GET', `/projects/${slug}/tasks?view=${view}`),
     get: (slug: string, number: number) => call<Task>('GET', `/projects/${slug}/tasks/${number}`),
     byRef: (ref: string) => call<Task>('GET', `/tasks/${ref}`),
+    // Proposed (COR-190): only the prototype's mock API answers this so far
+    pullRequest: (slug: string, number: number) => call<PullRequestDetail>('GET', `/projects/${slug}/tasks/${number}/pull-request`),
     create: (slug: string, input: CreateTaskInput) => call<Task>('POST', `/projects/${slug}/tasks`, input),
     patch: (slug: string, number: number, input: PatchTaskInput) => call<Task>('PATCH', `/projects/${slug}/tasks/${number}`, input),
     remove: (slug: string, number: number, reason?: string) => call<null>('DELETE', `/projects/${slug}/tasks/${number}`, reason ? { reason } : undefined),

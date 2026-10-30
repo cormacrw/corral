@@ -743,6 +743,20 @@ export type EvidenceKind = typeof EVIDENCE_KINDS[number]
 
 // ── Pull requests ───────────────────────────────────────────────────────────
 
+// A task PR's description and diff, for the Inbox's PR description and Code
+// diff tabs. Proposed by the COR-190 design: the server doesn't serve it yet,
+// only the prototype's mock API does.
+export interface PullRequestDetail {
+  number: number
+  url: string
+  title: string
+  // The PR description, as the developer wrote it (markdown)
+  body: string
+  baseBranch: string
+  headBranch: string
+  files: { path: string, status: 'added' | 'modified' | 'removed' | 'renamed', additions: number, deletions: number, patch: string }[]
+}
+
 // A task's open PR and where it stands against the merge gates, read live
 // from GitHub (GET /projects/:slug/pull-requests). `merge` comes from the
 // same gate check the merge orchestrator runs before it merges.
