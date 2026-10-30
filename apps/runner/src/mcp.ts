@@ -141,8 +141,8 @@ const toolDefinitions = {
   }
 } satisfies Record<AgentTool, ToolDefinition>
 
-// Where a role's tool differs: the PM reads any task in the project by ref,
-// while developers and reviewers only ever read their own
+// Where a role's tool differs: the PM reads and comments on any task in the
+// project by ref, while developers and reviewers only ever touch their own
 const roleToolDefinitions: Record<AgentRole, Partial<Record<AgentTool, ToolDefinition>>> = {
   developer: {},
   reviewer: {},
@@ -150,6 +150,13 @@ const roleToolDefinitions: Record<AgentRole, Partial<Record<AgentTool, ToolDefin
     get_task: {
       description: 'Read any task in this project by ref: title, description, acceptance criteria with their IDs, status, epic, dependencies and comments.',
       input: { taskRef: z.string().describe('e.g. COR-12') }
+    },
+    add_comment: {
+      description: 'Leave a note on any task in this project, for the human and the other agents, e.g. that a follow-up task changes its behaviour.',
+      input: {
+        taskRef: z.string().describe('e.g. COR-12'),
+        body: z.string().min(1).describe('Markdown text')
+      }
     }
   }
 }
@@ -157,7 +164,7 @@ const roleToolDefinitions: Record<AgentRole, Partial<Record<AgentTool, ToolDefin
 export const ROLE_TOOLS: Record<AgentRole, AgentTool[]> = {
   developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'report_outcome'],
   reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'get_design', 'report_outcome'],
-  pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
+  pm: ['list_tasks', 'get_task', 'add_comment', 'get_run_outcomes', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
 }
 
 // The tools a run gets: its role's, plus submit_design for a design task's

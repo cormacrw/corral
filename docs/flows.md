@@ -32,6 +32,7 @@ web            server                          runner                     claude
 | Tool | Purpose |
 |---|---|
 | `list_tasks`, `get_task`, `get_run_outcomes` | Live board state, so answers reflect current state, not only chat history (PRD §7.2) |
+| `add_comment` | Leave a comment on any task in the project by ref, e.g. that a follow-up task changes its behaviour. Attributed to the PM agent; a ref outside the project is rejected. Developers and reviewers have it too, for their own task |
 | `get_attachment` | An image pasted into task text (`attachment:<id>`), returned as image content with its file name and mime type. Only attachments in the run's own project; developers and reviewers have it too |
 | `ask_question` | A structured question, shown in the Plan conversation, and in the Inbox while it's pending (as its Plan thread, D11). Optionally with a `recommendation` (the PM's suggested answer) and `options` (2–5 short choices, each at most 120 characters). Both are stored on the message and shown, options numbered, in the history the PM sees on later turns |
 | `propose_plan` | Create or revise a draft plan: epics, tasks, acceptance criteria, dependencies, priority, task type (`task`, `bug`, `spike` or `design`, D19, D20), human-review flag, and for build tasks the design version and screens they pin (D20) |
