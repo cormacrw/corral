@@ -95,7 +95,8 @@ integration review.
 Epic PRs always squash, so `project.mergeMethod` applies only to task PRs. An
 epic is done for D22 once its PR merges (`holdsEpicOpen`); an `epic`-mode epic
 with no branch, such as one holding only spikes, is done when its tasks are.
-A task's dependency on a task in another epic still only checks that it's Merged.
+A task's dependency on a build task in another epic, or from outside any epic,
+waits until that epic is done; the same-epic case only checks Merged.
 Tasks added after the epic PR merged go straight to the target branch.
 
 ### Live GitHub verification

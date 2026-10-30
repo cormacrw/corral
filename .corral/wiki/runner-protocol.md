@@ -57,5 +57,7 @@ exact supported integration versions; missing means legacy only. Task jobs
 carry optional `integrationProtocol` (missing/0 is legacy). Placement and the
 last dispatch check refuse unsupported requirements; welcome and runner status
 provide `integrationCompatibilityReason` with an update instruction. Runners
-must not advertise execution they don't implement. See
+must not advertise execution they don't implement. Hello's optional
+`taskIntegrationExecutor` says the runner takes the `integration_*` setup jobs;
+missing means it doesn't, whatever protocols it lists. See
 [PR-free task state](pr-free-task-state.md) for the staged rollout.
