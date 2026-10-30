@@ -365,10 +365,20 @@ describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
       expect(audit).toMatchObject({ actor: t.actor, detail: { agentId: agent.id, role: 'developer', runtime: 'codex' } })
     })
 
+    it('creates and lists a designer', async () => {
+      runnerClis([...both])
+      const res = await t.request('POST', '/api/agents', { name: 'Design API', role: 'designer', runtime: 'claude-code', concurrency: 1 })
+      expect(res.status).toBe(201)
+      const agent = await res.json() as { id: string }
+      expect(agent).toMatchObject({ role: 'designer', runtime: 'claude-code' })
+      const listed = await t.request('GET', '/api/agents').then(r => r.json())
+      expect(listed).toEqual(expect.arrayContaining([expect.objectContaining({ id: agent.id, role: 'designer' })]))
+    })
+
     it('rejects a PM, an unknown runtime and a runtime whose CLI isn\'t installed, saying why', async () => {
       runnerClis([{ id: 'claude', version: '2.1.312' }, { id: 'codex', version: null }])
       const cases = [
-        [{ name: 'Second PM', role: 'pm', runtime: 'claude-code', concurrency: 1 }, 'Only one PM agent exists; the role must be developer or reviewer'],
+        [{ name: 'Second PM', role: 'pm', runtime: 'claude-code', concurrency: 1 }, 'Only one PM agent exists; the role must be developer, designer or reviewer'],
         [{ name: 'Gemini dev', role: 'developer', runtime: 'gemini', concurrency: 1 }, 'Unknown runtime; use one of claude-code, codex'],
         [{ name: 'Codex dev', role: 'developer', runtime: 'codex', concurrency: 1 }, 'Codex CLI isn’t installed on the runner, so the codex runtime can’t be used']
       ] as const

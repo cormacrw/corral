@@ -47,7 +47,7 @@ export const PRIORITY: Record<TaskPriority, { label: string, color: Color }> = {
   low: { label: 'Low', color: 'neutral' }
 }
 
-export const ROLE: Record<AgentRole, string> = { pm: 'PM', developer: 'Developer', reviewer: 'Reviewer' }
+export const ROLE: Record<AgentRole, string> = { pm: 'PM', developer: 'Developer', designer: 'Designer', reviewer: 'Reviewer' }
 
 // Runtime names in the UI. Never "Claude Code" (agent-runtime-and-auth.md, branding).
 export const RUNTIME: Record<AgentRuntime, string> = { 'claude-code': 'Claude', 'codex': 'Codex' }

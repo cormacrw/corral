@@ -805,7 +805,7 @@ describe('plan sessions', () => {
 
   it('names a renamed PM in the errors of turns that fail', async () => {
     const [pm] = await t.db.select().from(agents).where(eq(agents.role, 'pm'))
-    await t.db.update(agents).set({ name: 'Iris' }).where(eq(agents.id, pm!.id))
+    await t.db.update(agents).set({ name: 'Renamed PM' }).where(eq(agents.id, pm!.id))
     try {
       const project = await t.createProject()
       const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Hello' }).then(r => r.json()) as PlanSessionDetail
@@ -813,14 +813,14 @@ describe('plan sessions', () => {
       const resetsAt = '2030-01-01T00:00:00.000Z'
       runner.send({ type: 'run.ended', runId: first.runId, leaseEpoch: first.leaseEpoch, exit: { kind: 'rate_limited', resetsAt }, headSha: null })
       await sleep(150)
-      expect((await session(created.id)).messages.at(-1)).toMatchObject({ role: 'pm', kind: 'error', text: `Iris hit a usage limit; try again after ${resetsAt}` })
+      expect((await session(created.id)).messages.at(-1)).toMatchObject({ role: 'pm', kind: 'error', text: `Renamed PM hit a usage limit; try again after ${resetsAt}` })
 
       await t.db.update(agents).set({ pausedUntil: null }).where(eq(agents.id, pm!.id))
       await t.request('POST', `/api/plan/sessions/${created.id}/messages`, { text: 'Again' })
       const second = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.planSessionId === created.id)).job
       runner.send({ type: 'run.ended', runId: second.runId, leaseEpoch: second.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
       await sleep(150)
-      expect((await session(created.id)).messages.at(-1)).toMatchObject({ role: 'pm', kind: 'error', text: 'Iris finished without replying' })
+      expect((await session(created.id)).messages.at(-1)).toMatchObject({ role: 'pm', kind: 'error', text: 'Renamed PM finished without replying' })
     } finally {
       await t.db.update(agents).set({ name: pm!.name, pausedUntil: null }).where(eq(agents.id, pm!.id))
     }
