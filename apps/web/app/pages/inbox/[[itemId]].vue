@@ -6,6 +6,8 @@ import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
 import { moveRadioSelection } from '~/utils/radio'
 
+definePageMeta({ key: 'inbox' })
+
 // The Inbox (design/inbox.md, D11): list, selected item, action tray, task flyout
 const route = useRoute()
 const router = useRouter()
@@ -100,10 +102,13 @@ async function loadTask(item: TaskInboxItem | null) {
   // A human review carries its evidence in the message (design/inbox.md)
   const slug = live.state.value.projects.find(p => p.id === task.value?.projectId)?.slug
   if (item?.type === 'human_review' && task.value && slug) {
-    ;[evidence.value, reviews.value] = await Promise.all([
+    const [loadedEvidence, loadedReviews] = await Promise.all([
       api.tasks.evidence(slug, task.value.number).catch(() => []),
       api.tasks.reviews(slug, task.value.number).catch(() => [])
     ])
+    if (!isCurrent()) return
+    evidence.value = loadedEvidence
+    reviews.value = loadedReviews
   } else {
     evidence.value = []
     reviews.value = []
@@ -119,7 +124,13 @@ function retryTask() {
   void loadTask(isTaskItem(selected.value) ? selected.value : null)
 }
 watch(selected, async (item, previous) => {
-  text.value = ''
+  if (previous?.id !== item?.id) {
+    text.value = ''
+    busy.value = false
+    resolveTo.value = 'in_progress'
+    evidence.value = []
+    reviews.value = []
+  }
   // A live refresh keeps a failed load's error and Retry until a fetch settles it
   if (previous?.id !== item?.id) taskLoadFailed.value = false
   if (!taskLoadFailed.value) actionError.value = null
@@ -161,7 +172,11 @@ async function deleteThread(item: PlanThreadItem) {
   await router.replace(next ? `/inbox/${next.id}` : '/inbox')
 }
 function select(item: InboxItem) {
-  void router.push(`/inbox/${item.id}`)
+  void router.push({
+    path: `/inbox/${item.id}`,
+    // Keep the dock mounted while its task changes.
+    query: flyout.ref.value && isTaskItem(item) ? { task: item.taskRef } : {}
+  })
 }
 function toggleTask() {
   showTask.value = !showTask.value
@@ -224,11 +239,11 @@ async function submit(message: string): Promise<boolean> {
       await api.inbox.act(actedOn.taskId, input)
       toast.add({ title: 'Done', description, color: 'success' })
     }
-    text.value = ''
+    if (selectedId.value === actedOn.id) text.value = ''
     await load()
     // Resolved: move on to the next item that needs you, or to the empty
     // state when that was the last one
-    if (!inbox.value?.needsYou.some(i => i.id === actedOn.id)) {
+    if (selectedId.value === actedOn.id && !inbox.value?.needsYou.some(i => i.id === actedOn.id)) {
       const remaining = inbox.value?.needsYou ?? []
       const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
       // Finish removing the old task query before selecting the next row.
@@ -238,10 +253,10 @@ async function submit(message: string): Promise<boolean> {
     }
     return true
   } catch (e) {
-    actionError.value = e instanceof Error ? e.message : String(e)
+    if (selectedId.value === actedOn.id) actionError.value = e instanceof Error ? e.message : String(e)
     return false
   } finally {
-    busy.value = false
+    if (selectedId.value === actedOn.id) busy.value = false
   }
 }
 // On a phone the shell's header names the item and where it sits in the list
@@ -595,6 +610,7 @@ onBeforeUnmount(() => {
                 :actions="taskLoadFailed ? [{ label: 'Retry', onClick: retryTask }] : []"
               />
               <PromptComposer
+                :key="selected.id"
                 v-model="text"
                 :placeholder="placeholder"
                 :submit-label="submitLabel"

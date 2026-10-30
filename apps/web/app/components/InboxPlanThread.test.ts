@@ -27,6 +27,7 @@ async function mountInbox() {
   const toastRemove = vi.fn()
   vi.stubGlobal('useRoute', () => ({ params: { itemId: 's-1' } }))
   vi.stubGlobal('useRouter', () => ({ replace }))
+  vi.stubGlobal('definePageMeta', vi.fn())
   vi.stubGlobal('useSeoMeta', vi.fn())
   vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(false) }))
   vi.stubGlobal('useMobileHeader', () => vue.ref(null))

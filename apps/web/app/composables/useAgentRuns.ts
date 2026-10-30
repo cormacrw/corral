@@ -52,15 +52,23 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
     }
   }
   watch(agent, () => void load(), { immediate: true })
-  watch(selected, async (run, old) => {
-    if (!run || run.id === old?.id) return
+  watch(() => selected.value?.id, async (runId, _old, onCleanup) => {
+    let current = true
+    onCleanup(() => {
+      current = false
+    })
+    events.value = []
+    if (!runId) return
     try {
-      events.value = await api.runs.transcript(run.id)
+      const loaded = await api.runs.transcript(runId)
+      if (!current) return
+      events.value = loaded
     } catch {
+      if (!current) return
       events.value = []
     }
     // The live connection appends the run's new events to this same list
-    live.watchRun(run.id, events.value)
+    live.watchRun(runId, events.value)
   }, { immediate: true })
   onMounted(() => {
     const timer = setInterval(() => {

@@ -8,6 +8,8 @@ import { agentLimit } from '~/utils/agents'
 import { parseOverride } from '~/utils/device'
 import { cliLoginCommand, detectedRuntimes, ROLE, runtimeLabel } from '~/utils/labels'
 
+definePageMeta({ key: 'settings' })
+
 // Global settings (design/settings.md): profile, agents, runner, appearance
 const route = useRoute()
 const live = useLive()

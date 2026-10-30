@@ -242,6 +242,7 @@ const tabs = computed(() => [
           :actions="taskLoadFailed ? [{ label: 'Retry', onClick: onRetryTask }] : []"
         />
         <PromptComposer
+          :key="selected.id"
           v-model="text"
           :placeholder="composerPlaceholder"
           :submit-label="composerLabel"

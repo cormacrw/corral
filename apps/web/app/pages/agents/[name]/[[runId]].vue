@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { agentStatus, duration, isLiveRun as isLive, ROLE, runBadge, runRef, runTitle, runTokens, runtimeLabel, timeAgo } from '~/utils/labels'
 
+definePageMeta({ key: route => `agent:${String(route.params.name)}` })
+
 // An agent's page (design/agent.md): runs list and the transcript. Mobile
 // shows the agent and its runs at /agents/:name, and a run's transcript
 // at /agents/:name/:runId (design/mobile.md).

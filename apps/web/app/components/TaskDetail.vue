@@ -49,19 +49,24 @@ const epic = computed(() => task.value?.epicId ? live.state.value.epics[task.val
 const slug = computed(() => project.value?.slug ?? '')
 
 async function load() {
+  const requested = props.taskRef
   loading.value = true
   error.value = null
   try {
-    task.value = await api.tasks.byRef(props.taskRef)
+    const loaded = await api.tasks.byRef(requested)
+    if (requested !== props.taskRef) return
+    task.value = loaded
     await loadSide()
   } catch (e) {
+    if (requested !== props.taskRef) return
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
-    loading.value = false
+    if (requested === props.taskRef) loading.value = false
   }
 }
 async function loadSide() {
   if (!task.value || !project.value) return
+  const requested = task.value.id
   const [c, h, ev, r, ru] = await Promise.all([
     api.tasks.comments(slug.value, number.value),
     api.tasks.history(slug.value, number.value),
@@ -69,6 +74,7 @@ async function loadSide() {
     api.tasks.reviews(slug.value, number.value),
     api.runs.list({ taskId: task.value.id })
   ])
+  if (task.value?.id !== requested) return
   comments.value = c
   history.value = h
   evidence.value = ev
@@ -78,6 +84,17 @@ async function loadSide() {
 watch(() => props.taskRef, () => {
   draft.value = ''
   editingDescription.value = false
+  descriptionDraft.value = { type: 'doc', content: [] }
+  newCriterion.value = ''
+  confirmDelete.value = false
+  saved.value = false
+  if (savedTimer) clearTimeout(savedTimer)
+  task.value = null
+  comments.value = []
+  history.value = []
+  evidence.value = []
+  reviews.value = []
+  runs.value = []
   void load()
 }, { immediate: true })
 // Live updates for this task
@@ -941,6 +958,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
               No comments yet.
             </p>
             <PromptComposer
+              :key="props.taskRef"
               v-model="draft"
               placeholder="Comment…"
               :hint="composerHint"

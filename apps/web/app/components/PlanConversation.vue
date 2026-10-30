@@ -67,6 +67,9 @@ useSeoMeta({ title: () => props.inbox ? 'Inbox · Corral' : `${session.value?.ti
 
 watch(id, () => {
   text.value = ''
+  taskRef.value = null
+  busy.value = false
+  approving.value = null
   approvalTarget.value = null
 })
 
@@ -98,7 +101,7 @@ async function send(message: string): Promise<boolean> {
     toast.add({ title: 'Could not send', description: e instanceof Error ? e.message : String(e), color: 'error' })
     return false
   } finally {
-    busy.value = false
+    if (id.value === sendingTo) busy.value = false
   }
 }
 // One-tap answers and Grill me send straight away. An answer leaves the
@@ -112,17 +115,19 @@ async function submit(message: string): Promise<boolean> {
   return send(message)
 }
 async function quick(message: string, keepDraft = true) {
+  const sendingTo = id.value
   const draft = text.value
   const task = taskRef.value
   if (keepDraft) taskRef.value = null
   const sent = await send(message)
-  if (keepDraft) {
+  if (keepDraft && id.value === sendingTo) {
     taskRef.value = task
     if (sent) text.value = draft
   }
 }
 async function approve(plan: Plan, to: 'ready' | 'backlog') {
   if (cantApprove.value) return false
+  const approvingIn = id.value
   approving.value = plan.id
   emit('approving', true)
   try {
@@ -144,8 +149,10 @@ async function approve(plan: Plan, to: 'ready' | 'backlog') {
     toast.add({ title: 'Could not approve', description: e instanceof Error ? e.message : String(e), color: 'error' })
     return false
   } finally {
-    approving.value = null
-    emit('approving', false)
+    if (id.value === approvingIn) {
+      approving.value = null
+      emit('approving', false)
+    }
   }
 }
 // The PM's turn as it happens: the saved part, then live run.events
@@ -498,6 +505,7 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
               class="mb-2"
             />
             <PromptComposer
+              :key="id"
               ref="composer"
               v-model="text"
               :placeholder="runnerOffline && device.isMobile.value ? `${pm?.name ?? 'The PM'} is unavailable while the runner is offline` : `Reply to ${pm?.name ?? 'the PM'}…`"

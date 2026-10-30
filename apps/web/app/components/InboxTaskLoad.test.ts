@@ -36,6 +36,7 @@ async function mountInbox(type: 'human_review' | 'failed', taskRef?: string) {
   vi.stubGlobal('useRoute', () => ({ params }))
   const router = { replace: vi.fn(), push: vi.fn() }
   vi.stubGlobal('useRouter', () => router)
+  vi.stubGlobal('definePageMeta', vi.fn())
   vi.stubGlobal('useSeoMeta', vi.fn())
   vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(false) }))
   vi.stubGlobal('useMobileHeader', () => vue.ref(null))
