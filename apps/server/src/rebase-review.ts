@@ -1,6 +1,7 @@
 import type { Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, asc, desc, eq, sql } from 'drizzle-orm'
+import type { ChangedFile, GitHubClient } from './github.ts'
 import { applyTransition, type ProjectRow, type TaskRow } from './tasks.ts'
 
 const { acceptanceCriteria, auditLog, reviews } = schema
@@ -9,6 +10,54 @@ const { acceptanceCriteria, auditLog, reviews } = schema
 export interface RebaseCheckFailure {
   condition: 'changes_outside_conflicts' | 'project_docs_changed'
   files: string[]
+}
+
+function isProjectDoc(path: string): boolean {
+  return path === 'CORRAL.md' || path === 'CLAUDE.md' || path.startsWith('docs/') || path.startsWith('.corral/wiki/')
+}
+
+// What a file's entry in a diff changes. The base moving shifts line numbers
+// without changing the change, so hunk headers don't count. Without a patch
+// (binary or very large files) the blob on the head side stands in for it.
+function changeOf(file: ChangedFile): string {
+  return JSON.stringify([file.status, file.previousFilename ?? null, file.patch?.replace(/^@@ .*$/gm, '@@') ?? file.sha])
+}
+
+export interface TrivialRebaseCheck {
+  failures: RebaseCheckFailure[]
+  // Set when the check couldn't run, so it proved nothing
+  error?: string
+}
+
+// D24's server check of a developer's `trivial`. Old and new base are the
+// merge bases of the approved and new heads with the base branch, so nothing
+// here rests on the developer's word except the list it's checked against.
+export async function checkTrivialRebase(
+  github: GitHubClient,
+  repository: string,
+  input: { baseBranch: string, approvedHeadSha: string, newHeadSha: string, conflictedFiles: string[] }
+): Promise<TrivialRebaseCheck> {
+  try {
+    const baseHead = await github.branchHead(repository, input.baseBranch)
+    if (!baseHead) throw new Error(`Branch ${input.baseBranch} doesn't exist`)
+    const approved = await github.compare(repository, baseHead, input.approvedHeadSha)
+    const rebased = await github.compare(repository, baseHead, input.newHeadSha)
+    const onBase = await github.compare(repository, approved.mergeBase, rebased.mergeBase)
+
+    const before = new Map(approved.files.map(f => [f.filename, changeOf(f)]))
+    const after = new Map(rebased.files.map(f => [f.filename, changeOf(f)]))
+    const outside = [...new Set([...before.keys(), ...after.keys()])]
+      .filter(file => before.get(file) !== after.get(file) && !input.conflictedFiles.includes(file))
+    const docs = [...new Set(onBase.files.flatMap(f => [f.filename, f.previousFilename ?? f.filename]))].filter(isProjectDoc)
+
+    const failures: RebaseCheckFailure[] = []
+    if (outside.length > 0) failures.push({ condition: 'changes_outside_conflicts', files: outside.sort() })
+    if (docs.length > 0) failures.push({ condition: 'project_docs_changed', files: docs.sort() })
+    return { failures }
+  } catch (error) {
+    console.error(`Trivial rebase check for ${input.newHeadSha} failed`, error)
+    return { failures: [], error: error instanceof Error ? error.message : String(error) }
+  }
 }
 
 // The check's result is recorded with the transition into Agent review, under
