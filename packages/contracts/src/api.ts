@@ -16,4 +16,5 @@ export * from './deployments.ts'
 export { AGENT_RUNTIMES, RUNTIMES_TAKING_MESSAGES, type AgentRuntime } from './agent-runtimes.ts'
 
 // Kept here so web can label roles and statuses without importing core
-export { AGENT_ROLES, TASK_PRIORITIES, TASK_STATUSES, TASK_TYPES } from '@corral/core'
+export { AGENT_ROLES, EVIDENCE_KINDS, PLAN_CHANGES, PLAN_STATUSES, REVIEW_VERDICTS, TASK_PRIORITIES, TASK_STATUSES, TASK_TYPES } from '@corral/core'
+export type { EvidenceKind, PlanChange, PlanStatus, ReviewVerdict } from '@corral/core'

@@ -1,3 +1,5 @@
+import { REVIEW_VERDICTS } from './review.ts'
+
 // Agent runs (PRD §4.5, §8.6). A run is one agent session; a task can have many.
 export const RUN_STATES = [
   'queued',
@@ -24,8 +26,7 @@ export const RUN_OUTCOMES = [
   'findings_reported',
   // A design task's developer: a new design version instead of a PR (D20)
   'design_submitted',
-  'approved',
-  'changes_requested',
+  ...REVIEW_VERDICTS,
   'blocked',
   'stuck',
   'failed',

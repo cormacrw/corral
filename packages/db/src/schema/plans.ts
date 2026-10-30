@@ -1,4 +1,4 @@
-import type { Actor, TaskType } from '@corral/core'
+import type { Actor, TaskPriority, TaskType } from '@corral/core'
 import {
   boolean,
   index,
@@ -91,7 +91,7 @@ export interface PlanRevision {
   // Markdown, as the PM wrote it
   description: string
   type: TaskType
-  priority: 'urgent' | 'high' | 'medium' | 'low'
+  priority: TaskPriority
   humanReview: boolean
   acceptanceCriteria: (string | { text: string, checkedByHuman?: boolean | undefined })[]
   // Null when the revised task has no epic

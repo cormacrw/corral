@@ -34,7 +34,7 @@ export interface TaskLimits {
 }
 
 // PRD §7.8 defaults
-export const DEFAULT_LIMITS: TaskLimits = { reviewRoundCap: 5, failedRunCap: 3 }
+export const DEFAULT_LIMITS: Readonly<TaskLimits> = Object.freeze({ reviewRoundCap: 5, failedRunCap: 3 })
 
 // Each event carries the facts its guard needs, so this module stays pure.
 // The server gathers them from the database and GitHub.
@@ -138,7 +138,7 @@ export function transition(
   task: TaskState,
   event: TaskEvent,
   actor: Actor,
-  limits: TaskLimits = DEFAULT_LIMITS
+  limits: Readonly<TaskLimits> = DEFAULT_LIMITS
 ): TransitionResult {
   const rule = TRANSITION_RULES[event.type]
   if (!rule.from.includes(task.status)) {

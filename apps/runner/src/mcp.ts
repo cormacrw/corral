@@ -1,5 +1,5 @@
 import { askQuestionInput, EVIDENCE_KINDS, type AgentTool, type RunJob } from '@corral/contracts'
-import { EPIC_REVIEW_MODES, TASK_TYPES, type AgentRole } from '@corral/core'
+import { EPIC_REVIEW_MODES, REVIEW_VERDICTS, TASK_PRIORITIES, TASK_TYPES, type AgentRole } from '@corral/core'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
@@ -25,7 +25,7 @@ interface ImageResult {
 const outcomes: Record<AgentRole, readonly string[]> = {
   designer: ['design_submitted', 'stuck', 'failed'],
   developer: ['pr_opened', 'pr_updated', 'pr_rebased', 'findings_reported', 'stuck', 'failed'],
-  reviewer: ['approved', 'changes_requested', 'blocked', 'failed'],
+  reviewer: [...REVIEW_VERDICTS, 'blocked', 'failed'],
   pm: []
 }
 
@@ -120,7 +120,7 @@ const toolDefinitions = {
         title: z.string().min(1),
         description: z.string().min(1),
         type: z.enum(TASK_TYPES),
-        priority: z.enum(['urgent', 'high', 'medium', 'low']).default('medium'),
+        priority: z.enum(TASK_PRIORITIES).default('medium'),
         humanReview: z.boolean().default(false),
         acceptanceCriteria: z.array(z.union([z.string().trim().min(1), z.object({ text: z.string().trim().min(1), checkedByHuman: z.boolean().optional() })])).min(1),
         dependsOn: z.array(z.string()).default([]).describe('Keys of tasks in this plan, or refs of existing tasks'),

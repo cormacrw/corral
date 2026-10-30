@@ -1,4 +1,4 @@
-import { richTextIssue, TASK_PRIORITIES, TASK_TYPES, type Actor, type AgentRole, type TaskPriority, type TaskStatus, type TaskType } from '@corral/core'
+import { EVIDENCE_KINDS, REVIEW_VERDICTS, richTextIssue, TASK_PRIORITIES, TASK_TYPES, type Actor, type AgentRole, type EvidenceKind, type ReviewVerdict, type TaskPriority, type TaskStatus, type TaskType } from '@corral/core'
 import { z } from 'zod'
 
 // ── Tasks ───────────────────────────────────────────────────────────────────
@@ -166,7 +166,7 @@ export interface Evidence {
   createdAt: string
 }
 
-export type ReviewVerdict = 'approved' | 'changes_requested'
+export const reviewVerdict = z.enum(REVIEW_VERDICTS)
 
 export interface Review {
   id: string
@@ -181,5 +181,4 @@ export interface Review {
   createdAt: string
 }
 
-export const EVIDENCE_KINDS = ['screenshot', 'video', 'test_output', 'log', 'request', 'text', 'other', 'note'] as const
-export type EvidenceKind = typeof EVIDENCE_KINDS[number]
+export const evidenceKind = z.enum(EVIDENCE_KINDS)
