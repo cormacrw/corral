@@ -1,4 +1,4 @@
-import type { AgentTool, PlanMessage, PlanSession, PlanSessionDetail, RunJob } from '@corral/contracts'
+import type { Inbox, AgentTool, PlanMessage, PlanSession, PlanSessionDetail, RunJob } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { writeFile } from 'node:fs/promises'
@@ -70,11 +70,15 @@ describe('PM threads', () => {
   })
 
   it('notifies a running parent without starting another turn, and lists and reads across projects', async () => {
+    await call(parentJob, 'ask_question', { question: 'Which entry point should we prioritize?' })
     await call(childJob, 'propose_plan', { title: 'Check entry point', tasks: [{ key: 'entry', title: 'Review entry point', type: 'task', description: 'Review the app entry point', acceptanceCriteria: ['The entry point opens'] }] })
     await finish(childJob, 'The test app has a small web entry point.')
     await expect.poll(async () => (await t.plans.getSession(parent.id)).messages.some(m => m.senderSessionId === child.id)).toBe(true)
     const detail = await request('GET', `/plan/sessions/${parent.id}`) as PlanSessionDetail
     expect(detail.activeRunId).toBe(parentJob.runId)
+    expect(detail.status).toBe('question')
+    const inbox = await request('GET', '/inbox') as Inbox
+    expect(inbox.needsYou).toContainEqual(expect.objectContaining({ sessionId: parent.id, status: 'question', question: expect.objectContaining({ text: 'Which entry point should we prioritize?' }) }))
     expect(detail.messages).toContainEqual(expect.objectContaining({ role: 'thread', kind: 'notification', senderSessionId: child.id, text: expect.stringContaining('Inspect test app') }))
     const list = await call<(PlanSession & { running: boolean, project: string | null })[]>(parentJob, 'list_threads', {})
     expect(list).toEqual(expect.arrayContaining([expect.objectContaining({ id: parent.id, project: null, running: true }), expect.objectContaining({ id: child.id, parentSessionId: parent.id, project: 'test-app', running: false })]))

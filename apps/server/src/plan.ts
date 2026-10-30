@@ -1075,8 +1075,13 @@ export class PlanService {
 
 // A session as the API shows it, with the plan waiting for approval and its
 // latest message, which the Inbox's Plan thread items also need (D11)
-export async function sessionState(db: Executor, row: SessionRow, activeRunId?: string | null): Promise<{ session: PlanSession, planId: string | null, last: typeof planMessages.$inferSelect | null }> {
+export async function sessionState(db: Executor, row: SessionRow, activeRunId?: string | null): Promise<{ session: PlanSession, planId: string | null, last: typeof planMessages.$inferSelect | null, question: typeof planMessages.$inferSelect | null }> {
   const [last] = await db.select().from(planMessages).where(eq(planMessages.sessionId, row.id)).orderBy(desc(planMessages.createdAt)).limit(1)
+  // Completion notices add context; they do not answer a pending question.
+  const [latestConversation] = last?.kind === 'notification'
+    ? await db.select().from(planMessages)
+        .where(and(eq(planMessages.sessionId, row.id), ne(planMessages.kind, 'notification'))).orderBy(desc(planMessages.createdAt)).limit(1)
+    : [last]
   const [proposed] = await db.select({ id: plans.id }).from(plans).where(and(eq(plans.sessionId, row.id), eq(plans.status, 'proposed'))).limit(1)
   let runId = activeRunId ?? null
   if (activeRunId === undefined) {
@@ -1093,12 +1098,12 @@ export async function sessionState(db: Executor, row: SessionRow, activeRunId?: 
     preview: last?.text.slice(0, 160) ?? '',
     unread: row.unread,
     closed: row.closedAt !== null,
-    status: proposed ? 'needs_approval' : last?.kind === 'question' ? 'question' : 'none',
+    status: proposed ? 'needs_approval' : latestConversation?.kind === 'question' ? 'question' : 'none',
     activeRunId: runId,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString()
   }
-  return { session, planId: proposed?.id ?? null, last: last ?? null }
+  return { session, planId: proposed?.id ?? null, last: last ?? null, question: session.status === 'question' ? latestConversation ?? null : null }
 }
 
 // Writes a plan's staged edits to the task it revises, keeping criterion IDs

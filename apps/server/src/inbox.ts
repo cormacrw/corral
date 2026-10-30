@@ -108,7 +108,7 @@ async function planThreads(db: Executor): Promise<PlanThreadItem[]> {
   const [pm] = await db.select({ name: agents.name }).from(agents).where(eq(agents.role, 'pm')).limit(1)
   const sender = { name: pm?.name ?? 'PM', role: 'pm' as const }
   const items = await Promise.all(rows.map(async ({ session: row, project }) => {
-    const { session, planId, last } = await sessionState(db, row)
+    const { session, planId, question } = await sessionState(db, row)
     const waitingOnReply = session.status === 'none' && session.unread
     if (session.status !== 'question' && session.status !== 'needs_approval' && !waitingOnReply) return null
     const [reply] = waitingOnReply
@@ -116,7 +116,7 @@ async function planThreads(db: Executor): Promise<PlanThreadItem[]> {
       : []
     if (waitingOnReply && !reply) return null
     const [waiting] = planId ? await db.select().from(plans).where(eq(plans.id, planId)) : []
-    const since = session.status === 'needs_approval' ? waiting!.createdAt : session.status === 'question' ? last!.createdAt : reply!.createdAt
+    const since = session.status === 'needs_approval' ? waiting!.createdAt : session.status === 'question' ? question!.createdAt : reply!.createdAt
     // Tasks dropped in a revision keep a 'removed' row and aren't part of the plan. Plans saved before
     // plan_epics existed have no epic rows, only plans.epicId, so count that as one epic.
     const [epics, tasks] = waiting
@@ -133,7 +133,7 @@ async function planThreads(db: Executor): Promise<PlanThreadItem[]> {
       runtime: session.runtime,
       subject: session.title,
       preview: session.preview,
-      question: session.status === 'question' && last ? { text: last.text, recommendation: last.recommendation, options: last.options } : null,
+      question: question ? { text: question.text, recommendation: question.recommendation, options: question.options } : null,
       reply: reply ? reply.text : null,
       plan: waiting ? { id: waiting.id, version: waiting.version, title: waiting.title, summary: waiting.summary, epicCount: epics[0]?.rows === 0 && waiting.epicId ? 1 : epics[0]?.count ?? 0, taskCount: tasks[0]?.count ?? 0 } : null,
       sender,
