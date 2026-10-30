@@ -1,5 +1,5 @@
 import type { EpicReviewActionInput, EpicReviewItem, OutcomeReport, RunJob } from '@corral/contracts'
-import { ACTIVE_RUN_STATES, LEASE_DURATION_MS, taskRef, type Actor } from '@corral/core'
+import { ACTIVE_RUN_STATES, feedbackFixTitle, feedbackPoints, LEASE_DURATION_MS, markdownToRichText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne } from 'drizzle-orm'
 import type { OrchestratorDeps } from './orchestrator.ts'
@@ -50,7 +50,7 @@ export class EpicPullRequests {
                 body: this.body(epic, board, project)
               })
           if (pr.state !== 'open' || pr.merged) return
-          if (epic.prNumber && epic.prHeadSha === pr.headSha && epic.reviewState !== 'open') return
+          if (epic.prNumber && epic.prHeadSha === pr.headSha && epic.reviewState !== 'open' && epic.reviewState !== 'changes_requested') return
           await this.d.github.updatePullRequest(project.repository, pr.number, { body: this.body(epic, board, project) })
           // A moved epic head invalidates approval, even if board membership
           // didn't change. Active runs on the old head are fenced by state.
@@ -116,7 +116,7 @@ export class EpicPullRequests {
       if (pr.state !== 'open' || pr.merged || pr.headSha !== run.headSha) throw new Error('Epic PR head changed; this verdict is stale')
       const actor: Actor = { kind: 'agent', role: 'reviewer', runId: run.id }
       await tx.update(runs).set({ state: 'completed', outcome: report.outcome, summary: report.summary, endedAt: this.now() }).where(eq(runs.id, run.id))
-      await tx.update(epics).set({ reviewState: report.outcome === 'approved' ? 'human_review' : 'open', updatedAt: this.now() }).where(eq(epics.id, epic.id))
+      await tx.update(epics).set({ reviewState: report.outcome === 'approved' ? 'human_review' : 'changes_requested', updatedAt: this.now() }).where(eq(epics.id, epic.id))
       if (report.outcome === 'changes_requested') fixId = await this.fixTask(tx, project, epic, report.summary, actor)
       await tx.insert(auditLog).values({ projectId: project.id, actor, action: 'epic.pr', detail: { epicId: epic.id, event: report.outcome, headSha: run.headSha, summary: report.summary } })
     })
@@ -125,7 +125,7 @@ export class EpicPullRequests {
   }
 
   private async fixTask(tx: Executor, project: ProjectRow, epic: EpicRow, feedback: string, actor: Actor) {
-    return createTask(tx, project, { type: 'task', title: `Fix integration: ${epic.title}`.slice(0, 200), description: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: feedback }] }] }, epicId: epic.id, acceptanceCriteria: [feedback] }, actor, { epicFix: true })
+    return createTask(tx, project, { type: 'task', title: feedbackFixTitle(feedback), description: markdownToRichText(feedback), epicId: epic.id, acceptanceCriteria: feedbackPoints(feedback) }, actor, { epicFix: true })
   }
 
   async humanAction(epicId: string, input: EpicReviewActionInput, actor: Actor) {
@@ -141,7 +141,7 @@ export class EpicPullRequests {
       const pr = await this.d.github.getPullRequest(project.repository, epic.prNumber!)
       if (pr.headSha !== input.headSha || pr.state !== 'open' || pr.merged) throw new ApiFailure(409, { code: 'conflict', constraint: 'epic_pr_changed' })
       if (input.action === 'request_changes' && !input.text?.trim()) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ message: 'Describe the changes needed' }] })
-      await tx.update(epics).set({ reviewState: input.action === 'approve' ? 'ready_to_merge' : 'open', updatedAt: this.now() }).where(eq(epics.id, epic.id))
+      await tx.update(epics).set({ reviewState: input.action === 'approve' ? 'ready_to_merge' : 'changes_requested', updatedAt: this.now() }).where(eq(epics.id, epic.id))
       if (input.action === 'request_changes') fixId = await this.fixTask(tx, project, epic, input.text!.trim(), actor)
       await tx.insert(auditLog).values({ projectId: project.id, actor, action: 'epic.pr', detail: { epicId, event: input.action === 'approve' ? 'human_approved' : 'human_changes_requested', headSha: input.headSha, summary: input.text ?? '' } })
     })

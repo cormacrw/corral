@@ -245,9 +245,9 @@ The scheduler claims a reviewer run for the epic PR. The reviewer checks out the
 
 The reviewer approves, and the epic PR becomes a **Needs you** item in the Inbox (D11, D23), with the reviewer's verdict and the combined diff. The human tries it and requests changes: "Deleting a saved search doesn't ask for confirmation."
 
-The server creates fix task **#44** in E7, in **Ready**, with the feedback as its description and criteria, and moves the epic PR back to waiting on the epic's tasks. #44 runs through section 2 like any task in E7: its branch is cut from the epic branch, it's reviewed in `epic` mode, and it squash-merges into the epic branch. (A reviewer's `changes_requested` on the epic PR in step 4 creates a fix task the same way.)
+The server creates fix task **#44** in E7, in **Ready**, titled from the feedback, with the feedback as its description and each of its points (list items, or paragraphs) as a criterion. The epic PR's review state becomes `changes_requested`, which keeps it from being approved or merged, and the Inbox item is resolved. #44 runs through section 2 like any task in E7: its branch is cut from the epic branch, it's reviewed in `epic` mode, and it squash-merges into the epic branch. (A reviewer's `changes_requested` on the epic PR in step 4 creates a fix task the same way.)
 
-With #44 merged, every board task is Merged again, and the epic PR goes back to **integration review** (step 4) and then to the human. This time the human approves, and the epic PR is **ready to merge**.
+With #44 merged, every board task is Merged again, and the same epic PR goes back to **integration review** (step 4) and then returns to the Inbox for the human. This time the human approves, and the epic PR is **ready to merge**.
 
 ### Step 6 — Rebase before merge, and a conflict
 
