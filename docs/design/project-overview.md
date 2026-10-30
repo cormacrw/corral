@@ -25,7 +25,7 @@ The page scrolls, in a column up to 1200px wide with 24px padding.
 3. **Two columns**, auto-fit with a 340px minimum. They stack when narrow.
    - **Left:**
      - **Needs you:** a bordered card with its header, a count badge and an **Open Inbox** link. Rows show a type badge, the task ref and title, and the time. Clicking a row opens that item in the Inbox. Empty state: "Nothing is waiting on you."
-     - **Active now:** cards for agents working on this project, with the working pulse. Each shows the avatar with a ping dot, "Atlas is building COR-35 Settings page skeleton" and "Run #128 · 18m · In progress". Clicking one opens the agent's live run. Empty state: "No agent is working on this project right now."
+     - **Active now:** cards for agents working on this project, with the working pulse. Each shows the avatar with a ping dot, "Atlas is building COR-35 Settings page skeleton" and "Run #128 · 18m · In progress". An epic review names its epic instead of a task, e.g. "Rita is reviewing epic Saved searches". Clicking one opens the agent's live run. Empty state: "No agent is working on this project right now."
    - **Right:**
      - **Epics:** an **Open Backlog** link, then each epic's name, "2 of 6 merged" and a progress meter. The meter is a 6px bar split into a `primary` "merged" segment and a `bg-accented` "remaining" segment, with a 2px gap, `role="meter"` and an `aria-label` like "Billing: 2 of 6 tasks merged".
      - **Recent activity:** a timeline of dot, actor, action, task ref and time.

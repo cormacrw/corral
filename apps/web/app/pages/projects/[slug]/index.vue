@@ -186,7 +186,7 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
                   />
                   <div class="min-w-0">
                     <p class="truncate text-sm">
-                      {{ run.agentName }} is {{ run.role === 'reviewer' ? 'reviewing' : run.role === 'pm' ? 'planning' : 'building' }} {{ run.taskRef ?? '' }} {{ taskOf(run)?.title ?? '' }}
+                      {{ run.agentName }} is {{ run.role === 'reviewer' ? 'reviewing' : run.role === 'pm' ? 'planning' : 'building' }} {{ run.taskRef ?? (run.epicId ? 'epic' : '') }} {{ taskOf(run)?.title ?? run.epicTitle ?? '' }}
                     </p>
                     <p class="text-xs text-muted">
                       Run #{{ run.number }} · {{ duration(run.startedAt ?? run.queuedAt, null) }} · {{ run.state.replace('_', ' ') }}

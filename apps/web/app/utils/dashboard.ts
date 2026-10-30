@@ -1,5 +1,6 @@
-import type { Task } from '@corral/contracts'
+import type { Run, Task } from '@corral/contracts'
 import type { TaskStatus } from '@corral/core'
+import { runTitle } from './labels.ts'
 
 // The Home dashboard's numbers (design/mobile.md), all counted from the live
 // task lists so they match the Board's columns for the same project.
@@ -56,4 +57,12 @@ export function elapsed(startIso: string | null, now = Date.now()): string {
   const minutes = Math.floor(seconds / 60)
   if (minutes < 60) return `${minutes}m`
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+}
+
+// What a live run on Home is on. 'Planning' is for PM turns only: a run on a
+// task or an epic names it, and any other run falls back to its own title.
+export function liveRunTitle(run: Pick<Run, 'taskTitle' | 'epicTitle' | 'summary' | 'role'>, sessionTitle: string | null): string {
+  if (run.taskTitle ?? run.epicTitle) return runTitle(run)
+  if (sessionTitle) return `Answering in ${sessionTitle}`
+  return run.role === 'pm' ? 'Planning' : runTitle(run)
 }

@@ -2,7 +2,7 @@
 import type { Agent, Run } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { todayStats } from '~/utils/agents'
-import { dashboardCounts, elapsed, IN_PROGRESS_STAGES } from '~/utils/dashboard'
+import { dashboardCounts, elapsed, IN_PROGRESS_STAGES, liveRunTitle } from '~/utils/dashboard'
 import { agentStatus, epicInProgress, epicWithLiveCounts, isLiveRun, isWorking, projectColor, ROLE, STATUS, tokens } from '~/utils/labels'
 
 // Home, the global dashboard (design/mobile.md). Counts come from the live
@@ -81,8 +81,8 @@ const runLines = (agent: Agent) => runs.value
     const session = run.taskId ? null : state.value.planSessions.find(s => s.activeRunId === run.id)
     return {
       id: run.id,
-      ref: run.taskRef,
-      title: run.taskTitle ?? (session ? `Answering in ${session.title}` : 'Planning'),
+      ref: run.taskRef ?? (run.epicId ? 'Epic' : null),
+      title: liveRunTitle(run, session?.title ?? null),
       project: projectOf(run.projectId),
       status: task ? STATUS[task.status].label : null,
       // Reviews are about the PR; developer runs are about the run
