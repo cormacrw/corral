@@ -2,7 +2,9 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
 import { exec } from './exec.ts'
 
-const CONVERT_TIMEOUT_MS = 5 * 60_000
+// Leave 120 seconds for the upload and 15 seconds for file handling within
+// Codex's 180-second MCP tool budget (codex.ts).
+const CONVERT_TIMEOUT_MS = 45_000
 const MAX_REASON_CHARS = 300
 
 export type ConvertedVideo = { ok: true, fileName: string, data: Buffer } | { ok: false, error: string }

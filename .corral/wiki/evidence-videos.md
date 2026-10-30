@@ -13,6 +13,12 @@ conversion failed or timed out, MP4 over the limit), the original is attached
 with a run note giving the reason. When the original doesn't fit either, the
 tool call fails with that reason.
 
+Conversion is limited to 45 seconds. Together with the upload's 120-second
+timeout, this leaves 15 seconds for file handling within Codex's 180-second
+MCP tool budget. A timed-out conversion follows the same original-file and
+run-note fallback, rather than continuing past the agent's tool deadline and
+inviting duplicate attachments on retry.
+
 ffmpeg comes from Debian in `apps/runner/Dockerfile`, so an environment without
 it, such as a local dev runner, takes the fallback path.
 
