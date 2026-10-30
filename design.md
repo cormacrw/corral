@@ -1,4 +1,4 @@
-# COR-190 · Inbox message panel: five options · v3 (Option D chosen)
+# COR-190 · Inbox message panel: five options · v4 (Option D chosen)
 
 Prototype: `apps/web/prototype-dist/` (`pnpm --filter web prototype`). Open the Inbox and use the
 **Current · A · B · C · D · E** strip at the top (prototype only), or go straight to a URL:
@@ -24,6 +24,17 @@ Every option keeps the list column and Plan threads exactly as today. Only the t
 Mock data shape: `TaskInboxItem` from `inbox()` in `app/prototype/fixtures.ts`, `Task` (acceptanceCriteria, gateChecks,
 latestReview, reviewer), `Evidence[]` and `Review[]` from the existing endpoints, and `DesignVersion[]` from
 `GET /projects/:slug/tasks/:number/designs`. The mock API answers `POST /inbox/:taskId/actions` and `POST /projects/:slug/tasks/:number/designs/:version/approve`. Design approval uses the version-specific endpoint, marks the version approved, supersedes earlier versions, moves the task to Approved and advances selection. Code approvals still move to Ready to merge.
+
+## v4 revision: load race and screenshots
+
+The design is unchanged from v3. This version fixes a load race and replaces the screenshot set.
+
+- **Load race on a cold deep link** (e.g. opening `#/inbox/t-cor-5?option=d` directly). The task could load before the live state had the projects, so the project slug was missing. Loads keyed only on the task returned early and never ran again, which left the panel with no thumbnails, no Preview link and no PR tabs.
+  - `useInboxPanel` now derives the slug and adds it to the watch sources of the design-versions and PR-detail loads. A response for a task that's no longer open is dropped.
+  - The Inbox page's evidence and reviews load (in `inbox/[[itemId]].vue`, previously inside the selection watcher) is now its own watch on the selection, the task and the slug. That bug predates COR-190 and affects the shipped Inbox too, so the build should carry the fix.
+  - A new test, `useInboxPanel.test.ts`, covers the slug arriving after the task.
+- **Fixtures:** the review items now keep their named reviewer (Rita) when they have no run, instead of falling back to "Reviewer".
+- **Screenshots:** recaptured from the rebuilt bundle at exactly 1280×800 and 390×844. Each capture waits until the panel has rendered, every image has decoded, and the item's key artifacts are present: the PR link, the Code diff tab for D, and the Preview v1 link for design reviews. The after-approve shot waits for the toast to clear.
 
 ## v3 revision: Option D chosen
 

@@ -336,13 +336,14 @@ export const runs: Run[] = [
 ]
 
 // A task's developer and reviewer are the agents of its latest run of each
-// role, as the server fills them; tasks with no run stay "Any available"
+// role, as the server fills them; tasks with no run keep what they were
+// given (the COR-190 review items name theirs), else "Any available"
 for (const t of tasks) {
   const latest = (role: 'developer' | 'reviewer') => runs.filter(r => r.taskId === t.id && r.role === role).sort((a, b) => b.queuedAt.localeCompare(a.queuedAt))[0]
   const developer = latest('developer')
   const reviewer = latest('reviewer')
-  t.developer = developer ? { id: developer.agentId, name: developer.agentName } : null
-  t.reviewer = reviewer ? { id: reviewer.agentId, name: reviewer.agentName } : null
+  t.developer = developer ? { id: developer.agentId, name: developer.agentName } : t.developer
+  t.reviewer = reviewer ? { id: reviewer.agentId, name: reviewer.agentName } : t.reviewer
 }
 
 // Unbreakable tokens that once widened the Plan conversation past a phone's screen

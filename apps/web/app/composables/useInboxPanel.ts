@@ -109,26 +109,30 @@ export function useInboxPanel(ctx: InboxPanelContext) {
     return url ? { url, number: number ?? '' } : null
   })
   // A design task's latest version: its preview opens in a new tab (D20)
+  // Keyed on the project's slug too: on a cold deep link the task can load
+  // before the live state has the projects, and the loads must run once it does
+  const slug = computed(() => live.state.value.projects.find(p => p.id === task.value?.projectId)?.slug ?? null)
   const designs = ref<DesignVersion[]>([])
-  watch(() => [task.value?.id, isDesign.value], async () => {
+  watch(() => [task.value?.id, isDesign.value, slug.value], async () => {
     designs.value = []
     const t = task.value
-    const slug = live.state.value.projects.find(p => p.id === t?.projectId)?.slug
-    if (!t || !isDesign.value || !slug) return
-    designs.value = await api.tasks.designs(slug, t.number).catch(() => [])
+    if (!t || !isDesign.value || !slug.value) return
+    const loaded = await api.tasks.designs(slug.value, t.number).catch(() => [])
+    if (task.value?.id === t.id) designs.value = loaded
   }, { immediate: true })
   const design = computed(() => designs.value.at(-1) ?? null)
   // A code review's PR description and diff (proposed endpoint, design.md)
   const prDetail = ref<PullRequestDetail | null>(null)
   const prLoading = ref(false)
-  watch(() => [task.value?.id, item.value.prUrl], async () => {
+  watch(() => [task.value?.id, item.value.prUrl, slug.value], async () => {
     prDetail.value = null
     const t = task.value
-    const slug = live.state.value.projects.find(p => p.id === t?.projectId)?.slug
-    if (!t || !item.value.prUrl || isDesign.value || !slug) return
+    if (!t || !item.value.prUrl || isDesign.value || !slug.value) return
     prLoading.value = true
-    prDetail.value = await api.tasks.pullRequest(slug, t.number).catch(() => null)
-    if (task.value?.id === t.id) prLoading.value = false
+    const loaded = await api.tasks.pullRequest(slug.value, t.number).catch(() => null)
+    if (task.value?.id !== t.id) return
+    prDetail.value = loaded
+    prLoading.value = false
   }, { immediate: true })
   const preview = computed(() => design.value ? { url: router.resolve(`/designs/${design.value.id}`).href, label: `Preview v${design.value.version}` } : null)
 

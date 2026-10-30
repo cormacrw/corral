@@ -104,21 +104,30 @@ watch(selected, async (item, previous) => {
   const loadedTask = item ? await api.tasks.byRef(item.taskRef).catch(() => null) : null
   if (selected.value?.id !== item?.id) return
   task.value = loadedTask
-  // A human review carries its evidence in the message (design/inbox.md)
-  const slug = live.state.value.projects.find(p => p.id === task.value?.projectId)?.slug
-  if (item?.type === 'human_review' && task.value && slug) {
-    ;[evidence.value, reviews.value] = await Promise.all([
-      api.tasks.evidence(slug, task.value.number).catch(() => []),
-      api.tasks.reviews(slug, task.value.number).catch(() => [])
-    ])
-  } else {
-    evidence.value = []
-    reviews.value = []
-  }
   // Following the selection, not a click of its own: no extra history entry.
   // Phones open the task as its own page instead.
   if (selected.value?.id !== item?.id) return
   if (item && showTask.value && !device.isMobile.value) flyout.open(item.taskRef, { replace: true })
+}, { immediate: true })
+// A human review carries its evidence in the message (design/inbox.md).
+// Loaded once both the task and its project's slug are known: on a cold deep
+// link the task can arrive before the live state has the projects, and the
+// load must still run when they do. The selection is in the key so a refresh
+// of the Inbox refreshes the evidence, as before.
+const taskSlug = computed(() => live.state.value.projects.find(p => p.id === task.value?.projectId)?.slug ?? null)
+watch(() => [selected.value, task.value, taskSlug.value] as const, async ([item, t, slug]) => {
+  if (item?.type !== 'human_review' || !t || item.taskRef !== t.ref || !slug) {
+    evidence.value = []
+    reviews.value = []
+    return
+  }
+  const [loadedEvidence, loadedReviews] = await Promise.all([
+    api.tasks.evidence(slug, t.number).catch(() => []),
+    api.tasks.reviews(slug, t.number).catch(() => [])
+  ])
+  if (task.value?.id !== t.id) return
+  evidence.value = loadedEvidence
+  reviews.value = loadedReviews
 }, { immediate: true })
 // Capture before the request: plan.session can remove the row before it resolves.
 // Hold refreshes through both the request and flyout close, as for approval.
