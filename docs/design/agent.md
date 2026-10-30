@@ -37,7 +37,7 @@ See what an agent is doing right now, attach to its live run, and look back at p
    - **Previous runs:** each row shows the task ref, an outcome badge, when it ran, the title, and "{project dot} {project} · Run #128 · 18m".
    - **Outcome badges:** Live (`primary`), PR opened / PR updated / Plan proposed (`primary`), Approved / Answered (`success`), Changes requested (`warning`), Stuck / Failed (`error`), Rate limited / Stopped / Interrupted (neutral).
 2. **Run transcript:**
-   - **Run header:** "{ref} {title}", the outcome badge, and "Run #128 · branch · 18:42 elapsed · 12k in · 1.3M cache read · 4k out" (cache reads are shown apart from fresh input, which includes cache writes, because they cost about a tenth as much). On the right: **Open task** (opens the flyout) and, for live runs only, **Interrupt / Resume** (outline) and **Stop run** (`error` subtle).
+   - **Run header:** "{ref} {title}", the outcome badge, and "Run #128 · branch · 18:42 elapsed · 12k in · 1.3M cache read · 4k out · on {runner name}" (the runner the run was placed on, kept with the run) (cache reads are shown apart from fresh input, which includes cache writes, because they cost about a tenth as much). On the right: **Open task** (opens the flyout) and, for live runs only, **Interrupt / Resume** (outline) and **Stop run** (`error` subtle).
    - **Log** (`role="log"`, `aria-live="polite"`), up to 880px wide. Each entry is one of:
      - a **system divider**, e.g. "Run started in worktree …"
      - an **agent message** (highlighted text)

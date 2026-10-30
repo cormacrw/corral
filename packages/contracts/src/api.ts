@@ -717,6 +717,8 @@ export interface Attachment {
 
 export interface Run {
   runnerId: string | null
+  // The runner's name when the run was placed on it
+  runnerName: string | null
   id: string
   // Shown as #128
   number: number

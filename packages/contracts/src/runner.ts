@@ -192,12 +192,20 @@ export interface RunnerInfo extends RunnerCapacity {
   id: string
   name: string
   online: boolean
+  // Agent runs on this runner right now, out of `slots`
+  slotsInUse: number
+  // The protocol its last hello spoke. A runner on another version than the
+  // server's was turned away (closed with 4000) and needs updating.
+  protocol: number
+  needsUpdate: boolean
   connectedAt: string
   lastHeartbeatAt: string
 }
 
 export interface RunnerStatus {
   runners: RunnerInfo[]
+  // The protocol version this server speaks (RUNNER_PROTOCOL_VERSION)
+  protocol: number
   // Aggregate compatibility fields for the shell: online means any runner.
   online: boolean
   runnerId: string | null

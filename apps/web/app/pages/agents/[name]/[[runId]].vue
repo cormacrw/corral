@@ -149,7 +149,7 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
                 variant="subtle"
                 size="xs"
               />
-              <span class="min-w-0 truncate text-xs text-muted">Run #{{ selected.number }} · {{ duration(selected.startedAt, selected.endedAt, now) }} · {{ runTokens(selected) }}</span>
+              <span class="min-w-0 truncate text-xs text-muted">Run #{{ selected.number }} · {{ duration(selected.startedAt, selected.endedAt, now) }} · {{ runTokens(selected) }}<template v-if="selected.runnerName"> · on <span data-testid="run-runner">{{ selected.runnerName }}</span></template></span>
               <div class="ms-auto flex shrink-0 gap-2">
                 <UButton
                   v-if="selected.taskRef"

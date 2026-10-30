@@ -2,6 +2,7 @@ import {
   RUNNER_HEARTBEAT_MS,
   RUNNER_PROTOCOL_VERSION,
   RUNNER_ROLES,
+  type RunnerCapacity,
   type RunnerInfo,
   type RunnerMessage,
   type RunnerStatus,
@@ -44,6 +45,8 @@ export class RunnerHub {
   // on disk before run.ended reads the transcript. Tool calls and job
   // results stay unqueued: a tool call may wait on a job over this socket.
   #queues = new Map<string, Promise<void>>()
+  // Active runs per runner, as the orchestrator last counted them
+  #inUse = new Map<string, number>()
 
   readonly commit: string
 
@@ -59,7 +62,24 @@ export class RunnerHub {
   status(): RunnerStatus {
     const runners = [...this.#runners.values()].map(r => ({ ...r.status }))
     const first = runners.find(r => r.online)
-    return { online: !!first, runnerId: first?.id ?? null, name: first?.name ?? null, connectedAt: first?.connectedAt ?? null, lastHeartbeatAt: first?.lastHeartbeatAt ?? null, runners }
+    return { online: !!first, runnerId: first?.id ?? null, name: first?.name ?? null, connectedAt: first?.connectedAt ?? null, lastHeartbeatAt: first?.lastHeartbeatAt ?? null, protocol: RUNNER_PROTOCOL_VERSION, runners }
+  }
+
+  name(runnerId: string | null): string | null {
+    return runnerId ? this.#runners.get(runnerId)?.status.name ?? null : null
+  }
+
+  // The orchestrator's count of active runs per runner, after a run changes
+  setInUse(counts: Map<string, number>): void {
+    this.#inUse = counts
+    let changed = false
+    for (const [id, runner] of this.#runners) {
+      const n = counts.get(id) ?? 0
+      if (runner.status.slotsInUse === n) continue
+      runner.status.slotsInUse = n
+      changed = true
+    }
+    if (changed) this.#publishStatus()
   }
 
   get online(): boolean {
@@ -100,6 +120,7 @@ export class RunnerHub {
         }
         if (message.type === 'hello') {
           if (message.protocol !== RUNNER_PROTOCOL_VERSION) {
+            this.#turnAway(message)
             socket.close(4000, JSON.stringify({ protocol: RUNNER_PROTOCOL_VERSION, commit: this.commit }))
             return
           }
@@ -112,12 +133,8 @@ export class RunnerHub {
           }
           this.#cliCache.delete(runnerId)
           const now = new Date().toISOString()
-          const capacity = {
-            slots: Number.isInteger(message.slots) && message.slots > 0 ? message.slots : 1,
-            runtimes: Array.isArray(message.runtimes) ? message.runtimes.filter(r => typeof r === 'string') : [],
-            roles: Array.isArray(message.roles) ? message.roles.filter(r => (RUNNER_ROLES as readonly string[]).includes(r)) : []
-          }
-          this.#runners.set(runnerId, { socket, status: { id: runnerId, name: message.name, online: false, connectedAt: now, lastHeartbeatAt: now, ...capacity, commit: message.commit || 'unknown', serverCommit: this.commit, behind: message.commit !== this.commit, draining: !!message.draining || (!!message.autoUpdate && message.commit !== this.commit), updateRequested: !!message.updateRequested } })
+          const capacity = parseCapacity(message)
+          this.#runners.set(runnerId, { socket, status: { id: runnerId, name: message.name, online: false, slotsInUse: this.#inUse.get(runnerId) ?? 0, protocol: message.protocol, needsUpdate: false, connectedAt: now, lastHeartbeatAt: now, ...capacity, commit: message.commit || 'unknown', serverCommit: this.commit, behind: message.commit !== this.commit, draining: !!message.draining || (!!message.autoUpdate && message.commit !== this.commit), updateRequested: !!message.updateRequested } })
           // Don't dispatch into this socket until its hello snapshot has been
           // reconciled: a newly assigned run isn't in that snapshot.
           await this.#handlers?.onConnected(message.activeRuns, runnerId).catch(error => console.error('Runner reconciliation failed', error))
@@ -145,6 +162,36 @@ export class RunnerHub {
         await this.#handlers?.onDisconnected()
       }
     }
+  }
+
+  // A runner on another protocol stays in the list as needing an update,
+  // unless the same runner is connected on the right one
+  #turnAway(message: Extract<RunnerMessage, { type: 'hello' }>): void {
+    if (typeof message.runnerId !== 'string' || !message.runnerId) return
+    const old = this.#runners.get(message.runnerId)
+    if (old?.socket) return
+    const now = new Date().toISOString()
+    this.#runners.set(message.runnerId, {
+      socket: null,
+      status: {
+        id: message.runnerId,
+        name: typeof message.name === 'string' && message.name ? message.name : message.runnerId,
+        online: false,
+        slotsInUse: 0,
+        protocol: message.protocol,
+        needsUpdate: true,
+        commit: message.commit || 'unknown',
+        serverCommit: this.commit,
+        behind: message.commit !== this.commit,
+        draining: false,
+        updateRequested: false,
+        connectedAt: now,
+        lastHeartbeatAt: now,
+        // An older hello may not carry capacity; keep what it last said
+        ...parseCapacity(message, old?.status)
+      }
+    })
+    this.#publishStatus()
   }
 
   // Server shutdown: the runner reconnects on its own with backoff
@@ -273,6 +320,15 @@ export class RunnerHub {
 
   #publishStatus(): void {
     this.#events.publish({ type: 'runner.status', status: this.status() })
+  }
+}
+
+// A hello's capacity, checked: anything missing falls back to `fallback`
+function parseCapacity(message: Extract<RunnerMessage, { type: 'hello' }>, fallback?: RunnerCapacity): RunnerCapacity {
+  return {
+    slots: Number.isInteger(message.slots) && message.slots > 0 ? message.slots : fallback?.slots ?? 1,
+    runtimes: Array.isArray(message.runtimes) ? message.runtimes.filter(r => typeof r === 'string') : fallback?.runtimes ?? [],
+    roles: Array.isArray(message.roles) ? message.roles.filter(r => (RUNNER_ROLES as readonly string[]).includes(r)) : fallback?.roles ?? []
   }
 }
 

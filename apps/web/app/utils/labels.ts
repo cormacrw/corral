@@ -1,4 +1,4 @@
-import { AGENT_RUNTIMES, type Agent, type AgentRuntime, type CliStatus, type InboxItem, type PlanStatus, type Project, type Run, type Task } from '@corral/contracts'
+import { AGENT_RUNTIMES, type Agent, type AgentRuntime, type CliStatus, type RunnerInfo, type RunnerRole, type RunnerStatus, type InboxItem, type PlanStatus, type Project, type Run, type Task } from '@corral/contracts'
 import type { AgentRole, DesignVersionStatus, EpicReviewMode, RunOutcome, RunState, TaskPriority, TaskStatus } from '@corral/core'
 
 export type Color = 'primary' | 'secondary' | 'success' | 'info' | 'warning' | 'error' | 'neutral'
@@ -54,6 +54,25 @@ export const RUNTIME: Record<AgentRuntime, string> = { 'claude-code': 'Claude', 
 export function runtimeLabel(runtime: string): string {
   return RUNTIME[runtime as AgentRuntime] ?? runtime
 }
+// Runners (design/settings.md, Runner): a runner turned away for an old
+// protocol needs updating; otherwise it's online or offline
+const RUNNER_ROLE: Record<RunnerRole, string> = { ...ROLE, design: 'Design' }
+export function runnerRoles(roles: RunnerRole[]): string {
+  return roles.map(r => RUNNER_ROLE[r]).join(', ')
+}
+export function runnerState(runner: Pick<RunnerInfo, 'online' | 'needsUpdate'>): { label: string, color: Color } {
+  if (runner.needsUpdate) return { label: 'Needs update', color: 'warning' }
+  return runner.online ? { label: 'Online', color: 'success' } : { label: 'Offline', color: 'error' }
+}
+// The shell's one-line summary: "home-server", "2 of 3 online", or why none is
+export function runnerSummary(status: RunnerStatus | null): string {
+  const runners = status?.runners ?? []
+  const online = runners.filter(r => r.online)
+  if (!runners.length) return 'not connected'
+  if (runners.length === 1) return runners[0]!.needsUpdate ? `${runners[0]!.name} needs an update` : runners[0]!.name
+  return `${online.length} of ${runners.length} online`
+}
+
 // The runtimes whose CLI the runner found installed, for the runtime menu (D18)
 export function detectedRuntimes(clis: Pick<CliStatus, 'id' | 'version'>[]): AgentRuntime[] {
   return (Object.keys(AGENT_RUNTIMES) as AgentRuntime[]).filter(r => clis.some(c => c.id === AGENT_RUNTIMES[r] && c.version))

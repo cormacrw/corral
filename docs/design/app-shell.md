@@ -39,7 +39,7 @@ There is no top header on desktop; every page owns the full height. Below 1024px
 
 ### Sidebar footer
 
-- **Runner card** (`bg-elevated`): server icon, "Runner online", "{runner name} · {signed-in runtimes}" (e.g. "home-server · Claude Code, Codex"; the canvas says "This Mac") and a status dot (`success`, `warning` while reconnecting, `error` when offline).
+- **Runner card** (`bg-elevated`): server icon, "Runner online" while any runner is online, then the runner's name when there's one, or "{online} of {total} online" when there are several, and a status dot (`success`, `warning` while reconnecting, `error` when no runner is online). Settings · Runner lists each one ([settings.md](settings.md)).
 - **User row:** avatar and name (not a menu), a colour-mode button (`UColorModeButton`) and a collapse button (`UDashboardSidebarCollapse`).
 
 ### Active state
@@ -53,6 +53,8 @@ The active item has `bg-elevated` and `text-primary`, with its icon in `primary`
 - The footer stacks vertically.
 
 ## Banners
+
+**Runner offline:** a warning banner shows only when no runner is online: "The runner is offline…" with one runner, "Every runner is offline…" with several, or "The runner needs an update to protocol {n}…" when the only runners known were turned away for an old protocol. It links to **Runners** in Settings. When some runners are offline and another is online there is no banner; the runner list shows them as offline.
 
 **Updating (D16):** while either update-hold phase is active, show an info banner: "Corral is waiting to update". Plan messages and question replies remain enabled: turns start during draining and queue during finishing.
 

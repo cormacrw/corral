@@ -58,7 +58,7 @@ const live = computed(() => !!selected.value && isLiveRun(selected.value))
             variant="subtle"
             size="sm"
           />
-          <span class="truncate tabular-nums">{{ duration(selected.startedAt, selected.endedAt, now) }} · {{ runTokens(selected) }}</span>
+          <span class="truncate tabular-nums">{{ duration(selected.startedAt, selected.endedAt, now) }} · {{ runTokens(selected) }}<template v-if="selected.runnerName"> · on {{ selected.runnerName }}</template></span>
         </p>
         <UButton
           v-if="live"
