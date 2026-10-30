@@ -1,10 +1,70 @@
 import { marked, type Token, type Tokens } from 'marked'
 
+export interface RichTextIssue {
+  path: (string | number)[]
+  message: string
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+// Validate the structure converters consume, not an editor node/mark allowlist.
+// Unknown extension fields are deliberately retained by the API.
+export function richTextIssue(doc: unknown): RichTextIssue | undefined {
+  const pending: { value: unknown, path: (string | number)[], mark?: boolean }[] = [{ value: doc, path: [] }]
+  while (pending.length) {
+    const { value, path, mark } = pending.pop()!
+    const issue = (field: string, message: string): RichTextIssue => ({ path: [...path, field], message })
+    if (!isRecord(value)) return { path, message: `Expected a rich-text ${mark ? 'mark' : 'node'} object` }
+    if (typeof value.type !== 'string' || !value.type.trim()) return issue('type', 'Expected a non-empty node or mark type')
+    if (path.length === 0 && value.type !== 'doc') return issue('type', 'Expected a doc root')
+    if (value.attrs !== undefined && !isRecord(value.attrs)) return issue('attrs', 'Expected an attributes object')
+    const attrs = value.attrs as Record<string, unknown> | undefined
+    const stringAttrs = mark
+      ? (value.type === 'link' ? ['href'] : [])
+      : value.type === 'image' ? ['src', 'alt'] : value.type === 'codeBlock' ? ['language'] : []
+    for (const key of stringAttrs) {
+      if (attrs?.[key] != null && typeof attrs[key] !== 'string') {
+        return { path: [...path, 'attrs', key], message: 'Expected a string or null' }
+      }
+    }
+    if (mark) continue
+    if (value.type === 'heading' && attrs?.level != null
+      && (typeof attrs.level !== 'number' || !Number.isInteger(attrs.level) || attrs.level < 1 || attrs.level > 6)) {
+      return { path: [...path, 'attrs', 'level'], message: 'Expected a heading level from 1 to 6' }
+    }
+    if (value.type === 'orderedList' && attrs?.start != null
+      && (typeof attrs.start !== 'number' || !Number.isSafeInteger(attrs.start))) {
+      return { path: [...path, 'attrs', 'start'], message: 'Expected a safe integer' }
+    }
+    if (value.text !== undefined && typeof value.text !== 'string') return issue('text', 'Expected text to be a string')
+    if (value.type === 'text' && typeof value.text !== 'string') return issue('text', 'Expected text to be a string')
+    for (const field of ['content', 'marks'] as const) {
+      const items = value[field]
+      if (items === undefined) continue
+      if (!Array.isArray(items)) return issue(field, 'Expected an array')
+      for (let i = items.length - 1; i >= 0; i--) {
+        pending.push({ value: items[i], path: [...path, field, i], mark: field === 'marks' })
+      }
+    }
+  }
+}
+
+function validateStoredRichText(doc: unknown, context: string): void {
+  if (doc == null) return
+  const issue = richTextIssue(doc)
+  if (issue) {
+    const path = issue.path.reduce<string>((path, part) => typeof part === 'number' ? `${path}[${part}]` : `${path}.${part}`, 'description')
+    throw new Error(`${context}: invalid rich text at ${path}: ${issue.message}`)
+  }
+}
+
 // Task descriptions are rich-text documents from the editor (design/task.md),
 // in the ProseMirror/TipTap JSON shape: nodes with `text` or `content`.
 // The Definition of Ready only needs to know whether there's any text, so
 // images (attachment nodes with no text) don't count.
 export function richTextToPlainText(doc: unknown): string {
+  validateStoredRichText(doc, 'Converting to plain text')
   const parts: string[] = []
   const stack: unknown[] = [doc]
   while (stack.length > 0) {
@@ -134,6 +194,7 @@ function unescapeHtml(text: string): string {
 // line. Those are re-read as markdown; a document with any formatting or
 // structure is already the editor's and is returned as is.
 export function upgradePlainMarkdown<T>(doc: T): T | RichTextDocument {
+  validateStoredRichText(doc, 'Upgrading plain Markdown')
   const content = (doc as { content?: unknown } | null)?.content
   if (!Array.isArray(content) || content.length === 0) return doc
   const lines: string[] = []
@@ -151,6 +212,7 @@ export function upgradePlainMarkdown<T>(doc: T): T | RichTextDocument {
 // The reverse, for agent prompts: structure survives as markdown where
 // plain text would flatten it
 export function richTextToMarkdown(doc: unknown): string {
+  validateStoredRichText(doc, 'Converting to Markdown')
   const content = (doc as { content?: unknown } | null)?.content
   if (!Array.isArray(content)) return ''
   return (content as RichNode[]).map(blockToMarkdown).filter(Boolean).join('\n\n').trim()
@@ -165,7 +227,7 @@ function blockToMarkdown(node: RichNode): string {
     case 'blockquote': return children.map(blockToMarkdown).join('\n\n').split('\n').map(line => `> ${line}`).join('\n')
     case 'bulletList':
     case 'orderedList': {
-      const start = Number(node.attrs?.start ?? 1)
+      const start = node.type === 'orderedList' ? Number(node.attrs?.start ?? 1) : 1
       return children.map((item, i) => {
         const bullet = node.type === 'orderedList' ? `${start + i}. ` : '- '
         const body = (item.content ?? []).map(blockToMarkdown).join('\n')

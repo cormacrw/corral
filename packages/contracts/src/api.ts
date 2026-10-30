@@ -3,6 +3,7 @@ import {
   EPIC_REVIEW_MODES,
   MERGE_METHODS,
   PROJECT_PREFIX_PATTERN,
+  richTextIssue,
   TASK_PRIORITIES,
   TASK_STATUSES,
   TASK_TYPES,
@@ -124,8 +125,11 @@ export type PatchEpicInput = z.infer<typeof patchEpicInput>
 
 // ── Tasks ───────────────────────────────────────────────────────────────────
 
-// A ProseMirror/TipTap document from the editor; its inner shape is the editor's business
-export const richTextDocument = z.looseObject({ type: z.literal('doc') })
+// Structural safety only; semantic Ready checks belong in core.
+export const richTextDocument = z.looseObject({ type: z.literal('doc') }).superRefine((doc, ctx) => {
+  const issue = richTextIssue(doc)
+  if (issue) ctx.addIssue({ code: 'custom', ...issue })
+})
 
 export const createTaskInput = z.object({
   title: z.string().trim().min(1),
