@@ -48,4 +48,10 @@ describe('transcriptEntries', () => {
     expect(shape(events)).toEqual(['steps(1)', 'thinking', 'steps(1)'])
     expect(entries[1]).toMatchObject({ type: 'thinking', text: 'The tests failed, so check the config.' })
   })
+
+  it('labels the PM\'s team status check', () => {
+    const steps = (agent?: string) => transcriptEntries([{ type: 'tool_call', id: 'a', tool: 'mcp__corral__get_agent_activity', input: agent ? { agent } : {} }])
+    expect(steps()[0]).toMatchObject({ steps: [{ verb: 'Checked what the team is doing', target: '' }] })
+    expect(steps('Jack')[0]).toMatchObject({ steps: [{ verb: 'Checked what the team is doing', target: 'Jack' }] })
+  })
 })

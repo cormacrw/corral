@@ -142,6 +142,7 @@ export type AgentTool =
   | 'report_outcome'
   | 'list_tasks'
   | 'get_run_outcomes'
+  | 'get_agent_activity'
   | 'ask_question'
   | 'propose_plan'
   | 'approve_plan'

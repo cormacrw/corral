@@ -161,6 +161,8 @@ function describe(rawTool: string, input: unknown): Pick<ToolStep, 'kind' | 'ver
       return { kind: 'phrase', verb: 'Listed the tasks', target: '' }
     case 'get_run_outcomes':
       return { kind: 'phrase', verb: 'Checked past runs', target: str('taskRef') }
+    case 'get_agent_activity':
+      return { kind: 'phrase', verb: 'Checked what the team is doing', target: str('agent') }
     case 'ask_question':
       return { kind: 'phrase', verb: 'Asked a question', target: firstLine(str('question')) }
     case 'propose_plan':

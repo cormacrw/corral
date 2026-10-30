@@ -96,6 +96,10 @@ const toolDefinitions = {
     description: 'Recent run outcomes for a task.',
     input: { taskRef: z.string().describe('e.g. COR-12') }
   },
+  get_agent_activity: {
+    description: 'What the team is doing, across every project: each agent with its role, runtime, status, paused state and pausedUntil, its active runs and a few recent ones. Each run has its state, outcome, project, task or epic, runner, summary, error and times. Long summaries and errors are shortened. Pass `agent` for one agent with more of its run history.',
+    input: { agent: z.string().min(1).optional().describe('An agent\'s name, e.g. Jack; leave out for the whole team') }
+  },
   ask_question: {
     description: 'Ask the human a question in the Plan conversation. Add `recommendation` with the answer you suggest, and `options` (2–5 short choices) when the answer is one of a few.',
     input: askQuestionInput.shape
@@ -160,7 +164,7 @@ export const ROLE_TOOLS: Record<AgentRole, AgentTool[]> = {
   designer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'submit_design', 'report_outcome'],
   developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'report_outcome'],
   reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'get_design', 'report_outcome'],
-  pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
+  pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_agent_activity', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
 }
 
 // The tools a run gets: its role's alone. Only a designer submits designs (D23)

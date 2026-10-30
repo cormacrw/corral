@@ -226,6 +226,11 @@ describe('toolsFor', () => {
     }
   })
 
+  it('gives get_agent_activity to the PM alone', () => {
+    expect(toolsFor({ role: 'pm' })).toContain('get_agent_activity')
+    for (const role of ['developer', 'designer', 'reviewer'] as const) expect(toolsFor({ role })).not.toContain('get_agent_activity')
+  })
+
   it('serves submit_design over MCP only to a designer, and refuses a call naming the role', async () => {
     const server = new ToolServer()
     await server.start()
