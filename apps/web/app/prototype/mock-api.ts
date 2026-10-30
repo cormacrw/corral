@@ -158,6 +158,11 @@ route('GET', '/projects/:slug/pull-requests', ([slug]) => {
   return f.pullRequests.filter(pr => pr.taskRef.startsWith(`${p.prefix}-`))
 })
 route('GET', '/projects/:slug/epics', ([slug]) => f.epics.filter(e => e.projectId === project(slug!).id))
+route('POST', '/epics/:id/review', ([id]) => {
+  const epic = f.epics.find(e => e.id === id)
+  if (epic) epic.reviewState = 'open'
+  return { ok: true }
+})
 route('PUT', '/epics/:id/dependencies', ([id], body) => {
   const epic = f.epics.find(e => e.id === id) ?? notFound()
   const all = f.epics.filter(e => e.projectId === epic.projectId)

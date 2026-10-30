@@ -463,7 +463,7 @@ export type ApprovePlanInput = z.input<typeof approvePlanInput>
 // ── Inbox (D11, design/inbox.md) ───────────────────────────────────────────
 
 export type TaskInboxItemType = 'human_review' | 'question' | 'blocked' | 'failed' | 'activity'
-export type InboxItemType = TaskInboxItemType | 'plan_thread' | 'epic_review' | 'release_notes'
+export type InboxItemType = TaskInboxItemType | 'plan_thread' | 'epic_review' | 'release_notes' | 'epic_conflict'
 
 interface InboxItemBase {
   project: { id: string, slug: string, name: string, thumbnailColor: string | null, thumbnailUrl: string | null }
@@ -514,7 +514,8 @@ export interface PlanThreadItem extends InboxItemBase {
 }
 
 export const epicReviewActionInput = z.object({
-  action: z.enum(['approve', 'request_changes']),
+  // `rebase` hands an epic PR conflict to a developer run
+  action: z.enum(['approve', 'request_changes', 'rebase']),
   headSha: z.string().min(1),
   text: z.string().trim().optional()
 }).refine(input => input.action !== 'request_changes' || Boolean(input.text), { message: 'Describe the changes needed', path: ['text'] })
@@ -552,7 +553,23 @@ export function needsAttention(item: InboxItem): boolean {
   return item.type !== 'release_notes'
 }
 
-export type InboxItem = TaskInboxItem | PlanThreadItem | EpicReviewItem | ReleaseNotesItem
+// An epic PR that couldn't rebase onto the target branch (D23)
+export interface EpicConflictItem extends InboxItemBase {
+  id: string
+  type: 'epic_conflict'
+  epicId: string
+  taskId: null
+  taskRef: null
+  prUrl: string
+  body: string
+  resolution: null
+  headSha: string
+  targetBranch: string
+  // Empty when the runner couldn't work them out
+  files: string[]
+}
+
+export type InboxItem = TaskInboxItem | PlanThreadItem | EpicReviewItem | ReleaseNotesItem | EpicConflictItem
 
 export interface Inbox {
   // Attention items newest first, followed by undismissed release notes

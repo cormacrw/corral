@@ -2,7 +2,7 @@ import { tmpdir } from 'node:os'
 import type { RepoSummary, SetupJob, SetupJobResult } from '@corral/contracts'
 import type { RunnerConfig } from './config.ts'
 import { exec } from './exec.ts'
-import { barePath, syncRepository } from './repos.ts'
+import { barePath, conflictingFiles, syncRepository } from './repos.ts'
 import { removeWorktree, worktreePath } from './workspace.ts'
 
 // Setup jobs from the server (architecture.md, "Setup jobs, not only agent
@@ -49,6 +49,12 @@ export async function runSetupJob(config: RunnerConfig, job: SetupJob): Promise<
         ;(await removeWorktree(bare, path, role === 'reviewer') ? removed : kept).push(path)
       }
       return { kind: 'cleanup_worktrees', removed, kept }
+    }
+
+    case 'rebase_conflicts': {
+      const error = await syncRepository(config.dataDir, job.repository)
+      if (error) throw new Error(error)
+      return { kind: 'rebase_conflicts', files: await conflictingFiles(barePath(config.dataDir, job.repository), job.branch, job.onto) }
     }
 
     case 'session_title':

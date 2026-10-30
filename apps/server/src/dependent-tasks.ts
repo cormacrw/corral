@@ -1,30 +1,39 @@
 import { schema, type Executor } from '@corral/db'
-import { and, eq, isNull, notInArray } from 'drizzle-orm'
+import { and, eq, isNull } from 'drizzle-orm'
+import { holdsEpicOpen } from './epic-review-state.ts'
 import type { EventBus } from './events.ts'
 import { loadTask } from './tasks.ts'
+
+const { epics, epicDependencies, taskDependencies, tasks } = schema
 
 // Called after a merge commits, including spikes that complete without a PR.
 // Return IDs as well as publishing, so the scheduler bypasses wake intervals.
 export async function publishDependents(db: Executor, events: EventBus, taskId: string): Promise<string[]> {
-  const { tasks, taskDependencies, epicDependencies } = schema
-  const ids = new Set((await db.select({ id: taskDependencies.taskId }).from(taskDependencies)
-    .where(eq(taskDependencies.dependsOnId, taskId))).map(t => t.id))
+  const ids = (await db.select({ id: taskDependencies.taskId }).from(taskDependencies)
+    .where(eq(taskDependencies.dependsOnId, taskId))).map(t => t.id)
   const [task] = await db.select().from(tasks).where(eq(tasks.id, taskId))
-  if (task?.epicId) {
-    const [open] = await db.select({ id: tasks.id }).from(tasks).where(and(
-      eq(tasks.epicId, task.epicId), isNull(tasks.deletedAt),
-      notInArray(tasks.status, ['draft', 'backlog', 'merged'])
-    )).limit(1)
-    if (!open) {
-      const dependents = await db.select({ id: tasks.id }).from(epicDependencies)
-        .innerJoin(tasks, eq(tasks.epicId, epicDependencies.epicId))
-        .where(and(eq(epicDependencies.dependsOnEpicId, task.epicId), isNull(tasks.deletedAt)))
-      for (const dependent of dependents) ids.add(dependent.id)
-    }
-  }
+  return publish(db, events, [...ids, ...task?.epicId ? await epicDependents(db, task.epicId) : []])
+}
+
+// Called when an epic PR merges (D22): tasks in dependent epics can start
+export async function publishEpicDependents(db: Executor, events: EventBus, epicId: string): Promise<string[]> {
+  return publish(db, events, await epicDependents(db, epicId))
+}
+
+async function epicDependents(db: Executor, epicId: string): Promise<string[]> {
+  const [open] = await db.select({ id: tasks.id }).from(tasks).innerJoin(epics, eq(epics.id, tasks.epicId))
+    .where(and(eq(epics.id, epicId), holdsEpicOpen(tasks, epics))).limit(1)
+  if (open) return []
+  return (await db.select({ id: tasks.id }).from(epicDependencies)
+    .innerJoin(tasks, eq(tasks.epicId, epicDependencies.epicId))
+    .where(and(eq(epicDependencies.dependsOnEpicId, epicId), isNull(tasks.deletedAt)))).map(t => t.id)
+}
+
+async function publish(db: Executor, events: EventBus, taskIds: string[]): Promise<string[]> {
+  const ids = [...new Set(taskIds)]
   for (const id of ids) {
     const dependent = await loadTask(db, id).catch(() => null)
     if (dependent) events.publish({ type: 'task.updated', task: dependent })
   }
-  return [...ids]
+  return ids
 }

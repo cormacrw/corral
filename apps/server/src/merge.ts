@@ -1,7 +1,8 @@
 import { failedMergeGates, type Actor, type MergeGateFacts } from '@corral/core'
 import { schema, type Database } from '@corral/db'
 import { and, asc, desc, eq, isNull } from 'drizzle-orm'
-import { taskBase } from './task-base.ts'
+import { EpicMerger } from './epic-merge.ts'
+import { isEpicRebaseTask, taskBase } from './task-base.ts'
 import { publishDependents } from './dependent-tasks.ts'
 import type { EventBus } from './events.ts'
 import type { CheckResult, GitHubClient, PullRequest } from './github.ts'
@@ -50,11 +51,13 @@ export class MergeOrchestrator {
   #attempts = new Map<string, number>()
   // Tasks being advanced right now: a tick and a human approval can overlap
   #busy = new Set<string>()
+  #epics: EpicMerger
   // Set by the Orchestrator while the kill switch or the update hold is on
   stopped = false
 
   constructor(deps: MergeDeps) {
     this.#d = deps
+    this.#epics = new EpicMerger(deps)
   }
 
   #now(): Date {
@@ -63,7 +66,7 @@ export class MergeOrchestrator {
 
   // Merges being advanced right now; a redeploy waits for these
   get inFlight(): number {
-    return this.#busy.size
+    return this.#busy.size + this.#epics.inFlight
   }
 
   // One pass over every task in Ready to merge
@@ -76,9 +79,23 @@ export class MergeOrchestrator {
       .orderBy(asc(tasks.updatedAt))
     for (const { task, project } of waiting) {
       if (this.stopped) return
-      if (!task.prNumber || !task.headSha) continue
-      await this.#advanceOnce(task, project)
+      if (await isEpicRebaseTask(this.#d.db, task)) await this.#settleEpicRebase(task)
+      else if (task.prNumber && task.headSha) await this.#advanceOnce(task, project)
     }
+    await this.#epics.tick(() => this.stopped)
+  }
+
+  // A rebase task's work reached the epic branch when the runner pushed it;
+  // nothing is left to merge, and the epic PR goes back to integration review
+  async #settleEpicRebase(task: TaskRow): Promise<void> {
+    await this.#d.db.transaction(async (tx) => {
+      const locked = await lockTask(tx, task.id)
+      if (locked.task.status !== 'ready_to_merge') return
+      await applyTransition(tx, locked.task, locked.project, { type: 'merged_outside' }, server, { event: 'merged', headSha: task.headSha })
+      await tx.update(tasks).set({ mergedAt: this.#now(), updatedAt: this.#now() }).where(eq(tasks.id, task.id))
+    })
+    await this.#publish(task.id)
+    await this.cleanup(task.id)
   }
 
   // Approvals recorded before Ready to merge existed left the task in Agent

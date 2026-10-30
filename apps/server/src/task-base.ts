@@ -6,12 +6,22 @@ import type { ProjectRow, TaskRow } from './tasks.ts'
 
 export class EpicBranchError extends Error {}
 
+// A task handed an epic PR's rebase (D23): its branch is the epic branch, so
+// it opens no PR of its own
+export async function isEpicRebaseTask(db: Executor, task: TaskRow): Promise<boolean> {
+  if (!task.epicId || !task.branch) return false
+  const [epic] = await db.select({ branch: schema.epics.branch }).from(schema.epics).where(eq(schema.epics.id, task.epicId))
+  return epic?.branch === task.branch
+}
+
 // Resolve at every boundary so jobs, prompts, PRs and conflicts agree.
 // Supplying GitHub prepares the base before the first developer assignment.
 export async function taskBase(db: Executor, task: TaskRow, project: ProjectRow, github?: GitHubClient): Promise<string> {
   if (!task.epicId || task.type === 'spike' || task.type === 'design') return project.defaultBranch
   const [epic] = await db.select().from(schema.epics).where(eq(schema.epics.id, task.epicId))
-  if (!epic || epic.reviewMode === 'direct') return project.defaultBranch
+  if (!epic || epic.reviewMode === 'direct' || epic.reviewState === 'merged') return project.defaultBranch
+  // A rebase task works on the epic branch itself, against the target branch
+  if (epic.branch && task.branch === epic.branch) return project.defaultBranch
   const branch = epic.branch ?? `corral/epic-${epic.id}-${slugify(epic.title).slice(0, 40).replace(/-+$/, '')}`
   if (github) {
     try {

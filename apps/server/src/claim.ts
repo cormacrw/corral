@@ -2,9 +2,10 @@ import { ACTIVE_RUN_STATES, LEASE_DURATION_MS, transition, type Actor, type Task
 import { schema, type Executor } from '@corral/db'
 import { and, asc, count, eq, gt, inArray, isNotNull, isNull, ne, notInArray, notExists, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
+import { holdsEpicOpen } from './epic-review-state.ts'
 import { toTaskState, type TaskRow } from './tasks.ts'
 
-const { agents, auditLog, projects, reviews, runs, epicDependencies, taskDependencies, tasks } = schema
+const { agents, auditLog, projects, reviews, runs, epics, epicDependencies, taskDependencies, tasks } = schema
 
 // How many candidate tasks a placing claim locks and tries at a time
 export const PLACE_BATCH = 50
@@ -66,9 +67,9 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
             .innerJoin(dependency, eq(dependency.id, taskDependencies.dependsOnId))
             .where(and(eq(taskDependencies.taskId, tasks.id), ne(dependency.status, 'merged')))),
           notExists(tx.select({ one: sql`1` }).from(epicDependencies)
-            .innerJoin(epicTask, eq(epicTask.epicId, epicDependencies.dependsOnEpicId))
-            .where(and(eq(epicDependencies.epicId, tasks.epicId), isNull(epicTask.deletedAt),
-              notInArray(epicTask.status, ['draft', 'backlog', 'merged']))))
+            .innerJoin(epics, eq(epics.id, epicDependencies.dependsOnEpicId))
+            .innerJoin(epicTask, eq(epicTask.epicId, epics.id))
+            .where(and(eq(epicDependencies.epicId, tasks.epicId), holdsEpicOpen(epicTask, epics))))
         )
       : and(
           eq(tasks.status, 'agent_review'),
