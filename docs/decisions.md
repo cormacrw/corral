@@ -774,6 +774,8 @@ Plan approval isn't a confirm-required tool: `approve_plan` keeps D9's rule, tha
 
 Every server API route has a PM tool or an **explicit, reasoned exclusion**. The exclusions are a list in the repository, each with its reason, such as a route only the deploy script calls (`POST /api/deployments`). A **coverage check** in CI fails when a route has neither, so a new route can't quietly leave the PM behind.
 
+The method/path map is `pmRouteTools` in [`apps/server/src/pm-route-coverage.ts`](../apps/server/src/pm-route-coverage.ts); `pmRouteExclusions` beside it records an individual reason for every exclusion. Keys are exact registered methods and paths (including parameter names), not path prefixes. `apps/server/src/pm-route-coverage.test.ts` assembles the real listener through `createServerApp`, including the runner WebSocket and design-file middleware, and checks Hono's route table without starting a listener or database. It runs with the normal server tests in CI. Unknown tools are checked against `PM_TOOL_NAMES` in `packages/contracts/src/pm-tools.ts`, the same registry used to expose the PM role's MCP tools. New routes must add a mapping to an existing tool or a reasoned exclusion; removed routes must remove their entries. A mapping records the corresponding operation, not identical transport or response shape (for example, `get_run` returns a bounded transcript rather than streaming it).
+
 ### Global sessions
 
 Sessions can be **global** as well as tied to a project. A global session has **no repository worktree**. To read code it starts a thread in a project, which is a normal project session with its read-only checkout (D9). Sessions tied to a project work as before.

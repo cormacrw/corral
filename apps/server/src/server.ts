@@ -14,6 +14,30 @@ export interface RunningServer {
 // Both listeners share the runner hub; the external listener never mounts the API (D25).
 export function startServer(deps: AppDeps, options: { host: string, port: number, runnerToken?: string | undefined, runnerOnly?: boolean | undefined }): Promise<RunningServer> {
   if (options.runnerOnly && !options.runnerToken) throw new Error('CORRAL_RUNNER_TOKEN is required for CORRAL_RUNNER_LISTEN')
+  const { app: root, injectWebSocket } = createServerApp(deps, options)
+
+  return new Promise((resolve, reject) => {
+    const server: ServerType = serve({ fetch: root.fetch, hostname: options.host, port: options.port }, (info: AddressInfo) => {
+      resolve({
+        url: `http://${info.address.includes(':') ? `[${info.address}]` : info.address}:${info.port}`,
+        // close() alone waits for every connection, and the runner's upgraded
+        // WebSocket never ends on its own, so it's closed first and the rest
+        // are dropped (Docker stop, dev restarts)
+        close: () => new Promise((done) => {
+          deps.runner.disconnect()
+          server.close(() => done())
+          if ('closeAllConnections' in server) (server as { closeAllConnections(): void }).closeAllConnections()
+        })
+      })
+    })
+    server.once('error', reject)
+    injectWebSocket(server)
+  })
+}
+
+// Assemble the actual listener routes without binding a port, also used by the
+// PM coverage check so WebSocket and future wrapper routes cannot escape it.
+export function createServerApp(deps: AppDeps, options: { runnerToken?: string | undefined, runnerOnly?: boolean | undefined } = {}) {
   const root = new Hono()
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app: root })
 
@@ -43,23 +67,7 @@ export function startServer(deps: AppDeps, options: { host: string, port: number
   }))
   if (!options.runnerOnly) root.route('/', createApp(deps))
 
-  return new Promise((resolve, reject) => {
-    const server: ServerType = serve({ fetch: root.fetch, hostname: options.host, port: options.port }, (info: AddressInfo) => {
-      resolve({
-        url: `http://${info.address.includes(':') ? `[${info.address}]` : info.address}:${info.port}`,
-        // close() alone waits for every connection, and the runner's upgraded
-        // WebSocket never ends on its own, so it's closed first and the rest
-        // are dropped (Docker stop, dev restarts)
-        close: () => new Promise((done) => {
-          deps.runner.disconnect()
-          server.close(() => done())
-          if ('closeAllConnections' in server) (server as { closeAllConnections(): void }).closeAllConnections()
-        })
-      })
-    })
-    server.once('error', reject)
-    injectWebSocket(server)
-  })
+  return { app: root, injectWebSocket }
 }
 
 // Hash both inputs to fixed-length buffers before the constant-time comparison.

@@ -218,3 +218,12 @@ export function requiresPmConfirmation(tool: string, input: unknown): tool is ke
 export function isPmDirectTool(tool: string): tool is PmDirectTool {
   return Object.hasOwn(pmDirectTools, tool)
 }
+
+// The PM role's complete tool registry, shared by MCP registration and API coverage.
+// Legacy planning/read tools have their definitions in apps/runner/src/mcp.ts.
+export const PM_TOOL_NAMES = [
+  'list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design',
+  'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs',
+  ...Object.keys(pmActionTools) as (keyof typeof pmActionTools)[],
+  ...Object.keys(pmDirectTools) as (keyof typeof pmDirectTools)[]
+] satisfies AgentTool[]
