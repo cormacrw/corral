@@ -31,7 +31,7 @@ describe('epic scheduling', () => {
     await t.db.insert(epicDependencies).values({ projectId: project.id, epicId: b!.id, dependsOnEpicId: a!.id })
     const first = await t.createTask(project.slug)
     const second = await t.createTask(project.slug)
-    await t.db.update(tasks).set({ epicId: a!.id, status: 'blocked' }).where(eq(tasks.id, first.id))
+    await t.db.update(tasks).set({ epicId: a!.id, status: 'blocked', statusReason: 'Waiting for a decision' }).where(eq(tasks.id, first.id))
     await t.db.update(tasks).set({ epicId: b!.id, status: 'ready' }).where(eq(tasks.id, second.id))
     const [dev] = await t.db.select().from(agents).where(eq(agents.role, 'developer'))
     await t.db.update(schema.projects).set({ paused: false }).where(eq(schema.projects.id, project.id))
@@ -56,12 +56,12 @@ describe('epic scheduling', () => {
     expect(await get(second.number)).toMatchObject({ dependsOn: [], waitingOnEpics: [{ id: a.id, title: a.title }] })
     expect(await get(first.number)).toMatchObject({ waitingOnEpics: [] })
     for (const status of ['draft', 'backlog', 'merged'] as const) {
-      await t.db.update(tasks).set({ status }).where(eq(tasks.id, first.id))
+      await t.db.update(tasks).set({ status, statusReason: null }).where(eq(tasks.id, first.id))
       expect(await get(second.number)).toMatchObject({ waitingOnEpics: [] })
     }
-    await t.db.update(tasks).set({ status: 'blocked', deletedAt: new Date() }).where(eq(tasks.id, first.id))
+    await t.db.update(tasks).set({ status: 'blocked', statusReason: 'Waiting for a decision', deletedAt: new Date() }).where(eq(tasks.id, first.id))
     expect(await get(second.number)).toMatchObject({ waitingOnEpics: [] })
-    await t.db.update(tasks).set({ status: 'human_review', type: 'spike', humanReview: true, deletedAt: null }).where(eq(tasks.id, first.id))
+    await t.db.update(tasks).set({ status: 'human_review', statusReason: null, type: 'spike', humanReview: true, deletedAt: null }).where(eq(tasks.id, first.id))
     expect(await get(second.number)).toMatchObject({ waitingOnEpics: [{ id: a.id, title: a.title }] })
     expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${first.number}/approve`)).status).toBe(200)
     expect(t.events).toContainEqual(expect.objectContaining({ type: 'task.updated', task: expect.objectContaining({ id: second.id, waitingOnEpics: [] }) }))
@@ -158,17 +158,17 @@ describe('epic scheduling', () => {
   it('blocks for every unfinished board state and permits Merged, Draft, Backlog, deleted and empty epics', async () => {
     const { first, second, dev } = await setup()
     for (const status of ['ready', 'in_progress', 'agent_review', 'human_review', 'ready_to_merge', 'blocked', 'failed'] as const) {
-      await t.db.update(tasks).set({ status }).where(eq(tasks.id, first.id))
+      await t.db.update(tasks).set({ status, statusReason: status === 'blocked' || status === 'failed' ? 'Waiting for a decision' : null }).where(eq(tasks.id, first.id))
       expect(await claimNextTask(t.db, dev.id, new Date(), [second.id])).toBeNull()
     }
     for (const status of ['draft', 'backlog', 'merged'] as const) {
-      await t.db.update(tasks).set({ status }).where(eq(tasks.id, first.id))
+      await t.db.update(tasks).set({ status, statusReason: null }).where(eq(tasks.id, first.id))
       const claim = await claimNextTask(t.db, dev.id, new Date(), [second.id])
       expect(claim?.taskId).toBe(second.id)
       await t.db.update(schema.runs).set({ state: 'completed', endedAt: new Date() }).where(eq(schema.runs.id, claim!.runId))
       await t.db.update(tasks).set({ leaseRunId: null, leaseRole: null, leaseExpiresAt: null }).where(eq(tasks.id, second.id))
     }
-    await t.db.update(tasks).set({ status: 'blocked', deletedAt: new Date() }).where(eq(tasks.id, first.id))
+    await t.db.update(tasks).set({ status: 'blocked', statusReason: 'Waiting for a decision', deletedAt: new Date() }).where(eq(tasks.id, first.id))
     expect((await claimNextTask(t.db, dev.id, new Date(), [second.id]))?.taskId).toBe(second.id)
   })
 
@@ -178,7 +178,7 @@ describe('epic scheduling', () => {
     await t.db.update(tasks).set({ status: 'ready' }).where(eq(tasks.id, outside.id))
     expect((await claimNextTask(t.db, dev.id, new Date(), [outside.id]))?.taskId).toBe(outside.id)
     await t.db.update(agents).set({ concurrency: 10 }).where(eq(agents.id, dev.id))
-    await t.db.update(tasks).set({ status: 'merged' }).where(eq(tasks.id, first.id))
+    await t.db.update(tasks).set({ status: 'merged', statusReason: null }).where(eq(tasks.id, first.id))
     await t.db.insert(schema.taskDependencies).values({ projectId: project.id, taskId: second.id, dependsOnId: outside.id })
     expect(await claimNextTask(t.db, dev.id, new Date(), [second.id])).toBeNull()
     await t.db.delete(schema.taskDependencies).where(eq(schema.taskDependencies.taskId, second.id))
@@ -204,10 +204,10 @@ describe('epic scheduling', () => {
 
   it('reports the same board-only progress used for completion', async () => {
     const { project, a, first } = await setup()
-    await t.db.update(tasks).set({ status: 'merged' }).where(eq(tasks.id, first.id))
+    await t.db.update(tasks).set({ status: 'merged', statusReason: null }).where(eq(tasks.id, first.id))
     for (const status of ['draft', 'backlog', 'blocked'] as const) {
       const extra = await t.createTask(project.slug)
-      await t.db.update(tasks).set({ epicId: a.id, status, ...(status === 'blocked' && { deletedAt: new Date() }) }).where(eq(tasks.id, extra.id))
+      await t.db.update(tasks).set({ epicId: a.id, status, statusReason: status === 'blocked' ? 'Waiting for a decision' : null, ...(status === 'blocked' && { deletedAt: new Date() }) }).where(eq(tasks.id, extra.id))
     }
     const response = await t.request('GET', `/api/projects/${project.slug}/epics`)
     expect(await response.json()).toContainEqual(expect.objectContaining({ id: a.id, taskCount: 1, mergedCount: 1 }))
@@ -247,7 +247,7 @@ describe('epic scheduling', () => {
     const live = t.github.pulls.get(pr.number)!
     live.merged = true
     live.mergeCommitSha = 'merged'
-    await t.db.update(tasks).set({ status: 'ready_to_merge', prNumber: pr.number, headSha: 'abc' }).where(eq(tasks.id, first.id))
+    await t.db.update(tasks).set({ status: 'ready_to_merge', statusReason: null, prNumber: pr.number, prUrl: pr.url, headSha: 'abc' }).where(eq(tasks.id, first.id))
     await t.orchestrator.schedule()
     expect((await t.db.select().from(tasks).where(eq(tasks.id, second.id)))[0]?.leaseRunId).toBeNull()
     t.events.length = 0

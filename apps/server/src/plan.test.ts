@@ -1246,13 +1246,13 @@ describe('plan sessions', () => {
       const a = await proposeIn(project, 'Plan search', [{ title: 'Search box' }])
       const [item] = (await session(a.session.id)).plans[0]!.tasks
       const draft = await getTask(item!.ref!)
-      expect(draft).toMatchObject({ status: 'draft', planSessionId: a.session.id, planSessionTitle: 'Plan search' })
-      expect(lastTaskEvent(draft.id)?.task).toMatchObject({ planSessionId: a.session.id, planSessionTitle: 'Plan search' })
-      expect(await getTask(backlog.ref)).toMatchObject({ status: 'backlog', planSessionId: null, planSessionTitle: null })
+      expect(draft).toMatchObject({ status: 'draft', draftSession: { id: a.session.id, title: 'Plan search' } })
+      expect(lastTaskEvent(draft.id)?.task).toMatchObject({ draftSession: { id: a.session.id, title: 'Plan search' } })
+      expect(await getTask(backlog.ref)).toMatchObject({ status: 'backlog', draftSession: null })
 
       expect((await t.request('POST', `/api/plan/plans/${a.planId}/approve`, { to: 'backlog' })).status).toBe(200)
-      expect(await getTask(draft.ref)).toMatchObject({ status: 'backlog', planSessionId: null, planSessionTitle: null })
-      expect(lastTaskEvent(draft.id)?.task).toMatchObject({ status: 'backlog', planSessionId: null })
+      expect(await getTask(draft.ref)).toMatchObject({ status: 'backlog', draftSession: null })
+      expect(lastTaskEvent(draft.id)?.task).toMatchObject({ status: 'backlog', draftSession: null })
     })
 
     it('moves a Draft to the session whose plan revises it by ref, and back when that plan is discarded', async () => {
@@ -1261,9 +1261,9 @@ describe('plan sessions', () => {
       const [box, results] = (await session(a.session.id)).plans[0]!.tasks
       const b = await proposeIn(project, 'Refine search', [{ ref: box!.ref!, title: 'Search box with filters' }])
 
-      expect(await getTask(box!.ref!)).toMatchObject({ status: 'draft', title: 'Search box', planSessionId: b.session.id, planSessionTitle: 'Refine search' })
-      expect(lastTaskEvent(box!.taskId!)?.task).toMatchObject({ planSessionId: b.session.id })
-      expect(await getTask(results!.ref!)).toMatchObject({ planSessionId: a.session.id })
+      expect(await getTask(box!.ref!)).toMatchObject({ status: 'draft', title: 'Search box', draftSession: { id: b.session.id, title: 'Refine search' } })
+      expect(lastTaskEvent(box!.taskId!)?.task).toMatchObject({ draftSession: { id: b.session.id } })
+      expect(await getTask(results!.ref!)).toMatchObject({ draftSession: { id: a.session.id } })
       expect(await drafts(project.slug)).toMatchObject([
         { sessionId: b.session.id, title: 'Refine search', planStatus: 'proposed', drafts: [{ ref: box!.ref, title: 'Search box' }] },
         { sessionId: a.session.id, title: 'Plan search', planStatus: 'proposed', drafts: [{ ref: results!.ref }] }
@@ -1273,8 +1273,8 @@ describe('plan sessions', () => {
       const discarded = await t.request('POST', `/api/plan/plans/${b.planId}/discard`)
       expect(discarded.status).toBe(200)
       expect(await discarded.json() as Plan).toMatchObject({ status: 'discarded' })
-      expect(await getTask(box!.ref!)).toMatchObject({ status: 'draft', title: 'Search box', planSessionId: a.session.id })
-      expect(lastTaskEvent(box!.taskId!)?.task).toMatchObject({ planSessionId: a.session.id })
+      expect(await getTask(box!.ref!)).toMatchObject({ status: 'draft', title: 'Search box', draftSession: { id: a.session.id } })
+      expect(lastTaskEvent(box!.taskId!)?.task).toMatchObject({ draftSession: { id: a.session.id } })
       expect((await session(b.session.id)).status).toBe('none')
       expect(await drafts(project.slug)).toMatchObject([{ sessionId: a.session.id, drafts: [{ ref: box!.ref }, { ref: results!.ref }] }])
     })

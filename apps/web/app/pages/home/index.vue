@@ -75,7 +75,7 @@ const runLines = (agent: Agent) => runs.value
       project: projectOf(run.projectId),
       status: task ? STATUS[task.status].label : null,
       // Reviews are about the PR; developer runs are about the run
-      link: run.role === 'reviewer' && task?.prNumber ? `PR #${task.prNumber}` : `Run #${run.number}`,
+      link: run.role === 'reviewer' && task?.pr?.number ? `PR #${task.pr?.number}` : `Run #${run.number}`,
       elapsed: elapsed(run.startedAt ?? run.queuedAt, now.value)
     }
   })

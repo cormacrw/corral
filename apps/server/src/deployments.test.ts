@@ -90,7 +90,7 @@ describe.each(['pglite', 'postgres'] as const)('POST /api/deployments on %s', (d
   it('lists only the latest 20 deployments by date, including first-deploy and fallback notes', async () => {
     const project = await t.createProject()
     const task = await t.createTask(project.slug)
-    await t.db.update(schema.tasks).set({ status: 'failed' }).where(eq(schema.tasks.id, task.id))
+    await t.db.update(schema.tasks).set({ status: 'failed', statusReason: 'Unrecoverable error' }).where(eq(schema.tasks.id, task.id))
     const rows = await t.db.insert(schema.deployments).values(Array.from({ length: 22 }, (_, i) => ({
       projectId: project.id, fromSha: null, toSha: i.toString(16).padStart(40, '0'),
       notes: 'Fallback notes', notesStatus: 'failed' as const, createdAt: new Date(Date.now() + (i + 1) * 1000)

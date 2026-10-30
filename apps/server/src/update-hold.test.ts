@@ -134,10 +134,10 @@ describe('two-phase update hold', () => {
     await hold()
     for (const [type, status] of [['task', 'ready'], ['task', 'agent_review'], ['design', 'ready']] as const) {
       const task = await t.createTask(project.slug, { type })
-      await t.db.update(tasks).set({ status, ...(status === 'agent_review' && { headSha: 'abc', prNumber: 41, branch: 'corral/review-me' }) }).where(eq(tasks.id, task.id))
+      await t.db.update(tasks).set({ status, ...(status === 'agent_review' && { headSha: 'abc', prNumber: 41, prUrl: 'https://github.com/cormacrw/test-app/pull/41', branch: 'corral/review-me' }) }).where(eq(tasks.id, task.id))
     }
     const merge = await t.createTask(project.slug)
-    await t.db.update(tasks).set({ status: 'ready_to_merge', prNumber: 42, headSha: 'abc' }).where(eq(tasks.id, merge.id))
+    await t.db.update(tasks).set({ status: 'ready_to_merge', prNumber: 42, prUrl: 'https://github.com/cormacrw/test-app/pull/42', headSha: 'abc' }).where(eq(tasks.id, merge.id))
     for (const phase of ['draining', 'finishing']) {
       if (phase === 'finishing') await t.db.update(runs).set({ state: 'completed', endedAt: new Date() }).where(eq(runs.id, worker!.id))
       await hold()
