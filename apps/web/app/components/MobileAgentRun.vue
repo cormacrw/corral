@@ -72,13 +72,22 @@ const live = computed(() => !!selected.value && isLiveRun(selected.value))
       </div>
     </header>
 
-    <RunTranscript
+    <div
       v-if="selected && agent"
-      :events="events"
-      :live="live"
-      :agent-name="agent.name"
-      :mine="sent[selected.id]"
-    />
+      :class="selected.timings ? 'min-h-0 flex-1 overflow-y-auto overscroll-contain p-3' : 'flex min-h-0 flex-1 flex-col'"
+    >
+      <RunTimingBreakdown
+        :run="selected"
+        class="mb-4"
+      />
+      <RunTranscript
+        :events="events"
+        :inline="!!selected.timings"
+        :live="live"
+        :agent-name="agent.name"
+        :mine="sent[selected.id]"
+      />
+    </div>
     <p
       v-else-if="agent && runs.length > 0"
       class="flex-1 p-4 text-sm text-muted"
