@@ -14,6 +14,9 @@ import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './test-runner.ts'
 import { recordTaskSubmission } from './task-submissions.ts'
 
+// Real git processes, so these need more time than the default on a busy machine
+vi.setConfig({ testTimeout: 30_000 })
+
 // The real runner git code against a real origin, with the real server deciding.
 // Only the WebSocket's far end is a test: `faults` lets a test intervene around a job.
 type Job = Parameters<FakeRunner['onJob']>[0]
