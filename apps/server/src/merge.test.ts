@@ -90,8 +90,9 @@ describe('merge orchestrator and human controls', () => {
     t.github.setBranch(project.repository, pr.head, 'def456')
     await t.orchestrator.merges.tick()
     expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge', headSha: 'def456', branchUpdateRequested: false })
-    const reviews = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/reviews`).then(r => r.json()) as { headSha: string, verdict: string }[]
-    expect(reviews[0]).toMatchObject({ headSha: 'def456', verdict: 'approved' })
+    const reviews = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/reviews`).then(r => r.json()) as { headSha: string, verdict: string, round: number }[]
+    expect(reviews[0]).toMatchObject({ headSha: 'def456', verdict: 'approved', round: task.reviewRounds })
+    expect((await taskRow(task.id)).reviewRounds).toBe(task.reviewRounds)
     await t.orchestrator.schedule()
     expect(runner.received.filter(m => m.type === 'run.assign' && m.job.taskId === task.id)).toHaveLength(0)
 

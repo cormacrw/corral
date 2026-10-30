@@ -103,6 +103,41 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
     expect(await claimNextTask(t.db, agentId)).toBeNull()
   })
 
+  async function recordedReview(task: { id: string, projectId: string }, round: number, headSha: string, verdict: 'approved' | 'changes_requested') {
+    const agentId = await developer(2, { role: 'reviewer' })
+    const [run] = await t.db.insert(runs).values({ agentId, projectId: task.projectId, taskId: task.id, role: 'reviewer', state: 'completed', leaseEpoch: 1 }).returning()
+    await t.db.insert(schema.reviews).values({ taskId: task.id, runId: run!.id, round, headSha, verdict, summary: 'Recorded verdict', author: t.actor })
+    return agentId
+  }
+
+  it.each(['changes_requested', 'approved'] as const)('ignores an earlier-round %s verdict on the same commit, including already stranded tasks', async (verdict) => {
+    const project = await t.createProject()
+    const task = await t.createTask(project.slug)
+    // Persisted pre-fix state: no transition or resubmission is needed to recover.
+    await t.db.update(tasks).set({ status: 'agent_review', headSha: 'same-head', reviewRounds: 1 }).where(eq(tasks.id, task.id))
+    const reviewer = await recordedReview(task, 0, 'same-head', verdict)
+    expect(await claimNextTask(t.db, reviewer)).toMatchObject({ taskId: task.id, status: 'agent_review' })
+  })
+
+  it.each(['changes_requested', 'approved'] as const)('does not repeat a current-round %s verdict on the current commit', async (verdict) => {
+    const project = await t.createProject()
+    const task = await t.createTask(project.slug)
+    await t.db.update(tasks).set({ status: 'agent_review', headSha: 'same-head', reviewRounds: 2 }).where(eq(tasks.id, task.id))
+    const reviewer = await recordedReview(task, 2, 'same-head', verdict)
+
+    expect(await claimNextTask(t.db, reviewer)).toBeNull()
+    expect((await taskRow(project, task.number)).leaseRunId).toBeNull()
+  })
+
+  it('reviews a new commit even when the round already has a verdict on the old commit', async () => {
+    const project = await t.createProject()
+    const task = await t.createTask(project.slug)
+    await t.db.update(tasks).set({ status: 'agent_review', headSha: 'new-head', reviewRounds: 2 }).where(eq(tasks.id, task.id))
+    const reviewer = await recordedReview(task, 2, 'old-head', 'approved')
+
+    expect(await claimNextTask(t.db, reviewer)).toMatchObject({ taskId: task.id })
+  })
+
   it('finds nothing when only Backlog tasks exist', async () => {
     const project = await t.createProject()
     await t.createTask(project.slug)

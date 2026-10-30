@@ -440,7 +440,7 @@ describe('orchestrator', () => {
 
   // A reviewer requests changes, the developer pushes a new commit, and a
   // second reviewer run starts on it
-  async function secondReview(first: { summary: string, note: string }) {
+  async function secondReview(first: { summary: string, note: string }, headSha = 'def456') {
     const { project, task, review } = await underReview()
     const criterion = task.acceptanceCriteria[0]!
     await runner.call(review.runId, review.leaseEpoch, 'report_outcome', {
@@ -448,16 +448,31 @@ describe('orchestrator', () => {
     })
     await runner.next('run.stop', m => m.runId === review.runId)
     const developer = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
-    t.github.setBranch(project.repository, developer.branch!, 'def456')
+    t.github.setBranch(project.repository, developer.branch!, headSha)
     await runner.call(developer.runId, developer.leaseEpoch, 'attach_evidence', {
       criterionId: criterion.id, kind: 'screenshot', note: 'the page', fileName: 'shot.png', contentType: 'image/png', dataBase64: Buffer.from('png-bytes').toString('base64')
     })
-    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'pr_updated', summary: 'Fixed', headSha: 'def456' })).toMatchObject({ ok: true })
+    expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'pr_updated', summary: 'Fixed', headSha })).toMatchObject({ ok: true })
     await runner.next('run.stop', m => m.runId === developer.runId)
     await t.orchestrator.schedule()
     const second = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'reviewer')).job
     return { project, task, criterion, review: second }
   }
+
+  it('starts a new review on the same commit and shows the new round’s evidence', async () => {
+    const { project, task, review } = await secondReview({ summary: 'Show the error', note: 'Evidence missing' }, 'abc123')
+    expect(review).toMatchObject({ role: 'reviewer', headSha: 'abc123' })
+    expect(await taskRow(task.id)).toMatchObject({ reviewRounds: 1, leaseRunId: review.runId })
+    const allEvidence = await t.db.select().from(schema.evidence).where(eq(schema.evidence.taskId, task.id)).orderBy(asc(schema.evidence.round))
+    expect(allEvidence.map(e => e.round)).toEqual([0, 1])
+    const current = allEvidence[1]!
+    expect(await runner.call(review.runId, review.leaseEpoch, 'get_evidence', {})).toMatchObject({
+      ok: true, result: { round: 1, evidence: expect.arrayContaining([expect.objectContaining({ id: current.id, round: 1 })]) }
+    })
+    expect(review.prompt).toContain(current.id)
+    expect(review.prompt).not.toContain(allEvidence[0]!.id)
+    await pause(project)
+  })
 
   async function reviewAudit(taskId: string) {
     return t.db.select().from(auditLog).where(and(eq(auditLog.taskId, taskId), eq(auditLog.action, 'review.recorded'))).orderBy(asc(auditLog.id))
