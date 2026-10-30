@@ -23,12 +23,12 @@ afterAll(async () => {
 async function capture(name: string, data: unknown) {
   if (process.env.CORRAL_REBASE_EVIDENCE_DIR) await writeFile(join(process.env.CORRAL_REBASE_EVIDENCE_DIR, name), JSON.stringify(data, null, 2))
 }
-async function submitted(humanReview = false) {
+async function submitted(humanReview = false, humanCheck = false) {
   await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true, requiredChecks: ['lint'] })
-  const task = await t.createTask(project.slug, { humanReview, acceptanceCriteria: ['Preserves validation', 'Preserves navigation'] })
+  const task = await t.createTask(project.slug, { humanReview, acceptanceCriteria: ['Preserves validation', humanCheck ? { text: 'Preserves navigation', checkedByHuman: true } : 'Preserves navigation'] })
   const [agent] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'reviewer'))
   const [run] = await t.db.insert(schema.runs).values({ projectId: project.id, taskId: task.id, agentId: agent!.id, role: 'reviewer', state: 'completed', outcome: 'approved' }).returning()
-  const criteria = task.acceptanceCriteria.map(c => ({ criterionId: c.id, met: true, note: `Earlier proof: ${c.text}` }))
+  const criteria = task.acceptanceCriteria.map(c => c.checkedByHuman ? { criterionId: c.id, met: null, note: 'Needs human check' } : { criterionId: c.id, met: true, note: `Earlier proof: ${c.text}` })
   await t.db.insert(schema.reviews).values({ taskId: task.id, runId: run!.id, round: 0, headSha: 'approved-head', verdict: 'approved', summary: 'Feature checked', criteria, author: t.actor })
   await t.db.insert(schema.evidence).values(criteria.map(c => ({ taskId: task.id, runId: run!.id, criterionId: c.criterionId, round: 0, kind: 'note' as const, size: 0, note: c.note })))
   const branch = `corral/${task.ref.toLowerCase()}`
@@ -77,6 +77,14 @@ it.each([false, true])('carries approval and notes onto the new head (humanRevie
   expect(comment).toContain('app.ts')
   expect(comment).not.toContain('Earlier proof')
   await capture(`approved-${humanReview}.json`, { ...result, persistedApproval: approval, taskComment: comment })
+  await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
+})
+it('sends a flagged task back to Human review with its human check still open', async () => {
+  const { task, review, criteria, project } = await submitted(false, true)
+  const result = await reportAndRead(task, review, { outcome: 'approved', summary: 'app.ts conflict resolution holds.' })
+  expect(result.body).toMatchObject({ status: 'human_review', humanReview: false })
+  expect(result.body.latestReview?.criteria).toEqual(criteria)
+  expect(result.body.acceptanceCriteria.map(c => c.met)).toEqual([true, null])
   await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
 })
 it('counts changes requested as a normal revision and keeps its comment short', async () => {
