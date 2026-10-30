@@ -78,7 +78,7 @@ watch(selected, async (item, previous) => {
   actionError.value = null
   // Nothing selected (e.g. the last item was just resolved): nothing to show beside it
   if (!item) flyout.close()
-  if (item?.type === 'plan_thread' || item?.type === 'epic_review' || item?.type === 'release_notes') {
+  if (item?.type === 'plan_thread' || item?.type === 'epic_review' || item?.type === 'release_notes' || item?.type === 'epic_conflict') {
     if (previous?.id !== item.id && (flyout.ref.value || flyout.epic.value)) await flyout.close()
     task.value = null
     return
@@ -166,7 +166,7 @@ const submitLabel = computed(() => action.value ? (actions.value.find(a => a.val
 
 // Resolves false when not sent, so the composer keeps its images
 async function submit(message: string): Promise<boolean> {
-  if (!selected.value || selected.value.type === 'plan_thread' || selected.value.type === 'epic_review' || selected.value.type === 'release_notes') return false
+  if (!selected.value || selected.value.type === 'plan_thread' || selected.value.type === 'epic_review' || selected.value.type === 'release_notes' || selected.value.type === 'epic_conflict') return false
   busy.value = true
   actionError.value = null
   try {
@@ -213,7 +213,7 @@ watchEffect(() => {
   }
   const position = inbox.value?.needsYou.findIndex(i => i.id === selectedId.value) ?? -1
   mobileHeader.value = {
-    title: selected.value?.type === 'plan_thread' || selected.value?.type === 'epic_review' || selected.value?.type === 'release_notes' ? selected.value.subject : selected.value?.taskRef ?? '',
+    title: selected.value?.type === 'plan_thread' || selected.value?.type === 'epic_review' || selected.value?.type === 'release_notes' || selected.value?.type === 'epic_conflict' ? selected.value.subject : selected.value?.taskRef ?? '',
     eyebrow: position >= 0 ? `Inbox · ${position + 1} of ${inbox.value!.needsYou.length}` : 'Inbox'
   }
 })
@@ -231,6 +231,12 @@ onBeforeUnmount(() => {
       :item="selected"
       @resolved="nextAfterPlanResolution"
     />
+    <InboxEpicConflict
+      v-else-if="device.isMobile.value && selected?.type === 'epic_conflict'"
+      :key="selected.id"
+      :item="selected"
+      @resolved="nextAfterPlanResolution"
+    />
     <InboxMobile
       v-else-if="device.isMobile.value"
       v-model:tab="tab"
@@ -244,7 +250,7 @@ onBeforeUnmount(() => {
       :error="error"
       :items="items"
       :selected-id="selectedId"
-      :selected="selected?.type === 'plan_thread' || selected?.type === 'epic_review' ? null : selected"
+      :selected="selected?.type === 'plan_thread' || selected?.type === 'epic_review' || selected?.type === 'epic_conflict' ? null : selected"
       :already-resolved="alreadyResolved"
       :task="task"
       :evidence="evidence"
@@ -392,6 +398,12 @@ onBeforeUnmount(() => {
         v-else-if="selected?.type === 'release_notes'"
         :item="selected"
         @refresh="load"
+      />
+      <InboxEpicConflict
+        v-else-if="selected?.type === 'epic_conflict'"
+        :key="selected.id"
+        :item="selected"
+        @resolved="nextAfterPlanResolution"
       />
       <InboxPlanThread
         v-else-if="selected?.type === 'plan_thread'"

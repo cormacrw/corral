@@ -253,6 +253,13 @@
       "when": 1793373842763,
       "tag": "0035_amused_bloodaxe",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1793376586267,
+      "tag": "0036_heavy_queen_noir",
+      "breakpoints": true
     }
   ]
 }

@@ -58,6 +58,37 @@ Reporting a verdict checks board completion and the live GitHub head again;
 human actions also carry the head shown in the Inbox, so stale approvals fail.
 A changed epic PR head likewise starts fresh integration review.
 
+## Merging an approved epic PR
+
+`EpicMerger` (`apps/server/src/epic-merge.ts`) runs in the merge pass. It reads
+every open epic PR, so a PR merged by hand still counts, and advances only
+`ready_to_merge` ones. It compares the head with the target through the compare
+API first: `mergeable_state` says `behind` only under branch protection that
+requires it, and CI doesn't run on a conflicting PR, so this can't wait for CI.
+
+A moved target gets `updatePullRequestBranch` with `REBASE`. `rebaseRequested`
+marks the next head as Corral's, so the reconcile pass leaves it alone and the
+approval stays; any other new head restarts integration review. The flag is
+written before the call, because GitHub moves the head before the call returns
+and a scheduling pass can run in between. It's cleared if the call throws, and
+after five minutes with no new head. A failed rebase
+sets `conflict` with `conflictFiles` from the runner's `rebase_conflicts` job,
+which uses `git merge-tree` (git 2.38 or later). If that job fails, the Inbox item
+says the files are unknown; an older runner answers it that way too.
+
+The Inbox's **Hand the rebase to a developer** posts `action: 'rebase'`. That
+creates a Ready task whose `branch` is the epic branch, and `isEpicRebaseTask`
+is how the rest of the code recognises it: `taskBase` answers the target branch,
+`#submit` opens no PR, and once approved the merge pass marks it Merged, since
+the push already put the work on the epic branch. The moved head then restarts
+integration review.
+
+Epic PRs always squash, so `project.mergeMethod` applies only to task PRs. An
+epic is done for D22 once its PR merges (`holdsEpicOpen`); an `epic`-mode epic
+with no branch, such as one holding only spikes, is done when its tasks are.
+A task's dependency on a task in another epic still only checks that it's Merged.
+Tasks added after the epic PR merged go straight to the target branch.
+
 ### Live GitHub verification
 
 COR-167 also has a real GitHub capture from an isolated `pnpm dev` stack with

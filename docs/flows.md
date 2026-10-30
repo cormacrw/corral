@@ -256,10 +256,10 @@ With #44 merged, every board task is Merged again, and the same epic PR goes bac
 
 ### Step 6 — Rebase before merge, and a conflict
 
-Just before merging, the server compares the epic branch with the target branch. The target branch has moved since E7's branch was created, so the server asks GitHub to rebase the epic PR onto it (`updatePullRequestBranch` with `updateMethod: REBASE`).
+Before anything else, the server compares the epic branch with the target branch through GitHub's compare API, because `mergeable_state` only says `behind` when branch protection requires it. The target branch has moved since E7's branch was created, so the server asks GitHub to rebase the epic PR onto it (`updatePullRequestBranch` with `updateMethod: REBASE`).
 
 - **Clean rebase:** the approval stands, as for task PRs. CI runs again on the new head, and when it passes the epic PR goes to step 7.
-- **Conflict (this example):** another task changed the same route file on the target branch, so GitHub reports a conflict. The epic PR leaves ready to merge, "Epic PR conflict" is posted to Activity, and the server creates conflict task **#45** in E7, in Ready, naming the conflicting files.
+- **Conflict (this example):** another task changed the same route file on the target branch, so GitHub reports a conflict. The epic PR leaves ready to merge for `conflict`, the target branch is unchanged, and "Epic PR conflict" is posted to Activity. The Inbox shows a **Needs you** item naming E7 and the conflicting files, which a runner works out with `git merge-tree`. The human picks **Hand the rebase to a developer**, and the server creates conflict task **#45** in E7, in Ready, naming the files.
 
 #45's job carries the epic branch itself as its branch, not a new task branch. The developer:
 
@@ -271,7 +271,7 @@ Just before merging, the server compares the epic branch with the target branch.
 
 ### Step 7 — The epic PR merges
 
-The final gate check (section 2, step 8) runs against live GitHub data for the epic PR: approved by the human at the current commit, required CI checks passed, mergeable. The server squash-merges the epic PR into the target branch with the project's merge method, so E7 lands as one commit, and records the merge commit. Never marked merged without seeing a merged state (section 2, step 9).
+The final gate check (section 2, step 8) runs against live GitHub data for the epic PR: approved by the human at the current commit, or carried over a clean rebase, required CI checks passed, mergeable. A failed required check creates a fix task in E7, as in step 5. The server squash-merges the epic PR into the target branch, whatever the project's merge method, so E7 lands as one commit, and records the merge commit. Never marked merged without seeing a merged state (section 2, step 9). After three failed attempts the epic PR goes back to **Human review**, where approving retries the merge. A PR merged by hand on GitHub counts as merged; one closed without merging goes back to `open`, and reopening it restarts integration review.
 
 Then:
 

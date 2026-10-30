@@ -67,3 +67,11 @@ describe('RunnerGitHub.createBranch', () => {
     expect(jobs.map(j => j.method)).toEqual(['POST', 'GET'])
   })
 })
+
+describe('RunnerGitHub.behindBy', () => {
+  it('reads how far the head is behind the base from the compare API', async () => {
+    const { github, jobs } = stub(() => ({ status: 200, body: { behind_by: 3 } }))
+    expect(await github.behindBy('owner/repo', 'release/2.x', 'abc123')).toBe(3)
+    expect(jobs[0]!.path).toBe('/repos/owner/repo/compare/release%2F2.x...abc123')
+  })
+})

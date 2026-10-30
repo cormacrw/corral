@@ -23,8 +23,8 @@ import { publishDependents } from './dependent-tasks.ts'
 import { bundleHasRootIndex, DesignNotFound, readDesign } from './designs.ts'
 import { ApiFailure } from './errors.ts'
 import type { EventBus } from './events.ts'
-import type { GitHubClient } from './github.ts'
-import { EpicBranchError, taskBase } from './task-base.ts'
+import type { GitHubClient, PullRequest } from './github.ts'
+import { EpicBranchError, isEpicRebaseTask, taskBase } from './task-base.ts'
 import { slugify } from './projects.ts'
 import { designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
 import { runExitError, withLastActivity } from './run-exit.ts'
@@ -1471,26 +1471,31 @@ export class Orchestrator implements RunnerHandlers {
 
     const ref = taskRef(ctx.project.prefix, task.number)
     const body = this.#prBody(ref, task.title, report.summary, criteria, attached)
-    const existing = task.prNumber
-      ? await github.getPullRequest(ctx.project.repository, task.prNumber)
-      : await github.findOpenPullRequest(ctx.project.repository, task.branch!)
-    let pr = existing && existing.state === 'open' ? existing : null
-    if (pr) await github.updatePullRequest(ctx.project.repository, pr.number, { body })
-    else pr = await github.openPullRequest(ctx.project.repository, { head: task.branch!, base: await taskBase(db, task, ctx.project, github), title: `${ref}: ${task.title}`, body })
+    // A rebase task's commits are already on the epic PR; it has no PR of its own
+    let pr: PullRequest | null = null
+    if (!await isEpicRebaseTask(db, task)) {
+      const existing = task.prNumber
+        ? await github.getPullRequest(ctx.project.repository, task.prNumber)
+        : await github.findOpenPullRequest(ctx.project.repository, task.branch!)
+      pr = existing && existing.state === 'open' ? existing : null
+      if (pr) await github.updatePullRequest(ctx.project.repository, pr.number, { body })
+      else pr = await github.openPullRequest(ctx.project.repository, { head: task.branch!, base: await taskBase(db, task, ctx.project, github), title: `${ref}: ${task.title}`, body })
+    }
 
     const comment = await db.transaction(async (tx) => {
       const locked = await lockTask(tx, task.id)
       if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease while submitting. Stop working.')
       await applyTransition(tx, locked.task, locked.project, {
         type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true
-      }, server, { event: report.outcome, runId: ctx.run.id, headSha: report.headSha, pr: pr.number })
-      await tx.update(tasks).set({ headSha: report.headSha, prNumber: pr.number, prUrl: pr.url }).where(eq(tasks.id, task.id))
+      }, server, { event: report.outcome, runId: ctx.run.id, headSha: report.headSha, pr: pr?.number ?? null })
+      await tx.update(tasks).set({ headSha: report.headSha, ...(pr && { prNumber: pr.number, prUrl: pr.url }) }).where(eq(tasks.id, task.id))
       const comment = await this.#postNote(tx, ctx, report.note!)
       await this.#endRunIn(tx, ctx, { state: 'completed', outcome: report.outcome as RunOutcome, summary: report.summary, headSha: report.headSha })
       return comment
     })
     this.#d.events.publish({ type: 'comment.created', comment })
     this.#finished(ctx, 'Outcome accepted', { handoff: true })
+    if (!pr) return { ok: true, message: 'The rebased epic branch is ready for review. You can stop now.' }
     return { ok: true, pr: pr.url, message: `PR #${pr.number} is ready for review. You can stop now.` }
   }
 

@@ -124,6 +124,23 @@ export const agents: Agent[] = [
 
 export const epics: Epic[] = [
   {
+    id: 'e-searches',
+    dependsOn: [],
+    blocks: [],
+    projectId: 'p-corral',
+    title: 'Saved searches',
+    description: 'Save a board search and come back to it.',
+    reviewMode: 'epic',
+    branch: 'corral/epic-e-searches-saved-searches',
+    prNumber: 212,
+    prHeadSha: '6f1c2ab94d',
+    reviewState: 'conflict',
+    taskCount: 3,
+    mergedCount: 3,
+    createdAt: ago(60 * 24 * 3),
+    updatedAt: ago(12)
+  },
+  {
     id: 'e-design',
     dependsOn: ['e-mobile'],
     blocks: [],
@@ -698,6 +715,18 @@ export function inbox(): Inbox {
       runtime: session.runtime, status: session.status, unread: session.unread,
       activeRunId: session.activeRunId,
       planId: plan?.id ?? null
+    })
+  }
+  const conflict = epics.find(e => e.reviewState === 'conflict')
+  if (conflict) {
+    const project = projects.find(p => p.id === conflict.projectId)!
+    const files = ['apps/server/src/routes/search.ts', 'apps/web/app/pages/search.vue']
+    const body = `The epic PR can't rebase onto main. Conflicting files: ${files.join(', ')}.`
+    needsYou.push({
+      id: conflict.id, type: 'epic_conflict', epicId: conflict.id, taskId: null, taskRef: null, subject: conflict.title,
+      project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
+      preview: body, body, sender: { name: 'Corral', role: 'system' }, at: conflict.updatedAt,
+      prUrl: `https://github.com/cormacrw/corral/pull/${conflict.prNumber}`, resolution: null, headSha: conflict.prHeadSha!, targetBranch: 'main', files
     })
   }
   needsYou.sort((a, b) => b.at.localeCompare(a.at))
