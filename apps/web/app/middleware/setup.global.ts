@@ -16,6 +16,8 @@ export default defineNuxtRouteMiddleware(async (to) => {
       return
     }
   }
+  // The design preview lands on the global overview, preserving option/state links.
+  if (import.meta.prototype && to.path === '/') return navigateTo({ path: '/home', query: to.query })
   const target = onboardingRedirect(to, live.state.value.projects)
   if (target) return navigateTo(target)
 })

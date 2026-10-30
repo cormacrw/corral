@@ -46,7 +46,7 @@ describe('prototype mock API', () => {
     expect(epic.tasks.length).toBeGreaterThan(0)
   })
 
-  it('derives the inbox from tasks that need the human', async () => {
+  it('derives the inbox from tasks, epic reviews and threads that need the human', async () => {
     const inbox = await mockCall<Inbox>('GET', '/inbox')
     expect(inbox.count).toBe(inbox.needsYou.length)
     const threads = inbox.needsYou.filter(i => i.type === 'plan_thread')
@@ -61,7 +61,7 @@ describe('prototype mock API', () => {
       question: null, plan: { id: 'plan-1', version: 1, epicCount: 1, taskCount: 3 }
     })
     expect(threads.every(i => !('body' in i))).toBe(true)
-    expect(inbox.needsYou.filter(i => i.type !== 'plan_thread').map(i => i.type).sort()).toEqual(['blocked', 'failed', 'human_review'])
+    expect(inbox.needsYou.filter(i => i.type !== 'plan_thread').map(i => i.type).sort()).toEqual(['blocked', 'epic_review', 'failed', 'human_review'])
     expect(threads.some(i => i.sessionId === 's-idle')).toBe(false)
   })
 

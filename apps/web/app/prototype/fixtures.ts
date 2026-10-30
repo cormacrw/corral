@@ -638,6 +638,14 @@ export function inbox(): Inbox {
         resolution: null
       }
     })
+  for (const epic of epics.filter(e => e.reviewState === 'human_review')) {
+    const project = projects.find(p => p.id === epic.projectId)!
+    needsYou.push({ id: epic.id, type: 'epic_review', epicId: epic.id, taskId: null, taskRef: null,
+      project, subject: `Review ${epic.title}`, preview: 'All tasks merged. Review the epic PR.',
+      body: 'Integration review passed. Please review the combined epic PR.', sender: { name: 'Rita', role: 'reviewer' },
+      at: epic.updatedAt, prUrl: `https://github.com/${project.repository}/pull/${epic.prNumber}`, resolution: null,
+      headSha: epic.prHeadSha!, tasks: tasks.filter(t => t.epicId === epic.id).map(task => ({ task, evidence: [] })) })
+  }
   // Threads waiting on the human: a question, a plan needing approval or an unread reply
   for (const session of planSessions.filter(s => !s.closed && (s.status !== 'none' || s.unread))) {
     const project = projects.find(p => p.id === session.projectId)!
@@ -663,4 +671,25 @@ export function inbox(): Inbox {
   }
   needsYou.sort((a, b) => b.at.localeCompare(a.at))
   return { needsYou, activity: [], resolved: [], count: needsYou.length }
+}
+
+// COR-191: a quiet third project and a range of epic outcomes.
+const notebook: Project = { ...projects[1]!, id: 'p-notes', name: 'Notebook', slug: 'notebook', prefix: 'NOTE', repository: 'cormacrw/notebook', thumbnailColor: '#f59e0b', paused: false, nextTaskNumber: 10 }
+projects.push(notebook)
+const completedTitles = ['Keyboard navigation', 'Search foundations', 'Release checklist', 'Legacy import']
+for (const [index, title] of completedTitles.entries()) {
+  const project = index % 2 ? notebook : projects[0]!
+  const minutes = [1440, 4320, 8640, 43200][index]!
+  const id = `e-complete-${index}`
+  epics.push({ ...epics[3]!, id, projectId: project.id, title, taskCount: 2, mergedCount: 2, createdAt: ago(minutes + 1440), updatedAt: ago(minutes) })
+  tasks.push(task(project, 70 + index * 2, { title: `${title}: implementation`, status: 'merged', epicId: id, mergedAt: ago(minutes), updatedAt: ago(minutes) }), task(project, 71 + index * 2, { title: `${title}: polish`, status: 'merged', epicId: id, mergedAt: ago(minutes + 60), updatedAt: ago(minutes) }))
+}
+// All four tasks merged into the epic branch; the epic PR still needs the human.
+epics.push({ ...epics[0]!, id: 'e-release', title: 'Runner updates', dependsOn: [], blocks: [], reviewMode: 'epic', branch: 'corral/epic-runner-updates', prNumber: 82, reviewState: 'human_review', prHeadSha: 'abc123', taskCount: 4, mergedCount: 4, updatedAt: ago(12) })
+for (let i = 0; i < 4; i++) tasks.push(task(projects[0]!, 90 + i, { title: `Runner updates: ${['drain safely', 'update runner', 'report version', 'release verification'][i]}`, status: 'merged', epicId: 'e-release', mergedAt: ago(60), updatedAt: ago(12) }))
+// Keep fixture progress consistent with the task lists used on the epic detail page.
+for (const epic of epics) {
+  const members = tasks.filter(t => t.epicId === epic.id && !['draft', 'backlog'].includes(t.status))
+  epic.taskCount = members.length
+  epic.mergedCount = members.filter(t => t.status === 'merged').length
 }

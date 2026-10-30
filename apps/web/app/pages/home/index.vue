@@ -8,6 +8,7 @@ import { agentStatus, isLiveRun, isWorking, projectColor, ROLE, STATUS, tokens }
 // Home, the global dashboard (design/mobile.md). Counts come from the live
 // task lists the shell loads; runs come from /api/runs and are
 // refetched whenever a run changes.
+const { isMobile } = useDevice()
 const live = useLive()
 const state = live.state
 useSeoMeta({ title: 'Home · Corral' })
@@ -97,7 +98,8 @@ const agents = computed(() => state.value.agents
 </script>
 
 <template>
-  <UDashboardPanel>
+  <HomeDesktop v-if="!isMobile" />
+  <UDashboardPanel v-else>
     <div
       class="mx-auto flex w-full max-w-[640px] flex-col gap-4 p-4"
       data-testid="home-dashboard"

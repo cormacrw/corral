@@ -92,6 +92,15 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
             class="flex flex-col gap-0.5"
           >
             <UButton
+              to="/home"
+              icon="i-lucide-house"
+              :label="collapsed ? undefined : 'Home'"
+              variant="ghost"
+              :color="isActive('/home') ? 'primary' : 'neutral'"
+              :class="['justify-start', isActive('/home') && 'bg-elevated']"
+              :aria-current="isActive('/home') ? 'page' : undefined"
+            />
+            <UButton
               to="/plan"
               icon="i-lucide-message-square"
               :label="collapsed ? undefined : 'Plan'"
