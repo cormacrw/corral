@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PatchTaskInput, Project, Task, TaskAgent } from '@corral/contracts'
-import type { TaskStatus } from '@corral/core'
+import { DEFAULT_LIMITS, type TaskStatus } from '@corral/core'
 import { STATUS } from '~/utils/labels'
 
 // The property rows of a task (design/task.md): label/value rows in the
@@ -222,7 +222,7 @@ const dotClass = (status: TaskStatus) => ({
         >{{ props.task.type === 'spike' ? 'None: a spike reports findings' : props.task.type === 'design' ? 'None: a design is submitted as versions' : 'Not opened yet' }}</span>
       </template>
 
-      <span v-else-if="row.key === 'round'">{{ props.task.reviewRounds }} of {{ props.project?.reviewRoundCap ?? 5 }}</span>
+      <span v-else-if="row.key === 'round'">{{ props.task.reviewRounds }} of {{ props.project?.reviewRoundCap ?? DEFAULT_LIMITS.reviewRoundCap }}</span>
     </dd>
   </template>
 </template>

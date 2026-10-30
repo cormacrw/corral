@@ -1,4 +1,5 @@
 import { needsAttention, type ReleaseNotesItem } from '@corral/contracts'
+import { auditText, readAudit, type AuditView } from './audit.ts'
 import { epicInboxItems } from './epic-prs.ts'
 import type { Inbox, InboxItem, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
 import { humanCheckTally, richTextToPlainText, taskRef, type Actor } from '@corral/core'
@@ -49,11 +50,11 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
   const activity: TaskInboxItem[] = []
   const resolved: (TaskInboxItem | ReleaseNotesItem)[] = []
   for (const { entry, task, project } of entries) {
-    const detail = entry.detail as Record<string, unknown>
-    const event = typeof detail.event === 'string' ? detail.event : typeof detail.event === 'object' && detail.event ? String((detail.event as { type?: string }).type) : null
+    const detail = readAudit(entry.detail)
+    const { event } = detail
     const base = { id: String(entry.id), project: projectTag(project), taskId: task.id, taskRef: taskRef(project.prefix, task.number), subject: task.title, prUrl: task.prUrl, at: entry.createdAt.toISOString() }
     if (entry.actor.kind === 'human' && (entry.action === 'task.deleted' || ['resolve', 'human_approve', 'human_request_changes', 'send_back'].includes(event ?? ''))) {
-      const resolution = resolutionText(entry.action, event, detail)
+      const resolution = resolutionText(entry.action, detail)
       resolved.push({ ...base, type: 'activity', preview: resolution, body: resolution, sender: { name: 'You', role: 'system' }, resolution })
     } else if (entry.action === 'review.recorded' || (entry.action === 'task.transition' && ACTIVITY_EVENTS.includes(event ?? ''))) {
       const text = activityText(entry.action, event, detail, task.prNumber, task.type)
@@ -62,15 +63,15 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     if (activity.length >= limit && resolved.length >= limit) break
   }
   const epicEvents = await db.select({ entry: auditLog, epic: epics, project: projects }).from(auditLog)
-    .innerJoin(epics, sql`${auditLog.detail}->>'epicId' = ${epics.id}::text`)
+    .innerJoin(epics, sql`${auditText('epic.pr', 'epicId')} = ${epics.id}::text`)
     .innerJoin(projects, eq(projects.id, epics.projectId))
     .where(eq(auditLog.action, 'epic.pr')).orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(limit)
   for (const { entry, epic, project } of epicEvents) {
-    const detail = entry.detail as { event: string, summary?: string }
+    const detail = readAudit(entry.detail)
     const [task] = await db.select().from(tasks).where(and(eq(tasks.epicId, epic.id), isNull(tasks.deletedAt))).limit(1)
     if (!task) continue
     const labels: Record<string, string> = { opened: 'Epic PR opened', review_started: 'Epic integration review started', approved: 'Epic PR approved by reviewer', changes_requested: 'Epic integration changes requested', human_approved: 'You approved the epic PR', human_changes_requested: 'You requested changes on the epic PR', rebase_requested: 'Rebasing the epic PR onto the target branch', rebased: 'Epic PR rebased; CI runs again', conflict: 'Epic PR conflict', rebase_handed_off: 'You handed the epic PR rebase to a developer', ci_failed: 'CI failed on the epic PR', merge_refused: 'GitHub refused the epic PR merge', closed: 'Epic PR closed on GitHub', merged: 'Epic PR merged' }
-    const body = [labels[detail.event] ?? detail.event, detail.summary].filter(Boolean).join(': ')
+    const body = [labels[detail.event ?? ''] ?? detail.event, detail.summary].filter(Boolean).join(': ')
     const item: TaskInboxItem = { id: `epic-${entry.id}`, type: 'activity', epicId: epic.id, project: projectTag(project), taskId: task.id, taskRef: taskRef(project.prefix, task.number), subject: epic.title, preview: body, body, sender: senderOf(entry.actor), at: entry.createdAt.toISOString(), prUrl: epic.prNumber ? `https://github.com/${project.repository}/pull/${epic.prNumber}` : null, resolution: entry.actor.kind === 'human' ? body : null }
     if (entry.actor.kind === 'human') resolved.push(item)
     else activity.push(item)
@@ -143,10 +144,10 @@ async function needsYouItem(db: Executor, task: typeof tasks.$inferSelect, proje
   // The item arrived when the task entered its status. Updates that keep the
   // status (a PR head moving, an edit) don't move it.
   const [entered] = await db.select({ detail: auditLog.detail, createdAt: auditLog.createdAt }).from(auditLog)
-    .where(and(eq(auditLog.taskId, task.id), eq(auditLog.action, 'task.transition'), sql`${auditLog.detail}->>'to' = ${task.status}`, sql`${auditLog.detail}->>'from' is distinct from ${task.status}`))
+    .where(and(eq(auditLog.taskId, task.id), eq(auditLog.action, 'task.transition'), sql`${auditText('task.transition', 'to')} = ${task.status}`, sql`${auditText('task.transition', 'from')} is distinct from ${task.status}`))
     .orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(1)
   // A Blocked task whose reason came from the agent's own report is a question
-  const stuck = task.status === 'blocked' && (entered?.detail as { event?: string } | undefined)?.event === 'stuck'
+  const stuck = task.status === 'blocked' && readAudit(entered?.detail).event === 'stuck'
   const type: TaskInboxItemType = task.status === 'human_review' ? 'human_review' : task.status === 'failed' ? 'failed' : stuck ? 'question' : 'blocked'
   // PR reviews get a short note; spikes show their findings. The
   // criteria and evidence sit right under it (design/inbox.md)
@@ -199,7 +200,7 @@ function senderOf(actor: Actor): TaskInboxItem['sender'] {
   return { name: actorLabel(actor), role: 'system' }
 }
 
-function activityText(action: string, event: string | null, detail: Record<string, unknown>, prNumber: number | null, type: string): string {
+function activityText(action: string, event: string | null, detail: AuditView, prNumber: number | null, type: string): string {
   const pr = prNumber ? `PR #${prNumber}` : 'the PR'
   if (action === 'review.recorded') {
     // A spike's findings (D19) and a design (D20) are reviewed without a PR
@@ -221,13 +222,12 @@ function activityText(action: string, event: string | null, detail: Record<strin
   }
 }
 
-function resolutionText(action: string, event: string | null, detail: Record<string, unknown>): string {
+function resolutionText(action: string, { event, to }: AuditView): string {
   if (action === 'task.deleted') return 'You deleted the task'
   if (event === 'human_approve') return 'You approved the merge'
   if (event === 'human_request_changes') return 'You requested changes'
   if (event === 'send_back') return 'You sent the task back to Backlog'
   if (event === 'resolve') {
-    const to = (detail.event as { to?: string } | undefined)?.to ?? detail.to
     return `You moved the task to ${String(to ?? 'a new status').replace('_', ' ')}`
   }
   return 'Resolved'

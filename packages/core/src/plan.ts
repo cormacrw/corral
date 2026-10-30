@@ -1,8 +1,13 @@
 import { checkEpicDependencies, type EpicDependencyProblem, type EpicDependencyTask } from './epic-dependencies.ts'
 import { checkDependencies, type DependencyProblem } from './dependencies.ts'
+import type { DesignVersionStatus } from './design.ts'
 import type { EpicReviewMode } from './project.ts'
 import type { TaskStatus } from './status.ts'
 import type { TaskPriority, TaskType } from './task.ts'
+
+// A plan version's lifecycle (design/plan.md)
+export const PLAN_STATUSES = ['proposed', 'approved', 'superseded', 'discarded'] as const
+export type PlanStatus = typeof PLAN_STATUSES[number]
 
 // What the PM proposes with `propose_plan` (D9). Keys are the PM's own
 // handles for epics and tasks inside one plan, so dependencies and
@@ -17,7 +22,16 @@ export interface ProposedEpic {
   reviewMode?: EpicReviewMode | undefined
 }
 
-export interface ProposedTask {
+export interface PlanTaskContent {
+  title: string
+  description: string
+  type: TaskType
+  priority: TaskPriority
+  humanReview: boolean
+  acceptanceCriteria: (string | { text: string, checkedByHuman?: boolean | undefined })[]
+}
+
+export interface ProposedTask extends PlanTaskContent {
   key: string
   // The ref of an existing task this one revises (e.g. COR-4), instead of
   // creating a new one
@@ -26,12 +40,6 @@ export interface ProposedTask {
   // edited Drafts for approval). A task without one has no
   // epic.
   epic?: string | undefined
-  title: string
-  description: string
-  type: TaskType
-  priority: TaskPriority
-  humanReview: boolean
-  acceptanceCriteria: (string | { text: string, checkedByHuman?: boolean | undefined })[]
   dependsOn: string[]
   // The approved design version this task builds, and the screens (ids
   // from its design.md) it covers (D20)
@@ -71,7 +79,7 @@ export type PlanProblem =
   | { code: 'ref_in_other_project', key: string, ref: string, project: string, message: string }
   | { code: 'ref_not_revisable', key: string, ref: string, status: TaskStatus, message: string }
   | { code: 'design_not_found', key: string, design: string, message: string }
-  | { code: 'design_not_approved', key: string, design: string, status: string, message: string }
+  | { code: 'design_not_approved', key: string, design: string, status: DesignVersionStatus, message: string }
   | { code: 'design_without_screens', key: string, design: string, message: string }
 
 // What an existing task's ref points at, looked up by the server before
@@ -85,7 +93,7 @@ export type PlanRef =
 // What a design pin points at, looked up by the server before checkPlan
 // runs. Keyed by designPinKey.
 export type DesignPinTarget =
-  | { kind: 'version', status: string }
+  | { kind: 'version', status: DesignVersionStatus }
   | { kind: 'not_design', status: TaskStatus }
   | { kind: 'unknown' }
 
@@ -218,7 +226,8 @@ function designProblem(key: string, pin: DesignPin, found: DesignPinTarget): Pla
   }
 }
 
-export type PlanChange = 'added' | 'changed' | 'unchanged' | 'removed'
+export const PLAN_CHANGES = ['added', 'changed', 'unchanged', 'removed'] as const
+export type PlanChange = typeof PLAN_CHANGES[number]
 
 // How a revised plan differs from the previous version, by key (design/plan.md)
 export function diffPlans(previous: readonly ProposedTask[], next: readonly ProposedTask[]): { key: string, change: PlanChange }[] {

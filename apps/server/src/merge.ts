@@ -2,6 +2,7 @@ import { failedMergeGates, type Actor, type MergeGateFacts } from '@corral/core'
 import { schema, type Database } from '@corral/db'
 import { and, asc, desc, eq, isNull } from 'drizzle-orm'
 import { EpicMerger } from './epic-merge.ts'
+import { appendAudit, auditEvent, type TransitionDetail } from './audit.ts'
 import { isEpicRebaseTask, taskBase } from './task-base.ts'
 import { publishDependents } from './dependent-tasks.ts'
 import type { EventBus } from './events.ts'
@@ -9,7 +10,7 @@ import type { CheckResult, GitHubClient, PullRequest } from './github.ts'
 import type { RunnerHub } from './runner-hub.ts'
 import { applyTransition, loadTask, lockTask, type ProjectRow, type TaskRow } from './tasks.ts'
 
-const { acceptanceCriteria, auditLog, comments, evidence, reviews, tasks } = schema
+const { acceptanceCriteria, comments, evidence, reviews, tasks } = schema
 
 const server: Actor = { kind: 'system', component: 'server' }
 
@@ -195,7 +196,7 @@ export class MergeOrchestrator {
       const updated = await github.updateBranch(project.repository, pr, pr.headSha)
       if (updated) {
         await db.update(tasks).set({ branchUpdateRequested: true }).where(eq(tasks.id, task.id))
-        await db.insert(auditLog).values({ projectId: project.id, taskId: task.id, actor: server, action: 'branch.update_requested', detail: { pr: pr.number, headSha: pr.headSha } })
+        await appendAudit(db, { projectId: project.id, taskId: task.id, actor: server }, auditEvent('branch.update_requested', { pr: pr.number, headSha: pr.headSha }))
       } else {
         await this.#transition(task.id, { type: 'base_conflict', approvedHeadSha: pr.headSha }, { event: 'base_conflict' },
           `The base branch \`${baseBranch}\` has moved and the update conflicts with this branch. ${rebaseInstruction(baseBranch)}`)
@@ -237,10 +238,7 @@ export class MergeOrchestrator {
         })
       }
       await tx.update(tasks).set({ headSha: pr.headSha, branchUpdateRequested: false, updatedAt: this.#now() }).where(eq(tasks.id, task.id))
-      await tx.insert(auditLog).values({
-        projectId: task.projectId, taskId: task.id, actor: server, action: 'branch.head_moved',
-        detail: { from: task.headSha, to: pr.headSha, approvalKept: kept }
-      })
+      await appendAudit(tx, { projectId: task.projectId, taskId: task.id, actor: server }, auditEvent('branch.head_moved', { from: task.headSha, to: pr.headSha, approvalKept: kept }))
       if (!kept) await applyTransition(tx, locked.task, locked.project, { type: 'head_moved' }, server, { event: 'head_moved', headSha: pr.headSha })
     })
     await this.#publish(task.id)
@@ -276,7 +274,7 @@ export class MergeOrchestrator {
     }
     // A plain refusal (405/409): the head moved or a check turned red. The
     // next tick re-evaluates from live state.
-    await this.#d.db.insert(auditLog).values({ projectId: project.id, taskId, actor: server, action: 'merge.refused', detail: { pr: report.pr.number, message: result.message, attempt } })
+    await appendAudit(this.#d.db, { projectId: project.id, taskId, actor: server }, auditEvent('merge.refused', { pr: report.pr.number, message: result.message, attempt }))
     if (attempt >= MAX_MERGE_ATTEMPTS) {
       await this.#transition(taskId, { type: 'fail', reason: `GitHub refused the merge ${attempt} times: ${result.message}` }, { event: 'merge_failed' })
       this.#attempts.delete(taskId)
@@ -318,7 +316,7 @@ export class MergeOrchestrator {
     if (!row) return
     try {
       const result = await runner.request({ kind: 'cleanup_worktrees', repository: row.project.repository, taskId })
-      await db.insert(auditLog).values({ projectId: row.project.id, taskId, actor: server, action: 'worktrees.cleaned', detail: result })
+      await appendAudit(db, { projectId: row.project.id, taskId, actor: server }, auditEvent('worktrees.cleaned', result))
       if (result.kept.length > 0) {
         await db.insert(comments).values({ taskId, author: server, body: `The runner kept a worktree with uncommitted changes: ${result.kept.join(', ')}. Remove it by hand when you're done with it.` })
       }
@@ -344,7 +342,7 @@ export class MergeOrchestrator {
     else if (row && !this.stopped && row.task.prNumber && row.task.headSha) void this.#advanceOnce(row.task, row.project)
   }
 
-  async #transition(taskId: string, event: Parameters<typeof applyTransition>[3], detail: Record<string, unknown>, comment?: string): Promise<void> {
+  async #transition(taskId: string, event: Parameters<typeof applyTransition>[3], detail: TransitionDetail, comment?: string): Promise<void> {
     await this.#d.db.transaction(async (tx) => {
       const { task, project } = await lockTask(tx, taskId)
       if (task.leaseRunId) return

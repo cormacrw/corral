@@ -1,5 +1,6 @@
+import { appendAudit, auditEvent } from './audit.ts'
 import { EpicPullRequests, epicReviewContext } from './epic-prs.ts'
-import { RUNNER_HEARTBEAT_MS, EVIDENCE_KINDS, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
+import { RUNNER_HEARTBEAT_MS, epicReviewReportSchema, evidenceKind, outcomeReportSchema, rebaseReviewReportSchema, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type PmRunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
 import {
   ACTIVE_RUN_STATES,
   LEASE_DURATION_MS,
@@ -8,10 +9,10 @@ import {
   reviewFeedbackText,
   transition,
   humanCheckTally,
+  type ReviewVerdict,
   taskRef,
   richTextToMarkdown,
   type Actor,
-  type RunOutcome,
   type RunState
 } from '@corral/core'
 import { schema, type Database, type Executor } from '@corral/db'
@@ -29,6 +30,7 @@ import { EpicBranchError, isEpicRebaseTask, taskBase } from './task-base.ts'
 import { slugify } from './projects.ts'
 import { designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
 import { runExitError, withLastActivity } from './run-exit.ts'
+import { runEndValues, type RunEnd } from './run-lifecycle.ts'
 import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
 import { MergeOrchestrator } from './merge.ts'
 import type { ReleaseNotes } from './deployments.ts'
@@ -38,7 +40,7 @@ import { addComment, applyTransition, deleteTaskRows, loadTask, lockTask, toTask
 import type { Transcripts } from './transcripts.ts'
 import { WorktreeSweep } from './worktree-sweep.ts'
 
-const { acceptanceCriteria, agents, attachments, auditLog, comments, designVersions, evidence, projects, reviews, runs, settings, taskDesignPins, tasks } = schema
+const { acceptanceCriteria, agents, attachments, comments, designVersions, evidence, projects, reviews, runs, settings, taskDesignPins, tasks } = schema
 type PlanSessionRow = typeof schema.planSessions.$inferSelect
 
 const server: Actor = { kind: 'system', component: 'server' }
@@ -78,13 +80,13 @@ const MAX_EVIDENCE_BYTES = 25 * 1024 * 1024
 export const MAX_NOTE_LENGTH = 200
 const NOTE_EXAMPLE = 'Rebased onto 6e67d6f; resolved conflict in docs/architecture.md keeping main’s SSE wording'
 
-const reportSchema = z.object({
-  outcome: z.string(),
-  summary: z.string().trim().min(1, 'Add a summary'),
-  note: z.string().trim().optional(),
-  criteria: z.array(z.object({ criterionId: z.string(), met: z.boolean(), note: z.string().default('') })).optional(),
-  headSha: z.string().optional()
-})
+// A report that doesn't fit its schema comes back to the agent field by field
+function parseReport<T>(schema: z.ZodType<T>, input: unknown): T {
+  const parsed = schema.safeParse(input)
+  if (parsed.success) return parsed.data
+  const fields = parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`)
+  throw new ToolError(`Not reported. ${fields.join('. ')}. Fix this and report again.`)
+}
 
 // What the runner sends for submit_design (D20)
 const designSchema = z.object({
@@ -103,7 +105,7 @@ const MAX_INLINE_TEXT = 64 * 1024
 // nothing to show (D21)
 const evidenceSchema = z.object({
   criterionId: z.string().uuid().nullable().default(null),
-  kind: z.enum(EVIDENCE_KINDS),
+  kind: evidenceKind,
   note: z.string().default(''),
   fileName: z.string().min(1).optional(),
   contentType: z.string().min(1).optional(),
@@ -165,7 +167,7 @@ export class Orchestrator implements RunnerHandlers {
   // A PM turn (D9): a run with no task and no lease, fenced by its own epoch.
   // It starts right away; it only waits as `queued`, holding its job, while
   // the PM is paused, the runner can't take it, or an update is finishing (D13, D16).
-  async startPmRun(session: PlanSessionRow, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'>): Promise<string> {
+  async startPmRun(session: PlanSessionRow, job: Omit<PmRunJob, 'runId' | 'runNumber' | 'leaseEpoch'>): Promise<string> {
     const { db } = this.#d
     if (this.#stopped) throw new ApiFailure(409, { code: 'conflict', constraint: 'corral_stopped' })
     const [pm] = await db.select().from(agents).where(eq(agents.role, 'pm')).orderBy(asc(agents.createdAt)).limit(1)
@@ -205,7 +207,7 @@ export class Orchestrator implements RunnerHandlers {
     if (!runner.online || this.#stopped || this.#finishingUpdate) return
     const due = await this.#exclusive(() => db.transaction(async (tx) => {
       const pmAgents = await tx.select().from(agents).where(eq(agents.role, 'pm')).orderBy(asc(agents.createdAt)).for('update')
-      const picked: { id: string, runnerId: string, note: string | null, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'> }[] = []
+      const picked: { id: string, runnerId: string, note: string | null, job: Omit<PmRunJob, 'runId' | 'runNumber' | 'leaseEpoch'> }[] = []
       for (const agent of pmAgents) {
         if (agent.paused || (agent.pausedUntil && agent.pausedUntil > this.#now())) continue
         const waiting = await tx.select({ id: runs.id, job: runs.pmJob, planSessionId: runs.planSessionId }).from(runs)
@@ -214,7 +216,7 @@ export class Orchestrator implements RunnerHandlers {
         for (const w of waiting) {
           // The runtime is the session's (D18); a job queued before sessions
           // had one runs on the PM agent's, as it always did
-          const held = w.job as Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch' | 'runtime'> & { runtime?: string }
+          const held = w.job as Omit<PmRunJob, 'runId' | 'runNumber' | 'leaseEpoch' | 'runtime'> & { runtime?: string }
           let job = { ...held, runtime: held.runtime ?? agent.runtime }
           // A Plan session stays on the runner of its earlier turns while it's
           // online: its warm process and session files are there
@@ -352,7 +354,7 @@ export class Orchestrator implements RunnerHandlers {
     this.#stopped = stopped
     this.merges.stopped = stopped || this.#updating
     await this.#d.db.insert(settings).values({ key: 'stopped', value: stopped }).onConflictDoUpdate({ target: settings.key, set: { value: stopped, updatedAt: this.#now() } })
-    await this.#d.db.insert(auditLog).values({ actor, action: stopped ? 'corral.stopped' : 'corral.resumed', detail: {} })
+    await appendAudit(this.#d.db, { actor }, stopped ? auditEvent('corral.stopped', {}) : auditEvent('corral.resumed', {}))
     this.#d.events.publish({ type: 'global.status', status: this.status })
   }
 
@@ -582,7 +584,7 @@ export class Orchestrator implements RunnerHandlers {
       model: null,
       timeoutSeconds: RUN_TIMEOUT_SECONDS,
       prompt: !resume ? prompt : author.revision(promptTask, feedback)
-    }
+    } as RunJob
   }
 
   // The design version a build task is pinned to (D20), for its prompt
@@ -804,8 +806,9 @@ export class Orchestrator implements RunnerHandlers {
     if (message.type === 'run.started') {
       const ctx = await this.#fenced(message.runId, message.leaseEpoch)
       if (!ctx) return
+      // Still active: the server may have ended the run since it was fenced
       await db.update(runs).set({ state: 'running', startedAt: this.#now(), agentSessionId: message.agentSessionId })
-        .where(eq(runs.id, ctx.run.id))
+        .where(and(eq(runs.id, ctx.run.id), inArray(runs.state, [...ACTIVE_RUN_STATES])))
       this.#confirmLease(ctx, message.sentAt)
       if (ctx.run.role === 'pm' && ctx.run.planSessionId) await this.plans?.onRunStarted(ctx.run.planSessionId, message.agentSessionId)
       await this.#publish(ctx)
@@ -921,24 +924,18 @@ export class Orchestrator implements RunnerHandlers {
     return addComment(tx, ctx.task!.id, { body: note, pinned: false }, this.#actor(ctx))
   }
 
-  async #endRun(ctx: RunContext, fields: Partial<typeof runs.$inferInsert> & { state: RunState }): Promise<void> {
-    await this.#d.db.transaction(tx => this.#endRunIn(tx, ctx, fields))
+  async #endRun(ctx: RunContext, end: RunEnd): Promise<void> {
+    await this.#d.db.transaction(tx => this.#endRunIn(tx, ctx, end))
   }
 
   // Ends the run and releases its lease, if it still holds one
-  async #endRunIn(tx: Executor, ctx: RunContext, fields: Partial<typeof runs.$inferInsert> & { state: RunState }): Promise<void> {
-    await tx.update(runs).set({ endedAt: this.#now(), pmJob: null, ...fields }).where(eq(runs.id, ctx.run.id))
+  async #endRunIn(tx: Executor, ctx: RunContext, end: RunEnd): Promise<void> {
+    await tx.update(runs).set(runEndValues(end, this.#now())).where(eq(runs.id, ctx.run.id))
     if (ctx.task) {
       await tx.update(tasks).set({ leaseRunId: null, leaseRole: null, leaseExpiresAt: null, leaseHeartbeatAt: null, updatedAt: this.#now() })
         .where(and(eq(tasks.id, ctx.task.id), eq(tasks.leaseRunId, ctx.run.id)))
     }
-    await tx.insert(auditLog).values({
-      projectId: ctx.project.id,
-      taskId: ctx.task?.id ?? null,
-      actor: server,
-      action: 'run.ended',
-      detail: { runId: ctx.run.id, runNumber: ctx.run.number, state: fields.state, outcome: fields.outcome ?? null, error: fields.error ?? null }
-    })
+    await appendAudit(tx, { projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor: server }, auditEvent('run.ended', { runId: ctx.run.id, runNumber: ctx.run.number, state: end.state, outcome: end.outcome ?? null, error: 'error' in end ? end.error : null }))
   }
 
   // A human stops a run: the process tree is killed, the run is Interrupted
@@ -950,7 +947,7 @@ export class Orchestrator implements RunnerHandlers {
     await this.#d.db.transaction(async (tx) => {
       await this.#endRunIn(tx, ctx, { state: 'interrupted', error: HUMAN_STOP })
       if (ctx.task) await tx.update(tasks).set({ paused: true }).where(eq(tasks.id, ctx.task.id))
-      await tx.insert(auditLog).values({ projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor, action: 'run.stopped', detail: { runId } })
+      await appendAudit(tx, { projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor }, auditEvent('run.stopped', { runId }))
     })
     await this.#publish(ctx)
   }
@@ -965,7 +962,7 @@ export class Orchestrator implements RunnerHandlers {
         .where(and(eq(tasks.id, taskId), eq(tasks.paused, true), isNull(tasks.deletedAt)))
         .returning({ projectId: tasks.projectId })
       if (!task) throw new ApiFailure(409, { code: 'conflict', constraint: 'task_not_paused' })
-      await tx.insert(auditLog).values({ projectId: task.projectId, taskId, actor, action: 'task.resumed', detail: {} })
+      await appendAudit(tx, { projectId: task.projectId, taskId, actor }, auditEvent('task.resumed', {}))
     })
   }
 
@@ -999,10 +996,7 @@ export class Orchestrator implements RunnerHandlers {
 
     const comment = await db.transaction(async (tx) => {
       const comment = await addComment(tx, task.id, { body, pinned: false }, actor)
-      await tx.insert(auditLog).values({
-        projectId, taskId: task.id, actor, action: 'run.message_sent',
-        detail: { runId: run.id, runNumber: run.number, commentId: comment.id, attachments: input.attachments }
-      })
+      await appendAudit(tx, { projectId, taskId: task.id, actor }, auditEvent('run.message_sent', { runId: run.id, runNumber: run.number, commentId: comment.id, attachments: input.attachments }))
       // Sent last, so a runner that dropped off rolls the comment back
       if (!runner.send({ type: 'run.message', runId: run.id, leaseEpoch: run.leaseEpoch!, text: body }, run.runnerId)) {
         throw notLive('No runner is connected to deliver the message')
@@ -1049,10 +1043,7 @@ export class Orchestrator implements RunnerHandlers {
     }
     const comment = await db.transaction(async (tx) => {
       const comment = await addComment(tx, taskId, { body: body(`The ${what} of ${ref} changed during run #${run.number}, which couldn't be told while it ran. Work to the new text below.`), pinned: true }, actor)
-      await tx.insert(auditLog).values({
-        projectId: project.id, taskId, actor, action: 'task.edit_pinned',
-        detail: { runId: run.id, runNumber: run.number, commentId: comment.id }
-      })
+      await appendAudit(tx, { projectId: project.id, taskId, actor }, auditEvent('task.edit_pinned', { runId: run.id, runNumber: run.number, commentId: comment.id }))
       return comment
     })
     events.publish({ type: 'comment.created', comment })
@@ -1117,7 +1108,7 @@ export class Orchestrator implements RunnerHandlers {
       const [row] = await tx.delete(projects).where(eq(projects.id, projectId)).returning()
       if (!row) throw new ApiFailure(404, { code: 'not_found' })
       // Not tied to the project, or it would go too
-      await tx.insert(auditLog).values({ projectId: null, actor, action: 'project.deleted', detail: { projectId, name: row.name, repository: row.repository } })
+      await appendAudit(tx, { projectId: null, actor }, auditEvent('project.deleted', { projectId, name: row.name, repository: row.repository }))
       return row
     })
     this.#d.events.publish({ type: 'project.deleted', projectId })
@@ -1173,7 +1164,7 @@ export class Orchestrator implements RunnerHandlers {
       }
       if (tool === 'get_evidence') return this.#getEvidence(ctx, z.object({ evidenceId: z.string().optional() }).parse(input))
       if (tool === 'report_outcome') {
-        await this.epicPrs.report(ctx.run, reportSchema.parse(input) as OutcomeReport)
+        await this.epicPrs.report(ctx.run, parseReport(epicReviewReportSchema, input))
         this.#finished(ctx, 'Epic integration review recorded')
         return { ok: true }
       }
@@ -1197,7 +1188,9 @@ export class Orchestrator implements RunnerHandlers {
       case 'submit_design':
         return this.#submitDesign(ctx, input)
       case 'report_outcome':
-        return this.#reportOutcome(ctx, reportSchema.parse(input) as OutcomeReport & { outcome: string })
+        // Human checks take no verdict, so a task with only those has none to give
+        if (ctx.task && !ctx.task.rebaseOnly && await this.#onlyHumanChecks(ctx.task.id)) return this.#reportOutcome(ctx, parseReport(outcomeReportSchema, { criteria: [], ...(input as object) }))
+        return this.#reportOutcome(ctx, ctx.task?.rebaseOnly ? parseReport(rebaseReviewReportSchema, input) : parseReport(outcomeReportSchema, input))
     }
     throw new ToolError(`Unknown tool ${tool}`)
   }
@@ -1291,7 +1284,12 @@ export class Orchestrator implements RunnerHandlers {
     return { ...meta, images: [{ mimeType: meta.mimeType, dataBase64: Buffer.from(data).toString('base64') }] }
   }
 
-  async #reportOutcome(ctx: RunContext, report: OutcomeReport & { outcome: string }): Promise<unknown> {
+  async #onlyHumanChecks(taskId: string): Promise<boolean> {
+    const rows = await this.#d.db.select({ checkedByHuman: acceptanceCriteria.checkedByHuman }).from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, taskId))
+    return rows.length > 0 && rows.every(c => c.checkedByHuman)
+  }
+
+  async #reportOutcome(ctx: RunContext, report: OutcomeReport): Promise<unknown> {
     if (ctx.run.role === 'reviewer') {
       switch (report.outcome) {
         case 'approved':
@@ -1320,7 +1318,7 @@ export class Orchestrator implements RunnerHandlers {
           if (!ctx.task!.rebaseOnly && report.outcome === 'pr_rebased') throw new ToolError('Not submitted. This round expects pr_opened or pr_updated, not pr_rebased.')
           if (spike) throw new ToolError('Not submitted. A spike opens no PR: report your findings with outcome findings_reported.')
           if (design) throw new ToolError('Not submitted. A design task opens no PR: call submit_design, then report design_submitted.')
-          return this.#submit(ctx, report)
+          return this.#submit(ctx, { ...report, outcome: report.outcome })
         case 'findings_reported':
           if (!spike) throw new ToolError(`Not submitted. Only a spike reports findings; this task reports ${design ? 'design_submitted' : 'pr_opened or pr_updated'}.`)
           return this.#reportFindings(ctx, report)
@@ -1345,7 +1343,7 @@ export class Orchestrator implements RunnerHandlers {
   // requested goes through core (round cap → Blocked) and the feedback is
   // posted as a comment; an approval moves the task to Human review or
   // Ready to merge, where the merge orchestrator takes over.
-  async #review(ctx: RunContext, report: OutcomeReport, verdict: 'approved' | 'changes_requested') {
+  async #review(ctx: RunContext, report: Extract<OutcomeReport, { outcome: ReviewVerdict }>, verdict: ReviewVerdict) {
     const { db } = this.#d
     const task = ctx.task!
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
@@ -1383,10 +1381,7 @@ export class Orchestrator implements RunnerHandlers {
         taskId: task.id, runId: ctx.run.id, round: locked.task.reviewRounds, headSha, verdict, summary, criteria: kept, author: this.#actor(ctx)
       })
       await tx.insert(comments).values({ taskId: task.id, author: this.#actor(ctx), body: feedback })
-      await tx.insert(auditLog).values({
-        projectId: ctx.project.id, taskId: task.id, actor: this.#actor(ctx), action: 'review.recorded',
-        detail: { runId: ctx.run.id, verdict, headSha, round: locked.task.reviewRounds, met: kept.filter(v => v.met).length, of: kept.length, ...(similarity !== undefined && { similarity }) }
-      })
+      await appendAudit(tx, { projectId: ctx.project.id, taskId: task.id, actor: this.#actor(ctx) }, auditEvent('review.recorded', { runId: ctx.run.id, verdict, headSha, round: locked.task.reviewRounds, met: kept.filter(v => v.met).length, of: kept.length, ...(similarity !== undefined && { similarity }) }))
       // Changes requested → the developer; approved → Human review when
       // flagged, otherwise Ready to merge (D10)
       const state = await applyTransition(tx, locked.task, locked.project, verdict === 'approved' ? { type: 'review_approved' } : { type: 'changes_requested', similarity }, server, { event: verdict === 'approved' ? 'review_approved' : 'changes_requested', runId: ctx.run.id, headSha, ...(similarity !== undefined && { similarity }) })
@@ -1453,7 +1448,7 @@ export class Orchestrator implements RunnerHandlers {
 
   // flows.md step 5: validate the developer's submission, open or update the
   // PR, then move the task to Agent review
-  async #submit(ctx: RunContext, report: OutcomeReport) {
+  async #submit(ctx: RunContext, report: OutcomeReport & { outcome: 'pr_opened' | 'pr_updated' | 'pr_rebased' }) {
     const { db, github } = this.#d
     const task = ctx.task!
     if (!report.headSha) throw new ToolError('There is no commit to submit. Commit your work, then report again.')
@@ -1499,7 +1494,7 @@ export class Orchestrator implements RunnerHandlers {
       }, server, { event: report.outcome, runId: ctx.run.id, headSha: report.headSha, pr: pr?.number ?? null })
       await tx.update(tasks).set({ headSha: report.headSha, ...(pr && { prNumber: pr.number, prUrl: pr.url }) }).where(eq(tasks.id, task.id))
       const comment = await this.#postNote(tx, ctx, report.note!)
-      await this.#endRunIn(tx, ctx, { state: 'completed', outcome: report.outcome as RunOutcome, summary: report.summary, headSha: report.headSha })
+      await this.#endRunIn(tx, ctx, { state: 'completed', outcome: report.outcome, summary: report.summary, headSha: report.headSha })
       return comment
     })
     this.#d.events.publish({ type: 'comment.created', comment })
@@ -1570,10 +1565,7 @@ export class Orchestrator implements RunnerHandlers {
       const [row] = await tx.insert(designVersions).values({
         taskId: task.id, version: nextDesignVersion(existing), bundleBlob, specBlob, screenshots, branch: task.branch!, commitSha: submission.headSha
       }).returning()
-      await tx.insert(auditLog).values({
-        projectId: ctx.project.id, taskId: task.id, actor: this.#actor(ctx), action: 'design.submitted',
-        detail: { runId: ctx.run.id, version: row!.version, headSha: submission.headSha, screenshots: screenshots.length }
-      })
+      await appendAudit(tx, { projectId: ctx.project.id, taskId: task.id, actor: this.#actor(ctx) }, auditEvent('design.submitted', { runId: ctx.run.id, version: row!.version, headSha: submission.headSha, screenshots: screenshots.length }))
       return row!
     })
     return {

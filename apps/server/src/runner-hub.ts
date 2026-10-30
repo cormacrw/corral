@@ -1,5 +1,8 @@
 import {
   RUNNER_HEARTBEAT_MS,
+  runnerMessageSchema,
+  legacyRunnerHelloSchema,
+  protocolMessageType,
   RUNNER_PROTOCOL_VERSION,
   RUNNER_ROLES,
   type RunnerCapacity,
@@ -120,18 +123,26 @@ export class RunnerHub {
     let runnerId: string | null = null
     return {
       onMessage: async (raw: string) => {
-        let message: RunnerMessage
+        let decoded: unknown
         try {
-          message = JSON.parse(raw) as RunnerMessage
+          decoded = JSON.parse(raw)
         } catch {
+          console.warn('Runner protocol error (runner → server, <invalid JSON>): Invalid JSON syntax')
           return
         }
+        const legacyHello = legacyRunnerHelloSchema.safeParse(decoded)
+        if (legacyHello.success && legacyHello.data.protocol !== RUNNER_PROTOCOL_VERSION) {
+          this.#turnAway(legacyHello.data)
+          socket.close(4000, JSON.stringify({ protocol: RUNNER_PROTOCOL_VERSION, commit: this.commit }))
+          return
+        }
+        const parsed = runnerMessageSchema.safeParse(decoded)
+        if (!parsed.success) {
+          console.warn(`Runner protocol error (runner → server, ${protocolMessageType(decoded)}): ${parsed.error.message}`)
+          return
+        }
+        const message = parsed.data
         if (message.type === 'hello') {
-          if (message.protocol !== RUNNER_PROTOCOL_VERSION) {
-            this.#turnAway(message)
-            socket.close(4000, JSON.stringify({ protocol: RUNNER_PROTOCOL_VERSION, commit: this.commit }))
-            return
-          }
           if (runnerId) return
           runnerId = message.runnerId
           const old = this.#runners.get(runnerId)
@@ -350,7 +361,7 @@ export class RunnerHub {
 function parseCapacity(message: Extract<RunnerMessage, { type: 'hello' }>, fallback?: RunnerCapacity): RunnerCapacity {
   return {
     slotSource: parseSlotSource(message.slotSource),
-    slots: Number.isInteger(message.slots) && message.slots > 0 ? message.slots : fallback?.slots ?? 1,
+    slots: typeof message.slots === 'number' && Number.isInteger(message.slots) && message.slots > 0 ? message.slots : fallback?.slots ?? 1,
     runtimes: Array.isArray(message.runtimes) ? message.runtimes.filter(r => typeof r === 'string') : fallback?.runtimes ?? [],
     roles: Array.isArray(message.roles) ? message.roles.filter(r => (RUNNER_ROLES as readonly string[]).includes(r)) : fallback?.roles ?? []
   }

@@ -154,6 +154,6 @@ describe('worktree sweep', () => {
 
   async function pmRun(planSessionId: string, state: 'queued' | 'running' | 'completed') {
     const [agent] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'pm'))
-    await t.db.insert(runs).values({ projectId: project.id, planSessionId, agentId: agent!.id, role: 'pm', state })
+    await t.db.insert(runs).values({ projectId: project.id, planSessionId, agentId: agent!.id, role: 'pm', state, endedAt: state === 'completed' ? new Date() : null })
   }
 })

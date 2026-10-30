@@ -1,9 +1,10 @@
 import { ACTIVE_RUN_STATES, type Actor } from '@corral/core'
 import { schema, type Database } from '@corral/db'
 import { and, eq, gte, inArray, isNotNull, isNull, ne, or } from 'drizzle-orm'
+import { appendAudit, auditEvent } from './audit.ts'
 import type { RunnerHub } from './runner-hub.ts'
 
-const { auditLog, planSessions, runs, tasks } = schema
+const { planSessions, runs, tasks } = schema
 
 const server: Actor = { kind: 'system', component: 'server' }
 
@@ -70,11 +71,7 @@ export class WorktreeSweep {
       if (result.status === 'rejected') console.error('Worktree sweep failed on a runner', result.reason)
     }
     if (!answers.length) return
-    await db.insert(auditLog).values({
-      actor: server,
-      action: 'worktrees.swept',
-      detail: { removed: answers.flatMap(a => a.removed), kept: answers.flatMap(a => a.kept) }
-    })
+    await appendAudit(db, { actor: server }, auditEvent('worktrees.swept', { removed: answers.flatMap(a => a.removed), kept: answers.flatMap(a => a.kept) }))
   }
 
   async #keepSet(): Promise<{ keepTaskIds: string[], keepPlanSessionIds: string[] }> {

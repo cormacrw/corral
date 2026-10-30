@@ -33,9 +33,9 @@ async function setup(mode: 'epic' | 'each_task' | 'direct' = 'epic') {
   await t.db.update(schema.tasks).set({ status: 'merged' }).where(eq(schema.tasks.id, task.id))
   await t.db.update(schema.tasks).set({ status: 'ready', paused: true }).where(eq(schema.tasks.id, other.id))
   const [agent] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'developer'))
-  const [run] = await t.db.insert(schema.runs).values({ agentId: agent!.id, projectId: project.id, taskId: task.id, role: 'developer', state: 'completed' }).returning()
+  const [run] = await t.db.insert(schema.runs).values({ agentId: agent!.id, projectId: project.id, taskId: task.id, role: 'developer', state: 'completed', endedAt: new Date() }).returning()
   await t.db.insert(schema.evidence).values({ runId: run!.id, taskId: task.id, criterionId: task.acceptanceCriteria[0]!.id, round: 0, size: 0, kind: 'note', note: 'Search API returns saved searches' })
-  const [uiRun] = await t.db.insert(schema.runs).values({ agentId: agent!.id, projectId: project.id, taskId: other.id, role: 'developer', state: 'completed' }).returning()
+  const [uiRun] = await t.db.insert(schema.runs).values({ agentId: agent!.id, projectId: project.id, taskId: other.id, role: 'developer', state: 'completed', endedAt: new Date() }).returning()
   await t.db.insert(schema.evidence).values({ runId: uiRun!.id, taskId: other.id, criterionId: other.acceptanceCriteria[0]!.id, round: 0, size: 0, kind: 'note', note: 'UI uses the same saved search response fields as the API' })
   await t.db.update(schema.projects).set({ paused: false }).where(eq(schema.projects.id, project.id))
   return { project, epic: epic!, task, other }

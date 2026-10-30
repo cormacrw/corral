@@ -27,7 +27,7 @@ async function submitted(humanReview = false, humanCheck = false) {
   await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true, requiredChecks: ['lint'] })
   const task = await t.createTask(project.slug, { humanReview, acceptanceCriteria: ['Preserves validation', humanCheck ? { text: 'Preserves navigation', checkedByHuman: true } : 'Preserves navigation'] })
   const [agent] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'reviewer'))
-  const [run] = await t.db.insert(schema.runs).values({ projectId: project.id, taskId: task.id, agentId: agent!.id, role: 'reviewer', state: 'completed', outcome: 'approved' }).returning()
+  const [run] = await t.db.insert(schema.runs).values({ projectId: project.id, taskId: task.id, agentId: agent!.id, role: 'reviewer', state: 'completed', outcome: 'approved', endedAt: new Date() }).returning()
   const criteria = task.acceptanceCriteria.map(c => c.checkedByHuman ? { criterionId: c.id, met: null, note: 'Needs human check' } : { criterionId: c.id, met: true, note: `Earlier proof: ${c.text}` })
   await t.db.insert(schema.reviews).values({ taskId: task.id, runId: run!.id, round: 0, headSha: 'approved-head', verdict: 'approved', summary: 'Feature checked', criteria, author: t.actor })
   await t.db.insert(schema.evidence).values(criteria.map(c => ({ taskId: task.id, runId: run!.id, criterionId: c.criterionId, round: 0, kind: 'note' as const, size: 0, note: c.note })))

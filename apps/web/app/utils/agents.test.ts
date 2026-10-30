@@ -7,8 +7,8 @@ const agent = (id: string, activeRuns = 0): Agent => ({
 })
 const run = (id: string, agentId: string, state: Run['state'], queuedAt = '2026-10-29T10:00:00Z', tokens = 0): Run => ({
   id, runnerId: null, runnerName: null, number: 1, agentId, agentName: agentId, role: 'developer', projectId: 'p', taskId: null, taskRef: null, taskTitle: null,
-  state, outcome: null, summary: null, error: null, headSha: null, inputTokens: tokens, cacheReadTokens: null, outputTokens: 0, rateLimitResetAt: null,
-  queuedAt, startedAt: queuedAt, endedAt: null
+  outcome: null, summary: null, error: null, headSha: null, inputTokens: tokens, cacheReadTokens: null, outputTokens: 0, rateLimitResetAt: null,
+  queuedAt, startedAt: queuedAt, ...(state === 'completed' || state === 'failed' || state === 'interrupted' ? { state, endedAt: queuedAt } : { state, endedAt: null })
 })
 
 describe('groupAgents', () => {
@@ -50,8 +50,8 @@ describe('agentFacts', () => {
 
 describe('designerStats', () => {
   it('counts versions by author commit and approved tasks once, including superseded approvals', () => {
-    const own = { ...run('design', 'iris', 'completed'), role: 'designer' as const, taskId: 'task', headSha: 'own' }
-    const review = { ...run('review', 'iris', 'completed'), role: 'reviewer' as const, taskId: 'task', headSha: 'other' }
+    const own = { ...run('design', 'iris', 'completed'), role: 'designer', taskId: 'task', headSha: 'own' } as Run
+    const review = { ...run('review', 'iris', 'completed'), role: 'reviewer', taskId: 'task', headSha: 'other' } as Run
     const version = (id: string, commitSha: string, status: DesignVersion['status'], planSessionId: string | null = null): DesignVersion => ({
       id, version: 1, commitSha, status, planSessionId, branch: 'design/COR-1', spec: '', screenshots: [], previewUrl: '', feedback: null, createdAt: '2026-10-29T12:00:00Z'
     })
