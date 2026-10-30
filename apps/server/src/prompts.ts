@@ -99,6 +99,7 @@ export interface ReviewTask extends PromptTask {
   previousFeedback: string | null
   // A spike's latest findings, which are what's under review
   findings?: string | null
+  rebaseReport?: { review: string | null, conflictedFiles: string[] | null } | null
   // The project's required CI checks: with none, the reviewer runs the gates
   requiredChecks: string[]
 }
@@ -145,6 +146,8 @@ function rebaseReviewerPrompt(task: ReviewTask, agentName: string): string {
   return [
     `You are ${agentName}, the reviewer agent in Corral. Rebase review for ${task.ref}: ${task.title}.`,
     section('Rebase under review', `Previously approved head: ${task.approvedHeadSha}. New head: ${task.headSha}. Base branch: origin/${task.defaultBranch}.
+Developer review choice: ${task.rebaseReport?.review ?? '(not recorded)'}.
+Conflicted files: ${task.rebaseReport?.conflictedFiles?.join(', ') ?? '(not recorded)'}.
 This is a conflict check of approved work, excluded from the review-round cap.`),
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
     section('Acceptance criteria (previously approved)', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
@@ -479,7 +482,7 @@ function rebaseDeveloperPrompt(task: PromptTask, agentName: string): string {
 - Check that \`git merge-tree --write-tree HEAD origin/${task.defaultBranch}\` is clean.
 - Do not push or use gh. Corral pushes with --force-with-lease.
 ${WORK_NOTE}
-- Report \`pr_rebased\` with a summary naming every conflicted file and how each was resolved, and a one-line note naming the conflicted files and their resolutions. If a human decision is needed, report stuck instead.
+- Report \`pr_rebased\` with \`conflictedFiles\`: a non-empty list of every file in which you resolved a conflict, and \`review\`: \`trivial\` only if the resolution just combines both sides with no new logic, renames or behaviour changes; otherwise choose \`needs_review\`. Both choices go to Agent review. Include a summary naming every conflicted file and how each was resolved, and a one-line note naming the conflicted files and their resolutions. If a human decision is needed, report stuck instead.
 - Always finish by calling \`report_outcome\`.`),
     commentsSection(task)
   ].join('\n')

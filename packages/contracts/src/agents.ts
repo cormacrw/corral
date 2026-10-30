@@ -120,6 +120,8 @@ interface RunFields {
   epicId: string | null
   epicTitle: string | null
   summary: string | null
+  review?: import('@corral/core').RebaseReview | null
+  conflictedFiles?: string[] | null
   error: string | null
   headSha: string | null
   inputTokens: number | null

@@ -1,4 +1,4 @@
-import { RUN_OUTCOMES, REVIEW_VERDICTS, TASK_TYPES, type AgentRole, type ReviewVerdict } from '@corral/core'
+import { REBASE_REVIEWS, RUN_OUTCOMES, REVIEW_VERDICTS, TASK_TYPES, type AgentRole, type ReviewVerdict } from '@corral/core'
 import { z } from 'zod'
 
 // The protocol between apps/server and apps/runner over WebSocket (D7). The
@@ -121,12 +121,14 @@ const missingCriteria = 'Give a verdict for every acceptance criterion'
 export const reportOutcomeInput = z.object({
   outcome: REPORTED_OUTCOMES.describe('One of the outcomes listed for your role'),
   summary: z.string().trim().min(1, 'Add a summary').describe('Plain-English summary of what you did, or your question when stuck'),
+  review: z.enum(REBASE_REVIEWS).optional().describe('Required for pr_rebased: trivial only for combining both sides with no new logic, renames or behaviour changes; otherwise needs_review'),
+  conflictedFiles: z.array(z.string().trim().min(1)).min(1, 'conflictedFiles must contain at least one file').optional().describe('Required for pr_rebased: every file in which you resolved a conflict'),
   note: z.string().trim().optional().describe('Developer only, required: one line of at most 200 characters saying what this run did, posted as a comment on the task, e.g. "Addressed review: dropped idle-thread fixture"'),
   criteria: z.array(criterionVerdict).optional().describe('Reviewer only: a verdict per acceptance criterion')
 })
 
 // Developer: the commit the runner pushed
-const reportFields = { summary: reportOutcomeInput.shape.summary, note: reportOutcomeInput.shape.note, headSha: z.string().optional() }
+const reportFields = { summary: reportOutcomeInput.shape.summary, note: reportOutcomeInput.shape.note, review: reportOutcomeInput.shape.review, conflictedFiles: reportOutcomeInput.shape.conflictedFiles, headSha: z.string().optional() }
 const taskReview = <Outcome extends z.ZodType<ReviewVerdict>>(outcome: Outcome) => z.object({ ...reportFields, outcome, criteria: z.array(criterionVerdict, { error: missingCriteria }) })
 const nonReview = z.object({ ...reportFields, outcome: NON_REVIEW_OUTCOMES })
 

@@ -58,3 +58,11 @@ The rebase-only reviewer outcome `blocked` preserves the round count and posts
 the changed binding decision as the task reason for the human. It is a run outcome,
 not a criterion review verdict. `rebase-review.test.ts` exercises all three paths
 through runner WebSocket reports and task HTTP responses.
+
+Rebase submissions now require `review: trivial | needs_review` and a non-empty
+`conflictedFiles` list (non-blank file paths). Trivial means combining both sides
+with no new logic, renames or behaviour changes; every other resolution needs
+review. Both choices still enter Agent review pending the later server fast path.
+The run stores both fields; the reviewer assignment includes them and the task
+History entry shows the choice and complete file list. Historical runs remain
+readable without these fields. The additive migration leaves existing data intact.

@@ -1,5 +1,5 @@
 import type { HumanTransitionInput, SetupJobResult } from '@corral/contracts'
-import type { Actor, ReviewVerdict, TaskStatus } from '@corral/core'
+import type { Actor, RebaseReview, ReviewVerdict, TaskStatus } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { sql, type SQL } from 'drizzle-orm'
 
@@ -69,7 +69,7 @@ export interface AuditDetails {
   'project.resumed': Changed
   'project.updated': Changed
   'review.recorded': { runId: string, verdict: ReviewVerdict, headSha: string, round: number, met: number, of: number, similarity?: number }
-  'run.ended': { runId: string, runNumber: number, state: string, outcome: string | null, error: string | null }
+  'run.ended': { runId: string, runNumber: number, state: string, outcome: string | null, error: string | null, review?: RebaseReview | undefined, conflictedFiles?: string[] | undefined }
   'run.message_sent': RunComment & { attachments: string[] }
   'run.stopped': { runId: string }
   'task.claimed': StatusChange & { runId: string, agentId: string, leaseEpoch: number }
