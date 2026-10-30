@@ -126,7 +126,7 @@ Run: Starting → Running. A heartbeat every 2 minutes renews the lease, and eve
 
 ### Step 6 — Agent review
 
-1. The scheduler sees an Agent review task with no lease and no verdict for the current commit and review round, and claims a reviewer lease.
+1. The scheduler sees an Agent review task with no lease and no verdict for the current commit and review round since the latest submission, and claims a reviewer lease.
 2. The runner creates a separate review worktree at the PR commit (`worktrees/<taskId>-review`).
 3. The reviewer reads the criteria and the evidence (`get_evidence`), and reviews the diff for security, efficiency and logic problems, raising each as specific, actionable feedback. Its prompt says whether the project has required CI checks (D26). With required checks, CI verifies lint, typecheck, tests and build (D21) and the merge gate enforces them, so the reviewer doesn't rerun them; it may run a targeted test or the app when that's the best way to check a criterion or a suspected bug. With none, nothing else verifies the gates, so it runs all four itself without the cache. For Turbo projects that means `TURBO_FORCE=1 pnpm run lint`, `TURBO_FORCE=1 pnpm run typecheck`, `TURBO_FORCE=1 pnpm run test` and `TURBO_FORCE=1 pnpm run build`; if a check cannot be run without the cache, the reviewer explains which check and why in its outcome. A cached result never counts as verification.
 4. It calls `report_outcome('approved' | 'changes_requested')` with a verdict per criterion and its reasoning. It judges note-only explanations as well as files; its per-criterion verdict note is the proof for note-only evidence (D21). The server records review round N, tied to that commit.

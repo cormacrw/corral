@@ -1,6 +1,6 @@
 import { ACTIVE_RUN_STATES, LEASE_DURATION_MS, transition, type Actor, type TaskStatus } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, asc, count, eq, inArray, isNotNull, isNull, ne, notInArray, notExists, sql } from 'drizzle-orm'
+import { and, asc, count, eq, gt, inArray, isNotNull, isNull, ne, notInArray, notExists, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { toTaskState, type TaskRow } from './tasks.ts'
 
@@ -28,7 +28,7 @@ export interface Claim {
 //
 // Developer runs pick up Ready tasks (→ In progress) and In progress tasks
 // with no lease, e.g. after changes were requested (D10). Reviewer runs pick
-// up Agent review tasks whose current commit and round have no verdict yet (flows.md
+// up Agent review tasks with no verdict since their latest submission (flows.md
 // step 6). Two claims can't take the same task: the candidate row is locked
 // with SKIP LOCKED, so a parallel claim moves on to the next task instead of
 // waiting for this one. Locking the agent row first means its concurrency
@@ -72,9 +72,18 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
       : and(
           eq(tasks.status, 'agent_review'),
           isNotNull(tasks.headSha),
-          // Earlier rounds may review the same commit with different evidence.
+          // A human resolving Blocked resets the round counter (D10), so
+          // even this head and round may have a verdict from an older submission.
+          // Use existing history so already-stranded tasks recover too.
           notExists(tx.select({ one: sql`1` }).from(reviews)
-            .where(and(eq(reviews.taskId, tasks.id), eq(reviews.headSha, tasks.headSha), eq(reviews.round, tasks.reviewRounds))))
+            .where(and(eq(reviews.taskId, tasks.id), eq(reviews.headSha, tasks.headSha), eq(reviews.round, tasks.reviewRounds),
+              notExists(tx.select({ one: sql`1` }).from(auditLog).where(and(
+                eq(auditLog.taskId, tasks.id),
+                eq(auditLog.action, 'task.transition'),
+                sql`${auditLog.detail}->>'from' = 'in_progress'`,
+                sql`${auditLog.detail}->>'to' = 'agent_review'`,
+                gt(auditLog.createdAt, reviews.createdAt)
+              ))))))
         )
     const batch = (offset: number) => tx.select({ task: tasks })
       .from(tasks)
