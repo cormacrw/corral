@@ -94,11 +94,11 @@ describe('migrations', () => {
     expect((await db.execute(sql`select runner_name from runs`)).rows).toEqual([{ runner_name: 'home-server' }])
   })
 
-  it.each([
-    { driver: 'pglite' as const, enabled: true },
-    { driver: 'postgres' as const, enabled: postgresAvailable }
-  ])('0034 adds dismissal without changing historical deployment notes or read state on $driver', async ({ driver, enabled }) => {
-    if (!enabled) return
+  it.for([
+    { driver: 'pglite' as const },
+    { driver: 'postgres' as const }
+  ])('0034 adds dismissal without changing historical deployment notes or read state on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+    requireDatabase(driver, context)
     const before = await migrationsBefore('0034_typical_prowler')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
     const { db, migrate } = await open(driver)
@@ -111,7 +111,7 @@ describe('migrations', () => {
       .toEqual([{ notes: 'Existing release notes', notes_status: 'ready', read: true, dismissed_at: null }])
     await migrate(migrationsFolder)
     expect((await db.execute(sql`select count(*)::int as count from deployments`)).rows).toEqual([{ count: 1 }])
-  }, 60_000)
+  })
 
   it('0028 preserves historical runs with null runner ownership', async () => {
     const before = await migrationsBefore('0028_complex_clint_barton')

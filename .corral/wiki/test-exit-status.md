@@ -1,9 +1,10 @@
 # Trustworthy test exit status
 
-The root test command remains Turbo → package Vitest. Server/db global setup
-imports embedded-postgres, which registers async-exit-hook@2.0.1 even when
-CORRAL_DATABASE_URL skips starting local Postgres. Its beforeExit handler used
-a hardcoded zero, masking Vitest's failure status. The pnpm dependency patch
+The root test command remains Turbo → package Vitest. Server/db no longer use
+global setup: Postgres tests opt in through runtime fixtures when
+CORRAL_DATABASE_URL is set. Only the explicit local startTestPostgres helper
+imports embedded-postgres, which registers async-exit-hook@2.0.1. Its beforeExit
+handler used a hardcoded zero, masking failure status. The pnpm dependency patch
 preserves the beforeExit event's status while retaining signal handling and
 asynchronous cleanup.
 
