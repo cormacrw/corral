@@ -32,9 +32,13 @@ async function mountInbox() {
   vi.stubGlobal('usePlanThreads', () => ({ add: vi.fn(), remove }))
   vi.stubGlobal('usePlanThreadDelete', usePlanThreadDelete)
   vi.stubGlobal('useTaskFlyout', () => ({ ref: vue.ref(null), epic: vue.ref(null), plan: vue.ref(false), close: vi.fn().mockResolvedValue(undefined) }))
+  const listeners: ((event: { type: string }) => void)[] = []
   vi.stubGlobal('useLive', () => ({
     state: vue.ref({ agents, projects, loaded: true, runner: { online: true } }),
-    subscribe: () => () => {}
+    subscribe: (listener: typeof listeners[number]) => {
+      listeners.push(listener)
+      return () => {}
+    }
   }))
   let data = inbox()
   vi.mocked(api.inbox.get).mockImplementation(async () => structuredClone(data))
@@ -46,16 +50,37 @@ async function mountInbox() {
   const plain = vue.defineComponent({ name: 'Plain', setup: (_, { slots }) => () => vue.h('div', [slots.default?.(), slots.footer?.()]) })
   const button = vue.defineComponent({ props: ['label', 'ariaLabel'], setup: props => () => vue.h('button', props.label ?? props.ariaLabel) })
   const row = vue.defineComponent({ props: ['item'], setup: props => () => vue.h('span', { 'data-row': props.item.id }, props.item.subject) })
+  const avatar = vue.defineComponent({ props: ['name'], setup: props => () => vue.h('i', { 'data-avatar': props.name }) })
   const wrapper = mount(InboxPage, { global: { components: { InboxPlanThread, UDashboardPanel: plain, UButton: button, PlanThreadRow: row }, stubs: {
     UBadge: true, UInput: true, UTabs: true,
-    AgentAvatar: true, MarkdownText: true, TaskFlyout: true,
+    AgentAvatar: avatar, MarkdownText: true, TaskFlyout: true,
     PlanConversation: true, InboxMobile: true, UAlert: true, USkeleton: true, NuxtLink: true,
     EvidenceList: true, USelectMenu: true, PromptComposer: true, UIcon: true, PlanQuestion: true, PlanDetail: true
   } } })
   await flushPromises()
   const rows = () => wrapper.findAll('[data-row]').map(r => r.attributes('data-row'))
-  return { wrapper, replace, remove, toasts, toastRemove, rows }
+  const rename = (name: string) => {
+    data = { ...data, needsYou: data.needsYou.map(i => i.type === 'plan_thread' ? { ...i, sender: { ...i.sender, name } } : i) }
+    for (const listener of listeners) listener({ type: 'agent.updated' })
+  }
+  return { wrapper, replace, remove, toasts, toastRemove, rows, rename }
 }
+
+it('shows the sender in the detail header, and a renamed PM without a reload', async () => {
+  const { wrapper, rename } = await mountInbox()
+  try {
+    const header = wrapper.getComponent(InboxPlanThread).get('header')
+    expect(header.text()).toContain('Pam · PM')
+    expect(header.text()).toContain(projects[0]!.name)
+    expect(header.get('[data-avatar]').attributes('data-avatar')).toBe('Pam')
+    rename('Renamed PM')
+    await flushPromises()
+    expect(header.text()).toContain('Renamed PM · PM')
+    expect(header.get('[data-avatar]').attributes('data-avatar')).toBe('Renamed PM')
+  } finally {
+    wrapper.unmount()
+  }
+})
 
 it('deletes from the header at once, selects the next item, and closes when Undo runs out', async () => {
   vi.useFakeTimers()

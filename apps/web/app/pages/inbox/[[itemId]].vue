@@ -44,7 +44,7 @@ async function load() {
 onMounted(() => {
   void load()
   const stop = live.subscribe((event) => {
-    if (['task.updated', 'task.deleted', 'task.created', 'run.updated', 'epic.updated', 'plan.session', 'deployment.updated'].includes(event.type)) void load()
+    if (['task.updated', 'task.deleted', 'task.created', 'run.updated', 'epic.updated', 'plan.session', 'deployment.updated', 'agent.updated'].includes(event.type)) void load()
   })
   onBeforeUnmount(stop)
 })

@@ -14,8 +14,6 @@ const live = useLive()
 const flyout = useTaskFlyout()
 const toast = useToast()
 const threads = usePlanThreads()
-const pm = computed(() => live.state.value.agents.find(a => a.role === 'pm') ?? null)
-const pmName = computed(() => pm.value?.name ?? 'Juno')
 const runnerOffline = computed(() => live.state.value.loaded && !live.state.value.runner?.online)
 
 // The plan itself, for View plan and approving; the item only has its summary
@@ -109,35 +107,42 @@ async function approve(to: 'ready' | 'backlog') {
 <template>
   <div class="flex h-full min-h-0 min-w-0 flex-1">
     <div class="flex min-w-0 flex-1 flex-col">
-      <header class="flex h-14 shrink-0 items-center gap-2 border-b border-default px-4 text-sm">
-        <ProjectThumbnail
-          :project="item.project"
-          :size="20"
-        />
-        <span class="shrink-0 text-muted">{{ item.project.name }}</span>
-        <h1 class="truncate font-medium">
-          {{ item.subject }}
-        </h1>
-        <UBadge
-          v-if="item.status !== 'none'"
-          :label="item.status === 'needs_approval' ? 'Needs approval' : 'Question'"
-          :color="item.status === 'needs_approval' ? 'primary' : 'info'"
-          variant="subtle"
-          size="xs"
-        />
-        <UBadge
-          :label="runtimeLabel(item.runtime)"
-          variant="subtle"
-          color="neutral"
+      <header class="flex h-14 shrink-0 items-center gap-3 border-b border-default px-4">
+        <AgentAvatar
+          :name="item.sender.name"
           size="sm"
         />
+        <div class="min-w-0 flex-1">
+          <h1 class="truncate text-sm font-medium">
+            {{ item.subject }}
+          </h1>
+          <div class="flex items-center gap-2 overflow-hidden text-xs whitespace-nowrap text-muted">
+            <span><span class="font-medium text-default">{{ item.sender.name }}</span> · PM</span>
+            <span class="flex items-center gap-1"><ProjectThumbnail
+              :project="item.project"
+              :size="16"
+            />{{ item.project.name }}</span>
+            <UBadge
+              v-if="item.status !== 'none'"
+              :label="item.status === 'needs_approval' ? 'Needs approval' : 'Question'"
+              :color="item.status === 'needs_approval' ? 'primary' : 'info'"
+              variant="subtle"
+              size="xs"
+            />
+            <UBadge
+              :label="runtimeLabel(item.runtime)"
+              variant="subtle"
+              color="neutral"
+              size="xs"
+            />
+          </div>
+        </div>
         <UButton
           :to="`/plan/${item.sessionId}`"
           label="Open in Plan"
           variant="ghost"
           color="neutral"
           size="sm"
-          class="ms-auto"
         />
         <!-- Deletes at once, with Undo in a toast (design/inbox.md#delete-thread) -->
         <UButton
@@ -152,14 +157,6 @@ async function approve(to: 'ready' | 'backlog') {
 
       <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
         <div class="mx-auto flex w-full max-w-[720px] flex-col gap-4">
-          <div class="flex items-center gap-2 text-xs text-muted">
-            <AgentAvatar
-              :name="pmName"
-              size="xs"
-            />
-            <span>{{ pmName }} · PM</span>
-          </div>
-
           <template v-if="item.question">
             <PlanQuestion
               :message="item.question"
@@ -248,7 +245,7 @@ async function approve(to: 'ready' | 'backlog') {
               name="i-lucide-loader-circle"
               class="size-4 animate-spin"
             />
-            {{ pmName }} is working on it.
+            {{ item.sender.name }} is working on it.
           </div>
         </div>
       </div>
@@ -269,7 +266,7 @@ async function approve(to: 'ready' | 'backlog') {
           <PromptComposer
             ref="composer"
             v-model="text"
-            :placeholder="`Reply to ${pmName}…`"
+            :placeholder="`Reply to ${item.sender.name}…`"
             :disabled="runnerOffline || working"
             :busy="busy"
             :project="item.project.slug"

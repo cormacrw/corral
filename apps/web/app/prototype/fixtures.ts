@@ -665,7 +665,7 @@ export function inbox(): Inbox {
       reply: reply?.text ?? null,
       plan: plan ? { id: plan.id, version: plan.version, title: plan.title, summary: plan.summary, epicCount: plan.epics.length, taskCount: plan.tasks.filter(t => t.change !== 'removed').length } : null,
       // When it started waiting: the question, the plan or the reply
-      sender: { name: 'Juno', role: 'pm' }, at: (session.status === 'needs_approval' ? plan?.createdAt : session.status === 'question' ? last?.createdAt : reply?.createdAt) ?? session.updatedAt,
+      sender: { name: agents.find(a => a.role === 'pm')?.name ?? 'PM', role: 'pm' }, at: (session.status === 'needs_approval' ? plan?.createdAt : session.status === 'question' ? last?.createdAt : reply?.createdAt) ?? session.updatedAt,
       taskId: null, taskRef: null, prUrl: null, resolution: null,
       runtime: session.runtime, status: session.status, unread: session.unread,
       activeRunId: session.activeRunId,
