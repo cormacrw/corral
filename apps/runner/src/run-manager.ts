@@ -2,6 +2,7 @@ import type { AgentTool, RunEvent, RunExit, RunJob, RunnerMessage, ServerMessage
 import { randomBytes, randomUUID } from 'node:crypto'
 import { createWriteStream, type WriteStream } from 'node:fs'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { constants } from 'node:os'
 import { basename, extname, isAbsolute, join, resolve } from 'node:path'
 import { createRuntimeRegistry, STOP_GRACE_MS, type AgentExit, type AgentProcess, type AgentRuntime, type AgentSession, type ParsedLine, type RuntimeRegistry } from './agent-runtime.ts'
 import type { RunnerConfig } from './config.ts'
@@ -48,7 +49,7 @@ interface SpawnOptions {
   resume: string | null
 }
 
-type StopReason = Extract<RunExit, { kind: 'stopped' | 'timed_out' }>['kind']
+type StopReason = Extract<RunExit, { kind: 'stopped' | 'timed_out' | 'runner_shutdown' }>['kind']
 
 interface ActiveRun {
   job: RunJob
@@ -63,14 +64,23 @@ interface ActiveRun {
   outcomeAccepted: boolean
   // Settles when the server answers a report_outcome call that is still open
   reportingOutcome: Promise<unknown> | null
-  // Set when the server or the timeout asked for the process to die
+  // Set when the server, the timeout or a runner shutdown asked for the process
+  // to die. The first one wins: it's what cut the run off.
   stopping: StopReason | null
+  stopDetail: string
+  // Corral signalled the process outside a stop, so its signal isn't a stranger's
+  signalledByCorral: boolean
+  // A signal Corral didn't send killed the agent, even if a resume came after
+  killedBy: string | null
+  lastActivityAt: string | null
   rateLimit: { resetsAt: string | null } | null
   resumed: boolean
   // The init line arrived, so the CLI really started (a failed --resume never gets there)
   sawInit: boolean
   resumeFailed: boolean
   ended: boolean
+  // Settles once the server has been told the run ended
+  closing: Promise<void>
   // The last agent exit code, or the turn's when a warm PM process answered it
   exitCode: number | null
   events: RunEvent[]
@@ -165,11 +175,16 @@ export class RunManager {
       outcomeAccepted: false,
       reportingOutcome: null,
       stopping: null,
+      stopDetail: '',
+      signalledByCorral: false,
+      killedBy: null,
+      lastActivityAt: null,
       rateLimit: null,
       resumed: false,
       sawInit: false,
       resumeFailed: false,
       ended: false,
+      closing: Promise.resolve(),
       exitCode: null,
       events: [],
       flushTimer: null,
@@ -189,30 +204,38 @@ export class RunManager {
     const run = this.#runs.get(runId)
     if (!run || run.ended) return
     this.#note(run, `${reason === 'timed_out' ? 'Time limit reached' : 'Stopping'}: ${detail}`)
-    if (!run.process) {
-      // Still setting up: the start path checks `stopping` before spawning
+    if (!run.stopping) {
       run.stopping = reason
-      return
+      run.stopDetail = detail
     }
-    run.stopping ??= reason
+    // Still setting up: the start path checks `stopping` before spawning
+    if (!run.process) return
     // The server stops the run as it accepts report_outcome, so the stop can
     // arrive before the tool result: wait for the answer before signalling
     const process = run.process
     const reporting = run.reportingOutcome
-    if (reporting && reason === 'stopped') void reporting.then(() => this.#signal(run, process, reason))
+    if (reporting && reason !== 'timed_out') void reporting.then(() => this.#signal(run, process, reason))
     else this.#signal(run, process, reason)
   }
 
   #signal(run: ActiveRun, process: AgentProcess, reason: StopReason): void {
     // After an accepted outcome the agent is just finishing its last reply;
     // let it see the tool result and exit on its own before signalling
-    const delay = run.outcomeAccepted && reason === 'stopped' ? OUTCOME_EXIT_GRACE_MS : 0
+    const delay = run.outcomeAccepted && reason !== 'timed_out' ? OUTCOME_EXIT_GRACE_MS : 0
     const soft = setTimeout(() => process.kill('SIGTERM'), delay)
     const hard = setTimeout(() => process.kill('SIGKILL'), delay + STOP_GRACE_MS)
     void process.exited.then(() => {
       clearTimeout(soft)
       clearTimeout(hard)
     })
+  }
+
+  #stopExit(run: ActiveRun): RunExit {
+    switch (run.stopping) {
+      case 'timed_out': return { kind: 'timed_out', limitSeconds: run.job.timeoutSeconds }
+      case 'runner_shutdown': return { kind: 'runner_shutdown' }
+      default: return { kind: 'stopped', reason: run.stopDetail }
+    }
   }
 
   // A human's message for a live developer or reviewer run. A stale lease
@@ -258,14 +281,16 @@ export class RunManager {
   // and tell the server the runs were interrupted
   async shutdown(): Promise<void> {
     const live = [...this.#runs.values()].filter(r => !r.ended)
-    for (const run of live) this.stop(run.job.runId, 'stopped', 'The runner is shutting down')
+    for (const run of live) this.stop(run.job.runId, 'runner_shutdown', 'The runner is shutting down')
     await Promise.all([
       ...live.map(run => run.process?.exited ?? Promise.resolve()),
       ...[...this.#warm.values()].map(warm => this.#killWarm(warm))
     ])
     for (const run of live) {
-      if (!run.ended) this.#end(run, { kind: 'stopped' })
+      if (!run.ended) this.#end(run, this.#stopExit(run))
     }
+    // The caller closes the connection next, and run.ended has to go out first
+    await Promise.all(live.map(run => run.closing))
   }
 
   async #start(run: ActiveRun): Promise<void> {
@@ -287,7 +312,7 @@ export class RunManager {
     }
     run.worktree = prepared.workspace.path
     if (run.stopping) {
-      this.#end(run, { kind: run.stopping })
+      this.#end(run, this.#stopExit(run))
       return
     }
 
@@ -298,15 +323,16 @@ export class RunManager {
       run.sessionId = warm.sessionId
       run.sawInit = true
       this.#started(run)
-      await this.#warmTurn(run, warm, job.prompt)
+      this.#noteExit(run, await this.#warmTurn(run, warm, job.prompt))
       this.#flush(run)
     } else {
       await this.#coldStart(run, prepared.workspace.path)
     }
 
     if (run.ended) return
-    if (run.stopping) this.#end(run, { kind: run.stopping })
+    if (run.stopping) this.#end(run, this.#stopExit(run))
     else if (run.rateLimit) this.#end(run, { kind: 'rate_limited', resetsAt: run.rateLimit.resetsAt })
+    else if (run.killedBy) this.#end(run, { kind: 'signalled', signal: run.killedBy })
     else this.#end(run, { kind: 'exited', code: run.exitCode })
   }
 
@@ -360,6 +386,7 @@ export class RunManager {
 
   async #spawn(run: ActiveRun, options: SpawnOptions): Promise<void> {
     if (run.stopping || run.ended) return
+    run.signalledByCorral = false
     const exit = this.#keepsWarm(run.job)
       ? await this.#warmTurn(run, await this.#spawnWarm(run, options), options.prompt)
       : this.#takesMessages(run.job)
@@ -369,7 +396,15 @@ export class RunManager {
     // A failed --resume waits: the fresh session that replaces it is the one
     // the server must record, or the next turn tries the dead one again
     if (!run.started && !(options.resume && !run.sawInit)) this.#started(run)
-    if (exit?.signal && !run.stopping && !run.outcomeAccepted) this.#note(run, `The agent was killed by ${exit.signal}`)
+    this.#noteExit(run, exit)
+  }
+
+  #noteExit(run: ActiveRun, exit: AgentExit | null): void {
+    const signal = exit && !run.stopping && !run.outcomeAccepted && !run.signalledByCorral ? exitSignal(exit) : null
+    if (signal) {
+      run.killedBy = signal
+      this.#note(run, `The agent was killed by ${signal}, which Corral did not send`)
+    }
   }
 
   async #spawnOnce(run: ActiveRun, options: SpawnOptions): Promise<AgentExit> {
@@ -413,7 +448,10 @@ export class RunManager {
     run.session = null
     session.close()
     // A CLI that doesn't exit once stdin closes is stopped as usual
-    const soft = setTimeout(() => session.kill('SIGTERM'), OUTCOME_EXIT_GRACE_MS)
+    const soft = setTimeout(() => {
+      run.signalledByCorral = true
+      session.kill('SIGTERM')
+    }, OUTCOME_EXIT_GRACE_MS)
     const hard = setTimeout(() => session.kill('SIGKILL'), OUTCOME_EXIT_GRACE_MS + STOP_GRACE_MS)
     const exit = await session.exited
     clearTimeout(soft)
@@ -502,6 +540,7 @@ export class RunManager {
   // Kills the process group, gracefully first (architecture.md, runner rule 2)
   async #killWarm(warm: WarmSession): Promise<void> {
     this.#dropWarm(warm)
+    if (warm.run) warm.run.signalledByCorral = true
     warm.session.kill('SIGTERM')
     const hard = setTimeout(() => warm.session.kill('SIGKILL'), STOP_GRACE_MS)
     await warm.session.exited
@@ -525,6 +564,7 @@ export class RunManager {
     }
     if (parsed.sessionId && !run.started) this.#started(run)
     if (parsed.rateLimit) run.rateLimit = parsed.rateLimit
+    if (raw || parsed.events.length > 0) run.lastActivityAt = new Date().toISOString()
     this.#queue(run, parsed.events)
   }
 
@@ -564,11 +604,11 @@ export class RunManager {
     run.unregisterTools?.()
     run.spool?.end()
     const finish = (sha: string | null) => {
-      this.#connection.send({ type: 'run.ended', runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, exit, headSha: sha })
+      this.#connection.send({ type: 'run.ended', runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, exit, headSha: sha, lastActivityAt: run.lastActivityAt })
       this.#runs.delete(run.job.runId)
       this.#connection.refreshUpdateStatus?.()
     }
-    if (run.worktree && run.job.role === 'developer') void headSha(run.worktree).then(finish, () => finish(null))
+    if (run.worktree && run.job.role === 'developer') run.closing = headSha(run.worktree).then(finish, () => finish(null))
     else finish(null)
   }
 
@@ -690,6 +730,14 @@ export class RunManager {
       }
     }
   }
+}
+
+// The signal that killed the agent. A CLI that handles the signal, or a shell
+// in front of it, exits with 128 + the signal number instead of dying by it.
+export function exitSignal(exit: AgentExit): string | null {
+  if (exit.signal) return exit.signal
+  if (exit.code === null || exit.code <= 128) return null
+  return Object.entries(constants.signals).find(([, number]) => number === exit.code! - 128)?.[0] ?? null
 }
 
 // Machine-specific details the agent needs, kept out of RunJob (PRD §8.5)

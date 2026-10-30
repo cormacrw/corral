@@ -318,6 +318,18 @@ export const runs: Run[] = [
     inputTokens: 12_000, cacheReadTokens: 90_000, outputTokens: 2_000, rateLimitResetAt: null,
     queuedAt: ago(90), startedAt: ago(89), endedAt: ago(80)
   },
+  // One of each way a run gets cut off, so the Activity tab and the run list show their errors
+  ...([
+    [121, 'failed', 'The run hit its time limit of 60 minutes. Last transcript activity: 2026-10-30T08:59:41.000Z', 410],
+    [122, 'interrupted', 'Stopped by the server: The server no longer recognises this run. Last transcript activity: 2026-10-30T09:40:12.000Z', 380],
+    [123, 'interrupted', 'The runner shut down (container stop or redeploy) and stopped the agent. Last transcript activity: 2026-10-30T10:12:03.000Z', 330],
+    [124, 'failed', 'The agent was killed by SIGTERM, which came from outside Corral. Last transcript activity: 2026-10-30T11:02:55.000Z', 280]
+  ] as const).map(([number, state, error, endedAgo]): Run => ({
+    runnerId: null, id: `r-cut-${number}`, number, agentId: 'a-dev2', agentName: 'Dana', role: 'developer', projectId: 'p-corral',
+    taskId: at('COR-3').id, taskRef: 'COR-3', taskTitle: at('COR-3').title, state, outcome: state === 'failed' ? 'failed' : null, summary: null,
+    error, headSha: null, inputTokens: 4_000, cacheReadTokens: 22_000, outputTokens: 900, rateLimitResetAt: null,
+    queuedAt: ago(endedAgo + 22), startedAt: ago(endedAgo + 21), endedAt: ago(endedAgo)
+  })),
   // A live Codex run, which can't take messages mid-run
   {
     runnerId: 'runner-1', runnerName: 'home-server', id: 'r-4', number: 130, agentId: 'a-dev', agentName: 'Victor', role: 'developer', projectId: 'p-site',

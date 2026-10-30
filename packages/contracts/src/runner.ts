@@ -108,8 +108,14 @@ export type RunEvent =
 
 export type RunExit =
   | { kind: 'exited', code: number | null }
-  | { kind: 'stopped' }
-  | { kind: 'timed_out' }
+  // Asked to stop by the server, with its reason. The optional fields here and
+  // on run.ended are missing from a runner that hasn't been updated yet.
+  | { kind: 'stopped', reason?: string }
+  | { kind: 'timed_out', limitSeconds?: number }
+  // The runner process itself was told to stop (container stop or redeploy)
+  | { kind: 'runner_shutdown' }
+  // Killed by a signal Corral didn't send
+  | { kind: 'signalled', signal: string }
   | { kind: 'rate_limited', resetsAt: string | null }
   | { kind: 'error', message: string }
 
@@ -150,7 +156,8 @@ export type RunnerMessage =
   | { type: 'job.result', jobId: string, ok: false, error: string }
   | { type: 'run.started', runId: string, leaseEpoch: number, agentSessionId: string | null }
   | { type: 'run.events', runId: string, leaseEpoch: number, events: RunEvent[] }
-  | { type: 'run.ended', runId: string, leaseEpoch: number, exit: RunExit, headSha: string | null }
+  // lastActivityAt: when the agent last wrote to its transcript
+  | { type: 'run.ended', runId: string, leaseEpoch: number, exit: RunExit, headSha: string | null, lastActivityAt?: string | null }
   | { type: 'tool.call', callId: string, runId: string, leaseEpoch: number, tool: AgentTool, input: unknown }
   // A run.message the runner could not deliver: a Codex or PM run, or a run
   // that has ended. Messages with a stale lease epoch get no answer (fencing).

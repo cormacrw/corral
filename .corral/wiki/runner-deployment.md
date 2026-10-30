@@ -23,3 +23,17 @@ See `docs/runner-wsl2.md` for Docker Engine under systemd, Windows Tailscale,
 user-owned Task Scheduler startup, foreground WSL keepalive, CLI sign-in and
 manual reboot/end-to-end verification. Hardware checks require the actual PC;
 Linux-only CI cannot demonstrate Windows reboot or Windows/WSL tailnet routing.
+
+## How a stopped run reads
+
+A run's error says what cut it off: its time limit, the server's stop reason, a
+runner shutdown, or a signal from outside Corral, plus the last transcript
+activity. A runner SIGTERM (`docker compose up -d` recreating the container)
+ends runs as Interrupted once `run.ended` has gone out. If the server is
+unreachable at that moment, the run ends as "The runner restarted during the
+run" when the runner reconnects. An older runner on the same protocol
+version sends none of the new exit fields, and its runs read as they did.
+
+Outside signals are classified for both newly spawned agents and a PM process
+reused for a later warm turn. A process that exits before replying ends that
+turn with the signal name, rather than an unexplained null or 128+n exit code.

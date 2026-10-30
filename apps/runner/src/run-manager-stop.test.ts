@@ -6,7 +6,7 @@ import { STOP_GRACE_MS, type AgentExit, type AgentRuntime } from './agent-runtim
 import type { RunnerConfig } from './config.ts'
 import type { ServerConnection } from './connection.ts'
 import type { ToolHandler, ToolServer } from './mcp.ts'
-import { RunManager } from './run-manager.ts'
+import { exitSignal, RunManager } from './run-manager.ts'
 import { createTestDataDir, pmJob } from './test-repo.ts'
 
 const OUTCOME_EXIT_GRACE_MS = 20_000
@@ -42,6 +42,12 @@ describe('RunManager stopping a run', () => {
         }
       }
     }
+  }
+
+  // The run's end, once the runner has told the server
+  async function ended() {
+    await expect.poll(() => sent.some(m => m.type === 'run.ended'), { timeout: 10_000 }).toBe(true)
+    return sent.find(m => m.type === 'run.ended')
   }
 
   beforeEach(async () => {
@@ -125,5 +131,62 @@ describe('RunManager stopping a run', () => {
     // Only one signal: the process exited, so the SIGKILL timer was cleared
     await vi.advanceTimersByTimeAsync(STOP_GRACE_MS)
     expect(signals).toEqual(['SIGTERM'])
+  })
+
+  it('ends with the time limit that was reached and the last transcript activity', async () => {
+    const manager = await startRun()
+    manager.stop('r1', 'timed_out', '60 s')
+
+    const end = await ended()
+    expect(end).toMatchObject({ exit: { kind: 'timed_out', limitSeconds: 60 } })
+    expect(end).toMatchObject({ lastActivityAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/) })
+  })
+
+  it('ends with the reason the server gave for the stop', async () => {
+    const manager = await startRun()
+    manager.handle({ type: 'run.stop', runId: 'r1', reason: 'This run no longer holds its lease' })
+
+    expect(await ended()).toMatchObject({ exit: { kind: 'stopped', reason: 'This run no longer holds its lease' } })
+  })
+
+  it('keeps the first reason when a second stop follows', async () => {
+    const manager = await startRun()
+    manager.stop('r1', 'timed_out', '60 s')
+    manager.handle({ type: 'run.stop', runId: 'r1', reason: 'Stopped by a human' })
+
+    expect(await ended()).toMatchObject({ exit: { kind: 'timed_out' } })
+  })
+
+  it('tells the server about a runner shutdown before it resolves', async () => {
+    const manager = await startRun()
+    await manager.shutdown()
+
+    expect(sent.find(m => m.type === 'run.ended')).toMatchObject({ exit: { kind: 'runner_shutdown' } })
+  })
+
+  it('names a signal Corral did not send, from an exit by signal or by code', async () => {
+    let kill!: (exit: AgentExit) => void
+    const killed: AgentRuntime = {
+      id: 'fake',
+      spawn: (options) => {
+        options.onLine('', { events: [], sessionId: null, rateLimit: null, result: null })
+        return { pid: -1, exited: new Promise(resolve => (kill = resolve)), kill: () => {} }
+      }
+    }
+    const manager = new RunManager(config, connection, tools, new Map([['fake', killed]]))
+    manager.assign(pmJob({ runId: 'r1', role: 'developer', runtime: 'fake', planSessionId: null, taskId: 'task-1', taskRef: 'APP-1', branch: 'corral/app-1' }))
+    await expect.poll(() => kill, { timeout: 10_000 }).toBeTruthy()
+    kill({ code: 143, signal: null })
+
+    expect(await ended()).toMatchObject({ exit: { kind: 'signalled', signal: 'SIGTERM' } })
+  })
+
+  it('reads the signal from the exit', () => {
+    expect(exitSignal({ code: null, signal: 'SIGKILL' })).toBe('SIGKILL')
+    expect(exitSignal({ code: 143, signal: null })).toBe('SIGTERM')
+    expect(exitSignal({ code: 137, signal: null })).toBe('SIGKILL')
+    expect(exitSignal({ code: 1, signal: null })).toBeNull()
+    expect(exitSignal({ code: 255, signal: null })).toBeNull()
+    expect(exitSignal({ code: null, signal: null })).toBeNull()
   })
 })

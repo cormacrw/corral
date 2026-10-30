@@ -63,7 +63,7 @@ Ready tasks whose epic has unfinished prerequisites show **Waiting on epic: <tit
    - Supported content: paragraphs, headings, lists, inline code, code blocks, links, bold and italic.
 5. **Acceptance criteria:** a count ("2 of 3 met") and one row per criterion, each with a met or open icon, an inline-editable text and a remove button. There's an **Add criterion** button and the note "The reviewer marks criteria met from evidence." Humans can't tick criteria.
 6. **Activity:**
-   - **Events:** a dot, the actor, the text and the time.
+   - **Events:** a dot, the actor, the text and the time. A run that ended with an error shows here with that error.
    - **Comments:** an avatar and a bubble.
    - **Composer** (shared pattern), with no recipient picker. The destination is implicit:
      - If an agent holds the task (In progress, Blocked, Agent review or Human review), messages go to the developer: "Atlas gets this on its next step."
