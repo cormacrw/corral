@@ -48,9 +48,9 @@ describe.each(['pglite', 'postgres'] as const)('flow metrics on %s', (driver) =>
       transition(two.id, 'human_review', 'merged', -2)
     ])
     await t.db.insert(schema.runs).values([
-      { projectId: p.id, taskId: one.id, agentId: agent!.id, role: 'developer', queuedAt: at(-81), startedAt: at(-80), endedAt: at(-74) },
-      { projectId: p.id, taskId: one.id, agentId: agent!.id, role: 'developer', queuedAt: at(-66), startedAt: at(-63), endedAt: at(-61) },
-      { projectId: p.id, taskId: two.id, agentId: agent!.id, role: 'reviewer', queuedAt: at(-32), startedAt: at(-30), endedAt: at(-29) },
+      { projectId: p.id, taskId: one.id, agentId: agent!.id, role: 'developer', queuedAt: at(-81), state: 'completed', startedAt: at(-80), endedAt: at(-74) },
+      { projectId: p.id, taskId: one.id, agentId: agent!.id, role: 'developer', queuedAt: at(-66), state: 'completed', startedAt: at(-63), endedAt: at(-61) },
+      { projectId: p.id, taskId: two.id, agentId: agent!.id, role: 'reviewer', queuedAt: at(-32), state: 'completed', startedAt: at(-30), endedAt: at(-29) },
       // Missing timestamps don't invent zero-duration samples.
       { projectId: p.id, taskId: two.id, agentId: agent!.id, role: 'developer', queuedAt: at(-42) },
       // Runs queued after the merge are not part of the task's delivery.
@@ -99,7 +99,7 @@ describe.each(['pglite', 'postgres'] as const)('flow metrics on %s', (driver) =>
     const p = await t.createProject()
     const [agent] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'reviewer'))
     const [task] = await t.db.insert(schema.tasks).values({ projectId: p.id, number: 1, createdBy: t.actor, title: 'Spike', type: 'spike', status: 'merged', createdAt: at(-3), mergedAt: at(-1) }).returning()
-    await t.db.insert(schema.runs).values({ projectId: p.id, taskId: task!.id, agentId: agent!.id, role: 'reviewer', queuedAt: at(-2.5), startedAt: at(-2), endedAt: new Date(at(-1).getTime() + 100) })
+    await t.db.insert(schema.runs).values({ projectId: p.id, taskId: task!.id, agentId: agent!.id, role: 'reviewer', queuedAt: at(-2.5), state: 'completed', startedAt: at(-2), endedAt: new Date(at(-1).getTime() + 100) })
     const result = await flowMetrics(t.db, p, '7d', now)
     expect(result.runsByRole).toEqual([{ role: 'reviewer', queueWait: { medianMs: 0.5 * hour, p90Ms: 0.5 * hour }, duration: { medianMs: hour + 100, p90Ms: hour + 100 } }])
   })
