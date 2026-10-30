@@ -21,7 +21,7 @@ const runColumns = {
 type RunJoin = {
   run: typeof runs.$inferSelect
   agentName: string
-  agentRuntime: Run['agentRuntime']
+  agentRuntime: string
   prefix: string
   taskNumber: number | null
   taskTitle: string | null
