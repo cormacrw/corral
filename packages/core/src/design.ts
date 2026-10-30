@@ -28,11 +28,17 @@ export function approveDesignVersion<V extends DesignVersionState>(versions: rea
   return {
     ok: true,
     versions: versions.map((v) => {
-      if (v.version === version) return { ...v, status: 'approved' }
-      if (v.version < version) return { ...v, status: 'superseded' }
+      if (v.version === version) return withStatus(v, 'approved')
+      if (v.version < version) return withStatus(v, 'superseded')
       return v
     })
   }
+}
+
+// Spreading a generic V hides the literal from the checker, so the status is
+// typed here
+function withStatus<V extends DesignVersionState>(version: V, status: DesignVersionStatus): V {
+  return { ...version, status }
 }
 
 // A build task's pin goes stale when a newer version of its design is
