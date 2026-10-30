@@ -234,4 +234,21 @@ describe('PM threads', () => {
     evidence.push({ event: 'target-project audit records', records: globalAudit.filter(r => ['start_thread', 'read_thread', 'message_thread', 'close_thread'].includes(String(r.detail.tool))) })
     await finish(job, 'Audit checks complete.')
   })
+
+  it('notifies a surviving parent when the runner restarts without its child turn', async () => {
+    const coordinator = await request('POST', '/plan/sessions', { text: 'Coordinate restart checks' }) as PlanSessionDetail
+    const job = (await runner.next('run.assign', m => m.job.planSessionId === coordinator.id)).job
+    const interrupted = await call<PlanSessionDetail>(job, 'start_thread', { title: 'Restart helper', message: 'Wait for instructions' })
+    await runner.next('run.assign', m => m.job.planSessionId === interrupted.id)
+    await finish(job, 'Parent has read this reply.')
+    await request('POST', `/plan/sessions/${coordinator.id}/read`)
+    await new Promise<void>((resolve) => {
+      runner.socket.once('close', resolve)
+      runner.close()
+    })
+    runner = await FakeRunner.connect(t.server!.url)
+    await expect.poll(async () => (await t.plans.getSession(coordinator.id)).messages.some(m => m.senderSessionId === interrupted.id)).toBe(true)
+    expect(await request('GET', `/plan/sessions/${coordinator.id}`)).toMatchObject({ unread: false, messages: expect.arrayContaining([expect.objectContaining({ text: 'Thread “Restart helper” was stopped.' })]) })
+    expect(await request('GET', `/plan/sessions/${interrupted.id}`)).toMatchObject({ activeRunId: null })
+  })
 })

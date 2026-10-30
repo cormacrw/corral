@@ -395,7 +395,6 @@ export class Orchestrator implements RunnerHandlers {
       if (!ctx) continue
       this.#d.runner.send({ type: 'run.stop', runId: id, reason: 'Corral was stopped', keepWork: true }, ctx.run.runnerId)
       await this.#endRun(ctx, { state: 'interrupted', error: KILL_SWITCH_STOP })
-      if (ctx.run.role === 'pm' && ctx.run.planSessionId) await this.plans?.notifyParent(ctx.run.planSessionId, id, true)
       await this.#publish(ctx)
     }
   }
@@ -951,6 +950,9 @@ export class Orchestrator implements RunnerHandlers {
 
   async #endRun(ctx: RunContext, fields: Partial<typeof runs.$inferInsert> & { state: RunState }): Promise<void> {
     await this.#d.db.transaction(tx => this.#endRunIn(tx, ctx, fields))
+    if (ctx.run.role === 'pm' && ctx.run.planSessionId && fields.state === 'interrupted') {
+      await this.plans?.notifyParent(ctx.run.planSessionId, ctx.run.id, true)
+    }
   }
 
   // Ends the run and releases its lease, if it still holds one
