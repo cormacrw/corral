@@ -323,7 +323,7 @@ export class RunManager {
       run.sessionId = warm.sessionId
       run.sawInit = true
       this.#started(run)
-      await this.#warmTurn(run, warm, job.prompt)
+      this.#noteExit(run, await this.#warmTurn(run, warm, job.prompt))
       this.#flush(run)
     } else {
       await this.#coldStart(run, prepared.workspace.path)
@@ -396,6 +396,10 @@ export class RunManager {
     // A failed --resume waits: the fresh session that replaces it is the one
     // the server must record, or the next turn tries the dead one again
     if (!run.started && !(options.resume && !run.sawInit)) this.#started(run)
+    this.#noteExit(run, exit)
+  }
+
+  #noteExit(run: ActiveRun, exit: AgentExit | null): void {
     const signal = exit && !run.stopping && !run.outcomeAccepted && !run.signalledByCorral ? exitSignal(exit) : null
     if (signal) {
       run.killedBy = signal
