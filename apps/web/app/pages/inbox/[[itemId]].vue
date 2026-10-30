@@ -3,6 +3,7 @@ import type { Evidence, Inbox, InboxActionInput, Review, Task, InboxItem, PlanTh
 import { api } from '~/composables/useApi'
 import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
+import { moveRadioSelection } from '~/utils/radio'
 
 // The Inbox (design/inbox.md, D11): list, selected item, action tray, task flyout
 const route = useRoute()
@@ -73,7 +74,6 @@ const selected = computed<InboxItem | null>(() => {
 })
 const alreadyResolved = computed(() => selected.value !== null && selected.value.type !== 'activity' && !inbox.value?.needsYou.some(i => i.id === selected.value!.id))
 watch(selected, async (item, previous) => {
-  action.value = null
   text.value = ''
   actionError.value = null
   // Nothing selected (e.g. the last item was just resolved): nothing to show beside it
@@ -148,6 +148,10 @@ const actions = computed(() => {
     default: return []
   }
 })
+// Reset only when the item or its type changes, not on live refreshes.
+watch([() => selected.value?.id, () => selected.value?.type], () => {
+  action.value = (actions.value[0]?.value as InboxActionInput['action'] | undefined) ?? null
+}, { immediate: true })
 const needsText = computed(() => action.value === 'request_changes' || action.value === 'clarify')
 const placeholder = computed(() => {
   switch (action.value) {
@@ -184,7 +188,6 @@ async function submit(message: string): Promise<boolean> {
     const actedOn = selected.value
     const position = items.value.findIndex(i => i.id === actedOn.id)
     text.value = ''
-    action.value = null
     await load()
     // Resolved: move on to the next item that needs you, or to the empty
     // state when that was the last one
@@ -500,6 +503,7 @@ onBeforeUnmount(() => {
                 role="radiogroup"
                 aria-label="Quick actions"
                 class="flex flex-wrap gap-1.5"
+                @keydown="moveRadioSelection"
               >
                 <UButton
                   v-for="a in actions"
@@ -509,9 +513,10 @@ onBeforeUnmount(() => {
                   size="xs"
                   role="radio"
                   :aria-checked="action === a.value"
+                  :tabindex="action === a.value ? 0 : -1"
                   :variant="action === a.value ? 'subtle' : 'outline'"
                   :color="a.value === 'delete' ? 'error' : action === a.value ? 'primary' : 'neutral'"
-                  @click="action = action === a.value ? null : (a.value as InboxActionInput['action'])"
+                  @click="action = (a.value as InboxActionInput['action'])"
                 />
                 <USelectMenu
                   v-if="action === 'resolve'"

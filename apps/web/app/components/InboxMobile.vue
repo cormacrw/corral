@@ -3,6 +3,7 @@ import { needsAttention } from '@corral/contracts'
 import type { Evidence, Inbox, InboxActionInput, InboxItem, PlanThreadItem, Review, Task, TaskInboxItem, ReleaseNotesItem } from '@corral/contracts'
 import { ROLE, timeAgo, type Color } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
+import { moveRadioSelection } from '~/utils/radio'
 
 // The Inbox on a phone (design/inbox.md, design/mobile.md): /inbox is the
 // list and /inbox/:itemId the item, each a screen of its own. The page owns
@@ -42,11 +43,7 @@ function toggleSearch() {
   if (!searching.value) search.value = ''
 }
 
-// A question is answered from the composer, so answering is already chosen
-// (the Question frame). Every other item starts with no action, as on the web.
-watch(() => props.selected, () => {
-  if (props.selected?.type === 'question') action.value = 'clarify'
-}, { immediate: true, flush: 'post' })
+// Questions keep their composer-only answer flow; the page selects clarify.
 const isQuestion = computed(() => props.selected?.type === 'question')
 const sender = computed(() => props.selected?.sender.name ?? 'the agent')
 const composerPlaceholder = computed(() => isQuestion.value && action.value === 'clarify' ? `Your answer for ${sender.value}` : props.placeholder)
@@ -205,6 +202,7 @@ const tabs = computed(() => [
           role="radiogroup"
           aria-label="Quick actions"
           class="flex flex-wrap gap-2"
+          @keydown="moveRadioSelection"
         >
           <UButton
             v-for="a in actions"
@@ -215,9 +213,10 @@ const tabs = computed(() => [
             role="radio"
             class="rounded-full"
             :aria-checked="action === a.value"
+            :tabindex="action === a.value ? 0 : -1"
             :variant="action === a.value ? 'subtle' : 'outline'"
             :color="a.value === 'delete' && action === a.value ? 'error' : action === a.value ? 'primary' : 'neutral'"
-            @click="action = action === a.value ? null : (a.value as Action)"
+            @click="action = (a.value as Action)"
           />
           <USelectMenu
             v-if="action === 'resolve'"

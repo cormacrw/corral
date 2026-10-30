@@ -54,18 +54,19 @@ There are three columns. The list divider can be resized (280–560px, default 3
   - Your replies, shown as "You → Atlas" bubbles.
 - **Tray**, pinned to the bottom with a top divider. This is the only place you act.
   - **Question:** "Suggested answers: Pick one, or write your own below" as radio cards in an auto-fit grid. Sending posts the chosen answer plus any note, resolves the item, and puts the task back In progress.
-  - **Quick actions** (a `radiogroup` of chips; see shared pattern):
+  - **Quick actions** (a `radiogroup` of chips; see shared pattern): exactly one is selected, starting with the first action whenever an item opens. Clicking the selected chip keeps it selected; another chip replaces the selection. Arrow keys wrap between chips and select the focused chip; only the selected chip is in the Tab order.
 
     | Item type | Actions | Needs text |
     |---|---|---|
     | Human review | ✓ Approve and merge · ✎ Request changes | Request changes only |
-    | Blocked | 💬 Clarify and continue · ↩ Send back to Backlog · 🗑 Delete task (`error`) | Clarify only |
+    | Blocked / Question | 💬 Clarify and continue · ↩ Send back to Backlog · 🗑 Delete task (`error`) | Clarify only |
+    | Failed | ↻ Retry · ↩ Send back to Backlog · 🗑 Delete task (`error`) | None |
 
   - **Composer:**
-    - The placeholder follows the selected action, e.g. "What should Atlas change?" or "Reason for deleting (optional)". With no action selected it's "Reply to {sender}…".
+    - The placeholder follows the selected action, e.g. "What should Atlas change?" or "Reason for deleting (optional)". Items without quick actions use "Reply to {sender}…".
     - The submit button becomes labelled with the action and turns `error` for Delete.
-    - Sending with no action is a plain reply to the agent.
-  - Switching items clears the draft and the selected action.
+    - Items without quick actions keep their plain reply behavior. Items with quick actions always send the selected action. Mobile questions have no chips and send the composer answer with Clarify and continue.
+  - Switching items clears the draft and selects the new item’s first action, including after a successful send advances to the next item.
 
 ### 3. Task flyout
 
