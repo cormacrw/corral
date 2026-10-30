@@ -176,6 +176,8 @@ export async function pushBranch(worktree: string, branch: string, timeoutMs = 5
   return { sha, error: null }
 }
 
+const WIP_AUTHOR: GitAuthor = { name: 'Corral', email: 'corral@localhost' }
+
 export interface SavedWork {
   // The WIP commit; null when there was nothing to save or it couldn't be made
   sha: string | null
@@ -202,8 +204,10 @@ export async function saveStoppedWork(worktree: string, branch: string, message:
   if (lock.code === 0) await rm(resolve(worktree, lock.stdout.trim()), { force: true })
   const added = await git(['add', '--all'], options())
   if (added.code !== 0) return failed(added.stderr.trim() || 'git add failed')
-  const identity = gitAuthor
-    ? { GIT_AUTHOR_NAME: gitAuthor.name, GIT_AUTHOR_EMAIL: gitAuthor.email, GIT_COMMITTER_NAME: gitAuthor.name, GIT_COMMITTER_EMAIL: gitAuthor.email }
+  // A runner with no identity of its own still has to save the work
+  const configured = gitAuthor ?? ((await git(['config', 'user.email'], options())).code === 0 ? null : WIP_AUTHOR)
+  const identity = configured
+    ? { GIT_AUTHOR_NAME: configured.name, GIT_AUTHOR_EMAIL: configured.email, GIT_COMMITTER_NAME: configured.name, GIT_COMMITTER_EMAIL: configured.email }
     : {}
   // Hooks are for finished work, and this work may not even build
   const committed = await git(['commit', '--no-verify', '--quiet', '--message', message], { ...options(), env: identity })

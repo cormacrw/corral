@@ -170,6 +170,16 @@ describe('a stopped run keeps its work', () => {
       expect(await saveStoppedWork(path, BRANCH, 'WIP', AUTHOR, 5_000)).toMatchObject({ pushed: true, error: null })
     })
 
+    it('commits as Corral on a runner with no git identity', async () => {
+      const path = await worktree()
+      await writeFile(join(path, 'feature.txt'), 'x\n')
+      vi.stubEnv('GIT_CONFIG_GLOBAL', '/dev/null')
+      vi.stubEnv('GIT_CONFIG_SYSTEM', '/dev/null')
+
+      expect(await saveStoppedWork(path, BRANCH, 'WIP', null, 5_000)).toMatchObject({ pushed: true })
+      expect((await git(['log', '-1', '--format=%an <%ae>', BRANCH], { cwd: origin })).stdout.trim()).toBe('Corral <corral@localhost>')
+    })
+
     it('skips commit hooks', async () => {
       const path = await worktree()
       await writeFile(join(path, 'feature.txt'), 'x\n')
