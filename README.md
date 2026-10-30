@@ -30,15 +30,17 @@ Settings come from environment variables; see [.env.example](.env.example).
 
 ## Deployment (Docker)
 
-Corral runs as four containers on your own server (`docs/decisions.md` D12, D14): `web`, `server`, `runner` and `postgres`, on a private Docker network. Only `web` is published; point your Cloudflare Tunnel at it and put Cloudflare Access in front.
+Corral runs as four containers on your own server (`docs/decisions.md` D12, D14): `web`, `server`, `runner` and `postgres`, on a private Docker network. Point your Cloudflare Tunnel at `web` and put Cloudflare Access in front. The separate authenticated runner listener defaults to host loopback; bind it to the server’s Tailscale IP for remote runners. The HTTP API and Postgres stay private.
 
 ```sh
-cp .env.docker.example .env        # set POSTGRES_PASSWORD and CORRAL_PUBLIC_URL
+cp .env.docker.example .env        # set POSTGRES_PASSWORD, CORRAL_PUBLIC_URL and CORRAL_RUNNER_TOKEN
 docker compose up -d --build
 docker exec -it corral-runner claude            # sign in to Claude once
 docker exec -it corral-runner codex login --device-auth   # sign in to Codex once, for agents whose runtime is codex
 docker exec -it corral-runner gh auth login     # sign in to GitHub once
 ```
+
+For a runner on the gaming PC, follow [Runner-only deployment on WSL2](docs/runner-wsl2.md). It uses Docker Engine inside Ubuntu, without Docker Desktop.
 
 The logins live on volumes that only the runner container mounts. Corral never reads, stores or relays them (D2).
 
