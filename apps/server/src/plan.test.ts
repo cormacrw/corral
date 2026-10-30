@@ -1,4 +1,4 @@
-import type { Attachment, DraftSession, Epic, EpicDetail, Plan, PlanSession, PlanSessionDetail, RunJob, Task } from '@corral/contracts'
+import type { Attachment, Comment, DraftSession, Epic, EpicDetail, Plan, PlanSession, PlanSessionDetail, RunJob, Task } from '@corral/contracts'
 import { richTextToMarkdown } from '@corral/core'
 import { schema } from '@corral/db'
 import { and, desc, eq, inArray, ne } from 'drizzle-orm'
@@ -291,6 +291,27 @@ describe('plan sessions', () => {
     expect(await runner.call(job.runId, job.leaseEpoch, 'get_task', { taskRef: missing })).toMatchObject({ ok: false, error: `No task ${missing} in this project` })
     expect(await runner.call(job.runId, job.leaseEpoch, 'get_task', { taskRef: 'XYZ-1' })).toMatchObject({ ok: false, error: expect.stringContaining('No task XYZ-1 in this project') })
     await endTurn(job, 'Read it.')
+  })
+
+  it('lets the PM comment on any task in its project, as the PM, and rejects other projects\' tasks', async () => {
+    const project = await t.createProject()
+    const other = await t.createProject()
+    const task = await t.createTask(project.slug, { title: 'Add login' })
+    const elsewhere = await t.createTask(other.slug, { title: 'Not ours' })
+
+    await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: `Note on ${task.ref}` })
+    const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
+
+    const before = t.events.length
+    expect(await runner.call(job.runId, job.leaseEpoch, 'add_comment', { taskRef: task.ref, body: 'A follow-up task changes this' })).toMatchObject({ ok: true })
+    const added = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/comments`).then(r => r.json()) as Comment[]
+    expect(added).toMatchObject([{ body: 'A follow-up task changes this', pinned: false, author: { kind: 'agent', role: 'pm', runId: job.runId } }])
+    expect(t.events.slice(before)).toContainEqual({ type: 'comment.created', comment: added[0] })
+
+    const rejected = await runner.call(job.runId, job.leaseEpoch, 'add_comment', { taskRef: elsewhere.ref, body: 'Crossing over' })
+    expect(rejected).toMatchObject({ ok: false, error: expect.stringContaining(`No task ${elsewhere.ref} in this project`) })
+    expect(await t.request('GET', `/api/projects/${other.slug}/tasks/${elsewhere.number}/comments`).then(r => r.json())).toEqual([])
+    await endTurn(job, 'Noted.')
   })
 
   it('gives the PM an attachment from its own project as an image, and refuses other projects\' and unknown ids', async () => {
