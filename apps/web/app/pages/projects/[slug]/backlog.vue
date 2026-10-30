@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isTaskDone } from '@corral/core'
 import type { Task } from '@corral/contracts'
 import { api, ApiError } from '~/composables/useApi'
 import { epicTitle, PRIORITY, timeAgo } from '~/utils/labels'
@@ -37,7 +38,7 @@ const groups = computed(() => {
     id,
     title: id === 'none' ? 'No epic' : epicTitle(live.state.value.epics[project.value?.id ?? ''], id, i),
     rows: backlog.value.filter(t => (t.epicId ?? 'none') === id),
-    merged: all.value.filter(t => (t.epicId ?? 'none') === id && t.status === 'merged').length,
+    merged: all.value.filter(t => (t.epicId ?? 'none') === id && isTaskDone(t)).length,
     total: all.value.filter(t => (t.epicId ?? 'none') === id).length
   })).filter(g => g.rows.length > 0)
 })
@@ -188,7 +189,7 @@ async function newTask() {
                 variant="subtle"
                 color="neutral"
               />
-              <span class="text-xs text-muted">{{ group.merged }} of {{ group.total }} merged</span>
+              <span class="text-xs text-muted">{{ group.merged }} of {{ group.total }} done</span>
               <UButton
                 v-if="group.id !== 'none'"
                 label="Epic details"

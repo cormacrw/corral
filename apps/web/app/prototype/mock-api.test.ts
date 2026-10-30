@@ -166,7 +166,7 @@ describe('prototype mock API', () => {
     expect((await mockCall<Project>('GET', '/projects/corral')).paused).toBe(true)
   })
 
-  it('broadcasts updated epic progress when a task merges, excluding Drafts', async () => {
+  it('broadcasts updated epic progress including Approved designs and excluding Drafts', async () => {
     const events: ServerEvent[] = []
     const stop = onMockEvent(event => events.push(event))
     try {
@@ -176,7 +176,7 @@ describe('prototype mock API', () => {
       }))
       await mockCall('PATCH', '/projects/corral/tasks/6', { status: 'merged' })
       expect(events).toContainEqual(expect.objectContaining({
-        type: 'epic.updated', epic: expect.objectContaining({ id: 'e-design', taskCount: 7, mergedCount: 3 })
+        type: 'epic.updated', epic: expect.objectContaining({ id: 'e-design', taskCount: 9, mergedCount: 4 })
       }))
     } finally {
       await mockCall('PATCH', '/projects/corral/tasks/8', { status: 'blocked' })

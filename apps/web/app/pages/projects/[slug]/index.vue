@@ -230,11 +230,11 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
                     class="hover:text-primary hover:underline"
                   >{{ epic.title }}</NuxtLink>
                   <span v-else>{{ epic.title }}</span>
-                  <span class="text-muted">{{ epic.merged }} of {{ epic.total }} merged</span>
+                  <span class="text-muted">{{ epic.merged }} of {{ epic.total }} done</span>
                 </div>
                 <div
                   role="meter"
-                  :aria-label="`${epic.title}: ${epic.merged} of ${epic.total} tasks merged`"
+                  :aria-label="`${epic.title}: ${epic.merged} of ${epic.total} tasks done`"
                   :aria-valuenow="epic.merged"
                   aria-valuemin="0"
                   :aria-valuemax="epic.total"

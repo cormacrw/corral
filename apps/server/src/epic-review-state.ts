@@ -2,6 +2,7 @@ import { ACTIVE_RUN_STATES } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, eq, inArray, isNotNull, isNull, ne, notInArray, or, type SQL } from 'drizzle-orm'
 import type { AnyPgColumn } from 'drizzle-orm/pg-core'
+import { unfinishedTask } from './completion.ts'
 import { runEndValues } from './run-lifecycle.ts'
 
 const { epics, runs } = schema
@@ -9,12 +10,12 @@ const { epics, runs } = schema
 // True for a board task that keeps its epic from being done (D22, D27). An
 // epic with a branch is done when its PR has merged; a `direct` epic, or one
 // that never needed a branch, when its board tasks have. Join tasks to epics.
-export function holdsEpicOpen(task: { deletedAt: AnyPgColumn, status: AnyPgColumn }, epic: { reviewMode: AnyPgColumn, branch: AnyPgColumn, reviewState: AnyPgColumn }): SQL {
+export function holdsEpicOpen(task: { deletedAt: AnyPgColumn, status: AnyPgColumn, type: AnyPgColumn }, epic: { reviewMode: AnyPgColumn, branch: AnyPgColumn, reviewState: AnyPgColumn }): SQL {
   return and(
     isNull(task.deletedAt),
     notInArray(task.status, ['draft', 'backlog']),
     or(
-      ne(task.status, 'merged'),
+      unfinishedTask(task),
       and(ne(epic.reviewMode, 'direct'), isNotNull(epic.branch), or(isNull(epic.reviewState), ne(epic.reviewState, 'merged')))
     )
   )!

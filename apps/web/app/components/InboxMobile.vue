@@ -211,6 +211,7 @@ const tabs = computed(() => [
           class="flex flex-wrap gap-2"
           @keydown="moveRadioSelection"
         >
+          <InboxDesignReviewLink :task="task" />
           <UButton
             v-for="a in actions"
             :key="a.value"

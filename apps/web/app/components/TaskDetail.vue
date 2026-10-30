@@ -119,12 +119,12 @@ async function patch(input: Parameters<typeof api.tasks.patch>[2]) {
 // Status: only the moves a human may make under D10
 const statusOptions = computed(() => {
   if (!task.value) return []
-  const state = { status: task.value.status, humanReview: task.value.humanReview, reviewRounds: task.value.reviewRounds, failedRuns: task.value.failedRuns, reason: task.value.statusReason }
+  const state = { type: task.value.type, status: task.value.status, humanReview: task.value.humanReview, reviewRounds: task.value.reviewRounds, failedRuns: task.value.failedRuns, reason: task.value.statusReason }
   const events = availableEvents(state, { kind: 'human', userId: 'me' })
   const options: { label: string, value: string, status: TaskStatus }[] = [{ label: STATUS[task.value.status].label, value: 'current', status: task.value.status }]
   if (events.includes('approve')) options.push({ label: 'Ready', value: 'approve', status: 'ready' })
   if (events.includes('send_back')) options.push({ label: 'Backlog', value: 'send_back', status: 'backlog' })
-  if (events.includes('human_request_changes')) options.push({ label: 'In progress (request changes)', value: 'human_request_changes', status: 'in_progress' })
+  if (events.includes('human_request_changes') && task.value.status !== 'approved') options.push({ label: 'In progress (request changes)', value: 'human_request_changes', status: 'in_progress' })
   if (events.includes('resolve')) {
     options.push({ label: 'Backlog', value: 'resolve:backlog', status: 'backlog' }, { label: 'Ready', value: 'resolve:ready', status: 'ready' }, { label: 'In progress', value: 'resolve:in_progress', status: 'in_progress' })
   }

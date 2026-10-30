@@ -1,5 +1,5 @@
 import type { Epic, EpicDetail, PatchEpicInput } from '@corral/contracts'
-import { checkEpicDependencies, type Actor } from '@corral/core'
+import { checkEpicDependencies, isTaskDone, type CompletionState, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { asc, eq, or } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
@@ -14,7 +14,7 @@ type EpicRow = typeof epics.$inferSelect
 // the board yet; the detail includes them so the canvas shows the whole plan.
 export async function listEpics(db: Executor, project: ProjectRow): Promise<Epic[]> {
   const rows = await db.select().from(epics).where(eq(epics.projectId, project.id)).orderBy(asc(epics.createdAt))
-  const taskRows = await db.select({ epicId: tasks.epicId, status: tasks.status, prNumber: tasks.prNumber, deletedAt: tasks.deletedAt }).from(tasks)
+  const taskRows = await db.select({ epicId: tasks.epicId, status: tasks.status, type: tasks.type, prNumber: tasks.prNumber, deletedAt: tasks.deletedAt }).from(tasks)
     .where(eq(tasks.projectId, project.id))
   const edges = await db.select().from(epicDependencies)
   return rows.map(row => toEpic(row, project, taskRows.filter(t => t.epicId === row.id), edges))
@@ -34,7 +34,7 @@ export async function patchEpic(db: Executor, epicId: string, input: PatchEpicIn
     const changed = (Object.keys(input) as (keyof PatchEpicInput)[]).filter(k => input[k] !== undefined && input[k] !== row[k])
     if (changed.includes('reviewMode')) {
       const [epic] = await tx.select({ prNumber: epics.prNumber }).from(epics).where(eq(epics.id, epicId)).for('update')
-      const taskRows = await tx.select({ status: tasks.status, prNumber: tasks.prNumber }).from(tasks).where(eq(tasks.epicId, epicId))
+      const taskRows = await tx.select({ status: tasks.status, type: tasks.type, prNumber: tasks.prNumber }).from(tasks).where(eq(tasks.epicId, epicId))
       if (reviewModeLocked(epic!, taskRows)) throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: 'The review mode can\'t change once a task in the epic has opened a PR' }] })
     }
     if (changed.length > 0) {
@@ -59,7 +59,7 @@ function reviewModeLocked(epic: { prNumber: number | null }, taskRows: { status:
   return epic.prNumber !== null || taskRows.some(t => t.prNumber !== null || t.status === 'merged')
 }
 
-function toEpic(row: EpicRow, project: ProjectRow, taskRows: { status: string, prNumber: number | null, deletedAt: Date | null }[], edges: { epicId: string, dependsOnEpicId: string }[]): Epic {
+function toEpic(row: EpicRow, project: ProjectRow, taskRows: (CompletionState & { prNumber: number | null, deletedAt: Date | null })[], edges: { epicId: string, dependsOnEpicId: string }[]): Epic {
   const counted = taskRows.filter(t => !t.deletedAt && t.status !== 'draft' && t.status !== 'backlog')
   return {
     id: row.id,
@@ -76,7 +76,7 @@ function toEpic(row: EpicRow, project: ProjectRow, taskRows: { status: string, p
     reviewState: row.reviewState,
     reviewModeLocked: reviewModeLocked(row, taskRows),
     taskCount: counted.length,
-    mergedCount: counted.filter(t => t.status === 'merged').length,
+    mergedCount: counted.filter(isTaskDone).length,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString()
   }

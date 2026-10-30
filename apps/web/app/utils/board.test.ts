@@ -36,7 +36,7 @@ describe('BOARD_COLUMNS', () => {
   it('covers every status past Backlog exactly once', () => {
     const statuses = BOARD_COLUMNS.flatMap(c => c.statuses)
     expect(new Set(statuses).size).toBe(statuses.length)
-    expect(statuses.sort()).toEqual(['agent_review', 'blocked', 'failed', 'human_review', 'in_progress', 'merged', 'ready', 'ready_to_merge'])
+    expect(statuses.sort()).toEqual(['agent_review', 'approved', 'blocked', 'failed', 'human_review', 'in_progress', 'merged', 'ready', 'ready_to_merge'])
   })
 
   it('has unique keys', () => {

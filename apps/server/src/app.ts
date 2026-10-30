@@ -38,6 +38,7 @@ import { Hono, type Context, type ValidationTargets } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { streamSSE } from 'hono/streaming'
 import type { ZodType } from 'zod'
+import { publishDependents } from './dependent-tasks.ts'
 import { ApiFailure, fromDatabaseError } from './errors.ts'
 import { checkThumbnail, readThumbnail, THUMBNAIL_MAX_BYTES } from './thumbnails.ts'
 import { byteRange } from './byte-range.ts'
@@ -140,7 +141,6 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
         await orchestrator.merges.humanApprove(taskId, actor)
         break
       case 'request_changes':
-        await addComment(db, taskId, { body: input.text, pinned: true }, actor)
         await transitionTask(db, taskId, { type: 'human_request_changes', feedback: input.text }, actor)
         break
       case 'delete':
@@ -398,6 +398,7 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       const taskId = await findTaskId(db, project.id, taskNumber(c.req.param('number')))
       plans.assertTurnPossible()
       const versionId = await approveDesign(db, taskId, taskNumber(c.req.param('version')), actor)
+      orchestrator.poke(await publishDependents(db, events, taskId))
       await plans.startDesignBuild(versionId, parsed.data.note || undefined, actor)
       return c.json(await publishTask(taskId))
     })

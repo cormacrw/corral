@@ -9,6 +9,7 @@ export const TASK_STATUSES = [
   'human_review',
   'ready_to_merge',
   'merged',
+  'approved',
   'blocked',
   'failed'
 ] as const

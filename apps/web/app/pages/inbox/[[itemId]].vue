@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Evidence, Inbox, InboxActionInput, Review, Task, TaskInboxItem, InboxItem, PlanThreadItem } from '@corral/contracts'
+import { inboxActions } from '~/utils/inbox-actions'
 import { api } from '~/composables/useApi'
 import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
@@ -168,20 +169,15 @@ function toggleTask() {
   else flyout.close()
 }
 
-const actions = computed(() => {
-  if (!selected.value) return []
-  switch (selected.value.type) {
-    case 'human_review': return [{ value: 'approve', label: taskLoading.value ? 'Loading task…' : taskLoadFailed.value ? 'Task not loaded' : isSpike.value ? 'Accept findings' : 'Approve and merge', icon: 'i-lucide-check' }, { value: 'request_changes', label: 'Request changes', icon: 'i-lucide-pencil' }]
-    case 'question':
-    case 'blocked': return [{ value: 'clarify', label: 'Clarify and continue', icon: 'i-lucide-message-circle' }, { value: 'send_back', label: 'Send back to Backlog', icon: 'i-lucide-undo-2' }, { value: 'delete', label: 'Delete task', icon: 'i-lucide-trash-2' }]
-    case 'failed': return [{ value: 'resolve', label: 'Retry', icon: 'i-lucide-rotate-ccw' }, { value: 'send_back', label: 'Send back to Backlog', icon: 'i-lucide-undo-2' }, { value: 'delete', label: 'Delete task', icon: 'i-lucide-trash-2' }]
-    default: return []
-  }
-})
+const actions = computed(() => selected.value && selected.value.type !== 'plan_thread' ? inboxActions(selected.value.type, task.value, taskLoading.value ? 'loading' : taskLoadFailed.value ? 'failed' : null) : [])
 // Reset only when the item or its type changes, not on live refreshes.
 watch([() => selected.value?.id, () => selected.value?.type], () => {
   action.value = (actions.value[0]?.value as InboxActionInput['action'] | undefined) ?? null
 }, { immediate: true })
+// A loaded design has no generic approve, so that choice can't outlive the load.
+watch(actions, (list) => {
+  if (!list.some(a => a.value === action.value)) action.value = (list[0]?.value as InboxActionInput['action'] | undefined) ?? null
+})
 const needsText = computed(() => action.value === 'request_changes' || action.value === 'clarify')
 const placeholder = computed(() => {
   switch (action.value) {
@@ -569,6 +565,7 @@ onBeforeUnmount(() => {
                 class="flex flex-wrap gap-1.5"
                 @keydown="moveRadioSelection"
               >
+                <InboxDesignReviewLink :task="task" />
                 <UButton
                   v-for="a in actions"
                   :key="a.value"

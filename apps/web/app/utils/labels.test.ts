@@ -93,6 +93,10 @@ describe('agentStatus', () => {
   })
 })
 
+it('excludes Approved designs from open board work', () => {
+  expect(taskCounts([{ status: 'approved' }, { status: 'merged' }, { status: 'ready' }, { status: 'backlog' }])).toEqual({ board: 1, backlog: 1 })
+})
+
 describe('Ready waiting notes', () => {
   it('marks a paused task, ahead of its other notes', () => {
     const paused = task(projects[0]!, 99, { title: 'Stopped', status: 'in_progress', reviewRounds: 1, paused: true })

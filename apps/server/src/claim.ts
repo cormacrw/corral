@@ -5,6 +5,7 @@ import { alias } from 'drizzle-orm/pg-core'
 import { holdsEpicOpen } from './epic-review-state.ts'
 import { appendAudit, auditEvent, auditText } from './audit.ts'
 import { toTaskState, type TaskRow } from './tasks.ts'
+import { unfinishedTask } from './completion.ts'
 
 const { agents, auditLog, projects, reviews, runs, epics, epicDependencies, taskDependencies, tasks } = schema
 
@@ -68,7 +69,7 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
           // Every dependency Merged (D10: Ready tasks wait on them)
           notExists(tx.select({ one: sql`1` }).from(taskDependencies)
             .innerJoin(dependency, eq(dependency.id, taskDependencies.dependsOnId))
-            .where(and(eq(taskDependencies.taskId, tasks.id), ne(dependency.status, 'merged')))),
+            .where(and(eq(taskDependencies.taskId, tasks.id), unfinishedTask(dependency)))),
           notExists(tx.select({ one: sql`1` }).from(epicDependencies)
             .innerJoin(epics, eq(epics.id, epicDependencies.dependsOnEpicId))
             .innerJoin(epicTask, eq(epicTask.epicId, epics.id))
@@ -133,8 +134,8 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
     // In progress or Agent review task keeps its status and just gets a lease
     let status = task.status
     if (task.status === 'ready') {
-      // The query only returns tasks whose dependencies are all Merged
-      const result = transition(toTaskState(task), { type: 'claim', dependencyStatuses: [] }, scheduler)
+      // The query only returns tasks whose dependencies are all finished
+      const result = transition(toTaskState(task), { type: 'claim', dependencies: [] }, scheduler)
       if (!result.ok) throw new Error(`Claim rejected by core: ${result.error.code}`)
       status = result.task.status
     }
