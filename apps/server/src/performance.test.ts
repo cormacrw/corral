@@ -1,9 +1,9 @@
-import { schema } from '@corral/db'
+import { schema, type DatabaseHandle } from '@corral/db'
 import { createTestDatabase } from '@corral/db/testing'
 import { Hono } from 'hono'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { apiTiming, PerformanceSamples } from './performance.ts'
-import { createTestApp } from './test-app.ts'
+import { createTestApp, type TestApp } from './test-app.ts'
 
 afterEach(() => {
   vi.useRealTimers()
@@ -11,36 +11,52 @@ afterEach(() => {
 })
 
 describe('API timing', () => {
+  let t: TestApp
+
+  beforeAll(async () => {
+    t = await createTestApp('pglite')
+  })
+
+  afterAll(async () => {
+    await t?.close()
+  })
+
   it('records real API successes, validation and errors using patterns and the header duration', async () => {
-    const t = await createTestApp('pglite')
-    try {
-      const paths = ['/api/runner', '/api/tasks/PRIVATE-123?secret=hidden', '/api/projects/private-id', '/api/unknown-private-id', '/api/designs/private-version/files/index.html']
-      const responses: Response[] = []
-      for (const path of paths) responses.push(await t.request('GET', path))
-      responses.push(await t.request('POST', '/api/projects', {}))
-      await t.performance.flush()
-      const rows = await t.db.select().from(schema.perfSamples)
-      expect(rows.map(r => r.name)).toEqual(['/api/runner', '/api/tasks/:ref', '/api/projects/:slug', '/api/*', '/api/designs/:versionId/files/*', '/api/projects'])
-      rows.forEach((row, i) => {
-        expect(row.kind).toBe('api')
-        expect(row.status).toBe(responses[i]!.status)
-        expect(row.durationMs).toBeGreaterThanOrEqual(0)
-        expect(responses[i]!.headers.get('server-timing')).toBe(`total;dur=${row.durationMs}`)
-      })
-      const health = await t.request('GET', '/api/health')
-      const sse = await t.request('GET', '/api/events')
-      expect(health.headers.get('server-timing')).toMatch(/^total;dur=/)
-      expect(sse.headers.get('server-timing')).toMatch(/^total;dur=/)
-      await sse.body!.cancel()
-      await t.performance.flush()
-      expect(await t.db.select().from(schema.perfSamples)).toHaveLength(6)
-    } finally {
-      await t.close()
-    }
+    const paths = ['/api/runner', '/api/tasks/PRIVATE-123?secret=hidden', '/api/projects/private-id', '/api/unknown-private-id', '/api/designs/private-version/files/index.html']
+    const responses: Response[] = []
+    for (const path of paths) responses.push(await t.request('GET', path))
+    responses.push(await t.request('POST', '/api/projects', {}))
+    await t.performance.flush()
+    const rows = await t.db.select().from(schema.perfSamples)
+    expect(rows.map(r => r.name)).toEqual(['/api/runner', '/api/tasks/:ref', '/api/projects/:slug', '/api/*', '/api/designs/:versionId/files/*', '/api/projects'])
+    rows.forEach((row, i) => {
+      expect(row.kind).toBe('api')
+      expect(row.status).toBe(responses[i]!.status)
+      expect(row.durationMs).toBeGreaterThanOrEqual(0)
+      expect(responses[i]!.headers.get('server-timing')).toBe(`total;dur=${row.durationMs}`)
+    })
+    const health = await t.request('GET', '/api/health')
+    const sse = await t.request('GET', '/api/events')
+    expect(health.headers.get('server-timing')).toMatch(/^total;dur=/)
+    expect(sse.headers.get('server-timing')).toMatch(/^total;dur=/)
+    await sse.body!.cancel()
+    await t.performance.flush()
+    expect(await t.db.select().from(schema.perfSamples)).toHaveLength(6)
+  })
+})
+
+describe('performance sample recorder', () => {
+  let handle: DatabaseHandle
+
+  beforeAll(async () => {
+    handle = await createTestDatabase('pglite')
+  })
+
+  afterAll(async () => {
+    await handle?.close()
   })
 
   it('defers and batches writes, warns once only above threshold, excludes upgrades and prunes on its timer', async () => {
-    const handle = await createTestDatabase('pglite')
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
     const samples = new PerformanceSamples(handle.db, '10')
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -90,7 +106,6 @@ describe('API timing', () => {
       expect(names).toContain('recent')
     } finally {
       await samples.stop()
-      await handle.close()
     }
   })
 })
