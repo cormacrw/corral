@@ -28,7 +28,7 @@ describe.each(['pglite', 'postgres'] as const)('POST /api/deployments on %s', (d
     expect(rows).toHaveLength(1)
   })
 
-  it('lists release notes below attention items, keeps reading separate from dismissal and streams updates', async () => {
+  it('lists release notes in the Inbox, keeps reading separate from dismissal and streams updates', async () => {
     const project = await t.createProject()
     const getInbox = async () => (await (await t.request('GET', '/api/inbox')).json()) as Inbox
     const before = await getInbox()
@@ -39,7 +39,6 @@ describe.each(['pglite', 'postgres'] as const)('POST /api/deployments on %s', (d
     expect(item).toMatchObject({ type: 'release_notes', fromSha: '1111111', toSha: '2222222', notesStatus: 'pending', unread: true, sender: { role: 'pm' }, project: { id: project.id } })
     expect(needsAttention(item)).toBe(false)
     expect(pending.count).toBe(before.count)
-    expect(pending.needsYou.slice(pending.needsYou.findIndex(i => i.type === 'release_notes')).every(i => i.type === 'release_notes')).toBe(true)
     expect(t.events).toContainEqual(expect.objectContaining({ type: 'deployment.updated', deployment: expect.objectContaining({ id: deployment.id }) }))
     const read = await t.request('POST', `/api/deployments/${deployment.id}/read`)
     expect(read.status).toBe(200)
@@ -86,7 +85,7 @@ describe.each(['pglite', 'postgres'] as const)('POST /api/deployments on %s', (d
     }
   })
 
-  it('lists only the latest 20 deployments by date below attention items, including first-deploy and fallback notes', async () => {
+  it('lists only the latest 20 deployments by date, including first-deploy and fallback notes', async () => {
     const project = await t.createProject()
     const task = await t.createTask(project.slug)
     await t.db.update(schema.tasks).set({ status: 'failed' }).where(eq(schema.tasks.id, task.id))
@@ -98,8 +97,27 @@ describe.each(['pglite', 'postgres'] as const)('POST /api/deployments on %s', (d
     const notes = inbox.needsYou.filter(i => i.type === 'release_notes')
     expect(notes.map(i => i.deploymentId)).toEqual(rows.slice(-20).reverse().map(r => r.id))
     expect(notes[0]).toMatchObject({ fromSha: null, notesStatus: 'failed', notes: 'Fallback notes' })
-    expect(inbox.needsYou.findIndex(i => i.id === task.id)).toBeLessThan(inbox.needsYou.findIndex(i => i.type === 'release_notes'))
     expect(inbox.count).toBe(inbox.needsYou.length - 20)
+  })
+
+  it('places release notes among attention items by deployment time, read or unread', async () => {
+    // The suite shares a database, and only the latest 20 deployments are listed
+    await t.db.delete(schema.deployments)
+    const project = await t.createProject()
+    const task = await t.createTask(project.slug)
+    await t.db.update(schema.tasks).set({ status: 'failed' }).where(eq(schema.tasks.id, task.id))
+    const getInbox = async () => (await (await t.request('GET', '/api/inbox')).json()) as Inbox
+    const before = await getInbox()
+    const at = Date.parse(before.needsYou.find(i => i.taskId === task.id)!.at)
+    const deployment = (minutes: number, toSha: string) => ({ projectId: project.id, fromSha: null, toSha, notes: 'Notes', notesStatus: 'ready' as const, createdAt: new Date(at + minutes * 60_000) })
+    const [older, newer] = await t.db.insert(schema.deployments).values([deployment(-1, sha('1')), deployment(1, sha('2'))]).returning()
+    const ids = async () => (await getInbox()).needsYou.filter(i => i.project.id === project.id).map(i => i.id)
+    const expected = [newer!.id, task.id, older!.id]
+    expect(await ids()).toEqual(expected)
+    expect((await t.request('POST', `/api/deployments/${older!.id}/read`)).status).toBe(200)
+    expect((await t.request('POST', `/api/deployments/${newer!.id}/read`)).status).toBe(200)
+    expect(await ids()).toEqual(expected)
+    expect((await getInbox()).count).toBe(before.count)
   })
 
   it('404s for a repository no project uses and rejects bad input', async () => {

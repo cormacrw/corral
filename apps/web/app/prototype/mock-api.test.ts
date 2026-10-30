@@ -85,9 +85,7 @@ describe('prototype mock API', () => {
     expect(inbox.count).toBe(inbox.needsYou.filter(i => i.type !== 'release_notes').length)
     const threads = inbox.needsYou.filter(i => i.type === 'plan_thread')
     expect(threads.map(i => i.sessionId).sort()).toEqual(['s-1', 's-2', 's-3', 's-5'])
-    const attention = inbox.needsYou.filter(i => i.type !== 'release_notes')
-    expect(attention.map(i => i.at)).toEqual(attention.map(i => i.at).sort().reverse())
-    expect(inbox.needsYou.at(-1)?.type).toBe('release_notes')
+    expect(inbox.needsYou.map(i => i.at)).toEqual(inbox.needsYou.map(i => i.at).sort().reverse())
     expect(threads.find(i => i.sessionId === 's-5')).toMatchObject({ status: 'none', unread: true, question: null, plan: null, reply: expect.stringContaining('SSE reconnect') })
     expect(threads.find(i => i.sessionId === 's-2')).toMatchObject({
       question: { text: 'Which push service should we use?', recommendation: 'Web Push', options: ['Web Push with VAPID keys', 'ntfy'] },
@@ -99,6 +97,16 @@ describe('prototype mock API', () => {
     expect(threads.every(i => !('body' in i))).toBe(true)
     expect(inbox.needsYou.filter(i => i.type !== 'plan_thread' && i.type !== 'release_notes').map(i => i.type).sort()).toEqual(['blocked', 'epic_conflict', 'epic_review', 'failed', 'human_review'])
     expect(threads.some(i => i.sessionId === 's-idle')).toBe(false)
+  })
+
+  it('places release notes among the other items by deployment time, read or not', async () => {
+    const ids = async () => (await mockCall<Inbox>('GET', '/inbox')).needsYou.map(i => i.id)
+    const before = await ids()
+    const position = before.indexOf('release-demo')
+    expect(position).toBeGreaterThan(0)
+    expect(position).toBeLessThan(before.length - 1)
+    await mockCall('POST', '/deployments/release-demo/read')
+    expect(await ids()).toEqual(before)
   })
 
   it('drops an unread-reply thread from the inbox once it is read', async () => {

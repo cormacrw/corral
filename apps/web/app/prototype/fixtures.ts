@@ -796,7 +796,6 @@ export function inbox(): Inbox {
       prUrl: conflict.prUrl!, resolution: null, headSha: conflict.prHeadSha!, targetBranch: 'main', files
     })
   }
-  needsYou.sort((a, b) => b.at.localeCompare(a.at))
   const completed = tasks.find(t => t.status === 'merged')!
   const project = projects.find(p => p.id === completed.projectId)!
   const activity: Inbox['activity'] = [{
@@ -809,5 +808,6 @@ export function inbox(): Inbox {
   }]
   const count = needsYou.length
   needsYou.push(...releaseNotes.filter(r => !r.resolution))
+  needsYou.sort((a, b) => b.at.localeCompare(a.at))
   return { needsYou, activity, resolved: releaseNotes.filter(r => r.resolution), count }
 }
