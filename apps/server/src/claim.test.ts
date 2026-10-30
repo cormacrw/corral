@@ -1,3 +1,4 @@
+import { requireDatabase } from '@corral/db/testing'
 import type { Project } from '@corral/contracts'
 import type { TaskPriority } from '@corral/core'
 import { schema } from '@corral/db'
@@ -12,7 +13,8 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
   let t: TestApp
 
   // A failed assertion must not leave claimable tasks for the next test.
-  beforeEach(async () => {
+  beforeEach(async ({ skip }) => {
+    requireDatabase(driver, { skip })
     t = await createTestApp(driver)
   })
 
@@ -326,7 +328,8 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
 describe('concurrent claims on postgres', () => {
   let t: TestApp
 
-  beforeEach(async () => {
+  beforeEach(async ({ skip }) => {
+    requireDatabase('postgres', { skip })
     t = await createTestApp('postgres')
   })
 

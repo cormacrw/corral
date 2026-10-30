@@ -1,9 +1,10 @@
+import { databaseFixture } from '@corral/db/testing'
 import type { PlanSessionDetail } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import { writeFile } from 'node:fs/promises'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './test-runner.ts'
 
@@ -16,7 +17,7 @@ describe('idempotent, asynchronous Plan starts', () => {
   let stream: ReadableStreamDefaultReader<string>
   let sse = ''
   let collecting: Promise<void>
-  beforeAll(async () => {
+  databaseFixture(driver, async () => {
     t = await createTestApp(driver, { listen: true })
     runner = await FakeRunner.connect(t.server!.url)
     await t.request('GET', '/api/setup/clis')
