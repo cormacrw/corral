@@ -13,3 +13,5 @@ A tool reaches the PM only once it's on `main`, because `main` is what deploys. 
 The server and the runner both have to run the new commit: the server's list decides what may be called and the runner's decides what's advertised. Check each runner's commit in Settings or `/runner/version`.
 
 An existing session needs no restart and keeps its conversation; **it needs one new turn after the runner has updated**. An agent CLI reads the tool list when its process starts. Updating the runner ends its warm PM processes (D9), so the next message cold-starts with `--resume`, which connects to MCP again and gets the new list. A turn answered by a warm process on the old runner, or one in progress during the deploy, doesn't see the tools. The session's opening prompt isn't resent, so an existing session learns these tools from their MCP descriptions.
+
+Claude Code may list a session's MCP tools as deferred, so the PM's first use of one in a resumed session can go through its own ToolSearch. That is the CLI loading the tool, not a Corral failure.
