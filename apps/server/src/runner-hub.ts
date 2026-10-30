@@ -266,6 +266,12 @@ export class RunnerHub {
     return this.#request(job, timeoutMs, runnerId)
   }
 
+  // Every online runner sweeps. Each answer settles on its own, so one runner
+  // failing doesn't lose what the others removed.
+  sweepWorktrees(job: Extract<SetupJob, { kind: 'sweep_worktrees' }>, timeoutMs: number): Promise<PromiseSettledResult<Extract<SetupJobResult, { kind: 'sweep_worktrees' }>>[]> {
+    return Promise.allSettled(this.available().map(r => this.#request(job, timeoutMs, r.id)))
+  }
+
   #request<K extends SetupJob['kind']>(job: Extract<SetupJob, { kind: K }>, timeoutMs: number, runnerId: string): Promise<Extract<SetupJobResult, { kind: K }>> {
     const jobId = randomUUID()
     return new Promise((resolve, reject) => {
