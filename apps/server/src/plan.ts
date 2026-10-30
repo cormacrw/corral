@@ -1,5 +1,5 @@
-import { askQuestionInput, type AgentRuntime, type DraftSession, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type PmRunJob } from '@corral/contracts'
-import { checkPlan, EPIC_REVIEW_MODES, checkPlanEpicDependencies, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, REVISABLE_STATUSES, requiresHumanReview, richTextToMarkdown, TASK_PRIORITIES, TASK_TYPES, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
+import { askQuestionInput, normalizeProposedPlan, proposedPlanInput, type AgentRuntime, type DraftSession, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type PmRunJob } from '@corral/contracts'
+import { checkPlan, checkPlanEpicDependencies, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, REVISABLE_STATUSES, richTextToMarkdown, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
@@ -24,50 +24,7 @@ const TITLE_MAX_LENGTH = 60
 // Thrown back to the PM as a tool error
 class ToolError extends Error {}
 
-const proposedTask = z.object({
-  key: z.string().trim().min(1),
-  ref: z.string().trim().toUpperCase().optional().transform(ref => ref || undefined),
-  epic: z.string().trim().optional(),
-  title: z.string().trim().min(1),
-  description: z.string().trim(),
-  type: z.enum(TASK_TYPES),
-  priority: z.enum(TASK_PRIORITIES).default('medium'),
-  humanReview: z.boolean().default(false),
-  acceptanceCriteria: z.array(z.string().trim()).default([]),
-  dependsOn: z.array(z.string().trim()).default([]),
-  // The approved design version a build task builds (D20)
-  design: z.object({
-    taskRef: z.string().trim().toUpperCase(),
-    version: z.number().int().positive(),
-    screens: z.array(z.string().trim()).default([])
-  }).optional()
-})
-
-// The key old plans that stored only plans.epicId give their epic. New
-// plans without `epics` have no epic.
 const ONLY_EPIC = 'main'
-
-const proposedPlan = z.object({
-  title: z.string().trim().min(1),
-  summary: z.string().trim().default(''),
-  epics: z.array(z.object({
-    key: z.string().trim().min(1),
-    title: z.string().trim(),
-    summary: z.string().trim().default(''),
-    dependsOn: z.array(z.string().trim()).optional(),
-    // The project's default when left out (D23)
-    reviewMode: z.enum(EPIC_REVIEW_MODES, { error: `reviewMode must be one of ${EPIC_REVIEW_MODES.join(', ')}` }).optional()
-  })).default([]),
-  tasks: z.array(proposedTask)
-}).transform((plan): ProposedPlan => {
-  // A dependency that isn't a key is an existing task's ref, in any case
-  const keys = new Set(plan.tasks.map(t => t.key))
-  const dependency = (dep: string) => keys.has(dep) || !REF.test(dep) ? dep : dep.toUpperCase()
-  // A task without `epic` has no epic. A design task always gets human
-  // review, whatever the PM asked for (D20).
-  return { ...plan, tasks: plan.tasks.map(t => ({ ...t, epic: t.epic || undefined, humanReview: requiresHumanReview(t.type, t.humanReview), dependsOn: t.dependsOn.map(dependency) })) }
-})
-
 const REF = /^([A-Za-z]+)-(\d+)$/
 
 // An existing task a plan names by ref
@@ -480,9 +437,9 @@ export class PlanService {
       }
 
       case 'propose_plan': {
-        const parsed = proposedPlan.safeParse(input)
+        const parsed = proposedPlanInput.safeParse(input)
         if (!parsed.success) throw new ToolError(`The plan was not saved: ${z.prettifyError(parsed.error)}`)
-        return this.#propose(session, project, runId, parsed.data, actor)
+        return this.#propose(session, project, runId, normalizeProposedPlan(parsed.data), actor)
       }
 
       // The human's approval, given in chat and carried out by the PM. It's

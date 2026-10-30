@@ -53,6 +53,27 @@ describe('plan sessions', () => {
     return t.request('GET', `/api/plan/sessions/${id}`).then(r => r.json()) as Promise<PlanSessionDetail>
   }
 
+  it('stores current and legacy wire plans with the same content', async () => {
+    const snapshots = []
+    const base = plan([{}])
+    const epic = { title: 'Accounts', summary: 'Login feature' }
+    for (const input of [
+      { ...base, epic },
+      { ...base, epics: [{ key: 'main', ...epic }], tasks: base.tasks.map(task => ({ ...task, epic: 'main', priority: 'medium', humanReview: false })) }
+    ]) {
+      const project = await t.createProject()
+      const res = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan login' })
+      const created = await res.json() as PlanSessionDetail
+      const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
+      expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', input)).toMatchObject({ ok: true })
+      const stored = (await session(created.id)).plans[0]!
+      const [task] = await t.db.select().from(tasks).where(eq(tasks.projectId, project.id))
+      snapshots.push({ title: stored.title, summary: stored.summary, epics: stored.epics.map(e => ({ key: e.key, title: e.title })), task: { title: task!.title, description: task!.description, type: task!.type, priority: task!.priority, humanReview: task!.humanReview } })
+      await endTurn(job, 'Plan proposed')
+    }
+    expect(snapshots[0]).toEqual(snapshots[1])
+  })
+
   it('starts a session with a PM turn, records questions and plans, and approves the plan', async () => {
     const project = await t.createProject()
     const res = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan a login feature' })
