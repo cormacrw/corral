@@ -23,6 +23,7 @@ interface ImageResult {
 }
 
 const outcomes: Record<AgentRole, readonly string[]> = {
+  designer: ['design_submitted', 'stuck', 'failed'],
   developer: ['pr_opened', 'pr_updated', 'pr_rebased', 'findings_reported', 'design_submitted', 'stuck', 'failed'],
   reviewer: ['approved', 'changes_requested', 'blocked', 'failed'],
   pm: []
@@ -144,6 +145,7 @@ const toolDefinitions = {
 // Where a role's tool differs: the PM reads any task in the project by ref,
 // while developers and reviewers only ever read their own
 const roleToolDefinitions: Record<AgentRole, Partial<Record<AgentTool, ToolDefinition>>> = {
+  designer: {},
   developer: {},
   reviewer: {},
   pm: {
@@ -155,6 +157,7 @@ const roleToolDefinitions: Record<AgentRole, Partial<Record<AgentTool, ToolDefin
 }
 
 export const ROLE_TOOLS: Record<AgentRole, AgentTool[]> = {
+  designer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'submit_design', 'report_outcome'],
   developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'report_outcome'],
   reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'get_design', 'report_outcome'],
   pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
