@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, expect, test } from 'vitest'
 import { checkCpus } from '../../../scripts/check-cpus.ts'
 
@@ -21,7 +22,7 @@ async function fixture() {
   await writeFile(join(cwd, '.git', 'info', 'exclude'), 'bin/\ncalls\n.corral/checks/\n')
   await writeFile(join(cwd, 'bin', 'pnpm'), `#!/usr/bin/env node
 const fs = require('node:fs');
-fs.appendFileSync('calls', JSON.stringify({ args: process.argv.slice(2), cpus: process.env.CORRAL_CHECK_CPUS, force: process.env.TURBO_FORCE }) + '\\n');
+fs.appendFileSync('calls', JSON.stringify({ args: process.argv.slice(2), cpus: process.env.CORRAL_CHECK_CPUS, force: process.env.TURBO_FORCE, workers: process.env.VITEST_MAX_WORKERS }) + '\\n');
 if (process.argv.includes(process.env.FAIL_STAGE)) process.exit(7);
 `, { mode: 0o755 })
   const run = (args: string[] = [], extra = {}) => exec(process.execPath, [resolve(import.meta.dirname, '../../../scripts/check.ts'), ...args], {
@@ -38,9 +39,9 @@ test('validates a single positive CPU setting', () => {
 
 test('runs all workspace gates at the shared cap and includes root checks', async () => {
   const { run, calls } = await fixture()
-  await run([], { CORRAL_CHECK_CPUS: '2' })
+  await run([], { CORRAL_CHECK_CPUS: '2', VITEST_MAX_WORKERS: '99' })
   expect(await calls()).toEqual([
-    expect.objectContaining({ args: ['exec', 'turbo', 'run', 'lint', 'typecheck', 'test', '--concurrency=2'], cpus: '2' }),
+    expect.objectContaining({ args: ['exec', 'turbo', 'run', 'lint', 'typecheck', 'test', '--concurrency=2'], cpus: '2', workers: '2' }),
     expect.objectContaining({ args: ['exec', 'eslint', 'scripts'] }),
     expect.objectContaining({ args: ['exec', 'tsc'] })
   ])
@@ -71,3 +72,33 @@ test('only reuses a clean review check for the same clean head and cites its run
   expect((await run(['--review'])).stdout).toContain('Saved clean review check run')
   expect(await calls()).toHaveLength(12)
 })
+
+// Isolated Vitest workers used to free their slot before graceful process exit.
+// Delaying SIGTERM reproduces the overlap reliably instead of relying on timing
+// in a large suite. Each worker records entry and exit from its own process.
+test('holds the worker cap while isolated workers are exiting', async () => {
+  const { cwd } = await fixture()
+  await symlink(resolve(import.meta.dirname, '../node_modules'), join(cwd, 'node_modules'), 'dir')
+  const events = join(cwd, 'worker-events')
+  const source = `import { test } from 'vitest'
+import { appendFileSync } from 'node:fs'
+const record = (event) => appendFileSync(${JSON.stringify(events)}, event + process.pid + '\\n')
+record('+')
+process.on('exit', () => record('-'))
+process.on('SIGTERM', () => setTimeout(() => process.exit(0), 250))
+test('passing worker', () => {})
+`
+  await writeFile(join(cwd, 'vitest.config.mjs'), 'export default { test: { maxWorkers: 2 } }')
+  await Promise.all(Array.from({ length: 6 }, (_, i) => writeFile(join(cwd, `${i}.test.mjs`), source)))
+  const vitest = fileURLToPath(new URL('./vitest.mjs', import.meta.resolve('vitest/package.json')))
+  await exec(process.execPath, [vitest, 'run'], { cwd, timeout: 15_000 })
+  const active = new Set<string>()
+  let maximum = 0
+  for (const event of (await readFile(events, 'utf8')).trim().split('\n')) {
+    if (event.startsWith('+')) active.add(event.slice(1))
+    else active.delete(event.slice(1))
+    maximum = Math.max(maximum, active.size)
+  }
+  expect(maximum).toBe(2)
+  expect(active.size).toBe(0)
+}, 20_000)

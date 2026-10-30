@@ -1,0 +1,33 @@
+diff --git a/dist/chunks/index.1TqnEahn.js b/dist/chunks/index.1TqnEahn.js
+index 50dd001b7b24be2eac6f37eeb1929ad4645aa1a9..34b14b9021208dc6200aa86a119dd2ed109826ad 100644
+--- a/dist/chunks/index.1TqnEahn.js
++++ b/dist/chunks/index.1TqnEahn.js
+@@ -5927,18 +5927,24 @@ class Pool {
+ 				runner.request(method, task.context);
+ 			}
+ 			await resolver.promise.catch((error) => span?.recordException(error)).finally(() => span?.end());
+-			const index = this.activeTasks.indexOf(activeTask);
+-			if (index !== -1) this.activeTasks.splice(index, 1);
++			const releaseTask = () => {
++				const index = this.activeTasks.indexOf(activeTask);
++				if (index !== -1) this.activeTasks.splice(index, 1);
++			};
+ 			if (!task.isolate && !runner.isTerminated && !isMemoryLimitReached && this.queue[0]?.task.isolate === false && isEqualRunner(runner, this.queue[0].task)) {
+ 				this.sharedRunners.push(runner);
++				releaseTask();
+ 				return this.schedule();
+ 			}
+-			// Runner terminations are started but not awaited until the end of full run.
++			// Hold the worker slot until its process exits, including graceful teardown.
+ 			// Runner termination can also already start from task cancellation.
+ 			if (!runner.isTerminated) {
+ 				const id = setTimeout(() => this.logger.error(`[vitest-pool]: Timeout terminating ${task.worker} worker for test files ${formatFiles(task)}.`), this.options.teardownTimeout);
+-				this.exitPromises.push(runner.stop({ force: resolver.isRejected }).then(() => clearTimeout(id)).catch((error) => this.logger.error(`[vitest-pool]: Failed to terminate ${task.worker} worker for test files ${formatFiles(task)}.`, error)));
++				const stopping = runner.stop({ force: resolver.isRejected }).then(() => clearTimeout(id)).catch((error) => this.logger.error(`[vitest-pool]: Failed to terminate ${task.worker} worker for test files ${formatFiles(task)}.`, error));
++				this.exitPromises.push(stopping);
++				await stopping;
+ 			}
++			releaseTask();
+ 			workerIds.set(poolId, true);
+ 		} 
+ 		// This is mostly to avoid zombie workers when/if Vitest internals run into errors

@@ -10,7 +10,12 @@ if (review.some(arg => arg !== '--review') || review.length > 1) {
   throw new Error('Usage: pnpm run check [--review]; set CORRAL_CHECK_CPUS to change the worker cap')
 }
 const isReview = review.length === 1
-const env: NodeJS.ProcessEnv = { ...process.env, CORRAL_CHECK_CPUS: String(cpus) }
+const env: NodeJS.ProcessEnv = {
+  ...process.env,
+  CORRAL_CHECK_CPUS: String(cpus),
+  // Vitest's environment override takes precedence over its config file.
+  VITEST_MAX_WORKERS: String(cpus)
+}
 if (isReview) env.TURBO_FORCE = '1'
 
 async function run(command: string, args: string[], capture = false): Promise<string> {

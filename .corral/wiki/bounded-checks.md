@@ -27,3 +27,13 @@ head (for example after a toolchain or external service change).
 shared by all six Vitest configs. `apps/runner/src/check-command.test.ts` covers
 orchestration failure propagation and receipt eligibility using real subprocesses
 and temporary git repositories with a recording pnpm stand-in.
+
+Vitest 5.0.5 starts replacement isolated workers before awaiting retiring worker
+processes, briefly exceeding maxWorkers in a process listing. The pnpm patch in
+`patches/vitest@5.0.5.patch` holds each active pool slot until graceful teardown
+and process exit finish. It preserves isolation and the existing teardown timeout.
+The worker-exit regression probe delays SIGTERM in six isolated passing files
+and verifies that no more than two worker processes overlap.
+
+Docker install stages copy `patches/` before pnpm install so the pinned dependency
+patches are available in production and web build images.
