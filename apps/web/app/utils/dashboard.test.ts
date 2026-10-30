@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { TaskStatus } from '@corral/core'
-import { dashboardCounts, elapsed, isToday } from './dashboard.ts'
+import { dashboardCounts, elapsed, isToday, liveRunTitle } from './dashboard.ts'
 
 const now = new Date(2026, 9, 29, 15, 0)
 const task = (status: TaskStatus, extra: { mergedAt?: string | null, reviewRounds?: number } = {}) => ({ status, mergedAt: null, reviewRounds: 0, ...extra })
@@ -56,5 +56,26 @@ describe('elapsed', () => {
     expect(elapsed(new Date(at - 18 * 60_000).toISOString(), at)).toBe('18m')
     expect(elapsed(new Date(at - 125 * 60_000).toISOString(), at)).toBe('2h 5m')
     expect(elapsed(null, at)).toBe('')
+  })
+})
+
+describe('liveRunTitle', () => {
+  const run = { taskTitle: null, epicTitle: null, summary: null, role: 'pm' as const }
+
+  it('names the epic of a live epic review instead of Planning', () => {
+    expect(liveRunTitle({ ...run, role: 'reviewer', epicTitle: 'Saved searches' }, null)).toBe('Saved searches')
+  })
+
+  it('names the task of a task run', () => {
+    expect(liveRunTitle({ ...run, role: 'developer', taskTitle: 'Prototype build' }, null)).toBe('Prototype build')
+  })
+
+  it('keeps Planning and the Plan session for PM turns', () => {
+    expect(liveRunTitle(run, 'Search filters')).toBe('Answering in Search filters')
+    expect(liveRunTitle(run, null)).toBe('Planning')
+  })
+
+  it('never calls another role Planning', () => {
+    expect(liveRunTitle({ ...run, role: 'reviewer' }, null)).toBe('Run')
   })
 })
