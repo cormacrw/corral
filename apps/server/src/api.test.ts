@@ -274,7 +274,7 @@ describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
       const [second] = await t.db.insert(schema.agents).values({ name: `Dev-${randomBytes(3).toString('hex')}`, role: 'developer' }).returning()
       const [reviewer] = await t.db.insert(schema.agents).values({ name: `Rev-${randomBytes(3).toString('hex')}`, role: 'reviewer' }).returning()
       const run = (agentId: string, role: 'developer' | 'reviewer', minutesAgo: number) => ({
-        agentId, projectId: project.id, taskId: created.id, role, state: 'completed' as const, queuedAt: new Date(Date.now() - minutesAgo * 60_000)
+        agentId, projectId: project.id, taskId: created.id, role, state: 'completed' as const, endedAt: new Date(), queuedAt: new Date(Date.now() - minutesAgo * 60_000)
       })
 
       await t.db.insert(schema.runs).values(run(second!.id, 'developer', 30))
@@ -404,7 +404,7 @@ describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
         expect(await res.json()).toEqual({ error: { code: 'conflict', constraint: 'agent_has_active_runs' } })
         // Other settings can still change
         expect((await t.request('PATCH', `/api/agents/${created.id}`, { concurrency: 2 })).status).toBe(200)
-        await t.db.update(schema.runs).set({ state: 'completed' }).where(eq(schema.runs.id, run!.id))
+        await t.db.update(schema.runs).set({ state: 'completed', endedAt: new Date() }).where(eq(schema.runs.id, run!.id))
       }
 
       t.events.length = 0

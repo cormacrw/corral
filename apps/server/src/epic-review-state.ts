@@ -1,6 +1,7 @@
 import { ACTIVE_RUN_STATES } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, eq, inArray } from 'drizzle-orm'
+import { runEndValues } from './run-lifecycle.ts'
 
 const { epics, runs } = schema
 
@@ -12,6 +13,6 @@ export async function invalidateEpicReview(db: Executor, epicId: string | null):
   // Changes requested stands until the epic's fix work has merged
   if (!epic?.prNumber || epic.reviewState === 'merged' || epic.reviewState === 'changes_requested') return
   await db.update(epics).set({ reviewState: 'open', updatedAt: new Date() }).where(eq(epics.id, epicId))
-  await db.update(runs).set({ state: 'interrupted', endedAt: new Date(), error: 'Epic board changed; integration review must run again' })
+  await db.update(runs).set(runEndValues({ state: 'interrupted', error: 'Epic board changed; integration review must run again' }, new Date()))
     .where(and(eq(runs.epicId, epicId), inArray(runs.state, [...ACTIVE_RUN_STATES])))
 }
