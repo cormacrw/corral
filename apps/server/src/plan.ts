@@ -159,9 +159,12 @@ export class PlanService {
     const { db, events } = this.#d
     const session = await this.#session(sessionId)
     if (session.closedAt) return this.#toSession(session)
-    const active = await db.select({ id: runs.id }).from(runs)
-      .where(and(eq(runs.planSessionId, sessionId), eq(runs.role, 'pm'), inArray(runs.state, ['queued', 'starting', 'running', 'stopping'])))
-    for (const run of active) await this.#d.stopRun(run.id, actor)
+    const stopTurns = async () => {
+      const active = await db.select({ id: runs.id }).from(runs)
+        .where(and(eq(runs.planSessionId, sessionId), eq(runs.role, 'pm'), inArray(runs.state, ['queued', 'starting', 'running', 'stopping'])))
+      for (const run of active) await this.#d.stopRun(run.id, actor)
+    }
+    await stopTurns()
     const deleted = await db.transaction(async (tx) => {
       const [locked] = await tx.select().from(planSessions).where(eq(planSessions.id, sessionId)).for('update')
       if (locked!.closedAt) return null
@@ -180,6 +183,9 @@ export class PlanService {
       await tx.update(planSessions).set({ closedAt: now, updatedAt: now, unread: false }).where(eq(planSessions.id, sessionId))
       return { owned, detached: [...detached].filter(id => !owned.some(t => t.id === id)) }
     })
+    // Catch a turn inserted between the first stop and the session lock.
+    // startPmRun's same lock now refuses every insertion after close.
+    await stopTurns()
     const closed = await this.#toSession(await this.#session(sessionId))
     if (deleted) {
       for (const task of deleted.owned) events.publish({ type: 'task.deleted', taskId: task.id, projectId: task.projectId })
@@ -250,6 +256,7 @@ export class PlanService {
         fallbackPrompt: pmFallbackPrompt({ text, attachedTask: attached, projectName: project?.name ?? null, prefix: project?.prefix ?? null, history: await this.#history(session.id) })
       })
     } catch (error) {
+      if ((await this.#session(session.id)).closedAt) return
       const { db, events } = this.#d
       const [message] = await db.insert(planMessages).values({ sessionId: session.id, role: 'pm', kind: 'error', text: `Could not queue the PM turn: ${error instanceof Error ? error.message : String(error)}`, runId: null }).returning()
       await db.update(planSessions).set({ updatedAt: new Date(), unread: true }).where(eq(planSessions.id, session.id))
