@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { developerPrompt, isGrillRequest, pmFallbackPrompt, pmPrompt, questionText, reviewerPrompt, type PromptTask } from './prompts.ts'
+import { developerPrompt, developerRevisionPrompt, isGrillRequest, pmFallbackPrompt, pmPrompt, questionText, reviewerPrompt, type PromptTask } from './prompts.ts'
 
 const turn = { text: 'hi', attachedTask: null, projectName: 'Test app', prefix: 'TA' }
 
@@ -364,5 +364,35 @@ describe('D21 evidence guidance', () => {
     expect(prompt).toContain('Write acceptance criteria as observable behaviour')
     expect(prompt).toContain('Do not write criteria that only restate lint, typecheck, tests or build passing')
     expect(prompt).toContain('the gates already cover those checks')
+  })
+})
+
+describe('rebase-only developer prompts', () => {
+  const task: PromptTask = {
+    ref: 'TA-1',
+    title: 'Login',
+    description: null,
+    branch: 'corral/ta-1-login',
+    defaultBranch: 'main',
+    reviewRounds: 0,
+    reviewRoundCap: 3,
+    criteria: [{ id: 'c1', text: 'Works' }],
+    comments: [],
+    attachments: []
+  }
+  it('limits both fresh and resumed sessions to the rebase, even after revision rounds', () => {
+    const rebase = { ...task, rebaseOnly: true, approvedHeadSha: 'approved-head', reviewRounds: 3, defaultBranch: 'epic/release' }
+    for (const prompt of [developerPrompt(rebase, 'Tam'), developerRevisionPrompt(rebase, [])]) {
+      expect(prompt).toContain('rebase-only round from approved head approved-head')
+      expect(prompt).toContain('origin/epic/release')
+      expect(prompt).toContain('Make no other changes')
+      expect(prompt).toContain('main\'s')
+      expect(prompt).toContain('lint, typecheck, tests and build')
+      expect(prompt).toContain('git merge-tree --write-tree HEAD origin/epic/release')
+      expect(prompt).toContain('pr_rebased')
+      expect(prompt).toContain('naming every conflicted file and how each was resolved')
+      expect(prompt).not.toContain('pr_updated')
+      expect(prompt).not.toContain('requested changes')
+    }
   })
 })

@@ -34,6 +34,8 @@ export function toTaskState(row: TaskRow): TaskState {
   return {
     status: row.status,
     humanReview: row.humanReview,
+    rebaseOnly: row.rebaseOnly,
+    approvedHeadSha: row.approvedHeadSha,
     reviewRounds: row.reviewRounds,
     failedRuns: row.failedRuns,
     reason: row.statusReason,
@@ -340,6 +342,8 @@ export async function applyTransition(
   if (['draft', 'backlog'].includes(task.status) && !['draft', 'backlog'].includes(next.status)) await invalidateEpicReview(tx, task.epicId)
   await tx.update(tasks).set({
     status: next.status,
+    rebaseOnly: next.rebaseOnly ?? false,
+    approvedHeadSha: next.approvedHeadSha ?? null,
     reviewRounds: next.reviewRounds,
     failedRuns: next.failedRuns,
     statusReason: next.reason,

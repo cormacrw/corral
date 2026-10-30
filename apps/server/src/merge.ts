@@ -19,7 +19,7 @@ const MAX_MERGE_ATTEMPTS = 3
 // Developers always rebase; a merge of the base would put merge commits on
 // the branch (and Corral pushes with --force-with-lease, so rebases push)
 function rebaseInstruction(defaultBranch: string): string {
-  return `Rebase onto \`origin/${defaultBranch}\`, resolve the conflicts, and report pr_updated.`
+  return `Rebase onto \`origin/${defaultBranch}\`, resolve the conflicts, and report pr_rebased.`
 }
 
 export interface MergeDeps {
@@ -180,13 +180,13 @@ export class MergeOrchestrator {
         await db.update(tasks).set({ branchUpdateRequested: true }).where(eq(tasks.id, task.id))
         await db.insert(auditLog).values({ projectId: project.id, taskId: task.id, actor: server, action: 'branch.update_requested', detail: { pr: pr.number, headSha: pr.headSha } })
       } else {
-        await this.#transition(task.id, { type: 'base_conflict' }, { event: 'base_conflict' },
+        await this.#transition(task.id, { type: 'base_conflict', approvedHeadSha: pr.headSha }, { event: 'base_conflict' },
           `The base branch \`${baseBranch}\` has moved and the update conflicts with this branch. ${rebaseInstruction(baseBranch)}`)
       }
       return
     }
     if (pr.mergeable === false) {
-      await this.#transition(task.id, { type: 'base_conflict' }, { event: 'base_conflict', mergeableState: pr.mergeableState },
+      await this.#transition(task.id, { type: 'base_conflict', approvedHeadSha: pr.headSha }, { event: 'base_conflict', mergeableState: pr.mergeableState },
         `GitHub reports this branch can’t be merged (${pr.mergeableState ?? 'conflict'}). ${rebaseInstruction(baseBranch)}`)
       return
     }

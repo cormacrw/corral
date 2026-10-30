@@ -16,6 +16,8 @@ export interface PromptTask {
   // D20: a build task pinned to an approved design version and its screens
   pin?: PinnedDesign | null
   defaultBranch: string
+  rebaseOnly?: boolean
+  approvedHeadSha?: string | null
   reviewRounds: number
   reviewRoundCap: number
   criteria: { id: string, text: string }[]
@@ -258,6 +260,7 @@ export function questionText(m: { text: string, recommendation: string | null, o
 const WORK_NOTE = '- Every `report_outcome` needs a `note` as well: one line of at most 200 characters saying what this run did, e.g. "Rebased onto 6e67d6f; resolved conflict in docs/architecture.md keeping main’s SSE wording". It\'s posted on the task as your comment, so the history shows your work between reviews.'
 
 export function developerPrompt(task: PromptTask, agentName: string): string {
+  if (task.rebaseOnly) return rebaseDeveloperPrompt(task, agentName)
   if (task.spike) return spikeDeveloperPrompt(task, agentName)
   if (task.design) return designDeveloperPrompt(task, agentName)
   const revision = task.reviewRounds > 0
@@ -352,6 +355,7 @@ function designDeveloperPrompt(task: PromptTask, agentName: string): string {
 // (changes requested, or a retry): the session already holds the task, the
 // working rules and the earlier work, so it gets only what's new
 export function developerRevisionPrompt(task: PromptTask, feedback: PromptTask['comments']): string {
+  if (task.rebaseOnly) return rebaseDeveloperPrompt({ ...task, comments: feedback }, 'the assigned developer')
   const format = (c: PromptTask['comments'][number]) => `- ${c.author} (${c.createdAt.toISOString()}): ${c.body}`
   const outcome = task.spike ? 'findings_reported' : task.reviewRounds > 0 ? 'pr_updated' : 'pr_opened'
   return [
@@ -411,5 +415,23 @@ function designReviewerPrompt(task: ReviewTask, underReview: DesignUnderReview |
 - When you approve, keep it short: the summary is one or two sentences, and each criterion note must explain concretely why it is met or not, because the human reads it next to the evidence.
 - When you request changes, the summary is posted to the developer as a comment: make every point specific and actionable.
 - Always finish by calling \`report_outcome\`.`)
+  ].join('\n')
+}
+
+// Fresh and resumed sessions receive the same narrow scope after a conflict.
+function rebaseDeveloperPrompt(task: PromptTask, agentName: string): string {
+  return [
+    `You are ${agentName}, the developer agent in Corral, working on ${task.ref}: ${task.title}.`,
+    `This is a rebase-only round from approved head ${task.approvedHeadSha ?? '(unknown)'}. It does not consume a review round.`,
+    section('How to work', `
+- Fetch origin and rebase branch \`${task.branch}\` onto \`origin/${task.defaultBranch}\`.
+- Resolve conflicts keeping the base branch's (main's) changes and the approved branch's intent. Make no other changes; do not undo newly merged work.
+- Run the project's lint, typecheck, tests and build.
+- Check that \`git merge-tree --write-tree HEAD origin/${task.defaultBranch}\` is clean.
+- Do not push or use gh. Corral pushes with --force-with-lease.
+${WORK_NOTE}
+- Report \`pr_rebased\` with a summary naming every conflicted file and how each was resolved, and a one-line note naming the conflicted files and their resolutions. If a human decision is needed, report stuck instead.
+- Always finish by calling \`report_outcome\`.`),
+    commentsSection(task)
   ].join('\n')
 }

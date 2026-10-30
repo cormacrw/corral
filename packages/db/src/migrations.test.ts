@@ -39,7 +39,7 @@ describe('migrations', () => {
   it.each([
     { driver: 'pglite' as const, enabled: true },
     { driver: 'postgres' as const, enabled: postgresAvailable }
-  ])('0031 adds runner names after main’s 0030, preserving historical runs, on $driver', async ({ driver, enabled }) => {
+  ])('upgrades historical runs and tasks after 0030 without data loss, on $driver', async ({ driver, enabled }) => {
     if (!enabled) return
     const before = await migrationsBefore('0031_omniscient_firedrake')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
@@ -62,7 +62,12 @@ describe('migrations', () => {
     expect((await db.execute(sql`select state, runner_name from runs`)).rows).toEqual([{ state: 'completed', runner_name: null }])
     await db.execute(sql`update runs set runner_name = 'home-server'`)
     expect((await db.execute(sql`select runner_name from runs`)).rows).toEqual([{ runner_name: 'home-server' }])
-    expect(Number((await db.execute(sql`select max(created_at) as latest from drizzle.__drizzle_migrations`)).rows[0]!.latest)).toBe(added.when)
+    expect((await db.execute(sql`select rebase_only, approved_head_sha from tasks`)).rows).toEqual([{ rebase_only: false, approved_head_sha: null }])
+    await db.execute(sql`update tasks set rebase_only = true, approved_head_sha = 'approved-head'`)
+    await db.execute(sql`update runs set outcome = 'pr_rebased'`)
+    expect((await db.execute(sql`select outcome from runs`)).rows).toEqual([{ outcome: 'pr_rebased' }])
+    expect((await db.execute(sql`select rebase_only, approved_head_sha from tasks`)).rows).toEqual([{ rebase_only: true, approved_head_sha: 'approved-head' }])
+    expect(Number((await db.execute(sql`select max(created_at) as latest from drizzle.__drizzle_migrations`)).rows[0]!.latest)).toBe(journal.entries.at(-1)!.when)
     await migrate(migrationsFolder)
     expect((await db.execute(sql`select runner_name from runs`)).rows).toEqual([{ runner_name: 'home-server' }])
   }, 60_000)

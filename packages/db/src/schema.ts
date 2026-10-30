@@ -133,6 +133,8 @@ export const tasks = pgTable('tasks', {
   priority: taskPriority().notNull().default('medium'),
   type: taskType().notNull(),
   humanReview: boolean().notNull().default(false),
+  rebaseOnly: boolean().notNull().default(false),
+  approvedHeadSha: text(),
   reviewRounds: integer().notNull().default(0),
   failedRuns: integer().notNull().default(0),
   // Why the task is Blocked or Failed (D10, D11)
