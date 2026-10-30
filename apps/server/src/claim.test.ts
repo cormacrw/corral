@@ -165,7 +165,7 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
       return task.id === runnable.id ? 'runner-b' : null
     }
 
-    const claim = await claimNextTask(t.db, await developer(), new Date(), undefined, place)
+    const claim = await claimNextTask(t.db, await developer(), new Date(), undefined, [], place)
     expect(claim).toMatchObject({ taskId: runnable.id, runnerId: 'runner-b' })
     expect(new Set(tried).size).toBe(blocked + 1)
     expect((await taskRow(project, 2)).leaseRunId).toBeNull()

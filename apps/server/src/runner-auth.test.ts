@@ -14,7 +14,7 @@ function dial(url: string, token?: string): WebSocket {
   const ws = new WebSocket(`${url.replace('http', 'ws')}/runner`, {
     headers: token ? { authorization: `Bearer ${token}` } : {}
   })
-  ws.on('open', () => ws.send(JSON.stringify({ type: 'hello', protocol: 1, runnerId: 'auth-test', name: 'auth-test', activeRuns: [] })))
+  ws.on('open', () => ws.send(JSON.stringify({ type: 'hello', protocol: 2, runnerId: 'auth-test', name: 'auth-test', activeRuns: [], slots: 1, runtimes: ['claude-code'], roles: ['developer'] })))
   socket = ws
   return ws
 }
