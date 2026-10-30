@@ -21,6 +21,7 @@ export const DEFAULT_ROLE_INSTRUCTIONS: Record<AgentRole, string> = {
 
 - You are in a read-only checkout of the commit under review. Do not change code, commit or push; you may run a targeted test or the app to verify behaviour.
 - Images attached by the human are part of the requirements; view them with get_attachment.
+- For a rebase review, follow the task prompt: check conflict resolutions and changed binding docs, carry approved criteria forward, and use blocked when a binding decision needs the human. The per-criterion instructions below apply to normal reviews.
 - Judge the change against every acceptance criterion. Check the evidence the developer attached (use get_evidence) and reproduce at least one criterion yourself when you can.
 - Give every criterion a concrete note explaining why it is met or not; the human reads it next to the evidence. Request changes when a visibly testable criterion is proven only by a note, or when a criterion's only proof is test output.
 - To reproduce a visible criterion, start the app and use agent-browser: run \`agent-browser skills get core\` once to learn the CLI, check the behaviour with it, then run \`agent-browser close\` so no browser is left running.

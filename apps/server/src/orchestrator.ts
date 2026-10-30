@@ -621,6 +621,8 @@ export class Orchestrator implements RunnerHandlers {
         pin,
         underReview: version ? { version: version.version, commitSha: version.commitSha, screenshots: version.screenshots.map(s => s.fileName) } : null,
         defaultBranch: baseBranch,
+        rebaseOnly: task.rebaseOnly,
+        approvedHeadSha: task.approvedHeadSha,
         reviewRounds: task.reviewRounds,
         reviewRoundCap: ctx.project.reviewRoundCap,
         criteria: criteria.map(c => ({ id: c.id, text: c.text })),
@@ -1222,12 +1224,15 @@ export class Orchestrator implements RunnerHandlers {
         case 'approved':
         case 'changes_requested':
           return this.#review(ctx, report, report.outcome)
+        case 'blocked':
+          if (!ctx.task?.rebaseOnly) throw new ToolError('Only a rebase review can report blocked.')
+          return this.#blockedRebaseReview(ctx, report.summary)
         case 'failed':
           await this.#failRun(ctx, report.summary)
           this.#finished(ctx, 'Reported failed')
           return { ok: true, message: 'Recorded. You can stop now.' }
       }
-      throw new ToolError('A reviewer reports approved, changes_requested or failed')
+      throw new ToolError('A reviewer reports approved, changes_requested, blocked (rebase review only) or failed')
     }
     if (ctx.run.role === 'developer') {
       const problem = noteProblem(report.note)
@@ -1271,7 +1276,11 @@ export class Orchestrator implements RunnerHandlers {
     const { db } = this.#d
     const task = ctx.task!
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
-    const verdicts = report.criteria ?? []
+    const [approval] = task.rebaseOnly && verdict === 'approved'
+      ? await db.select().from(reviews).where(and(eq(reviews.taskId, task.id), eq(reviews.verdict, 'approved'), eq(reviews.headSha, task.approvedHeadSha!))).orderBy(desc(reviews.createdAt)).limit(1)
+      : []
+    if (task.rebaseOnly && verdict === 'approved' && !approval) throw new ToolError('Not recorded. No approval found for the previously approved head.')
+    const verdicts = approval ? approval.criteria : report.criteria ?? []
     const missing = criteria.filter(c => !verdicts.some(v => v.criterionId === c.id))
     if (missing.length > 0) {
       throw new ToolError(`Not recorded. Give a verdict for every criterion; missing: ${missing.map(c => `[${c.id}] ${c.text}`).join('; ')}.`)
@@ -1284,8 +1293,9 @@ export class Orchestrator implements RunnerHandlers {
     const kept = criteria.map(c => verdicts.find(v => v.criterionId === c.id)!).map(v => ({ criterionId: v.criterionId, met: v.met, note: v.note ?? '' }))
     // An approval is a short note; the per-criterion notes are kept on the
     // review and shown next to the evidence. Changes requested spells out
-    // every criterion for the developer.
-    const feedback = verdict === 'approved' ? `Approved: all ${kept.length} criteria met. ${report.summary.trim()}`.trim() : feedbackComment(report.summary, kept, criteria)
+    // every criterion for the developer, except the narrow rebase comment.
+    const summary = approval ? `Approval carried over a reviewed rebase from ${task.approvedHeadSha} to ${task.headSha}. ${report.summary.trim()}` : report.summary
+    const feedback = task.rebaseOnly ? `Rebase review ${verdict === 'approved' ? 'approved' : 'changes requested'}: ${report.summary.trim()}` : verdict === 'approved' ? `Approved: all ${kept.length} criteria met. ${report.summary.trim()}`.trim() : feedbackComment(report.summary, kept, criteria)
 
     const next = await db.transaction(async (tx) => {
       const locked = await lockTask(tx, task.id)
@@ -1295,7 +1305,7 @@ export class Orchestrator implements RunnerHandlers {
       // one requested changes too; near-identical feedback blocks the task
       const similarity = verdict === 'changes_requested' ? await this.#feedbackSimilarity(tx, task.id, locked.task.reviewRounds, report.summary, kept) : undefined
       await tx.insert(reviews).values({
-        taskId: task.id, runId: ctx.run.id, round: locked.task.reviewRounds, headSha, verdict, summary: report.summary, criteria: kept, author: this.#actor(ctx)
+        taskId: task.id, runId: ctx.run.id, round: locked.task.reviewRounds, headSha, verdict, summary, criteria: kept, author: this.#actor(ctx)
       })
       await tx.insert(comments).values({ taskId: task.id, author: this.#actor(ctx), body: feedback })
       await tx.insert(auditLog).values({
@@ -1336,6 +1346,20 @@ export class Orchestrator implements RunnerHandlers {
       .orderBy(desc(reviews.createdAt)).limit(1)
     if (!previous) return undefined
     return feedbackSimilarity(reviewFeedbackText(previous.summary, previous.criteria), reviewFeedbackText(summary, criteria))
+  }
+
+  // D24: a changed binding decision must be settled by the human.
+  async #blockedRebaseReview(ctx: RunContext, reason: string) {
+    if (!reason.trim()) throw new ToolError('Explain the changed binding decision and affected criteria for the human.')
+    await this.#d.db.transaction(async (tx) => {
+      const { task, project } = await lockTask(tx, ctx.task!.id)
+      if (task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease. Stop working.')
+      await tx.insert(comments).values({ taskId: task.id, author: this.#actor(ctx), body: `Rebase review blocked: ${reason.trim()}` })
+      await applyTransition(tx, task, project, { type: 'block', reason }, server, { event: 'blocked', runId: ctx.run.id })
+      await this.#endRunIn(tx, ctx, { state: 'completed', outcome: 'blocked', summary: reason })
+    })
+    this.#finished(ctx, 'Rebase review blocked: waiting on a human')
+    return { ok: true, message: 'The task is Blocked for a human decision. You can stop now.' }
   }
 
   // Asks a human: the task becomes Blocked with the question as its reason (D11)

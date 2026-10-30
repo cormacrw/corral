@@ -93,6 +93,7 @@ export interface DesignUnderReview {
 export function reviewerPrompt(task: ReviewTask & { underReview?: DesignUnderReview | null }, agentName: string): string {
   if (task.spike) return spikeReviewerPrompt(task, agentName)
   if (task.design) return designReviewerPrompt(task, task.underReview ?? null, agentName)
+  if (task.rebaseOnly) return rebaseReviewerPrompt(task, agentName)
   const evidence = evidenceList(task)
   return [
     `You are ${agentName}, the reviewer agent in Corral. Review round ${task.reviewRounds + 1} of ${task.reviewRoundCap} for task ${task.ref}: ${task.title}.`,
@@ -115,6 +116,30 @@ export function reviewerPrompt(task: ReviewTask & { underReview?: DesignUnderRev
 - Call \`report_outcome\` with outcome "approved" or "changes_requested" and a \`criteria\` verdict for every criterion ID above (met true/false with a note).
 - When you approve, keep it short: the summary is one or two sentences (what you checked and anything worth knowing), and each criterion note must explain concretely why it is met or not, because the human reads it next to the evidence. Don't restate the task or the developer's summary.
 - When you request changes, the summary is posted to the developer as a comment: make every point specific and actionable.
+- Always finish by calling \`report_outcome\`.`)
+  ].join('\n')
+}
+
+// D24: review the resolution; the server carries the approved criteria forward.
+function rebaseReviewerPrompt(task: ReviewTask, agentName: string): string {
+  return [
+    `You are ${agentName}, the reviewer agent in Corral. Rebase review for ${task.ref}: ${task.title}.`,
+    section('Rebase under review', `Previously approved head: ${task.approvedHeadSha}. New head: ${task.headSha}. Base branch: origin/${task.defaultBranch}.
+This is a conflict check of approved work, excluded from the review-round cap.`),
+    section('Task', richTextToMarkdown(task.description) || '(no description)'),
+    section('Acceptance criteria (previously approved)', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
+    commentsSection(task),
+    attachmentsSection(task),
+    pinSection(task, 'reviewer'),
+    gatesSection(task),
+    section('How to review', `
+- You are in a read-only checkout of the new head. Do not edit, commit or push.
+- Identify old-base and new-base, the base commits of the approved and rebased work (use git merge-base against origin/${task.defaultBranch}; inspect history to confirm them). Run \`git range-diff <old-base>..<approved> <new-base>..<new-head>\`, substituting the approved and new head SHAs above. Compare rewritten commits with the approved work; no feature changes are allowed.
+- Read the developer's conflict report. Check each conflicted hunk against the specific main/base commit that caused it, preserving both sides' intent without reverting newly merged work.
+- Inspect binding docs changed on the base since approval and check this branch against them. If a changed binding decision affects the criteria, report outcome "blocked" with the changed decision, affected criteria and reason for the human. Do not choose a side or rewrite the criteria.
+- If the resolution holds, report "approved" without criteria verdicts: the server copies the earlier approval's verdicts and notes onto the new head.
+- If the resolution needs changes, report "changes_requested" with actionable feedback and a verdict for every criterion. This starts a normal counted revision.
+- Your summary becomes a short task comment: name the conflicted files and the verdict, explaining whether their resolutions hold. Do not repeat a per-criterion list in the summary or add_comment.
 - Always finish by calling \`report_outcome\`.`)
   ].join('\n')
 }

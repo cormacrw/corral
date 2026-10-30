@@ -26,6 +26,7 @@ export const RUN_OUTCOMES = [
   'design_submitted',
   'approved',
   'changes_requested',
+  'blocked',
   'stuck',
   'failed',
   'rate_limited'
