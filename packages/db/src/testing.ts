@@ -26,7 +26,10 @@ export async function createTestDatabase(driver: 'pglite' | 'postgres'): Promise
     db: handle.db,
     async close() {
       await handle.close()
-      await withAdmin(adminUrl, admin => admin.query(`drop database if exists ${name} with (force)`))
+      // pg.Pool.end resolves before every client's socket has finished closing.
+      // Let Postgres wait for those disconnects; FORCE can kill an ending client
+      // and emit an uncaught 57P01 error after all assertions have passed.
+      await withAdmin(adminUrl, admin => admin.query(`drop database if exists ${name}`))
     }
   }
 }
