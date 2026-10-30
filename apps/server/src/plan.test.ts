@@ -882,9 +882,10 @@ describe('plan sessions', () => {
     const sent = await t.db.select().from(runs).where(inArray(runs.id, jobs.map(j => j.runId)))
     expect(sent.map(r => r.pmJob)).toEqual([null, null, null])
     for (const job of jobs) runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: `claude-${job.runId}` })
-    await sleep(150)
-    const rows = await t.db.select().from(runs).where(inArray(runs.id, jobs.map(j => j.runId)))
-    expect(rows.map(r => r.state)).toEqual(['running', 'running', 'running'])
+    await vi.waitFor(async () => {
+      const rows = await t.db.select().from(runs).where(inArray(runs.id, jobs.map(j => j.runId)))
+      expect(rows.map(r => r.state)).toEqual(['running', 'running', 'running'])
+    })
 
     // Still one turn at a time per session
     const again = await t.request('POST', `/api/plan/sessions/${sessions[1]!.id}/messages`, { text: 'Again' })
@@ -936,9 +937,10 @@ describe('plan sessions', () => {
     const startJobs = await Promise.all(atStart.map(id => runner.next('run.assign', m => m.job.runId === id).then(m => m.job)))
     expect(startJobs).toHaveLength(3)
     for (const job of startJobs) runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: `claude-${job.runId}` })
-    await sleep(150)
-    const started = await t.db.select().from(runs).where(inArray(runs.id, atStart))
-    expect(started.map(r => [r.state, r.pmJob])).toEqual([['running', null], ['running', null], ['running', null]])
+    await vi.waitFor(async () => {
+      const started = await t.db.select().from(runs).where(inArray(runs.id, atStart))
+      expect(started.map(r => [r.state, r.pmJob])).toEqual([['running', null], ['running', null], ['running', null]])
+    })
 
     for (const job of [...resumedJobs, ...startJobs]) await endTurn(job, 'Noted.')
     await t.db.update(agents).set({ concurrency: 50 }).where(eq(agents.role, 'pm'))
