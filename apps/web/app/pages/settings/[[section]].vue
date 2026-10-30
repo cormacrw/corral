@@ -5,7 +5,7 @@ import { agentLimit } from '~/utils/agents'
 import { parseOverride } from '~/utils/device'
 import { cliLoginCommand, detectedRuntimes, ROLE, runtimeLabel, timeAgo } from '~/utils/labels'
 
-// Global settings (design/settings.md): profile, agents, runner, appearance
+// Global settings (design/settings.md): profile, agents, runner, performance, appearance
 const route = useRoute()
 const live = useLive()
 const toast = useToast()
@@ -95,6 +95,7 @@ const items = [
   { label: 'Profile', to: '/settings/profile', icon: 'i-lucide-user' },
   { label: 'Agents', to: '/settings/agents', icon: 'i-lucide-bot' },
   { label: 'Runner', to: '/settings/runner', icon: 'i-lucide-server' },
+  { label: 'Performance', to: '/settings/performance', icon: 'i-lucide-gauge' },
   { label: 'Appearance', to: '/settings/appearance', icon: 'i-lucide-palette' }
 ]
 </script>
@@ -461,6 +462,8 @@ const items = [
             </div>
           </div>
         </UCard>
+
+        <SettingsPerformance v-else-if="section === 'performance'" />
 
         <UCard v-else-if="section === 'appearance'">
           <template #header>

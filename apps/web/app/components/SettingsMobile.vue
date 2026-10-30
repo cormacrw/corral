@@ -71,6 +71,23 @@ const name = computed(() => state.value.profile?.name || 'You')
           />
         </NuxtLink>
       </li>
+      <li>
+        <NuxtLink
+          to="/settings/performance"
+          class="flex min-h-14 items-center gap-3 px-4 py-3"
+          data-testid="settings-performance"
+        >
+          <UIcon
+            name="i-lucide-gauge"
+            class="size-5 shrink-0 text-muted"
+          />
+          <span class="flex-1 text-highlighted">Performance</span>
+          <UIcon
+            name="i-lucide-chevron-right"
+            class="size-4 shrink-0 text-dimmed"
+          />
+        </NuxtLink>
+      </li>
     </ul>
 
     <div class="flex items-baseline justify-between px-4 pt-4">
