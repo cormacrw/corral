@@ -215,7 +215,7 @@ const epicOptions = computed(() => epics.value.map(id => ({ id, label: epicLabel
                         working
                         size="xs"
                       />
-                      {{ agentFor(task)!.name }}
+                      {{ task.type === 'design' && agentFor(task)!.role === 'designer' ? 'Designer · ' : '' }}{{ agentFor(task)!.name }}
                     </span>
                   </span>
                 </button>

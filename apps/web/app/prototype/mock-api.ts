@@ -1,5 +1,5 @@
 import { checkEpicDependencies } from '@corral/core'
-import type { CreateTaskInput, InboxActionInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
+import type { CreateAgentInput, CreateTaskInput, InboxActionInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
 import * as f from './fixtures'
@@ -112,6 +112,10 @@ route('POST', '/projects/:slug/tasks', ([slug], body) => {
   emit({ type: 'task.created', task })
   return task
 })
+route('GET', '/projects/:slug/tasks/:number/designs', ([slug, number]) => {
+  const task = taskIn(slug!, number!)
+  return task.ref === 'COR-4' ? [{ id: 'design-v1', version: 1, status: 'approved', branch: 'design/COR-4', commitSha: 'design-review-v1', spec: '# Review screen', screenshots: [], previewUrl: '', feedback: null, planSessionId: 's-1', createdAt: f.ago(100) }] : []
+})
 route('GET', '/projects/:slug/tasks/:number', ([slug, number]) => taskIn(slug!, number!))
 // A real resume goes on to start a run, which the prototype has no use for
 route('POST', '/projects/:slug/tasks/:number/resume', ([slug, number]) => {
@@ -183,6 +187,13 @@ route('GET', '/epics/:id', ([id]) => {
 })
 
 route('GET', '/agents', () => f.agents)
+route('POST', '/agents', (_, body) => {
+  const input = body as CreateAgentInput
+  const agent = { ...input, id: `mock-agent-${f.agents.length}`, paused: false, pausedUntil: null, wakeIntervalSeconds: null, activeRuns: 0, avatarUrl: null }
+  f.agents.push(agent)
+  emit({ type: 'agent.updated', agent })
+  return agent
+})
 route('PATCH', '/agents/:id', ([id], body) => Object.assign(f.agents.find(a => a.id === id) ?? notFound(), body))
 route('GET', '/me', () => f.profile)
 route('PATCH', '/me', (_, body) => Object.assign(f.profile, body))

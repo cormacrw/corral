@@ -1,4 +1,4 @@
-import type { DraftSession, EpicDetail, Inbox, PlanSessionDetail, Project, PullRequestStatus, ServerEvent, Task } from '@corral/contracts'
+import type { Agent, DraftSession, EpicDetail, Inbox, PlanSessionDetail, Project, PullRequestStatus, ServerEvent, Task } from '@corral/contracts'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
@@ -8,6 +8,21 @@ describe('prototype mock API', () => {
   it('answers everything the shell loads at startup', async () => {
     for (const path of ['/projects', '/agents', '/runner', '/status', '/inbox', '/plan/sessions', '/me']) {
       await expect(mockCall('GET', path), path).resolves.toBeTruthy()
+    }
+  })
+
+  it('adds designers live and includes an assigned design task without duplicate task IDs', async () => {
+    const events: ServerEvent[] = []
+    const stop = onMockEvent(event => events.push(event))
+    try {
+      const added = await mockCall<Agent>('POST', '/agents', { name: 'Mira', role: 'designer', runtime: 'claude-code', concurrency: 1 })
+      expect(await mockCall<Agent[]>('GET', '/agents')).toContainEqual(added)
+      expect(events).toContainEqual({ type: 'agent.updated', agent: added })
+      const tasks = await mockCall<Task[]>('GET', '/projects/corral/tasks?view=all')
+      expect(new Set(tasks.map(t => t.id)).size).toBe(tasks.length)
+      expect(tasks.find(t => t.ref === 'COR-20')).toMatchObject({ type: 'design', status: 'in_progress', developer: { name: 'Iris' }, lease: { role: 'designer' } })
+    } finally {
+      stop()
     }
   })
 

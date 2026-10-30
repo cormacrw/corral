@@ -245,7 +245,7 @@ const note = (task: Task) => taskNote(task, props.all, props.reviewRoundCap)
                   v-if="agentFor(task)"
                   class="ms-auto flex items-center gap-1 font-medium text-default"
                 >
-                  {{ agentFor(task)!.name }}
+                  {{ task.type === 'design' && agentFor(task)!.role === 'designer' ? 'Designer · ' : '' }}{{ agentFor(task)!.name }}
                   <AgentAvatar
                     :name="agentFor(task)!.name"
                     working

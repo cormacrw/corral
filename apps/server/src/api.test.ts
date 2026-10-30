@@ -290,6 +290,17 @@ describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
       expect(listed.find(x => x.id === created.id)?.developer).toEqual({ id: first!.id, name: first!.name })
     })
 
+    it('names the designer as the author of design tasks in detail and lists', async () => {
+      const project = await t.createProject({ prefix: 'DSN' })
+      const task = await t.createTask(project.slug, { type: 'design' })
+      const [designer] = await t.db.insert(schema.agents).values({ name: `Iris-${randomBytes(3).toString('hex')}`, role: 'designer' }).returning()
+      await t.db.insert(schema.runs).values({ agentId: designer!.id, projectId: project.id, taskId: task.id, role: 'designer', state: 'running' })
+      const detail = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}`).then(r => r.json()) as Task
+      const listed = await t.request('GET', `/api/projects/${project.slug}/tasks?view=all`).then(r => r.json()) as Task[]
+      expect(detail.developer).toEqual({ id: designer!.id, name: designer!.name })
+      expect(listed.find(t => t.id === task.id)?.developer).toEqual(detail.developer)
+    })
+
     it('takes the human-review default from the project (D5)', async () => {
       const project = await t.createProject({ humanReviewDefault: true })
       expect((await t.createTask(project.slug)).humanReview).toBe(true)
