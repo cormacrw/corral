@@ -89,7 +89,7 @@ export interface TaskAgent {
   name: string
 }
 
-export interface Task {
+interface TaskFields {
   id: string
   projectId: string
   // PREFIX-NUMBER, e.g. COR-29 (D13)
@@ -97,18 +97,15 @@ export interface Task {
   number: number
   title: string
   description: unknown
-  status: TaskStatus
   priority: TaskPriority
   type: TaskType
   epicId: string | null
   humanReview: boolean
   reviewRounds: number
   failedRuns: number
-  statusReason: string | null
   paused: boolean
   branch: string | null
-  prNumber: number | null
-  prUrl: string | null
+  pr: { number: number, url: string } | null
   // `met` comes from the latest review of the current commit (design/task.md)
   acceptanceCriteria: { id: string, position: number, text: string, checkedByHuman?: boolean, met: boolean | null }[]
   // Refs of the tasks this one waits on
@@ -131,14 +128,17 @@ export interface Task {
   // The approved design version a build task builds, and the screens it
   // covers (D20)
   design: TaskDesignPin | null
-  // A Draft's Plan session: the session of the latest proposed plan that
-  // includes it, so a revision from another session moves it there. Null
-  // for every other status.
-  planSessionId: string | null
-  planSessionTitle: string | null
   createdAt: string
   updatedAt: string
 }
+// Draft ownership follows the latest proposed plan that includes the task.
+// Draft ownership and status reasons cannot leak into unrelated statuses.
+export type Task = TaskFields & (
+  | { status: 'draft', statusReason: null, draftSession: { id: string, title: string } | null }
+  | { status: 'blocked' | 'failed', statusReason: string, draftSession: null }
+  | { status: Exclude<TaskStatus, 'draft' | 'blocked' | 'failed'>, statusReason: null, draftSession: null }
+)
+
 export interface TaskDesignPin {
   // The design task, e.g. COR-70
   taskRef: string

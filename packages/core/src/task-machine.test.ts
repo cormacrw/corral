@@ -9,6 +9,7 @@ import {
   transition,
   type TaskEvent,
   type TaskEventType,
+  normalizeTaskState,
   type TaskState
 } from './task-machine.ts'
 
@@ -79,7 +80,7 @@ const stateFor: Partial<Record<TaskEventType, Partial<TaskState>>> = {}
 
 function task(status: TaskStatus, overrides: Partial<TaskState> = {}): TaskState {
   // Flagged tasks are the only ones that may reach Human review
-  return { type: 'task', status, humanReview: status === 'human_review', reviewRounds: 0, failedRuns: 0, reason: null, ...overrides }
+  return normalizeTaskState({ type: 'task', status, humanReview: status === 'human_review', reviewRounds: 0, failedRuns: 0, reason: status === 'blocked' || status === 'failed' ? 'Needs attention' : null, ...overrides })
 }
 
 function expectOk(result: ReturnType<typeof transition>): TaskState {
@@ -287,6 +288,23 @@ describe('approval and merging', () => {
 
   it('records a merge done outside Corral from any review status', () => {
     expect(expectOk(transition(task('agent_review', { humanReview: true }), validEvents.merged_outside, server)).status).toBe('merged')
+  })
+})
+
+describe('normalized task state', () => {
+  it('requires a nonblank reason when loading blocked or failed state', () => {
+    for (const status of ['blocked', 'failed'] as const) {
+      for (const reason of [null, '', ' \t\n']) {
+        expect(() => normalizeTaskState({ status, reason, humanReview: false, reviewRounds: 0, failedRuns: 0 })).toThrow('require a reason')
+      }
+      expect(normalizeTaskState({ status, reason: '  Which provider?  ', humanReview: false, reviewRounds: 0, failedRuns: 0 }).reason).toBe('Which provider?')
+    }
+  })
+
+  it('clears irrelevant reasons when normalizing ordinary states', () => {
+    for (const status of TASK_STATUSES.filter(s => s !== 'blocked' && s !== 'failed')) {
+      expect(normalizeTaskState({ status, reason: 'Old reason', humanReview: false, reviewRounds: 0, failedRuns: 0 }).reason).toBeNull()
+    }
   })
 })
 

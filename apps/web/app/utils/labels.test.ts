@@ -117,7 +117,7 @@ describe('Ready waiting notes', () => {
     const ready = task(projects[0]!, 99, { title: 'Waiting', status: 'ready', waitingOnEpics: [{ id: 'foundation', title: 'Foundation' }] })
     expect(taskNote(ready, [ready], 5)).toEqual({ text: 'Waiting on epic: Foundation', color: 'neutral' })
     expect(taskNote({ ...ready, waitingOnEpics: [] }, [ready], 5)).toBeNull()
-    expect(taskNote({ ...ready, status: 'in_progress' }, [ready], 5)).toBeNull()
+    expect(taskNote({ ...ready, status: 'in_progress', statusReason: null, draftSession: null }, [ready], 5)).toBeNull()
   })
 
   it('preserves task dependency notes for epics without prerequisites', () => {

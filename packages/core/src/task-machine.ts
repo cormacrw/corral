@@ -9,8 +9,7 @@ import { requiresHumanReview, type TaskType } from './task.ts'
 // The task state machine (D10). Every status change in Corral goes through
 // `transition`; the server enforces it and rejects anything not listed here.
 
-export interface TaskState {
-  status: TaskStatus
+interface TaskStateFields {
   // D5: flagged tasks wait in Human review instead of auto-merging
   humanReview: boolean
   // D24: conflict repair retains the approved head through resubmission.
@@ -22,11 +21,24 @@ export interface TaskState {
   // Failed runs since the task was last un-failed. Rate-limited, stopped and
   // interrupted runs don't count (D3, D10).
   failedRuns: number
-  // Why the task is Blocked or Failed; shown in the Inbox (D11)
-  reason: string | null
-  // Normalised state always identifies the deliverable. D19: a spike delivers
-  // findings, not a PR, so human approval ends it without a merge.
+  // Normalised state always identifies the deliverable.
   type: TaskType
+}
+
+// Reasons exist only while human intervention is needed. The normalizer is
+// the boundary for flat database rows and checks the invariant at runtime.
+export type TaskState = TaskStateFields & (
+  | { status: 'blocked' | 'failed', reason: string }
+  | { status: Exclude<TaskStatus, 'blocked' | 'failed'>, reason: null }
+)
+
+export function normalizeTaskState(task: TaskStateFields & { status: TaskStatus, reason: string | null }): TaskState {
+  if (task.status === 'blocked' || task.status === 'failed') {
+    const reason = task.reason?.trim()
+    if (!reason) throw new Error('Blocked and failed tasks require a reason')
+    return { ...task, status: task.status, reason }
+  }
+  return { ...task, status: task.status, reason: null }
 }
 
 export interface TaskLimits {
@@ -259,7 +271,7 @@ export function transition(
 
 // The events this actor may attempt on this task right now. Guards can still
 // reject them; this is for showing or hiding actions in the UI.
-export function availableEvents(task: TaskState, actor: Actor): TaskEventType[] {
+export function availableEvents(task: Pick<TaskState, 'status'>, actor: Actor): TaskEventType[] {
   const type = actorType(actor)
   if (type === null) return []
   return (Object.keys(TRANSITION_RULES) as TaskEventType[]).filter((event) => {
@@ -269,8 +281,8 @@ export function availableEvents(task: TaskState, actor: Actor): TaskEventType[] 
   })
 }
 
-function ok(task: TaskState): TransitionResult {
-  return { ok: true, task }
+function ok(task: TaskStateFields & { status: TaskStatus, reason: string | null }): TransitionResult {
+  return { ok: true, task: normalizeTaskState(task) }
 }
 
 function fail(error: TransitionError): TransitionResult {

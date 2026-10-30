@@ -236,8 +236,8 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
                     />
                     <DesignChangedBadge :design="task.design" />
                     <a
-                      v-if="task.prUrl"
-                      :href="task.prUrl"
+                      v-if="task.pr?.url"
+                      :href="task.pr?.url"
                       target="_blank"
                       rel="noopener"
                       class="ms-auto flex items-center gap-0.5 text-muted hover:text-primary"
@@ -245,7 +245,7 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
                     ><UIcon
                       name="i-lucide-git-pull-request"
                       class="size-3"
-                    />#{{ task.prNumber }}</a>
+                    />#{{ task.pr?.number }}</a>
                   </span>
                   <span class="font-medium text-highlighted">{{ task.title }}</span>
                   <span

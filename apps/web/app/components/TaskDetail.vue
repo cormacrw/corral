@@ -559,6 +559,16 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
           @change="patch({ title: ($event.target as HTMLInputElement).value })"
         >
 
+        <UAlert
+          v-if="task.status === 'blocked' || task.status === 'failed'"
+          color="error"
+          variant="subtle"
+          :title="STATUS[task.status].label"
+          :description="task.statusReason"
+          class="w-auto"
+          data-testid="task-status-reason"
+        />
+
         <!-- Above the mobile tabs, so it shows on both -->
         <div
           v-if="task.paused"
@@ -622,12 +632,12 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
         >
           <span class="me-auto text-muted">Proposed in a plan. Only you can see it until you add the plan to the board or the Backlog.</span>
           <UButton
-            v-if="task.planSessionId"
+            v-if="task.draftSession?.id"
             label="Open plan session"
             trailing-icon="i-lucide-arrow-right"
             variant="link"
             size="sm"
-            :to="`/plan/${task.planSessionId}`"
+            :to="`/plan/${task.draftSession?.id}`"
             data-testid="task-plan-session"
           />
         </div>

@@ -158,6 +158,32 @@ describe.each([
     })
   })
 
+  it('requires reasons only for blocked and failed tasks, including direct writes', async () => {
+    const task = await insertTask((await insertProject()).id, 1)
+    for (const status of ['blocked', 'failed'] as const) {
+      for (const statusReason of [null, '', ' ', '\t\r\n', '\u00a0\u2003\ufeff']) {
+        await expectViolation(db.update(tasks).set({ status, statusReason }).where(eq(tasks.id, task.id)), 'tasks_status_reason')
+      }
+      await db.update(tasks).set({ status, statusReason: 'Human decision needed' }).where(eq(tasks.id, task.id))
+      await expectViolation(db.update(tasks).set({ status: 'ready' }).where(eq(tasks.id, task.id)), 'tasks_status_reason')
+      await db.update(tasks).set({ status: 'ready', statusReason: null }).where(eq(tasks.id, task.id))
+    }
+  })
+
+  it('requires complete PR pairs without requiring a PR or a lease for a status', async () => {
+    const task = await insertTask((await insertProject()).id, 1)
+    await expectViolation(db.update(tasks).set({ prNumber: 123 }).where(eq(tasks.id, task.id)), 'tasks_pr_complete')
+    await expectViolation(db.update(tasks).set({ prUrl: 'https://github.com/cormacrw/test-app/pull/123' }).where(eq(tasks.id, task.id)), 'tasks_pr_complete')
+    await db.update(tasks).set({ prNumber: 123, prUrl: 'https://github.com/cormacrw/test-app/pull/123' }).where(eq(tasks.id, task.id))
+    await expectViolation(db.update(tasks).set({ prNumber: null }).where(eq(tasks.id, task.id)), 'tasks_pr_complete')
+    await db.update(tasks).set({ status: 'in_progress', prNumber: null, prUrl: null }).where(eq(tasks.id, task.id))
+    expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ status: 'in_progress', leaseRunId: null })
+    for (const type of ['spike', 'design'] as const) {
+      await db.update(tasks).set({ status: 'merged', type }).where(eq(tasks.id, task.id))
+      expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ status: 'merged', type, prNumber: null, prUrl: null })
+    }
+  })
+
   it('rejects a half-set lease', async () => {
     const project = await insertProject()
     const task = await insertTask(project.id, 1)
