@@ -2,6 +2,7 @@ import type { Attachment, DraftSession, Epic, EpicDetail, Plan, PlanSession, Pla
 import { richTextToMarkdown } from '@corral/core'
 import { schema } from '@corral/db'
 import { and, desc, eq, inArray, ne } from 'drizzle-orm'
+import { writeFile } from 'node:fs/promises'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner, sleep } from './test-runner.ts'
@@ -447,6 +448,62 @@ describe('plan sessions', () => {
     expect(rows.map(r => [r.title, r.epicId])).toEqual([['Login form', v1!.epics[0]!.id], ['Fix typo', null]])
     expect(await t.db.select().from(epics).where(eq(epics.projectId, project.id))).toHaveLength(1)
     await endTurn(job, 'Proposed.')
+  })
+
+  it('refuses locked epic mode changes in reopened approved plans without saving the revision (D23)', async () => {
+    const evidence: unknown[] = []
+    async function request(method: string, path: string, body?: unknown) {
+      const response = await fetch(`${t.server!.url}${path}`, {
+        method,
+        ...(body !== undefined && { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      })
+      const result: unknown = await response.json()
+      evidence.push({ request: { method, path, body }, response: { status: response.status, body: result } })
+      expect(response.ok).toBe(true)
+      return result
+    }
+    const project = await t.createProject({ repository: 'cormacrw/test-app' })
+    await request('PATCH', `/api/projects/${project.slug}`, { paused: true })
+    const created = await request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan login in an epic' }) as PlanSessionDetail
+    let job = (await runner.next('run.assign', m => m.job.planSessionId === created.id)).job
+    async function propose(reviewMode?: string, title = 'Login') {
+      const input = {
+        ...plan([]),
+        epics: [{ key: 'login', title, ...(reviewMode && { reviewMode }) }],
+        tasks: [{ ...plan([{}]).tasks[0]!, epic: 'login' }]
+      }
+      const response = await runner.call(job.runId, job.leaseEpoch, 'propose_plan', input)
+      evidence.push({ request: { transport: 'runner WebSocket', tool: 'propose_plan', input }, response })
+      return response
+    }
+    expect(await propose('each_task')).toMatchObject({ ok: true })
+    // A Draft revision with no PR work can still change the mode.
+    expect(await propose('epic')).toMatchObject({ ok: true })
+    const draft = await request('GET', `/api/plan/sessions/${created.id}`) as PlanSessionDetail
+    const latest = draft.plans.at(-1)!
+    const epicId = latest.epics[0]!.id
+    expect(latest).toMatchObject({ status: 'proposed', epics: [{ reviewMode: 'epic' }], tasks: [{ status: 'draft' }] })
+    await endTurn(job, 'Ready for approval.')
+    const approved = await request('POST', `/api/plan/plans/${latest.id}/approve`) as Plan
+    expect(approved).toMatchObject({ status: 'approved', tasks: [{ status: 'ready' }] })
+    await t.db.update(tasks).set({ status: 'merged' }).where(eq(tasks.id, approved.tasks[0]!.taskId!))
+    await request('POST', `/api/plan/sessions/${created.id}/messages`, { text: 'Revisit the plan' })
+    job = (await runner.next('run.assign', m => m.job.planSessionId === created.id)).job
+    const before = await request('GET', `/api/plan/sessions/${created.id}`) as PlanSessionDetail
+    for (const mode of ['direct', 'each_task']) {
+      expect(await propose(mode, 'Must roll back')).toMatchObject({ ok: false, error: expect.stringContaining('The plan was not saved: the review mode can\'t change') })
+      expect((await request('GET', `/api/plan/sessions/${created.id}`) as PlanSessionDetail).plans).toEqual(before.plans)
+      expect(await request('GET', `/api/epics/${epicId}`)).toMatchObject({ reviewMode: 'epic', title: 'Login', tasks: [{ status: 'merged' }] })
+    }
+    // The mode itself, not the fact of revising a live epic, is locked.
+    expect(await propose('epic', 'Allowed metadata')).toMatchObject({ ok: true })
+    expect(await propose(undefined, 'Mode omitted')).toMatchObject({ ok: true })
+    expect(await request('GET', `/api/epics/${epicId}`)).toMatchObject({ reviewMode: 'epic', title: 'Mode omitted', tasks: [{ status: 'merged' }] })
+    const after = await request('GET', `/api/plan/sessions/${created.id}`) as PlanSessionDetail
+    expect(after.plans).toHaveLength(before.plans.length + 2)
+    expect(after.plans.at(-1)).toMatchObject({ status: 'proposed', epics: [{ reviewMode: 'epic' }] })
+    await endTurn(job, 'Kept the epic review mode.')
+    if (process.env.CORRAL_PLAN_MODE_EVIDENCE) await writeFile(process.env.CORRAL_PLAN_MODE_EVIDENCE, JSON.stringify(evidence, null, 2))
   })
 
   it('stores each epic\'s review mode from the plan or the project\'s default, and rejects an unknown one (D23)', async () => {
