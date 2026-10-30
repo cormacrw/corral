@@ -1,4 +1,4 @@
-import { PLAN_CHANGES, PLAN_STATUSES, type EpicReviewMode, type PlanChange, type PlanStatus, type TaskPriority, type TaskStatus, type TaskType } from '@corral/core'
+import { PLAN_CHANGES, PLAN_STATUSES, TASK_STATUSES, type EpicReviewMode, type PlanChange, type PlanStatus, type TaskPriority, type TaskStatus, type TaskType } from '@corral/core'
 import { z } from 'zod'
 import { agentRuntime, type AgentRuntime } from './agent-runtimes.ts'
 
@@ -133,3 +133,12 @@ export const approvePlanInput = z.object({
   to: z.enum(['ready', 'backlog']).default('ready')
 })
 export type ApprovePlanInput = z.input<typeof approvePlanInput>
+
+export const listTasksInput = z.object({
+  status: z.union([z.enum(TASK_STATUSES), z.array(z.enum(TASK_STATUSES)).min(1)]).optional().describe('Only tasks in this status, or in any of these. Naming merged returns Merged tasks without includeMerged.'),
+  epic: z.string().trim().min(1).optional().describe('Only tasks in this epic, by the epic id from list_tasks'),
+  query: z.string().trim().min(1).optional().describe('Only tasks whose ref or title contains this, ignoring case'),
+  includeMerged: z.boolean().default(false).describe('Also return Merged tasks; they are left out by default')
+})
+export type ListTasksInput = z.infer<typeof listTasksInput>
+

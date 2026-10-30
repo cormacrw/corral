@@ -33,7 +33,7 @@ The PM can also call `attach_evidence` to attach a scratch file to the conversat
 
 | Tool | Purpose |
 |---|---|
-| `list_tasks`, `get_task`, `get_run_outcomes` | Live board state, so answers reflect current state, not only chat history (PRD §7.2) |
+| `list_tasks`, `get_task`, `get_run_outcomes` | Live board state, so answers reflect current state, not only chat history (PRD §7.2). `list_tasks` returns compact rows and every epic, leaves out Merged tasks unless `includeMerged` or `status` asks for them, and filters by `status`, `epic` and `query`; `get_task` has the full text |
 | `get_agent_activity` | What each agent is doing, across every project: role, runtime, status, paused state, active runs and a few recent ones, or more history for one named agent. Runs are capped and long summaries and errors shortened to fit one tool response. Read-only, and only the PM has it |
 | `list_runs`, `get_run` | Runs across every project, including epic reviews, which have an epic and no task. `list_runs` filters by project, task, role and status and returns at most 50. `get_run` takes the number shown in the app or the run's id, needs no task reference, and returns the run's task or epic, agent, runtime, runner, state, times, outcome and error, with the end of its transcript up to a character limit. `transcript.truncated` and `transcript.empty` say when it was cut or there is none. Calls are audited as `pm.tool_called` |
 | `add_comment` | Leave a comment on any task in the project by ref, e.g. that a follow-up task changes its behaviour. Attributed to the PM agent; a ref outside the project is rejected. Developers and reviewers have it too, for their own task |

@@ -1,4 +1,4 @@
-import { askQuestionInput, normalizeProposedPlan, proposedPlanInput, type AgentRuntime, type DraftSession, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type PmRunJob } from '@corral/contracts'
+import { askQuestionInput, listTasksInput, normalizeProposedPlan, proposedPlanInput, type AgentRuntime, type DraftSession, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type PmRunJob } from '@corral/contracts'
 import { checkPlan, checkPlanEpicDependencies, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, requiresHumanReview, revisionProblem, richTextToMarkdown, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
@@ -378,24 +378,37 @@ export class PlanService {
 
     switch (tool) {
       case 'list_tasks': {
-        const rows = await db.select().from(tasks).where(and(eq(tasks.projectId, project.id), isNull(tasks.deletedAt))).orderBy(asc(tasks.number))
+        const parsed = listTasksInput.safeParse(input)
+        if (!parsed.success) throw new ToolError(`The tasks were not listed: ${z.prettifyError(parsed.error)}`)
+        const { status, epic, query, includeMerged } = parsed.data
+        const statuses = status === undefined ? [] : [status].flat()
+        const rows = await db.select({ id: tasks.id, number: tasks.number, title: tasks.title, status: tasks.status, type: tasks.type, priority: tasks.priority, epicId: tasks.epicId }).from(tasks)
+          .where(and(
+            eq(tasks.projectId, project.id),
+            isNull(tasks.deletedAt),
+            statuses.length > 0 ? inArray(tasks.status, statuses) : includeMerged ? undefined : ne(tasks.status, 'merged')
+          ))
+          .orderBy(asc(tasks.number))
         const deps = await db.select({ taskId: taskDependencies.taskId, number: tasks.number }).from(taskDependencies)
           .innerJoin(tasks, eq(tasks.id, taskDependencies.dependsOnId))
+          .where(eq(tasks.projectId, project.id))
         const epicRows = await db.select().from(epics).where(eq(epics.projectId, project.id))
         const epicDeps = await db.select().from(epicDependencies).innerJoin(epics, eq(epics.id, epicDependencies.epicId)).where(eq(epics.projectId, project.id))
+        const needle = query?.toLowerCase()
+        const matches = rows
+          .map(t => ({ ...t, ref: taskRef(project.prefix, t.number) }))
+          // In memory: an epic id that isn't a UUID finds nothing here, where Postgres would reject it
+          .filter(t => (!epic || t.epicId === epic) && (!needle || t.ref.toLowerCase().includes(needle) || t.title.toLowerCase().includes(needle)))
         return {
           project: { name: project.name, prefix: project.prefix, defaultBranch: project.defaultBranch, epicReviewModeDefault: project.epicReviewModeDefault },
           epics: epicRows.map(e => ({ id: e.id, title: e.title, reviewMode: e.reviewMode, dependsOn: epicDeps.filter(d => d.epic_dependencies.epicId === e.id).map(d => d.epic_dependencies.dependsOnEpicId) })),
-          tasks: rows.map(t => ({
-            ref: taskRef(project.prefix, t.number),
+          tasks: matches.map(t => ({
+            ref: t.ref,
             title: t.title,
             status: t.status,
-            priority: t.priority,
             type: t.type,
+            priority: t.priority,
             epicId: t.epicId,
-            humanReview: t.humanReview,
-            statusReason: t.statusReason,
-            pr: t.prUrl,
             dependsOn: deps.filter(d => d.taskId === t.id).map(d => taskRef(project.prefix, d.number))
           }))
         }
