@@ -1,5 +1,5 @@
 import { EpicPullRequests, epicReviewContext } from './epic-prs.ts'
-import { RUNNER_HEARTBEAT_MS, EVIDENCE_KINDS, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
+import { RUNNER_HEARTBEAT_MS, evidenceInputSchema, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
 import {
   ACTIVE_RUN_STATES,
   LEASE_DURATION_MS,
@@ -99,22 +99,7 @@ const MAX_INLINE_TEXT = 64 * 1024
 
 // A file, or a note on its own: written evidence for a criterion with
 // nothing to show (D21)
-const evidenceSchema = z.object({
-  criterionId: z.string().uuid().nullable().default(null),
-  kind: z.enum(EVIDENCE_KINDS),
-  note: z.string().default(''),
-  fileName: z.string().min(1).optional(),
-  contentType: z.string().min(1).optional(),
-  dataBase64: z.string().optional()
-}).superRefine((input, ctx) => {
-  if (input.dataBase64 !== undefined) {
-    if (input.kind === 'note') ctx.addIssue({ code: 'custom', message: 'A note is evidence without a file: leave out path, or pick the kind of the file' })
-    if (!input.fileName || !input.contentType) ctx.addIssue({ code: 'custom', message: 'A file needs its fileName and contentType' })
-    return
-  }
-  if (input.kind !== 'note') ctx.addIssue({ code: 'custom', path: ['path'], message: `Pass the path of the file to attach, or use kind "note" to explain in writing a criterion with nothing to show (${input.kind} needs a file)` })
-  else if (!input.note.trim()) ctx.addIssue({ code: 'custom', path: ['note'], message: 'A note needs its text: explain how the criterion is met' })
-})
+const evidenceSchema = evidenceInputSchema
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -1199,7 +1184,7 @@ export class Orchestrator implements RunnerHandlers {
       if (!criterion) throw new ToolError(`${input.criterionId} isn't one of this task's acceptance criteria`)
     }
     const row = { taskId: task.id, criterionId: input.criterionId, runId: ctx.run.id, round: task.reviewRounds, kind: input.kind }
-    if (input.dataBase64 === undefined) {
+    if (input.kind === 'note') {
       // A note: no blob, the text is the evidence
       const [note] = await this.#d.db.insert(evidence).values({ ...row, note: input.note.trim(), size: 0 }).returning()
       return { id: note!.id }
@@ -1211,8 +1196,8 @@ export class Orchestrator implements RunnerHandlers {
       ...row,
       note: input.note,
       blob,
-      fileName: input.fileName!,
-      contentType: input.contentType!,
+      fileName: input.fileName,
+      contentType: input.contentType,
       size: data.length
     }).returning()
     return { id: file!.id, sha256: blob }
