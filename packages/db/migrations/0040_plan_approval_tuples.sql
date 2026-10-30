@@ -1,0 +1,3 @@
+-- Enforce new writes without scanning or rewriting historical plans.
+ALTER TABLE "plan_tasks" ADD CONSTRAINT "plan_tasks_revision_change" CHECK ("plan_tasks"."revision" is null or "plan_tasks"."change" in ('added', 'changed', 'unchanged')) NOT VALID;--> statement-breakpoint
+ALTER TABLE "plans" ADD CONSTRAINT "plans_approval_tuple" CHECK (("plans"."approved_by" is null) = ("plans"."approved_at" is null) and ("plans"."status" <> 'approved' or ("plans"."approved_by" is not null and "plans"."approved_at" is not null))) NOT VALID;

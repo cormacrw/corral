@@ -2,7 +2,7 @@ import type { Actor } from '@corral/core'
 import { eq, sql } from 'drizzle-orm'
 import { afterAll, describe, expect, it } from 'vitest'
 import type { Database, DatabaseHandle } from './client.ts'
-import { agents, attachments, epicDependencies, epics, planMessages, planSessions, projects, runs, taskDependencies, tasks, users } from './schema.ts'
+import { agents, attachments, epicDependencies, epics, planEpics, planTasks, plans, planMessages, planSessions, projects, runs, taskDependencies, tasks, users } from './schema.ts'
 import { createTestDatabase, databaseFixture } from './testing.ts'
 
 const human: Actor = { kind: 'human', userId: '00000000-0000-4000-8000-000000000001' }
@@ -74,6 +74,47 @@ describe.each([
       await db.update(table).set({ avatarBlob: 'replacement', avatarContentType: 'image/jpeg' }).where(eq(table.id, row!.id))
       await db.update(table).set({ avatarBlob: null, avatarContentType: null }).where(eq(table.id, row!.id))
     }
+  })
+
+  it('checks approval tuples and preserves approval when superseded', async () => {
+    const project = await insertProject()
+    const [session] = await db.insert(planSessions).values({ projectId: project.id, title: 'Plan', createdBy: human }).returning()
+    const base = { sessionId: session!.id, projectId: project.id, title: 'Plan', version: 1 }
+    const insert = (values: Partial<typeof plans.$inferInsert>) => db.insert(plans).values({ ...base, ...values })
+    await expectViolation(insert({ status: 'approved' }), 'plans_approval_tuple')
+    await expectViolation(insert({ status: 'approved', approvedBy: human }), 'plans_approval_tuple')
+    await expectViolation(insert({ status: 'approved', approvedAt: new Date() }), 'plans_approval_tuple')
+    await expectViolation(insert({ approvedBy: human }), 'plans_approval_tuple')
+    const approvedAt = new Date('2026-10-30T12:00:00Z')
+    const [approved] = await db.insert(plans).values({ ...base, status: 'approved', approvedBy: human, approvedAt }).returning()
+    await expectViolation(db.update(plans).set({ approvedAt: null }).where(eq(plans.id, approved!.id)), 'plans_approval_tuple')
+    await db.update(plans).set({ status: 'superseded' }).where(eq(plans.id, approved!.id))
+    expect((await db.select().from(plans).where(eq(plans.id, approved!.id)))[0]).toMatchObject({ status: 'superseded', approvedBy: human, approvedAt })
+    await insert({ version: 2, status: 'superseded' })
+    await insert({ version: 3, status: 'discarded' })
+  })
+
+  it('allows staged revisions on active diffs and retains nullable deleted references', async () => {
+    const project = await insertProject()
+    const task = await insertTask(project.id, 1)
+    const [epic] = await db.insert(epics).values({ projectId: project.id, title: 'Epic', createdBy: human }).returning()
+    const [session] = await db.insert(planSessions).values({ projectId: project.id, title: 'Plan', createdBy: human }).returning()
+    const [plan] = await db.insert(plans).values({ sessionId: session!.id, projectId: project.id, epicId: epic!.id, version: 1, title: 'Plan' }).returning()
+    const revision = { title: 'Staged', description: '', type: 'task' as const, priority: 'medium' as const, humanReview: false, acceptanceCriteria: [], epicId: epic!.id, dependsOn: [] }
+    for (const change of ['added', 'changed', 'unchanged'] as const) {
+      await db.insert(planTasks).values({ planId: plan!.id, key: change, taskId: task.id, change, position: 0, revision })
+    }
+    await expectViolation(db.insert(planTasks).values({ planId: plan!.id, key: 'bad', change: 'removed', position: 0, revision }), 'plan_tasks_revision_change')
+    await expectViolation(db.update(planTasks).set({ change: 'removed' }).where(eq(planTasks.key, 'added')), 'plan_tasks_revision_change')
+    await db.insert(planTasks).values({ planId: plan!.id, key: 'removed', change: 'removed', position: 3 })
+    await db.insert(planEpics).values({ planId: plan!.id, key: 'epic', epicId: epic!.id, position: 0 })
+    await db.delete(tasks).where(eq(tasks.id, task.id))
+    await db.delete(epics).where(eq(epics.id, epic!.id))
+    const items = await db.select().from(planTasks).where(eq(planTasks.planId, plan!.id))
+    expect(items).toHaveLength(4)
+    expect(items.every(item => item.taskId === null)).toBe(true)
+    expect(items.filter(item => item.revision !== null)).toHaveLength(3)
+    expect((await db.select().from(planEpics).where(eq(planEpics.planId, plan!.id)))[0]!.epicId).toBeNull()
   })
 
   it('keeps plan message roles, kinds and question fields consistent on new rows, without validating history', async () => {
