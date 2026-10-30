@@ -15,7 +15,7 @@ describe('prototype mock API', () => {
     const projects = await mockCall<Project[]>('GET', '/projects')
     expect(projects.filter(p => p.thumbnailUrl)).toHaveLength(1)
     const corral = projects.find(p => p.slug === 'corral')!
-    expect(corral.thumbnailUrl).toContain('corral-thumbnail.svg')
+    expect(corral.thumbnailUrl).toMatch(/^data:image\/svg\+xml,/)
     const detail = await mockCall<Project>('GET', '/projects/corral')
     expect(detail.thumbnailUrl).toBe(corral.thumbnailUrl)
     const inbox = await mockCall<Inbox>('GET', '/inbox')
