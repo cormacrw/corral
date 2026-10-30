@@ -15,6 +15,7 @@
       "dependsOn": ["^build"]
     },
     "test": {
+      "cache": false,
       "env": ["CORRAL_DATABASE_URL"]
     }
   }

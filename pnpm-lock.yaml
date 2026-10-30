@@ -177,6 +177,9 @@ catalogs:
       specifier: ^5.0.5
       version: 5.0.5
 
+patchedDependencies:
+  async-exit-hook@2.0.1: 4dd200a7a72626e89b9bf67d236be9e32f16d26882f14430ccd5cc31fb26fa48
+
 importers:
 
   .:
@@ -9435,7 +9438,7 @@ snapshots:
       '@babel/types': 8.0.8
       ast-kit: 3.0.0
 
-  async-exit-hook@2.0.1: {}
+  async-exit-hook@2.0.1(patch_hash=4dd200a7a72626e89b9bf67d236be9e32f16d26882f14430ccd5cc31fb26fa48): {}
 
   async-sema@3.1.1: {}
 
@@ -9875,7 +9878,7 @@ snapshots:
 
   embedded-postgres@17.9.0-beta.17:
     dependencies:
-      async-exit-hook: 2.0.1
+      async-exit-hook: 2.0.1(patch_hash=4dd200a7a72626e89b9bf67d236be9e32f16d26882f14430ccd5cc31fb26fa48)
       pg: 8.23.1
     optionalDependencies:
       '@embedded-postgres/darwin-arm64': 17.9.0-beta.17
