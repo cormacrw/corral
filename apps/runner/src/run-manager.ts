@@ -73,6 +73,8 @@ interface ActiveRun {
   stopDetail: string
   // The stop asked for uncommitted work to be saved
   keepWork: boolean
+  leaseConfirmedUntil: number
+  leaseRevoked: boolean
   // Corral signalled the process outside a stop, so its signal isn't a stranger's
   signalledByCorral: boolean
   // A signal Corral didn't send killed the agent, even if a resume came after
@@ -149,6 +151,11 @@ export class RunManager {
       case 'run.assign':
         this.assign(message.job)
         return
+      case 'run.lease': {
+        const run = this.#runs.get(message.runId)
+        if (run && !run.leaseRevoked && run.job.leaseEpoch === message.leaseEpoch) run.leaseConfirmedUntil = Date.parse(message.validUntil)
+        return
+      }
       case 'run.stop':
         this.stop(message.runId, 'stopped', message.reason, message.keepWork === true)
         return
@@ -184,6 +191,8 @@ export class RunManager {
       stopping: null,
       stopDetail: '',
       keepWork: false,
+      leaseConfirmedUntil: 0,
+      leaseRevoked: false,
       signalledByCorral: false,
       killedBy: null,
       lastActivityAt: null,
@@ -211,7 +220,12 @@ export class RunManager {
 
   stop(runId: string, reason: StopReason, detail: string, keepWork = true): void {
     const run = this.#runs.get(runId)
-    if (!run || run.ended) return
+    if (!run) return
+    if (!keepWork) {
+      run.leaseRevoked = true
+      run.leaseConfirmedUntil = 0
+    }
+    if (run.ended) return
     this.#note(run, `${reason === 'timed_out' ? 'Time limit reached' : 'Stopping'}: ${detail}`)
     if (!run.stopping) {
       run.stopping = reason
@@ -582,7 +596,7 @@ export class RunManager {
 
   #started(run: ActiveRun): void {
     run.started = true
-    this.#connection.send({ type: 'run.started', runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, agentSessionId: run.sessionId })
+    this.#connection.send({ type: 'run.started', sentAt: Date.now(), runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, agentSessionId: run.sessionId })
   }
 
   #note(run: ActiveRun, text: string): void {
@@ -636,7 +650,7 @@ export class RunManager {
     const { job } = run
     const stopped = run.keepWork || exit.kind === 'signalled'
     if (!stopped || !job.branch || run.outcomeAccepted || run.reportingOutcome) return null
-    const saved = await saveStoppedWork(worktree, job.branch, wipMessage(job, exit, run.stopDetail), this.#config.gitAuthor, STOP_GRACE_MS)
+    const saved = await saveStoppedWork(worktree, job.branch, wipMessage(job, exit, run.stopDetail), this.#config.gitAuthor, STOP_GRACE_MS, () => this.#connection.connected && run.leaseConfirmedUntil > Date.now() + STOP_GRACE_MS)
     const short = saved.sha?.slice(0, 10)
     const note = saved.pushed
       ? `Saved the uncommitted work as WIP commit ${short} and pushed it to ${job.branch}`

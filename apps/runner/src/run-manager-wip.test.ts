@@ -23,7 +23,7 @@ describe('a stopped run keeps its work', () => {
   let writes: Record<string, string>
   let cwds: string[]
   let exit: (value: AgentExit) => void
-  const connection = { send: (message: RunnerMessage) => sent.push(message) > 0 } as unknown as ServerConnection
+  const connection = { connected: true, send: (message: RunnerMessage) => sent.push(message) > 0 } as unknown as ServerConnection
   const tools = { register: () => () => {}, url: () => 'http://127.0.0.1:9/mcp' } as unknown as ToolServer
 
   const runtime: AgentRuntime = {
@@ -47,6 +47,7 @@ describe('a stopped run keeps its work', () => {
     const manager = new RunManager(config, connection, tools, new Map([['fake', runtime]]))
     manager.assign(job)
     await expect.poll(() => sent.some(m => m.type === 'run.started' && m.runId === job.runId), { timeout: 10_000 }).toBe(true)
+    manager.handle({ type: 'run.lease', runId: job.runId, leaseEpoch: job.leaseEpoch, validUntil: new Date(Date.now() + 240_000).toISOString() })
     return manager
   }
 
@@ -105,6 +106,28 @@ describe('a stopped run keeps its work', () => {
     const end = await ended()
     expect(end.exit).toEqual({ kind: 'signalled', signal: 'SIGKILL' })
     expect(await onOrigin(BRANCH)).toBe(end.wipSha)
+  })
+
+  it('keeps WIP local after sleep even when the socket still looks connected', async () => {
+    const manager = await start(developer())
+    manager.handle({ type: 'run.lease', runId: 'r1', leaseEpoch: 1, validUntil: new Date(Date.now() - 1).toISOString() })
+    manager.stop('r1', 'timed_out', '60 s')
+
+    expect((await ended()).wipSha).toBeNull()
+    expect(await onOrigin(BRANCH)).toBeNull()
+    const path = worktreePath(dataDir, 'task-1', 'developer')
+    expect((await git(['log', '-1', '--format=%s'], { cwd: path })).stdout).toContain('WIP:')
+    expect((await git(['show', 'HEAD:feature.txt'], { cwd: path })).stdout).toBe('half done\n')
+  })
+
+  it('revokes a recent acknowledgement even if the time limit stopped it first', async () => {
+    const manager = await start(developer())
+    manager.stop('r1', 'timed_out', '60 s')
+    manager.handle({ type: 'run.stop', runId: 'r1', reason: 'This run no longer holds its lease' })
+    // An acknowledgement already in transit cannot restore revoked permission.
+    manager.handle({ type: 'run.lease', runId: 'r1', leaseEpoch: 1, validUntil: new Date(Date.now() + 240_000).toISOString() })
+    expect((await ended()).wipSha).toBeNull()
+    expect(await onOrigin(BRANCH)).toBeNull()
   })
 
   it('pushes nothing when the worktree is clean', async () => {

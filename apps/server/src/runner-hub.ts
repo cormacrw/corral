@@ -25,7 +25,7 @@ type ActiveRuns = { runId: string, leaseEpoch: number }[]
 export interface RunnerHandlers {
   onConnected(activeRuns: ActiveRuns, runnerId: string): Promise<void>
   onReady(): void
-  onHeartbeat(activeRuns: ActiveRuns, runnerId: string): Promise<void>
+  onHeartbeat(activeRuns: ActiveRuns, runnerId: string, sentAt?: number): Promise<void>
   onDisconnected(): Promise<void>
   onRunMessage(message: Extract<RunnerMessage, { type: 'run.started' | 'run.events' | 'run.ended' }>, runnerId: string): Promise<void>
   // Returns the tool result, or throws to send an error back to the agent
@@ -285,7 +285,7 @@ export class RunnerHub {
       case 'heartbeat':
         this.#runners.get(runnerId)!.status.lastHeartbeatAt = new Date().toISOString()
         this.#publishStatus()
-        await this.#handlers?.onHeartbeat(message.activeRuns, runnerId)
+        await this.#handlers?.onHeartbeat(message.activeRuns, runnerId, message.sentAt)
         return
       case 'job.result': {
         const pending = this.#pending.get(message.jobId)

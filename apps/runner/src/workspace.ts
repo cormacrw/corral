@@ -189,7 +189,7 @@ export interface SavedWork {
 // all within timeoutMs. A clean worktree pushes nothing. The agent has exited
 // by now, so a lock it left behind is stale. A commit that can't be pushed
 // stays in the worktree, which the next run on this runner reuses.
-export async function saveStoppedWork(worktree: string, branch: string, message: string, gitAuthor: GitAuthor | null, timeoutMs: number): Promise<SavedWork> {
+export async function saveStoppedWork(worktree: string, branch: string, message: string, gitAuthor: GitAuthor | null, timeoutMs: number, canPush: () => boolean = () => true): Promise<SavedWork> {
   const failed = (error: string): SavedWork => ({ sha: null, pushed: false, error })
   const deadline = Date.now() + timeoutMs
   const remaining = () => Math.max(deadline - Date.now(), 1)
@@ -213,6 +213,7 @@ export async function saveStoppedWork(worktree: string, branch: string, message:
   const committed = await git(['commit', '--no-verify', '--quiet', '--message', message], { ...options(), env: identity })
   if (committed.code !== 0) return failed(committed.stderr.trim() || committed.stdout.trim() || 'git commit failed')
 
+  if (!canPush()) return { sha: await headSha(worktree), pushed: false, error: 'no recent lease acknowledgement; keeping the commit local' }
   const pushed = await pushBranch(worktree, branch, remaining())
   if (pushed.sha === null) return { sha: await headSha(worktree), pushed: false, error: pushed.error }
   return { sha: pushed.sha, pushed: true, error: null }

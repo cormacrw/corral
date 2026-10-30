@@ -12,6 +12,7 @@ services:
       args:
         CORRAL_BUILD_SHA: ${CORRAL_BUILD_SHA:-development}
     container_name: corral-remote-runner
+    stop_grace_period: 20s
     environment:
       CORRAL_SERVER_URL: ${CORRAL_SERVER_URL:?set the home server tailnet URL and runner port}
       CORRAL_RUNNER_TOKEN: ${CORRAL_RUNNER_TOKEN:?set the shared runner token}

@@ -85,7 +85,7 @@ export class ServerConnection {
       if (this.#socket !== socket) return
       this.send({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, commit: this.updateStatus?.commit || process.env.CORRAL_BUILD_SHA || 'development', draining: this.updateStatus?.draining ?? false, updateRequested: this.updateStatus?.updateRequested ?? false, autoUpdate: this.updateStatus?.autoUpdate ?? false, ...this.#identity, ...capacity, activeRuns: this.#handlers.activeRuns() })
       this.#heartbeat = setInterval(() => {
-        this.send({ type: 'heartbeat', activeRuns: this.#handlers.activeRuns() })
+        this.send({ type: 'heartbeat', sentAt: Date.now(), activeRuns: this.#handlers.activeRuns() })
         // Keeps proxies from dropping an idle socket (D12)
         socket.ping()
       }, RUNNER_HEARTBEAT_MS)

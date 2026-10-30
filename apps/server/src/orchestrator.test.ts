@@ -308,8 +308,47 @@ describe('orchestrator', () => {
     const retry = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.runId !== job.runId)).job
     expect(retry.continueFrom).toBeNull()
     expect(retry.prompt).toContain('Stop reason: The run hit its time limit of 60 minutes')
-    expect(retry.prompt).toContain('No WIP commit was saved')
+    expect(retry.prompt).toContain('No WIP commit is recorded yet')
     await finish(project, retry)
+  })
+
+  it('carries a WIP commit to another developer without a resumable session', async () => {
+    const { project, task, job } = await assigned()
+    // The stopped run belongs to another developer and never acquired a session.
+    const [other] = await t.db.insert(agents).values({ name: 'Other developer', role: 'developer', runtime: 'claude-code', paused: true }).returning()
+    await t.db.update(runs).set({ agentId: other!.id, agentSessionId: null }).where(eq(runs.id, job.runId))
+    runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'timed_out', limitSeconds: 3600 }, headSha: 'wip-other', wipSha: 'wip-other' })
+    const retry = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.runId !== job.runId)).job
+    expect(retry.agentSessionId).toBeNull()
+    expect(retry.continueFrom).toBe('wip-other')
+    expect(retry.prompt).toContain('Continuing a stopped run')
+    expect(retry.prompt).toContain('Stop reason: The run hit its time limit')
+    expect((await runRow(job.runId)).headSha).toBe('wip-other')
+    await finish(project, retry)
+  })
+
+  it('does not describe an agent-reported failure as a stopped run', async () => {
+    const { project, task, job } = await assigned()
+    expect(await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'failed', summary: 'Cannot implement this' })).toMatchObject({ ok: true })
+    const retry = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.runId !== job.runId)).job
+    expect(retry.prompt).not.toContain('Continuing a stopped run')
+    expect(retry.continueFrom).toBeNull()
+    expect((await runRow(job.runId)).summary).toBe('Cannot implement this')
+    await finish(project, retry)
+  })
+
+  it('acknowledges lease ownership using the runner clock and rejects an overdue heartbeat', async () => {
+    const { project, task, job } = await assigned()
+    const sentAt = 1234 // Deliberately different from the server clock.
+    runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: null, sentAt })
+    expect(await runner.next('run.lease', m => m.runId === job.runId)).toMatchObject({ leaseEpoch: job.leaseEpoch, validUntil: new Date(sentAt + 60_000).toISOString() })
+    runner.send({ type: 'heartbeat', activeRuns: [{ runId: job.runId, leaseEpoch: job.leaseEpoch }], sentAt: sentAt + 10 })
+    expect(await runner.next('run.lease', m => m.runId === job.runId)).toMatchObject({ validUntil: new Date(sentAt + 60_010).toISOString() })
+    await t.db.update(tasks).set({ leaseExpiresAt: new Date(t.clock.now.getTime() - 1) }).where(eq(tasks.id, task.id))
+    runner.send({ type: 'heartbeat', activeRuns: [{ runId: job.runId, leaseEpoch: job.leaseEpoch }], sentAt: sentAt + 20 })
+    expect(await runner.next('run.stop', m => m.runId === job.runId)).toMatchObject({ reason: 'This run no longer holds its lease' })
+    expect((await taskRow(task.id)).leaseExpiresAt!.getTime()).toBeLessThan(t.clock.now.getTime())
+    await finish(project, job)
   })
 
   it('ignores a WIP commit from a stale lease epoch', async () => {

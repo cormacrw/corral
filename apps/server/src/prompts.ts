@@ -66,7 +66,7 @@ You are continuing run #${run.number}, which stopped before it reported an outco
 
 ${run.wipSha
   ? `Corral saved its uncommitted work as WIP commit \`${run.wipSha}\`, and your branch includes it. That work is unfinished and may not build. Read it with \`git show ${run.wipSha}\` and carry on from it; don't start over.`
-  : 'No WIP commit was saved. Check what it left in your worktree and carry on from there; don\'t start over.'}`)
+  : 'No WIP commit is recorded yet. Check the branch log and what it left in your worktree and carry on from there; don\'t start over.'}`)
 }
 
 // Images the human attached to the task text, so the agent fetches them

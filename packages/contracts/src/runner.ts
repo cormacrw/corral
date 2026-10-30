@@ -160,10 +160,10 @@ export interface OutcomeReport {
 export type RunnerMessage =
   | { type: 'hello', protocol: number, commit: string, draining?: boolean, updateRequested?: boolean, autoUpdate?: boolean, runnerId: string, name: string, activeRuns: { runId: string, leaseEpoch: number }[] } & RunnerCapacity
   | { type: 'runner.draining', updateRequested: boolean }
-  | { type: 'heartbeat', activeRuns: { runId: string, leaseEpoch: number }[] }
+  | { type: 'heartbeat', sentAt?: number, activeRuns: { runId: string, leaseEpoch: number }[] }
   | { type: 'job.result', jobId: string, ok: true, result: SetupJobResult }
   | { type: 'job.result', jobId: string, ok: false, error: string }
-  | { type: 'run.started', runId: string, leaseEpoch: number, agentSessionId: string | null }
+  | { type: 'run.started', sentAt?: number, runId: string, leaseEpoch: number, agentSessionId: string | null }
   | { type: 'run.events', runId: string, leaseEpoch: number, events: RunEvent[] }
   // lastActivityAt: when the agent last wrote to its transcript
   // wipSha: the commit that saved a stopped developer run's work, once pushed
@@ -175,12 +175,14 @@ export type RunnerMessage =
 
 export type ServerMessage =
   | { type: 'welcome', runnerId: string, commit: string, draining: boolean, updateRequested: boolean }
+  // A short-lived acknowledgement of a live lease; expired acknowledgements never authorise a WIP push.
+  | { type: 'run.lease', runId: string, leaseEpoch: number, validUntil: string }
   | { type: 'runner.drain', updateRequested: boolean }
   | { type: 'job.request', jobId: string, job: SetupJob }
   | { type: 'run.assign', job: RunJob }
   // keepWork: a developer run saves and pushes its uncommitted work. Only for
   // a stop the task will be retried after: without it nothing is pushed, so a
-  // run that lost its lease or task never touches the branch.
+  // revoked run never pushes; local stops also require a recent lease acknowledgement.
   | { type: 'run.stop', runId: string, reason: string, keepWork?: boolean }
   // A human's message for a live Claude Code developer or reviewer run. The
   // runner writes it to the agent's stdin and records it as a message event.
