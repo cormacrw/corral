@@ -8,6 +8,7 @@ import { createRuntimeRegistry, STOP_GRACE_MS, type AgentExit, type AgentProcess
 import type { RunnerConfig } from './config.ts'
 import type { ServerConnection } from './connection.ts'
 import { packDesign, saveDesign } from './designs.ts'
+import { convertToMp4 } from './evidence-video.ts'
 import { outcomesFor, toolsFor, type ToolOutcome, type ToolServer } from './mcp.ts'
 import { headSha, prepareWorkspace, pushBranch, readProjectBrief, readRoleInstructions, saveStoppedWork } from './workspace.ts'
 
@@ -37,6 +38,11 @@ const CONTENT_TYPES: Record<string, string> = {
   '.webp': 'image/webp',
   '.webm': 'video/webm',
   '.mp4': 'video/mp4',
+  '.m4v': 'video/x-m4v',
+  '.mov': 'video/quicktime',
+  '.mkv': 'video/x-matroska',
+  '.avi': 'video/x-msvideo',
+  '.ogv': 'video/ogg',
   '.txt': 'text/plain',
   '.log': 'text/plain',
   '.md': 'text/markdown',
@@ -761,25 +767,29 @@ export class RunManager {
 
   // Reads the file the agent attached and sends it as base64. Files must
   // live outside the repository: the scratch folder is the usual place.
+  // A video other than MP4 goes up as an H.264 MP4, which Safari can play; the
+  // size limit applies to that copy. If there's no usable copy the original
+  // goes up instead, with a note saying why, so evidence is never lost.
   async #readEvidence(run: ActiveRun, input: Record<string, unknown>): Promise<ToolOutcome> {
     const given = String(input.path ?? '')
     if (!given) return { ok: false, error: 'Pass the path of the file to attach, or leave out path and use kind "note" for a written explanation' }
     const path = isAbsolute(given) ? given : resolve(run.scratchDir, given)
     const info = await stat(path).catch(() => null)
     if (!info?.isFile()) return { ok: false, error: `No file at ${path}` }
-    if (info.size > MAX_EVIDENCE_BYTES) return { ok: false, error: 'Evidence files are limited to 25 MB' }
-    const data = await readFile(path)
-    const extension = extname(path).toLowerCase()
-    return {
-      ok: true,
-      result: {
-        fileName: basename(path),
-        contentType: CONTENT_TYPES[extension] ?? 'application/octet-stream',
-        dataBase64: data.toString('base64'),
-        path: undefined
-      }
+    const contentType = CONTENT_TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream'
+    if (contentType.startsWith('video/') && contentType !== 'video/mp4') {
+      const converted = await convertToMp4(path, run.scratchDir, MAX_EVIDENCE_BYTES)
+      if (converted.ok) return evidenceFile(converted.fileName, 'video/mp4', converted.data)
+      if (info.size > MAX_EVIDENCE_BYTES) return { ok: false, error: `Evidence files are limited to 25 MB, and ${basename(path)} could not be converted to fit: ${converted.error}` }
+      this.#note(run, `Attaching ${basename(path)} as it is, because it could not be converted to MP4: ${converted.error}`)
     }
+    if (info.size > MAX_EVIDENCE_BYTES) return { ok: false, error: 'Evidence files are limited to 25 MB' }
+    return evidenceFile(basename(path), contentType, await readFile(path))
   }
+}
+
+function evidenceFile(fileName: string, contentType: string, data: Buffer): ToolOutcome {
+  return { ok: true, result: { fileName, contentType, dataBase64: data.toString('base64'), path: undefined } }
 }
 
 // The signal that killed the agent. A CLI that handles the signal, or a shell

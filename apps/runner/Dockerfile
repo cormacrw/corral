@@ -9,9 +9,9 @@ ENV PATH=$PNPM_HOME:$PATH
 RUN npm install -g pnpm@12.15.0
 
 # Tools agents and the runner need. Chromium comes from Debian so it runs
-# on arm64 and x64 alike.
+# on arm64 and x64 alike. ffmpeg converts evidence videos to H.264 MP4.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl git gnupg chromium fonts-liberation jq \
+  && apt-get install -y --no-install-recommends ca-certificates curl git gnupg chromium ffmpeg fonts-liberation jq \
   && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
   && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
   && apt-get update && apt-get install -y --no-install-recommends gh \
