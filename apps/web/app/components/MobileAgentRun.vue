@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AgentRuns } from '~/composables/useAgentRuns'
-import { duration, isLiveRun, runBadge, runTokens } from '~/utils/labels'
+import { duration, isLiveRun, runBadge, runRef, runTitle, runTokens } from '~/utils/labels'
 
 // One run's transcript on mobile (design/agent.md, design/mobile.md). It
 // fills the screen: its own header with the run and its controls, the
@@ -31,7 +31,7 @@ const live = computed(() => !!selected.value && isLiveRun(selected.value))
           </p>
           <h1 class="truncate font-semibold text-highlighted">
             <template v-if="selected">
-              {{ selected.taskRef ?? 'Plan' }} {{ selected.taskTitle ?? selected.summary ?? 'PM turn' }}
+              {{ runRef(selected) }} {{ runTitle(selected) }}
             </template>
             <template v-else>
               Run
