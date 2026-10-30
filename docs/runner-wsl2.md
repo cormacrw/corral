@@ -261,8 +261,9 @@ sudo systemctl enable --now corral-runner-update.timer
 systemctl list-timers corral-runner-update.timer
 ```
 
-Set `CORRAL_RUNNER_AUTO_UPDATE=true` in `deploy/runner/.env` (the default). For
-manual-only updates set false and recreate the runner. Settings → Runner →
+After installing the timer, set `CORRAL_RUNNER_AUTO_UPDATE=true` in
+`deploy/runner/.env` and recreate the runner to enable automatic updates. Keep
+the default false for manual-only updates. Settings → Runner →
 **Update now** requests a drain; the next minute's timer builds while existing
 runs finish, then replaces only the idle runner. Status shows the old and server
 commits, draining runs, waiting, offline during replacement, and the new commit

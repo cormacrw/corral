@@ -17,7 +17,8 @@ checks out the authenticated and reviewed server target,
 builds locally with that SHA, then waits for draining + idle + zero active runs
 (including terminal reports) before runner-only `up -d --no-build`. A lock avoids
 overlap. Current runners log and exit without Git or Compose mutations. The
-runner-only compose defaults auto-update on; manual-only policy remains supported.
+runner-only compose defaults auto-update off until the host timer is installed;
+set CORRAL_RUNNER_AUTO_UPDATE=true and recreate the runner to enable it.
 
 The host atomically writes `updater-result.json` (target, state, error, attempt). The runner
 polls it even while disconnected and publishes `runner.update-status` to Settings;
