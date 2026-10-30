@@ -1,5 +1,5 @@
 import { EpicPullRequests, epicReviewContext } from './epic-prs.ts'
-import { pmActionTools, requiresPmConfirmation, RUNNER_HEARTBEAT_MS, EVIDENCE_KINDS, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
+import { isPmDirectTool, pmActionTools, pmDirectTools, requiresPmConfirmation, RUNNER_HEARTBEAT_MS, EVIDENCE_KINDS, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
 import {
   ACTIVE_RUN_STATES,
   LEASE_DURATION_MS,
@@ -28,6 +28,7 @@ import { EpicBranchError, taskBase } from './task-base.ts'
 import { slugify } from './projects.ts'
 import { designRevisionPrompt, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
 import { runExitError, withLastActivity } from './run-exit.ts'
+import { PmTools } from './pm-tools.ts'
 import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
 import { MergeOrchestrator } from './merge.ts'
 import type { ReleaseNotes } from './deployments.ts'
@@ -143,6 +144,7 @@ export class Orchestrator implements RunnerHandlers {
   // PM turns and claims never both take a runner's last slot
   #placing: Promise<unknown> = Promise.resolve()
   readonly pmActions: PmActions
+  readonly pmTools: PmTools
   readonly epicPrs: EpicPullRequests
   readonly merges: MergeOrchestrator
   // Set once the plan service exists (it needs the orchestrator to start runs)
@@ -156,9 +158,22 @@ export class Orchestrator implements RunnerHandlers {
       events: deps.events,
       prepare: (sessionId, tool, input) => this.#preparePmAction(sessionId, tool, input),
       execute: async (_sessionId, tool, prepared, actor) => {
-        if (tool === 'delete_task' && prepared.taskId) {
-          await this.deleteTask(prepared.taskId, actor, prepared.input.reason as string | undefined ?? null)
-          return `Deleted ${String(prepared.input.taskRef)}.`
+        switch (tool) {
+          case 'delete_task':
+            await this.deleteTask(prepared.targetId!, actor, prepared.input.reason as string | undefined ?? null)
+            return `Deleted ${String(prepared.input.taskRef)}.`
+          case 'delete_project':
+            await this.deleteProject(prepared.targetId!, actor)
+            return 'The project was removed.'
+          case 'stop_run':
+            await this.stopRun(prepared.targetId!, actor)
+            return 'The run was stopped.'
+          case 'stop_all':
+            await this.stopAll(actor)
+            return 'Corral is stopped.'
+          case 'resume_all':
+            await this.resumeAll(actor)
+            return 'Corral is running again.'
         }
         if (prepared.taskId && (tool === 'approve_task' || tool === 'move_task')) {
           if (tool === 'approve_task') await this.merges.humanApprove(prepared.taskId, actor)
@@ -176,6 +191,7 @@ export class Orchestrator implements RunnerHandlers {
       },
       sessionChanged: async sessionId => this.plans?.actionSessionChanged(sessionId)
     })
+    this.pmTools = new PmTools({ db: deps.db, events: deps.events, runner: deps.runner, transcripts: deps.transcripts, orchestrator: this })
     this.epicPrs = new EpicPullRequests(deps)
     this.merges = new MergeOrchestrator({
       db: deps.db,
@@ -1148,12 +1164,16 @@ export class Orchestrator implements RunnerHandlers {
     const allowed: Record<string, readonly string[]> = {
       developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'submit_design', 'report_outcome'],
       reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'get_design', 'report_outcome'],
-      pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs', 'delete_task', 'create_task', 'update_task', 'move_task', 'approve_task', 'update_epic']
+      pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs', ...Object.keys(pmActionTools), ...Object.keys(pmDirectTools)]
     }
     if (!allowed[role]?.includes(tool)) throw new ToolError(`The ${role} can’t use ${tool}`)
     if (role === 'pm' && requiresPmConfirmation(tool)) {
       if (!this.plans || !ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
       return this.pmActions.propose(ctx.run.planSessionId, ctx.run.id, tool, input, this.#actor(ctx))
+    }
+    if (role === 'pm' && isPmDirectTool(tool)) {
+      if (!ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
+      return this.pmTools.call(tool, input, this.#actor(ctx), { sessionId: ctx.run.planSessionId, runId: ctx.run.id, projectId: ctx.project.id })
     }
     if (tool === 'get_attachment') return this.#getAttachment(ctx, z.object({ attachmentId: z.string() }).parse(input))
     if (tool === 'get_design') {
@@ -1251,14 +1271,14 @@ export class Orchestrator implements RunnerHandlers {
 
   async #preparePmAction(sessionId: string, tool: string, input: unknown): Promise<PreparedPmAction> {
     if (!requiresPmConfirmation(tool)) throw new ToolError(`Unknown confirm-required tool ${tool}`)
-    const validated = z.object(pmActionTools[tool].input).strict().parse(input)
-    const parsed = z.object({ taskRef: z.string().trim().min(1), reason: z.string().optional(), transition: humanTransitionInput.optional() }).strict().parse(validated)
     const { db } = this.#d
     const [session] = await db.select().from(schema.planSessions).where(eq(schema.planSessions.id, sessionId))
     if (!session) throw new ToolError('The conversation no longer exists')
     const [project] = await db.select().from(projects).where(eq(projects.id, session.projectId))
     if (!project) throw new ToolError('The project no longer exists')
+    const strict = <T extends z.ZodRawShape>(shape: T) => z.object(shape).strict().parse(input)
     if (tool === 'delete_task' || tool === 'approve_task' || tool === 'move_task') {
+      const parsed = z.object({ taskRef: z.string().trim().min(1), reason: z.string().optional(), transition: humanTransitionInput.optional() }).strict().parse(strict(pmActionTools[tool].input))
       const match = /^([A-Za-z]+)-(\d+)$/.exec(parsed.taskRef)
       if (!match || match[1]!.toUpperCase() !== project.prefix.toUpperCase()) throw new ToolError('Use a task ref from this conversation’s project')
       const [task] = await db.select().from(tasks).where(and(eq(tasks.projectId, project.id), eq(tasks.number, Number(match[2])), isNull(tasks.deletedAt)))
@@ -1269,7 +1289,27 @@ export class Orchestrator implements RunnerHandlers {
       const destination = event?.type === 'resolve' ? event.to : event?.type === 'approve' ? 'ready' : event?.type === 'human_request_changes' ? 'in_progress' : 'backlog'
       const verb = tool === 'delete_task' ? 'Delete' : tool === 'approve_task' ? 'Approve' : 'Move'
       const summary = `${verb} ${taskRef(project.prefix, task.number)}${tool === 'move_task' ? ` to ${destination.replaceAll('_', ' ')}` : ''}: ${task.title}`
-      return { input: { ...parsed, taskRef: taskRef(project.prefix, task.number) }, summary: parsed.reason ? `${summary} — ${parsed.reason}` : summary, taskId: task.id, projectId: project.id }
+      return { input: { ...parsed, taskRef: taskRef(project.prefix, task.number) }, summary: parsed.reason ? `${summary} — ${parsed.reason}` : summary, targetId: task.id, taskId: task.id, projectId: project.id }
+    }
+    switch (tool) {
+      case 'delete_project': {
+        const parsed = strict(pmActionTools.delete_project.input)
+        const [target] = await db.select().from(projects).where(eq(projects.slug, parsed.project))
+        if (!target) throw new ToolError(`Project ${parsed.project} no longer exists`)
+        return { input: parsed, summary: `Remove project ${target.name} (${target.repository}) with all its tasks, runs and Plan sessions`, targetId: target.id, taskId: null, projectId: target.id }
+      }
+      case 'stop_run': {
+        const parsed = strict(pmActionTools.stop_run.input)
+        const ctx = await this.#load(parsed.runId)
+        if (!ctx) throw new ToolError('This run no longer exists')
+        if (!(ACTIVE_RUN_STATES as readonly RunState[]).includes(ctx.run.state)) throw new ToolError(`Run #${ctx.run.number} isn't live: it's ${ctx.run.state}`)
+        const about = ctx.task ? ` on ${taskRef(ctx.project.prefix, ctx.task.number)}: ${ctx.task.title}` : ` in ${ctx.project.name}`
+        return { input: parsed, summary: `Stop run #${ctx.run.number}, the ${ctx.run.role} run${about}`, targetId: ctx.run.id, taskId: ctx.task?.id ?? null, projectId: ctx.project.id }
+      }
+      case 'stop_all':
+        return { input: strict(pmActionTools.stop_all.input), summary: 'Stop every run in Corral and start no new ones', targetId: null, taskId: null, projectId: project.id }
+      case 'resume_all':
+        return { input: strict(pmActionTools.resume_all.input), summary: 'Resume Corral so runs start again', targetId: null, taskId: null, projectId: project.id }
     }
     throw new ToolError(`Unknown confirm-required tool ${tool}`)
   }

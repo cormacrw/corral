@@ -1,9 +1,9 @@
 import { needsAttention, type ReleaseNotesItem } from '@corral/contracts'
 import { epicInboxItems } from './epic-prs.ts'
-import type { Inbox, InboxItem, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
+import type { Inbox, InboxItem, PlanThreadItem, PmActivityItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
 import { richTextToPlainText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, count, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
+import { and, count, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm'
 import { actorLabel } from './orchestrator.ts'
 import { thumbnailUrl } from './projects.ts'
 import { sessionState } from './plan.ts'
@@ -46,7 +46,7 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     .orderBy(desc(auditLog.createdAt), desc(auditLog.id))
     .limit(limit * 3)
 
-  const activity: TaskInboxItem[] = []
+  const activity: (TaskInboxItem | PmActivityItem)[] = []
   const resolved: (TaskInboxItem | ReleaseNotesItem)[] = []
   for (const { entry, task, project } of entries) {
     const detail = entry.detail as Record<string, unknown>
@@ -75,16 +75,21 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     if (entry.actor.kind === 'human') resolved.push(item)
     else activity.push(item)
   }
-  // Read confirmed actions independently of tasks: deleting a Backlog task
-  // removes its row, but its PM attribution and conversation must survive.
+  // Read PM actions independently of tasks: deleting a Backlog task removes
+  // its row, but its PM attribution and conversation must survive. Removing a
+  // project clears the entry's project, so that join is a left join.
   const pmActions = await db.select({ entry: auditLog, project: projects }).from(auditLog)
-    .innerJoin(projects, eq(projects.id, auditLog.projectId))
-    .where(eq(auditLog.action, 'pm.action_confirmed')).orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(limit)
+    .leftJoin(projects, eq(projects.id, auditLog.projectId))
+    .where(or(eq(auditLog.action, 'pm.action_confirmed'), and(eq(auditLog.action, 'pm.tool_called'), sql`${auditLog.detail}->>'changed' = 'true'`)))
+    .orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(limit)
   for (const { entry, project } of pmActions) {
-    const detail = entry.detail as { targetId: string | null, summary: string, sessionId: string, input: { taskRef?: string } }
-    if (!detail.targetId || !detail.input.taskRef) continue
-    const body = `${detail.summary}, confirmed by you. [PM conversation](/plan/${detail.sessionId})`
-    activity.push({ id: `pm-${entry.id}`, type: 'activity', project: projectTag(project), taskId: detail.targetId, taskRef: detail.input.taskRef, subject: detail.summary, preview: `${detail.summary}, confirmed by you`, body, sender: { name: 'PM', role: 'pm' }, at: entry.createdAt.toISOString(), prUrl: null, resolution: null })
+    const detail = entry.detail as { targetId?: string | null, summary: string, sessionId: string, input: { taskRef?: string } }
+    const confirmed = entry.action === 'pm.action_confirmed'
+    const text = confirmed ? `${detail.summary}, confirmed by you` : detail.summary
+    const base = { id: `pm-${entry.id}`, type: 'activity' as const, subject: detail.summary, preview: text, body: project ? `${text}. [PM conversation](/plan/${detail.sessionId})` : `${text}.`, sender: { name: 'PM', role: 'pm' as const }, at: entry.createdAt.toISOString(), prUrl: null, resolution: null }
+    const tag = project ? projectTag(project) : { id: '', slug: '', name: 'Removed project', thumbnailColor: null, thumbnailUrl: null }
+    if (project && detail.targetId && detail.input.taskRef) activity.push({ ...base, project: tag, taskId: detail.targetId, taskRef: detail.input.taskRef })
+    else activity.push({ ...base, project: tag, taskId: null, taskRef: null })
   }
   resolved.push(...releases.filter(d => d.resolution))
   activity.sort((a, b) => b.at.localeCompare(a.at))

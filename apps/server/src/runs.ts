@@ -1,5 +1,5 @@
 import type { Agent, CreateAgentInput, Evidence, PatchAgentInput, Review, Run } from '@corral/contracts'
-import { ACTIVE_RUN_STATES, taskRef, type Actor } from '@corral/core'
+import { ACTIVE_RUN_STATES, taskRef, type Actor, type RunState } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, count, desc, eq, inArray, type SQL } from 'drizzle-orm'
 import { ApiFailure, notFound } from './errors.ts'
@@ -51,10 +51,12 @@ function toRun({ run, agentName, prefix, taskNumber, taskTitle }: RunJoin): Run 
   }
 }
 
-export async function listRuns(db: Executor, filter: { agentId?: string, taskId?: string, active?: boolean }, limit = 50): Promise<Run[]> {
+export async function listRuns(db: Executor, filter: { agentId?: string, taskId?: string, projectId?: string, state?: RunState, active?: boolean }, limit = 50): Promise<Run[]> {
   const where: SQL[] = []
   if (filter.agentId) where.push(eq(runs.agentId, filter.agentId))
   if (filter.taskId) where.push(eq(runs.taskId, filter.taskId))
+  if (filter.projectId) where.push(eq(runs.projectId, filter.projectId))
+  if (filter.state) where.push(eq(runs.state, filter.state))
   if (filter.active) where.push(inArray(runs.state, [...ACTIVE_RUN_STATES]))
   const rows = await db.select(runColumns).from(runs)
     .innerJoin(agents, eq(agents.id, runs.agentId))
