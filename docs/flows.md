@@ -70,7 +70,7 @@ The PM has **no** tools to merge, edit docs or change status. This is enforced b
 
 - The agent session ID (from `claude` or `codex`; the session's runtime is locked once it has messages, D18) is stored with the conversation in the database. If the session is lost (e.g. the runner's disk was wiped), the next turn starts a fresh session seeded with a summary built from the database messages. The database is the source of truth; `~/.claude` and `~/.codex` are only caches.
 - A PM turn runs only when the human sends a message, or approves a design version, which opens a Plan session for the build with the human's message (D20). Nothing goes back to the PM when tasks or epics merge.
-- **One checkout and one turn per session.** Each Plan session gets its own read-only checkout of the default branch, kept between turns so the agent CLI can resume the session. A session runs one turn at a time: a second message while its turn is active gets 409 `pm_turn_in_progress`, and the session's `activeRunId` is that turn. Other sessions, in the same project or another, can talk to Juno meanwhile.
+- **One checkout and one turn per session.** Each Plan session gets its own read-only checkout of the default branch, kept between turns so the agent CLI can resume the session. It expires after 24 hours idle, and the next turn recreates it at the same path. A session runs one turn at a time: a second message while its turn is active gets 409 `pm_turn_in_progress`, and the session's `activeRunId` is that turn. Other sessions, in the same project or another, can talk to Juno meanwhile.
 - **Warm process between turns** (D9). After a turn, its agent CLI process stays alive for `CORRAL_PM_WARM_SECONDS` (default 5 minutes). A message within that time goes to the same process over stdin, after the checkout is reset to fresh code, so the reply skips CLI startup. After the timeout, or if the model or session changed, the next turn cold-starts with `--resume`.
 - **Juno has no concurrency** (D13): one turn per session is the only limit, so a message to any other session starts its turn right away. A turn waits as `queued` while Juno is paused, the runner can't take it, or an update hold is finishing (D16), and is sent, oldest first, once that clears. During the draining phase of an update, PM turns still start normally; once workers and merges finish, new messages are saved with their jobs held until the hold is lifted or the server restarts.
 
@@ -186,7 +186,9 @@ When every gate passes → step 9.
 
 ### Step 10 — Cleanup and what follows
 
-- The runner removes the worktrees. If one somehow has uncommitted changes, it's kept and flagged.
+- The runner removes the task's worktrees. Uncommitted developer work is always kept: a developer worktree with uncommitted changes stays, and a task comment flags it for removal by hand. The review worktree is read-only by contract, so it always goes.
+- The same cleanup runs when a spike is approved, since it has no PR to merge, and when a task or project is deleted.
+- **The hourly sweep is the backstop.** A cleanup is missed when no runner is online or a runner doesn't answer, so the server also sends every online runner a `sweep_worktrees` job each time a runner connects and then hourly. It removes the worktrees of merged and deleted tasks by the same rules, and PM worktrees idle for 24 hours. A developer worktree it keeps is recorded in the `worktrees.swept` audit entry, with no new comment ([architecture.md](architecture.md), Runner connections and ownership).
 - Tasks that depended on this one become eligible; the scheduler checks again.
 
 ---
