@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Run } from '@corral/contracts'
 import type { AgentRuns } from '~/composables/useAgentRuns'
-import { agentStatus, duration, isLiveRun, projectColor, ROLE, runBadge, runtimeLabel, timeAgo } from '~/utils/labels'
+import { agentStatus, duration, isLiveRun, projectColor, ROLE, runBadge, runRef, runTitle, runtimeLabel, timeAgo } from '~/utils/labels'
 
 // An agent's page on mobile (design/agent.md, design/mobile.md): the
 // header and stat tiles, then the current run and previous runs. Each run
@@ -122,7 +122,7 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
         data-testid="current-run"
       >
         <span class="flex items-center gap-2">
-          <span class="font-mono text-xs text-muted">{{ current.taskRef ?? 'Plan' }}</span>
+          <span class="font-mono text-xs text-muted">{{ runRef(current) }}</span>
           <UBadge
             label="Live"
             color="primary"
@@ -131,7 +131,7 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
           />
           <span class="ms-auto text-xs text-muted tabular-nums">{{ duration(current.startedAt, null, now) }}</span>
         </span>
-        <span class="truncate font-medium text-highlighted">{{ current.taskTitle ?? current.summary ?? 'PM turn' }}</span>
+        <span class="truncate font-medium text-highlighted">{{ runTitle(current) }}</span>
         <span class="flex items-center gap-1.5 text-xs text-muted">
           <span
             v-if="project(current)"
@@ -178,7 +178,7 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
             class="flex flex-col gap-1 px-4 py-3"
           >
             <span class="flex items-center gap-2">
-              <span class="font-mono text-xs text-muted">{{ run.taskRef ?? 'Plan' }}</span>
+              <span class="font-mono text-xs text-muted">{{ runRef(run) }}</span>
               <UBadge
                 :label="runBadge(run).label"
                 :color="runBadge(run).color"
@@ -187,7 +187,7 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
               />
               <span class="ms-auto text-xs text-muted">{{ timeAgo(run.queuedAt, now) }}</span>
             </span>
-            <span class="truncate font-medium text-highlighted">{{ run.taskTitle ?? run.summary ?? 'PM turn' }}</span>
+            <span class="truncate font-medium text-highlighted">{{ runTitle(run) }}</span>
             <span class="flex items-center gap-1.5 text-xs text-muted">
               <span
                 v-if="project(run)"

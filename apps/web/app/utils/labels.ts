@@ -163,6 +163,16 @@ export function isLiveRun(run: Pick<Run, 'state'>): boolean {
   return LIVE_RUN_STATES.includes(run.state)
 }
 
+// design/agent.md: what a run was for. Only a task or an epic's integration
+// review has a title of its own, and only a PM run is a turn.
+export function runRef(run: Pick<Run, 'taskRef' | 'epicId'>): string {
+  return run.taskRef ?? (run.epicId ? 'Epic' : 'Plan')
+}
+
+export function runTitle(run: Pick<Run, 'taskTitle' | 'epicTitle' | 'summary' | 'role'>): string {
+  return run.taskTitle ?? run.epicTitle ?? run.summary ?? (run.role === 'pm' ? 'PM turn' : 'Run')
+}
+
 // design/agent.md outcome badges
 export function runBadge(run: Pick<Run, 'state' | 'outcome' | 'role'>): { label: string, color: Color } {
   if (isLiveRun(run)) return { label: 'Live', color: 'primary' }

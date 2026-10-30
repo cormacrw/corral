@@ -1,6 +1,6 @@
 import type { TaskStatus } from '@corral/core'
 import { describe, expect, it } from 'vitest'
-import { agentStatus, cliLoginCommand, detectedRuntimes, formatMs, epicInProgress, epicReviewStatus, epicWithLiveCounts, runtimeLabel, runBadge, runTokens, taskCounts, taskTypeBadge, taskNote } from './labels.ts'
+import { agentStatus, cliLoginCommand, detectedRuntimes, formatMs, epicInProgress, epicReviewStatus, epicWithLiveCounts, runtimeLabel, runBadge, runRef, runTitle, runTokens, taskCounts, taskTypeBadge, taskNote } from './labels.ts'
 import { projects, task } from '../prototype/fixtures'
 
 const tasks = (...statuses: TaskStatus[]) => statuses.map(status => ({ status }))
@@ -149,5 +149,28 @@ describe('formatMs', () => {
   it('scales from milliseconds to days', () => {
     expect([0, 400, 9000, 60_000, 125_000, 3_599_600, 5_400_000, 86_400_000, 129_600_000].map(formatMs))
       .toEqual(['0 ms', '400 ms', '9.0 s', '1m 0s', '2m 5s', '1h', '1.5h', '1d', '1.5d'])
+  })
+})
+
+describe('runRef and runTitle', () => {
+  const run = { taskRef: null, taskTitle: null, epicId: null, epicTitle: null, summary: null, role: 'pm' as const }
+
+  it('names an epic review after its epic, live or finished', () => {
+    const live = { ...run, role: 'reviewer' as const, epicId: 'e-1', epicTitle: 'Saved searches' }
+    expect(runRef(live)).toBe('Epic')
+    expect(runTitle(live)).toBe('Saved searches')
+    expect(runTitle({ ...live, summary: 'Works together.' })).toBe('Saved searches')
+  })
+
+  it('keeps PM turn and Plan for PM runs only', () => {
+    expect(runRef(run)).toBe('Plan')
+    expect(runTitle(run)).toBe('PM turn')
+    expect(runTitle({ ...run, role: 'reviewer' })).not.toBe('PM turn')
+  })
+
+  it('shows a task run\'s ref and title', () => {
+    const task = { ...run, role: 'developer' as const, taskRef: 'COR-3', taskTitle: 'Prototype build' }
+    expect(runRef(task)).toBe('COR-3')
+    expect(runTitle(task)).toBe('Prototype build')
   })
 })
