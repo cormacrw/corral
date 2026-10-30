@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Evidence, Inbox, InboxActionInput, Review, Task, InboxItem, PlanThreadItem } from '@corral/contracts'
+import type { Evidence, Inbox, InboxActionInput, Review, Task, TaskInboxItem, InboxItem, PlanThreadItem } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
@@ -81,8 +81,9 @@ const taskLoading = computed(() => Boolean(selected.value?.taskId) && !task.valu
 // Approval needs the task for its human-criteria check. The other actions don't.
 const approveBlocked = computed(() => taskLoadFailed.value && action.value === 'approve')
 const alreadyResolved = computed(() => selected.value !== null && selected.value.type !== 'activity' && !inbox.value?.needsYou.some(i => i.id === selected.value!.id))
+const isTaskItem = (item: InboxItem | null): item is TaskInboxItem => item?.taskId != null
 const TASK_LOAD_ERROR = 'Couldn\'t load this task'
-async function loadTask(item: InboxItem | null) {
+async function loadTask(item: TaskInboxItem | null) {
   const request = ++taskRequest
   const isCurrent = () => request === taskRequest && selected.value?.id === item?.id
   const fetchedTask = item ? await api.tasks.byRef(item.taskRef).catch(() => null) : null
@@ -114,7 +115,7 @@ async function loadTask(item: InboxItem | null) {
 function retryTask() {
   taskLoadFailed.value = false
   actionError.value = null
-  void loadTask(selected.value)
+  void loadTask(isTaskItem(selected.value) ? selected.value : null)
 }
 watch(selected, async (item, previous) => {
   text.value = ''
