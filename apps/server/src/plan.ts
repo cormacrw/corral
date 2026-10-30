@@ -410,7 +410,7 @@ export class PlanService {
     const turnText = results.length ? `${attributedText}\n\nRecorded tool results and thread notifications:\n${results.map(r => r.role === 'thread' ? threadText({ id: r.senderSessionId ?? 'removed', title: r.senderTitle ?? 'Removed thread' }, r.text) : r.text).join('\n')}` : attributedText
     await this.#turn(session, project, {
       prompt: pmPrompt({ text: turnText, attachedTask: attached, projectName: project?.name ?? null, prefix: project?.prefix ?? null, fresh: session.agentSessionId === null }),
-      fallbackPrompt: pmFallbackPrompt({ text, attachedTask: attached, projectName: project?.name ?? null, prefix: project?.prefix ?? null, history: await this.#history(sessionId) })
+      fallbackPrompt: pmFallbackPrompt({ text: attributedText, attachedTask: attached, projectName: project?.name ?? null, prefix: project?.prefix ?? null, history: await this.#history(sessionId) })
     })
     return toMessage(message!)
   }
