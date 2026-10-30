@@ -171,6 +171,7 @@ export function runBadge(run: Pick<Run, 'state' | 'outcome' | 'role'>): { label:
     case 'pr_opened': return { label: 'PR opened', color: 'primary' }
     case 'pr_rebased': return { label: 'PR rebased', color: 'primary' }
     case 'pr_updated': return { label: 'PR updated', color: 'primary' }
+    case 'commit_submitted': return { label: 'Commit submitted', color: 'primary' }
     case 'findings_reported': return { label: 'Findings reported', color: 'primary' }
     case 'design_submitted': return { label: 'Design submitted', color: 'primary' }
     case 'approved': return { label: 'Approved', color: 'success' }

@@ -47,8 +47,8 @@ export type TaskEvent =
   | { type: 'send_back' }
   // Ready → In progress: the scheduler claims it
   | { type: 'claim', dependencyStatuses: readonly TaskStatus[] }
-  // In progress → Agent review: a pr_opened / pr_updated / pr_rebased outcome, a
-  // spike's findings_reported or a design's design_submitted
+  // In progress → Agent review: a pr_opened / pr_updated / pr_rebased / commit_submitted
+  // outcome, a spike's findings_reported or a design's design_submitted
   | { type: 'submit', branchAtExpectedCommit: boolean, evidenceComplete: boolean }
   // Agent review → In progress, or Blocked once the review-round cap is
   // reached or when the feedback repeats the previous round's. `similarity`

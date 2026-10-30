@@ -27,6 +27,8 @@ export const RUN_OUTCOMES = [
   'pr_opened',
   'pr_updated',
   'pr_rebased',
+  // An epic task's developer: a commit on its own branch, with no task PR (D27)
+  'commit_submitted',
   // A spike's developer: findings instead of a PR (D19)
   'findings_reported',
   // A design task's designer: a new design version instead of a PR (D20)
@@ -43,7 +45,7 @@ export type RunOutcome = typeof RUN_OUTCOMES[number]
 // split too (runs_outcome_matches_role).
 const ANY_ROLE_RUN_OUTCOMES = ['failed', 'rate_limited'] as const satisfies readonly RunOutcome[]
 // design_submitted stays on developers for runs from before the designer role
-export const DEVELOPER_RUN_OUTCOMES = ['pr_opened', 'pr_updated', 'pr_rebased', 'findings_reported', 'design_submitted', 'stuck', ...ANY_ROLE_RUN_OUTCOMES] as const satisfies readonly RunOutcome[]
+export const DEVELOPER_RUN_OUTCOMES = ['pr_opened', 'pr_updated', 'pr_rebased', 'commit_submitted', 'findings_reported', 'design_submitted', 'stuck', ...ANY_ROLE_RUN_OUTCOMES] as const satisfies readonly RunOutcome[]
 export const DESIGNER_RUN_OUTCOMES = ['design_submitted', 'stuck', ...ANY_ROLE_RUN_OUTCOMES] as const satisfies readonly RunOutcome[]
 export const REVIEWER_RUN_OUTCOMES = [...REVIEW_VERDICTS, 'blocked', ...ANY_ROLE_RUN_OUTCOMES] as const satisfies readonly RunOutcome[]
 export const PM_RUN_OUTCOMES = ANY_ROLE_RUN_OUTCOMES

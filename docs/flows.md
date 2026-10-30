@@ -235,9 +235,9 @@ The plan is approved and the scheduler claims #41 (section 2, step 2). E7 has no
 
 ### Step 2 — Approved tasks integrate into the epic branch
 
-For eligible new task/bug submissions in `epic` mode, the PR-free executor uses this sequence (COR-286 defines its persistence and negotiation; execution is a subsequent rollout):
+For eligible new task/bug submissions in `epic` mode, the PR-free path uses this sequence (COR-286 defines its persistence and negotiation, COR-287 implements steps 1 and 2; integration is a subsequent rollout):
 
-1. Push the task branch and record a new immutable submission with its head, base and target epic branch. Do not open a task PR. Reviewers check out that exact head and record verdicts against it.
+1. The developer reports `commit_submitted`. The runner pushes the task branch and Corral records a new immutable submission with its head, base and target epic branch. Do not open a task PR. Reviewers check out that exact head; a verdict from a different head, or while the branch has moved, is rejected.
 2. Record agent approval for that exact submitted head. D5 flags and D28 human checks still require Human review before integration. Changes requested create a new submission on revision; old heads and verdicts remain history.
 3. In Ready to merge, journal an integration operation with the expected epic head and fenced runner. Rebase against a moved epic branch under D24, with review of changed resolutions; never silently transfer approval to arbitrary new work. Integrate one commit per task using a compare-and-swap push. Reconcile ambiguous pushes by reading the remote before retrying.
 4. Record the confirmed integrated commit and timestamp and only then mark Merged. #42 may now start after #41 integrates, because they share E7. A dependent outside E7 waits for the epic PR merge. A submission, approval or operation in progress does not satisfy dependencies.

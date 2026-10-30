@@ -392,6 +392,10 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
       const [epic] = await tx.select({ id: epics.id }).from(epics).where(and(eq(epics.id, fields.epicId), eq(epics.projectId, project.id)))
       if (!epic) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['epicId'], message: 'Unknown epic' }] })
     }
+    // A selected task's submissions target this epic's branch and it can't take another path
+    if (task.integrationProtocol > 0 && ((fields.epicId !== undefined && fields.epicId !== task.epicId) || (fields.type !== undefined && fields.type !== task.type))) {
+      throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: 'A task submitting commits to its epic branch can\'t change epic or type' }] })
+    }
     const descriptionChanged = fields.description !== undefined && JSON.stringify(fields.description) !== JSON.stringify(task.description)
     let criteriaChange: TaskContentEdit['criteria'] = null
     if (fields.epicId !== undefined && fields.epicId !== task.epicId && !['draft', 'backlog'].includes(task.status)) {
