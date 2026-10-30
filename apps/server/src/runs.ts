@@ -105,12 +105,9 @@ export function toEvidence(row: typeof evidence.$inferSelect): Evidence {
     criterionId: row.criterionId,
     runId: row.runId,
     round: row.round,
-    kind: row.kind,
-    note: row.note,
-    fileName: row.fileName,
-    contentType: row.contentType,
-    size: row.size,
-    url: row.blob ? `/api/evidence/${row.id}/file` : null,
+    ...(row.kind === 'note'
+      ? { kind: row.kind, note: row.note, fileName: null, contentType: null, size: 0 as const, url: null }
+      : { kind: row.kind, note: row.note, fileName: row.fileName!, contentType: row.contentType!, size: row.size, url: `/api/evidence/${row.id}/file` }),
     createdAt: row.createdAt.toISOString()
   }
 }

@@ -417,7 +417,7 @@ export const history: Record<string, AuditEntry[]> = {
 // D21: human files, note-only proof, mixed evidence and artifact-only proof.
 const reviewTask = at('COR-5')
 const criterionId = (position: number) => reviewTask.acceptanceCriteria[position]!.id
-const fileEvidence = (id: string, position: number | null, kind: Evidence['kind'], fileName: string, contentType: string, url: string): Evidence => ({
+const fileEvidence = (id: string, position: number | null, kind: Exclude<Evidence['kind'], 'note'>, fileName: string, contentType: string, url: string): Evidence => ({
   id, taskId: reviewTask.id, criterionId: position === null ? null : criterionId(position),
   runId: 'r-2', round: 0, kind, note: '', fileName, contentType, size: 128, url, createdAt: ago(20)
 })
@@ -429,7 +429,7 @@ export const evidence: Record<string, Evidence[]> = {
   [reviewTask.id]: [
     fileEvidence('ev-shot', 0, 'screenshot', 'approved-version.svg', 'image/svg+xml', screenshotUrl),
     fileEvidence('ev-log', 0, 'log', 'approval.log', 'text/plain', logUrl),
-    { ...fileEvidence('ev-note', 1, 'note', '', '', ''), fileName: null, contentType: null, url: null, size: 0, note: '**Earlier versions are superseded.** The approval transaction updates previous versions atomically. See `approveDesignVersion` in the design service.' },
+    { id: 'ev-note', taskId: reviewTask.id, criterionId: criterionId(1), runId: 'r-2', round: 0, kind: 'note', createdAt: ago(20), fileName: null, contentType: null, url: null, size: 0, note: '**Earlier versions are superseded.** The approval transaction updates previous versions atomically. See `approveDesignVersion` in the design service.' },
     fileEvidence('ev-request', 2, 'request', 'approval-response.txt', 'text/plain', requestUrl),
     fileEvidence('ev-output', 3, 'test_output', 'diagnostics.txt', 'text/plain', logUrl),
     fileEvidence('ev-text', null, 'text', 'agent-summary.txt', 'text/plain', logUrl),
