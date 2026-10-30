@@ -23,8 +23,7 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     .where(and(inArray(tasks.status, ['human_review', 'blocked', 'failed']), isNull(tasks.deletedAt)))
   const taskItems = await Promise.all(open.map(({ task, project }) => needsYouItem(db, task, project)))
   const threads = await planThreads(db)
-  // One list, newest first by when each item arrived (design/inbox.md)
-  const needsYou: InboxItem[] = [...taskItems, ...threads, ...await epicInboxItems(db)].sort((a: InboxItem, b: InboxItem) => b.at.localeCompare(a.at))
+  const epicItems = await epicInboxItems(db)
 
   const [pm] = await db.select().from(agents).where(eq(agents.role, 'pm')).limit(1)
   const recent = await db.select({ deployment: deployments, project: projects }).from(deployments)
@@ -38,7 +37,8 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     notesStatus: d.notesStatus, unread: !d.readAt, taskId: null, taskRef: null, prUrl: null,
     resolution: d.dismissedAt ? 'You dismissed these release notes' : null
   }))
-  needsYou.push(...releases.filter(d => !d.resolution))
+  // One list, newest first by when each item arrived (design/inbox.md)
+  const needsYou: InboxItem[] = [...taskItems, ...threads, ...epicItems, ...releases.filter(d => !d.resolution)].sort((a: InboxItem, b: InboxItem) => b.at.localeCompare(a.at))
 
   const entries = await db.select({ entry: auditLog, task: tasks, project: projects }).from(auditLog)
     .innerJoin(tasks, eq(tasks.id, auditLog.taskId))
