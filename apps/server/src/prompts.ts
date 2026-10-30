@@ -145,7 +145,7 @@ export function reviewerPrompt(task: ReviewTask & { underReview?: DesignUnderRev
 }
 
 const REBASE_CHECK_CONDITIONS: Record<RebaseCheckFailure['condition'], string> = {
-  changes_outside_conflicts: 'The change in these files differs from the approved diff, but they are not in the developer\'s conflicted-file list',
+  changes_outside_conflicts: 'The change in these files differs from the approved diff, or GitHub gave no patch to compare it by, but they are not in the developer\'s conflicted-file list',
   project_docs_changed: 'These project docs changed on the base since approval'
 }
 
@@ -498,7 +498,7 @@ function rebaseDeveloperPrompt(task: PromptTask, agentName: string): string {
 - Check that \`git merge-tree --write-tree HEAD origin/${task.defaultBranch}\` is clean.
 - Do not push or use gh. Corral pushes with --force-with-lease.
 ${WORK_NOTE}
-- Report \`pr_rebased\` with \`conflictedFiles\`: a non-empty list of every file in which you resolved a conflict, and \`review\`: \`trivial\` only if the resolution just combines both sides with no new logic, renames or behaviour changes; otherwise choose \`needs_review\`. Both choices go to Agent review. Include a summary naming every conflicted file and how each was resolved, and a one-line note naming the conflicted files and their resolutions. If a human decision is needed, report stuck instead.
+- Report \`pr_rebased\` with \`conflictedFiles\`: a non-empty list of every file in which you resolved a conflict, and \`review\`: \`trivial\` only if the resolution just combines both sides with no new logic, renames or behaviour changes; otherwise choose \`needs_review\`. The server checks a \`trivial\` choice: if only the conflicted files changed and no project doc moved on the base, the approval carries over without a review. Anything else goes to Agent review. Include a summary naming every conflicted file and how each was resolved, and a one-line note naming the conflicted files and their resolutions. If a human decision is needed, report stuck instead.
 - Always finish by calling \`report_outcome\`.`),
     commentsSection(task)
   ].join('\n')

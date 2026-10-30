@@ -46,7 +46,7 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
   const entries = await db.select({ entry: auditLog, task: tasks, project: projects }).from(auditLog)
     .innerJoin(tasks, eq(tasks.id, auditLog.taskId))
     .innerJoin(projects, eq(projects.id, tasks.projectId))
-    .where(inArray(auditLog.action, ['task.transition', 'review.recorded', 'task.deleted']))
+    .where(inArray(auditLog.action, ['task.transition', 'review.recorded', 'rebase.verified', 'task.deleted']))
     .orderBy(desc(auditLog.createdAt), desc(auditLog.id))
     .limit(limit * 3)
 
@@ -60,7 +60,7 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
       const resolution = resolutionText(entry.action, detail, task.type)
       resolved.push({ ...base, type: 'activity', preview: resolution, body: resolution, sender: { name: 'You', role: 'system' }, resolution })
     }
-    if (entry.action === 'review.recorded' || (entry.action === 'task.transition' && (ACTIVITY_EVENTS.includes(event ?? '') || (event === 'human_approve' && task.type === 'design')))) {
+    if (entry.action === 'review.recorded' || entry.action === 'rebase.verified' || (entry.action === 'task.transition' && (ACTIVITY_EVENTS.includes(event ?? '') || (event === 'human_approve' && task.type === 'design')))) {
       const text = activityText(entry.action, event, detail, task.prNumber, task.type)
       activity.push({ ...base, type: 'activity', preview: text, body: text, sender: senderOf(entry.actor), resolution: null })
     }
@@ -243,6 +243,7 @@ function senderOf(actor: Actor): TaskInboxItem['sender'] {
 
 function activityText(action: string, event: string | null, detail: AuditView, prNumber: number | null, type: string): string {
   const pr = prNumber ? `PR #${prNumber}` : 'the PR'
+  if (action === 'rebase.verified') return `Verified the rebase of ${pr} without review`
   if (action === 'review.recorded') {
     // A spike's findings (D19) and a design (D20) are reviewed without a PR
     const reviewed = prNumber ? pr : type === 'design' ? 'the design' : 'the findings'
