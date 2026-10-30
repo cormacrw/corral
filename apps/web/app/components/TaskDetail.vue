@@ -5,7 +5,7 @@ import type { AuditEntry, Comment, Evidence, Review, Run, Task } from '@corral/c
 import type { EditorToolbarItem } from '@nuxt/ui'
 import type { EditorView } from '@tiptap/pm/view'
 import type { TaskPriority, TaskStatus } from '@corral/core'
-import { availableEvents } from '@corral/core'
+import { availableEvents, canChangeType } from '@corral/core'
 import { api, ApiError } from '~/composables/useApi'
 import { PRIORITY, runBadge, STATUS, TASK_TYPE, timeAgo } from '~/utils/labels'
 import { attachmentProblem } from '~/utils/attachments'
@@ -203,7 +203,9 @@ async function resume() {
 }
 
 const priorityOptions = (Object.keys(PRIORITY) as TaskPriority[]).map(p => ({ label: PRIORITY[p].label, value: p }))
-const typeOptions = (Object.keys(TASK_TYPE) as Task['type'][]).map(t => ({ label: TASK_TYPE[t], value: t }))
+const typeOptions = computed(() => (Object.keys(TASK_TYPE) as Task['type'][])
+  .filter(t => !task.value || canChangeType(task.value.status, task.value.type, t))
+  .map(t => ({ label: TASK_TYPE[t], value: t })))
 // Tasks aren't assigned ahead of time: these are the agents of the task's
 // latest runs, or null until one claims it (D15)
 const developer = computed(() => task.value?.developer ?? null)

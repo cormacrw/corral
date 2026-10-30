@@ -4,6 +4,7 @@ import type { AuditEntry, Comment, CreateTaskInput, HumanTransitionInput, PatchT
 import { createTaskInput } from '@corral/contracts'
 import {
   canChangeTaskType,
+  canChangeType,
   checkDependencies,
   createTask as createTaskState,
   DEPENDENCY_DELETED_REASON,
@@ -406,6 +407,7 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
       throw new ApiFailure(409, { code: 'conflict', constraint: 'task_type_locked' })
     }
     const { acceptanceCriteria: criteriaInput, dependsOn, ...fields } = input
+    if (fields.type && !canChangeType(task.status, task.type, fields.type)) throw new ApiFailure(409, { code: 'conflict', constraint: 'task_type_locked' })
     // D20: a design task's flag can't be turned off, by the human or a plan
     if ((fields.type ?? task.type) === 'design') fields.humanReview = true
     if (fields.epicId) {

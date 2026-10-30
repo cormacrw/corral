@@ -31,7 +31,7 @@ describe('PM task and epic tools', () => {
     transcript.push({ request: { transport: 'runner WebSocket', tool, input }, response })
     return response
   }
-  async function action(tool: 'move_task' | 'approve_task' | 'delete_task', input: unknown) {
+  async function action(tool: 'move_task' | 'approve_task' | 'delete_task' | 'stop_run', input: unknown) {
     const response = await call(tool, input)
     expect(response).toMatchObject({ ok: true, result: { confirmationPending: true } })
     return (response as { result: { actionId: string } }).result.actionId
@@ -124,8 +124,14 @@ describe('PM task and epic tools', () => {
     expect(message.text).toContain('urgent')
     expect(message.text).toContain('The shared form validates email')
     expect(await history(task)).toContainEqual(expect.objectContaining({ action: 'run.message_sent', actor: actor() }))
-    expect(await call('update_task', { taskRef: task.ref, paused: true })).toMatchObject({ ok: true, result: { paused: true } })
+    expect(await call('update_task', { taskRef: task.ref, paused: true, title: 'Must not save' })).toMatchObject({ ok: false, error: expect.stringContaining('Use stop_run') })
+    expect(await get(task)).toMatchObject({ paused: false, title: 'Use the shared form' })
+    expect((await t.db.select().from(schema.runs).where(eq(schema.runs.id, developer.runId)))[0]?.state).toBe('running')
+    const stop = await action('stop_run', { runId: developer.runId })
+    expect((await get(task)).paused).toBe(false)
+    expect((await resolve(stop)).body).toMatchObject({ pendingAction: { status: 'confirmed' } })
     expect(await runner.next('run.stop', m => m.runId === developer.runId)).toMatchObject({ keepWork: true })
+    expect(await call('update_task', { taskRef: task.ref, paused: true })).toMatchObject({ ok: true, result: { paused: true } })
     expect(await call('update_task', { taskRef: task.ref, paused: false })).toMatchObject({ ok: true, result: { paused: false } })
     await get(task)
     await history(task)
@@ -153,6 +159,9 @@ describe('PM task and epic tools', () => {
     ] as const) {
       await t.db.update(schema.tasks).set({ status }).where(eq(schema.tasks.id, task.id))
       const proposal = await action('move_task', { taskRef: task.ref, transition })
+      const [card] = await t.db.select().from(schema.planMessages).where(eq(schema.planMessages.id, proposal))
+      if ('feedback' in transition) expect(card!.pendingAction!.summary).toContain(transition.feedback)
+      if (transition.type === 'accept') expect(card!.pendingAction!.summary).toContain('to backlog')
       expect((await resolve(proposal)).body).toMatchObject({ pendingAction: { status: 'confirmed' } })
       expect((await get(task)).status).toBe(expected)
     }
@@ -164,6 +173,52 @@ describe('PM task and epic tools', () => {
         expect((await get(task)).status).toBe(to)
       }
     }
+  })
+
+  it('refuses generic design approval and binds approval to the full reviewed head', async () => {
+    const design = await t.createTask(slug, { title: 'Design prototype', type: 'design' })
+    await t.db.update(schema.tasks).set({ status: 'human_review' }).where(eq(schema.tasks.id, design.id))
+    expect(await call('approve_task', { taskRef: design.ref })).toMatchObject({ ok: false, error: expect.stringContaining('Use approve_design') })
+    expect((await get(design)).status).toBe('human_review')
+    const task = await t.createTask(slug)
+    const oldHead = 'a'.repeat(40)
+    // Two heads sharing a short prefix must still invalidate the old card.
+    const newHead = 'a'.repeat(39) + 'b'
+    await t.db.update(schema.tasks).set({ status: 'human_review', prNumber: 42, headSha: oldHead }).where(eq(schema.tasks.id, task.id))
+    const proposal = await action('approve_task', { taskRef: task.ref })
+    const [card] = await t.db.select().from(schema.planMessages).where(eq(schema.planMessages.id, proposal))
+    expect(card!.pendingAction!.summary).toContain('PR #42 at ' + oldHead)
+    await t.db.update(schema.tasks).set({ status: 'in_progress' }).where(eq(schema.tasks.id, task.id))
+    await t.db.update(schema.tasks).set({ status: 'human_review', headSha: newHead }).where(eq(schema.tasks.id, task.id))
+    expect((await resolve(proposal)).body).toMatchObject({ pendingAction: { status: 'failed' } })
+    expect((await get(task)).status).toBe('human_review')
+  })
+
+  it('refuses a type change that would take a task out of its D19 or D20 flow', async () => {
+    const design = await t.createTask(slug, { title: 'Retyped design', type: 'design' })
+    await t.db.update(schema.tasks).set({ status: 'human_review' }).where(eq(schema.tasks.id, design.id))
+    expect(await call('update_task', { taskRef: design.ref, type: 'task', title: 'Must not save' })).toMatchObject({ ok: false, error: expect.stringContaining('left Draft or Backlog') })
+    expect(await get(design)).toMatchObject({ type: 'design', title: 'Retyped design', status: 'human_review' })
+    expect(await call('approve_task', { taskRef: design.ref })).toMatchObject({ ok: false, error: expect.stringContaining('Use approve_design') })
+    expect(await request('PATCH', `/api/projects/${slug}/tasks/${design.number}`, { type: 'task' })).toMatchObject({ status: 409 })
+    // A spike's approval ends in Merged with no merge, so a PR can't turn into one
+    const task = await t.createTask(slug)
+    await t.db.update(schema.tasks).set({ status: 'human_review', prNumber: 43, headSha: 'c'.repeat(40) }).where(eq(schema.tasks.id, task.id))
+    for (const type of ['design', 'spike']) {
+      expect(await call('update_task', { taskRef: task.ref, type })).toMatchObject({ ok: false, error: expect.stringContaining('left Draft or Backlog') })
+    }
+    expect(await call('update_task', { taskRef: task.ref, type: 'bug' })).toMatchObject({ ok: true, result: { type: 'bug' } })
+    // Unstarted work can still be retyped, which is what plan revisions rely on
+    const unstarted = await t.createTask(slug, { type: 'design' })
+    expect(await call('update_task', { taskRef: unstarted.ref, type: 'task' })).toMatchObject({ ok: true, result: { type: 'task' } })
+  })
+
+  it('keeps human Merged edits read-only while permitting PM metadata edits', async () => {
+    const task = await t.createTask(slug)
+    await t.db.update(schema.tasks).set({ status: 'merged' }).where(eq(schema.tasks.id, task.id))
+    expect(await request('PATCH', `/api/projects/${slug}/tasks/${task.number}`, { title: 'Human edit' })).toMatchObject({ status: 409 })
+    expect(await call('update_task', { taskRef: task.ref, title: 'PM metadata edit' })).toMatchObject({ ok: true })
+    expect(await get(task)).toMatchObject({ status: 'merged', title: 'PM metadata edit' })
   })
 
   it('requires human confirmation for approval and deletion, and revalidates changed approval state', async () => {
