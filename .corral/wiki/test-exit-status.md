@@ -16,3 +16,9 @@ test packages, kill workers in server/db, time out a server hook, and run a
 passing control. Each probe invokes the root test command with a package filter,
 checks its status and intended diagnostic, and removes its fixture in finally.
 CI runs these probes before its ordinary unguarded pnpm run test step.
+
+Throwaway Postgres databases are dropped without FORCE after the pool ends.
+pg.Pool.end can resolve before its client sockets finish disconnecting; forcing
+the drop in that gap can emit an uncaught 57P01 after every assertion passed.
+Normal DROP lets Postgres wait for those disconnects. testing.test.ts covers a
+client disconnecting during cleanup and fails with the old forced drop.

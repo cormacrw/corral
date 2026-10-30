@@ -19,10 +19,13 @@ export async function createTestDatabase(driver: 'pglite' | 'postgres'): Promise
   if (!adminUrl) return null
 
   const name = `corral_test_${randomUUID().replaceAll('-', '')}`
+  // pg.Pool.end resolves before every client's socket has finished closing.
+  // Let Postgres wait for those disconnects; FORCE can kill an ending client
+  // and emit an uncaught 57P01 error after all assertions have passed.
   const drop = () => withAdmin(
     adminUrl,
     `Dropping test database ${name}`,
-    admin => admin.query(`drop database if exists ${name} with (force)`)
+    admin => admin.query(`drop database if exists ${name}`)
   )
 
   // Only this run's generated database is ever dropped, and only once it exists

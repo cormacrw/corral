@@ -34,6 +34,32 @@ unreachable at that moment, the run ends as "The runner restarted during the
 run" when the runner reconnects. An older runner on the same protocol
 version sends none of the new exit fields, and its runs read as they did.
 
+A developer run stopped before reporting commits its uncommitted changes as a
+`WIP:` commit (hooks skipped) and pushes the task branch after the agent exits.
+That has `STOP_GRACE_MS` (5 s), on top of the agent's own 5 s, which together
+have margin within the runner Compose services' 20 s stop timeout. If the push doesn't finish, the commit
+stays in the worktree for the next run on that runner, and the run's transcript
+says so. A WIP push requires an open connection and an unexpired lease acknowledgement
+from run start or a heartbeat (two heartbeat intervals, with at least 5 s left).
+The acknowledgement echoes the runner's request timestamp, so delayed replies
+expire even if the hosts' clocks differ. After sleep or disconnection the commit stays local, even if the socket still
+looks open. A no-keepWork stop revokes that acknowledgement, including during
+a save. This bounds stale pushes but cannot fence a revocation still in transit
+at GitHub. A run a human or the kill switch stopped stays listed in heartbeats
+until its agent exits; the server doesn't revoke it then, unless a newer run
+holds the task or the task was deleted. A worktree that isn't on the task branch (mid-rebase) is left alone.
+The run's `headSha` records the pushed commit and the job's `continueFrom`
+carries it to the retry; a kept worktree on another runner fast-forwards to it
+and fails the run if it has diverged. After a human stop or the kill switch the
+server ends the run at once, so a Resume within seconds builds its prompt before
+`wipSha` arrives. That retry waits for the save and starts from the commit, but
+its prompt can't name it yet and asks the agent to check the branch log.
+For runner-originated exits, the WIP SHA is recorded in the same transaction
+that releases the lease, before another scheduling pass can claim the task.
+Stopped-work lookup is per task, independent of developer or session; session
+resume stays scoped to the developer. Reported failures store their summary
+and are excluded from the stopped-run prompt.
+
 Outside signals are classified for both newly spawned agents and a PM process
 reused for a later warm turn. A process that exits before replying ends that
 turn with the signal name, rather than an unexplained null or 128+n exit code.

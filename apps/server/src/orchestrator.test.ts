@@ -1,5 +1,5 @@
 import { databaseFixture } from '@corral/db/testing'
-import type { Inbox, Project, Task } from '@corral/contracts'
+import type { Inbox, Project, RunJob, Task } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { and, asc, eq, ne } from 'drizzle-orm'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -270,6 +270,125 @@ describe('orchestrator', () => {
       expect(history.find(e => e.action === 'run.ended')?.detail.error).toBe(run.error)
       await pause(project)
     }
+  })
+
+  // Frees the developer's slot for the next test
+  async function finish(project: Project, job: RunJob) {
+    await pause(project)
+    await t.request('POST', `/api/runs/${job.runId}/stop`)
+  }
+
+  it('asks a human stop to keep the work, and gives the retry the WIP commit and the stop reason', async () => {
+    const { project, task, job } = await assigned()
+    runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'session-1' })
+    await sleep(100)
+    const res = await t.request('POST', `/api/runs/${job.runId}/stop`)
+    expect(res.status).toBeLessThan(300)
+    expect(await runner.next('run.stop', m => m.runId === job.runId)).toMatchObject({ keepWork: true })
+
+    runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'stopped', reason: 'Stopped by a human' }, headSha: 'wip123', wipSha: 'wip123' })
+    await expect.poll(async () => (await runRow(job.runId)).headSha).toBe('wip123')
+    expect(await runRow(job.runId)).toMatchObject({ state: 'interrupted', error: 'Stopped by a human' })
+
+    expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/resume`)).status).toBe(200)
+    const retry = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.runId !== job.runId)).job
+    expect(retry.continueFrom).toBe('wip123')
+    for (const prompt of [retry.prompt, retry.fallbackPrompt!]) {
+      expect(prompt).toContain(`You are continuing run #${job.runNumber}, which stopped before it reported an outcome. Stop reason: Stopped by a human`)
+      expect(prompt).toContain('WIP commit `wip123`')
+    }
+    await finish(project, retry)
+  })
+
+  it('gives the retry of a timed-out run its reason, and no commit when there was nothing to save', async () => {
+    const { project, task, job } = await assigned()
+    runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'session-1' })
+    await sleep(100)
+    runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'timed_out', limitSeconds: 3600 }, headSha: 'base', wipSha: null })
+
+    const retry = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.runId !== job.runId)).job
+    expect(retry.continueFrom).toBeNull()
+    expect(retry.prompt).toContain('Stop reason: The run hit its time limit of 60 minutes')
+    expect(retry.prompt).toContain('No WIP commit is recorded yet')
+    await finish(project, retry)
+  })
+
+  it('carries a WIP commit to another developer without a resumable session', async () => {
+    const { project, task, job } = await assigned()
+    // The stopped run belongs to another developer and never acquired a session.
+    const [other] = await t.db.insert(agents).values({ name: 'Other developer', role: 'developer', runtime: 'claude-code', paused: true }).returning()
+    await t.db.update(runs).set({ agentId: other!.id, agentSessionId: null }).where(eq(runs.id, job.runId))
+    runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'timed_out', limitSeconds: 3600 }, headSha: 'wip-other', wipSha: 'wip-other' })
+    const retry = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.runId !== job.runId)).job
+    expect(retry.agentSessionId).toBeNull()
+    expect(retry.continueFrom).toBe('wip-other')
+    expect(retry.prompt).toContain('Continuing a stopped run')
+    expect(retry.prompt).toContain('Stop reason: The run hit its time limit')
+    expect((await runRow(job.runId)).headSha).toBe('wip-other')
+    await finish(project, retry)
+  })
+
+  it('does not describe an agent-reported failure as a stopped run', async () => {
+    const { project, task, job } = await assigned()
+    expect(await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'failed', summary: 'Cannot implement this', note: 'Gave up' })).toMatchObject({ ok: true })
+    const retry = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.runId !== job.runId)).job
+    expect(retry.prompt).not.toContain('Continuing a stopped run')
+    expect(retry.continueFrom).toBeNull()
+    expect((await runRow(job.runId)).summary).toBe('Cannot implement this')
+    await finish(project, retry)
+  })
+
+  it('acknowledges lease ownership using the runner clock and rejects an overdue heartbeat', async () => {
+    const { project, task, job } = await assigned()
+    const sentAt = 1234 // Deliberately different from the server clock.
+    runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: null, sentAt })
+    expect(await runner.next('run.lease', m => m.runId === job.runId)).toMatchObject({ leaseEpoch: job.leaseEpoch, validUntil: new Date(sentAt + 60_000).toISOString() })
+    runner.send({ type: 'heartbeat', activeRuns: [{ runId: job.runId, leaseEpoch: job.leaseEpoch }], sentAt: sentAt + 10 })
+    expect(await runner.next('run.lease', m => m.runId === job.runId)).toMatchObject({ validUntil: new Date(sentAt + 60_010).toISOString() })
+    await t.db.update(tasks).set({ leaseExpiresAt: new Date(t.clock.now.getTime() - 1) }).where(eq(tasks.id, task.id))
+    runner.send({ type: 'heartbeat', activeRuns: [{ runId: job.runId, leaseEpoch: job.leaseEpoch }], sentAt: sentAt + 20 })
+    expect(await runner.next('run.stop', m => m.runId === job.runId)).toMatchObject({ reason: 'This run no longer holds its lease' })
+    expect((await taskRow(task.id)).leaseExpiresAt!.getTime()).toBeLessThan(t.clock.now.getTime())
+    await finish(project, job)
+  })
+
+  it('lets a human-stopped run finish saving through a heartbeat, until the task moves on', async () => {
+    const { project, task, job } = await assigned()
+    runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'session-1' })
+    await sleep(100)
+    await t.request('POST', `/api/runs/${job.runId}/stop`)
+    await runner.next('run.stop', m => m.runId === job.runId)
+    const active = [{ runId: job.runId, leaseEpoch: job.leaseEpoch }]
+
+    // The agent is still exiting, so the runner still lists the run
+    await t.orchestrator.onHeartbeat(active, 'r1')
+    await sleep(100)
+    expect(runner.received.filter(m => m.type === 'run.stop' && m.runId === job.runId)).toEqual([])
+
+    // A retry holds the lease now: the stopped run may no longer push
+    expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/resume`)).status).toBe(200)
+    const retry = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.runId !== job.runId)).job
+    await t.orchestrator.onHeartbeat(active, 'r1')
+    expect((await runner.next('run.stop', m => m.runId === job.runId)).keepWork).toBeUndefined()
+    await finish(project, retry)
+  })
+
+  it('still revokes a run interrupted by an expired lease', async () => {
+    const { project, task, job } = await assigned()
+    await t.db.update(tasks).set({ leaseExpiresAt: new Date(Date.now() - 1000) }).where(eq(tasks.id, task.id))
+    await t.orchestrator.sweepLeases()
+    await runner.next('run.stop', m => m.runId === job.runId)
+    await t.orchestrator.onHeartbeat([{ runId: job.runId, leaseEpoch: job.leaseEpoch }], 'r1')
+    expect((await runner.next('run.stop', m => m.runId === job.runId)).reason).toBe('This run no longer holds its lease')
+    await pause(project)
+  })
+
+  it('ignores a WIP commit from a stale lease epoch', async () => {
+    const { project, job } = await assigned()
+    runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch - 1, exit: { kind: 'stopped' }, headSha: 'wip123', wipSha: 'wip123' })
+    await sleep(200)
+    expect((await runRow(job.runId)).headSha).toBeNull()
+    await finish(project, job)
   })
 
   it('adds the last transcript activity to a run the server already stopped', async () => {
