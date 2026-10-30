@@ -128,6 +128,7 @@ export function runBadge(run: Pick<Run, 'state' | 'outcome' | 'role'>): { label:
     case 'design_submitted': return { label: 'Design submitted', color: 'primary' }
     case 'approved': return { label: 'Approved', color: 'success' }
     case 'changes_requested': return { label: 'Changes requested', color: 'warning' }
+    case 'blocked': return { label: 'Blocked', color: 'error' }
     case 'stuck': return { label: 'Stuck', color: 'error' }
     case 'failed': return { label: 'Failed', color: 'error' }
     case 'rate_limited': return { label: 'Rate limited', color: 'neutral' }

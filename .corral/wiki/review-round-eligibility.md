@@ -45,3 +45,16 @@ review, while retaining `approvedHeadSha`. Later merge failures resolved to
 In progress therefore start ordinary developer rounds. Blocking an unfinished
 rebase and resolving it to In progress preserves rebase-only mode. The Inbox
 activity feed records `pr_rebased` as a rebase handed to the reviewer.
+
+Rebase reviewer assignments use a dedicated conflict-check prompt with the approved
+and submitted head SHAs, range-diff instructions, and checks against the base
+commits and changed binding docs. Approval copies the approval at
+`approvedHeadSha`, including its criterion notes, onto the submitted head; missing
+or no-longer-applicable criteria reject carry-over. The recorded review summary
+identifies the reviewed rebase. Human-review routing still follows D5/D23.
+Rebase comments contain only the verdict and the reviewer's conflict summary.
+Changes requested still supplies normal criterion verdicts and consumes one round.
+The rebase-only reviewer outcome `blocked` preserves the round count and posts
+the changed binding decision as the task reason for the human. It is a run outcome,
+not a criterion review verdict. `rebase-review.test.ts` exercises all three paths
+through runner WebSocket reports and task HTTP responses.
