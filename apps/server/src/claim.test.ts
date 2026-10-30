@@ -145,7 +145,7 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
 
   async function recordedReview(task: { id: string, projectId: string }, round: number, headSha: string, verdict: 'approved' | 'changes_requested') {
     const agentId = await developer(2, { role: 'reviewer' })
-    const [run] = await t.db.insert(runs).values({ agentId, projectId: task.projectId, taskId: task.id, role: 'reviewer', state: 'completed', leaseEpoch: 1 }).returning()
+    const [run] = await t.db.insert(runs).values({ agentId, projectId: task.projectId, taskId: task.id, role: 'reviewer', state: 'completed', endedAt: new Date(), leaseEpoch: 1 }).returning()
     await t.db.insert(schema.reviews).values({ taskId: task.id, runId: run!.id, round, headSha, verdict, summary: 'Recorded verdict', author: t.actor })
     return agentId
   }
@@ -353,7 +353,7 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
     await projectWithReadyTasks(1)
     const first = await claimNextTask(t.db, await developer())
     // The run ends, e.g. changes were requested: the task stays In progress, unleased (D10)
-    await t.db.update(runs).set({ state: 'completed' }).where(eq(runs.id, first!.runId))
+    await t.db.update(runs).set({ state: 'completed', endedAt: new Date() }).where(eq(runs.id, first!.runId))
     await t.db.update(tasks).set({ leaseRunId: null, leaseRole: null, leaseExpiresAt: null }).where(eq(tasks.id, first!.taskId))
 
     const second = await claimNextTask(t.db, await developer())

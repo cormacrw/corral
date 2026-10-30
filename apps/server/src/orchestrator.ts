@@ -1,6 +1,6 @@
 import { appendAudit, auditEvent } from './audit.ts'
 import { EpicPullRequests, epicReviewContext } from './epic-prs.ts'
-import { RUNNER_HEARTBEAT_MS, evidenceKind, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type PmRunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
+import { RUNNER_HEARTBEAT_MS, epicReviewReportSchema, evidenceKind, outcomeReportSchema, rebaseReviewReportSchema, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type PmRunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
 import {
   ACTIVE_RUN_STATES,
   LEASE_DURATION_MS,
@@ -13,7 +13,6 @@ import {
   taskRef,
   richTextToMarkdown,
   type Actor,
-  type RunOutcome,
   type RunState
 } from '@corral/core'
 import { schema, type Database, type Executor } from '@corral/db'
@@ -31,6 +30,7 @@ import { EpicBranchError, isEpicRebaseTask, taskBase } from './task-base.ts'
 import { slugify } from './projects.ts'
 import { designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
 import { runExitError, withLastActivity } from './run-exit.ts'
+import { runEndValues, type RunEnd } from './run-lifecycle.ts'
 import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
 import { MergeOrchestrator } from './merge.ts'
 import type { ReleaseNotes } from './deployments.ts'
@@ -80,13 +80,13 @@ const MAX_EVIDENCE_BYTES = 25 * 1024 * 1024
 export const MAX_NOTE_LENGTH = 200
 const NOTE_EXAMPLE = 'Rebased onto 6e67d6f; resolved conflict in docs/architecture.md keeping main’s SSE wording'
 
-const reportSchema = z.object({
-  outcome: z.string(),
-  summary: z.string().trim().min(1, 'Add a summary'),
-  note: z.string().trim().optional(),
-  criteria: z.array(z.object({ criterionId: z.string(), met: z.boolean(), note: z.string().default('') })).optional(),
-  headSha: z.string().optional()
-})
+// A report that doesn't fit its schema comes back to the agent field by field
+function parseReport<T>(schema: z.ZodType<T>, input: unknown): T {
+  const parsed = schema.safeParse(input)
+  if (parsed.success) return parsed.data
+  const fields = parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`)
+  throw new ToolError(`Not reported. ${fields.join('. ')}. Fix this and report again.`)
+}
 
 // What the runner sends for submit_design (D20)
 const designSchema = z.object({
@@ -806,8 +806,9 @@ export class Orchestrator implements RunnerHandlers {
     if (message.type === 'run.started') {
       const ctx = await this.#fenced(message.runId, message.leaseEpoch)
       if (!ctx) return
+      // Still active: the server may have ended the run since it was fenced
       await db.update(runs).set({ state: 'running', startedAt: this.#now(), agentSessionId: message.agentSessionId })
-        .where(eq(runs.id, ctx.run.id))
+        .where(and(eq(runs.id, ctx.run.id), inArray(runs.state, [...ACTIVE_RUN_STATES])))
       this.#confirmLease(ctx, message.sentAt)
       if (ctx.run.role === 'pm' && ctx.run.planSessionId) await this.plans?.onRunStarted(ctx.run.planSessionId, message.agentSessionId)
       await this.#publish(ctx)
@@ -923,18 +924,18 @@ export class Orchestrator implements RunnerHandlers {
     return addComment(tx, ctx.task!.id, { body: note, pinned: false }, this.#actor(ctx))
   }
 
-  async #endRun(ctx: RunContext, fields: Partial<typeof runs.$inferInsert> & { state: RunState }): Promise<void> {
-    await this.#d.db.transaction(tx => this.#endRunIn(tx, ctx, fields))
+  async #endRun(ctx: RunContext, end: RunEnd): Promise<void> {
+    await this.#d.db.transaction(tx => this.#endRunIn(tx, ctx, end))
   }
 
   // Ends the run and releases its lease, if it still holds one
-  async #endRunIn(tx: Executor, ctx: RunContext, fields: Partial<typeof runs.$inferInsert> & { state: RunState }): Promise<void> {
-    await tx.update(runs).set({ endedAt: this.#now(), pmJob: null, ...fields }).where(eq(runs.id, ctx.run.id))
+  async #endRunIn(tx: Executor, ctx: RunContext, end: RunEnd): Promise<void> {
+    await tx.update(runs).set(runEndValues(end, this.#now())).where(eq(runs.id, ctx.run.id))
     if (ctx.task) {
       await tx.update(tasks).set({ leaseRunId: null, leaseRole: null, leaseExpiresAt: null, leaseHeartbeatAt: null, updatedAt: this.#now() })
         .where(and(eq(tasks.id, ctx.task.id), eq(tasks.leaseRunId, ctx.run.id)))
     }
-    await appendAudit(tx, { projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor: server }, auditEvent('run.ended', { runId: ctx.run.id, runNumber: ctx.run.number, state: fields.state, outcome: fields.outcome ?? null, error: fields.error ?? null }))
+    await appendAudit(tx, { projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor: server }, auditEvent('run.ended', { runId: ctx.run.id, runNumber: ctx.run.number, state: end.state, outcome: end.outcome ?? null, error: 'error' in end ? end.error : null }))
   }
 
   // A human stops a run: the process tree is killed, the run is Interrupted
@@ -1163,7 +1164,7 @@ export class Orchestrator implements RunnerHandlers {
       }
       if (tool === 'get_evidence') return this.#getEvidence(ctx, z.object({ evidenceId: z.string().optional() }).parse(input))
       if (tool === 'report_outcome') {
-        await this.epicPrs.report(ctx.run, reportSchema.parse(input) as OutcomeReport)
+        await this.epicPrs.report(ctx.run, parseReport(epicReviewReportSchema, input))
         this.#finished(ctx, 'Epic integration review recorded')
         return { ok: true }
       }
@@ -1187,7 +1188,9 @@ export class Orchestrator implements RunnerHandlers {
       case 'submit_design':
         return this.#submitDesign(ctx, input)
       case 'report_outcome':
-        return this.#reportOutcome(ctx, reportSchema.parse(input) as OutcomeReport & { outcome: string })
+        // Human checks take no verdict, so a task with only those has none to give
+        if (ctx.task && !ctx.task.rebaseOnly && await this.#onlyHumanChecks(ctx.task.id)) return this.#reportOutcome(ctx, parseReport(outcomeReportSchema, { criteria: [], ...(input as object) }))
+        return this.#reportOutcome(ctx, ctx.task?.rebaseOnly ? parseReport(rebaseReviewReportSchema, input) : parseReport(outcomeReportSchema, input))
     }
     throw new ToolError(`Unknown tool ${tool}`)
   }
@@ -1281,7 +1284,12 @@ export class Orchestrator implements RunnerHandlers {
     return { ...meta, images: [{ mimeType: meta.mimeType, dataBase64: Buffer.from(data).toString('base64') }] }
   }
 
-  async #reportOutcome(ctx: RunContext, report: OutcomeReport & { outcome: string }): Promise<unknown> {
+  async #onlyHumanChecks(taskId: string): Promise<boolean> {
+    const rows = await this.#d.db.select({ checkedByHuman: acceptanceCriteria.checkedByHuman }).from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, taskId))
+    return rows.length > 0 && rows.every(c => c.checkedByHuman)
+  }
+
+  async #reportOutcome(ctx: RunContext, report: OutcomeReport): Promise<unknown> {
     if (ctx.run.role === 'reviewer') {
       switch (report.outcome) {
         case 'approved':
@@ -1335,7 +1343,7 @@ export class Orchestrator implements RunnerHandlers {
   // requested goes through core (round cap → Blocked) and the feedback is
   // posted as a comment; an approval moves the task to Human review or
   // Ready to merge, where the merge orchestrator takes over.
-  async #review(ctx: RunContext, report: OutcomeReport, verdict: ReviewVerdict) {
+  async #review(ctx: RunContext, report: Extract<OutcomeReport, { outcome: ReviewVerdict }>, verdict: ReviewVerdict) {
     const { db } = this.#d
     const task = ctx.task!
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
@@ -1486,7 +1494,7 @@ export class Orchestrator implements RunnerHandlers {
       }, server, { event: report.outcome, runId: ctx.run.id, headSha: report.headSha, pr: pr?.number ?? null })
       await tx.update(tasks).set({ headSha: report.headSha, ...(pr && { prNumber: pr.number, prUrl: pr.url }) }).where(eq(tasks.id, task.id))
       const comment = await this.#postNote(tx, ctx, report.note!)
-      await this.#endRunIn(tx, ctx, { state: 'completed', outcome: report.outcome as RunOutcome, summary: report.summary, headSha: report.headSha })
+      await this.#endRunIn(tx, ctx, { state: 'completed', outcome: report.outcome, summary: report.summary, headSha: report.headSha })
       return comment
     })
     this.#d.events.publish({ type: 'comment.created', comment })

@@ -1,4 +1,12 @@
-import type { AgentRole, RunOutcome, RunState } from '@corral/core'
+import {
+  ACTIVE_RUN_STATES,
+  DESIGNER_RUN_OUTCOMES,
+  DEVELOPER_RUN_OUTCOMES,
+  PM_RUN_OUTCOMES,
+  REVIEWER_RUN_OUTCOMES,
+  TERMINAL_RUN_STATES,
+  type AgentRole
+} from '@corral/core'
 import { z } from 'zod'
 import { agentRuntime } from './agent-runtimes.ts'
 import type { RunnerInfo } from './runner.ts'
@@ -74,7 +82,24 @@ export interface RunMessageAccepted {
   comment: Comment
 }
 
-export interface Run {
+// What a run's role, state, outcome and end time may be together, matching the
+// checks on the runs table. A run has no outcome or end time until it ends. A
+// finished PM turn and an interrupted run have no outcome.
+const lifecycleOf = <R extends AgentRole, O extends readonly [string, ...string[]]>(role: R, outcomes: O) => [
+  z.object({ role: z.literal(role), state: z.enum(ACTIVE_RUN_STATES), outcome: z.null(), endedAt: z.null() }),
+  z.object({ role: z.literal(role), state: z.enum(TERMINAL_RUN_STATES), outcome: z.enum(outcomes).nullable(), endedAt: z.string() })
+] as const
+export const runLifecycleSchema = z.union([
+  ...lifecycleOf('pm', PM_RUN_OUTCOMES),
+  ...lifecycleOf('developer', DEVELOPER_RUN_OUTCOMES),
+  ...lifecycleOf('designer', DESIGNER_RUN_OUTCOMES),
+  ...lifecycleOf('reviewer', REVIEWER_RUN_OUTCOMES)
+])
+export type RunLifecycle = z.infer<typeof runLifecycleSchema>
+
+export type Run = RunFields & RunLifecycle
+
+interface RunFields {
   runnerId: string | null
   // The runner's name when the run was placed on it
   runnerName: string | null
@@ -83,13 +108,10 @@ export interface Run {
   number: number
   agentId: string
   agentName: string
-  role: AgentRole
   projectId: string
   taskId: string | null
   taskRef: string | null
   taskTitle: string | null
-  state: RunState
-  outcome: RunOutcome | null
   summary: string | null
   error: string | null
   headSha: string | null
@@ -99,5 +121,4 @@ export interface Run {
   rateLimitResetAt: string | null
   queuedAt: string
   startedAt: string | null
-  endedAt: string | null
 }

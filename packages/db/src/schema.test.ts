@@ -163,6 +163,73 @@ describe.each([
     )
   })
 
+  describe('run lifecycle', () => {
+    const endedAt = new Date()
+    async function context() {
+      const project = await insertProject()
+      const task = await insertTask(project.id, 1)
+      const [pm] = await db.insert(agents).values({ name: `Juno ${project.id}`, role: 'pm' }).returning()
+      const [developer] = await db.insert(agents).values({ name: `Atlas ${project.id}`, role: 'developer' }).returning()
+      const [reviewer] = await db.insert(agents).values({ name: `Vera ${project.id}`, role: 'reviewer' }).returning()
+      const [epic] = await db.insert(epics).values({ projectId: project.id, title: 'Epic', createdBy: human }).returning()
+      return {
+        epicId: epic!.id,
+        pmRun: { agentId: pm!.id, projectId: project.id, role: 'pm' as const },
+        developerRun: { agentId: developer!.id, projectId: project.id, taskId: task.id, role: 'developer' as const },
+        reviewerRun: { agentId: reviewer!.id, projectId: project.id, taskId: task.id, role: 'reviewer' as const }
+      }
+    }
+
+    it.skipIf(!enabled)('rejects a running run with an end time, and an ended run without one', async () => {
+      const { developerRun } = await context()
+      await expectViolation(db.insert(runs).values({ ...developerRun, state: 'running', endedAt }), 'runs_ended_at_matches_state')
+      await expectViolation(db.insert(runs).values({ ...developerRun, state: 'completed' }), 'runs_ended_at_matches_state')
+    })
+
+    it.skipIf(!enabled)('rejects an outcome on a run that has not ended', async () => {
+      const { developerRun } = await context()
+      await expectViolation(db.insert(runs).values({ ...developerRun, state: 'running', outcome: 'pr_opened' }), 'runs_outcome_only_when_ended')
+    })
+
+    it.skipIf(!enabled)('rejects an outcome from another role', async () => {
+      const { developerRun, reviewerRun, pmRun } = await context()
+      const ended = { state: 'completed' as const, endedAt }
+      await expectViolation(db.insert(runs).values({ ...developerRun, ...ended, outcome: 'approved' }), 'runs_outcome_matches_role')
+      await expectViolation(db.insert(runs).values({ ...reviewerRun, ...ended, outcome: 'pr_opened' }), 'runs_outcome_matches_role')
+      await expectViolation(db.insert(runs).values({ ...pmRun, ...ended, outcome: 'stuck' }), 'runs_outcome_matches_role')
+    })
+
+    it.skipIf(!enabled)('gives a designer run the outcomes and context of a design author', async () => {
+      const { developerRun, epicId } = await context()
+      const designerRun = { ...developerRun, role: 'designer' as const }
+      const ended = { state: 'completed' as const, endedAt }
+      await db.insert(runs).values({ ...designerRun, ...ended, outcome: 'design_submitted' })
+      await expectViolation(db.insert(runs).values({ ...designerRun, ...ended, outcome: 'pr_opened' }), 'runs_outcome_matches_role')
+      await expectViolation(db.insert(runs).values({ ...designerRun, epicId }), 'runs_role_context')
+    })
+
+    it.skipIf(!enabled)('rejects a run outside its role\'s context', async () => {
+      const { developerRun, reviewerRun, pmRun, epicId } = await context()
+      await expectViolation(db.insert(runs).values({ ...pmRun, taskId: developerRun.taskId }), 'runs_role_context')
+      await expectViolation(db.insert(runs).values({ ...pmRun, epicId }), 'runs_role_context')
+      await expectViolation(db.insert(runs).values({ ...developerRun, epicId }), 'runs_role_context')
+      await expectViolation(db.insert(runs).values({ ...reviewerRun, epicId }), 'runs_role_context')
+    })
+
+    it.skipIf(!enabled)('keeps outcome-less endings, null reset times and deleted session refs legal', async () => {
+      const { developerRun, reviewerRun, pmRun, epicId } = await context()
+      await db.insert(runs).values([
+        { ...pmRun, state: 'completed', endedAt, planSessionId: null },
+        { ...pmRun, state: 'interrupted', endedAt },
+        { ...pmRun, state: 'failed', outcome: 'failed', endedAt },
+        { ...pmRun, state: 'completed', outcome: 'rate_limited', rateLimitResetAt: null, endedAt },
+        { ...developerRun, state: 'interrupted', endedAt },
+        { ...reviewerRun, state: 'completed', outcome: 'blocked', endedAt },
+        { ...reviewerRun, taskId: null, epicId, state: 'completed', outcome: 'approved', endedAt }
+      ])
+    })
+  })
+
   it.skipIf(!enabled)('rejects a task depending on itself', async () => {
     const task = await insertTask((await insertProject()).id, 1)
     await expectViolation(

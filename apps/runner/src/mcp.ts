@@ -1,5 +1,5 @@
-import { askQuestionInput, proposedPlanInput, EVIDENCE_KINDS, type AgentTool, type RunJob } from '@corral/contracts'
-import { REVIEW_VERDICTS, type AgentRole } from '@corral/core'
+import { askQuestionInput, proposedPlanInput, EVIDENCE_KINDS, reportOutcomeInput, type AgentTool, type RunJob } from '@corral/contracts'
+import { DESIGNER_RUN_OUTCOMES, DEVELOPER_RUN_OUTCOMES, REVIEWER_RUN_OUTCOMES, type AgentRole } from '@corral/core'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
@@ -22,10 +22,11 @@ interface ImageResult {
   images?: { mimeType: string, dataBase64: string }[]
 }
 
+const reported = (outcome: string) => outcome !== 'rate_limited'
 const outcomes: Record<AgentRole, readonly string[]> = {
-  designer: ['design_submitted', 'stuck', 'failed'],
-  developer: ['pr_opened', 'pr_updated', 'pr_rebased', 'findings_reported', 'stuck', 'failed'],
-  reviewer: [...REVIEW_VERDICTS, 'blocked', 'failed'],
+  designer: DESIGNER_RUN_OUTCOMES.filter(reported),
+  developer: DEVELOPER_RUN_OUTCOMES.filter(outcome => reported(outcome) && outcome !== 'design_submitted'),
+  reviewer: REVIEWER_RUN_OUTCOMES.filter(reported),
   pm: []
 }
 
@@ -77,16 +78,7 @@ const toolDefinitions = {
   },
   report_outcome: {
     description: 'Finish your run by reporting what happened. Corral validates it; if something is missing, the call fails and tells you what to fix.',
-    input: {
-      outcome: z.string().describe('One of the outcomes listed for your role'),
-      summary: z.string().min(1).describe('Plain-English summary of what you did, or your question when stuck'),
-      note: z.string().optional().describe('Developer only, required: one line of at most 200 characters saying what this run did, posted as a comment on the task, e.g. "Addressed review: dropped idle-thread fixture"'),
-      criteria: z.array(z.object({
-        criterionId: z.string(),
-        met: z.boolean(),
-        note: z.string().default('')
-      })).optional().describe('Reviewer only: a verdict per acceptance criterion')
-    }
+    input: reportOutcomeInput.shape
   },
   list_tasks: {
     description: 'The project’s tasks with their status, and epics with dependsOn epic ids, so plans reflect the live board.',

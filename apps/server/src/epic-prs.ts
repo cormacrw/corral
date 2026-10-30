@@ -1,4 +1,4 @@
-import type { EpicConflictItem, EpicReviewActionInput, EpicReviewItem, OutcomeReport, RunJob } from '@corral/contracts'
+import type { EpicConflictItem, EpicReviewActionInput, EpicReviewItem, EpicReviewReport, RunJob } from '@corral/contracts'
 import { ACTIVE_RUN_STATES, feedbackFixTitle, feedbackPoints, LEASE_DURATION_MS, markdownToRichText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne } from 'drizzle-orm'
@@ -6,6 +6,7 @@ import { appendAudit, auditEvent } from './audit.ts'
 import type { OrchestratorDeps } from './orchestrator.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import { getEpic } from './epics.ts'
+import { runEndValues } from './run-lifecycle.ts'
 import { listEvidence } from './runs.ts'
 import { thumbnailUrl } from './projects.ts'
 import { createTask, loadTask, toTasks, type ProjectRow } from './tasks.ts'
@@ -57,7 +58,7 @@ export class EpicPullRequests {
           await this.d.github.updatePullRequest(project.repository, pr.number, { body: this.body(epic, board, project) })
           // A moved epic head invalidates approval, even if board membership
           // didn't change. Active runs on the old head are fenced by state.
-          await tx.update(runs).set({ state: 'interrupted', endedAt: this.now(), error: 'Epic PR changed' })
+          await tx.update(runs).set(runEndValues({ state: 'interrupted', error: 'Epic PR changed' }, this.now()))
             .where(and(eq(runs.epicId, epic.id), inArray(runs.state, [...ACTIVE_RUN_STATES])))
           await tx.update(epics).set({ prNumber: pr.number, prHeadSha: pr.headSha, reviewState: 'in_review', rebaseRequested: false, conflictFiles: null, updatedAt: this.now() }).where(eq(epics.id, epic.id))
           changed = true
@@ -107,9 +108,8 @@ export class EpicPullRequests {
     })
   }
 
-  async report(run: RunRow, report: OutcomeReport): Promise<void> {
+  async report(run: RunRow, report: EpicReviewReport): Promise<void> {
     const { outcome } = report
-    if (outcome !== 'approved' && outcome !== 'changes_requested') throw new Error('Epic review outcomes are approved or changes_requested')
     let fixId: string | null = null
     await this.d.db.transaction(async (tx) => {
       const [project] = await tx.select().from(projects).where(eq(projects.id, run.projectId)).for('update')
@@ -119,7 +119,7 @@ export class EpicPullRequests {
       const pr = await this.d.github.getPullRequest(project.repository, epic.prNumber!)
       if (pr.state !== 'open' || pr.merged || pr.headSha !== run.headSha) throw new Error('Epic PR head changed; this verdict is stale')
       const actor: Actor = { kind: 'agent', role: 'reviewer', runId: run.id }
-      await tx.update(runs).set({ state: 'completed', outcome: report.outcome, summary: report.summary, endedAt: this.now() }).where(eq(runs.id, run.id))
+      await tx.update(runs).set(runEndValues({ state: 'completed', outcome, summary: report.summary }, this.now())).where(eq(runs.id, run.id))
       await tx.update(epics).set({ reviewState: report.outcome === 'approved' ? 'human_review' : 'changes_requested', updatedAt: this.now() }).where(eq(epics.id, epic.id))
       if (report.outcome === 'changes_requested') fixId = await createEpicFixTask(tx, project, epic, report.summary, actor)
       await appendAudit(tx, { projectId: project.id, actor }, auditEvent('epic.pr', { epicId: epic.id, event: outcome, headSha: run.headSha, summary: report.summary }))

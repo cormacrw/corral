@@ -148,11 +148,11 @@ describe('design tasks submit versions instead of a PR', () => {
     await t.db.update(tasks).set({ status: 'in_progress', branch: `design/${task.ref}`, headSha: 'old-design' }).where(eq(tasks.id, task.id))
     await t.db.insert(runs).values({
       agentId: designer!.id, projectId: project.id, taskId: task.id, role: 'designer',
-      state: 'completed', agentSessionId: 'older-designer-session', runnerId: 'r1'
+      state: 'completed', endedAt: new Date(), agentSessionId: 'older-designer-session', runnerId: 'r1'
     })
     await t.db.insert(runs).values({
       agentId: designer!.id, projectId: project.id, taskId: task.id, role: 'developer',
-      state: 'completed', agentSessionId: 'old-developer-session', runnerId: 'r1'
+      state: 'completed', endedAt: new Date(), agentSessionId: 'old-developer-session', runnerId: 'r1'
     })
     await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/comments`, { body: 'Keep the existing error screen' })
     await t.request('PATCH', `/api/projects/${project.slug}`, { paused: false })
@@ -354,7 +354,7 @@ describe('design tasks submit versions instead of a PR', () => {
       await t.db.update(tasks).set({ status }).where(eq(tasks.id, created.id))
       if (ran) {
         const [agent] = await t.db.select().from(agents).where(eq(agents.role, 'developer')).limit(1)
-        await t.db.insert(runs).values({ agentId: agent!.id, projectId: project.id, taskId: created.id, role: 'developer', state: 'completed' })
+        await t.db.insert(runs).values({ agentId: agent!.id, projectId: project.id, taskId: created.id, role: 'developer', state: 'completed', endedAt: new Date() })
       }
       return created
     }

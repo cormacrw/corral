@@ -1,4 +1,4 @@
-import { TASK_TYPES, type AgentRole, type RunOutcome } from '@corral/core'
+import { RUN_OUTCOMES, REVIEW_VERDICTS, TASK_TYPES, type AgentRole } from '@corral/core'
 import { z } from 'zod'
 
 // The protocol between apps/server and apps/runner over WebSocket (D7). The
@@ -87,16 +87,47 @@ export type RunExit = z.infer<typeof runExitSchema>
 // epoch, so a stale run's calls are rejected (stale-runners-and-fencing.md).
 export type AgentTool = z.infer<typeof agentToolSchema>
 
-export interface OutcomeReport {
-  outcome: RunOutcome
-  summary: string
-  // Developer: a one-line work note, posted as a comment by the agent
-  note?: string
-  // Reviewer verdicts per acceptance criterion
-  criteria?: { criterionId: string, met: boolean, note: string }[]
-  // Developer: the commit the runner pushed
-  headSha?: string
-}
+// What an agent can report. `rate_limited` comes from the run's exit, never from
+// the agent.
+const REPORTED_OUTCOMES = z.enum(RUN_OUTCOMES).exclude(['rate_limited'])
+const NON_REVIEW_OUTCOMES = REPORTED_OUTCOMES.exclude([...REVIEW_VERDICTS])
+const unknownOutcome = `must be one of ${REPORTED_OUTCOMES.options.join(', ')}`
+const criterionVerdict = z.object({ criterionId: z.string(), met: z.boolean(), note: z.string().default('') })
+const missingCriteria = 'Give a verdict for every acceptance criterion'
+
+// The report_outcome tool's arguments. MCP clients need a plain object as a
+// tool's input, so this stays flat; the schemas below decide which fields each
+// outcome needs.
+export const reportOutcomeInput = z.object({
+  outcome: REPORTED_OUTCOMES.describe('One of the outcomes listed for your role'),
+  summary: z.string().trim().min(1, 'Add a summary').describe('Plain-English summary of what you did, or your question when stuck'),
+  note: z.string().trim().optional().describe('Developer only, required: one line of at most 200 characters saying what this run did, posted as a comment on the task, e.g. "Addressed review: dropped idle-thread fixture"'),
+  criteria: z.array(criterionVerdict).optional().describe('Reviewer only: a verdict per acceptance criterion')
+})
+
+// Developer: the commit the runner pushed
+const reportFields = { summary: reportOutcomeInput.shape.summary, note: reportOutcomeInput.shape.note, headSha: z.string().optional() }
+const taskReview = (outcome: z.ZodType<'approved' | 'changes_requested'>) => z.object({ ...reportFields, outcome, criteria: z.array(criterionVerdict, { error: missingCriteria }) })
+const nonReview = z.object({ ...reportFields, outcome: NON_REVIEW_OUTCOMES })
+
+export const outcomeReportSchema = z.discriminatedUnion('outcome', [
+  taskReview(z.literal('approved')), taskReview(z.literal('changes_requested')), nonReview
+], { error: unknownOutcome })
+
+// D24: an approved rebase review carries the earlier approval's verdicts over,
+// so it needs none of its own
+export const rebaseReviewReportSchema = z.discriminatedUnion('outcome', [
+  z.object({ ...reportFields, outcome: z.literal('approved'), criteria: z.array(criterionVerdict).optional() }),
+  taskReview(z.literal('changes_requested')), nonReview
+], { error: unknownOutcome })
+
+// D23: an integration review judges the whole epic, not one task's criteria
+export const epicReviewReportSchema = z.object({
+  ...reportFields, outcome: z.enum(REVIEW_VERDICTS, { error: `must be one of ${REVIEW_VERDICTS.join(', ')}` })
+})
+
+export type OutcomeReport = z.infer<typeof outcomeReportSchema> | z.infer<typeof rebaseReviewReportSchema>
+export type EpicReviewReport = z.infer<typeof epicReviewReportSchema>
 
 // ── Messages ─────────────────────────────────────────────────────────────────
 

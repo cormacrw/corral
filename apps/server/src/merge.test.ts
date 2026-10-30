@@ -39,7 +39,7 @@ describe('merge orchestrator and human controls', () => {
 
   // Approve, claim, submit with evidence, review and approve: the task waits
   // in Agent review with an approved verdict for 'abc123'
-  async function approved(options: { humanReview?: boolean, requiredChecks?: string[], task?: Parameters<TestApp['createTask']>[1], noteEvidence?: boolean, reviewRounds?: number } = {}) {
+  async function approved(options: { humanReview?: boolean, requiredChecks?: string[], task?: Parameters<TestApp['createTask']>[1], noteEvidence?: boolean, reviewRounds?: number, noVerdicts?: boolean } = {}) {
     const project = await t.createProject()
     await t.request('PATCH', `/api/projects/${project.slug}`, { requiredChecks: options.requiredChecks ?? ['lint'] })
     const created = await t.createTask(project.slug, { ...(options.humanReview !== undefined && { humanReview: options.humanReview }), ...options.task })
@@ -59,11 +59,17 @@ describe('merge orchestrator and human controls', () => {
     const review = (await runner.next('run.assign', m => m.job.taskId === created.id && m.job.role === 'reviewer')).job
     if (task.acceptanceCriteria.some(c => c.checkedByHuman)) expect(review.prompt).toContain('Do not request changes over them or their missing evidence')
     expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', {
-      outcome: 'approved', summary: 'Looks right', criteria: task.acceptanceCriteria.filter(c => !c.checkedByHuman).map(c => ({ criterionId: c.id, met: true, note: '' }))
+      outcome: 'approved', summary: 'Looks right', ...(!options.noVerdicts && { criteria: task.acceptanceCriteria.filter(c => !c.checkedByHuman).map(c => ({ criterionId: c.id, met: true, note: '' })) })
     })).toMatchObject({ ok: true })
     const pr = [...t.github.pulls.values()].find(p => p.head === dev.branch)!
     return { project, task: await getTask(project, created.number), pr, dev }
   }
+
+  it('takes a reviewer approval with no verdicts when every criterion is a human check', async () => {
+    const { project, task } = await approved({ humanReview: false, requiredChecks: [], noVerdicts: true, task: { acceptanceCriteria: [{ text: 'Plays on a real iPhone', checkedByHuman: true }] } })
+    expect(task).toMatchObject({ status: 'human_review' })
+    await pause(project)
+  })
 
   it.each([1, 2])('reserves flagged criteria for the human, without requiring agent evidence or verdicts, and merges after Inbox approval (%i human checks)', async (humanChecks) => {
     const { project, task, pr, dev } = await approved({
