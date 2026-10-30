@@ -375,6 +375,7 @@ export async function applyTransition(
 // when the description and criteria are as they were
 export interface TaskContentEdit {
   description: boolean
+  fields?: string[]
   criteria: { added: number, removed: number, reworded: number } | null
 }
 
@@ -383,8 +384,6 @@ export interface TaskContentEdit {
 export async function patchTask(db: Executor, project: ProjectRow, taskId: string, input: PatchTaskInput, actor: Actor): Promise<TaskContentEdit | null> {
   return db.transaction(async (tx) => {
     const { task } = await lockTask(tx, taskId)
-    // Merged is final (D10): the record stays as it shipped; comments still work
-    if (task.status === 'merged') throw new ApiFailure(409, { code: 'conflict', constraint: 'task_merged' })
     const { acceptanceCriteria: criteriaInput, dependsOn, ...fields } = input
     // D20: a design task's flag can't be turned off, by the human or a plan
     if ((fields.type ?? task.type) === 'design') fields.humanReview = true
@@ -420,7 +419,9 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
     }
     if (dependsOn) await setDependencies(tx, project, task, dependsOn)
     await tx.insert(auditLog).values({ projectId: project.id, taskId, actor, action: 'task.updated', detail: { changed: Object.keys(input) } })
-    return descriptionChanged || criteriaChange ? { description: descriptionChanged, criteria: criteriaChange } : null
+    const changedFields = Object.keys(fields).filter(k => JSON.stringify(fields[k as keyof typeof fields]) !== JSON.stringify(task[k as keyof TaskRow]))
+    if (dependsOn !== undefined) changedFields.push('dependsOn')
+    return descriptionChanged || criteriaChange || changedFields.length ? { description: descriptionChanged, criteria: criteriaChange, fields: changedFields.filter(k => k !== 'description') } : null
   })
 }
 

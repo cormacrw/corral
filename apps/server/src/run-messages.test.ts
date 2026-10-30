@@ -156,9 +156,12 @@ describe('edits to a task with a live run', () => {
     expect(history.some(h => h.action === 'run.message_sent')).toBe(true)
   })
 
-  it('sends the new description when only the description changed, and nothing for other fields', async () => {
+  it('sends changed title and priority as well as description, and skips unchanged content', async () => {
     const { project, task, job } = await liveRun()
     await patch(project.slug, task.number, { priority: 'high', title: 'Add a login page' })
+    const fields = await runner.next('run.message', m => m.runId === job.runId)
+    expect(fields.text).toContain('Add a login page')
+    expect(fields.text).toContain('high')
     // Same description and criteria as before: no change to tell
     await patch(project.slug, task.number, { description: task.description, acceptanceCriteria: task.acceptanceCriteria.map(c => ({ id: c.id, text: c.text })) })
     expect(messagesFor(job.runId)).toHaveLength(0)

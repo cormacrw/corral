@@ -2,7 +2,7 @@
 // nothing here assumes there is only one user.
 export type Actor =
   | { kind: 'human', userId: string, viaPm?: { sessionId: string, runId: string } }
-  | { kind: 'agent', role: AgentRole, runId: string }
+  | { kind: 'agent', role: AgentRole, runId: string, sessionId?: string }
   | { kind: 'system', component: SystemComponent }
 
 export const AGENT_ROLES = ['pm', 'developer', 'reviewer'] as const
