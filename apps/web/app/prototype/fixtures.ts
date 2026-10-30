@@ -330,6 +330,16 @@ export const runs: Run[] = [
     error, headSha: null, inputTokens: 4_000, cacheReadTokens: 22_000, outputTokens: 900, rateLimitResetAt: null,
     queuedAt: ago(endedAgo + 22), startedAt: ago(endedAgo + 21), endedAt: ago(endedAgo)
   })),
+  // PM turns have no outcome to report: one finished, one stopped
+  ...([
+    [125, 'completed', 'The flaky test is the SSE reconnect one.', null, 240],
+    [120, 'interrupted', null, 'Stopped by a human', 500]
+  ] as const).map(([number, state, summary, error, endedAgo]): Run => ({
+    runnerId: 'runner-1', runnerName: 'home-server', id: `r-pm-${number}`, number, agentId: 'a-pm', agentName: 'Pam', role: 'pm', projectId: 'p-corral',
+    taskId: null, taskRef: null, taskTitle: null, state, outcome: null, summary,
+    error, headSha: null, inputTokens: 2_000, cacheReadTokens: 12_000, outputTokens: 400, rateLimitResetAt: null,
+    queuedAt: ago(endedAgo + 3), startedAt: ago(endedAgo + 2), endedAt: ago(endedAgo)
+  })),
   // A live Codex run, which can't take messages mid-run
   {
     runnerId: 'runner-1', runnerName: 'home-server', id: 'r-4', number: 130, agentId: 'a-dev', agentName: 'Victor', role: 'developer', projectId: 'p-site',
