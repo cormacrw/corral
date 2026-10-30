@@ -11,6 +11,7 @@ import {
   createTaskInput,
   deleteProjectInput,
   humanTransitionInput,
+  flowMetricsQuery,
   inboxActionInput,
   epicReviewActionInput,
   patchAgentInput,
@@ -42,6 +43,7 @@ import { checkThumbnail, readThumbnail, THUMBNAIL_MAX_BYTES } from './thumbnails
 import { byteRange } from './byte-range.ts'
 import { createAttachment, readAttachment } from './attachments.ts'
 import { recordDeployment, updateDeploymentInbox, type ReleaseNotes } from './deployments.ts'
+import { flowMetrics } from './flow-metrics.ts'
 import { approveDesign, DESIGN_BUNDLE_HEADERS, listDesignVersions, readDesignFile, readDesignScreenshot } from './designs.ts'
 import { checkAvatar, getProfile, patchProfile, readAvatar, setAgentAvatar, setUserAvatar } from './avatars.ts'
 import { getEpic, listEpics, patchEpic, setEpicDependencies } from './epics.ts'
@@ -223,6 +225,11 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     })
 
     .get('/projects/:slug', async c => c.json(toProject(await findProjectBySlug(db, c.req.param('slug')))))
+
+    .get('/projects/:slug/metrics/flow', validate('query', flowMetricsQuery), async (c) => {
+      const project = await findProjectBySlug(db, c.req.param('slug'))
+      return c.json(await flowMetrics(db, project, c.req.valid('query').window))
+    })
 
     .put('/projects/:slug/thumbnail', thumbnailBodyLimit, async (c) => {
       const project = await findProjectBySlug(db, c.req.param('slug'))
