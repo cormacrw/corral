@@ -1,5 +1,5 @@
 import { checkEpicDependencies } from '@corral/core'
-import type { CreateTaskInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
+import type { CreateTaskInput, InboxActionInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
 import * as f from './fixtures'
@@ -216,6 +216,15 @@ route('POST', '/deployments/:id/dismiss', ([id]) => {
   return { ok: true }
 })
 route('GET', '/inbox', () => f.inbox())
+// Let the static Inbox exercise send and auto-advance without a server.
+route('POST', '/inbox/:taskId/actions', ([taskId], body) => {
+  const task = f.tasks.find(t => t.id === taskId) ?? notFound()
+  const input = body as InboxActionInput
+  if (input.action === 'delete') f.tasks.splice(f.tasks.indexOf(task), 1)
+  else task.status = input.action === 'approve' ? 'merged' : input.action === 'send_back' ? 'backlog' : input.action === 'resolve' ? input.to : 'in_progress'
+  emit({ type: 'task.updated', task })
+  return { task: input.action === 'delete' ? null : task }
+})
 
 route('POST', '/plan/sessions', (_, body) => {
   const { id = crypto.randomUUID(), projectId, text, runtime = 'claude-code', taskRef } = body as StartPlanSessionInput

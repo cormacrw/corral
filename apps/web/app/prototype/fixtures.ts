@@ -673,7 +673,17 @@ export function inbox(): Inbox {
     })
   }
   needsYou.sort((a, b) => b.at.localeCompare(a.at))
+  const completed = tasks.find(t => t.status === 'merged')!
+  const project = projects.find(p => p.id === completed.projectId)!
+  const activity: Inbox['activity'] = [{
+    id: 'activity-merged', type: 'activity',
+    project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
+    taskId: completed.id, taskRef: completed.ref, subject: completed.title,
+    preview: 'The task was merged.', body: 'The task was merged.',
+    sender: { name: 'Corral', role: 'system' }, at: completed.updatedAt,
+    prUrl: completed.prUrl, resolution: null
+  }]
   const count = needsYou.length
   needsYou.push(...releaseNotes.filter(r => !r.resolution))
-  return { needsYou, activity: [], resolved: releaseNotes.filter(r => r.resolution), count }
+  return { needsYou, activity, resolved: releaseNotes.filter(r => r.resolution), count }
 }
