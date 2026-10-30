@@ -49,8 +49,10 @@ export async function flowMetrics(db: Executor, project: Pick<typeof schema.proj
     let cursor = created
     let cycleStart: number | null = waiting(status) ? null : created
     const spent = new Map<TaskStatus, number>()
+    // Merged is terminal, not time spent waiting. The audit row uses the
+    // transaction's start time, so it can fall just before mergedAt.
     const accrue = (end: number) => {
-      spent.set(status, (spent.get(status) ?? 0) + Math.max(0, end - cursor))
+      if (status !== 'merged') spent.set(status, (spent.get(status) ?? 0) + Math.max(0, end - cursor))
       cursor = end
     }
     for (const entry of history) {
