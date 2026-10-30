@@ -50,7 +50,7 @@ A card with an `error`-tinted border.
 ## Data
 
 - **Project:** name, thumbnail (colour or image), prefix, GitHub remote, default branch, default epic review mode, merge method, required checks, paused, human-review default, review-round cap, failed-run cap.
-- **Writes:** a single `PATCH` on Save. Pause is its own call.
+- **Writes:** a single `PATCH` on Save for form fields (including the fallback colour). Pause is its own call. Thumbnail upload (`PUT /api/projects/:slug/thumbnail`, multipart `file` field) and removal (`DELETE` at the same path) apply immediately and update the preview and sidebar. Upload accepts PNG, JPEG, WebP and GIF up to 2 MB, shows a spinner over the 40px preview while pending, and reports validation and server errors in a toast without replacing the previous image. **Remove image** appears only when an image is set. Swatches remain usable with an image and change only its fallback colour; the image takes precedence. The prototype keeps these changes in memory until reload.
 - **Remove:** `DELETE /api/projects/:slug` with `{ "confirm": "<project name>" }`; anything else is a 400. The server pauses the project, stops its queued and running runs and releases their leases, then deletes the project with its tasks, epics, plans, plan sessions and runs in one transaction. It makes no GitHub call. Clients get a `project.deleted` event. The runner is asked to remove each worked task's worktrees (keeping any with uncommitted changes); it has no hook yet for removing the repository's clone, so that stays on disk.
 
 ## States

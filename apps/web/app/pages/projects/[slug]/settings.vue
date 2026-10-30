@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { PatchProjectInput, Project } from '@corral/contracts'
 import { api, ApiError } from '~/composables/useApi'
-import { EPIC_REVIEW_MODE, initials, THUMBNAIL_COLORS } from '~/utils/labels'
+import { EPIC_REVIEW_MODE, THUMBNAIL_COLORS } from '~/utils/labels'
 
-// Project settings (design/project-settings.md): one PATCH on Save; pause is its own switch.
+// Project settings (design/project-settings.md): form fields save together; pause and images apply immediately.
 // On mobile the sections stack under the mobile header, which holds Save (design/mobile.md).
 const route = useRoute()
 const device = useDevice()
@@ -19,8 +19,14 @@ const form = reactive<Required<Omit<PatchProjectInput, 'paused'>>>({
 function fill(p: Project) {
   Object.assign(form, { name: p.name, prefix: p.prefix, thumbnailColor: p.thumbnailColor, defaultBranch: p.defaultBranch, mergeMethod: p.mergeMethod, requiredChecks: [...p.requiredChecks], humanReviewDefault: p.humanReviewDefault, epicReviewModeDefault: p.epicReviewModeDefault, reviewRoundCap: p.reviewRoundCap, failedRunCap: p.failedRunCap })
 }
-watch(project, (p) => {
-  if (p) fill(p)
+watch(project, (p, previous) => {
+  if (!p) return
+  // Immediate image writes and live events must not discard unsaved fields.
+  const edits = previous?.id === p.id
+    ? Object.fromEntries(Object.entries(form).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(previous[key as keyof Project])))
+    : {}
+  fill(p)
+  Object.assign(form, edits)
 }, { immediate: true })
 
 const prefixValid = computed(() => /^[A-Z]{2,5}$/.test(form.prefix))
@@ -59,6 +65,35 @@ async function setPaused(paused: boolean) {
   } catch (e) {
     toast.add({ title: 'Could not change pause', description: e instanceof Error ? e.message : String(e), color: 'error' })
   }
+}
+const thumbnailInput = ref<HTMLInputElement | null>(null)
+const thumbnailBusy = ref(false)
+async function changeThumbnail(image: File | null) {
+  const p = project.value
+  if (!p || thumbnailBusy.value) return
+  thumbnailBusy.value = true
+  try {
+    const updated = image ? await api.projects.setThumbnail(p.slug, image) : await api.projects.clearThumbnail(p.slug)
+    live.state.value.projects = live.state.value.projects.map(item => item.id === updated.id ? updated : item)
+  } catch (e) {
+    toast.add({ title: image ? 'Image not uploaded' : 'Image not removed', description: e instanceof Error ? e.message : String(e), color: 'error' })
+  } finally {
+    thumbnailBusy.value = false
+  }
+}
+function uploadThumbnail(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  const error = !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)
+    ? 'Choose a PNG, JPEG, WebP or GIF image.'
+    : file.size > 2 * 1024 * 1024 ? 'The image is over 2 MB.' : null
+  if (error) {
+    toast.add({ title: 'Image not uploaded', description: error, color: 'error' })
+    return
+  }
+  void changeThumbnail(file)
 }
 const checkChoices = ['lint', 'typecheck', 'test', 'build']
 const toggleCheck = (name: string) => {
@@ -172,11 +207,27 @@ async function remove() {
                 Shown in the sidebar and overview
               </p>
             </div>
-            <div class="flex items-center gap-2">
+            <div class="flex flex-wrap items-center gap-2">
               <span
-                class="flex size-10 items-center justify-center rounded-lg font-semibold text-white"
-                :style="{ background: form.thumbnailColor ?? '#64748b' }"
-              >{{ initials(form.name || project.name) }}</span>
+                class="relative inline-flex"
+                :aria-busy="thumbnailBusy"
+              >
+                <ProjectThumbnail
+                  :project="{ ...project, name: form.name || project.name, thumbnailColor: form.thumbnailColor }"
+                  :size="40"
+                />
+                <span
+                  v-if="thumbnailBusy"
+                  role="status"
+                  aria-label="Updating thumbnail"
+                  class="absolute inset-0 flex items-center justify-center rounded-lg bg-default/80"
+                >
+                  <UIcon
+                    name="i-lucide-loader-circle"
+                    class="size-5 animate-spin"
+                  />
+                </span>
+              </span>
               <div
                 role="radiogroup"
                 aria-label="Thumbnail colour"
@@ -194,6 +245,31 @@ async function remove() {
                   @click="form.thumbnailColor = color"
                 />
               </div>
+              <input
+                ref="thumbnailInput"
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                aria-label="Choose a project thumbnail"
+                class="hidden"
+                @change="uploadThumbnail"
+              >
+              <UButton
+                label="Upload image"
+                size="xs"
+                variant="outline"
+                color="neutral"
+                :disabled="thumbnailBusy"
+                @click="thumbnailInput?.click()"
+              />
+              <UButton
+                v-if="project.thumbnailUrl"
+                label="Remove image"
+                size="xs"
+                variant="ghost"
+                color="neutral"
+                :disabled="thumbnailBusy"
+                @click="changeThumbnail(null)"
+              />
             </div>
           </div>
           <div class="grid gap-2 sm:grid-cols-[1fr_320px]">

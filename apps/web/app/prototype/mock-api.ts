@@ -58,7 +58,29 @@ route('GET', '/setup/clis', () => f.clis)
 // Return the complete project, including its bundled thumbnailUrl, just like the API.
 route('GET', '/projects', () => f.projects)
 route('GET', '/projects/:slug', ([slug]) => project(slug!))
-route('PATCH', '/projects/:slug', ([slug], body) => Object.assign(project(slug!), body))
+route('PATCH', '/projects/:slug', ([slug], body) => {
+  const p = Object.assign(project(slug!), body)
+  emit({ type: 'project.updated', project: p })
+  return p
+})
+route('PUT', '/projects/:slug/thumbnail', async ([slug], body) => {
+  const p = project(slug!)
+  const image = (body as FormData).get('file') as Blob
+  const thumbnailUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(image)
+  })
+  Object.assign(p, { thumbnailUrl, updatedAt: new Date().toISOString() })
+  emit({ type: 'project.updated', project: p })
+  return p
+})
+route('DELETE', '/projects/:slug/thumbnail', ([slug]) => {
+  const p = Object.assign(project(slug!), { thumbnailUrl: null, updatedAt: new Date().toISOString() })
+  emit({ type: 'project.updated', project: p })
+  return p
+})
 
 route('GET', '/projects/:slug/tasks', ([slug], _, query) => {
   const p = project(slug!)
@@ -322,8 +344,8 @@ export async function mockCall<T>(method: string, path: string, body?: unknown):
     if (!match) continue
     const params = match.slice(1).map(decodeURIComponent)
     // Copies both ways, as if over the wire, so pages and fixtures stay apart
-    const input: unknown = body === undefined || body instanceof Blob ? body : JSON.parse(JSON.stringify(body))
-    const result = handler(params, input, new URLSearchParams(search))
+    const input: unknown = body === undefined || body instanceof Blob || body instanceof FormData ? body : JSON.parse(JSON.stringify(body))
+    const result = await handler(params, input, new URLSearchParams(search))
     return (result === undefined ? undefined : JSON.parse(JSON.stringify(result))) as T
   }
   notFound()

@@ -59,11 +59,11 @@ async function call<T>(method: string, path: string, body?: unknown, options?: {
     const { mockCall } = await import('~/prototype/mock-api')
     return mockCall<T>(method, path, body)
   }
-  // A Blob (an image upload) goes as is, with its own type; anything else is JSON
+  // Multipart uploads let the browser set the boundary; blobs use their own type.
   const res = await fetch(`/api${path}`, {
     method,
-    headers: body === undefined ? {} : { 'content-type': body instanceof Blob ? body.type : 'application/json' },
-    body: body === undefined ? undefined : body instanceof Blob ? body : JSON.stringify(body),
+    headers: body === undefined || body instanceof FormData ? {} : { 'content-type': body instanceof Blob ? body.type : 'application/json' },
+    body: body === undefined ? undefined : body instanceof Blob || body instanceof FormData ? body : JSON.stringify(body),
     // Outlives the page, for a request sent as it unloads
     keepalive: options?.keepalive
   })
@@ -121,6 +121,12 @@ export const api = {
     create: (input: CreateProjectInput) => call<Project>('POST', '/projects', input),
     patch: (slug: string, input: PatchProjectInput) => call<Project>('PATCH', `/projects/${slug}`, input),
     remove: (slug: string, confirm: string) => call<null>('DELETE', `/projects/${slug}`, { confirm }),
+    setThumbnail: (slug: string, image: File) => {
+      const form = new FormData()
+      form.append('file', image)
+      return call<Project>('PUT', `/projects/${slug}/thumbnail`, form)
+    },
+    clearThumbnail: (slug: string) => call<Project>('DELETE', `/projects/${slug}/thumbnail`),
     // Open PRs and their merge gates, read live from GitHub
     pullRequests: (slug: string) => call<PullRequestStatus[]>('GET', `/projects/${slug}/pull-requests`)
   },
