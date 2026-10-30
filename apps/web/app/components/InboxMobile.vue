@@ -144,7 +144,7 @@ const tabs = computed(() => [
             class="text-base"
           />
           <div
-            v-if="selected.prUrl || (selected.type === 'human_review' && task?.gateChecks?.length)"
+            v-if="task?.type !== 'spike' && (selected.prUrl || (selected.type === 'human_review' && task?.gateChecks?.length))"
             class="flex flex-wrap gap-1.5"
           >
             <UButton

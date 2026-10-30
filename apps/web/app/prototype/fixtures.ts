@@ -276,6 +276,11 @@ export const tasks: Task[] = [
     acceptanceCriteria: criteria('Undelivered webhooks are sent again after a restart')
   }),
   task(corral, 19, { title: 'Keep the run log open across reloads', status: 'in_progress', paused: true, branch: 'corral/cor-19-run-log' }),
+  task(corral, 20, {
+    title: 'Spike: resilient SSE reconnects', type: 'spike', status: 'human_review',
+    headSha: 'findings-spike-20',
+    acceptanceCriteria: criteria('Recommend a reconnect strategy').map(c => ({ ...c, met: true }))
+  }),
   task(site, 1, { title: 'New landing page hero', status: 'ready', type: 'design', epicId: 'e-site' }),
   task(site, 2, { title: 'Fix broken pricing link', status: 'merged', type: 'bug', epicId: 'e-shipped', mergedAt: ago(10) }),
   task(site, 3, {
@@ -397,6 +402,10 @@ export const runEvents: Record<string, RunEvent[]> = {
 }
 
 export const comments: Record<string, Comment[]> = {
+  [at('COR-20').id]: [{
+    id: 'cm-findings', taskId: at('COR-20').id, author: { kind: 'agent', role: 'developer', runId: 'r-spike' }, pinned: false, createdAt: ago(10),
+    body: '## Findings\n\n### Recommendation\n\nUse **exponential backoff** with jitter.\n\n- Resume from the last event ID.\n- Cap the retry delay at 30 seconds.\n\nFollow up: add reconnect coverage for interrupted streams.'
+  }],
   [at('COR-3').id]: [
     { id: 'cm-1', taskId: at('COR-3').id, author: { kind: 'human', userId: 'user-1' }, body: 'Keep the fixtures out of the production bundle.', pinned: true, createdAt: ago(40) },
     { id: 'cm-2', taskId: at('COR-3').id, author: { kind: 'agent', role: 'developer', runId: 'r-1' }, body: 'Done: the fixtures load only when the prototype flag is set.', pinned: false, createdAt: ago(10) }
@@ -422,6 +431,11 @@ const logUrl = 'data:text/plain,' + encodeURIComponent('Approval recorded for ve
 // A self-contained preview image keeps the prototype independent of the API.
 const screenshotUrl = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#f8fafc"/><rect x="32" y="32" width="576" height="296" rx="12" fill="white" stroke="#cbd5e1"/><text x="64" y="90" font-family="sans-serif" font-size="24" fill="#0f172a">Design version 1</text><text x="64" y="146" font-family="sans-serif" font-size="20" fill="#15803d">✓ Approved</text><text x="64" y="198" font-family="sans-serif" font-size="16" fill="#475569">The build can now be planned.</text></svg>')
 export const evidence: Record<string, Evidence[]> = {
+  [at('COR-20').id]: [{
+    id: 'ev-spike', taskId: at('COR-20').id, criterionId: at('COR-20').acceptanceCriteria[0]!.id, runId: 'r-spike', round: 0, kind: 'note',
+    note: '**Investigation:** replaying the last event ID recovered missed events; capped backoff avoided repeated immediate retries.',
+    fileName: null, contentType: null, size: 0, url: null, createdAt: ago(15)
+  }],
   [reviewTask.id]: [
     fileEvidence('ev-shot', 0, 'screenshot', 'approved-version.svg', 'image/svg+xml', screenshotUrl),
     fileEvidence('ev-log', 0, 'log', 'approval.log', 'text/plain', logUrl),
@@ -434,6 +448,12 @@ export const evidence: Record<string, Evidence[]> = {
 }
 
 export const reviews: Record<string, Review[]> = {
+  [at('COR-20').id]: [{
+    id: 'review-spike', taskId: at('COR-20').id, runId: 'r-spike-review', round: 0, headSha: 'findings-spike-20',
+    verdict: 'approved', summary: 'The findings answer the investigation.', author: { kind: 'agent', role: 'reviewer', runId: 'r-spike-review' },
+    criteria: at('COR-20').acceptanceCriteria.map(c => ({ criterionId: c.id, met: true, note: 'The recommendation covers replay and bounded retries.' })),
+    createdAt: ago(5)
+  }],
   [reviewTask.id]: [{
     id: 'review-5', taskId: reviewTask.id, runId: 'r-2', round: 0, headSha: '5b030d7e1c',
     verdict: 'approved', summary: 'Approval verified.', author: { kind: 'agent', role: 'reviewer', runId: 'r-2' },
@@ -614,6 +634,8 @@ export const clis: CliStatus[] = [
   { id: 'codex', name: 'Codex', version: '0.50.0', signedIn: false }
 ]
 
+export const resolvedInbox: Inbox['resolved'] = []
+
 // The inbox is derived from the tasks above that need the human
 export function inbox(): Inbox {
   const needsYou: InboxItem[] = tasks
@@ -622,7 +644,7 @@ export function inbox(): Inbox {
       const project = projects.find(p => p.id === t.projectId)!
       const type = t.status === 'human_review' ? 'human_review' as const : t.status === 'blocked' ? 'blocked' as const : 'failed' as const
       const subject = type === 'human_review' ? `Review ${t.title}` : t.title
-      const body = t.statusReason ?? 'The reviewer approved this change and it needs your review.'
+      const body = (t.type === 'spike' ? comments[t.id]?.findLast(c => c.body.startsWith('## Findings'))?.body : null) ?? t.statusReason ?? 'The reviewer approved this change and it needs your review.'
       return {
         id: t.id,
         type,
@@ -662,5 +684,5 @@ export function inbox(): Inbox {
     })
   }
   needsYou.sort((a, b) => b.at.localeCompare(a.at))
-  return { needsYou, activity: [], resolved: [], count: needsYou.length }
+  return { needsYou, activity: [], resolved: resolvedInbox, count: needsYou.length }
 }

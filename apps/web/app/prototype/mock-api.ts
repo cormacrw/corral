@@ -1,5 +1,5 @@
 import { checkEpicDependencies } from '@corral/core'
-import type { CreateTaskInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
+import type { InboxActionInput, CreateTaskInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
 import * as f from './fixtures'
@@ -205,6 +205,25 @@ route('POST', '/projects/:slug/runs/:runId/messages', ([slug, runId], body) => {
 })
 
 route('GET', '/inbox', () => f.inbox())
+route('POST', '/inbox/:taskId/actions', ([taskId], body) => {
+  const task = f.tasks.find(t => t.id === taskId) ?? notFound()
+  const input = body as InboxActionInput
+  const item = f.inbox().needsYou.find(i => i.taskId === taskId)
+  if (!item || item.type === 'plan_thread' || item.type === 'epic_review' || task.status !== 'human_review' || !['approve', 'request_changes'].includes(input.action)) {
+    throw new ApiError(409, { code: 'conflict', constraint: null }, 'This review is no longer actionable')
+  }
+  const accepted = input.action === 'approve'
+  const now = new Date().toISOString()
+  Object.assign(task, { status: accepted ? 'merged' : 'in_progress', mergedAt: accepted ? now : null, updatedAt: now })
+  if (input.action === 'request_changes') {
+    ;(f.comments[task.id] ??= []).push({ id: `cm-${Date.now()}`, taskId: task.id, author: { kind: 'human', userId: f.profile.id }, body: input.text, pinned: false, createdAt: now })
+    task.statusReason = input.text
+  }
+  const resolution = accepted ? (task.type === 'spike' ? 'You accepted the findings' : 'You approved the merge') : 'You requested changes'
+  f.resolvedInbox.unshift({ ...item, id: `resolved-${task.id}-${Date.now()}`, type: 'activity', sender: { name: 'You', role: 'system' }, body: resolution, preview: resolution, resolution, at: now })
+  emit({ type: 'task.updated', task })
+  return { task }
+})
 
 route('POST', '/plan/sessions', (_, body) => {
   const { id = crypto.randomUUID(), projectId, text, runtime = 'claude-code', taskRef } = body as StartPlanSessionInput

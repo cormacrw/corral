@@ -38,7 +38,7 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     const event = typeof detail.event === 'string' ? detail.event : typeof detail.event === 'object' && detail.event ? String((detail.event as { type?: string }).type) : null
     const base = { id: String(entry.id), project: projectTag(project), taskId: task.id, taskRef: taskRef(project.prefix, task.number), subject: task.title, prUrl: task.prUrl, at: entry.createdAt.toISOString() }
     if (entry.actor.kind === 'human' && (entry.action === 'task.deleted' || ['resolve', 'human_approve', 'human_request_changes', 'send_back'].includes(event ?? ''))) {
-      const resolution = resolutionText(entry.action, event, detail)
+      const resolution = resolutionText(entry.action, event, detail, task.type)
       resolved.push({ ...base, type: 'activity', preview: resolution, body: resolution, sender: { name: 'You', role: 'system' }, resolution })
     } else if (entry.action === 'review.recorded' || (entry.action === 'task.transition' && ACTIVITY_EVENTS.includes(event ?? ''))) {
       const text = activityText(entry.action, event, detail, task.prNumber, task.type)
@@ -198,9 +198,9 @@ function activityText(action: string, event: string | null, detail: Record<strin
   }
 }
 
-function resolutionText(action: string, event: string | null, detail: Record<string, unknown>): string {
+function resolutionText(action: string, event: string | null, detail: Record<string, unknown>, taskType: string): string {
   if (action === 'task.deleted') return 'You deleted the task'
-  if (event === 'human_approve') return 'You approved the merge'
+  if (event === 'human_approve') return taskType === 'spike' ? 'You accepted the findings' : 'You approved the merge'
   if (event === 'human_request_changes') return 'You requested changes'
   if (event === 'send_back') return 'You sent the task back to Backlog'
   if (event === 'resolve') {
