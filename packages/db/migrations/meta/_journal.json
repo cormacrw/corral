@@ -239,6 +239,13 @@
       "when": 1793348132330,
       "tag": "0033_famous_blue_marvel",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1793349410188,
+      "tag": "0034_typical_prowler",
+      "breakpoints": true
     }
   ]
 }

@@ -1,3 +1,4 @@
+import { needsAttention, type ReleaseNotesItem } from '@corral/contracts'
 import { epicInboxItems } from './epic-prs.ts'
 import type { Inbox, InboxItem, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
 import { richTextToPlainText, taskRef, type Actor } from '@corral/core'
@@ -7,14 +8,14 @@ import { actorLabel } from './orchestrator.ts'
 import { thumbnailUrl } from './projects.ts'
 import { sessionState } from './plan.ts'
 
-const { agents, auditLog, planMessages, planSessions, plans, planEpics, planTasks, projects, reviews, runs, tasks, comments, epics } = schema
+const { deployments, agents, auditLog, planMessages, planSessions, plans, planEpics, planTasks, projects, reviews, runs, tasks, comments, epics } = schema
 
 const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'pr_rebased', 'findings_reported', 'design_submitted', 'changes_requested', 'merged', 'ci_failed', 'base_conflict', 'head_moved']
 
 // The Inbox (D11, design/inbox.md): what developer and reviewer runs need
 // from the human, plus what they did, and Plan sessions waiting on the human as a Plan
 // thread (D11, amended). Items are derived from tasks, Plan sessions and the
-// audit log, so there's nothing to keep in sync.
+// audit log and deployments, so there's nothing to keep in sync.
 export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
   const open = await db.select({ task: tasks, project: projects }).from(tasks)
     .innerJoin(projects, eq(projects.id, tasks.projectId))
@@ -22,7 +23,21 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
   const taskItems = await Promise.all(open.map(({ task, project }) => needsYouItem(db, task, project)))
   const threads = await planThreads(db)
   // One list, newest first by when each item arrived (design/inbox.md)
-  const needsYou = [...taskItems, ...threads, ...await epicInboxItems(db)].sort((a: InboxItem, b: InboxItem) => b.at.localeCompare(a.at))
+  const needsYou: InboxItem[] = [...taskItems, ...threads, ...await epicInboxItems(db)].sort((a: InboxItem, b: InboxItem) => b.at.localeCompare(a.at))
+
+  const [pm] = await db.select().from(agents).where(eq(agents.role, 'pm')).limit(1)
+  const recent = await db.select({ deployment: deployments, project: projects }).from(deployments)
+    .innerJoin(projects, eq(projects.id, deployments.projectId))
+    .orderBy(desc(deployments.createdAt), desc(deployments.id)).limit(20)
+  const releases: ReleaseNotesItem[] = recent.map(({ deployment: d, project }) => ({
+    id: d.id, type: 'release_notes', deploymentId: d.id, project: projectTag(project),
+    subject: 'Release notes', preview: d.notesStatus === 'pending' ? 'Writing release notes…' : d.notes ?? '',
+    sender: { name: pm?.name ?? 'PM', role: 'pm' }, at: d.createdAt.toISOString(),
+    fromSha: d.fromSha?.slice(0, 7) ?? null, toSha: d.toSha.slice(0, 7), notes: d.notes,
+    notesStatus: d.notesStatus, unread: !d.readAt, taskId: null, taskRef: null, prUrl: null,
+    resolution: d.dismissedAt ? 'You dismissed these release notes' : null
+  }))
+  needsYou.push(...releases.filter(d => !d.resolution))
 
   const entries = await db.select({ entry: auditLog, task: tasks, project: projects }).from(auditLog)
     .innerJoin(tasks, eq(tasks.id, auditLog.taskId))
@@ -32,7 +47,7 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     .limit(limit * 3)
 
   const activity: TaskInboxItem[] = []
-  const resolved: TaskInboxItem[] = []
+  const resolved: (TaskInboxItem | ReleaseNotesItem)[] = []
   for (const { entry, task, project } of entries) {
     const detail = entry.detail as Record<string, unknown>
     const event = typeof detail.event === 'string' ? detail.event : typeof detail.event === 'object' && detail.event ? String((detail.event as { type?: string }).type) : null
@@ -60,9 +75,10 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     if (entry.actor.kind === 'human') resolved.push(item)
     else activity.push(item)
   }
+  resolved.push(...releases.filter(d => d.resolution))
   activity.sort((a, b) => b.at.localeCompare(a.at))
   resolved.sort((a, b) => b.at.localeCompare(a.at))
-  return { needsYou, activity: activity.slice(0, limit), resolved: resolved.slice(0, limit), count: needsYou.length }
+  return { needsYou, activity: activity.slice(0, limit), resolved: resolved.slice(0, limit), count: needsYou.filter(needsAttention).length }
 }
 
 // Only open sessions waiting on the human belong in the Inbox: a question, a

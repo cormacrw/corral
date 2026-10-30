@@ -41,7 +41,7 @@ import { ApiFailure, fromDatabaseError } from './errors.ts'
 import { checkThumbnail, readThumbnail, THUMBNAIL_MAX_BYTES } from './thumbnails.ts'
 import { byteRange } from './byte-range.ts'
 import { createAttachment, readAttachment } from './attachments.ts'
-import { recordDeployment, type ReleaseNotes } from './deployments.ts'
+import { recordDeployment, updateDeploymentInbox, type ReleaseNotes } from './deployments.ts'
 import { approveDesign, DESIGN_BUNDLE_HEADERS, listDesignVersions, readDesignFile, readDesignScreenshot } from './designs.ts'
 import { checkAvatar, getProfile, patchProfile, readAvatar, setAgentAvatar, setUserAvatar } from './avatars.ts'
 import { getEpic, listEpics, patchEpic, setEpicDependencies } from './epics.ts'
@@ -603,9 +603,15 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     .post('/deployments', validate('json', createDeploymentInput), async (c) => {
       const { deployment, created } = await recordDeployment(db, c.req.valid('json'))
       // The response doesn't wait for the notes
-      if (created) setImmediate(() => void releaseNotes.sweep())
+      if (created) {
+        events.publish({ type: 'deployment.updated', deployment })
+        setImmediate(() => void releaseNotes.sweep())
+      }
       return c.json(deployment, created ? 201 : 200)
     })
+
+    .post('/deployments/:id/read', async c => c.json(await updateDeploymentInbox(db, events, c.req.param('id'))))
+    .post('/deployments/:id/dismiss', async c => c.json(await updateDeploymentInbox(db, events, c.req.param('id'), true)))
 
     .get('/runs', async (c) => {
       const agentId = c.req.query('agentId')

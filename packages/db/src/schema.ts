@@ -515,5 +515,6 @@ export const deployments = pgTable('deployments', {
   notes: text(),
   notesStatus: deploymentNotesStatus().notNull().default('pending'),
   readAt: timestamp('read_at', { withTimezone: true }),
+  dismissedAt: timestamp('dismissed_at', { withTimezone: true }),
   createdAt: createdAt()
 }, t => [unique('deployments_project_to_sha_unique').on(t.projectId, t.toSha)])
