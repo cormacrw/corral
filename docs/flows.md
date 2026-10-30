@@ -78,6 +78,8 @@ The PM has **no** tools to merge, edit docs or change status. This is enforced b
 
 ## 2. A task from Ready to Merged
 
+The PR steps below describe standalone/direct tasks and the legacy task-PR path. D27's COR-286 amendment defines the PR-free epic path and its staged rollout; section 4 describes it. Existing task PRs keep these steps through completion, including revisions. Spikes and designs retain their explicit exceptions below.
+
 Remember the D10 rule: **status = whose turn it is; the lease = whether a run is active.** The scheduler starts a run for a task in Ready, In progress or Agent review that has no lease, if its group has capacity.
 
 ### Step 1 — Approve → Ready
@@ -229,9 +231,20 @@ The example: epic **E7 "Saved searches"** in `epic` mode, with three board tasks
 
 ### Step 1 — First claim creates the epic branch
 
-The plan is approved and the scheduler claims #41 (section 2, step 2). E7 has no epic branch yet, so the server creates `corral/epic-<epicId>-saved-searches` from the tip of the target branch. The runner then creates #41's branch from `origin/corral/epic-…` instead of the target branch (section 2, step 3), and the server opens #41's PR with the epic branch as its base.
+The plan is approved and the scheduler claims #41 (section 2, step 2). E7 has no epic branch yet, so the server creates `corral/epic-<epicId>-saved-searches` from the tip of the target branch. The runner then creates #41's branch from `origin/corral/epic-…` instead of the target branch (section 2, step 3), and the task submits from that branch. The legacy path instead opens #41's task PR with the epic branch as its base.
 
-### Step 2 — Task PRs merge into the epic branch
+### Step 2 — Approved tasks integrate into the epic branch
+
+For eligible new task/bug submissions in `epic` mode, the PR-free executor uses this sequence (COR-286 defines its persistence and negotiation; execution is a subsequent rollout):
+
+1. Push the task branch and record a new immutable submission with its head, base and target epic branch. Do not open a task PR. Reviewers check out that exact head and record verdicts against it.
+2. Record agent approval for that exact submitted head. D5 flags and D28 human checks still require Human review before integration. Changes requested create a new submission on revision; old heads and verdicts remain history.
+3. In Ready to merge, journal an integration operation with the expected epic head and fenced runner. Rebase against a moved epic branch under D24, with review of changed resolutions; never silently transfer approval to arbitrary new work. Integrate one commit per task using a compare-and-swap push. Reconcile ambiguous pushes by reading the remote before retrying.
+4. Record the confirmed integrated commit and timestamp and only then mark Merged. #42 may now start after #41 integrates, because they share E7. A dependent outside E7 waits for the epic PR merge. A submission, approval or operation in progress does not satisfy dependencies.
+
+Only runners explicitly advertising the task's integration protocol can claim it. Missing support leaves it unleased; the runner receives an update reason and can still take legacy tasks. Existing task PRs keep their branch, PR link, evidence and approval history and finish through the following legacy flow. `each_task` also keeps that flow. `direct` epics are not converted.
+
+### Legacy step 2 — Task PRs merge into the epic branch
 
 Each task follows section 2, steps 4–10, against the epic branch:
 
@@ -243,7 +256,7 @@ Meanwhile the target branch has moved on with other work. Corral doesn't touch t
 
 ### Step 3 — Corral opens the epic PR
 
-#42 was the last board task of E7 still unmerged. With all three Merged, the server opens the **epic PR** from the epic branch into the target branch. Its description lists the epic's tasks with links to their PRs and evidence. In the Inbox it's Activity: "Epic PR opened". E7 isn't done yet, so epics that depend on it (D22) are still waiting.
+#42 was the last board task of E7 still unmerged. With all three Merged, the server opens the **epic PR** from the epic branch into the target branch. Its description lists the epic's tasks with their submitted, reviewed and integrated commits and evidence (and task PR links for legacy tasks). In the Inbox it's Activity: "Epic PR opened". E7 isn't done yet, so epics that depend on it (D22) are still waiting.
 
 ### Step 4 — Integration review
 
