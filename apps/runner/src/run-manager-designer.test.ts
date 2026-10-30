@@ -1,6 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import type { RunnerMessage } from '@corral/contracts'
+import type { RunJob, RunnerMessage } from '@corral/contracts'
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -79,7 +79,7 @@ describe('RunManager design authoring (D23)', () => {
   const developerJob = pmJob({ runId: 'r1', role: 'developer', leaseEpoch: 1, planSessionId: null, taskId: 'task-1', taskRef: 'APP-1', taskType: 'task', branch: 'corral/app-1', prompt: 'Build it' })
 
   // Assigns the job and connects to its MCP server as the agent would
-  async function start(job: typeof designerJob): Promise<Client> {
+  async function start(job: RunJob): Promise<Client> {
     manager.assign(job)
     await expect.poll(() => sent.some(m => m.type === 'run.started'), { timeout: 10_000 }).toBe(true)
     const config = JSON.parse(await readFile(join(dataDir, 'scratch', 'r1', 'mcp.json'), 'utf8')) as { mcpServers: { corral: { url: string } } }
@@ -125,8 +125,8 @@ describe('RunManager design authoring (D23)', () => {
 
   it.each([
     ['a build task', developerJob],
-    ['a task pinned to a design', { ...developerJob, designPinned: true }],
-    ['a design task', { ...developerJob, taskType: 'design' as const }]
+    ['a task pinned to a design', { ...developerJob, designPinned: true } as RunJob],
+    ['a design task', { ...developerJob, taskType: 'design' } as RunJob]
   ])('refuses submit_design and design_submitted from a developer on %s', async (_name, job) => {
     const agent = await start(job)
     expect((await agent.listTools()).tools.map(t => t.name)).not.toContain('submit_design')

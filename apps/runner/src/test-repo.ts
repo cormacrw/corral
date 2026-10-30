@@ -31,7 +31,8 @@ export async function createTestDataDir(): Promise<string> {
   return dataDir
 }
 
-export function pmJob(overrides: Partial<RunJob> = {}): RunJob {
+// Test-only fixture builder also supports malformed jobs for defensive workspace checks.
+export function pmJob(overrides: Partial<{ [K in keyof RunJob]: RunJob[K] }> = {}): RunJob {
   return {
     runId: 'run-1',
     runNumber: 1,
@@ -52,5 +53,5 @@ export function pmJob(overrides: Partial<RunJob> = {}): RunJob {
     model: null,
     timeoutSeconds: 60,
     ...overrides
-  }
+  } as RunJob
 }

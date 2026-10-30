@@ -1,4 +1,4 @@
-import { askQuestionInput, type AgentRuntime, type DraftSession, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type RunJob } from '@corral/contracts'
+import { askQuestionInput, type AgentRuntime, type DraftSession, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type PmRunJob } from '@corral/contracts'
 import { checkPlan, EPIC_REVIEW_MODES, checkPlanEpicDependencies, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, REVISABLE_STATUSES, requiresHumanReview, richTextToMarkdown, TASK_TYPES, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
@@ -86,7 +86,7 @@ export interface PlanDeps {
   stopRun(runId: string, actor: Actor): Promise<void>
   // Starts a PM run for a session; the orchestrator owns runs. The job
   // carries the session's runtime, not the PM agent's (D18).
-  startRun(session: SessionRow, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'>): Promise<string>
+  startRun(session: SessionRow, job: Omit<PmRunJob, 'runId' | 'runNumber' | 'leaseEpoch'>): Promise<string>
 }
 
 // The PM conversation (D9, design/plan.md). Each turn is a runner job with

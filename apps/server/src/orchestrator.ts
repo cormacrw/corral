@@ -1,5 +1,5 @@
 import { EpicPullRequests, epicReviewContext } from './epic-prs.ts'
-import { RUNNER_HEARTBEAT_MS, EVIDENCE_KINDS, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
+import { RUNNER_HEARTBEAT_MS, EVIDENCE_KINDS, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type PmRunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
 import {
   ACTIVE_RUN_STATES,
   LEASE_DURATION_MS,
@@ -165,7 +165,7 @@ export class Orchestrator implements RunnerHandlers {
   // A PM turn (D9): a run with no task and no lease, fenced by its own epoch.
   // It starts right away; it only waits as `queued`, holding its job, while
   // the PM is paused, the runner can't take it, or an update is finishing (D13, D16).
-  async startPmRun(session: PlanSessionRow, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'>): Promise<string> {
+  async startPmRun(session: PlanSessionRow, job: Omit<PmRunJob, 'runId' | 'runNumber' | 'leaseEpoch'>): Promise<string> {
     const { db } = this.#d
     if (this.#stopped) throw new ApiFailure(409, { code: 'conflict', constraint: 'corral_stopped' })
     const [pm] = await db.select().from(agents).where(eq(agents.role, 'pm')).orderBy(asc(agents.createdAt)).limit(1)
@@ -205,7 +205,7 @@ export class Orchestrator implements RunnerHandlers {
     if (!runner.online || this.#stopped || this.#finishingUpdate) return
     const due = await this.#exclusive(() => db.transaction(async (tx) => {
       const pmAgents = await tx.select().from(agents).where(eq(agents.role, 'pm')).orderBy(asc(agents.createdAt)).for('update')
-      const picked: { id: string, runnerId: string, note: string | null, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'> }[] = []
+      const picked: { id: string, runnerId: string, note: string | null, job: Omit<PmRunJob, 'runId' | 'runNumber' | 'leaseEpoch'> }[] = []
       for (const agent of pmAgents) {
         if (agent.paused || (agent.pausedUntil && agent.pausedUntil > this.#now())) continue
         const waiting = await tx.select({ id: runs.id, job: runs.pmJob, planSessionId: runs.planSessionId }).from(runs)
@@ -214,7 +214,7 @@ export class Orchestrator implements RunnerHandlers {
         for (const w of waiting) {
           // The runtime is the session's (D18); a job queued before sessions
           // had one runs on the PM agent's, as it always did
-          const held = w.job as Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch' | 'runtime'> & { runtime?: string }
+          const held = w.job as Omit<PmRunJob, 'runId' | 'runNumber' | 'leaseEpoch' | 'runtime'> & { runtime?: string }
           let job = { ...held, runtime: held.runtime ?? agent.runtime }
           // A Plan session stays on the runner of its earlier turns while it's
           // online: its warm process and session files are there
@@ -582,7 +582,7 @@ export class Orchestrator implements RunnerHandlers {
       model: null,
       timeoutSeconds: RUN_TIMEOUT_SECONDS,
       prompt: !resume ? prompt : author.revision(promptTask, feedback)
-    }
+    } as RunJob
   }
 
   // The design version a build task is pinned to (D20), for its prompt
