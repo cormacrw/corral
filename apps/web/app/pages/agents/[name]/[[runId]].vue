@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { agentStatus, duration, isLiveRun as isLive, ROLE, runBadge, runTokens, runtimeLabel, timeAgo } from '~/utils/labels'
+import { agentStatus, duration, isLiveRun as isLive, ROLE, runBadge, runRef, runTitle, runTokens, runtimeLabel, timeAgo } from '~/utils/labels'
 
 // An agent's page (design/agent.md): runs list and the transcript. Mobile
 // shows the agent and its runs at /agents/:name, and a run's transcript
@@ -128,7 +128,7 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
                 @click="router.push(`/agents/${name}/${run.id}`)"
               >
                 <span class="flex items-center gap-2">
-                  <span class="font-mono text-xs text-muted">{{ run.taskRef ?? 'Plan' }}</span>
+                  <span class="font-mono text-xs text-muted">{{ runRef(run) }}</span>
                   <UBadge
                     :label="runBadge(run).label"
                     :color="runBadge(run).color"
@@ -137,7 +137,7 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
                   />
                   <span class="ms-auto text-xs text-dimmed">{{ timeAgo(run.queuedAt, now) }}</span>
                 </span>
-                <span class="truncate">{{ run.taskTitle ?? run.summary ?? 'PM turn' }}</span>
+                <span class="truncate">{{ runTitle(run) }}</span>
                 <span class="text-xs text-muted">{{ projectName(run) }} · Run #{{ run.number }} · {{ duration(run.startedAt, run.endedAt, now) }}</span>
                 <span
                   v-if="run.error"
@@ -159,7 +159,7 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
           <template v-if="selected">
             <!-- One line at the flyout header's height; long titles truncate -->
             <header class="flex h-14 shrink-0 items-center gap-2 border-b border-default px-4 text-sm">
-              <span class="min-w-0 truncate font-medium">{{ selected.taskRef ?? 'Plan' }} {{ selected.taskTitle ?? '' }}</span>
+              <span class="min-w-0 truncate font-medium">{{ runRef(selected) }} {{ selected.taskTitle ?? selected.epicTitle ?? '' }}</span>
               <UBadge
                 class="shrink-0"
                 :label="runBadge(selected).label"

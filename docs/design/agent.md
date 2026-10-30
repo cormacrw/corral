@@ -38,7 +38,7 @@ See what an agent is doing right now, attach to its live run, and look back at p
 
 1. **Runs list** (320px):
    - **Current run:** pinned at the top, with the working pulse.
-   - **Previous runs:** each row shows the task ref, an outcome badge, when it ran, the title, and "{project dot} {project} · Run #128 · 18m". A run that ended with an error shows it on a line below (`error` text, up to three lines).
+   - **Previous runs:** each row shows the task ref ("Epic" for an epic's integration review, "Plan" for a PM turn), an outcome badge, when it ran, the title (the task's, or the epic's for an integration review), and "{project dot} {project} · Run #128 · 18m". A run that ended with an error shows it on a line below (`error` text, up to three lines).
    - **Outcome badges:** Live (`primary`), PR opened / PR updated / Plan proposed (`primary`), Approved / Answered (`success`), Changes requested (`warning`), Stuck / Failed (`error`), Rate limited / Stopped / Interrupted (neutral).
 2. **Run transcript:**
    - **Run header:** "{ref} {title}", the outcome badge, and "Run #128 · branch · 18:42 elapsed · 12k in · 1.3M cache read · 4k out · on {runner name}" (the runner the run was placed on, kept with the run) (cache reads are shown apart from fresh input, which includes cache writes, because they cost about a tenth as much). On the right: **Open task** (opens the flyout) and, for live runs only, **Interrupt / Resume** (outline) and **Stop run** (`error` subtle).
