@@ -596,6 +596,8 @@ export type PatchAgentInput = z.infer<typeof patchAgentInput>
 
 export type ApiError =
   | { code: 'not_found' }
+  // A human-only action attempted by anyone else
+  | { code: 'forbidden' }
   | { code: 'invalid_input', issues: unknown }
   | { code: 'conflict', constraint: string | null }
   | { code: 'transition_rejected', reason: TransitionError }

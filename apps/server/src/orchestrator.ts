@@ -361,7 +361,8 @@ export class Orchestrator implements RunnerHandlers {
 
   // Asks for a scheduling pass soon; passes never overlap. Passing the tasks
   // an event is about lets them start right away despite a wake interval;
-  // anything else (a run ending, a settings change, a resume) waits for it
+  // anything else (a run ending, a settings change, the kill switch's
+  // resume) waits for it
   poke(taskIds: readonly string[] = []): void {
     void this.schedule(taskIds)
   }
@@ -854,6 +855,20 @@ export class Orchestrator implements RunnerHandlers {
       await tx.insert(auditLog).values({ projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor, action: 'run.stopped', detail: { runId } })
     })
     await this.#publish(ctx)
+  }
+
+  // A human lets a paused task be claimed again (flows.md §3). Only clears the
+  // flag: the caller pokes the scheduler once the task is published. Throws
+  // 409 task_not_paused, so a double click can't resume it twice.
+  async resumeTask(taskId: string, actor: Actor): Promise<void> {
+    if (actor.kind !== 'human') throw new ApiFailure(403, { code: 'forbidden' })
+    await this.#d.db.transaction(async (tx) => {
+      const [task] = await tx.update(tasks).set({ paused: false, updatedAt: this.#now() })
+        .where(and(eq(tasks.id, taskId), eq(tasks.paused, true), isNull(tasks.deletedAt)))
+        .returning({ projectId: tasks.projectId })
+      if (!task) throw new ApiFailure(409, { code: 'conflict', constraint: 'task_not_paused' })
+      await tx.insert(auditLog).values({ projectId: task.projectId, taskId, actor, action: 'task.resumed', detail: {} })
+    })
   }
 
   // A human messages a live developer or reviewer run. It's kept as their

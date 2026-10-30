@@ -95,6 +95,7 @@ export function describe(status: number, error: ApiErrorBody['error'] | null): s
       const first = Array.isArray(error.issues) ? (error.issues[0] as { message?: unknown } | undefined)?.message : undefined
       return typeof first === 'string' ? first : 'Some of the input is invalid'
     }
+    case 'forbidden': return 'Only a human can do that'
     case 'conflict': return error.constraint ? `Conflict: ${error.constraint.replaceAll('_', ' ')}` : 'Conflict'
     case 'transition_rejected': return `Not allowed: ${JSON.stringify(error.reason)}`
     case 'invalid_dependencies': return `Invalid dependencies: ${JSON.stringify(error.problems)}`
@@ -141,6 +142,7 @@ export const api = {
     remove: (slug: string, number: number, reason?: string) => call<null>('DELETE', `/projects/${slug}/tasks/${number}`, reason ? { reason } : undefined),
     transition: (slug: string, number: number, input: HumanTransitionInput) => call<Task>('POST', `/projects/${slug}/tasks/${number}/transitions`, input),
     approve: (slug: string, number: number) => call<Task>('POST', `/projects/${slug}/tasks/${number}/approve`),
+    resume: (slug: string, number: number) => call<Task>('POST', `/projects/${slug}/tasks/${number}/resume`),
     comments: (slug: string, number: number) => call<Comment[]>('GET', `/projects/${slug}/tasks/${number}/comments`),
     comment: (slug: string, number: number, body: string, pinned = false) => call<Comment>('POST', `/projects/${slug}/tasks/${number}/comments`, { body, pinned }),
     history: (slug: string, number: number) => call<AuditEntry[]>('GET', `/projects/${slug}/tasks/${number}/history`),

@@ -94,6 +94,12 @@ describe('agentStatus', () => {
 })
 
 describe('Ready waiting notes', () => {
+  it('marks a paused task, ahead of its other notes', () => {
+    const paused = task(projects[0]!, 99, { title: 'Stopped', status: 'in_progress', reviewRounds: 1, paused: true })
+    expect(taskNote(paused, [paused], 5)).toEqual({ text: 'Paused', color: 'warning' })
+    expect(taskNote({ ...paused, paused: false }, [paused], 5)).toEqual({ text: 'Review round 1 of 5', color: 'neutral' })
+  })
+
   it('shows epic prerequisites and clears the note when they finish', () => {
     const ready = task(projects[0]!, 99, { title: 'Waiting', status: 'ready', waitingOnEpics: [{ id: 'foundation', title: 'Foundation' }] })
     expect(taskNote(ready, [ready], 5)).toEqual({ text: 'Waiting on epic: Foundation', color: 'neutral' })

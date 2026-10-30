@@ -28,6 +28,7 @@ Ready tasks whose epic has unfinished prerequisites show **Waiting on epic: <tit
 ### Body, in order (stacked; split mode moves the properties to the rail)
 
 1. **Title:** an inline-editable input, 18px semibold. A borderless field that shows a background on hover and a `primary` ring on focus.
+   - **Paused** (`task.paused`, after a human stopped a run): a `warning` bar under the title, in every mode, reads "Paused. Its run was stopped, so nothing picks it up until you resume it." with a **Resume** button. Resuming clears the pause and the scheduler starts the task right away, even inside its agent's wake interval. A task that isn't paused has no bar and no Resume action, and only a human can resume (403 `forbidden` otherwise).
 2. **Properties.** In stacked mode each row is a label (104px) and a value; in split mode the label sits above the value.
 
    | Property | Control | Editable |

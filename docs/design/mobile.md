@@ -71,6 +71,7 @@ Agent detail and run screens follow [agent.md](agent.md); the web and mobile pag
 ## Task and epic
 
 - **Task** (`/tasks/<ref>`, frames *Task · details* and *Task · criteria and activity*): `TaskDetail` in `mobile` mode, a full page with no shell header or tab bar. Its header has a back arrow, the epic (linking to it) over the ref, copy link, and a **⋯** menu with **Delete task**. Under the title, a "{agent} is working · Watch" strip while an agent holds the task, then two tabs:
+  - **Paused:** a paused task shows the same bar and **Resume** button as the other modes ([task.md](task.md)), above the tabs so it stays on both, with a 44px tap target.
   - **Details:** the property rows (label and value, divided), Depends on, and the description.
   - **Criteria and activity:** acceptance criteria, then Activity, Evidence and History with the composer. `?evidence=1` opens this tab on Evidence.
 - **Epic** (`/epics/<id>`, frame *Epic*): `EpicDetail` in `mobile` mode with its own header (back, an Epic badge and the project over the title, copy link) and the tab bar. The body is stacked like the flyout, with Tasks and Graph as a segmented control. Tapping a task, in the list or the graph, opens its page.

@@ -258,6 +258,17 @@ export const tasks: Task[] = [
   task(corral, 15, { title: 'Pin a design version to a task', status: 'draft', priority: 'low', epicId: 'e-design', dependsOn: ['COR-14'], planSessionId: 's-1', planSessionTitle: 'Design tasks' }),
   task(corral, 16, { title: 'Cards jump when a run starts', status: 'draft', type: 'bug', planSessionId: 's-3', planSessionTitle: 'Board polish' }),
   task(corral, 17, { title: 'Spike: virtualise long columns', status: 'draft', type: 'spike', priority: 'low', planSessionId: 's-3', planSessionTitle: 'Board polish' }),
+  // Stopped by a human, one in each state a run can be stopped in
+  task(corral, 18, {
+    title: 'Retry webhooks after a server restart',
+    status: 'agent_review',
+    paused: true,
+    branch: 'corral/cor-18-retry-webhooks',
+    prNumber: 67,
+    prUrl: 'https://github.com/cormacrw/corral/pull/67',
+    acceptanceCriteria: criteria('Undelivered webhooks are sent again after a restart')
+  }),
+  task(corral, 19, { title: 'Keep the run log open across reloads', status: 'in_progress', paused: true, branch: 'corral/cor-19-run-log' }),
   task(site, 1, { title: 'New landing page hero', status: 'ready', type: 'design', epicId: 'e-site' }),
   task(site, 2, { title: 'Fix broken pricing link', status: 'merged', type: 'bug', epicId: 'e-shipped', mergedAt: ago(10) }),
   task(site, 3, {
