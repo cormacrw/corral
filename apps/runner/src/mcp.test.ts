@@ -266,6 +266,47 @@ describe('toolsFor', () => {
     }
   })
 
+  it('gives the run diagnostics to the PM alone', () => {
+    expect(toolsFor({ role: 'pm' })).toEqual(expect.arrayContaining(['get_agent_activity', 'list_runs', 'get_run']))
+    for (const role of ['developer', 'designer', 'reviewer'] as const) {
+      for (const tool of ['get_agent_activity', 'list_runs', 'get_run'] as const) expect(toolsFor({ role })).not.toContain(tool)
+    }
+  })
+
+  it('advertises the run diagnostics over MCP to the PM, and refuses them to other roles by name', async () => {
+    const server = new ToolServer()
+    await server.start()
+    try {
+      const calls: string[] = []
+      server.register('pm', 'pm', async (tool) => {
+        calls.push(tool)
+        return { ok: true, result: {} }
+      })
+      const client = new Client({ name: 'test', version: '1' })
+      await client.connect(new StreamableHTTPClientTransport(new URL(server.url('pm'))))
+      const tools = (await client.listTools()).tools
+      expect(tools.map(t => t.name)).toEqual(expect.arrayContaining(['get_agent_activity', 'list_runs', 'get_run']))
+      // Claude's API refuses a tool whose input is a top-level union
+      for (const tool of tools) expect(tool.inputSchema.type).toBe('object')
+      await client.callTool({ name: 'get_run', arguments: { runNumber: 2857 } })
+      await client.callTool({ name: 'list_runs', arguments: { role: 'reviewer', status: 'failed' } })
+      expect(calls).toEqual(['get_run', 'list_runs'])
+      await client.close()
+
+      for (const role of ['developer', 'designer', 'reviewer'] as const) {
+        server.register(role, role, async () => ({ ok: true, result: {} }))
+        const other = new Client({ name: 'test', version: '1' })
+        await other.connect(new StreamableHTTPClientTransport(new URL(server.url(role))))
+        expect((await other.listTools()).tools.map(t => t.name)).not.toContain('get_run')
+        expect(await other.callTool({ name: 'get_run', arguments: { runNumber: 1 } })).toEqual({ isError: true, content: [{ type: 'text', text: `The ${role} can't use get_run` }] })
+        await other.close()
+      }
+    } finally {
+      // Not awaited: the SDK client keeps its connection open a while
+      void server.close()
+    }
+  })
+
   it('serves submit_design over MCP only to a designer, and refuses a call naming the role', async () => {
     const server = new ToolServer()
     await server.start()

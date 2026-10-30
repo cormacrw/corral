@@ -4,6 +4,7 @@ import { schema, type Database, type Executor, type PlanRevision } from '@corral
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { appendAudit, auditEvent, auditText } from './audit.ts'
+import { agentActivity, UnknownAgent } from './agent-activity.ts'
 import { listTaskAttachments } from './attachments.ts'
 import { listEpics } from './epics.ts'
 import { ApiFailure, notFound } from './errors.ts'
@@ -423,6 +424,13 @@ export class PlanService {
           number: run.number, agent, role: run.role, state: run.state, outcome: run.outcome, summary: run.summary, error: run.error,
           startedAt: run.startedAt?.toISOString() ?? null, endedAt: run.endedAt?.toISOString() ?? null
         }))
+      }
+
+      case 'get_agent_activity': {
+        const { agent } = z.object({ agent: z.string().trim().min(1).optional() }).parse(input)
+        return agentActivity(db, agent).catch((error: unknown) => {
+          throw error instanceof UnknownAgent ? new ToolError(error.message) : error
+        })
       }
 
       case 'ask_question': {

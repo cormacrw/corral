@@ -62,6 +62,7 @@ export interface AuditDetails {
   'plan.message': PlanMessage
   'plan.proposed': { planId: string, version: number, tasks: number, revises: number }
   'plan.runtime': { sessionId: string, from: string, to: string }
+  'pm.tool_called': { sessionId: string, runId: string, tool: string, input: unknown, ok: boolean, summary: string, error?: string }
   'project.created': Record<string, never>
   'project.deleted': { projectId: string, name: string, repository: string }
   'project.paused': Changed

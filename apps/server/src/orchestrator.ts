@@ -1,6 +1,6 @@
 import { appendAudit, auditEvent } from './audit.ts'
 import { EpicPullRequests, epicReviewContext } from './epic-prs.ts'
-import { RUNNER_HEARTBEAT_MS, epicReviewReportSchema, evidenceKind, outcomeReportSchema, rebaseReviewReportSchema, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type PmRunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
+import { RUNNER_HEARTBEAT_MS, epicReviewReportSchema, isPmDirectTool, pmDirectTools, evidenceKind, outcomeReportSchema, rebaseReviewReportSchema, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type PmRunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
 import {
   ACTIVE_RUN_STATES,
   LEASE_DURATION_MS,
@@ -29,6 +29,7 @@ import type { GitHubClient, PullRequest } from './github.ts'
 import { EpicBranchError, isEpicRebaseTask, taskBase } from './task-base.ts'
 import { slugify } from './projects.ts'
 import { designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
+import { PmTools } from './pm-tools.ts'
 import { runExitError, withLastActivity } from './run-exit.ts'
 import { runEndValues, type RunEnd } from './run-lifecycle.ts'
 import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
@@ -144,6 +145,7 @@ export class Orchestrator implements RunnerHandlers {
   // PM turns and claims never both take a runner's last slot
   #placing: Promise<unknown> = Promise.resolve()
   readonly epicPrs: EpicPullRequests
+  readonly pmTools: PmTools
   readonly merges: MergeOrchestrator
   readonly sweep: WorktreeSweep
   // Set once the plan service exists (it needs the orchestrator to start runs)
@@ -153,6 +155,7 @@ export class Orchestrator implements RunnerHandlers {
   constructor(deps: OrchestratorDeps) {
     this.#d = deps
     this.epicPrs = new EpicPullRequests(deps)
+    this.pmTools = new PmTools({ db: deps.db, transcripts: deps.transcripts })
     this.merges = new MergeOrchestrator({
       db: deps.db,
       events: deps.events,
@@ -428,6 +431,7 @@ export class Orchestrator implements RunnerHandlers {
         for (let job = await claimEpic(); job; job = await claimEpic()) {
           const ctx = await this.#load(job.runId)
           if (!ctx) break
+          if (ctx.run.runnerId) await this.#d.db.update(runs).set({ runnerName: runner.name(ctx.run.runnerId) }).where(eq(runs.id, job.runId))
           if (!runner.send({ type: 'run.assign', job }, ctx.run.runnerId)) {
             await this.#endRun(ctx, { state: 'interrupted', error: 'The runner went offline before the run started' })
             break
@@ -1143,9 +1147,13 @@ export class Orchestrator implements RunnerHandlers {
       developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'report_outcome'],
       designer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'submit_design', 'report_outcome'],
       reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'get_design', 'report_outcome'],
-      pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
+      pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_agent_activity', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs', ...Object.keys(pmDirectTools)]
     }
     if (!allowed[role]?.includes(tool)) throw new ToolError(`The ${role} can’t use ${tool}`)
+    if (role === 'pm' && isPmDirectTool(tool)) {
+      if (!ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
+      return this.pmTools.call(tool, input, this.#actor(ctx), { sessionId: ctx.run.planSessionId, runId: ctx.run.id, projectId: ctx.project.id })
+    }
     if (tool === 'get_attachment') return this.#getAttachment(ctx, z.object({ attachmentId: z.string() }).parse(input))
     if (tool === 'get_design') {
       const { taskRef: ref, version } = z.object({ taskRef: z.string(), version: z.number().int().positive().optional() }).parse(input)
