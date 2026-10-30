@@ -249,11 +249,15 @@ export const tasks: Task[] = [
 
 // COR-154: identical stress cases across every card direction.
 tasks.push(
-  task(corral, 21, { title: 'Keep the board readable when a task has a very long title, multiple dependencies and an agent working on the implementation', status: 'ready', priority: 'urgent', type: 'bug', dependsOn: ['COR-3'], acceptanceCriteria: criteria('Wrap the title', 'Keep metadata visible') }),
+  task(corral, 21, { title: 'Keep the board readable when a task has a very long title, multiple dependencies and an agent working on the implementation', status: 'ready', priority: 'urgent', type: 'bug', dependsOn: ['COR-3', 'COR-4', 'COR-8'], acceptanceCriteria: criteria('Wrap the title', 'Keep metadata visible') }),
   task(corral, 22, { title: 'Explore a quieter board', status: 'ready', type: 'spike', priority: 'low', epicId: 'e-board' }),
-  task(corral, 23, { title: 'Design the next task card', status: 'ready', type: 'design', priority: 'high', epicId: 'e-design', design: { taskRef: 'COR-4', version: 1, screens: ['card'], newerVersion: 2 } }),
+  task(corral, 23, { title: 'Design the next task card', status: 'ready', type: 'design', priority: 'high', epicId: 'e-design', dependsOn: ['COR-1'], design: { taskRef: 'COR-4', version: 1, screens: ['card'], newerVersion: 2 } }),
   task(corral, 24, { title: 'Preserve selection after reconnecting', status: 'in_progress', priority: 'urgent', type: 'bug', reviewRounds: 2, acceptanceCriteria: criteria('Restore selection', 'Preserve scroll') }),
-  task(corral, 25, { title: 'Check narrow column rendering', status: 'agent_review', priority: 'low', type: 'spike' })
+  task(corral, 25, { title: 'Check narrow column rendering', status: 'agent_review', priority: 'low', type: 'spike' }),
+  // Several cards working at once, to show the glows out of step
+  task(corral, 26, { title: 'Show task type as an icon', status: 'in_progress', priority: 'medium', type: 'design', epicId: 'e-board', lease: { agentId: 'a-dev', runId: 'r-7', role: 'developer', expiresAt: ago(-16) } }),
+  task(corral, 27, { title: 'Drop the status note from cards', status: 'in_progress', priority: 'high', epicId: 'e-board', lease: { agentId: 'a-dev2', runId: 'r-8', role: 'developer', expiresAt: ago(-11) } }),
+  task(corral, 28, { title: 'Review the popover on phones', status: 'agent_review', priority: 'medium', epicId: 'e-board', lease: { agentId: 'a-rev', runId: 'r-9', role: 'reviewer', expiresAt: ago(-9) } })
 )
 
 const at = (ref: string): Task => tasks.find(t => t.ref === ref)!
@@ -313,7 +317,8 @@ const RITA = { id: 'a-rev', name: 'Rita' }
 for (const [ref, developer, reviewer] of [
   ['COR-1', VICTOR, RITA], ['COR-2', DANA, RITA], ['COR-3', DANA, RITA], ['COR-4', VICTOR, RITA],
   ['COR-6', VICTOR, null], ['COR-7', DANA, RITA], ['COR-8', VICTOR, null], ['COR-9', DANA, null],
-  ['COR-10', DANA, RITA], ['COR-23', DANA, null], ['COR-24', VICTOR, RITA], ['COR-25', DANA, null]
+  ['COR-10', DANA, RITA], ['COR-23', DANA, null], ['COR-24', VICTOR, RITA], ['COR-25', DANA, null],
+  ['COR-26', VICTOR, null], ['COR-27', DANA, null], ['COR-28', VICTOR, RITA]
 ] as const) {
   at(ref).developer = developer
   at(ref).reviewer = reviewer

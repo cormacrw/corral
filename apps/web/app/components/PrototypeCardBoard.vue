@@ -7,14 +7,14 @@ const router = useRouter()
 const live = useLive()
 const device = useDevice()
 const flyout = useTaskFlyout()
-const options = [
-  { id: 'a', name: 'Stacked', summary: 'Title, then epic, then a footer with the priority word and the assignee. Every field reads as words.' },
-  { id: 'b', name: 'Compact', summary: 'Title over a single line: priority bars, epic, assignee avatar. Most tasks in view.' },
-  { id: 'c', name: 'Priority edge', summary: 'Priority is a coloured left edge, not a label. The body holds only title, epic and assignee.' },
-  { id: 'd', name: 'Assignee first', summary: 'The assignee heads the card with priority opposite; title and epic sit below.' },
-  { id: 'e', name: 'Epic header', summary: 'The epic heads the card as a divided header; a larger title, then priority and assignee.' }
+// The blocked icon is still being tried out, so the Board can show each one
+const blockedIcons = [
+  { id: 'ban', label: 'Ban', icon: 'i-lucide-ban' },
+  { id: 'hourglass', label: 'Hourglass', icon: 'i-lucide-hourglass' },
+  { id: 'lock', label: 'Lock', icon: 'i-lucide-lock' },
+  { id: 'link', label: 'Link', icon: 'i-lucide-link-2' }
 ]
-const option = computed(() => options.find(o => o.id === route.query.option) ?? options[0]!)
+const blockedIcon = computed(() => blockedIcons.find(i => i.id === route.query.blocked) ?? blockedIcons[0]!)
 const all = computed(() => live.state.value.tasks['p-corral'] ?? [])
 const columnKey = computed(() => String(route.query.column ?? 'in_progress'))
 const columns = computed(() => BOARD_COLUMNS.filter(c => !device.isMobile.value || c.key === columnKey.value))
@@ -36,7 +36,7 @@ const colors: Record<string, string> = { neutral: 'bg-neutral-400', info: 'bg-in
       <header class="shrink-0 border-b border-default px-4 py-3">
         <div class="mb-2 flex items-center justify-between gap-2">
           <p class="text-xs font-medium tracking-wide text-muted">
-            COR-154 / CARD EXPLORATIONS
+            COR-154 / BOARD CARD
           </p><UBadge
             label="Prototype"
             color="neutral"
@@ -44,31 +44,30 @@ const colors: Record<string, string> = { neutral: 'bg-neutral-400', info: 'bg-in
             size="sm"
           />
         </div>
-        <nav
-          aria-label="Card design options"
-          class="flex flex-wrap gap-1.5"
-        >
-          <UButton
-            v-for="o in options"
-            :key="o.id"
-            :label="`Option ${o.id.toUpperCase()}`"
-            :variant="option.id === o.id ? 'solid' : 'outline'"
-            :color="option.id === o.id ? 'primary' : 'neutral'"
-            size="sm"
-            :aria-pressed="option.id === o.id"
-            @click="query({ option: o.id })"
-          />
-        </nav>
-        <div class="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <h1 class="text-base font-semibold text-highlighted">
-            {{ option.name }}
+            Option A
           </h1><p class="text-xs text-muted">
-            {{ option.summary }}
+            Title, epic, then priority on the left with the type, blocked and assignee icons on the right.
           </p>
         </div>
-        <p class="mt-1 text-xs text-dimmed">
-          Same tasks in every option · 272px desktop columns · “Preserve selection after reconnecting” shows selection · click a card to inspect
-        </p>
+        <nav
+          aria-label="Blocked icon"
+          class="mt-2 flex flex-wrap items-center gap-1.5"
+        >
+          <span class="me-1 text-xs text-muted">Blocked icon</span>
+          <UButton
+            v-for="i in blockedIcons"
+            :key="i.id"
+            :label="i.label"
+            :icon="i.icon"
+            :variant="blockedIcon.id === i.id ? 'solid' : 'outline'"
+            :color="blockedIcon.id === i.id ? 'primary' : 'neutral'"
+            size="xs"
+            :aria-pressed="blockedIcon.id === i.id"
+            @click="query({ blocked: i.id })"
+          />
+        </nav>
       </header>
       <nav
         v-if="device.isMobile.value"
@@ -112,9 +111,11 @@ const colors: Record<string, string> = { neutral: 'bg-neutral-400', info: 'bg-in
                 v-for="task in all.filter(t => column.statuses.includes(t.status))"
                 :key="task.id"
                 :task="task"
-                :option="option.id"
+                :all="all"
+                :blocked-icon="blockedIcon.icon"
                 :selected="selected(task.ref)"
                 @open="open(task.ref)"
+                @open-blocker="open"
               />
               <p
                 v-if="!all.some(t => column.statuses.includes(t.status))"

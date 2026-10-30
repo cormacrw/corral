@@ -1,106 +1,100 @@
-# COR-154 v2 — Five directions for the Board task card
+# COR-154 v4 — Board task card, Option A
 
-v1 was rejected: "the card should have the developer always shown unless its in agent review, then show the reviewer. No tags they look shit, we need title, epic, priority, assignee thats it." v2 is rebuilt around that. **Every option shows exactly four things: title, epic, priority, assignee.** The options differ only in how those four are arranged.
+v3 feedback: keep Option A, drop the others, remove the assignee's name, show the task type with icons (nothing for task, bug icon for bug, paint icon for design), try a blocked icon with the blocking tasks in a popover, make sure the long blocked and failed message doesn't carry over, and offset the glow start so cards aren't in sync.
 
-Open `index.html` to land on the Board. The Option A–E buttons change the whole Board. Direct routes: `index.html#/projects/corral/board?option=a` (replace `a` with `b`–`e`). Desktop columns are 272px and scroll sideways; a phone shows one column at a time.
-
-## Rules shared by all five
-
-**Assignee.** Agent review shows `task.reviewer`. Every other status shows `task.developer`. If that field is null, the card shows "Unassigned" with a dashed circle. It never falls back to the other role, so a task in Agent review with no reviewer yet reads Unassigned even if it has a developer.
-
-**Removed from the card.** Ref, type badge, design-changed badge, PR link and status note (waiting on, review warnings, blocked and failed reasons) are all gone. These fixtures still exist, and the information is in the task flyout. PRs are reached from the flyout's properties.
-
-**No tags.** Epic and priority are plain text or a small glyph, never a pill or badge.
-
-**Kept, because they are states and not content.** `BorderGlow` and the avatar's working dot when the shown assignee holds the lease; primary border and ring when selected.
-
-## Shared screens, states and interactions
-
-Each option uses **the same card on mobile**, at the column's full width, so there are no separate mobile screen ids. Phones default to In progress, which shows the working and selected cards together.
-
-| State | Fixture |
-| --- | --- |
-| Working developer, glow, high priority, epic | COR-3 "Static prototype build", In progress: Dana. Has a reviewer on file (Rita) that is not shown |
-| Working reviewer, glow | COR-4 "Design review screen", Agent review: Rita. Developer on file (Victor) is not shown |
-| Agent review with no reviewer | COR-25 "Check narrow column rendering": Unassigned, though Dana is its developer |
-| Selected, urgent, no epic | COR-24 "Preserve selection after reconnecting", In progress: Victor |
-| Unclaimed, urgent, no epic, long title (3+ lines) | COR-21, Ready: Unassigned |
-| Low priority, long epic name truncated to one line | COR-22, Ready: Unassigned |
-| Medium priority, epic | COR-6, Ready: Victor |
-| High priority, epic | COR-23, Ready: Dana |
-| Developer shown after review, Human review | COR-5: Victor |
-| Developer shown when blocked or failed | COR-8, COR-9: Victor, Dana |
-
-Task types, the design-changed flag, PR links and notes stay on these fixtures (COR-21 bug, COR-22 spike, COR-23 design with design-changed, COR-3 PR #66, COR-21 waiting, COR-5 warning, COR-8/9 error), and the card deliberately renders none of them. Cards look the same whatever their type.
-
-COR-24 starts selected, as a staging state to show the selected look without opening a pane. Click any card to open the real TaskFlyout; click again to close. The whole card is one button, with a focus ring, and Enter or Space opens it. Its accessible name still includes the ref. On phones the flyout fills the Board area; today's mobile Board goes to the task page instead.
-
-Components: real app shell and mobile shell, UDashboardPanel, UButton, UBadge (column counts only), UIcon, UAvatar through AgentAvatar, BorderGlow, TaskFlyout, TaskDetail. New in the prototype: `PrototypeTaskCard` (the five layouts), `PrototypeCardAssignee` (avatar and name, or Unassigned), `PrototypePriorityBars` (one to four rising bars) and `PrototypeCardBoard` (the comparison page). Production rendering is unchanged: the replacement is gated by `import.meta.prototype`.
+Open `index.html` to land on the Board. Route: `index.html#/projects/corral/board`. Add `?blocked=ban`, `hourglass`, `lock` or `link` to pick a blocked icon, or use the buttons above the Board. Desktop columns are 272px and scroll sideways; a phone shows one column at a time (`&column=ready`, `blocked`, and so on).
 
 ## card-option-a — Option A / Stacked
 
-Route: `#/projects/corral/board?option=a`. Mobile: same card.
+Options B to E are removed, and `card-option-b` to `card-option-e` no longer exist. Mobile uses the same card at the column's full width, so there is no separate mobile screen id.
 
-States: all shared states. Title, then epic on its own line (omitted when there is none), then a footer with the priority word left and the assignee right.
+Layout, top to bottom:
 
-Components: PrototypeTaskCard, PrototypeCardAssignee, AgentAvatar, BorderGlow.
+1. **Title**, wrapping as far as it needs.
+2. **Epic**, one line, truncated. Omitted when there is none.
+3. **Footer**: the priority word on the left, then on the right the blocked icon, the type icon and the assignee's avatar.
 
-Rationale and trade-offs: the plainest answer to the feedback. Each field sits on its own line as a word, so nothing needs learning, and urgent and high stand out through colour on the word. It is the tallest of the quiet layouts, at three rows for a one-line title, so long columns take more scrolling.
+Rationale and trade-offs: the title gets the full card width, because every icon sits in the footer. The left edge stays straight, since a plain task has no icon to leave a gap. All the small signals are in one place, so they scan down a column. The cost is that the type sits at the bottom of the card, and a card with no name relies on recognising the initial or picture; the full name shows on hover only, so phones don't get it.
 
-## card-option-b — Option B / Compact
+### What each part does
 
-Route: `#/projects/corral/board?option=b`. Mobile: same card.
+**Assignee.** Avatar only, never a name. Agent review shows `task.reviewer`; every other status shows `task.developer`. If that field is null, the card shows a dashed circle (hover: Unassigned). It never falls back to the other role.
 
-States: all shared states. Title, then one line: priority bars, truncated epic, 2xs avatar on the right. Tighter padding.
+**Type icon.** Task: nothing. Bug: `i-lucide-bug`. Design: `i-lucide-paintbrush`. Spike: `i-lucide-flask-conical`, the icon spikes already use elsewhere in the app. You didn't list spike; I gave it an icon so it doesn't read as a plain task. All are muted, because colour on the card belongs to priority.
 
-Components: PrototypeTaskCard, PrototypePriorityBars, PrototypeCardAssignee in avatar-only mode, AgentAvatar, BorderGlow.
+**Blocked icon.** Shown when a Ready task has dependencies that aren't merged, which is the same rule as today's "Waiting on" note. A merged dependency doesn't count. The icon is amber, and clicking it opens a popover headed "Waiting on" that lists each blocking task's title, ref and status. Clicking a row opens that task's flyout. Clicking the icon doesn't open the card's flyout. Escape or clicking outside closes the popover.
 
-Rationale and trade-offs: fits the most tasks in a column, and the bars let priority be scanned down the column. The assignee's name is not written out: you read an initial or picture, with the name on hover only, which is weakest against "developer always shown". Bars also need learning, and Low and Medium look similar at a glance.
+The four blocked icons to compare:
 
-## card-option-c — Option C / Priority edge
+| Button | Icon | Read |
+| --- | --- | --- |
+| Ban (default, my pick) | `i-lucide-ban` | Clearest "can't start", and it stays legible at 16px |
+| Hourglass | `i-lucide-hourglass` | Says "waiting", but sounds passive and could read as a slow task |
+| Lock | `i-lucide-lock` | Clear, but suggests permissions rather than order of work |
+| Link | `i-lucide-link-2` | Says "dependency" but not "stopped", so it's the easiest to miss |
 
-Route: `#/projects/corral/board?option=c`. Mobile: same card.
+**Removed from the card.** The whole note line, in every status: blocked and failed reasons, review round, "Waiting for you", "Merges when checks pass". The waiting note is replaced by the blocked icon. Also gone: ref, type badge, design-changed badge and PR link. All of it stays in the flyout.
 
-States: all shared states. A 4px left edge carries priority: Urgent red, High amber, Medium grey, Low pale. Below the title, the footer has the epic left and the assignee right, with the assignee kept whole when the epic is long.
+**Glow.** `BorderGlow` now picks a random point in the lap when each card mounts, using a negative `animation-delay`. Cards working at the same time sweep out of step, and the offsets change on each load. This is in the real component, so the project overview's glows get it too. With reduced motion the sweep is off, and every glow rests at the same angle, as it does today.
 
-Components: PrototypeTaskCard, PrototypeCardAssignee, AgentAvatar, BorderGlow.
+**Selected and working.** Selected keeps the primary border and ring. Working keeps the glow, and the avatar's green dot shows when the displayed assignee holds the lease.
 
-Rationale and trade-offs: the cleanest card body, with no priority text at all, and urgent work jumps out of a column. Priority here relies on colour alone for sighted users (screen readers get the word), and Medium and Low are hard to tell apart. Any status-coloured edge can't be added later without a clash.
+### States and fixtures
 
-## card-option-d — Option D / Assignee first
+| State | Fixture |
+| --- | --- |
+| Working, glow, glows out of step | COR-3, 26, 27 In progress; COR-4, 28 Agent review |
+| Agent review shows reviewer | COR-4, COR-28: Rita. Developer not shown |
+| Agent review, no reviewer | COR-25: dashed circle, though Dana is its developer |
+| Selected | COR-24, In progress (preview state; clicking any card moves it) |
+| Blocked, one blocker | COR-6, Ready: waiting on COR-5 |
+| Blocked, three blockers, long title, no epic, urgent, bug | COR-21, Ready: waiting on COR-3, 4, 8 |
+| Merged dependency, no blocked icon | COR-23, Ready: depends on merged COR-1 |
+| Design type | COR-23, COR-26, COR-4 |
+| Bug type | COR-21, COR-24, COR-9 |
+| Spike type | COR-22, COR-25 |
+| Plain task, no type icon | COR-3, COR-27 |
+| Priorities | Urgent COR-21; High COR-3; Medium COR-6; Low COR-22 |
+| Long epic truncated | COR-22, COR-26 |
+| Long reason not shown | COR-8 blocked, COR-9 failed: both have a `statusReason`, and it appears only in the flyout |
+| PR link not on the card | COR-3 PR #66, in the flyout |
 
-Route: `#/projects/corral/board?option=d`. Mobile: same card.
+### Interactions
 
-States: all shared states. The header row has an sm avatar with the name in bold, and the priority word opposite. Title follows, then the epic. Unclaimed tasks show the dashed circle and Unassigned in the header.
+- Click anywhere on a card to open the real TaskFlyout; click again to close. On a phone the flyout fills the Board area here, while today's phone Board goes to the task page.
+- The title is the card's keyboard button: Tab to it, then Enter or Space. A focus ring shows round the whole card.
+- The blocked icon is its own button, so Tab reaches it after the title. The card is a `div` rather than a `button` so this is valid HTML: a button can't hold another button.
+- PR links are reached from the flyout's properties, and open in a new tab.
 
-Components: PrototypeTaskCard, PrototypeCardAssignee, AgentAvatar, BorderGlow.
+### Components
 
-Rationale and trade-offs: makes the rule you asked for the most visible thing on the card, so a glance down a column tells you who has what, and In progress and Agent review read as different people. The title is no longer the first thing you read, and every Unassigned card in Ready spends its top row saying so.
+Real app and mobile shells, UDashboardPanel, UButton, UBadge (column counts only), UPopover, UIcon, AgentAvatar, BorderGlow, TaskFlyout, TaskDetail.
 
-## card-option-e — Option E / Epic header
-
-Route: `#/projects/corral/board?option=e`. Mobile: same card.
-
-States: all shared states. The epic is a one-line header with a divider under it, dropped entirely when there is no epic. The title is 16px. The footer has bars with the priority word on the left and the assignee on the right.
-
-Components: PrototypeTaskCard, PrototypePriorityBars, PrototypeCardAssignee, AgentAvatar, BorderGlow.
-
-Rationale and trade-offs: reads best when a column mixes several epics, and the larger title gives the most comfortable reading. It is the tallest option, cards with and without an epic have visibly different shapes, and long titles take more lines at 16px.
+New in the prototype: `PrototypeTaskCard` (the card), `PrototypeCardAssignee` (avatar or dashed circle), `PrototypeCardBlockers` (blocked icon and popover), `PrototypeCardBoard` (the Board page and the icon switcher). `BorderGlow` is changed in place. Otherwise production rendering is untouched: the replacement Board is gated by `import.meta.prototype`. `PrototypePriorityBars` is deleted.
 
 ## Mock data and data availability
 
-Data uses the typed `Task`, `Agent` and `Epic` fixtures through the existing in-memory mock API. v2 adds `developer` and `reviewer` to the COR tasks, and the epic `e-board` with a long name. **No option needs new data**: `developer`, `reviewer`, `lease`, `priority`, `epicId` and `title` are all on the Task contract already. The bundle calls no backend.
+Data uses the typed `Task`, `Agent` and `Epic` fixtures through the in-memory mock API. v4 adds COR-26, 27 and 28 as working tasks, gives COR-21 three dependencies and COR-23 a merged one.
 
-## Decisions for review
+**No new data is needed.** `title`, `epicId`, `priority`, `type`, `developer`, `reviewer`, `lease` and `dependsOn` are all on the Task contract, and the popover reads the blockers from the project's task list. The build would need a blocker from another project to be in that list; the prototype doesn't cover that case. The bundle calls no backend.
 
-- Choose one of A–E. My recommendation is **D** if who has the task matters most, as your comment suggests, or **A** if the title should still lead.
-- Acceptance criteria vs. your comment: the task asks for PR links, type badges, the design-changed badge and notes on the card. Your comment says title, epic, priority and assignee only, so I followed your comment. The PR link now lives only in the flyout, so the "click the PR link" criterion can't be met on the card.
-- Losing the note means a Ready task no longer says it is waiting on another task, and a blocked task no longer gives its reason on the card. The column still shows Blocked & failed.
-- Whether an unclaimed task should say Unassigned or leave the spot empty. I chose Unassigned, so the assignee position is always filled.
-- Whether phone cards keep today's task-page navigation or use the full-width pane shown here.
+## Open questions
+
+- **Which blocked icon?** I recommend Ban unless you prefer another once you've compared them.
+- **Spike icon**: keep the flask, or show nothing like a plain task?
+- **Blocked vs failed**: with the message gone, those two cards look the same in the Blocked & failed column, and nothing says why until you open one. The column's status filter still tells them apart. The word "blocked" also now means two things: the icon on a waiting Ready task and the status in that column. The popover says "Waiting on" to keep them apart, and tasks in the Blocked & failed column don't get the icon.
+- **Phone tap**: keep the full-width pane shown here, or today's task page?
+
+## Acceptance criteria that changed
+
+These follow your comments, so the original wording no longer applies:
+
+- "Five options, A to E" is now one, Option A, on a full Board.
+- The design-changed badge, status notes and on-card PR link are gone, so "click the PR link" is met through the flyout's link.
+- The warning note, error note and `waiting on` note no longer appear as text. The fixtures still have them, and the waiting state is now the icon.
 
 ## Validation
 
-The bundle was served from `/prototype-dist/` and driven with agent-browser at 1280px and 390px. `browser-verification.txt` records it: all desktop columns are 272px; no card or card list overflows horizontally in any option; no links or badges exist inside any card; clicking a card in each option sets `task=COR-3` and opens the flyout at both widths; and the flyout has the `/pull/66` link with `target=_blank`.
+The bundle was served from `/prototype-dist/` and driven with agent-browser at 1280px and at 390px with the phone layout forced. `browser-verification.txt` records the results: all columns are 272px; no card or list overflows at either width; no card contains a link, an agent's name or note text, including the blocked and failed cards; clicking a card opens the flyout; the blocked icon opens the popover without opening the flyout; a popover row opens that task; Enter on the title opens the flyout; the flyout has `/pull/66` with `target=_blank`; and the glow delays differ between cards and between loads.
 
-Screenshots per screen id: `-desktop.png` and `-mobile.png` (working glow and selected), `-desktop-later-columns.png` (Human review onward), `-mobile-ready.png` (long title, Unassigned, long epic; 390px wide, taller viewport), `-flyout.png` and `-mobile-flyout.png`.
+Screenshots: `card-option-a-desktop` (working, selected, blocked, types), `-desktop-later-columns` (reasons not shown), `-desktop-blocked-popover`, `-desktop-flyout`, `-desktop-flyout-from-popover`, `-blocked-icon-hourglass`, `-lock` and `-link`, `-mobile`, `-mobile-ready`, `-mobile-blocked-popover`, `-mobile-blocked-failed`, `-mobile-flyout`.

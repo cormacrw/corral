@@ -74,6 +74,9 @@ function buildMeshGradients(colors: string[]): string[] {
   return gradients
 }
 
+// A random point in the lap, so cards that start together don't sweep in sync.
+// A negative delay starts the animation already part way round.
+const startOffset = Math.random()
 const mesh = computed(() => buildMeshGradients(props.colors))
 const boxShadow = computed(() => buildBoxShadow(props.glowColor, props.glowIntensity))
 const edgeCone = computed(() => {
@@ -96,7 +99,7 @@ const glowCone = 'conic-gradient(from var(--glow-angle) at center, black 2.5%, t
   <div
     v-if="props.active"
     class="relative isolate flex flex-col motion-safe:animate-glow-spin"
-    :style="{ borderRadius: `${props.borderRadius}px`, animationDuration: `${props.duration}s` }"
+    :style="{ borderRadius: `${props.borderRadius}px`, animationDuration: `${props.duration}s`, animationDelay: `${-startOffset * props.duration}s` }"
   >
     <slot />
 
