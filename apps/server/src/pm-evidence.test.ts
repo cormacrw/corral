@@ -37,7 +37,7 @@ it('attaches PM files to chat or a project task, validating scope, criteria and 
   for (const ref of ['OTHER-1', `${project.prefix}-9999`]) {
     const refused = await runner.call(job.runId, job.leaseEpoch, 'attach_evidence', { ...upload, taskRef: ref })
     expect(refused).toMatchObject({ ok: false, error: expect.stringContaining(`No task ${ref} in this project`) })
-    expect(await runner.call(job.runId, job.leaseEpoch, 'add_comment', { taskRef: ref, body: 'Context' })).toMatchObject({ error: refused.error })
+    expect(await runner.call(job.runId, job.leaseEpoch, 'add_comment', { taskRef: ref, body: 'Context' })).toMatchObject({ error: 'error' in refused ? refused.error : null })
   }
   expect((await runner.call(job.runId, job.leaseEpoch, 'attach_evidence', { ...upload, criterionId: task.acceptanceCriteria[0]!.id })).ok).toBe(false)
   expect((await runner.call(job.runId, job.leaseEpoch, 'attach_evidence', { ...upload, taskRef: task.ref, criterionId: '00000000-0000-4000-8000-000000000000' })).ok).toBe(false)
