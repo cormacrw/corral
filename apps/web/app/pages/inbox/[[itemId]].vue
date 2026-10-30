@@ -334,9 +334,9 @@ onBeforeUnmount(() => {
                       size="xs"
                     />
                     <span class="flex items-center gap-1 text-xs text-muted">
-                      <span
-                        class="size-2 rounded-full"
-                        :style="{ background: item.project.thumbnailColor ?? '#64748b' }"
+                      <ProjectThumbnail
+                        :project="item.project"
+                        :size="16"
                       />{{ item.project.name }}
                     </span>
                   </span>
@@ -394,7 +394,10 @@ onBeforeUnmount(() => {
                   variant="subtle"
                   size="xs"
                 />
-                <span>{{ selected.project.name }} · {{ selected.taskRef }}</span>
+                <span class="flex items-center gap-1"><ProjectThumbnail
+                  :project="selected.project"
+                  :size="16"
+                />{{ selected.project.name }} · {{ selected.taskRef }}</span>
                 <span>{{ selected.sender.name }} · {{ selected.sender.role }} · {{ timeAgo(selected.at) }}</span>
               </div>
             </div>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { AgentRuntime, CliStatus, DraftSession } from '@corral/contracts'
 import { api } from '~/composables/useApi'
-import { detectedRuntimes, initials, projectColor, runtimeLabel } from '~/utils/labels'
+import { detectedRuntimes, projectColor, runtimeLabel } from '~/utils/labels'
 
 // Plan, new session (design/plan.md)
 const live = useLive()
@@ -161,7 +161,7 @@ async function start(message: string): Promise<boolean> {
           <template #tools>
             <USelectMenu
               :model-value="project?.id"
-              :items="live.state.value.projects.map(p => ({ label: p.name, value: p.id, color: projectColor(p), initial: initials(p.name) }))"
+              :items="live.state.value.projects.map(p => ({ label: p.name, value: p.id, project: p }))"
               value-key="value"
               size="xs"
               variant="ghost"
@@ -170,6 +170,12 @@ async function start(message: string): Promise<boolean> {
               :ui="{ content: 'w-80 max-w-[calc(100vw-2rem)]', base: 'max-w-56' }"
               @update:model-value="projectId = $event as string"
             >
+              <template #item-leading="{ item }">
+                <ProjectThumbnail
+                  :project="item.project"
+                  :size="20"
+                />
+              </template>
               <template #leading>
                 <span
                   class="size-2.5 rounded-full"

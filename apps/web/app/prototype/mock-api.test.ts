@@ -11,6 +11,17 @@ describe('prototype mock API', () => {
     }
   })
 
+  it('includes thumbnails on project and inbox responses', async () => {
+    const projects = await mockCall<Project[]>('GET', '/projects')
+    expect(projects.filter(p => p.thumbnailUrl)).toHaveLength(1)
+    const corral = projects.find(p => p.slug === 'corral')!
+    expect(corral.thumbnailUrl).toMatch(/^data:image\/svg\+xml,/)
+    const detail = await mockCall<Project>('GET', '/projects/corral')
+    expect(detail.thumbnailUrl).toBe(corral.thumbnailUrl)
+    const inbox = await mockCall<Inbox>('GET', '/inbox')
+    expect(inbox.needsYou.filter(i => i.project.id === corral.id).every(i => i.project.thumbnailUrl === corral.thumbnailUrl)).toBe(true)
+  })
+
   it('serves a project\'s open PRs, with eligible and blocked ones', async () => {
     const prs = await mockCall<PullRequestStatus[]>('GET', '/projects/corral/pull-requests')
     expect(prs.every(pr => pr.taskRef.startsWith('COR-'))).toBe(true)

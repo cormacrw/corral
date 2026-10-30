@@ -1,17 +1,16 @@
 <script setup lang="ts">
 import type { PlanThreadItem } from '@corral/contracts'
-import { projectColor, timeAgo } from '~/utils/labels'
+import { timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
 
 defineProps<{ item: PlanThreadItem }>()
 </script>
 
 <template>
-  <span
-    class="mt-1.5 size-2.5 shrink-0 rounded-full"
-    :style="{ background: projectColor(item.project) }"
-    :title="item.project.name"
-    :aria-label="item.project.name"
+  <ProjectThumbnail
+    :project="item.project"
+    :size="20"
+    class="mt-1"
   />
   <span class="flex min-w-0 flex-1 flex-col gap-1">
     <span class="flex items-center gap-2">
