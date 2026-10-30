@@ -2,6 +2,7 @@ import type { EpicConflictItem, EpicReviewActionInput, EpicReviewItem, OutcomeRe
 import { ACTIVE_RUN_STATES, feedbackFixTitle, feedbackPoints, LEASE_DURATION_MS, markdownToRichText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne } from 'drizzle-orm'
+import { appendAudit, auditEvent } from './audit.ts'
 import type { OrchestratorDeps } from './orchestrator.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import { getEpic } from './epics.ts'
@@ -9,7 +10,7 @@ import { listEvidence } from './runs.ts'
 import { thumbnailUrl } from './projects.ts'
 import { createTask, loadTask, toTasks, type ProjectRow } from './tasks.ts'
 
-const { agents, auditLog, epics, projects, runs, tasks } = schema
+const { agents, epics, projects, runs, tasks } = schema
 const system: Actor = { kind: 'system', component: 'server' }
 type EpicRow = typeof epics.$inferSelect
 type RunRow = typeof runs.$inferSelect
@@ -60,7 +61,7 @@ export class EpicPullRequests {
             .where(and(eq(runs.epicId, epic.id), inArray(runs.state, [...ACTIVE_RUN_STATES])))
           await tx.update(epics).set({ prNumber: pr.number, prHeadSha: pr.headSha, reviewState: 'in_review', rebaseRequested: false, conflictFiles: null, updatedAt: this.now() }).where(eq(epics.id, epic.id))
           changed = true
-          await tx.insert(auditLog).values({ projectId: project.id, actor: system, action: 'epic.pr', detail: { epicId: epic.id, event: epic.prNumber ? 'review_started' : 'opened', prNumber: pr.number } })
+          await appendAudit(tx, { projectId: project.id, actor: system }, auditEvent('epic.pr', { epicId: epic.id, event: epic.prNumber ? 'review_started' : 'opened', prNumber: pr.number }))
         })
         if (changed) await this.publish(candidate.id)
       } catch (error) {
@@ -107,7 +108,8 @@ export class EpicPullRequests {
   }
 
   async report(run: RunRow, report: OutcomeReport): Promise<void> {
-    if (!['approved', 'changes_requested'].includes(report.outcome)) throw new Error('Epic review outcomes are approved or changes_requested')
+    const { outcome } = report
+    if (outcome !== 'approved' && outcome !== 'changes_requested') throw new Error('Epic review outcomes are approved or changes_requested')
     let fixId: string | null = null
     await this.d.db.transaction(async (tx) => {
       const [project] = await tx.select().from(projects).where(eq(projects.id, run.projectId)).for('update')
@@ -120,7 +122,7 @@ export class EpicPullRequests {
       await tx.update(runs).set({ state: 'completed', outcome: report.outcome, summary: report.summary, endedAt: this.now() }).where(eq(runs.id, run.id))
       await tx.update(epics).set({ reviewState: report.outcome === 'approved' ? 'human_review' : 'changes_requested', updatedAt: this.now() }).where(eq(epics.id, epic.id))
       if (report.outcome === 'changes_requested') fixId = await createEpicFixTask(tx, project, epic, report.summary, actor)
-      await tx.insert(auditLog).values({ projectId: project.id, actor, action: 'epic.pr', detail: { epicId: epic.id, event: report.outcome, headSha: run.headSha, summary: report.summary } })
+      await appendAudit(tx, { projectId: project.id, actor }, auditEvent('epic.pr', { epicId: epic.id, event: outcome, headSha: run.headSha, summary: report.summary }))
     })
     if (fixId) this.d.events.publish({ type: 'task.created', task: await loadTask(this.d.db, fixId) })
     await this.publish(run.epicId!)
@@ -142,7 +144,7 @@ export class EpicPullRequests {
       if (input.action === 'request_changes' && !input.text?.trim()) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ message: 'Describe the changes needed' }] })
       await tx.update(epics).set({ reviewState: input.action === 'approve' ? 'ready_to_merge' : 'changes_requested', updatedAt: this.now() }).where(eq(epics.id, epic.id))
       if (input.action === 'request_changes') fixId = await createEpicFixTask(tx, project, epic, input.text!.trim(), actor)
-      await tx.insert(auditLog).values({ projectId: project.id, actor, action: 'epic.pr', detail: { epicId, event: input.action === 'approve' ? 'human_approved' : 'human_changes_requested', headSha: input.headSha, summary: input.text ?? '' } })
+      await appendAudit(tx, { projectId: project.id, actor }, auditEvent('epic.pr', { epicId, event: input.action === 'approve' ? 'human_approved' : 'human_changes_requested', headSha: input.headSha, summary: input.text ?? '' }))
     })
     if (fixId) this.d.events.publish({ type: 'task.created', task: await loadTask(this.d.db, fixId) })
     await this.publish(epicId)
@@ -164,7 +166,7 @@ export class EpicPullRequests {
       const text = `Rebase the epic branch ${epic.branch} onto origin/${target}: git fetch origin && git rebase origin/${target}. Never merge ${target} in. Resolve the conflicts in ${files}, keeping both sides' intent and never reverting what ${target} just merged. No feature changes. Run the project's gates, then report pr_updated; Corral force-pushes the epic branch with --force-with-lease, and no separate PR is opened.`
       const id = await createTask(tx, project, { type: 'task', title: `Rebase epic: ${epic.title}`.slice(0, 200), description: paragraph(text), epicId: epic.id, acceptanceCriteria: [`${epic.branch} is rebased onto origin/${target} with no merge commits, and the conflicts in ${files} are resolved keeping both sides' intent`] }, actor, { epicFix: true })
       await tx.update(tasks).set({ branch: epic.branch }).where(eq(tasks.id, id))
-      await tx.insert(auditLog).values({ projectId: project.id, actor, action: 'epic.pr', detail: { epicId, event: 'rebase_handed_off', headSha } })
+      await appendAudit(tx, { projectId: project.id, actor }, auditEvent('epic.pr', { epicId, event: 'rebase_handed_off', headSha }))
       return id
     })
     this.d.events.publish({ type: 'task.created', task: await loadTask(this.d.db, taskId) })

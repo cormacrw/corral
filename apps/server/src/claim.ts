@@ -3,6 +3,7 @@ import { schema, type Executor } from '@corral/db'
 import { and, asc, count, eq, gt, inArray, isNotNull, isNull, ne, notInArray, notExists, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { holdsEpicOpen } from './epic-review-state.ts'
+import { appendAudit, auditEvent, auditText } from './audit.ts'
 import { toTaskState, type TaskRow } from './tasks.ts'
 
 const { agents, auditLog, projects, reviews, runs, epics, epicDependencies, taskDependencies, tasks } = schema
@@ -84,8 +85,8 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
               notExists(tx.select({ one: sql`1` }).from(auditLog).where(and(
                 eq(auditLog.taskId, tasks.id),
                 eq(auditLog.action, 'task.transition'),
-                sql`${auditLog.detail}->>'from' = 'in_progress'`,
-                sql`${auditLog.detail}->>'to' = 'agent_review'`,
+                sql`${auditText('task.transition', 'from')} = 'in_progress'`,
+                sql`${auditText('task.transition', 'to')} = 'agent_review'`,
                 gt(auditLog.createdAt, reviews.createdAt)
               ))))))
         )
@@ -161,13 +162,7 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
       updatedAt: now
     }).where(eq(tasks.id, task.id))
 
-    await tx.insert(auditLog).values({
-      projectId: task.projectId,
-      taskId: task.id,
-      actor: scheduler,
-      action: 'task.claimed',
-      detail: { runId: run!.id, agentId, leaseEpoch, from: task.status, to: status }
-    })
+    await appendAudit(tx, { projectId: task.projectId, taskId: task.id, actor: scheduler }, auditEvent('task.claimed', { runId: run!.id, agentId, leaseEpoch, from: task.status, to: status }))
 
     return { taskId: task.id, runId: run!.id, runNumber: run!.number, leaseEpoch, leaseExpiresAt, status, runnerId }
   })

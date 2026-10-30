@@ -1,6 +1,7 @@
 import { ACTIVE_RUN_STATES, type Actor } from '@corral/core'
 import { schema } from '@corral/db'
 import { and, asc, eq, inArray, isNotNull, ne } from 'drizzle-orm'
+import { appendAudit, auditEvent, type EpicPrDetail } from './audit.ts'
 import { publishEpicDependents } from './dependent-tasks.ts'
 import { getEpic } from './epics.ts'
 import { complete, createEpicFixTask, epicBoard } from './epic-prs.ts'
@@ -8,7 +9,7 @@ import type { CheckResult, PullRequest } from './github.ts'
 import type { MergeDeps } from './merge.ts'
 import { loadTask, type ProjectRow } from './tasks.ts'
 
-const { auditLog, epics, projects, runs } = schema
+const { epics, projects, runs } = schema
 const server: Actor = { kind: 'system', component: 'server' }
 type EpicRow = typeof epics.$inferSelect
 
@@ -113,7 +114,7 @@ export class EpicMerger {
       throw error
     }
     if (!updated) return this.#conflict(epic, project)
-    await db.insert(auditLog).values({ projectId: project.id, actor: server, action: 'epic.pr', detail: { epicId: epic.id, event: 'rebase_requested', headSha: pr.headSha } })
+    await appendAudit(db, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, event: 'rebase_requested', headSha: pr.headSha }))
     this.#d.events.publish({ type: 'epic.updated', epic: await getEpic(db, epic.id) })
   }
 
@@ -122,12 +123,12 @@ export class EpicMerger {
   }
 
   // Writes the epic's next state unless a task or human action changed it
-  async #leave(epic: EpicRow, project: ProjectRow, reviewState: EpicRow['reviewState'], values: Partial<EpicRow>, detail: { event: string, summary?: string, [key: string]: unknown }): Promise<void> {
+  async #leave(epic: EpicRow, project: ProjectRow, reviewState: EpicRow['reviewState'], values: Partial<EpicRow>, detail: EpicPrDetail): Promise<void> {
     const { db } = this.#d
     const [moved] = await db.update(epics).set({ reviewState, ...values, updatedAt: this.#now() })
       .where(and(eq(epics.id, epic.id), eq(epics.reviewState, 'ready_to_merge'))).returning({ id: epics.id })
     if (!moved) return
-    await db.insert(auditLog).values({ projectId: project.id, actor: server, action: 'epic.pr', detail: { epicId: epic.id, ...detail } })
+    await appendAudit(db, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, ...detail }))
     this.#d.events.publish({ type: 'epic.updated', epic: await getEpic(db, epic.id) })
   }
 
@@ -146,7 +147,7 @@ export class EpicMerger {
     const { db, events } = this.#d
     const lines = failed.map(c => `${c.name}: failed${c.url ? ` (${c.url})` : ''}`).join('; ')
     const taskId = await db.transaction(tx => createEpicFixTask(tx, project, epic, `CI failed on the epic PR. ${lines}`, server))
-    await db.insert(auditLog).values({ projectId: project.id, actor: server, action: 'epic.pr', detail: { epicId: epic.id, event: 'ci_failed', summary: lines } })
+    await appendAudit(db, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, event: 'ci_failed', summary: lines }))
     events.publish({ type: 'task.created', task: await loadTask(db, taskId) })
     events.publish({ type: 'epic.updated', epic: await getEpic(db, epic.id) })
     this.#d.wake?.([taskId])
@@ -172,7 +173,7 @@ export class EpicMerger {
     const again = await github.getPullRequest(project.repository, pr.number).catch(() => null)
     if (again?.merged) return this.#recordMerged(epic, project, again)
     if (failure === null) return
-    await db.insert(auditLog).values({ projectId: project.id, actor: server, action: 'merge.refused', detail: { epicId: epic.id, pr: pr.number, message: failure, attempt } })
+    await appendAudit(db, { projectId: project.id, actor: server }, auditEvent('merge.refused', { epicId: epic.id, pr: pr.number, message: failure, attempt }))
     if (attempt < MAX_MERGE_ATTEMPTS) return
     // Approving again retries the merge
     this.#attempts.delete(epic.id)
@@ -185,7 +186,7 @@ export class EpicMerger {
       await tx.update(epics).set({ reviewState: 'merged', mergeCommitSha: pr.mergeCommitSha, prHeadSha: pr.headSha, rebaseRequested: false, conflictFiles: null, updatedAt: this.#now() }).where(eq(epics.id, epic.id))
       await tx.update(runs).set({ state: 'interrupted', endedAt: this.#now(), error: 'Epic PR merged' })
         .where(and(eq(runs.epicId, epic.id), inArray(runs.state, [...ACTIVE_RUN_STATES])))
-      await tx.insert(auditLog).values({ projectId: project.id, actor: server, action: 'epic.pr', detail: { epicId: epic.id, event: 'merged', pr: pr.number, mergeCommitSha: pr.mergeCommitSha } })
+      await appendAudit(tx, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, event: 'merged', pr: pr.number, mergeCommitSha: pr.mergeCommitSha }))
     })
     this.#attempts.delete(epic.id)
     events.publish({ type: 'epic.updated', epic: await getEpic(db, epic.id) })

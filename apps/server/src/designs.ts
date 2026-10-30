@@ -2,11 +2,12 @@ import type { DesignVersion } from '@corral/contracts'
 import { approveDesignVersion, bundlePath, designPreviewUrl, taskRef, unpackBundle, type Actor } from '@corral/core'
 import { schema, type Database, type Executor } from '@corral/db'
 import { and, asc, desc, eq, isNull } from 'drizzle-orm'
+import { appendAudit, auditEvent } from './audit.ts'
 import type { BlobStore } from './blob-store.ts'
 import { ApiFailure } from './errors.ts'
 import { lockTask } from './tasks.ts'
 
-const { auditLog, designVersions, taskDesignPins, tasks } = schema
+const { designVersions, taskDesignPins, tasks } = schema
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -244,7 +245,7 @@ export async function approveDesign(db: Database, taskId: string, version: numbe
       const before = rows.find(r => r.id === next.id)!
       if (before.status !== next.status) await tx.update(designVersions).set({ status: next.status, updatedAt: new Date() }).where(eq(designVersions.id, next.id))
     }
-    await tx.insert(auditLog).values({ projectId: project.id, taskId, actor, action: 'design.approved', detail: { version } })
+    await appendAudit(tx, { projectId: project.id, taskId, actor }, auditEvent('design.approved', { version }))
     return result.versions.find(v => v.version === version)!.id
   })
 }
