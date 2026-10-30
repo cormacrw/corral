@@ -2,8 +2,9 @@ import type { AgentTool } from '@corral/contracts'
 import { TASK_TYPES, type AgentRole } from '@corral/core'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { spawnSync } from 'node:child_process'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { ROLE_TOOLS, toolsFor, ToolServer } from './mcp.ts'
+import { outcomesFor, ROLE_TOOLS, toolsFor, ToolServer } from './mcp.ts'
 
 // The tools each role sees over MCP, through the SDK client the agent uses
 describe('ToolServer', () => {
@@ -172,40 +173,94 @@ describe('ToolServer', () => {
   })
 })
 
-// D20: only a design task's developer gets submit_design
+// A subprocess, because the failure is an uncaught exception that ends Node
+const ABORTED_REQUEST = `
+import { request } from 'node:http'
+import { ToolServer } from './src/mcp.ts'
+
+const server = new ToolServer()
+await server.start()
+server.register('agent', 'developer', async () => ({ ok: true, result: {} }))
+const url = new URL(server.url('agent'))
+
+await new Promise((resolve) => {
+  const aborted = request(url, { method: 'POST', headers: { 'content-length': '1000' } })
+  aborted.on('error', () => {})
+  aborted.on('close', resolve)
+  aborted.write('{')
+  setTimeout(() => aborted.destroy(), 100)
+})
+await new Promise(resolve => setTimeout(resolve, 100))
+
+const next = await fetch(url, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+  body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+})
+const listed = await next.json()
+console.log(listed.result.tools.some(tool => tool.name === 'get_task') ? 'still serving' : 'no tools')
+process.exit(0)
+`
+
+describe('ToolServer aborted requests', () => {
+  it('stays alive and serves the next request when a client drops mid-POST', async () => {
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', ABORTED_REQUEST], { cwd: new URL('..', import.meta.url), encoding: 'utf8', timeout: 15_000 })
+    expect(child.status, child.stderr).toBe(0)
+    expect(child.stdout.trim()).toBe('still serving')
+  }, 20_000)
+})
+
+// D23: only a designer gets submit_design
 describe('toolsFor', () => {
-  it('adds submit_design for a design task\'s developer, before report_outcome', () => {
-    const tools = toolsFor({ role: 'developer', taskType: 'design' })
-    expect(tools).toContain('submit_design')
+  it('gives a designer the developer\'s tools plus submit_design, before report_outcome', () => {
+    const tools = toolsFor({ role: 'designer' })
+    expect(tools).toEqual(expect.arrayContaining([...ROLE_TOOLS.developer, 'get_design', 'submit_design']))
+    expect(tools).toHaveLength(ROLE_TOOLS.developer.length + 1)
     expect(tools.at(-1)).toBe('report_outcome')
   })
 
-  it('leaves every other run with its role\'s tools', () => {
-    for (const taskType of ['task', 'bug', 'spike', null, undefined] as const) {
-      expect(toolsFor({ role: 'developer', taskType })).toEqual(ROLE_TOOLS.developer)
+  it('leaves every other role with no submit_design', () => {
+    for (const role of ['developer', 'reviewer', 'pm'] as const) {
+      expect(toolsFor({ role })).toEqual(ROLE_TOOLS[role])
+      expect(toolsFor({ role })).not.toContain('submit_design')
     }
-    expect(toolsFor({ role: 'reviewer', taskType: 'design' })).toEqual(ROLE_TOOLS.reviewer)
-    expect(ROLE_TOOLS.developer).not.toContain('submit_design')
   })
 
-  it('serves submit_design over MCP only where it was registered', async () => {
+  it('serves submit_design over MCP only to a designer, and refuses a call naming the role', async () => {
     const server = new ToolServer()
     await server.start()
     try {
-      server.register('design-dev', 'developer', async () => ({ ok: true, result: {} }), toolsFor({ role: 'developer', taskType: 'design' }))
-      server.register('task-dev', 'developer', async () => ({ ok: true, result: {} }))
-      const names = async (secret: string) => {
+      server.register('designer', 'designer', async () => ({ ok: true, result: {} }))
+      server.register('developer', 'developer', async () => ({ ok: true, result: {} }))
+      const connect = async (secret: string) => {
         const client = new Client({ name: 'test', version: '1' })
         await client.connect(new StreamableHTTPClientTransport(new URL(server.url(secret))))
-        const listed = (await client.listTools()).tools.map(t => t.name)
-        await client.close()
-        return listed
+        return client
       }
-      expect(await names('design-dev')).toContain('submit_design')
-      expect(await names('task-dev')).not.toContain('submit_design')
+      const designer = await connect('designer')
+      const developer = await connect('developer')
+      expect((await designer.listTools()).tools.map(t => t.name)).toContain('submit_design')
+      expect((await developer.listTools()).tools.map(t => t.name)).not.toContain('submit_design')
+      expect(await developer.callTool({ name: 'submit_design', arguments: {} })).toEqual({
+        isError: true,
+        content: [{ type: 'text', text: 'The developer can\'t use submit_design: only a designer submits a design' }]
+      })
+      await designer.close()
+      await developer.close()
     } finally {
       // Not awaited: the SDK client keeps its connection open a while
       void server.close()
     }
+  })
+})
+
+describe('outcomesFor', () => {
+  it('lets a designer report design_submitted and stuck but never a PR outcome', () => {
+    expect(outcomesFor('designer')).toEqual(expect.arrayContaining(['design_submitted', 'stuck']))
+    for (const outcome of ['pr_opened', 'pr_updated', 'pr_rebased', 'findings_reported']) expect(outcomesFor('designer')).not.toContain(outcome)
+  })
+
+  it('leaves design_submitted to designers', () => {
+    expect(outcomesFor('developer')).not.toContain('design_submitted')
   })
 })

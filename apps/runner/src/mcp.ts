@@ -24,7 +24,7 @@ interface ImageResult {
 
 const outcomes: Record<AgentRole, readonly string[]> = {
   designer: ['design_submitted', 'stuck', 'failed'],
-  developer: ['pr_opened', 'pr_updated', 'pr_rebased', 'findings_reported', 'design_submitted', 'stuck', 'failed'],
+  developer: ['pr_opened', 'pr_updated', 'pr_rebased', 'findings_reported', 'stuck', 'failed'],
   reviewer: ['approved', 'changes_requested', 'blocked', 'failed'],
   pm: []
 }
@@ -163,12 +163,13 @@ export const ROLE_TOOLS: Record<AgentRole, AgentTool[]> = {
   pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
 }
 
-// The tools a run gets: its role's, plus submit_design for a design task's
-// developer (D20)
-export function toolsFor(job: Pick<RunJob, 'role' | 'taskType'>): AgentTool[] {
-  const tools = ROLE_TOOLS[job.role] ?? []
-  if (job.role === 'developer' && job.taskType === 'design') return [...tools.slice(0, -1), 'submit_design', ...tools.slice(-1)]
-  return tools
+// The tools a run gets: its role's alone. Only a designer submits designs (D23)
+export function toolsFor(job: Pick<RunJob, 'role'>): AgentTool[] {
+  return ROLE_TOOLS[job.role] ?? []
+}
+
+export function toolRefusal(role: AgentRole, tool: string): string {
+  return `The ${role} can't use ${tool}${tool === 'submit_design' ? ': only a designer submits a design' : ''}`
 }
 
 interface Route {
@@ -214,6 +215,29 @@ export class ToolServer {
       res.writeHead(404).end()
       return
     }
+    try {
+      await this.#serve(route, req, res)
+    } catch (error) {
+      // This runs detached, so nothing above catches it: a client that drops
+      // mid-request must not take the runner down
+      if (!res.headersSent) res.writeHead(500).end(error instanceof Error ? error.message : 'MCP error')
+    }
+  }
+
+  async #serve(route: Route, req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const body = req.method === 'POST' ? await readJson(req) : undefined
+    if (body === null) {
+      res.writeHead(400).end()
+      return
+    }
+    // The SDK only says an unlisted tool wasn't found; name the role instead
+    const call = body as { id?: unknown, method?: unknown, params?: { name?: unknown } } | undefined
+    const name = call?.method === 'tools/call' ? String(call.params?.name) : null
+    if (name && name in toolDefinitions && !route.tools.includes(name as AgentTool)) {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ jsonrpc: '2.0', id: call!.id, result: toContent({ ok: false, error: toolRefusal(route.role, name) }) }))
+      return
+    }
     // Stateless: a fresh server per request, so a resumed agent process can
     // initialise again without a session clash
     const server = new McpServer({ name: 'corral', version: '1' })
@@ -229,12 +253,19 @@ export class ToolServer {
       void transport.close()
       void server.close()
     })
-    try {
-      await server.connect(transport)
-      await transport.handleRequest(req, res)
-    } catch (error) {
-      if (!res.headersSent) res.writeHead(500).end(error instanceof Error ? error.message : 'MCP error')
-    }
+    await server.connect(transport)
+    await transport.handleRequest(req, res, body)
+  }
+}
+
+// Null when the body isn't JSON
+async function readJson(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = []
+  for await (const chunk of req) chunks.push(chunk as Buffer)
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'))
+  } catch {
+    return null
   }
 }
 

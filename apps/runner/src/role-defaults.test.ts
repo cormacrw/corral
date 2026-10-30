@@ -48,6 +48,29 @@ describe('developer role defaults', () => {
   })
 })
 
+describe('designer role defaults', () => {
+  const designer = DEFAULT_ROLE_INSTRUCTIONS.designer
+
+  it.each([
+    ['the real components', 'from the project\'s real components and styles'],
+    ['mock data and no network', 'Use mock data only. The prototype makes no network calls'],
+    ['the static bundle', 'an `index.html` at its root and its assets, with relative paths'],
+    ['design.md', 'Write a `design.md` spec'],
+    ['screenshots as evidence', 'using the screenshots as evidence'],
+    ['the design branch', '`design/<ref>` branch'],
+    ['the design outcome', 'outcome "design_submitted"'],
+    ['the missing build command', 'report stuck and ask the human']
+  ])('covers %s', (_topic, text) => {
+    expect(designer).toContain(text)
+  })
+})
+
+describe('developer role keeps nothing design-specific', () => {
+  it.each(['submit_design', 'design_submitted', 'design.md', 'prototype', 'design/'])('leaves out %s', (text) => {
+    expect(DEFAULT_ROLE_INSTRUCTIONS.developer).not.toContain(text)
+  })
+})
+
 describe('reviewer role defaults', () => {
   it.each([
     ['built-in default', DEFAULT_ROLE_INSTRUCTIONS.reviewer],
@@ -85,7 +108,7 @@ describe('Corral reviewer override', () => {
 
 describe('attachments in role defaults', () => {
   it('tells every role to view attached images', () => {
-    for (const role of ['developer', 'reviewer', 'pm'] as const) {
+    for (const role of ['designer', 'developer', 'reviewer', 'pm'] as const) {
       expect(DEFAULT_ROLE_INSTRUCTIONS[role]).toContain('Images attached by the human are part of the requirements; view them with get_attachment.')
     }
   })
