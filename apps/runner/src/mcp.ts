@@ -215,7 +215,7 @@ export class ToolServer {
     const name = call?.method === 'tools/call' ? String(call.params?.name) : null
     if (name && name in toolDefinitions && !route.tools.includes(name as AgentTool)) {
       res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ jsonrpc: '2.0', id: call!.id, result: toContent({ ok: false, error: toolRefusal(route.role, name) }) }))
+      res.end(JSON.stringify({ jsonrpc: '2.0', id: call!.id, result: toContent({ ok: false, error: toolRefusal(route.role, name) }, 2) }))
       return
     }
     // Stateless: a fresh server per request, so a resumed agent process can
