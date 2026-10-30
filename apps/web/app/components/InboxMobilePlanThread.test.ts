@@ -150,7 +150,7 @@ describe('a task opened from the mobile plan sheet', () => {
     mocks.session.mockResolvedValue({ plans: [planned], messages: [] })
     const stub = (tag = 'span') => defineComponent({ props: ['label'], setup: p => () => h(tag, p.label) })
     const w = mount(InboxMobilePlanThread, {
-      props: { item: { ...planItem, planId: planned.id }, onRefresh: mocks.refresh },
+      props: { item: { ...planItem, status: 'needs_approval', question: null, plan: { id: planned.id, version: planned.version, title: planned.title, summary: planned.summary, epicCount: 0, taskCount: 0 }, planId: planned.id, reply: null }, onRefresh: mocks.refresh },
       global: {
         plugins: [router],
         components: {
