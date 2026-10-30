@@ -67,7 +67,10 @@ describe('release notes', () => {
     answer(job.jobId, notes)
     await expect.poll(async () => (await row(deployment.id)).notesStatus).toBe('ready')
     expect((await row(deployment.id)).notes).toBe(notes)
-    expect(updates(deployment.id)).toMatchObject([{ deployment: { id: deployment.id, notes, notesStatus: 'ready' } }])
+    expect(updates(deployment.id)).toMatchObject([
+      { deployment: { id: deployment.id, notes: null, notesStatus: 'pending' } },
+      { deployment: { id: deployment.id, notes, notesStatus: 'ready' } }
+    ])
   })
 
   it('adds whatever the model left out', async () => {
@@ -95,7 +98,10 @@ describe('release notes', () => {
     runner.send({ type: 'job.result', jobId: (await notesJob()).jobId, ok: false, error: 'claude exited with code 1' })
     await expect.poll(async () => (await row(deployment.id)).notesStatus).toBe('failed')
     expect((await row(deployment.id)).notes).toBe(`## Bugs\n\n- ${task.ref} Search\n\n## Other commits\n\n- Update readme`)
-    expect(updates(deployment.id)).toMatchObject([{ deployment: { notesStatus: 'failed' } }])
+    expect(updates(deployment.id)).toMatchObject([
+      { deployment: { notesStatus: 'pending' } },
+      { deployment: { notesStatus: 'failed' } }
+    ])
   })
 
   it('uses the PM agent\'s runtime, on a runner that has it', async () => {

@@ -1,6 +1,7 @@
 import type { AuditEntry, Inbox, Run, Task } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { epicTitle } from '~/utils/labels'
+import { projectNeedsYou } from '~/utils/projects'
 
 // Project overview data (design/project-overview.md), shared by the web page
 // and MobileProjectOverview. Loads and stays live while its caller is mounted.
@@ -47,7 +48,7 @@ export function useProjectOverview() {
 
   const DOT = { neutral: 'bg-neutral-400', info: 'bg-info', primary: 'bg-primary', warning: 'bg-warning', error: 'bg-error', success: 'bg-success', secondary: 'bg-secondary' } as const
   const count = (status: Task['status']) => tasks.value.filter(t => t.status === status).length
-  const needsYou = computed(() => inbox.value?.needsYou.filter(i => i.project.id === project.value?.id) ?? [])
+  const needsYou = computed(() => projectNeedsYou(inbox.value, project.value?.id))
   const weekAgo = Date.now() - 7 * 86_400_000
   const mergedThisWeek = computed(() => tasks.value.filter(t => t.mergedAt && new Date(t.mergedAt).getTime() > weekAgo))
   const firstPass = computed(() => {

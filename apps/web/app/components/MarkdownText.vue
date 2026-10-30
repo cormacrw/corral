@@ -3,6 +3,7 @@ import type { Token, Tokens } from 'marked'
 import { attachmentIdFromSrc, attachmentUrl } from '@corral/core'
 import { marked } from 'marked'
 import { h, ref, type VNode } from 'vue'
+import { RouterLink } from 'vue-router'
 
 // Agents write markdown (PM replies, transcripts, comments, summaries).
 // Rendered from marked's tokens into Vue nodes rather than v-html, so agent
@@ -11,7 +12,9 @@ import { h, ref, type VNode } from 'vue'
 // `breaks` keeps single newlines, for text a person typed into a composer.
 // Long paths, URLs and inline code wrap anywhere, so they never widen the
 // thread on a phone; code blocks and tables scroll in their own box instead.
-const props = defineProps<{ text: string, breaks?: boolean }>()
+// `taskRefs` lists the project prefixes whose task refs become links, so text
+// like SHA-256 or UTF-8 stays text.
+const props = defineProps<{ text: string, breaks?: boolean, taskRefs?: string[] }>()
 const lightbox = ref<{ src: string, alt: string } | null>(null)
 
 const SAFE_HREF = /^(https?:|mailto:|\/|#)/i
@@ -88,10 +91,19 @@ function inline(tokens: Token[]): (VNode | string)[] {
           'onClick': () => (lightbox.value = { src, alt: image.text })
         }, h('img', { src, alt: image.text, loading: 'lazy', class: 'block max-h-40 max-w-full object-contain sm:max-w-60' }))
       }
-      case 'text': return token.tokens ? h('span', inline(token.tokens)) : unescapeHtml((token as Tokens.Text).text)
+      case 'text': return token.tokens ? h('span', inline(token.tokens)) : textNode(unescapeHtml((token as Tokens.Text).text))
       default: return unescapeHtml('text' in token && typeof token.text === 'string' ? token.text : token.raw)
     }
   })
+}
+
+function textNode(text: string): VNode | string {
+  if (!props.taskRefs?.length) return text
+  const ref = new RegExp(`\\b((?:${props.taskRefs.join('|')})-\\d+)\\b`)
+  return h('span', text.split(ref).map((part, i) =>
+    i % 2 === 1
+      ? h(RouterLink, { to: `/tasks/${part}`, class: 'text-primary hover:underline' }, () => part)
+      : part))
 }
 
 function unescapeHtml(text: string): string {

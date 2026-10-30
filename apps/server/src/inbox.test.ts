@@ -82,7 +82,7 @@ describe('plan threads in the inbox', () => {
     expect(mine.find(i => i.id === unread.id)).toMatchObject({ type: 'plan_thread', status: 'none', unread: true, question: null, plan: null, reply: 'Finished investigating.' })
     expect(mine.filter(i => i.type === 'plan_thread').every(i => !('body' in i))).toBe(true)
     expect(before.count).toBe(before.needsYou.length)
-    expect(before.activity.concat(before.resolved).some(i => (i as { type: string }).type === 'plan_thread')).toBe(false)
+    expect([...before.activity, ...before.resolved].some(i => (i as { type: string }).type === 'plan_thread')).toBe(false)
 
     // Reading the unread-only thread takes it out of the list and the count
     await t.request('POST', `/api/plan/sessions/${unread.id}/read`)

@@ -43,7 +43,7 @@ async function load() {
 onMounted(() => {
   void load()
   const stop = live.subscribe((event) => {
-    if (['task.updated', 'task.deleted', 'task.created', 'run.updated', 'epic.updated', 'plan.session'].includes(event.type)) void load()
+    if (['task.updated', 'task.deleted', 'task.created', 'run.updated', 'epic.updated', 'plan.session', 'deployment.updated'].includes(event.type)) void load()
   })
   onBeforeUnmount(stop)
 })
@@ -78,7 +78,7 @@ watch(selected, async (item, previous) => {
   actionError.value = null
   // Nothing selected (e.g. the last item was just resolved): nothing to show beside it
   if (!item) flyout.close()
-  if (item?.type === 'plan_thread' || item?.type === 'epic_review') {
+  if (item?.type === 'plan_thread' || item?.type === 'epic_review' || item?.type === 'release_notes') {
     if (previous?.id !== item.id && (flyout.ref.value || flyout.epic.value)) await flyout.close()
     task.value = null
     return
@@ -162,7 +162,7 @@ const submitLabel = computed(() => action.value ? (actions.value.find(a => a.val
 
 // Resolves false when not sent, so the composer keeps its images
 async function submit(message: string): Promise<boolean> {
-  if (!selected.value || selected.value.type === 'plan_thread' || selected.value.type === 'epic_review') return false
+  if (!selected.value || selected.value.type === 'plan_thread' || selected.value.type === 'epic_review' || selected.value.type === 'release_notes') return false
   busy.value = true
   actionError.value = null
   try {
@@ -210,7 +210,7 @@ watchEffect(() => {
   }
   const position = inbox.value?.needsYou.findIndex(i => i.id === selectedId.value) ?? -1
   mobileHeader.value = {
-    title: selected.value?.type === 'plan_thread' || selected.value?.type === 'epic_review' ? selected.value.subject : selected.value?.taskRef ?? '',
+    title: selected.value?.type === 'plan_thread' || selected.value?.type === 'epic_review' || selected.value?.type === 'release_notes' ? selected.value.subject : selected.value?.taskRef ?? '',
     eyebrow: position >= 0 ? `Inbox · ${position + 1} of ${inbox.value!.needsYou.length}` : 'Inbox'
   }
 })
@@ -321,6 +321,11 @@ onBeforeUnmount(() => {
                 :item="item"
               />
               <template v-else>
+                <span
+                  v-if="item.type === 'release_notes' && item.unread"
+                  class="mt-2 size-2 shrink-0 rounded-full bg-primary"
+                  aria-label="Unread"
+                />
                 <AgentAvatar
                   :name="item.sender.name"
                   size="xs"
@@ -332,6 +337,10 @@ onBeforeUnmount(() => {
                   </span>
                   <span class="block truncate text-sm font-medium">{{ item.subject }}</span>
                   <span class="line-clamp-2 text-xs text-muted">{{ markdownToPlainText(item.preview) }}</span>
+                  <span
+                    v-if="item.type === 'release_notes'"
+                    class="block font-mono text-xs text-muted"
+                  >{{ item.fromSha ? `${item.fromSha}…` : '' }}{{ item.toSha }}</span>
                   <span class="mt-1 flex items-center gap-2">
                     <UBadge
                       :label="typeBadge(item.type).label"
@@ -375,6 +384,11 @@ onBeforeUnmount(() => {
         :key="selected.id"
         :item="selected"
         @resolved="nextAfterPlanResolution"
+      />
+      <InboxReleaseNotes
+        v-else-if="selected?.type === 'release_notes'"
+        :item="selected"
+        @refresh="load"
       />
       <InboxPlanThread
         v-else-if="selected?.type === 'plan_thread'"

@@ -463,7 +463,7 @@ export type ApprovePlanInput = z.input<typeof approvePlanInput>
 // ── Inbox (D11, design/inbox.md) ───────────────────────────────────────────
 
 export type TaskInboxItemType = 'human_review' | 'question' | 'blocked' | 'failed' | 'activity'
-export type InboxItemType = TaskInboxItemType | 'plan_thread' | 'epic_review'
+export type InboxItemType = TaskInboxItemType | 'plan_thread' | 'epic_review' | 'release_notes'
 
 interface InboxItemBase {
   project: { id: string, slug: string, name: string, thumbnailColor: string | null, thumbnailUrl: string | null }
@@ -533,15 +533,34 @@ export interface EpicReviewItem extends InboxItemBase {
   tasks: { task: Task, evidence: Evidence[] }[]
 }
 
-export type InboxItem = TaskInboxItem | PlanThreadItem | EpicReviewItem
+export interface ReleaseNotesItem extends InboxItemBase {
+  id: string
+  type: 'release_notes'
+  deploymentId: string
+  fromSha: string | null
+  toSha: string
+  notes: string | null
+  notesStatus: Deployment['notesStatus']
+  unread: boolean
+  taskId: null
+  taskRef: null
+  prUrl: null
+  resolution: string | null
+}
+
+export function needsAttention(item: InboxItem): boolean {
+  return item.type !== 'release_notes'
+}
+
+export type InboxItem = TaskInboxItem | PlanThreadItem | EpicReviewItem | ReleaseNotesItem
 
 export interface Inbox {
-  // Task items and Plan threads waiting on the human, one list newest first by
-  // when each arrived (`at`)
+  // Attention items newest first, followed by undismissed release notes
+  // newest first. Release notes remain here after reading.
   needsYou: InboxItem[]
   activity: TaskInboxItem[]
-  resolved: TaskInboxItem[]
-  // The Needs you count (the Inbox badge): exactly the listed items
+  resolved: (TaskInboxItem | ReleaseNotesItem)[]
+  // The Needs you count excludes informational release notes
   count: number
 }
 

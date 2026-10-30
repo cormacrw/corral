@@ -48,10 +48,12 @@ describe('prototype mock API', () => {
 
   it('derives the inbox from tasks that need the human', async () => {
     const inbox = await mockCall<Inbox>('GET', '/inbox')
-    expect(inbox.count).toBe(inbox.needsYou.length)
+    expect(inbox.count).toBe(inbox.needsYou.filter(i => i.type !== 'release_notes').length)
     const threads = inbox.needsYou.filter(i => i.type === 'plan_thread')
     expect(threads.map(i => i.sessionId).sort()).toEqual(['s-1', 's-2', 's-3', 's-5'])
-    expect(inbox.needsYou.map(i => i.at)).toEqual(inbox.needsYou.map(i => i.at).sort().reverse())
+    const attention = inbox.needsYou.filter(i => i.type !== 'release_notes')
+    expect(attention.map(i => i.at)).toEqual(attention.map(i => i.at).sort().reverse())
+    expect(inbox.needsYou.at(-1)?.type).toBe('release_notes')
     expect(threads.find(i => i.sessionId === 's-5')).toMatchObject({ status: 'none', unread: true, question: null, plan: null, reply: expect.stringContaining('SSE reconnect') })
     expect(threads.find(i => i.sessionId === 's-2')).toMatchObject({
       question: { text: 'Which push service should we use?', recommendation: 'Web Push', options: ['Web Push with VAPID keys', 'ntfy'] },
@@ -61,7 +63,7 @@ describe('prototype mock API', () => {
       question: null, plan: { id: 'plan-1', version: 1, epicCount: 1, taskCount: 3 }
     })
     expect(threads.every(i => !('body' in i))).toBe(true)
-    expect(inbox.needsYou.filter(i => i.type !== 'plan_thread').map(i => i.type).sort()).toEqual(['blocked', 'failed', 'human_review'])
+    expect(inbox.needsYou.filter(i => i.type !== 'plan_thread' && i.type !== 'release_notes').map(i => i.type).sort()).toEqual(['blocked', 'failed', 'human_review'])
     expect(threads.some(i => i.sessionId === 's-idle')).toBe(false)
   })
 
@@ -69,7 +71,7 @@ describe('prototype mock API', () => {
     await mockCall('POST', '/plan/sessions/s-5/read')
     const inbox = await mockCall<Inbox>('GET', '/inbox')
     expect(inbox.needsYou.some(i => i.id === 's-5')).toBe(false)
-    expect(inbox.count).toBe(inbox.needsYou.length)
+    expect(inbox.count).toBe(inbox.needsYou.filter(i => i.type !== 'release_notes').length)
   })
 
   it('opens a plan session with its messages and plans', async () => {

@@ -85,6 +85,7 @@ export function cliLoginCommand(id: CliStatus['id']): string {
 // design/inbox.md item type badges
 export function inboxTypeBadge(type: InboxItem['type']): { label: string, color: Color } {
   return ({
+    release_notes: { label: 'Release notes', color: 'neutral' as const },
     epic_review: { label: 'Epic PR', color: 'warning' as const },
     human_review: { label: 'Human review', color: 'warning' as const },
     question: { label: 'Question', color: 'info' as const },
