@@ -249,6 +249,8 @@ export interface Task {
   acceptanceCriteria: { id: string, position: number, text: string, met: boolean | null }[]
   // Refs of the tasks this one waits on
   dependsOn: string[]
+  // Unfinished prerequisite epics, with titles for display and IDs for links.
+  waitingOnEpics: { id: string, title: string }[]
   lease: Lease | null
   // The agents of the task's latest developer and reviewer runs. Tasks aren't
   // assigned ahead of time: a free agent claims them (D15), so these are null

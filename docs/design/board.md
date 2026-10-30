@@ -59,6 +59,8 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
 - Ready tasks with unmerged dependencies stay in Ready, with the note "Waiting on {ref}" (D10).
 - "Working" comes from an active lease, not from the status. A task in In progress waiting for a retry doesn't pulse.
 
+Ready tasks held by epic dependencies use the same neutral waiting note as task dependencies: **Waiting on epic: <title>**. Tasks without unfinished epic prerequisites keep their existing card notes.
+
 ## Data
 
 - **Tasks** (status other than Backlog, and merged within the last 3 days): ref, title, type, status, priority, epic, PR, review round, assigned agent, working (lease), note.
