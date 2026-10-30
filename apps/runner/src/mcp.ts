@@ -1,4 +1,4 @@
-import { askQuestionInput, listTasksInput, pmDirectTools, proposedPlanInput, EVIDENCE_KINDS, reportOutcomeInput, type AgentTool, type PmDirectTool, type RunJob } from '@corral/contracts'
+import { pmActionTools, askQuestionInput, listTasksInput, pmDirectTools, proposedPlanInput, EVIDENCE_KINDS, reportOutcomeInput, type AgentTool, type PmDirectTool, type RunJob } from '@corral/contracts'
 import { DESIGNER_RUN_OUTCOMES, DEVELOPER_RUN_OUTCOMES, REVIEWER_RUN_OUTCOMES, type AgentRole } from '@corral/core'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -31,12 +31,15 @@ const outcomes: Record<AgentRole, readonly string[]> = {
 }
 
 interface ToolDefinition {
+  confirmRequired?: boolean
   description: string
   input: z.ZodRawShape
 }
 
 const toolDefinitions = {
   ...pmDirectTools,
+  // The confirm-required flag is shared with the server dispatcher.
+  ...pmActionTools,
   get_task: {
     description: 'The task you are working on: title, description, acceptance criteria with their IDs, comments and evidence attached so far.',
     input: {}
@@ -140,7 +143,7 @@ export const ROLE_TOOLS: Record<AgentRole, AgentTool[]> = {
   designer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'submit_design', 'report_outcome'],
   developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'report_outcome'],
   reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'get_design', 'report_outcome'],
-  pm: ['attach_evidence', 'list_tasks', 'get_task', 'add_comment', 'get_run_outcomes', 'get_agent_activity', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs', ...Object.keys(pmDirectTools) as PmDirectTool[]]
+  pm: ['attach_evidence', 'list_tasks', 'get_task', 'add_comment', 'get_run_outcomes', 'get_agent_activity', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs', 'delete_task', ...Object.keys(pmDirectTools) as PmDirectTool[]]
 }
 
 // The tools a run gets: its role's alone. Only a designer submits designs (D23)

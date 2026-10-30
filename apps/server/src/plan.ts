@@ -296,6 +296,10 @@ export class PlanService {
       .map(p => ({ ref: taskRef(prefix, p.number), title: p.title, status: p.status, version: p.version }))
   }
 
+  async actionSessionChanged(sessionId: string): Promise<void> {
+    this.#d.events.publish({ type: 'plan.session', session: await this.#toSession(await this.#session(sessionId)) })
+  }
+
   // A human message starts one PM turn (D9)
   async message(sessionId: string, input: { text: string, taskRef?: string | undefined }, actor: Actor): Promise<PlanMessage> {
     const { db } = this.#d
@@ -321,8 +325,15 @@ export class PlanService {
     await appendAudit(db, { projectId: project.id, actor }, auditEvent('plan.message', { sessionId, messageId: message!.id }))
     this.#d.events.publish({ type: 'plan.message', message: toMessage(message!) })
 
+    // Warm agent sessions do not replay database history. Include the saved
+    // confirmation ledger explicitly, as well as in cold-start history.
+    // Replaying it also prevents a result racing a turn start from being lost.
+    const results = await db.select({ text: planMessages.text }).from(planMessages)
+      .where(and(eq(planMessages.sessionId, sessionId), eq(planMessages.kind, 'action_result')))
+      .orderBy(asc(planMessages.createdAt))
+    const turnText = results.length ? `${text}\n\nRecorded tool confirmation results:\n${results.map(r => r.text).join('\n')}` : text
     await this.#turn(session, project, {
-      prompt: pmPrompt({ text, attachedTask: attached, projectName: project.name, prefix: project.prefix, fresh: session.agentSessionId === null }),
+      prompt: pmPrompt({ text: turnText, attachedTask: attached, projectName: project.name, prefix: project.prefix, fresh: session.agentSessionId === null }),
       fallbackPrompt: pmFallbackPrompt({ text, attachedTask: attached, projectName: project.name, prefix: project.prefix, history: await this.#history(sessionId) })
     })
     return toMessage(message!)
@@ -1096,13 +1107,14 @@ async function keepCriterionIds(tx: Executor, taskId: string, texts: (string | {
   })
 }
 
-function toMessage(row: typeof planMessages.$inferSelect): PlanMessage {
+export function toMessage(row: typeof planMessages.$inferSelect): PlanMessage {
   return {
     id: row.id,
     sessionId: row.sessionId,
     role: row.role as 'human' | 'pm',
     kind: row.kind as PlanMessage['kind'],
     text: row.text,
+    pendingAction: row.pendingAction,
     recommendation: row.recommendation,
     options: row.options,
     planId: row.planId,

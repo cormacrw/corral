@@ -38,7 +38,7 @@ defineProps<{ ctx: InboxPanelContext, p: InboxPanel }>()
       size="sm"
     />
     <UButton
-      v-if="ctx.item.type === 'activity'"
+      v-if="ctx.item.type === 'activity' && ctx.task"
       :to="ctx.item.epicId ? `/epics/${ctx.item.epicId}` : `/tasks/${ctx.item.taskRef}`"
       :label="ctx.item.epicId ? 'Open epic' : 'Open task'"
       color="neutral"

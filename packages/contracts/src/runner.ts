@@ -274,6 +274,7 @@ export const runExitSchema = z.discriminatedUnion('kind', [
 ])
 
 export const agentToolSchema = z.enum([
+  'delete_task',
   'get_task', 'add_comment', 'attach_evidence', 'get_evidence', 'get_attachment',
   'get_design', 'submit_design', 'report_outcome', 'list_tasks', 'get_run_outcomes', 'get_agent_activity', 'list_runs', 'get_run',
   'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs'

@@ -40,7 +40,7 @@ const loading = computed(() => props.ctx.taskLoading || (p.isReview.value && pro
           </h1>
         </div>
         <UButton
-          v-if="!mobile"
+          v-if="!mobile && ctx.task"
           icon="i-lucide-panel-right"
           aria-label="Task details"
           title="Task details"

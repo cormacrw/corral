@@ -39,7 +39,7 @@ defineExpose({ send: () => panel.value?.send() ?? Promise.resolve(false) })
     <MobilePageHeader compact>
       <template #actions>
         <UButton
-          v-if="selected"
+          v-if="selected && ctx.task"
           :to="`/tasks/${selected.taskRef}`"
           label="Task"
           icon="i-lucide-list"

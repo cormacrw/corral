@@ -27,7 +27,8 @@ export interface PlanMessage {
   id: string
   sessionId: string
   role: 'human' | 'pm'
-  kind: 'message' | 'question' | 'error'
+  kind: 'message' | 'question' | 'error' | 'confirmation' | 'action_result'
+  pendingAction?: import('@corral/core').PmAction | null
   text: string
   // Set only on questions, and only when the PM gave them
   recommendation: string | null

@@ -1,4 +1,4 @@
-import type { Actor, PlanTaskContent } from '@corral/core'
+import type { Actor, PmAction, PlanTaskContent } from '@corral/core'
 import {
   boolean,
   index,
@@ -49,6 +49,7 @@ export const planMessages = pgTable('plan_messages', {
   role: text().notNull(),
   kind: text().notNull().default('message'),
   text: text().notNull(),
+  pendingAction: jsonb().$type<PmAction>(),
   // A question's suggested answer and answer choices (ask_question)
   recommendation: text(),
   options: jsonb().$type<string[]>(),

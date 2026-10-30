@@ -210,6 +210,7 @@ export const api = {
     patch: (id: string, input: PatchEpicInput) => call<Epic>('PATCH', `/epics/${id}`, input)
   },
   plan: {
+    resolveAction: (sessionId: string, actionId: string, decision: 'confirm' | 'cancel') => call<PlanMessage>('POST', `/plan/sessions/${sessionId}/actions/${actionId}`, { decision }),
     sessions: () => call<PlanSession[]>('GET', '/plan/sessions'),
     session: (id: string) => call<PlanSessionDetail>('GET', `/plan/sessions/${id}`),
     start: (projectId: string, text: string, taskRef?: string, runtime?: AgentRuntime, id?: string) => call<PlanSessionDetail>('POST', '/plan/sessions', { projectId, text, ...(id && { id }), ...(taskRef && { taskRef }), ...(runtime && { runtime }) }),
