@@ -33,6 +33,19 @@ function typeChecks() {
 void typeChecks
 
 describe('runner protocol schemas', () => {
+  it('preserves timings alongside stopped-work metadata on run.ended', () => {
+    const ended = {
+      type: 'run.ended', runId: 'run', leaseEpoch: 3,
+      exit: { kind: 'signalled', signal: 'SIGTERM' }, headSha: 'head',
+      lastActivityAt: '2026-10-30T12:00:00Z', wipSha: 'wip',
+      timings: { totalMs: 100, phases: [{ phase: 'finish', durationMs: 100 }], tools: [{ tool: 'get_task', count: 1, totalMs: 20, maxMs: 20 }] }
+    }
+    expect(runnerMessageSchema.parse(ended)).toEqual(ended)
+    const legacy = { ...ended }
+    Reflect.deleteProperty(legacy, 'timings')
+    expect(runnerMessageSchema.parse(legacy)).toEqual(legacy)
+  })
+
   it.each(['developer', 'reviewer'])('rejects a %s assignment without a task', (role) => {
     for (const taskId of [null, undefined, '']) {
       expect(serverMessageSchema.safeParse({ type: 'run.assign', job: { ...developer, role, taskId } }).success).toBe(false)

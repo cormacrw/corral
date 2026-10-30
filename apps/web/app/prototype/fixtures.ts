@@ -380,13 +380,13 @@ export const runs: Run[] = [
     runnerId: 'runner-1', runnerName: 'home-server', id: 'r-design', number: 140, agentId: 'a-design', agentName: 'Iris', role: 'designer', projectId: 'p-corral',
     taskId: at('COR-20').id, taskRef: 'COR-20', taskTitle: at('COR-20').title, state: 'running', outcome: null, summary: null,
     error: null, headSha: null, inputTokens: 12000, cacheReadTokens: 80000, outputTokens: 3000, rateLimitResetAt: null,
-    queuedAt: ago(12), startedAt: ago(11), endedAt: null
+    queuedAt: ago(12), startedAt: ago(11), endedAt: null, timings: null
   },
   {
     runnerId: 'runner-1', runnerName: 'home-server', id: 'r-design-done', number: 139, agentId: 'a-design', agentName: 'Iris', role: 'designer', projectId: 'p-corral',
     taskId: at('COR-4').id, taskRef: 'COR-4', taskTitle: at('COR-4').title, state: 'completed', outcome: 'design_submitted', summary: 'Submitted the review screen prototype.',
     error: null, headSha: 'design-review-v1', inputTokens: 8000, cacheReadTokens: 60000, outputTokens: 2000, rateLimitResetAt: null,
-    queuedAt: ago(120), startedAt: ago(119), endedAt: ago(100)
+    queuedAt: ago(120), startedAt: ago(119), endedAt: ago(100), timings: null
   },
   {
     runnerId: 'runner-1', runnerName: 'home-server', id: 'r-1', number: 128, agentId: 'a-dev2', agentName: 'Dana', role: 'developer', projectId: 'p-corral',
@@ -439,7 +439,7 @@ export const runs: Run[] = [
     runnerId: null, runnerName: null, id: `r-cut-${number}`, number, agentId: 'a-dev2', agentName: 'Dana', role: 'developer', projectId: 'p-corral',
     taskId: at('COR-3').id, taskRef: 'COR-3', taskTitle: at('COR-3').title, state, outcome: state === 'failed' ? 'failed' : null, summary: null,
     error, headSha: null, inputTokens: 4_000, cacheReadTokens: 22_000, outputTokens: 900, rateLimitResetAt: null,
-    queuedAt: ago(endedAgo + 22), startedAt: ago(endedAgo + 21), endedAt: ago(endedAgo)
+    queuedAt: ago(endedAgo + 22), startedAt: ago(endedAgo + 21), endedAt: ago(endedAgo), timings: null
   })),
   // PM turns have no outcome to report: one finished, one stopped
   ...([
@@ -449,7 +449,7 @@ export const runs: Run[] = [
     runnerId: 'runner-1', runnerName: 'home-server', id: `r-pm-${number}`, number, agentId: 'a-pm', agentName: 'Pam', role: 'pm', projectId: 'p-corral',
     taskId: null, taskRef: null, taskTitle: null, state, outcome: null, summary,
     error, headSha: null, inputTokens: 2_000, cacheReadTokens: 12_000, outputTokens: 400, rateLimitResetAt: null,
-    queuedAt: ago(endedAgo + 3), startedAt: ago(endedAgo + 2), endedAt: ago(endedAgo)
+    queuedAt: ago(endedAgo + 3), startedAt: ago(endedAgo + 2), endedAt: ago(endedAgo), timings: null
   })),
   // A live Codex run, which can't take messages mid-run
   {
