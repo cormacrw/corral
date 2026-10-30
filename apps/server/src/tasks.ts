@@ -77,15 +77,15 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
     .where(inArray(taskDesignPins.taskId, ids))
   const { latestApproved, started } = await pinStaleness(db, pins.map(p => p.designTaskId), ids)
   const owners = await draftSessions(db, rows.filter(r => r.status === 'draft').map(r => r.id))
-  // Newest first, so the first run per task and role names its agent (a retry
-  // keeps the same developer, D15)
+  // Newest first, so the first run per task and role names its agent.
+  // Designs use their designer in the API's Developer field (D23).
   const runAgents = await db
     .select({ taskId: runs.taskId, role: runs.role, id: agents.id, name: agents.name })
     .from(runs)
     .innerJoin(agents, eq(agents.id, runs.agentId))
-    .where(and(inArray(runs.taskId, ids), inArray(runs.role, ['developer', 'reviewer'])))
+    .where(and(inArray(runs.taskId, ids), inArray(runs.role, ['developer', 'designer', 'reviewer'])))
     .orderBy(desc(runs.queuedAt), desc(runs.number))
-  const agentOf = (taskId: string, role: 'developer' | 'reviewer'): TaskAgent | null => {
+  const agentOf = (taskId: string, role: 'developer' | 'designer' | 'reviewer'): TaskAgent | null => {
     const found = runAgents.find(r => r.taskId === taskId && r.role === role)
     return found ? { id: found.id, name: found.name } : null
   }
@@ -101,7 +101,7 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
     return {
       ...toTask(project, row, criteria, dependencies, latest, current, design, owners.get(row.id) ?? null, row.leaseRunId ? leaseAgents.get(row.leaseRunId) ?? null : null),
       waitingOnEpics: waitingEpics.filter(e => e.epicId === row.epicId).map(({ id, title }) => ({ id, title })),
-      developer: agentOf(row.id, 'developer'),
+      developer: agentOf(row.id, row.type === 'design' ? 'designer' : 'developer'),
       reviewer: agentOf(row.id, 'reviewer')
     }
   })

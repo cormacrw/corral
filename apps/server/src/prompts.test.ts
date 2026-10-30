@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { designRevisionPrompt, developerPrompt, developerRevisionPrompt, isGrillRequest, pmFallbackPrompt, pmPrompt, questionText, reviewerPrompt, type PromptTask } from './prompts.ts'
+import { designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, isGrillRequest, pmFallbackPrompt, pmPrompt, questionText, reviewerPrompt, type PromptTask } from './prompts.ts'
 
 const turn = { text: 'hi', attachedTask: null, projectName: 'Test app', prefix: 'TA' }
 
@@ -411,12 +411,12 @@ describe('continuing a stopped run', () => {
     expect(developerRevisionPrompt(task, [])).not.toContain('stopped')
   })
 
-  it('names the run, the stop reason and the WIP commit in every developer prompt', () => {
+  it('names the run, the stop reason and the WIP commit in every authoring prompt', () => {
     const prompts = [
       developerPrompt({ ...task, stoppedRun }, 'Dev'),
-      developerPrompt({ ...task, stoppedRun, design: { version: null } }, 'Dev'),
+      designerPrompt({ ...task, stoppedRun, design: { version: null } }, 'Dev'),
       developerRevisionPrompt({ ...task, stoppedRun }, []),
-      designRevisionPrompt({ ...task, stoppedRun, design: { version: 1 } }, [])
+      designerRevisionPrompt({ ...task, stoppedRun, design: { version: 1 } }, [])
     ]
     for (const prompt of prompts) {
       expect(prompt).toContain('## Continuing a stopped run')

@@ -307,7 +307,6 @@ const WORK_NOTE = '- Every `report_outcome` needs a `note` as well: one line of 
 export function developerPrompt(task: PromptTask, agentName: string): string {
   if (task.rebaseOnly) return rebaseDeveloperPrompt(task, agentName)
   if (task.spike) return spikeDeveloperPrompt(task, agentName)
-  if (task.design) return designDeveloperPrompt(task, agentName)
   const revision = task.reviewRounds > 0
   return [
     `You are ${agentName}, the developer agent in Corral. You are working on task ${task.ref}: ${task.title}.`,
@@ -382,10 +381,10 @@ ${WORK_NOTE}
 - If you cannot continue without a human decision, call \`report_outcome\` with outcome "stuck" and put the question in the summary.
 - Always finish by calling \`report_outcome\`.`
 
-function designDeveloperPrompt(task: PromptTask, agentName: string): string {
+export function designerPrompt(task: PromptTask, agentName: string): string {
   const version = task.design?.version ?? null
   return [
-    `You are ${agentName}, the developer agent in Corral. You are working on design task ${task.ref}: ${task.title}.`,
+    `You are ${agentName}, the designer agent in Corral. You are working on design task ${task.ref}: ${task.title}.`,
     version !== null
       ? `This is a revision: changes were requested on design v${version}. Address every piece of feedback below and submit the result as v${version + 1}.`
       : 'A design task agrees a UI or flow before it is built. Build a prototype and a spec that meet every acceptance criterion, and submit them as a design version for review.',
@@ -422,7 +421,7 @@ export function developerRevisionPrompt(task: PromptTask, feedback: PromptTask['
 
 // The message a resumed design session gets after changes were requested:
 // the session already holds the task and the earlier work (D20)
-export function designRevisionPrompt(task: PromptTask, feedback: PromptTask['comments']): string {
+export function designerRevisionPrompt(task: PromptTask, feedback: PromptTask['comments']): string {
   const version = task.design?.version ?? 0
   const format = (c: PromptTask['comments'][number]) => `- ${c.author} (${c.createdAt.toISOString()}): ${c.body}`
   return [

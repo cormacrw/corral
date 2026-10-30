@@ -20,8 +20,8 @@ activity/history role fallbacks. Existing run attribution still uses the
 agent's configured name when available.
 
 This change supplies the role, persistence and seed foundation. Design task
-routing, server tool permissions and Settings authoring controls
-are separate D23 work. The runner role registries include designer outcomes,
+routing and server authoring are now covered by [designer claims](designer-claims.md)
+(COR-157). Settings authoring controls remain separate D23 work. The runner role registries include designer outcomes,
 authoring tools and a basic instructions fallback so the new shared role is
 represented exhaustively.
 
