@@ -778,11 +778,11 @@ export function exitSignal(exit: AgentExit): string | null {
 
 function wipMessage(job: RunJob, exit: RunExit, stopDetail: string): string {
   const reason = exit.kind === 'timed_out'
-    ? 'the time limit'
+    ? 'Time limit reached'
     : exit.kind === 'runner_shutdown'
-      ? 'a runner shutdown'
+      ? 'The runner shut down'
       : exit.kind === 'signalled' ? exit.signal : stopDetail
-  return `WIP: ${job.taskRef} run #${job.runNumber} stopped by ${reason}\n\nCorral saved this unfinished work when the run stopped. It may not build.`
+  return `WIP: ${job.taskRef} run #${job.runNumber} stopped: ${reason}\n\nCorral saved this unfinished work when the run stopped. It may not build.`
 }
 
 // Machine-specific details the agent needs, kept out of RunJob (PRD §8.5)

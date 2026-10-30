@@ -74,9 +74,9 @@ describe('a stopped run keeps its work', () => {
   })
 
   it.each([
-    ['the time limit', (m: RunManager) => m.stop('r1', 'timed_out', '60 s'), 'stopped by the time limit'],
-    ['a human', (m: RunManager) => m.handle({ type: 'run.stop', runId: 'r1', reason: 'Stopped by a human', keepWork: true }), 'stopped by Stopped by a human'],
-    ['a runner shutdown', (m: RunManager) => void m.shutdown(), 'stopped by a runner shutdown']
+    ['the time limit', (m: RunManager) => m.stop('r1', 'timed_out', '60 s'), 'stopped: Time limit reached'],
+    ['a human', (m: RunManager) => m.handle({ type: 'run.stop', runId: 'r1', reason: 'Stopped by a human', keepWork: true }), 'stopped: Stopped by a human'],
+    ['a runner shutdown', (m: RunManager) => void m.shutdown(), 'stopped: The runner shut down']
   ])('commits and pushes uncommitted work on a stop by %s', async (_name, stop, subject) => {
     stop(await start(developer()))
     const end = await ended()
