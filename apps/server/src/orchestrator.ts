@@ -1,4 +1,4 @@
-import { EVIDENCE_KINDS, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type RunnerMessage } from '@corral/contracts'
+import { EVIDENCE_KINDS, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
 import {
   ACTIVE_RUN_STATES,
   feedbackSimilarity,
@@ -12,18 +12,19 @@ import {
   type RunState
 } from '@corral/core'
 import { schema, type Database, type Executor } from '@corral/db'
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne } from 'drizzle-orm'
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt, ne } from 'drizzle-orm'
 import { z } from 'zod'
 import { listTaskAttachments, readProjectAttachment } from './attachments.ts'
 import type { BlobStore } from './blob-store.ts'
-import { claimNextTask, type Claim } from './claim.ts'
+import { claimNextTask, type Claim, type Place } from './claim.ts'
 import { publishDependents } from './dependent-tasks.ts'
 import { bundleHasRootIndex, DesignNotFound, readDesign } from './designs.ts'
 import { ApiFailure } from './errors.ts'
 import type { EventBus } from './events.ts'
 import type { GitHubClient } from './github.ts'
+import { EpicBranchError, taskBase } from './task-base.ts'
 import { slugify } from './projects.ts'
-import { designRevisionPrompt, developerPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
+import { designRevisionPrompt, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
 import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
 import { MergeOrchestrator } from './merge.ts'
 import type { PlanService } from './plan.ts'
@@ -122,6 +123,9 @@ export class Orchestrator implements RunnerHandlers {
   #updating = false
   #finishingUpdate = false
   #pmStarting: Promise<void> = Promise.resolve()
+  // Picking a runner and recording the run on it happen one at a time, so
+  // PM turns and claims never both take a runner's last slot
+  #placing: Promise<unknown> = Promise.resolve()
   readonly merges: MergeOrchestrator
   // Set once the plan service exists (it needs the orchestrator to start runs)
   plans: PlanService | null = null
@@ -179,34 +183,87 @@ export class Orchestrator implements RunnerHandlers {
     const { db, runner } = this.#d
     await this.#updatePhase()
     if (!runner.online || this.#stopped || this.#finishingUpdate) return
-    const due = await db.transaction(async (tx) => {
+    const due = await this.#exclusive(() => db.transaction(async (tx) => {
       const pmAgents = await tx.select().from(agents).where(eq(agents.role, 'pm')).orderBy(asc(agents.createdAt)).for('update')
-      const picked: { id: string, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'> }[] = []
+      const picked: { id: string, runnerId: string, note: string | null, job: Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch'> }[] = []
       for (const agent of pmAgents) {
         if (agent.paused || (agent.pausedUntil && agent.pausedUntil > this.#now())) continue
-        const waiting = await tx.select({ id: runs.id, job: runs.pmJob }).from(runs)
+        const waiting = await tx.select({ id: runs.id, job: runs.pmJob, planSessionId: runs.planSessionId }).from(runs)
           .where(and(eq(runs.agentId, agent.id), eq(runs.state, 'queued'), isNotNull(runs.pmJob)))
           .orderBy(asc(runs.queuedAt), asc(runs.number))
         for (const w of waiting) {
-          await tx.update(runs).set({ pmJob: null }).where(eq(runs.id, w.id))
           // The runtime is the session's (D18); a job queued before sessions
           // had one runs on the PM agent's, as it always did
-          const job = w.job as Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch' | 'runtime'> & { runtime?: string }
-          picked.push({ id: w.id, job: { ...job, runtime: job.runtime ?? agent.runtime } })
+          const held = w.job as Omit<RunJob, 'runId' | 'runNumber' | 'leaseEpoch' | 'runtime'> & { runtime?: string }
+          let job = { ...held, runtime: held.runtime ?? agent.runtime }
+          // A Plan session stays on the runner of its earlier turns while it's
+          // online: its warm process and session files are there
+          const [previous] = w.planSessionId
+            ? await tx.select({ runnerId: runs.runnerId, number: runs.number }).from(runs)
+                .where(and(eq(runs.planSessionId, w.planSessionId), ne(runs.id, w.id), isNotNull(runs.runnerId)))
+                .orderBy(desc(runs.number)).limit(1)
+            : []
+          const runnerId = await this.#pickRunner(tx, 'pm', job.runtime, previous?.runnerId ?? null)
+          // No PM runner free: the turn keeps its job and waits
+          if (!runnerId) continue
+          let note: string | null = null
+          if (previous && previous.runnerId !== runnerId && job.agentSessionId) {
+            // Its runner is gone: cold-start a fresh session from the saved conversation
+            job = { ...job, agentSessionId: null, prompt: job.fallbackPrompt ?? job.prompt, fallbackPrompt: null }
+            note = `This session's earlier turns ran on ${this.#runnerName(previous.runnerId)}, which is offline: starting a fresh session on ${this.#runnerName(runnerId)} from the saved conversation`
+          }
+          await tx.update(runs).set({ pmJob: null, runnerId }).where(eq(runs.id, w.id))
+          picked.push({ id: w.id, runnerId, note, job })
         }
       }
       return picked
-    })
-    for (const { id, job } of due) {
+    }))
+    for (const { id, runnerId, note, job } of due) {
       const ctx = await this.#load(id)
       if (!ctx) continue
-      if (!runner.send({ type: 'run.assign', job: { ...job, runId: id, runNumber: ctx.run.number, leaseEpoch: ctx.run.leaseEpoch! } })) {
+      if (note) await this.#note(id, note)
+      if (!runner.send({ type: 'run.assign', job: { ...job, runId: id, runNumber: ctx.run.number, leaseEpoch: ctx.run.leaseEpoch! } }, runnerId)) {
         const error = 'The runner went offline before the turn started'
         await this.#endRun(ctx, { state: 'interrupted', error })
         if (ctx.run.planSessionId) await this.plans?.onRunEnded(ctx.run.planSessionId, id, null, error)
       }
       await this.#publish(ctx)
     }
+  }
+
+  #exclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.#placing.then(fn)
+    this.#placing = next.catch(() => {})
+    return next
+  }
+
+  // The runner a run goes to: an online one that takes the role, has a
+  // signed-in CLI for the runtime and a free slot, the emptiest first. A run
+  // with a previous runner that's still online waits for that one.
+  async #pickRunner(tx: Executor, role: RunnerRole, runtime: string, previous: string | null): Promise<string | null> {
+    const fit = this.#d.runner.available().filter(r => r.roles.includes(role) && r.runtimes.includes(runtime))
+    if (!fit.length) return null
+    const busy = await tx.select({ runnerId: runs.runnerId, n: count() }).from(runs)
+      .where(and(inArray(runs.state, [...ACTIVE_RUN_STATES]), inArray(runs.runnerId, fit.map(r => r.id))))
+      .groupBy(runs.runnerId)
+    const free = (id: string, slots: number) => slots - (busy.find(b => b.runnerId === id)?.n ?? 0)
+    const sticky = previous ? fit.find(r => r.id === previous) : undefined
+    if (sticky) return free(sticky.id, sticky.slots) > 0 ? sticky.id : null
+    const best = fit.map(r => ({ id: r.id, free: free(r.id, r.slots) })).filter(r => r.free > 0)
+      .sort((a, b) => b.free - a.free)[0]
+    return best?.id ?? null
+  }
+
+  #runnerName(runnerId: string | null): string {
+    const name = this.#d.runner.status().runners.find(r => r.id === runnerId)?.name
+    return name ? `runner ${name}` : 'a runner this server no longer knows'
+  }
+
+  // A line in the run's transcript from Corral itself
+  async #note(runId: string, text: string): Promise<void> {
+    const events: RunEvent[] = [{ type: 'system', text }]
+    await this.#d.transcripts.append(runId, events)
+    this.#d.events.publish({ type: 'run.events', runId, events })
   }
 
   // Reads the kill switch; called once at startup
@@ -260,7 +317,7 @@ export class Orchestrator implements RunnerHandlers {
     for (const { id } of live) {
       const ctx = await this.#load(id)
       if (!ctx) continue
-      this.#d.runner.send({ type: 'run.stop', runId: id, reason: 'Corral was stopped' })
+      this.#d.runner.send({ type: 'run.stop', runId: id, reason: 'Corral was stopped' }, ctx.run.runnerId)
       await this.#endRun(ctx, { state: 'interrupted', error: 'Stopped: Corral was stopped' })
       await this.#publish(ctx)
     }
@@ -332,13 +389,22 @@ export class Orchestrator implements RunnerHandlers {
     await this.#startPmTurns()
     if (this.#updating) return
     const workers = await db.select().from(agents).where(ne(agents.role, 'pm')).orderBy(asc(agents.createdAt))
+    // Tasks whose run couldn't start wait for the next pass rather than
+    // burning their failed-run cap in a tight loop
+    const skip: string[] = []
     for (const agent of workers) {
       // An agent with a wake interval starts at most one task of its own
       // choosing per interval, counted from its last run however that one
       // started. Tasks an event is about start regardless.
       let only = agent.wakeIntervalSeconds === null || (await this.#awake(agent)) ? undefined : urgent
-      for (let claim = await claimNextTask(db, agent.id, this.#now(), only); claim; claim = await claimNextTask(db, agent.id, this.#now(), only)) {
-        await this.#assign(claim)
+      const place: Place = async (tx, task) => {
+        const role: RunnerRole = agent.role === 'developer' && task.type === 'design' ? 'design' : agent.role
+        const previous = agent.role === 'developer' ? await this.#previousDeveloperRun(tx, task.id, agent.id) : null
+        return this.#pickRunner(tx, role, agent.runtime, previous?.runnerId ?? null)
+      }
+      const claimNext = () => this.#exclusive(() => claimNextTask(db, agent.id, this.#now(), only, skip, place))
+      for (let claim = await claimNext(); claim; claim = await claimNext()) {
+        if (!await this.#assign(claim)) skip.push(claim.taskId)
         if (this.#stopped || this.#updating) return
         if (agent.wakeIntervalSeconds !== null) only = urgent
       }
@@ -352,14 +418,27 @@ export class Orchestrator implements RunnerHandlers {
     return !last || this.#now().getTime() - last.queuedAt.getTime() >= agent.wakeIntervalSeconds! * 1000
   }
 
-  async #assign(claim: Claim): Promise<void> {
+  // Whether the run was handed to the runner
+  async #assign(claim: Claim): Promise<boolean> {
     const ctx = await this.#load(claim.runId)
-    if (!ctx?.task) return
-    const job = ctx.run.role === 'reviewer' ? await this.#reviewerJob(ctx) : await this.#developerJob(ctx)
-    if (!this.#d.runner.send({ type: 'run.assign', job })) {
+    if (!ctx?.task) return false
+    let job: RunJob
+    try {
+      job = ctx.run.role === 'reviewer' ? await this.#reviewerJob(ctx) : await this.#developerJob(ctx)
+    } catch (error) {
+      // Preparing the epic branch calls GitHub; the run fails straight away
+      // with the cause instead of holding its lease until it expires
+      if (!(error instanceof EpicBranchError)) throw error
+      await this.#failRun(ctx, error.message)
+      await this.#publish(ctx)
+      return false
+    }
+    const sent = this.#d.runner.send({ type: 'run.assign', job }, ctx.run.runnerId)
+    if (!sent) {
       await this.#endRun(ctx, { state: 'interrupted', error: 'The runner went offline before the run started' })
     }
     await this.#publish(ctx)
+    return sent
   }
 
   async #developerJob(ctx: RunContext): Promise<RunJob> {
@@ -368,6 +447,7 @@ export class Orchestrator implements RunnerHandlers {
     const ref = taskRef(ctx.project.prefix, task.number)
     // A spike delivers findings, not a PR (D19), so it never gets a branch.
     // A design is built on design/<ref>, pushed but never merged (D20).
+    const baseBranch = await taskBase(db, task, ctx.project, this.#d.github)
     const spike = task.type === 'spike'
     const design = task.type === 'design'
     if (!task.branch && !spike) {
@@ -390,7 +470,7 @@ export class Orchestrator implements RunnerHandlers {
       spike,
       design: design ? { version: latest?.version ?? null } : null,
       pin,
-      defaultBranch: ctx.project.defaultBranch,
+      defaultBranch: baseBranch,
       reviewRounds: task.reviewRounds,
       reviewRoundCap: ctx.project.reviewRoundCap,
       criteria: criteria.map(c => ({ id: c.id, text: c.text })),
@@ -398,10 +478,20 @@ export class Orchestrator implements RunnerHandlers {
       attachments: attached
     }
     const prompt = developerPrompt(promptTask, ctx.agent.name)
-    // D20: rework on a design continues the developer's own session with the
-    // feedback given since the last version. The full prompt is the fallback
-    // when the session can't be resumed.
-    const resume = latest ? await this.#developerSession(ctx) : null
+    // A revision continues the developer's own session (D20 for designs) with
+    // the feedback given since, when it runs where that session lives. The
+    // full prompt is the fallback when the session can't be resumed, and the
+    // prompt on another runner, which starts fresh from the pushed branch.
+    const previous = await this.#previousDeveloperRun(db, task.id, ctx.agent.id, ctx.run.id)
+    const local = previous !== null && (previous.runnerId === null || previous.runnerId === ctx.run.runnerId)
+    const resume = local ? previous.agentSessionId : null
+    if (resume) {
+      await this.#note(ctx.run.id, `Resuming the agent session of run #${previous!.number} on ${this.#runnerName(ctx.run.runnerId)}`)
+    } else if (previous) {
+      await this.#note(ctx.run.id, `Run #${previous.number} ran on ${this.#runnerName(previous.runnerId)}, which is offline: starting a fresh session on ${this.#runnerName(ctx.run.runnerId)}${spike ? '' : ` from the pushed branch ${task.branch}`}`)
+    }
+    const since = previous?.queuedAt ?? null
+    const feedback = since ? notes.filter(c => c.createdAt > since) : []
     return {
       runId: ctx.run.id,
       runNumber: ctx.run.number,
@@ -411,6 +501,7 @@ export class Orchestrator implements RunnerHandlers {
       projectId: ctx.project.id,
       repository: ctx.project.repository,
       defaultBranch: ctx.project.defaultBranch,
+      baseBranch,
       taskId: task.id,
       taskRef: ref,
       taskType: task.type,
@@ -422,7 +513,7 @@ export class Orchestrator implements RunnerHandlers {
       fallbackPrompt: resume ? prompt : null,
       model: null,
       timeoutSeconds: RUN_TIMEOUT_SECONDS,
-      prompt: resume && latest ? designRevisionPrompt(promptTask, notes.filter(c => c.createdAt > latest.createdAt)) : prompt
+      prompt: !resume ? prompt : latest ? designRevisionPrompt(promptTask, notes.filter(c => c.createdAt > latest.createdAt)) : developerRevisionPrompt(promptTask, feedback)
     }
   }
 
@@ -434,12 +525,13 @@ export class Orchestrator implements RunnerHandlers {
     return pin ? { designRef: taskRef(prefix, pin.number), version: pin.version, screens: pin.screens, branch: pin.branch, commitSha: pin.commitSha } : null
   }
 
-  // The agent session of this agent's last developer run on the task, to resume
-  async #developerSession(ctx: RunContext): Promise<string | null> {
-    const [previous] = await this.#d.db.select({ agentSessionId: runs.agentSessionId }).from(runs)
-      .where(and(eq(runs.taskId, ctx.task!.id), eq(runs.role, 'developer'), eq(runs.agentId, ctx.agent.id), ne(runs.id, ctx.run.id), isNotNull(runs.agentSessionId)))
+  // This agent's last developer run on the task that started a session: its
+  // runner holds the worktree and session a revision resumes
+  async #previousDeveloperRun(db: Executor, taskId: string, agentId: string, exclude?: string) {
+    const [previous] = await db.select({ number: runs.number, runnerId: runs.runnerId, agentSessionId: runs.agentSessionId, queuedAt: runs.queuedAt }).from(runs)
+      .where(and(eq(runs.taskId, taskId), eq(runs.role, 'developer'), eq(runs.agentId, agentId), exclude ? ne(runs.id, exclude) : undefined, isNotNull(runs.agentSessionId)))
       .orderBy(desc(runs.number)).limit(1)
-    return previous?.agentSessionId ?? null
+    return previous ?? null
   }
 
   // flows.md step 6: the reviewer checks out the submitted commit
@@ -454,6 +546,7 @@ export class Orchestrator implements RunnerHandlers {
     const attached = await listTaskAttachments(db, ctx.project.id, task.description, notes)
     // A spike has no commit: the reviewer gets a checkout of the default
     // branch and judges the findings the developer last reported (D19)
+    const baseBranch = await taskBase(db, task, ctx.project)
     const spike = task.type === 'spike'
     const [reported] = spike
       ? await db.select({ summary: runs.summary }).from(runs)
@@ -475,6 +568,7 @@ export class Orchestrator implements RunnerHandlers {
       projectId: ctx.project.id,
       repository: ctx.project.repository,
       defaultBranch: ctx.project.defaultBranch,
+      baseBranch,
       taskId: task.id,
       taskRef: ref,
       taskType: task.type,
@@ -496,7 +590,7 @@ export class Orchestrator implements RunnerHandlers {
         design: design ? { version: version?.version ?? null } : null,
         pin,
         underReview: version ? { version: version.version, commitSha: version.commitSha, screenshots: version.screenshots.map(s => s.fileName) } : null,
-        defaultBranch: ctx.project.defaultBranch,
+        defaultBranch: baseBranch,
         reviewRounds: task.reviewRounds,
         reviewRoundCap: ctx.project.reviewRoundCap,
         criteria: criteria.map(c => ({ id: c.id, text: c.text })),
@@ -526,16 +620,16 @@ export class Orchestrator implements RunnerHandlers {
       const ctx = runId ? await this.#load(runId) : null
       if (!ctx) continue
       await this.#endRun(ctx, { state: 'interrupted', error: 'Lease expired: no heartbeat from the runner' })
-      this.#d.runner.send({ type: 'run.stop', runId: ctx.run.id, reason: 'Lease expired' })
+      this.#d.runner.send({ type: 'run.stop', runId: ctx.run.id, reason: 'Lease expired' }, ctx.run.runnerId)
       await this.#publish(ctx)
     }
   }
 
-  async onConnected(activeRuns: { runId: string, leaseEpoch: number }[]): Promise<void> {
+  async onConnected(activeRuns: { runId: string, leaseEpoch: number }[], runnerId: string): Promise<void> {
     const { db, runner } = this.#d
     // Runs the server thinks are live but the runner doesn't have were lost
     // when the runner restarted
-    const live = await db.select().from(runs).where(inArray(runs.state, [...ACTIVE_RUN_STATES]))
+    const live = await db.select().from(runs).where(and(eq(runs.runnerId, runnerId), inArray(runs.state, [...ACTIVE_RUN_STATES])))
     for (const run of live) {
       // A PM turn waiting for a slot was never sent
       if (run.pmJob !== null) continue
@@ -547,19 +641,23 @@ export class Orchestrator implements RunnerHandlers {
     }
     // Runs the runner has but the server no longer recognises must stop
     for (const active of activeRuns) {
-      if (!(await this.#fenced(active.runId, active.leaseEpoch))) {
-        runner.send({ type: 'run.stop', runId: active.runId, reason: 'The server no longer recognises this run' })
+      const ctx = await this.#fenced(active.runId, active.leaseEpoch)
+      if (!ctx || ctx.run.runnerId !== runnerId) {
+        runner.send({ type: 'run.stop', runId: active.runId, reason: 'The server no longer recognises this run' }, runnerId)
       }
     }
+  }
+
+  onReady(): void {
     this.poke()
   }
 
-  async onHeartbeat(activeRuns: { runId: string, leaseEpoch: number }[]): Promise<void> {
+  async onHeartbeat(activeRuns: { runId: string, leaseEpoch: number }[], runnerId: string): Promise<void> {
     const now = this.#now()
     for (const active of activeRuns) {
       const ctx = await this.#fenced(active.runId, active.leaseEpoch)
-      if (!ctx) {
-        this.#d.runner.send({ type: 'run.stop', runId: active.runId, reason: 'This run no longer holds its lease' })
+      if (!ctx || ctx.run.runnerId !== runnerId) {
+        this.#d.runner.send({ type: 'run.stop', runId: active.runId, reason: 'This run no longer holds its lease' }, runnerId)
         continue
       }
       if (ctx.task) {
@@ -577,8 +675,10 @@ export class Orchestrator implements RunnerHandlers {
 
   // ── Run lifecycle ──────────────────────────────────────────────────────────
 
-  async onRunMessage(message: Extract<RunnerMessage, { type: 'run.started' | 'run.events' | 'run.ended' }>): Promise<void> {
+  async onRunMessage(message: Extract<RunnerMessage, { type: 'run.started' | 'run.events' | 'run.ended' }>, runnerId: string): Promise<void> {
     const { db, events, transcripts } = this.#d
+    const owner = await this.#load(message.runId)
+    if (!owner || owner.run.runnerId !== runnerId) return
     if (message.type === 'run.events') {
       // Transcript lines are kept even from a stale run: they're history, not writes
       await transcripts.append(message.runId, message.events)
@@ -718,7 +818,7 @@ export class Orchestrator implements RunnerHandlers {
   async stopRun(runId: string, actor: Actor): Promise<void> {
     const ctx = await this.#load(runId)
     if (!ctx || !(ACTIVE_RUN_STATES as readonly RunState[]).includes(ctx.run.state)) throw new ApiFailure(409, { code: 'conflict', constraint: 'run_not_active' })
-    this.#d.runner.send({ type: 'run.stop', runId, reason: 'Stopped by a human' })
+    this.#d.runner.send({ type: 'run.stop', runId, reason: 'Stopped by a human' }, ctx.run.runnerId)
     await this.#d.db.transaction(async (tx) => {
       await this.#endRunIn(tx, ctx, { state: 'interrupted', error: 'Stopped by a human' })
       if (ctx.task) await tx.update(tasks).set({ paused: true }).where(eq(tasks.id, ctx.task.id))
@@ -742,7 +842,7 @@ export class Orchestrator implements RunnerHandlers {
     if (run.state === 'queued') throw notLive(`Run #${run.number} hasn't started yet`)
     if (!(ACTIVE_RUN_STATES as readonly RunState[]).includes(run.state) || run.state === 'stopping') throw notLive(`Run #${run.number} has ended`)
     if (task.leaseRunId !== run.id || task.leaseEpoch !== run.leaseEpoch) throw notLive(`Run #${run.number} no longer holds ${taskRef(ctx.project.prefix, task.number)}`)
-    if (!runner.online) throw notLive('No runner is connected to deliver the message')
+    if (!runner.isOnline(run.runnerId)) throw notLive('No runner is connected to deliver the message')
 
     const found = input.attachments.length === 0
       ? []
@@ -762,7 +862,7 @@ export class Orchestrator implements RunnerHandlers {
         detail: { runId: run.id, runNumber: run.number, commentId: comment.id, attachments: input.attachments }
       })
       // Sent last, so a runner that dropped off rolls the comment back
-      if (!runner.send({ type: 'run.message', runId: run.id, leaseEpoch: run.leaseEpoch!, text: body })) {
+      if (!runner.send({ type: 'run.message', runId: run.id, leaseEpoch: run.leaseEpoch!, text: body }, run.runnerId)) {
         throw notLive('No runner is connected to deliver the message')
       }
       return comment
@@ -829,7 +929,7 @@ export class Orchestrator implements RunnerHandlers {
     if (task.leaseRunId) {
       const ctx = await this.#load(task.leaseRunId)
       if (ctx) {
-        runner.send({ type: 'run.stop', runId: ctx.run.id, reason: 'The task was deleted' })
+        runner.send({ type: 'run.stop', runId: ctx.run.id, reason: 'The task was deleted' }, ctx.run.runnerId)
         await this.#endRun(ctx, { state: 'interrupted', error: 'The task was deleted' })
         this.#d.events.publish({ type: 'run.updated', run: await getRun(db, ctx.run.id) })
       }
@@ -863,7 +963,7 @@ export class Orchestrator implements RunnerHandlers {
     for (const { id } of live) {
       const ctx = await this.#load(id)
       if (!ctx) continue
-      runner.send({ type: 'run.stop', runId: id, reason: 'The project was removed' })
+      runner.send({ type: 'run.stop', runId: id, reason: 'The project was removed' }, ctx.run.runnerId)
       await this.#endRun(ctx, { state: 'interrupted', error: 'The project was removed' })
       this.#d.events.publish({ type: 'run.updated', run: await getRun(db, id) })
     }
@@ -887,9 +987,9 @@ export class Orchestrator implements RunnerHandlers {
 
   // ── Agent tools ────────────────────────────────────────────────────────────
 
-  async onToolCall(message: Extract<RunnerMessage, { type: 'tool.call' }>): Promise<unknown> {
+  async onToolCall(message: Extract<RunnerMessage, { type: 'tool.call' }>, runnerId: string): Promise<unknown> {
     const ctx = await this.#fenced(message.runId, message.leaseEpoch)
-    if (!ctx) throw new ToolError('This run no longer holds its task: its lease expired or was given to another run. Stop working.')
+    if (!ctx || ctx.run.runnerId !== runnerId) throw new ToolError('This run no longer holds its task: its lease expired or was given to another run. Stop working.')
     try {
       return await this.#tool(ctx, message.tool, message.input)
     } catch (error) {
@@ -1131,7 +1231,7 @@ export class Orchestrator implements RunnerHandlers {
         : task.type === 'design'
           ? 'Approval recorded. The human reviews the design next. You can stop now.'
           : spike
-            ? `Approval recorded. ${task.humanReview ? 'A human reviews the findings next.' : 'The spike is finished and its findings stay on the task.'} You can stop now.`
+            ? 'Approval recorded. A human reviews the findings next. You can stop now.'
             : 'Approval recorded. Corral handles human review, CI and the merge from here. You can stop now.'
     }
   }
@@ -1193,7 +1293,7 @@ export class Orchestrator implements RunnerHandlers {
       : await github.findOpenPullRequest(ctx.project.repository, task.branch!)
     let pr = existing && existing.state === 'open' ? existing : null
     if (pr) await github.updatePullRequest(ctx.project.repository, pr.number, { body })
-    else pr = await github.openPullRequest(ctx.project.repository, { head: task.branch!, base: ctx.project.defaultBranch, title: `${ref}: ${task.title}`, body })
+    else pr = await github.openPullRequest(ctx.project.repository, { head: task.branch!, base: await taskBase(db, task, ctx.project, github), title: `${ref}: ${task.title}`, body })
 
     await db.transaction(async (tx) => {
       const locked = await lockTask(tx, task.id)
@@ -1346,7 +1446,7 @@ export class Orchestrator implements RunnerHandlers {
   // The outcome is recorded; the runner stops the agent's process tree. A
   // handoff (a pushed PR, a verdict) lets the next agent start the task now.
   #finished(ctx: RunContext, reason: string, { handoff = false } = {}): void {
-    this.#d.runner.send({ type: 'run.stop', runId: ctx.run.id, reason })
+    this.#d.runner.send({ type: 'run.stop', runId: ctx.run.id, reason }, ctx.run.runnerId)
     void this.#publish(ctx).then(() => this.poke(handoff && ctx.task ? [ctx.task.id] : []))
   }
 

@@ -1,4 +1,4 @@
-import type { AgentTool, RunnerMessage, ServerMessage, SetupJobResult } from '@corral/contracts'
+import { RUNNER_PROTOCOL_VERSION, RUNNER_ROLES, type AgentTool, type RunnerCapacity, type RunnerMessage, type ServerMessage, type SetupJobResult } from '@corral/contracts'
 import WebSocket from 'ws'
 
 export const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
@@ -39,11 +39,12 @@ export class FakeRunner {
     })
   }
 
-  static async connect(url: string, activeRuns: { runId: string, leaseEpoch: number }[] = []): Promise<FakeRunner> {
+  // Takes every role and runtime with plenty of slots unless a test says otherwise
+  static async connect(url: string, activeRuns: { runId: string, leaseEpoch: number }[] = [], runnerId = 'r1', capacity: Partial<RunnerCapacity> = {}): Promise<FakeRunner> {
     const socket = new WebSocket(`${url.replace('http', 'ws')}/runner`)
     const runner = new FakeRunner(socket)
     await new Promise(resolve => socket.once('open', resolve))
-    runner.send({ type: 'hello', protocol: 1, runnerId: 'r1', name: 'fake', activeRuns })
+    runner.send({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, runnerId, name: runnerId, activeRuns, slots: 10, runtimes: ['claude-code', 'codex'], roles: [...RUNNER_ROLES], ...capacity })
     await runner.next('welcome')
     return runner
   }

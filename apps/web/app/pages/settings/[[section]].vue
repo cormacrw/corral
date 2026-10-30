@@ -390,13 +390,23 @@ const items = [
             </h2>
           </template>
           <div class="flex flex-col gap-4 text-sm">
-            <div class="flex items-center gap-2">
+            <p
+              v-if="!live.state.value.runner?.runners.length"
+              class="text-sm text-muted"
+            >
+              Offline · no runner yet
+            </p>
+            <div
+              v-for="runner in live.state.value.runner?.runners"
+              :key="runner.id"
+              class="flex items-center gap-2"
+            >
               <span
-                :class="['size-2.5 rounded-full', live.state.value.runner?.online ? 'bg-success' : 'bg-error']"
+                :class="['size-2.5 rounded-full', runner.online ? 'bg-success' : 'bg-error']"
                 aria-hidden="true"
               />
-              <span class="font-medium">{{ live.state.value.runner?.online ? 'Online' : 'Offline' }} · {{ live.state.value.runner?.name ?? 'no runner yet' }}</span>
-              <span class="text-xs text-muted">Runs agents for every project · last heartbeat {{ timeAgo(live.state.value.runner?.lastHeartbeatAt) }}</span>
+              <span class="font-medium">{{ runner.online ? 'Online' : 'Offline' }} · {{ runner.name ?? 'no runner yet' }}</span>
+              <span class="text-xs text-muted">{{ runner.slots }} at once · {{ runner.roles.join(', ') }} · {{ runner.runtimes.join(', ') || 'no signed-in CLI' }} · last heartbeat {{ timeAgo(runner.lastHeartbeatAt) }}</span>
             </div>
             <p class="text-xs text-muted">
               The runner keeps clones, worktrees and its spool in its own data directory, set by its configuration (a Docker volume when deployed).

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Project } from '@corral/contracts'
-import { agentStatus, initials, isWorking, projectColor, ROLE, taskCounts } from '~/utils/labels'
+import { agentStatus, isWorking, projectColor, ROLE, taskCounts } from '~/utils/labels'
 import { searchPages } from '~/utils/search'
 
 // The app shell (design/app-shell.md): global nav, projects, agents, runner
@@ -217,10 +217,10 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
                     color="neutral"
                     :class="[collapsed ? 'p-1.5' : 'flex-1 justify-start', currentSlug === project.slug && 'text-highlighted']"
                   >
-                    <span
-                      class="flex size-5 shrink-0 items-center justify-center rounded text-[10px] font-semibold text-white"
-                      :style="{ background: projectColor(project) }"
-                    >{{ initials(project.name) }}</span>
+                    <ProjectThumbnail
+                      :project="project"
+                      :size="20"
+                    />
                     <span
                       v-if="!collapsed"
                       class="truncate"

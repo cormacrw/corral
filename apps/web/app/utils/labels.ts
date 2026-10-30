@@ -190,6 +190,7 @@ export function epicTitle(epics: { id: string, title: string }[] | undefined, id
 }
 
 export function taskNote(task: Task, all: Task[], reviewRoundCap: number): { text: string, color: Color } | null {
+  if (task.status === 'ready' && task.waitingOnEpics.length > 0) return { text: `Waiting on epic: ${task.waitingOnEpics.map(e => e.title).join(', ')}`, color: 'neutral' }
   if (task.status === 'ready' && task.dependsOn.length > 0) {
     const waiting = task.dependsOn.filter(ref => all.find(t => t.ref === ref)?.status !== 'merged')
     if (waiting.length > 0) return { text: `Waiting on ${waiting.join(', ')}`, color: 'neutral' }

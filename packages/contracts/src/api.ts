@@ -3,6 +3,7 @@ import {
   EPIC_REVIEW_MODES,
   MERGE_METHODS,
   PROJECT_PREFIX_PATTERN,
+  richTextIssue,
   TASK_PRIORITIES,
   TASK_STATUSES,
   TASK_TYPES,
@@ -21,7 +22,7 @@ import {
   type TransitionError
 } from '@corral/core'
 import { z } from 'zod'
-import type { CliId } from './runner.ts'
+import type { CliId, RunnerInfo } from './runner.ts'
 
 // HTTP API between apps/web and apps/server. Inputs are zod schemas the server
 // validates; outputs are plain types (JSON, so dates are ISO strings).
@@ -124,8 +125,11 @@ export type PatchEpicInput = z.infer<typeof patchEpicInput>
 
 // ── Tasks ───────────────────────────────────────────────────────────────────
 
-// A ProseMirror/TipTap document from the editor; its inner shape is the editor's business
-export const richTextDocument = z.looseObject({ type: z.literal('doc') })
+// Structural safety only; semantic Ready checks belong in core.
+export const richTextDocument = z.looseObject({ type: z.literal('doc') }).superRefine((doc, ctx) => {
+  const issue = richTextIssue(doc)
+  if (issue) ctx.addIssue({ code: 'custom', ...issue })
+})
 
 export const createTaskInput = z.object({
   title: z.string().trim().min(1),
@@ -249,6 +253,8 @@ export interface Task {
   acceptanceCriteria: { id: string, position: number, text: string, met: boolean | null }[]
   // Refs of the tasks this one waits on
   dependsOn: string[]
+  // Unfinished prerequisite epics, with titles for display and IDs for links.
+  waitingOnEpics: { id: string, title: string }[]
   lease: Lease | null
   // The agents of the task's latest developer and reviewer runs. Tasks aren't
   // assigned ahead of time: a free agent claims them (D15), so these are null
@@ -413,7 +419,9 @@ export interface PlanSessionDetail extends PlanSession {
   plans: Plan[]
 }
 
+// A client UUID makes a start safe to retry within the same project.
 export const startPlanSessionInput = z.object({
+  id: z.uuid().optional(),
   projectId: z.uuid(),
   // The PM's runtime for this session (D18); only a CLI the runner has
   runtime: agentRuntime.default('claude-code'),
@@ -536,6 +544,10 @@ export interface GlobalStatus {
   stopped: boolean
   // Held for a redeploy: nothing new starts, running work finishes
   updating: boolean
+}
+
+export interface ServerStatus extends GlobalStatus {
+  runners: RunnerInfo[]
 }
 
 // New agents. There is only one PM (D13), so only developers and reviewers.
@@ -682,6 +694,7 @@ export interface Attachment {
 }
 
 export interface Run {
+  runnerId: string | null
   id: string
   // Shown as #128
   number: number
@@ -795,3 +808,37 @@ export interface PullRequestStatus {
 }
 
 export type CheckConclusion = 'success' | 'failure' | 'pending' | 'neutral' | 'skipped'
+
+// ── Deployments ─────────────────────────────────────────────────────────────
+
+const commitSha = z.string().regex(/^[0-9a-f]{40}$/)
+
+// What scripts/deploy/auto-deploy.sh posts after `docker compose up -d`
+// (D16). The project is the one whose repository is `repository`. Posting
+// the same toSha again returns the existing deployment.
+export const createDeploymentInput = z.object({
+  repository: z.string().regex(/^[\w.-]+\/[\w.-]+$/),
+  // Null for the first deploy
+  fromSha: commitSha.nullable(),
+  toSha: commitSha,
+  // Newest first, as `git log` lists them. Every commit in the range, however
+  // many: a capped list would lose the oldest and the PM's notes with them.
+  commits: z.array(z.object({ sha: commitSha, subject: z.string() }))
+})
+export type CreateDeploymentInput = z.infer<typeof createDeploymentInput>
+
+export const DEPLOYMENT_NOTES_STATUSES = ['pending', 'ready', 'failed'] as const
+export type DeploymentNotesStatus = typeof DEPLOYMENT_NOTES_STATUSES[number]
+
+export interface Deployment {
+  id: string
+  projectId: string
+  fromSha: string | null
+  toSha: string
+  commits: { sha: string, subject: string }[]
+  // The PM's release notes in markdown, once notesStatus is ready
+  notes: string | null
+  notesStatus: DeploymentNotesStatus
+  readAt: string | null
+  createdAt: string
+}

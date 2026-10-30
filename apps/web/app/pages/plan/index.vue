@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { AgentRuntime, CliStatus, DraftSession } from '@corral/contracts'
 import { api } from '~/composables/useApi'
-import { detectedRuntimes, initials, projectColor, runtimeLabel } from '~/utils/labels'
+import { detectedRuntimes, projectColor, runtimeLabel } from '~/utils/labels'
 
 // Plan, new session (design/plan.md)
 const live = useLive()
@@ -9,7 +9,7 @@ const live = useLive()
 const pm = computed(() => live.state.value.agents.find(a => a.role === 'pm') ?? null)
 const router = useRouter()
 const route = useRoute()
-const toast = useToast()
+const pending = usePendingPlan()
 const device = useDevice()
 useSeoMeta({ title: 'Plan · Corral' })
 
@@ -39,8 +39,16 @@ const runtimes = computed(() => {
 const runtimeItems = computed(() => runtimes.value.map(r => ({ label: runtimeLabel(r), value: r })))
 const lastRuntime = useLocalStorage<AgentRuntime>('corral.plan.runtime', 'claude-code')
 const runtime = computed<AgentRuntime>(() => runtimes.value.includes(lastRuntime.value) ? lastRuntime.value : runtimes.value[0]!)
-const text = ref('')
-const taskRef = ref<string | null>(null)
+const restored = pending.restored.value
+pending.restored.value = null
+if (restored) {
+  projectId.value = restored.session.projectId
+  lastRuntime.value = restored.session.runtime
+}
+const restoredImages = [...(restored?.message ?? '').matchAll(/!\[([^\]]*)\]\(attachment:([^)]*)\)/g)].map(m => ({ name: m[1]!, id: m[2]! }))
+const text = ref((restored?.message ?? '').replace(/!\[[^\]]*\]\(attachment:[^)]*\)/g, '').trim())
+const composer = ref<{ send: (message: string) => Promise<void> } | null>(null)
+const taskRef = ref<string | null>(restored?.taskRef ?? null)
 const busy = ref(false)
 const runnerOffline = computed(() => live.state.value.loaded && !live.state.value.runner?.online)
 const reconnecting = ref(false)
@@ -77,17 +85,13 @@ onMounted(() => {
 // Resolves false when not started, so the composer keeps its images
 async function start(message: string): Promise<boolean> {
   if (!project.value) return false
+  if (busy.value) return false
   busy.value = true
-  try {
-    const session = await api.plan.start(project.value.id, message, taskRef.value ?? undefined, runtime.value)
-    await router.push(`/plan/${session.id}`)
-    return true
-  } catch (e) {
-    toast.add({ title: 'Could not start the session', description: e instanceof Error ? e.message : String(e), color: 'error' })
-    return false
-  } finally {
-    busy.value = false
-  }
+  const id = pending.seed(project.value.id, message, runtime.value, taskRef.value ?? undefined)
+  usePlanThreads().add(id)
+  await router.push(`/plan/${id}`)
+  void pending.start(id)
+  return true
 }
 </script>
 
@@ -125,7 +129,9 @@ async function start(message: string): Promise<boolean> {
         />
 
         <PromptComposer
+          ref="composer"
           v-model="text"
+          :initial-images="restoredImages"
           :placeholder="runnerOffline && device.isMobile.value ? `${pm?.name ?? 'The PM'} is unavailable while the runner is offline` : 'Describe what you want to build…'"
           :disabled="runnerOffline || !project"
           :busy="busy"
@@ -161,7 +167,7 @@ async function start(message: string): Promise<boolean> {
           <template #tools>
             <USelectMenu
               :model-value="project?.id"
-              :items="live.state.value.projects.map(p => ({ label: p.name, value: p.id, color: projectColor(p), initial: initials(p.name) }))"
+              :items="live.state.value.projects.map(p => ({ label: p.name, value: p.id, project: p }))"
               value-key="value"
               size="xs"
               variant="ghost"
@@ -170,6 +176,12 @@ async function start(message: string): Promise<boolean> {
               :ui="{ content: 'w-80 max-w-[calc(100vw-2rem)]', base: 'max-w-56' }"
               @update:model-value="projectId = $event as string"
             >
+              <template #item-leading="{ item }">
+                <ProjectThumbnail
+                  :project="item.project"
+                  :size="20"
+                />
+              </template>
               <template #leading>
                 <span
                   class="size-2.5 rounded-full"
@@ -208,7 +220,7 @@ async function start(message: string): Promise<boolean> {
               :draft="text"
               :disabled="busy || runnerOffline || !project"
               :class="device.isMobile.value && 'order-first'"
-              @send="start"
+              @send="composer?.send($event)"
             />
             <USelectMenu
               v-if="!device.isMobile.value"

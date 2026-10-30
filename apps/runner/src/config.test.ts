@@ -13,7 +13,9 @@ describe('loadConfig', () => {
       codexBin: 'codex',
       gitAuthor: null,
       pmWarmSeconds: 300,
-      titleModel: 'haiku'
+      titleModel: 'haiku',
+      slots: 4,
+      roles: ['pm', 'developer', 'reviewer', 'design']
     })
   })
 
@@ -27,7 +29,9 @@ describe('loadConfig', () => {
       CORRAL_GIT_AUTHOR_NAME: 'Configured Person',
       CORRAL_GIT_AUTHOR_EMAIL: 'configured@example.com',
       CORRAL_PM_WARM_SECONDS: '0',
-      CORRAL_TITLE_MODEL: 'claude-haiku-5-5'
+      CORRAL_TITLE_MODEL: 'claude-haiku-5-5',
+      CORRAL_RUNNER_SLOTS: '2',
+      CORRAL_RUNNER_ROLES: 'developer, reviewer'
     })).toEqual({
       dataDir: '/data/runner',
       serverUrl: new URL('http://server:4100'),
@@ -36,7 +40,9 @@ describe('loadConfig', () => {
       codexBin: '/opt/codex/bin/codex',
       gitAuthor: { name: 'Configured Person', email: 'configured@example.com' },
       pmWarmSeconds: 0,
-      titleModel: 'claude-haiku-5-5'
+      titleModel: 'claude-haiku-5-5',
+      slots: 2,
+      roles: ['developer', 'reviewer']
     })
   })
 
@@ -47,6 +53,9 @@ describe('loadConfig', () => {
   it('rejects a PM warm time that is not a whole number of seconds', () => {
     expect(() => loadConfig({ CORRAL_PM_WARM_SECONDS: '-1' })).toThrow(/CORRAL_PM_WARM_SECONDS/)
     expect(() => loadConfig({ CORRAL_PM_WARM_SECONDS: 'soon' })).toThrow(/CORRAL_PM_WARM_SECONDS/)
+    expect(() => loadConfig({ CORRAL_RUNNER_SLOTS: '0' })).toThrow(/CORRAL_RUNNER_SLOTS/)
+    expect(() => loadConfig({ CORRAL_RUNNER_SLOTS: 'two' })).toThrow(/CORRAL_RUNNER_SLOTS/)
+    expect(() => loadConfig({ CORRAL_RUNNER_ROLES: 'developer,tester' })).toThrow(/CORRAL_RUNNER_ROLES/)
   })
 
   it('needs both git author settings, and warns at startup without them', () => {

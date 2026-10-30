@@ -1,6 +1,7 @@
 import type { TaskStatus } from '@corral/core'
 import { describe, expect, it } from 'vitest'
-import { agentStatus, cliLoginCommand, detectedRuntimes, runtimeLabel, runTokens, taskCounts, taskTypeBadge } from './labels.ts'
+import { agentStatus, cliLoginCommand, detectedRuntimes, runtimeLabel, runTokens, taskCounts, taskTypeBadge, taskNote } from './labels.ts'
+import { projects, task } from '../prototype/fixtures'
 
 const tasks = (...statuses: TaskStatus[]) => statuses.map(status => ({ status }))
 
@@ -89,5 +90,19 @@ describe('agentStatus', () => {
     expect(agentStatus({ ...idle, activeRuns: 1 }, now)?.label).toBe('Working')
     expect(agentStatus({ ...idle, activeRuns: 1 }, now, false)).toBeNull()
     expect(agentStatus({ ...idle, paused: true }, now, false)?.label).toBe('Paused')
+  })
+})
+
+describe('Ready waiting notes', () => {
+  it('shows epic prerequisites and clears the note when they finish', () => {
+    const ready = task(projects[0]!, 99, { title: 'Waiting', status: 'ready', waitingOnEpics: [{ id: 'foundation', title: 'Foundation' }] })
+    expect(taskNote(ready, [ready], 5)).toEqual({ text: 'Waiting on epic: Foundation', color: 'neutral' })
+    expect(taskNote({ ...ready, waitingOnEpics: [] }, [ready], 5)).toBeNull()
+    expect(taskNote({ ...ready, status: 'in_progress' }, [ready], 5)).toBeNull()
+  })
+
+  it('preserves task dependency notes for epics without prerequisites', () => {
+    const ready = task(projects[0]!, 99, { title: 'Waiting', status: 'ready', dependsOn: ['COR-98'] })
+    expect(taskNote(ready, [ready], 5)).toEqual({ text: 'Waiting on COR-98', color: 'neutral' })
   })
 })

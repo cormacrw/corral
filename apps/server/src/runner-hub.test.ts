@@ -1,4 +1,4 @@
-import type { RunnerMessage, ServerMessage } from '@corral/contracts'
+import { RUNNER_PROTOCOL_VERSION, type RunnerMessage, type ServerMessage } from '@corral/contracts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import WebSocket from 'ws'
 import type { RunnerHub } from './runner-hub.ts'
@@ -39,7 +39,7 @@ describe('runner connection', () => {
       })
     })
     await new Promise(resolve => connection.once('open', resolve))
-    connection.send(JSON.stringify({ type: 'hello', protocol: 1, runnerId: 'r1', name: 'test-runner', activeRuns: [] } satisfies RunnerMessage))
+    connection.send(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, runnerId: 'r1', name: 'test-runner', activeRuns: [], slots: 1, runtimes: ['claude-code'], roles: ['developer'] } satisfies RunnerMessage))
     await welcomed
     return connection
   }

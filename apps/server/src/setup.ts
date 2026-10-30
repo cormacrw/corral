@@ -90,8 +90,8 @@ export async function checkRepository(db: Executor, runner: RunnerHub, repositor
 
 const CLI_NAMES: Record<CliId, string> = { claude: 'Claude Code', codex: 'Codex CLI' }
 
-export async function detectClis(runner: RunnerHub): Promise<CliStatus[]> {
-  const result = await runner.request({ kind: 'detect_clis' })
+export async function detectClis(runner: RunnerHub, refresh = true): Promise<CliStatus[]> {
+  const result = await runner.detectClis(refresh)
   return result.clis.map(cli => ({ id: cli.id, name: CLI_NAMES[cli.id], version: cli.version, signedIn: cli.signedIn }))
 }
 
@@ -100,7 +100,7 @@ export async function detectClis(runner: RunnerHub): Promise<CliStatus[]> {
 // without recreating the agent.
 export async function requireRuntimeCli(runner: RunnerHub, runtime: AgentRuntime): Promise<void> {
   const id = AGENT_RUNTIMES[runtime]
-  const cli = (await detectClis(runner)).find(c => c.id === id)
+  const cli = (await detectClis(runner, false)).find(c => c.id === id)
   if (!cli?.version) {
     const message = `${CLI_NAMES[id]} isn’t installed on the runner, so the ${runtime} runtime can’t be used`
     throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['runtime'], message }] })

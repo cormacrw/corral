@@ -1,5 +1,5 @@
 import { checkEpicDependencies } from '@corral/core'
-import type { CreateTaskInput, InboxActionInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, RunEvent, ServerEvent, Task } from '@corral/contracts'
+import type { CreateTaskInput, InboxActionInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
 import * as f from './fixtures'
@@ -38,7 +38,7 @@ function session(id: string): PlanSessionDetail {
 
 route('GET', '/health', () => ({ ok: true }))
 route('GET', '/runner', () => f.runner)
-route('GET', '/status', () => f.status)
+route('GET', '/status', () => ({ ...f.status, runners: f.runner.runners }))
 route('POST', '/stop-all', () => Object.assign(f.status, { stopped: true }))
 route('POST', '/resume-all', () => Object.assign(f.status, { stopped: false }))
 
@@ -55,9 +55,32 @@ route('POST', '/setup/check-repo', (_, body) => ({
 }))
 route('GET', '/setup/clis', () => f.clis)
 
+// Return the complete project, including its bundled thumbnailUrl, just like the API.
 route('GET', '/projects', () => f.projects)
 route('GET', '/projects/:slug', ([slug]) => project(slug!))
-route('PATCH', '/projects/:slug', ([slug], body) => Object.assign(project(slug!), body))
+route('PATCH', '/projects/:slug', ([slug], body) => {
+  const p = Object.assign(project(slug!), body)
+  emit({ type: 'project.updated', project: p })
+  return p
+})
+route('PUT', '/projects/:slug/thumbnail', async ([slug], body) => {
+  const p = project(slug!)
+  const image = (body as FormData).get('file') as Blob
+  const thumbnailUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(image)
+  })
+  Object.assign(p, { thumbnailUrl, updatedAt: new Date().toISOString() })
+  emit({ type: 'project.updated', project: p })
+  return p
+})
+route('DELETE', '/projects/:slug/thumbnail', ([slug]) => {
+  const p = Object.assign(project(slug!), { thumbnailUrl: null, updatedAt: new Date().toISOString() })
+  emit({ type: 'project.updated', project: p })
+  return p
+})
 
 route('GET', '/projects/:slug/tasks', ([slug], _, query) => {
   const p = project(slug!)
@@ -210,6 +233,22 @@ function approveDesign(task: Task, version: number): Task {
 }
 route('POST', '/projects/:slug/tasks/:number/designs/:version/approve', ([slug, number, version]) => approveDesign(taskIn(slug!, number!), Number(version)))
 
+route('POST', '/plan/sessions', (_, body) => {
+  const { id = crypto.randomUUID(), projectId, text, runtime = 'claude-code', taskRef } = body as StartPlanSessionInput
+  const existing = f.planSessions.find(s => s.id === id)
+  if (existing) {
+    if (existing.projectId !== projectId) throw new ApiError(409, { code: 'conflict', constraint: 'plan_session_project' }, 'Session belongs to another project')
+    return session(id)
+  }
+  const now = new Date().toISOString()
+  f.planSessions.unshift({ id, projectId, runtime, title: text.split('\n')[0]!.slice(0, 60) || 'New session', preview: text, unread: false, closed: false, status: 'none', activeRunId: null, createdAt: now, updatedAt: now })
+  postMessage(id, { role: 'human', kind: 'message', text: text || `Refine ${taskRef}` })
+  emit({ type: 'plan.session', session: f.planSessions[0]! })
+  setTimeout(() => {
+    postMessage(id, { role: 'pm', kind: 'message', text: 'I will help you work through this plan.' })
+  }, 1800)
+  return session(id)
+})
 route('GET', '/plan/sessions', () => f.planSessions)
 route('GET', '/plan/sessions/:id', ([id]) => session(id!))
 // Drafts by the session they belong to, newest session first, as the server lists them
@@ -355,8 +394,8 @@ export async function mockCall<T>(method: string, path: string, body?: unknown):
     if (!match) continue
     const params = match.slice(1).map(decodeURIComponent)
     // Copies both ways, as if over the wire, so pages and fixtures stay apart
-    const input: unknown = body === undefined || body instanceof Blob ? body : JSON.parse(JSON.stringify(body))
-    const result = handler(params, input, new URLSearchParams(search))
+    const input: unknown = body === undefined || body instanceof Blob || body instanceof FormData ? body : JSON.parse(JSON.stringify(body))
+    const result = await handler(params, input, new URLSearchParams(search))
     return (result === undefined ? undefined : JSON.parse(JSON.stringify(result))) as T
   }
   notFound()

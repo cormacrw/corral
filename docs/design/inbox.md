@@ -47,6 +47,7 @@ There are three columns. The list divider can be resized (280–560px, default 3
   - The agent's message in plain English.
   - Type-specific context:
     - **Human review:** the PR link (`#41`), passing-check badges, and a card of acceptance criteria. Each criterion shows a met icon, the reviewer’s note, screenshot/video/request cards, then inline markdown notes. Agent artifacts are collapsed separately; see [Evidence review](task.md#evidence-review-d21).
+    - **Spikes always stop in Human review**, whatever their human-review flag says. They appear under Needs you and add one to its count. The message body is the latest `## Findings` comment, and the preview is the start of that comment. Approval finishes the spike in Merged; requesting changes returns it to the developer with the feedback.
     - **Blocked:** the reviewer's and developer's positions side by side (2 columns, `bg-muted`).
     - **Question:** the question itself. The answers live in the tray.
     - **Activity:** one link button (Open PR, Open task…).
@@ -137,11 +138,12 @@ The selected message column shows only what needs you, **not the conversation**.
 
 On the mobile layout ([mobile.md](mobile.md#inbox)), a Plan thread opens as its own screen at `/inbox/:itemId`:
 
-- **Header:** "Inbox · n of m" above the session title, a back button to the list, **Open in Plan** in place of the Task button, and a **⋯** menu with **Close thread**. The tab bar is hidden, as on any item.
-- **Body:** only the question or the plan, full width, not the conversation. A question's answers are stacked, full-width buttons at least 44px tall, as in Plan on mobile, with the reply box ("Reply to Juno…") pinned below. A plan shows its title, summary and counts, with **View plan** (opens the plan in a bottom sheet; a task from it opens in a taller sheet over it) and **Approve to board** and **Approve to Backlog** side by side, full width.
-- **Close thread** confirms in a bottom sheet with the same text, then returns to `/inbox`.
+- **Header:** "Inbox · n of m" above the session title, a back button to the list, **Open in Plan** in place of the Task button, and a **⋯** menu with **Delete thread**. The tab bar is hidden, as on any item.
+- **Body:** only the question or the plan, full width, not the conversation. A question's answers are stacked, full-width buttons at least 44px tall, as in Plan on mobile, with the reply box ("Reply to Juno…") pinned below. An unread reply shows Juno's latest reply with the same reply box. A plan shows its title, summary and counts, with **View plan** (opens the plan in a bottom sheet; a task from it opens in a taller sheet over it) and **Approve to board** and **Approve to Backlog** side by side, full width.
+- **Delete thread** doesn't ask first. It returns to `/inbox` without the thread and offers **Undo**, as a swipe does (below).
 - Approving returns to `/inbox`; a failed approval keeps the screen and sheet open with the error.
-- **Row:** the project dot, session title, time, status badge and preview, in the same list as the other items.
+- **Row:** the project dot, session title, time, status badge and preview, in the same list as the other items. The first tab is named **Inbox** (the web's Needs you), newest first, with no group for threads.
+- **Swipe to delete:** swiping a thread row left reveals a red **Delete** button; a full swipe deletes at once, and a short one snaps back. Task items don't swipe. Deleting removes the row immediately and shows a "Thread deleted · its drafts were discarded" toast with **Undo** for 5 seconds; only then is the thread closed (as [Delete thread](#delete-thread), discarding its drafts and unapproved plan). Undo puts the row back with nothing discarded. If the close fails, the row comes back with an error toast. `usePlanThreadDelete` holds the pending deletes, shared with desktop, so a delete started on the thread screen carries on after it returns to the list or the layout changes. Reloading or closing the tab during Undo sends the close immediately with a keepalive request.
 
 ## What each action does (D10)
 
@@ -184,4 +186,4 @@ On the mobile layout ([mobile.md](mobile.md#inbox)), a Plan thread opens as its 
 - Approve could be one click instead of select-then-send. Two steps are safer; decide after testing.
 - Should Activity items expire, or stay forever?
 
-Mobile Plan threads reuse Plan's `PlanQuestion`, composer and `PlanDetail` bottom sheet, without `PlanConversation`. `InboxMobile` renders its focused Plan thread through `InboxMobilePlanThread`; the Inbox header keeps Back to Inbox and Open in Plan (the session route), with Close thread in the overflow menu. Closing confirms in a bottom sheet; Cancel preserves the thread, and a successful close refreshes the list and returns to `/inbox`. A failed close keeps the confirmation open with its error. A waiting plan has View plan and side-by-side approval destinations. The thread provides `FLYOUT_SHEETS`, so `useTaskFlyout` keeps a task or epic opened from the plan sheet on the Inbox route (`?task=`/`?epic=`) in a taller sheet over the plan, and dismissing it goes back to the plan; either successful approval closes the sheet and returns to `/inbox`. Failed approvals keep the screen and sheet open.
+Mobile Plan threads reuse Plan's `PlanQuestion`, composer and `PlanDetail` bottom sheet, without `PlanConversation`. `InboxMobile` renders its focused Plan thread through `InboxMobilePlanThread`; the Inbox header keeps Back to Inbox and Open in Plan (the session route), with Delete thread in the overflow menu. Deleting returns to `/inbox` at once and closes the session after the 5-second Undo toast (`usePlanThreadDelete`); list rows use `SwipeToDelete` for the same action. A waiting plan has View plan and side-by-side approval destinations. The thread provides `FLYOUT_SHEETS`, so `useTaskFlyout` keeps a task or epic opened from the plan sheet on the Inbox route (`?task=`/`?epic=`) in a taller sheet over the plan, and dismissing it goes back to the plan; either successful approval closes the sheet and returns to `/inbox`. Failed approvals keep the screen and sheet open.

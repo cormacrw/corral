@@ -70,6 +70,12 @@ async function sessionTitle(config: RunnerConfig, prompt: string): Promise<strin
   return title
 }
 
+// The runtime ids whose CLI is installed and signed in, for the runner's hello
+export async function signedInRuntimes(config: Pick<RunnerConfig, 'claudeBin' | 'codexBin'>): Promise<string[]> {
+  const [claude, codex] = await Promise.all([detectClaude(config.claudeBin), detectCodex(config.codexBin)])
+  return [...(claude.signedIn ? ['claude-code'] : []), ...(codex.signedIn ? ['codex'] : [])]
+}
+
 type DetectedCli = Extract<SetupJobResult, { kind: 'detect_clis' }>['clis'][number]
 
 async function detectClaude(bin: string): Promise<DetectedCli> {

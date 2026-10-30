@@ -1,0 +1,33 @@
+# Run from the checkout root with:
+# docker compose --env-file deploy/runner/.env -f deploy/runner/docker-compose.yml up -d --build
+# Separate project name keeps these volumes independent of the home-server stack.
+name: corral-remote-runner
+
+services:
+  runner:
+    build:
+      context: ../..
+      dockerfile: apps/runner/Dockerfile
+    container_name: corral-remote-runner
+    environment:
+      CORRAL_SERVER_URL: ${CORRAL_SERVER_URL:?set the home server tailnet URL and runner port}
+      CORRAL_RUNNER_TOKEN: ${CORRAL_RUNNER_TOKEN:?set the shared runner token}
+      CORRAL_RUNNER_NAME: ${CORRAL_RUNNER_NAME:-gaming-pc}
+      CORRAL_RUNNER_SLOTS: ${CORRAL_RUNNER_SLOTS:-4}
+      CORRAL_RUNNER_ROLES: ${CORRAL_RUNNER_ROLES:-developer,reviewer,design}
+      CORRAL_GIT_AUTHOR_NAME: ${CORRAL_GIT_AUTHOR_NAME:?set the git author name}
+      CORRAL_GIT_AUTHOR_EMAIL: ${CORRAL_GIT_AUTHOR_EMAIL:?set the git author email}
+    volumes:
+      - runner-data:/data/runner
+      - claude-config:/home/runner/.claude
+      - codex-config:/home/runner/.codex
+      - gh-config:/home/runner/.config/gh
+    mem_limit: ${CORRAL_RUNNER_MEMORY:-6g}
+    shm_size: 1g
+    restart: unless-stopped
+
+volumes:
+  runner-data:
+  claude-config:
+  codex-config:
+  gh-config:

@@ -2,6 +2,7 @@ import { RUNNER_PATH } from '@corral/contracts'
 import { serve, type ServerType } from '@hono/node-server'
 import { createNodeWebSocket } from '@hono/node-ws'
 import { Hono } from 'hono'
+import { createHash, timingSafeEqual } from 'node:crypto'
 import type { AddressInfo } from 'node:net'
 import { createApp, type AppDeps } from './app.ts'
 
@@ -10,16 +11,23 @@ export interface RunningServer {
   close(): Promise<void>
 }
 
-// The HTTP API under /api plus the runner WebSocket at /runner. Only /api is
-// proxied by web, so the runner socket stays on the private network (D12).
-export function startServer(deps: AppDeps, options: { host: string, port: number }): Promise<RunningServer> {
+// Both listeners share the runner hub; the external listener never mounts the API (D25).
+export function startServer(deps: AppDeps, options: { host: string, port: number, runnerToken?: string | undefined, runnerOnly?: boolean | undefined }): Promise<RunningServer> {
+  if (options.runnerOnly && !options.runnerToken) throw new Error('CORRAL_RUNNER_TOKEN is required for CORRAL_RUNNER_LISTEN')
   const root = new Hono()
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app: root })
 
-  root.get(RUNNER_PATH, upgradeWebSocket(() => {
+  root.get(RUNNER_PATH, upgradeWebSocket((context) => {
+    const supplied = context.req.header('authorization')
+    const authenticated = !options.runnerToken || tokenMatches(supplied, options.runnerToken)
     let connection: ReturnType<AppDeps['runner']['connect']> | null = null
     return {
       onOpen: (_event, ws) => {
+        if (!authenticated) {
+          console.warn('Runner authentication rejected: missing or invalid runner token')
+          ws.close(4003, 'Missing or invalid runner token')
+          return
+        }
         connection = deps.runner.connect({
           send: data => ws.send(data),
           close: (code, reason) => ws.close(code, reason)
@@ -33,9 +41,9 @@ export function startServer(deps: AppDeps, options: { host: string, port: number
       }
     }
   }))
-  root.route('/', createApp(deps))
+  if (!options.runnerOnly) root.route('/', createApp(deps))
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const server: ServerType = serve({ fetch: root.fetch, hostname: options.host, port: options.port }, (info: AddressInfo) => {
       resolve({
         url: `http://${info.address.includes(':') ? `[${info.address}]` : info.address}:${info.port}`,
@@ -49,6 +57,13 @@ export function startServer(deps: AppDeps, options: { host: string, port: number
         })
       })
     })
+    server.once('error', reject)
     injectWebSocket(server)
   })
+}
+
+// Hash both inputs to fixed-length buffers before the constant-time comparison.
+function tokenMatches(header: string | undefined, token: string): boolean {
+  const digest = (value: string) => createHash('sha256').update(value).digest()
+  return timingSafeEqual(digest(header ?? ''), digest(`Bearer ${token}`))
 }

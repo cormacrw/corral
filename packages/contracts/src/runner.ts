@@ -4,7 +4,8 @@ import type { AgentRole, RunOutcome, TaskType } from '@corral/core'
 // runner always dials out (D1), so the same messages work on localhost, the
 // Docker network (D12) and a hosted server later. Messages are JSON.
 
-export const RUNNER_PROTOCOL_VERSION = 1
+// 2: hello carries the runner's slots, runtimes and roles (COR-184)
+export const RUNNER_PROTOCOL_VERSION = 2
 export const RUNNER_HEARTBEAT_MS = 30_000
 export const RUNNER_PATH = '/runner'
 
@@ -64,6 +65,8 @@ export interface RunJob {
   projectId: string
   repository: string
   defaultBranch: string
+  // Actual task PR base; absent for older servers and PM runs.
+  baseBranch?: string
   // Developer and reviewer runs
   taskId: string | null
   taskRef: string | null
@@ -137,7 +140,7 @@ export interface OutcomeReport {
 // ── Messages ─────────────────────────────────────────────────────────────────
 
 export type RunnerMessage =
-  | { type: 'hello', protocol: number, runnerId: string, name: string, activeRuns: { runId: string, leaseEpoch: number }[] }
+  | { type: 'hello', protocol: number, runnerId: string, name: string, activeRuns: { runId: string, leaseEpoch: number }[] } & RunnerCapacity
   | { type: 'heartbeat', activeRuns: { runId: string, leaseEpoch: number }[] }
   | { type: 'job.result', jobId: string, ok: true, result: SetupJobResult }
   | { type: 'job.result', jobId: string, ok: false, error: string }
@@ -160,7 +163,32 @@ export type ServerMessage =
   | { type: 'tool.result', callId: string, ok: true, result: unknown }
   | { type: 'tool.result', callId: string, ok: false, error: string }
 
+// What a runner takes on, sent in its hello. The server only assigns a run
+// to a runner that takes its role, has its runtime and has a free slot.
+export interface RunnerCapacity {
+  // Most agent runs the machine runs at once (CORRAL_RUNNER_SLOTS)
+  slots: number
+  // Runtime ids with a signed-in CLI, e.g. 'claude-code', 'codex'
+  runtimes: string[]
+  // Agent roles it takes (CORRAL_RUNNER_ROLES); design runs are developer
+  // runs on design tasks, taken only with 'design'
+  roles: RunnerRole[]
+}
+
+export type RunnerRole = AgentRole | 'design'
+export const RUNNER_ROLES: readonly RunnerRole[] = ['pm', 'developer', 'reviewer', 'design']
+
+export interface RunnerInfo extends RunnerCapacity {
+  id: string
+  name: string
+  online: boolean
+  connectedAt: string
+  lastHeartbeatAt: string
+}
+
 export interface RunnerStatus {
+  runners: RunnerInfo[]
+  // Aggregate compatibility fields for the shell: online means any runner.
   online: boolean
   runnerId: string | null
   name: string | null

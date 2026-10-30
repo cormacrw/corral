@@ -37,6 +37,23 @@ describe('epic scheduling', () => {
     return { project, a: a!, b: b!, first, second, dev: dev! }
   }
 
+  it('reports unfinished prerequisite epics on API tasks and clears them in live completion updates', async () => {
+    const { project, a, first, second } = await setup()
+    const get = async (number: number) => (await t.request('GET', `/api/projects/${project.slug}/tasks/${number}`)).json()
+    expect(await get(second.number)).toMatchObject({ dependsOn: [], waitingOnEpics: [{ id: a.id, title: a.title }] })
+    expect(await get(first.number)).toMatchObject({ waitingOnEpics: [] })
+    for (const status of ['draft', 'backlog', 'merged'] as const) {
+      await t.db.update(tasks).set({ status }).where(eq(tasks.id, first.id))
+      expect(await get(second.number)).toMatchObject({ waitingOnEpics: [] })
+    }
+    await t.db.update(tasks).set({ status: 'blocked', deletedAt: new Date() }).where(eq(tasks.id, first.id))
+    expect(await get(second.number)).toMatchObject({ waitingOnEpics: [] })
+    await t.db.update(tasks).set({ status: 'human_review', type: 'spike', humanReview: true, deletedAt: null }).where(eq(tasks.id, first.id))
+    expect(await get(second.number)).toMatchObject({ waitingOnEpics: [{ id: a.id, title: a.title }] })
+    expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${first.number}/approve`)).status).toBe(200)
+    expect(t.events).toContainEqual(expect.objectContaining({ type: 'task.updated', task: expect.objectContaining({ id: second.id, waitingOnEpics: [] }) }))
+  })
+
   it('edits dependencies through the API, audits and rejects cycles and task deadlocks atomically', async () => {
     const { project, a, b, first, second, dev } = await setup()
     const put = (id: string, dependsOn: string[]) => t.request('PUT', `/api/epics/${id}/dependencies`, { dependsOn })

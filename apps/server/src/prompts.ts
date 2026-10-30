@@ -318,6 +318,25 @@ function designDeveloperPrompt(task: PromptTask, agentName: string): string {
   ].join('\n')
 }
 
+// The message a resumed developer session gets on its next run of a task
+// (changes requested, or a retry): the session already holds the task, the
+// working rules and the earlier work, so it gets only what's new
+export function developerRevisionPrompt(task: PromptTask, feedback: PromptTask['comments']): string {
+  const format = (c: PromptTask['comments'][number]) => `- ${c.author} (${c.createdAt.toISOString()}): ${c.body}`
+  const outcome = task.spike ? 'findings_reported' : task.reviewRounds > 0 ? 'pr_updated' : 'pr_opened'
+  return [
+    task.reviewRounds > 0
+      ? `Review round ${task.reviewRounds} of ${task.reviewRoundCap} on ${task.ref} requested changes. This is the same session${task.branch ? ` and the same branch, \`${task.branch}\`` : ''}: continue from your earlier work.`
+      : `${task.ref} is back with you. This is the same session${task.branch ? ` and the same branch, \`${task.branch}\`` : ''}: continue from your earlier work.`,
+    '',
+    section('New comments', feedback.length > 0 ? feedback.map(format).join('\n') : '(none: re-read the task with `get_task`)'),
+    section('What to do', `
+- Address every point of the feedback, and finish whatever the task still needs.
+- Re-read the task with \`get_task\` if anything may have changed, and attach evidence for every acceptance criterion again if the review round has moved on.
+- Then call \`report_outcome\` with outcome "${outcome}" and a summary${task.spike ? ' of your findings' : ' of the change as a whole'}.`)
+  ].join('\n')
+}
+
 // The message a resumed design session gets after changes were requested:
 // the session already holds the task and the earlier work (D20)
 export function designRevisionPrompt(task: PromptTask, feedback: PromptTask['comments']): string {

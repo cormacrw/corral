@@ -1,6 +1,8 @@
 import {
   RUNNER_HEARTBEAT_MS,
   RUNNER_PROTOCOL_VERSION,
+  RUNNER_ROLES,
+  type RunnerInfo,
   type RunnerMessage,
   type RunnerStatus,
   type ServerMessage,
@@ -20,22 +22,22 @@ type ActiveRuns = { runId: string, leaseEpoch: number }[]
 
 // What the orchestrator does with run traffic. Set once at startup.
 export interface RunnerHandlers {
-  onConnected(activeRuns: ActiveRuns): Promise<void>
-  onHeartbeat(activeRuns: ActiveRuns): Promise<void>
+  onConnected(activeRuns: ActiveRuns, runnerId: string): Promise<void>
+  onReady(): void
+  onHeartbeat(activeRuns: ActiveRuns, runnerId: string): Promise<void>
   onDisconnected(): Promise<void>
-  onRunMessage(message: Extract<RunnerMessage, { type: 'run.started' | 'run.events' | 'run.ended' }>): Promise<void>
+  onRunMessage(message: Extract<RunnerMessage, { type: 'run.started' | 'run.events' | 'run.ended' }>, runnerId: string): Promise<void>
   // Returns the tool result, or throws to send an error back to the agent
-  onToolCall(message: Extract<RunnerMessage, { type: 'tool.call' }>): Promise<unknown>
+  onToolCall(message: Extract<RunnerMessage, { type: 'tool.call' }>, runnerId: string): Promise<unknown>
 }
 
 const JOB_TIMEOUT_MS = 60_000
 
-// The server's side of the runner WebSocket. The POC has one runner (D1); a
-// second connection replaces the first. Pairing and auth come with hosting.
+// Connections are independent; only the same runner identity replaces a socket.
 export class RunnerHub {
-  #socket: RunnerSocket | null = null
-  #status: RunnerStatus = { online: false, runnerId: null, name: null, connectedAt: null, lastHeartbeatAt: null }
-  #pending = new Map<string, { resolve: (r: SetupJobResult) => void, reject: (e: Error) => void, timer: NodeJS.Timeout }>()
+  #runners = new Map<string, { socket: RunnerSocket | null, status: RunnerStatus['runners'][number] }>()
+  #pending = new Map<string, { resolve: (r: SetupJobResult) => void, reject: (e: Error) => void, timer: NodeJS.Timeout, runnerId: string }>()
+  #cliCache = new Map<string, { result?: Extract<SetupJobResult, { kind: 'detect_clis' }>, detecting?: Promise<Extract<SetupJobResult, { kind: 'detect_clis' }>> }>()
   #handlers: RunnerHandlers | null = null
   #events: EventBus
   // Run messages are handled in order per run, so the last events batch is
@@ -52,16 +54,39 @@ export class RunnerHub {
   }
 
   status(): RunnerStatus {
-    return { ...this.#status }
+    const runners = [...this.#runners.values()].map(r => ({ ...r.status }))
+    const first = runners.find(r => r.online)
+    return { online: !!first, runnerId: first?.id ?? null, name: first?.name ?? null, connectedAt: first?.connectedAt ?? null, lastHeartbeatAt: first?.lastHeartbeatAt ?? null, runners }
   }
 
   get online(): boolean {
-    return this.#status.online
+    return !!this.pick()
+  }
+
+  // Detection is cached per connection and shared by requests during setup.
+  detectClis(refresh = false, runnerId = this.pick()): Promise<Extract<SetupJobResult, { kind: 'detect_clis' }>> {
+    if (!this.isOnline(runnerId) || !runnerId) return Promise.reject(runnerOffline())
+    let cache = this.#cliCache.get(runnerId)
+    if (!cache) {
+      cache = {}
+      this.#cliCache.set(runnerId, cache)
+    }
+    if (!refresh && cache.result) return Promise.resolve(cache.result)
+    if (cache.detecting) return cache.detecting
+    const entry = cache
+    const detecting = this.#request({ kind: 'detect_clis' }, JOB_TIMEOUT_MS, runnerId).then((result) => {
+      entry.result = result
+      return result
+    }).finally(() => {
+      if (entry.detecting === detecting) delete entry.detecting
+    })
+    entry.detecting = detecting
+    return detecting
   }
 
   // Called by the WebSocket route for each new connection
   connect(socket: RunnerSocket) {
-    let hello = false
+    let runnerId: string | null = null
     return {
       onMessage: async (raw: string) => {
         let message: RunnerMessage
@@ -75,28 +100,45 @@ export class RunnerHub {
             socket.close(4000, `Protocol ${message.protocol} not supported; server speaks ${RUNNER_PROTOCOL_VERSION}`)
             return
           }
-          hello = true
-          if (this.#socket && this.#socket !== socket) this.#socket.close(4001, 'Replaced by a newer runner connection')
-          this.#socket = socket
+          if (runnerId) return
+          runnerId = message.runnerId
+          const old = this.#runners.get(runnerId)
+          if (old?.socket) {
+            this.#rejectJobs(runnerId)
+            old.socket.close(4001, 'Replaced by a newer runner connection')
+          }
+          this.#cliCache.delete(runnerId)
           const now = new Date().toISOString()
-          this.#setStatus({ online: true, runnerId: message.runnerId, name: message.name, connectedAt: now, lastHeartbeatAt: now })
-          this.send({ type: 'welcome', runnerId: message.runnerId })
-          await this.#handlers?.onConnected(message.activeRuns).catch(error => console.error('Runner reconciliation failed', error))
+          const capacity = {
+            slots: Number.isInteger(message.slots) && message.slots > 0 ? message.slots : 1,
+            runtimes: Array.isArray(message.runtimes) ? message.runtimes.filter(r => typeof r === 'string') : [],
+            roles: Array.isArray(message.roles) ? message.roles.filter(r => (RUNNER_ROLES as readonly string[]).includes(r)) : []
+          }
+          this.#runners.set(runnerId, { socket, status: { id: runnerId, name: message.name, online: false, connectedAt: now, lastHeartbeatAt: now, ...capacity } })
+          // Don't dispatch into this socket until its hello snapshot has been
+          // reconciled: a newly assigned run isn't in that snapshot.
+          await this.#handlers?.onConnected(message.activeRuns, runnerId).catch(error => console.error('Runner reconciliation failed', error))
+          const runner = this.#runners.get(runnerId)
+          if (runner?.socket !== socket) return
+          runner.status.online = true
+          this.#publishStatus()
+          this.send({ type: 'welcome', runnerId }, runnerId)
+          void this.detectClis(true, runnerId).catch(error => console.error('Runner CLI detection failed', error))
+          this.#handlers?.onReady()
           return
         }
-        if (!hello || this.#socket !== socket) return
+        if (!runnerId || this.#runners.get(runnerId)?.socket !== socket) return
         // One bad message must not take the connection or the process down
-        await this.#handle(message).catch(error => console.error(`Runner message ${message.type} failed`, error))
+        await this.#handle(message, runnerId).catch(error => console.error(`Runner message ${message.type} failed`, error))
       },
       onClose: async () => {
-        if (this.#socket !== socket) return
-        this.#socket = null
-        for (const [jobId, pending] of this.#pending) {
-          clearTimeout(pending.timer)
-          pending.reject(new Error('Runner disconnected'))
-          this.#pending.delete(jobId)
-        }
-        this.#setStatus({ ...this.#status, online: false })
+        if (!runnerId) return
+        const runner = this.#runners.get(runnerId)
+        if (runner?.socket !== socket) return
+        runner.socket = null
+        runner.status.online = false
+        this.#rejectJobs(runnerId)
+        this.#publishStatus()
         await this.#handlers?.onDisconnected()
       }
     }
@@ -104,40 +146,78 @@ export class RunnerHub {
 
   // Server shutdown: the runner reconnects on its own with backoff
   disconnect(): void {
-    this.#socket?.close(1001, 'Server shutting down')
-    this.#socket = null
+    for (const runner of this.#runners.values()) runner.socket?.close(1001, 'Server shutting down')
   }
 
-  send(message: ServerMessage): boolean {
-    if (!this.#socket) return false
-    this.#socket.send(JSON.stringify(message))
+  pick(): string | null {
+    return [...this.#runners.entries()].filter(([, r]) => r.socket && r.status.online).sort((a, b) => a[1].status.connectedAt.localeCompare(b[1].status.connectedAt))[0]?.[0] ?? null
+  }
+
+  // Online runners ready for dispatch, longest connected first
+  available(): RunnerInfo[] {
+    return [...this.#runners.values()].filter(r => r.socket && r.status.online).map(r => ({ ...r.status }))
+      .sort((a, b) => a.connectedAt.localeCompare(b.connectedAt))
+  }
+
+  isOnline(runnerId: string | null): boolean {
+    return !!runnerId && !!this.#runners.get(runnerId)?.socket && !!this.#runners.get(runnerId)?.status.online
+  }
+
+  send(message: ServerMessage, runnerId: string | null): boolean {
+    const socket = runnerId ? this.#runners.get(runnerId)?.socket : null
+    if (!socket) return false
+    socket.send(JSON.stringify(message))
     return true
+  }
+
+  #rejectJobs(runnerId: string): void {
+    for (const [jobId, pending] of this.#pending) {
+      if (pending.runnerId !== runnerId) continue
+      clearTimeout(pending.timer)
+      pending.reject(new Error('Runner disconnected'))
+      this.#pending.delete(jobId)
+    }
   }
 
   // Sends a setup job and waits for its result. Throws an API failure when
   // the runner is offline, so routes report it plainly.
   request<K extends SetupJob['kind']>(job: Extract<SetupJob, { kind: K }>, timeoutMs = JOB_TIMEOUT_MS): Promise<Extract<SetupJobResult, { kind: K }>> {
-    if (!this.#socket) return Promise.reject(runnerOffline())
+    if (job.kind === 'cleanup_worktrees') {
+      const ids = [...this.#runners.keys()].filter(id => this.isOnline(id))
+      if (!ids.length) return Promise.reject(runnerOffline())
+      return Promise.all(ids.map(id => this.#request<'cleanup_worktrees'>(job as Extract<SetupJob, { kind: 'cleanup_worktrees' }>, timeoutMs, id))).then(results => ({
+        kind: 'cleanup_worktrees',
+        removed: results.flatMap(r => r.removed),
+        kept: results.flatMap(r => r.kept)
+      }) as Extract<SetupJobResult, { kind: K }>)
+    }
+    const runnerId = this.pick()
+    if (!runnerId) return Promise.reject(runnerOffline())
+    return this.#request(job, timeoutMs, runnerId)
+  }
+
+  #request<K extends SetupJob['kind']>(job: Extract<SetupJob, { kind: K }>, timeoutMs: number, runnerId: string): Promise<Extract<SetupJobResult, { kind: K }>> {
     const jobId = randomUUID()
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(jobId)
         reject(new Error(`Runner job ${job.kind} timed out`))
       }, timeoutMs)
-      this.#pending.set(jobId, { resolve: resolve as (r: SetupJobResult) => void, reject, timer })
-      this.send({ type: 'job.request', jobId, job })
+      this.#pending.set(jobId, { resolve: resolve as (r: SetupJobResult) => void, reject, timer, runnerId })
+      this.send({ type: 'job.request', jobId, job }, runnerId)
     })
   }
 
-  async #handle(message: RunnerMessage): Promise<void> {
+  async #handle(message: RunnerMessage, runnerId: string): Promise<void> {
     switch (message.type) {
       case 'heartbeat':
-        this.#setStatus({ ...this.#status, lastHeartbeatAt: new Date().toISOString() }, false)
-        await this.#handlers?.onHeartbeat(message.activeRuns)
+        this.#runners.get(runnerId)!.status.lastHeartbeatAt = new Date().toISOString()
+        this.#publishStatus()
+        await this.#handlers?.onHeartbeat(message.activeRuns, runnerId)
         return
       case 'job.result': {
         const pending = this.#pending.get(message.jobId)
-        if (!pending) return
+        if (!pending || pending.runnerId !== runnerId) return
         clearTimeout(pending.timer)
         this.#pending.delete(message.jobId)
         if (message.ok) pending.resolve(message.result)
@@ -148,7 +228,7 @@ export class RunnerHub {
       case 'run.events':
       case 'run.ended': {
         const previous = this.#queues.get(message.runId) ?? Promise.resolve()
-        const next = previous.then(() => this.#handlers?.onRunMessage(message)).catch(error => console.error(`Runner message ${message.type} failed`, error))
+        const next = previous.then(() => this.#handlers?.onRunMessage(message, runnerId)).catch(error => console.error(`Runner message ${message.type} failed`, error))
         this.#queues.set(message.runId, next)
         await next
         if (message.type === 'run.ended') this.#queues.delete(message.runId)
@@ -157,10 +237,10 @@ export class RunnerHub {
       case 'tool.call': {
         if (!this.#handlers) return
         try {
-          const result = await this.#handlers.onToolCall(message)
-          this.send({ type: 'tool.result', callId: message.callId, ok: true, result })
+          const result = await this.#handlers.onToolCall(message, runnerId)
+          this.send({ type: 'tool.result', callId: message.callId, ok: true, result }, runnerId)
         } catch (error) {
-          this.send({ type: 'tool.result', callId: message.callId, ok: false, error: error instanceof Error ? error.message : String(error) })
+          this.send({ type: 'tool.result', callId: message.callId, ok: false, error: error instanceof Error ? error.message : String(error) }, runnerId)
         }
         return
       }
@@ -174,9 +254,8 @@ export class RunnerHub {
     }
   }
 
-  #setStatus(status: RunnerStatus, publish = true): void {
-    this.#status = status
-    if (publish) this.#events.publish({ type: 'runner.status', status: this.status() })
+  #publishStatus(): void {
+    this.#events.publish({ type: 'runner.status', status: this.status() })
   }
 }
 

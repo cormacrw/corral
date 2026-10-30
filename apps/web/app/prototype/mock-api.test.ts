@@ -12,6 +12,17 @@ describe('prototype mock API', () => {
     }
   })
 
+  it('includes thumbnails on project and inbox responses', async () => {
+    const projects = await mockCall<Project[]>('GET', '/projects')
+    expect(projects.filter(p => p.thumbnailUrl)).toHaveLength(1)
+    const corral = projects.find(p => p.slug === 'corral')!
+    expect(corral.thumbnailUrl).toMatch(/^data:image\/svg\+xml,/)
+    const detail = await mockCall<Project>('GET', '/projects/corral')
+    expect(detail.thumbnailUrl).toBe(corral.thumbnailUrl)
+    const inbox = await mockCall<Inbox>('GET', '/inbox')
+    expect(inbox.needsYou.filter(i => i.project.id === corral.id).every(i => i.project.thumbnailUrl === corral.thumbnailUrl)).toBe(true)
+  })
+
   it('serves a project\'s open PRs, with eligible and blocked ones', async () => {
     const prs = await mockCall<PullRequestStatus[]>('GET', '/projects/corral/pull-requests')
     expect(prs.every(pr => pr.taskRef.startsWith('COR-'))).toBe(true)
@@ -233,5 +244,25 @@ describe('prototype mock API', () => {
     expect(pr.files.map(f => f.path)).toContain('apps/server/src/designs.ts')
     expect(pr.files.every(f => f.patch.startsWith('@@'))).toBe(true)
     await expect(mockCall('GET', '/projects/corral/tasks/18/pull-request')).rejects.toBeInstanceOf(ApiError)
+  })
+
+  it('starts and retries a client UUID as one session with one human message', async () => {
+    vi.useFakeTimers()
+    try {
+      const [project] = await mockCall<Project[]>('GET', '/projects')
+      const id = '1568b7db-293e-4fc2-a670-b62dc0088e17'
+      const body = { id, projectId: project!.id, text: 'Plan a small change', runtime: 'codex' }
+      const first = await mockCall<PlanSessionDetail>('POST', '/plan/sessions', body)
+      const retry = await mockCall<PlanSessionDetail>('POST', '/plan/sessions', body)
+      expect(first.id).toBe(id)
+      expect(retry.messages).toEqual(first.messages)
+      expect(retry.messages.filter(m => m.role === 'human')).toHaveLength(1)
+      expect(await mockCall('GET', `/plan/sessions/${id}`)).toEqual(retry)
+      await vi.runAllTimersAsync()
+      const replied = await mockCall<PlanSessionDetail>('GET', `/plan/sessions/${id}`)
+      expect(replied.messages.filter(m => m.role === 'pm')).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

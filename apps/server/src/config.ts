@@ -4,6 +4,8 @@ import { join, resolve } from 'node:path'
 // Everything environment-specific comes from env vars (D12). The defaults are
 // for local development only; the Docker images set every value explicitly.
 export interface ServerConfig {
+  runnerToken: string | undefined
+  runnerListen: { host: string, port: number } | undefined
   // Holds pgdata/ and blobs/ (docs/architecture.md, Layout on disk)
   dataDir: string
   host: string
@@ -15,7 +17,13 @@ export interface ServerConfig {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
+  const runnerToken = env.CORRAL_RUNNER_TOKEN || undefined
+  if (env.CORRAL_RUNNER_LISTEN && !runnerToken) {
+    throw new Error('CORRAL_RUNNER_TOKEN is required for CORRAL_RUNNER_LISTEN')
+  }
   return {
+    runnerToken,
+    runnerListen: env.CORRAL_RUNNER_LISTEN ? parseListen(env.CORRAL_RUNNER_LISTEN) : undefined,
     dataDir: resolve(env.CORRAL_SERVER_DATA_DIR || join(homedir(), '.corral', 'server')),
     host: env.CORRAL_SERVER_HOST || '127.0.0.1',
     port: parsePort(env.CORRAL_SERVER_PORT, 4100),
@@ -31,4 +39,12 @@ function parsePort(value: string | undefined, fallback: number): number {
     throw new Error(`CORRAL_SERVER_PORT must be a port number, got "${value}"`)
   }
   return port
+}
+
+function parseListen(value: string): { host: string, port: number } {
+  const match = /^(\[[^\]]+\]|[^:/]+):(\d+)$/.exec(value)
+  if (!match || Number(match[2]) < 1 || Number(match[2]) > 65535) {
+    throw new Error('CORRAL_RUNNER_LISTEN must be host:port (IPv6: [address]:port)')
+  }
+  return { host: match[1]!.replace(/^\[|\]$/g, ''), port: Number(match[2]) }
 }

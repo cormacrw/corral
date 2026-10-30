@@ -30,6 +30,7 @@ export function usePlanThreads() {
 // current. Call it from a component: it tracks the current session as a thread.
 export function useOpenPlanSessions() {
   const live = useLive()
+  const pending = usePendingPlan()
   const route = useRoute()
   const { threads, add, remove, prune } = usePlanThreads()
 
@@ -39,11 +40,12 @@ export function useOpenPlanSessions() {
   }, { immediate: true })
   // Only against a full load: a session you just started may not have arrived yet
   watch(() => live.state.value.loaded, (loaded) => {
-    if (loaded) prune(live.state.value.planSessions.filter(s => !s.closed || s.id === active.value).map(s => s.id))
+    if (loaded) prune([...live.state.value.planSessions.filter(s => !s.closed || s.id === active.value).map(s => s.id), ...Object.keys(pending.entries.value)])
   }, { immediate: true })
 
   const sessions = computed(() => {
     const byId = new Map(live.state.value.planSessions.map(s => [s.id, s]))
+    for (const entry of Object.values(pending.entries.value)) if (!byId.has(entry.session.id)) byId.set(entry.session.id, entry.session)
     return threads.value.map(id => byId.get(id)).filter((s): s is PlanSession => s !== undefined)
   })
 

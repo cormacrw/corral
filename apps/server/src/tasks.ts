@@ -17,11 +17,11 @@ import {
   type TaskStatus
 } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, asc, desc, eq, inArray, isNull, max, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, max, ne, notInArray, sql } from 'drizzle-orm'
 import { ApiFailure, notFound } from './errors.ts'
 import { toReview } from './runs.ts'
 
-const { acceptanceCriteria, agents, auditLog, comments, designVersions, epics, planSessions, planTasks, plans, projects, reviews, runs, taskDependencies, taskDesignPins, tasks } = schema
+const { acceptanceCriteria, agents, auditLog, comments, designVersions, epicDependencies, epics, planSessions, planTasks, plans, projects, reviews, runs, taskDependencies, taskDesignPins, tasks } = schema
 
 type TaskRow = typeof tasks.$inferSelect
 type ProjectRow = typeof projects.$inferSelect
@@ -58,6 +58,12 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
     .innerJoin(tasks, eq(tasks.id, taskDependencies.dependsOnId))
     .where(inArray(taskDependencies.taskId, ids))
     .orderBy(asc(tasks.number))
+  const waitingEpics = await db.selectDistinct({ epicId: epicDependencies.epicId, id: epics.id, title: epics.title })
+    .from(epicDependencies)
+    .innerJoin(epics, eq(epics.id, epicDependencies.dependsOnEpicId))
+    .innerJoin(tasks, eq(tasks.epicId, epics.id))
+    .where(and(eq(epics.projectId, project.id), isNull(tasks.deletedAt), notInArray(tasks.status, ['draft', 'backlog', 'merged'])))
+    .orderBy(asc(epics.title), asc(epics.id))
   // Newest first, so the first row per task is its latest review
   const reviewRows = await db.select().from(reviews).where(inArray(reviews.taskId, ids)).orderBy(desc(reviews.createdAt))
   const pins = await db
@@ -91,6 +97,7 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
     const design = pin ? { taskRef: taskRef(project.prefix, pin.number), version: pin.version, screens: pin.screens, newerVersion: stale ? newest : null } : null
     return {
       ...toTask(project, row, criteria, dependencies, latest, current, design, owners.get(row.id) ?? null, row.leaseRunId ? leaseAgents.get(row.leaseRunId) ?? null : null),
+      waitingOnEpics: waitingEpics.filter(e => e.epicId === row.epicId).map(({ id, title }) => ({ id, title })),
       developer: agentOf(row.id, 'developer'),
       reviewer: agentOf(row.id, 'reviewer')
     }
@@ -126,7 +133,7 @@ function toTask(
   design: TaskDesignPin | null,
   session: { id: string, title: string } | null,
   leaseAgentId: string | null
-): Omit<Task, 'developer' | 'reviewer'> {
+): Omit<Task, 'developer' | 'reviewer' | 'waitingOnEpics'> {
   return {
     id: row.id,
     projectId: row.projectId,
@@ -313,7 +320,12 @@ export async function applyTransition(
   actor: Actor,
   detail: Record<string, unknown> = { event: event.type }
 ): Promise<TaskState> {
-  const result = transition(toTaskState(task), event, actor, {
+  const state = toTaskState(task)
+  if (task.epicId) {
+    const [epic] = await tx.select({ reviewMode: epics.reviewMode }).from(epics).where(eq(epics.id, task.epicId))
+    if (epic?.reviewMode === 'each_task') state.humanReview = true
+  }
+  const result = transition(state, event, actor, {
     reviewRoundCap: project.reviewRoundCap,
     failedRunCap: project.failedRunCap
   })

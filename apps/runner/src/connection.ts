@@ -2,6 +2,7 @@ import {
   RUNNER_HEARTBEAT_MS,
   RUNNER_PATH,
   RUNNER_PROTOCOL_VERSION,
+  type RunnerCapacity,
   type RunnerMessage,
   type ServerMessage
 } from '@corral/contracts'
@@ -9,6 +10,8 @@ import WebSocket from 'ws'
 
 export interface ConnectionHandlers {
   activeRuns(): { runId: string, leaseEpoch: number }[]
+  // Read on every connect, so a CLI signed in since then is advertised
+  capacity(): Promise<RunnerCapacity>
   onMessage(message: ServerMessage): void
   onStatus(status: 'connected' | 'disconnected', detail?: string): void
 }
@@ -19,6 +22,7 @@ const MAX_BACKOFF_MS = 30_000
 // forever; heartbeats run on their own timer so agent work can't delay them
 // (architecture.md, runner rule 1).
 export class ServerConnection {
+  #token: string | undefined
   #url: string
   #identity: { runnerId: string, name: string }
   #handlers: ConnectionHandlers
@@ -28,7 +32,8 @@ export class ServerConnection {
   #backoff = 1000
   #closed = false
 
-  constructor(serverUrl: URL, identity: { runnerId: string, name: string }, handlers: ConnectionHandlers) {
+  constructor(serverUrl: URL, identity: { runnerId: string, name: string }, handlers: ConnectionHandlers, token?: string) {
+    this.#token = token
     const url = new URL(RUNNER_PATH, serverUrl)
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
     this.#url = url.href
@@ -59,12 +64,14 @@ export class ServerConnection {
   }
 
   #open(): void {
-    const socket = new WebSocket(this.#url)
+    const socket = new WebSocket(this.#url, { headers: this.#token ? { authorization: `Bearer ${this.#token}` } : {} })
     this.#socket = socket
 
-    socket.on('open', () => {
+    socket.on('open', async () => {
       this.#backoff = 1000
-      this.send({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, ...this.#identity, activeRuns: this.#handlers.activeRuns() })
+      const capacity = await this.#handlers.capacity()
+      if (this.#socket !== socket) return
+      this.send({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, ...this.#identity, ...capacity, activeRuns: this.#handlers.activeRuns() })
       this.#heartbeat = setInterval(() => {
         this.send({ type: 'heartbeat', activeRuns: this.#handlers.activeRuns() })
         // Keeps proxies from dropping an idle socket (D12)

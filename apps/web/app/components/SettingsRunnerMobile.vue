@@ -7,7 +7,6 @@ import { cliLoginCommand, timeAgo } from '~/utils/labels'
 const props = defineProps<{ clis: CliStatus[] | null, cliError: string | null }>()
 const emit = defineEmits<{ scan: [] }>()
 const live = useLive()
-const runner = computed(() => live.state.value.runner)
 const toast = useToast()
 
 // The browser can't restart the runner; this fetches its status again and
@@ -41,7 +40,17 @@ async function copy(command: string) {
       class="flex flex-col gap-4 rounded-lg border border-default p-4"
       data-testid="runner-card"
     >
-      <div class="flex items-start gap-3">
+      <p
+        v-if="!live.state.value.runner?.runners.length"
+        class="text-sm text-muted"
+      >
+        Offline · no runner yet
+      </p>
+      <div
+        v-for="runner in live.state.value.runner?.runners"
+        :key="runner.id"
+        class="flex items-start gap-3"
+      >
         <UIcon
           name="i-lucide-server"
           class="mt-0.5 size-6 shrink-0 text-muted"

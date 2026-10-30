@@ -61,8 +61,13 @@ const prLabel = computed(() => {
 })
 const role = (r: InboxItem['sender']['role']) => r === 'system' ? 'System' : ROLE[r]
 const canAct = computed(() => props.selected !== null && props.selected.type !== 'activity' && !props.selected.resolution && !props.alreadyResolved)
+// A thread being deleted leaves the list at once, while its Undo toast shows
+const deleting = usePlanThreadDelete()
+const isHidden = (item: InboxItem) => item.type === 'plan_thread' && deleting.pending.value.includes(item.sessionId)
+const listed = computed(() => props.items.filter(i => !isHidden(i)))
+// Server order: newest first, task items and threads together (D11)
 const tabs = computed(() => [
-  { label: 'Needs you', value: 'needsYou', icon: 'i-lucide-inbox', count: props.inbox?.count ?? 0 },
+  { label: 'Inbox', value: 'needsYou', icon: 'i-lucide-inbox', count: (props.inbox?.needsYou ?? []).filter(i => !isHidden(i)).length },
   { label: 'Activity', value: 'activity', icon: 'i-lucide-activity', count: null },
   { label: 'Resolved', value: 'resolved', icon: 'i-lucide-circle-check', count: props.inbox?.resolved.length ?? 0 }
 ])
@@ -119,10 +124,9 @@ const tabs = computed(() => [
                   size="sm"
                 />
                 <span class="flex items-center gap-1">
-                  <span
-                    class="size-2 rounded-full"
-                    :style="{ background: selected.project.thumbnailColor ?? '#64748b' }"
-                    aria-hidden="true"
+                  <ProjectThumbnail
+                    :project="selected.project"
+                    :size="16"
                   />{{ selected.project.name }}
                 </span>
               </span>
@@ -332,50 +336,57 @@ const tabs = computed(() => [
       class="shrink-0"
     >
       <li
-        v-for="item in items"
+        v-for="item in listed"
         :key="item.id"
       >
+        <!-- Only Plan threads swipe to delete; task items are resolved from their screen -->
+        <SwipeToDelete
+          v-if="item.type === 'plan_thread'"
+          @delete="deleting.remove(item.sessionId, props.onRefresh)"
+        >
+          <NuxtLink
+            :to="`/inbox/${item.id}`"
+            draggable="false"
+            class="flex gap-3 border-b border-default px-4 py-3 active:bg-elevated"
+          >
+            <PlanThreadRow :item="item" />
+          </NuxtLink>
+        </SwipeToDelete>
         <NuxtLink
+          v-else
           :to="`/inbox/${item.id}`"
           class="flex gap-3 border-b border-default px-4 py-3 active:bg-elevated"
         >
-          <PlanThreadRow
-            v-if="item.type === 'plan_thread'"
-            :item="item"
+          <AgentAvatar
+            :name="item.sender.name"
+            size="md"
           />
-          <template v-else>
-            <AgentAvatar
-              :name="item.sender.name"
-              size="md"
-            />
-            <span class="flex min-w-0 flex-1 flex-col gap-1">
-              <span class="flex items-center gap-2">
-                <span class="font-semibold text-highlighted">{{ item.sender.name }}</span>
-                <span class="ms-auto shrink-0 text-xs text-muted">{{ timeAgo(item.at) }}</span>
-              </span>
-              <span class="font-semibold text-highlighted">{{ item.subject }}</span>
-              <span class="line-clamp-2 text-sm text-muted">{{ markdownToPlainText(item.preview) }}</span>
-              <span class="mt-0.5 flex items-center gap-2">
-                <UBadge
-                  :label="typeBadge(item.type).label"
-                  :color="typeBadge(item.type).color"
-                  variant="subtle"
-                  size="sm"
-                />
-                <span class="flex min-w-0 items-center gap-1 truncate text-xs text-muted">
-                  <span
-                    class="size-2 shrink-0 rounded-full"
-                    :style="{ background: item.project.thumbnailColor ?? '#64748b' }"
-                    aria-hidden="true"
-                  />{{ item.project.name }} · {{ item.taskRef }}
-                </span>
+          <span class="flex min-w-0 flex-1 flex-col gap-1">
+            <span class="flex items-center gap-2">
+              <span class="font-semibold text-highlighted">{{ item.sender.name }}</span>
+              <span class="ms-auto shrink-0 text-xs text-muted">{{ timeAgo(item.at) }}</span>
+            </span>
+            <span class="font-semibold text-highlighted">{{ item.subject }}</span>
+            <span class="line-clamp-2 text-sm text-muted">{{ markdownToPlainText(item.preview) }}</span>
+            <span class="mt-0.5 flex items-center gap-2">
+              <UBadge
+                :label="typeBadge(item.type).label"
+                :color="typeBadge(item.type).color"
+                variant="subtle"
+                size="sm"
+              />
+              <span class="flex min-w-0 items-center gap-1 truncate text-xs text-muted">
+                <ProjectThumbnail
+                  :project="item.project"
+                  :size="16"
+                />{{ item.project.name }} · {{ item.taskRef }}
               </span>
             </span>
-          </template>
+          </span>
         </NuxtLink>
       </li>
       <li
-        v-if="items.length === 0"
+        v-if="listed.length === 0"
         class="flex flex-col items-center gap-2 p-8 text-center text-sm text-muted"
       >
         <UIcon
@@ -388,7 +399,7 @@ const tabs = computed(() => [
         v-else-if="tab === 'needsYou'"
         class="p-6 text-center text-sm text-muted"
       >
-        That's everything that needs you.
+        That's everything in your Inbox.
       </li>
     </ul>
   </div>

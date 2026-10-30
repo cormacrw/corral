@@ -4,6 +4,7 @@ import { projectColor } from '~/utils/labels'
 defineProps<{ compact?: boolean }>()
 const route = useRoute()
 const state = useLive().state
+const pending = usePendingPlan()
 const parts = computed(() => route.path.split('/').filter(Boolean))
 
 // A project's own pages (Board, Backlog, Pull requests, Settings) name the project above
@@ -20,7 +21,7 @@ const projectPage = computed(() => {
 const planSession = computed(() => {
   const [section, id] = parts.value
   if (section !== 'plan' || !id) return null
-  const session = state.value.planSessions.find(s => s.id === id)
+  const session = state.value.planSessions.find(s => s.id === id) ?? pending.entries.value[id]?.session
   const project = state.value.projects.find(p => p.id === session?.projectId)
   return { title: session?.title ?? 'Plan', eyebrow: project?.name ?? '', back: '/plan', backLabel: 'Back to Plan', dot: project ? projectColor(project) : null }
 })

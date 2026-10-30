@@ -55,10 +55,10 @@ describe('orchestrator', () => {
   }
 
   it('names the claiming agent’s runtime in the job (D15)', async () => {
-    await t.db.update(agents).set({ runtime: 'other-cli' }).where(eq(agents.role, 'developer'))
+    await t.db.update(agents).set({ runtime: 'codex' }).where(eq(agents.role, 'developer'))
     try {
       const { project, job } = await assigned()
-      expect(job.runtime).toBe('other-cli')
+      expect(job.runtime).toBe('codex')
       await pause(project)
     } finally {
       await t.db.update(agents).set({ runtime: 'claude-code' }).where(eq(agents.role, 'developer'))
@@ -281,9 +281,11 @@ describe('orchestrator', () => {
     const { project, task, job } = await assigned()
     runner.close()
     runner = await FakeRunner.connect(t.server!.url, [{ runId: 'ghost', leaseEpoch: 1 }])
-    await sleep(200)
-    expect(await runRow(job.runId)).toMatchObject({ state: 'interrupted' })
+    // The ghost is stopped only after all lost runs have been reconciled.
+    // Earlier tests leave live runs behind, so a fixed delay can inspect
+    // this run before reconciliation has reached it on a busy machine.
     await runner.next('run.stop', m => m.runId === 'ghost')
+    expect(await runRow(job.runId)).toMatchObject({ state: 'interrupted' })
     // Reconciling freed the task, so the scheduler gave it a new run and epoch
     const again = await runner.next('run.assign', m => m.job.taskId === task.id)
     expect(again.job.leaseEpoch).toBe(job.leaseEpoch + 1)

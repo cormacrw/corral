@@ -10,7 +10,7 @@ import PlanDetail from './PlanDetail.vue'
 
 const mocks = vi.hoisted(() => ({
   message: vi.fn(), close: vi.fn(), session: vi.fn(), read: vi.fn(), approve: vi.fn(),
-  replace: vi.fn(), refresh: vi.fn(), remove: vi.fn(), add: vi.fn(), toast: vi.fn()
+  replace: vi.fn(), refresh: vi.fn(), remove: vi.fn(), add: vi.fn(), toast: vi.fn(), deleteThread: vi.fn()
 }))
 vi.mock('~/composables/useApi', () => ({ api: { plan: mocks } }))
 
@@ -35,7 +35,7 @@ const UDrawer = defineComponent({
     : null
 })
 const UDropdownMenu = defineComponent({
-  props: ['items'], setup: p => () => h('button', { onClick: () => p.items[0].onSelect() }, 'Close thread menu')
+  props: ['items'], setup: p => () => h('button', { onClick: () => p.items[0].onSelect() }, p.items[0].label)
 })
 function screen(item = question) {
   return mount(InboxMobilePlanThread, {
@@ -47,6 +47,7 @@ function screen(item = question) {
         PlanQuestion: defineComponent({ props: ['message', 'disabled'], emits: ['answer'], setup: (p, { emit }) => () => h('button', { disabled: p.disabled, onClick: () => emit('answer', 'ntfy') }, p.message.text) }),
         PromptComposer: defineComponent({ setup: () => () => h('textarea') }),
         MarkdownText: defineComponent({ props: ['text'], setup: p => () => h('p', p.text) }),
+        AgentAvatar: defineComponent({ setup: () => () => h('span') }),
         PlanDetail: defineComponent({ setup: () => () => h('div') }),
         TaskDetail: defineComponent({ setup: () => () => h('div') }),
         EpicDetail: defineComponent({ setup: () => () => h('div') }),
@@ -68,6 +69,7 @@ beforeEach(() => {
   vi.stubGlobal('usePlanThreads', () => ({ remove: mocks.remove, add: mocks.add }))
   vi.stubGlobal('useTaskFlyout', () => ({ plan: ref(false), ref: ref(null), epic: ref(null), close: vi.fn(), openPlan: vi.fn() }))
   vi.stubGlobal('useToast', () => ({ add: mocks.toast }))
+  vi.stubGlobal('usePlanThreadDelete', () => ({ remove: mocks.deleteThread, pending: ref([]) }))
   mocks.session.mockResolvedValue({ plans: [plan], messages: [{ text: 'Earlier conversation must stay hidden' }] })
   mocks.approve.mockResolvedValue(plan)
 })
@@ -98,41 +100,31 @@ describe('focused mobile Plan thread', () => {
     expect(mocks.replace).toHaveBeenCalledWith('/inbox')
   })
 
-  it('asks before closing, supports Cancel, then refreshes before returning to Inbox', async () => {
+  it('shows an unread reply with a reply box that messages its session', async () => {
+    const reply: PlanThreadItem = { ...question, question: null, status: 'none', unread: true, reply: 'The flaky test is the SSE reconnect one.' }
+    mocks.read.mockResolvedValue(undefined)
+    const w = screen(reply)
+    await flushPromises()
+    expect(w.text()).toContain('The flaky test is the SSE reconnect one.')
+    expect(w.text()).toContain('Open in Plan')
+    expect(w.find('textarea').exists()).toBe(true)
+    expect(mocks.read).toHaveBeenCalledWith('s-2')
+  })
+
+  it('deletes from the menu without asking and returns to the Inbox', async () => {
     const w = screen()
-    await click(w, 'Close thread menu')
-    expect(w.text()).toContain('Close this thread?')
-    expect(w.text()).toContain('draft tasks and the unapproved plan will be discarded')
-    expect(mocks.close).not.toHaveBeenCalled()
-    await click(w, 'Cancel')
+    await click(w, 'Delete thread')
     expect(w.text()).not.toContain('Close this thread?')
+    expect(mocks.deleteThread).toHaveBeenCalledWith(question.sessionId, mocks.refresh)
+    // The session is closed later, after the Undo window
     expect(mocks.close).not.toHaveBeenCalled()
-    await click(w, 'Close thread menu')
-    await click(w, 'Close thread')
-    expect(mocks.close).toHaveBeenCalledWith('s-2')
-    expect(mocks.remove).toHaveBeenCalledWith('s-2')
-    expect(mocks.refresh).toHaveBeenCalledOnce()
     expect(mocks.replace).toHaveBeenCalledWith('/inbox')
-    expect(mocks.refresh.mock.invocationCallOrder[0]).toBeLessThan(mocks.replace.mock.invocationCallOrder[0]!)
   })
 
-  it('keeps confirmation open and shows an error when closing fails', async () => {
-    mocks.close.mockRejectedValue(new Error('Could not close'))
-    const w = screen()
-    await click(w, 'Close thread menu')
-    await click(w, 'Close thread')
-    expect(w.text()).toContain('Close this thread?')
-    expect(w.text()).toContain('Could not close')
-    expect(mocks.remove).not.toHaveBeenCalled()
-    expect(mocks.replace).not.toHaveBeenCalled()
-  })
-
-  it('disables answers during a PM turn and explains that closing stops it', async () => {
+  it('disables answers during a PM turn', async () => {
     const w = screen({ ...question, activeRunId: 'run-1' })
     expect(w.findAll('button').find(b => b.text() === 'Which service?')!.attributes('disabled')).toBeDefined()
     expect(w.text()).toContain('Juno is working…')
-    await click(w, 'Close thread menu')
-    expect(w.text()).toContain('Juno\'s current turn will be stopped.')
   })
 })
 

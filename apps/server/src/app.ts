@@ -6,6 +6,7 @@ import {
   approvePlanInput,
   checkRepoInput,
   createAgentInput,
+  createDeploymentInput,
   createProjectInput,
   createTaskInput,
   deleteProjectInput,
@@ -37,7 +38,9 @@ import { streamSSE } from 'hono/streaming'
 import type { ZodType } from 'zod'
 import { ApiFailure, fromDatabaseError } from './errors.ts'
 import { checkThumbnail, readThumbnail, THUMBNAIL_MAX_BYTES } from './thumbnails.ts'
+import { byteRange } from './byte-range.ts'
 import { createAttachment, readAttachment } from './attachments.ts'
+import { recordDeployment } from './deployments.ts'
 import { approveDesign, DESIGN_BUNDLE_HEADERS, listDesignVersions, readDesignFile, readDesignScreenshot } from './designs.ts'
 import { checkAvatar, getProfile, patchProfile, readAvatar, setAgentAvatar, setUserAvatar } from './avatars.ts'
 import { getEpic, listEpics, patchEpic, setEpicDependencies } from './epics.ts'
@@ -284,6 +287,7 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       const updated = await setEpicDependencies(db, id, c.req.valid('json').dependsOn, actor)
       for (const epic of updated) events.publish({ type: 'epic.updated', epic })
       const detail = await getEpic(db, id)
+      for (const task of detail.tasks) events.publish({ type: 'task.updated', task })
       orchestrator.poke(detail.tasks.map(t => t.id))
       return c.json(updated.find(e => e.id === id)!)
     })
@@ -405,16 +409,30 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     })
 
     .get('/evidence/:id/file', async (c) => {
+      c.header('accept-ranges', 'bytes')
       const [row] = await db.select().from(schema.evidence).where(eq(schema.evidence.id, c.req.param('id')))
       // A note has no file
       const data = row?.blob ? await blobs.get(row.blob) : null
       if (!row || !data) throw new ApiFailure(404, { code: 'not_found' })
-      return c.body(new Uint8Array(data), 200, {
+      const headers = {
         'content-type': row.contentType!,
         // Blobs are immutable, so they can be cached forever
         'cache-control': 'private, max-age=31536000, immutable',
         'content-disposition': `inline; filename="${row.fileName!.replace(/"/g, '')}"`
-      })
+      }
+      const range = byteRange(c.req.header('range'), data.byteLength)
+      if (range === 'unsatisfiable') {
+        return c.body(null, 416, { ...headers, 'content-range': `bytes */${data.byteLength}`, 'content-length': '0' })
+      }
+      if (range) {
+        const { start, end } = range
+        return c.body(new Uint8Array(data.subarray(start, end + 1)), 206, {
+          ...headers,
+          'content-range': `bytes ${start}-${end}/${data.byteLength}`,
+          'content-length': String(end - start + 1)
+        })
+      }
+      return c.body(new Uint8Array(data), 200, { ...headers, 'content-length': String(data.byteLength) })
     })
 
     .get('/agents', async c => c.json(await listAgents(db)))
@@ -500,8 +518,7 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
 
     .post('/plan/sessions', validate('json', startPlanSessionInput), async (c) => {
       const input = c.req.valid('json')
-      await requireRuntimeCli(runner, input.runtime)
-      return c.json(await plans.start(input.projectId, { text: input.text, taskRef: input.taskRef, runtime: input.runtime }, actor), 201)
+      return c.json(await plans.start(input.projectId, input, actor), 201)
     })
 
     .get('/plan/sessions/:id', async c => c.json(await plans.getSession(c.req.param('id'))))
@@ -545,7 +562,7 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     })
 
     // The kill switch (PRD §7.11)
-    .get('/status', c => c.json(orchestrator.status))
+    .get('/status', c => c.json({ ...orchestrator.status, runners: runner.status().runners }))
 
     .post('/stop-all', async (c) => {
       await orchestrator.stopAll(actor)
@@ -563,6 +580,13 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     .delete('/update-hold', (c) => {
       orchestrator.releaseUpdate()
       return c.json(orchestrator.status)
+    })
+
+    // What a deploy shipped, also from auto-deploy.sh once the new server
+    // answers. 201 when recorded, 200 when this toSha already was.
+    .post('/deployments', validate('json', createDeploymentInput), async (c) => {
+      const { deployment, created } = await recordDeployment(db, c.req.valid('json'))
+      return c.json(deployment, created ? 201 : 200)
     })
 
     .get('/runs', async (c) => {

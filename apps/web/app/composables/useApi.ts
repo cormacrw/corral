@@ -14,6 +14,7 @@ import type {
   EpicDetail,
   Evidence,
   GlobalStatus,
+  ServerStatus,
   HumanTransitionInput,
   Inbox,
   InboxActionInput,
@@ -59,11 +60,11 @@ async function call<T>(method: string, path: string, body?: unknown, options?: {
     const { mockCall } = await import('~/prototype/mock-api')
     return mockCall<T>(method, path, body)
   }
-  // A Blob (an image upload) goes as is, with its own type; anything else is JSON
+  // Multipart uploads let the browser set the boundary; blobs use their own type.
   const res = await fetch(`/api${path}`, {
     method,
-    headers: body === undefined ? {} : { 'content-type': body instanceof Blob ? body.type : 'application/json' },
-    body: body === undefined ? undefined : body instanceof Blob ? body : JSON.stringify(body),
+    headers: body === undefined || body instanceof FormData ? {} : { 'content-type': body instanceof Blob ? body.type : 'application/json' },
+    body: body === undefined ? undefined : body instanceof Blob || body instanceof FormData ? body : JSON.stringify(body),
     // Outlives the page, for a request sent as it unloads
     keepalive: options?.keepalive
   })
@@ -105,7 +106,7 @@ export function describe(status: number, error: ApiErrorBody['error'] | null): s
 export const api = {
   health: () => call<{ ok: boolean }>('GET', '/health'),
   runner: () => call<RunnerStatus>('GET', '/runner'),
-  status: () => call<GlobalStatus>('GET', '/status'),
+  status: () => call<ServerStatus>('GET', '/status'),
   stopAll: () => call<GlobalStatus>('POST', '/stop-all'),
   resumeAll: () => call<GlobalStatus>('POST', '/resume-all'),
 
@@ -121,6 +122,12 @@ export const api = {
     create: (input: CreateProjectInput) => call<Project>('POST', '/projects', input),
     patch: (slug: string, input: PatchProjectInput) => call<Project>('PATCH', `/projects/${slug}`, input),
     remove: (slug: string, confirm: string) => call<null>('DELETE', `/projects/${slug}`, { confirm }),
+    setThumbnail: (slug: string, image: File) => {
+      const form = new FormData()
+      form.append('file', image)
+      return call<Project>('PUT', `/projects/${slug}/thumbnail`, form)
+    },
+    clearThumbnail: (slug: string) => call<Project>('DELETE', `/projects/${slug}/thumbnail`),
     // Open PRs and their merge gates, read live from GitHub
     pullRequests: (slug: string) => call<PullRequestStatus[]>('GET', `/projects/${slug}/pull-requests`)
   },
@@ -194,7 +201,7 @@ export const api = {
   plan: {
     sessions: () => call<PlanSession[]>('GET', '/plan/sessions'),
     session: (id: string) => call<PlanSessionDetail>('GET', `/plan/sessions/${id}`),
-    start: (projectId: string, text: string, taskRef?: string, runtime?: AgentRuntime) => call<PlanSessionDetail>('POST', '/plan/sessions', { projectId, text, ...(taskRef && { taskRef }), ...(runtime && { runtime }) }),
+    start: (projectId: string, text: string, taskRef?: string, runtime?: AgentRuntime, id?: string) => call<PlanSessionDetail>('POST', '/plan/sessions', { projectId, text, ...(id && { id }), ...(taskRef && { taskRef }), ...(runtime && { runtime }) }),
     message: (id: string, text: string, taskRef?: string) => call<PlanMessage>('POST', `/plan/sessions/${id}/messages`, { text, ...(taskRef && { taskRef }) }),
     close: (id: string, options?: { keepalive?: boolean }) => call<PlanSession>('POST', `/plan/sessions/${id}/close`, undefined, options),
     read: (id: string) => call<PlanSession>('POST', `/plan/sessions/${id}/read`),

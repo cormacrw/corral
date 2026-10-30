@@ -231,7 +231,7 @@ Both appear in the Inbox (D11) with their reason. When a human resolves a Failed
 
 ## D11 — The Inbox holds developer and reviewer items only; the PM stays in Plan
 
-**Status:** Accepted. Replaces the PRD's "Human queue" (§7.11, §12.2) and its separate notifications. Amended 2026-10-29 (COR-103, COR-118, COR-130): Plan sessions with a question, a plan needing approval or an unread reply now appear in the Inbox too (see the amendment below).
+**Status:** Accepted. Replaces the PRD's "Human queue" (§7.11, §12.2) and its separate notifications. Amended 2026-10-29 (COR-103, COR-118, COR-130): Plan sessions with a question, a plan needing approval or an unread reply now appear in the Inbox too (see the amendment below). Amended 2026-10-29 (COR-127): so do the PM's release notes for each deploy (see the second amendment).
 
 **Decision:** The PRD's Human queue is called the **Inbox**. It only holds items raised by developer and reviewer runs, which happen in the background while the human is elsewhere:
 
@@ -258,6 +258,13 @@ There is no separate notifications feed or bell. System events (usage limits, ru
 - **Unchanged:** `ask_question`, `propose_plan` and `approve_plan` still belong to the Plan session; the Inbox shows the same session's question or plan rather than a copy. System events stay out of the Inbox, and Activity still only holds developer and reviewer events.
 
 **Why the amendment:** with several Plan sessions open across projects, the Inbox was the one place that didn't show what Juno was waiting on, and the human had to check Plan separately. Showing the open sessions themselves (not copies of their questions) keeps one conversation per session while making the Inbox the single list of everything waiting on the human. Plan's own Recent sessions list is dropped, because the Inbox and the side nav threads cover it. Listing only questions, plans needing approval and unread replies, and showing just that instead of the conversation, keeps every Inbox thread something to act on and its count meaning what's waiting on the human; **Close thread** gives the human a way to abandon a session they don't want without approving it (COR-118).
+
+**Amended 2026-10-29 (COR-127): the PM's release notes are an Inbox item.** After each deploy (D16) the server records a **deployment**: the commits it shipped since the last one. The PM writes release notes for it in markdown, and those notes appear in the Inbox as a **Release notes** item for the deployment's project.
+
+- **Not Needs you:** release notes are something to read, not something an agent is waiting on, so they don't count toward the Needs you count (badge and tab) and don't sit under Needs you. They're listed with Activity, unread until the human opens them (the deployment's `readAt`).
+- **Unchanged:** nothing else from the PM goes in the Inbox; system events (including a deploy that failed, which records no deployment) stay out.
+
+**Why:** the notes are written in the background after a deploy the human didn't trigger, which is the kind of thing the Inbox is for. Keeping them out of Needs you keeps that count meaning what's waiting on the human.
 
 ---
 
@@ -400,6 +407,7 @@ The UI specs are in [design/](design/README.md).
 **Consequences for the build:**
 - New worker runs and merges must respect both hold phases. PM dispatch must respect the finishing phase while accepting messages in Plan and Inbox throughout. Count dispatched PM turns in `busy`, but exclude held jobs so the deploy can finish. The existing auto-deploy polling loop needs no change.
 - The hold endpoint sits on the same API as the rest of the app, behind Cloudflare Access. It needs proper auth when hosting arrives (D1).
+- **Recording the deploy (COR-127):** once `docker compose up -d` succeeds and `.corral/deploy/deployed` is written, the script waits for the new server to answer (bounded retries) and posts `POST /api/deployments` with the repository, the previous and new commit and the commits between them (`git log deployed..new`, or just the new commit on a first deploy). The project is found by its repository, and posting the same new commit again returns the existing record. Failing to report is logged as a warning and never fails or rolls back the deploy. A deploy that stops earlier (CI, build or backup failed) records nothing. The PM's release notes for it are an Inbox item (D11), not part of Needs you.
 
 ---
 
@@ -467,7 +475,7 @@ The UI specs are in [design/](design/README.md).
 - **A spike delivers findings instead of a PR** (amended 2026-10-29, COR-65). It goes through the same columns and review as any task, minus the branch, PR and merge:
   - **Developer:** works in a detached checkout of the default branch, with no branch. It investigates without changing code, attaches evidence for every criterion as usual, and reports `findings_reported` with its findings as the summary (answer, evidence, recommendation, suggested follow-up tasks). Nothing is pushed and no PR is opened; `pr_opened` and `pr_updated` are refused for a spike, and `findings_reported` for anything else. The findings are posted on the task as a `## Findings` comment, and the task moves to Agent review.
   - **Reviewer:** gets the latest findings in its prompt and a detached checkout of the default branch, with no diff. It checks that the findings answer every criterion and are backed by evidence, with the usual per-criterion verdicts. Changes requested sends the spike back to the developer exactly like a failed review (round cap included).
-  - **Approved:** the spike goes straight to **Merged**, the final column (or to Human review first when flagged, then Merged on the human's approval). It never enters Ready to merge, `mergedAt` records when it finished, and its worktrees are cleaned up. Tasks that depend on it unblock as for any merged task.
+  - **Approved:** the spike always stops in **Human review**, whatever its human-review flag says, then goes to **Merged**, the final column, on the human's approval. It never enters Ready to merge, `mergedAt` records when it finished, and its worktrees are cleaned up. Tasks that depend on it unblock as for any merged task.
   - **Reviews per submission:** a spike has no commits, so each `findings_reported` sets the task's `headSha` to a marker, `findings-<runId>`, in place of a commit. Reviews are kept per marker exactly as they are per commit.
   - **The PM** is told it can read a finished spike's findings with `get_task` and turn them into a plan.
 - **D15 (Jev)** still gets the task's `type` in its input, with these values.
@@ -670,3 +678,15 @@ If the resolution needs changes, the reviewer requests changes: **Agent review �
 If main changed a **binding decision that the task's criteria rely on**, the reviewer instead **blocks the task for the human**, explaining the changed decision and the affected criteria. It must not pick a side or silently rewrite the criteria, even if the textual conflicts are easy to resolve. COR-118 changing the binding decision under COR-106 is the motivating example.
 
 **Why existing roles:** This is a mode of the existing developer and reviewer roles, not a third agent role. The developer still changes the branch and the reviewer independently judges those changes; only their scope and the review's accounting differ. A third role would duplicate those responsibilities without adding an independent check. Explicit modes keep a mechanical conflict repair from consuming feature-review rounds or becoming an excuse to undo newly merged work.
+
+---
+
+## D25 — Private-network runners and shared authentication
+
+**Status:** Accepted 2026-10-29 (COR-182). Amends D1 and D12.
+
+Corral supports runners on multiple machines over a private tailnet. The server has an optional runner-only listener, separate from the HTTP API. Only that listener may be published on the tailnet; the API stays on localhost or the internal Docker network behind web and Cloudflare Access. The existing internal `/runner` endpoint remains available during the Compose transition.
+
+For the POC, all runners share `CORRAL_RUNNER_TOKEN`. Both runner endpoints require it when configured; the runner sends it in the WebSocket Authorization header, and the server compares it in constant time before registering the runner. The token is never logged. Without a token, only the existing internal endpoint is available; configuring the external listener fails at startup. Shared authentication is separate from runner identity and job scheduling: connections for distinct runner identities remain independent, and a newer authenticated connection replaces only the connection with the same runner identity.
+
+Per-runner pairing and revocation come later with hosting. Remote runners run under WSL2 or Linux and update themselves by pulling from GitHub (see the runner updater task), rather than receiving executable updates from the control plane.

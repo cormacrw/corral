@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { attachmentUrl } from '@corral/core'
 import { api } from '~/composables/useApi'
 import { attachmentProblem, withAttachments } from '~/utils/attachments'
 
@@ -18,6 +19,8 @@ const props = withDefaults(defineProps<{
   rows?: number
   // The project's slug, where images upload to; no slug, no attachments
   project?: string | null
+  // Already uploaded images restored from a failed Plan start.
+  initialImages?: { id: string, name: string }[]
   // Bound with @submit. Resolving to false means it wasn't sent, so the
   // images stay for another try.
   onSubmit?: (text: string) => unknown
@@ -34,23 +37,23 @@ interface Image {
   id?: string
   error?: string
 }
-const images = ref<Image[]>([])
+const images = ref<Image[]>((props.initialImages ?? []).map((image, key) => ({ ...image, key, preview: attachmentUrl(image.id), status: 'done' })))
 const picker = ref<HTMLInputElement | null>(null)
 const dragging = ref(false)
 const sending = ref(false)
-let nextKey = 0
+let nextKey = images.value.length
 
 const uploading = computed(() => images.value.some(i => i.status === 'uploading'))
 const ready = computed(() => images.value.filter(i => i.status === 'done'))
-const canSend = computed(() => !props.disabled && !props.busy && !sending.value && !uploading.value
-  && (props.allowEmpty || text.value.trim().length > 0 || ready.value.length > 0))
+const available = computed(() => !props.disabled && !props.busy && !sending.value && !uploading.value)
+const canSend = computed(() => available.value && (props.allowEmpty || text.value.trim().length > 0 || ready.value.length > 0))
 
-async function send() {
-  if (!canSend.value) return
+async function send(message = text.value) {
+  if (!available.value || (!props.allowEmpty && !message.trim() && ready.value.length === 0)) return
   const sent = ready.value
   sending.value = true
   try {
-    const result = await props.onSubmit?.(withAttachments(text.value, sent.map(i => ({ id: i.id!, name: i.name }))))
+    const result = await props.onSubmit?.(withAttachments(message, sent.map(i => ({ id: i.id!, name: i.name }))))
     if (result !== false) for (const image of sent) remove(image)
   } finally {
     sending.value = false
@@ -88,7 +91,7 @@ onBeforeUnmount(() => images.value.forEach(i => URL.revokeObjectURL(i.preview)))
 
 // Lets a page put the cursor in the composer (e.g. Other… on a question)
 const box = ref<HTMLElement | null>(null)
-defineExpose({ focus: () => box.value?.querySelector('textarea')?.focus() })
+defineExpose({ focus: () => box.value?.querySelector('textarea')?.focus(), send })
 
 function filesOf(data: DataTransfer | null): File[] {
   if (!data) return []
@@ -139,7 +142,7 @@ function onPick(event: Event) {
       :rows="props.rows"
       :autofocus="false"
       variant="outline"
-      @submit.prevent="send"
+      @submit.prevent="send()"
     >
       <template #header>
         <ul
@@ -224,7 +227,7 @@ function onPick(event: Event) {
           :disabled="!canSend"
           :loading="props.busy || uploading"
           size="sm"
-          @click="send"
+          @click="send()"
         />
         <UButton
           v-else
@@ -234,7 +237,7 @@ function onPick(event: Event) {
           :disabled="!canSend"
           :loading="props.busy || uploading"
           size="sm"
-          @click="send"
+          @click="send()"
         />
       </template>
     </UChatPrompt>

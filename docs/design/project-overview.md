@@ -30,6 +30,8 @@ The page scrolls, in a column up to 1200px wide with 24px padding.
      - **Epics:** an **Open Backlog** link, then each epic's name, "2 of 6 merged" and a progress meter. The meter is a 6px bar split into a `primary` "merged" segment and a `bg-accented` "remaining" segment, with a 2px gap, `role="meter"` and an `aria-label` like "Billing: 2 of 6 tasks merged".
      - **Recent activity:** a timeline of dot, actor, action, task ref and time.
 
+The Ready tile’s waiting-on-dependency count includes each Ready task with an unmet task dependency or an unfinished prerequisite epic, counting a task only once.
+
 ## Data
 
 - **Project:** name, slug, prefix, thumbnail, remote, default branch, paused.

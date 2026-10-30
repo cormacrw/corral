@@ -6,7 +6,7 @@ import { actorLabel } from './orchestrator.ts'
 import { thumbnailUrl } from './projects.ts'
 import { sessionState } from './plan.ts'
 
-const { agents, auditLog, planMessages, planSessions, plans, planEpics, planTasks, projects, reviews, runs, tasks } = schema
+const { agents, auditLog, planMessages, planSessions, plans, planEpics, planTasks, projects, reviews, runs, tasks, comments } = schema
 
 const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'findings_reported', 'design_submitted', 'changes_requested', 'merged', 'ci_failed', 'base_conflict', 'head_moved']
 
@@ -115,7 +115,7 @@ async function needsYouItem(db: Executor, task: typeof tasks.$inferSelect, proje
   // A Blocked task whose reason came from the agent's own report is a question
   const stuck = task.status === 'blocked' && (entered?.detail as { event?: string } | undefined)?.event === 'stuck'
   const type: TaskInboxItemType = task.status === 'human_review' ? 'human_review' : task.status === 'failed' ? 'failed' : stuck ? 'question' : 'blocked'
-  // A human review gets a short note, not the reviewer's full write-up: the
+  // PR reviews get a short note; spikes show their findings. The
   // criteria and evidence sit right under it (design/inbox.md)
   const body = task.status === 'human_review'
     ? await humanReviewNote(db, task)
@@ -137,6 +137,12 @@ async function needsYouItem(db: Executor, task: typeof tasks.$inferSelect, proje
 }
 
 async function humanReviewNote(db: Executor, task: typeof tasks.$inferSelect): Promise<string> {
+  if (task.type === 'spike') {
+    const [findings] = await db.select({ body: comments.body }).from(comments)
+      .where(and(eq(comments.taskId, task.id), sql`${comments.body} like ${'## Findings\n%'}`))
+      .orderBy(desc(comments.createdAt), desc(comments.id)).limit(1)
+    return findings?.body ?? ''
+  }
   const [review] = await db.select({ criteria: reviews.criteria }).from(reviews)
     .where(and(eq(reviews.taskId, task.id), eq(reviews.verdict, 'approved')))
     .orderBy(desc(reviews.createdAt)).limit(1)

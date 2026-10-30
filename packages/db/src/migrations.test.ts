@@ -36,6 +36,25 @@ describe('migrations', () => {
     for (const fn of cleanup.splice(0)) await fn()
   })
 
+  it('0028 preserves historical runs with null runner ownership', async () => {
+    const before = await migrationsBefore('0028_complex_clint_barton')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const client = new PGlite()
+    cleanup.push(() => client.close())
+    const db = drizzle(client, { casing: 'snake_case' })
+    await migrate(db, { migrationsFolder: before })
+    await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('Test app', 'test-app', 'TA', 'cormacrw/test-app', 'main')`)
+    await db.execute(sql`insert into agents (name, role) values ('Developer', 'developer')`)
+    await db.execute(sql`insert into tasks (project_id, number, title, type, created_by) select id, 1, 'Historical task', 'task', '{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb from projects`)
+    await db.execute(sql`insert into runs (project_id, agent_id, task_id, role, state)
+      select p.id, a.id, t.id, 'developer', 'completed' from projects p, agents a, tasks t`)
+    await migrate(db, { migrationsFolder })
+    expect((await db.execute(sql`select state, runner_id from runs`)).rows).toEqual([{ state: 'completed', runner_id: null }])
+    await db.execute(sql`insert into runs (project_id, agent_id, task_id, role, runner_id)
+      select p.id, a.id, t.id, 'developer', 'runner-B' from projects p, agents a, tasks t`)
+    expect((await db.execute(sql`select runner_id from runs order by number`)).rows).toEqual([{ runner_id: null }, { runner_id: 'runner-B' }])
+  }, 60_000)
+
   it('0015 turns every task of the four old types into a task (D19)', async () => {
     const before = await migrationsBefore('0015_task_bug_spike')
     cleanup.push(() => rm(before, { recursive: true, force: true }))

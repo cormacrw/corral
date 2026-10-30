@@ -43,6 +43,10 @@ Multiple projects, global agents and per-project task prefixes are decided in **
 - Light and dark mode both have to work. Primary uses shade 500 in light mode and 400 in dark mode, which is Nuxt UI's default.
 - Radii follow Nuxt UI: controls `rounded-md`, cards and panels `rounded-lg`, avatars and dots `rounded-full`.
 
+### Project thumbnails
+
+`ProjectThumbnail` takes a project and a pixel size. It displays the uploaded image as a cropped rounded square, with the project name as alt text, and falls back to the existing colour and initial when absent or unable to load. Use it for project thumbnails in navigation, lists, overview headers, Plan picker options and Inbox project labels. Small contextual colour dots remain dots. The static prototype bundles a Corral image; Marketing site demonstrates the colour fallback.
+
 ### Task IDs
 
 Tasks are shown as `PREFIX-NUMBER`, e.g. `COR-29`. Each project sets its own prefix. PRs keep `#41` and runs keep `#128`, so the three never look alike.
