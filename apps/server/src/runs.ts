@@ -39,6 +39,8 @@ function toRun({ run, agentName, prefix, taskNumber, taskTitle }: RunJoin): Run 
     state: run.state,
     outcome: run.outcome,
     summary: run.summary,
+    review: run.review,
+    conflictedFiles: run.conflictedFiles,
     error: run.error,
     headSha: run.headSha,
     inputTokens: run.inputTokens,

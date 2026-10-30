@@ -1,5 +1,5 @@
 import { askQuestionInput, EVIDENCE_KINDS, type AgentTool, type RunJob } from '@corral/contracts'
-import { EPIC_REVIEW_MODES, TASK_TYPES, type AgentRole } from '@corral/core'
+import { EPIC_REVIEW_MODES, REBASE_REVIEWS, TASK_TYPES, type AgentRole } from '@corral/core'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
@@ -79,6 +79,8 @@ const toolDefinitions = {
     input: {
       outcome: z.string().describe('One of the outcomes listed for your role'),
       summary: z.string().min(1).describe('Plain-English summary of what you did, or your question when stuck'),
+      review: z.enum(REBASE_REVIEWS).optional().describe('Required for pr_rebased: trivial only for combining both sides with no new logic, renames or behaviour changes; otherwise needs_review'),
+      conflictedFiles: z.array(z.string().trim().min(1)).min(1).optional().describe('Required for pr_rebased: every file in which you resolved a conflict'),
       note: z.string().optional().describe('Developer only, required: one line of at most 200 characters saying what this run did, posted as a comment on the task, e.g. "Addressed review: dropped idle-thread fixture"'),
       criteria: z.array(z.object({
         criterionId: z.string(),

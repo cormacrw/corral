@@ -37,13 +37,38 @@ async function submitted(humanReview = false) {
   await t.request('PATCH', `/api/projects/${project.slug}`, { paused: false })
   await t.orchestrator.schedule()
   const dev = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
+  await capture(`developer-prompt-${humanReview}.json`, { transport: 'Runner WebSocket assignment from isolated test server', developerAssignment: dev })
   t.github.setBranch(project.repository, branch, 'new-head')
-  const submission = { outcome: 'pr_rebased', headSha: 'new-head', summary: 'app.ts: retained main validation and task navigation', note: 'app.ts: retained both sides of the conflict' }
+  const submission = { outcome: 'pr_rebased', review: humanReview ? 'trivial' : 'needs_review', conflictedFiles: ['app.ts'], headSha: 'new-head', summary: 'app.ts: retained main validation and task navigation', note: 'app.ts: retained both sides of the conflict' }
+  const validation = []
+  for (const invalid of [
+    { ...submission, review: undefined },
+    { ...submission, conflictedFiles: [] },
+    { ...submission, conflictedFiles: undefined },
+    { ...submission, review: 'easy' },
+    { ...submission, conflictedFiles: [' '] }
+  ]) {
+    const result = await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', invalid)
+    const field = invalid.review === undefined || invalid.review === 'easy' ? 'review' : 'conflictedFiles'
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining(field) })
+    validation.push({ request: invalid, response: result })
+  }
+  await capture(`validation-${humanReview}.json`, { transport: 'Runner WebSocket report_outcome; isolated test server, simulated GitHub', validation })
   const submitted = await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', submission)
   expect(submitted, JSON.stringify(submitted)).toMatchObject({ ok: true })
   await t.orchestrator.schedule()
   const review = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'reviewer')).job
   await capture(`prompt-${humanReview}.json`, { transport: 'Real runner WebSocket to isolated server; GitHub simulated, no remote writes', submission, reviewerAssignment: review })
+  expect(review.prompt).toContain(`Developer review choice: ${submission.review}`)
+  expect(review.prompt).toContain('Conflicted files: app.ts')
+  const runsResponse = await fetch(`${t.server!.url}/api/runs?taskId=${task.id}`)
+  const runHistory = await runsResponse.json()
+  expect(runHistory).toEqual(expect.arrayContaining([expect.objectContaining({ id: dev.runId, review: submission.review, conflictedFiles: ['app.ts'] })]))
+  const historyResponse = await fetch(`${t.server!.url}/api/projects/${project.slug}/tasks/${task.number}/history`)
+  const history = await historyResponse.json()
+  expect(history).toEqual(expect.arrayContaining([expect.objectContaining({ action: 'run.ended', detail: expect.objectContaining({ runId: dev.runId, review: submission.review, conflictedFiles: ['app.ts'] }) })]))
+  await capture(`task-history-${humanReview}.json`, { request: { method: 'GET', url: historyResponse.url }, status: historyResponse.status, body: history })
+  await capture(`run-history-${humanReview}.json`, { request: { method: 'GET', url: runsResponse.url }, status: runsResponse.status, body: runHistory })
   expect(review.prompt).toContain('Previously approved head: approved-head. New head: new-head')
   expect(review.prompt).toContain('git range-diff <old-base>..<approved> <new-base>..<new-head>')
   expect(review.prompt).toContain('specific main/base commit')
