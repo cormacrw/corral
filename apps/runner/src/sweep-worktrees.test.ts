@@ -57,6 +57,15 @@ describe('sweep_worktrees', () => {
     return pmWorktreePath(dataDir, PROJECT, planSessionId)
   }
 
+  it('lets the next PM turn recreate a swept worktree at the same path', async () => {
+    const session = randomUUID()
+    const path = await pm(session)
+    expect(await sweep([], [])).toEqual({ kind: 'sweep_worktrees', removed: [path], kept: [] })
+    expect(await exists(path)).toBe(false)
+    await pm(session)
+    expect(await exists(join(path, '.git'))).toBe(true)
+  })
+
   it('removes what is outside the keep lists, from disk and from the bare clone', async () => {
     const [a, b, s1, s2] = [randomUUID(), randomUUID(), randomUUID(), randomUUID()]
     const stay = [await developer(a), await reviewer(a), await pm(s1)]

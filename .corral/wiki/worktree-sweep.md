@@ -18,3 +18,14 @@ An orphan with a dangling `.git` file can't report changes, so it is deleted.
 The running-turn check happens synchronously before `removeWorktree` joins the
 repo queue, so a turn that starts later checks out after the removal and
 recreates its worktree.
+
+The server sends the job from `WorktreeSweep` (`apps/server/src/worktree-sweep.ts`)
+when a runner connects and hourly. The keep list filters on `deletedAt`: a
+deleted task that had started is only soft-deleted, so it's still in the table.
+A pm worktree that outlives `PM_WORKTREE_TTL` is recreated at the same path by
+the next turn, so `claude --resume` still finds its session.
+
+A sweep asked for while one is running runs afterwards rather than being
+dropped, because the runner that just connected may have missed the keep list
+of the one in flight. If one runner fails, the audit entry still records what
+the others removed; only an error is logged for it.
