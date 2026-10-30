@@ -227,5 +227,40 @@ Disable automatic sleep while you want the PC to work. If it sleeps mid-run,
 heartbeats stop; when the lease expires the run is interrupted and its work is
 redone. On wake the runner reconnects, but the old lease cannot submit results.
 Windows shutdown and `wsl --shutdown` also interrupt work. This setup does not
-wake a sleeping PC. Automatic code/image updates are covered by the separate
-runner updater task; this guide configures startup and persistent authentication.
+wake a sleeping PC. The host updater below handles code and image updates.
+
+## Enable the host updater
+
+The checkout is dedicated to deployment: do not edit tracked files there. The
+updater checks out the server's exact SHA, including older commits, rather than
+following main. GitHub checkout authentication must work unattended for root
+(the system service user); for a public repo HTTPS needs no credentials. Runner
+CLI authentication remains separate. No registry or image publishing is used.
+
+Install `jq` and the timer inside Ubuntu, adjusting the service's checkout path:
+
+```sh
+sudo apt-get install -y jq
+sudo cp scripts/deploy/corral-runner-update.{service,timer} /etc/systemd/system/
+sudo systemctl edit --full corral-runner-update.service
+# Set ExecStart to the absolute path of scripts/deploy/runner-update.sh in this checkout.
+sudo git config --global --add safe.directory "$PWD"
+sudo systemctl daemon-reload
+sudo systemctl enable --now corral-runner-update.timer
+systemctl list-timers corral-runner-update.timer
+```
+
+Set `CORRAL_RUNNER_AUTO_UPDATE=true` in `deploy/runner/.env` (the default). For
+manual-only updates set false and recreate the runner. Settings → Runner →
+**Update now** requests a drain; the next minute's timer builds while existing
+runs finish, then replaces only the idle runner. Status shows the old and server
+commits, draining runs, waiting, offline during replacement, and the new commit
+on reconnect. Build failures release the drain and show **Update failed**; retry
+with Update now after fixing the host problem. Inspect host logs with
+`sudo journalctl -u corral-runner-update.service`. The lock prevents overlap.
+
+The enabled timer starts on every distro boot. The Windows startup task above
+starts and keeps that distro alive after a PC reboot; systemd alone cannot start
+WSL. Verify both the enabled timer and the Windows task, then reboot and observe
+the runner returning in Settings without opening a WSL shell. A sleeping or
+powered-off PC cannot update. Never mount the Docker socket into any container.

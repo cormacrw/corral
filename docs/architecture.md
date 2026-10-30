@@ -61,13 +61,22 @@ Runtimes aren't configured: on every connect the runner runs the same checks as 
 - **Affinity.** A developer run (build or design) on a task with an earlier developer run by the same agent that started a session goes to that run's runner while it's online, waiting for its slot if it's full: the worktree and agent session live there. It resumes that session with only what's new (the feedback since; designs use the design revision prompt), with the full prompt as `fallbackPrompt`. If that runner is offline, the run goes to another runner as a fresh session on the full prompt, its worktree started from the pushed branch. The transcript's first line says which: "Resuming the agent session of run #N on runner X", or "Run #N ran on runner X, which is offline: starting a fresh session on runner Y from the pushed branch …". The developer's one resume to report happens inside the same run, so on the same runner. Reviewers have no affinity.
 - **Plan sessions.** A turn goes to the runner of the session's latest placed turn while that runner is online (its warm process and session files are there), waiting for its slot if needed. If it's gone, the turn cold-starts on another runner that takes `pm` with a fresh session from the `fallbackPrompt` (the saved conversation), and its transcript says so.
 
-### Runner updates (COR-187)
+### Runner updates (COR-187, COR-188)
 
 Protocol 3 hello reports `commit` (`CORRAL_BUILD_SHA`, baked into both images using the build argument), `autoUpdate`, `draining` and `updateRequested`. Welcome returns the server commit and drain state; a protocol refusal closes with code 4000 and JSON `{protocol, commit}` so even a refused runner can compare versions. Different commits mean `behind`, regardless of ancestry. Development defaults to `development`.
 
 `POST /api/runners/:runnerId/update` sets `draining` and `updateRequested` and sends `runner.drain`. Draining runners stay online for current run traffic, but no new runs are dispatched there; affinity can move to another eligible runner. Setup jobs prefer a runner that is not draining, falling back to a draining one when necessary. Cleanup still reaches all online runners. A behind runner with `CORRAL_RUNNER_AUTO_UPDATE=true` drains automatically at hello, before dispatch can start. Without it, being behind does not stop work.
 
 The runner atomically replaces `<dataDir>/update-status.json` at startup, on connection and protocol refusal, on drain and on run changes. It contains `commit`, `serverCommit` (null until known), `behind`, `draining`, `updateRequested`, `activeRunCount` and `idle` (zero active runs). The host updater reads this file; there is no updater port. Drain survives socket reconnects in the same process. A restarted process starts clear, so a runner restarted on the server commit takes work again. `GET /api/status` and runner status events include both commits and all three flags for every runner.
+
+The WSL host runs `scripts/deploy/runner-update.sh` from a systemd timer. It reads
+that status from the Docker data mount, fetches the exact server commit and builds
+locally while the old container runs, then replaces only an idle, draining runner.
+No image registry or Docker socket mount is involved. Host feedback is atomically
+written to `updater-result.json` (target, state, error); the runner polls it and
+sends `runner.update-status` with active count, drain/request flags and build/error
+state. Build failures release the drain on the old process. Settings shows these
+states and requests updates through the existing runner update endpoint.
 
 ### `apps/runner`: runner daemon
 

@@ -158,8 +158,9 @@ export interface OutcomeReport {
 // ── Messages ─────────────────────────────────────────────────────────────────
 
 export type RunnerMessage =
-  | { type: 'hello', protocol: number, commit: string, draining?: boolean, updateRequested?: boolean, autoUpdate?: boolean, runnerId: string, name: string, activeRuns: { runId: string, leaseEpoch: number }[] } & RunnerCapacity
+  | { type: 'hello', protocol: number, commit: string, updateTarget?: string, updateState?: string, updateError?: string, draining?: boolean, updateRequested?: boolean, autoUpdate?: boolean, runnerId: string, name: string, activeRuns: { runId: string, leaseEpoch: number }[] } & RunnerCapacity
   | { type: 'runner.draining', updateRequested: boolean }
+  | { type: 'runner.update-status', draining: boolean, updateRequested: boolean, activeRunCount: number, updateState?: string, updateError?: string }
   | { type: 'heartbeat', sentAt?: number, activeRuns: { runId: string, leaseEpoch: number }[] }
   | { type: 'job.result', jobId: string, ok: true, result: SetupJobResult }
   | { type: 'job.result', jobId: string, ok: false, error: string }
@@ -216,6 +217,9 @@ export type RunnerRole = AgentRole | 'design'
 export const RUNNER_ROLES: readonly RunnerRole[] = ['pm', 'developer', 'reviewer', 'design']
 
 export interface RunnerInfo extends RunnerCapacity {
+  activeRunCount?: number
+  updateState?: string
+  updateError?: string
   commit: string
   serverCommit: string
   behind: boolean

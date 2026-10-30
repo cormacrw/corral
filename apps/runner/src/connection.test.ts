@@ -1,5 +1,5 @@
 import { RUNNER_PROTOCOL_VERSION, type RunnerMessage, type ServerMessage } from '@corral/contracts'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -50,6 +50,16 @@ describe('runner update status on the wire', () => {
   async function status() {
     return JSON.parse(await readFile(join(dataDir, 'update-status.json'), 'utf8'))
   }
+
+  it('releases a failed host build drain and reports the failure without stopping live work', async () => {
+    active = [{ runId: 'run-1', leaseEpoch: 1 }]
+    await start(true, socket => socket.send(JSON.stringify({ type: 'welcome', runnerId: 'r1', commit: 'new', draining: true, updateRequested: true } satisfies ServerMessage)))
+    await vi.waitFor(async () => expect(await status()).toMatchObject({ draining: true }))
+    await writeFile(join(dataDir, 'updater-result.json'), JSON.stringify({ target: 'new', state: 'failed', error: 'Image build failed' }))
+    await vi.waitFor(async () => expect(await status()).toMatchObject({ draining: false, updateRequested: false, updateState: 'failed', activeRunCount: 1 }), { timeout: 2500 })
+    expect(active).toHaveLength(1)
+    await vi.waitFor(() => expect(received).toContainEqual(expect.objectContaining({ type: 'runner.update-status', draining: false, updateError: 'Image build failed' })))
+  })
 
   it('learns the server commit even when refused before welcome', async () => {
     await start(false, (socket, hello) => {
