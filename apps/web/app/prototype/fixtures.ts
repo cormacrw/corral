@@ -8,6 +8,8 @@ import type {
   Epic,
   Evidence,
   GlobalStatus,
+  FlowMetrics,
+  FlowMetricsQuery,
   Inbox,
   InboxItem,
   ReleaseNotesItem,
@@ -352,7 +354,7 @@ export const tasks: Task[] = [
   ...epicTasks('e-digest', 32, ['Collect the week\'s merges', 'Send the digest']),
   ...epicTasks('e-tags', 34, ['Add tags to tasks', 'Filter the Board by tag'], 60),
   task(site, 1, { title: 'New landing page hero', status: 'ready', type: 'design', epicId: 'e-site' }),
-  task(site, 2, { title: 'Fix broken pricing link', status: 'merged', type: 'bug', epicId: 'e-shipped', mergedAt: ago(10) }),
+  task(site, 2, { title: 'Fix broken pricing link', status: 'merged', type: 'bug', epicId: 'e-shipped', mergedAt: ago(60 * 24 * 10) }),
   task(site, 3, {
     title: 'Footer links open in the same tab',
     epicId: 'e-site',
@@ -378,39 +380,54 @@ export const runs: Run[] = [
     runnerId: 'runner-1', runnerName: 'home-server', id: 'r-design', number: 140, agentId: 'a-design', agentName: 'Iris', role: 'designer', projectId: 'p-corral',
     taskId: at('COR-20').id, taskRef: 'COR-20', taskTitle: at('COR-20').title, state: 'running', outcome: null, summary: null,
     error: null, headSha: null, inputTokens: 12000, cacheReadTokens: 80000, outputTokens: 3000, rateLimitResetAt: null,
-    queuedAt: ago(12), startedAt: ago(11), endedAt: null
+    queuedAt: ago(12), startedAt: ago(11), endedAt: null, timings: null
   },
   {
     runnerId: 'runner-1', runnerName: 'home-server', id: 'r-design-done', number: 139, agentId: 'a-design', agentName: 'Iris', role: 'designer', projectId: 'p-corral',
     taskId: at('COR-4').id, taskRef: 'COR-4', taskTitle: at('COR-4').title, state: 'completed', outcome: 'design_submitted', summary: 'Submitted the review screen prototype.',
     error: null, headSha: 'design-review-v1', inputTokens: 8000, cacheReadTokens: 60000, outputTokens: 2000, rateLimitResetAt: null,
-    queuedAt: ago(120), startedAt: ago(119), endedAt: ago(100)
+    queuedAt: ago(120), startedAt: ago(119), endedAt: ago(100), timings: null
   },
   {
     runnerId: 'runner-1', runnerName: 'home-server', id: 'r-1', number: 128, agentId: 'a-dev2', agentName: 'Dana', role: 'developer', projectId: 'p-corral',
     taskId: at('COR-3').id, taskRef: 'COR-3', taskTitle: at('COR-3').title, state: 'running', outcome: null, summary: null,
     error: null, headSha: null, inputTokens: 18_200, cacheReadTokens: 240_000, outputTokens: 6_100, rateLimitResetAt: null,
-    queuedAt: ago(25), startedAt: ago(24), endedAt: null
+    queuedAt: ago(25), startedAt: ago(24), endedAt: null, timings: null
   },
   {
     runnerId: 'runner-1', runnerName: 'home-server', id: 'r-2', number: 129, agentId: 'a-rev', agentName: 'Rita', role: 'reviewer', projectId: 'p-corral',
     taskId: at('COR-4').id, taskRef: 'COR-4', taskTitle: at('COR-4').title, state: 'running', outcome: null, summary: null,
     error: null, headSha: '9e71e28', inputTokens: 9_000, cacheReadTokens: 80_000, outputTokens: 1_200, rateLimitResetAt: null,
-    queuedAt: ago(8), startedAt: ago(7), endedAt: null
+    queuedAt: ago(8), startedAt: ago(7), endedAt: null, timings: null
   },
   {
     runnerId: 'runner-1', runnerName: 'home-server', id: 'r-3', number: 127, agentId: 'a-dev', agentName: 'Victor', role: 'developer', projectId: 'p-corral',
     taskId: at('COR-5').id, taskRef: 'COR-5', taskTitle: at('COR-5').title, state: 'completed', outcome: 'pr_opened',
     summary: 'Approving a version marks it approved and supersedes earlier ones.', error: null, headSha: '5b030d7',
     inputTokens: 30_000, cacheReadTokens: 400_000, outputTokens: 9_800, rateLimitResetAt: null,
-    queuedAt: ago(140), startedAt: ago(139), endedAt: ago(95)
+    queuedAt: ago(140), startedAt: ago(139), endedAt: ago(95),
+    timings: {
+      totalMs: 2_700_000,
+      phases: [
+        { phase: 'worktree_prepare', durationMs: 40_000 },
+        { phase: 'session_setup', durationMs: 20_000 },
+        { phase: 'agent_cold_start', durationMs: 2_520_000 },
+        { phase: 'push', durationMs: 90_000 },
+        { phase: 'finish', durationMs: 30_000 }
+      ],
+      tools: [
+        { tool: 'get_task', count: 2, totalMs: 800, maxMs: 500 },
+        { tool: 'exec_command', count: 36, totalMs: 1_080_000, maxMs: 240_000 },
+        { tool: 'apply_patch', count: 12, totalMs: 6_000, maxMs: 1_200 }
+      ]
+    }
   },
   {
     runnerId: 'runner-2', runnerName: 'macbook', id: 'r-5', number: 126, agentId: 'a-rev', agentName: 'Rita', role: 'reviewer', projectId: 'p-corral',
     taskId: at('COR-5').id, taskRef: 'COR-5', taskTitle: at('COR-5').title, state: 'completed', outcome: 'approved',
     summary: 'Every criterion is met.', error: null, headSha: '5b030d7',
     inputTokens: 12_000, cacheReadTokens: 90_000, outputTokens: 2_000, rateLimitResetAt: null,
-    queuedAt: ago(90), startedAt: ago(89), endedAt: ago(80)
+    queuedAt: ago(90), startedAt: ago(89), endedAt: ago(80), timings: null
   },
   // One of each way a run gets cut off, so the Activity tab and the run list show their errors
   ...([
@@ -422,7 +439,7 @@ export const runs: Run[] = [
     runnerId: null, runnerName: null, id: `r-cut-${number}`, number, agentId: 'a-dev2', agentName: 'Dana', role: 'developer', projectId: 'p-corral',
     taskId: at('COR-3').id, taskRef: 'COR-3', taskTitle: at('COR-3').title, state, outcome: state === 'failed' ? 'failed' : null, summary: null,
     error, headSha: null, inputTokens: 4_000, cacheReadTokens: 22_000, outputTokens: 900, rateLimitResetAt: null,
-    queuedAt: ago(endedAgo + 22), startedAt: ago(endedAgo + 21), endedAt: ago(endedAgo)
+    queuedAt: ago(endedAgo + 22), startedAt: ago(endedAgo + 21), endedAt: ago(endedAgo), timings: null
   })),
   // PM turns have no outcome to report: one finished, one stopped
   ...([
@@ -432,14 +449,14 @@ export const runs: Run[] = [
     runnerId: 'runner-1', runnerName: 'home-server', id: `r-pm-${number}`, number, agentId: 'a-pm', agentName: 'Pam', role: 'pm', projectId: 'p-corral',
     taskId: null, taskRef: null, taskTitle: null, state, outcome: null, summary,
     error, headSha: null, inputTokens: 2_000, cacheReadTokens: 12_000, outputTokens: 400, rateLimitResetAt: null,
-    queuedAt: ago(endedAgo + 3), startedAt: ago(endedAgo + 2), endedAt: ago(endedAgo)
+    queuedAt: ago(endedAgo + 3), startedAt: ago(endedAgo + 2), endedAt: ago(endedAgo), timings: null
   })),
   // A live Codex run, which can't take messages mid-run
   {
     runnerId: 'runner-1', runnerName: 'home-server', id: 'r-4', number: 130, agentId: 'a-dev', agentName: 'Victor', role: 'developer', projectId: 'p-site',
     taskId: at('WEB-3').id, taskRef: 'WEB-3', taskTitle: at('WEB-3').title, state: 'running', outcome: null, summary: null,
     error: null, headSha: null, inputTokens: 4_000, cacheReadTokens: 22_000, outputTokens: 900, rateLimitResetAt: null,
-    queuedAt: ago(5), startedAt: ago(4), endedAt: null
+    queuedAt: ago(5), startedAt: ago(4), endedAt: null, timings: null
   }
 ]
 
@@ -820,4 +837,41 @@ export function inbox(): Inbox {
   needsYou.push(...releaseNotes.filter(r => !r.resolution))
   needsYou.sort((a, b) => b.at.localeCompare(a.at))
   return { needsYou, activity, resolved: releaseNotes.filter(r => r.resolution), count }
+}
+
+// Different cohorts make every window visibly distinct. Marketing site has no
+// merges in 7d, demonstrating the window-specific empty state.
+export function flowMetrics(slug: string, window: FlowMetricsQuery['window']): FlowMetrics {
+  const scale = window === '7d' ? 1 : window === '30d' ? 2 : 3
+  const empty = slug === 'marketing-site' && window === '7d'
+  const pair = (hours: number) => ({ medianMs: hours * scale * 3_600_000, p90Ms: hours * scale * 1.8 * 3_600_000 })
+  return {
+    window,
+    mergedTaskCount: empty ? 0 : 3 * scale,
+    leadTime: empty ? pair(0) : pair(48),
+    cycleTime: empty ? pair(0) : pair(12),
+    timeInStatus: empty
+      ? []
+      : [
+          { status: 'backlog', ...pair(36) },
+          { status: 'ready', ...pair(2) },
+          { status: 'in_progress', ...pair(4) },
+          { status: 'agent_review', ...pair(1) },
+          { status: 'human_review', ...pair(4) },
+          { status: 'ready_to_merge', ...pair(1) }
+        ],
+    runsByRole: empty
+      ? []
+      : [
+          { role: 'developer', duration: pair(0.5), queueWait: pair(0.1) },
+          { role: 'reviewer', duration: pair(0.2), queueWait: pair(0.05) },
+          { role: 'pm', duration: pair(0.1), queueWait: pair(0.02) }
+        ],
+    averageDeveloperRuns: empty ? 0 : scale,
+    slowestTasks: empty
+      ? []
+      : (slug === 'corral' ? ['COR-1', 'COR-10', 'COR-2'] : ['WEB-2']).map((ref, i) => ({
+          ref, leadTimeMs: (72 - i * 12) * scale * 3_600_000, dominantStatus: 'backlog'
+        }))
+  }
 }
