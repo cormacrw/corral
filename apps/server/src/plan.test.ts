@@ -547,7 +547,7 @@ describe('plan sessions', () => {
     await endTurn(next, 'Not approved.')
   })
 
-  it("doesn't tell the PM a revised Ready task went to the Backlog", async () => {
+  it('tells the PM a revised Ready task stayed on the board', async () => {
     const { target, created, job, revise } = await backlogSetup()
     await t.db.update(tasks).set({ status: 'ready' }).where(eq(tasks.id, target.id))
     expect(await revise()).toMatchObject({ ok: true })

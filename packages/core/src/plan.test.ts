@@ -229,7 +229,7 @@ describe('approvedPlanSummary', () => {
     expect(approvedPlanSummary([item('backlog')])).toBe('1 task in the Backlog')
   })
 
-  it("doesn't report a revised Ready task as moved to the Backlog", () => {
+  it('does not report a revised Ready task as moved to the Backlog', () => {
     expect(approvedPlanSummary([item('backlog'), item('backlog'), item('backlog'), item('ready', 'changed')])).toBe('3 tasks in the Backlog, 1 on the board')
   })
 
