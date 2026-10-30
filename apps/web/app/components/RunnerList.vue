@@ -74,6 +74,7 @@ const expected = computed(() => state.value.runner?.protocol)
         <p class="text-xs text-muted">
           {{ runner.needsUpdate ? 'Turned away' : 'Last heartbeat' }} {{ timeAgo(runner.lastHeartbeatAt) }}
         </p>
+        <RunnerUpdate :runner="runner" />
       </div>
     </div>
   </div>

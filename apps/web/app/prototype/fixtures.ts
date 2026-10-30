@@ -1,3 +1,4 @@
+import { RUNNER_PROTOCOL_VERSION } from '@corral/contracts'
 import corralThumbnail from '~/assets/images/corral-thumbnail.svg'
 import type {
   Agent,
@@ -43,7 +44,20 @@ export const runner: RunnerStatus = {
   runners: [
     { commit: 'prototype', serverCommit: 'prototype', behind: false, draining: false, updateRequested: false, id: 'runner-1', name: 'home-server', online: true, slotsInUse: 3, protocol: 2, needsUpdate: false, connectedAt: ago(600), lastHeartbeatAt: ago(0), slots: 4, runtimes: ['claude-code', 'codex'], roles: ['pm', 'developer', 'reviewer', 'design'] },
     { commit: 'prototype', serverCommit: 'prototype', behind: false, draining: false, updateRequested: false, id: 'runner-2', name: 'macbook', online: false, slotsInUse: 0, protocol: 2, needsUpdate: false, connectedAt: ago(300), lastHeartbeatAt: ago(42), slots: 2, runtimes: ['claude-code'], roles: ['developer', 'reviewer'] },
-    { commit: 'prototype', serverCommit: 'prototype', behind: false, draining: false, updateRequested: false, id: 'runner-3', name: 'old-mini', online: false, slotsInUse: 0, protocol: 1, needsUpdate: true, connectedAt: ago(15), lastHeartbeatAt: ago(15), slots: 1, runtimes: [], roles: [] }
+    { commit: 'prototype', serverCommit: 'prototype', behind: false, draining: false, updateRequested: false, id: 'runner-3', name: 'old-mini', online: false, slotsInUse: 0, protocol: 1, needsUpdate: true, connectedAt: ago(15), lastHeartbeatAt: ago(15), slots: 1, runtimes: [], roles: [] },
+    ...['behind', 'draining', 'waiting', 'building', 'offline', 'failed'].map((state, i) => ({
+      slotsInUse: state === 'draining' ? 2 : 0, protocol: RUNNER_PROTOCOL_VERSION, needsUpdate: false, id: `remote-${i}`, name: `gaming-pc-${state}`, online: state !== 'offline',
+      commit: '1234567890123456789012345678901234567890',
+      serverCommit: '9abcdef0123456789abcdef0123456789abcdef012',
+      behind: true,
+      draining: ['draining', 'waiting', 'building', 'offline'].includes(state),
+      updateRequested: state !== 'behind' && state !== 'failed',
+      activeRunCount: state === 'draining' ? 2 : 0,
+      updateState: ['failed', 'building'].includes(state) ? state : '',
+      updateError: state === 'failed' ? 'Image build failed; old runner taking work' : '',
+      connectedAt: ago(60), lastHeartbeatAt: ago(0), slots: 4,
+      runtimes: ['codex'], roles: ['developer' as const]
+    }))
   ],
   protocol: 2,
   online: true,

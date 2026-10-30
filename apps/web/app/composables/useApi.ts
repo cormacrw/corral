@@ -106,6 +106,7 @@ export function describe(status: number, error: ApiErrorBody['error'] | null): s
 // Everything web asks the server for. Only the server touches storage (D8).
 export const api = {
   health: () => call<{ ok: boolean }>('GET', '/health'),
+  updateRunner: (id: string) => call('POST', `/runners/${id}/update`),
   runner: () => call<RunnerStatus>('GET', '/runner'),
   status: () => call<ServerStatus>('GET', '/status'),
   stopAll: () => call<GlobalStatus>('POST', '/stop-all'),
