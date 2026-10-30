@@ -95,7 +95,7 @@ describe('plan sessions', () => {
     // A plan without epics creates none, and its tasks have no epic
     expect(v1).toMatchObject({ epicId: null, epics: [] })
     expect(await t.db.select().from(epics).where(eq(epics.projectId, project.id))).toEqual([])
-    const rows = await t.db.select().from(tasks).where(eq(tasks.projectId, project.id))
+    const rows = await t.db.select().from(tasks).where(eq(tasks.projectId, project.id)).orderBy(tasks.number)
     expect(rows.map(r => [r.status, r.humanReview, r.epicId])).toEqual([['draft', false, null], ['draft', true, null]])
     // Drafts are seen only in the plan, not on the board or in the Backlog
     expect(await t.request('GET', `/api/projects/${project.slug}/tasks?view=all`).then(r => r.json())).toEqual([])
