@@ -118,7 +118,7 @@ Built from the **Install Corral** frame. Corral is an installable PWA, served by
   - Chrome and Android: when `beforeinstallprompt` has fired, **Install app** shows the browser's prompt. The plugin catches the event early and suppresses Chrome's own mini-bar.
   - iOS (iPadOS included), which has no prompt: the three Add to Home Screen steps.
   - Already running standalone, or a browser that can't install: no Settings entry, and the sheet closes.
-- Launched from the home screen, `(display-mode: standalone)` matches, so `useDevice()` picks the mobile layout whatever the window size.
+- Launched from the home screen, `(display-mode: standalone)` matches, so `useDevice()` picks the mobile layout whatever the window size. The setup middleware resolves this mode before redirecting: with a project, `/` and completed `/setup` open `/home` on mobile; desktop keeps the first project overview. With no projects, both layouts open onboarding, and `/setup?add=1` keeps the add-project flow.
 
 ## Setup
 
