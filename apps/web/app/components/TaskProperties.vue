@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PatchTaskInput, Project, Task, TaskAgent } from '@corral/contracts'
-import type { TaskStatus } from '@corral/core'
+import { canChangeTaskType, type TaskStatus } from '@corral/core'
 import { STATUS } from '~/utils/labels'
 
 // The property rows of a task (design/task.md): label/value rows in the
@@ -171,6 +171,7 @@ const dotClass = (status: TaskStatus) => ({
       <USelectMenu
         v-else-if="row.key === 'type'"
         :model-value="props.task.type"
+        :disabled="!canChangeTaskType(props.task)"
         :items="props.typeOptions"
         value-key="value"
         variant="ghost"

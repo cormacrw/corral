@@ -1,4 +1,4 @@
-import type { DesignVersion } from '@corral/contracts'
+import type { DesignVersion, Inbox } from '@corral/contracts'
 import { packBundle } from '@corral/core'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
@@ -183,9 +183,31 @@ describe('design versions in the task view', () => {
     const list = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/designs`).then(r => r.json()) as DesignVersion[]
     expect(list.map(v => [v.version, v.status])).toEqual([[2, 'approved'], [1, 'superseded']])
 
+    const taskPath = `/api/projects/${project.slug}/tasks/${task.number}`
+    const patched = await t.request('PATCH', taskPath, { type: 'task' })
+    expect(patched.status).toBe(409)
+    expect(await patched.json()).toMatchObject({ error: { code: 'conflict', constraint: 'task_type_locked' } })
+    expect(await t.request('GET', taskPath).then(r => r.json())).toMatchObject({ type: 'design', status: 'approved' })
+    const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
+    expect(inbox.resolved.find(i => i.taskId === task.id)?.resolution).toBe('You approved the design')
+    expect(inbox.activity.find(i => i.taskId === task.id)?.preview).toBe('You approved the design')
+    const reopened = await t.request('POST', `/api/inbox/${task.id}/actions`, { action: 'request_changes', text: 'Please make the controls larger.' })
+    expect(reopened.status).toBe(200)
+    expect(await reopened.json()).toMatchObject({ task: { type: 'design', status: 'in_progress' } })
+
     // A superseded version can't be approved
     const again = await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/designs/1/approve`)
     expect(again.status).toBe(409)
+  })
+
+  it('rejects changing a task awaiting merge into a design without changing its status', async () => {
+    const { project, task } = await designTask(0)
+    await t.db.update(schema.tasks).set({ type: 'task', status: 'ready_to_merge' }).where(eq(schema.tasks.id, task.id))
+    const path = `/api/projects/${project.slug}/tasks/${task.number}`
+    const res = await t.request('PATCH', path, { type: 'design' })
+    expect(res.status).toBe(409)
+    expect(await res.json()).toMatchObject({ error: { code: 'conflict', constraint: 'task_type_locked' } })
+    expect(await t.request('GET', path).then(r => r.json())).toMatchObject({ type: 'task', status: 'ready_to_merge' })
   })
 
   it('refuses to approve a version of a task that is not a design', async () => {

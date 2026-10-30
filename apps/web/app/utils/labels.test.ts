@@ -93,6 +93,10 @@ describe('agentStatus', () => {
   })
 })
 
+it('excludes Approved designs from open board work', () => {
+  expect(taskCounts([{ status: 'approved' }, { status: 'merged' }, { status: 'ready' }, { status: 'backlog' }])).toEqual({ board: 1, backlog: 1 })
+})
+
 describe('Ready waiting notes', () => {
   it('shows epic prerequisites and clears the note when they finish', () => {
     const ready = task(projects[0]!, 99, { title: 'Waiting', status: 'ready', waitingOnEpics: [{ id: 'foundation', title: 'Foundation' }] })

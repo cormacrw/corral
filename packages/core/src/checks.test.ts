@@ -55,9 +55,9 @@ describe('checkDependencies', () => {
 
 describe('deletionFor', () => {
   it('follows D10', () => {
-    expect(deletionFor('backlog')).toBe('hard')
-    expect(deletionFor('in_progress')).toBe('soft')
-    expect(deletionFor('blocked')).toBe('soft')
-    expect(deletionFor('merged')).toBe('not_allowed')
+    expect(deletionFor({ type: 'task', status: 'backlog' })).toBe('hard')
+    expect(deletionFor({ type: 'task', status: 'in_progress' })).toBe('soft')
+    expect(deletionFor({ type: 'task', status: 'blocked' })).toBe('soft')
+    expect(deletionFor({ type: 'task', status: 'merged' })).toBe('not_allowed')
   })
 })

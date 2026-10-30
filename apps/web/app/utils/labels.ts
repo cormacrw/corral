@@ -1,3 +1,4 @@
+import { isTaskDone } from '@corral/core'
 import { AGENT_RUNTIMES, type Agent, type AgentRuntime, type CliStatus, type InboxItem, type PlanStatus, type Project, type Run, type Task } from '@corral/contracts'
 import type { AgentRole, DesignVersionStatus, EpicReviewMode, RunOutcome, RunState, TaskPriority, TaskStatus } from '@corral/core'
 
@@ -12,6 +13,7 @@ export const STATUS: Record<TaskStatus, { label: string, color: Color }> = {
   agent_review: { label: 'Agent review', color: 'primary' },
   human_review: { label: 'Human review', color: 'warning' },
   ready_to_merge: { label: 'Ready to merge', color: 'success' },
+  approved: { label: 'Approved', color: 'success' },
   merged: { label: 'Merged', color: 'success' },
   blocked: { label: 'Blocked', color: 'error' },
   failed: { label: 'Failed', color: 'error' }
@@ -192,7 +194,7 @@ export function epicTitle(epics: { id: string, title: string }[] | undefined, id
 export function taskNote(task: Task, all: Task[], reviewRoundCap: number): { text: string, color: Color } | null {
   if (task.status === 'ready' && task.waitingOnEpics.length > 0) return { text: `Waiting on epic: ${task.waitingOnEpics.map(e => e.title).join(', ')}`, color: 'neutral' }
   if (task.status === 'ready' && task.dependsOn.length > 0) {
-    const waiting = task.dependsOn.filter(ref => all.find(t => t.ref === ref)?.status !== 'merged')
+    const waiting = task.dependsOn.filter(ref => !all.some(t => t.ref === ref && isTaskDone(t)))
     if (waiting.length > 0) return { text: `Waiting on ${waiting.join(', ')}`, color: 'neutral' }
   }
   if (task.status === 'blocked' || task.status === 'failed') return { text: task.statusReason ?? STATUS[task.status].label, color: 'error' }
@@ -207,7 +209,7 @@ export function taskNote(task: Task, all: Task[], reviewRoundCap: number): { tex
 // Sidebar counts: the Board counts open work only, so merged tasks drop out
 export function taskCounts(tasks: Pick<Task, 'status'>[]): { board: number, backlog: number } {
   return {
-    board: tasks.filter(t => t.status !== 'backlog' && t.status !== 'merged').length,
+    board: tasks.filter(t => t.status !== 'backlog' && t.status !== 'merged' && t.status !== 'approved').length,
     backlog: tasks.filter(t => t.status === 'backlog').length
   }
 }

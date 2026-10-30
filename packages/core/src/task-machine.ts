@@ -2,6 +2,7 @@ import { actorType, type Actor, type ActorType } from './actor.ts'
 import { failedMergeGates, type MergeGate, type MergeGateFacts } from './merge-gates.ts'
 import { checkDefinitionOfReady, type ReadyProblem, type TaskContent } from './ready.ts'
 import { isRepeatedFeedback, REPEATED_FEEDBACK_REASON } from './review-feedback.ts'
+import { isTaskDone, type CompletionState } from './completion.ts'
 import type { TaskStatus } from './status.ts'
 import { requiresHumanReview, type TaskType } from './task.ts'
 
@@ -20,9 +21,8 @@ export interface TaskState {
   failedRuns: number
   // Why the task is Blocked or Failed; shown in the Inbox (D11)
   reason: string | null
-  // D19: a spike delivers findings, not a PR, so an approval ends it
-  // without a merge. Absent means a plain task.
-  type?: TaskType
+  // Normalised state always identifies the deliverable.
+  type: TaskType
 }
 
 export interface TaskLimits {
@@ -43,7 +43,7 @@ export type TaskEvent =
   // Ready → Backlog: sent back for rethinking
   | { type: 'send_back' }
   // Ready → In progress: the scheduler claims it
-  | { type: 'claim', dependencyStatuses: readonly TaskStatus[] }
+  | { type: 'claim', dependencies: readonly CompletionState[] }
   // In progress → Agent review: a pr_opened / pr_updated outcome, a
   // spike's findings_reported or a design's design_submitted
   | { type: 'submit', branchAtExpectedCommit: boolean, evidenceComplete: boolean }
@@ -55,7 +55,7 @@ export type TaskEvent =
   // Agent review → Human review for a flagged task, otherwise Ready to
   // merge (a spike: Merged, its findings accepted)
   | { type: 'review_approved' }
-  // Human review → Ready to merge (a spike: Merged)
+  // Human review → Approved for designs, Merged for spikes, Ready to merge otherwise
   | { type: 'human_approve' }
   // Ready to merge → In progress: CI failed or the branch conflicts with the base
   | { type: 'ci_failed' }
@@ -66,7 +66,7 @@ export type TaskEvent =
   | { type: 'merged', gates: MergeGateFacts }
   // → Merged: GitHub shows the PR merged outside Corral. A fact, not a request.
   | { type: 'merged_outside' }
-  // Human review or Ready to merge → In progress. A design keeps the
+  // Human review, Ready to merge or Approved → In progress. A design keeps the
   // feedback on the version it sends back (D20).
   | { type: 'human_request_changes', feedback?: string | undefined }
   | { type: 'block', reason: string }
@@ -97,7 +97,7 @@ export const TRANSITION_RULES: Readonly<Record<TaskEventType, Rule>> = {
   head_moved: { from: ['ready_to_merge'], actors: ['server'] },
   merged: { from: ['ready_to_merge'], actors: ['server'] },
   merged_outside: { from: ['agent_review', 'human_review', 'ready_to_merge'], actors: ['server'] },
-  human_request_changes: { from: ['human_review', 'ready_to_merge'], actors: ['human'] },
+  human_request_changes: { from: ['human_review', 'ready_to_merge', 'approved'], actors: ['human'] },
   block: { from: ['ready', 'in_progress', 'agent_review', 'human_review', 'ready_to_merge'], actors: ['server'] },
   fail: { from: ['in_progress', 'agent_review', 'ready_to_merge'], actors: ['server'] },
   run_failed: { from: ['in_progress', 'agent_review'], actors: ['server'] },
@@ -120,12 +120,12 @@ export type TransitionResult =
 // The human's tasks start in Backlog. The PM's plan tasks start as Drafts,
 // seen only in the plan until the human sends them to the board or the
 // Backlog; its other tasks (documentation fixes) start in Backlog.
-export function createTask(actor: Actor, humanReview: boolean, draft = false): TransitionResult {
+export function createTask(actor: Actor, humanReview: boolean, draft = false, taskType: TaskType = 'task'): TransitionResult {
   const type = actorType(actor)
   if (type !== 'human' && type !== 'pm') {
     return fail({ code: 'actor_not_allowed', actor: type, event: 'approve' })
   }
-  return ok({ status: draft && type === 'pm' ? 'draft' : 'backlog', humanReview, reviewRounds: 0, failedRuns: 0, reason: null })
+  return ok({ type: taskType, status: draft && type === 'pm' ? 'draft' : 'backlog', humanReview, reviewRounds: 0, failedRuns: 0, reason: null })
 }
 
 export function transition(
@@ -134,6 +134,13 @@ export function transition(
   actor: Actor,
   limits: TaskLimits = DEFAULT_LIMITS
 ): TransitionResult {
+  const invalidDesignMerge = task.type === 'design' && ['merged', 'merged_outside', 'ci_failed', 'base_conflict', 'head_moved'].includes(event.type)
+  if (invalidDesignMerge || (task.status === 'approved' && task.type !== 'design')) {
+    return fail({ code: 'invalid_transition', status: task.status, event: event.type })
+  }
+  if (task.status === 'approved' && event.type === 'human_request_changes' && !event.feedback?.trim()) {
+    return fail({ code: 'reason_required' })
+  }
   const rule = TRANSITION_RULES[event.type]
   if (!rule.from.includes(task.status)) {
     return fail({ code: 'invalid_transition', status: task.status, event: event.type })
@@ -155,8 +162,8 @@ export function transition(
       return ok({ ...task, status: 'backlog' })
 
     case 'claim':
-      // D10: Ready tasks may have unmerged dependencies; they just aren't claimed yet
-      if (event.dependencyStatuses.some(s => s !== 'merged')) {
+      // D10/D20: Ready tasks wait until every dependency finishes for its type
+      if (event.dependencies.some(t => !isTaskDone(t))) {
         return fail({ code: 'dependencies_not_merged' })
       }
       return ok({ ...task, status: 'in_progress' })
@@ -191,10 +198,10 @@ export function transition(
     // always goes to one (D20). A spike has no PR to merge, so accepting its
     // findings finishes it.
     case 'review_approved':
-      return ok({ ...task, status: requiresHumanReview(task.type ?? 'task', task.humanReview) ? 'human_review' : 'ready_to_merge' })
+      return ok({ ...task, status: requiresHumanReview(task.type, task.humanReview) ? 'human_review' : 'ready_to_merge' })
 
     case 'human_approve':
-      return ok({ ...task, status: task.type === 'spike' ? 'merged' : 'ready_to_merge' })
+      return ok({ ...task, status: task.type === 'design' ? 'approved' : task.type === 'spike' ? 'merged' : 'ready_to_merge' })
 
     case 'head_moved':
       return ok({ ...task, status: 'agent_review' })
@@ -243,7 +250,7 @@ export function availableEvents(task: TaskState, actor: Actor): TaskEventType[] 
   if (type === null) return []
   return (Object.keys(TRANSITION_RULES) as TaskEventType[]).filter((event) => {
     const rule = TRANSITION_RULES[event]
-    return rule.from.includes(task.status) && rule.actors.includes(type)
+    return rule.from.includes(task.status) && rule.actors.includes(type) && (task.status !== 'approved' || task.type === 'design')
   })
 }
 

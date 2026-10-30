@@ -1,4 +1,4 @@
-import type { TaskStatus } from './status.ts'
+import { isTaskImmutable, type CompletionState } from './completion.ts'
 
 // How a task is deleted (D10, "Deleting"). There's no Cancelled status.
 //   hard:        removed outright (Draft and Backlog)
@@ -7,11 +7,11 @@ import type { TaskStatus } from './status.ts'
 //   not_allowed: Merged tasks are immutable history
 export type Deletion = 'hard' | 'soft' | 'not_allowed'
 
-export function deletionFor(status: TaskStatus): Deletion {
-  switch (status) {
+export function deletionFor(task: CompletionState): Deletion {
+  if (isTaskImmutable(task)) return 'not_allowed'
+  switch (task.status) {
     case 'draft':
     case 'backlog': return 'hard'
-    case 'merged': return 'not_allowed'
     default: return 'soft'
   }
 }

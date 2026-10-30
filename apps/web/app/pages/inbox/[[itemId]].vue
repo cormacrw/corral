@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Evidence, Inbox, InboxActionInput, Review, Task, InboxItem, PlanThreadItem } from '@corral/contracts'
+import { inboxActions } from '~/utils/inbox-actions'
 import { api } from '~/composables/useApi'
 import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
@@ -138,16 +139,7 @@ function toggleTask() {
   else flyout.close()
 }
 
-const actions = computed(() => {
-  if (!selected.value) return []
-  switch (selected.value.type) {
-    case 'human_review': return [{ value: 'approve', label: 'Approve and merge', icon: 'i-lucide-check' }, { value: 'request_changes', label: 'Request changes', icon: 'i-lucide-pencil' }]
-    case 'question':
-    case 'blocked': return [{ value: 'clarify', label: 'Clarify and continue', icon: 'i-lucide-message-circle' }, { value: 'send_back', label: 'Send back to Backlog', icon: 'i-lucide-undo-2' }, { value: 'delete', label: 'Delete task', icon: 'i-lucide-trash-2' }]
-    case 'failed': return [{ value: 'resolve', label: 'Retry', icon: 'i-lucide-rotate-ccw' }, { value: 'send_back', label: 'Send back to Backlog', icon: 'i-lucide-undo-2' }, { value: 'delete', label: 'Delete task', icon: 'i-lucide-trash-2' }]
-    default: return []
-  }
-})
+const actions = computed(() => selected.value && selected.value.type !== 'plan_thread' ? inboxActions(selected.value.type, task.value) : [])
 const needsText = computed(() => action.value === 'request_changes' || action.value === 'clarify')
 const placeholder = computed(() => {
   switch (action.value) {
@@ -475,6 +467,7 @@ onBeforeUnmount(() => {
                 aria-label="Quick actions"
                 class="flex flex-wrap gap-1.5"
               >
+                <InboxDesignReviewLink :task="task" />
                 <UButton
                   v-for="a in actions"
                   :key="a.value"

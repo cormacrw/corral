@@ -195,6 +195,7 @@ const tabs = computed(() => [
           aria-label="Quick actions"
           class="flex flex-wrap gap-2"
         >
+          <InboxDesignReviewLink :task="task" />
           <UButton
             v-for="a in actions"
             :key="a.value"

@@ -24,7 +24,8 @@ export const BOARD_COLUMNS: { key: string, label: string, statuses: TaskStatus[]
   { key: 'human_review', label: 'Human review', statuses: ['human_review'], hint: 'You' },
   { key: 'ready_to_merge', label: 'Ready to merge', statuses: ['ready_to_merge'], hint: 'Corral' },
   { key: 'blocked', label: 'Blocked & failed', statuses: ['blocked', 'failed'], hint: 'You' },
-  { key: 'merged', label: 'Merged', statuses: ['merged'], hint: `Last ${MERGED_WINDOW_DAYS} days` }
+  { key: 'merged', label: 'Merged', statuses: ['merged'], hint: `Last ${MERGED_WINDOW_DAYS} days` },
+  { key: 'approved', label: 'Approved', statuses: ['approved'], hint: 'Designs' }
 ]
 
 // How far a finger must travel sideways, in px, to count as a swipe

@@ -37,6 +37,18 @@ describe('epic scheduling', () => {
     return { project, a: a!, b: b!, first, second, dev: dev! }
   }
 
+  it('counts Approved designs and Merged tasks as done in both epic API views', async () => {
+    const { project, a, first, second } = await setup()
+    await t.db.update(tasks).set({ type: 'design', status: 'approved' }).where(eq(tasks.id, first.id))
+    await t.db.update(tasks).set({ epicId: a.id, status: 'merged' }).where(eq(tasks.id, second.id))
+    expect(await t.request('GET', `/api/epics/${a.id}`).then(r => r.json())).toMatchObject({ taskCount: 2, mergedCount: 2 })
+    const list = await t.request('GET', `/api/projects/${project.slug}/epics`).then(r => r.json()) as { id: string, taskCount: number, mergedCount: number }[]
+    expect(list.find(e => e.id === a.id)).toMatchObject({ taskCount: 2, mergedCount: 2 })
+    // A legacy Merged design is unfinished until repaired by a reviewed migration.
+    await t.db.update(tasks).set({ status: 'merged' }).where(eq(tasks.id, first.id))
+    expect(await t.request('GET', `/api/epics/${a.id}`).then(r => r.json())).toMatchObject({ taskCount: 2, mergedCount: 1 })
+  })
+
   it('reports unfinished prerequisite epics on API tasks and clears them in live completion updates', async () => {
     const { project, a, first, second } = await setup()
     const get = async (number: number) => (await t.request('GET', `/api/projects/${project.slug}/tasks/${number}`)).json()
@@ -52,6 +64,22 @@ describe('epic scheduling', () => {
     expect(await get(second.number)).toMatchObject({ waitingOnEpics: [{ id: a.id, title: a.title }] })
     expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${first.number}/approve`)).status).toBe(200)
     expect(t.events).toContainEqual(expect.objectContaining({ type: 'task.updated', task: expect.objectContaining({ id: second.id, waitingOnEpics: [] }) }))
+  })
+
+  it('claims task and epic dependents of Approved designs, but never treats normal Approved or design Merged as done', async () => {
+    const { project, a, first, second, dev } = await setup()
+    await t.db.insert(schema.taskDependencies).values({ taskId: second.id, dependsOnId: first.id })
+    const normal = await t.createTask(project.slug, { description: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Normal work in the prerequisite epic' }] }] } })
+    await t.db.update(tasks).set({ epicId: a.id, status: 'merged' }).where(eq(tasks.id, normal.id))
+    const get = async () => (await t.request('GET', `/api/projects/${project.slug}/tasks/${second.number}`)).json()
+    for (const [type, status] of [['design', 'human_review'], ['design', 'merged'], ['task', 'approved'], ['task', 'ready_to_merge']] as const) {
+      await t.db.update(tasks).set({ type, status }).where(eq(tasks.id, first.id))
+      expect(await get()).toMatchObject({ waitingOnEpics: [{ id: a.id }] })
+      expect(await claimNextTask(t.db, dev.id, new Date(), [second.id])).toBeNull()
+    }
+    await t.db.update(tasks).set({ type: 'design', status: 'approved' }).where(eq(tasks.id, first.id))
+    expect(await get()).toMatchObject({ waitingOnEpics: [] })
+    expect(await claimNextTask(t.db, dev.id, new Date(), [second.id])).toMatchObject({ taskId: second.id, status: 'in_progress' })
   })
 
   it('edits dependencies through the API, audits and rejects cycles and task deadlocks atomically', async () => {

@@ -266,6 +266,8 @@ describe('design tasks submit versions instead of a PR', () => {
 
     const path = `/api/projects/${project.slug}/tasks/${task.number}/designs/1/approve`
     expect((await t.request('POST', path, { note: 'Ship the desktop layout first.' })).status).toBe(200)
+    expect(await taskRow(task.id)).toMatchObject({ status: 'approved', prNumber: null, mergedAt: null })
+    expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/approve`)).status).toBe(409)
     const sessions = async () => t.db.select().from(planSessions).where(eq(planSessions.projectId, project.id))
     const [session] = await sessions()
     expect(session).toMatchObject({ title: 'Build: Login screen' })
@@ -386,6 +388,12 @@ describe('design tasks submit versions instead of a PR', () => {
       expect(await pinOf(ready)).toEqual({ taskRef: design.ref, version: 1, screens: ['login', 'login-error'], newerVersion: null })
 
       // The human reopens the design and v2 is submitted and reviewed
+      const reopened = await t.request('POST', `/api/projects/${project.slug}/tasks/${design.number}/transitions`, { type: 'human_request_changes', feedback: 'Revise the design for v2' })
+      expect(reopened.status).toBe(200)
+      expect(await taskRow(design.id)).toMatchObject({ status: 'in_progress' })
+      expect((await versionsOf(design))[0]).toMatchObject({ status: 'approved' })
+      const feedback = await t.request('GET', `/api/projects/${project.slug}/tasks/${design.number}/comments`).then(r => r.json())
+      expect(feedback).toContainEqual(expect.objectContaining({ body: 'Revise the design for v2', pinned: true }))
       await t.db.update(tasks).set({ status: 'human_review' }).where(eq(tasks.id, design.id))
       await t.db.insert(designVersions).values({ taskId: design.id, version: 2, bundleBlob: v1.bundleBlob, specBlob: v1.specBlob, screenshots: v1.screenshots, branch: v1.branch, commitSha: 'd2' })
       expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${design.number}/designs/2/approve`)).status).toBe(200)

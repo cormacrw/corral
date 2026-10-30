@@ -103,7 +103,7 @@ const collapsed = defineModel<Record<string, boolean>>('collapsed', { required: 
               variant="subtle"
               color="neutral"
             />
-            <span class="text-xs text-muted">{{ group.merged }} of {{ group.total }} merged</span>
+            <span class="text-xs text-muted">{{ group.merged }} of {{ group.total }} done</span>
           </div>
           <div
             v-if="!collapsed[group.id]"
