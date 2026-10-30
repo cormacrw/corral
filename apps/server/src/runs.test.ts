@@ -26,9 +26,9 @@ it('names the epic on its integration reviews, and only those', async () => {
   const reviewer = await agentOf('reviewer')
   const [review, finished, build, turn] = await t.db.insert(runs).values([
     { agentId: reviewer.id, projectId: project.id, epicId: epic!.id, role: 'reviewer', state: 'running' },
-    { agentId: reviewer.id, projectId: project.id, epicId: epic!.id, role: 'reviewer', state: 'completed', outcome: 'approved', summary: 'Works together.' },
-    { agentId: (await agentOf('developer')).id, projectId: project.id, taskId: task.id, role: 'developer', state: 'completed' },
-    { agentId: (await agentOf('pm')).id, projectId: project.id, role: 'pm', state: 'completed' }
+    { agentId: reviewer.id, projectId: project.id, epicId: epic!.id, role: 'reviewer', state: 'completed', endedAt: new Date(), outcome: 'approved', summary: 'Works together.' },
+    { agentId: (await agentOf('developer')).id, projectId: project.id, taskId: task.id, role: 'developer', state: 'completed', endedAt: new Date() },
+    { agentId: (await agentOf('pm')).id, projectId: project.id, role: 'pm', state: 'completed', endedAt: new Date() }
   ]).returning()
 
   const get = async (id: string) => await (await t.request('GET', `/api/runs/${id}`)).json() as Run
