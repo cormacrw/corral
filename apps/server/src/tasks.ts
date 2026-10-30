@@ -158,7 +158,7 @@ function toTask(
     prUrl: row.prUrl,
     acceptanceCriteria: criteria
       .filter(c => c.taskId === row.id)
-      .map(c => ({ id: c.id, position: c.position, text: c.text, met: current?.criteria.find(v => v.criterionId === c.id)?.met ?? null })),
+      .map(c => ({ id: c.id, position: c.position, text: c.text, checkedByHuman: c.checkedByHuman, met: c.checkedByHuman ? null : current?.criteria.find(v => v.criterionId === c.id)?.met ?? null })),
     dependsOn: dependencies.filter(d => d.taskId === row.id).map(d => taskRef(project.prefix, d.number)),
     lease: row.leaseRunId && row.leaseRole && row.leaseExpiresAt && leaseAgentId
       ? { agentId: leaseAgentId, runId: row.leaseRunId, role: row.leaseRole, expiresAt: row.leaseExpiresAt.toISOString() }
@@ -285,7 +285,7 @@ export async function createTask(db: Executor, project: ProjectRow, rawInput: Cr
 
     if (input.acceptanceCriteria.length > 0) {
       await tx.insert(acceptanceCriteria).values(
-        input.acceptanceCriteria.map((text, position) => ({ taskId, position, text }))
+        input.acceptanceCriteria.map((criterion, position) => ({ taskId, position, ...(typeof criterion === 'string' ? { text: criterion } : criterion) }))
       )
     }
     if (dependencies.length > 0) {
@@ -328,6 +328,11 @@ export async function applyTransition(
   detail: Record<string, unknown> = { event: event.type }
 ): Promise<TaskState> {
   const state = toTaskState(task)
+  if (event.type === 'review_approved') {
+    const humanCriteria = await tx.select({ id: acceptanceCriteria.id }).from(acceptanceCriteria)
+      .where(and(eq(acceptanceCriteria.taskId, task.id), eq(acceptanceCriteria.checkedByHuman, true))).limit(1)
+    if (humanCriteria.length) state.humanReview = true
+  }
   if (task.epicId) {
     const [epic] = await tx.select({ reviewMode: epics.reviewMode }).from(epics).where(eq(epics.id, task.epicId))
     if (epic?.reviewMode === 'each_task') state.humanReview = true
@@ -401,22 +406,27 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
     if (Object.keys(fields).length > 0) {
       await tx.update(tasks).set({ ...fields, updatedAt: new Date() }).where(eq(tasks.id, taskId))
     }
+    let newHumanCheck = false
     if (criteriaInput) {
       const existing = await tx.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, taskId))
+      newHumanCheck = criteriaInput.some(c => c.checkedByHuman && !existing.some(e => e.id === c.id && e.checkedByHuman))
       const keep = new Set(criteriaInput.map(c => c.id).filter((id): id is string => Boolean(id)))
       const gone = existing.filter(c => !keep.has(c.id)).map(c => c.id)
       if (gone.length > 0) await tx.delete(acceptanceCriteria).where(inArray(acceptanceCriteria.id, gone))
       const added = criteriaInput.filter(c => !c.id || !existing.some(e => e.id === c.id)).length
-      const reworded = criteriaInput.filter(c => existing.some(e => e.id === c.id && e.text !== c.text)).length
+      const reworded = criteriaInput.filter(c => existing.some(e => e.id === c.id && (e.text !== c.text || e.checkedByHuman !== (c.checkedByHuman ?? e.checkedByHuman)))).length
       const reordered = criteriaInput.some((c, i) => c.id !== undefined && existing.find(e => e.id === c.id)?.position !== i)
       if (added + gone.length + reworded > 0 || reordered) criteriaChange = { added, removed: gone.length, reworded }
       for (const [position, criterion] of criteriaInput.entries()) {
         if (criterion.id && existing.some(c => c.id === criterion.id)) {
-          await tx.update(acceptanceCriteria).set({ position, text: criterion.text, updatedAt: new Date() }).where(eq(acceptanceCriteria.id, criterion.id))
+          await tx.update(acceptanceCriteria).set({ position, text: criterion.text, checkedByHuman: criterion.checkedByHuman, updatedAt: new Date() }).where(eq(acceptanceCriteria.id, criterion.id))
         } else {
-          await tx.insert(acceptanceCriteria).values({ taskId, position, text: criterion.text })
+          await tx.insert(acceptanceCriteria).values({ taskId, position, text: criterion.text, checkedByHuman: criterion.checkedByHuman })
         }
       }
+    }
+    if (task.status === 'ready_to_merge' && newHumanCheck) {
+      await applyTransition(tx, task, project, { type: 'require_human_check' }, { kind: 'system', component: 'server' })
     }
     if (dependsOn) await setDependencies(tx, project, task, dependsOn)
     await tx.insert(auditLog).values({ projectId: project.id, taskId, actor, action: 'task.updated', detail: { changed: Object.keys(input) } })

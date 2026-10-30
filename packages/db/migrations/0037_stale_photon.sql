@@ -1,0 +1,1 @@
+ALTER TABLE "acceptance_criteria" ADD COLUMN "checked_by_human" boolean DEFAULT false NOT NULL;

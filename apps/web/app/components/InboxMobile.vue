@@ -31,6 +31,7 @@ const props = defineProps<{
   onSubmit: (text: string) => Promise<boolean>
   onRetry: () => unknown
 }>()
+const checkedHumanCriteria = defineModel<string[]>('checkedHumanCriteria', { required: true })
 const tab = defineModel<'needsYou' | 'activity' | 'resolved'>('tab', { required: true })
 const search = defineModel<string>('search', { required: true })
 const action = defineModel<Action | null>('action', { required: true })
@@ -178,7 +179,9 @@ const tabs = computed(() => [
           </div>
           <EvidenceList
             v-if="selected.type === 'human_review' && task"
+            v-model:checked="checkedHumanCriteria"
             :evidence="evidence"
+            human-checklist
             :criteria="task.acceptanceCriteria"
             :reviews="reviews.length > 0 ? reviews : task.latestReview ? [task.latestReview] : []"
           />

@@ -144,7 +144,7 @@ export const createTaskInput = z.object({
   epicId: z.uuid().nullable().default(null),
   // Defaults to the project's setting (D5)
   humanReview: z.boolean().optional(),
-  acceptanceCriteria: z.array(z.string().trim().min(1)).default([]),
+  acceptanceCriteria: z.array(z.union([z.string().trim().min(1), z.object({ text: z.string().trim().min(1), checkedByHuman: z.boolean().optional() })])).default([]),
   // Task numbers in the same project
   dependsOn: z.array(z.number().int().positive()).default([])
 })
@@ -159,7 +159,7 @@ export const patchTaskInput = z.object({
   epicId: z.uuid().nullable().optional(),
   humanReview: z.boolean().optional(),
   // Replaces the list; existing criteria keep their IDs when their text is unchanged
-  acceptanceCriteria: z.array(z.object({ id: z.uuid().optional(), text: z.string().trim().min(1) })).optional(),
+  acceptanceCriteria: z.array(z.object({ id: z.uuid().optional(), text: z.string().trim().min(1), checkedByHuman: z.boolean().optional() })).optional(),
   // Task numbers in the same project; replaces the list
   dependsOn: z.array(z.number().int().positive()).optional()
 })
@@ -255,7 +255,7 @@ export interface Task {
   prNumber: number | null
   prUrl: string | null
   // `met` comes from the latest review of the current commit (design/task.md)
-  acceptanceCriteria: { id: string, position: number, text: string, met: boolean | null }[]
+  acceptanceCriteria: { id: string, position: number, text: string, checkedByHuman?: boolean, met: boolean | null }[]
   // Refs of the tasks this one waits on
   dependsOn: string[]
   // Unfinished prerequisite epics, with titles for display and IDs for links.
@@ -813,7 +813,7 @@ export interface Review {
   headSha: string
   verdict: ReviewVerdict
   summary: string
-  criteria: { criterionId: string, met: boolean, note: string }[]
+  criteria: { criterionId: string, met: boolean | null, note: string }[]
   author: Actor
   createdAt: string
 }

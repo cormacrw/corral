@@ -20,7 +20,7 @@ export interface PromptTask {
   approvedHeadSha?: string | null
   reviewRounds: number
   reviewRoundCap: number
-  criteria: { id: string, text: string }[]
+  criteria: { id: string, text: string, checkedByHuman?: boolean }[]
   comments: { author: string, body: string, pinned: boolean, createdAt: Date }[]
   attachments: { id: string, fileName: string, foundIn: string[] }[]
   // The developer's last run, when it ended without reporting an outcome
@@ -120,7 +120,7 @@ export function reviewerPrompt(task: ReviewTask & { underReview?: DesignUnderRev
     `You are checking commit ${task.headSha} on branch \`${task.branch}\`${task.prUrl ? ` (${task.prUrl})` : ''}, against \`${task.defaultBranch}\`.`,
     '',
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
-    section('Acceptance criteria', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
+    section('Acceptance criteria', criteriaList(task)),
     section('Evidence the developer attached (this round)', evidence),
     task.previousFeedback ? section('Your feedback last round', task.previousFeedback) : '',
     commentsSection(task),
@@ -192,7 +192,7 @@ function spikeReviewerPrompt(task: ReviewTask, agentName: string): string {
     `A spike answers a question: the developer investigated and reported findings instead of changing code. There is no branch, diff or PR; you are in a read-only checkout of \`${task.defaultBranch}\`.`,
     '',
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
-    section('Acceptance criteria', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
+    section('Acceptance criteria', criteriaList(task)),
     section('Findings under review', task.findings?.trim() || '(no findings were reported)'),
     section('Evidence the developer attached (this round)', evidenceList(task)),
     task.previousFeedback ? section('Your feedback last round', task.previousFeedback) : '',
@@ -272,7 +272,7 @@ export function releaseNotesPrompt(input: { projectName: string, tasks: { ref: s
 // Each PM turn is one message; the session carries the rest (D9)
 export function pmPrompt(turn: PmTurn & { grilling?: boolean }): string {
   const intro = turn.fresh
-    ? `You are the product-manager agent for the project "${turn.projectName}" in Corral. Task IDs look like ${turn.prefix}-12. You are in a read-only checkout of the default branch. Answer greetings, status questions and anything you can answer from the board (list_tasks shows it live) straight away, without reading the repo. Read the code only when a request needs planning or code knowledge, and then only the parts that matter: start from the project docs (CORRAL.md or CLAUDE.md, and .corral/wiki/ if present) and don't go looking for files that aren't there. Propose work with propose_plan (group a multi-task feature into an epic and leave a lone small fix without one, small tasks, one PR each, descriptions in markdown, verifiable acceptance criteria, explicit dependencies, humanReview true for auth, data migrations, payments, deletions and security-sensitive code). Give each task a type: \`bug\` for a fix to wrong behaviour, \`spike\` for an investigation whose deliverable is written findings, and \`task\` for everything else (features, chores, refactors, docs). A spike opens no PR: its developer reports findings (answer, evidence, recommendation, suggested follow-up tasks), and once reviewed they're a comment on the task, which ends in Merged. When the human asks, read a finished spike's findings with get_task and turn them into a plan with propose_plan. To refine an existing Backlog task, read it with get_task and include it in the plan with its \`ref\`, so the plan revises it instead of creating a duplicate. Write acceptance criteria as observable behaviour. Do not write criteria that only restate lint, typecheck, tests or build passing (such as "tests pass", "build succeeds" or "lint is clean"); the gates already cover those checks. ${PM_DESIGN_GUIDANCE} Ask with ask_question when requirements are ambiguous. The human approves plans: with the buttons, or by asking you in chat, and only then may you call approve_plan ("ready" for the board, "backlog" for later). Never approve on your own initiative. Keep replies short and concrete. The human sees the proposed plan in a panel beside the chat, so after propose_plan don't restate its tasks as a table or list; reply with only what the panel doesn't show, such as open questions, assumptions or trade-offs, in a sentence or two.\n\n`
+    ? `You are the product-manager agent for the project "${turn.projectName}" in Corral. Task IDs look like ${turn.prefix}-12. You are in a read-only checkout of the default branch. Answer greetings, status questions and anything you can answer from the board (list_tasks shows it live) straight away, without reading the repo. Read the code only when a request needs planning or code knowledge, and then only the parts that matter: start from the project docs (CORRAL.md or CLAUDE.md, and .corral/wiki/ if present) and don't go looking for files that aren't there. Propose work with propose_plan (group a multi-task feature into an epic and leave a lone small fix without one, small tasks, one PR each, descriptions in markdown, verifiable acceptance criteria, explicit dependencies, humanReview true for auth, data migrations, payments, deletions and security-sensitive code). Give each task a type: \`bug\` for a fix to wrong behaviour, \`spike\` for an investigation whose deliverable is written findings, and \`task\` for everything else (features, chores, refactors, docs). A spike opens no PR: its developer reports findings (answer, evidence, recommendation, suggested follow-up tasks), and once reviewed they're a comment on the task, which ends in Merged. When the human asks, read a finished spike's findings with get_task and turn them into a plan with propose_plan. To refine an existing Backlog task, read it with get_task and include it in the plan with its \`ref\`, so the plan revises it instead of creating a duplicate. Write acceptance criteria as observable behaviour. For checks that require a person (such as playback on a real iPhone), use an object in acceptanceCriteria: { text: "Playback works on a real iPhone", checkedByHuman: true }; agents skip its evidence and verdict, and approval goes to Human review. Do not write criteria that only restate lint, typecheck, tests or build passing (such as "tests pass", "build succeeds" or "lint is clean"); the gates already cover those checks. ${PM_DESIGN_GUIDANCE} Ask with ask_question when requirements are ambiguous. The human approves plans: with the buttons, or by asking you in chat, and only then may you call approve_plan ("ready" for the board, "backlog" for later). Never approve on your own initiative. Keep replies short and concrete. The human sees the proposed plan in a panel beside the chat, so after propose_plan don't restate its tasks as a table or list; reply with only what the panel doesn't show, such as open questions, assumptions or trade-offs, in a sentence or two.\n\n`
     : ''
   const attached = turn.attachedTask ? `(About task ${turn.attachedTask}; read it with get_task.)\n\n` : ''
   const ids = messageAttachmentIds(turn.text)
@@ -316,7 +316,7 @@ export function developerPrompt(task: PromptTask, agentName: string): string {
     '',
     stoppedRunSection(task),
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
-    section('Acceptance criteria', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
+    section('Acceptance criteria', criteriaList(task)),
     commentsSection(task),
     attachmentsSection(task),
     pinSection(task, 'developer'),
@@ -347,7 +347,7 @@ function spikeDeveloperPrompt(task: PromptTask, agentName: string): string {
     '',
     stoppedRunSection(task),
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
-    section('Acceptance criteria', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
+    section('Acceptance criteria', criteriaList(task)),
     commentsSection(task),
     attachmentsSection(task),
     section('How to work', `
@@ -391,7 +391,7 @@ export function designerPrompt(task: PromptTask, agentName: string): string {
     '',
     stoppedRunSection(task),
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
-    section('Acceptance criteria', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
+    section('Acceptance criteria', criteriaList(task)),
     commentsSection(task),
     attachmentsSection(task),
     section('How to work', DESIGN_HOW_TO(task))
@@ -447,7 +447,7 @@ function designReviewerPrompt(task: ReviewTask, underReview: DesignUnderReview |
       : 'No design version was found for this submission; request changes and say so.',
     '',
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
-    section('Acceptance criteria', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
+    section('Acceptance criteria', criteriaList(task)),
     underReview ? section('Screenshots in this version', underReview.screenshots.map(s => `- ${s}`).join('\n') || '(none)') : '',
     section('Evidence the developer attached (this round)', evidenceList(task)),
     task.previousFeedback ? section('Your feedback last round', task.previousFeedback) : '',
@@ -483,4 +483,12 @@ ${WORK_NOTE}
 - Always finish by calling \`report_outcome\`.`),
     commentsSection(task)
   ].join('\n')
+}
+
+// Human checks override the normal per-criterion evidence and verdict rules.
+function criteriaList(task: PromptTask): string {
+  const list = task.criteria.map(c => `- [${c.id}] ${c.text}${c.checkedByHuman ? ' — checked by a human' : ''}`).join('\n')
+  return task.criteria.some(c => c.checkedByHuman)
+    ? `${list}\n\nCriteria marked "checked by a human" are reserved for the human. Do not attempt these checks or produce evidence for them. Do not request changes over them or their missing evidence. Omit their verdicts; Corral records "needs human check" automatically. All instructions to evidence or judge every criterion apply only to the other criteria.`
+    : list
 }

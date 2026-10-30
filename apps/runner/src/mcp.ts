@@ -122,7 +122,7 @@ const toolDefinitions = {
         type: z.enum(TASK_TYPES),
         priority: z.enum(['urgent', 'high', 'medium', 'low']).default('medium'),
         humanReview: z.boolean().default(false),
-        acceptanceCriteria: z.array(z.string().min(1)).min(1),
+        acceptanceCriteria: z.array(z.union([z.string().trim().min(1), z.object({ text: z.string().trim().min(1), checkedByHuman: z.boolean().optional() })])).min(1),
         dependsOn: z.array(z.string()).default([]).describe('Keys of tasks in this plan, or refs of existing tasks'),
         design: z.object({
           taskRef: z.string().describe('The design task, e.g. COR-70'),

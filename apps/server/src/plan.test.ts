@@ -53,6 +53,73 @@ describe('plan sessions', () => {
     return t.request('GET', `/api/plan/sessions/${id}`).then(r => r.json()) as Promise<PlanSessionDetail>
   }
 
+  it('proposes human checks, preserves them on approval, and lets the human toggle them without replacing IDs', async () => {
+    const project = await t.createProject()
+    await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
+    const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan device playback' }).then(r => r.json()) as PlanSessionDetail
+    const job = (await runner.next('run.assign', m => m.job.planSessionId === created.id)).job
+    expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', {
+      title: 'Device playback', tasks: [{ key: 'playback', title: 'Playback', description: 'Support playback', type: 'task', acceptanceCriteria: [{ text: 'Works on a real iPhone', checkedByHuman: true }, 'Shows playback controls'] }]
+    })).toMatchObject({ ok: true })
+    const detail = await session(created.id)
+    const proposed = detail.plans[0]!
+    const res = await t.request('POST', `/api/plan/plans/${proposed.id}/approve`, { to: 'backlog' })
+    expect(res.status).toBe(200)
+    const [row] = await t.db.select().from(tasks).where(eq(tasks.projectId, project.id))
+    const path = `/api/projects/${project.slug}/tasks/${row!.number}`
+    const task = await t.request('GET', path).then(r => r.json()) as Task
+    expect(task.acceptanceCriteria[0]).toMatchObject({ text: 'Works on a real iPhone', checkedByHuman: true })
+    const changed = await t.request('PATCH', path, { acceptanceCriteria: task.acceptanceCriteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: false })) }).then(r => r.json()) as Task
+    expect(changed.acceptanceCriteria[0]).toMatchObject({ id: task.acceptanceCriteria[0]!.id, checkedByHuman: false })
+  })
+
+  it.each(['draft', 'backlog'] as const)('preserves a human-set flag when re-proposing a %s with strings or omitted flags, but accepts an explicit false', async (status) => {
+    const project = await t.createProject()
+    await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
+    const start = async () => {
+      const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan device playback' }).then(r => r.json()) as PlanSessionDetail
+      return { id: created.id, job: (await runner.next('run.assign', m => m.job.planSessionId === created.id)).job }
+    }
+    let pm = await start()
+    const propose = async (criteria: (string | { text: string, checkedByHuman?: boolean })[], ref?: string) => {
+      expect(await runner.call(pm.job.runId, pm.job.leaseEpoch, 'propose_plan', {
+        title: 'Device playback', tasks: [{ key: 'playback', ...(ref && { ref }), title: 'Playback', description: 'Support playback', type: 'task', acceptanceCriteria: criteria }]
+      })).toMatchObject({ ok: true })
+    }
+    const approve = async () => {
+      const plans = (await session(pm.id)).plans
+      expect((await t.request('POST', `/api/plan/plans/${plans.at(-1)!.id}/approve`, { to: 'backlog' })).status).toBe(200)
+      await endTurn(pm.job, 'Plan approved')
+    }
+    await propose(['Works on a real iPhone', 'Shows playback controls'])
+    const [row] = await t.db.select().from(tasks).where(eq(tasks.projectId, project.id))
+    const path = `/api/projects/${project.slug}/tasks/${row!.number}`
+    const getTask = () => t.request('GET', path).then(r => r.json()) as Promise<Task>
+    const original = await getTask()
+    const criterion = original.acceptanceCriteria[0]!
+    await t.request('PATCH', path, { acceptanceCriteria: original.acceptanceCriteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.id === criterion.id })) })
+    if (status === 'backlog') {
+      await approve()
+      pm = await start()
+    }
+    const ref = status === 'backlog' ? original.ref : undefined
+    // Strings and objects with no flag must both retain the human's choice.
+    for (const input of [criterion.text, { text: criterion.text }]) {
+      await propose([input, 'Shows playback controls'], ref)
+      if (status === 'backlog') {
+        await approve()
+        pm = await start()
+      }
+      expect((await getTask()).acceptanceCriteria[0]).toMatchObject({ id: criterion.id, checkedByHuman: true })
+    }
+    await propose([{ text: criterion.text, checkedByHuman: false }, 'Shows playback controls', 'Shows elapsed time'], ref)
+    if (status === 'backlog') await approve()
+    const changed = await getTask()
+    expect(changed.acceptanceCriteria[0]).toMatchObject({ id: criterion.id, checkedByHuman: false })
+    expect(changed.acceptanceCriteria[2]).toMatchObject({ text: 'Shows elapsed time', checkedByHuman: false })
+    if (status === 'draft') await endTurn(pm.job, 'Plan proposed')
+  })
+
   it('starts a session with a PM turn, records questions and plans, and approves the plan', async () => {
     const project = await t.createProject()
     const res = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan a login feature' })

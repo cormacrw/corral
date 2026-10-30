@@ -15,6 +15,8 @@ Items come from two places:
 
 There's no separate notifications feed.
 
+A criterion marked **Checked by a human** always sends an approved task here, even if its task-level human-review flag is off. Its evidence card says **Needs human check** and has a checkbox for the human. Tick every such criterion before **Approve and merge**; requesting changes remains available. These ticks are local to the selected item; approval uses the usual merge gates.
+
 ## Layout
 
 There are three columns. The list divider can be resized (280–560px, default 380px). The task flyout docks on the right and can be resized from its own edge.

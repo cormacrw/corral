@@ -7,6 +7,7 @@ import {
   nextDesignVersion,
   reviewFeedbackText,
   transition,
+  humanCheckTally,
   taskRef,
   richTextToMarkdown,
   type Actor,
@@ -534,7 +535,7 @@ export class Orchestrator implements RunnerHandlers {
       rebaseOnly: task.rebaseOnly,
       approvedHeadSha: task.approvedHeadSha,
       reviewRoundCap: ctx.project.reviewRoundCap,
-      criteria: criteria.map(c => ({ id: c.id, text: c.text })),
+      criteria: criteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })),
       comments: notes,
       attachments: attached,
       stoppedRun
@@ -664,7 +665,7 @@ export class Orchestrator implements RunnerHandlers {
         approvedHeadSha: task.approvedHeadSha,
         reviewRounds: task.reviewRounds,
         reviewRoundCap: ctx.project.reviewRoundCap,
-        criteria: criteria.map(c => ({ id: c.id, text: c.text })),
+        criteria: criteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })),
         comments: notes,
         attachments: attached,
         headSha: task.headSha!,
@@ -1029,7 +1030,7 @@ export class Orchestrator implements RunnerHandlers {
     const body = (lead: string) => [
       lead,
       edit.description ? `**Description**\n\n${richTextToMarkdown(task.description) || '(no description)'}` : null,
-      edit.criteria ? `**Acceptance criteria** (${counts})\n\n${criteria.map(c => `- [${c.id}] ${c.text}`).join('\n') || '(none)'}` : null
+      edit.criteria ? `**Acceptance criteria** (${counts})\n\n${criteria.map(c => `- [${c.id}] ${c.text}${c.checkedByHuman ? ' — checked by a human: skip evidence and verdict; do not request changes over it' : ''}`).join('\n') || '(none)'}` : null
     ].filter(Boolean).join('\n\n')
 
     if ((RUNTIMES_TAKING_MESSAGES as readonly string[]).includes(ctx.agent.runtime) && run.state !== 'queued') {
@@ -1211,7 +1212,7 @@ export class Orchestrator implements RunnerHandlers {
       description: richTextToMarkdown(task.description),
       branch: task.branch,
       reviewRound: task.reviewRounds,
-      criteria: criteria.map(c => ({ id: c.id, text: c.text })),
+      criteria: criteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })),
       comments: notes.map(c => ({ ...c, createdAt: c.createdAt.toISOString() })),
       attachments: await listTaskAttachments(this.#d.db, ctx.project.id, task.description, notes),
       evidence: items.map(e => ({ id: e.id, criterionId: e.criterionId, kind: e.kind, note: e.note, fileName: e.fileName, round: e.round }))
@@ -1347,21 +1348,23 @@ export class Orchestrator implements RunnerHandlers {
       : []
     if (task.rebaseOnly && verdict === 'approved' && !approval) throw new ToolError('Not recorded. No approval found for the previously approved head.')
     const verdicts = approval ? approval.criteria : report.criteria ?? []
-    const missing = criteria.filter(c => !verdicts.some(v => v.criterionId === c.id))
+    const missing = criteria.filter(c => !c.checkedByHuman && !verdicts.some(v => v.criterionId === c.id))
     if (missing.length > 0) {
       throw new ToolError(`Not recorded. Give a verdict for every criterion; missing: ${missing.map(c => `[${c.id}] ${c.text}`).join('; ')}.`)
     }
     const unknown = verdicts.filter(v => !criteria.some(c => c.id === v.criterionId))
     if (unknown.length > 0) throw new ToolError(`Not recorded. Unknown criterion IDs: ${unknown.map(v => v.criterionId).join(', ')}.`)
-    if (verdict === 'approved' && verdicts.some(v => !v.met)) {
+    if (verdict === 'approved' && verdicts.some(v => !v.met && !criteria.find(c => c.id === v.criterionId)?.checkedByHuman)) {
       throw new ToolError('Not recorded. An approval needs every criterion met; otherwise report changes_requested.')
     }
-    const kept = criteria.map(c => verdicts.find(v => v.criterionId === c.id)!).map(v => ({ criterionId: v.criterionId, met: v.met, note: v.note ?? '' }))
+    const kept = criteria.map(c => c.checkedByHuman
+      ? { criterionId: c.id, met: null, note: 'Needs human check' }
+      : { criterionId: c.id, met: verdicts.find(v => v.criterionId === c.id)!.met, note: verdicts.find(v => v.criterionId === c.id)!.note ?? '' })
     // An approval is a short note; the per-criterion notes are kept on the
     // review and shown next to the evidence. Changes requested spells out
     // every criterion for the developer, except the narrow rebase comment.
     const summary = approval ? `Approval carried over a reviewed rebase from ${task.approvedHeadSha} to ${task.headSha}. ${report.summary.trim()}` : report.summary
-    const feedback = task.rebaseOnly ? `Rebase review ${verdict === 'approved' ? 'approved' : 'changes requested'}: ${report.summary.trim()}` : verdict === 'approved' ? `Approved: all ${kept.length} criteria met. ${report.summary.trim()}`.trim() : feedbackComment(report.summary, kept, criteria)
+    const feedback = task.rebaseOnly ? `Rebase review ${verdict === 'approved' ? 'approved' : 'changes requested'}: ${report.summary.trim()}` : verdict === 'approved' ? `Approved: ${kept.some(v => v.met === null) ? humanCheckTally(kept.filter(v => v.met).length, kept.filter(v => v.met === null).length) : `all ${kept.length} criteria met`}. ${report.summary.trim()}`.trim() : feedbackComment(report.summary, kept, criteria)
 
     const next = await db.transaction(async (tx) => {
       const locked = await lockTask(tx, task.id)
@@ -1405,7 +1408,7 @@ export class Orchestrator implements RunnerHandlers {
   // How alike this change request is to the previous round's (0 to 1);
   // undefined when the previous round didn't request changes
   // (the first round, or the first since the task was unblocked)
-  async #feedbackSimilarity(tx: Executor, taskId: string, round: number, summary: string, criteria: { met: boolean, note: string }[]): Promise<number | undefined> {
+  async #feedbackSimilarity(tx: Executor, taskId: string, round: number, summary: string, criteria: { met: boolean | null, note: string }[]): Promise<number | undefined> {
     if (round === 0) return undefined
     const [previous] = await tx.select({ summary: reviews.summary, criteria: reviews.criteria }).from(reviews)
       .where(and(eq(reviews.taskId, taskId), eq(reviews.round, round - 1), eq(reviews.verdict, 'changes_requested')))
@@ -1453,7 +1456,7 @@ export class Orchestrator implements RunnerHandlers {
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
     const attached = await db.select({ criterionId: evidence.criterionId }).from(evidence)
       .where(and(eq(evidence.taskId, task.id), eq(evidence.round, task.reviewRounds)))
-    const missing = criteria.filter(c => !attached.some(e => e.criterionId === c.id))
+    const missing = criteria.filter(c => !c.checkedByHuman && !attached.some(e => e.criterionId === c.id))
 
     // Check with core before touching GitHub, so a rejected outcome leaves no trace
     const check = transition(toTaskState(task), {
@@ -1510,7 +1513,7 @@ export class Orchestrator implements RunnerHandlers {
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
     const attached = await db.select({ criterionId: evidence.criterionId }).from(evidence)
       .where(and(eq(evidence.taskId, task.id), eq(evidence.round, task.reviewRounds)))
-    const missing = criteria.filter(c => !attached.some(e => e.criterionId === c.id))
+    const missing = criteria.filter(c => !c.checkedByHuman && !attached.some(e => e.criterionId === c.id))
     if (missing.length > 0) {
       throw new ToolError(`Not submitted. No evidence yet for: ${missing.map(c => `[${c.id}] ${c.text}`).join('; ')}. Attach it and report again.`)
     }
@@ -1588,7 +1591,7 @@ export class Orchestrator implements RunnerHandlers {
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
     const attached = await db.select({ criterionId: evidence.criterionId }).from(evidence)
       .where(and(eq(evidence.taskId, task.id), eq(evidence.round, task.reviewRounds)))
-    const missing = criteria.filter(c => !attached.some(e => e.criterionId === c.id))
+    const missing = criteria.filter(c => !c.checkedByHuman && !attached.some(e => e.criterionId === c.id))
     const problems = [
       head !== report.headSha ? `The branch on GitHub is at ${head ?? 'nothing'}, not your commit ${report.headSha}.` : '',
       !version ? `No design version was submitted at your latest commit ${report.headSha}: call submit_design first.` : '',
@@ -1612,7 +1615,7 @@ export class Orchestrator implements RunnerHandlers {
     return { ok: true, message: `Design v${version!.version} goes to the reviewer next, then to the human. You can stop now.` }
   }
 
-  #prBody(ref: string, title: string, summary: string, criteria: { id: string, text: string }[], attached: { criterionId: string | null }[]): string {
+  #prBody(ref: string, title: string, summary: string, criteria: { id: string, text: string, checkedByHuman: boolean }[], attached: { criterionId: string | null }[]): string {
     const link = `${this.#d.publicUrl}/tasks/${ref}`
     // Table cells can't hold newlines or bare pipes
     const cell = (text: string) => text.replace(/\s*\n\s*/g, ' ').replaceAll('|', '\\|')
@@ -1627,7 +1630,7 @@ export class Orchestrator implements RunnerHandlers {
       '| --- | --- |',
       ...criteria.map((c) => {
         const n = attached.filter(e => e.criterionId === c.id).length
-        return `| ${cell(c.text)} | ${n} item${n === 1 ? '' : 's'} |`
+        return `| ${cell(c.text)} | ${c.checkedByHuman ? 'Needs human check' : `${n} item${n === 1 ? '' : 's'}`} |`
       }),
       '',
       `Screenshots, logs and the reviewer's verdicts are on the [evidence page](${link}?evidence=1).`,
@@ -1703,10 +1706,10 @@ export function noteProblem(note: string | undefined): string | null {
 }
 
 // The review as a comment the developer reads next round
-export function feedbackComment(summary: string, verdicts: { criterionId: string, met: boolean, note: string }[], criteria: { id: string, text: string }[]): string {
+export function feedbackComment(summary: string, verdicts: { criterionId: string, met: boolean | null, note: string }[], criteria: { id: string, text: string }[]): string {
   const lines = verdicts.map((v) => {
     const text = criteria.find(c => c.id === v.criterionId)?.text ?? v.criterionId
-    return `- ${v.met ? '✅' : '❌'} ${text}${v.note ? ` — ${v.note}` : ''}`
+    return `- ${v.met === null ? 'Needs human check:' : v.met ? '✅' : '❌'} ${text}${v.note ? ` — ${v.note}` : ''}`
   })
   return [summary.trim(), '', ...lines].join('\n').trim()
 }
