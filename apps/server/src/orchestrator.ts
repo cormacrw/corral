@@ -831,6 +831,8 @@ export class Orchestrator implements RunnerHandlers {
     }
     const blob = await transcripts.finish(ctx.run.id)
     if (blob) await db.update(runs).set({ transcriptBlob: blob }).where(eq(runs.id, ctx.run.id))
+    // Kept whether or not the run is live: an accepted outcome already ended it
+    if (message.timings) await db.update(runs).set({ timings: message.timings }).where(eq(runs.id, ctx.run.id))
     await this.#publish(ctx)
     this.poke()
   }

@@ -390,27 +390,27 @@ export const runs: Run[] = [
     runnerId: 'runner-1', runnerName: 'home-server', id: 'r-1', number: 128, agentId: 'a-dev2', agentName: 'Dana', role: 'developer', projectId: 'p-corral',
     taskId: at('COR-3').id, taskRef: 'COR-3', taskTitle: at('COR-3').title, state: 'running', outcome: null, summary: null,
     error: null, headSha: null, inputTokens: 18_200, cacheReadTokens: 240_000, outputTokens: 6_100, rateLimitResetAt: null,
-    queuedAt: ago(25), startedAt: ago(24), endedAt: null
+    queuedAt: ago(25), startedAt: ago(24), endedAt: null, timings: null
   },
   {
     runnerId: 'runner-1', runnerName: 'home-server', id: 'r-2', number: 129, agentId: 'a-rev', agentName: 'Rita', role: 'reviewer', projectId: 'p-corral',
     taskId: at('COR-4').id, taskRef: 'COR-4', taskTitle: at('COR-4').title, state: 'running', outcome: null, summary: null,
     error: null, headSha: '9e71e28', inputTokens: 9_000, cacheReadTokens: 80_000, outputTokens: 1_200, rateLimitResetAt: null,
-    queuedAt: ago(8), startedAt: ago(7), endedAt: null
+    queuedAt: ago(8), startedAt: ago(7), endedAt: null, timings: null
   },
   {
     runnerId: 'runner-1', runnerName: 'home-server', id: 'r-3', number: 127, agentId: 'a-dev', agentName: 'Victor', role: 'developer', projectId: 'p-corral',
     taskId: at('COR-5').id, taskRef: 'COR-5', taskTitle: at('COR-5').title, state: 'completed', outcome: 'pr_opened',
     summary: 'Approving a version marks it approved and supersedes earlier ones.', error: null, headSha: '5b030d7',
     inputTokens: 30_000, cacheReadTokens: 400_000, outputTokens: 9_800, rateLimitResetAt: null,
-    queuedAt: ago(140), startedAt: ago(139), endedAt: ago(95)
+    queuedAt: ago(140), startedAt: ago(139), endedAt: ago(95), timings: null
   },
   {
     runnerId: 'runner-2', runnerName: 'macbook', id: 'r-5', number: 126, agentId: 'a-rev', agentName: 'Rita', role: 'reviewer', projectId: 'p-corral',
     taskId: at('COR-5').id, taskRef: 'COR-5', taskTitle: at('COR-5').title, state: 'completed', outcome: 'approved',
     summary: 'Every criterion is met.', error: null, headSha: '5b030d7',
     inputTokens: 12_000, cacheReadTokens: 90_000, outputTokens: 2_000, rateLimitResetAt: null,
-    queuedAt: ago(90), startedAt: ago(89), endedAt: ago(80)
+    queuedAt: ago(90), startedAt: ago(89), endedAt: ago(80), timings: null
   },
   // One of each way a run gets cut off, so the Activity tab and the run list show their errors
   ...([
@@ -439,7 +439,7 @@ export const runs: Run[] = [
     runnerId: 'runner-1', runnerName: 'home-server', id: 'r-4', number: 130, agentId: 'a-dev', agentName: 'Victor', role: 'developer', projectId: 'p-site',
     taskId: at('WEB-3').id, taskRef: 'WEB-3', taskTitle: at('WEB-3').title, state: 'running', outcome: null, summary: null,
     error: null, headSha: null, inputTokens: 4_000, cacheReadTokens: 22_000, outputTokens: 900, rateLimitResetAt: null,
-    queuedAt: ago(5), startedAt: ago(4), endedAt: null
+    queuedAt: ago(5), startedAt: ago(4), endedAt: null, timings: null
   }
 ]
 

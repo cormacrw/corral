@@ -70,6 +70,47 @@ describe('RunManager runtimes', () => {
     expect(args.slice(-2)).toEqual(['--', 'Plan it'])
   })
 
+  it('reports phase and tool timings on run.ended for a Codex run', async () => {
+    const fixture = join(import.meta.dirname, 'fixtures', 'codex', 'tools.jsonl')
+    const codexBin = join(dirname(dataDir), 'codex')
+    await writeFile(codexBin, `#!/bin/sh\ncat ${JSON.stringify(fixture)}\n`)
+    await chmod(codexBin, 0o755)
+    const manager = new RunManager({ ...config, codexBin }, connection, tools)
+    manager.assign(pmJob({ runId: 'r1', runtime: 'codex' }))
+    const ended = (await finish('r1')).find(m => m.type === 'run.ended')!
+    const timings = (ended as Extract<RunnerMessage, { type: 'run.ended' }>).timings!
+
+    expect(timings.phases.map(p => p.phase)).toEqual(expect.arrayContaining(['worktree_prepare', 'session_setup', 'agent_cold_start']))
+    expect(timings.tools.map(t => t.tool)).toEqual(expect.arrayContaining(['Bash', 'Edit']))
+    for (const tool of timings.tools) expect(tool.count).toBeGreaterThan(0)
+    const sum = timings.phases.reduce((total, p) => total + p.durationMs, 0)
+    expect(Math.abs(sum - timings.totalMs)).toBeLessThanOrEqual(timings.phases.length)
+  })
+
+  it('times a Claude Code run from its parsed tool events, and a resumed one as a resume', async () => {
+    const runtime = fakeRuntime('claude-code', [])
+    const spawn = runtime.spawn.bind(runtime)
+    runtime.spawn = (options) => {
+      options.onLine('{}', { events: [{ type: 'tool_call', id: 't1', tool: 'Read', input: {} }], sessionId: null, rateLimit: null, result: null })
+      options.onLine('{}', { events: [{ type: 'tool_result', id: 't1', output: '', isError: false }], sessionId: null, rateLimit: null, result: null })
+      return spawn(options)
+    }
+    const manager = new RunManager({ ...config, pmWarmSeconds: 0 }, connection, tools, new Map([['claude-code', runtime]]))
+    manager.assign(pmJob({ runId: 'r1', agentSessionId: 'old', planSessionId: 's1' }))
+    const ended = (await finish('r1')).find(m => m.type === 'run.ended') as Extract<RunnerMessage, { type: 'run.ended' }>
+
+    expect(ended.timings!.phases.map(p => p.phase)).toContain('agent_resume')
+    expect(ended.timings!.phases.map(p => p.phase)).not.toContain('agent_cold_start')
+    expect(ended.timings!.tools).toEqual([expect.objectContaining({ tool: 'Read', count: 1 })])
+  })
+
+  it('still sends timings for a run that never started an agent', async () => {
+    const manager = new RunManager(config, connection, tools)
+    manager.assign(pmJob({ runId: 'r1', runtime: 'nope' }))
+    const ended = (await finish('r1')).find(m => m.type === 'run.ended') as Extract<RunnerMessage, { type: 'run.ended' }>
+    expect(ended.timings).toMatchObject({ phases: [{ phase: 'other' }], tools: [] })
+  })
+
   it('ends a job with an unknown runtime with an error that names it', async () => {
     const manager = new RunManager(config, connection, tools)
     manager.assign(pmJob({ runId: 'r1', runtime: 'nope' }))

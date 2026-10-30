@@ -1,4 +1,4 @@
-import { runLifecycleSchema, type Agent, type CreateAgentInput, type Evidence, type PatchAgentInput, type Review, type Run } from '@corral/contracts'
+import { runLifecycleSchema, type Agent, type CreateAgentInput, type Evidence, type PatchAgentInput, type Review, type Run, type RunTimings } from '@corral/contracts'
 import { ACTIVE_RUN_STATES, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, count, desc, eq, inArray, type SQL } from 'drizzle-orm'
@@ -45,6 +45,7 @@ function toRun({ run, agentName, prefix, taskNumber, taskTitle }: RunJoin): Run 
     rateLimitResetAt: run.rateLimitResetAt?.toISOString() ?? null,
     queuedAt: run.queuedAt.toISOString(),
     startedAt: run.startedAt?.toISOString() ?? null,
+    timings: run.timings as RunTimings | null,
     // The checks on the runs table allow only what this accepts
     ...runLifecycleSchema.parse({ role: run.role, state: run.state, outcome: run.outcome, endedAt: run.endedAt?.toISOString() ?? null })
   }

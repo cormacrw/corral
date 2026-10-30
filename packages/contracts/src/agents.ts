@@ -9,7 +9,7 @@ import {
 } from '@corral/core'
 import { z } from 'zod'
 import { agentRuntime } from './agent-runtimes.ts'
-import type { RunnerInfo } from './runner.ts'
+import type { RunnerInfo, RunTimings } from './runner.ts'
 import type { Comment } from './tasks.ts'
 
 // ── Control panel (PRD §7.11) ────────────────────────────────────────────────
@@ -100,6 +100,7 @@ export type RunLifecycle = z.infer<typeof runLifecycleSchema>
 export type Run = RunFields & RunLifecycle
 
 interface RunFields {
+  timings: RunTimings | null
   runnerId: string | null
   // The runner's name when the run was placed on it
   runnerName: string | null

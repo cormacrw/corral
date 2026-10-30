@@ -1,4 +1,4 @@
-import type { Inbox, Project, RunJob, Task } from '@corral/contracts'
+import type { Inbox, Project, Run, RunJob, RunTimings, Task } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { and, asc, eq, ne } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -154,6 +154,9 @@ describe('orchestrator', () => {
     t.clock.now = new Date(t.clock.now.getTime() + 16 * 60_000)
     await t.orchestrator.sweepLeases()
     expect(await runRow(job.runId)).toMatchObject({ state: 'interrupted' })
+    // An older runner sends no timings
+    const run = await t.request('GET', `/api/runs/${job.runId}`).then(r => r.json()) as Run
+    expect(run).toMatchObject({ state: 'interrupted', timings: null })
     expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', leaseRunId: null, failedRuns: 0 })
     await runner.next('run.stop', m => m.runId === job.runId)
     // A heartbeat for the dead run is told to stop
@@ -224,9 +227,16 @@ describe('orchestrator', () => {
     // The run is over: later calls from it are rejected, and its exit is ignored
     const late = await runner.call(job.runId, job.leaseEpoch, 'add_comment', { body: 'late' })
     expect(late).toMatchObject({ ok: false })
-    runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'stopped' }, headSha: 'abc123' })
+    const timings: RunTimings = {
+      totalMs: 1500,
+      phases: [{ phase: 'worktree_prepare', durationMs: 500 }, { phase: 'agent_cold_start', durationMs: 900 }, { phase: 'push', durationMs: 100 }],
+      tools: [{ tool: 'Bash', count: 2, totalMs: 300, maxMs: 200 }]
+    }
+    runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'stopped' }, headSha: 'abc123', timings })
     await sleep(200)
     expect(await runRow(job.runId)).toMatchObject({ state: 'completed', outcome: 'pr_opened' })
+    // The exit is ignored, but its timings are the run's record
+    expect(await t.request('GET', `/api/runs/${job.runId}`).then(r => r.json())).toMatchObject({ timings })
     const evidence = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/evidence`).then(r => r.json()) as { id: string, url: string }[]
     expect(evidence).toHaveLength(1)
     const file = await t.request('GET', evidence[0]!.url)

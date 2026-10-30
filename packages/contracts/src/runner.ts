@@ -81,6 +81,30 @@ export type DesignerRunJob = z.infer<typeof designerRunJobSchema>
 // Structured run events, in the runtime-neutral shape web shows (rule 7)
 export type RunEvent = z.infer<typeof runEventSchema>
 
+// Where a run's time went. An `agent_*` phase is one agent process or turn,
+// less any phase nested in it: a push or design pack inside a tool call
+// pauses the agent's clock. `other` is everything unnamed.
+export type RunPhase =
+  | 'worktree_prepare'
+  | 'session_setup'
+  | 'design_save'
+  | 'agent_cold_start'
+  | 'agent_resume'
+  | 'agent_warm_turn'
+  | 'design_pack'
+  | 'push'
+  | 'finish'
+  | 'other'
+
+// Measured by the runner from assignment to run.ended, so totalMs starts
+// before the run's startedAt and can end after its endedAt.
+export interface RunTimings {
+  totalMs: number
+  // In the order the run first entered them; they add up to totalMs
+  phases: { phase: RunPhase, durationMs: number }[]
+  tools: { tool: string, count: number, totalMs: number, maxMs: number }[]
+}
+
 export type RunExit = z.infer<typeof runExitSchema>
 
 // Tools an agent can call. The runner forwards each one with the run's lease
@@ -282,7 +306,7 @@ export const runnerMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('run.started'), sentAt: z.number().optional(), runId: z.string(), leaseEpoch: z.number(), agentSessionId: z.union([z.string(), z.null()]) }),
   z.object({ type: z.literal('run.events'), runId: z.string(), leaseEpoch: z.number(), events: z.array(runEventSchema) }),
   // wipSha: the commit that saved a stopped developer run's work, once pushed
-  z.object({ type: z.literal('run.ended'), runId: z.string(), leaseEpoch: z.number(), exit: runExitSchema, headSha: z.union([z.string(), z.null()]), lastActivityAt: z.union([z.string(), z.null()]).optional(), wipSha: z.union([z.string(), z.null()]).optional() }),
+  z.object({ type: z.literal('run.ended'), runId: z.string(), leaseEpoch: z.number(), exit: runExitSchema, headSha: z.union([z.string(), z.null()]), lastActivityAt: z.union([z.string(), z.null()]).optional(), wipSha: z.union([z.string(), z.null()]).optional(), timings: z.object({ totalMs: z.number(), phases: z.array(z.object({ phase: z.enum(['worktree_prepare', 'session_setup', 'design_save', 'agent_cold_start', 'agent_resume', 'agent_warm_turn', 'design_pack', 'push', 'finish', 'other']), durationMs: z.number() })), tools: z.array(z.object({ tool: z.string(), count: z.number(), totalMs: z.number(), maxMs: z.number() })) }).optional() }),
   z.object({ type: z.literal('tool.call'), callId: z.string(), runId: z.string(), leaseEpoch: z.number(), tool: agentToolSchema, input: z.unknown() }),
   z.object({ type: z.literal('run.message.rejected'), runId: z.string(), leaseEpoch: z.number(), text: z.string(), error: z.string() })
 ])

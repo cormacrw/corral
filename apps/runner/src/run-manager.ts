@@ -11,6 +11,7 @@ import { packDesign, saveDesign } from './designs.ts'
 import { convertToMp4 } from './evidence-video.ts'
 import { outcomesFor, toolRefusal, toolsFor, type ToolOutcome, type ToolServer } from './mcp.ts'
 import { headSha, prepareWorkspace, pushBranch, readProjectBrief, readRoleInstructions, saveStoppedWork } from './workspace.ts'
+import { RunTimer } from './run-timings.ts'
 
 // Runs on this runner (flows.md §2 steps 3–5, PRD §8.6). Each run gets a
 // worktree, a secret MCP path, and an agent process in its own process
@@ -107,6 +108,7 @@ interface ActiveRun {
   session: AgentSession | null
   // Messages that arrived while there was no live session to take them
   queuedMessages: string[]
+  timer: RunTimer
 }
 
 // A PM session's agent process kept alive between turns (D9). It holds no
@@ -221,7 +223,8 @@ export class RunManager {
       spool: null,
       unregisterTools: null,
       session: null,
-      queuedMessages: []
+      queuedMessages: [],
+      timer: new RunTimer()
     }
     this.#runs.set(job.runId, run)
     this.#start(run).catch((error: unknown) => {
@@ -342,7 +345,7 @@ export class RunManager {
 
     // A PM follow-up turn reuses its session's checkout; the note is noise there
     if (!(job.role === 'pm' && job.agentSessionId)) this.#note(run, `Preparing a worktree for ${job.repository}${job.branch ? ` on ${job.branch}` : ''}`)
-    const prepared = await prepareWorkspace(this.#config.dataDir, job)
+    const prepared = await run.timer.during('worktree_prepare', () => prepareWorkspace(this.#config.dataDir, job))
     if (prepared.workspace === null) {
       this.#end(run, { kind: 'error', message: prepared.error })
       return
@@ -360,7 +363,7 @@ export class RunManager {
       run.sessionId = warm.sessionId
       run.sawInit = true
       this.#started(run)
-      this.#noteExit(run, await this.#warmTurn(run, warm, job.prompt))
+      this.#noteExit(run, await run.timer.during('agent_warm_turn', () => this.#warmTurn(run, warm, job.prompt)))
       this.#flush(run)
     } else {
       await this.#coldStart(run, prepared.workspace.path)
@@ -376,12 +379,12 @@ export class RunManager {
   async #coldStart(run: ActiveRun, worktree: string): Promise<void> {
     const { job } = run
     const mcpConfigPath = join(run.scratchDir, 'mcp.json')
-    // A warm process registers its own tools, since it outlives this run
-    if (!this.#keepsWarm(job)) run.unregisterTools = await this.#registerTools(mcpConfigPath, job, (tool, input) => this.#toolCall(run, tool, input))
-
-    const instructions = await readRoleInstructions(worktree, job.role)
-    const brief = await readProjectBrief(worktree)
-    const design = job.designPinned ? await this.#savePinnedDesign(run) : null
+    const { instructions, brief } = await run.timer.during('session_setup', async () => {
+      // A warm process registers its own tools, since it outlives this run
+      if (!this.#keepsWarm(job)) run.unregisterTools = await this.#registerTools(mcpConfigPath, job, (tool, input) => this.#toolCall(run, tool, input))
+      return { instructions: await readRoleInstructions(worktree, job.role), brief: await readProjectBrief(worktree) }
+    })
+    const design = job.designPinned ? await run.timer.during('design_save', () => this.#savePinnedDesign(run)) : null
     const systemPrompt = `${instructions}\n\n${brief ? `${brief}\n\n` : ''}${runnerNotes(run, job, design)}`
 
     run.timeoutTimer = setTimeout(() => this.stop(job.runId, 'timed_out', `${job.timeoutSeconds} s`), job.timeoutSeconds * 1000)
@@ -424,11 +427,11 @@ export class RunManager {
   async #spawn(run: ActiveRun, options: SpawnOptions): Promise<void> {
     if (run.stopping || run.ended) return
     run.signalledByCorral = false
-    const exit = this.#keepsWarm(run.job)
+    const exit = await run.timer.during(options.resume ? 'agent_resume' : 'agent_cold_start', async () => this.#keepsWarm(run.job)
       ? await this.#warmTurn(run, await this.#spawnWarm(run, options), options.prompt)
       : this.#takesMessages(run.job)
         ? await this.#spawnSession(run, options)
-        : await this.#spawnOnce(run, options)
+        : await this.#spawnOnce(run, options))
     this.#flush(run)
     // A failed --resume waits: the fresh session that replaces it is the one
     // the server must record, or the next turn tries the dead one again
@@ -602,6 +605,7 @@ export class RunManager {
     if (parsed.sessionId && !run.started) this.#started(run)
     if (parsed.rateLimit) run.rateLimit = parsed.rateLimit
     if (raw || parsed.events.length > 0) run.lastActivityAt = new Date().toISOString()
+    run.timer.observe(parsed.events)
     this.#queue(run, parsed.events)
   }
 
@@ -641,14 +645,14 @@ export class RunManager {
     run.unregisterTools?.()
     run.spool?.end()
     const finish = (sha: string | null, wipSha: string | null = null) => {
-      this.#connection.send({ type: 'run.ended', runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, exit, headSha: sha, lastActivityAt: run.lastActivityAt, wipSha })
+      this.#connection.send({ type: 'run.ended', runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, exit, headSha: sha, lastActivityAt: run.lastActivityAt, wipSha, timings: run.timer.finish() })
       this.#runs.delete(run.job.runId)
       this.#connection.refreshUpdateStatus?.()
       run.closed.resolve()
     }
     const worktree = run.worktree
     if (worktree && (run.job.role === 'developer' || run.job.role === 'designer')) {
-      run.closing = this.#saveWork(run, worktree, exit).then(wipSha => headSha(worktree).then(sha => finish(sha, wipSha)), () => finish(null))
+      run.closing = run.timer.during('finish', () => this.#saveWork(run, worktree, exit).then(wipSha => headSha(worktree).then(sha => ({ sha, wipSha })))).then(({ sha, wipSha }) => finish(sha, wipSha), () => finish(null))
     } else {
       finish(null)
     }
@@ -688,15 +692,17 @@ export class RunManager {
     }
 
     if (tool === 'get_design') {
-      const design = await this.#forward(run, tool, input)
-      if (!design.ok) return design
-      return saveDesign(run.scratchDir, design.result as Parameters<typeof saveDesign>[1])
+      return run.timer.during('design_save', async () => {
+        const design = await this.#forward(run, tool, input)
+        if (!design.ok) return design
+        return saveDesign(run.scratchDir, design.result as Parameters<typeof saveDesign>[1])
+      })
     }
 
     // D20: pack the bundle, push the design branch, then the server records
     // a new version at the pushed commit
     if (tool === 'submit_design') {
-      const packed = await packDesign(run.worktree!, input)
+      const packed = await run.timer.during('design_pack', () => packDesign(run.worktree!, input))
       if (!packed.ok) return packed
       const pushed = await this.#push(run)
       if (!pushed.ok) return pushed
@@ -734,7 +740,8 @@ export class RunManager {
 
   async #push(run: ActiveRun): Promise<{ ok: true, result: string } | { ok: false, error: string }> {
     if (!run.job.branch) return { ok: false, error: 'This run has no branch to push' }
-    const pushed = await pushBranch(run.worktree!, run.job.branch)
+    const branch = run.job.branch
+    const pushed = await run.timer.during('push', () => pushBranch(run.worktree!, branch))
     if (pushed.sha === null) return { ok: false, error: `Corral could not push your branch: ${pushed.error}. Commit your work and try again.` }
     this.#note(run, `Pushed ${pushed.sha.slice(0, 10)} to ${run.job.branch}`)
     return { ok: true, result: pushed.sha }
