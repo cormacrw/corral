@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ProjectOverview } from '~/composables/useProjectOverview'
-import { duration, inboxTypeBadge, initials, projectColor, STATUS, timeAgo } from '~/utils/labels'
+import { duration, inboxTypeBadge, STATUS, timeAgo } from '~/utils/labels'
 
 // Project overview on mobile (design/mobile.md, frame "Project overview").
 // The same sections as the web page in one column, with links to the
@@ -27,11 +27,10 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
     >
       <header class="flex flex-col gap-4 px-4">
         <div class="flex items-center gap-3">
-          <span
-            class="flex size-11 shrink-0 items-center justify-center rounded-lg text-lg font-semibold text-white"
-            :style="{ background: projectColor(project) }"
-            aria-hidden="true"
-          >{{ initials(project.name) }}</span>
+          <ProjectThumbnail
+            :project="project"
+            :size="44"
+          />
           <div class="min-w-0">
             <div class="flex items-center gap-2">
               <h2 class="truncate text-2xl font-semibold text-highlighted">

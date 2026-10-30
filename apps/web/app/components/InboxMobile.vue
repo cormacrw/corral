@@ -108,10 +108,9 @@ const tabs = computed(() => [
                   size="sm"
                 />
                 <span class="flex items-center gap-1">
-                  <span
-                    class="size-2 rounded-full"
-                    :style="{ background: selected.project.thumbnailColor ?? '#64748b' }"
-                    aria-hidden="true"
+                  <ProjectThumbnail
+                    :project="selected.project"
+                    :size="16"
                   />{{ selected.project.name }}
                 </span>
               </span>
@@ -352,10 +351,9 @@ const tabs = computed(() => [
                   size="sm"
                 />
                 <span class="flex min-w-0 items-center gap-1 truncate text-xs text-muted">
-                  <span
-                    class="size-2 shrink-0 rounded-full"
-                    :style="{ background: item.project.thumbnailColor ?? '#64748b' }"
-                    aria-hidden="true"
+                  <ProjectThumbnail
+                    :project="item.project"
+                    :size="16"
                   />{{ item.project.name }} · {{ item.taskRef }}
                 </span>
               </span>

@@ -55,6 +55,7 @@ route('POST', '/setup/check-repo', (_, body) => ({
 }))
 route('GET', '/setup/clis', () => f.clis)
 
+// Return the complete project, including its bundled thumbnailUrl, just like the API.
 route('GET', '/projects', () => f.projects)
 route('GET', '/projects/:slug', ([slug]) => project(slug!))
 route('PATCH', '/projects/:slug', ([slug], body) => Object.assign(project(slug!), body))

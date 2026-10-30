@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { duration, initials, projectColor, STATUS, timeAgo } from '~/utils/labels'
+import { duration, STATUS, timeAgo } from '~/utils/labels'
 
 // Project overview (design/project-overview.md). Mobile gets
 // MobileProjectOverview (design/mobile.md) over the same data.
@@ -25,10 +25,10 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
       class="mx-auto flex w-full max-w-[1200px] flex-col gap-6 p-6"
     >
       <header class="flex flex-wrap items-center gap-4">
-        <span
-          class="flex size-11 items-center justify-center rounded-lg text-lg font-semibold text-white"
-          :style="{ background: projectColor(project) }"
-        >{{ initials(project.name) }}</span>
+        <ProjectThumbnail
+          :project="project"
+          :size="44"
+        />
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2">
             <h1 class="text-2xl font-semibold">

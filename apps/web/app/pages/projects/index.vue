@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { initials, projectColor } from '~/utils/labels'
-
 // The Projects tab: MobileProjects on mobile (design/mobile.md), a plain
 // project list on the web
 const state = useLive().state
@@ -25,10 +23,10 @@ useSeoMeta({ title: 'Projects · Corral' })
         color="neutral"
         class="justify-start"
       >
-        <span
-          class="flex size-6 shrink-0 items-center justify-center rounded text-[10px] font-semibold text-white"
-          :style="{ background: projectColor(project) }"
-        >{{ initials(project.name) }}</span>
+        <ProjectThumbnail
+          :project="project"
+          :size="24"
+        />
         <span class="truncate">{{ project.name }}</span>
         <span
           v-if="project.paused"

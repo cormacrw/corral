@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { Inbox } from '@corral/contracts'
 import { api } from '~/composables/useApi'
-import { initials, projectColor } from '~/utils/labels'
 import { projectCardSummary } from '~/utils/projects'
 
 // The mobile Projects tab (design/mobile.md, frame "Projects"): a card per
@@ -57,11 +56,10 @@ const cards = computed(() => state.value.projects.map((project) => {
         :to="`/projects/${card.project.slug}`"
         class="flex items-center gap-3 p-3.5 pb-2"
       >
-        <span
-          class="flex size-9 shrink-0 items-center justify-center rounded-lg text-sm font-semibold text-white"
-          :style="{ background: projectColor(card.project) }"
-          aria-hidden="true"
-        >{{ initials(card.project.name) }}</span>
+        <ProjectThumbnail
+          :project="card.project"
+          :size="36"
+        />
         <span class="min-w-0 flex-1">
           <span class="flex items-center gap-2">
             <span class="truncate font-semibold text-highlighted">{{ card.project.name }}</span>

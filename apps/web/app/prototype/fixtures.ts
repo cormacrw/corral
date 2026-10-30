@@ -1,3 +1,4 @@
+import corralThumbnail from '~/assets/images/corral-thumbnail.svg'
 import type {
   Agent,
   AuditEntry,
@@ -51,7 +52,7 @@ export const projects: Project[] = [
     name: 'Corral',
     slug: 'corral',
     prefix: 'COR',
-    thumbnailUrl: null,
+    thumbnailUrl: corralThumbnail,
     thumbnailColor: '#14b8a6',
     nextTaskNumber: 13,
     repository: 'cormacrw/corral',

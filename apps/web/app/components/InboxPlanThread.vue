@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Plan, PlanThreadItem } from '@corral/contracts'
 import { api } from '~/composables/useApi'
-import { projectColor, runtimeLabel } from '~/utils/labels'
+import { runtimeLabel } from '~/utils/labels'
 import { approvedMessage } from '~/utils/plan-approval'
 import { STOP_ASKING } from '~/utils/plan-questions'
 
@@ -133,9 +133,9 @@ async function close() {
   <div class="flex h-full min-h-0 min-w-0 flex-1">
     <div class="flex min-w-0 flex-1 flex-col">
       <header class="flex h-14 shrink-0 items-center gap-2 border-b border-default px-4 text-sm">
-        <span
-          class="size-2.5 shrink-0 rounded-full"
-          :style="{ background: projectColor(item.project) }"
+        <ProjectThumbnail
+          :project="item.project"
+          :size="20"
         />
         <span class="shrink-0 text-muted">{{ item.project.name }}</span>
         <h1 class="truncate font-medium">
