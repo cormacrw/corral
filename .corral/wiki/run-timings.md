@@ -25,3 +25,15 @@ calls each count in full, so tool totals can exceed the agent's phase time.
 
 `timings` is null for runs that haven't ended, runs from older runners, and runs
 whose `run.ended` never arrived. Nothing depends on it being present.
+
+The desktop and mobile run pages share `RunTimingBreakdown.vue`. When timings
+are present it shows a stacked phase bar, phases sorted by duration with the
+largest marked, and tools sorted by total time with count and max. The panel
+scrolls with the transcript, so long lists remain reachable on phones. Runs
+without timings keep the transcript alone. Prototype Victor run `r-3` includes
+phase/tool timings; Rita run `r-5` is a finished run without them.
+
+Queue wait is displayed separately as queued-to-started, explicitly including
+preparation. The API exposes no assignment timestamp, and `startedAt` follows
+preparation, so this interval overlaps preparation phases and must not be added
+to the runner's phase bar or total.
