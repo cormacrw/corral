@@ -152,6 +152,11 @@ export class RunManager {
     return this.#runs.size
   }
 
+  // Set from assign on, so a turn still preparing its checkout counts
+  pmTurnRunning(planSessionId: string): boolean {
+    return [...this.#runs.values()].some(r => !r.ended && r.job.role === 'pm' && r.job.planSessionId === planSessionId)
+  }
+
   handle(message: ServerMessage): void {
     switch (message.type) {
       case 'run.assign':

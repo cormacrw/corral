@@ -3,12 +3,13 @@ import type { RepoSummary, SetupJob, SetupJobResult } from '@corral/contracts'
 import type { RunnerConfig } from './config.ts'
 import { exec } from './exec.ts'
 import { barePath, conflictingFiles, syncRepository } from './repos.ts'
-import { removeWorktree, worktreePath } from './workspace.ts'
+import { removeWorktree, sweepWorktrees, worktreePath } from './workspace.ts'
 
 // Setup jobs from the server (architecture.md, "Setup jobs, not only agent
 // runs"). Tokens stay in `gh`'s, `claude`'s and `codex`'s own config; these only report
-// whether a login exists (D2, D12).
-export async function runSetupJob(config: RunnerConfig, job: SetupJob): Promise<SetupJobResult> {
+// whether a login exists (D2, D12). `pmTurnRunning` says whether a Plan
+// session has a turn in progress on this runner.
+export async function runSetupJob(config: RunnerConfig, job: SetupJob, pmTurnRunning: (planSessionId: string) => boolean = () => false): Promise<SetupJobResult> {
   switch (job.kind) {
     case 'list_repos': {
       if (!(await ghSignedIn())) return { kind: 'list_repos', signedIn: false }
@@ -56,6 +57,8 @@ export async function runSetupJob(config: RunnerConfig, job: SetupJob): Promise<
       if (error) throw new Error(error)
       return { kind: 'rebase_conflicts', files: await conflictingFiles(barePath(config.dataDir, job.repository), job.branch, job.onto) }
     }
+    case 'sweep_worktrees':
+      return { kind: 'sweep_worktrees', ...await sweepWorktrees(config.dataDir, job, pmTurnRunning) }
 
     case 'session_title':
       return { kind: 'session_title', title: await sessionTitle(config, job.prompt) }

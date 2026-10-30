@@ -42,6 +42,10 @@ Three processes. In development they're all started together by `turbo dev`; whe
 
 The server keeps connections keyed by runner ID. A connection becomes available for dispatch after its hello snapshot is reconciled. Different IDs coexist; a reconnect replaces only that ID's socket and rejects only its pending setup jobs. Each dispatched run records its nullable `runnerId` before assignment; historical rows remain null. Stops, messages, lease-expiry stops and run traffic are scoped to that owner. Reconnect reconciliation interrupts only that runner's missing runs, and heartbeats renew only its leases.
 
+A `sweep_worktrees` setup job removes every folder under `worktrees/` whose task or Plan session isn't in the job's keep list, through its bare clone (or `rm -rf` for a folder no clone knows). Developer worktrees and orphans with uncommitted changes stay and are returned in `kept`, review and PM worktrees are force-removed, the checkout of a PM turn running on that runner is never touched, and names that aren't `<uuid>`, `<uuid>-review` or `pm-<uuid>-<uuid>` are left alone.
+
+The server broadcasts that job to every online runner each time a runner connects and then hourly, and skips it with none online (`apps/server/src/worktree-sweep.ts`). The keep list is every task that isn't merged or deleted, plus every Plan session with a PM turn active or `updatedAt` within `PM_WORKTREE_TTL` (24 hours). Each sweep is one `worktrees.swept` audit entry with `removed` and `kept`, and it posts no task comments. This also retries a `cleanup_worktrees` from a merge or deletion that found no runner online.
+
 Setup jobs use the online runner connected longest. Worktree cleanup is broadcast to every online runner. With any runner online, dispatch and setup remain available; with none online, setup returns `503 runner_offline` and PM turns wait. `GET /api/status` includes `runners`, and `/api/runner` and `runner.status` SSE include the same list (`id`, `name`, `online`, `connectedAt`, `lastHeartbeatAt`) alongside aggregate compatibility fields. Disconnected runners remain listed as offline until server restart. Settings shows each known runner.
 
 ### Runner capacity, runtimes and roles
@@ -166,10 +170,17 @@ The root is configurable (env vars). `pnpm dev` puts it in the checkout's own `.
     config.json                 server URL, runner ID
     repos/<repoId>.git          bare clone, fetched before each job; fetches
                                 and worktree changes run one at a time per clone
-    worktrees/<taskId>/         one per task, removed after merge
+    worktrees/<taskId>/         one per task, removed on merge, approved spike
+                                or task or project deletion, or by a
+                                sweep_worktrees job when outside its keep list;
+                                uncommitted work keeps it in place
+    worktrees/<taskId>-review/  read-only review checkout, removed with the
+                                task's worktree
     worktrees/pm-<projectId>-<planSessionId>/
                                 read-only default-branch checkout, one per Plan
-                                session; stable so the agent CLI can resume
+                                session; stable so the agent CLI can resume;
+                                expires after 24 hours idle and the next turn
+                                recreates it at the same path
     scratch/<runId>/            evidence and other agent scratch output
     scratch/pm-<projectId>-<planSessionId>/
                                 the same, one per Plan session when PM
@@ -283,5 +294,9 @@ Rough estimates, to be checked against real measurements once built.
 At the PRD defaults (1 developer + 1 reviewer): **~2–5 GB peak**. Comfortable on 16 GB; tight on 8 GB above concurrency 1.
 
 **Disk:** each worktree needs its own dependency install (often 0.5–1 GB for `node_modules`). Use pnpm's shared store, install when the worktree is created, and remove worktrees promptly after merge (never discarding uncommitted work; PRD §7.4).
+
+- **Task worktrees** are removed when the task merges, when a spike is approved, and when the task or its project is deleted. The hourly sweep is the backstop for any of these that didn't reach a runner ([flows.md](flows.md) step 10).
+- **PM worktrees** (`pm-<projectId>-<planSessionId>`) expire after 24 hours idle: a sweep removes one once its Plan session's `updatedAt` is older than `PM_WORKTREE_TTL` and no turn is active. They hold nothing of their own, and the next turn recreates the checkout at the same path, so the agent session still resumes.
+- **Uncommitted developer work is always kept.** A developer worktree with uncommitted changes survives every cleanup and sweep until someone removes it by hand. Review and PM checkouts are read-only by contract, so they're force-removed.
 
 **Possible later addition:** the runner checks free memory before claiming work. Not needed for the POC.
