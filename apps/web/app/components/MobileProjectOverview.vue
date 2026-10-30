@@ -120,6 +120,7 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
 
       <ProjectFlow
         :slug="project.slug"
+        :project-id="project.id"
         class="mx-4"
       />
 

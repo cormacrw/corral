@@ -1,6 +1,6 @@
 import type { TaskStatus } from '@corral/core'
 import { describe, expect, it } from 'vitest'
-import { agentStatus, cliLoginCommand, detectedRuntimes, epicInProgress, epicReviewStatus, epicWithLiveCounts, runtimeLabel, runBadge, runTokens, taskCounts, taskTypeBadge, taskNote } from './labels.ts'
+import { agentStatus, cliLoginCommand, detectedRuntimes, formatMs, epicInProgress, epicReviewStatus, epicWithLiveCounts, runtimeLabel, runBadge, runTokens, taskCounts, taskTypeBadge, taskNote } from './labels.ts'
 import { projects, task } from '../prototype/fixtures'
 
 const tasks = (...statuses: TaskStatus[]) => statuses.map(status => ({ status }))
@@ -142,5 +142,12 @@ describe('epic review status', () => {
       { epicId: 'e', status: 'merged' }, { epicId: 'e', status: 'ready' }, { epicId: 'e', status: 'backlog' }, { epicId: 'e', status: 'draft' }, { epicId: 'other', status: 'merged' }
     ])
     expect(counted).toMatchObject({ taskCount: 2, mergedCount: 1 })
+  })
+})
+
+describe('formatMs', () => {
+  it('scales from milliseconds to days', () => {
+    expect([0, 400, 9000, 60_000, 125_000, 3_599_600, 5_400_000, 86_400_000, 129_600_000].map(formatMs))
+      .toEqual(['0 ms', '400 ms', '9.0 s', '1m 0s', '2m 5s', '1h', '1.5h', '1d', '1.5d'])
   })
 })

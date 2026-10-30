@@ -44,7 +44,7 @@ The Ready tile’s waiting-on-dependency count includes each Ready task with an 
 
 ## Charts
 
-The Flow section follows the stat tiles on desktop and mobile. It offers 7d / 30d / 90d windows (30d default), median and p90 lead/cycle times, median status bars with p90 labels, run duration and queue wait by role, and linked slowest tasks. Human review uses warning and the label “Human wait”; agent work uses primary and “Agent time”; other statuses use neutral and “Other wait”. Bars share a median scale and numbers use text tokens. An empty cohort shows “No tasks merged” for the selected window.
+The Flow section follows the stat tiles on desktop and mobile. It offers 7d / 30d / 90d windows (30d default), median and p90 lead/cycle times, median status bars with p90 labels, run duration and queue wait by role, and linked slowest tasks. Queue wait is labelled “Queue wait (queued to started, including preparation)”, the same wording as the run timing breakdown ([agent.md](agent.md)). Live task and run events for this project refresh the figures in place, without the loading skeleton; other projects' events are ignored. Changing project or window clears the figures while loading. Human review uses warning and the label “Human wait”; agent work uses primary and “Agent time”; other statuses use neutral and “Other wait”. Bars share a median scale and numbers use text tokens. An empty cohort shows “No tasks merged” for the selected window.
 
 ## States
 

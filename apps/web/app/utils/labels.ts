@@ -223,6 +223,20 @@ export function duration(startIso: string | null, endIso: string | null, now = D
   return `${minutes}:${String(seconds).padStart(2, '0')}`
 }
 
+// A measured duration, from milliseconds up to days
+export function formatMs(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)} ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`
+  const seconds = Math.round(ms / 1000)
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+  if (seconds < 86_400) return `${Number((ms / 3_600_000).toFixed(1))}h`
+  return `${Number((ms / 86_400_000).toFixed(1))}d`
+}
+
+// startedAt is recorded after worktree/session preparation and the API has no
+// assignment timestamp, so every queue-to-start figure is labelled this way.
+export const QUEUE_WAIT_LABEL = 'Queue wait (queued to started, including preparation)'
+
 export function tokens(n: number | null): string {
   if (n === null) return '—'
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Run, RunPhase } from '@corral/contracts'
+import { QUEUE_WAIT_LABEL, formatMs } from '~/utils/labels'
 
 const props = defineProps<{ run: Run }>()
 const labels: Record<RunPhase, string> = {
@@ -13,17 +14,9 @@ const phases = computed(() => [...(props.run.timings?.phases ?? [])]
   .sort((a, b) => b.durationMs - a.durationMs)
   .map((phase, index) => ({ ...phase, label: labels[phase.phase], color: colors[index % colors.length] })))
 const tools = computed(() => [...(props.run.timings?.tools ?? [])].sort((a, b) => b.totalMs - a.totalMs))
-// startedAt is recorded after worktree/session preparation. The API has no
-// assignment timestamp, so label this queue-to-start interval explicitly.
 const queueMs = computed(() => props.run.startedAt
   ? Math.max(0, Date.parse(props.run.startedAt) - Date.parse(props.run.queuedAt))
   : null)
-function time(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)} ms`
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`
-  const seconds = Math.round(ms / 1000)
-  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
-}
 </script>
 
 <template>
@@ -36,22 +29,22 @@ function time(ms: number): string {
       Run timing breakdown
     </h2>
     <p class="mt-1 text-xs text-muted">
-      Queue wait (queued to started, including preparation): {{ queueMs === null ? 'Unavailable' : time(queueMs) }}
+      {{ QUEUE_WAIT_LABEL }}: {{ queueMs === null ? 'Unavailable' : formatMs(queueMs) }}
     </p>
     <p class="mt-2 text-xs text-muted">
-      Run phases · {{ time(run.timings.totalMs) }} total · slowest first
+      Run phases · {{ formatMs(run.timings.totalMs) }} total · slowest first
     </p>
     <div
       class="mt-2 flex h-3 overflow-hidden rounded-full bg-elevated"
       role="img"
-      :aria-label="phases.map(p => `${p.label}: ${time(p.durationMs)}`).join(', ') || 'No recorded phases'"
+      :aria-label="phases.map(p => `${p.label}: ${formatMs(p.durationMs)}`).join(', ') || 'No recorded phases'"
     >
       <span
         v-for="phase in phases"
         :key="phase.phase"
         :class="[phase.color, 'h-full']"
         :style="{ width: `${run.timings.totalMs > 0 ? phase.durationMs / run.timings.totalMs * 100 : 0}%` }"
-        :title="`${phase.label}: ${time(phase.durationMs)}`"
+        :title="`${phase.label}: ${formatMs(phase.durationMs)}`"
       />
     </div>
     <table class="mt-2 w-full text-xs">
@@ -93,7 +86,7 @@ function time(ms: number): string {
             >· largest</span>
           </th>
           <td class="text-end tabular-nums">
-            {{ time(phase.durationMs) }}
+            {{ formatMs(phase.durationMs) }}
           </td>
         </tr>
       </tbody>
@@ -149,10 +142,10 @@ function time(ms: number): string {
             {{ tool.count }}
           </td>
           <td class="text-end tabular-nums">
-            {{ time(tool.totalMs) }}
+            {{ formatMs(tool.totalMs) }}
           </td>
           <td class="text-end tabular-nums">
-            {{ time(tool.maxMs) }}
+            {{ formatMs(tool.maxMs) }}
           </td>
         </tr>
       </tbody>

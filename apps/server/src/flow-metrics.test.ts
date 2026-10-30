@@ -63,10 +63,14 @@ describe.each(['pglite', 'postgres'] as const)('flow metrics on %s', (driver) =>
     expect(result.mergedTaskCount).toBe(2)
     expect(result.leadTime).toEqual({ medianMs: 75 * hour, p90Ms: 95 * hour })
     expect(result.cycleTime).toEqual({ medianMs: 60 * hour, p90Ms: 76 * hour })
-    expect(result.timeInStatus).toEqual(expect.arrayContaining([
+    expect(result.timeInStatus).toEqual([
+      { status: 'backlog', medianMs: 10 * hour, p90Ms: 10 * hour },
+      { status: 'ready', medianMs: 10 * hour, p90Ms: 10 * hour },
+      { status: 'in_progress', medianMs: 12.5 * hour, p90Ms: 14.5 * hour },
+      { status: 'agent_review', medianMs: 5 * hour, p90Ms: 5 * hour },
       { status: 'human_review', medianMs: 40 * hour, p90Ms: 48 * hour },
-      { status: 'in_progress', medianMs: 12.5 * hour, p90Ms: 14.5 * hour }
-    ]))
+      { status: 'ready_to_merge', medianMs: 10 * hour, p90Ms: 10 * hour }
+    ])
     expect(result.runsByRole).toEqual([
       { role: 'developer', queueWait: { medianMs: 2 * hour, p90Ms: 2.8 * hour }, duration: { medianMs: 4 * hour, p90Ms: 5.6 * hour } },
       { role: 'reviewer', queueWait: { medianMs: 2 * hour, p90Ms: 2 * hour }, duration: { medianMs: hour, p90Ms: hour } }
@@ -98,6 +102,25 @@ describe.each(['pglite', 'postgres'] as const)('flow metrics on %s', (driver) =>
     await t.db.insert(schema.runs).values({ projectId: p.id, taskId: task!.id, agentId: agent!.id, role: 'reviewer', queuedAt: at(-2.5), startedAt: at(-2), endedAt: new Date(at(-1).getTime() + 100) })
     const result = await flowMetrics(t.db, p, '7d', now)
     expect(result.runsByRole).toEqual([{ role: 'reviewer', queueWait: { medianMs: 0.5 * hour, p90Ms: 0.5 * hour }, duration: { medianMs: hour + 100, p90Ms: hour + 100 } }])
+  })
+
+  it('never counts time in Merged when the audit row predates mergedAt', async () => {
+    const p = await t.createProject()
+    const seed = async (number: number, type: 'task' | 'spike', from: string, createdHours: number) => {
+      const [task] = await t.db.insert(schema.tasks).values({ projectId: p.id, number, createdBy: t.actor, title: 'Merged', type, status: 'merged', createdAt: at(createdHours), mergedAt: at(-1) }).returning()
+      // The audit row takes the transaction's start time, mergedAt the app clock
+      await t.db.insert(schema.auditLog).values({ projectId: p.id, taskId: task!.id, actor: t.actor, action: 'task.transition', detail: { from, to: 'merged' }, createdAt: new Date(at(-1).getTime() - 28) })
+    }
+    await seed(1, 'task', 'ready_to_merge', -3)
+    await seed(2, 'task', 'human_review', -5) // merged_outside
+    await seed(3, 'spike', 'agent_review', -9)
+    const result = await flowMetrics(t.db, p, '7d', now)
+    expect(result.timeInStatus).toEqual([
+      { status: 'agent_review', medianMs: 8 * hour - 28, p90Ms: 8 * hour - 28 },
+      { status: 'human_review', medianMs: 4 * hour - 28, p90Ms: 4 * hour - 28 },
+      { status: 'ready_to_merge', medianMs: 2 * hour - 28, p90Ms: 2 * hour - 28 }
+    ])
+    expect(result.slowestTasks.map(task => task.dominantStatus)).toEqual(['agent_review', 'human_review', 'ready_to_merge'])
   })
 
   it('serves zero/empty metrics and validates windows and project slugs', async () => {

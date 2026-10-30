@@ -42,6 +42,7 @@ See what an agent is doing right now, attach to its live run, and look back at p
    - **Outcome badges:** Live (`primary`), PR opened / PR updated / Plan proposed (`primary`), Approved / Answered (`success`), Changes requested (`warning`), Stuck / Failed (`error`), Rate limited / Stopped / Interrupted (neutral).
 2. **Run transcript:**
    - **Run header:** "{ref} {title}", the outcome badge, and "Run #128 · branch · 18:42 elapsed · 12k in · 1.3M cache read · 4k out · on {runner name}" (the runner the run was placed on, kept with the run) (cache reads are shown apart from fresh input, which includes cache writes, because they cost about a tenth as much). On the right: **Open task** (opens the flyout) and, for live runs only, **Interrupt / Resume** (outline) and **Stop run** (`error` subtle).
+   - **Run timing breakdown:** under the run header, for runs with recorded timings; older runs have none and show nothing. "Queue wait (queued to started, including preparation)", the same wording as the Flow section ([project-overview.md](project-overview.md#charts)), or Unavailable before the run starts. Then the total, a stacked bar and a table of run phases, slowest first with the largest highlighted, and a table of tools (count, total, max), slowest total first. Tool calls can overlap, so their totals are separate from run phases.
    - **Log** (`role="log"`, `aria-live="polite"`), up to 880px wide. Each entry is one of:
      - a **system divider**, e.g. "Run started in worktree …"
      - an **agent message** (highlighted text)
@@ -73,6 +74,7 @@ Juno only runs when you message it in Plan (D9). With no live run, the transcrip
 - **Agent:** name, role, runtime, group, concurrency, instructions path, caps, status.
 - **Stats:** the per-role aggregates listed above.
 - **Runs:** id, project, task, outcome, started, duration, tokens, branch, events.
+- **Timings:** per-run phase and tool durations, delivered with `run.updated`.
 - **Live:** an SSE stream of events for the active run.
 
 ## Accessibility
