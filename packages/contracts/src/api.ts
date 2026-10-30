@@ -621,6 +621,8 @@ export type ApiError =
   | { code: 'conflict', constraint: string | null }
   | { code: 'transition_rejected', reason: TransitionError }
   | { code: 'invalid_dependencies', problems: unknown }
+  // A task the plan revises can no longer take its edits; each message names one
+  | { code: 'plan_not_approvable', problems: { code: string, key: string, ref: string, message: string }[] }
   | { code: 'runner_offline' }
   | { code: 'corral_updating' }
   // PM turns have no concurrency, only one per Plan session (D9, D13)
