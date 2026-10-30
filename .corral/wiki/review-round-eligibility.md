@@ -51,7 +51,7 @@ and submitted head SHAs, range-diff instructions, and checks against the base
 commits and changed binding docs. Approval copies the approval at
 `approvedHeadSha`, including its criterion notes, onto the submitted head; missing
 or no-longer-applicable criteria reject carry-over. The recorded review summary
-identifies the reviewed rebase. Human-review routing still follows D5/D23.
+identifies the reviewed rebase. Human-review routing still follows D5/D27.
 Rebase comments contain only the verdict and the reviewer's conflict summary.
 Changes requested still supplies normal criterion verdicts and consumes one round.
 The rebase-only reviewer outcome `blocked` preserves the round count and posts

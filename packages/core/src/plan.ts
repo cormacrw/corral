@@ -12,7 +12,7 @@ export interface ProposedEpic {
   title: string
   summary: string
   dependsOn?: string[] | undefined
-  // How its tasks reach the target branch (D23); the project's default
+  // How its tasks reach the target branch (D27); the project's default
   // when left out
   reviewMode?: EpicReviewMode | undefined
 }

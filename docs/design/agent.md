@@ -14,6 +14,7 @@ See what an agent is doing right now, attach to its live run, and look back at p
 
 - the avatar, with a ping dot while working
 - the name and a status badge only for **Working** (`success`), **Paused** (neutral) or **Waiting on usage limit** (neutral). Idle agents have no marker. Explicit `paused` means Paused; only a future `pausedUntil` means Waiting on usage limit. Expired cooldowns are idle. All agent screens use `agentStatus` in `utils/labels.ts`
+- a role badge: PM, Developer, Designer or Reviewer (D23)
 - "{Role} · {runtime} · {summary}" (Claude Code or Codex, D18), e.g. "6 runs today"
 - **Agent settings** (outline; goes to Settings › Agents)
 
@@ -24,9 +25,11 @@ See what an agent is doing right now, attach to its live run, and look back at p
   | Role | Tiles |
   |---|---|
   | Developer | Runs this week · PRs merged · First-pass approval · Avg run · Usage today |
+  | Designer | Runs this week · Design versions submitted · Designs approved · Avg run · Usage today |
   | Reviewer | Reviews this week · Approved · Changes requested (avg rounds per task) · Avg review · Usage today |
   | PM | Turns this week · Plans approved · Tasks proposed · Avg turn · Usage today |
 
+- Designer tiles count authoring runs, submitted versions and design tasks whose version the human approved; they do not count PRs. The facts line shows a task worktree on `design/<ref>` and `.corral/agents/designer.md` (built-in defaults when absent; D23).
 - **Facts line:** group and concurrency (for the PM, "One turn per session" instead: it has no concurrency limit beyond one turn per Plan session; D13), where it runs (one worktree per task, a read-only task worktree, or a read-only checkout of main), its instructions file (mono, e.g. `.corral/agents/developer.md`), and its caps or limits.
 - Usage is in tokens, with no dollar cost on a subscription. Show it where available (agent-runtime-and-auth.md, rule 6).
 
