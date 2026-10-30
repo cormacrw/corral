@@ -42,6 +42,8 @@ Three processes. In development they're all started together by `turbo dev`; whe
 
 The server keeps connections keyed by runner ID. A connection becomes available for dispatch after its hello snapshot is reconciled. Different IDs coexist; a reconnect replaces only that ID's socket and rejects only its pending setup jobs. Each dispatched run records its nullable `runnerId` before assignment; historical rows remain null. Stops, messages, lease-expiry stops and run traffic are scoped to that owner. Reconnect reconciliation interrupts only that runner's missing runs, and heartbeats renew only its leases.
 
+A `sweep_worktrees` setup job removes every folder under `worktrees/` whose task or Plan session isn't in the job's keep list, through its bare clone (or `rm -rf` for a folder no clone knows). Developer worktrees and orphans with uncommitted changes stay and are returned in `kept`, review and PM worktrees are force-removed, the checkout of a PM turn running on that runner is never touched, and names that aren't `<uuid>`, `<uuid>-review` or `pm-<uuid>-<uuid>` are left alone.
+
 Setup jobs use the online runner connected longest. Worktree cleanup is broadcast to every online runner. With any runner online, dispatch and setup remain available; with none online, setup returns `503 runner_offline` and PM turns wait. `GET /api/status` includes `runners`, and `/api/runner` and `runner.status` SSE include the same list (`id`, `name`, `online`, `connectedAt`, `lastHeartbeatAt`) alongside aggregate compatibility fields. Disconnected runners remain listed as offline until server restart. Settings shows each known runner.
 
 ### Runner capacity, runtimes and roles
@@ -166,7 +168,8 @@ The root is configurable (env vars). `pnpm dev` puts it in the checkout's own `.
     config.json                 server URL, runner ID
     repos/<repoId>.git          bare clone, fetched before each job; fetches
                                 and worktree changes run one at a time per clone
-    worktrees/<taskId>/         one per task, removed after merge
+    worktrees/<taskId>/         one per task, removed after merge, or by a
+                                sweep_worktrees job when outside its keep list
     worktrees/pm-<projectId>-<planSessionId>/
                                 read-only default-branch checkout, one per Plan
                                 session; stable so the agent CLI can resume

@@ -39,6 +39,10 @@ export type SetupJob =
   | { kind: 'cleanup_worktrees', repository: string, taskId: string }
   // The files that stop `branch` rebasing onto `onto`, read from a fresh fetch
   | { kind: 'rebase_conflicts', repository: string, branch: string, onto: string }
+  // Remove every worktree outside this keep set, which covers all projects.
+  // Developer worktrees with uncommitted work stay (PRD §7.4), and so does the
+  // checkout of a PM turn running on the runner.
+  | { kind: 'sweep_worktrees', keepTaskIds: string[], keepPlanSessionIds: string[] }
   // A Plan session's short title: the runner's `claude` CLI answers the
   // prompt with its smallest model and no tools (COR-40). Never a PM slot.
   | { kind: 'session_title', prompt: string }
@@ -54,6 +58,8 @@ export type SetupJobResult =
   | { kind: 'github', status: number, body: unknown }
   | { kind: 'cleanup_worktrees', removed: string[], kept: string[] }
   | { kind: 'rebase_conflicts', files: string[] }
+  // `kept` is only what stayed because it holds uncommitted changes
+  | { kind: 'sweep_worktrees', removed: string[], kept: string[] }
   // The model's raw answer; the server cleans it up
   | { kind: 'session_title', title: string }
   | { kind: 'release_notes', notes: string }
