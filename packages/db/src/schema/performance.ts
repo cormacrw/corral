@@ -10,5 +10,7 @@ export const perfSamples = pgTable('perf_samples', {
   name: text().notNull(),
   durationMs: doublePrecision('duration_ms').notNull(),
   status: integer(),
+  queryCount: integer('query_count'),
+  dbTimeMs: doublePrecision('db_time_ms'),
   createdAt: createdAt()
 }, table => [index('perf_samples_kind_created_at_idx').on(table.kind, table.createdAt)])
