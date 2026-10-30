@@ -149,22 +149,42 @@ export interface TaskDesignPin {
   // repinned or revised (D20). Null otherwise.
   newerVersion: number | null
 }
-export interface Evidence {
+interface EvidenceBase {
   id: string
   taskId: string | null
   criterionId: string | null
   runId: string
   round: number
-  kind: EvidenceKind
-  // For a `note`, the text is the evidence and there is no file (D21)
   note: string
-  fileName: string | null
-  contentType: string | null
-  size: number
-  // Served by the server (D8: web never touches storage); null for a note
-  url: string | null
   createdAt: string
 }
+
+// Notes have no file. All D21 artifact kinds retain complete file metadata.
+export type Evidence = EvidenceBase & (
+  | { kind: 'note', fileName: null, contentType: null, size: 0, url: null }
+  | { kind: Exclude<EvidenceKind, 'note'>, fileName: string, contentType: string, size: number, url: string }
+)
+
+const evidenceInputBase = {
+  criterionId: z.string().uuid().nullable().default(null)
+}
+export const evidenceInputSchema = z.discriminatedUnion('kind', [
+  z.object({
+    ...evidenceInputBase,
+    kind: z.literal('note'),
+    note: z.string({ error: 'A note needs its text: explain how the criterion is met' }).trim().min(1, 'A note needs its text: explain how the criterion is met')
+  }).strict(),
+  z.object({
+    ...evidenceInputBase,
+    kind: z.enum(['screenshot', 'video', 'test_output', 'log', 'request', 'text', 'other']),
+    note: z.string().default(''),
+    fileName: z.string({ error: 'A file needs its fileName' }).trim().min(1, 'A file needs its fileName'),
+    contentType: z.string({ error: 'A file needs its contentType' }).trim().min(1, 'A file needs its contentType'),
+    dataBase64: z.string({ error: 'Pass the path of the file to attach, or use kind "note" to explain a criterion with nothing to show' })
+  }).strict()
+])
+export type EvidenceInput = z.infer<typeof evidenceInputSchema>
+
 
 export const reviewVerdict = z.enum(REVIEW_VERDICTS)
 

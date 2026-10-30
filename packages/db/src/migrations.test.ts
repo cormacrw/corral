@@ -39,6 +39,36 @@ describe('migrations', () => {
   it.for([
     { driver: 'pglite' as const },
     { driver: 'postgres' as const }
+  ])('0039 reports all inconsistent avatars and preserves them on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+    requireDatabase(driver, context)
+    const before = await migrationsBefore('0039_chunky_peter_parker')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db, migrate } = await open(driver)
+    await migrate(before)
+    const userId = '00000000-0000-4000-8000-000000000001'
+    const agentId = '00000000-0000-4000-8000-000000000002'
+    await db.execute(sql`insert into users (id, name, avatar_blob) values (${userId}, 'Human', 'keep-image')`)
+    await db.execute(sql`insert into agents (id, name, role, avatar_content_type) values (${agentId}, 'Agent', 'developer', 'image/png')`)
+    const error = await migrate(migrationsFolder).then(() => null, (e: unknown) => e)
+    expect(error).not.toBeNull()
+    const cause = (error as { cause?: Error }).cause ?? error
+    expect(String(cause)).toContain('Inconsistent avatars:')
+    expect(String(cause)).toContain(userId)
+    expect(String(cause)).toContain(agentId)
+    expect((await db.execute(sql`select avatar_blob, avatar_content_type from users where id = ${userId}`)).rows)
+      .toEqual([{ avatar_blob: 'keep-image', avatar_content_type: null }])
+    expect((await db.execute(sql`select avatar_blob, avatar_content_type from agents where id = ${agentId}`)).rows)
+      .toEqual([{ avatar_blob: null, avatar_content_type: 'image/png' }])
+    await db.execute(sql`update users set avatar_content_type = 'image/png' where id = ${userId}`)
+    await db.execute(sql`update agents set avatar_blob = 'restored-image' where id = ${agentId}`)
+    await migrate(migrationsFolder)
+    expect((await db.execute(sql`select conname from pg_constraint where conname in ('users_avatar_paired', 'agents_avatar_paired') order by conname`)).rows)
+      .toEqual([{ conname: 'agents_avatar_paired' }, { conname: 'users_avatar_paired' }])
+  })
+
+  it.for([
+    { driver: 'pglite' as const },
+    { driver: 'postgres' as const }
   ])('0035 adds designer without changing existing agents or runs on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
     requireDatabase(driver, context)
     const before = await migrationsBefore('0035_amused_bloodaxe')

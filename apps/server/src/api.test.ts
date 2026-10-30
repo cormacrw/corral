@@ -127,6 +127,24 @@ describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
       expect((await t.request('PUT', '/api/agents/not-an-id/avatar', new Blob([png], { type: 'image/png' }))).status).toBe(404)
     })
 
+    it('replaces and removes avatars for both owner types', async () => {
+      const [agent] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'reviewer'))
+      const gif = new TextEncoder().encode('GIF89a')
+      for (const path of ['/api/me/avatar', `/api/agents/${agent!.id}/avatar`]) {
+        const first = await t.request('PUT', path, new Blob([png], { type: 'image/png' }))
+        const original = await first.json() as { avatarUrl: string }
+        const replacement = await t.request('PUT', path, new Blob([gif], { type: 'image/gif' }))
+        expect(replacement.status).toBe(200)
+        const updated = await replacement.json() as { avatarUrl: string }
+        expect(updated.avatarUrl).not.toBe(original.avatarUrl)
+        const served = await t.request('GET', updated.avatarUrl)
+        expect(served.headers.get('content-type')).toBe('image/gif')
+        expect(new Uint8Array(await served.arrayBuffer())).toEqual(gif)
+        expect(await t.request('DELETE', path).then(r => r.json())).toMatchObject({ avatarUrl: null })
+        expect((await t.request('GET', path)).status).toBe(404)
+      }
+    })
+
     it('rejects files that aren\'t the image they claim to be', async () => {
       const text = await t.request('PUT', '/api/me/avatar', new Blob(['hello'], { type: 'text/plain' }))
       expect(text.status).toBe(400)

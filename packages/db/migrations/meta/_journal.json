@@ -302,13 +302,6 @@
       "when": 1793414758744,
       "tag": "0042_short_oracle",
       "breakpoints": true
-    },
-    {
-      "idx": 38,
-      "version": "7",
-      "when": 1793391792493,
-      "tag": "0038_evidence_shapes",
-      "breakpoints": true
     }
   ]
 }
