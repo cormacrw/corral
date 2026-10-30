@@ -215,6 +215,16 @@ export class ToolServer {
       res.writeHead(404).end()
       return
     }
+    try {
+      await this.#serve(route, req, res)
+    } catch (error) {
+      // This runs detached, so nothing above catches it: a client that drops
+      // mid-request must not take the runner down
+      if (!res.headersSent) res.writeHead(500).end(error instanceof Error ? error.message : 'MCP error')
+    }
+  }
+
+  async #serve(route: Route, req: IncomingMessage, res: ServerResponse): Promise<void> {
     const body = req.method === 'POST' ? await readJson(req) : undefined
     if (body === null) {
       res.writeHead(400).end()
@@ -243,12 +253,8 @@ export class ToolServer {
       void transport.close()
       void server.close()
     })
-    try {
-      await server.connect(transport)
-      await transport.handleRequest(req, res, body)
-    } catch (error) {
-      if (!res.headersSent) res.writeHead(500).end(error instanceof Error ? error.message : 'MCP error')
-    }
+    await server.connect(transport)
+    await transport.handleRequest(req, res, body)
   }
 }
 

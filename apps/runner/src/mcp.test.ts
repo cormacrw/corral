@@ -2,6 +2,7 @@ import type { AgentTool } from '@corral/contracts'
 import { TASK_TYPES, type AgentRole } from '@corral/core'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { spawnSync } from 'node:child_process'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { outcomesFor, ROLE_TOOLS, toolsFor, ToolServer } from './mcp.ts'
 
@@ -170,6 +171,43 @@ describe('ToolServer', () => {
     expect(refused.content).toEqual([{ type: 'text', text: '00000000-0000-4000-8000-000000000000 isn\'t an attachment in this project' }])
     await client.close()
   })
+})
+
+// A subprocess, because the failure is an uncaught exception that ends Node
+const ABORTED_REQUEST = `
+import { request } from 'node:http'
+import { ToolServer } from './src/mcp.ts'
+
+const server = new ToolServer()
+await server.start()
+server.register('agent', 'developer', async () => ({ ok: true, result: {} }))
+const url = new URL(server.url('agent'))
+
+await new Promise((resolve) => {
+  const aborted = request(url, { method: 'POST', headers: { 'content-length': '1000' } })
+  aborted.on('error', () => {})
+  aborted.on('close', resolve)
+  aborted.write('{')
+  setTimeout(() => aborted.destroy(), 100)
+})
+await new Promise(resolve => setTimeout(resolve, 100))
+
+const next = await fetch(url, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+  body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+})
+const listed = await next.json()
+console.log(listed.result.tools.some(tool => tool.name === 'get_task') ? 'still serving' : 'no tools')
+process.exit(0)
+`
+
+describe('ToolServer aborted requests', () => {
+  it('stays alive and serves the next request when a client drops mid-POST', async () => {
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', ABORTED_REQUEST], { cwd: new URL('..', import.meta.url), encoding: 'utf8', timeout: 15_000 })
+    expect(child.status, child.stderr).toBe(0)
+    expect(child.stdout.trim()).toBe('still serving')
+  }, 20_000)
 })
 
 // D23: only a designer gets submit_design
