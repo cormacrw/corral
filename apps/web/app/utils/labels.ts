@@ -1,4 +1,4 @@
-import { AGENT_RUNTIMES, type Agent, type AgentRuntime, type CliStatus, type InboxItem, type PlanStatus, type Project, type Run, type Task } from '@corral/contracts'
+import { AGENT_RUNTIMES, type Agent, type AgentRuntime, type CliStatus, type EpicReview, type InboxItem, type PlanStatus, type Project, type Run, type Task } from '@corral/contracts'
 import type { AgentRole, DesignVersionStatus, EpicReviewMode, RunOutcome, RunState, TaskPriority, TaskStatus } from '@corral/core'
 
 export type Color = 'primary' | 'secondary' | 'success' | 'info' | 'warning' | 'error' | 'neutral'
@@ -71,7 +71,8 @@ export function inboxTypeBadge(type: InboxItem['type']): { label: string, color:
     blocked: { label: 'Blocked', color: 'error' as const },
     failed: { label: 'Failed', color: 'error' as const },
     activity: { label: 'Activity', color: 'neutral' as const },
-    plan_thread: { label: 'Plan', color: 'primary' as const }
+    plan_thread: { label: 'Plan', color: 'primary' as const },
+    epic_review: { label: 'Epic review', color: 'warning' as const }
   })[type]
 }
 
@@ -184,6 +185,16 @@ export function agentStatus(agent: Pick<Agent, 'paused' | 'pausedUntil' | 'activ
 }
 
 // The note under a board card (design/board.md)
+// Where an epic PR stands, in plain words (D23)
+export const EPIC_PR_STATE: Record<EpicReview['state'], string> = {
+  open: 'Opened',
+  in_review: 'In integration review',
+  human_review: 'Waiting on you',
+  changes_requested: 'Waiting on a fix task',
+  ready_to_merge: 'Approved, merging after CI',
+  merged: 'Merged'
+}
+
 // An epic's name for display; numbered when it isn't loaded yet
 export function epicTitle(epics: { id: string, title: string }[] | undefined, id: string, fallbackIndex: number): string {
   return epics?.find(e => e.id === id)?.title ?? `Epic ${fallbackIndex + 1}`

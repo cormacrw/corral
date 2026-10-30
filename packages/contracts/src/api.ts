@@ -511,14 +511,32 @@ export interface PlanThreadItem extends InboxItemBase {
   activeRunId: string | null
 }
 
-export type InboxItem = TaskInboxItem | PlanThreadItem
+// An epic PR in the Inbox (D11, D23). Proposed by the COR-190 design: the
+// server doesn't raise these yet, only the prototype's mock API does. One
+// item type for the epic PR's whole life; `event` says which moment it is, and
+// only `human_review` waits on the human.
+export interface EpicInboxItem extends InboxItemBase {
+  // The epic ID in Needs you; the audit entry in Activity and Resolved
+  id: string
+  type: 'epic_review'
+  event: 'human_review' | 'opened' | 'conflict' | 'approved' | 'merged'
+  epicId: string
+  body: string
+  // Not about one task
+  taskId: null
+  taskRef: null
+  prUrl: string
+  resolution: string | null
+}
+
+export type InboxItem = TaskInboxItem | PlanThreadItem | EpicInboxItem
 
 export interface Inbox {
   // Task items and Plan threads waiting on the human, one list newest first by
   // when each arrived (`at`)
   needsYou: InboxItem[]
-  activity: TaskInboxItem[]
-  resolved: TaskInboxItem[]
+  activity: (TaskInboxItem | EpicInboxItem)[]
+  resolved: (TaskInboxItem | EpicInboxItem)[]
   // The Needs you count (the Inbox badge): exactly the listed items
   count: number
 }
@@ -769,6 +787,63 @@ export interface PullRequestDetail {
   headBranch: string
   files: { path: string, status: 'added' | 'modified' | 'removed' | 'renamed', additions: number, deletions: number, patch: string }[]
 }
+
+// What the human needs to judge an epic PR (D23), for the Inbox's epic review.
+// Proposed by the COR-190 design at GET /epics/:id/review; the server doesn't
+// serve it yet, only the prototype's mock API does.
+export interface EpicReviewTask {
+  ref: string
+  title: string
+  prNumber: number | null
+  prUrl: string | null
+  // A fix or conflict task came from a review of the epic PR (D23)
+  kind: 'task' | 'fix' | 'conflict'
+  merged: boolean
+  // Who passed it: the human in `each_task` mode or when flagged, else the reviewer
+  reviewedBy: 'human' | 'reviewer'
+  criteriaMet: number
+  criteriaTotal: number
+  // Its screenshots, for the viewer
+  evidence: Evidence[]
+}
+export interface EpicReviewRound {
+  id: string
+  round: number
+  verdict: ReviewVerdict
+  reviewer: string
+  headSha: string
+  summary: string
+  // What the integration check found across tasks; a note doesn't block
+  findings: { level: 'pass' | 'note', text: string, taskRefs: string[] }[]
+  createdAt: string
+}
+export interface EpicReview {
+  epicId: string
+  title: string
+  goal: string
+  reviewMode: EpicReviewMode
+  // D23 keeps "ready to merge" on the epic; EPIC_REVIEW_STATES lacks it so far
+  state: EpicReviewState | 'ready_to_merge'
+  targetBranch: string
+  pr: PullRequestDetail
+  gateChecks: { name: string, url: string | null }[]
+  // Commits the target branch has moved since the epic branch was cut, so
+  // approval will rebase first (D23)
+  targetMovedBy: number
+  // Newest first
+  rounds: EpicReviewRound[]
+  tasks: EpicReviewTask[]
+  // The human's last request for changes, when this is a later round
+  lastFeedback: { text: string, at: string, fixTaskRefs: string[], files: PullRequestDetail['files'] } | null
+  conflictTaskRef: string | null
+  mergeCommitSha: string | null
+}
+
+export const epicReviewActionInput = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('approve') }),
+  z.object({ action: z.literal('request_changes'), text: z.string().trim().min(1) })
+])
+export type EpicReviewActionInput = z.infer<typeof epicReviewActionInput>
 
 // A task's open PR and where it stands against the merge gates, read live
 // from GitHub (GET /projects/:slug/pull-requests). `merge` comes from the

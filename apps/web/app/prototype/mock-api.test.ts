@@ -1,4 +1,4 @@
-import type { DraftSession, EpicDetail, Inbox, PlanSessionDetail, Project, PullRequestDetail, PullRequestStatus, ServerEvent, Task } from '@corral/contracts'
+import type { DraftSession, EpicDetail, EpicReview, Inbox, PlanSessionDetail, Project, PullRequestDetail, PullRequestStatus, ServerEvent, Task } from '@corral/contracts'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
@@ -62,7 +62,7 @@ describe('prototype mock API', () => {
       question: null, plan: { id: 'plan-1', version: 1, epicCount: 1, taskCount: 3 }
     })
     expect(threads.every(i => !('body' in i))).toBe(true)
-    expect(inbox.needsYou.filter(i => i.type !== 'plan_thread').map(i => i.type).sort()).toEqual(['blocked', 'failed', 'human_review', 'human_review', 'human_review', 'question'])
+    expect(inbox.needsYou.filter(i => i.type !== 'plan_thread').map(i => i.type).sort()).toEqual(['blocked', 'epic_review', 'epic_review', 'epic_review', 'failed', 'human_review', 'human_review', 'human_review', 'human_review', 'question'])
     expect(threads.some(i => i.sessionId === 's-idle')).toBe(false)
   })
 
@@ -240,10 +240,34 @@ describe('prototype mock API', () => {
 
   it('serves a code review PR description and diff, and 404s for a design task', async () => {
     const pr = await mockCall<PullRequestDetail>('GET', '/projects/corral/tasks/5/pull-request')
-    expect(pr).toMatchObject({ number: 64, baseBranch: 'main', body: expect.stringContaining('## What') })
+    expect(pr).toMatchObject({ number: 64, baseBranch: 'corral/epic-e-design-design-tasks', body: expect.stringContaining('## What') })
     expect(pr.files.map(f => f.path)).toContain('apps/server/src/designs.ts')
     expect(pr.files.every(f => f.patch.startsWith('@@'))).toBe(true)
     await expect(mockCall('GET', '/projects/corral/tasks/18/pull-request')).rejects.toBeInstanceOf(ApiError)
+  })
+
+  it('offers epic reviews in Needs you, with their tasks and combined diff', async () => {
+    const inbox = await mockCall<Inbox>('GET', '/inbox')
+    expect(inbox.needsYou.filter(i => i.type === 'epic_review').map(i => i.id).sort()).toEqual(['e-exports', 'e-newsletter', 'e-searches'])
+    expect(inbox.activity.filter(i => i.type === 'epic_review').map(i => i.type === 'epic_review' && i.event).sort()).toEqual(['conflict', 'merged', 'opened'])
+    const review = await mockCall<EpicReview>('GET', '/epics/e-exports/review')
+    expect(review.tasks.map(t => [t.ref, t.kind])).toContainEqual(['COR-48', 'fix'])
+    expect(review.lastFeedback?.fixTaskRefs).toEqual(['COR-48'])
+    expect(review.pr.baseBranch).toBe('main')
+  })
+
+  it('approving an epic resolves it, and requesting changes opens a fix task in Ready', async () => {
+    const approved = await mockCall<EpicReview>('POST', '/epics/e-newsletter/review/actions', { action: 'approve' })
+    expect(approved.state).toBe('ready_to_merge')
+    const changed = await mockCall<EpicReview>('POST', '/epics/e-searches/review/actions', { action: 'request_changes', text: 'Block duplicate names' })
+    expect(changed.state).toBe('changes_requested')
+    const fix = changed.tasks.at(-1)!
+    expect(fix).toMatchObject({ title: 'Fix: Block duplicate names', merged: false })
+    expect((await mockCall<Task>('GET', `/tasks/${fix.ref}`)).status).toBe('ready')
+    const inbox = await mockCall<Inbox>('GET', '/inbox')
+    expect(inbox.needsYou.map(i => i.id)).not.toEqual(expect.arrayContaining(['e-newsletter']))
+    expect(inbox.needsYou.map(i => i.id)).not.toEqual(expect.arrayContaining(['e-searches']))
+    expect(inbox.resolved.map(i => i.id)).toEqual(expect.arrayContaining(['resolved-e-newsletter', 'resolved-e-searches']))
   })
 
   it('starts and retries a client UUID as one session with one human message', async () => {

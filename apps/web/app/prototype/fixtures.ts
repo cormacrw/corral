@@ -6,6 +6,8 @@ import type {
   DesignVersion,
   Comment,
   Epic,
+  EpicInboxItem,
+  EpicReview,
   Evidence,
   GlobalStatus,
   Inbox,
@@ -111,7 +113,7 @@ export const epics: Epic[] = [
     title: 'Design tasks',
     description: 'Versioned, sandboxed prototypes the human approves before the build is planned (D20).',
     reviewMode: 'each_task',
-    branch: null,
+    branch: 'corral/epic-e-design-design-tasks',
     prNumber: null,
     prHeadSha: null,
     reviewState: null,
@@ -534,7 +536,9 @@ const testPatch = [
 ].join('\n')
 function prDetail(t: Task, body: string): PullRequestDetail {
   return {
-    number: t.prNumber!, url: t.prUrl!, title: t.title, body, baseBranch: 'main', headBranch: t.branch!,
+    number: t.prNumber!, url: t.prUrl!, title: t.title, body, headBranch: t.branch!,
+    // In an `epic` or `each_task` epic, a task PR's base is the epic branch (D23)
+    baseBranch: epics.find(e => e.id === t.epicId)?.branch ?? 'main',
     files: [
       { path: 'apps/server/src/designs.ts', status: 'modified', additions: 12, deletions: 5, patch: approvePatch },
       { path: 'apps/server/src/routes/designs.ts', status: 'modified', additions: 4, deletions: 2, patch: routePatch },
@@ -570,6 +574,234 @@ export const pullRequestDetails: Record<string, PullRequestDetail> = {
     '- Checked the toast and next-item flow in the static prototype'
   ].join('\n'))
 }
+
+// ── COR-190: epic review (D23) ──────────────────────────────────────────────
+// Worked examples of an epic PR's life in the Inbox. Needs you: a first
+// review in `epic` mode, a first review in `each_task` mode, and a second round
+// after the human asked for changes. Also a fix task waiting on the human, and
+// Activity and Resolved entries for the other moments.
+function epicRow(id: string, project: Project, title: string, description: string, reviewMode: Epic['reviewMode'], prNumber: number, reviewState: Epic['reviewState'], taskCount: number, mergedCount: number): Epic {
+  const slug = title.toLowerCase().replaceAll(' ', '-')
+  return {
+    id, projectId: project.id, title, description, dependsOn: [], blocks: [], reviewMode,
+    branch: `corral/epic-${id}-${slug}`, prNumber, prHeadSha: `${prNumber}a7f3c21`, reviewState, taskCount, mergedCount,
+    createdAt: ago(60 * 24 * 3), updatedAt: ago(10)
+  }
+}
+epics.push(
+  epicRow('e-searches', corral, 'Saved searches', 'Save a board filter and get back to it in one click.', 'epic', 71, 'human_review', 3, 3),
+  epicRow('e-newsletter', site, 'Newsletter signup', 'Let visitors subscribe from the landing page and the footer.', 'each_task', 31, 'human_review', 4, 4),
+  epicRow('e-exports', corral, 'Run history export', 'Download a project\'s run history as CSV.', 'epic', 75, 'human_review', 3, 3),
+  epicRow('e-notify', corral, 'Notification settings', 'Choose which Inbox events send a push.', 'each_task', 78, 'changes_requested', 3, 2),
+  epicRow('e-audit', corral, 'Audit log export', 'Export the audit log for a date range.', 'epic', 79, 'in_review', 2, 2),
+  epicRow('e-shortcuts', corral, 'Keyboard shortcuts', 'Move around the board and the Inbox from the keyboard.', 'epic', 73, 'changes_requested', 3, 2),
+  epicRow('e-themes', corral, 'Project themes', 'Give each project its own accent colour.', 'epic', 70, 'merged', 2, 2),
+  // Approved: D23's "ready to merge", which EPIC_REVIEW_STATES lacks (design.md)
+  epicRow('e-thumbs', corral, 'Project thumbnails', 'Show a thumbnail for every project.', 'epic', 72, 'human_review', 2, 2)
+)
+
+function epicTask(project: Project, number: number, epicId: string, title: string, prNumber: number, fields: Partial<Task> = {}, criteriaCount = 3): Task {
+  const repo = project.repository
+  return task(project, number, {
+    title, status: 'merged', epicId, prNumber, prUrl: `https://github.com/${repo}/pull/${prNumber}`,
+    branch: `corral/${project.prefix.toLowerCase()}-${number}`, mergedAt: ago(60 * 5), mergeCommitSha: `${number}e0c4a`,
+    developer: { id: 'a-dev', name: 'Victor' }, reviewer: { id: 'a-rev', name: 'Rita' },
+    acceptanceCriteria: Array.from({ length: criteriaCount }, (_, position) => ({ id: `c-${project.prefix}-${number}-${position}`, position, text: `${title}: criterion ${position + 1}`, met: true })),
+    ...fields
+  })
+}
+const fixTaskCriteria = [
+  { id: 'c-52-0', position: 0, text: 'Turning off every event asks for confirmation', met: true },
+  { id: 'c-52-1', position: 1, text: 'The settings page explains that a muted event still reaches the Inbox', met: true }
+]
+tasks.push(
+  epicTask(corral, 41, 'e-searches', 'Saved search API', 67),
+  epicTask(corral, 42, 'e-searches', 'Save and reopen a search on the board', 68, { humanReview: true }, 4),
+  epicTask(corral, 43, 'e-searches', 'Document saved searches', 69, {}, 2),
+  epicTask(site, 11, 'e-newsletter', 'Subscribe form component', 24, { humanReview: true }),
+  epicTask(site, 12, 'e-newsletter', 'Double opt-in email', 25, { humanReview: true }),
+  epicTask(site, 13, 'e-newsletter', 'Add the form to the landing page', 26, { humanReview: true }, 2),
+  epicTask(site, 14, 'e-newsletter', 'Add the form to the footer', 27, { humanReview: true }, 2),
+  epicTask(corral, 46, 'e-exports', 'Export endpoint streams CSV', 74),
+  epicTask(corral, 47, 'e-exports', 'Export button on the Runs page', 76, { humanReview: true }),
+  epicTask(corral, 48, 'e-exports', 'Fix: put times in the project\'s time zone', 77, {}, 2),
+  epicTask(corral, 50, 'e-notify', 'Notification preferences API', 80, { humanReview: true }),
+  epicTask(corral, 51, 'e-notify', 'Notification settings page', 81, { humanReview: true }, 4),
+  epicTask(corral, 52, 'e-notify', 'Fix: confirm before muting everything', 82, {
+    status: 'human_review', humanReview: true, reviewRounds: 0, mergedAt: null, mergeCommitSha: null, headSha: '52c0ffee11',
+    gateChecks: [{ name: 'lint', url: null }, { name: 'test', url: null }], acceptanceCriteria: fixTaskCriteria, updatedAt: ago(6)
+  }),
+  epicTask(corral, 54, 'e-audit', 'Audit export query', 83),
+  epicTask(corral, 55, 'e-audit', 'Audit export page', 84),
+  epicTask(corral, 56, 'e-shortcuts', 'Shortcut registry', 85),
+  epicTask(corral, 57, 'e-shortcuts', 'Board and Inbox shortcuts', 86),
+  epicTask(corral, 58, 'e-shortcuts', 'Resolve the epic PR conflict', 0, { status: 'ready', prNumber: null, prUrl: null, mergedAt: null, mergeCommitSha: null, reviewer: null, developer: null, branch: 'corral/epic-e-shortcuts-keyboard-shortcuts' }, 1),
+  epicTask(corral, 59, 'e-themes', 'Theme colour setting', 87),
+  epicTask(corral, 60, 'e-themes', 'Apply the theme across the app', 88),
+  epicTask(corral, 61, 'e-thumbs', 'Thumbnail upload', 89),
+  epicTask(corral, 62, 'e-thumbs', 'Show thumbnails in lists', 90)
+)
+const epicTaskKinds: Record<string, 'fix' | 'conflict'> = { 'COR-48': 'fix', 'COR-52': 'fix', 'COR-58': 'conflict' }
+
+const taskEvidence = (ref: string, fileName: string, title: string, line: string, accent: string): Evidence => ({
+  id: `ev-${ref}-${fileName}`, taskId: at(ref).id, criterionId: null, runId: 'r-2', round: 0, kind: 'screenshot', note: '',
+  fileName, contentType: 'image/svg+xml', size: 128, url: shot(title, line, accent), createdAt: ago(60 * 6)
+})
+Object.assign(evidence, {
+  [at('COR-42').id]: [
+    taskEvidence('COR-42', 'save-search.svg', 'Save this search', 'Name it, then find it under Saved', '#14b8a6'),
+    taskEvidence('COR-42', 'saved-list.svg', 'Saved searches', 'Open, rename or delete', '#6366f1')
+  ],
+  [at('WEB-13').id]: [taskEvidence('WEB-13', 'landing-form.svg', 'Stay in the loop', 'The form on the landing page', '#f59e0b')],
+  [at('WEB-14').id]: [taskEvidence('WEB-14', 'footer-form.svg', 'Footer signup', 'At every width', '#0ea5e9')],
+  [at('WEB-12').id]: [taskEvidence('WEB-12', 'confirm-email.svg', 'Confirm your email', 'The double opt-in message', '#ec4899')],
+  [at('COR-47').id]: [taskEvidence('COR-47', 'export-button.svg', 'Export CSV', 'On the Runs page', '#6366f1')],
+  [at('COR-48').id]: [taskEvidence('COR-48', 'export-times.svg', 'Times match the Runs page', '2026-10-29 14:02 Europe/Dublin', '#14b8a6')],
+  [at('COR-51').id]: [taskEvidence('COR-51', 'settings-page.svg', 'Notifications', 'Pick the events that push', '#6366f1')],
+  [at('COR-52').id]: [taskEvidence('COR-52', 'mute-confirm.svg', 'Mute everything?', 'You will only see items in the Inbox', '#ef4444')]
+})
+const fixReview: Review = {
+  id: 'review-52', taskId: at('COR-52').id, runId: 'r-2', round: 0, headSha: '52c0ffee11', verdict: 'approved',
+  summary: 'Muting the last event now asks for confirmation, and the page says muted events still reach the Inbox. Both criteria are met.',
+  criteria: fixTaskCriteria.map(c => ({ criterionId: c.id, met: true, note: 'Checked on the settings page.' })),
+  author: { kind: 'agent', role: 'reviewer', runId: 'r-2' }, createdAt: ago(7)
+}
+reviews[at('COR-52').id] = [fixReview]
+at('COR-52').latestReview = fixReview
+
+function changedFile(path: string, status: PullRequestDetail['files'][number]['status'], lines: string[]): PullRequestDetail['files'][number] {
+  const additions = lines.filter(l => l.startsWith('+')).length
+  const deletions = lines.filter(l => l.startsWith('-')).length
+  return { path, status, additions, deletions, patch: [`@@ -12,${deletions + 2} +12,${additions + 2} @@`, ...lines].join('\n') }
+}
+pullRequestDetails[at('COR-52').id] = {
+  ...prDetail(at('COR-52'), '## What\n\nMuting the last event asks for confirmation.\n\n## Why\n\nFrom your review of epic PR #78.'),
+  files: [changedFile('apps/web/app/pages/settings/notifications.vue', 'modified', [
+    ' function toggle(event: string) {',
+    '+  if (enabled.value.length === 1 && enabled.value[0] === event) return confirmMuteAll()',
+    '   enabled.value = enabled.value.includes(event) ? without(enabled.value, event) : [...enabled.value, event]',
+    ' }'
+  ])]
+}
+
+function epicPr(epicId: string, body: string, files: PullRequestDetail['files']): PullRequestDetail {
+  const epic = epics.find(e => e.id === epicId)!
+  const project = projects.find(p => p.id === epic.projectId)!
+  return {
+    number: epic.prNumber!, url: `https://github.com/${project.repository}/pull/${epic.prNumber}`, title: epic.title, body,
+    baseBranch: project.defaultBranch, headBranch: epic.branch!, files
+  }
+}
+const lintTest = [{ name: 'lint', url: null }, { name: 'test', url: null }]
+const round = (id: string, number: number, summary: string, findings: EpicReview['rounds'][number]['findings'], minutes: number, verdict: Review['verdict'] = 'approved'): EpicReview['rounds'][number] => ({
+  id: `${id}-${number}`, round: number, verdict, reviewer: 'Rita', headSha: `${id.length}f4e2a1b9c`, summary, findings, createdAt: ago(minutes)
+})
+const exportFix = changedFile('apps/server/src/exports/runs-csv.ts', 'modified', [
+  ' export function formatRow(run: Run, project: Project) {',
+  '-  return [run.number, run.state, run.startedAt.toISOString()]',
+  '+  return [run.number, run.state, formatInTimeZone(run.startedAt, project.timeZone)]',
+  ' }'
+])
+const quietReview = (epicId: string, state: EpicReview['state'], fields: Partial<Omit<EpicReview, 'tasks'>> = {}): Omit<EpicReview, 'tasks'> => {
+  const epic = epics.find(e => e.id === epicId)!
+  return {
+    epicId, title: epic.title, goal: epic.description, reviewMode: epic.reviewMode, state, targetBranch: 'main', gateChecks: lintTest, targetMovedBy: 0,
+    pr: epicPr(epicId, `## What\n\n${epic.description}`, [changedFile('apps/web/app/pages/index.vue', 'modified', [' <template>', '+  <EpicFeature />', ' </template>'])]),
+    rounds: [], lastFeedback: null, conflictTaskRef: null, mergeCommitSha: null, ...fields
+  }
+}
+export const epicReviews: Record<string, Omit<EpicReview, 'tasks'>> = {
+  'e-searches': quietReview('e-searches', 'human_review', {
+    targetMovedBy: 6,
+    pr: epicPr('e-searches', [
+      '## What', '', 'Save a board filter and get back to it in one click.', '', '## Tasks', '',
+      '- COR-41 Saved search API (#67)', '- COR-42 Save and reopen a search on the board (#68)', '- COR-43 Document saved searches (#69)'
+    ].join('\n'), [
+      changedFile('apps/server/src/saved-searches.ts', 'added', ['+export async function saveSearch(db: Db, projectId: string, input: SavedSearchInput) {', '+  return db.insert(savedSearches).values({ projectId, ...input }).returning()', '+}']),
+      changedFile('apps/server/src/routes/saved-searches.ts', 'added', ['+app.get(\'/projects/:slug/saved-searches\', listSavedSearches)', '+app.post(\'/projects/:slug/saved-searches\', createSavedSearch)']),
+      changedFile('apps/web/app/components/SavedSearchMenu.vue', 'added', ['+<template>', '+  <UDropdownMenu :items="searches" />', '+</template>']),
+      changedFile('apps/web/app/pages/projects/[slug]/board.vue', 'modified', [' <BoardFilters v-model="filters">', '+  <SavedSearchMenu :filters="filters" />', ' </BoardFilters>']),
+      changedFile('packages/db/migrations/0031_saved_searches.sql', 'added', ['+CREATE TABLE saved_searches (id uuid PRIMARY KEY, project_id uuid NOT NULL, name text NOT NULL);']),
+      changedFile('docs/design/board.md', 'modified', ['+## Saved searches', '+', '+Save a filter from the board\'s filter bar.'])
+    ]),
+    rounds: [round('e-searches', 0, [
+      'Approved. The three tasks work as one feature: a search saved on the board goes through the API, survives a reload and reopens with the same filters. I reviewed the combined diff against the epic\'s goal, not each task\'s evidence again.',
+      '', 'One thing to look at: the API allows two searches with the same name, and the menu then shows both with nothing to tell them apart. Not blocking.'
+    ].join('\n'), [
+      { level: 'pass', text: 'Saving, reloading and reopening work end to end', taskRefs: ['COR-41', 'COR-42'] },
+      { level: 'pass', text: 'The docs match what shipped', taskRefs: ['COR-43'] },
+      { level: 'note', text: 'Two searches can share a name, and the menu can\'t tell them apart', taskRefs: ['COR-41', 'COR-42'] }
+    ], 3)]
+  }),
+  'e-newsletter': quietReview('e-newsletter', 'human_review', {
+    pr: epicPr('e-newsletter', '## What\n\nVisitors can subscribe from the landing page and the footer, with double opt-in.', [
+      changedFile('src/components/SubscribeForm.astro', 'added', ['+<form method="post" action="/api/subscribe">', '+  <input type="email" name="email" required />', '+</form>']),
+      changedFile('src/pages/api/subscribe.ts', 'added', ['+export const POST = async ({ request }) => sendConfirmation(await request.formData())']),
+      changedFile('src/components/Footer.astro', 'modified', [' <footer>', '+  <SubscribeForm compact />', ' </footer>'])
+    ]),
+    rounds: [round('e-newsletter', 0, 'Approved. You reviewed all four tasks, so I only checked them together: the landing page form and the footer form use the same component and post to the same endpoint, and the confirmation email reaches both flows.', [
+      { level: 'pass', text: 'Both forms share one component and one endpoint', taskRefs: ['WEB-11', 'WEB-13', 'WEB-14'] },
+      { level: 'pass', text: 'The confirmation email arrives from either form', taskRefs: ['WEB-12'] }
+    ], 4)]
+  }),
+  'e-exports': quietReview('e-exports', 'human_review', {
+    targetMovedBy: 2,
+    pr: epicPr('e-exports', '## What\n\nDownload a project\'s run history as CSV from the Runs page.', [
+      exportFix,
+      changedFile('apps/server/src/routes/exports.ts', 'added', ['+app.get(\'/projects/:slug/runs.csv\', streamRunsCsv)']),
+      changedFile('apps/web/app/pages/agents/index.vue', 'modified', [' <RunsHeader>', '+  <ExportButton />', ' </RunsHeader>'])
+    ]),
+    lastFeedback: { text: 'The CSV times are in UTC, but the Runs page shows the project\'s time zone. Make them match.', at: ago(60 * 3), fixTaskRefs: ['COR-48'], files: [exportFix] },
+    rounds: [
+      round('e-exports', 1, 'Approved. COR-48 puts the CSV times in the project\'s time zone, and a row now matches the Runs page. Nothing else on the epic branch moved since your last review.', [
+        { level: 'pass', text: 'CSV times match the Runs page', taskRefs: ['COR-48'] }
+      ], 5),
+      round('e-exports', 0, 'Approved. The export streams, so a long history doesn\'t time out, and the button matches the filters on the page.', [
+        { level: 'pass', text: 'The button exports the filtered runs', taskRefs: ['COR-46', 'COR-47'] }
+      ], 60 * 5)
+    ]
+  }),
+  'e-notify': quietReview('e-notify', 'changes_requested', { lastFeedback: { text: 'Muting every event should ask first.', at: ago(60), fixTaskRefs: ['COR-52'], files: [] } }),
+  'e-audit': quietReview('e-audit', 'in_review'),
+  'e-shortcuts': quietReview('e-shortcuts', 'changes_requested', { conflictTaskRef: 'COR-58', targetMovedBy: 9 }),
+  'e-themes': quietReview('e-themes', 'merged', { mergeCommitSha: 'c0a1d3e', rounds: [round('e-themes', 0, 'Approved. The theme applies everywhere it should.', [{ level: 'pass', text: 'The accent colour reaches every page', taskRefs: ['COR-60'] }], 90)] }),
+  'e-thumbs': quietReview('e-thumbs', 'ready_to_merge', { targetMovedBy: 3, rounds: [round('e-thumbs', 0, 'Approved. Uploads show up in every list.', [{ level: 'pass', text: 'Uploaded thumbnails reach every list', taskRefs: ['COR-62'] }], 70)] })
+}
+export function epicReview(id: string): EpicReview | null {
+  const review = epicReviews[id]
+  if (!review) return null
+  return {
+    ...review,
+    tasks: tasks.filter(t => t.epicId === id && t.status !== 'draft').map(t => ({
+      ref: t.ref, title: t.title, prNumber: t.prNumber, prUrl: t.prUrl, kind: epicTaskKinds[t.ref] ?? 'task', merged: t.status === 'merged',
+      reviewedBy: t.humanReview ? 'human' : 'reviewer',
+      criteriaMet: t.acceptanceCriteria.filter(c => c.met).length, criteriaTotal: t.acceptanceCriteria.length,
+      evidence: evidence[t.id] ?? []
+    }))
+  }
+}
+// When each epic started waiting on the human, in minutes
+const epicWaiting: Record<string, number> = { 'e-searches': 2, 'e-newsletter': 3, 'e-exports': 5 }
+const epicBodies: Record<string, string> = {
+  'e-searches': 'Saved searches is ready for you as a whole: all 3 tasks merged into the epic branch, and they work together. One thing to look at: two searches can share a name.\n\nYou\'ve seen COR-42. COR-41 and COR-43 merged on my approval.',
+  'e-newsletter': 'Newsletter signup is ready to go out. You reviewed all 4 tasks, and they work together: both forms share one component and the confirmation email arrives from either.',
+  'e-exports': 'Back for round 2: COR-48 fixes the time zone you flagged, and nothing else moved. The CSV times now match the Runs page.',
+  'e-audit': 'All 2 tasks merged, so Corral opened epic PR #79. Rita is running the integration review. It comes to you if she approves.',
+  'e-shortcuts': 'Rebasing onto main hit a conflict in apps/web/app/layouts/default.vue, so epic PR #73 is on hold. COR-58 is in Ready to resolve it. It comes back through integration review and then to you.',
+  'e-themes': 'Project themes is on main as one squash commit, c0a1d3e. The epic branch is deleted, and anything waiting on this epic has started.',
+  'e-thumbs': 'You approved Project thumbnails. Main has moved 3 commits, so Corral rebases first, CI runs again, then it merges.'
+}
+function epicItem(epicId: string, id: string, event: EpicInboxItem['event'], sender: string, role: EpicInboxItem['sender']['role'], subject: string, body: string, minutes: number): EpicInboxItem {
+  const epic = epics.find(e => e.id === epicId)!
+  const project = projects.find(p => p.id === epic.projectId)!
+  return {
+    id, type: 'epic_review', event, epicId, taskId: null, taskRef: null, subject, preview: body, body,
+    project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
+    sender: { name: sender, role }, at: ago(minutes), prUrl: epicReviews[epicId]!.pr.url, resolution: null
+  }
+}
+// What the human did to an epic PR this session, by epic
+export const epicResolutions: Record<string, string> = {}
 
 // A design task's submitted versions (D20); the preview itself is served by the server
 export const designs: Record<string, DesignVersion[]> = {
@@ -769,6 +1001,7 @@ export const clis: CliStatus[] = [
 // What each item's agent wrote (COR-190): a long, realistic body for the
 // items whose panel is being designed. Others fall back to statusReason.
 const inboxBodies: Record<string, string> = {
+  'COR-52': 'Fix for your feedback on epic PR #78: muting the last event now asks first, and the page says muted events still reach the Inbox.',
   'COR-20': 'All five criteria are met. Review the approval confirmation and merge PR #66.\n\n' + reviews[allMetTask.id]![0]!.summary,
   'COR-5': 'Rita approved round 2 of this change. Approving a design version now marks it approved and supersedes the earlier versions in the same transaction, and the approval response identifies the version.\n\n' + reviewerSummary,
   'COR-18': 'Dana submitted version 1 of the Agents page design: three layout options (grid, list and board) on desktop and mobile, each with every agent state. Rita approved it. Approve the version to plan its build, or request changes.',
@@ -867,8 +1100,24 @@ export function inbox(): Inbox {
     })
   }
   if (!answered.has('COR-19')) needsYou.push(taskItem('COR-19', 'question', 'Victor', 'developer', 'Should Retry reuse the failed run\'s worktree?', 4))
+  for (const [id, review] of Object.entries(epicReviews)) {
+    if (review.state === 'human_review') needsYou.push(epicItem(id, id, 'human_review', 'Rita', 'reviewer', `Review the ${review.title} epic`, epicBodies[id]!, epicWaiting[id]!))
+  }
   needsYou.sort((a, b) => b.at.localeCompare(a.at))
-  const activity = [taskItem('COR-7', 'activity', 'Rita', 'reviewer', 'PM drafts tasks from an approved design: approved, waiting to merge', 40, 'audit-7')]
-  const resolved = [{ ...taskItem('COR-10', 'human_review', 'Rita', 'reviewer', 'Review Install sheet on iOS', 60 * 30, 'audit-10'), resolution: 'You approved and merged it' }]
+  const activity = [
+    epicItem('e-audit', 'audit-e-audit', 'opened', 'Corral', 'system', 'Epic PR opened: Audit log export', epicBodies['e-audit']!, 12),
+    epicItem('e-shortcuts', 'audit-e-shortcuts', 'conflict', 'Corral', 'system', 'Epic PR conflict: Keyboard shortcuts', epicBodies['e-shortcuts']!, 25),
+    epicItem('e-themes', 'audit-e-themes', 'merged', 'Corral', 'system', 'Epic PR merged: Project themes', epicBodies['e-themes']!, 38),
+    taskItem('COR-7', 'activity', 'Rita', 'reviewer', 'PM drafts tasks from an approved design: approved, waiting to merge', 40, 'audit-7')
+  ]
+  // Epics acted on this session join the earlier ones
+  const acted = Object.entries(epicResolutions).map(([id, resolution]) => ({
+    ...epicItem(id, `resolved-${id}`, 'human_review', 'Rita', 'reviewer', `Review the ${epicReviews[id]!.title} epic`, epicBodies[id]!, 0), resolution
+  }))
+  const resolved = [
+    ...acted,
+    { ...epicItem('e-thumbs', 'audit-e-thumbs', 'approved', 'Rita', 'reviewer', 'Review the Project thumbnails epic', epicBodies['e-thumbs']!, 55), resolution: 'You approved it. Waiting for CI, after rebasing onto main.' },
+    { ...taskItem('COR-10', 'human_review', 'Rita', 'reviewer', 'Review Install sheet on iOS', 60 * 30, 'audit-10'), resolution: 'You approved and merged it' }
+  ]
   return { needsYou, activity, resolved, count: needsYou.length }
 }

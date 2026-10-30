@@ -2,7 +2,7 @@
 import type { InboxPanel, InboxPanelContext } from '~/composables/useInboxPanel'
 import { timeAgo } from '~/utils/labels'
 
-// What every option hides by default: the full message, the criteria with
+// What the panel hides by default: the full message, the criteria with
 // the reviewer's notes and their evidence, and the review history
 const props = withDefaults(defineProps<{ ctx: InboxPanelContext, p: InboxPanel, section?: 'all' | 'message' | 'criteria' | 'history' }>(), { section: 'all' })
 const show = (s: 'message' | 'criteria' | 'history') => props.section === 'all' || props.section === s

@@ -12,6 +12,8 @@ import type {
   DesignVersion,
   Epic,
   EpicDetail,
+  EpicReview,
+  EpicReviewActionInput,
   Evidence,
   GlobalStatus,
   ServerStatus,
@@ -196,7 +198,10 @@ export const api = {
     setDependencies: (id: string, dependsOn: string[]) => call<Epic>('PUT', `/epics/${id}/dependencies`, { dependsOn }),
     list: (slug: string) => call<Epic[]>('GET', `/projects/${slug}/epics`),
     get: (id: string) => call<EpicDetail>('GET', `/epics/${id}`),
-    patch: (id: string, input: PatchEpicInput) => call<Epic>('PATCH', `/epics/${id}`, input)
+    patch: (id: string, input: PatchEpicInput) => call<Epic>('PATCH', `/epics/${id}`, input),
+    // Proposed by COR-190; only the prototype's mock API answers these
+    review: (id: string) => call<EpicReview>('GET', `/epics/${id}/review`),
+    act: (id: string, input: EpicReviewActionInput) => call<EpicReview>('POST', `/epics/${id}/review/actions`, input)
   },
   plan: {
     sessions: () => call<PlanSession[]>('GET', '/plan/sessions'),

@@ -2,7 +2,7 @@
 import type { InboxActionInput } from '@corral/contracts'
 import type { InboxPanelContext } from '~/composables/useInboxPanel'
 
-// The reply box under every option: the chosen action (if any), its
+// The panel's reply box: the chosen action (if any), its
 // resolve target, errors and the composer. With chips, the quick actions too.
 const props = withDefaults(defineProps<{ ctx: InboxPanelContext, chips?: boolean }>(), { chips: false })
 const composer = ref<{ focus: () => void } | null>(null)

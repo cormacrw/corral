@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import type { Epic, EpicDetail, PatchEpicInput } from '@corral/contracts'
+import type { Epic, EpicDetail, EpicReview, PatchEpicInput } from '@corral/contracts'
 import type { TaskStatus } from '@corral/core'
 import { api, ApiError } from '~/composables/useApi'
-import { PRIORITY, STATUS } from '~/utils/labels'
+import { EPIC_PR_STATE, EPIC_REVIEW_MODE, PRIORITY, STATUS } from '~/utils/labels'
 
 // An epic: its title, description and progress, and the dependency tree of
 // its tasks. Docked in the flyout, as a page with room for a big tree, or
@@ -120,6 +120,12 @@ const byStatus = computed(() => {
   const counts = new Map<TaskStatus, number>()
   for (const t of epic.value?.tasks ?? []) counts.set(t.status, (counts.get(t.status) ?? 0) + 1)
   return (Object.keys(STATUS) as TaskStatus[]).filter(s => counts.has(s)).map(s => ({ status: s, count: counts.get(s)! }))
+})
+
+// The epic PR, once there is one (D23; COR-190, proposed)
+const review = ref<EpicReview | null>(null)
+watch(() => epic.value?.prNumber, async (number) => {
+  review.value = number ? await api.epics.review(props.epicId).catch(() => null) : null
 })
 
 // Mobile has no flyout, so a task opens as its own page
@@ -403,6 +409,38 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
               size="xs"
             />
           </div>
+        </section>
+
+        <section
+          v-if="review"
+          class="flex flex-col gap-1 text-sm"
+          data-testid="epic-pr"
+        >
+          <h3 class="text-xs font-medium text-muted">
+            Epic PR
+          </h3>
+          <a
+            :href="review.pr.url"
+            target="_blank"
+            rel="noopener"
+            class="flex items-center gap-1.5 text-primary hover:underline"
+          >
+            <UIcon
+              name="i-lucide-git-pull-request"
+              class="size-4"
+            />
+            #{{ review.pr.number }} into {{ review.targetBranch }}
+          </a>
+          <p class="text-muted">
+            {{ EPIC_PR_STATE[review.state] }} · Review: {{ EPIC_REVIEW_MODE[review.reviewMode].label }}
+          </p>
+          <NuxtLink
+            v-if="review.state === 'human_review'"
+            :to="`/inbox/${epic.id}`"
+            class="text-primary hover:underline"
+          >
+            Review in the Inbox
+          </NuxtLink>
         </section>
       </div>
 

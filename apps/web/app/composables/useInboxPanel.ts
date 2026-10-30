@@ -1,19 +1,10 @@
-import type { DesignVersion, PullRequestDetail, Evidence, InboxActionInput, Review, Task, TaskInboxItem } from '@corral/contracts'
+import type { DesignVersion, Epic, PullRequestDetail, Evidence, InboxActionInput, Review, Task, TaskInboxItem } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { markdownToPlainText } from '~/utils/markdown'
 
-// COR-190 design options for the Inbox message panel. The page owns the data
-// and the actions and hands them to whichever option is showing; this turns
-// them into what a reviewer decides on: the ask, the verdict and the artifacts.
-export type InboxPanelOption = 'a' | 'b' | 'c' | 'd' | 'e'
-export const INBOX_PANEL_OPTIONS: { value: InboxPanelOption, label: string, name: string }[] = [
-  { value: 'a', label: 'A', name: 'Verdict card' },
-  { value: 'b', label: 'B', name: 'Artifacts first' },
-  { value: 'c', label: 'C', name: 'Checklist' },
-  { value: 'd', label: 'D', name: 'TL;DR + tabs · chosen (v3)' },
-  { value: 'e', label: 'E', name: 'Triage' }
-]
-
+// The Inbox message panel (COR-190, inbox-panel-option-d). The page owns the
+// data and the actions; this turns them into what a reviewer decides on: the
+// ask, the verdict and the artifacts.
 type Action = InboxActionInput['action']
 export interface InboxPanelContext {
   item: TaskInboxItem
@@ -30,15 +21,12 @@ export interface InboxPanelContext {
   placeholder: string
   submitLabel: string
   needsText: boolean
-  // Where the item sits in Needs you, for Triage's "3 of 7"
-  position: { index: number, total: number } | null
   submit: (text: string) => Promise<boolean>
   // One click: actions that need no text are sent; the others pick the action for the reply box
   act: (value: Action) => Promise<void>
   setAction: (value: Action | null) => void
   setText: (value: string) => void
   setResolveTo: (value: 'backlog' | 'ready' | 'in_progress') => void
-  next: () => void
   openTask: () => void
 }
 
@@ -72,7 +60,9 @@ export function useInboxPanel(ctx: InboxPanelContext) {
     if (i.resolution) return i.resolution
     if (ctx.alreadyResolved) return 'Already resolved elsewhere. Nothing to do.'
     switch (i.type) {
-      case 'human_review': return isDesign.value ? 'Approve this design version, or request changes' : `Approve and merge ${pr.value ? `PR #${pr.value.number}` : 'the change'}, or request changes`
+      case 'human_review': return isDesign.value
+        ? 'Approve this design version, or request changes'
+        : `Approve and merge ${pr.value ? `PR #${pr.value.number}` : 'the change'}${intoEpic.value ? ' into the epic branch' : ''}, or request changes`
       case 'question': return `Answer ${i.sender.name}'s question`
       case 'blocked': return `Unblock ${i.sender.name}: answer, or send it back`
       case 'failed': return 'Retry, send back to the Backlog, or delete'
@@ -136,6 +126,17 @@ export function useInboxPanel(ctx: InboxPanelContext) {
   }, { immediate: true })
   const preview = computed(() => design.value ? { url: router.resolve(`/designs/${design.value.id}`).href, label: `Preview v${design.value.version}` } : null)
 
+  // The task's epic: in `epic` and `each_task` modes approving lands on the
+  // epic branch, not the target branch (D23), so the panel says so
+  const epic = ref<Epic | null>(null)
+  watch(() => task.value?.epicId, async (id) => {
+    epic.value = null
+    if (!id) return
+    const loaded = await api.epics.get(id).catch(() => null)
+    if (task.value?.epicId === id) epic.value = loaded
+  }, { immediate: true })
+  const intoEpic = computed(() => !!epic.value && epic.value.reviewMode !== 'direct')
+
   const primary = computed(() => canAct.value ? ctx.actions[0] ?? null : null)
   const secondary = computed(() => canAct.value ? ctx.actions.slice(1) : [])
   const primaryLabel = computed(() => isDesign.value && primary.value?.value === 'approve' ? 'Approve design' : primary.value?.label)
@@ -149,6 +150,6 @@ export function useInboxPanel(ctx: InboxPanelContext) {
     viewing.value = e
   }
 
-  return { item, task, isDesign, canAct, kind, ask, tldr, bodyIsLong, latestReview, history, criteria, met, gates, images, files, hasVerdict, pr, prDetail, prLoading, design, preview, primary, secondary, primaryLabel, viewing, view }
+  return { item, task, isDesign, canAct, kind, ask, tldr, bodyIsLong, latestReview, history, criteria, met, gates, images, files, hasVerdict, pr, prDetail, prLoading, design, preview, epic, intoEpic, primary, secondary, primaryLabel, viewing, view }
 }
 export type InboxPanel = ReturnType<typeof useInboxPanel>

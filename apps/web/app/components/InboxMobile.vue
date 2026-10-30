@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import type { Evidence, Inbox, InboxActionInput, InboxItem, PlanThreadItem, Review, Task, TaskInboxItem } from '@corral/contracts'
+import type { EpicInboxItem, EpicReview, Evidence, Inbox, InboxActionInput, InboxItem, PlanThreadItem, Review, Task, TaskInboxItem } from '@corral/contracts'
 import { ROLE, timeAgo, type Color } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
-import type { Component } from 'vue'
 import type { InboxPanelContext } from '~/composables/useInboxPanel'
 
 // The Inbox on a phone (design/inbox.md, design/mobile.md): /inbox is the
@@ -30,9 +29,11 @@ const props = defineProps<{
   typeBadge: (type: InboxItem['type']) => { label: string, color: Color }
   onSubmit: (text: string) => Promise<boolean>
   onRetry: () => unknown
-  // COR-190 prototype: a design option's panel in place of today's item view
-  panel?: Component | null
+  // COR-190 prototype: the new message panel in place of today's item view
+  panel?: boolean
   panelCtx?: InboxPanelContext
+  epicItem?: EpicInboxItem | null
+  epicReview?: EpicReview | null
 }>()
 const tab = defineModel<'needsYou' | 'activity' | 'resolved'>('tab', { required: true })
 const search = defineModel<string>('search', { required: true })
@@ -96,11 +97,25 @@ const tabs = computed(() => [
           variant="ghost"
           color="neutral"
         />
+        <UButton
+          v-else-if="epicItem"
+          :to="`/epics/${epicItem.epicId}`"
+          label="Epic"
+          icon="i-lucide-list"
+          variant="ghost"
+          color="neutral"
+        />
       </template>
     </MobilePageHeader>
-    <component
-      :is="panel"
-      v-if="selected && panel && panelCtx"
+    <InboxEpicPanel
+      v-if="epicItem && panelCtx"
+      :item="epicItem"
+      :review="epicReview ?? null"
+      :ctx="panelCtx"
+      mobile
+    />
+    <InboxPanel
+      v-else-if="selected && panel && panelCtx"
       :ctx="panelCtx"
       mobile
     />
@@ -379,7 +394,7 @@ const tabs = computed(() => [
                 <ProjectThumbnail
                   :project="item.project"
                   :size="16"
-                />{{ item.project.name }} · {{ item.taskRef }}
+                />{{ item.project.name }}{{ item.taskRef ? ` · ${item.taskRef}` : '' }}
               </span>
             </span>
           </span>

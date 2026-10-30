@@ -1,31 +1,30 @@
 <script setup lang="ts">
 import type { InboxActionInput } from '@corral/contracts'
-import { actionNeedsText, type InboxPanel, type InboxPanelContext } from '~/composables/useInboxPanel'
+import { actionNeedsText, type InboxPanelContext } from '~/composables/useInboxPanel'
 
-// Option D on a phone (COR-190 v3): every action as a large touch target in
+// The panel's actions on a phone (COR-190): every action as a large touch target in
 // a bar at the bottom of the screen, within thumb reach. Actions that need
 // words (Request changes, Clarify) and Reply open the composer just above
 // the bar; the others are sent on the tap.
-const props = defineProps<{ ctx: InboxPanelContext, p: InboxPanel }>()
+const props = withDefaults(defineProps<{ ctx: InboxPanelContext, approveLabel?: string, reply?: boolean }>(), { approveLabel: 'Approve and merge', reply: true })
 const replying = ref(false)
 watch(() => props.ctx.item.id, () => {
   replying.value = false
 })
 const composing = computed(() => replying.value || (props.ctx.action !== null && actionNeedsText(props.ctx.action)))
 const SHORT: Record<string, string> = {
-  approve: 'Approve and merge',
   request_changes: 'Request changes',
   clarify: 'Answer',
   send_back: 'Send back',
   delete: 'Delete',
   resolve: 'Retry'
 }
-const label = (a: { value: string, label: string }) => a.value === 'approve' && props.p.isDesign.value ? 'Approve design' : SHORT[a.value] ?? a.label
+const label = (a: { value: string, label: string }) => a.value === 'approve' ? props.approveLabel : SHORT[a.value] ?? a.label
 function tap(value: string) {
   replying.value = false
   void props.ctx.act(value as InboxActionInput['action'])
 }
-function reply() {
+function toggleReply() {
   props.ctx.setAction(null)
   replying.value = !replying.value
 }
@@ -71,10 +70,11 @@ function reply() {
         <span class="line-clamp-2 text-center leading-tight">{{ label(a) }}</span>
       </button>
       <button
+        v-if="reply"
         type="button"
         :class="['flex min-h-16 w-16 shrink-0 flex-col items-center justify-center gap-1 rounded-lg border text-sm font-medium', replying ? 'border-primary bg-primary/10 text-primary' : 'border-default text-muted active:bg-elevated']"
         :aria-pressed="replying"
-        @click="reply"
+        @click="toggleReply"
       >
         <UIcon
           name="i-lucide-reply"

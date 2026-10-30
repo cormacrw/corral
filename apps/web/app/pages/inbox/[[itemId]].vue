@@ -1,15 +1,10 @@
 <script setup lang="ts">
-import type { Evidence, Inbox, InboxActionInput, Review, Task, InboxItem, PlanThreadItem, TaskInboxItem } from '@corral/contracts'
+import type { EpicInboxItem, EpicReview, Evidence, Inbox, InboxActionInput, Review, Task, InboxItem, PlanThreadItem, TaskInboxItem } from '@corral/contracts'
 import { reactive } from 'vue'
-import { INBOX_PANEL_OPTIONS, actionNeedsText, type InboxPanelContext, type InboxPanelOption } from '~/composables/useInboxPanel'
+import { actionNeedsText, type InboxPanelContext } from '~/composables/useInboxPanel'
 import { api } from '~/composables/useApi'
 import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
-import InboxPanelA from '~/components/InboxPanelA.vue'
-import InboxPanelB from '~/components/InboxPanelB.vue'
-import InboxPanelC from '~/components/InboxPanelC.vue'
-import InboxPanelD from '~/components/InboxPanelD.vue'
-import InboxPanelE from '~/components/InboxPanelE.vue'
 
 // The Inbox (design/inbox.md, D11): list, selected item, action tray, task flyout
 const route = useRoute()
@@ -33,18 +28,11 @@ const actionError = ref<string | null>(null)
 const task = ref<Task | null>(null)
 const evidence = ref<Evidence[]>([])
 const reviews = ref<Review[]>([])
-// COR-190 design options for the message panel, in the prototype only
-// (?option=a…e). They take the full width, so the task flyout starts closed.
-const panelOption = computed<InboxPanelOption | null>(() => {
-  if (!import.meta.prototype) return null
-  const value = route.query?.option
-  return INBOX_PANEL_OPTIONS.some(o => o.value === value) ? value as InboxPanelOption : null
-})
-const showTask = ref(panelOption.value === null)
-watch(panelOption, (value) => {
-  showTask.value = value === null
-  if (value) void flyout.close()
-})
+// COR-190: the new message panel, in the prototype only. It takes the full
+// width, so the task flyout starts closed.
+const prototype = import.meta.prototype
+const showTask = ref(!prototype)
+const epicReview = ref<EpicReview | null>(null)
 const planResolving = ref(false)
 let resolutionPosition = 0
 
@@ -61,7 +49,7 @@ async function load() {
 onMounted(() => {
   void load()
   const stop = live.subscribe((event) => {
-    if (['task.updated', 'task.deleted', 'task.created', 'run.updated', 'plan.session'].includes(event.type)) void load()
+    if (['task.updated', 'task.deleted', 'task.created', 'run.updated', 'plan.session', 'epic.updated'].includes(event.type)) void load()
   })
   onBeforeUnmount(stop)
 })
@@ -89,7 +77,8 @@ const selected = computed<InboxItem | null>(() => {
   return [...inbox.value.needsYou, ...inbox.value.activity, ...inbox.value.resolved].find(i => i.id === selectedId.value)
     ?? (openThread.value?.id === selectedId.value ? openThread.value : null)
 })
-const alreadyResolved = computed(() => selected.value !== null && selected.value.type !== 'activity' && !inbox.value?.needsYou.some(i => i.id === selected.value!.id))
+const epicItem = computed<EpicInboxItem | null>(() => selected.value?.type === 'epic_review' ? selected.value : null)
+const alreadyResolved = computed(() => selected.value !== null && selected.value.type !== 'activity' && (!epicItem.value || epicItem.value.event === 'human_review') && !inbox.value?.needsYou.some(i => i.id === selected.value!.id))
 watch(selected, async (item, previous) => {
   action.value = null
   text.value = ''
@@ -97,6 +86,11 @@ watch(selected, async (item, previous) => {
   // Nothing selected (e.g. the last item was just resolved): nothing to show beside it
   if (!item) flyout.close()
   if (item?.type === 'plan_thread') {
+    if (previous?.id !== item.id && (flyout.ref.value || flyout.epic.value)) await flyout.close()
+    task.value = null
+    return
+  }
+  if (item?.type === 'epic_review') {
     if (previous?.id !== item.id && (flyout.ref.value || flyout.epic.value)) await flyout.close()
     task.value = null
     return
@@ -128,6 +122,13 @@ watch(() => [selected.value, task.value, taskSlug.value] as const, async ([item,
   if (task.value?.id !== t.id) return
   evidence.value = loadedEvidence
   reviews.value = loadedReviews
+}, { immediate: true })
+// An epic PR's review: its tasks, integration verdict and combined diff
+watch(() => epicItem.value?.epicId, async (id) => {
+  epicReview.value = null
+  if (!id) return
+  const loaded = await api.epics.review(id).catch(() => null)
+  if (epicItem.value?.epicId === id) epicReview.value = loaded
 }, { immediate: true })
 // Capture before the request: plan.session can remove the row before it resolves.
 // Hold refreshes through both the request and flyout close, as for approval.
@@ -168,6 +169,9 @@ function toggleTask() {
 const actions = computed(() => {
   if (!selected.value) return []
   switch (selected.value.type) {
+    case 'epic_review': return epicItem.value?.event === 'human_review' && !epicItem.value.resolution && !alreadyResolved.value
+      ? [{ value: 'approve', label: 'Approve epic', icon: 'i-lucide-check' }, { value: 'request_changes', label: 'Request changes', icon: 'i-lucide-pencil' }]
+      : []
     case 'human_review': return [{ value: 'approve', label: 'Approve and merge', icon: 'i-lucide-check' }, { value: 'request_changes', label: 'Request changes', icon: 'i-lucide-pencil' }]
     case 'question':
     case 'blocked': return [{ value: 'clarify', label: 'Clarify and continue', icon: 'i-lucide-message-circle' }, { value: 'send_back', label: 'Send back to Backlog', icon: 'i-lucide-undo-2' }, { value: 'delete', label: 'Delete task', icon: 'i-lucide-trash-2' }]
@@ -178,7 +182,7 @@ const actions = computed(() => {
 const needsText = computed(() => action.value === 'request_changes' || action.value === 'clarify')
 const placeholder = computed(() => {
   switch (action.value) {
-    case 'request_changes': return `What should ${task.value?.developer?.name ?? 'the developer'} change?`
+    case 'request_changes': return epicItem.value ? 'What should change? This becomes a fix task in the epic' : `What should ${task.value?.developer?.name ?? 'the developer'} change?`
     case 'clarify': return 'Your answer or guidance for the developer'
     case 'delete': return 'Reason for deleting (optional)'
     case null: return `Reply to ${selected.value?.sender.name ?? 'the agent'}…`
@@ -193,7 +197,10 @@ async function submit(message: string): Promise<boolean> {
   busy.value = true
   actionError.value = null
   try {
-    if (!action.value) {
+    if (epicItem.value) {
+      await api.epics.act(epicItem.value.epicId, action.value === 'request_changes' ? { action: 'request_changes', text: message } : { action: 'approve' })
+      toast.add({ title: 'Done', description: submitLabel.value, color: 'success' })
+    } else if (!action.value) {
       if (task.value) await api.tasks.comment(live.state.value.projects.find(p => p.id === task.value!.projectId)!.slug, task.value.number, message)
     } else {
       const input: InboxActionInput = action.value === 'clarify'
@@ -212,7 +219,7 @@ async function submit(message: string): Promise<boolean> {
         if (!version) throw new Error('No submitted design version to approve')
         await api.tasks.approveDesign(slug, task.value.number, version.version, message.trim() || undefined)
       } else {
-        await api.inbox.act(selected.value.taskId, input)
+        await api.inbox.act(selected.value.taskId!, input)
       }
       toast.add({ title: 'Done', description: submitLabel.value, color: 'success' })
     }
@@ -226,8 +233,7 @@ async function submit(message: string): Promise<boolean> {
     if (!inbox.value?.needsYou.some(i => i.id === actedOn.id)) {
       const remaining = inbox.value?.needsYou ?? []
       const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
-      // The prototype's design option stays chosen (COR-190)
-      void router.replace({ path: next ? `/inbox/${next.id}` : '/inbox', query: panelOption.value ? { option: panelOption.value } : {} })
+      void router.replace(next ? `/inbox/${next.id}` : '/inbox')
     }
     return true
   } catch (e) {
@@ -237,33 +243,20 @@ async function submit(message: string): Promise<boolean> {
     busy.value = false
   }
 }
-// What the design options get: the page's data and actions in one object
+// What the panel gets: the page's data and actions in one object
 async function act(value: InboxActionInput['action']) {
   action.value = value
   if (!actionNeedsText(value)) await submit(text.value)
 }
-function next() {
-  const list = inbox.value?.needsYou ?? []
-  const position = list.findIndex(i => i.id === selectedId.value)
-  const following = list[(position + 1) % Math.max(list.length, 1)]
-  if (following) void router.push({ path: `/inbox/${following.id}`, query: route.query })
-}
 const panelCtx = reactive({
   item: computed(() => selected.value as TaskInboxItem),
   task, evidence, reviews, alreadyResolved, actions, action, resolveTo, text, busy, actionError, placeholder, submitLabel, needsText,
-  position: computed(() => {
-    const list = inbox.value?.needsYou ?? []
-    const index = list.findIndex(i => i.id === selectedId.value)
-    return index >= 0 ? { index, total: list.length } : null
-  }),
-  submit, act, next,
+  submit, act,
   setAction: (value: InboxActionInput['action'] | null) => { action.value = value },
   setText: (value: string) => { text.value = value },
   setResolveTo: (value: 'backlog' | 'ready' | 'in_progress') => { resolveTo.value = value },
   openTask: () => device.isMobile.value ? void router.push(`/tasks/${selected.value?.taskRef}`) : toggleTask()
 }) as InboxPanelContext
-const panelComponent = computed(() => panelOption.value && { a: InboxPanelA, b: InboxPanelB, c: InboxPanelC, d: InboxPanelD, e: InboxPanelE }[panelOption.value])
-const prototype = import.meta.prototype
 
 // On a phone the shell's header names the item and where it sits in the list
 const mobileHeader = useMobileHeader()
@@ -274,7 +267,7 @@ watchEffect(() => {
   }
   const position = inbox.value?.needsYou.findIndex(i => i.id === selectedId.value) ?? -1
   mobileHeader.value = {
-    title: selected.value?.type === 'plan_thread' ? selected.value.subject : selected.value?.taskRef ?? '',
+    title: selected.value?.type === 'plan_thread' ? selected.value.subject : epicItem.value ? 'Epic review' : selected.value?.taskRef ?? '',
     eyebrow: position >= 0 ? `Inbox · ${position + 1} of ${inbox.value!.needsYou.length}` : 'Inbox'
   }
 })
@@ -285,7 +278,6 @@ onBeforeUnmount(() => {
 
 <template>
   <UDashboardPanel :ui="{ body: 'p-0' }">
-    <InboxOptionSwitcher v-if="prototype" />
     <!-- Phones get the list and the item as separate screens (design/mobile.md) -->
     <InboxMobile
       v-if="device.isMobile.value"
@@ -300,7 +292,7 @@ onBeforeUnmount(() => {
       :error="error"
       :items="items"
       :selected-id="selectedId"
-      :selected="selected?.type === 'plan_thread' ? null : selected"
+      :selected="selected?.type === 'plan_thread' || selected?.type === 'epic_review' ? null : selected"
       :already-resolved="alreadyResolved"
       :task="task"
       :evidence="evidence"
@@ -314,8 +306,10 @@ onBeforeUnmount(() => {
       :type-badge="typeBadge"
       :on-submit="submit"
       :on-retry="load"
-      :panel="panelComponent && selected && selected.type !== 'plan_thread' ? panelComponent : null"
+      :panel="prototype"
       :panel-ctx="panelCtx"
+      :epic-item="epicItem"
+      :epic-review="epicReview"
     />
     <div
       v-else
@@ -444,9 +438,14 @@ onBeforeUnmount(() => {
         v-else
         class="flex min-w-0 flex-1 flex-col"
       >
-        <component
-          :is="panelComponent"
-          v-if="selected && panelComponent"
+        <InboxEpicPanel
+          v-if="epicItem"
+          :item="epicItem"
+          :review="epicReview"
+          :ctx="panelCtx"
+        />
+        <InboxPanel
+          v-else-if="selected && prototype"
           :ctx="panelCtx"
         />
         <template v-else-if="selected">

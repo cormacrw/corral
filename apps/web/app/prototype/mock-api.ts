@@ -1,5 +1,5 @@
 import { checkEpicDependencies } from '@corral/core'
-import type { CreateTaskInput, InboxActionInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
+import type { CreateTaskInput, EpicReviewActionInput, InboxActionInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
 import * as f from './fixtures'
@@ -166,6 +166,35 @@ route('PUT', '/epics/:id/dependencies', ([id], body) => {
 route('GET', '/epics/:id', ([id]) => {
   const epic = f.epics.find(e => e.id === id) ?? notFound()
   return { ...epic, tasks: f.tasks.filter(t => t.epicId === epic.id) }
+})
+
+// Epic review (COR-190, proposed): approving waits for CI and a rebase;
+// requesting changes opens a fix task in the epic, in Ready (D23)
+route('GET', '/epics/:id/review', ([id]) => f.epicReview(id!) ?? notFound())
+route('POST', '/epics/:id/review/actions', ([id], body) => {
+  const epic = f.epics.find(e => e.id === id) ?? notFound()
+  const review = f.epicReviews[id!] ?? notFound()
+  const input = body as EpicReviewActionInput
+  if (input.action === 'approve') {
+    review.state = 'ready_to_merge'
+    f.epicResolutions[id!] = 'You approved it. Corral merges it once CI passes, rebasing first if the target branch has moved.'
+  } else {
+    const p = f.projects.find(p => p.id === epic.projectId) ?? notFound()
+    const number = Math.max(p.nextTaskNumber, ...f.tasks.filter(t => t.projectId === p.id).map(t => t.number + 1))
+    const task = f.task(p, number, {
+      title: `Fix: ${input.text.split('\n')[0]!.slice(0, 60)}`, status: 'ready', epicId: epic.id,
+      acceptanceCriteria: [{ id: `mock-${number}-0`, text: input.text, position: 0, met: null }]
+    })
+    p.nextTaskNumber = number + 1
+    f.tasks.push(task)
+    emit({ type: 'task.created', task })
+    review.state = 'changes_requested'
+    epic.reviewState = 'changes_requested'
+    epic.taskCount++
+    f.epicResolutions[id!] = `You requested changes. ${task.ref} is in Ready, and the epic comes back to you once it's merged.`
+  }
+  emit({ type: 'epic.updated', epic })
+  return f.epicReview(id!)
 })
 
 route('GET', '/agents', () => f.agents)

@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { useInboxPanel, type InboxPanelContext } from '~/composables/useInboxPanel'
 
-// Option D, TL;DR + tabs (COR-190, inbox-panel-option-d), the chosen
-// direction: a one-to-two line summary, the verdict and the actions on top,
-// then tabs. The first tab is an overview of the artifacts; the criteria with
+// The Inbox message panel (COR-190, inbox-panel-option-d): a one-to-two line
+// summary, the verdict and the actions on top, then tabs. The first tab is an overview of the artifacts; the criteria with
 // notes, the review history, the PR description, the code diff and the full
 // message each have a tab of their own. On a phone the actions move to a
 // bar of large touch targets at the bottom of the screen.
@@ -29,14 +28,16 @@ const tabs = computed(() => [
 watch(tabs, (list) => {
   if (!list.some(t => t.value === tab.value)) tab.value = 'overview'
 })
-const explain: Record<string, string> = {
-  approve: 'Merges the PR once the checks pass.',
+const explain = computed<Record<string, string>>(() => ({
+  approve: p.intoEpic.value ? 'Merges into the epic branch once the checks pass.' : 'Merges the PR once the checks pass.',
   request_changes: 'Sends it back to the developer with your note.',
   clarify: 'Your answer goes to the developer, who carries on.',
   send_back: 'Moves the task to the Backlog.',
   delete: 'Removes the task.',
   resolve: 'Starts a new run from where the task is.'
-}
+}))
+const flyout = useTaskFlyout()
+const openEpic = () => flyout.openEpic(p.epic.value!.id)
 </script>
 
 <template>
@@ -68,6 +69,23 @@ const explain: Record<string, string> = {
       </div>
       <p class="line-clamp-2 text-sm">
         <span class="font-medium">TL;DR</span> <span class="text-muted">{{ p.tldr.value }}</span>
+      </p>
+      <p
+        v-if="p.intoEpic.value"
+        class="flex items-center gap-1.5 text-sm text-muted"
+        data-testid="inbox-epic-line"
+      >
+        <UIcon
+          name="i-lucide-git-branch"
+          class="size-4 shrink-0"
+        />
+        <span>Part of
+          <button
+            type="button"
+            class="font-medium text-default hover:underline"
+            @click="openEpic"
+          >{{ p.epic.value?.title }}</button>.
+          You'll review it all together at the epic PR.</span>
       </p>
       <InboxPanelVerdict :p="p" />
       <div class="flex flex-wrap items-center justify-between gap-2">
@@ -193,7 +211,7 @@ const explain: Record<string, string> = {
     <InboxPanelThumbBar
       v-if="p.canAct.value && mobile"
       :ctx="ctx"
-      :p="p"
+      :approve-label="p.isDesign.value ? 'Approve design' : undefined"
     />
     <div
       v-else-if="p.canAct.value"

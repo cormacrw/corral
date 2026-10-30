@@ -1,138 +1,127 @@
-# COR-190 · Inbox message panel: five options · v4 (Option D chosen)
+# COR-190 · Inbox message panel (Option D) and epic review · v5
 
-Prototype: `apps/web/prototype-dist/` (`pnpm --filter web prototype`). Open the Inbox and use the
-**Current · A · B · C · D · E** strip at the top (prototype only), or go straight to a URL:
-`index.html#/inbox/t-cor-5?option=a`. The option stays chosen as you move between items and after acting.
-Phones: the same URL at 390px (the screenshots force the phone layout with the app's own
-`corral.device.layout = mobile` override, as a touch phone gets automatically).
+Prototype: `apps/web/prototype-dist/` (`pnpm --filter web prototype`). Open `index.html#/inbox`; the routes below go straight to each example. There is no option switcher any more.
 
-Every option keeps the list column and Plan threads exactly as today. Only the task item panel changes.
+v5 does what the human asked after v4: **D only**, and **what epic review looks like, with examples**.
 
-## Fixture items (all rendered by every option)
+- Options A, B, C and E, their shared drawer and the switcher are gone, so the prototype's Inbox now always shows D. The earlier versions keep them.
+- The branch now includes `main`, so the prototype has the latest app, including the mobile Inbox work.
+- D itself is as approved in v4, plus one line for tasks in an epic (below).
 
-| Item | URL id | What it exercises |
+## Screens
+
+| Screen id | What it is |
+|---|---|
+| `inbox-panel-option-d` | The task item panel on desktop |
+| `inbox-panel-option-d-mobile` | The same on a phone, with the bar of large touch targets |
+| `inbox-panel-epic-review` | **New:** an epic PR waiting on you, desktop |
+| `inbox-panel-epic-review-mobile` | **New:** the same on a phone |
+| `inbox-panel-epic-activity` | **New:** the read-only epic PR moments: opened, conflict, approved, merged |
+| `inbox-panel-task-in-epic` | **New:** D for a task in an epic, with the "Part of…" line |
+| `epic-pr-section` | **New:** the Epic PR block on the epic flyout and page |
+
+## Epic review (D23, D11)
+
+Under D23 the human reviews a feature once, as a whole, at its epic PR. Today only the epic's fields exist: nothing raises an Inbox item and there's no screen. This is that screen, in D's layout, so reviewing an epic feels the same as reviewing a task.
+
+**What differs from a task review.** A task asks "did this task meet its criteria?". An epic asks "do these tasks work together, and do I want this on main?". So:
+
+- The verdict line reads **Rita approved the epic · lint, test passed · 3 of 3 tasks merged · You saw 1 of 3**. "You saw" is the new idea: in `epic` mode most tasks merged without you, so this says how much of the feature you're seeing for the first time.
+- Criteria are replaced by **Tasks n/m**, one row per task: who passed it, criteria met, its PR, and whether it was a fix or conflict task. A row opens the task.
+- **Review** shows the integration findings first, then the reviewer's summary, for every round.
+- A line under the actions says what approving does, because this one reaches the target branch: "Approving rebases onto main (6 commits ahead), runs CI and squash-merges."
+- There's no Reply on an epic item: an epic has no comment thread to reply to, so you only approve or request changes.
+
+**Tabs:** Overview · Tasks n/m · Review · PR description · Code diff N · Message. They're hidden by default and one click away, as on a task.
+
+**Overview:** any non-blocking notes from the reviewer, then screenshots gathered from all the tasks (labelled with their task, opening the evidence viewer), then the review mode and size. In a later round, a **Since your last review** block leads.
+
+**Actions:** *Approve epic* is sent on one click and the Inbox moves on. *Request changes* opens the composer; your text becomes a fix task in Ready in the epic (D23), and the Inbox moves on. On a phone both are 64px targets in the bottom bar, with the composer opening above it.
+
+### Examples
+
+| Example | Route | Shows |
 |---|---|---|
-| Code review COR-5 | `t-cor-5` | PR #64, gate checks lint/test, 5 criteria (4 met, 1 unmet), 3 screenshots + text evidence (log, request, test output, note), long reviewer summary, 2 review rounds |
-| All-met code review COR-20 | `t-cor-20` | PR #66, lint/test gates, 5 of 5 criteria met, image + text evidence, long reviewer summary and history |
-| Design review COR-18 | `t-cor-18` | Design version v1 with 4 screenshots and a preview link (`/designs/dv-18-1`), 3 of 3 criteria |
-| Question COR-19 | `t-cor-19` | Developer question, primary action Clarify |
-| Blocked COR-8 | `t-cor-8` | Blocked with a question |
-| Failed COR-9 | `t-cor-9` | **Very long body** (headings, logs, options) |
-| Activity COR-7 | Activity tab, `audit-7` | Read-only, no actions |
-| Resolved COR-10 | Resolved tab, `audit-10` | Resolved: shows the resolution as the "ask" |
+| First review, `epic` mode | `#/inbox/e-searches` | Saved searches. D23's own worked example: you saw 1 of 3 tasks, with one non-blocking note and rebase needed |
+| First review, `each_task` mode | `#/inbox/e-newsletter` | Newsletter signup, another project: "You saw all", so the review is about how they fit, and main hasn't moved |
+| Round 2 after you requested changes | `#/inbox/e-exports` | Run history export: *Since your last review* quotes your feedback and names the fix task. **See only these changes** opens Code diff on *Since your last review* rather than *Whole epic* |
+| Fix task in an `each_task` epic | `#/inbox/t-cor-52` | An ordinary task review with the "Part of Notification settings" line |
+| Epic PR opened (Activity) | `#/inbox/audit-e-audit` | Read-only; Rita is reviewing |
+| Epic PR conflict (Activity) | `#/inbox/audit-e-shortcuts` | Read-only; links conflict task COR-58, which isn't merged yet (2 of 3) |
+| Epic PR merged (Activity) | `#/inbox/audit-e-themes` | Read-only; the squash commit |
+| Approved, waiting on CI (Resolved) | `#/inbox/audit-e-thumbs` | Read-only; what happens next |
+| Epic flyout and page | `#/epics/e-searches` | The Epic PR block: link, state, review mode, *Review in the Inbox* |
 
-Mock data shape: `TaskInboxItem` from `inbox()` in `app/prototype/fixtures.ts`, `Task` (acceptanceCriteria, gateChecks,
-latestReview, reviewer), `Evidence[]` and `Review[]` from the existing endpoints, and `DesignVersion[]` from
-`GET /projects/:slug/tasks/:number/designs`. The mock API answers `POST /inbox/:taskId/actions` and `POST /projects/:slug/tasks/:number/designs/:version/approve`. Design approval uses the version-specific endpoint, marks the version approved, supersedes earlier versions, moves the task to Approved and advances selection. Code approvals still move to Ready to merge.
+Acting works against the mock API. Approving moves the epic to Resolved. Requesting changes creates a real fix task in Ready and updates the epic's counts. Reload resets everything.
 
-## v4 revision: load race and screenshots
+### Tasks in an epic
 
-The design is unchanged from v3. This version fixes a load race and replaces the screenshot set.
+D's panel now has one line for a task in an `epic` or `each_task` epic: "Part of **Saved searches**. You'll review it all together at the epic PR." The epic name opens the epic. The ask reads "Approve and merge PR #64 into the epic branch, or request changes", because approving doesn't put it on main (D23). Its PR description shows the epic branch as the base. `direct` epics are unchanged.
 
-- **Load race on a cold deep link** (e.g. opening `#/inbox/t-cor-5?option=d` directly). The task could load before the live state had the projects, so the project slug was missing. Loads keyed only on the task returned early and never ran again, which left the panel with no thumbnails, no Preview link and no PR tabs.
-  - `useInboxPanel` now derives the slug and adds it to the watch sources of the design-versions and PR-detail loads. A response for a task that's no longer open is dropped.
-  - The Inbox page's evidence and reviews load (in `inbox/[[itemId]].vue`, previously inside the selection watcher) is now its own watch on the selection, the task and the slug. That bug predates COR-190 and affects the shipped Inbox too, so the build should carry the fix.
-  - A new test, `useInboxPanel.test.ts`, covers the slug arriving after the task.
-- **Fixtures:** the review items now keep their named reviewer (Rita) when they have no run, instead of falling back to "Reviewer".
-- **Screenshots:** recaptured from the rebuilt bundle at exactly 1280×800 and 390×844. Each capture waits until the panel has rendered, every image has decoded, and the item's key artifacts are present: the PR link, the Code diff tab for D, and the Preview v1 link for design reviews. The after-approve shot waits for the toast to clear.
+### States
 
-## v3 revision: Option D chosen
+- **Waiting on you:** actions, the "what approving does" line and "You saw".
+- **Read-only** (opened, conflict, merged, approved, or resolved by you): the same layout, with "For your information. Nothing to do." or the resolution in place of the actions; no action bar on a phone.
+- **Loading:** the top block shows at once, with skeletons in the tab body until the review arrives.
+- **Screenshots:** none means the Overview shows just the notes and the size.
 
-The human picked **Option D** for desktop, asked for **PR description** and **Code diff** tabs, and for **large touch areas for each action at the bottom of the screen** on mobile. A, B, C and E stay in the switcher unchanged, for reference only. The switcher labels D "TL;DR + tabs · chosen (v3)".
+### Components
 
-- **New tabs (code reviews with a PR):** Overview · Criteria n/m · Review · **PR description** · **Code diff N** · Message. Design reviews, questions, blocked, failed, activity and resolved items have no PR, so these tabs don't show for them.
-  - *PR description:* `#64 Title`, head → base branch, then the PR body as markdown (`MarkdownText`).
-  - *Code diff:* a summary line ("3 files +27 −7 head → base" plus *Open on GitHub* to `/files`), then one block per changed file with its path, status and +/− counts. Each block expands to a unified diff with added lines tinted success and removed lines tinted error, in mono with horizontal scroll. The first file starts open and the rest are collapsed. New component: `InboxPanelDiff`.
-  - Both tabs are hidden by default and one click away, like the other long text. The diff is never in the way of deciding.
-- **Mobile action bar (`inbox-panel-option-d-mobile`):** the actions leave the top block and move to a bar pinned to the bottom of the screen, within thumb reach (`InboxPanelThumbBar`).
-  - Every action is its own target, at least 64px tall, filling the width in equal parts with an icon above a short label: *Approve and merge / Approve design / Answer / Retry* (primary, filled), *Request changes / Send back* (outline), *Delete* (outline, red text). A fixed-width **Reply** target sits at the end.
-  - Actions that need no words are sent on the tap and the Inbox moves on. *Request changes*, *Answer* and *Reply* open the composer directly above the bar, so the bar never moves. A question opens with *Answer* already chosen, as today's phone Inbox does.
-  - The top block now holds only what it is, the TL;DR, the verdict and the PR/Preview link, which leaves more room for the tabs. Tabs scroll sideways on a phone.
-- **Desktop** keeps D's layout from v2: actions sit inline under the verdict, and the reply composer is pinned at the bottom.
+New: `InboxEpicPanel`. Reused: `InboxPanelDiff`, `InboxPanelThumbBar` (now takes the approve label and can leave out Reply), `InboxPanelTray`, `EvidenceViewer`, `MarkdownText`, `UTabs`. `EpicDetail` gains the Epic PR block.
 
-### New data: PR description and diff
+## Option D · `inbox-panel-option-d`, `inbox-panel-option-d-mobile`
 
-`Task` and `TaskInboxItem` carry only `prUrl`/`prNumber`. Neither the PR body nor the diff is served today. The prototype proposes a **`PullRequestDetail`** contract (`packages/contracts/src/api.ts`): `{ number, url, title, body, baseBranch, headBranch, files: [{ path, status, additions, deletions, patch }] }`. It is served at **`GET /projects/:slug/tasks/:number/pull-request`** (`api.tasks.pullRequest`), and only the mock API answers it so far. The server would read it from GitHub with the project's token, the same way the Pull requests page reads gate status. It loads when a code-review item with a PR opens. Fixtures: COR-5 and COR-20 (`pullRequestDetails` in `fixtures.ts`). Large diffs need a cap (see open questions).
+Unchanged from v4.
 
-## v2 revision
+- **Up front (desktop):** kind · project · ref · sender · time, the title, a **TL;DR**, the verdict, the actions and the PR or Preview link. Then the tabs **Overview · Criteria n/m · Review · PR description · Code diff N · Message**. Overview shows a screenshot grid and files on reviews, or what each action does on other items.
+- **Up front (mobile):** the same, with the actions in a bottom bar of targets at least 64px tall, plus Reply. *Request changes*, *Answer* and *Reply* open the composer above the bar.
+- **Hidden, one click away:** criteria notes, review history, PR description, diff and the full message.
+- **Components:** `InboxPanel`, `InboxPanelMeta`, `InboxPanelVerdict`, `InboxPanelActions`, `InboxPanelThumbBar`, `InboxPanelArtifacts`, `InboxPanelDiff`, `InboxPanelDetails`, `InboxPanelTray`, `EvidenceViewer`, `MarkdownText`, `UTabs`. Composable: `useInboxPanel`.
+- **Rationale:** familiar, and it scales to any amount of content. **Trade-off:** an unmet criterion's reason is one click away.
 
-- `DesignPreview` uses a bundled HTML document via `srcdoc` only in prototype builds. The same sandbox remains (`allow-scripts`, no same-origin). Preview v1 opens the real `/designs/dv-18-1` route and its iframe shows an interactive mock Agents layout (Grid / List / Role board), without any backend request. Production keeps the existing API preview URL.
-- B's filmstrip now opens the existing EvidenceViewer on the first click, while updating the hero for when the viewer closes.
-- Approve design uses the existing design-approval API contract and mock version/task transitions; it never follows the code merge path.
-- COR-20 is a separate all-met code review, alongside COR-5's 4-of-5 state. Both appear in every option, including at phone width.
-- The five visual directions and the open product decisions below are unchanged.
+| Item | Route | Exercises |
+|---|---|---|
+| Code review COR-5 | `#/inbox/t-cor-5` | PR, gates, 4 of 5 criteria, image and text evidence, long reviewer summary, 2 rounds, in an epic |
+| All-met code review COR-20 | `#/inbox/t-cor-20` | 5 of 5 criteria |
+| Design review COR-18 | `#/inbox/t-cor-18` | Screenshots and Preview v1; *Approve design* uses the version endpoint |
+| Question COR-19 | `#/inbox/t-cor-19` | Answer is already chosen on a phone |
+| Blocked COR-8 | `#/inbox/t-cor-8` | Answer, Send back, Delete |
+| Failed COR-9 | `#/inbox/t-cor-9` | Very long body, Retry |
+| Activity COR-7 | `#/inbox/audit-7` | No actions |
+| Resolved COR-10 | `#/inbox/audit-10` | The resolution |
 
-## Shared across all options
+## Mock data
 
-- **What it is:** kind as icon + plain word (Code review, Design review, Question, Blocked, Failed, Activity, Resolved), project · ref · sender · time as one quiet line. No type badges (COR-154 taste).
-- **The ask:** one derived line, e.g. "Approve and merge PR #64, or request changes", "Answer Victor's question".
-- **Verdict:** plain text with icons: "✓ Rita approved · round 2", "✓ lint, test passed", "✗ 4 of 5 criteria met" (red when any unmet).
-- **Artifacts:** screenshot thumbnails (open the existing evidence viewer, now `EvidenceViewer.vue`, extracted from `EvidenceList`), PR link and design preview link (both open in a new tab).
-- **Primary action:** one click. Actions needing no text (Approve and merge, Approve design, Retry, Send back, Delete) are sent immediately; Request changes / Clarify pick the action and focus the reply box. After acting, the Inbox moves on to the next item (as today).
-- **Hidden by default, one click away:** full body, reviewer criterion notes + evidence groups (`EvidenceList`), review history.
-- **TL;DR line:** the body's first paragraph as plain text, clipped to 180 characters. ⚠ See open questions: a real summary field would be better.
-- With an option on, the Task details flyout starts closed so the panel gets the full width; the Task details button still opens it.
+`app/prototype/fixtures.ts`: task items as before, plus eight epics and their tasks, `epicReviews` and `epicItem()`. `mock-api.ts` answers `GET /epics/:id/review` and `POST /epics/:id/review/actions`.
 
-Components (new, `apps/web/app/components`): `InboxPanelA…E`, `InboxPanelMeta`, `InboxPanelVerdict`, `InboxPanelArtifacts`,
-`InboxPanelActions`, `InboxPanelTray` (reply composer; wraps `PromptComposer`), `InboxPanelDetails` (body · `EvidenceList` · history),
-`InboxPanelSheet` (`USlideover` on desktop, `UDrawer` on phones), `EvidenceViewer`, `InboxOptionSwitcher`; composable `useInboxPanel`.
+```ts
+EpicInboxItem: { id, type: 'epic_review', event: 'human_review' | 'opened' | 'conflict' | 'approved' | 'merged',
+                 epicId, subject, preview, body, project, sender, at, prUrl, resolution, taskId: null, taskRef: null }
+EpicReview:    { epicId, title, goal, reviewMode, state, targetBranch, pr: PullRequestDetail, gateChecks, targetMovedBy,
+                 rounds: [{ round, verdict, reviewer, headSha, summary, findings: [{ level, text, taskRefs }], createdAt }],
+                 tasks: [{ ref, title, prNumber, prUrl, kind, merged, reviewedBy, criteriaMet, criteriaTotal, evidence }],
+                 lastFeedback: { text, at, fixTaskRefs, files } | null, conflictTaskRef, mergeCommitSha }
+```
 
-## Option A · Verdict card · `inbox-panel-option-a`, `inbox-panel-option-a-mobile`
+## ⚠ What the build needs that doesn't exist yet
 
-- **Up front:** one card: ask (with arrow), 2-line TL;DR, verdict line, criteria as a ✓/✗ checklist (one line each, unmet in red), thumbnail strip + PR / Preview, Approve + Request changes buttons. Reply box pinned at the bottom.
-- **Hidden:** *Details ▾* under the card expands body, criteria notes with evidence, history inline.
-- **States:** review (code/design) shows checklist; question/blocked/failed show ask + TL;DR + their actions; activity/resolved show the resolution and no actions or tray.
-- **Mobile:** same card stacked under the shell header; thumbnails smaller, title moves into the panel.
-- **Rationale:** closest to today, cheapest to build, readable in one glance. **Trade-off:** with many criteria (8+) the checklist pushes the actions below the fold on a phone; we may need to collapse met criteria into a count past ~6.
+Everything here is proposed in `packages/contracts/src/api.ts` and served only by the mock API.
 
-## Option B · Artifacts first · `inbox-panel-option-b` (desktop), `inbox-panel-option-b-mobile`
-
-- **Up front:** a large stage with the selected screenshot (click → viewer) and a filmstrip (each thumbnail selects the hero and opens EvidenceViewer immediately); a 340px rail with kind, title, ask, verdict (stacked), PR / Preview, full-width Approve / Request changes, *Read message*. Items without screenshots lead with their TL;DR in large type instead.
-- **Hidden:** *Read message* opens a side sheet (bottom sheet on phones) with body, notes, history.
-- **Mobile differs:** stage on top (≈210px) with filmstrip, rail content below, reply box at the bottom.
-- **Rationale:** judging outcomes means looking at them; best for design reviews and UI work. **Trade-off:** for code tasks whose evidence is text (logs, requests), the stage is empty and the option degrades to a summary; criteria are only a count, not a list.
-
-## Option C · Checklist · `inbox-panel-option-c` (mobile: same layout stacked, actions below the title)
-
-- **Up front:** header with title, ask and actions; a single list: a checks row (verdict + PR/Preview), then one row per criterion, **unmet first**, each with its evidence thumbnail inline (click → viewer) and a file/note icon when there's more.
-- **Hidden:** expand a criterion row for the reviewer's note and all its evidence; a *Message* row (shows TL;DR collapsed) expands the body; *Review history · N rounds* row expands history.
-- **Rationale:** maps exactly onto how Corral judges work (criteria + evidence, D19/D21). **Trade-off:** for question/blocked/failed there are no criteria, so it becomes a header + message row, i.e. like A; the most rows to scan when criteria are many.
-
-## Option D · TL;DR + tabs · **chosen** · `inbox-panel-option-d`, `inbox-panel-option-d-mobile`
-
-- **Up front (desktop):** kind · project · ref · sender · time, title, a **TL;DR** line, the verdict, the actions and PR/Preview. Then the tabs **Overview · Criteria n/m · Review · PR description · Code diff N · Message**. Overview shows a screenshot grid and the files (reviews), or what each action does (other items).
-- **Up front (mobile, `inbox-panel-option-d-mobile`):** the same top block without the actions. The actions are in the bottom bar of large touch targets, with Reply, and the composer opens above the bar on demand (see v3 revision).
-- **Hidden:** criteria notes (Criteria tab), history (Review tab), PR body (PR description tab), diff (Code diff tab) and message body (Message tab), each one click or tap away.
-- **States:** code review with a PR (all six tabs); all-met code review (COR-20); design review (no PR tabs, Preview v1 link, screenshot grid); question, blocked and failed (Overview + Message, with the composer for Answer); activity and resolved (no actions, no bar).
-- **Components:** `InboxPanelD`, `InboxPanelMeta`, `InboxPanelVerdict`, `InboxPanelActions` (desktop), `InboxPanelThumbBar` (mobile), `InboxPanelArtifacts`, `InboxPanelDiff`, `InboxPanelDetails`, `InboxPanelTray`, `EvidenceViewer`, `MarkdownText`, `UTabs`.
-- **Rationale:** familiar, scales to any amount of content. **Trade-off:** the tab bar hides the unmet criterion's reason one click away; tabs don't fit more than four on a phone.
-
-## Option E · Triage · `inbox-panel-option-e` (mobile: same, big buttons stacked)
-
-- **Up front:** a slim bar "2 of 9 · project · ref · Details · Skip →", then centred: kind icon, title, ask, verdict, thumbnails + links, two big buttons (Approve / Request changes, or Clarify / Send back), minor actions as links. No reply box until an action needs words or you tap *Reply*.
-- **Hidden:** *Details* opens the side/bottom sheet with body, notes, history.
-- **Interactions:** acting moves to the next item; *Skip* goes to the next without acting (wraps).
-- **Rationale:** fastest for back-to-back review. **Trade-off:** least context; the unmet criterion is only "4 of 5" until Details is opened, so it relies on trusting the reviewer's verdict.
-
-## Data the contracts don't have yet
-
-- **All options:** the TL;DR is the body's first paragraph. A short `summary` field on `TaskInboxItem` (written by the agent, ≤ 140 chars) would make it reliable. The "ask" line is derived from type + task type and needs nothing new.
-- **All options, design reviews:** the preview link and design screenshots come from `GET …/designs`, which the task page calls but the Inbox page doesn't yet (one extra request per design item). Alternatively add `designVersionId` to the inbox item.
-- **Option E:** Skip / position use the Needs-you list already loaded; nothing new.
-- Reviewer name: `Task.reviewer` is the latest reviewer run's agent; fine as is.
+- **Inbox:** an `EpicInboxItem`, in Needs you, Activity and Resolved.
+- **`GET /epics/:id/review`** and **`POST /epics/:id/review/actions`**. These are new because `POST /inbox/:taskId/actions` is keyed on a task.
+- **Integration findings:** the reviewer needs to report structured findings, not only a summary.
+- **Fix and conflict marking:** tasks need a marker for `kind`; nothing records it today.
+- **Feedback and "since" diff:** store the human's last request and compare the head they reviewed with the current head.
+- **`ready_to_merge` on the epic:** D23 lists it, but `EPIC_REVIEW_STATES` doesn't, and it's a Postgres enum, so it needs a migration. The prototype keeps it on `EpicReview.state` only.
+- **`PullRequestDetail`** (v3), for the task PR tabs: still mock only.
+- **`summary` field:** the TL;DR is still the first paragraph of the body. A short agent-written summary would be more reliable, and matters more for epics.
 
 ## Open questions
 
-v3 (Option D):
-
-1. **Large diffs:** cap the Code diff tab (e.g. 20 files or 1,000 lines) and link to GitHub for the rest? Should generated files and lockfiles start collapsed?
-2. Should the PR description tab be dropped when the PR body only repeats the agent's message, or always shown?
-3. On mobile, should *Delete* stay in the bottom bar, or move behind a "More" target so the bar never holds more than three actions?
-
-Earlier (v1–v2):
-
-1. Which direction (or blend, e.g. A's card with C's inline thumbnails, E's next-item flow on phones)?
-2. Should the agent write a short summary field, or should the panel keep deriving it from the body?
-3. With an unmet criterion and an approving reviewer, should Approve ask for confirmation, or is the red "4 of 5" enough?
-4. Should the Task details flyout stay closed by default once the panel shows everything needed?
-5. Keyboard shortcuts for Triage (A approve, R request changes, J skip)?
+1. **Approve with a note:** should a non-blocking reviewer note on an epic ask for confirmation? Decision for now: no, the note leads the Overview and approval is one click.
+2. **Approve on an unmet task criterion:** same question as v1 for tasks, and still open.
+3. **Reply on epic items:** is approve or request changes enough, or do you want to ask Rita a question about an epic?
+4. **Large epic diffs:** cap the Code diff tab (e.g. 20 files or 1,000 lines) and link to GitHub for the rest? Epics will hit this far more often than tasks.
+5. **Fix task title:** the prototype titles it from your first line. Should the PM rewrite it?
+6. **Mobile Delete:** should it stay in the bottom bar, or move behind "More" so the bar never holds more than three actions?
+7. **Task details flyout:** should it stay closed by default now the panel shows what's needed? The prototype keeps it closed.
