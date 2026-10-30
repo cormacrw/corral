@@ -14,7 +14,7 @@ import {
   type RunState
 } from '@corral/core'
 import { schema, type Database, type Executor } from '@corral/db'
-import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt, ne } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lt, ne } from 'drizzle-orm'
 import { z } from 'zod'
 import { listTaskAttachments, readProjectAttachment } from './attachments.ts'
 import type { BlobStore } from './blob-store.ts'
@@ -26,7 +26,7 @@ import type { EventBus } from './events.ts'
 import type { GitHubClient } from './github.ts'
 import { EpicBranchError, taskBase } from './task-base.ts'
 import { slugify } from './projects.ts'
-import { designRevisionPrompt, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
+import { designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
 import { runExitError, withLastActivity } from './run-exit.ts'
 import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
 import { MergeOrchestrator } from './merge.ts'
@@ -430,8 +430,8 @@ export class Orchestrator implements RunnerHandlers {
       }
       let only = agent.wakeIntervalSeconds === null || (await this.#awake(agent)) ? undefined : urgent
       const place: Place = async (tx, task) => {
-        const role: RunnerRole = agent.role === 'developer' && task.type === 'design' ? 'design' : agent.role
-        const previous = agent.role === 'developer' ? await this.#previousDeveloperRun(tx, task.id, agent.id) : null
+        const role: RunnerRole = agent.role === 'designer' ? 'design' : agent.role
+        const previous = agent.role !== 'reviewer' ? await this.#previousAuthorRun(tx, task.id, agent.id, agent.role) : null
         return this.#pickRunner(tx, role, agent.runtime, previous?.runnerId ?? null)
       }
       const claimNext = () => this.#exclusive(() => claimNextTask(db, agent.id, this.#now(), only, skip, place))
@@ -457,7 +457,7 @@ export class Orchestrator implements RunnerHandlers {
     if (!ctx?.task) return false
     let job: RunJob
     try {
-      job = ctx.run.role === 'reviewer' ? await this.#reviewerJob(ctx) : await this.#developerJob(ctx)
+      job = ctx.run.role === 'reviewer' ? await this.#reviewerJob(ctx) : ctx.run.role === 'designer' ? await this.#designerJob(ctx) : await this.#developerJob(ctx)
     } catch (error) {
       // Preparing the epic branch calls GitHub; the run fails straight away
       // with the cause instead of holding its lease until it expires
@@ -475,6 +475,30 @@ export class Orchestrator implements RunnerHandlers {
   }
 
   async #developerJob(ctx: RunContext): Promise<RunJob> {
+    return this.#authorJob(ctx, {
+      branch: ref => `corral/${ref.toLowerCase()}-${slugify(ctx.task!.title).slice(0, 40).replace(/-+$/, '')}`,
+      prompt: developerPrompt,
+      revision: developerRevisionPrompt
+    })
+  }
+
+  async #designerJob(ctx: RunContext): Promise<RunJob> {
+    const [latest] = await this.#d.db.select({ version: designVersions.version, createdAt: designVersions.createdAt }).from(designVersions)
+      .where(eq(designVersions.taskId, ctx.task!.id)).orderBy(desc(designVersions.version)).limit(1)
+    return this.#authorJob(ctx, {
+      branch: ref => `design/${ref}`,
+      design: { version: latest?.version ?? null },
+      prompt: designerPrompt,
+      revision: task => latest ? designerRevisionPrompt(task, task.comments.filter(c => c.createdAt > latest.createdAt)) : designerPrompt(task, ctx.agent.name)
+    })
+  }
+
+  async #authorJob(ctx: RunContext, author: {
+    branch: (ref: string) => string
+    design?: { version: number | null }
+    prompt: typeof developerPrompt
+    revision: typeof developerRevisionPrompt
+  }): Promise<RunJob> {
     const { db } = this.#d
     let task = ctx.task!
     const ref = taskRef(ctx.project.prefix, task.number)
@@ -482,22 +506,17 @@ export class Orchestrator implements RunnerHandlers {
     // A design is built on design/<ref>, pushed but never merged (D20).
     const baseBranch = await taskBase(db, task, ctx.project, this.#d.github)
     const spike = task.type === 'spike'
-    const design = task.type === 'design'
     if (!task.branch && !spike) {
-      const branch = design ? `design/${ref}` : `corral/${ref.toLowerCase()}-${slugify(task.title).slice(0, 40).replace(/-+$/, '')}`
+      const branch = author.branch(ref)
       ;[task] = await db.update(tasks).set({ branch }).where(eq(tasks.id, task.id)).returning() as [TaskRow]
     }
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
     const notes = await this.#comments(task.id)
     const attached = await listTaskAttachments(db, ctx.project.id, task.description, notes)
-    const [latest] = design
-      ? await db.select({ version: designVersions.version, createdAt: designVersions.createdAt }).from(designVersions)
-          .where(eq(designVersions.taskId, task.id)).orderBy(desc(designVersions.version)).limit(1)
-      : []
     const pin = await this.#pinnedDesign(ctx.project.prefix, task.id)
-    const previous = await this.#previousDeveloperRun(db, task.id, ctx.agent.id, ctx.run.id)
+    const previous = await this.#previousAuthorRun(db, task.id, ctx.agent.id, ctx.run.role, ctx.run.id)
     const [lastRun] = await db.select().from(runs)
-      .where(and(eq(runs.taskId, task.id), eq(runs.role, 'developer'), ne(runs.id, ctx.run.id)))
+      .where(and(eq(runs.taskId, task.id), inArray(runs.role, ['developer', 'designer']), ne(runs.id, ctx.run.id)))
       .orderBy(desc(runs.number)).limit(1)
     const stoppedRun = lastRun && (lastRun.state === 'interrupted' || (lastRun.state === 'failed' && lastRun.summary === null))
       ? { number: lastRun.number, reason: lastRun.error ?? 'Stopped', wipSha: lastRun.headSha }
@@ -508,7 +527,7 @@ export class Orchestrator implements RunnerHandlers {
       description: task.description,
       branch: spike ? null : task.branch,
       spike,
-      design: design ? { version: latest?.version ?? null } : null,
+      design: author.design ?? null,
       pin,
       defaultBranch: baseBranch,
       reviewRounds: task.reviewRounds,
@@ -520,8 +539,8 @@ export class Orchestrator implements RunnerHandlers {
       attachments: attached,
       stoppedRun
     }
-    const prompt = developerPrompt(promptTask, ctx.agent.name)
-    // A revision continues the developer's own session (D20 for designs) with
+    const prompt = author.prompt(promptTask, ctx.agent.name)
+    // A revision continues the author's own session with
     // the feedback given since, when it runs where that session lives. The
     // full prompt is the fallback when the session can't be resumed, and the
     // prompt on another runner, which starts fresh from the pushed branch.
@@ -538,7 +557,7 @@ export class Orchestrator implements RunnerHandlers {
       runId: ctx.run.id,
       runNumber: ctx.run.number,
       leaseEpoch: ctx.run.leaseEpoch!,
-      role: 'developer',
+      role: ctx.run.role,
       runtime: ctx.agent.runtime,
       projectId: ctx.project.id,
       repository: ctx.project.repository,
@@ -556,7 +575,7 @@ export class Orchestrator implements RunnerHandlers {
       fallbackPrompt: resume ? prompt : null,
       model: null,
       timeoutSeconds: RUN_TIMEOUT_SECONDS,
-      prompt: !resume ? prompt : latest ? designRevisionPrompt(promptTask, notes.filter(c => c.createdAt > latest.createdAt)) : developerRevisionPrompt(promptTask, feedback)
+      prompt: !resume ? prompt : author.revision(promptTask, feedback)
     }
   }
 
@@ -568,11 +587,18 @@ export class Orchestrator implements RunnerHandlers {
     return pin ? { designRef: taskRef(prefix, pin.number), version: pin.version, screens: pin.screens, branch: pin.branch, commitSha: pin.commitSha } : null
   }
 
-  // This agent's last developer run on the task that started a session: its
+  // This agent's last run in the same authoring role on the task that started a session: its
   // runner holds the worktree and session a revision resumes
-  async #previousDeveloperRun(db: Executor, taskId: string, agentId: string, exclude?: string) {
+  async #previousAuthorRun(db: Executor, taskId: string, agentId: string, role: AgentRow['role'], exclude?: string) {
+    // A developer-authored design is a session boundary (D23), including
+    // when this agent had an older designer session before that developer run.
+    const [legacy] = role === 'designer'
+      ? await db.select({ number: runs.number }).from(runs)
+          .where(and(eq(runs.taskId, taskId), eq(runs.role, 'developer')))
+          .orderBy(desc(runs.number)).limit(1)
+      : []
     const [previous] = await db.select({ number: runs.number, runnerId: runs.runnerId, agentSessionId: runs.agentSessionId, queuedAt: runs.queuedAt }).from(runs)
-      .where(and(eq(runs.taskId, taskId), eq(runs.role, 'developer'), eq(runs.agentId, agentId), exclude ? ne(runs.id, exclude) : undefined, isNotNull(runs.agentSessionId)))
+      .where(and(eq(runs.taskId, taskId), eq(runs.role, role), eq(runs.agentId, agentId), legacy ? gt(runs.number, legacy.number) : undefined, exclude ? ne(runs.id, exclude) : undefined, isNotNull(runs.agentSessionId)))
       .orderBy(desc(runs.number)).limit(1)
     return previous ?? null
   }
@@ -737,13 +763,13 @@ export class Orchestrator implements RunnerHandlers {
     const ctx = await this.#load(runId)
     if (!ctx?.task || ctx.task.deletedAt || ctx.task.leaseRunId !== null) return false
     const { run } = ctx
-    return run.role === 'developer' && run.state === 'interrupted' && run.leaseEpoch === leaseEpoch && run.runnerId === runnerId && KEEP_WORK_STOPS.has(run.error ?? '')
+    return (run.role === 'developer' || run.role === 'designer') && run.state === 'interrupted' && run.leaseEpoch === leaseEpoch && run.runnerId === runnerId && KEEP_WORK_STOPS.has(run.error ?? '')
   }
 
   #confirmLease(ctx: RunContext, sentAt: number | undefined): void {
     // Echo the runner's clock: delayed replies after sleep must already be expired,
     // and runner/server wall clocks need not agree. Older runners need no ack.
-    if (ctx.run.role !== 'developer' || sentAt === undefined || !Number.isFinite(sentAt)) return
+    if ((ctx.run.role !== 'developer' && ctx.run.role !== 'designer') || sentAt === undefined || !Number.isFinite(sentAt)) return
     this.#d.runner.send({ type: 'run.lease', runId: ctx.run.id, leaseEpoch: ctx.run.leaseEpoch!, validUntil: new Date(sentAt + 2 * RUNNER_HEARTBEAT_MS).toISOString() }, ctx.run.runnerId)
   }
 
@@ -936,7 +962,7 @@ export class Orchestrator implements RunnerHandlers {
     })
   }
 
-  // A human messages a live developer or reviewer run. It's kept as their
+  // A human messages a live developer, designer or reviewer run. It's kept as their
   // comment on the task, with an audit entry, and sent to the runner as
   // run.message. The runner may still turn it down (e.g. a Codex run); it
   // says so in the run's transcript. Throws 409 run_not_live when no runner
@@ -947,7 +973,7 @@ export class Orchestrator implements RunnerHandlers {
     if (!ctx || ctx.run.projectId !== projectId) throw new ApiFailure(404, { code: 'not_found' })
     const notLive = (reason: string) => new ApiFailure(409, { code: 'run_not_live', reason })
     const { run, task } = ctx
-    if (!task || (run.role !== 'developer' && run.role !== 'reviewer')) throw notLive(`Run #${run.number} is a ${run.role} run; only developer and reviewer runs take messages`)
+    if (!task || (run.role !== 'developer' && run.role !== 'designer' && run.role !== 'reviewer')) throw notLive(`Run #${run.number} is a ${run.role} run; only developer, designer and reviewer runs take messages`)
     if (run.state === 'queued') throw notLive(`Run #${run.number} hasn't started yet`)
     if (!(ACTIVE_RUN_STATES as readonly RunState[]).includes(run.state) || run.state === 'stopping') throw notLive(`Run #${run.number} has ended`)
     if (task.leaseRunId !== run.id || task.leaseEpoch !== run.leaseEpoch) throw notLive(`Run #${run.number} no longer holds ${taskRef(ctx.project.prefix, task.number)}`)
@@ -981,7 +1007,7 @@ export class Orchestrator implements RunnerHandlers {
   }
 
   // PRD §7.3: a human edited the description or criteria of a task a
-  // developer or reviewer run holds. A run that takes messages is told at
+  // developer, designer or reviewer run holds. A run that takes messages is told at
   // once; otherwise (Codex, not started yet, no runner) a pinned comment
   // carries the change to the agent through get_task and to the next run.
   async noticeTaskEdit(taskId: string, edit: TaskContentEdit, actor: Actor): Promise<void> {
@@ -991,7 +1017,7 @@ export class Orchestrator implements RunnerHandlers {
     const ctx = await this.#load(task.leaseRunId)
     if (!ctx || ctx.run.leaseEpoch !== task.leaseEpoch) return
     const { run, project } = ctx
-    if (run.role !== 'developer' && run.role !== 'reviewer') return
+    if (run.role !== 'developer' && run.role !== 'designer' && run.role !== 'reviewer') return
     if (!(ACTIVE_RUN_STATES as readonly RunState[]).includes(run.state) || run.state === 'stopping') return
 
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, taskId)).orderBy(asc(acceptanceCriteria.position))
@@ -1114,7 +1140,10 @@ export class Orchestrator implements RunnerHandlers {
   async #tool(ctx: RunContext, tool: string, input: unknown): Promise<unknown> {
     const role = ctx.run.role
     const allowed: Record<string, readonly string[]> = {
+      // Keep the tool path for already-live developer-authored designs (D23).
+      // New developer claims cannot be designs; submit_design also checks type.
       developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'submit_design', 'report_outcome'],
+      designer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'submit_design', 'report_outcome'],
       reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'get_design', 'report_outcome'],
       pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
     }
@@ -1273,7 +1302,7 @@ export class Orchestrator implements RunnerHandlers {
       }
       throw new ToolError('A reviewer reports approved, changes_requested, blocked (rebase review only) or failed')
     }
-    if (ctx.run.role === 'developer') {
+    if (ctx.run.role === 'developer' || ctx.run.role === 'designer') {
       const problem = noteProblem(report.note)
       if (problem) throw new ToolError(`Not reported. ${problem} Add \`note\`: one line of at most ${MAX_NOTE_LENGTH} characters saying what this run did, e.g. "${NOTE_EXAMPLE}". Then report again.`)
       const spike = ctx.task!.type === 'spike'
@@ -1302,7 +1331,7 @@ export class Orchestrator implements RunnerHandlers {
       }
       throw new ToolError(spike
         ? 'A spike’s developer reports findings_reported, stuck or failed'
-        : design ? 'A design task’s developer reports design_submitted, stuck or failed' : 'A developer reports pr_opened, pr_updated, pr_rebased (rebase-only rounds), stuck or failed')
+        : design ? 'A design task’s designer reports design_submitted, stuck or failed' : 'A developer reports pr_opened, pr_updated, pr_rebased (rebase-only rounds), stuck or failed')
     }
     throw new ToolError(`Outcomes for ${ctx.run.role} runs aren't supported yet`)
   }

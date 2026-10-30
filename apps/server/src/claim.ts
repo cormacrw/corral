@@ -26,8 +26,8 @@ export interface Claim {
 // Atomically gives an agent the next task to work on, or null if there's
 // nothing eligible or the agent is at capacity (flows.md step 2).
 //
-// Developer runs pick up Ready tasks (→ In progress) and In progress tasks
-// with no lease, e.g. after changes were requested (D10). Priority wins first,
+// Developer and designer runs pick up their own task types in Ready
+// (→ In progress) and In progress with no lease, e.g. after changes were requested (D10). Priority wins first,
 // then In progress before Ready, then oldest createdAt and id. Reviewer runs pick
 // up Agent review tasks with no verdict since their latest submission (flows.md
 // step 6). Two claims can't take the same task: the candidate row is locked
@@ -58,9 +58,11 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
 
     const dependency = alias(tasks, 'dependency')
     const epicTask = alias(tasks, 'epic_task')
-    const eligible = agent.role === 'developer'
+    const author = agent.role === 'developer' || agent.role === 'designer'
+    const eligible = author
       ? and(
           inArray(tasks.status, ['ready', 'in_progress']),
+          agent.role === 'designer' ? eq(tasks.type, 'design') : ne(tasks.type, 'design'),
           // Every dependency Merged (D10: Ready tasks wait on them)
           notExists(tx.select({ one: sql`1` }).from(taskDependencies)
             .innerJoin(dependency, eq(dependency.id, taskDependencies.dependsOnId))
@@ -100,7 +102,7 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
       ))
       // Priority enum: urgent first. The explicit status rank avoids enum order;
       // createdAt and id keep each status group stable across placement pages.
-      .orderBy(asc(tasks.priority), ...(agent.role === 'developer'
+      .orderBy(asc(tasks.priority), ...(author
         ? [asc(sql`case when ${tasks.status} = 'in_progress' then 0 else 1 end`)]
         : []), asc(tasks.createdAt), asc(tasks.id))
       .limit(place ? PLACE_BATCH : 1)

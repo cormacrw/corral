@@ -124,9 +124,9 @@ describe('RunManager messages for live runs', () => {
     await writeFile(`${claudeBin}.release`, '')
   }
 
-  it('writes a message to a live developer run\'s stdin and shows it in the transcript', async () => {
+  it.each(['developer', 'designer'] as const)('writes a message to a live %s run and shows its reply', async (role) => {
     const manager = new RunManager(config, connection, tools)
-    manager.assign(devJob())
+    manager.assign(devJob({ role }))
     await started('r1')
 
     manager.handle({ type: 'run.message', runId: 'r1', leaseEpoch: 3, text: 'Use pnpm, not npm' })
@@ -141,7 +141,7 @@ describe('RunManager messages for live runs', () => {
     expect(sent.some(m => m.type === 'run.message.rejected')).toBe(false)
   })
 
-  it.each([['developer', 'stuck'], ['reviewer', 'approved']] as const)('ends a %s run normally once it reports its outcome', async (role, outcome) => {
+  it.each([['developer', 'stuck'], ['designer', 'stuck'], ['reviewer', 'approved']] as const)('ends a %s run normally once it reports its outcome', async (role, outcome) => {
     const sha = (await exec('git', ['rev-parse', 'main'], { cwd: barePath(dataDir, TEST_REPOSITORY) })).stdout.trim()
     const manager = new RunManager(config, connection, tools)
     manager.assign(devJob({ role, headSha: role === 'reviewer' ? sha : null }))

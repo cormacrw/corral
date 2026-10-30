@@ -288,13 +288,13 @@ export class RunManager {
     const { job } = run
     if (run.ended || run.stopping) return 'The run has ended'
     if (run.outcomeAccepted) return 'The agent has already reported its outcome'
-    if (job.role !== 'developer' && job.role !== 'reviewer') return `A ${job.role} run doesn't take messages`
+    if (job.role !== 'developer' && job.role !== 'designer' && job.role !== 'reviewer') return `A ${job.role} run doesn't take messages`
     if (!this.#takesMessages(job)) return `A ${job.runtime} run can't take input while it runs`
     return null
   }
 
   #takesMessages(job: RunJob): boolean {
-    return (job.role === 'developer' || job.role === 'reviewer') && this.#runtimes.get(job.runtime)?.spawnSession !== undefined
+    return (job.role === 'developer' || job.role === 'designer' || job.role === 'reviewer') && this.#runtimes.get(job.runtime)?.spawnSession !== undefined
   }
 
   #deliver(run: ActiveRun, text: string): void {
@@ -330,7 +330,7 @@ export class RunManager {
       return
     }
     // The worktree is shared: a stopped run on this task saves its work first
-    await Promise.all([...this.#runs.values()].filter(other => other !== run && other.keepWork && other.job.role === 'developer' && other.job.taskId === job.taskId).map(other => other.closed.promise))
+    await Promise.all([...this.#runs.values()].filter(other => other !== run && other.keepWork && (other.job.role === 'developer' || other.job.role === 'designer') && other.job.taskId === job.taskId).map(other => other.closed.promise))
     await mkdir(join(this.#config.dataDir, 'spool'), { recursive: true })
     await mkdir(run.scratchDir, { recursive: true })
     run.spool = createWriteStream(join(this.#config.dataDir, 'spool', `${job.runId}.jsonl`), { flags: 'a' })
@@ -642,7 +642,7 @@ export class RunManager {
       run.closed.resolve()
     }
     const worktree = run.worktree
-    if (worktree && run.job.role === 'developer') {
+    if (worktree && (run.job.role === 'developer' || run.job.role === 'designer')) {
       run.closing = this.#saveWork(run, worktree, exit).then(wipSha => headSha(worktree).then(sha => finish(sha, wipSha)), () => finish(null))
     } else {
       finish(null)
@@ -704,7 +704,7 @@ export class RunManager {
         return { ok: false, error: `A ${run.job.role} reports one of: ${outcomesFor(run.job.role).join(', ')}` }
       }
       let payload: Record<string, unknown> = input
-      if (run.job.role === 'developer' && (outcome === 'pr_opened' || outcome === 'pr_updated' || outcome === 'pr_rebased' || outcome === 'design_submitted')) {
+      if ((run.job.role === 'developer' || run.job.role === 'designer') && (outcome === 'pr_opened' || outcome === 'pr_updated' || outcome === 'pr_rebased' || outcome === 'design_submitted')) {
         // A spike has no branch to push (D19)
         if (!run.job.branch) return { ok: false, error: 'A spike opens no PR: report your findings with outcome findings_reported.' }
         // The runner pushes, not the agent (D8); the commit goes with the report
@@ -816,7 +816,7 @@ function runnerNotes(run: ActiveRun, job: RunJob, design: string | null = null):
     '',
     `- Your Corral tools are on the MCP server "corral": ${toolsFor(job).join(', ')}.`,
     `- Save evidence files and other scratch output under ${run.scratchDir} (outside the repository), then attach them with attach_evidence using the absolute path.`,
-    job.role === 'developer' && job.branch ? `- You are in a git worktree on branch ${job.branch}. Pushing is disabled; Corral pushes when you ${job.taskType === 'design' ? 'call submit_design' : 'report'}.` : '',
+    (job.role === 'developer' || job.role === 'designer') && job.branch ? `- You are in a git worktree on branch ${job.branch}. Pushing is disabled; Corral pushes when you ${job.taskType === 'design' ? 'call submit_design' : 'report'}.` : '',
     // A spike (D19): findings, not commits
     job.role === 'developer' && !job.branch ? '- You are in a detached checkout of the default branch for a spike. Don\'t commit or push; report your findings.' : '',
     design ?? '',
