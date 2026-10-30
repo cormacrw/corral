@@ -30,10 +30,11 @@ export async function getEpic(db: Executor, epicId: string): Promise<EpicDetail>
 
 export async function patchEpic(db: Executor, epicId: string, input: PatchEpicInput, actor: Actor): Promise<Epic> {
   return db.transaction(async (tx) => {
+    // Read the current mode under the same lock used by epic PR reconciliation.
     const { row, project } = await findEpic(tx, epicId)
-    const changed = (Object.keys(input) as (keyof PatchEpicInput)[]).filter(k => input[k] !== undefined && input[k] !== row[k])
+    const [epic] = await tx.select().from(epics).where(eq(epics.id, epicId)).for('update')
+    const changed = (Object.keys(input) as (keyof PatchEpicInput)[]).filter(k => input[k] !== undefined && input[k] !== epic![k])
     if (changed.includes('reviewMode')) {
-      const [epic] = await tx.select({ prNumber: epics.prNumber }).from(epics).where(eq(epics.id, epicId)).for('update')
       const taskRows = await tx.select({ status: tasks.status, type: tasks.type, prNumber: tasks.prNumber }).from(tasks).where(eq(tasks.epicId, epicId))
       if (reviewModeLocked(epic!, taskRows)) throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: 'The review mode can\'t change once a task in the epic has opened a PR' }] })
     }
@@ -55,7 +56,7 @@ async function findEpic(db: Executor, epicId: string): Promise<{ row: EpicRow, p
 }
 
 // A deleted task counts here: its PR may already have merged into the epic branch
-function reviewModeLocked(epic: { prNumber: number | null }, taskRows: { status: string, prNumber: number | null }[]): boolean {
+export function reviewModeLocked(epic: { prNumber: number | null }, taskRows: { status: string, prNumber: number | null }[]): boolean {
   return epic.prNumber !== null || taskRows.some(t => t.prNumber !== null || t.status === 'merged')
 }
 

@@ -45,7 +45,7 @@ export const pmActionTools = {
   },
   update_epic: {
     confirmRequired: false,
-    description: 'Edit an epic in the selected project; dependsOn replaces its epic dependencies.',
+    description: 'Edit an epic in the selected project; dependsOn replaces its epic dependencies. Review mode is locked once the epic or any task has opened a PR, or any task has merged (including deleted tasks).',
     input: { epicId: z.uuid(), ...patchEpicInput.omit({ description: true }).shape, summary: z.string().optional(), dependsOn: z.array(z.uuid()).optional() }
   },
   delete_task: {
