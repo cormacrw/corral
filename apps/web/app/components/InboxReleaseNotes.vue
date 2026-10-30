@@ -7,6 +7,8 @@ const props = defineProps<{ item: ReleaseNotesItem }>()
 const emit = defineEmits<{ refresh: [] }>()
 const error = ref<string | null>(null)
 const busy = ref(false)
+const { state } = useLive()
+const taskPrefixes = computed(() => state.value.projects.map(p => p.prefix))
 watch(() => props.item.unread && props.item.deploymentId, async () => {
   if (!props.item.unread) return
   try {
@@ -76,7 +78,7 @@ async function dismiss() {
       <MarkdownText
         v-else
         :text="item.notes ?? ''"
-        task-refs
+        :task-refs="taskPrefixes"
         class="text-sm"
       />
       <UAlert

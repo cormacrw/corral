@@ -12,7 +12,9 @@ import { RouterLink } from 'vue-router'
 // `breaks` keeps single newlines, for text a person typed into a composer.
 // Long paths, URLs and inline code wrap anywhere, so they never widen the
 // thread on a phone; code blocks and tables scroll in their own box instead.
-const props = defineProps<{ text: string, breaks?: boolean, taskRefs?: boolean }>()
+// `taskRefs` lists the project prefixes whose task refs become links, so text
+// like SHA-256 or UTF-8 stays text.
+const props = defineProps<{ text: string, breaks?: boolean, taskRefs?: string[] }>()
 const lightbox = ref<{ src: string, alt: string } | null>(null)
 
 const SAFE_HREF = /^(https?:|mailto:|\/|#)/i
@@ -96,9 +98,10 @@ function inline(tokens: Token[]): (VNode | string)[] {
 }
 
 function textNode(text: string): VNode | string {
-  if (!props.taskRefs) return text
-  return h('span', text.split(/(\b[A-Z][A-Z0-9]*-\d+\b)/g).map(part =>
-    /^[A-Z][A-Z0-9]*-\d+$/.test(part)
+  if (!props.taskRefs?.length) return text
+  const ref = new RegExp(`\\b((?:${props.taskRefs.join('|')})-\\d+)\\b`)
+  return h('span', text.split(ref).map((part, i) =>
+    i % 2 === 1
       ? h(RouterLink, { to: `/tasks/${part}`, class: 'text-primary hover:underline' }, () => part)
       : part))
 }
