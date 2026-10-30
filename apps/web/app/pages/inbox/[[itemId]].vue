@@ -11,6 +11,7 @@ const live = useLive()
 const flyout = useTaskFlyout()
 const toast = useToast()
 const device = useDevice()
+const deletes = usePlanThreadDelete()
 useSeoMeta({ title: 'Inbox · Corral' })
 
 const inbox = ref<Inbox | null>(null)
@@ -47,7 +48,8 @@ onMounted(() => {
   onBeforeUnmount(stop)
 })
 
-const items = computed<InboxItem[]>(() => (inbox.value?.[tab.value] ?? []).filter(i => !search.value || `${i.taskRef ?? ''} ${i.subject} ${i.preview}`.toLowerCase().includes(search.value.toLowerCase())))
+// In the server's order (newest first, D11), less threads waiting out their Undo
+const items = computed<InboxItem[]>(() => (inbox.value?.[tab.value] ?? []).filter(i => !deletes.pending.value.includes(i.id)).filter(i => !search.value || `${i.taskRef ?? ''} ${i.subject} ${i.preview}`.toLowerCase().includes(search.value.toLowerCase())))
 const selectedId = computed(() => typeof route.params.itemId === 'string' ? route.params.itemId : null)
 watch(selectedId, () => {
   // Leaving during approval or close unmounts the thread before it can
@@ -111,6 +113,19 @@ async function nextAfterPlanResolution() {
   const position = resolutionPosition
   await load()
   const remaining = inbox.value?.needsYou ?? []
+  const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
+  await router.replace(next ? `/inbox/${next.id}` : '/inbox')
+}
+const count = computed(() => (inbox.value?.count ?? 0) - (inbox.value?.needsYou.filter(i => deletes.pending.value.includes(i.id)).length ?? 0))
+// Delete thread, from its row or its header: no confirmation, Undo instead.
+// Deleting the selected thread moves on to the next item, as resolving does.
+async function deleteThread(item: PlanThreadItem) {
+  const position = items.value.findIndex(i => i.id === item.id)
+  deletes.remove(item.sessionId, load)
+  if (selectedId.value !== item.id) return
+  if (openThread.value?.id === item.id) openThread.value = null
+  await flyout.close()
+  const remaining = items.value
   const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
   await router.replace(next ? `/inbox/${next.id}` : '/inbox')
 }
@@ -245,7 +260,7 @@ onBeforeUnmount(() => {
           <UTabs
             v-model="tab"
             :items="[
-              { label: `Needs you (${inbox?.count ?? 0})`, value: 'needsYou', icon: 'i-lucide-inbox' },
+              { label: `Inbox (${count})`, value: 'needsYou', icon: 'i-lucide-inbox' },
               { label: 'Activity', value: 'activity', icon: 'i-lucide-activity' },
               { label: `Resolved (${inbox?.resolved.length ?? 0})`, value: 'resolved', icon: 'i-lucide-circle-check' }
             ]"
@@ -288,6 +303,7 @@ onBeforeUnmount(() => {
           <li
             v-for="item in items"
             :key="item.id"
+            class="group relative"
           >
             <button
               type="button"
@@ -327,6 +343,17 @@ onBeforeUnmount(() => {
                 </span>
               </template>
             </button>
+            <UButton
+              v-if="item.type === 'plan_thread'"
+              icon="i-lucide-trash-2"
+              variant="soft"
+              color="error"
+              size="xs"
+              aria-label="Delete thread"
+              title="Delete thread"
+              class="absolute end-3 bottom-2 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+              @click="deleteThread(item)"
+            />
           </li>
           <li
             v-if="items.length === 0"
@@ -344,8 +371,7 @@ onBeforeUnmount(() => {
         @read="load"
         @approved="nextAfterPlanResolution"
         @approving="setPlanResolving"
-        @closed="nextAfterPlanResolution"
-        @closing="setPlanResolving"
+        @delete="deleteThread(selected)"
       />
       <div
         v-else
@@ -490,7 +516,7 @@ onBeforeUnmount(() => {
           v-else
           class="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center text-sm text-muted"
         >
-          <template v-if="inbox && inbox.count === 0">
+          <template v-if="inbox && count === 0">
             <UIcon
               name="i-lucide-circle-check"
               class="size-8 text-success"
