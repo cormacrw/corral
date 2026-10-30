@@ -1,0 +1,1 @@
+ALTER TABLE "evidence" ALTER COLUMN "task_id" DROP NOT NULL;

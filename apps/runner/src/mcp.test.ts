@@ -83,6 +83,18 @@ describe('ToolServer', () => {
     await client.close()
   })
 
+  it('gives the PM evidence uploads with an optional task ref', async () => {
+    const { client, calls } = await connect('pm')
+    const definition = (await client.listTools()).tools.find(t => t.name === 'attach_evidence')!
+    expect(definition.inputSchema).toMatchObject({ properties: { taskRef: { type: 'string' }, path: { type: 'string' } } })
+    for (const taskRef of [undefined, 'COR-4']) {
+      const input = { kind: 'text', path: '/scratch/notes.txt', ...(taskRef && { taskRef }) }
+      expect((await client.callTool({ name: 'attach_evidence', arguments: input })).isError).not.toBe(true)
+      expect(calls.at(-1)).toEqual({ tool: 'attach_evidence', input })
+    }
+    await client.close()
+  })
+
   it('tells the PM to refine a Backlog task by ref in propose_plan, and passes the ref through', async () => {
     const { client, calls } = await connect('pm')
     const propose = (await client.listTools()).tools.find(t => t.name === 'propose_plan')!

@@ -147,6 +147,10 @@ const roleToolDefinitions: Record<AgentRole, Partial<Record<AgentTool, ToolDefin
   developer: {},
   reviewer: {},
   pm: {
+    attach_evidence: {
+      description: 'Attach a file from your scratch directory to this chat, or to a task in this project when taskRef is given. Files are limited to 25 MB.',
+      input: { ...toolDefinitions.attach_evidence.input, taskRef: z.string().optional().describe('Task ref, e.g. COR-12; omit to attach to this chat') }
+    },
     get_task: {
       description: 'Read any task in this project by ref: title, description, acceptance criteria with their IDs, status, epic, dependencies and comments.',
       input: { taskRef: z.string().describe('e.g. COR-12') }
@@ -164,7 +168,7 @@ const roleToolDefinitions: Record<AgentRole, Partial<Record<AgentTool, ToolDefin
 export const ROLE_TOOLS: Record<AgentRole, AgentTool[]> = {
   developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'report_outcome'],
   reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'get_design', 'report_outcome'],
-  pm: ['list_tasks', 'get_task', 'add_comment', 'get_run_outcomes', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
+  pm: ['attach_evidence', 'list_tasks', 'get_task', 'add_comment', 'get_run_outcomes', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
 }
 
 // The tools a run gets: its role's, plus submit_design for a design task's

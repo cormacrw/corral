@@ -766,7 +766,7 @@ export interface Run {
 
 export interface Evidence {
   id: string
-  taskId: string
+  taskId: string | null
   criterionId: string | null
   runId: string
   round: number
