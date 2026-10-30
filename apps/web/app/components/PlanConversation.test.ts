@@ -15,6 +15,9 @@ vi.mock('~/composables/useApi', () => ({
 }))
 
 let listener: (event: ServerEvent) => void
+const pendingEntries = vue.ref<Record<string, { session: PlanSessionDetail, state: string, error: string | null, taskRef?: string }>>({})
+const retryStart = vi.fn()
+const restored = vue.ref(null)
 const state = vue.ref({
   loaded: true, runner: { online: true }, agents, projects,
   tasks: {}, runEvents: {} as Record<string, import('@corral/contracts').RunEvent[]>
@@ -33,6 +36,10 @@ const button = vue.defineComponent({
   props: { label: String, to: String, disabled: Boolean },
   setup: (props, { attrs }) => () => vue.h(props.to ? 'a' : 'button', { ...attrs, href: props.to, disabled: props.disabled }, props.label)
 })
+const alertComponent = vue.defineComponent({
+  props: ['title', 'description', 'actions'],
+  setup: props => () => vue.h('div', { 'data-alert': props.title }, props.description)
+})
 function detail(id = 's-1'): PlanSessionDetail {
   return structuredClone({
     ...planSessions.find(s => s.id === id)!,
@@ -49,10 +56,11 @@ async function open(id = 's-1', mobile = false) {
         PromptComposer: true, PlanQuestion: true,
         AgentAvatar: true, PlanTurnSteps: true, PlanDetail: true,
         TaskFlyout: true, UDrawer: true, UBadge: true, UIcon: true,
-        UAlert: true, USkeleton: true, UTooltip: true, USelectMenu: true,
+        USkeleton: true, UTooltip: true, USelectMenu: true,
         PlanSessionSwitcher: true, PlanGrillButton: true
       },
       components: {
+        UAlert: alertComponent,
         UButton: button,
         MarkdownText: vue.defineComponent({
           props: { text: String },
@@ -75,6 +83,8 @@ beforeEach(() => {
   for (const name of ['ref', 'computed', 'watch', 'nextTick', 'onMounted', 'onBeforeUnmount'] as const) vi.stubGlobal(name, vue[name])
   vi.stubGlobal('useRouter', () => ({ push }))
   vi.stubGlobal('useSeoMeta', vi.fn())
+  pendingEntries.value = {}
+  vi.stubGlobal('usePendingPlan', () => ({ entries: pendingEntries, restored, start: retryStart }))
   vi.stubGlobal('usePlanThreads', () => ({ add: vi.fn() }))
   vi.stubGlobal('useTaskFlyout', () => flyout)
   vi.stubGlobal('useToast', () => toast)
@@ -100,6 +110,31 @@ afterEach(() => {
 })
 
 describe('Inbox shared Plan conversation', () => {
+  it('renders a pending start without fetching a nonexistent session, including working and failure recovery', async () => {
+    const initial = detail()
+    initial.id = 'pending-session'
+    initial.plans = []
+    initial.messages = [{ ...initial.messages[0]!, id: 'pending-human', role: 'human', text: 'My unsent prompt' }]
+    pendingEntries.value[initial.id] = { session: initial, state: 'starting', error: null, taskRef: 'TA-1' }
+    const wrapper = await open(initial.id)
+    expect(api.plan.session).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('My unsent prompt')
+    expect(wrapper.find('[data-transcript]').exists()).toBe(true)
+    pendingEntries.value[initial.id]!.state = 'failed'
+    pendingEntries.value[initial.id]!.error = 'Network unavailable'
+    await vue.nextTick()
+    expect(wrapper.text()).toContain('Not sent')
+    expect(wrapper.find('[data-transcript]').exists()).toBe(false)
+    const alert = wrapper.getComponent(alertComponent)
+    expect(alert.props('description')).toBe('Network unavailable')
+    const actions = alert.props('actions') as { label: string, onClick: () => Promise<void> }[]
+    await actions.find(a => a.label === 'Retry')!.onClick()
+    expect(retryStart).toHaveBeenCalledWith(initial.id)
+    await actions.find(a => a.label === 'Back to prompt')!.onClick()
+    expect(restored.value).toMatchObject({ taskRef: 'TA-1' })
+    expect(push).toHaveBeenCalledWith('/plan')
+  })
+
   it('loads the selected session, marks it read, opens its plan and links to Plan', async () => {
     const wrapper = await open()
     expect(api.plan.session).toHaveBeenCalledWith('s-1')

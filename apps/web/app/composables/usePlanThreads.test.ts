@@ -28,6 +28,7 @@ describe('open Plan threads', () => {
       expect(key).toBe('corral.plan.tabs')
       return stored
     })
+    vi.stubGlobal('usePendingPlan', () => ({ entries: ref({}) }))
     vi.stubGlobal('useLive', () => ({ state }))
     vi.stubGlobal('useRoute', () => route)
   })

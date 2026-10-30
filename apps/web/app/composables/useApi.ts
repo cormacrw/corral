@@ -192,7 +192,7 @@ export const api = {
   plan: {
     sessions: () => call<PlanSession[]>('GET', '/plan/sessions'),
     session: (id: string) => call<PlanSessionDetail>('GET', `/plan/sessions/${id}`),
-    start: (projectId: string, text: string, taskRef?: string, runtime?: AgentRuntime) => call<PlanSessionDetail>('POST', '/plan/sessions', { projectId, text, ...(taskRef && { taskRef }), ...(runtime && { runtime }) }),
+    start: (projectId: string, text: string, taskRef?: string, runtime?: AgentRuntime, id?: string) => call<PlanSessionDetail>('POST', '/plan/sessions', { projectId, text, ...(id && { id }), ...(taskRef && { taskRef }), ...(runtime && { runtime }) }),
     message: (id: string, text: string, taskRef?: string) => call<PlanMessage>('POST', `/plan/sessions/${id}/messages`, { text, ...(taskRef && { taskRef }) }),
     close: (id: string, options?: { keepalive?: boolean }) => call<PlanSession>('POST', `/plan/sessions/${id}/close`, undefined, options),
     read: (id: string) => call<PlanSession>('POST', `/plan/sessions/${id}/read`),

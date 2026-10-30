@@ -1,5 +1,5 @@
 import { checkEpicDependencies } from '@corral/core'
-import type { CreateTaskInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, RunEvent, ServerEvent, Task } from '@corral/contracts'
+import type { CreateTaskInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
 import * as f from './fixtures'
@@ -177,6 +177,22 @@ route('POST', '/projects/:slug/runs/:runId/messages', ([slug, runId], body) => {
 
 route('GET', '/inbox', () => f.inbox())
 
+route('POST', '/plan/sessions', (_, body) => {
+  const { id = crypto.randomUUID(), projectId, text, runtime = 'claude-code', taskRef } = body as StartPlanSessionInput
+  const existing = f.planSessions.find(s => s.id === id)
+  if (existing) {
+    if (existing.projectId !== projectId) throw new ApiError(409, { code: 'conflict', constraint: 'plan_session_project' }, 'Session belongs to another project')
+    return session(id)
+  }
+  const now = new Date().toISOString()
+  f.planSessions.unshift({ id, projectId, runtime, title: text.split('\n')[0]!.slice(0, 60) || 'New session', preview: text, unread: false, closed: false, status: 'none', activeRunId: null, createdAt: now, updatedAt: now })
+  postMessage(id, { role: 'human', kind: 'message', text: text || `Refine ${taskRef}` })
+  emit({ type: 'plan.session', session: f.planSessions[0]! })
+  setTimeout(() => {
+    postMessage(id, { role: 'pm', kind: 'message', text: 'I will help you work through this plan.' })
+  }, 1800)
+  return session(id)
+})
 route('GET', '/plan/sessions', () => f.planSessions)
 route('GET', '/plan/sessions/:id', ([id]) => session(id!))
 // Drafts by the session they belong to, newest session first, as the server lists them
