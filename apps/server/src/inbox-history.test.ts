@@ -10,7 +10,7 @@ const { auditLog, tasks } = schema
 // has to keep reading them the same way, and reading must leave them alone.
 describe('inbox over stored audit rows', () => {
   let t: TestApp
-  const now = Date.now()
+  const now = new Date('2026-10-30T09:00:00.000Z').getTime()
   const at = (minutes: number) => new Date(now - minutes * 60_000)
   const system = { kind: 'system', component: 'server' } as const
 
@@ -25,7 +25,9 @@ describe('inbox over stored audit rows', () => {
   const inbox = async () => t.request('GET', '/api/inbox').then(r => r.json()) as Promise<Inbox>
 
   it('shows the same activity, resolutions and arrival times for string and object events', async () => {
-    const project = await t.createProject({ name: 'History', prefix: 'HIS', repository: 'acme/history' })
+    const project = await t.createProject({ name: 'History', prefix: 'HIS', repository: 'cormacrw/test-app', defaultBranch: 'main' })
+    const paused = await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
+    expect(paused.status).toBe(200)
     const task = async (title: string, set: Partial<typeof tasks.$inferInsert> = {}) => {
       const created = await t.createTask(project.slug, { title })
       await t.db.update(tasks).set({ updatedAt: at(0), ...set }).where(eq(tasks.id, created.id))
