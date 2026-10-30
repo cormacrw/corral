@@ -107,7 +107,7 @@ const agents = computed(() => state.value.agents
           :class="['size-2 rounded-full', state.runner?.online ? 'bg-success' : 'bg-error']"
           aria-hidden="true"
         />
-        Runner {{ state.runner?.online ? 'online' : 'offline' }} ·
+        {{ (state.runner?.runners.length ?? 0) > 1 ? `${state.runner!.runners.filter(r => r.online).length} of ${state.runner!.runners.length} runners online` : `Runner ${state.runner?.online ? 'online' : 'offline'}` }} ·
         <UDropdownMenu :items="projectItems.map(item => ({ label: item.label, onSelect: () => { projectId = item.value } }))">
           <UButton
             :label="projectItems.find(item => item.value === projectId)?.label ?? 'All projects'"

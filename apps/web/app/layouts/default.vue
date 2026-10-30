@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Project } from '@corral/contracts'
-import { agentStatus, isWorking, projectColor, ROLE, taskCounts } from '~/utils/labels'
+import { agentStatus, isWorking, projectColor, ROLE, runnerSummary, taskCounts } from '~/utils/labels'
 import { searchPages } from '~/utils/search'
 
 // The app shell (design/app-shell.md): global nav, projects, agents, runner
@@ -355,7 +355,7 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
                 Runner {{ state.runner?.online ? 'online' : 'offline' }}
               </div>
               <div class="truncate text-muted">
-                {{ state.runner?.name ?? 'not connected' }} · Claude
+                {{ runnerSummary(state.runner) }}
               </div>
             </div>
           </div>

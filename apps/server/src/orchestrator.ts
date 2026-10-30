@@ -216,7 +216,7 @@ export class Orchestrator implements RunnerHandlers {
             job = { ...job, agentSessionId: null, prompt: job.fallbackPrompt ?? job.prompt, fallbackPrompt: null }
             note = `This session's earlier turns ran on ${this.#runnerName(previous.runnerId)}, which is offline: starting a fresh session on ${this.#runnerName(runnerId)} from the saved conversation`
           }
-          await tx.update(runs).set({ pmJob: null, runnerId }).where(eq(runs.id, w.id))
+          await tx.update(runs).set({ pmJob: null, runnerId, runnerName: this.#d.runner.name(runnerId) }).where(eq(runs.id, w.id))
           picked.push({ id: w.id, runnerId, note, job })
         }
       }
@@ -440,6 +440,7 @@ export class Orchestrator implements RunnerHandlers {
 
   // Whether the run was handed to the runner
   async #assign(claim: Claim): Promise<boolean> {
+    if (claim.runnerId) await this.#d.db.update(runs).set({ runnerName: this.#d.runner.name(claim.runnerId) }).where(eq(runs.id, claim.runId))
     const ctx = await this.#load(claim.runId)
     if (!ctx?.task) return false
     let job: RunJob
@@ -668,6 +669,7 @@ export class Orchestrator implements RunnerHandlers {
       await this.#endRun(ctx, { state: 'interrupted', error: 'The runner restarted during the run' })
       await this.#publish(ctx)
     }
+    await this.refreshLoad()
     // Runs the runner has but the server no longer recognises must stop
     for (const active of activeRuns) {
       const ctx = await this.#fenced(active.runId, active.leaseEpoch)
@@ -976,6 +978,7 @@ export class Orchestrator implements RunnerHandlers {
         runner.send({ type: 'run.stop', runId: ctx.run.id, reason: 'The task was deleted' }, ctx.run.runnerId)
         await this.#endRun(ctx, { state: 'interrupted', error: 'The task was deleted' })
         this.#d.events.publish({ type: 'run.updated', run: await getRun(db, ctx.run.id) })
+        await this.refreshLoad()
       }
     }
     if (task.prNumber) {
@@ -1011,6 +1014,7 @@ export class Orchestrator implements RunnerHandlers {
       await this.#endRun(ctx, { state: 'interrupted', error: 'The project was removed' })
       this.#d.events.publish({ type: 'run.updated', run: await getRun(db, id) })
     }
+    await this.refreshLoad()
     const worked = await db.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.projectId, projectId), ne(tasks.status, 'backlog')))
     const project = await db.transaction(async (tx) => {
       // Tasks, epics, plans, plan sessions and runs go with it (onDelete: cascade)
@@ -1533,9 +1537,18 @@ export class Orchestrator implements RunnerHandlers {
     return ctx
   }
 
+  // Slots in use on each runner, for the runner list (design/settings.md)
+  async refreshLoad(): Promise<void> {
+    const busy = await this.#d.db.select({ runnerId: runs.runnerId, n: count() }).from(runs)
+      .where(and(inArray(runs.state, [...ACTIVE_RUN_STATES]), isNotNull(runs.runnerId)))
+      .groupBy(runs.runnerId)
+    this.#d.runner.setInUse(new Map(busy.map(b => [b.runnerId!, b.n])))
+  }
+
   async #publish(ctx: RunContext): Promise<void> {
     const { db, events } = this.#d
     events.publish({ type: 'run.updated', run: await getRun(db, ctx.run.id) })
+    await this.refreshLoad()
     // A soft-deleted task has nothing left to show
     const task = ctx.task ? await loadTask(db, ctx.task.id).catch(() => null) : null
     if (task) events.publish({ type: 'task.updated', task })

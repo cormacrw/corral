@@ -39,7 +39,7 @@ const subPage = computed(() => projectPage.value ?? planSession.value ?? inboxIt
 const agentPage = computed(() => parts.value[0] === 'agents' && parts.value.length === 2)
 // Settings lists its sections at /settings, and each section is its own
 // screen that goes back to the list.
-const SETTINGS_SECTIONS: Record<string, string> = { profile: 'Profile', agents: 'Agents', runner: 'Runner', appearance: 'Appearance' }
+const SETTINGS_SECTIONS: Record<string, string> = { profile: 'Profile', agents: 'Agents', runner: 'Runners', appearance: 'Appearance' }
 const settingsPage = computed(() => parts.value[0] === 'settings')
 const settingsSection = computed(() => settingsPage.value ? SETTINGS_SECTIONS[parts.value[1] ?? ''] ?? null : null)
 const overviewPage = computed(() => parts.value[0] === 'projects' && parts.value.length === 2)

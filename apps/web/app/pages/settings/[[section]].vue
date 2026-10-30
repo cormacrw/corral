@@ -3,7 +3,7 @@ import type { Agent, AgentRuntime, CliStatus } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { agentLimit } from '~/utils/agents'
 import { parseOverride } from '~/utils/device'
-import { cliLoginCommand, detectedRuntimes, ROLE, runtimeLabel, timeAgo } from '~/utils/labels'
+import { cliLoginCommand, detectedRuntimes, ROLE, runtimeLabel } from '~/utils/labels'
 
 // Global settings (design/settings.md): profile, agents, runner, appearance
 const route = useRoute()
@@ -94,7 +94,7 @@ async function resumeAll() {
 const items = [
   { label: 'Profile', to: '/settings/profile', icon: 'i-lucide-user' },
   { label: 'Agents', to: '/settings/agents', icon: 'i-lucide-bot' },
-  { label: 'Runner', to: '/settings/runner', icon: 'i-lucide-server' },
+  { label: 'Runners', to: '/settings/runner', icon: 'i-lucide-server' },
   { label: 'Appearance', to: '/settings/appearance', icon: 'i-lucide-palette' }
 ]
 </script>
@@ -386,30 +386,13 @@ const items = [
         <UCard v-else-if="section === 'runner'">
           <template #header>
             <h2 class="font-medium">
-              Runner
+              Runners
             </h2>
           </template>
           <div class="flex flex-col gap-4 text-sm">
-            <p
-              v-if="!live.state.value.runner?.runners.length"
-              class="text-sm text-muted"
-            >
-              Offline · no runner yet
-            </p>
-            <div
-              v-for="runner in live.state.value.runner?.runners"
-              :key="runner.id"
-              class="flex items-center gap-2"
-            >
-              <span
-                :class="['size-2.5 rounded-full', runner.online ? 'bg-success' : 'bg-error']"
-                aria-hidden="true"
-              />
-              <span class="font-medium">{{ runner.online ? 'Online' : 'Offline' }} · {{ runner.name ?? 'no runner yet' }}</span>
-              <span class="text-xs text-muted">{{ runner.slots }} at once · {{ runner.roles.join(', ') }} · {{ runner.runtimes.join(', ') || 'no signed-in CLI' }} · last heartbeat {{ timeAgo(runner.lastHeartbeatAt) }}</span>
-            </div>
+            <RunnerList />
             <p class="text-xs text-muted">
-              The runner keeps clones, worktrees and its spool in its own data directory, set by its configuration (a Docker volume when deployed).
+              Each runner keeps clones, worktrees and its spool in its own data directory, set by its configuration (a Docker volume when deployed).
             </p>
             <div>
               <div class="mb-1 flex items-center gap-2">

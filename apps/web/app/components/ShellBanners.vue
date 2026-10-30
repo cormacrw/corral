@@ -8,6 +8,17 @@ const state = useLive().state
 const route = useRoute()
 const toast = useToast()
 
+// Shown only when no runner at all is online; some offline is just the list
+const runnerBanner = computed(() => {
+  const runners = state.value.runner?.runners ?? []
+  if (runners.some(r => r.needsUpdate) && !runners.some(r => !r.needsUpdate)) {
+    return `The runner needs an update to protocol ${state.value.runner?.protocol}. Plan and live runs are unavailable until it reconnects.`
+  }
+  return runners.length > 1
+    ? 'Every runner is offline. Plan and live runs are unavailable until one reconnects.'
+    : 'The runner is offline. Plan and live runs are unavailable until it reconnects.'
+})
+
 const currentSlug = computed(() => typeof route.params.slug === 'string' ? route.params.slug : null)
 const currentProject = computed(() => state.value.projects.find(p => p.slug === currentSlug.value) ?? null)
 
@@ -62,9 +73,11 @@ async function resumeAll() {
     color="warning"
     variant="subtle"
     icon="i-lucide-server-off"
-    title="The runner is offline. Plan and live runs are unavailable until it reconnects."
+    :title="runnerBanner"
+    data-testid="runner-offline-banner"
     :ui="{ root: 'shrink-0 rounded-none py-2' }"
     orientation="horizontal"
+    :actions="[{ label: 'Runners', color: 'neutral', variant: 'outline', to: '/settings/runner' }]"
   />
   <UAlert
     v-else-if="state.connection === 'reconnecting'"

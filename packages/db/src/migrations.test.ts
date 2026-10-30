@@ -36,6 +36,37 @@ describe('migrations', () => {
     for (const fn of cleanup.splice(0)) await fn()
   })
 
+  it.each([
+    { driver: 'pglite' as const, enabled: true },
+    { driver: 'postgres' as const, enabled: postgresAvailable }
+  ])('0031 adds runner names after main’s 0030, preserving historical runs, on $driver', async ({ driver, enabled }) => {
+    if (!enabled) return
+    const before = await migrationsBefore('0031_omniscient_firedrake')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db, migrate } = await open(driver)
+    await migrate(before)
+    const journal = JSON.parse(await readFile(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as { entries: { tag: string, when: number }[] }
+    const main = journal.entries.find(e => e.tag === '0030_lumpy_wiccan')!
+    const added = journal.entries.find(e => e.tag === '0031_omniscient_firedrake')!
+    expect(added.when).toBeGreaterThan(main.when)
+    expect(Number((await db.execute(sql`select max(created_at) as latest from drizzle.__drizzle_migrations`)).rows[0]!.latest)).toBe(main.when)
+    expect((await db.execute(sql`select column_name from information_schema.columns where table_name = 'runs' and column_name = 'runner_name'`)).rows).toEqual([])
+    await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('Test app', 'test-app', 'TA', 'cormacrw/test-app', 'main')`)
+    await db.execute(sql`insert into agents (name, role) values ('Developer', 'developer')`)
+    await db.execute(sql`insert into tasks (project_id, number, title, type, created_by) select id, 1, 'Historical task', 'task', '{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb from projects`)
+    await db.execute(sql`insert into runs (project_id, agent_id, task_id, role, state)
+      select p.id, a.id, t.id, 'developer', 'completed' from projects p, agents a, tasks t`)
+
+    await migrate(migrationsFolder)
+    expect((await db.execute(sql`select data_type, is_nullable from information_schema.columns where table_name = 'runs' and column_name = 'runner_name'`)).rows).toEqual([{ data_type: 'text', is_nullable: 'YES' }])
+    expect((await db.execute(sql`select state, runner_name from runs`)).rows).toEqual([{ state: 'completed', runner_name: null }])
+    await db.execute(sql`update runs set runner_name = 'home-server'`)
+    expect((await db.execute(sql`select runner_name from runs`)).rows).toEqual([{ runner_name: 'home-server' }])
+    expect(Number((await db.execute(sql`select max(created_at) as latest from drizzle.__drizzle_migrations`)).rows[0]!.latest)).toBe(added.when)
+    await migrate(migrationsFolder)
+    expect((await db.execute(sql`select runner_name from runs`)).rows).toEqual([{ runner_name: 'home-server' }])
+  }, 60_000)
+
   it('0028 preserves historical runs with null runner ownership', async () => {
     const before = await migrationsBefore('0028_complex_clint_barton')
     cleanup.push(() => rm(before, { recursive: true, force: true }))

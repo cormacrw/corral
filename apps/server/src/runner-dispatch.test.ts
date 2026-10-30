@@ -1,4 +1,4 @@
-import type { PlanSessionDetail, Project, RunEvent, RunJob, RunnerCapacity, Task } from '@corral/contracts'
+import type { PlanSessionDetail, Project, RunEvent, RunJob, RunnerCapacity, RunnerStatus, Task } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -80,6 +80,10 @@ describe('runner capacity, runtimes and roles', () => {
     await vi.waitFor(() => expect(assigns(a).length + assigns(b).length).toBe(3))
     expect(assigns(a)).toHaveLength(1)
     expect(assigns(b)).toHaveLength(2)
+    // The runner list counts each runner's slots in use, live
+    const slots = async () => ((await t.request('GET', '/api/runner').then(r => r.json())) as RunnerStatus).runners.map(r => [r.id, r.slotsInUse, r.slots])
+    await vi.waitFor(async () => expect(await slots()).toEqual([['A', 1, 1], ['B', 2, 2]]))
+    expect(t.events.filter(e => e.type === 'runner.status').at(-1)).toMatchObject({ status: { runners: [{ id: 'A', slotsInUse: 1 }, { id: 'B', slotsInUse: 2 }] } })
 
     const fourth = await readyTask(project)
     await t.orchestrator.schedule()
@@ -97,6 +101,8 @@ describe('runner capacity, runtimes and roles', () => {
     expect(await taskRow(fourth.id)).toMatchObject({ status: 'in_progress', leaseRunId: next.job.runId })
     expect(ready.map(r => r.id)).not.toContain(fourth.id)
     expect((await t.db.select().from(runs).where(eq(runs.id, next.job.runId)))[0]!.runnerId).toBe('B')
+    expect(await t.request('GET', `/api/runs/${next.job.runId}`).then(r => r.json())).toMatchObject({ runnerId: 'B', runnerName: 'B' })
+    await vi.waitFor(async () => expect(await slots()).toEqual([['A', 1, 1], ['B', 2, 2]]))
   }, 60000)
 
   it('sends PM turns and design runs only to runners that take those roles', async () => {

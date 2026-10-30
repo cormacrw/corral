@@ -218,6 +218,13 @@
       "when": 1793338508528,
       "tag": "0030_lumpy_wiccan",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1793342326573,
+      "tag": "0031_omniscient_firedrake",
+      "breakpoints": true
     }
   ]
 }

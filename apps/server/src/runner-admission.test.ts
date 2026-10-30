@@ -33,7 +33,7 @@ it('reconciles the hello snapshot before accepting new assignments', async () =>
   expect(ready).toHaveBeenCalledOnce()
 })
 
-it('includes the server build in protocol refusals without registering the runner', async () => {
+it('includes the server build in protocol refusals while listing the runner as needing an update', async () => {
   const hub = new RunnerHub(new EventBus(), 'new-commit')
   const close = vi.fn()
   const send = vi.fn()
@@ -41,5 +41,25 @@ it('includes the server build in protocol refusals without registering the runne
   await peer.onMessage(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION - 1, runnerId: 'old' }))
   expect(close).toHaveBeenCalledWith(4000, JSON.stringify({ protocol: RUNNER_PROTOCOL_VERSION, commit: 'new-commit' }))
   expect(send).not.toHaveBeenCalled()
-  expect(hub.status().runners).toEqual([])
+  expect(hub.status().runners).toMatchObject([{ id: 'old', needsUpdate: true }])
+})
+
+it('lists a runner on an older protocol as needing an update until it reconnects on the current one', async () => {
+  const events = new EventBus()
+  const published: unknown[] = []
+  events.subscribe(e => published.push(e))
+  const hub = new RunnerHub(events)
+  const closed = vi.fn()
+  const old = hub.connect({ send: () => {}, close: closed })
+  await old.onMessage(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION - 1, runnerId: 'M', name: 'old-mini', activeRuns: [] }))
+  expect(closed).toHaveBeenCalledWith(4000, JSON.stringify({ protocol: RUNNER_PROTOCOL_VERSION, commit: 'development' }))
+  expect(hub.status()).toMatchObject({ online: false, protocol: RUNNER_PROTOCOL_VERSION, runners: [{ id: 'M', name: 'old-mini', online: false, needsUpdate: true, protocol: RUNNER_PROTOCOL_VERSION - 1 }] })
+  expect(published.at(-1)).toMatchObject({ type: 'runner.status', status: { runners: [{ id: 'M', needsUpdate: true }] } })
+  expect(hub.pick()).toBeNull()
+
+  const updated = hub.connect({ send: () => {}, close: () => {} })
+  await updated.onMessage(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, runnerId: 'M', name: 'old-mini', activeRuns: [], slots: 2, runtimes: ['claude-code'], roles: ['developer'] }))
+  expect(hub.status().runners).toMatchObject([{ id: 'M', online: true, needsUpdate: false, protocol: RUNNER_PROTOCOL_VERSION, slots: 2, slotsInUse: 0 }])
+  hub.setInUse(new Map([['M', 1]]))
+  expect(hub.status().runners[0]).toMatchObject({ slotsInUse: 1 })
 })
