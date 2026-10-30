@@ -17,6 +17,16 @@ The page specs in this folder still set the behaviour. This page covers the shel
 
 Pages and components use `useDevice().isMobile` to choose a mobile component. Don't add mobile-only routes.
 
+## Page scale
+
+The app shell fixes mobile page scale at 1 with the viewport meta (including
+`viewport-fit=cover`). Root `touch-action: manipulation` prevents double-tap zoom
+while allowing vertical and horizontal scrolling. On iOS, including iPadOS with a
+desktop user agent, the shell cancels `gesturestart` and `gesturechange` once for
+its mounted lifetime. Touch devices use at least 16px text in inputs, textareas,
+selects and editable composers to avoid Safari focus zoom, including dialogs and
+the Desktop layout override. Desktop keyboard zoom remains available.
+
 ## Override
 
 **Settings → Appearance → Layout** is a segmented control: **Auto** (the rule above), **Desktop** or **Mobile**.

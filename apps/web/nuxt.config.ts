@@ -6,6 +6,8 @@ import { darkNeutralInit } from './app/utils/dark-neutral'
 // files with relative paths and hash routes, so it runs from any sub-path in
 // a sandboxed iframe with no server. Off for dev and production builds.
 const prototype = process.env.CORRAL_PROTOTYPE === '1'
+// Match app.vue before hydration: this app serves a client-only HTML shell.
+const viewport = { name: 'viewport', content: 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover' }
 
 export default defineNuxtConfig({
   modules: [
@@ -27,10 +29,11 @@ export default defineNuxtConfig({
   app: {
     ...(prototype && { cdnURL: './' }),
     head: prototype
-      ? { script: [{ innerHTML: darkNeutralInit }] }
+      ? { script: [{ innerHTML: darkNeutralInit }], meta: [viewport] }
       : {
           script: [{ innerHTML: darkNeutralInit }],
           meta: [
+            viewport,
             { name: 'theme-color', content: '#ffffff', media: '(prefers-color-scheme: light)' },
             { name: 'theme-color', content: '#0f172b', media: '(prefers-color-scheme: dark)' },
             { name: 'mobile-web-app-capable', content: 'yes' },
