@@ -14,7 +14,7 @@ independent `prNumber` and `prUrl` properties. They expose
 derived from Plan history, never stored on a task. Historical Plan links stay
 intact after approval, but are not exposed as a non-Draft task's session.
 
-Migration 0036 checks every existing task (including deleted tasks) before
+Migration 0037 checks every existing task (including deleted tasks) before
 adding reason/status and PR-pair checks. It stops with offending task IDs if
 old rows are inconsistent; it does not invent reasons or discard data.
 An operator must repair those rows before retrying the migration. No existing

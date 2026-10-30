@@ -168,9 +168,9 @@ describe('migrations', () => {
   it.each([
     { driver: 'pglite' as const, enabled: true },
     { driver: 'postgres' as const, enabled: postgresAvailable }
-  ])('0036 refuses inconsistent historical rows without rewriting them on $driver', async ({ driver, enabled }) => {
+  ])('0037 refuses inconsistent historical rows without rewriting them on $driver', async ({ driver, enabled }) => {
     if (!enabled) return
-    const before = await migrationsBefore('0036_known_sphinx')
+    const before = await migrationsBefore('0037_nostalgic_thanos')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
     const { db, migrate } = await open(driver)
     await migrate(before)
