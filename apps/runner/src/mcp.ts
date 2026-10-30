@@ -101,7 +101,7 @@ const toolDefinitions = {
     input: askQuestionInput.shape
   },
   propose_plan: {
-    description: 'Propose a plan: epics and tasks with acceptance criteria and dependencies. Corral validates it and shows it to the human for approval. Use `epics` to group the tasks of a feature, and put each of those tasks in one with `epic`. A task without `epic` gets no epic, and a plan without `epics` creates none: leave them out for a lone small fix. A revision keeps the epic and task keys it reuses. To refine an existing Backlog task, read it with get_task and include it in the plan with its `ref`: the plan then revises that task instead of creating a new one, and the edits are applied when the human approves. Set each epic’s dependsOn to epic keys in this plan or existing epic ids from list_tasks; omit it on revision to preserve dependencies, or use [] to clear them. Pin a task that builds part of an approved design with `design`; only an approved version can be pinned.',
+    description: 'Propose a plan: epics and tasks with acceptance criteria and dependencies. Corral validates it and shows it to the human for approval. Use `epics` to group the tasks of a feature, and put each of those tasks in one with `epic`. A task without `epic` gets no epic, and a plan without `epics` creates none: leave them out for a lone small fix. A revision keeps the epic and task keys it reuses. To refine an existing Backlog task or an unclaimed Ready task (one no developer has picked up), read it with get_task and include it in the plan with its `ref`: the plan then revises that task instead of creating a new one, and the edits are applied when the human approves; a revised Ready task stays in Ready. Set each epic’s dependsOn to epic keys in this plan or existing epic ids from list_tasks; omit it on revision to preserve dependencies, or use [] to clear them. Pin a task that builds part of an approved design with `design`; only an approved version can be pinned.',
     input: {
       title: z.string().min(1),
       summary: z.string().default(''),
@@ -115,7 +115,7 @@ const toolDefinitions = {
       })).optional(),
       tasks: z.array(z.object({
         key: z.string().describe('A short handle used by dependsOn, e.g. t1'),
-        ref: z.string().optional().describe('The ref of an existing Backlog task this revises, e.g. COR-4; leave out for a new task'),
+        ref: z.string().optional().describe('The ref of an existing Backlog or unclaimed Ready task this revises, e.g. COR-4; leave out for a new task'),
         epic: z.string().optional().describe('The key of its epic in `epics`; leave it out for a task with no epic'),
         title: z.string().min(1),
         description: z.string().min(1),

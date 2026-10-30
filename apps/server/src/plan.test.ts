@@ -455,7 +455,7 @@ describe('plan sessions', () => {
     const deleted = await t.createTask(project.slug, { title: 'Old idea' })
     expect((await t.request('DELETE', `/api/projects/${project.slug}/tasks/${deleted.number}`)).status).toBe(204)
     const started = await t.createTask(project.slug, { title: 'Started' })
-    await t.db.update(tasks).set({ status: 'ready' }).where(eq(tasks.id, started.id))
+    await t.db.update(tasks).set({ status: 'in_progress' }).where(eq(tasks.id, started.id))
     const elsewhere = await t.createProject()
     const foreign = await t.createTask(elsewhere.slug, { title: 'Foreign' })
     const tasksBefore = await count()
@@ -464,12 +464,104 @@ describe('plan sessions', () => {
     expect(await propose(`${project.prefix}-999`)).toMatchObject({ ok: false, error: expect.stringContaining(`There is no task ${project.prefix}-999 in this project`) })
     expect(await propose(deleted.ref)).toMatchObject({ ok: false, error: expect.stringContaining(`${deleted.ref} was deleted`) })
     expect(await propose(foreign.ref)).toMatchObject({ ok: false, error: expect.stringContaining(`${foreign.ref} belongs to the project`) })
-    expect(await propose(started.ref)).toMatchObject({ ok: false, error: expect.stringContaining(`${started.ref} is ready; only Backlog tasks can be revised`) })
+    expect(await propose(started.ref)).toMatchObject({ ok: false, error: expect.stringContaining(`${started.ref} is in_progress; only Backlog and unclaimed Ready tasks can be revised`) })
     // A dependency may name any existing task, but not a deleted one
     expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ dependsOn: [deleted.ref] }]))).toMatchObject({ ok: false, error: expect.stringContaining('deleted_ref') })
     expect(await count()).toBe(tasksBefore)
     expect((await t.request('GET', `/api/tasks/${target.ref}`).then(r => r.json()) as Task).title).toBe('Add login')
     await endTurn(job, 'Nothing saved.')
+  })
+
+  const lease = (runId: string) => ({ leaseRunId: runId, leaseRole: 'developer' as const, leaseAcquiredAt: new Date(), leaseHeartbeatAt: new Date(), leaseExpiresAt: new Date(Date.now() + 60_000) })
+  const noLease = { leaseRunId: null, leaseRole: null, leaseAcquiredAt: null, leaseHeartbeatAt: null, leaseExpiresAt: null }
+
+  it('revises an unclaimed Ready task, which stays in Ready whichever way the plan is approved', async () => {
+    for (const to of ['ready', 'backlog'] as const) {
+      const { target, created, job, getTask, revise } = await backlogSetup()
+      await t.db.update(tasks).set({ status: 'ready' }).where(eq(tasks.id, target.id))
+      expect(await revise()).toMatchObject({ ok: true, result: { tasks: [{ ref: target.ref, revises: true }, { revises: false }] } })
+      expect((await getTask(target.ref)).title).toBe('Add login')
+      await endTurn(job, 'Revised.')
+      const [plan] = (await session(created.id)).plans
+      const approved = await t.request('POST', `/api/plan/plans/${plan!.id}/approve`, { to })
+      expect(approved.status).toBe(200)
+      expect(await getTask(target.ref)).toMatchObject({ title: 'Add email login', status: 'ready', priority: 'urgent' })
+    }
+  })
+
+  it('rejects revising a Ready task with a lease or earlier runs, pointing at update_task', async () => {
+    const { project, target, job, getTask } = await backlogSetup()
+    const propose = (ref: string) => runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ ref, title: 'Revised' }]))
+    // The run that picked it up has ended, and the task went back to Ready
+    await t.db.update(tasks).set({ status: 'ready' }).where(eq(tasks.id, target.id))
+    const [developer] = await t.db.select().from(agents).where(eq(agents.role, 'developer')).limit(1)
+    await t.db.insert(runs).values({ agentId: developer!.id, projectId: project.id, taskId: target.id, role: 'developer', state: 'failed', leaseEpoch: 1, queuedAt: new Date() })
+    const ran = await propose(target.ref)
+    expect(ran).toMatchObject({ ok: false, error: expect.stringContaining(`${target.ref} has already been picked up`) })
+    expect(ran).toMatchObject({ error: expect.stringContaining('update_task') })
+
+    const leased = await t.createTask(project.slug, { title: 'Leased' })
+    await t.db.update(tasks).set({ status: 'ready', ...lease(job.runId) }).where(eq(tasks.id, leased.id))
+    expect(await propose(leased.ref)).toMatchObject({ ok: false, error: expect.stringContaining(`${leased.ref} has already been picked up`) })
+    await t.db.update(tasks).set(noLease).where(eq(tasks.id, leased.id))
+    expect((await getTask(target.ref)).title).toBe('Add login')
+    await endTurn(job, 'Nothing saved.')
+  })
+
+  it('refuses approval with a problem naming a revised task claimed since, applying none of the plan', async () => {
+    const claimed: ((task: Task, runId: string) => Promise<unknown>)[] = [
+      (task, runId) => t.db.update(tasks).set({ status: 'in_progress', ...lease(runId) }).where(eq(tasks.id, task.id)),
+      // Still Ready, but a run has it: the status alone doesn't show this
+      (task, runId) => t.db.update(tasks).set({ status: 'ready', ...lease(runId) }).where(eq(tasks.id, task.id))
+    ]
+    for (const claim of claimed) {
+      const { project, target, created, job, getTask, count, revise } = await backlogSetup()
+      await t.db.update(tasks).set({ status: 'ready' }).where(eq(tasks.id, target.id))
+      expect(await revise()).toMatchObject({ ok: true })
+      await endTurn(job, 'Revised.')
+      const [proposed] = (await session(created.id)).plans
+      const rateLimiter = proposed!.tasks[1]!.ref!
+      const before = await count()
+      await claim(target, job.runId)
+
+      const refused = await t.request('POST', `/api/plan/plans/${proposed!.id}/approve`, { to: 'ready' })
+      expect(refused.status).toBe(409)
+      expect(await refused.json()).toMatchObject({ error: { code: 'plan_not_approvable', problems: [{ code: 'ref_not_revisable', key: 't1', ref: target.ref, message: expect.stringContaining(target.ref) }] } })
+      expect(await getTask(target.ref)).toMatchObject({ title: 'Add login', priority: 'medium' })
+      expect(await getTask(rateLimiter)).toMatchObject({ status: 'draft' })
+      expect(await count()).toBe(before)
+      expect((await session(created.id)).plans[0]).toMatchObject({ status: 'proposed' })
+      await t.db.update(tasks).set(noLease).where(eq(tasks.projectId, project.id))
+    }
+  })
+
+  it('tells the PM which revised task stopped approve_plan', async () => {
+    const { target, created, job, revise } = await backlogSetup()
+    await t.db.update(tasks).set({ status: 'ready' }).where(eq(tasks.id, target.id))
+    expect(await revise()).toMatchObject({ ok: true })
+    await endTurn(job, 'Revised.')
+    await t.db.update(tasks).set({ status: 'in_progress' }).where(eq(tasks.id, target.id))
+    expect((await t.request('POST', `/api/plan/sessions/${created.id}/messages`, { text: 'Looks good, add it to the board' })).status).toBeLessThan(300)
+    const next = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.planSessionId === created.id)).job
+    expect(await runner.call(next.runId, next.leaseEpoch, 'approve_plan', { to: 'ready' })).toMatchObject({ ok: false, error: expect.stringContaining(`${target.ref} is in_progress`) })
+    await endTurn(next, 'Not approved.')
+  })
+
+  it('revises a task an approved version of the same session put on the board', async () => {
+    const { project, job, created, getTask } = await backlogSetup()
+    await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+    expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ title: 'First cut' }]))).toMatchObject({ ok: true })
+    await endTurn(job, 'Proposed.')
+    const [first] = (await session(created.id)).plans
+    expect((await t.request('POST', `/api/plan/plans/${first!.id}/approve`, { to: 'ready' })).status).toBe(200)
+    const ref = first!.tasks[0]!.ref!
+    expect((await t.request('POST', `/api/plan/sessions/${created.id}/messages`, { text: 'Rename it' })).status).toBeLessThan(300)
+    const next = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.planSessionId === created.id)).job
+    expect(await runner.call(next.runId, next.leaseEpoch, 'propose_plan', plan([{ ref, title: 'Second cut' }]))).toMatchObject({ ok: true, result: { tasks: [{ ref, revises: true }] } })
+    await endTurn(next, 'Revised.')
+    const latest = (await session(created.id)).plans.at(-1)!
+    expect((await t.request('POST', `/api/plan/plans/${latest.id}/approve`, { to: 'ready' })).status).toBe(200)
+    expect(await getTask(ref)).toMatchObject({ title: 'Second cut', status: 'ready' })
   })
 
   it('spans several epics, keeping each one a revision still names and deleting the one it drops', async () => {

@@ -352,8 +352,9 @@ export const planTasks = pgTable('plan_tasks', {
   key: text().notNull(),
   change: planChange().notNull(),
   position: integer().notNull(),
-  // Set when the item revises an existing Backlog task (or a Draft from
-  // elsewhere): the proposed edits, written to the task only on approval
+  // Set when the item revises an existing Backlog or unclaimed Ready task (or
+  // a Draft from elsewhere): the proposed edits, written to the task only on
+  // approval
   revision: jsonb().$type<PlanRevision>()
 }, t => [primaryKey({ columns: [t.planId, t.key] })])
 
