@@ -48,3 +48,10 @@ including the unassigned fallback and working avatar. Board cards name the
 active designer, and design revision feedback addresses the designer. The
 static prototype includes Iris, an active design task (COR-20), a completed
 submission and an approved version; Add agent updates its in-memory live list.
+
+## Corral's own designer instructions (COR-160)
+
+Corral's repository overrides the built-in designer defaults with
+`.corral/agents/designer.md`, which replaces them entirely, so it repeats their
+workflow. It holds the prototype build notes that used to be in `CLAUDE.md`, so
+only designers get them; `CLAUDE.md` keeps a one-line pointer.
