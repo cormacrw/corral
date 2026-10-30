@@ -1,5 +1,5 @@
 import { askQuestionInput, normalizeProposedPlan, proposedPlanInput, type AgentRuntime, type DraftSession, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type PmRunJob } from '@corral/contracts'
-import { checkPlan, checkPlanEpicDependencies, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, REVISABLE_STATUSES, richTextToMarkdown, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
+import { checkPlan, checkPlanEpicDependencies, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, requiresHumanReview, revisionProblem, richTextToMarkdown, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
@@ -470,7 +470,12 @@ export class PlanService {
         if (!said || said.actor.kind !== 'human' || said.createdAt < latest.createdAt) {
           throw new ToolError('Not approved. The human hasn\'t replied since this plan was proposed; only approve when their latest message asks you to.')
         }
-        const approved = await this.approve(latest.id, said.actor, to, { runId })
+        const approved = await this.approve(latest.id, said.actor, to, { runId }).catch((error: unknown) => {
+          if (error instanceof ApiFailure && error.body.code === 'plan_not_approvable') {
+            throw new ToolError(`The plan was not approved and nothing was changed: ${error.body.problems.map(p => p.message).join(' ')} Tell the human, and propose a new version without these revisions.`)
+          }
+          throw error
+        })
         const count = approved.tasks.filter(t => t.change !== 'removed').length
         return { ok: true, message: `Plan v${approved.version} approved for the human: ${count} task${count === 1 ? '' : 's'} added to the ${to === 'ready' ? 'board' : 'Backlog'}. Tell them it's done.` }
       }
@@ -494,8 +499,8 @@ export class PlanService {
   // Validates with core and saves a plan version. Tasks are created as
   // Drafts, seen only in the plan (D10); a revision updates, adds or deletes
   // the ones still in Draft by key. A task with a `ref` revises an existing
-  // Backlog task instead: its edits are staged on the plan and written only
-  // when the human approves.
+  // Backlog or unclaimed Ready task instead: its edits are staged on the plan
+  // and written only when the human approves.
   async #propose(session: SessionRow, project: ProjectRow, runId: string, proposed: ProposedPlan, actor: Actor) {
     const { db } = this.#d
     const { found, targets } = await this.#lookupRefs(project, proposed)
@@ -565,7 +570,9 @@ export class PlanService {
       const revising = new Set<string>()
       for (const task of proposed.tasks) {
         const target = task.ref ? targets.get(task.ref)! : null
-        if (target && !owned.has(target.id)) {
+        // A task an earlier approved version put on the board or in the
+        // Backlog is revised like any other
+        if (target && (target.status !== 'draft' || !owned.has(target.id))) {
           // Staged below, once every dependency has a number
           ids.set(task.key, target.id)
           revising.add(task.key)
@@ -670,7 +677,8 @@ export class PlanService {
 
   // Approve plan (design/plan.md): human only. Its Drafts go to the board
   // (Ready) or to the Backlog for later or for refining. Tasks it revises
-  // get their staged edits first, then go the same way.
+  // get their staged edits first, then go the same way, except that a revised
+  // Ready task stays in Ready.
   // `via` is the PM run that carried out the human's say-so in chat
   async approve(planId: string, actor: Actor, to: 'ready' | 'backlog' = 'ready', via: { runId: string } | null = null): Promise<Plan> {
     if (actor.kind !== 'human') throw new ApiFailure(409, { code: 'transition_rejected', reason: { code: 'actor_not_allowed', actor: null, event: 'approve' } })
@@ -686,13 +694,19 @@ export class PlanService {
       await tx.select().from(planSessions).where(eq(planSessions.id, plan.sessionId)).for('update')
       const [current] = await tx.select().from(plans).where(eq(plans.id, planId)).for('update')
       if (current?.status !== 'proposed') throw new ApiFailure(409, { code: 'conflict', constraint: `plan_${current?.status}` })
-      // A revised task someone has since started (or deleted) can't take the
-      // plan's edits; nothing is written then
+      // A revised task someone has since claimed, moved on or deleted can't
+      // take the plan's edits; nothing is written then. The lock holds off a
+      // claim until these edits are in.
+      const refused: { code: string, key: string, ref: string, message: string }[] = []
       for (const item of items) {
         if (!item.taskId || !item.revision) continue
-        const [row] = await tx.select({ number: tasks.number, status: tasks.status }).from(tasks).where(and(eq(tasks.id, item.taskId), isNull(tasks.deletedAt)))
-        if (!row || !REVISABLE_STATUSES.includes(row.status)) throw new ApiFailure(409, { code: 'conflict', constraint: 'revised_task_not_in_backlog' })
+        const [row] = await tx.select({ status: tasks.status, leaseRunId: tasks.leaseRunId, deletedAt: tasks.deletedAt }).from(tasks).where(eq(tasks.id, item.taskId)).for('update')
+        const ref = proposed.tasks.find(t => t.key === item.key)?.ref ?? item.key
+        const found: PlanRef = row && !row.deletedAt ? { kind: 'task', status: row.status, pickedUp: await pickedUp(tx, item.taskId, row.leaseRunId) } : { kind: 'deleted' }
+        const problem = revisionProblem(item.key, ref, found)
+        if (problem) refused.push({ code: problem.code, key: item.key, ref, message: 'message' in problem ? problem.message : `${ref} can't be revised.` })
       }
+      if (refused.length) throw new ApiFailure(409, { code: 'plan_not_approvable', problems: refused })
       const problems = checkPlanEpicDependencies(proposed, await this.#dependencyContext(project, proposed, plan, tx))
       if (problems.length) throw new ApiFailure(409, { code: 'invalid_dependencies', problems })
 
@@ -891,10 +905,10 @@ export class PlanService {
         found.set(name, other ? { kind: 'other_project', project: other.name } : { kind: 'unknown' })
         continue
       }
-      const [row] = await db.select({ id: tasks.id, number: tasks.number, status: tasks.status, deletedAt: tasks.deletedAt }).from(tasks)
+      const [row] = await db.select({ id: tasks.id, number: tasks.number, status: tasks.status, leaseRunId: tasks.leaseRunId, deletedAt: tasks.deletedAt }).from(tasks)
         .where(and(eq(tasks.projectId, project.id), eq(tasks.number, number)))
       if (row && !row.deletedAt) {
-        found.set(name, { kind: 'task', status: row.status })
+        found.set(name, { kind: 'task', status: row.status, pickedUp: await pickedUp(db, row.id, row.leaseRunId) })
         targets.set(name, { id: row.id, number: row.number, status: row.status })
       } else {
         // Backlog tasks are deleted outright, but their number stays used
@@ -1026,6 +1040,13 @@ export async function sessionState(db: Executor, row: SessionRow, activeRunId?: 
     updatedAt: row.updatedAt.toISOString()
   }
   return { session, planId: proposed?.id ?? null, last: last ?? null }
+}
+
+// Whether an agent holds the task now or has ever run on it
+async function pickedUp(db: Executor, taskId: string, leaseRunId: string | null): Promise<boolean> {
+  if (leaseRunId) return true
+  const [run] = await db.select({ id: runs.id }).from(runs).where(eq(runs.taskId, taskId)).limit(1)
+  return Boolean(run)
 }
 
 // Writes a plan's staged edits to the task it revises, keeping criterion IDs

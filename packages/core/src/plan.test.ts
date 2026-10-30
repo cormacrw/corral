@@ -90,19 +90,22 @@ describe('checkPlan without epics', () => {
 
 describe('checkPlan with refs', () => {
   const refs = new Map<string, PlanRef>([
-    ['COR-1', { kind: 'task', status: 'backlog' }],
-    ['COR-2', { kind: 'task', status: 'draft' }],
-    ['COR-3', { kind: 'task', status: 'in_progress' }],
+    ['COR-1', { kind: 'task', status: 'backlog', pickedUp: false }],
+    ['COR-2', { kind: 'task', status: 'draft', pickedUp: false }],
+    ['COR-3', { kind: 'task', status: 'in_progress', pickedUp: true }],
+    ['COR-5', { kind: 'task', status: 'ready', pickedUp: false }],
+    ['COR-6', { kind: 'task', status: 'ready', pickedUp: true }],
     ['COR-4', { kind: 'deleted' }],
     ['COR-9', { kind: 'unknown' }],
     ['WEB-1', { kind: 'other_project', project: 'Website' }]
   ])
 
-  it('lets a task revise a Backlog task or a Draft, and depend on any existing task or on a revised task by its ref', () => {
+  it('lets a task revise a Backlog task, an unclaimed Ready task or a Draft, and depend on any existing task or on a revised task by its ref', () => {
     expect(checkPlan({ title: 'x', summary: '', epics, tasks: [
       task('a', { ref: 'COR-1', dependsOn: ['COR-3'] }),
       task('b', { ref: 'COR-2', dependsOn: ['COR-1'] }),
-      task('c', { dependsOn: ['a', 'b'] })
+      task('c', { dependsOn: ['a', 'b'] }),
+      task('d', { ref: 'COR-5' })
     ] }, refs)).toEqual([])
   })
 
@@ -129,6 +132,12 @@ describe('checkPlan with refs', () => {
       .toEqual([{ code: 'dependency', problem: { code: 'cycle', path: ['a', 'b', 'a'] } }])
   })
 
+  it('refuses a Ready task that has been picked up, pointing at update_task, but lets a task depend on it', () => {
+    expect(checkPlan({ title: 'x', summary: '', epics, tasks: [task('a', { ref: 'COR-6' }), task('b', { dependsOn: ['COR-6'] })] }, refs)).toEqual([
+      { code: 'ref_not_revisable', key: 'a', ref: 'COR-6', status: 'ready', message: expect.stringMatching(/COR-6 has already been picked up.*update_task/) }
+    ])
+  })
+
   it('says why each ref it can\'t revise is wrong', () => {
     const problems = checkPlan({ title: 'x', summary: '', epics, tasks: [
       task('a', { ref: 'COR-3' }),
@@ -139,7 +148,7 @@ describe('checkPlan with refs', () => {
       task('f', { ref: 'COR-1' })
     ] }, refs)
     expect(problems).toEqual([
-      { code: 'ref_not_revisable', key: 'a', ref: 'COR-3', status: 'in_progress', message: expect.stringContaining('only Backlog tasks can be revised') },
+      { code: 'ref_not_revisable', key: 'a', ref: 'COR-3', status: 'in_progress', message: expect.stringContaining('only Backlog and unclaimed Ready tasks can be revised') },
       { code: 'deleted_ref', key: 'b', ref: 'COR-4', message: expect.stringContaining('COR-4 was deleted') },
       { code: 'unknown_ref', key: 'c', ref: 'COR-9', message: expect.stringContaining('There is no task COR-9 in this project') },
       { code: 'ref_in_other_project', key: 'd', ref: 'WEB-1', project: 'Website', message: expect.stringContaining('belongs to the project "Website"') },
