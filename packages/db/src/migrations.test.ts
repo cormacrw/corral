@@ -39,6 +39,36 @@ describe('migrations', () => {
   it.each([
     { driver: 'pglite' as const, enabled: true },
     { driver: 'postgres' as const, enabled: postgresAvailable }
+  ])('0039 reports all inconsistent avatars and preserves them on $driver', async ({ driver, enabled }) => {
+    if (!enabled) return
+    const before = await migrationsBefore('0039_chunky_peter_parker')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db, migrate } = await open(driver)
+    await migrate(before)
+    const userId = '00000000-0000-4000-8000-000000000001'
+    const agentId = '00000000-0000-4000-8000-000000000002'
+    await db.execute(sql`insert into users (id, name, avatar_blob) values (${userId}, 'Human', 'keep-image')`)
+    await db.execute(sql`insert into agents (id, name, role, avatar_content_type) values (${agentId}, 'Agent', 'developer', 'image/png')`)
+    const error = await migrate(migrationsFolder).then(() => null, (e: unknown) => e)
+    expect(error).not.toBeNull()
+    const cause = (error as { cause?: Error }).cause ?? error
+    expect(String(cause)).toContain('Inconsistent avatars:')
+    expect(String(cause)).toContain(userId)
+    expect(String(cause)).toContain(agentId)
+    expect((await db.execute(sql`select avatar_blob, avatar_content_type from users where id = ${userId}`)).rows)
+      .toEqual([{ avatar_blob: 'keep-image', avatar_content_type: null }])
+    expect((await db.execute(sql`select avatar_blob, avatar_content_type from agents where id = ${agentId}`)).rows)
+      .toEqual([{ avatar_blob: null, avatar_content_type: 'image/png' }])
+    await db.execute(sql`update users set avatar_content_type = 'image/png' where id = ${userId}`)
+    await db.execute(sql`update agents set avatar_blob = 'restored-image' where id = ${agentId}`)
+    await migrate(migrationsFolder)
+    expect((await db.execute(sql`select conname from pg_constraint where conname in ('users_avatar_paired', 'agents_avatar_paired') order by conname`)).rows)
+      .toEqual([{ conname: 'agents_avatar_paired' }, { conname: 'users_avatar_paired' }])
+  }, 60_000)
+
+  it.each([
+    { driver: 'pglite' as const, enabled: true },
+    { driver: 'postgres' as const, enabled: postgresAvailable }
   ])('upgrades historical runs and tasks after 0030 without data loss, on $driver', async ({ driver, enabled }) => {
     if (!enabled) return
     const before = await migrationsBefore('0031_omniscient_firedrake')
