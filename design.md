@@ -1,5 +1,7 @@
 # COR-191 — Desktop Home directions
 
+**v3.** Option B's sections keep their normal spacing when the epic lists are empty, and the mobile Home capture and its description are corrected.
+
 **v2.** The layouts are unchanged from v1. v2 fixes the singular labels, gives the busy and blocked fixtures separate projects (adding Companion app) and gives each epic its own description.
 
 A global landing page for checking progress and deciding where human attention will help. Three alternatives use the real Corral shell, tokens, fonts and shared components. These are reviewable alternatives, not three modes proposed for the shipped product.
@@ -94,7 +96,7 @@ A is the most balanced default to discuss first; B favours delivery monitoring, 
 
 Counts and durations in every option use the shared `plural()` and `timeAgo()` helpers (“1 human review”, “1 to review”, “Updated 1h ago”).
 
-Screenshots are captured with agent-browser from the built static bundle, served under `/prototype-dist/`, at 1440×900 for each option and empty state. Additional captures cover each option at 1280px, 1920px and 390px. The 390px option captures use the supported Desktop layout override so each proposed desktop screen can be inspected narrow; a separate mobile capture demonstrates the existing mobile Home remains available. The evidence also records board and epic destinations after real clicks. Lint, typecheck and tests are gates, not visual acceptance evidence.
+Screenshots are captured with agent-browser from the built static bundle, served under `/prototype-dist/`, at 1440×900 for each option and empty state. Additional captures cover each option at 1280px, 1920px and 390px. The 390px option captures come from a non-touch browser: `isMobile` needs `(max-width: 767px) and (pointer: coarse)`, so that browser keeps the desktop layout and shows how the desktop page behaves when very narrow. `home-mobile-390.png` shows the existing mobile dashboard, captured with `corral.device.layout=mobile` in localStorage, and proves that page is unchanged. The evidence also records board and epic destinations after real clicks. Lint, typecheck and tests are gates, not visual acceptance evidence.
 
 ## Open questions
 

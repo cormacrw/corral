@@ -248,7 +248,7 @@ function change(key: string, value: string) {
 [data-option="a"] [data-home="attention-section"], [data-option="a"] [data-home="projects-section"], [data-home="home-footer"] { grid-column: 1 / -1; }
 [data-option="a"] [data-home="projects-section"] { grid-row: 1; }
 [data-option="a"] [data-home="attention-section"] { grid-row: 2; }
-[data-option="b"] [data-home="home-layout"] { grid-template-columns: minmax(0, 1fr) 300px; align-items: start; }
+[data-option="b"] [data-home="home-layout"] { grid-template-columns: minmax(0, 1fr) 300px; grid-template-rows: auto auto 1fr; align-items: start; }
 [data-option="b"] [data-home="attention-section"] { grid-column: 1; grid-row: 1; }
 [data-option="b"] [data-home="open-section"] { grid-column: 1; grid-row: 2; }
 [data-option="b"] [data-home="projects-section"] { grid-column: 2; grid-row: 1 / 4; border-left: 1px solid var(--ui-border); padding-left: 24px; }
