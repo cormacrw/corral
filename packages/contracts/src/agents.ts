@@ -110,6 +110,7 @@ interface RunFields {
   agentId: string
   agentName: string
   projectId: string
+  planSessionId: string | null
   taskId: string | null
   taskRef: string | null
   taskTitle: string | null

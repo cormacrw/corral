@@ -33,6 +33,7 @@ function toRun({ run, agentName, prefix, taskNumber, taskTitle }: RunJoin): Run 
     agentId: run.agentId,
     agentName,
     projectId: run.projectId,
+    planSessionId: run.planSessionId,
     taskId: run.taskId,
     taskRef: taskNumber === null ? null : taskRef(prefix, taskNumber),
     taskTitle,

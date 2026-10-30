@@ -5,13 +5,15 @@ import { agentStatus, duration, isLiveRun, projectColor, ROLE, runBadge, runtime
 
 // An agent's page on mobile (design/agent.md, design/mobile.md): the
 // header and stat tiles, then the current run and previous runs. Each run
-// opens its transcript at /agents/:name/:runId.
+// opens its transcript, or its linked Plan conversation for a PM turn.
 const props = defineProps<{ view: AgentRuns }>()
 const { name, agent, runs, error, now, current, today, tiles, facts, load, project, resume } = props.view
 
 const previous = computed(() => runs.value.filter(r => !isLiveRun(r)))
 const status = computed(() => agent.value ? agentStatus(agent.value, now.value) : null)
-const to = (run: Run) => `/agents/${name.value}/${run.id}`
+const to = (run: Run) => run.role === 'pm' && run.planSessionId
+  ? { path: `/plan/${run.planSessionId}`, query: { project: run.projectId } }
+  : `/agents/${name.value}/${run.id}`
 const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(run) ? null : duration(run.startedAt, run.endedAt, now.value)].filter(Boolean).join(' · ')
 </script>
 
