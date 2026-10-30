@@ -1,5 +1,5 @@
-import { askQuestionInput, EVIDENCE_KINDS, type AgentTool, type RunJob } from '@corral/contracts'
-import { EPIC_REVIEW_MODES, REVIEW_VERDICTS, TASK_PRIORITIES, TASK_TYPES, type AgentRole } from '@corral/core'
+import { askQuestionInput, proposedPlanInput, EVIDENCE_KINDS, type AgentTool, type RunJob } from '@corral/contracts'
+import { REVIEW_VERDICTS, type AgentRole } from '@corral/core'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
@@ -101,35 +101,7 @@ const toolDefinitions = {
   },
   propose_plan: {
     description: 'Propose a plan: epics and tasks with acceptance criteria and dependencies. Corral validates it and shows it to the human for approval. Use `epics` to group the tasks of a feature, and put each of those tasks in one with `epic`. A task without `epic` gets no epic, and a plan without `epics` creates none: leave them out for a lone small fix. A revision keeps the epic and task keys it reuses. To refine an existing Backlog task, read it with get_task and include it in the plan with its `ref`: the plan then revises that task instead of creating a new one, and the edits are applied when the human approves. Set each epic’s dependsOn to epic keys in this plan or existing epic ids from list_tasks; omit it on revision to preserve dependencies, or use [] to clear them. Pin a task that builds part of an approved design with `design`; only an approved version can be pinned.',
-    input: {
-      title: z.string().min(1),
-      summary: z.string().default(''),
-      epics: z.array(z.object({
-        key: z.string().describe('A short handle used by a task\'s epic, e.g. e1'),
-        title: z.string().min(1),
-        summary: z.string().default(''),
-        dependsOn: z.array(z.string()).optional().describe('Epic keys in this plan or existing epic ids from list_tasks. Omit to keep dependencies in a revision; [] clears them. Tasks wait until prerequisite epics are done.'),
-        reviewMode: z.enum(EPIC_REVIEW_MODES, { error: `reviewMode must be one of ${EPIC_REVIEW_MODES.join(', ')}` }).optional()
-          .describe('How its tasks reach the target branch: epic = each task merges into an epic branch on review, and the human reviews the epic PR; each_task = the same, but the human also reviews every task; direct = each task merges straight into the target branch. Leave it out for the project\'s default.')
-      })).optional(),
-      tasks: z.array(z.object({
-        key: z.string().describe('A short handle used by dependsOn, e.g. t1'),
-        ref: z.string().optional().describe('The ref of an existing Backlog task this revises, e.g. COR-4; leave out for a new task'),
-        epic: z.string().optional().describe('The key of its epic in `epics`; leave it out for a task with no epic'),
-        title: z.string().min(1),
-        description: z.string().min(1),
-        type: z.enum(TASK_TYPES),
-        priority: z.enum(TASK_PRIORITIES).default('medium'),
-        humanReview: z.boolean().default(false),
-        acceptanceCriteria: z.array(z.string().min(1)).min(1),
-        dependsOn: z.array(z.string()).default([]).describe('Keys of tasks in this plan, or refs of existing tasks'),
-        design: z.object({
-          taskRef: z.string().describe('The design task, e.g. COR-70'),
-          version: z.number().int().positive().describe('Its approved version'),
-          screens: z.array(z.string().min(1)).min(1).describe('Ids of the screens in design.md this task builds')
-        }).optional().describe('For a task that builds part of an approved design: the version and the screens it covers')
-      })).min(1)
-    }
+    input: proposedPlanInput.shape
   },
   approve_plan: {
     description: 'Approve the current plan on the human\'s behalf, only when their latest message explicitly asks you to (e.g. "looks good, add it to the board"). Never approve on your own initiative. "ready" adds the tasks to the board; "backlog" keeps them for later.',

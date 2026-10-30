@@ -22,7 +22,16 @@ export interface ProposedEpic {
   reviewMode?: EpicReviewMode | undefined
 }
 
-export interface ProposedTask {
+export interface PlanTaskContent {
+  title: string
+  description: string
+  type: TaskType
+  priority: TaskPriority
+  humanReview: boolean
+  acceptanceCriteria: string[]
+}
+
+export interface ProposedTask extends PlanTaskContent {
   key: string
   // The ref of an existing task this one revises (e.g. COR-4), instead of
   // creating a new one
@@ -31,12 +40,6 @@ export interface ProposedTask {
   // edited Drafts for approval). A task without one has no
   // epic.
   epic?: string | undefined
-  title: string
-  description: string
-  type: TaskType
-  priority: TaskPriority
-  humanReview: boolean
-  acceptanceCriteria: string[]
   dependsOn: string[]
   // The approved design version this task builds, and the screens (ids
   // from its design.md) it covers (D20)
