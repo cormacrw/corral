@@ -7,7 +7,7 @@ import { agentStatus, duration, isLiveRun, projectColor, ROLE, runBadge, runtime
 // header and stat tiles, then the current run and previous runs. Each run
 // opens its transcript at /agents/:name/:runId.
 const props = defineProps<{ view: AgentRuns }>()
-const { name, agent, runs, error, now, current, today, tiles, facts, load, project } = props.view
+const { name, agent, runs, error, now, current, today, tiles, facts, load, project, resume } = props.view
 
 const previous = computed(() => runs.value.filter(r => !isLiveRun(r)))
 const status = computed(() => agent.value ? agentStatus(agent.value, now.value) : null)
@@ -58,6 +58,15 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
         >
           Waiting on usage limit until {{ new Date(agent.pausedUntil!).toLocaleTimeString() }}
         </p>
+        <UButton
+          v-if="status?.label === 'Waiting on usage limit'"
+          label="Resume now"
+          variant="outline"
+          color="neutral"
+          size="sm"
+          class="mt-2"
+          @click="resume"
+        />
       </div>
     </header>
 

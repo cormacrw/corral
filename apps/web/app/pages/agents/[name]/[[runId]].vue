@@ -9,7 +9,7 @@ const router = useRouter()
 const flyout = useTaskFlyout()
 const device = useDevice()
 const view = useAgentRuns({ autoSelect: () => !device.isMobile.value })
-const { name, agent, runs, error, events, now, selected, load, today, tiles, facts, stop, projectName, sent } = view
+const { name, agent, runs, error, events, now, selected, load, today, tiles, facts, stop, resume, projectName, sent } = view
 useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
 </script>
 
@@ -68,6 +68,14 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
             <span v-if="agentStatus(agent, now)?.label === 'Waiting on usage limit'"> · Waiting on usage limit until {{ new Date(agent.pausedUntil!).toLocaleTimeString() }}</span>
           </p>
         </div>
+        <UButton
+          v-if="agentStatus(agent, now)?.label === 'Waiting on usage limit'"
+          label="Resume now"
+          variant="outline"
+          color="neutral"
+          size="sm"
+          @click="resume"
+        />
         <UButton
           to="/settings/agents"
           label="Agent settings"

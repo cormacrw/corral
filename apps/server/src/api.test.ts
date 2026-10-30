@@ -437,6 +437,19 @@ describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
       expect((await t.request('PATCH', `/api/agents/${created.id}`, { runtime: 'gemini' })).status).toBe(400)
     })
 
+    it('ends a usage-limit wait when the agent is resumed, and only then (D3)', async () => {
+      const [developer] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'developer')).orderBy(asc(schema.agents.createdAt)).limit(1)
+      const pausedUntil = new Date(Date.now() + 60 * 60 * 1000)
+      await t.db.update(schema.agents).set({ pausedUntil }).where(eq(schema.agents.id, developer!.id))
+
+      await t.request('PATCH', `/api/agents/${developer!.id}`, { paused: true })
+      await t.request('PATCH', `/api/agents/${developer!.id}`, { concurrency: developer!.concurrency })
+      expect((await t.db.select().from(schema.agents).where(eq(schema.agents.id, developer!.id)))[0]!.pausedUntil).toEqual(pausedUntil)
+
+      const res = await t.request('PATCH', `/api/agents/${developer!.id}`, { paused: false })
+      expect(await res.json()).toMatchObject({ paused: false, pausedUntil: null })
+    })
+
     it('refuses concurrency for the PM, leaving it unchanged, and still sets it for a developer (D13)', async () => {
       const [pm] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'pm'))
       const res = await t.request('PATCH', `/api/agents/${pm!.id}`, { concurrency: 3, paused: true })

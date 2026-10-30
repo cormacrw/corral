@@ -199,7 +199,7 @@ route('POST', '/agents', (_, body) => {
   emit({ type: 'agent.updated', agent })
   return agent
 })
-route('PATCH', '/agents/:id', ([id], body) => Object.assign(f.agents.find(a => a.id === id) ?? notFound(), body))
+route('PATCH', '/agents/:id', ([id], body) => Object.assign(f.agents.find(a => a.id === id) ?? notFound(), body, (body as { paused?: boolean }).paused === false ? { pausedUntil: null } : {}))
 route('GET', '/me', () => f.profile)
 route('PATCH', '/me', (_, body) => Object.assign(f.profile, body))
 

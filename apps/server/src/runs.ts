@@ -138,7 +138,8 @@ export async function patchAgent(db: Executor, agentId: string, input: PatchAgen
         .where(and(eq(runs.agentId, agentId), inArray(runs.state, [...ACTIVE_RUN_STATES])))
       if (active!.n > 0) throw new ApiFailure(409, { code: 'conflict', constraint: 'agent_has_active_runs' })
     }
-    await tx.update(agents).set({ ...input, updatedAt: new Date() }).where(eq(agents.id, agentId))
+    // Resuming also ends a usage-limit wait, so the human can overrule it (D3)
+    await tx.update(agents).set({ ...input, ...(input.paused === false && { pausedUntil: null }), updatedAt: new Date() }).where(eq(agents.id, agentId))
     await tx.insert(auditLog).values({ actor, action: input.paused !== undefined ? (input.paused ? 'agent.paused' : 'agent.resumed') : 'agent.updated', detail: { agentId, changed: Object.keys(input) } })
   })
   return (await listAgents(db)).find(a => a.id === agentId)!
