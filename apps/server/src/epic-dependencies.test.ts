@@ -28,7 +28,7 @@ describe('epic scheduling', () => {
     const project = await t.createProject({ repository: 'cormacrw/test-app', defaultBranch: 'main' })
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
     const [a, b] = await t.db.insert(epics).values(['Foundation', 'Application'].map(title => ({ projectId: project.id, title, createdBy: t.actor }))).returning()
-    await t.db.insert(epicDependencies).values({ epicId: b!.id, dependsOnEpicId: a!.id })
+    await t.db.insert(epicDependencies).values({ projectId: project.id, epicId: b!.id, dependsOnEpicId: a!.id })
     const first = await t.createTask(project.slug)
     const second = await t.createTask(project.slug)
     await t.db.update(tasks).set({ epicId: a!.id, status: 'blocked' }).where(eq(tasks.id, first.id))
@@ -140,7 +140,7 @@ describe('epic scheduling', () => {
     expect((await t.request('GET', `/api/epics/${a.id}`)).status).toBe(200)
     expect(await (await t.request('GET', `/api/epics/${a.id}`)).json()).toMatchObject({ dependsOn: [], blocks: [b.id] })
     await put(b.id, [])
-    await t.db.insert(schema.taskDependencies).values({ taskId: first.id, dependsOnId: second.id })
+    await t.db.insert(schema.taskDependencies).values({ projectId: project.id, taskId: first.id, dependsOnId: second.id })
     const deadlock = await put(b.id, [a.id])
     expect(deadlock.status).toBe(400)
     const message = JSON.stringify(await deadlock.json())
@@ -179,7 +179,7 @@ describe('epic scheduling', () => {
     expect((await claimNextTask(t.db, dev.id, new Date(), [outside.id]))?.taskId).toBe(outside.id)
     await t.db.update(agents).set({ concurrency: 10 }).where(eq(agents.id, dev.id))
     await t.db.update(tasks).set({ status: 'merged' }).where(eq(tasks.id, first.id))
-    await t.db.insert(schema.taskDependencies).values({ taskId: second.id, dependsOnId: outside.id })
+    await t.db.insert(schema.taskDependencies).values({ projectId: project.id, taskId: second.id, dependsOnId: outside.id })
     expect(await claimNextTask(t.db, dev.id, new Date(), [second.id])).toBeNull()
     await t.db.delete(schema.taskDependencies).where(eq(schema.taskDependencies.taskId, second.id))
     // Removing all tasks from A makes it done too.
@@ -215,15 +215,25 @@ describe('epic scheduling', () => {
 
   it('cascades either end and enforces primary key and no-self constraints', async () => {
     const { a, b, second, dev } = await setup()
-    await expect(t.db.insert(epicDependencies).values({ epicId: a.id, dependsOnEpicId: a.id })).rejects.toThrow()
-    await expect(t.db.insert(epicDependencies).values({ epicId: b.id, dependsOnEpicId: a.id })).rejects.toThrow()
+    await expect(t.db.insert(epicDependencies).values({ projectId: b.projectId, epicId: a.id, dependsOnEpicId: a.id })).rejects.toThrow()
+    await expect(t.db.insert(epicDependencies).values({ projectId: b.projectId, epicId: b.id, dependsOnEpicId: a.id })).rejects.toThrow()
     await t.db.delete(epics).where(eq(epics.id, a.id))
     expect(await t.db.select().from(epicDependencies)).toEqual([])
     expect((await claimNextTask(t.db, dev.id))?.taskId).toBe(second.id)
     const [c] = await t.db.insert(epics).values({ projectId: b.projectId, title: 'Third', createdBy: t.actor }).returning()
-    await t.db.insert(epicDependencies).values({ epicId: b.id, dependsOnEpicId: c!.id })
+    await t.db.insert(epicDependencies).values({ projectId: b.projectId, epicId: b.id, dependsOnEpicId: c!.id })
     await t.db.delete(epics).where(eq(epics.id, b.id))
     expect(await t.db.select().from(epicDependencies)).toEqual([])
+  })
+
+  it('turns another project\'s epic into a 400 at every API entry point, leaving nothing written', async () => {
+    const { project, a, b, first } = await setup()
+    const other = await t.createProject()
+    const [foreign] = await t.db.insert(epics).values({ projectId: other.id, title: 'Elsewhere', createdBy: t.actor }).returning()
+    expect((await t.request('PUT', `/api/epics/${b.id}/dependencies`, { dependsOn: [foreign!.id] })).status).toBe(400)
+    expect(await (await t.request('GET', `/api/epics/${b.id}`)).json()).toMatchObject({ dependsOn: [a.id] })
+    expect((await t.request('PATCH', `/api/projects/${project.slug}/tasks/${first.number}`, { epicId: foreign!.id })).status).toBe(400)
+    expect((await t.request('POST', `/api/projects/${project.slug}/tasks`, { type: 'task', title: 'New', epicId: foreign!.id })).status).toBe(400)
   })
 
   it('wakes waiting epic tasks after the last merge despite a developer wake interval', async () => {
