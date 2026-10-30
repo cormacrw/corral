@@ -453,6 +453,44 @@ describe('migrations', () => {
     })
   })
 
+  it.each([
+    { driver: 'pglite' as const, enabled: true },
+    { driver: 'postgres' as const, enabled: postgresAvailable }
+  ])('0038 checks old evidence before enforcing note/file shapes on $driver', async ({ driver, enabled }) => {
+    if (!enabled) return
+    const before = await migrationsBefore('0038_evidence_shapes')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db, migrate } = await open(driver)
+    await migrate(before)
+    await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('P', 'p', 'PA', 'cormacrw/test-app', 'main')`)
+    await db.execute(sql`insert into tasks (project_id, number, title, type, created_by) select id, 1, 'T', 'task', '{"kind":"system","component":"server"}'::jsonb from projects`)
+    await db.execute(sql`insert into agents (role, name) values ('developer', 'Dev')`)
+    await db.execute(sql`insert into runs (task_id, project_id, agent_id, role) select t.id, t.project_id, a.id, 'developer' from tasks t, agents a`)
+    await db.execute(sql`insert into evidence (task_id, run_id, round, kind, note, blob, file_name, content_type, size)
+      select t.id, r.id, 0, k::evidence_kind, 'Existing evidence', 'blob', 'file', 'application/octet-stream', 42
+      from tasks t, runs r, unnest(array['screenshot', 'video']) k`)
+    await db.execute(sql`insert into evidence (task_id, run_id, round, kind, note, size)
+      select t.id, r.id, 0, 'note', 'Explanation', 0 from tasks t, runs r`)
+    const old = (await db.execute(sql`select * from evidence order by id`)).rows
+    // Legacy-invalid evidence must stop the migration without silently rewriting it.
+    await db.execute(sql`update evidence set note = E' \t\n' where kind = 'note'`)
+    await expect(migrate(migrationsFolder)).rejects.toMatchObject({ cause: { message: expect.stringContaining('Evidence violates note/file invariant; inspect rows before migrating:') } })
+    await db.execute(sql`update evidence set note = 'Explanation' where kind = 'note'`)
+    await migrate(migrationsFolder)
+    expect((await db.execute(sql`select * from evidence order by id`)).rows).toEqual(old)
+    for (const change of [
+      sql`note = E' \t\n'`, sql`note = chr(160)`, sql`note = chr(65279)`, sql`blob = 'x'`, sql`file_name = 'x'`, sql`content_type = 'x'`, sql`size = 1`, sql`size = -1`
+    ]) {
+      await expect(db.execute(sql`update evidence set ${change} where kind = 'note'`)).rejects.toThrow()
+    }
+    for (const change of [
+      sql`blob = null`, sql`file_name = null`, sql`content_type = null`, sql`blob = ''`, sql`file_name = ' '`, sql`content_type = E'\t'`, sql`file_name = chr(160)`, sql`content_type = chr(65279)`, sql`size = -1`
+    ]) {
+      await expect(db.execute(sql`update evidence set ${change} where kind <> 'note'`)).rejects.toThrow()
+    }
+    await db.execute(sql`update evidence set size = 0 where kind <> 'note'`)
+  }, 60_000)
+
   // An empty database to migrate step by step: PGlite in memory, or a
   // throwaway database on the test Postgres server
   async function open(driver: 'pglite' | 'postgres') {
