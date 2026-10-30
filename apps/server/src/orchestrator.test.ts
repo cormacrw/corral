@@ -317,6 +317,17 @@ describe('orchestrator', () => {
     return { ...state, review }
   }
 
+  it('tells the reviewer whether the project has required checks (D26)', async () => {
+    const { review } = await underReview()
+    expect(review.prompt).toContain('This project has no required CI checks')
+
+    const { project, task } = await submitted()
+    await t.request('PATCH', `/api/projects/${project.slug}`, { requiredChecks: ['ci'] })
+    await t.orchestrator.schedule()
+    const next = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'reviewer')).job
+    expect(next.prompt).toContain('This project has required CI checks: `ci`')
+  })
+
   it('claims an Agent review task for the reviewer at the submitted commit', async () => {
     const { project, task, review } = await underReview()
     expect(review).toMatchObject({ role: 'reviewer', runtime: 'claude-code', headSha: 'abc123', branch: task.branch, leaseEpoch: 2 })
