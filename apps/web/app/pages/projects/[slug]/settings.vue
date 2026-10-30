@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { PatchProjectInput, Project } from '@corral/contracts'
+import { DEFAULT_LIMITS } from '@corral/core'
 import { api, ApiError } from '~/composables/useApi'
 import { EPIC_REVIEW_MODE, THUMBNAIL_COLORS } from '~/utils/labels'
 
@@ -14,7 +15,7 @@ const project = computed(() => live.state.value.projects.find(p => p.slug === sl
 useSeoMeta({ title: () => `Settings · ${project.value?.name ?? ''} · Corral` })
 
 const form = reactive<Required<Omit<PatchProjectInput, 'paused'>>>({
-  name: '', prefix: '', thumbnailColor: null, defaultBranch: 'main', mergeMethod: 'squash', requiredChecks: [], humanReviewDefault: false, epicReviewModeDefault: 'epic', reviewRoundCap: 5, failedRunCap: 3
+  name: '', prefix: '', thumbnailColor: null, defaultBranch: 'main', mergeMethod: 'squash', requiredChecks: [], humanReviewDefault: false, epicReviewModeDefault: 'epic', ...DEFAULT_LIMITS
 })
 function fill(p: Project) {
   Object.assign(form, { name: p.name, prefix: p.prefix, thumbnailColor: p.thumbnailColor, defaultBranch: p.defaultBranch, mergeMethod: p.mergeMethod, requiredChecks: [...p.requiredChecks], humanReviewDefault: p.humanReviewDefault, epicReviewModeDefault: p.epicReviewModeDefault, reviewRoundCap: p.reviewRoundCap, failedRunCap: p.failedRunCap })

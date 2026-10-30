@@ -1,3 +1,4 @@
+import { DEFAULT_LIMITS } from '@corral/core'
 import { sql } from 'drizzle-orm'
 import { boolean, check, integer, pgTable, text, uuid } from 'drizzle-orm/pg-core'
 import { createdAt, updatedAt } from './columns.ts'
@@ -24,8 +25,8 @@ export const projects = pgTable('projects', {
   humanReviewDefault: boolean().notNull().default(false),
   // The review mode of each new epic a plan doesn't give one (D23)
   epicReviewModeDefault: epicReviewMode().notNull().default('epic'),
-  reviewRoundCap: integer().notNull().default(5),
-  failedRunCap: integer().notNull().default(3),
+  reviewRoundCap: integer().notNull().default(DEFAULT_LIMITS.reviewRoundCap),
+  failedRunCap: integer().notNull().default(DEFAULT_LIMITS.failedRunCap),
   createdAt: createdAt(),
   updatedAt: updatedAt()
 }, t => [

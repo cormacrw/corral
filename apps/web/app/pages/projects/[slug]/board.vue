@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Task } from '@corral/contracts'
-import type { TaskStatus } from '@corral/core'
+import { DEFAULT_LIMITS, type TaskStatus } from '@corral/core'
 import type { BoardFilters } from '~/utils/board'
 import { BOARD_COLUMNS, filtersFromQuery, filtersToQuery, matchesFilter, onBoard, sortColumn, taskAgentIds } from '~/utils/board'
 import { epicTitle, PRIORITY, STATUS, taskNote } from '~/utils/labels'
@@ -80,7 +80,7 @@ const epicOptions = computed(() => epics.value.map(id => ({ id, label: epicLabel
       :agents="taskAgents"
       :total="visible.length"
       :all="all"
-      :review-round-cap="project?.reviewRoundCap ?? 5"
+      :review-round-cap="project?.reviewRoundCap ?? DEFAULT_LIMITS.reviewRoundCap"
       :loading="loading"
       :error="error"
     />
@@ -201,9 +201,9 @@ const epicOptions = computed(() => epics.value.map(id => ({ id, label: epicLabel
                   </span>
                   <span class="font-medium text-highlighted">{{ task.title }}</span>
                   <span
-                    v-if="taskNote(task, all, project?.reviewRoundCap ?? 5)"
-                    :class="['text-xs', taskNote(task, all, project?.reviewRoundCap ?? 5)!.color === 'error' ? 'text-error' : taskNote(task, all, project?.reviewRoundCap ?? 5)!.color === 'warning' ? 'text-warning' : 'text-muted']"
-                  >{{ taskNote(task, all, project?.reviewRoundCap ?? 5)!.text }}</span>
+                    v-if="taskNote(task, all, project?.reviewRoundCap ?? DEFAULT_LIMITS.reviewRoundCap)"
+                    :class="['text-xs', taskNote(task, all, project?.reviewRoundCap ?? DEFAULT_LIMITS.reviewRoundCap)!.color === 'error' ? 'text-error' : taskNote(task, all, project?.reviewRoundCap ?? DEFAULT_LIMITS.reviewRoundCap)!.color === 'warning' ? 'text-warning' : 'text-muted']"
+                  >{{ taskNote(task, all, project?.reviewRoundCap ?? DEFAULT_LIMITS.reviewRoundCap)!.text }}</span>
                   <span class="flex items-center gap-2 text-xs text-muted">
                     <span v-if="task.epicId">{{ epicLabel(task.epicId) }}</span>
                     <span

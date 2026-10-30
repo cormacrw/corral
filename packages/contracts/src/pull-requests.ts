@@ -1,5 +1,4 @@
-import type { MergeGate, TaskStatus } from '@corral/core'
-import type { ReviewVerdict } from './tasks.ts'
+import type { MergeGate, ReviewVerdict, TaskStatus } from '@corral/core'
 
 // ── Pull requests ───────────────────────────────────────────────────────────
 

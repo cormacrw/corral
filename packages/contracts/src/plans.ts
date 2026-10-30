@@ -1,4 +1,4 @@
-import type { EpicReviewMode, TaskPriority, TaskStatus, TaskType } from '@corral/core'
+import { PLAN_CHANGES, PLAN_STATUSES, type EpicReviewMode, type PlanChange, type PlanStatus, type TaskPriority, type TaskStatus, type TaskType } from '@corral/core'
 import { z } from 'zod'
 import { agentRuntime, type AgentRuntime } from './agent-runtimes.ts'
 
@@ -37,9 +37,9 @@ export interface PlanMessage {
   createdAt: string
 }
 
-export type PlanStatus = 'proposed' | 'approved' | 'superseded' | 'discarded'
+export const planStatus = z.enum(PLAN_STATUSES)
 
-export type PlanChange = 'added' | 'changed' | 'unchanged' | 'removed'
+export const planChange = z.enum(PLAN_CHANGES)
 
 export interface Plan {
   id: string
