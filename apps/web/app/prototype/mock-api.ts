@@ -1,5 +1,5 @@
 import { checkEpicDependencies } from '@corral/core'
-import type { CreateTaskInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, RunEvent, ServerEvent, Task } from '@corral/contracts'
+import type { CreateTaskInput, InboxActionInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, RunEvent, ServerEvent, Task } from '@corral/contracts'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
 import * as f from './fixtures'
@@ -175,6 +175,26 @@ route('POST', '/projects/:slug/runs/:runId/messages', ([slug, runId], body) => {
 })
 
 route('GET', '/inbox', () => f.inbox())
+// Acting on an Inbox item moves its task on, so it leaves Needs you
+route('POST', '/inbox/:taskId/actions', ([taskId], body) => {
+  const task = f.tasks.find(t => t.id === taskId) ?? notFound()
+  const input = body as InboxActionInput
+  f.answered.add(task.ref)
+  if (input.action === 'delete') {
+    f.tasks.splice(f.tasks.indexOf(task), 1)
+    emit({ type: 'task.deleted', taskId: task.id, projectId: task.projectId })
+    return { task: null }
+  }
+  const status: Task['status'] = input.action === 'approve'
+    ? 'ready_to_merge'
+    : input.action === 'send_back'
+      ? 'backlog'
+      : input.action === 'resolve' ? input.to : 'in_progress'
+  Object.assign(task, { status, statusReason: null, updatedAt: new Date().toISOString() })
+  emit({ type: 'task.updated', task })
+  return { task }
+})
+route('GET', '/projects/:slug/tasks/:number/designs', ([slug, number]) => f.designs[taskIn(slug!, number!).id] ?? [])
 
 route('GET', '/plan/sessions', () => f.planSessions)
 route('GET', '/plan/sessions/:id', ([id]) => session(id!))

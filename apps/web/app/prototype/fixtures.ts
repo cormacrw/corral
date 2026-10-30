@@ -2,12 +2,14 @@ import type {
   Agent,
   AuditEntry,
   CliStatus,
+  DesignVersion,
   Comment,
   Epic,
   Evidence,
   GlobalStatus,
   Inbox,
   InboxItem,
+  TaskInboxItem,
   PlanMessage,
   Plan,
   PlanSession,
@@ -239,7 +241,11 @@ export const tasks: Task[] = [
     prUrl: 'https://github.com/cormacrw/corral/pull/64',
     reviewRounds: 1,
     gateChecks: [{ name: 'lint', url: null }, { name: 'test', url: null }],
-    acceptanceCriteria: criteria('Approve marks the version approved', 'Earlier versions are superseded', 'The approval response identifies the version', 'Diagnostic artifacts are retained').map(c => ({ ...c, met: true }))
+    developer: { id: 'a-dev', name: 'Victor' },
+    reviewer: { id: 'a-rev', name: 'Rita' },
+    headSha: '5b030d7e1c',
+    // COR-190: one criterion unmet, so the Inbox shows "4 of 5 met"
+    acceptanceCriteria: criteria('Approve marks the version approved', 'Earlier versions are superseded', 'The approval response identifies the version', 'Diagnostic artifacts are retained', 'A toast confirms the approval').map((c, i) => ({ ...c, met: i !== 4 }))
   }),
   // Pinned to v1 of the design after v2 was approved, so it's flagged (D20)
   task(corral, 6, { title: 'Pin build tasks to a design', status: 'ready', epicId: 'e-design', dependsOn: ['COR-5'], design: { taskRef: 'COR-4', version: 1, screens: ['review', 'review-empty'], newerVersion: 2 } }),
@@ -255,6 +261,20 @@ export const tasks: Task[] = [
   task(corral, 15, { title: 'Pin a design version to a task', status: 'draft', priority: 'low', epicId: 'e-design', dependsOn: ['COR-14'], planSessionId: 's-1', planSessionTitle: 'Design tasks' }),
   task(corral, 16, { title: 'Cards jump when a run starts', status: 'draft', type: 'bug', planSessionId: 's-3', planSessionTitle: 'Board polish' }),
   task(corral, 17, { title: 'Spike: virtualise long columns', status: 'draft', type: 'spike', priority: 'low', planSessionId: 's-3', planSessionTitle: 'Board polish' }),
+  // COR-190: the Inbox message panel's states (design, question, activity, resolved)
+  task(corral, 18, {
+    title: 'Agents page layout',
+    status: 'human_review',
+    type: 'design',
+    humanReview: true,
+    epicId: 'e-design',
+    branch: 'design/COR-18',
+    reviewRounds: 1,
+    developer: { id: 'a-dev2', name: 'Dana' },
+    reviewer: { id: 'a-rev', name: 'Rita' },
+    acceptanceCriteria: criteria('Three layout options on desktop and mobile', 'Every agent state is shown', 'design.md lists the screen ids').map(c => ({ ...c, met: true }))
+  }),
+  task(corral, 19, { title: 'Retry button on failed runs', status: 'in_progress', epicId: 'e-mobile', branch: 'corral/cor-19-retry', developer: { id: 'a-dev', name: 'Victor' } }),
   task(site, 1, { title: 'New landing page hero', status: 'ready', type: 'design', epicId: 'e-site' }),
   task(site, 2, { title: 'Fix broken pricing link', status: 'merged', type: 'bug', epicId: 'e-shipped', mergedAt: ago(10) }),
   task(site, 3, {
@@ -388,9 +408,15 @@ const requestUrl = 'data:text/plain,' + encodeURIComponent('POST /api/designs/v1
 const logUrl = 'data:text/plain,' + encodeURIComponent('Approval recorded for version 1. Earlier versions superseded.')
 // A self-contained preview image keeps the prototype independent of the API.
 const screenshotUrl = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#f8fafc"/><rect x="32" y="32" width="576" height="296" rx="12" fill="white" stroke="#cbd5e1"/><text x="64" y="90" font-family="sans-serif" font-size="24" fill="#0f172a">Design version 1</text><text x="64" y="146" font-family="sans-serif" font-size="20" fill="#15803d">✓ Approved</text><text x="64" y="198" font-family="sans-serif" font-size="16" fill="#475569">The build can now be planned.</text></svg>')
+// A mock screenshot: a titled page in a frame, so thumbnails tell apart
+function shot(title: string, line: string, accent: string, width = 640, height = 400): string {
+  return 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="${width}" height="${height}" fill="#f1f5f9"/><rect width="${width}" height="44" fill="${accent}"/><circle cx="24" cy="22" r="7" fill="white" opacity=".7"/><rect x="44" y="16" width="120" height="12" rx="6" fill="white" opacity=".7"/><rect x="24" y="68" width="${width - 48}" height="${height - 92}" rx="12" fill="white" stroke="#cbd5e1"/><text x="48" y="116" font-family="sans-serif" font-size="26" fill="#0f172a">${title}</text><text x="48" y="156" font-family="sans-serif" font-size="17" fill="#475569">${line}</text><rect x="48" y="186" width="${width - 160}" height="14" rx="7" fill="#e2e8f0"/><rect x="48" y="214" width="${width - 240}" height="14" rx="7" fill="#e2e8f0"/><rect x="48" y="${height - 76}" width="120" height="32" rx="8" fill="${accent}"/></svg>`)
+}
 export const evidence: Record<string, Evidence[]> = {
   [reviewTask.id]: [
     fileEvidence('ev-shot', 0, 'screenshot', 'approved-version.svg', 'image/svg+xml', screenshotUrl),
+    fileEvidence('ev-shot-2', 1, 'screenshot', 'versions-list.svg', 'image/svg+xml', shot('Versions', 'v2 approved · v1 superseded', '#14b8a6')),
+    fileEvidence('ev-shot-3', 2, 'screenshot', 'inbox-after-approve.svg', 'image/svg+xml', shot('Inbox', 'Design approved. Planning the build.', '#6366f1')),
     fileEvidence('ev-log', 0, 'log', 'approval.log', 'text/plain', logUrl),
     { ...fileEvidence('ev-note', 1, 'note', '', '', ''), fileName: null, contentType: null, url: null, size: 0, note: '**Earlier versions are superseded.** The approval transaction updates previous versions atomically. See `approveDesignVersion` in the design service.' },
     fileEvidence('ev-request', 2, 'request', 'approval-response.txt', 'text/plain', requestUrl),
@@ -400,13 +426,59 @@ export const evidence: Record<string, Evidence[]> = {
   ]
 }
 
+const reviewerSummary = [
+  'Approved. I checked out `corral/cor-5-approve-design` at 5b030d7e1c, ran the full test suite and walked the approval flow in a dev stack against test-app.',
+  '',
+  'Approving version 2 marks it approved and supersedes version 1 in one transaction; I confirmed this by approving twice concurrently and reading back the versions table. The approval response carries the version number and status, and the request/response evidence matches what the server returns.',
+  '',
+  'Diagnostic artifacts (approval.log, diagnostics.txt) are retained under the run. One criterion is not met: no toast confirms the approval. The page re-renders with the new status, so the human does get feedback, and I judged this minor enough not to block; it is flagged for the human to decide.',
+  '',
+  'Non-blocking notes: `approveDesignVersion` could share the transaction helper used by `rejectDesignVersion`; the empty state copy says "No designs" where the rest of the app says "Nothing here yet". Neither affects behaviour.'
+].join('\n')
+const designTask = at('COR-18')
 export const reviews: Record<string, Review[]> = {
   [reviewTask.id]: [{
-    id: 'review-5', taskId: reviewTask.id, runId: 'r-2', round: 0, headSha: '5b030d7e1c',
-    verdict: 'approved', summary: 'Approval verified.', author: { kind: 'agent', role: 'reviewer', runId: 'r-2' },
-    criteria: reviewTask.acceptanceCriteria.map(c => ({ criterionId: c.id, met: true, note: 'Verified the approval flow and its recorded result.' })),
+    id: 'review-5', taskId: reviewTask.id, runId: 'r-2', round: 1, headSha: '5b030d7e1c',
+    verdict: 'approved', summary: reviewerSummary, author: { kind: 'agent', role: 'reviewer', runId: 'r-2' },
+    criteria: reviewTask.acceptanceCriteria.map((c, i) => ({ criterionId: c.id, met: i !== 4, note: i === 4 ? 'No toast is shown after approving; the status badge changes in place instead. Minor, left for the human.' : 'Verified the approval flow and its recorded result in a dev stack, approving twice concurrently.' })),
     createdAt: ago(15)
+  }, {
+    id: 'review-5a', taskId: reviewTask.id, runId: 'r-0', round: 0, headSha: '1a2b3c4d5e',
+    verdict: 'changes_requested', summary: 'Earlier versions stay approved after a newer one is approved. Supersede them in the same transaction.', author: { kind: 'agent', role: 'reviewer', runId: 'r-0' },
+    criteria: reviewTask.acceptanceCriteria.map((c, i) => ({ criterionId: c.id, met: i !== 1 && i !== 4, note: i === 1 ? 'v1 is still approved after approving v2.' : 'Looks right.' })),
+    createdAt: ago(90)
+  }],
+  [designTask.id]: [{
+    id: 'review-18', taskId: designTask.id, runId: 'r-9', round: 0, headSha: '9c8b7a6d5e',
+    verdict: 'approved', summary: 'All three options render on desktop and at 390px, every agent state has a fixture, and design.md lists the screen ids with their states. Option B is the strongest on mobile.', author: { kind: 'agent', role: 'reviewer', runId: 'r-9' },
+    criteria: designTask.acceptanceCriteria.map(c => ({ criterionId: c.id, met: true, note: 'Checked in the bundle at both widths.' })),
+    createdAt: ago(8)
   }]
+}
+reviewTask.latestReview = reviews[reviewTask.id]![0]!
+designTask.latestReview = reviews[designTask.id]![0]!
+
+// A design task's submitted versions (D20); the preview itself is served by the server
+export const designs: Record<string, DesignVersion[]> = {
+  [designTask.id]: [{
+    id: 'dv-18-1', version: 1, status: 'submitted', branch: 'design/COR-18', commitSha: '9c8b7a6d5e',
+    spec: '# Agents page layout\n\nThree options: `agents-grid`, `agents-list`, `agents-board`.',
+    screenshots: [
+      { fileName: 'agents-grid-desktop.png', url: shot('Option A · Grid', 'Agents as cards, two per row', '#0ea5e9') },
+      { fileName: 'agents-list-desktop.png', url: shot('Option B · List', 'One row per agent, runs inline', '#8b5cf6') },
+      { fileName: 'agents-board-desktop.png', url: shot('Option C · Board', 'Columns by role', '#f59e0b') },
+      { fileName: 'agents-list-mobile.png', url: shot('Option B', 'Phone', '#8b5cf6', 260, 460) }
+    ],
+    previewUrl: '/api/designs/dv-18-1/preview/index.html',
+    feedback: null, planSessionId: null, createdAt: ago(10)
+  }]
+}
+for (const [taskId, versions] of Object.entries(designs)) {
+  const t = tasks.find(x => x.id === taskId)!
+  evidence[taskId] = versions.at(-1)!.screenshots.map((s, i) => ({
+    id: `ev-dv-${i}`, taskId, criterionId: t.acceptanceCriteria[0]!.id, runId: 'r-9', round: 0, kind: 'screenshot', note: '',
+    fileName: s.fileName, contentType: 'image/svg+xml', size: 128, url: s.url, createdAt: ago(10)
+  }))
 }
 
 // Open PRs and their merge gates (GET /projects/:slug/pull-requests), one
@@ -581,6 +653,58 @@ export const clis: CliStatus[] = [
   { id: 'codex', name: 'Codex', version: '0.50.0', signedIn: false }
 ]
 
+// What each item's agent wrote (COR-190): a long, realistic body for the
+// items whose panel is being designed. Others fall back to statusReason.
+const inboxBodies: Record<string, string> = {
+  'COR-5': 'Rita approved round 2 of this change. Approving a design version now marks it approved and supersedes the earlier versions in the same transaction, and the approval response identifies the version.\n\n' + reviewerSummary,
+  'COR-18': 'Dana submitted version 1 of the Agents page design: three layout options (grid, list and board) on desktop and mobile, each with every agent state. Rita approved it. Approve the version to plan its build, or request changes.',
+  'COR-19': 'Should **Retry** reuse the failed run\'s worktree, or start from a fresh checkout?\n\nReusing it keeps the agent\'s partial work and is faster, but a corrupted worktree (the usual cause of COR-9) would fail again. A fresh checkout is slower by about 40s on this repo.\n\nI\'d start fresh by default and reuse only when the failure was a timeout. Which do you want?',
+  'COR-8': 'Which push service should the server use: Web Push with VAPID keys, or ntfy?\n\nI can\'t continue the notification work without this: the server stores subscriptions differently for each.',
+  'COR-9': [
+    'The runner lost its worktree three times in a row, so Corral stopped retrying this task.',
+    '',
+    '## What happened',
+    '',
+    'Run 1 (Victor, 2h ago) started normally, installed dependencies and began editing `apps/web/app/composables/useOffline.ts`. After 11 minutes the runner logged `ENOENT: no such file or directory, scandir \'/data/runner/worktrees/9f1c…\'` and the run ended with exit code 1. Run 2 (Victor, 1h ago) got as far as the first test run before the same error. Run 3 (Dana, 25m ago) failed during `pnpm install`.',
+    '',
+    '## Likely cause',
+    '',
+    'All three runs overlapped with the nightly `git worktree prune` job on the home server. That job removes worktrees whose `.git` file points at a missing directory, and the runner creates the directory a moment after registering the worktree. This looks like a race between the two rather than anything in the task itself.',
+    '',
+    '## Logs',
+    '',
+    '```',
+    '[runner] claim COR-9 run 3 lease 10m',
+    '[runner] git worktree add /data/runner/worktrees/9f1c… corral/cor-9-offline-board',
+    '[runner] pnpm install --frozen-lockfile',
+    '[prune] removing worktrees/9f1c… (gitdir missing)',
+    '[runner] ENOENT: no such file or directory, scandir',
+    '[runner] run 3 failed (exit 1); failedRuns 3 of 3',
+    '```',
+    '',
+    '## Options',
+    '',
+    '- **Retry** once the prune job is moved or disabled; nothing in the branch needs to change.',
+    '- **Send back** to the Backlog if offline support should wait.',
+    '- **Delete** the task if it is no longer wanted.'
+  ].join('\n')
+}
+
+// Questions the human has answered in this session (mock-api's inbox actions)
+export const answered = new Set<string>()
+
+// A task item of any type, for the Activity and Resolved tabs and questions
+function taskItem(ref: string, type: TaskInboxItem['type'], sender: string, role: 'developer' | 'reviewer', subject: string, minutes: number, id?: string): TaskInboxItem {
+  const t = at(ref)
+  const project = projects.find(p => p.id === t.projectId)!
+  const body = inboxBodies[ref] ?? `${subject}.`
+  return {
+    id: id ?? t.id, type, taskId: t.id, taskRef: t.ref, subject, preview: body, body,
+    project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
+    sender: { name: sender, role }, at: ago(minutes), prUrl: t.prUrl, resolution: null
+  }
+}
+
 // The inbox is derived from the tasks above that need the human
 export function inbox(): Inbox {
   const needsYou: InboxItem[] = tasks
@@ -589,7 +713,7 @@ export function inbox(): Inbox {
       const project = projects.find(p => p.id === t.projectId)!
       const type = t.status === 'human_review' ? 'human_review' as const : t.status === 'blocked' ? 'blocked' as const : 'failed' as const
       const subject = type === 'human_review' ? `Review ${t.title}` : t.title
-      const body = t.statusReason ?? 'The reviewer approved this change and it needs your review.'
+      const body = inboxBodies[t.ref] ?? t.statusReason ?? 'The reviewer approved this change and it needs your review.'
       return {
         id: t.id,
         type,
@@ -628,6 +752,9 @@ export function inbox(): Inbox {
       planId: plan?.id ?? null
     })
   }
+  if (!answered.has('COR-19')) needsYou.push(taskItem('COR-19', 'question', 'Victor', 'developer', 'Should Retry reuse the failed run\'s worktree?', 4))
   needsYou.sort((a, b) => b.at.localeCompare(a.at))
-  return { needsYou, activity: [], resolved: [], count: needsYou.length }
+  const activity = [taskItem('COR-7', 'activity', 'Rita', 'reviewer', 'PM drafts tasks from an approved design: approved, waiting to merge', 40, 'audit-7')]
+  const resolved = [{ ...taskItem('COR-10', 'human_review', 'Rita', 'reviewer', 'Review Install sheet on iOS', 60 * 30, 'audit-10'), resolution: 'You approved and merged it' }]
+  return { needsYou, activity, resolved, count: needsYou.length }
 }

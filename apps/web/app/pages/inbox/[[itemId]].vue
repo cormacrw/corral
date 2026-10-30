@@ -1,8 +1,14 @@
 <script setup lang="ts">
-import type { Evidence, Inbox, InboxActionInput, Review, Task, InboxItem, PlanThreadItem } from '@corral/contracts'
+import type { Evidence, Inbox, InboxActionInput, Review, Task, InboxItem, PlanThreadItem, TaskInboxItem } from '@corral/contracts'
+import { INBOX_PANEL_OPTIONS, actionNeedsText, type InboxPanelContext, type InboxPanelOption } from '~/composables/useInboxPanel'
 import { api } from '~/composables/useApi'
 import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
+import InboxPanelA from '~/components/InboxPanelA.vue'
+import InboxPanelB from '~/components/InboxPanelB.vue'
+import InboxPanelC from '~/components/InboxPanelC.vue'
+import InboxPanelD from '~/components/InboxPanelD.vue'
+import InboxPanelE from '~/components/InboxPanelE.vue'
 
 // The Inbox (design/inbox.md, D11): list, selected item, action tray, task flyout
 const route = useRoute()
@@ -26,7 +32,17 @@ const actionError = ref<string | null>(null)
 const task = ref<Task | null>(null)
 const evidence = ref<Evidence[]>([])
 const reviews = ref<Review[]>([])
-const showTask = ref(true)
+// COR-190 design options for the message panel, in the prototype only
+// (?option=a…e). They take the full width, so the task flyout starts closed.
+const panelOption = computed<InboxPanelOption | null>(() => {
+  const value = route.query.option
+  return import.meta.prototype && INBOX_PANEL_OPTIONS.some(o => o.value === value) ? value as InboxPanelOption : null
+})
+const showTask = ref(panelOption.value === null)
+watch(panelOption, (value) => {
+  showTask.value = value === null
+  if (value) void flyout.close()
+})
 const planResolving = ref(false)
 let resolutionPosition = 0
 
@@ -191,7 +207,8 @@ async function submit(message: string): Promise<boolean> {
     if (!inbox.value?.needsYou.some(i => i.id === actedOn.id)) {
       const remaining = inbox.value?.needsYou ?? []
       const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
-      void router.replace(next ? `/inbox/${next.id}` : '/inbox')
+      // The prototype's design option stays chosen (COR-190)
+      void router.replace({ path: next ? `/inbox/${next.id}` : '/inbox', query: panelOption.value ? { option: panelOption.value } : {} })
     }
     return true
   } catch (e) {
@@ -201,6 +218,34 @@ async function submit(message: string): Promise<boolean> {
     busy.value = false
   }
 }
+// What the design options get: the page's data and actions in one object
+async function act(value: InboxActionInput['action']) {
+  action.value = value
+  if (!actionNeedsText(value)) await submit(text.value)
+}
+function next() {
+  const list = inbox.value?.needsYou ?? []
+  const position = list.findIndex(i => i.id === selectedId.value)
+  const following = list[(position + 1) % Math.max(list.length, 1)]
+  if (following) void router.push({ path: `/inbox/${following.id}`, query: route.query })
+}
+const panelCtx = reactive({
+  item: computed(() => selected.value as TaskInboxItem),
+  task, evidence, reviews, alreadyResolved, actions, action, resolveTo, text, busy, actionError, placeholder, submitLabel, needsText,
+  position: computed(() => {
+    const list = inbox.value?.needsYou ?? []
+    const index = list.findIndex(i => i.id === selectedId.value)
+    return index >= 0 ? { index, total: list.length } : null
+  }),
+  submit, act, next,
+  setAction: (value: InboxActionInput['action'] | null) => { action.value = value },
+  setText: (value: string) => { text.value = value },
+  setResolveTo: (value: 'backlog' | 'ready' | 'in_progress') => { resolveTo.value = value },
+  openTask: () => device.isMobile.value ? void router.push(`/tasks/${selected.value?.taskRef}`) : toggleTask()
+}) as InboxPanelContext
+const panelComponent = computed(() => panelOption.value && { a: InboxPanelA, b: InboxPanelB, c: InboxPanelC, d: InboxPanelD, e: InboxPanelE }[panelOption.value])
+const prototype = import.meta.prototype
+
 // On a phone the shell's header names the item and where it sits in the list
 const mobileHeader = useMobileHeader()
 watchEffect(() => {
@@ -221,6 +266,7 @@ onBeforeUnmount(() => {
 
 <template>
   <UDashboardPanel :ui="{ body: 'p-0' }">
+    <InboxOptionSwitcher v-if="prototype" />
     <!-- Phones get the list and the item as separate screens (design/mobile.md) -->
     <InboxMobile
       v-if="device.isMobile.value"
@@ -249,6 +295,8 @@ onBeforeUnmount(() => {
       :type-badge="typeBadge"
       :on-submit="submit"
       :on-retry="load"
+      :panel="panelComponent && selected && selected.type !== 'plan_thread' ? panelComponent : null"
+      :panel-ctx="panelCtx"
     />
     <div
       v-else
@@ -377,7 +425,12 @@ onBeforeUnmount(() => {
         v-else
         class="flex min-w-0 flex-1 flex-col"
       >
-        <template v-if="selected">
+        <component
+          :is="panelComponent"
+          v-if="selected && panelComponent"
+          :ctx="panelCtx"
+        />
+        <template v-else-if="selected">
           <header class="flex h-14 shrink-0 items-center gap-3 border-b border-default px-4">
             <AgentAvatar
               :name="selected.sender.name"

@@ -2,6 +2,8 @@
 import type { Evidence, Inbox, InboxActionInput, InboxItem, PlanThreadItem, Review, Task, TaskInboxItem } from '@corral/contracts'
 import { ROLE, timeAgo, type Color } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
+import type { Component } from 'vue'
+import type { InboxPanelContext } from '~/composables/useInboxPanel'
 
 // The Inbox on a phone (design/inbox.md, design/mobile.md): /inbox is the
 // list and /inbox/:itemId the item, each a screen of its own. The page owns
@@ -28,6 +30,9 @@ const props = defineProps<{
   typeBadge: (type: InboxItem['type']) => { label: string, color: Color }
   onSubmit: (text: string) => Promise<boolean>
   onRetry: () => unknown
+  // COR-190 prototype: a design option's panel in place of today's item view
+  panel?: Component | null
+  panelCtx?: InboxPanelContext
 }>()
 const tab = defineModel<'needsYou' | 'activity' | 'resolved'>('tab', { required: true })
 const search = defineModel<string>('search', { required: true })
@@ -88,7 +93,13 @@ const tabs = computed(() => [
         />
       </template>
     </MobilePageHeader>
-    <template v-if="selected">
+    <component
+      :is="panel"
+      v-if="selected && panel && panelCtx"
+      :ctx="panelCtx"
+      mobile
+    />
+    <template v-else-if="selected">
       <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
         <div class="flex flex-col gap-4">
           <div class="flex gap-3">
