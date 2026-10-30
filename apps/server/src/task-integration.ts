@@ -1,6 +1,6 @@
 import { taskRef, type Actor } from '@corral/core'
 import { schema, type Database, type Executor } from '@corral/db'
-import { and, asc, desc, eq, inArray, isNotNull, isNull, gt, notInArray } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNotNull, isNull, gt, notInArray, notLike } from 'drizzle-orm'
 import { appendAudit, auditEvent, type TransitionDetail } from './audit.ts'
 import type { EventBus } from './events.ts'
 import type { CheckResult, GitHubClient } from './github.ts'
@@ -16,10 +16,13 @@ const server: Actor = { kind: 'system', component: 'server' }
 const ACTIVE = ['pending', 'running', 'reconciling'] as const
 
 // Why an operation ended, when that says nothing against the submission: these
-// retry freely, and anything else counts towards MAX_FAILED_OPERATIONS
+// retry at once, and anything else counts towards MAX_FAILED_OPERATIONS
 const TARGET_MOVED = 'The epic branch moved'
 const INTERRUPTED = 'Interrupted before a candidate was ready'
 const CANCELLED = 'The task left Ready to merge'
+// Starts the error of a job the runner couldn't answer: a network blip or a lost
+// runner says nothing against the submission, so it's retried on a later pass
+const UNAVAILABLE = 'The runner could not finish the job'
 const MAX_FAILED_OPERATIONS = 3
 // Fresh operations one epic may go through in a pass, when its branch keeps moving
 const MAX_OPERATIONS_PER_PASS = 5
@@ -160,6 +163,7 @@ export class TaskIntegrator {
     const { db, runner } = this.#d
     const { submission, task, project, epic } = ctx
     if (task.status !== 'ready_to_merge' || task.deletedAt) return this.#fail(pending, ctx, CANCELLED)
+    if (task.paused || project.paused) return false
     const runnerId = runner.integrationRunner()
     if (!runnerId) return false
     const [operation] = await db.update(operations).set({ state: 'running', runnerId, updatedAt: this.#now() })
@@ -175,7 +179,7 @@ export class TaskIntegrator {
         candidateRef: project.requiredChecks.length > 0 ? candidateRef(operation) : null
       }, PREPARE_TIMEOUT_MS)
     } catch (error) {
-      return this.#fail(operation, ctx, `Could not prepare the integration: ${message(error)}`)
+      return this.#fail(operation, ctx, `${UNAVAILABLE}: ${message(error)}`)
     }
     switch (prepared.status) {
       case 'integrated':
@@ -183,6 +187,8 @@ export class TaskIntegrator {
         return true
       case 'moved':
         return this.#fail(operation, ctx, TARGET_MOVED)
+      case 'failed':
+        return this.#fail(operation, ctx, `Could not build a candidate: ${prepared.error ?? 'unknown error'}`)
       case 'conflict':
         await this.#fail(operation, ctx, `Conflicts with the epic branch: ${prepared.files.join(', ')}`)
         await this.#transition(task.id, { type: 'base_conflict', approvedHeadSha: task.headSha! }, { event: 'base_conflict' },
@@ -195,7 +201,8 @@ export class TaskIntegrator {
         return true
       case 'prepared': {
         const [ready] = await db.update(operations).set({ resultHeadSha: prepared.commitSha, updatedAt: this.#now() }).where(eq(operations.id, operation.id)).returning()
-        return this.#gate(ready!, ctx)
+        // Preparing can take minutes: the gate needs the task as it is now
+        return this.#gate(ready!, await this.#context(ready!))
       }
     }
   }
@@ -207,6 +214,8 @@ export class TaskIntegrator {
     const { db, runner } = this.#d
     const { submission, task, project, epic } = ctx
     if (task.status !== 'ready_to_merge' || task.deletedAt || task.headSha !== submission.agentApprovedHeadSha) return this.#fail(operation, ctx, CANCELLED)
+    // Nothing shared moves while paused; the operation carries on afterwards
+    if (task.paused || project.paused) return false
     const verdict = await this.#checks(project, operation)
     if (verdict.state === 'waiting') {
       this.#awaitingChecks.add(operation.id)
@@ -236,7 +245,7 @@ export class TaskIntegrator {
         kind: 'integration_push', repository: project.repository, targetBranch: epic.branch!, expectedTargetSha: operation.expectedTargetSha, candidateSha: operation.resultHeadSha!
       }, PUSH_TIMEOUT_MS)).error
     } catch (failure) {
-      error = message(failure)
+      error = `${UNAVAILABLE}: ${message(failure)}`
     }
     if (error) await db.update(operations).set({ error }).where(eq(operations.id, operation.id))
     return true
@@ -306,8 +315,10 @@ export class TaskIntegrator {
     await this.#settled(task.id)
   }
 
-  // Ends an operation that didn't integrate. True: look at the epic again. A
-  // submission that keeps failing for its own reasons goes to a human.
+  // Ends an operation that didn't integrate. True: look at the epic again now,
+  // for an ending that retries at once. Any other waits for a later pass, so one
+  // bad moment can't use up every attempt. A submission that keeps failing for
+  // its own reasons goes to a human.
   async #fail(operation: OperationRow, ctx: Context, error: string): Promise<boolean> {
     const { db } = this.#d
     const { submission, task, project } = ctx
@@ -318,11 +329,11 @@ export class TaskIntegrator {
     })
     await this.#finish(operation, ctx)
     const counted = await db.select({ id: operations.id }).from(operations)
-      .where(and(eq(operations.submissionId, submission.id), eq(operations.state, 'failed'), notInArray(operations.error, [TARGET_MOVED, INTERRUPTED, CANCELLED])))
+      .where(and(eq(operations.submissionId, submission.id), eq(operations.state, 'failed'), notInArray(operations.error, [TARGET_MOVED, INTERRUPTED, CANCELLED]), notLike(operations.error, `${UNAVAILABLE}%`)))
     if (counted.length >= MAX_FAILED_OPERATIONS) {
       await this.#transition(task.id, { type: 'fail', reason: `Integration failed ${counted.length} times: ${error}` }, { event: 'merge_failed' })
     }
-    return true
+    return [TARGET_MOVED, INTERRUPTED, CANCELLED].includes(error)
   }
 
   async #finish(operation: OperationRow, ctx: Context): Promise<void> {

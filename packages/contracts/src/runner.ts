@@ -222,9 +222,6 @@ export const setupJobSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('cleanup_worktrees'), repository: z.string(), taskId: z.string() }),
   // The files that stop `branch` rebasing onto `onto`, read from a fresh fetch
   z.object({ kind: z.literal('rebase_conflicts'), repository: z.string(), branch: z.string(), onto: z.string() }),
-  // Remove every worktree outside this keep set, which covers all projects.
-  // Developer worktrees with uncommitted work stay (PRD §7.4), and so does the
-  // checkout of a PM turn running on the runner.
   // PR-free integration (D27). Prepare builds one commit from a reviewed
   // submission on top of the expected epic head, touching no shared ref; push
   // advances the epic branch only if it's still at that head; inspect reads the
@@ -234,6 +231,9 @@ export const setupJobSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('integration_prepare'), repository: z.string(), targetBranch: z.string(), expectedTargetSha: z.string(), submissionId: z.string(), headSha: z.string(), baseSha: z.string(), message: z.string(), committedAt: z.string(), candidateRef: z.string().nullable() }),
   z.object({ kind: z.literal('integration_push'), repository: z.string(), targetBranch: z.string(), expectedTargetSha: z.string(), candidateSha: z.string() }),
   z.object({ kind: z.literal('integration_inspect'), repository: z.string(), targetBranch: z.string(), submissionId: z.string() }),
+  // Remove every worktree outside this keep set, which covers all projects.
+  // Developer worktrees with uncommitted work stay (PRD §7.4), and so does the
+  // checkout of a PM turn running on the runner.
   z.object({ kind: z.literal('sweep_worktrees'), keepTaskIds: z.array(z.string()), keepPlanSessionIds: z.array(z.string()) }),
   z.object({ kind: z.literal('session_title'), prompt: z.string() }),
   z.object({ kind: z.literal('release_notes'), runtime: z.string(), prompt: z.string() })
@@ -249,7 +249,7 @@ export const setupJobResultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('github'), status: z.number(), body: z.unknown() }),
   z.object({ kind: z.literal('cleanup_worktrees'), removed: z.array(z.string()), kept: z.array(z.string()) }),
   z.object({ kind: z.literal('rebase_conflicts'), files: z.array(z.string()) }),
-  z.object({ kind: z.literal('integration_prepare'), status: z.enum(['prepared', 'integrated', 'moved', 'conflict', 'empty']), targetSha: z.string(), commitSha: z.string().nullable(), files: z.array(z.string()) }),
+  z.object({ kind: z.literal('integration_prepare'), status: z.enum(['prepared', 'integrated', 'moved', 'conflict', 'empty', 'failed']), targetSha: z.string(), commitSha: z.string().nullable(), files: z.array(z.string()), error: z.string().nullable().optional() }),
   z.object({ kind: z.literal('integration_push'), pushed: z.boolean(), error: z.string().nullable() }),
   z.object({ kind: z.literal('integration_inspect'), targetSha: z.string().nullable(), integratedSha: z.string().nullable() }),
   // `kept` is only what stayed because it holds uncommitted changes

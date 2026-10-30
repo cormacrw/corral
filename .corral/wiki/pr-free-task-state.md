@@ -107,8 +107,18 @@ fresh head, up to five per pass. A conflict ends it and starts a D24 rebase-only
 round: the developer reports `commit_submitted`, which is a new submission, and the
 rebase review carries approval over. A clean three-way onto a moved epic is a
 mechanical update and keeps its approval; the epic's integration review and CI
-still see the result. Three failures of a submission's own (moved, interrupted and
-cancelled don't count) fail the task. A task sent back during its push lands
+still see the result.
+
+Failures are sorted by whose they are. A moved branch, an interrupted or cancelled
+operation retries at once. A job the runner couldn't finish (a rejected prepare or
+push: offline, timed out, fetch failed) doesn't count and retries on a later pass,
+so an outage can't fail a task. Prepare only throws for that; a candidate it can't
+build comes back as `failed`. Anything else counts, one per pass, and three fail
+the task. A push git itself refused looks the same as any other refusal and counts.
+
+Pausing the task or project stops `#prepare` and the gate before the push, leaving
+the operation where it is to carry on later. Reconcile still runs: it only reads,
+and a commit already on the branch is a fact. A task sent back during its push lands
 anyway: the commit stands, the task stays open and gets a comment.
 
 Dependents: `claim.ts` treats a dependency on a build task in another epic as met

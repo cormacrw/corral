@@ -112,6 +112,13 @@ it('publishes a candidate for CI without moving the epic branch', async () => {
   expect(await run('rev-parse', 'epic')).toBe(tip)
 })
 
+it('calls a submission it can\'t build failed, and leaves not reaching the remote as an error', async () => {
+  const a = await commit('task-a', 'epic', 'a.txt', 'a\n')
+  expect(await prepareIntegration(dataDir, null, job('sub-a', a, '1'.repeat(40), tip))).toMatchObject({ status: 'failed', commitSha: null, error: expect.any(String) })
+  await exec('git', ['config', 'remote.origin.url', '/nowhere'], { cwd: join(dataDir, 'repos', 'acme__app.git') })
+  await expect(prepareIntegration(dataDir, null, job('sub-a', a, tip, tip))).rejects.toThrow()
+})
+
 it('calls a change the epic already has empty', async () => {
   const a = await commit('task-a', 'epic', 'a.txt', 'a\n')
   const copy = await commit('task-b', 'epic', 'a.txt', 'a\n')

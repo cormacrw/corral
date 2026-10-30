@@ -136,10 +136,12 @@ it('stays in Ready to merge until a read of the remote shows the integrated comm
     return real()
   }
   await tick()
-  // A runner claiming success changes nothing: the first operation failed on
-  // the remote's say-so, and the retry really landed
-  const [first, second] = await ops(epic.id)
-  expect(first).toMatchObject({ state: 'failed', error: 'The push did not reach the epic branch' })
+  // A runner claiming success changes nothing: the operation failed on the
+  // remote's say-so, and only the retry's commit counts
+  expect(await ops(epic.id)).toMatchObject([{ state: 'failed', error: 'The push did not reach the epic branch' }])
+  expect(await row(task)).toMatchObject({ status: 'ready_to_merge', mergedAt: null })
+  await tick()
+  const [, second] = await ops(epic.id)
   expect(second).toMatchObject({ state: 'succeeded' })
   expect(await row(task)).toMatchObject({ status: 'merged', mergeCommitSha: second!.resultHeadSha })
   expect(await git('rev-parse', epic.branch)).toBe(second!.resultHeadSha)
@@ -282,17 +284,83 @@ it('needs no task PR when CI only runs on the epic PR, and leaves those checks t
   expect(audit.some(e => e.action === 'integration.operation' && (e.detail as { event: string, error?: string }).event === 'checks_deferred' && (e.detail as { error?: string }).error === 'pr-only')).toBe(true)
 })
 
-it('fails a task whose integration keeps failing, without touching the branch', async () => {
+it('fails a task over later passes when its own submission can\'t be integrated', async () => {
   const epic = await createEpic()
   const task = await approved(epic, 'a.txt')
-  faults = async (job, real) => {
-    if (job.kind === 'integration_prepare' && job.targetBranch === epic.branch) throw new Error('fatal: could not read')
-    return real()
-  }
+  await t.db.update(schema.taskSubmissions).set({ baseSha: '1'.repeat(40) }).where(eq(schema.taskSubmissions.id, task.submissionId))
+  await tick()
+  expect(await row(task)).toMatchObject({ status: 'ready_to_merge' })
+  expect(await ops(epic.id)).toMatchObject([{ state: 'failed', error: expect.stringContaining('Could not build a candidate') }])
+  await tick()
   await tick()
   expect(await row(task)).toMatchObject({ status: 'failed' })
   expect((await row(task)).statusReason).toContain('Integration failed 3 times')
   expect(await git('rev-parse', epic.branch)).toBe(epic.base)
+})
+
+it('rides out a runner outage: nothing is counted against the task and a later pass integrates it', async () => {
+  const epic = await createEpic()
+  const task = await approved(epic, 'a.txt')
+  faults = async (job, real) => {
+    if ((job.kind === 'integration_prepare' || job.kind === 'integration_push') && job.targetBranch === epic.branch) throw new Error('Could not resolve host: github.com')
+    return real()
+  }
+  for (let pass = 1; pass <= 4; pass++) {
+    await tick()
+    expect(await ops(epic.id)).toHaveLength(pass)
+    expect(await row(task)).toMatchObject({ status: 'ready_to_merge' })
+  }
+  faults = async (job, real) => {
+    if (job.kind === 'integration_push' && job.targetBranch === epic.branch) throw new Error('Runner disconnected')
+    return real()
+  }
+  await tick()
+  await tick()
+  expect((await ops(epic.id)).at(-1)).toMatchObject({ state: 'failed', error: expect.stringContaining('Runner disconnected') })
+  expect(await row(task)).toMatchObject({ status: 'ready_to_merge' })
+  faults = null
+  await tick()
+  expect(await row(task)).toMatchObject({ status: 'merged' })
+  expect(await trailers(epic.branch, task.submissionId)).toHaveLength(1)
+})
+
+it('moves nothing while paused, and carries on from the same operation afterwards', async () => {
+  await t.db.update(schema.projects).set({ requiredChecks: ['ci'] }).where(eq(schema.projects.id, project.id))
+  const epic = await createEpic()
+  const task = await approved(epic, 'a.txt')
+  await tick()
+  const [op] = await ops(epic.id)
+  t.github.setChecks(op!.resultHeadSha!, [{ name: 'ci', conclusion: 'pending', url: null }])
+  await tick()
+
+  await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+  t.github.setChecks(op!.resultHeadSha!, [{ name: 'ci', conclusion: 'success', url: null }])
+  await tick()
+  expect(await git('rev-parse', epic.branch)).toBe(epic.base)
+  expect(await row(task)).toMatchObject({ status: 'ready_to_merge' })
+  expect(await ops(epic.id)).toMatchObject([{ id: op!.id, state: 'running' }])
+  await t.db.update(schema.projects).set({ paused: false }).where(eq(schema.projects.id, project.id))
+
+  await t.db.update(schema.tasks).set({ paused: true }).where(eq(schema.tasks.id, task.id))
+  await tick()
+  expect(await git('rev-parse', epic.branch)).toBe(epic.base)
+  await t.db.update(schema.tasks).set({ paused: false }).where(eq(schema.tasks.id, task.id))
+
+  await tick()
+  expect(await row(task)).toMatchObject({ status: 'merged', mergeCommitSha: op!.resultHeadSha })
+  expect(await ops(epic.id)).toHaveLength(1)
+})
+
+it('leaves a pending operation alone while paused', async () => {
+  const epic = await createEpic()
+  const task = await approved(epic, 'a.txt')
+  await t.db.insert(schema.taskIntegrationOperations).values({ submissionId: task.submissionId, epicId: epic.id, kind: 'integrate', expectedTargetSha: epic.base, leaseEpoch: 1 })
+  await t.db.update(schema.tasks).set({ paused: true }).where(eq(schema.tasks.id, task.id))
+  await tick()
+  expect(await ops(epic.id)).toMatchObject([{ state: 'pending', runnerId: null }])
+  await t.db.update(schema.tasks).set({ paused: false }).where(eq(schema.tasks.id, task.id))
+  await tick()
+  expect(await row(task)).toMatchObject({ status: 'merged' })
 })
 
 it('drops an operation whose task was sent back before the push', async () => {

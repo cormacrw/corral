@@ -58,12 +58,14 @@ async function buildCandidate(bare: string, author: GitAuthor | null, job: Job<'
   if (merged.code === 1) return prepared('conflict', null, conflicted)
   if (tree === await required(['rev-parse', `${job.expectedTargetSha}^{tree}`], bare)) return prepared('empty')
   const candidate = await required(['commit-tree', tree!, '-p', job.expectedTargetSha, '-F', '-'], bare, job.message, env)
-  if (job.candidateRef) await required(['push', '--force', 'origin', `${candidate}:refs/heads/${job.candidateRef}`], bare)
   return prepared('prepared', candidate)
 }
 
 // Changes no shared ref. An already integrated submission is reported rather
-// than rebuilt, so a retry after a lost answer can't add a second commit.
+// than rebuilt, so a retry after a lost answer can't add a second commit. A
+// candidate that can't be built is the submission's problem and comes back as
+// `failed`; a throw means the runner couldn't reach the remote, which says
+// nothing about the submission.
 export async function prepareIntegration(dataDir: string, author: GitAuthor | null, job: Job<'integration_prepare'>): Promise<Result<'integration_prepare'>> {
   const bare = await sync(dataDir, job.repository)
   return withRepoLock(bare, async () => {
@@ -72,7 +74,11 @@ export async function prepareIntegration(dataDir: string, author: GitAuthor | nu
     const integrated = await findIntegrated(bare, job.targetBranch, job.submissionId)
     if (integrated) return { kind: 'integration_prepare', status: 'integrated', targetSha: target, commitSha: integrated, files: [] }
     if (target !== job.expectedTargetSha) return { kind: 'integration_prepare', status: 'moved', targetSha: target, commitSha: null, files: [] }
-    return buildCandidate(bare, author, job)
+    const built = await buildCandidate(bare, author, job).catch((error: unknown) => ({
+      kind: 'integration_prepare' as const, status: 'failed' as const, targetSha: target, commitSha: null, files: [], error: error instanceof Error ? error.message : String(error)
+    }))
+    if (built.status === 'prepared' && job.candidateRef) await required(['push', '--force', 'origin', `${built.commitSha}:refs/heads/${job.candidateRef}`], bare)
+    return built
   })
 }
 
