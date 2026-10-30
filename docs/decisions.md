@@ -144,6 +144,8 @@ Full table, disk layout, flows and the known POC push limitation are in [archite
 
 **Amended by D18:** a Plan session can run on Codex instead of `claude`, picked per session and locked once it has messages. What this decision says about `claude` sessions and `--resume` applies to the session's runtime.
 
+**Amended by D29:** the PM gets typed tools for every area, and its checkout applies only to sessions tied to a project. Its limits on merging, editing docs and approving plans stay.
+
 **Consequence:** PM chat requires the runner to be online. When hosted, that means the user's runner must be connected to chat.
 
 ---
@@ -213,6 +215,8 @@ A status says whose turn it is. Whether a run is actually active is shown by the
 
 All transitions go through `packages/core` and are enforced by the server. Anything not in this table is rejected.
 
+**Amended by D29:** the PM can create tasks in Backlog of any kind, and can propose the human's transitions on a confirm card. They run only when the human clicks Confirm, so the actor is still the human.
+
 ### Blocked vs Failed
 
 | Blocked: an agent needs a decision | Failed: the system broke |
@@ -248,6 +252,8 @@ A design in Human review is a Needs-you item like any other (D20). An epic PR wa
 Nothing from the PM goes in the Inbox. *(Amended 2026-10-29, see below: Plan sessions with a question, a plan needing approval or an unread reply do.)* PM questions (`ask_question`), proposed plans and plan approval live in the **Plan** conversation. A PM turn only runs when the human sends a message or approves a design (D9, D20), so the human is already there. `flag_stale_docs` creates a task in Backlog.
 
 There is no separate notifications feed or bell. System events (usage limits, runner disconnects) are shown on Runs and in the runner status, not in the Inbox. OS or desktop notifications can be added later and would point into the Inbox or Plan.
+
+**Amended by D29:** the PM's actions appear in Activity, and it can act on Inbox items, with decisions on a confirm card. The PM still raises no Needs-you items of its own.
 
 **Why:** Copying PM questions into a queue duplicates a conversation the human is already reading. Keeping the Inbox to agent work that's waiting on the human makes its count mean one thing: how many agents are stuck on you.
 
@@ -314,6 +320,8 @@ There is no separate notifications feed or bell. System events (usage limits, ru
 - **Pause is per project.** Pausing stops new runs for that project only.
 
 **Amended by D23:** adds the designer role, its instructions fallback and fresh-install seed, and includes designers in global agent capacity and configuration.
+
+**Amended by D29:** Plan sessions can be global as well as tied to a project, and a global session has no `projectId`.
 
 **Why:** A personal software factory (D12) runs more than one codebase. Planning, review and agent capacity are shared across all of them, while task state belongs to one repo.
 
@@ -770,3 +778,66 @@ Epic PR review state is kept on the epic (open, agent review, human review, chan
 - The Inbox lists the criteria with **Needs human check** and a checkbox per criterion. The human ticks each before approving; ticks are local to the selected item. Approval resolves the Inbox item and follows the existing human approval and merge gates, excluding these criteria from the agent-evidence gate. Requesting changes remains available.
 
 **Why:** checks requiring a person or a real device must reach the human, rather than trapping developers and reviewers in a loop over evidence no runner can produce.
+
+---
+
+## D29 — The PM is the human's point of contact, through deliberate tools
+
+**Status:** Accepted 2026-10-30 (COR-239). Amends D9, D10, D11, D13, D20 and PRD §7.2. The tools below are being built; until each one ships, [flows.md](flows.md) lists what the PM has today.
+
+**Decision:** The PM chat is the human's point of contact for everything in Corral, and planning is one of its jobs. The PM can do anything the human can, through **specific, typed tools for each area**, not one general API tool.
+
+### Tools per area
+
+| Area | Covers |
+|---|---|
+| Tasks and epics | Reading, creating, editing and moving them |
+| Projects | Reading them, changing their settings, pausing them |
+| Runs | Reading them, stopping them, sending messages to live runs |
+| Inbox | Reading items and acting on them |
+| Designs | Reading versions, approving them, requesting changes |
+| Agents | Reading them and changing their settings |
+| Threads | Listing Plan sessions, reading them, starting them, closing them |
+
+Each tool does one thing, with a typed input. The server validates it and applies the same rules as for the human, so a tool never gets around D10's transitions or a project's gates.
+
+**Why specific tools:**
+
+- **Narrower blast radius under prompt injection.** The PM reads text it doesn't control, such as code, task descriptions and agent output. An injected instruction can only reach the actions the tools expose, in the shape they accept, while a general tool would expose every route, including any added later.
+- **Fewer mistakes.** A typed tool with a clear purpose is harder to misuse than a composed method, path and body.
+- **Actions can be treated differently.** Each tool has its own place in the rules: some act directly and some need the human's confirmation (below).
+- **A readable audit.** "Stopped run #128" says what happened. "POST to a URL" doesn't.
+
+### Attribution
+
+Every agent action is attributed to the agent and session that made it, and shown in Activity and the audit log. An action the human confirmed records both: the human who confirmed it, and the agent and session that proposed it.
+
+### Confirm-required tools
+
+**Confirm-required** tools are the destructive or decision-making ones. They don't act directly: the tool posts a **confirm card** in the chat saying what will happen, and the action runs only when the human clicks **Confirm**. If the human doesn't click it, nothing happens. They cover:
+
+- **Deleting** a project or a task.
+- **Stop-all**, the kill switch on every run.
+- **Approving** tasks or designs.
+- **Inbox decisions**, such as resolving a Needs-you item.
+
+This isn't a role restriction. The PM can propose any of these at any time, whether or not the human asked. The click is the human's own action, so it goes through the same endpoint and rules as the button elsewhere in the app, and is refused the same way if the state has moved on.
+
+Plan approval isn't a confirm-required tool: `approve_plan` keeps D9's rule, that the human must have written since the plan was proposed.
+
+### API coverage
+
+Every server API route has a PM tool or an **explicit, reasoned exclusion**. The exclusions are a list in the repository, each with its reason, such as a route only the deploy script calls (`POST /api/deployments`). A **coverage check** in CI fails when a route has neither, so a new route can't quietly leave the PM behind.
+
+### Global sessions
+
+Sessions can be **global** as well as tied to a project. A global session has **no repository worktree**. To read code it starts a thread in a project, which is a normal project session with its read-only checkout (D9). Sessions tied to a project work as before.
+
+### Amendments to earlier decisions
+
+- **D9:** the PM's tools are no longer the short list there, and `propose_plan` is no longer the only way for the PM to change the board: it can create and edit tasks with its task tools. Plans stay the way to propose a body of work. Only a session tied to a project has a read-only checkout. **Unchanged:** the PM has no tool to merge or edit docs, its checkout stays read-only, and a turn runs only when the human sends a message or approves a design.
+- **D10:** the PM can create tasks in Backlog of any kind, not only documentation tasks. The **Human only** transitions stay human: the PM can propose them on a confirm card, and the transition runs on the human's click with the human as its actor.
+- **D11:** "the PM stays in Plan" no longer holds. The PM can read and act on the Inbox, with decisions on a confirm card, and its actions appear in Activity. **Unchanged:** it raises no Needs-you items of its own.
+- **D13:** "Plan sessions belong to one project" and "every PM session has a `projectId`" no longer hold, because global sessions have none. A project session's project is still locked once it has messages.
+- **D20:** design approval stays **Human only**. The PM can propose it on a confirm card, and the rest of D20's approval flow follows from the human's click as usual.
+- **PRD §7.2:** the PM still can't merge PRs, approve its own plan or modify canonical documentation. "Cannot bypass role permissions" now means the tools and rules above.
