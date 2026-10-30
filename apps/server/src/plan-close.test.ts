@@ -120,7 +120,7 @@ it('detaches accepted dependents from discarded drafts instead of blocking them'
     { planId: plan!.id, taskId: accepted!.id, key: 'a', change: 'added', position: 0 },
     { planId: plan!.id, taskId: draft!.id, key: 'b', change: 'added', position: 1 }
   ])
-  await t.db.insert(schema.taskDependencies).values({ taskId: accepted!.id, dependsOnId: draft!.id })
+  await t.db.insert(schema.taskDependencies).values({ projectId: project.id, taskId: accepted!.id, dependsOnId: draft!.id })
   expect((await t.request('POST', `/api/plan/sessions/${session!.id}/close`)).status).toBe(200)
   expect((await t.db.select().from(schema.tasks).where(eq(schema.tasks.id, accepted!.id)))[0]).toEqual(accepted)
   expect((await t.db.select().from(schema.tasks).where(eq(schema.tasks.id, draft!.id)))[0]!.deletedAt).not.toBeNull()

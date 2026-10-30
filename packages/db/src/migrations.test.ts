@@ -91,6 +91,80 @@ describe('migrations', () => {
     expect((await db.execute(sql`select count(*)::int as count from deployments`)).rows).toEqual([{ count: 1 }])
   }, 60_000)
 
+  describe('0036 project-scoped edges', () => {
+    const actor = sql`'{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb`
+    // Two projects, each with two epics and two tasks, in the old shape
+    async function seed(driver: 'pglite' | 'postgres') {
+      const before = await migrationsBefore('0036_robust_jackpot')
+      cleanup.push(() => rm(before, { recursive: true, force: true }))
+      const { db, migrate } = await open(driver)
+      await migrate(before)
+      for (const prefix of ['AA', 'BB']) {
+        await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values (${prefix}, ${prefix}, ${prefix}, ${`o/${prefix}`}, 'main')`)
+        for (const n of [1, 2]) {
+          await db.execute(sql`insert into epics (project_id, title, created_by) select id, ${`${prefix}${n}`}, ${actor} from projects where prefix = ${prefix}`)
+          await db.execute(sql`insert into tasks (project_id, number, title, type, created_by) select id, ${n}, 'T', 'task', ${actor} from projects where prefix = ${prefix}`)
+        }
+      }
+      const task = (prefix: string, n: number) => sql`(select t.id from tasks t join projects p on p.id = t.project_id where p.prefix = ${prefix} and t.number = ${n})`
+      const epic = (title: string) => sql`(select id from epics where title = ${title})`
+      return { db, migrate, task, epic }
+    }
+
+    it.each([
+      { driver: 'pglite' as const, enabled: true },
+      { driver: 'postgres' as const, enabled: postgresAvailable }
+    ])('fills in the project of every same-project row on $driver', async ({ driver, enabled }) => {
+      if (!enabled) return
+      const { db, migrate, task, epic } = await seed(driver)
+      await db.execute(sql`update tasks set epic_id = ${epic('AA1')} where id = ${task('AA', 1)}`)
+      await db.execute(sql`insert into task_dependencies (task_id, depends_on_id) values (${task('AA', 1)}, ${task('AA', 2)})`)
+      await db.execute(sql`insert into epic_dependencies (epic_id, depends_on_epic_id) values (${epic('BB1')}, ${epic('BB2')})`)
+
+      await migrate(migrationsFolder)
+
+      const prefixes = (table: string) => db.execute(sql`select p.prefix from ${sql.raw(table)} d join projects p on p.id = d.project_id`)
+      expect((await prefixes('task_dependencies')).rows).toEqual([{ prefix: 'AA' }])
+      expect((await prefixes('epic_dependencies')).rows).toEqual([{ prefix: 'BB' }])
+      expect((await db.execute(sql`select count(*)::int as count from tasks where epic_id is not null`)).rows).toEqual([{ count: 1 }])
+      await db.execute(sql`delete from epics where title = 'AA1'`)
+      expect((await db.execute(sql`select count(*)::int as count from tasks where epic_id is null`)).rows).toEqual([{ count: 4 }])
+    }, 60_000)
+
+    it.each([
+      { driver: 'pglite' as const, enabled: true },
+      { driver: 'postgres' as const, enabled: postgresAvailable }
+    ])('reports every cross-project row and stops without changing anything on $driver', async ({ driver, enabled }) => {
+      if (!enabled) return
+      const { db, migrate, task, epic } = await seed(driver)
+      await db.execute(sql`update tasks set epic_id = ${epic('BB1')} where id = ${task('AA', 1)}`)
+      await db.execute(sql`insert into task_dependencies (task_id, depends_on_id) values (${task('AA', 2)}, ${task('BB', 2)})`)
+      await db.execute(sql`insert into epic_dependencies (epic_id, depends_on_epic_id) values (${epic('AA2')}, ${epic('BB2')})`)
+      await db.execute(sql`insert into epic_dependencies (epic_id, depends_on_epic_id) values (${epic('AA1')}, ${epic('AA2')})`)
+
+      const error = await migrate(migrationsFolder).then(() => null, (e: unknown) => e as Error & { cause?: Error })
+      const message = error?.cause?.message ?? error?.message
+      expect(message).toContain('Cross-project rows must be fixed by hand')
+      expect(message).toMatch(/task AA-1 \(.+\) is in epic .+ \(BB1, BB\)/)
+      expect(message).toMatch(/task AA-2 \(.+\) depends on task BB-2/)
+      expect(message).toMatch(/epic .+ \(AA2, AA\) depends on epic .+ \(BB2, BB\)/)
+      expect(message).not.toContain('(AA1, AA) depends on')
+
+      // Nothing was rewritten, and the migration didn't count as applied
+      expect((await db.execute(sql`select count(*)::int as count from tasks where epic_id is not null`)).rows).toEqual([{ count: 1 }])
+      expect((await db.execute(sql`select count(*)::int as count from task_dependencies`)).rows).toEqual([{ count: 1 }])
+      expect((await db.execute(sql`select count(*)::int as count from epic_dependencies`)).rows).toEqual([{ count: 2 }])
+      expect((await db.execute(sql`select column_name from information_schema.columns where table_name = 'task_dependencies' and column_name = 'project_id'`)).rows).toEqual([])
+
+      // Once a human has fixed the rows, the same migration goes through
+      await db.execute(sql`update tasks set epic_id = null`)
+      await db.execute(sql`delete from task_dependencies`)
+      await db.execute(sql`delete from epic_dependencies where depends_on_epic_id = ${epic('BB2')}`)
+      await migrate(migrationsFolder)
+      expect((await db.execute(sql`select count(*)::int as count from epic_dependencies where project_id is not null`)).rows).toEqual([{ count: 1 }])
+    }, 60_000)
+  })
+
   it('0028 preserves historical runs with null runner ownership', async () => {
     const before = await migrationsBefore('0028_complex_clint_barton')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
