@@ -434,7 +434,8 @@ export const evidenceKind = pgEnum('evidence_kind', ['screenshot', 'video', 'tes
 // written explanation with no file (D21): its text is the evidence.
 export const evidence = pgTable('evidence', {
   id: uuid().primaryKey().defaultRandom(),
-  taskId: uuid().notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  // Null for a PM file shared in its Plan conversation, owned by runId.
+  taskId: uuid().references(() => tasks.id, { onDelete: 'cascade' }),
   // Null for evidence about the task as a whole (e.g. a full test run)
   criterionId: uuid().references(() => acceptanceCriteria.id, { onDelete: 'set null' }),
   runId: uuid().notNull().references(() => runs.id, { onDelete: 'cascade' }),
