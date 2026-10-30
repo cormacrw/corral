@@ -363,6 +363,17 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       return c.json(await publishTask(taskId))
     })
 
+    // Clears a stopped run's pause. The task is what this is about, so it
+    // starts right away even inside its agent's wake interval (flows.md §3)
+    .post('/projects/:slug/tasks/:number/resume', async (c) => {
+      const project = await findProjectBySlug(db, c.req.param('slug'))
+      const taskId = await findTaskId(db, project.id, taskNumber(c.req.param('number')))
+      await orchestrator.resumeTask(taskId, actor)
+      const task = await publishTask(taskId)
+      orchestrator.poke([taskId])
+      return c.json(task)
+    })
+
     // A design task's versions (D20), newest first
     .get('/projects/:slug/tasks/:number/designs', async (c) => {
       const project = await findProjectBySlug(db, c.req.param('slug'))

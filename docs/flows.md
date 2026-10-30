@@ -86,7 +86,7 @@ Approval writes the status change and an audit entry, then triggers an immediate
 
 ### Step 2 — Claim (server, no model call)
 
-The scheduler checks: project and group not paused, the task not paused, developer group under its concurrency limit, runner online, and the task is Ready with all dependencies Merged. An agent with a wake interval starts at most one task of its own choosing per interval, counted from when its last run started. Only the task an event is about skips that wait: a task the human approved or acted on, the tasks of an approved plan, and a task handed on by a pushed PR or a review verdict. Other passes, such as a run ending, a runner reconnecting, a settings change or a resume, leave the agent's waiting work for the interval. Then it claims in one statement:
+The scheduler checks: project and group not paused, the task not paused, developer group under its concurrency limit, runner online, and the task is Ready with all dependencies Merged. An agent with a wake interval starts at most one task of its own choosing per interval, counted from when its last run started. Only the task an event is about skips that wait: a task the human approved or acted on, the tasks of an approved plan, and a task handed on by a pushed PR or a review verdict. Other passes, such as a run ending, a runner reconnecting, a settings change or the kill switch's Resume everything, leave the agent's waiting work for the interval. Resuming a paused task counts as acting on that task, so it skips the wait. Then it claims in one statement:
 
 ```sql
 UPDATE tasks SET status = 'in_progress', lease_epoch = lease_epoch + 1, ...
@@ -205,7 +205,7 @@ A design task follows steps 1–7 with these differences: the developer builds a
 | Agent crashes | Run → Failed (after reconciliation), lease released; task stays in its status and is retried. 3 failed runs → task **Failed** |
 | Laptop sleeps / runner disconnects | Heartbeat stops → lease expires → stale writes rejected by epoch → reconcile, then retry |
 | Usage limit hit | Run outcome `rate_limited`; group paused until reset; not counted as a failure (D3) |
-| Human stops a run | Process tree killed, run → Interrupted; the task is **paused** so the scheduler doesn't restart it until the human resumes it |
+| Human stops a run | Process tree killed, run → Interrupted; the task is **paused** so the scheduler doesn't restart it until the human presses **Resume** on the task (`POST /projects/:slug/tasks/:number/resume`, human only). That clears the pause and asks for a scheduling pass for the task right away, and the run that starts depends on its status: a developer run in In progress, a reviewer run in Agent review |
 | Agent reports `stuck` | Task → **Blocked** |
 | Review cap reached | Task → **Blocked** |
 | Unrecoverable error / unsafe merge failure | Task → **Failed** |

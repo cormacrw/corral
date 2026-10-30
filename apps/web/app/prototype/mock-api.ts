@@ -106,6 +106,13 @@ route('POST', '/projects/:slug/tasks', ([slug], body) => {
   return task
 })
 route('GET', '/projects/:slug/tasks/:number', ([slug, number]) => taskIn(slug!, number!))
+// A real resume goes on to start a run, which the prototype has no use for
+route('POST', '/projects/:slug/tasks/:number/resume', ([slug, number]) => {
+  const task = taskIn(slug!, number!)
+  Object.assign(task, { paused: false, updatedAt: new Date().toISOString() })
+  emit({ type: 'task.updated', task })
+  return task
+})
 route('PATCH', '/projects/:slug/tasks/:number', ([slug, number], body) => {
   const task = taskIn(slug!, number!)
   const previousEpicId = task.epicId

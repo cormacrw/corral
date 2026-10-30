@@ -191,6 +191,8 @@ export function epicTitle(epics: { id: string, title: string }[] | undefined, id
 }
 
 export function taskNote(task: Task, all: Task[], reviewRoundCap: number): { text: string, color: Color } | null {
+  // Takes the note's place: nothing else about the task moves until it's resumed
+  if (task.paused) return { text: 'Paused', color: 'warning' }
   if (task.status === 'ready' && task.waitingOnEpics.length > 0) return { text: `Waiting on epic: ${task.waitingOnEpics.map(e => e.title).join(', ')}`, color: 'neutral' }
   if (task.status === 'ready' && task.dependsOn.length > 0) {
     const waiting = task.dependsOn.filter(ref => all.find(t => t.ref === ref)?.status !== 'merged')

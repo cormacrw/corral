@@ -192,6 +192,12 @@ describe('prototype mock API', () => {
     await mockCall('POST', '/plan/sessions/s-3/close')
     await expect(mockCall<Task>('GET', '/tasks/COR-16')).resolves.toMatchObject({ status: 'backlog' })
   })
+  it('resumes a paused task', async () => {
+    await expect(mockCall('GET', '/tasks/COR-18')).resolves.toMatchObject({ status: 'agent_review', paused: true })
+    await expect(mockCall('POST', '/projects/corral/tasks/18/resume')).resolves.toMatchObject({ status: 'agent_review', paused: false })
+    await expect(mockCall('GET', '/tasks/COR-18')).resolves.toMatchObject({ paused: false })
+  })
+
   it('closes a thread: discards its drafts and plan, and drops it from the inbox', async () => {
     // Fresh fixtures: the tests above approved s-3's plan
     vi.resetModules()

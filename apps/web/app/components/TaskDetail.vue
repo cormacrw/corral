@@ -145,6 +145,20 @@ async function changeStatus(value: string) {
   }
 }
 
+const resuming = ref(false)
+async function resume() {
+  if (!task.value) return
+  resuming.value = true
+  try {
+    task.value = await api.tasks.resume(slug.value, number.value)
+    flashSaved()
+  } catch (e) {
+    fail(e)
+  } finally {
+    resuming.value = false
+  }
+}
+
 const priorityOptions = (Object.keys(PRIORITY) as TaskPriority[]).map(p => ({ label: PRIORITY[p].label, value: p }))
 const typeOptions = (Object.keys(TASK_TYPE) as Task['type'][]).map(t => ({ label: TASK_TYPE[t], value: t }))
 // Tasks aren't assigned ahead of time: these are the agents of the task's
@@ -343,6 +357,7 @@ function historyText(entry: AuditEntry): string {
     case 'design.approved': return `approved design v${String(d.version)}`
     case 'task.deleted': return 'deleted the task'
     case 'run.stopped': return 'stopped the run'
+    case 'task.resumed': return 'resumed the task'
     default: return entry.action
   }
 }
@@ -521,6 +536,27 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
           aria-label="Title"
           @change="patch({ title: ($event.target as HTMLInputElement).value })"
         >
+
+        <!-- Above the mobile tabs, so it shows on both -->
+        <div
+          v-if="task.paused"
+          :class="['flex items-center gap-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2 text-sm', mobile && '-mt-2']"
+          data-testid="task-paused"
+        >
+          <UIcon
+            name="i-lucide-pause"
+            class="size-4 shrink-0 text-warning"
+          />
+          <span class="min-w-0 flex-1"><span class="font-medium">Paused.</span> <span class="text-muted">Its run was stopped, so nothing picks it up until you resume it.</span></span>
+          <UButton
+            label="Resume"
+            icon="i-lucide-play"
+            size="sm"
+            :class="mobile && 'min-h-11'"
+            :loading="resuming"
+            @click="resume"
+          />
+        </div>
 
         <template v-if="mobile">
           <div
