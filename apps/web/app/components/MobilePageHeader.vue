@@ -23,7 +23,7 @@ const planSession = computed(() => {
   if (section !== 'plan' || !id) return null
   const session = shell.planSessions.find(s => s.id === id) ?? pending.entries.value[id]?.session
   const project = shell.projects.find(p => p.id === session?.projectId)
-  return { title: session?.title ?? 'Plan', eyebrow: project?.name ?? '', back: '/plan', backLabel: 'Back to Plan', dot: project ? projectColor(project) : null }
+  return { title: session?.title ?? 'Plan', eyebrow: project?.name ?? 'Global', back: '/plan', backLabel: 'Back to Plan', dot: project ? projectColor(project) : null }
 })
 // An Inbox item is its own screen: the task above where it sits in the
 // list, a back button to the list, and the tray at the bottom in place of

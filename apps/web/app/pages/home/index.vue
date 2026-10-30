@@ -60,11 +60,11 @@ onMounted(() => {
   onBeforeUnmount(() => clearInterval(timer))
 })
 
-const taskOf = (run: Run) => run.taskId ? lists.tasks.value[run.projectId]?.find(t => t.id === run.taskId) : undefined
-const projectOf = (id: string) => shell.projects.find(p => p.id === id)
+const taskOf = (run: Run) => run.taskId && run.projectId ? lists.tasks.value[run.projectId]?.find(t => t.id === run.taskId) : undefined
+const projectOf = (id: string | null) => shell.projects.find(p => p.id === id)
 // One line per active run: what it's on, where, and for how long
 const runLines = (agent: Agent) => runs.value
-  .filter(r => isLiveRun(r) && r.agentId === agent.id && scope.value.some(p => p.id === r.projectId))
+  .filter(r => isLiveRun(r) && r.agentId === agent.id && (r.projectId === null || scope.value.some(p => p.id === r.projectId)))
   .map((run) => {
     const task = taskOf(run)
     const session = run.taskId ? null : shell.planSessions.find(s => s.activeRunId === run.id)

@@ -6,7 +6,7 @@ import { agentRuntime, type AgentRuntime } from './agent-runtimes.ts'
 
 export interface PlanSession {
   id: string
-  projectId: string
+  projectId: string | null
   title: string
   // The PM's runtime (D18), e.g. 'claude-code' or 'codex'. Locked once the
   // session has messages.
@@ -97,7 +97,7 @@ export interface PlanSessionDetail extends PlanSession {
 // A client UUID makes a start safe to retry within the same project.
 export const startPlanSessionInput = z.object({
   id: z.uuid().optional(),
-  projectId: z.uuid(),
+  projectId: z.uuid().nullable().default(null),
   // The PM's runtime for this session (D18); only a CLI the runner has
   runtime: agentRuntime.default('claude-code'),
   text: z.string().trim().default(''),

@@ -22,7 +22,7 @@ type RunJoin = {
   run: typeof runs.$inferSelect
   agentName: string
   agentRuntime: string
-  prefix: string
+  prefix: string | null
   taskNumber: number | null
   taskTitle: string | null
   epicTitle: string | null
@@ -40,7 +40,7 @@ function toRun({ run, agentName, agentRuntime, prefix, taskNumber, taskTitle, ep
     projectId: run.projectId,
     planSessionId: run.planSessionId,
     taskId: run.taskId,
-    taskRef: taskNumber === null ? null : taskRef(prefix, taskNumber),
+    taskRef: taskNumber === null ? null : taskRef(prefix!, taskNumber),
     taskTitle,
     epicId: run.epicId,
     epicTitle,
@@ -71,7 +71,7 @@ export async function listRuns(db: Executor, filter: { agentId?: string, taskId?
   if (filter.active) where.push(inArray(runs.state, [...ACTIVE_RUN_STATES]))
   const rows = await db.select(runColumns).from(runs)
     .innerJoin(agents, eq(agents.id, runs.agentId))
-    .innerJoin(projects, eq(projects.id, runs.projectId))
+    .leftJoin(projects, eq(projects.id, runs.projectId))
     .leftJoin(tasks, eq(tasks.id, runs.taskId))
     .leftJoin(epics, eq(epics.id, runs.epicId))
     .where(and(...where))
@@ -83,7 +83,7 @@ export async function listRuns(db: Executor, filter: { agentId?: string, taskId?
 export async function findRun(db: Executor, where: SQL): Promise<Run | null> {
   const [row] = await db.select(runColumns).from(runs)
     .innerJoin(agents, eq(agents.id, runs.agentId))
-    .innerJoin(projects, eq(projects.id, runs.projectId))
+    .leftJoin(projects, eq(projects.id, runs.projectId))
     .leftJoin(tasks, eq(tasks.id, runs.taskId))
     .leftJoin(epics, eq(epics.id, runs.epicId))
     .where(where)

@@ -225,7 +225,7 @@ async function deleteThread() {
         ref="composer"
         v-model="text"
         :placeholder="`Reply to ${item.sender.name}…`"
-        :project="item.project.slug"
+        :project="item.project?.slug"
         :disabled="cantSend"
         :busy="busy"
         @submit="send"

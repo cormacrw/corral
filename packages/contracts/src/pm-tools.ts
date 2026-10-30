@@ -25,7 +25,7 @@ const version = z.number().int().positive()
 export const pmActionTools = {
   create_task: {
     confirmRequired: false,
-    description: 'Create a single Backlog task in this conversation’s project, outside a plan.',
+    description: 'Create a single Backlog task in the selected project, outside a plan.',
     input: createTaskInput.shape
   },
   update_task: {
@@ -45,12 +45,12 @@ export const pmActionTools = {
   },
   update_epic: {
     confirmRequired: false,
-    description: 'Edit an epic in this project; dependsOn replaces its epic dependencies.',
+    description: 'Edit an epic in the selected project; dependsOn replaces its epic dependencies.',
     input: { epicId: z.uuid(), ...patchEpicInput.omit({ description: true }).shape, summary: z.string().optional(), dependsOn: z.array(z.uuid()).optional() }
   },
   delete_task: {
     confirmRequired: true,
-    description: 'Propose deleting a task in this project. Nothing is deleted until the human clicks Confirm in the conversation. Merged tasks cannot be deleted.',
+    description: 'Propose deleting a task. Nothing is deleted until the human clicks Confirm in the conversation. Merged tasks cannot be deleted.',
     input: { taskRef: z.string().trim().min(1), reason: z.string().trim().min(1).optional() }
   },
   delete_project: {

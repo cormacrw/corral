@@ -236,7 +236,7 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
             class="size-2.5 rounded-full"
             :style="{ background: projectColor(project) }"
           />
-          <span class="text-muted">{{ project?.name }}</span>
+          <span class="text-muted">{{ project?.name ?? 'Global' }}</span>
           <span class="truncate font-medium">{{ session?.title }}</span>
           <UBadge
             v-if="session"
@@ -402,7 +402,7 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
                   :events="liveEvents"
                   live
                   :agent-name="pm?.name ?? 'PM'"
-                  working="Reading the code, wiki and board…"
+                  :working="project ? 'Reading the code, wiki and board…' : 'Checking the board…'"
                   inline
                 />
               </div>
@@ -558,6 +558,7 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
                   />
                 </UTooltip>
                 <USelectMenu
+                  v-if="project"
                   :model-value="taskRef ?? undefined"
                   :items="backlog.map(t => ({ label: `${t.ref} ${t.title}`, value: t.ref }))"
                   value-key="value"
