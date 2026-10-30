@@ -599,6 +599,7 @@ export class Orchestrator implements RunnerHandlers {
         headSha: task.headSha!,
         prUrl: task.prUrl,
         evidence: items.map(e => ({ id: e.id, criterionId: e.criterionId, kind: e.kind, note: e.note, fileName: e.fileName })),
+        requiredChecks: ctx.project.requiredChecks,
         previousFeedback: previous ? feedbackComment(previous.summary, previous.criteria, criteria) : null
       }, ctx.agent.name)
     }

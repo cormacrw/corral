@@ -1,5 +1,8 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_ROLE_INSTRUCTIONS } from './role-defaults.ts'
+
+const corralReviewer = readFileSync(new URL('../../../.corral/agents/reviewer.md', import.meta.url), 'utf8')
 
 describe('pm role defaults', () => {
   const pm = DEFAULT_ROLE_INSTRUCTIONS.pm
@@ -41,14 +44,20 @@ describe('developer role defaults', () => {
 })
 
 describe('reviewer role defaults', () => {
-  it('requires independent checks without the Turbo cache or an explanation', () => {
-    const reviewer = DEFAULT_ROLE_INSTRUCTIONS.reviewer
-    expect(reviewer).toContain('Run the project\'s lint, typecheck and tests yourself before reporting')
-    for (const check of ['lint', 'typecheck', 'test']) {
-      expect(reviewer).toContain(`TURBO_FORCE=1 pnpm run ${check}`)
-    }
-    expect(reviewer).toContain('A cache hit replays the developer\'s results and does not verify the change')
-    expect(reviewer).toContain('If you cannot run a check without the cache, explain which check and why in your outcome')
+  it.each([
+    ['built-in default', DEFAULT_ROLE_INSTRUCTIONS.reviewer],
+    ['Corral override', corralReviewer]
+  ])('%s reviews the diff and leaves the gates to required CI (D26)', (_name, reviewer) => {
+    expect(reviewer).not.toContain('TURBO_FORCE')
+    expect(reviewer).not.toContain('Run the project\'s lint')
+    expect(reviewer).toContain('Review the diff for security, efficiency and logic problems')
+    expect(reviewer).toContain('specific, actionable feedback')
+    expect(reviewer).toContain('so don\'t rerun them')
+    expect(reviewer).toContain('When it has none, the prompt tells you to run them yourself without the cache')
+    expect(reviewer).toContain('You may run a targeted test or the app')
+    expect(reviewer).toContain('A cached result never counts as verification')
+    expect(reviewer).toContain('Give every criterion a concrete note explaining why it is met or not')
+    expect(reviewer).toContain('a verdict for every criterion')
   })
 
   it('reproduces visible criteria with agent-browser', () => {
@@ -56,6 +65,14 @@ describe('reviewer role defaults', () => {
     expect(reviewer).toContain('To reproduce a visible criterion, start the app and use agent-browser')
     expect(reviewer).toContain('run `agent-browser skills get core` once')
     expect(reviewer).toContain('run `agent-browser close`')
+  })
+})
+
+describe('Corral reviewer override', () => {
+  it('keeps the rules for reviewing Corral itself', () => {
+    expect(corralReviewer).toContain('Request changes if the diff edits, renames or deletes a migration already on main')
+    expect(corralReviewer).toContain('could stop the deployed Corral from fixing itself')
+    expect(corralReviewer).toContain('must use a dev-stack project for **`cormacrw/test-app`**')
   })
 })
 

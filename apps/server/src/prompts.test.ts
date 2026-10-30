@@ -130,7 +130,7 @@ describe('developer and reviewer attachments', () => {
     comments: [],
     attachments: []
   }
-  const review = { ...task, headSha: 'abc', prUrl: null, evidence: [], previousFeedback: null }
+  const review = { ...task, headSha: 'abc', prUrl: null, evidence: [], previousFeedback: null, requiredChecks: ['ci'] }
   const attachments = [
     { id: '11111111-1111-4111-8111-111111111111', fileName: 'mockup.png', foundIn: ['the description'] },
     { id: '22222222-2222-4222-8222-222222222222', fileName: 'bug.jpg', foundIn: ['a comment by human (2026-10-01T00:00:00.000Z)'] }
@@ -192,7 +192,7 @@ describe('spike prompts', () => {
     comments: [],
     attachments: []
   }
-  const review = { ...task, headSha: 'findings-r1', prUrl: null, evidence: [], previousFeedback: null, findings: '**Answer:** Use pg-boss.' }
+  const review = { ...task, headSha: 'findings-r1', prUrl: null, evidence: [], previousFeedback: null, requiredChecks: ['ci'], findings: '**Answer:** Use pg-boss.' }
 
   it('tells the developer to investigate without changing code and report findings', () => {
     const prompt = developerPrompt(task, 'Victor')
@@ -256,7 +256,8 @@ describe('reviewer evidence list', () => {
     attachments: [],
     headSha: 'abc',
     prUrl: null,
-    previousFeedback: null
+    previousFeedback: null,
+    requiredChecks: ['ci']
   }
 
   it('shows the text of a note inline, and files by name (D21)', () => {
@@ -273,6 +274,53 @@ describe('reviewer evidence list', () => {
       '  See src/login.ts:12.',
       '- e2: screenshot "form.png" for [c2] — The form'
     ].join('\n'))
+  })
+})
+
+describe('reviewer gates (D26)', () => {
+  const task = {
+    ref: 'TA-1',
+    title: 'Login',
+    description: null,
+    branch: 'corral/ta-1-login',
+    defaultBranch: 'main',
+    reviewRounds: 0,
+    reviewRoundCap: 3,
+    criteria: [{ id: 'c1', text: 'Works' }],
+    comments: [],
+    attachments: [],
+    headSha: 'abc',
+    prUrl: null,
+    evidence: [],
+    previousFeedback: null
+  }
+
+  it('leaves the gates to required CI and points the reviewer at the diff', () => {
+    const prompt = reviewerPrompt({ ...task, requiredChecks: ['ci', 'e2e'] }, 'Rita')
+    expect(prompt).toContain('This project has required CI checks: `ci`, `e2e`')
+    expect(prompt).toContain('don\'t rerun the project\'s lint, typecheck, tests or build')
+    expect(prompt).toContain('security, efficiency and logic problems')
+    expect(prompt).toContain('A cached result never counts as verification')
+    expect(prompt).not.toContain('TURBO_FORCE')
+    expect(prompt).not.toContain('Check the project\'s lint, typecheck and tests pass')
+  })
+
+  it('has the reviewer run the gates without the cache when nothing else does', () => {
+    const prompt = reviewerPrompt({ ...task, requiredChecks: [] }, 'Rita')
+    expect(prompt).toContain('This project has no required CI checks')
+    expect(prompt).toContain('Run the project\'s lint, typecheck, tests and build yourself before reporting, without the cache')
+    for (const check of ['lint', 'typecheck', 'test', 'build']) {
+      expect(prompt).toContain(`TURBO_FORCE=1 pnpm run ${check}`)
+    }
+    expect(prompt).toContain('If you cannot run a check without the cache, explain which check and why in your outcome')
+  })
+
+  it('stays out of spikes and designs, which have no diff to gate', () => {
+    for (const extra of [{ spike: true }, { design: { version: 1 } }]) {
+      const prompt = reviewerPrompt({ ...task, ...extra, requiredChecks: [] }, 'Rita')
+      expect(prompt).not.toContain('## Gates')
+      expect(prompt).not.toContain('TURBO_FORCE')
+    }
   })
 })
 
@@ -296,7 +344,7 @@ describe('D21 evidence guidance', () => {
   it('requires concrete reviewer notes and rejects unsuitable proof on every review path', () => {
     for (const extra of [{}, { spike: true }, { design: { version: 1 } }]) {
       const prompt = reviewerPrompt({
-        ...task, ...extra, headSha: 'abc', prUrl: null, evidence: [], previousFeedback: null
+        ...task, ...extra, headSha: 'abc', prUrl: null, evidence: [], previousFeedback: null, requiredChecks: ['ci']
       }, 'Rita')
       expect(prompt).toContain('Give every criterion a concrete note explaining why it is met or not')
       expect(prompt).toContain('the human reads it next to the evidence')
