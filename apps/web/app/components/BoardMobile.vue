@@ -221,12 +221,12 @@ const note = (task: Task) => taskNote(task, props.all, props.reviewRoundCap)
                 <TaskTypeBadge :type="task.type" />
                 <DesignChangedBadge :design="task.design" />
                 <span
-                  v-if="task.prNumber"
+                  v-if="task.pr?.number"
                   class="ms-auto flex items-center gap-0.5 text-muted"
                 ><UIcon
                   name="i-lucide-git-pull-request"
                   class="size-3"
-                />#{{ task.prNumber }}</span>
+                />#{{ task.pr?.number }}</span>
               </span>
               <span class="font-medium text-highlighted">{{ task.title }}</span>
               <span

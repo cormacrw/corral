@@ -70,7 +70,7 @@ describe.each(['pglite', 'postgres'] as const)('project thumbnails on %s', (driv
     await t.request('PATCH', `/api/projects/${project.slug}`, { thumbnailColor: '#123456' })
     const saved = await upload(png, 'image/png').then(r => r.json()) as Project
     const task = await t.createTask(project.slug)
-    await t.db.update(schema.tasks).set({ status: 'blocked' }).where(eq(schema.tasks.id, task.id))
+    await t.db.update(schema.tasks).set({ status: 'blocked', statusReason: 'Waiting for a decision' }).where(eq(schema.tasks.id, task.id))
     const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
     expect(inbox.needsYou.some(item => item.project.thumbnailUrl === saved.thumbnailUrl)).toBe(true)
     const removed = await t.request('DELETE', `/api/projects/${project.slug}/thumbnail`)

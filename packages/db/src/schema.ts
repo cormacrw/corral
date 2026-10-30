@@ -187,6 +187,11 @@ export const tasks = pgTable('tasks', {
   // list if a later migration recreates the key.
   foreignKey({ name: 'tasks_epic_same_project_fk', columns: [t.projectId, t.epicId], foreignColumns: [epics.projectId, epics.id] }).onDelete('set null'),
   index().on(t.projectId, t.status),
+  // Match JavaScript trim's whitespace, including Unicode, on both drivers.
+  check('tasks_status_reason', sql`case when ${t.status} in ('blocked', 'failed')
+    then ${t.statusReason} is not null and btrim(${t.statusReason}, U&'\\0009\\000A\\000B\\000C\\000D\\0020\\00A0\\1680\\2000\\2001\\2002\\2003\\2004\\2005\\2006\\2007\\2008\\2009\\200A\\2028\\2029\\202F\\205F\\3000\\FEFF') <> ''
+    else ${t.statusReason} is null end`),
+  check('tasks_pr_complete', sql`(${t.prNumber} is null) = (${t.prUrl} is null)`),
   check('tasks_counters_non_negative', sql`${t.reviewRounds} >= 0 and ${t.failedRuns} >= 0 and ${t.leaseEpoch} >= 0`),
   // A lease is either fully held or fully released
   check('tasks_lease_complete', sql`(${t.leaseRunId} is null) = (${t.leaseExpiresAt} is null)

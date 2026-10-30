@@ -165,6 +165,31 @@ describe('migrations', () => {
     }, 60_000)
   })
 
+  it.each([
+    { driver: 'pglite' as const, enabled: true },
+    { driver: 'postgres' as const, enabled: postgresAvailable }
+  ])('0035 refuses inconsistent historical rows without rewriting them on $driver', async ({ driver, enabled }) => {
+    if (!enabled) return
+    const before = await migrationsBefore('0036_known_sphinx')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db, migrate } = await open(driver)
+    await migrate(before)
+    await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('Test app', 'test-app', 'TA', 'cormacrw/test-app', 'main')`)
+    await db.execute(sql`insert into tasks (project_id, number, title, type, status, created_by)
+      select id, 1, 'Needs a reason', 'task', 'blocked', '{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb from projects`)
+    const id = (await db.execute(sql`select id from tasks`)).rows[0]!.id
+    const failure = await migrate(migrationsFolder).catch((error: unknown) => error) as { cause?: Error }
+    expect(failure.cause?.message).toContain(`Task metadata preflight failed. Repair status reasons or PR pairs for task IDs: ${id}`)
+    expect((await db.execute(sql`select status_reason from tasks`)).rows).toEqual([{ status_reason: null }])
+    await db.execute(sql`update tasks set status_reason = 'Which provider?', pr_number = 123`)
+    await expect(migrate(migrationsFolder)).rejects.toThrow()
+    await db.execute(sql`update tasks set pr_url = 'https://github.com/cormacrw/test-app/pull/123'`)
+    await migrate(migrationsFolder)
+    expect((await db.execute(sql`select status_reason, pr_number, pr_url from tasks`)).rows).toEqual([
+      { status_reason: 'Which provider?', pr_number: 123, pr_url: 'https://github.com/cormacrw/test-app/pull/123' }
+    ])
+  }, 60_000)
+
   it('0028 preserves historical runs with null runner ownership', async () => {
     const before = await migrationsBefore('0028_complex_clint_barton')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
