@@ -425,6 +425,7 @@ describe('continuing a stopped run', () => {
   it('names no commit when the stopped run saved none', () => {
     const prompt = developerPrompt({ ...task, stoppedRun: { ...stoppedRun, wipSha: null } }, 'Dev')
     expect(prompt).toContain('Stop reason: The run hit its time limit')
-    expect(prompt).toContain('No WIP commit was saved')
+    expect(prompt).toContain('No WIP commit is recorded yet')
+    expect(prompt).toContain('Check the branch log')
   })
 })
