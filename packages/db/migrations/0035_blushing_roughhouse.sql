@@ -1,0 +1,3 @@
+-- NOT VALID: history is not rewritten or scanned, and only new and updated rows are checked.
+ALTER TABLE "plan_messages" ADD CONSTRAINT "plan_messages_role_kind" CHECK (("plan_messages"."role" = 'human' and "plan_messages"."kind" = 'message') or ("plan_messages"."role" = 'pm' and "plan_messages"."kind" in ('message', 'question', 'error'))) NOT VALID;--> statement-breakpoint
+ALTER TABLE "plan_messages" ADD CONSTRAINT "plan_messages_question_fields" CHECK ("plan_messages"."kind" = 'question' or ("plan_messages"."recommendation" is null and "plan_messages"."options" is null)) NOT VALID;

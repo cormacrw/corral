@@ -77,7 +77,7 @@ export interface TaskInboxItem extends InboxItemBase, Partial<ReviewChanges> {
 
 // An open Plan session waiting on the human (D11, amended): a question, a plan
 // needing approval or an unread PM reply
-export interface PlanThreadItem extends InboxItemBase {
+interface PlanThreadBase extends InboxItemBase {
   // The session ID
   id: string
   type: 'plan_thread'

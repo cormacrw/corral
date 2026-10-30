@@ -1,6 +1,6 @@
 import type { Inbox, PlanSessionDetail, PlanThreadItem, RunJob } from '@corral/contracts'
 import { schema } from '@corral/db'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner, sleep } from './test-runner.ts'
@@ -93,6 +93,74 @@ describe('plan threads in the inbox', () => {
     expect(after.count).toBe(after.needsYou.length)
     expect(after.needsYou.filter(i => i.project.id === project.id).map(i => i.subject)).toEqual(order.slice(0, -1))
     await t.db.delete(planSessions).where(eq(planSessions.id, idleOld.id))
+  })
+
+  it('rejects a human message with question fields, at the start and in a thread', async () => {
+    const project = await t.createProject()
+    const start = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan it', recommendation: 'Yes' })
+    expect(start.status).toBe(400)
+    const [row] = await t.db.insert(planSessions).values({ projectId: project.id, title: 'Rejected', createdBy: t.actor }).returning()
+    for (const fields of [{ recommendation: 'Yes' }, { options: ['Yes', 'No'] }]) {
+      const res = await t.request('POST', `/api/plan/sessions/${row!.id}/messages`, { text: 'Hello', ...fields })
+      expect(res.status).toBe(400)
+    }
+    expect(await t.db.select().from(planMessages).where(eq(planMessages.sessionId, row!.id))).toEqual([])
+  })
+
+  it('gives every thread the data its status needs, and keeps threads that are only unread listed', async () => {
+    const project = await t.createProject()
+    const session = async (title: string, values: Partial<typeof planSessions.$inferInsert> = {}) => {
+      const [row] = await t.db.insert(planSessions).values({ projectId: project.id, title, createdBy: t.actor, ...values }).returning()
+      return row!
+    }
+    const question = await session('A question')
+    await t.db.insert(planMessages).values({ sessionId: question.id, role: 'pm', kind: 'question', text: 'Which one?' })
+    const approval = await session('A plan')
+    const [plan] = await t.db.insert(plans).values({ sessionId: approval.id, projectId: project.id, version: 1, title: 'The plan' }).returning()
+    // A proposed plan outranks a question after it
+    await t.db.insert(planMessages).values({ sessionId: approval.id, role: 'pm', kind: 'question', text: 'Also this?' })
+    const unread = await session('Only unread', { unread: true })
+    await t.db.insert(planMessages).values({ sessionId: unread.id, role: 'pm', kind: 'message', text: 'Done.' })
+    const answered = await session('Answered')
+    await t.db.insert(planMessages).values([
+      { sessionId: answered.id, role: 'pm', kind: 'question', text: 'Which one?', createdAt: at(2) },
+      { sessionId: answered.id, role: 'human', kind: 'message', text: 'This one', createdAt: at(1) }
+    ])
+
+    const threads = (await inbox()).needsYou.filter((item): item is PlanThreadItem => item.type === 'plan_thread' && item.project.id === project.id)
+    expect(threads.find(i => i.sessionId === question.id)).toMatchObject({ status: 'question', question: { text: 'Which one?', recommendation: null, options: null }, plan: null, planId: null, reply: null })
+    expect(threads.find(i => i.sessionId === approval.id)).toMatchObject({ status: 'needs_approval', question: null, plan: { id: plan!.id, title: 'The plan' }, planId: plan!.id, reply: null })
+    expect(threads.find(i => i.sessionId === unread.id)).toMatchObject({ status: 'none', question: null, plan: null, planId: null, reply: 'Done.', unread: true })
+    expect(threads.find(i => i.sessionId === answered.id)).toBeUndefined()
+  })
+
+  it('reads historical rows from before the constraints, showing a human row as a plain message', async () => {
+    const project = await t.createProject()
+    const [row] = await t.db.insert(planSessions).values({ projectId: project.id, title: 'Old thread', createdBy: t.actor }).returning()
+    // Rows written before the constraints: the migration leaves them unchecked
+    await t.db.execute(sql`alter table plan_messages drop constraint plan_messages_role_kind, drop constraint plan_messages_question_fields`)
+    await t.db.insert(planMessages).values([
+      { sessionId: row!.id, role: 'human', kind: 'question' as 'message', text: 'Old human', recommendation: 'Stale', options: ['Stale'], createdAt: at(4) },
+      { sessionId: row!.id, role: 'pm', kind: 'retired' as 'message', text: 'Old PM kind', recommendation: 'Stale', createdAt: at(3) },
+      { sessionId: row!.id, role: 'pm', kind: 'question', text: 'Old question', options: ['A', 'B'], createdAt: at(2) },
+      { sessionId: row!.id, role: 'pm', kind: 'error', text: 'Old error', createdAt: at(1) },
+      { sessionId: row!.id, role: 'human', kind: 'question' as 'message', text: 'Old answer', createdAt: at(0) }
+    ])
+    await t.db.execute(sql`alter table plan_messages add constraint plan_messages_role_kind check ((role = 'human' and kind = 'message') or (role = 'pm' and kind in ('message', 'question', 'error'))) not valid, add constraint plan_messages_question_fields check (kind = 'question' or (recommendation is null and options is null)) not valid`)
+
+    const res = await t.request('GET', `/api/plan/sessions/${row!.id}`)
+    expect(res.status).toBe(200)
+    const detail = await res.json() as PlanSessionDetail
+    expect(detail.messages.map(({ role, kind, text, recommendation, options }) => ({ role, kind, text, recommendation, options }))).toEqual([
+      { role: 'human', kind: 'message', text: 'Old human', recommendation: null, options: null },
+      { role: 'pm', kind: 'message', text: 'Old PM kind', recommendation: null, options: null },
+      { role: 'pm', kind: 'question', text: 'Old question', recommendation: null, options: ['A', 'B'] },
+      { role: 'pm', kind: 'error', text: 'Old error', recommendation: null, options: null },
+      { role: 'human', kind: 'message', text: 'Old answer', recommendation: null, options: null }
+    ])
+    // A human row flagged as a question is an answer, not a waiting question
+    expect(detail.status).toBe('none')
+    expect((await inbox()).needsYou.find(i => i.id === row!.id)).toBeUndefined()
   })
 
   it('follows a session through a question, a plan, approval (which closes it) and a new message, with a plan.session event at each step', async () => {

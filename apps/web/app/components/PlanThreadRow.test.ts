@@ -6,10 +6,12 @@ import * as vue from 'vue'
 import { inbox } from '~/prototype/fixtures'
 import PlanThreadRow from './PlanThreadRow.vue'
 
-const thread = (changes: Partial<PlanThreadItem> = {}) => ({
-  ...inbox().needsYou.find((i): i is PlanThreadItem => i.type === 'plan_thread')!,
-  status: 'question', unread: false, activeRunId: null, ...changes
-} satisfies PlanThreadItem)
+const base = inbox().needsYou.find((i): i is PlanThreadItem => i.type === 'plan_thread')!
+const thread = (changes: Partial<Pick<PlanThreadItem, 'sender' | 'subject'>> = {}): PlanThreadItem => ({
+  ...base,
+  status: 'question', question: { text: 'Which one?', recommendation: null, options: null }, plan: null, planId: null, reply: null,
+  unread: false, activeRunId: null, ...changes
+})
 
 const avatar = vue.defineComponent({ props: ['name', 'size'], setup: p => () => vue.h('i', { 'data-avatar': p.name, 'data-size': p.size }) })
 const thumbnail = vue.defineComponent({ setup: () => () => vue.h('i', { 'data-thumbnail': '' }) })
@@ -43,7 +45,7 @@ it('keeps the unread dot and working spinner', () => {
   const idle = mountRow(thread())
   expect(idle.find('[aria-label="Unread reply"]').exists()).toBe(false)
   expect(idle.find('[data-spinner]').exists()).toBe(false)
-  const active = mountRow(thread({ status: 'none', unread: true, activeRunId: 'r-1' }))
+  const active = mountRow({ ...thread(), status: 'none', question: null, plan: null, planId: null, reply: 'Done.', unread: true, activeRunId: 'r-1' })
   expect(active.find('[aria-label="Unread reply"]').exists()).toBe(true)
   expect(active.find('[data-spinner]').exists()).toBe(true)
   expect(active.text()).toContain('Unread reply')

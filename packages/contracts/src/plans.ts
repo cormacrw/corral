@@ -94,7 +94,7 @@ export interface PlanSessionDetail extends PlanSession {
 }
 
 // A client UUID makes a start safe to retry within the same project.
-export const startPlanSessionInput = z.object({
+export const startPlanSessionInput = z.strictObject({
   id: z.uuid().optional(),
   projectId: z.uuid(),
   // The PM's runtime for this session (D18); only a CLI the runner has
@@ -105,7 +105,8 @@ export const startPlanSessionInput = z.object({
 }).refine(input => input.text.length > 0 || input.taskRef, { message: 'Write a message or attach a task' })
 export type StartPlanSessionInput = z.infer<typeof startPlanSessionInput>
 
-export const planMessageInput = z.object({
+// Strict: a human message is only text, so question fields are rejected
+export const planMessageInput = z.strictObject({
   text: z.string().trim().default(''),
   taskRef: z.string().trim().optional()
 }).refine(input => input.text.length > 0 || input.taskRef, { message: 'Write a message or attach a task' })

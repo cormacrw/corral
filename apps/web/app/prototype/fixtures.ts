@@ -17,6 +17,7 @@ import type {
   PlanMessage,
   Plan,
   PlanSession,
+  PlanThreadAttention,
   Profile,
   Project,
   PullRequestStatus,
@@ -802,6 +803,20 @@ export const releaseNotes: ReleaseNotesItem[] = [{
 export const resolvedInbox: Inbox['resolved'] = []
 
 // The inbox is derived from the tasks above that need the human
+// What a thread waits on, or nothing when it's missing the data its status needs
+function threadAttention(status: PlanSession['status'], last?: PlanMessage, plan?: Plan, reply?: PlanMessage): PlanThreadAttention | null {
+  if (status === 'question') {
+    if (last?.kind !== 'question') return null
+    return { status, question: { text: last.text, recommendation: last.recommendation, options: last.options }, plan: null, planId: null, reply: null }
+  }
+  if (status === 'needs_approval') {
+    if (!plan) return null
+    const summary = { id: plan.id, version: plan.version, title: plan.title, summary: plan.summary, epicCount: plan.epics.length, taskCount: plan.tasks.filter(t => t.change !== 'removed').length }
+    return { status, question: null, plan: summary, planId: plan.id, reply: null }
+  }
+  return reply ? { status, question: null, plan: null, planId: null, reply: reply.text } : null
+}
+
 export function inbox(): Inbox {
   const needsYou: InboxItem[] = tasks
     .filter(t => t.status === 'human_review' || t.status === 'blocked' || t.status === 'failed')
@@ -840,21 +855,19 @@ export function inbox(): Inbox {
     const messages = planMessages[session.id] ?? []
     const last = messages.at(-1)
     const plan = plans[session.id]?.find(p => p.status === 'proposed')
-    const reply = session.status === 'none' ? messages.findLast(m => m.role === 'pm') : undefined
-    if (session.status === 'none' && !reply) continue
+    const reply = messages.findLast(m => m.role === 'pm')
+    const waiting = threadAttention(session.status, last, plan, reply)
+    if (!waiting) continue
     needsYou.push({
+      ...waiting,
       id: session.id, type: 'plan_thread', sessionId: session.id,
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
       subject: session.title, preview: session.preview ?? '',
-      question: session.status === 'question' && last ? { text: last.text, recommendation: last.recommendation, options: last.options } : null,
-      reply: reply?.text ?? null,
-      plan: plan ? { id: plan.id, version: plan.version, title: plan.title, summary: plan.summary, epicCount: plan.epics.length, taskCount: plan.tasks.filter(t => t.change !== 'removed').length } : null,
       // When it started waiting: the question, the plan or the reply
       sender: { name: agents.find(a => a.role === 'pm')?.name ?? 'PM', role: 'pm' }, at: (session.status === 'needs_approval' ? plan?.createdAt : session.status === 'question' ? last?.createdAt : reply?.createdAt) ?? session.updatedAt,
       taskId: null, taskRef: null, prUrl: null, resolution: null,
-      runtime: session.runtime, status: session.status, unread: session.unread,
-      activeRunId: session.activeRunId,
-      planId: plan?.id ?? null
+      runtime: session.runtime, unread: session.unread,
+      activeRunId: session.activeRunId
     })
   }
   const review = epics.find(e => e.reviewState === 'human_review')

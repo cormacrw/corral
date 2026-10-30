@@ -1,4 +1,4 @@
-import { askQuestionInput, listTasksInput, normalizeProposedPlan, proposedPlanInput, type AgentRuntime, type DraftSession, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type PmRunJob } from '@corral/contracts'
+import { askQuestionInput, planMessageFields, type NewPlanMessageFields, listTasksInput, normalizeProposedPlan, proposedPlanInput, type AgentRuntime, type DraftSession, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type PmRunJob } from '@corral/contracts'
 import { approvedPlanSummary, checkPlan, checkPlanEpicDependencies, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, revisionProblem, richTextToMarkdown, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
@@ -177,7 +177,7 @@ export class PlanService {
       const [session] = await tx.insert(planSessions).values({ ...(input.id ? { id: input.id } : {}), projectId, title: fallback, runtime: input.runtime ?? 'claude-code', createdBy: actor })
         .onConflictDoNothing({ target: planSessions.id }).returning()
       if (!session) return null
-      const [message] = await tx.insert(planMessages).values({ sessionId: session.id, role: 'human', text, runId: null }).returning()
+      const message = await insertMessage(tx, session.id, { role: 'human', kind: 'message', text })
       await appendAudit(tx, { projectId, actor }, auditEvent('plan.message', { sessionId: session.id, messageId: message!.id }))
       return { session, message: message! }
     })
@@ -209,9 +209,9 @@ export class PlanService {
       })
     } catch (error) {
       const { db, events } = this.#d
-      const [message] = await db.insert(planMessages).values({ sessionId: session.id, role: 'pm', kind: 'error', text: `Could not queue the PM turn: ${error instanceof Error ? error.message : String(error)}`, runId: null }).returning()
+      const message = await insertMessage(db, session.id, { role: 'pm', kind: 'error', text: `Could not queue the PM turn: ${error instanceof Error ? error.message : String(error)}` })
       await db.update(planSessions).set({ updatedAt: new Date(), unread: true }).where(eq(planSessions.id, session.id))
-      events.publish({ type: 'plan.message', message: toMessage(message!) })
+      events.publish({ type: 'plan.message', message: toMessage(message) })
       events.publish({ type: 'plan.session', session: await this.#toSession(await this.#session(session.id)) })
     }
   }
@@ -315,7 +315,7 @@ export class PlanService {
       attached = `${task.ref} ${task.title}`
     }
     const text = input.text || `Refine ${attached}`
-    const [message] = await db.insert(planMessages).values({ sessionId, role: 'human', text, runId: null }).returning()
+    const message = await insertMessage(db, sessionId, { role: 'human', kind: 'message', text })
     // A new message reopens a session closed by approving its plan
     await db.update(planSessions).set({ updatedAt: new Date(), unread: false, closedAt: null }).where(eq(planSessions.id, sessionId))
     await appendAudit(db, { projectId: project.id, actor }, auditEvent('plan.message', { sessionId, messageId: message!.id }))
@@ -325,7 +325,7 @@ export class PlanService {
       prompt: pmPrompt({ text, attachedTask: attached, projectName: project.name, prefix: project.prefix, fresh: session.agentSessionId === null }),
       fallbackPrompt: pmFallbackPrompt({ text, attachedTask: attached, projectName: project.name, prefix: project.prefix, history: await this.#history(sessionId) })
     })
-    return toMessage(message!)
+    return toMessage(message)
   }
 
   async #turn(session: SessionRow, project: ProjectRow, prompts: { prompt: string, fallbackPrompt: string }): Promise<void> {
@@ -359,11 +359,11 @@ export class PlanService {
   async onRunEnded(sessionId: string, runId: string, reply: string | null, error: string | null): Promise<void> {
     const { db, events } = this.#d
     if (reply?.trim()) {
-      const [message] = await db.insert(planMessages).values({ sessionId, role: 'pm', kind: 'message', text: reply.trim(), runId }).returning()
-      events.publish({ type: 'plan.message', message: toMessage(message!) })
+      const message = await insertMessage(db, sessionId, { role: 'pm', kind: 'message', text: reply.trim() }, { runId })
+      events.publish({ type: 'plan.message', message: toMessage(message) })
     } else if (error) {
-      const [message] = await db.insert(planMessages).values({ sessionId, role: 'pm', kind: 'error', text: error, runId }).returning()
-      events.publish({ type: 'plan.message', message: toMessage(message!) })
+      const message = await insertMessage(db, sessionId, { role: 'pm', kind: 'error', text: error }, { runId })
+      events.publish({ type: 'plan.message', message: toMessage(message) })
     }
     // Every finished turn (reply, question or plan) waits for the human to read it
     await db.update(planSessions).set({ updatedAt: new Date(), unread: true }).where(eq(planSessions.id, sessionId))
@@ -459,8 +459,8 @@ export class PlanService {
         const parsed = askQuestionInput.safeParse(input)
         if (!parsed.success) throw new ToolError(`The question was not asked: ${z.prettifyError(parsed.error)}`)
         const { question, recommendation, options } = parsed.data
-        const [message] = await db.insert(planMessages).values({ sessionId, role: 'pm', kind: 'question', text: question, recommendation, options, runId }).returning()
-        this.#d.events.publish({ type: 'plan.message', message: toMessage(message!) })
+        const message = await insertMessage(db, sessionId, { role: 'pm', kind: 'question', text: question, recommendation, options }, { runId })
+        this.#d.events.publish({ type: 'plan.message', message: toMessage(message) })
         // The session now has a question: its Inbox item moves up (D11)
         this.#d.events.publish({ type: 'plan.session', session: await this.#toSession(await this.#session(sessionId), runId) })
         return { ok: true, message: 'The question is shown to the human. Finish your turn; their answer arrives as the next message.' }
@@ -669,7 +669,7 @@ export class PlanService {
         ...proposed.tasks.map((task, position) => ({ planId, key: task.key, taskId: ids.get(task.key)!, change: changes.get(task.key) ?? 'added', position, revision: revisions.get(task.key) ?? null })),
         ...dropped.map((r, i) => ({ planId, key: r.key, taskId: r.revision ? r.taskId : null, change: 'removed' as const, position: proposed.tasks.length + i }))
       ])
-      await tx.insert(planMessages).values({ sessionId: session.id, role: 'pm', kind: 'message', text: proposed.summary || `Proposed plan v${row!.version}: ${proposed.title}`, planId, runId })
+      await insertMessage(tx, session.id, { role: 'pm', kind: 'message', text: proposed.summary || `Proposed plan v${row!.version}: ${proposed.title}` }, { planId, runId })
       await appendAudit(tx, { projectId: project.id, actor }, auditEvent('plan.proposed', { planId, version: row!.version, tasks: proposed.tasks.length, revises: revisions.size }))
       return row!
     })
@@ -1031,17 +1031,27 @@ export class PlanService {
   }
 }
 
-// A session as the API shows it, with the plan waiting for approval and its
-// latest message, which the Inbox's Plan thread items also need (D11)
-export async function sessionState(db: Executor, row: SessionRow, activeRunId?: string | null): Promise<{ session: PlanSession, planId: string | null, last: typeof planMessages.$inferSelect | null }> {
+// What a session is waiting on. A question or a proposed plan comes with its
+// row, so the status can't be shown without it.
+export type SessionAttention =
+  | { status: 'needs_approval', plan: typeof plans.$inferSelect }
+  | { status: 'question', question: typeof planMessages.$inferSelect }
+  | { status: 'none' }
+
+// A session as the API shows it, with what it waits on, which the Inbox's Plan
+// thread items also need (D11)
+export async function sessionState(db: Executor, row: SessionRow, activeRunId?: string | null): Promise<{ session: PlanSession, attention: SessionAttention }> {
   const [last] = await db.select().from(planMessages).where(eq(planMessages.sessionId, row.id)).orderBy(desc(planMessages.createdAt)).limit(1)
-  const [proposed] = await db.select({ id: plans.id }).from(plans).where(and(eq(plans.sessionId, row.id), eq(plans.status, 'proposed'))).limit(1)
+  const [proposed] = await db.select().from(plans).where(and(eq(plans.sessionId, row.id), eq(plans.status, 'proposed'))).limit(1)
   let runId = activeRunId ?? null
   if (activeRunId === undefined) {
     const [active] = await db.select({ id: runs.id }).from(runs)
       .where(and(eq(runs.role, 'pm'), eq(runs.planSessionId, row.id), inArray(runs.state, ['queued', 'starting', 'running'])))
     runId = active?.id ?? null
   }
+  const attention: SessionAttention = proposed
+    ? { status: 'needs_approval', plan: proposed }
+    : last?.role === 'pm' && last.kind === 'question' ? { status: 'question', question: last } : { status: 'none' }
   const session: PlanSession = {
     id: row.id,
     projectId: row.projectId,
@@ -1050,12 +1060,12 @@ export async function sessionState(db: Executor, row: SessionRow, activeRunId?: 
     preview: last?.text.slice(0, 160) ?? '',
     unread: row.unread,
     closed: row.closedAt !== null,
-    status: proposed ? 'needs_approval' : last?.kind === 'question' ? 'question' : 'none',
+    status: attention.status,
     activeRunId: runId,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString()
   }
-  return { session, planId: proposed?.id ?? null, last: last ?? null }
+  return { session, attention }
 }
 
 // Whether an agent holds the task now or has ever run on it
@@ -1096,19 +1106,27 @@ async function keepCriterionIds(tx: Executor, taskId: string, texts: (string | {
   })
 }
 
+// Every message is written here, so its fields match its role and kind
+async function insertMessage(db: Executor, sessionId: string, fields: NewPlanMessageFields, links: { planId?: string, runId?: string | null } = {}): Promise<typeof planMessages.$inferSelect> {
+  const [row] = await db.insert(planMessages).values({ ...planMessageFields.parse(fields), sessionId, ...links }).returning()
+  return row!
+}
+
+// Rows older than the constraints aren't checked, so the role and kind are
+// read defensively: anything unknown shows as a plain PM message, and only a
+// PM question keeps its question fields.
 function toMessage(row: typeof planMessages.$inferSelect): PlanMessage {
-  return {
+  const message = {
     id: row.id,
     sessionId: row.sessionId,
-    role: row.role as 'human' | 'pm',
-    kind: row.kind as PlanMessage['kind'],
     text: row.text,
-    recommendation: row.recommendation,
-    options: row.options,
     planId: row.planId,
     runId: row.runId,
     createdAt: row.createdAt.toISOString()
   }
+  if (row.role === 'human') return { ...message, role: 'human', kind: 'message', recommendation: null, options: null }
+  if (row.kind === 'question') return { ...message, role: 'pm', kind: 'question', recommendation: row.recommendation, options: row.options }
+  return { ...message, role: 'pm', kind: row.kind === 'error' ? 'error' : 'message', recommendation: null, options: null }
 }
 
 // The model's answer as a title: its first line without quotes, a "Title:"
