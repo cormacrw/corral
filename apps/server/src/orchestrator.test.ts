@@ -14,9 +14,9 @@ describe('orchestrator', () => {
 
   beforeAll(async () => {
     t = await createTestApp('postgres', { listen: true })
-    // Each test leaves its run live, so the one developer must have room for all of them
+    // Each test leaves its run live, so the developer and runner need room for all of them
     await t.db.update(agents).set({ concurrency: 50 }).where(ne(agents.role, 'pm'))
-    runner = await FakeRunner.connect(t.server!.url)
+    runner = await FakeRunner.connect(t.server!.url, [], 'r1', { slots: 50 })
   })
 
   afterAll(async () => {
@@ -341,7 +341,7 @@ describe('orchestrator', () => {
   it('reconciles on reconnect: runs the runner lost are interrupted, unknown ones are stopped', async () => {
     const { project, task, job } = await assigned()
     runner.close()
-    runner = await FakeRunner.connect(t.server!.url, [{ runId: 'ghost', leaseEpoch: 1 }])
+    runner = await FakeRunner.connect(t.server!.url, [{ runId: 'ghost', leaseEpoch: 1 }], 'r1', { slots: 50 })
     // The ghost is stopped only after all lost runs have been reconciled.
     // Earlier tests leave live runs behind, so a fixed delay can inspect
     // this run before reconciliation has reached it on a busy machine.
