@@ -38,6 +38,7 @@ services:
         condition: service_healthy
     environment:
       CORRAL_DATABASE_URL: postgres://corral:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/corral
+      CORRAL_RUNNER_TOKEN: ${CORRAL_RUNNER_TOKEN:-}
       # Where people open Corral; PR bodies link here
       CORRAL_PUBLIC_URL: ${CORRAL_PUBLIC_URL:-http://localhost:3000}
     volumes:
@@ -53,6 +54,7 @@ services:
       - server
     environment:
       CORRAL_SERVER_URL: http://server:4100
+      CORRAL_RUNNER_TOKEN: ${CORRAL_RUNNER_TOKEN:-}
       CORRAL_RUNNER_NAME: ${CORRAL_RUNNER_NAME:-home-server}
       # Author and committer of agent commits; unset makes the runner warn
       CORRAL_GIT_AUTHOR_NAME: ${CORRAL_GIT_AUTHOR_NAME:-}

@@ -34,7 +34,7 @@ export interface TestApp extends Services {
 
 let counter = 0
 
-export async function createTestApp(driver: 'pglite' | 'postgres', options: { listen?: boolean } = {}): Promise<TestApp> {
+export async function createTestApp(driver: 'pglite' | 'postgres', options: { listen?: boolean, runnerToken?: string | undefined, runnerOnly?: boolean | undefined } = {}): Promise<TestApp> {
   const handle: DatabaseHandle | null = driver === 'pglite'
     ? await createTestDatabase('pglite')
     : await createTestDatabase('postgres')
@@ -53,7 +53,7 @@ export async function createTestApp(driver: 'pglite' | 'postgres', options: { li
   await services.orchestrator.init()
   const deps = { db: handle.db, events: bus, actor, ...services }
   const app = createApp(deps)
-  const server = options.listen ? await startServer(deps, { host: '127.0.0.1', port: 0 }) : null
+  const server = options.listen ? await startServer(deps, { host: '127.0.0.1', port: 0, runnerToken: options.runnerToken, runnerOnly: options.runnerOnly }) : null
 
   const request = async (method: string, path: string, body?: unknown) => app.request(path, {
     method,

@@ -30,6 +30,14 @@ describe('loadConfig', () => {
     })
   })
 
+  it('requires a token before enabling the external listener', () => {
+    expect(() => loadConfig({ CORRAL_RUNNER_LISTEN: '0.0.0.0:4200' })).toThrow(/CORRAL_RUNNER_TOKEN/)
+    expect(loadConfig({ CORRAL_RUNNER_LISTEN: '[::1]:4200', CORRAL_RUNNER_TOKEN: 'secret' }).runnerListen).toEqual({ host: '::1', port: 4200 })
+    for (const value of ['4200', 'host:0', 'host:65536', 'http://host:4200']) {
+      expect(() => loadConfig({ CORRAL_RUNNER_LISTEN: value, CORRAL_RUNNER_TOKEN: 'secret' })).toThrow(/CORRAL_RUNNER_LISTEN/)
+    }
+  })
+
   it('rejects a port that is not a number', () => {
     expect(() => loadConfig({ CORRAL_SERVER_PORT: 'abc' })).toThrow(/CORRAL_SERVER_PORT/)
   })
