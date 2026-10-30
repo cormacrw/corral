@@ -26,3 +26,32 @@ as the target and exercise assignment, PR submission, approval, merge, dependenc
 claims and conflicts. Runner workspace tests use real local git commits to check
 that a new task starts at the epic tip. These tests use a simulated GitHub; they
 do not create remote branches or PRs.
+
+## Epic PR integration review
+
+Once every non-deleted board task is Merged, the scheduler opens (or recovers)
+the epic branch's PR into the configured target. Drafts and Backlog tasks don't
+hold it back. The PR body links each board task's PR and evidence page.
+
+Epic integration reviews are reviewer runs with `runs.epicId` and no task ID.
+Their detached checkout is the epic PR head, their diff base is the project's
+target, and their prompt includes the epic goal plus every board task's criteria
+and evidence. They rerun lint, typecheck, tests and build without cached results,
+checking how the tasks fit together rather than re-judging individual evidence.
+`get_task` returns the whole epic; `get_evidence` can fetch any of its task items.
+Run leases, runner ownership, concurrency, usage cooldowns and update holds apply.
+
+The epic's `in_review` state means agent integration review. Approval at the
+current head moves it to `human_review`, which alone produces an Epic PR Needs
+you item. The Inbox displays all board tasks and their evidence together. Human
+Approve records `ready_to_merge`; merging is a separate step. Agent or human
+Request changes creates a Ready fix task with the feedback as description and
+criterion, and returns the epic PR to `open`. When fixes merge the same PR gets
+a new integration review.
+
+Moving a Draft or Backlog task onto the board, or moving a board task between
+epics, resets pending epic approval to `open` inside the same transaction and
+interrupts any active integration run. Merely adding Backlog work doesn't.
+Reporting a verdict checks board completion and the live GitHub head again;
+human actions also carry the head shown in the Inbox, so stale approvals fail.
+A changed epic PR head likewise starts fresh integration review.
