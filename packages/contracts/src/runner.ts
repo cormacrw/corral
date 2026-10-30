@@ -69,6 +69,8 @@ export interface RunJob {
   baseBranch?: string
   // Developer and reviewer runs
   taskId: string | null
+  // Integration review: the epic instead of an individual task.
+  epicId?: string
   taskRef: string | null
   // The task's type: a design task's developer gets submit_design (D20).
   // Absent on PM turns and from older servers.

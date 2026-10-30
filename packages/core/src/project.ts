@@ -13,5 +13,5 @@ export const EPIC_REVIEW_MODES = ['epic', 'each_task', 'direct'] as const
 export type EpicReviewMode = typeof EPIC_REVIEW_MODES[number]
 
 // Where an epic's PR is in its review (D23); null on the epic until it opens
-export const EPIC_REVIEW_STATES = ['open', 'in_review', 'human_review', 'changes_requested', 'merged'] as const
+export const EPIC_REVIEW_STATES = ['open', 'in_review', 'human_review', 'changes_requested', 'ready_to_merge', 'merged'] as const
 export type EpicReviewState = typeof EPIC_REVIEW_STATES[number]
