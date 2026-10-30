@@ -46,8 +46,9 @@ describe('design tasks submit versions instead of a PR', () => {
 
   beforeAll(async () => {
     t = await createTestApp('pglite', { listen: true })
+    // Shared scenarios leave fake author and PM runs active; match their capacity.
     await t.db.update(agents).set({ concurrency: 50 })
-    runner = await FakeRunner.connect(t.server!.url)
+    runner = await FakeRunner.connect(t.server!.url, [], 'r1', { slots: 50 })
   })
 
   afterAll(async () => {
@@ -474,7 +475,7 @@ describe('design tasks submit versions instead of a PR', () => {
       expect((await versionsOf(task))[0]).toMatchObject({ status: 'submitted', planSessionId: null })
       expect(await t.db.select().from(planSessions).where(eq(planSessions.projectId, project.id))).toHaveLength(0)
     } finally {
-      runner = await FakeRunner.connect(t.server!.url)
+      runner = await FakeRunner.connect(t.server!.url, [], 'r1', { slots: 50 })
       await expect.poll(() => t.runner.online).toBe(true)
     }
   })
