@@ -273,6 +273,15 @@ export const tasks: Task[] = [
     reviewer: { id: 'a-rev', name: 'Rita' },
     acceptanceCriteria: criteria('Three layout options on desktop and mobile', 'Every agent state is shown', 'design.md lists the screen ids').map(c => ({ ...c, met: true }))
   }),
+  task(corral, 20, {
+    title: 'Show approval confirmation', status: 'human_review', humanReview: true,
+    branch: 'corral/cor-20-confirmation', prNumber: 66,
+    prUrl: 'https://github.com/cormacrw/test-app/pull/66',
+    reviewRounds: 1, headSha: '20aabbccdd',
+    gateChecks: [{ name: 'lint', url: null }, { name: 'test', url: null }],
+    developer: { id: 'a-dev', name: 'Victor' }, reviewer: { id: 'a-rev', name: 'Rita' },
+    acceptanceCriteria: criteria('Approval shows a confirmation', 'Earlier versions are superseded', 'The approval response identifies the version', 'Diagnostic artifacts are retained', 'The Inbox advances after approval').map(c => ({ ...c, met: true }))
+  }),
   task(corral, 19, { title: 'Retry button on failed runs', status: 'in_progress', branch: 'corral/cor-19-retry', developer: { id: 'a-dev', name: 'Victor' } }),
   task(site, 1, { title: 'New landing page hero', status: 'ready', type: 'design', epicId: 'e-site' }),
   task(site, 2, { title: 'Fix broken pricing link', status: 'merged', type: 'bug', epicId: 'e-shipped', mergedAt: ago(10) }),
@@ -456,6 +465,19 @@ export const reviews: Record<string, Review[]> = {
 }
 reviewTask.latestReview = reviews[reviewTask.id]![0]!
 designTask.latestReview = reviews[designTask.id]![0]!
+
+// Separate all-met code/PR state, alongside COR-5's deliberately unmet criterion.
+const allMetTask = at('COR-20')
+evidence[allMetTask.id] = evidence[reviewTask.id]!.map(e => ({
+  ...e, id: `${e.id}-20`, taskId: allMetTask.id,
+  criterionId: e.criterionId ? allMetTask.acceptanceCriteria[reviewTask.acceptanceCriteria.findIndex(c => c.id === e.criterionId)]!.id : null
+}))
+reviews[allMetTask.id] = reviews[reviewTask.id]!.map((r, i) => ({
+  ...r, id: `${r.id}-20`, taskId: allMetTask.id, headSha: allMetTask.headSha!,
+  summary: i === 0 ? reviewerSummary.replace('One criterion is not met: no toast confirms the approval. The page re-renders with the new status, so the human does get feedback, and I judged this minor enough not to block; it is flagged for the human to decide.', 'All five criteria are met. The confirmation appears and the Inbox advances to the next item.') : r.summary,
+  criteria: allMetTask.acceptanceCriteria.map(c => ({ criterionId: c.id, met: i === 0, note: 'Checked the confirmation and next-item flow in the static prototype.' }))
+}))
+allMetTask.latestReview = reviews[allMetTask.id]![0]!
 
 // A design task's submitted versions (D20); the preview itself is served by the server
 export const designs: Record<string, DesignVersion[]> = {
@@ -655,6 +677,7 @@ export const clis: CliStatus[] = [
 // What each item's agent wrote (COR-190): a long, realistic body for the
 // items whose panel is being designed. Others fall back to statusReason.
 const inboxBodies: Record<string, string> = {
+  'COR-20': 'All five criteria are met. Review the approval confirmation and merge PR #66.\n\n' + reviews[allMetTask.id]![0]!.summary,
   'COR-5': 'Rita approved round 2 of this change. Approving a design version now marks it approved and supersedes the earlier versions in the same transaction, and the approval response identifies the version.\n\n' + reviewerSummary,
   'COR-18': 'Dana submitted version 1 of the Agents page design: three layout options (grid, list and board) on desktop and mobile, each with every agent state. Rita approved it. Approve the version to plan its build, or request changes.',
   'COR-19': 'Should **Retry** reuse the failed run\'s worktree, or start from a fresh checkout?\n\nReusing it keeps the agent\'s partial work and is faster, but a corrupted worktree (the usual cause of COR-9) would fail again. A fresh checkout is slower by about 40s on this repo.\n\nI\'d start fresh by default and reuse only when the failure was a timeout. Which do you want?',

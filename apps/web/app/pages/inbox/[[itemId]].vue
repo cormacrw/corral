@@ -196,7 +196,15 @@ async function submit(message: string): Promise<boolean> {
             : action.value === 'delete'
               ? { action: 'delete', ...(message && { text: message }) }
               : action.value === 'send_back' ? { action: 'send_back' } : { action: 'approve' }
-      await api.inbox.act(selected.value.taskId, input)
+      if (input.action === 'approve' && task.value?.type === 'design') {
+        const slug = live.state.value.projects.find(p => p.id === task.value!.projectId)!.slug
+        const versions = await api.tasks.designs(slug, task.value.number)
+        const version = versions.find(v => v.status === 'submitted')
+        if (!version) throw new Error('No submitted design version to approve')
+        await api.tasks.approveDesign(slug, task.value.number, version.version, message.trim() || undefined)
+      } else {
+        await api.inbox.act(selected.value.taskId, input)
+      }
       toast.add({ title: 'Done', description: submitLabel.value, color: 'success' })
     }
     const actedOn = selected.value

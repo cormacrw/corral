@@ -2,6 +2,7 @@ import type { DraftSession, EpicDetail, Inbox, PlanSessionDetail, Project, PullR
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
+import { designs } from './fixtures'
 import { mockCall, onMockEvent, pmReply } from './mock-api'
 
 describe('prototype mock API', () => {
@@ -50,8 +51,36 @@ describe('prototype mock API', () => {
       question: null, plan: { id: 'plan-1', version: 1, epicCount: 1, taskCount: 3 }
     })
     expect(threads.every(i => !('body' in i))).toBe(true)
-    expect(inbox.needsYou.filter(i => i.type !== 'plan_thread').map(i => i.type).sort()).toEqual(['blocked', 'failed', 'human_review', 'human_review', 'question'])
+    expect(inbox.needsYou.filter(i => i.type !== 'plan_thread').map(i => i.type).sort()).toEqual(['blocked', 'failed', 'human_review', 'human_review', 'human_review', 'question'])
     expect(threads.some(i => i.sessionId === 's-idle')).toBe(false)
+  })
+
+  it('includes both unmet and all-met code reviews with artifacts', async () => {
+    const partial = await mockCall<Task>('GET', '/tasks/COR-5')
+    const complete = await mockCall<Task>('GET', '/tasks/COR-20')
+    expect(partial.acceptanceCriteria.filter(c => c.met)).toHaveLength(4)
+    expect(complete.acceptanceCriteria.filter(c => c.met)).toHaveLength(5)
+    expect(complete.type).toBe('task')
+    expect(complete.prUrl).toContain('/pull/')
+    expect(complete.gateChecks).toHaveLength(2)
+  })
+
+  it('approves the design version and task without entering merge states', async () => {
+    const fixture = designs['t-cor-18']!
+    const before = structuredClone(fixture)
+    fixture.push({ ...structuredClone(fixture[0]!), id: 'dv-18-old', version: 0, status: 'approved' })
+    try {
+      const task = await mockCall<Task>('POST', '/projects/corral/tasks/18/designs/1/approve', {})
+      expect(task.status).toBe('approved')
+      const versions = await mockCall<{ version: number, status: string }[]>('GET', '/projects/corral/tasks/18/designs')
+      expect(versions.find(v => v.version === 1)!.status).toBe('approved')
+      expect(versions.find(v => v.version === 0)!.status).toBe('superseded')
+      const inbox = await mockCall<Inbox>('GET', '/inbox')
+      expect(inbox.needsYou.some(i => i.id === task.id)).toBe(false)
+    } finally {
+      fixture.splice(0, fixture.length, ...before)
+      await mockCall('PATCH', '/projects/corral/tasks/18', { status: 'human_review' })
+    }
   })
 
   it('drops an unread-reply thread from the inbox once it is read', async () => {

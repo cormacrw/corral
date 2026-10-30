@@ -180,6 +180,10 @@ route('POST', '/inbox/:taskId/actions', ([taskId], body) => {
   const task = f.tasks.find(t => t.id === taskId) ?? notFound()
   const input = body as InboxActionInput
   f.answered.add(task.ref)
+  if (input.action === 'approve' && task.type === 'design') {
+    const version = f.designs[task.id]?.find(v => v.status === 'submitted') ?? notFound()
+    return { task: approveDesign(task, version.version) }
+  }
   if (input.action === 'delete') {
     f.tasks.splice(f.tasks.indexOf(task), 1)
     emit({ type: 'task.deleted', taskId: task.id, projectId: task.projectId })
@@ -195,6 +199,15 @@ route('POST', '/inbox/:taskId/actions', ([taskId], body) => {
   return { task }
 })
 route('GET', '/projects/:slug/tasks/:number/designs', ([slug, number]) => f.designs[taskIn(slug!, number!).id] ?? [])
+function approveDesign(task: Task, version: number): Task {
+  const versions = f.designs[task.id] ?? []
+  const selected = versions.find(v => v.version === version) ?? notFound()
+  for (const v of versions) v.status = v === selected ? 'approved' : 'superseded'
+  Object.assign(task, { status: 'approved', statusReason: null, updatedAt: new Date().toISOString() })
+  emit({ type: 'task.updated', task })
+  return task
+}
+route('POST', '/projects/:slug/tasks/:number/designs/:version/approve', ([slug, number, version]) => approveDesign(taskIn(slug!, number!), Number(version)))
 
 route('GET', '/plan/sessions', () => f.planSessions)
 route('GET', '/plan/sessions/:id', ([id]) => session(id!))

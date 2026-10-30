@@ -42,8 +42,8 @@ const hero = computed(() => p.images.value[shown.value] ?? p.images.value[0] ?? 
             :key="e.id"
             type="button"
             :class="['h-12 w-20 shrink-0 overflow-hidden rounded border bg-default', i === shown ? 'border-primary ring-2 ring-primary' : 'border-default']"
-            :aria-label="`Show ${e.fileName}`"
-            @click="shown = i"
+            :aria-label="`Open ${e.fileName}`"
+            @click="shown = i; p.view(e)"
           >
             <img
               :src="e.url ?? undefined"
