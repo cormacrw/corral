@@ -645,6 +645,9 @@ export class Orchestrator implements RunnerHandlers {
       ? await db.select().from(designVersions)
           .where(and(eq(designVersions.taskId, task.id), eq(designVersions.commitSha, task.headSha))).orderBy(desc(designVersions.version)).limit(1)
       : []
+    const [rebase] = task.rebaseOnly
+      ? await db.select().from(runs).where(and(eq(runs.taskId, task.id), eq(runs.outcome, 'pr_rebased'), eq(runs.headSha, task.headSha!))).orderBy(desc(runs.number)).limit(1)
+      : []
     const pin = await this.#pinnedDesign(ctx.project.prefix, task.id)
     return {
       runId: ctx.run.id,
@@ -674,6 +677,7 @@ export class Orchestrator implements RunnerHandlers {
         branch: spike ? null : task.branch,
         spike,
         findings: reported?.summary ?? null,
+        rebaseReport: rebase ? { review: rebase.review, conflictedFiles: rebase.conflictedFiles } : null,
         design: design ? { version: version?.version ?? null } : null,
         pin,
         underReview: version ? { version: version.version, commitSha: version.commitSha, screenshots: version.screenshots.map(s => s.fileName) } : null,
@@ -947,7 +951,7 @@ export class Orchestrator implements RunnerHandlers {
       await tx.update(tasks).set({ leaseRunId: null, leaseRole: null, leaseExpiresAt: null, leaseHeartbeatAt: null, updatedAt: this.#now() })
         .where(and(eq(tasks.id, ctx.task.id), eq(tasks.leaseRunId, ctx.run.id)))
     }
-    await appendAudit(tx, { projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor: server }, auditEvent('run.ended', { runId: ctx.run.id, runNumber: ctx.run.number, state: end.state, outcome: end.outcome ?? null, error: 'error' in end ? end.error : null }))
+    await appendAudit(tx, { projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor: server }, auditEvent('run.ended', { runId: ctx.run.id, runNumber: ctx.run.number, state: end.state, outcome: end.outcome ?? null, error: 'error' in end ? end.error : null, ...(end.outcome === 'pr_rebased' ? { review: end.review, conflictedFiles: end.conflictedFiles } : {}) }))
   }
 
   // A human stops a run: the process tree is killed, the run is Interrupted
@@ -1344,6 +1348,10 @@ export class Orchestrator implements RunnerHandlers {
           if (!ctx.task!.rebaseOnly && report.outcome === 'pr_rebased') throw new ToolError('Not submitted. This round expects pr_opened or pr_updated, not pr_rebased.')
           if (spike) throw new ToolError('Not submitted. A spike opens no PR: report your findings with outcome findings_reported.')
           if (design) throw new ToolError('Not submitted. A design task opens no PR: call submit_design, then report design_submitted.')
+          if (report.outcome === 'pr_rebased') {
+            if (!report.review) throw new ToolError('Not submitted. Add review: trivial or needs_review.')
+            if (!report.conflictedFiles?.length) throw new ToolError('Not submitted. Add conflictedFiles: every file in which you resolved a conflict.')
+          }
           return this.#submit(ctx, { ...report, outcome: report.outcome })
         case 'findings_reported':
           if (!spike) throw new ToolError(`Not submitted. Only a spike reports findings; this task reports ${design ? 'design_submitted' : 'pr_opened or pr_updated'}.`)
@@ -1518,7 +1526,7 @@ export class Orchestrator implements RunnerHandlers {
       }, server, { event: report.outcome, runId: ctx.run.id, headSha: report.headSha, pr: pr?.number ?? null })
       await tx.update(tasks).set({ headSha: report.headSha, ...(pr && { prNumber: pr.number, prUrl: pr.url }) }).where(eq(tasks.id, task.id))
       const comment = await this.#postNote(tx, ctx, report.note!)
-      await this.#endRunIn(tx, ctx, { state: 'completed', outcome: report.outcome, summary: report.summary, headSha: report.headSha })
+      await this.#endRunIn(tx, ctx, { state: 'completed', outcome: report.outcome, summary: report.summary, headSha: report.headSha, ...(report.outcome === 'pr_rebased' ? { review: report.review, conflictedFiles: report.conflictedFiles } : {}) })
       return comment
     })
     this.#d.events.publish({ type: 'comment.created', comment })

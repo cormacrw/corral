@@ -12,7 +12,7 @@ import {
   uuid,
   type AnyPgColumn
 } from 'drizzle-orm/pg-core'
-import { DESIGNER_RUN_OUTCOMES, DEVELOPER_RUN_OUTCOMES, PM_RUN_OUTCOMES, REVIEWER_RUN_OUTCOMES, TERMINAL_RUN_STATES } from '@corral/core'
+import { DESIGNER_RUN_OUTCOMES, DEVELOPER_RUN_OUTCOMES, PM_RUN_OUTCOMES, REVIEWER_RUN_OUTCOMES, TERMINAL_RUN_STATES, type RebaseReview } from '@corral/core'
 import { createdAt, updatedAt } from './columns.ts'
 import { agentRole, runOutcome, runState } from './enums.ts'
 import { epics } from './epics.ts'
@@ -78,6 +78,8 @@ export const runs = pgTable('runs', {
   pmJob: jsonb(),
   // The commit a developer run pushed, or a reviewer run reviewed
   headSha: text(),
+  review: text().$type<RebaseReview>(),
+  conflictedFiles: jsonb().$type<string[]>(),
   summary: text(),
   error: text(),
   // Known reset time when the outcome is rate_limited (D3)

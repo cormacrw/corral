@@ -45,6 +45,8 @@ function toRun({ run, agentName, agentRuntime, prefix, taskNumber, taskTitle, ep
     epicId: run.epicId,
     epicTitle,
     summary: run.summary,
+    review: run.review,
+    conflictedFiles: run.conflictedFiles,
     error: run.error,
     headSha: run.headSha,
     inputTokens: run.inputTokens,
