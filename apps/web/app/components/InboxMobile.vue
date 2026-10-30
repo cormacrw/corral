@@ -19,6 +19,7 @@ const props = defineProps<{
   selected: TaskInboxItem | ReleaseNotesItem | null
   alreadyResolved: boolean
   task: Task | null
+  isSpike: boolean
   evidence: Evidence[]
   reviews: Review[]
   actions: { value: string, label: string, icon: string }[]
@@ -26,10 +27,13 @@ const props = defineProps<{
   submitLabel: string
   needsText: boolean
   busy: boolean
+  approveBlocked: boolean
+  taskLoadFailed: boolean
   actionError: string | null
   typeBadge: (type: InboxItem['type']) => { label: string, color: Color }
   onSubmit: (text: string) => Promise<boolean>
   onRetry: () => unknown
+  onRetryTask: () => unknown
 }>()
 const checkedHumanCriteria = defineModel<string[]>('checkedHumanCriteria', { required: true })
 const tab = defineModel<'needsYou' | 'activity' | 'resolved'>('tab', { required: true })
@@ -153,7 +157,7 @@ const tabs = computed(() => [
             class="text-base"
           />
           <div
-            v-if="selected.prUrl || (selected.type === 'human_review' && task?.gateChecks?.length)"
+            v-if="!isSpike && (selected.prUrl || (selected.type === 'human_review' && task?.gateChecks?.length))"
             class="flex flex-wrap gap-1.5"
           >
             <UButton
@@ -234,6 +238,7 @@ const tabs = computed(() => [
           color="error"
           variant="subtle"
           :title="actionError"
+          :actions="taskLoadFailed ? [{ label: 'Retry', onClick: onRetryTask }] : []"
         />
         <PromptComposer
           v-model="text"
@@ -242,6 +247,7 @@ const tabs = computed(() => [
           :submit-color="action === 'delete' ? 'error' : 'primary'"
           :allow-empty="action !== null && !needsText"
           :busy="busy"
+          :disabled="approveBlocked"
           :project="selected.project.slug"
           @submit="onSubmit"
         />

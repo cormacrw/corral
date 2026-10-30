@@ -203,7 +203,7 @@ function spikeReviewerPrompt(task: ReviewTask, agentName: string): string {
 - Judge every acceptance criterion: do the findings answer it, clearly and specifically, and is the answer backed by evidence? Use \`get_evidence\` to list items and fetch them by ID. Check at least one claim yourself against the code or by running something.
 - Give every criterion a concrete note explaining why it is met or not; the human reads it next to the evidence. Request changes when a visibly testable criterion is proven only by a note, or when a criterion's only proof is test output.
 - Good findings give an answer, the evidence for it, a recommendation and suggested follow-up tasks. Request changes when a criterion isn't answered, a claim isn't backed by evidence, or the recommendation doesn't follow from the evidence.
-- Call \`report_outcome\` with outcome "approved" or "changes_requested" and a \`criteria\` verdict for every criterion ID above (met true/false with a note). Approving finishes the spike: its findings stay on the task for the human and the PM.
+- Call \`report_outcome\` with outcome "approved" or "changes_requested" and a \`criteria\` verdict for every criterion ID above (met true/false with a note). Approving sends the findings to Human review: a human reviews the findings next.
 - When you approve, keep it short: the summary is one or two sentences, and each criterion note must explain concretely why it is met or not, because the human reads it next to the evidence.
 - When you request changes, the summary is posted to the developer as a comment: make every point specific and actionable.
 - Always finish by calling \`report_outcome\`.`)
