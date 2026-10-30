@@ -234,8 +234,8 @@ describe('approval and merging', () => {
     expect(expectOk(transition(task('agent_review'), validEvents.review_approved, server)).status).toBe('ready_to_merge')
   })
 
-  it('finishes an unflagged spike when the reviewer approves: there is no PR to merge', () => {
-    expect(expectOk(transition(task('agent_review', { type: 'spike' }), validEvents.review_approved, server)).status).toBe('merged')
+  it('sends an unflagged spike to Human review when the reviewer approves', () => {
+    expect(expectOk(transition(task('agent_review', { type: 'spike' }), validEvents.review_approved, server)).status).toBe('human_review')
   })
 
   it('always sends an approved design to Human review, whatever its flag (D20)', () => {

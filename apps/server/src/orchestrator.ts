@@ -1162,7 +1162,7 @@ export class Orchestrator implements RunnerHandlers {
         : task.type === 'design'
           ? 'Approval recorded. The human reviews the design next. You can stop now.'
           : spike
-            ? `Approval recorded. ${task.humanReview ? 'A human reviews the findings next.' : 'The spike is finished and its findings stay on the task.'} You can stop now.`
+            ? 'Approval recorded. A human reviews the findings next. You can stop now.'
             : 'Approval recorded. Corral handles human review, CI and the merge from here. You can stop now.'
     }
   }

@@ -191,7 +191,7 @@ export function transition(
     // always goes to one (D20). A spike has no PR to merge, so accepting its
     // findings finishes it.
     case 'review_approved':
-      return ok({ ...task, status: requiresHumanReview(task.type ?? 'task', task.humanReview) ? 'human_review' : task.type === 'spike' ? 'merged' : 'ready_to_merge' })
+      return ok({ ...task, status: requiresHumanReview(task.type ?? 'task', task.humanReview) ? 'human_review' : 'ready_to_merge' })
 
     case 'human_approve':
       return ok({ ...task, status: task.type === 'spike' ? 'merged' : 'ready_to_merge' })

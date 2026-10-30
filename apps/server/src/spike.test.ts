@@ -1,4 +1,4 @@
-import type { Comment, Project, RunJob, Task } from '@corral/contracts'
+import type { Inbox, Comment, Project, RunJob, Task } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { and, eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -48,7 +48,10 @@ describe('spikes deliver findings instead of a PR', () => {
 
   async function approved(input: Parameters<TestApp['createTask']>[1] = {}) {
     const project = await t.createProject()
-    const task = await t.createTask(project.slug, { title: 'Can we lock with Postgres?', type: 'spike', acceptanceCriteria: ['Says whether advisory locks are enough', 'Names the follow-up work'], ...input })
+    const task = await t.createTask(project.slug, { title: 'Can we lock with Postgres?', type: 'spike', humanReview: false, acceptanceCriteria: ['Says whether advisory locks are enough', 'Names the follow-up work'], ...input })
+    // Creation enables mandatory review; turn the stored flag off to also
+    // cover existing spikes and later edits that disable it.
+    expect((await t.request('PATCH', `/api/projects/${project.slug}/tasks/${task.number}`, { humanReview: input.humanReview ?? false })).status).toBe(200)
     expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'approve' })).status).toBe(200)
     return { project, task: await full(project, task) }
   }
@@ -80,6 +83,11 @@ describe('spikes deliver findings instead of a PR', () => {
   it('runs a spike end to end with no branch or PR, and ends in Merged with the findings on the task', async () => {
     const { project, task } = await approved()
 
+    const dependent = await t.createTask(project.slug, { title: 'Implement locking', dependsOn: [task.number] })
+    expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${dependent.number}/transitions`, { type: 'approve' })).status).toBe(200)
+    await t.orchestrator.schedule()
+    expect(runner.received.some(m => m.type === 'run.assign' && m.job.taskId === dependent.id)).toBe(false)
+
     // The developer gets no branch and is told to investigate and report findings
     const developer = await nextJob(task, 'developer')
     expect(developer).toMatchObject({ branch: null, headSha: null })
@@ -108,7 +116,10 @@ describe('spikes deliver findings instead of a PR', () => {
     expect(reviewer.prompt).toContain('lock-test.txt')
     expect(reviewer.prompt).not.toContain('git diff')
     const result = await runner.call(reviewer.runId, reviewer.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Answers both.', criteria: verdicts(task, [true, true]) })
-    expect(result).toMatchObject({ ok: true, result: { message: expect.stringContaining('The spike is finished') } })
+    expect(result).toMatchObject({ ok: true, result: { message: expect.stringContaining('A human reviews the findings next.') } })
+
+    expect(await taskRow(task.id)).toMatchObject({ status: 'human_review', humanReview: false, mergedAt: null })
+    expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/approve`)).status).toBe(200)
 
     // Merged, the final column, without GitHub: nothing pushed, opened or merged
     row = await taskRow(task.id)
@@ -124,6 +135,9 @@ describe('spikes deliver findings instead of a PR', () => {
     const detail = await full(project, task)
     expect(detail).toMatchObject({ status: 'merged', prUrl: null })
     expect(detail.acceptanceCriteria.every(c => c.met)).toBe(true)
+
+    // Finishing the spike releases its dependent for developer work.
+    expect((await nextJob(dependent, 'developer')).taskId).toBe(dependent.id)
 
     // Finished: nothing more is claimed for it
     await t.orchestrator.schedule()
@@ -170,23 +184,31 @@ describe('spikes deliver findings instead of a PR', () => {
     expect(second.prompt).toContain('Suggested follow-up tasks')
     expect(second.prompt).toContain('Your feedback last round')
     await runner.call(second.runId, second.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Now complete.', criteria: verdicts(task, [true, true]) })
-    expect(await taskRow(task.id)).toMatchObject({ status: 'merged', reviewRounds: 1 })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'human_review', reviewRounds: 1 })
+    const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
+    expect(inbox.needsYou.find(i => i.id === task.id)).toMatchObject({ body: `## Findings\n\n${FINDINGS}`, preview: `## Findings\n\n${FINDINGS}`.slice(0, 200) })
     const findings = (await commentsOf(project, task)).filter(c => c.body.startsWith('## Findings'))
     expect(findings).toHaveLength(2)
     expect(t.github.pulls.size).toBe(0)
     await pause(project)
   })
 
-  it('sends a flagged spike to Human review, and finishes it on the human’s approval', async () => {
-    const { project, task } = await approved({ humanReview: true })
+  it('always stops a spike for human feedback, then delivers that feedback to the developer', async () => {
+    const { project, task } = await approved({ humanReview: false })
     await reportFindings(await nextJob(task, 'developer'), task)
+    const before = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
     const reviewer = await nextJob(task, 'reviewer')
     await runner.call(reviewer.runId, reviewer.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Good.', criteria: verdicts(task, [true, true]) })
     expect(await taskRow(task.id)).toMatchObject({ status: 'human_review' })
 
-    expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/approve`)).status).toBe(200)
-    expect(await taskRow(task.id)).toMatchObject({ status: 'merged', prNumber: null })
-    expect(t.github.pulls.size).toBe(0)
+    const after = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
+    expect(after.count).toBe(before.count + 1)
+    expect(after.needsYou.find(i => i.id === task.id)).toMatchObject({ type: 'human_review', body: `## Findings\n\n${FINDINGS}`, preview: `## Findings\n\n${FINDINGS}`.slice(0, 200) })
+    await runner.next('run.stop', m => m.runId === reviewer.runId)
+    const feedback = 'Please compare session locks too.'
+    expect((await t.request('POST', `/api/inbox/${task.id}/actions`, { action: 'request_changes', text: feedback })).status).toBe(200)
+    expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress' })
+    expect((await nextJob(task, 'developer')).prompt).toContain(feedback)
     await pause(project)
   })
 
