@@ -5,9 +5,10 @@ project-isolated data and CLI config volumes. Its `.env.example` defaults to
 `gaming-pc`, four slots and `developer,reviewer,design`. Use the explicit
 `--env-file deploy/runner/.env` when invoking Compose from the checkout root.
 
-The home-server Compose now requires a shared `CORRAL_RUNNER_TOKEN` for server
-and local runner. It enables the separate runner-only listener on container port
-4200 and publishes it on `CORRAL_RUNNER_BIND_ADDRESS` (default loopback) and
+The home-server Compose passes a shared `CORRAL_RUNNER_TOKEN` to server and local
+runner. With the token set it enables the separate runner-only listener on
+container port 4200; without one the listener stays off, so a deployed `.env`
+without a token still deploys. The port is published on `CORRAL_RUNNER_BIND_ADDRESS` (default loopback) and
 `CORRAL_RUNNER_PORT` (default 4200). Operators set the binding to the home server's
 Tailscale IPv4 address; port 4100 remains internal. This does not expose the API.
 

@@ -14,13 +14,23 @@ secret with `openssl rand -hex 32`. Set `CORRAL_RUNNER_TOKEN` to that secret and
 (`tailscale ip -4`, e.g. `100.90.80.70`). Leave `CORRAL_RUNNER_PORT=4200`, or
 choose an unused host port. Then run `docker compose up -d --build`.
 
-Both the server and its local runner receive the same token. A missing token
-fails Compose configuration. The listener binds `0.0.0.0:4200` *inside Docker*,
+Both the server and its local runner receive the same token. Without a token
+the listener stays off and the local runner keeps working on the private Docker
+network, so an existing `.env` keeps deploying. The listener binds `0.0.0.0:4200` *inside Docker*,
 but the host publication defaults to `127.0.0.1:4200`, so remote access requires
 explicitly choosing the tailnet address. Never use `0.0.0.0`, `::`, the LAN IP,
 port forwarding on your router, or a Cloudflare Tunnel for this port. Port 4100
 (the API) and Postgres are not published. Allow only the gaming PC to reach this
-port in your Tailscale policy. Start Tailscale before Compose so the address exists.
+port in your Tailscale policy.
+
+Docker can't publish on an address the host doesn't have yet, and after a reboot
+it may start before Tailscale. Let it bind early, or the server container won't
+come back after a reboot:
+
+```sh
+echo 'net.ipv4.ip_nonlocal_bind=1' | sudo tee /etc/sysctl.d/90-corral-tailscale.conf
+sudo sysctl --system
+```
 
 After configuring the tailnet binding, in Windows PowerShell run
 `Test-NetConnection <home-server-tailnet-name> -Port 4200` (expect
