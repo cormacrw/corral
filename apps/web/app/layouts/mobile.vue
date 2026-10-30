@@ -1,6 +1,8 @@
 <script setup lang="ts">
 // The mobile shell (D17, design/mobile.md): banners, the page and a five-tab
 // bar. app.vue swaps it in for the default layout; URLs stay the same.
+import { stepsToAppStart } from '~/utils/app-history'
+
 const live = useLive()
 const state = live.state
 const route = useRoute()
@@ -17,20 +19,25 @@ async function selectTab(event: MouseEvent, to: string) {
   if (resettingHistory) return
   resettingHistory = true
   try {
-    const position = window.history.state?.position
-    if (typeof position === 'number' && position > 0) {
+    // Back to Corral's own first entry, not the browser tab's: earlier
+    // entries may be other sites.
+    const steps = stepsToAppStart(window.history.state?.position)
+    if (steps > 0) {
       await new Promise<void>((resolve) => {
         window.addEventListener('popstate', () => resolve(), { once: true })
         // Suppress the router's pop navigation: intermediate pages must not
         // render (or unmount this shell) while returning to the first entry.
-        router.options.history.go(-position, false)
+        router.options.history.go(-steps, false)
       })
     }
     // Rapid taps during the asynchronous traversal use the latest destination.
+    // The router still thinks it is on the page we left, so force the replace:
+    // when that page is the same tab root, it would otherwise be skipped as a
+    // duplicate and leave the first entry's URL in the address bar.
     let destination: string
     do {
       destination = pendingTab
-      await router.replace(destination)
+      await router.replace({ path: destination, force: steps > 0 })
     } while (pendingTab !== destination)
   } finally {
     resettingHistory = false
