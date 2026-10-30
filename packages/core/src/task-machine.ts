@@ -79,6 +79,9 @@ export type TaskEvent =
   | { type: 'fail', reason: string }
   // A run ended Failed. Keeps the status for a retry, or → Failed at the cap.
   | { type: 'run_failed' }
+  // Blocked → In progress: the PM answered for the human (D27). It keeps the
+  // counters, so an answer can't lift the review-round cap the way resolve does.
+  | { type: 'answer' }
   // Blocked or Failed → Backlog, Ready or In progress (In progress keeps the branch and PR)
   | { type: 'resolve', to: 'backlog' | 'ready' | 'in_progress' }
 
@@ -108,6 +111,7 @@ export const TRANSITION_RULES: Readonly<Record<TaskEventType, Rule>> = {
   block: { from: ['ready', 'in_progress', 'agent_review', 'human_review', 'ready_to_merge'], actors: ['server'] },
   fail: { from: ['in_progress', 'agent_review', 'ready_to_merge'], actors: ['server'] },
   run_failed: { from: ['in_progress', 'agent_review'], actors: ['server'] },
+  answer: { from: ['blocked'], actors: ['pm'] },
   resolve: { from: ['blocked', 'failed'], actors: ['human'] }
 }
 
@@ -243,6 +247,9 @@ export function transition(
       }
       return ok({ ...task, failedRuns })
     }
+
+    case 'answer':
+      return ok({ ...task, status: 'in_progress', reason: null })
 
     case 'resolve':
       // D10: resolving Failed resets the failed-run counter; resolving
