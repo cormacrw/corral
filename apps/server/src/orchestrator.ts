@@ -2,6 +2,7 @@ import { EpicPullRequests, epicReviewContext } from './epic-prs.ts'
 import { RUNNER_HEARTBEAT_MS, EVIDENCE_KINDS, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
 import {
   ACTIVE_RUN_STATES,
+  REBASE_REVIEWS,
   LEASE_DURATION_MS,
   feedbackSimilarity,
   nextDesignVersion,
@@ -81,6 +82,8 @@ const reportSchema = z.object({
   summary: z.string().trim().min(1, 'Add a summary'),
   note: z.string().trim().optional(),
   criteria: z.array(z.object({ criterionId: z.string(), met: z.boolean(), note: z.string().default('') })).optional(),
+  review: z.enum(REBASE_REVIEWS).optional(),
+  conflictedFiles: z.array(z.string().trim().min(1)).min(1, 'conflictedFiles must contain at least one file').optional(),
   headSha: z.string().optional()
 })
 
@@ -601,6 +604,9 @@ export class Orchestrator implements RunnerHandlers {
       ? await db.select().from(designVersions)
           .where(and(eq(designVersions.taskId, task.id), eq(designVersions.commitSha, task.headSha))).orderBy(desc(designVersions.version)).limit(1)
       : []
+    const [rebase] = task.rebaseOnly
+      ? await db.select().from(runs).where(and(eq(runs.taskId, task.id), eq(runs.outcome, 'pr_rebased'), eq(runs.headSha, task.headSha!))).orderBy(desc(runs.number)).limit(1)
+      : []
     const pin = await this.#pinnedDesign(ctx.project.prefix, task.id)
     return {
       runId: ctx.run.id,
@@ -630,6 +636,7 @@ export class Orchestrator implements RunnerHandlers {
         branch: spike ? null : task.branch,
         spike,
         findings: reported?.summary ?? null,
+        rebaseReport: rebase ? { review: rebase.review, conflictedFiles: rebase.conflictedFiles } : null,
         design: design ? { version: version?.version ?? null } : null,
         pin,
         underReview: version ? { version: version.version, commitSha: version.commitSha, screenshots: version.screenshots.map(s => s.fileName) } : null,
@@ -904,7 +911,7 @@ export class Orchestrator implements RunnerHandlers {
       taskId: ctx.task?.id ?? null,
       actor: server,
       action: 'run.ended',
-      detail: { runId: ctx.run.id, runNumber: ctx.run.number, state: fields.state, outcome: fields.outcome ?? null, error: fields.error ?? null }
+      detail: { runId: ctx.run.id, runNumber: ctx.run.number, state: fields.state, outcome: fields.outcome ?? null, error: fields.error ?? null, ...(fields.outcome === 'pr_rebased' ? { review: fields.review, conflictedFiles: fields.conflictedFiles } : {}) }
     })
   }
 
@@ -1286,6 +1293,10 @@ export class Orchestrator implements RunnerHandlers {
           if (!ctx.task!.rebaseOnly && report.outcome === 'pr_rebased') throw new ToolError('Not submitted. This round expects pr_opened or pr_updated, not pr_rebased.')
           if (spike) throw new ToolError('Not submitted. A spike opens no PR: report your findings with outcome findings_reported.')
           if (design) throw new ToolError('Not submitted. A design task opens no PR: call submit_design, then report design_submitted.')
+          if (report.outcome === 'pr_rebased') {
+            if (!report.review) throw new ToolError('Not submitted. Add review: trivial or needs_review.')
+            if (!report.conflictedFiles?.length) throw new ToolError('Not submitted. Add conflictedFiles: every file in which you resolved a conflict.')
+          }
           return this.#submit(ctx, report)
         case 'findings_reported':
           if (!spike) throw new ToolError(`Not submitted. Only a spike reports findings; this task reports ${design ? 'design_submitted' : 'pr_opened or pr_updated'}.`)
@@ -1459,7 +1470,7 @@ export class Orchestrator implements RunnerHandlers {
       }, server, { event: report.outcome, runId: ctx.run.id, headSha: report.headSha, pr: pr.number })
       await tx.update(tasks).set({ headSha: report.headSha, prNumber: pr.number, prUrl: pr.url }).where(eq(tasks.id, task.id))
       const comment = await this.#postNote(tx, ctx, report.note!)
-      await this.#endRunIn(tx, ctx, { state: 'completed', outcome: report.outcome as RunOutcome, summary: report.summary, headSha: report.headSha })
+      await this.#endRunIn(tx, ctx, { state: 'completed', outcome: report.outcome as RunOutcome, summary: report.summary, headSha: report.headSha, ...(report.outcome === 'pr_rebased' ? { review: report.review, conflictedFiles: report.conflictedFiles } : {}) })
       return comment
     })
     this.#d.events.publish({ type: 'comment.created', comment })

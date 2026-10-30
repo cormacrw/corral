@@ -1,3 +1,6 @@
+export const REBASE_REVIEWS = ['trivial', 'needs_review'] as const
+export type RebaseReview = typeof REBASE_REVIEWS[number]
+
 // Agent runs (PRD §4.5, §8.6). A run is one agent session; a task can have many.
 export const RUN_STATES = [
   'queued',

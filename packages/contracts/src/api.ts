@@ -751,6 +751,8 @@ export interface Run {
   taskRef: string | null
   taskTitle: string | null
   state: RunState
+  review?: import('@corral/core').RebaseReview | null
+  conflictedFiles?: string[] | null
   outcome: RunOutcome | null
   summary: string | null
   error: string | null

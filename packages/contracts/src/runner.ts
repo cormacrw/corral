@@ -151,6 +151,9 @@ export interface OutcomeReport {
   note?: string
   // Reviewer verdicts per acceptance criterion
   criteria?: { criterionId: string, met: boolean, note: string }[]
+  // Required for pr_rebased
+  review?: import('@corral/core').RebaseReview
+  conflictedFiles?: string[]
   // Developer: the commit the runner pushed
   headSha?: string
 }

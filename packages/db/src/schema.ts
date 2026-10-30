@@ -9,6 +9,7 @@ import {
   TASK_PRIORITIES,
   TASK_STATUSES,
   TASK_TYPES,
+  type RebaseReview,
   type Actor,
   type TaskType
 } from '@corral/core'
@@ -261,6 +262,8 @@ export const runs = pgTable('runs', {
   pmJob: jsonb(),
   // The commit a developer run pushed, or a reviewer run reviewed
   headSha: text(),
+  review: text().$type<RebaseReview>(),
+  conflictedFiles: jsonb().$type<string[]>(),
   summary: text(),
   error: text(),
   // Known reset time when the outcome is rate_limited (D3)

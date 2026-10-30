@@ -953,6 +953,23 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
                 <span class="font-medium">{{ authorLabel(entry.actor) }}</span>
                 <span class="text-muted"> {{ historyText(entry) }}</span>
                 <span class="ms-2 text-xs text-dimmed">{{ timeAgo(entry.createdAt) }}</span>
+                <template v-if="entry.action === 'run.ended' && entry.detail.outcome === 'pr_rebased' && entry.detail.review">
+                  <p class="mt-1 text-toned">
+                    Review choice: {{ entry.detail.review }}
+                  </p>
+                  <p class="text-muted">
+                    Conflicted files:
+                  </p>
+                  <ul class="list-inside list-disc text-muted">
+                    <li
+                      v-for="file in (entry.detail.conflictedFiles as string[] ?? [])"
+                      :key="file"
+                      class="wrap-anywhere font-mono text-xs"
+                    >
+                      {{ file }}
+                    </li>
+                  </ul>
+                </template>
               </div>
             </li>
           </ol>

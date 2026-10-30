@@ -407,7 +407,9 @@ export const comments: Record<string, Comment[]> = {
 export const history: Record<string, AuditEntry[]> = {
   [at('COR-3').id]: [
     { id: 1, projectId: 'p-corral', taskId: at('COR-3').id, actor: { kind: 'human', userId: 'user-1' }, action: 'task.created', detail: {}, createdAt: ago(60 * 24) },
-    { id: 2, projectId: 'p-corral', taskId: at('COR-3').id, actor: { kind: 'system', component: 'scheduler' }, action: 'task.transition', detail: { from: 'ready', to: 'in_progress' }, createdAt: ago(25) }
+    { id: 2, projectId: 'p-corral', taskId: at('COR-3').id, actor: { kind: 'system', component: 'scheduler' }, action: 'task.transition', detail: { from: 'ready', to: 'in_progress' }, createdAt: ago(25) },
+    { id: 3, projectId: 'p-corral', taskId: at('COR-3').id, actor: { kind: 'system', component: 'scheduler' }, action: 'run.ended', detail: { runId: 'r-rebase-1', runNumber: 119, state: 'completed', outcome: 'pr_rebased', review: 'trivial', conflictedFiles: ['apps/web/app/components/TaskDetail.vue', 'apps/server/src/prompts.ts'] }, createdAt: ago(20) },
+    { id: 4, projectId: 'p-corral', taskId: at('COR-3').id, actor: { kind: 'system', component: 'scheduler' }, action: 'run.ended', detail: { runId: 'r-rebase-2', runNumber: 120, state: 'completed', outcome: 'pr_rebased', review: 'needs_review', conflictedFiles: ['packages/core/src/task-machine.ts', 'docs/decisions.md'] }, createdAt: ago(15) }
   ]
 }
 
