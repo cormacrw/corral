@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { agentLimit } from '~/utils/agents'
 import { parseOverride } from '~/utils/device'
 import { ROLE, runtimeLabel } from '~/utils/labels'
 
@@ -84,18 +83,19 @@ const name = computed(() => state.value.profile?.name || 'You')
       <li
         v-for="agent in state.agents"
         :key="agent.id"
+        class="flex items-center gap-2 pr-4"
       >
         <NuxtLink
-          to="/settings/agents"
-          class="flex min-h-14 items-center gap-3 px-4 py-3"
+          :to="`/settings/agents#agent-${agent.id}`"
+          class="flex min-h-14 min-w-0 flex-1 items-center gap-3 py-3 pl-4"
         >
           <AgentAvatar
             :name="agent.name"
             size="md"
           />
           <span class="min-w-0 flex-1">
-            <span class="flex items-center gap-2">
-              <span class="font-medium text-highlighted">{{ agent.name }}</span>
+            <span class="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span class="truncate font-medium text-highlighted">{{ agent.name }}</span>
               <UBadge
                 :label="ROLE[agent.role]"
                 color="primary"
@@ -110,13 +110,20 @@ const name = computed(() => state.value.profile?.name || 'You')
                 size="xs"
               />
             </span>
-            <span class="block truncate text-xs text-muted">{{ runtimeLabel(agent.runtime) }} · {{ agentLimit(agent) }}</span>
+            <span class="block truncate text-xs text-muted">{{ runtimeLabel(agent.runtime) }}<template v-if="agent.role === 'pm'"> · one turn per session</template></span>
           </span>
           <UIcon
+            v-if="agent.role === 'pm'"
             name="i-lucide-chevron-right"
             class="size-4 shrink-0 text-dimmed"
           />
         </NuxtLink>
+        <ConcurrencyStepper
+          v-if="agent.role !== 'pm'"
+          :agent="agent"
+          compact
+          class="shrink-0"
+        />
       </li>
     </ul>
     <p class="px-4 text-xs text-muted">
