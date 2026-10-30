@@ -44,6 +44,7 @@ const runJobCommon = {
   timeoutSeconds: z.number()
 }
 const taskJobContext = {
+  integrationProtocol: z.number().int().nonnegative().optional(),
   baseBranch: z.string().optional(), taskId: z.string().min(1), taskRef: z.string().min(1),
   // Older servers omit taskType and designPinned; preserve absence.
   epicId: z.string().optional(), taskType: z.enum(TASK_TYPES).nullish(),
@@ -161,7 +162,18 @@ export interface RunnerCapacity {
 export type RunnerRole = AgentRole | 'design'
 export const RUNNER_ROLES: readonly RunnerRole[] = ['pm', 'developer', 'reviewer', 'design']
 
+// Integration protocol is negotiated independently of the WebSocket envelope.
+// Omission means legacy only; do not advertise execution before implementing it.
+export const TASK_INTEGRATION_PROTOCOL = 1
+export function integrationCompatibilityReason(required: number, supported: readonly number[] = []): string | null {
+  return required === 0 || supported.includes(required)
+    ? null
+    : `Task requires integration protocol ${required}. Update the runner to a build supporting PR-free epic task integration; legacy PR work remains available.`
+}
+
 export interface RunnerInfo extends RunnerCapacity {
+  taskIntegrationProtocols?: number[]
+  integrationCompatibilityReason?: string | null
   activeRunCount?: number
   updateState?: string
   updateError?: string
@@ -262,7 +274,7 @@ export const slotSourceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('derived'), cpus: z.number(), memoryBytes: z.number(), slotCpus: z.number(), slotMemoryBytes: z.number() })
 ])
 
-export const runnerHelloSchema = z.object({ type: z.literal('hello'), protocol: z.number(), commit: z.string().default('unknown'), updateTarget: z.string().optional(), updateState: z.string().optional(), updateError: z.string().optional(), draining: z.boolean().optional(), updateRequested: z.boolean().optional(), autoUpdate: z.boolean().optional(), runnerId: z.string(), name: z.string(), activeRuns: z.array(z.object({ runId: z.string(), leaseEpoch: z.number() })), slotSource: slotSourceSchema.optional().catch(undefined), slots: z.number().optional(), runtimes: z.array(z.string()).optional(), roles: z.array(z.enum(RUNNER_ROLES)).optional() })
+export const runnerHelloSchema = z.object({ type: z.literal('hello'), protocol: z.number(), taskIntegrationProtocols: z.array(z.number().int().positive()).optional(), commit: z.string().default('unknown'), updateTarget: z.string().optional(), updateState: z.string().optional(), updateError: z.string().optional(), draining: z.boolean().optional(), updateRequested: z.boolean().optional(), autoUpdate: z.boolean().optional(), runnerId: z.string(), name: z.string(), activeRuns: z.array(z.object({ runId: z.string(), leaseEpoch: z.number() })), slotSource: slotSourceSchema.optional().catch(undefined), slots: z.number().optional(), runtimes: z.array(z.string()).optional(), roles: z.array(z.enum(RUNNER_ROLES)).optional() })
 
 // Pre-capacity/build hello packets must still get the protocol-version refusal.
 // This schema is used only for rejecting a different version, never admission.
@@ -288,7 +300,7 @@ export const runnerMessageSchema = z.discriminatedUnion('type', [
 ])
 
 export const serverMessageSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('welcome'), runnerId: z.string(), commit: z.string(), draining: z.boolean(), updateRequested: z.boolean() }),
+  z.object({ type: z.literal('welcome'), integrationCompatibilityReason: z.string().nullable().optional(), runnerId: z.string(), commit: z.string(), draining: z.boolean(), updateRequested: z.boolean() }),
   // A short-lived acknowledgement of a live lease; expired acknowledgements never authorise a WIP push.
   z.object({ type: z.literal('run.lease'), runId: z.string(), leaseEpoch: z.number(), validUntil: z.string() }),
   z.object({ type: z.literal('runner.drain'), updateRequested: z.boolean() }),

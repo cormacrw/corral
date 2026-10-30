@@ -29,7 +29,7 @@ describe('runner listener authentication', () => {
       it(`accepts an authenticated runner (runnerOnly=${runnerOnly})`, async () => {
         const ws = dial(t!.server!.url, 'correct')
         const message = await new Promise<string>(resolve => ws.once('message', data => resolve(String(data))))
-        expect(JSON.parse(message)).toEqual({ type: 'welcome', runnerId: 'auth-test', commit: 'development', draining: false, updateRequested: false })
+        expect(JSON.parse(message)).toEqual({ type: 'welcome', integrationCompatibilityReason: expect.stringContaining('Update the runner'), runnerId: 'auth-test', commit: 'development', draining: false, updateRequested: false })
         expect(t!.runner.online).toBe(true)
         for (const path of ['/api/runner', '/api/projects', '/api/anything']) {
           expect((await fetch(t!.server!.url + path)).status).toBe(runnerOnly ? 404 : path === '/api/anything' ? 404 : 200)

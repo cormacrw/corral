@@ -119,6 +119,7 @@ export class ServerConnection {
       }
       const message = parsed.data
       if (message.type === 'welcome') {
+        if (message.integrationCompatibilityReason) console.warn(message.integrationCompatibilityReason)
         this.updateStatus?.server(message.commit)
         if (message.draining) this.updateStatus?.drain(message.updateRequested)
         if (this.updateStatus?.draining) this.send({ type: 'runner.draining', updateRequested: this.updateStatus.updateRequested })
