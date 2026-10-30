@@ -4,12 +4,14 @@ import { afterEach, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import { api } from '~/composables/useApi'
 import { agents, inbox, projects, tasks } from '~/prototype/fixtures'
+import InboxReleaseNotes from '~/components/InboxReleaseNotes.vue'
 import InboxPage from '~/pages/inbox/[[itemId]].vue'
 
 vi.mock('~/composables/useApi', () => ({
   api: {
     inbox: { get: vi.fn(), act: vi.fn() },
-    tasks: { byRef: vi.fn(), evidence: vi.fn(), reviews: vi.fn() }
+    tasks: { byRef: vi.fn(), evidence: vi.fn(), reviews: vi.fn() },
+    deployments: { read: vi.fn() }
   }
 }))
 
@@ -29,10 +31,10 @@ const alertStub = vue.defineComponent({
   setup: props => () => vue.h('div', { 'data-alert': true }, [props.title, ...(props.actions ?? []).map((a: { label: string, onClick: () => void }) => vue.h('button', { onClick: a.onClick }, a.label))])
 })
 
-async function mountInbox(type: 'human_review' | 'failed', taskRef?: string) {
+async function mountInbox(type: 'human_review' | 'failed', taskRef?: string, dockedTask: string | null = null) {
   for (const name of ['ref', 'shallowRef', 'computed', 'watch', 'watchEffect', 'onMounted', 'onBeforeUnmount'] as const) vi.stubGlobal(name, vue[name])
   const item = inbox().needsYou.find(i => i.type === type && (taskRef ? i.taskRef === taskRef : tasks.find(t => t.id === i.taskId)?.type !== 'design'))!
-  const params = vue.reactive({ itemId: item.id })
+  const params = vue.reactive<{ itemId: string }>({ itemId: item.id })
   vi.stubGlobal('useRoute', () => ({ params }))
   const router = { replace: vi.fn(), push: vi.fn() }
   vi.stubGlobal('useRouter', () => router)
@@ -43,8 +45,8 @@ async function mountInbox(type: 'human_review' | 'failed', taskRef?: string) {
   vi.stubGlobal('useToast', () => ({ add: vi.fn() }))
   vi.stubGlobal('usePlanThreadDelete', () => ({ pending: vue.ref([]), remove: vi.fn() }))
   const closeFlyout = vi.fn().mockResolvedValue(undefined)
-  vi.stubGlobal('useTaskFlyout', () => ({ ref: vue.ref(null), epic: vue.ref(null), open: vi.fn(), close: closeFlyout }))
-  const listeners: ((event: { type: string }) => void)[] = []
+  vi.stubGlobal('useTaskFlyout', () => ({ ref: vue.ref(dockedTask), epic: vue.ref(null), open: vi.fn(), close: closeFlyout }))
+  const listeners: ((event: { type: string, markedRead?: unknown, deployment?: { id: string } }) => void)[] = []
   vi.stubGlobal('useLive', () => ({
     state: vue.ref({ agents, projects, loaded: true, runner: { online: true } }),
     subscribe: (listener: typeof listeners[number]) => {
@@ -60,8 +62,8 @@ async function mountInbox(type: 'human_review' | 'failed', taskRef?: string) {
   vi.mocked(api.tasks.evidence).mockResolvedValue([])
   vi.mocked(api.tasks.reviews).mockResolvedValue([])
   const wrapper = mount(InboxPage, { global: {
-    components: { PromptComposer: composerStub, UAlert: alertStub, UDashboardPanel: plain },
-    stubs: { UButton: true, UBadge: true, UInput: true, UTabs: true, UIcon: true, USkeleton: true, USelectMenu: true, MarkdownText: true, EvidenceList: true, TaskFlyout: true, AgentAvatar: true, ProjectThumbnail: true, PlanThreadRow: true, NuxtLink: true, InboxMobile: true }
+    components: { InboxReleaseNotes, PromptComposer: composerStub, UAlert: alertStub, UDashboardPanel: plain },
+    stubs: { InboxReleaseNotes: false, UAlert: false, UModal: true, UButton: true, UBadge: true, UInput: true, UTabs: true, UIcon: true, USkeleton: true, USelectMenu: true, MarkdownText: true, EvidenceList: true, TaskFlyout: true, AgentAvatar: true, ProjectThumbnail: true, PlanThreadRow: true, NuxtLink: true, InboxMobile: true }
   } })
   await flushPromises()
   const composer = () => wrapper.getComponent(composerStub)
@@ -71,8 +73,51 @@ async function mountInbox(type: 'human_review' | 'failed', taskRef?: string) {
     return sent
   }
   const alert = () => wrapper.find('[data-alert]')
-  return { wrapper, item, composer, submit, alert, router, closeFlyout, refresh: () => listeners.forEach(l => l({ type: 'task.updated' })) }
+  return { wrapper, item, params, replace: router.replace, close: closeFlyout, composer, submit, alert, router, closeFlyout, emitLive: (event: typeof listeners[number] extends (e: infer E) => void ? E : never) => listeners.forEach(l => l(event)), refresh: () => listeners.forEach(l => l({ type: 'task.updated' })) }
 }
+
+it('opens the next item at the top of a new detail scroller', async () => {
+  const { wrapper, item, params } = await mountInbox('human_review')
+  try {
+    const next = inbox().needsYou.find(i => i.type === 'failed')!
+    const scroller = wrapper.get('[data-testid="inbox-detail-scroller"]').element
+    scroller.scrollTop = 2000
+    params.itemId = next.id
+    await flushPromises()
+    expect(next.id).not.toBe(item.id)
+    expect(wrapper.get('[data-testid="inbox-detail-scroller"]').element).not.toBe(scroller)
+    expect(wrapper.get('[data-testid="inbox-detail-scroller"]').element.scrollTop).toBe(0)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('marks an unread release note read in place, without fetching the Inbox', async () => {
+  const { wrapper, params, emitLive } = await mountInbox('human_review')
+  try {
+    const note = inbox().needsYou.find(i => i.type === 'release_notes')!
+    vi.mocked(api.inbox.get).mockClear()
+    let finish = () => {}
+    vi.mocked(api.deployments.read).mockReturnValue(new Promise((resolve) => {
+      finish = () => resolve({} as never)
+    }))
+    params.itemId = note.id
+    await flushPromises()
+    expect(api.deployments.read).toHaveBeenCalledWith(note.id)
+    expect(wrapper.find('[aria-label="Unread"]').exists()).toBe(true)
+    finish()
+    await flushPromises()
+    expect(wrapper.find('[aria-label="Unread"]').exists()).toBe(false)
+    emitLive({ type: 'deployment.updated', deployment: { id: note.id }, markedRead: true })
+    await flushPromises()
+    expect(api.inbox.get).not.toHaveBeenCalled()
+    // Any other change to a deployment still reloads the list
+    emitLive({ type: 'deployment.updated', deployment: { id: note.id } })
+    expect(api.inbox.get).toHaveBeenCalledOnce()
+  } finally {
+    wrapper.unmount()
+  }
+})
 
 it('shows the error instead of loading forever and keeps approval blocked when the task fails to load', async () => {
   const { wrapper, composer, submit, alert } = await mountInbox('human_review')

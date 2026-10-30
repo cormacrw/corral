@@ -35,21 +35,43 @@ const showTask = ref(true)
 const planResolving = ref(false)
 let resolutionPosition = 0
 let taskRequest = 0
+// Items read while each load is in flight: its response may predate the read
+const readDuringLoads = new Set<Set<string>>()
 
 async function load() {
   if (planResolving.value) return
   error.value = null
+  const readDuringLoad = new Set<string>()
+  readDuringLoads.add(readDuringLoad)
   try {
     const loaded = await api.inbox.get()
-    if (!planResolving.value) inbox.value = loaded
+    if (!planResolving.value) inbox.value = [...readDuringLoad].reduce(inboxWithRead, loaded)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    readDuringLoads.delete(readDuringLoad)
   }
+}
+// Reading changes one row, so it needs no refetch. As on the server, a thread
+// listed only for its unread reply leaves Needs you; a read release note stays.
+function inboxWithRead(current: Inbox, id: string): Inbox {
+  const item = current.needsYou.find(i => i.id === id)
+  if (item?.type === 'plan_thread' && item.status === 'none') {
+    return { ...current, needsYou: current.needsYou.filter(i => i.id !== id), count: current.count - 1 }
+  }
+  if (item?.type !== 'plan_thread' && item?.type !== 'release_notes') return current
+  return { ...current, needsYou: current.needsYou.map(i => i === item ? { ...item, unread: false } : i) }
+}
+function markRead(id: string) {
+  for (const reads of readDuringLoads) reads.add(id)
+  if (inbox.value) inbox.value = inboxWithRead(inbox.value, id)
+  if (openThread.value?.id === id) openThread.value = { ...openThread.value, unread: false }
 }
 onMounted(() => {
   void load()
   const stop = live.subscribe((event) => {
-    if (['task.updated', 'task.deleted', 'task.created', 'run.updated', 'epic.updated', 'plan.session', 'deployment.updated', 'agent.updated'].includes(event.type)) void load()
+    if ((event.type === 'plan.session' || event.type === 'deployment.updated') && event.markedRead) markRead(event.type === 'plan.session' ? event.session.id : event.deployment.id)
+    else if (['task.updated', 'task.deleted', 'task.created', 'run.updated', 'epic.updated', 'plan.session', 'deployment.updated', 'agent.updated'].includes(event.type)) void load()
   })
   onBeforeUnmount(stop)
 })
@@ -302,6 +324,7 @@ onBeforeUnmount(() => {
       v-model:text="text"
       :plan-thread="selected?.type === 'plan_thread' ? selected : null"
       :on-refresh="load"
+      :on-read="markRead"
       :inbox="inbox"
       :error="error"
       :items="items"
@@ -456,7 +479,9 @@ onBeforeUnmount(() => {
       />
       <InboxReleaseNotes
         v-else-if="selected?.type === 'release_notes'"
+        :key="selected.id"
         :item="selected"
+        @read="markRead(selected.id)"
         @refresh="load"
       />
       <InboxEpicConflict
@@ -469,7 +494,7 @@ onBeforeUnmount(() => {
         v-else-if="selected?.type === 'plan_thread'"
         :key="selected.sessionId"
         :item="selected"
-        @read="load"
+        @read="markRead(selected.id)"
         @approved="nextAfterPlanResolution"
         @approving="setPlanResolving"
         @delete="deleteThread(selected)"
@@ -511,7 +536,12 @@ onBeforeUnmount(() => {
               @click="toggleTask"
             />
           </header>
-          <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
+          <!-- Keyed so the next item opens at its top -->
+          <div
+            :key="selected.id"
+            class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4"
+            data-testid="inbox-detail-scroller"
+          >
             <div class="mx-auto flex max-w-[720px] flex-col gap-4">
               <UAlert
                 v-if="selected.resolution"

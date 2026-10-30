@@ -85,7 +85,9 @@ describe('plan threads in the inbox', () => {
     expect([...before.activity, ...before.resolved].some(i => (i as { type: string }).type === 'plan_thread')).toBe(false)
 
     // Reading the unread-only thread takes it out of the list and the count
+    const { count } = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
     await t.request('POST', `/api/plan/sessions/${unread.id}/read`)
+    expect(t.events.at(-1)).toMatchObject({ type: 'plan.session', session: { id: unread.id, unread: false }, markedRead: { inboxCount: count - 1 } })
     const after = await inbox()
     expect(after.count).toBe(before.count - 1)
     expect(after.count).toBe(after.needsYou.length)

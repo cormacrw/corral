@@ -22,24 +22,25 @@ it('marks an opened item read, replaces pending notes live, links task refs and 
   // Observe the parent's event listener directly: Vue Test Utils' emitted()
   // tracking relies on devtools hooks, which Vue disables in NODE_ENV=production.
   const onRefresh = vi.fn()
+  const onRead = vi.fn()
   const wrapper = mount(InboxReleaseNotes, {
-    props: { onRefresh, item: { ...releaseNotes[0]!, notesStatus: 'pending', notes: null } },
+    props: { onRefresh, onRead, item: { ...releaseNotes[0]!, notesStatus: 'pending', notes: null } },
     global: { plugins: [router], components: { MarkdownText, UButton: button }, stubs: { UAlert: true, AgentAvatar: true, ProjectThumbnail: true, UModal: true } }
   })
   await flushPromises()
   expect(api.deployments.read).toHaveBeenCalledWith('release-demo')
-  expect(onRefresh).toHaveBeenCalledTimes(1)
+  expect(onRead).toHaveBeenCalledTimes(1)
+  expect(onRefresh).not.toHaveBeenCalled()
   expect(wrapper.text()).toContain('Writing release notes…')
   await wrapper.setProps({ item: { ...releaseNotes[0]!, unread: false } })
   expect(wrapper.text()).not.toContain('Writing release notes…')
   expect(wrapper.find('h3').text()).toBe('What shipped')
-  expect(onRefresh).toHaveBeenCalledTimes(1)
   await wrapper.get('a').trigger('click')
   await flushPromises()
   expect(router.currentRoute.value.path).toBe('/tasks/COR-3')
   await wrapper.get('button').trigger('click')
   await flushPromises()
   expect(api.deployments.dismiss).toHaveBeenCalledWith('release-demo')
-  expect(onRefresh).toHaveBeenCalledTimes(2)
+  expect(onRefresh).toHaveBeenCalledTimes(1)
   wrapper.unmount()
 })

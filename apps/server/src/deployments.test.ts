@@ -42,6 +42,7 @@ describe.each(['pglite', 'postgres'] as const)('POST /api/deployments on %s', (d
     expect(pending.count).toBe(before.count)
     expect(t.events).toContainEqual(expect.objectContaining({ type: 'deployment.updated', deployment: expect.objectContaining({ id: deployment.id }) }))
     const read = await t.request('POST', `/api/deployments/${deployment.id}/read`)
+    expect(t.events).toContainEqual({ type: 'deployment.updated', deployment: expect.objectContaining({ id: deployment.id, readAt: expect.any(String) }), markedRead: true })
     expect(read.status).toBe(200)
     const readAt = (await read.json() as Deployment).readAt
     expect(readAt).toBeTruthy()

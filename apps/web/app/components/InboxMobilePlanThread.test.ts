@@ -12,7 +12,7 @@ import PlanDetail from './PlanDetail.vue'
 
 const mocks = vi.hoisted(() => ({
   message: vi.fn(), close: vi.fn(), session: vi.fn(), read: vi.fn(), approve: vi.fn(),
-  replace: vi.fn(), refresh: vi.fn(), remove: vi.fn(), add: vi.fn(), toast: vi.fn(), deleteThread: vi.fn()
+  replace: vi.fn(), refresh: vi.fn(), markRead: vi.fn(), remove: vi.fn(), add: vi.fn(), toast: vi.fn(), deleteThread: vi.fn()
 }))
 vi.mock('~/composables/useApi', () => ({ api: { plan: mocks } }))
 
@@ -41,7 +41,7 @@ const UDropdownMenu = defineComponent({
 })
 function screen(item = question) {
   return mount(InboxMobilePlanThread, {
-    props: { item, onRefresh: mocks.refresh },
+    props: { item, onRefresh: mocks.refresh, onRead: mocks.markRead },
     global: { plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }]],
       components: {
         UButton, UDrawer, UDropdownMenu,
@@ -111,6 +111,7 @@ describe('focused mobile Plan thread', () => {
     expect(w.text()).toContain('Open in Plan')
     expect(w.find('textarea').exists()).toBe(true)
     expect(mocks.read).toHaveBeenCalledWith('s-2')
+    expect(mocks.markRead).toHaveBeenCalledWith('s-2')
   })
 
   it('deletes from the menu without asking and returns to the Inbox', async () => {
@@ -152,7 +153,7 @@ describe('a task opened from the mobile plan sheet', () => {
     mocks.session.mockResolvedValue({ plans: [planned], messages: [] })
     const stub = (tag = 'span') => defineComponent({ props: ['label'], setup: p => () => h(tag, p.label) })
     const w = mount(InboxMobilePlanThread, {
-      props: { item: { ...planItem, planId: planned.id }, onRefresh: mocks.refresh },
+      props: { item: { ...planItem, planId: planned.id }, onRefresh: mocks.refresh, onRead: mocks.markRead },
       global: { plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }], router],
         components: {
           UButton, UDrawer, UDropdownMenu, PlanDetail,

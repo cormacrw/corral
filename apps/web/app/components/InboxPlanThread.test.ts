@@ -11,7 +11,7 @@ import InboxPage from '~/pages/inbox/[[itemId]].vue'
 import { UNDO_MS, usePlanThreadDelete } from '~/composables/usePlanThreadDelete'
 
 vi.mock('~/composables/useApi', () => ({
-  api: { inbox: { get: vi.fn() }, plan: { session: vi.fn(), close: vi.fn() } }
+  api: { inbox: { get: vi.fn() }, plan: { session: vi.fn(), close: vi.fn(), read: vi.fn() } }
 }))
 
 afterEach(() => {
@@ -35,7 +35,7 @@ async function mountInbox() {
   vi.stubGlobal('usePlanThreads', () => ({ add: vi.fn(), remove }))
   vi.stubGlobal('usePlanThreadDelete', usePlanThreadDelete)
   vi.stubGlobal('useTaskFlyout', () => ({ ref: vue.ref(null), epic: vue.ref(null), plan: vue.ref(false), close: vi.fn().mockResolvedValue(undefined) }))
-  const listeners: ((event: { type: string }) => void)[] = []
+  const listeners: ((event: { type: string, session?: { id: string, unread: boolean }, markedRead?: { inboxCount: number } }) => void)[] = []
   vi.stubGlobal('useLive', () => ({
     state: vue.ref({ agents, projects, loaded: true, runner: { online: true } }),
     subscribe: (listener: typeof listeners[number]) => {
@@ -66,8 +66,39 @@ async function mountInbox() {
     data = { ...data, needsYou: data.needsYou.map(i => i.type === 'plan_thread' ? { ...i, sender: { ...i.sender, name } } : i) }
     for (const listener of listeners) listener({ type: 'agent.updated' })
   }
-  return { wrapper, replace, remove, toasts, toastRemove, rows, rename }
+  const setInbox = (next: typeof data) => {
+    data = next
+  }
+  return { wrapper, replace, remove, toasts, toastRemove, rows, rename, setInbox, emitLive: (event: Parameters<typeof listeners[number]>[0]) => listeners.forEach(l => l(event)) }
 }
+
+it('reads an unread thread in place and keeps it open, without fetching the Inbox', async () => {
+  const { wrapper, rows, emitLive, setInbox } = await mountInbox()
+  try {
+    const opened = inbox().needsYou.find(i => i.id === 's-1')
+    if (opened?.type !== 'plan_thread') throw new Error('fixture')
+    setInbox({ ...inbox(), needsYou: inbox().needsYou.map(i => i.id === 's-1' ? { ...opened, status: 'none', question: null, plan: null, planId: null, unread: true, reply: 'Done' } : i) })
+    emitLive({ type: 'agent.updated' })
+    await flushPromises()
+    vi.mocked(api.inbox.get).mockClear()
+    vi.mocked(api.plan.read).mockResolvedValue({ ...planSessions.find(s => s.id === 's-1')!, unread: false })
+    expect(rows()).toContain('s-1')
+
+    emitLive({ type: 'plan.session', session: { id: 's-1', unread: true } })
+    await flushPromises()
+    expect(api.plan.read).toHaveBeenCalledWith('s-1')
+    expect(api.inbox.get).toHaveBeenCalledOnce()
+    expect(rows()).not.toContain('s-1')
+    expect(wrapper.findComponent(InboxPlanThread).exists()).toBe(true)
+
+    vi.mocked(api.inbox.get).mockClear()
+    emitLive({ type: 'plan.session', session: { id: 's-1', unread: false }, markedRead: { inboxCount: 1 } })
+    await flushPromises()
+    expect(api.inbox.get).not.toHaveBeenCalled()
+  } finally {
+    wrapper.unmount()
+  }
+})
 
 it('shows the sender in the detail header, and a renamed PM without a reload', async () => {
   const { wrapper, rename } = await mountInbox()
