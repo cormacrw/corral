@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { checkPlan, designPinKey, diffPlans, type DesignPinTarget, type PlanRef, type ProposedTask } from './plan.ts'
+import { checkDefinitionOfReady, type TaskContent } from './ready.ts'
 
 const task = (key: string, overrides: Partial<ProposedTask> = {}): ProposedTask => ({
   key,
@@ -16,6 +17,18 @@ const task = (key: string, overrides: Partial<ProposedTask> = {}): ProposedTask 
 const epics = [{ key: 'e1', title: 'Login', summary: '' }]
 
 describe('checkPlan', () => {
+  it.each([
+    { title: 'Title', description: 'Description', acceptanceCriteria: ['Works'] },
+    { title: ' ', description: '\n', acceptanceCriteria: [] },
+    { title: '', description: '', acceptanceCriteria: ['Works', ' '] }
+  ])('shares stored-task Ready problems for %j and tags each task key', (content: TaskContent) => {
+    const storedProblems = checkDefinitionOfReady(content)
+    const tasks = ['a', 'b'].map(key => task(key, { ...content, acceptanceCriteria: [...content.acceptanceCriteria] }))
+    expect(checkPlan({ title: 'Plan', summary: '', epics, tasks })).toEqual(
+      tasks.flatMap(({ key }) => storedProblems.map(code => ({ code, key })))
+    )
+  })
+
   it('accepts a DAG where every task has criteria', () => {
     expect(checkPlan({ title: 'Login', summary: '', epics, tasks: [task('a'), task('b', { dependsOn: ['a'] })] })).toEqual([])
   })
@@ -157,6 +170,26 @@ describe('checkPlan with design pins', () => {
 })
 
 describe('diffPlans', () => {
+  it.each(['dependsOn', 'screens'] as const)('compares %s as an unordered multiset without mutating inputs', (field) => {
+    const withMembers = (members: string[]) => task('a', field === 'dependsOn'
+      ? { dependsOn: members }
+      : { design: { taskRef: 'COR-7', version: 2, screens: members } })
+    const before = ['a', 'a']
+    const after = ['a', 'b']
+    expect(diffPlans([withMembers(before)], [withMembers(after)])).toEqual([{ key: 'a', change: 'changed' }])
+    expect(diffPlans([withMembers(after)], [withMembers(before)])).toEqual([{ key: 'a', change: 'changed' }])
+    expect(diffPlans([withMembers(['a', 'a', 'b'])], [withMembers(['a', 'b', 'b'])])).toEqual([{ key: 'a', change: 'changed' }])
+    expect(diffPlans([withMembers(['a', 'b', 'a'])], [withMembers(['b', 'a', 'a'])])).toEqual([{ key: 'a', change: 'unchanged' }])
+    expect(before).toEqual(['a', 'a'])
+    expect(after).toEqual(['a', 'b'])
+  })
+
+  it('preserves acceptance criterion order and normalized design refs', () => {
+    expect(diffPlans([task('a', { acceptanceCriteria: ['First', 'Second'] })], [task('a', { acceptanceCriteria: ['Second', 'First'] })])).toEqual([{ key: 'a', change: 'changed' }])
+    const pin = { taskRef: 'COR-7', version: 2, screens: ['login'] }
+    expect(diffPlans([task('a', { design: pin })], [task('a', { design: { ...pin, taskRef: 'cor-7' } })])).toEqual([{ key: 'a', change: 'unchanged' }])
+  })
+
   it('counts a changed design pin as a change', () => {
     const pin = { taskRef: 'COR-7', version: 2, screens: ['login'] }
     expect(diffPlans([task('a', { design: pin }), task('b', { design: pin })], [task('a', { design: pin }), task('b', { design: { ...pin, screens: ['signup'] } })])).toEqual([

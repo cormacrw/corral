@@ -1,6 +1,7 @@
 import { checkEpicDependencies, type EpicDependencyProblem, type EpicDependencyTask } from './epic-dependencies.ts'
 import { checkDependencies, type DependencyProblem } from './dependencies.ts'
 import type { EpicReviewMode } from './project.ts'
+import { checkDefinitionOfReady, type ReadyProblem } from './ready.ts'
 import type { TaskStatus } from './status.ts'
 import type { TaskPriority, TaskType } from './task.ts'
 
@@ -60,10 +61,7 @@ export type PlanProblem =
   | { code: 'empty_epic', key: string }
   | { code: 'unknown_epic', key: string, epic: string }
   | { code: 'duplicate_key', key: string }
-  | { code: 'missing_title', key: string }
-  | { code: 'missing_description', key: string }
-  | { code: 'missing_acceptance_criteria', key: string }
-  | { code: 'blank_acceptance_criterion', key: string }
+  | { code: ReadyProblem, key: string }
   | { code: 'dependency', problem: DependencyProblem }
   | { code: 'duplicate_ref', key: string, ref: string }
   | { code: 'unknown_ref', key: string, ref: string, message: string }
@@ -127,10 +125,7 @@ export function checkPlan(plan: ProposedPlan, refs: ReadonlyMap<string, PlanRef>
     if (task.epic && !epicKeys.has(task.epic)) problems.push({ code: 'unknown_epic', key: task.key, epic: task.epic })
     if (seen.has(task.key)) problems.push({ code: 'duplicate_key', key: task.key })
     seen.add(task.key)
-    if (!task.title.trim()) problems.push({ code: 'missing_title', key: task.key })
-    if (!task.description.trim()) problems.push({ code: 'missing_description', key: task.key })
-    if (task.acceptanceCriteria.length === 0) problems.push({ code: 'missing_acceptance_criteria', key: task.key })
-    else if (task.acceptanceCriteria.some(c => !c.trim())) problems.push({ code: 'blank_acceptance_criterion', key: task.key })
+    for (const code of checkDefinitionOfReady(task)) problems.push({ code, key: task.key })
     if (task.ref) {
       const problem = refProblem(task.key, task.ref, refs.get(task.ref) ?? { kind: 'unknown' }, true)
       if (problem) problems.push(problem)
@@ -234,22 +229,36 @@ export function diffPlans(previous: readonly ProposedTask[], next: readonly Prop
   return result
 }
 
+// Required even for optional fields: extending ProposedTask must add an equality
+// rule here. Keys are compared too, though diffPlans uses them for identity.
+const taskComparisons: { [K in keyof ProposedTask]-?: (a: ProposedTask, b: ProposedTask) => boolean } = {
+  key: (a, b) => a.key === b.key,
+  ref: (a, b) => a.ref === b.ref,
+  epic: (a, b) => (a.epic || undefined) === (b.epic || undefined),
+  title: (a, b) => a.title === b.title,
+  description: (a, b) => a.description === b.description,
+  type: (a, b) => a.type === b.type,
+  priority: (a, b) => a.priority === b.priority,
+  humanReview: (a, b) => a.humanReview === b.humanReview,
+  acceptanceCriteria: (a, b) => a.acceptanceCriteria.length === b.acceptanceCriteria.length && a.acceptanceCriteria.every((c, i) => c === b.acceptanceCriteria[i]),
+  dependsOn: (a, b) => sameMembers(a.dependsOn, b.dependsOn),
+  design: (a, b) => samePin(a.design, b.design)
+}
+
 function sameTask(a: ProposedTask, b: ProposedTask): boolean {
-  return a.title === b.title
-    && a.ref === b.ref
-    && (a.epic || undefined) === (b.epic || undefined)
-    && a.description === b.description
-    && a.type === b.type
-    && a.priority === b.priority
-    && a.humanReview === b.humanReview
-    && a.acceptanceCriteria.length === b.acceptanceCriteria.length
-    && a.acceptanceCriteria.every((c, i) => c === b.acceptanceCriteria[i])
-    && a.dependsOn.length === b.dependsOn.length
-    && a.dependsOn.every(d => b.dependsOn.includes(d))
-    && samePin(a.design, b.design)
+  return Object.values(taskComparisons).every(compare => compare(a, b))
+}
+
+// Dependencies and screens are unordered multisets: preserve duplicate counts
+// so edits to duplicate entries remain visible, while reordering is a no-op.
+function sameMembers(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false
+  const sortedA = [...a].sort()
+  const sortedB = [...b].sort()
+  return sortedA.every((value, i) => value === sortedB[i])
 }
 
 function samePin(a: DesignPin | undefined, b: DesignPin | undefined): boolean {
   if (!a || !b) return !a && !b
-  return designPinKey(a) === designPinKey(b) && a.screens.length === b.screens.length && a.screens.every(s => b.screens.includes(s))
+  return designPinKey(a) === designPinKey(b) && sameMembers(a.screens, b.screens)
 }
