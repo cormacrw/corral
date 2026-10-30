@@ -84,11 +84,12 @@ export class MergeOrchestrator {
   // Approvals recorded before Ready to merge existed left the task in Agent
   // review; move them on as the reviewer's approval does now
   async #promoteApproved(): Promise<void> {
-    const waiting = await this.#d.db.select({ id: tasks.id, headSha: tasks.headSha }).from(tasks)
+    const waiting = await this.#d.db.select({ id: tasks.id, headSha: tasks.headSha, rebaseOnly: tasks.rebaseOnly }).from(tasks)
       .where(and(eq(tasks.status, 'agent_review'), isNull(tasks.leaseRunId), isNull(tasks.deletedAt)))
     for (const task of waiting) {
       if (!task.headSha || !(await this.#approvalFor(task))) continue
-      await this.#transition(task.id, { type: 'review_approved' }, { event: 'review_approved', headSha: task.headSha })
+      const type = task.rebaseOnly ? 'approval_carried' : 'review_approved'
+      await this.#transition(task.id, { type }, { event: type, headSha: task.headSha })
     }
   }
 
