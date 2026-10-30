@@ -543,7 +543,7 @@ describe('plan sessions', () => {
     // The run that picked it up has ended, and the task went back to Ready
     await t.db.update(tasks).set({ status: 'ready' }).where(eq(tasks.id, target.id))
     const [developer] = await t.db.select().from(agents).where(eq(agents.role, 'developer')).limit(1)
-    await t.db.insert(runs).values({ agentId: developer!.id, projectId: project.id, taskId: target.id, role: 'developer', state: 'failed', leaseEpoch: 1, queuedAt: new Date() })
+    await t.db.insert(runs).values({ agentId: developer!.id, projectId: project.id, taskId: target.id, role: 'developer', state: 'failed', endedAt: new Date(), leaseEpoch: 1, queuedAt: new Date() })
     const ran = await propose(target.ref)
     expect(ran).toMatchObject({ ok: false, error: expect.stringContaining(`${target.ref} has already been picked up`) })
     expect(ran).toMatchObject({ error: expect.stringContaining('update_task') })
