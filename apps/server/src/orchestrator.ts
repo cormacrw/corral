@@ -30,7 +30,7 @@ import { EpicBranchError, isEpicRebaseTask, taskBase } from './task-base.ts'
 import { slugify } from './projects.ts'
 import { designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
 import { PmTools } from './pm-tools.ts'
-import { carryOverApproval, latestRebaseCheckFailures } from './rebase-review.ts'
+import { carryOverApproval, checkTrivialRebase, latestRebaseCheckFailures } from './rebase-review.ts'
 import { runExitError, withLastActivity } from './run-exit.ts'
 import { runEndValues, type RunEnd } from './run-lifecycle.ts'
 import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
@@ -1532,21 +1532,55 @@ export class Orchestrator implements RunnerHandlers {
       else pr = await github.openPullRequest(ctx.project.repository, { head: task.branch!, base: await taskBase(db, task, ctx.project, github), title: `${ref}: ${task.title}`, body })
     }
 
-    const comment = await db.transaction(async (tx) => {
+    // D24: a trivial rebase goes to the reviewer unless the server can confirm
+    // it. GitHub failing proves nothing, so that also means a review.
+    const rebaseCheck = report.outcome === 'pr_rebased' && report.review === 'trivial'
+      ? await checkTrivialRebase(github, ctx.project.repository, {
+          baseBranch: await taskBase(db, task, ctx.project),
+          approvedHeadSha: task.approvedHeadSha!,
+          newHeadSha: report.headSha,
+          conflictedFiles: report.conflictedFiles!
+        })
+      : null
+
+    const { posted, verified } = await db.transaction(async (tx) => {
       const locked = await lockTask(tx, task.id)
       if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease while submitting. Stop working.')
-      await applyTransition(tx, locked.task, locked.project, {
-        type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true
-      }, server, { event: report.outcome, runId: ctx.run.id, headSha: report.headSha, pr: pr?.number ?? null })
       await tx.update(tasks).set({ headSha: report.headSha, ...(pr && { prNumber: pr.number, prUrl: pr.url }) }).where(eq(tasks.id, task.id))
-      const comment = await this.#postNote(tx, ctx, report.note!)
+      const carried = rebaseCheck && !rebaseCheck.error && rebaseCheck.failures.length === 0
+        ? await this.#carryVerifiedRebase(tx, ctx, { task: { ...locked.task, headSha: report.headSha!, prNumber: pr?.number ?? locked.task.prNumber }, project: locked.project }, report)
+        : null
+      if (!carried?.comment) {
+        const checkError = carried?.problem ?? rebaseCheck?.error
+        const checkResult = rebaseCheck && { checkFailures: rebaseCheck.failures, ...(checkError && { checkError }) }
+        await applyTransition(tx, locked.task, locked.project, {
+          type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true
+        }, server, { event: report.outcome, runId: ctx.run.id, headSha: report.headSha, pr: pr?.number ?? null, ...checkResult })
+      }
+      const note = await this.#postNote(tx, ctx, report.note!)
       await this.#endRunIn(tx, ctx, { state: 'completed', outcome: report.outcome, summary: report.summary, headSha: report.headSha, ...(report.outcome === 'pr_rebased' ? { review: report.review, conflictedFiles: report.conflictedFiles } : {}) })
-      return comment
+      return { posted: carried?.comment ? [note, carried.comment] : [note], verified: Boolean(carried?.comment) }
     })
-    this.#d.events.publish({ type: 'comment.created', comment })
+    for (const comment of posted) this.#d.events.publish({ type: 'comment.created', comment })
     this.#finished(ctx, 'Outcome accepted', { handoff: true })
     if (!pr) return { ok: true, message: 'The rebased epic branch is ready for review. You can stop now.' }
+    if (verified) return { ok: true, pr: pr.url, message: 'The server verified your trivial rebase, so the approval carried over. Corral handles any human check, CI and the merge from here. You can stop now.' }
     return { ok: true, pr: pr.url, message: `PR #${pr.number} is ready for review. You can stop now.` }
+  }
+
+  // D24: the server check passed, so no reviewer is needed. The comment is the
+  // task's Activity entry. Call with `headSha` on the new head.
+  async #carryVerifiedRebase(tx: Executor, ctx: RunContext, locked: { task: TaskRow, project: ProjectRow }, report: OutcomeReport): Promise<{ comment?: Comment, problem?: string }> {
+    const files = report.conflictedFiles!.map(file => `\`${file}\``).join(', ')
+    const carried = await carryOverApproval(tx, locked, {
+      actor: server,
+      runId: ctx.run.id,
+      via: 'a server-verified trivial rebase',
+      note: `Only the conflicted files changed (${report.conflictedFiles!.join(', ')}) and no project doc moved on the base.`
+    })
+    if (!carried.ok) return { problem: carried.problem }
+    await appendAudit(tx, { projectId: locked.project.id, taskId: locked.task.id, actor: server }, auditEvent('rebase.verified', { runId: ctx.run.id, pr: locked.task.prNumber, approvedHeadSha: locked.task.approvedHeadSha, headSha: report.headSha, conflictedFiles: report.conflictedFiles }))
+    return { comment: await addComment(tx, locked.task.id, { body: `Trivial rebase verified without review: only the conflicted files changed (${files}) and no project doc changed on the base. The approval carried over to ${report.headSha}.`, pinned: false }, server) }
   }
 
   // D19: a spike's findings are its deliverable. Like a submission they

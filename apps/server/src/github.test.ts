@@ -52,6 +52,37 @@ describe('RunnerGitHub.updateBranch', () => {
   })
 })
 
+describe('RunnerGitHub.compare', () => {
+  it('reads the merge base and each file\'s change', async () => {
+    const { github, jobs } = stub(() => ({ status: 200, body: {
+      merge_base_commit: { sha: 'base' },
+      files: [
+        { filename: 'a.ts', status: 'modified', sha: 'blob-a', patch: '+a' },
+        { filename: 'b.png', previous_filename: 'old.png', status: 'renamed', sha: 'blob-b' }
+      ]
+    } }))
+    expect(await github.compare('owner/repo', 'one', 'two')).toEqual({
+      mergeBase: 'base',
+      files: [
+        { filename: 'a.ts', status: 'modified', sha: 'blob-a', patch: '+a' },
+        { filename: 'b.png', previousFilename: 'old.png', status: 'renamed', sha: 'blob-b' }
+      ]
+    })
+    expect(jobs[0]).toMatchObject({ method: 'GET', path: '/repos/owner/repo/compare/one...two?per_page=1' })
+  })
+
+  it('refuses a file list GitHub may have cut short', async () => {
+    const files = Array.from({ length: 300 }, (_, i) => ({ filename: `f${i}.ts`, status: 'modified', sha: 'x' }))
+    const { github } = stub(() => ({ status: 200, body: { merge_base_commit: { sha: 'base' }, files } }))
+    await expect(github.compare('owner/repo', 'one', 'two')).rejects.toThrow('too many files')
+  })
+
+  it('throws on HTTP failures', async () => {
+    const { github } = stub(() => ({ status: 404, body: { message: 'No common ancestor' } }))
+    await expect(github.compare('owner/repo', 'one', 'two')).rejects.toBeInstanceOf(GitHubError)
+  })
+})
+
 describe('RunnerGitHub.createBranch', () => {
   it('creates a ref at the configured target tip', async () => {
     const { github, jobs } = stub(() => ({ status: 201, body: {} }))

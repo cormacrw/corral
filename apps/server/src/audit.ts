@@ -5,14 +5,21 @@ import { sql, type SQL } from 'drizzle-orm'
 
 const { auditLog } = schema
 
+// Which of D24's two conditions the server check found broken, and where
+export interface RebaseCheckFailure {
+  condition: 'changes_outside_conflicts' | 'project_docs_changed'
+  files: string[]
+}
+
 // What applyTransition is told about a status change. Human transitions keep
 // the whole input as `event`; every other producer writes the event's name.
 export type TransitionDetail =
   | { event: HumanTransitionInput }
-  | { event: 'pr_opened' | 'pr_updated' | 'pr_rebased', runId: string, headSha: string | undefined, pr: number | null }
+  | { event: 'pr_opened' | 'pr_updated' | 'pr_rebased', runId: string, headSha: string | undefined, pr: number | null, checkFailures?: RebaseCheckFailure[], checkError?: string }
   | { event: 'findings_reported', runId: string, headSha: string }
   | { event: 'design_submitted', runId: string, headSha: string | undefined, version: number }
   | { event: 'review_approved', runId?: string, headSha: string | null }
+  | { event: 'approval_carried', runId?: string, headSha: string | null }
   | { event: 'changes_requested', runId: string, headSha: string, similarity?: number }
   | { event: 'human_approve', headSha: string | null }
   | { event: 'head_moved', headSha: string }
@@ -68,7 +75,8 @@ export interface AuditDetails {
   'project.paused': Changed
   'project.resumed': Changed
   'project.updated': Changed
-  'review.recorded': { runId: string, verdict: ReviewVerdict, headSha: string, round: number, met: number, of: number, similarity?: number }
+  'rebase.verified': { runId: string, pr: number | null, approvedHeadSha: string | null, headSha: string | undefined, conflictedFiles: string[] | undefined }
+  'review.recorded': { runId: string, verdict: ReviewVerdict, headSha: string, round: number, met: number, of: number, similarity?: number, carriedFrom?: string | null }
   'run.ended': { runId: string, runNumber: number, state: string, outcome: string | null, error: string | null, review?: RebaseReview | undefined, conflictedFiles?: string[] | undefined }
   'run.message_sent': RunComment & { attachments: string[] }
   'run.stopped': { runId: string }
