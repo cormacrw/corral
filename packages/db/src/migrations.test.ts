@@ -290,7 +290,7 @@ describe('migrations', () => {
     await admin.connect()
     await admin.query(`create database ${name}`)
     cleanup.push(async () => {
-      await admin.query(`drop database if exists ${name} with (force)`)
+      await admin.query(`drop database if exists ${name}`)
       await admin.end()
     })
     const url = new URL(adminUrl)
