@@ -60,6 +60,7 @@ export const projects: Project[] = [
     requiredChecks: ['lint', 'test'],
     paused: false,
     humanReviewDefault: false,
+    epicReviewModeDefault: 'epic',
     reviewRoundCap: 3,
     failedRunCap: 3,
     createdAt: ago(60 * 24 * 14),
@@ -79,6 +80,7 @@ export const projects: Project[] = [
     requiredChecks: [],
     paused: true,
     humanReviewDefault: true,
+    epicReviewModeDefault: 'direct',
     reviewRoundCap: 3,
     failedRunCap: 3,
     createdAt: ago(60 * 24 * 3),
@@ -103,6 +105,11 @@ export const epics: Epic[] = [
     projectId: 'p-corral',
     title: 'Design tasks',
     description: 'Versioned, sandboxed prototypes the human approves before the build is planned (D20).',
+    reviewMode: 'each_task',
+    branch: null,
+    prNumber: null,
+    prHeadSha: null,
+    reviewState: null,
     taskCount: 7,
     mergedCount: 2,
     createdAt: ago(60 * 24 * 2),
@@ -115,6 +122,11 @@ export const epics: Epic[] = [
     projectId: 'p-corral',
     title: 'Mobile app',
     description: 'The installable app for phones (D17).',
+    reviewMode: 'direct',
+    branch: null,
+    prNumber: null,
+    prHeadSha: null,
+    reviewState: null,
     taskCount: 3,
     mergedCount: 1,
     createdAt: ago(60 * 24 * 7),
@@ -123,16 +135,19 @@ export const epics: Epic[] = [
   {
     id: 'e-site', projectId: 'p-site', title: 'Website refresh',
     description: 'Refresh the landing page and navigation.', dependsOn: [], blocks: [],
+    reviewMode: 'direct', branch: null, prNumber: null, prHeadSha: null, reviewState: null,
     taskCount: 2, mergedCount: 0, createdAt: ago(60 * 24), updatedAt: ago(30)
   },
   {
     id: 'e-shipped', projectId: 'p-site', title: 'Pricing fixes',
     description: 'Completed fixes.', dependsOn: [], blocks: [],
+    reviewMode: 'direct', branch: null, prNumber: null, prHeadSha: null, reviewState: null,
     taskCount: 1, mergedCount: 1, createdAt: ago(60 * 24), updatedAt: ago(10)
   },
   {
     id: 'e-empty', projectId: 'p-site', title: 'Future campaigns',
     description: 'Planning only.', dependsOn: [], blocks: [],
+    reviewMode: 'direct', branch: null, prNumber: null, prHeadSha: null, reviewState: null,
     taskCount: 0, mergedCount: 0, createdAt: ago(60), updatedAt: ago(5)
   }
 ]
@@ -519,7 +534,7 @@ export const plans: Record<string, Plan[]> = {
     {
       id: 'plan-1', sessionId: 's-1', projectId: 'p-corral', epicId: null, version: 1, title: 'Design tasks',
       summary: 'A design task type whose deliverable is an approved, versioned prototype.', status: 'proposed', approvedAt: null,
-      epics: [{ key: 'E1', id: 'e-design', title: 'Design tasks' }],
+      epics: [{ key: 'E1', id: 'e-design', title: 'Design tasks', reviewMode: 'each_task' }],
       tasks: [
         { key: 'T1', change: 'added', revises: false, taskId: 't-cor-13', epicId: 'e-design', ref: 'COR-13', title: 'Design review screen', status: 'draft', priority: 'high', humanReview: true, dependsOn: [] },
         { key: 'T2', change: 'added', revises: false, taskId: 't-cor-14', epicId: 'e-design', ref: 'COR-14', title: 'Approve a design version', status: 'draft', priority: 'urgent', humanReview: false, dependsOn: ['T1'] },

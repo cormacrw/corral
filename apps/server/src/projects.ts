@@ -21,6 +21,7 @@ export function toProject(row: ProjectRow): Project {
     requiredChecks: row.requiredChecks,
     paused: row.paused,
     humanReviewDefault: row.humanReviewDefault,
+    epicReviewModeDefault: row.epicReviewModeDefault,
     reviewRoundCap: row.reviewRoundCap,
     failedRunCap: row.failedRunCap,
     createdAt: row.createdAt.toISOString(),
@@ -70,7 +71,8 @@ export async function createProject(db: Executor, input: CreateProjectInput, act
       repository: input.repository,
       defaultBranch: input.defaultBranch,
       ...(input.mergeMethod && { mergeMethod: input.mergeMethod }),
-      ...(input.humanReviewDefault !== undefined && { humanReviewDefault: input.humanReviewDefault })
+      ...(input.humanReviewDefault !== undefined && { humanReviewDefault: input.humanReviewDefault }),
+      ...(input.epicReviewModeDefault && { epicReviewModeDefault: input.epicReviewModeDefault })
     }).returning()
     await tx.insert(schema.auditLog).values({ projectId: row!.id, actor, action: 'project.created', detail: {} })
     return toProject(row!)

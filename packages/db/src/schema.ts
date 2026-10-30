@@ -1,6 +1,8 @@
 import {
   AGENT_ROLES,
   DESIGN_VERSION_STATUSES,
+  EPIC_REVIEW_MODES,
+  EPIC_REVIEW_STATES,
   MERGE_METHODS,
   RUN_OUTCOMES,
   RUN_STATES,
@@ -38,6 +40,8 @@ export const agentRole = pgEnum('agent_role', AGENT_ROLES)
 export const runState = pgEnum('run_state', RUN_STATES)
 export const runOutcome = pgEnum('run_outcome', RUN_OUTCOMES)
 export const mergeMethod = pgEnum('merge_method', MERGE_METHODS)
+export const epicReviewMode = pgEnum('epic_review_mode', EPIC_REVIEW_MODES)
+export const epicReviewState = pgEnum('epic_review_state', EPIC_REVIEW_STATES)
 
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 const updatedAt = () => timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
@@ -73,6 +77,8 @@ export const projects = pgTable('projects', {
   paused: boolean().notNull().default(false),
   // Default for each new task's human-review flag (D5)
   humanReviewDefault: boolean().notNull().default(false),
+  // The review mode of each new epic a plan doesn't give one (D23)
+  epicReviewModeDefault: epicReviewMode().notNull().default('epic'),
   reviewRoundCap: integer().notNull().default(5),
   failedRunCap: integer().notNull().default(3),
   createdAt: createdAt(),
@@ -88,6 +94,15 @@ export const epics = pgTable('epics', {
   title: text().notNull(),
   description: text().notNull().default(''),
   priority: taskPriority().notNull().default('medium'),
+  // Set from the plan or the project's default when the epic is created (D23).
+  // Epics that had board tasks before review modes existed are `direct`.
+  reviewMode: epicReviewMode().notNull().default('epic'),
+  // The epic branch and its PR into the target branch, in `epic` and
+  // `each_task` modes; null until Corral creates them (D23)
+  branch: text(),
+  prNumber: integer(),
+  prHeadSha: text(),
+  reviewState: epicReviewState(),
   createdBy: actor('created_by'),
   createdAt: createdAt(),
   updatedAt: updatedAt()

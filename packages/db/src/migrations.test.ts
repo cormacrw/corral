@@ -166,6 +166,41 @@ describe('migrations', () => {
     expect(notes.rows).toEqual([{ note: 'No visible change', blob: null, file_name: null, content_type: null }])
   }, 60_000)
 
+  it.each([
+    { driver: 'pglite' as const, enabled: true },
+    { driver: 'postgres' as const, enabled: postgresAvailable }
+  ])('0027 makes epics already on the board direct and new ones take the project default, on $driver (D23)', async ({ driver, enabled }) => {
+    if (!enabled) return
+    const before = await migrationsBefore('0027_epic_review_modes')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db, migrate } = await open(driver)
+
+    await migrate(before)
+    const actor = sql`'{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb`
+    await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('P', 'p', 'PA', 'o/r', 'main')`)
+    // In progress, all merged, only Backlog, and only a deleted board task
+    const epics = { inProgress: 'in_progress', merged: 'merged', backlog: 'backlog', deleted: 'ready' }
+    for (const [i, [title, status]] of Object.entries(epics).entries()) {
+      await db.execute(sql`insert into epics (project_id, title, created_by) select id, ${title}, ${actor} from projects`)
+      await db.execute(sql`insert into tasks (project_id, number, epic_id, title, type, status, deleted_at, created_by)
+        select e.project_id, ${i + 1}, e.id, 'T', 'task', ${status}::task_status, ${title === 'deleted' ? sql`now()` : null}, ${actor} from epics e where e.title = ${title}`)
+    }
+    await db.execute(sql`insert into tasks (project_id, number, epic_id, title, type, status, created_by)
+      select e.project_id, 5, e.id, 'T', 'task', 'merged', ${actor} from epics e where e.title = 'inProgress'`)
+
+    await migrate(migrationsFolder)
+
+    const modes = await db.execute(sql`select title, review_mode::text as mode, branch, pr_number, pr_head_sha, review_state from epics order by title`)
+    expect(modes.rows).toEqual([
+      { title: 'backlog', mode: 'epic', branch: null, pr_number: null, pr_head_sha: null, review_state: null },
+      { title: 'deleted', mode: 'epic', branch: null, pr_number: null, pr_head_sha: null, review_state: null },
+      { title: 'inProgress', mode: 'direct', branch: null, pr_number: null, pr_head_sha: null, review_state: null },
+      { title: 'merged', mode: 'direct', branch: null, pr_number: null, pr_head_sha: null, review_state: null }
+    ])
+    const projects = await db.execute(sql`select epic_review_mode_default::text as mode from projects`)
+    expect(projects.rows).toEqual([{ mode: 'epic' }])
+  }, 60_000)
+
   // An empty database to migrate step by step: PGlite in memory, or a
   // throwaway database on the test Postgres server
   async function open(driver: 'pglite' | 'postgres') {

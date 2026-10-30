@@ -1,5 +1,6 @@
 import {
   AGENT_ROLES,
+  EPIC_REVIEW_MODES,
   MERGE_METHODS,
   PROJECT_PREFIX_PATTERN,
   TASK_PRIORITIES,
@@ -8,6 +9,8 @@ import {
   type Actor,
   type AgentRole,
   type DesignVersionStatus,
+  type EpicReviewMode,
+  type EpicReviewState,
   type MergeGate,
   type MergeMethod,
   type RunOutcome,
@@ -34,7 +37,8 @@ export const createProjectInput = z.object({
   repository: z.string().regex(/^[\w.-]+\/[\w.-]+$/),
   defaultBranch: z.string().trim().min(1),
   mergeMethod: z.enum(MERGE_METHODS).optional(),
-  humanReviewDefault: z.boolean().optional()
+  humanReviewDefault: z.boolean().optional(),
+  epicReviewModeDefault: z.enum(EPIC_REVIEW_MODES).optional()
 })
 export type CreateProjectInput = z.infer<typeof createProjectInput>
 
@@ -48,6 +52,7 @@ export const patchProjectInput = z.object({
   requiredChecks: z.array(z.string().trim().min(1)).optional(),
   paused: z.boolean().optional(),
   humanReviewDefault: z.boolean().optional(),
+  epicReviewModeDefault: z.enum(EPIC_REVIEW_MODES).optional(),
   reviewRoundCap: z.number().int().positive().optional(),
   failedRunCap: z.number().int().positive().optional()
 })
@@ -71,6 +76,8 @@ export interface Project {
   requiredChecks: string[]
   paused: boolean
   humanReviewDefault: boolean
+  // The review mode of new epics a plan doesn't give one (D23)
+  epicReviewModeDefault: EpicReviewMode
   reviewRoundCap: number
   failedRunCap: number
   createdAt: string
@@ -87,6 +94,13 @@ export interface Epic {
   description: string
   dependsOn: string[]
   blocks: string[]
+  reviewMode: EpicReviewMode
+  // The epic branch and its PR into the target branch (D23); null until
+  // Corral creates them, and always in `direct` mode
+  branch: string | null
+  prNumber: number | null
+  prHeadSha: string | null
+  reviewState: EpicReviewState | null
   // Tasks outside Draft and Backlog, and how many of them are merged
   taskCount: number
   mergedCount: number
@@ -358,7 +372,7 @@ export interface Plan {
   status: PlanStatus
   approvedAt: string | null
   // In the order the PM gave them; epicId above is the first
-  epics: { key: string, id: string, title: string, dependsOn?: { id: string, title: string }[] }[]
+  epics: { key: string, id: string, title: string, reviewMode: EpicReviewMode, dependsOn?: { id: string, title: string }[] }[]
   tasks: {
     key: string
     change: PlanChange

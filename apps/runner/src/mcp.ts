@@ -1,5 +1,5 @@
 import { askQuestionInput, EVIDENCE_KINDS, type AgentTool, type RunJob } from '@corral/contracts'
-import { TASK_TYPES, type AgentRole } from '@corral/core'
+import { EPIC_REVIEW_MODES, TASK_TYPES, type AgentRole } from '@corral/core'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
@@ -107,7 +107,9 @@ const toolDefinitions = {
         key: z.string().describe('A short handle used by a task\'s epic, e.g. e1'),
         title: z.string().min(1),
         summary: z.string().default(''),
-        dependsOn: z.array(z.string()).optional().describe('Epic keys in this plan or existing epic ids from list_tasks. Omit to keep dependencies in a revision; [] clears them. Tasks wait until prerequisite epics are done.')
+        dependsOn: z.array(z.string()).optional().describe('Epic keys in this plan or existing epic ids from list_tasks. Omit to keep dependencies in a revision; [] clears them. Tasks wait until prerequisite epics are done.'),
+        reviewMode: z.enum(EPIC_REVIEW_MODES, { error: `reviewMode must be one of ${EPIC_REVIEW_MODES.join(', ')}` }).optional()
+          .describe('How its tasks reach the target branch: epic = each task merges into an epic branch on review, and the human reviews the epic PR; each_task = the same, but the human also reviews every task; direct = each task merges straight into the target branch. Leave it out for the project\'s default.')
       })).optional(),
       tasks: z.array(z.object({
         key: z.string().describe('A short handle used by dependsOn, e.g. t1'),
