@@ -123,6 +123,10 @@ export class RunManager {
     return [...this.#runs.values()].filter(r => !r.ended).map(r => ({ runId: r.job.runId, leaseEpoch: r.job.leaseEpoch }))
   }
 
+  activeRunCount(): number {
+    return this.#runs.size
+  }
+
   handle(message: ServerMessage): void {
     switch (message.type) {
       case 'run.assign':
@@ -562,6 +566,7 @@ export class RunManager {
     const finish = (sha: string | null) => {
       this.#connection.send({ type: 'run.ended', runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, exit, headSha: sha })
       this.#runs.delete(run.job.runId)
+      this.#connection.refreshUpdateStatus?.()
     }
     if (run.worktree && run.job.role === 'developer') void headSha(run.worktree).then(finish, () => finish(null))
     else finish(null)

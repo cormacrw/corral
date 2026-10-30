@@ -45,7 +45,10 @@ export class RunnerHub {
   // results stay unqueued: a tool call may wait on a job over this socket.
   #queues = new Map<string, Promise<void>>()
 
-  constructor(events: EventBus) {
+  readonly commit: string
+
+  constructor(events: EventBus, commit = process.env.CORRAL_BUILD_SHA || 'development') {
+    this.commit = commit
     this.#events = events
   }
 
@@ -97,7 +100,7 @@ export class RunnerHub {
         }
         if (message.type === 'hello') {
           if (message.protocol !== RUNNER_PROTOCOL_VERSION) {
-            socket.close(4000, `Protocol ${message.protocol} not supported; server speaks ${RUNNER_PROTOCOL_VERSION}`)
+            socket.close(4000, JSON.stringify({ protocol: RUNNER_PROTOCOL_VERSION, commit: this.commit }))
             return
           }
           if (runnerId) return
@@ -114,7 +117,7 @@ export class RunnerHub {
             runtimes: Array.isArray(message.runtimes) ? message.runtimes.filter(r => typeof r === 'string') : [],
             roles: Array.isArray(message.roles) ? message.roles.filter(r => (RUNNER_ROLES as readonly string[]).includes(r)) : []
           }
-          this.#runners.set(runnerId, { socket, status: { id: runnerId, name: message.name, online: false, connectedAt: now, lastHeartbeatAt: now, ...capacity } })
+          this.#runners.set(runnerId, { socket, status: { id: runnerId, name: message.name, online: false, connectedAt: now, lastHeartbeatAt: now, ...capacity, commit: message.commit || 'unknown', serverCommit: this.commit, behind: message.commit !== this.commit, draining: !!message.draining || (!!message.autoUpdate && message.commit !== this.commit), updateRequested: !!message.updateRequested } })
           // Don't dispatch into this socket until its hello snapshot has been
           // reconciled: a newly assigned run isn't in that snapshot.
           await this.#handlers?.onConnected(message.activeRuns, runnerId).catch(error => console.error('Runner reconciliation failed', error))
@@ -122,7 +125,7 @@ export class RunnerHub {
           if (runner?.socket !== socket) return
           runner.status.online = true
           this.#publishStatus()
-          this.send({ type: 'welcome', runnerId }, runnerId)
+          this.send({ type: 'welcome', runnerId, commit: this.commit, draining: runner.status.draining, updateRequested: runner.status.updateRequested }, runnerId)
           void this.detectClis(true, runnerId).catch(error => console.error('Runner CLI detection failed', error))
           this.#handlers?.onReady()
           return
@@ -150,12 +153,12 @@ export class RunnerHub {
   }
 
   pick(): string | null {
-    return [...this.#runners.entries()].filter(([, r]) => r.socket && r.status.online).sort((a, b) => a[1].status.connectedAt.localeCompare(b[1].status.connectedAt))[0]?.[0] ?? null
+    return [...this.#runners.entries()].filter(([, r]) => r.socket && r.status.online).sort((a, b) => Number(a[1].status.draining) - Number(b[1].status.draining) || a[1].status.connectedAt.localeCompare(b[1].status.connectedAt))[0]?.[0] ?? null
   }
 
   // Online runners ready for dispatch, longest connected first
   available(): RunnerInfo[] {
-    return [...this.#runners.values()].filter(r => r.socket && r.status.online).map(r => ({ ...r.status }))
+    return [...this.#runners.values()].filter(r => r.socket && r.status.online && !r.status.draining).map(r => ({ ...r.status }))
       .sort((a, b) => a.connectedAt.localeCompare(b.connectedAt))
   }
 
@@ -165,9 +168,20 @@ export class RunnerHub {
 
   send(message: ServerMessage, runnerId: string | null): boolean {
     const socket = runnerId ? this.#runners.get(runnerId)?.socket : null
-    if (!socket) return false
+    if (!socket || (message.type === 'run.assign' && runnerId && this.#runners.get(runnerId)?.status.draining)) return false
     socket.send(JSON.stringify(message))
     return true
+  }
+
+  drain(runnerId: string, updateRequested = false): RunnerInfo {
+    const runner = this.#runners.get(runnerId)
+    if (!runner?.socket || !runner.status.online) throw runnerOffline()
+    runner.status.draining = true
+    runner.status.updateRequested ||= updateRequested
+    this.send({ type: 'runner.drain', updateRequested: runner.status.updateRequested }, runnerId)
+    this.#publishStatus()
+    this.#handlers?.onReady()
+    return { ...runner.status }
   }
 
   #rejectJobs(runnerId: string): void {
@@ -210,6 +224,9 @@ export class RunnerHub {
 
   async #handle(message: RunnerMessage, runnerId: string): Promise<void> {
     switch (message.type) {
+      case 'runner.draining':
+        this.drain(runnerId, message.updateRequested)
+        return
       case 'heartbeat':
         this.#runners.get(runnerId)!.status.lastHeartbeatAt = new Date().toISOString()
         this.#publishStatus()

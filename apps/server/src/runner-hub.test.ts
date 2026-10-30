@@ -39,7 +39,7 @@ describe('runner connection', () => {
       })
     })
     await new Promise(resolve => connection.once('open', resolve))
-    connection.send(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, runnerId: 'r1', name: 'test-runner', activeRuns: [], slots: 1, runtimes: ['claude-code'], roles: ['developer'] } satisfies RunnerMessage))
+    connection.send(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, commit: 'development', runnerId: 'r1', name: 'test-runner', activeRuns: [], slots: 1, runtimes: ['claude-code'], roles: ['developer'] } satisfies RunnerMessage))
     await welcomed
     return connection
   }
