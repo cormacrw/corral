@@ -175,3 +175,18 @@ it('fences a moved PR head and retries an expired integration lease', async () =
   expect(await report(retried, 'approved')).toMatchObject({ ok: true })
   await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
+
+it('starts no integration review until a reviewer runner has a free slot, then records the runner on the run', async () => {
+  const { epic, other } = await setup()
+  await t.db.update(schema.agents).set({ paused: true }).where(eq(schema.agents.role, 'reviewer'))
+  await t.db.update(schema.tasks).set({ status: 'merged' }).where(eq(schema.tasks.id, other.id))
+  await t.orchestrator.schedule()
+  await t.db.update(schema.agents).set({ paused: false }).where(eq(schema.agents.role, 'reviewer'))
+  const [reviewer] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'reviewer'))
+  expect(await t.orchestrator.epicPrs.claim(reviewer!.id, async () => null)).toBeNull()
+  expect(await t.db.select().from(schema.runs).where(eq(schema.runs.epicId, epic.id))).toEqual([])
+  await t.orchestrator.schedule()
+  const { job } = await runner.next('run.assign', m => m.job.epicId === epic.id)
+  const [run] = await t.db.select().from(schema.runs).where(eq(schema.runs.id, job.runId))
+  expect(run!.runnerId).toBe('r1')
+})
