@@ -175,7 +175,7 @@ it('blocks a conflicted rebase with an Inbox item and hands it to a developer ru
   t.github.setBranch(project.repository, epic.branch!, `${head}-resolved`)
   await runner.call(dev.runId, dev.leaseEpoch, 'attach_evidence', { criterionId: criterion!.id, kind: 'note', note: 'Kept both route changes' })
   const prs = t.github.pulls.size
-  expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'pr_updated', summary: 'Rebased', headSha: `${head}-resolved` })).toMatchObject({ ok: true })
+  expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'pr_updated', note: 'Rebased the epic branch and resolved both conflicts', summary: 'Rebased', headSha: `${head}-resolved` })).toMatchObject({ ok: true })
   expect(t.github.pulls.size).toBe(prs)
   expect(pr.body).not.toContain('Rebased')
 
@@ -201,7 +201,7 @@ it('sends a failed required check back as a fix task in the epic', async () => {
   await t.orchestrator.merges.tick()
   expect((await reload(epic.id)).reviewState).toBe('open')
   const fixes = await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epic.id))
-  expect(fixes.find(row => row.title.startsWith('Fix integration:'))).toMatchObject({ status: 'ready' })
+  expect(fixes.find(row => row.title === 'Fix integration: CI failed on the epic PR')).toMatchObject({ status: 'ready' })
 })
 
 it('returns a repeatedly refused merge to the human, whose approval retries it', async () => {
