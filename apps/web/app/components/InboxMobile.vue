@@ -57,8 +57,8 @@ const prLabel = computed(() => {
 const role = (r: InboxItem['sender']['role']) => r === 'system' ? 'System' : ROLE[r]
 const canAct = computed(() => props.selected !== null && props.selected.type !== 'activity' && !props.selected.resolution && !props.alreadyResolved)
 // A thread being deleted leaves the list at once, while its Undo toast shows
-const deleting = useDeletePlanThread(props.onRefresh)
-const isHidden = (item: InboxItem) => item.type === 'plan_thread' && deleting.hidden(item.sessionId)
+const deleting = usePlanThreadDelete()
+const isHidden = (item: InboxItem) => item.type === 'plan_thread' && deleting.pending.value.includes(item.sessionId)
 const listed = computed(() => props.items.filter(i => !isHidden(i)))
 // Server order: newest first, task items and threads together (D11)
 const tabs = computed(() => [
@@ -331,7 +331,7 @@ const tabs = computed(() => [
         <!-- Only Plan threads swipe to delete; task items are resolved from their screen -->
         <SwipeToDelete
           v-if="item.type === 'plan_thread'"
-          @delete="deleting.remove(item)"
+          @delete="deleting.remove(item.sessionId, props.onRefresh)"
         >
           <NuxtLink
             :to="`/inbox/${item.id}`"

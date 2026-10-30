@@ -12,7 +12,7 @@ const props = defineProps<{ item: PlanThreadItem, onRefresh: () => Promise<void>
 const router = useRouter()
 const live = useLive()
 const threads = usePlanThreads()
-const deleting = useDeletePlanThread()
+const deleting = usePlanThreadDelete()
 const flyout = useTaskFlyout()
 // A task or epic opened from the plan sheet opens in a taller sheet over it,
 // on this route, rather than on its own page (design/inbox.md#mobile)
@@ -112,7 +112,7 @@ async function approve(plan: Plan, to: 'ready' | 'backlog') {
 // Deleting waits five seconds for Undo before closing the session; the
 // thread leaves the list at once (design/inbox.md#mobile)
 async function deleteThread() {
-  deleting.remove(props.item)
+  deleting.remove(props.item.sessionId, props.onRefresh)
   await flyout.close()
   await router.replace('/inbox')
 }

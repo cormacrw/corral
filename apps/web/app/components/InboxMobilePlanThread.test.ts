@@ -69,7 +69,7 @@ beforeEach(() => {
   vi.stubGlobal('usePlanThreads', () => ({ remove: mocks.remove, add: mocks.add }))
   vi.stubGlobal('useTaskFlyout', () => ({ plan: ref(false), ref: ref(null), epic: ref(null), close: vi.fn(), openPlan: vi.fn() }))
   vi.stubGlobal('useToast', () => ({ add: mocks.toast }))
-  vi.stubGlobal('useDeletePlanThread', () => ({ remove: mocks.deleteThread, hidden: () => false }))
+  vi.stubGlobal('usePlanThreadDelete', () => ({ remove: mocks.deleteThread, pending: ref([]) }))
   mocks.session.mockResolvedValue({ plans: [plan], messages: [{ text: 'Earlier conversation must stay hidden' }] })
   mocks.approve.mockResolvedValue(plan)
 })
@@ -115,7 +115,7 @@ describe('focused mobile Plan thread', () => {
     const w = screen()
     await click(w, 'Delete thread')
     expect(w.text()).not.toContain('Close this thread?')
-    expect(mocks.deleteThread).toHaveBeenCalledWith(question)
+    expect(mocks.deleteThread).toHaveBeenCalledWith(question.sessionId, mocks.refresh)
     // The session is closed later, after the Undo window
     expect(mocks.close).not.toHaveBeenCalled()
     expect(mocks.replace).toHaveBeenCalledWith('/inbox')
