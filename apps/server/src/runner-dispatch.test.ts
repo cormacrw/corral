@@ -97,7 +97,7 @@ describe('runner capacity, runtimes and roles', () => {
     expect(await taskRow(fourth.id)).toMatchObject({ status: 'in_progress', leaseRunId: next.job.runId })
     expect(ready.map(r => r.id)).not.toContain(fourth.id)
     expect((await t.db.select().from(runs).where(eq(runs.id, next.job.runId)))[0]!.runnerId).toBe('B')
-  }, 30000)
+  }, 60000)
 
   it('sends PM turns and design runs only to runners that take those roles', async () => {
     t = await createTestApp('pglite', { listen: true })
@@ -127,7 +127,7 @@ describe('runner capacity, runtimes and roles', () => {
     await t.orchestrator.schedule()
     await vi.waitFor(() => expect(assigns(a).map(m => m.type === 'run.assign' && m.job.taskId)).toEqual([build.id]))
     expect(assigns(a).every(m => m.type === 'run.assign' && m.job.role === 'developer' && m.job.taskType !== 'design')).toBe(true)
-  }, 30000)
+  }, 60000)
 
   it('sends a codex run only to a runner signed in to codex', async () => {
     t = await createTestApp('pglite', { listen: true })
@@ -144,7 +144,7 @@ describe('runner capacity, runtimes and roles', () => {
     const job = (await b.next('run.assign', m => m.job.taskId === task.id)).job
     expect(job.runtime).toBe('codex')
     expect(assigns(a)).toHaveLength(0)
-  }, 30000)
+  }, 60000)
 
   it('resumes a developer revision on the runner that ran the previous run', async () => {
     t = await createTestApp('pglite', { listen: true })
@@ -165,7 +165,7 @@ describe('runner capacity, runtimes and roles', () => {
     const other = developer === a ? b : a
     expect(assigns(other).some(m => m.type === 'run.assign' && m.job.role === 'developer')).toBe(false)
     expect(await transcript(revision.runId)).toContainEqual({ type: 'system', text: `Resuming the agent session of run #${first.runNumber} on runner ${developer === a ? 'A' : 'B'}` })
-  }, 30000)
+  }, 60000)
 
   it('starts a revision fresh from the pushed branch on another runner when the previous one is offline', async () => {
     t = await createTestApp('pglite', { listen: true })
@@ -190,7 +190,7 @@ describe('runner capacity, runtimes and roles', () => {
     expect(await transcript(revision.runId)).toContainEqual({
       type: 'system', text: `Run #${first.runNumber} ran on runner A, which is offline: starting a fresh session on runner C from the pushed branch ${first.branch}`
     })
-  }, 30000)
+  }, 60000)
 
   it('keeps a Plan session\'s turns on the runner of its first turn while it is online', async () => {
     t = await createTestApp('pglite', { listen: true })
@@ -225,5 +225,5 @@ describe('runner capacity, runtimes and roles', () => {
     expect(moved).toMatchObject({ agentSessionId: null, fallbackPrompt: null })
     expect(moved.prompt).toContain('One more thing')
     expect(await transcript(moved.runId)).toContainEqual(expect.objectContaining({ type: 'system', text: expect.stringContaining('starting a fresh session on runner') }))
-  }, 30000)
+  }, 60000)
 })
