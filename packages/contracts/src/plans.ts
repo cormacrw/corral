@@ -141,4 +141,3 @@ export const listTasksInput = z.object({
   includeMerged: z.boolean().default(false).describe('Also return Merged tasks; they are left out by default')
 })
 export type ListTasksInput = z.infer<typeof listTasksInput>
-

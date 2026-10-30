@@ -1,7 +1,7 @@
 import type { DesignVersion } from '@corral/contracts'
 import { approveDesignVersion, BundleError, bundlePath, designPreviewUrl, taskRef, unpackBundle, type Actor, type DesignVersionStatus } from '@corral/core'
 import { schema, type Database, type Executor } from '@corral/db'
-import { and, asc, desc, eq, isNull } from 'drizzle-orm'
+import { and, asc, desc, eq } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
 import type { BlobStore } from './blob-store.ts'
 import { ApiFailure } from './errors.ts'
