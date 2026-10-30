@@ -4,7 +4,7 @@ import { schema, type Database, type Executor, type PlanRevision } from '@corral
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { listTaskAttachments } from './attachments.ts'
-import { listEpics } from './epics.ts'
+import { listEpics, replaceEpicDependencies } from './epics.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
 import { pmFallbackPrompt, pmPrompt, questionText, sessionTitlePrompt } from './prompts.ts'
@@ -734,9 +734,7 @@ export class PlanService {
       const epicIds = await this.#epicsOf(plan, tx)
       for (const epic of proposed.epics) {
         const epicId = epicIds.get(epic.key)!
-        await tx.delete(epicDependencies).where(eq(epicDependencies.epicId, epicId))
-        const deps = [...new Set((epic.dependsOn ?? []).map(dep => epicIds.get(dep) ?? dep))]
-        if (deps.length) await tx.insert(epicDependencies).values(deps.map(dep => ({ epicId, dependsOnEpicId: dep })))
+        await replaceEpicDependencies(tx, project.id, epicId, (epic.dependsOn ?? []).map(dep => epicIds.get(dep) ?? dep))
       }
       // Approving the plan closes its session
       const now = new Date()
