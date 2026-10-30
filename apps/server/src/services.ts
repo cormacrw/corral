@@ -5,6 +5,7 @@ import { LocalBlobStore, type BlobStore } from './blob-store.ts'
 import type { EventBus } from './events.ts'
 import { RunnerGitHub, type GitHubClient } from './github.ts'
 import { Orchestrator } from './orchestrator.ts'
+import { PerformanceSamples } from './performance.ts'
 import { PlanService } from './plan.ts'
 import { RunnerHub } from './runner-hub.ts'
 import { Transcripts } from './transcripts.ts'
@@ -46,5 +47,5 @@ export function createServices(options: ServiceOptions): Services {
   runner.setHandlers(orchestrator)
   const plans = new PlanService({ db, events, runner, stopRun: (runId, actor) => orchestrator.stopRun(runId, actor), startRun: (session, job) => orchestrator.startPmRun(session, job) })
   orchestrator.plans = plans
-  return { runner, orchestrator, blobs, transcripts, github, plans }
+  return { runner, orchestrator, blobs, transcripts, github, plans, performance: new PerformanceSamples(db) }
 }

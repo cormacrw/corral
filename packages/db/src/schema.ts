@@ -17,6 +17,7 @@ import {
   bigint,
   boolean,
   check,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -509,3 +510,13 @@ export const deployments = pgTable('deployments', {
   readAt: timestamp('read_at', { withTimezone: true }),
   createdAt: createdAt()
 }, t => [unique('deployments_project_to_sha_unique').on(t.projectId, t.toSha)])
+
+// Shared timing samples; names are patterns, never URLs or request data.
+export const perfSamples = pgTable('perf_samples', {
+  id: uuid().primaryKey().defaultRandom(),
+  kind: text().notNull(),
+  name: text().notNull(),
+  durationMs: doublePrecision('duration_ms').notNull(),
+  status: integer(),
+  createdAt: createdAt()
+}, table => [index('perf_samples_kind_created_at_idx').on(table.kind, table.createdAt)])
