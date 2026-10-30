@@ -109,6 +109,21 @@ describe('ToolServer', () => {
     await client.close()
   })
 
+  it('gives the PM an add_comment that takes a required taskRef and body and passes them through', async () => {
+    const { client, calls } = await connect('pm')
+    const addComment = (await client.listTools()).tools.find(t => t.name === 'add_comment')!
+    expect(addComment.inputSchema).toMatchObject({ type: 'object', properties: { taskRef: { type: 'string' }, body: { type: 'string' } }, required: ['taskRef', 'body'] })
+
+    await client.callTool({ name: 'add_comment', arguments: { taskRef: 'COR-4', body: 'COR-9 changes this' } })
+    expect(calls).toEqual([{ tool: 'add_comment', input: { taskRef: 'COR-4', body: 'COR-9 changes this' } }])
+
+    // Without a ref the call is refused before it reaches Corral
+    const missing = await client.callTool({ name: 'add_comment', arguments: { body: 'Where?' } })
+    expect(missing.isError).toBe(true)
+    expect(calls).toHaveLength(1)
+    await client.close()
+  })
+
   it('tells the PM to refine a Backlog task by ref in propose_plan, and passes the ref through', async () => {
     const { client, calls } = await connect('pm')
     const propose = (await client.listTools()).tools.find(t => t.name === 'propose_plan')!

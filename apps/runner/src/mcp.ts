@@ -111,8 +111,8 @@ const toolDefinitions = {
   }
 } satisfies Record<AgentTool, ToolDefinition>
 
-// Where a role's tool differs: the PM reads any task in the project by ref,
-// while developers and reviewers only ever read their own
+// Where a role's tool differs: the PM reads and comments on any task in the
+// project by ref, while developers and reviewers only ever touch their own
 const roleToolDefinitions: Record<AgentRole, Partial<Record<AgentTool, ToolDefinition>>> = {
   designer: {},
   developer: {},
@@ -121,6 +121,13 @@ const roleToolDefinitions: Record<AgentRole, Partial<Record<AgentTool, ToolDefin
     get_task: {
       description: 'Read any task in this project by ref: title, description, acceptance criteria with their IDs, status, epic, dependencies and comments.',
       input: { taskRef: z.string().describe('e.g. COR-12') }
+    },
+    add_comment: {
+      description: 'Leave a note on any task in this project, for the human and the other agents, e.g. that a follow-up task changes its behaviour.',
+      input: {
+        taskRef: z.string().describe('e.g. COR-12'),
+        body: z.string().min(1).describe('Markdown text')
+      }
     }
   }
 }
@@ -129,7 +136,7 @@ export const ROLE_TOOLS: Record<AgentRole, AgentTool[]> = {
   designer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'submit_design', 'report_outcome'],
   developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'report_outcome'],
   reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'get_design', 'report_outcome'],
-  pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_agent_activity', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs', ...Object.keys(pmDirectTools) as PmDirectTool[]]
+  pm: ['list_tasks', 'get_task', 'add_comment', 'get_run_outcomes', 'get_agent_activity', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs', ...Object.keys(pmDirectTools) as PmDirectTool[]]
 }
 
 // The tools a run gets: its role's alone. Only a designer submits designs (D23)

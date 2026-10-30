@@ -12,7 +12,7 @@ import type { EventBus } from './events.ts'
 import { pmFallbackPrompt, pmPrompt, questionText, sessionTitlePrompt } from './prompts.ts'
 import type { RunnerHub } from './runner-hub.ts'
 import { requireRuntimeCli } from './setup.ts'
-import { createTask, deleteTaskRows, draftSessions, findTaskId, loadTask, patchTask, pinStaleness, setDesignPin, transitionTask, type ProjectRow } from './tasks.ts'
+import { addComment, createTask, deleteTaskRows, draftSessions, findTaskId, loadTask, patchTask, pinStaleness, setDesignPin, transitionTask, type ProjectRow } from './tasks.ts'
 
 const { acceptanceCriteria, agents, auditLog, designVersions, epicDependencies, epics, planEpics, planMessages, planSessions, planTasks, plans, projects, runs, taskDependencies, taskDesignPins, tasks } = schema
 
@@ -413,6 +413,13 @@ export class PlanService {
           comments: notes.map(c => ({ author: c.author.kind, body: c.body, pinned: c.pinned, at: c.createdAt.toISOString() })),
           attachments: await listTaskAttachments(db, project.id, task.description, notes.map(c => ({ author: c.author.kind, body: c.body, createdAt: c.createdAt })))
         }
+      }
+
+      case 'add_comment': {
+        const { taskRef: ref, body } = z.object({ taskRef: z.string(), body: z.string().trim().min(1) }).parse(input)
+        const comment = await addComment(db, await this.#taskIdByRef(project, ref), { body, pinned: false }, actor)
+        this.#d.events.publish({ type: 'comment.created', comment })
+        return { ok: true }
       }
 
       case 'get_run_outcomes': {
