@@ -71,7 +71,23 @@ through runner WebSocket reports and task HTTP responses.
 Rebase submissions now require `review: trivial | needs_review` and a non-empty
 `conflictedFiles` list (non-blank file paths). Trivial means combining both sides
 with no new logic, renames or behaviour changes; every other resolution needs
-review. Both choices still enter Agent review pending the later server fast path.
+review. `needs_review` goes to Agent review without any check.
 The run stores both fields; the reviewer assignment includes them and the task
 History entry shows the choice and complete file list. Historical runs remain
 readable without these fields. The additive migration leaves existing data intact.
+
+`trivial` runs `checkTrivialRebase` (`rebase-review.ts`) before the submission's
+transaction, using GitHub's three-dot compare. Old and new base are the merge
+bases of the approved and new heads with the base branch's current head; nothing
+stores them. File changes are compared without hunk headers, so a change that
+only moved down the file doesn't count as different. A file with no patch
+(binary or very large) can't be compared, because its head blob doesn't say what
+it replaced, so it counts as different; only an added file with the same blob
+on both sides counts as unchanged. A base-side rename counts both paths as changed.
+Passing carries the approval over as the `server` actor with the developer's run
+id, writes a `rebase.verified` audit entry and posts a Corral comment, which is
+what the task's Activity tab shows; no `pr_rebased` transition is written, so the
+Inbox shows the `rebase.verified` line instead. Failing records `checkFailures`
+on the `pr_rebased` transition. A GitHub error, a comparison of 300 or more
+files (GitHub silently truncates) or an approval that can't carry over records
+`checkError` there instead and goes to Agent review with no failed conditions.

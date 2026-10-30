@@ -357,6 +357,7 @@ function historyText(entry: AuditEntry): string {
     case 'run.ended': return `run #${String(d.runNumber)} ended ${String(d.state)}${d.outcome ? ` (${String(d.outcome)})` : ''}${d.error ? `: ${String(d.error)}` : ''}`
     case 'review.recorded': return `review: ${String(d.verdict).replaceAll('_', ' ')} (${String(d.met)} of ${String(d.of)} criteria met) on ${String(d.headSha).startsWith('findings-') ? 'the findings' : String(d.headSha).slice(0, 10)}`
     case 'merge.refused': return `GitHub refused the merge: ${String(d.message)}`
+    case 'rebase.verified': return 'verified the trivial rebase without review'
     case 'branch.update_requested': return 'asked GitHub to update the branch from the base'
     case 'branch.head_moved': return `branch moved to ${String(d.to).slice(0, 10)}${d.approvalKept ? ' (approval kept)' : ''}`
     case 'worktrees.cleaned': return 'worktrees removed on the runner'

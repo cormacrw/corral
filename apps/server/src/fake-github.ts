@@ -1,5 +1,5 @@
 import type { MergeMethod } from '@corral/core'
-import type { CheckResult, GitHubClient, PullRequest } from './github.ts'
+import type { CheckResult, Comparison, GitHubClient, PullRequest } from './github.ts'
 
 // An in-memory GitHub for tests: branches, PRs, checks and a configurable
 // merge result. Tests push a branch head with `setBranch` the way the runner
@@ -8,6 +8,8 @@ export class FakeGitHub implements GitHubClient {
   branches = new Map<string, string>()
   pulls = new Map<number, PullRequest & { head: string, base: string, title: string, body: string }>()
   checkResults = new Map<string, CheckResult[]>()
+  // Set with `setComparison`; comparing anything else fails
+  comparisons = new Map<string, Comparison | Error>()
   // Each call records what the orchestrator asked for
   calls: { method: string, args: unknown[] }[] = []
   mergeResult: { merged: boolean, sha: string | null, message: string } | Error = { merged: true, sha: 'merge-sha', message: 'Pull Request successfully merged' }
@@ -27,6 +29,10 @@ export class FakeGitHub implements GitHubClient {
 
   setChecks(sha: string, checks: CheckResult[]): void {
     this.checkResults.set(sha, checks)
+  }
+
+  setComparison(base: string, head: string, result: Comparison | Error): void {
+    this.comparisons.set(`${base}...${head}`, result)
   }
 
   #record(method: string, ...args: unknown[]): void {
@@ -90,6 +96,14 @@ export class FakeGitHub implements GitHubClient {
   async checks(repository: string, sha: string): Promise<CheckResult[]> {
     this.#record('checks', repository, sha)
     return this.checkResults.get(sha) ?? []
+  }
+
+  async compare(repository: string, base: string, head: string): Promise<Comparison> {
+    this.#record('compare', repository, base, head)
+    const result = this.comparisons.get(`${base}...${head}`)
+    if (result === undefined) throw new Error(`No comparison ${base}...${head}`)
+    if (result instanceof Error) throw result
+    return result
   }
 
   // Rebases onto the base: the head commit is rewritten, so the test pushes
