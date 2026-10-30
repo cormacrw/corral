@@ -118,6 +118,11 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
         </dl>
       </div>
 
+      <ProjectFlow
+        :slug="project.slug"
+        class="mx-4"
+      />
+
       <section>
         <div class="mb-2 flex items-center gap-2 px-4">
           <h3 class="text-sm font-semibold text-highlighted">

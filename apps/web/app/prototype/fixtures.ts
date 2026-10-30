@@ -7,6 +7,8 @@ import type {
   Epic,
   Evidence,
   GlobalStatus,
+  FlowMetrics,
+  FlowMetricsQuery,
   Inbox,
   InboxItem,
   PlanMessage,
@@ -259,7 +261,7 @@ export const tasks: Task[] = [
   task(corral, 16, { title: 'Cards jump when a run starts', status: 'draft', type: 'bug', planSessionId: 's-3', planSessionTitle: 'Board polish' }),
   task(corral, 17, { title: 'Spike: virtualise long columns', status: 'draft', type: 'spike', priority: 'low', planSessionId: 's-3', planSessionTitle: 'Board polish' }),
   task(site, 1, { title: 'New landing page hero', status: 'ready', type: 'design', epicId: 'e-site' }),
-  task(site, 2, { title: 'Fix broken pricing link', status: 'merged', type: 'bug', epicId: 'e-shipped', mergedAt: ago(10) }),
+  task(site, 2, { title: 'Fix broken pricing link', status: 'merged', type: 'bug', epicId: 'e-shipped', mergedAt: ago(60 * 24 * 10) }),
   task(site, 3, {
     title: 'Footer links open in the same tab',
     epicId: 'e-site',
@@ -648,4 +650,41 @@ export function inbox(): Inbox {
   }
   needsYou.sort((a, b) => b.at.localeCompare(a.at))
   return { needsYou, activity: [], resolved: [], count: needsYou.length }
+}
+
+// Different cohorts make every window visibly distinct. Marketing site has no
+// merges in 7d, demonstrating the window-specific empty state.
+export function flowMetrics(slug: string, window: FlowMetricsQuery['window']): FlowMetrics {
+  const scale = window === '7d' ? 1 : window === '30d' ? 2 : 3
+  const empty = slug === 'marketing-site' && window === '7d'
+  const pair = (hours: number) => ({ medianMs: hours * scale * 3_600_000, p90Ms: hours * scale * 1.8 * 3_600_000 })
+  return {
+    window,
+    mergedTaskCount: empty ? 0 : 3 * scale,
+    leadTime: empty ? pair(0) : pair(48),
+    cycleTime: empty ? pair(0) : pair(12),
+    timeInStatus: empty
+      ? []
+      : [
+          { status: 'backlog', ...pair(36) },
+          { status: 'ready', ...pair(2) },
+          { status: 'in_progress', ...pair(4) },
+          { status: 'agent_review', ...pair(1) },
+          { status: 'human_review', ...pair(4) },
+          { status: 'ready_to_merge', ...pair(1) }
+        ],
+    runsByRole: empty
+      ? []
+      : [
+          { role: 'developer', duration: pair(0.5), queueWait: pair(0.1) },
+          { role: 'reviewer', duration: pair(0.2), queueWait: pair(0.05) },
+          { role: 'pm', duration: pair(0.1), queueWait: pair(0.02) }
+        ],
+    averageDeveloperRuns: empty ? 0 : scale,
+    slowestTasks: empty
+      ? []
+      : (slug === 'corral' ? ['COR-1', 'COR-10', 'COR-2'] : ['WEB-2']).map((ref, i) => ({
+          ref, leadTimeMs: (72 - i * 12) * scale * 3_600_000, dominantStatus: 'backlog'
+        }))
+  }
 }
