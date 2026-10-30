@@ -2,7 +2,7 @@ import { ACTIVE_RUN_STATES, LEASE_DURATION_MS, transition, type Actor, type Task
 import { schema, type Executor } from '@corral/db'
 import { and, asc, count, eq, inArray, isNotNull, isNull, ne, notInArray, notExists, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
-import { toTaskState } from './tasks.ts'
+import { toTaskState, type TaskRow } from './tasks.ts'
 
 const { agents, auditLog, projects, reviews, runs, epicDependencies, taskDependencies, tasks } = schema
 
@@ -16,6 +16,8 @@ export interface Claim {
   leaseEpoch: number
   leaseExpiresAt: Date
   status: TaskStatus
+  // Where the run goes; null only when the caller placed nothing
+  runnerId: string | null
 }
 
 // Atomically gives an agent the next task to work on, or null if there's
@@ -33,7 +35,12 @@ export interface Claim {
 // `only` limits the claim to those tasks, for an agent still inside its
 // wake interval that an event about them may start anyway. `skip` leaves
 // those tasks out, e.g. ones whose run couldn't start earlier in the pass.
-export async function claimNextTask(db: Executor, agentId: string, now = new Date(), only?: readonly string[], skip: readonly string[] = []): Promise<Claim | null> {
+//
+// `place` picks the runner for a candidate task, or null when none can take
+// it now: that task is skipped without a lease and the next one is tried.
+export type Place = (tx: Executor, task: TaskRow) => Promise<string | null>
+
+export async function claimNextTask(db: Executor, agentId: string, now = new Date(), only?: readonly string[], skip: readonly string[] = [], place?: Place): Promise<Claim | null> {
   if (only?.length === 0) return null
   return db.transaction(async (tx) => {
     const [agent] = await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')
@@ -66,7 +73,7 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
           notExists(tx.select({ one: sql`1` }).from(reviews)
             .where(and(eq(reviews.taskId, tasks.id), eq(reviews.headSha, tasks.headSha))))
         )
-    const [candidate] = await tx.select({ task: tasks })
+    const candidates = await tx.select({ task: tasks })
       .from(tasks)
       .innerJoin(projects, eq(projects.id, tasks.projectId))
       .where(and(
@@ -80,10 +87,17 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
       ))
       // Enum order: urgent first
       .orderBy(asc(tasks.priority), asc(tasks.createdAt))
-      .limit(1)
+      .limit(place ? 50 : 1)
       .for('update', { of: tasks, skipLocked: true })
-    if (!candidate) return null
-    const task = candidate.task
+    let task: TaskRow | null = null
+    let runnerId: string | null = null
+    for (const candidate of candidates) {
+      runnerId = place ? await place(tx, candidate.task) : null
+      if (place && !runnerId) continue
+      task = candidate.task
+      break
+    }
+    if (!task) return null
 
     // Ready → In progress goes through core like every status change; an
     // In progress or Agent review task keeps its status and just gets a lease
@@ -102,6 +116,7 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
       projectId: task.projectId,
       taskId: task.id,
       role: agent.role,
+      runnerId,
       leaseEpoch,
       queuedAt: now
     }).returning()
@@ -125,6 +140,6 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
       detail: { runId: run!.id, agentId, leaseEpoch, from: task.status, to: status }
     })
 
-    return { taskId: task.id, runId: run!.id, runNumber: run!.number, leaseEpoch, leaseExpiresAt, status }
+    return { taskId: task.id, runId: run!.id, runNumber: run!.number, leaseEpoch, leaseExpiresAt, status, runnerId }
   })
 }

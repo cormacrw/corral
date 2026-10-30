@@ -42,7 +42,22 @@ Three processes. In development they're all started together by `turbo dev`; whe
 
 The server keeps connections keyed by runner ID. A connection becomes available for dispatch after its hello snapshot is reconciled. Different IDs coexist; a reconnect replaces only that ID's socket and rejects only its pending setup jobs. Each dispatched run records its nullable `runnerId` before assignment; historical rows remain null. Stops, messages, lease-expiry stops and run traffic are scoped to that owner. Reconnect reconciliation interrupts only that runner's missing runs, and heartbeats renew only its leases.
 
-Setup jobs use the online runner connected longest. Worktree cleanup is broadcast to every online runner. With any runner online, dispatch and setup remain available; with none online, setup returns `503 runner_offline` and PM turns wait. `GET /api/status` includes `runners`, and `/api/runner` and `runner.status` SSE include the same list (`id`, `name`, `online`, `connectedAt`, `lastHeartbeatAt`) alongside aggregate compatibility fields. Disconnected runners remain listed as offline until server restart. Settings shows each known runner. Dispatch currently selects any online runner, without capacity or role constraints.
+Setup jobs use the online runner connected longest. Worktree cleanup is broadcast to every online runner. With any runner online, dispatch and setup remain available; with none online, setup returns `503 runner_offline` and PM turns wait. `GET /api/status` includes `runners`, and `/api/runner` and `runner.status` SSE include the same list (`id`, `name`, `online`, `connectedAt`, `lastHeartbeatAt`) alongside aggregate compatibility fields. Disconnected runners remain listed as offline until server restart. Settings shows each known runner.
+
+### Runner capacity, runtimes and roles
+
+Each runner says in its `hello` (runner protocol 2) what it takes, and the server routes every run by it:
+
+| Env var (runner) | Default | Meaning |
+|---|---|---|
+| `CORRAL_RUNNER_SLOTS` | `4` | Most agent runs (developer, reviewer, design and PM turns) the machine runs at once. A whole number of at least 1. |
+| `CORRAL_RUNNER_ROLES` | `pm,developer,reviewer,design` | Comma-separated roles it takes. `design` is a developer run on a design task (D20); a runner without it never gets one, and one without `pm` never gets a Plan turn. |
+
+Runtimes aren't configured: on every connect the runner runs the same checks as `detect_clis` and advertises `claude-code` and/or `codex` for each CLI that is installed and signed in. Settings (desktop) and `GET /api/status` show each runner's `slots`, `runtimes` and `roles`.
+
+- **Placement.** A run goes only to an online runner that takes its role, has its runtime and has a free slot: its live runs (any active state, owned by that runner) are fewer than its slots. Among those, the one with the most free slots wins, then the one connected longest. Agent concurrency (`agents.concurrency`) still caps each agent across all runners. Claims pick the runner inside the claim transaction: a task no runner can take now is skipped without a lease and stays in its column, and the next pass (a run ending, a runner connecting, the 15 s tick) picks it up. A held PM turn keeps its job and stays `queued`. Picking and recording a runner happen one at a time in the server, so claims and PM turns can't both take a last slot.
+- **Affinity.** A developer run (build or design) on a task with an earlier developer run by the same agent that started a session goes to that run's runner while it's online, waiting for its slot if it's full: the worktree and agent session live there. It resumes that session with only what's new (the feedback since; designs use the design revision prompt), with the full prompt as `fallbackPrompt`. If that runner is offline, the run goes to another runner as a fresh session on the full prompt, its worktree started from the pushed branch. The transcript's first line says which: "Resuming the agent session of run #N on runner X", or "Run #N ran on runner X, which is offline: starting a fresh session on runner Y from the pushed branch …". The developer's one resume to report happens inside the same run, so on the same runner. Reviewers have no affinity.
+- **Plan sessions.** A turn goes to the runner of the session's latest placed turn while that runner is online (its warm process and session files are there), waiting for its slot if needed. If it's gone, the turn cold-starts on another runner that takes `pm` with a fresh session from the `fallbackPrompt` (the saved conversation), and its transcript says so.
 
 ### `apps/runner`: runner daemon
 

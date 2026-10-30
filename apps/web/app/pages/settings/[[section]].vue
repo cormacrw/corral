@@ -406,7 +406,7 @@ const items = [
                 aria-hidden="true"
               />
               <span class="font-medium">{{ runner.online ? 'Online' : 'Offline' }} · {{ runner.name ?? 'no runner yet' }}</span>
-              <span class="text-xs text-muted">Runs agents for every project · last heartbeat {{ timeAgo(runner.lastHeartbeatAt) }}</span>
+              <span class="text-xs text-muted">{{ runner.slots }} at once · {{ runner.roles.join(', ') }} · {{ runner.runtimes.join(', ') || 'no signed-in CLI' }} · last heartbeat {{ timeAgo(runner.lastHeartbeatAt) }}</span>
             </div>
             <p class="text-xs text-muted">
               The runner keeps clones, worktrees and its spool in its own data directory, set by its configuration (a Docker volume when deployed).

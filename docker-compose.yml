@@ -56,6 +56,9 @@ services:
       CORRAL_SERVER_URL: http://server:4100
       CORRAL_RUNNER_TOKEN: ${CORRAL_RUNNER_TOKEN:-}
       CORRAL_RUNNER_NAME: ${CORRAL_RUNNER_NAME:-home-server}
+      # Most agent runs at once on this machine, and the roles it takes
+      CORRAL_RUNNER_SLOTS: ${CORRAL_RUNNER_SLOTS:-4}
+      CORRAL_RUNNER_ROLES: ${CORRAL_RUNNER_ROLES:-pm,developer,reviewer,design}
       # Author and committer of agent commits; unset makes the runner warn
       CORRAL_GIT_AUTHOR_NAME: ${CORRAL_GIT_AUTHOR_NAME:-}
       CORRAL_GIT_AUTHOR_EMAIL: ${CORRAL_GIT_AUTHOR_EMAIL:-}
