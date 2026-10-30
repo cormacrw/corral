@@ -2,7 +2,7 @@
 
 Binding rules: D5, D24, D27, D28 in `docs/decisions.md`; section 4 of
 `docs/flows.md`. COR-286 added persistence and negotiation; COR-287 added commit
-submission and review. The integration executor is still to come.
+submission and review; COR-288 added integration into the epic branch.
 
 `tasks.integrationProtocol = 0` preserves all existing paths. The additive
 0039 migration changes no branches, PR links, review/evidence rows or epic
@@ -58,10 +58,69 @@ Revisions add a submission on the same branch. Comments, reviews and evidence
 rows are never rewritten; `get_task` returns all of them with `submissions`, and
 the reviewer prompt lists earlier submissions. Stopped-run recovery is unchanged.
 
-`merge.ts` skips a Ready to merge task with no PR, so approved work waits there
-until the integration executor lands. Nothing marks it Merged.
-
 Merged on the PR-free path means confirmed integration into the epic branch;
 same-epic dependents can then start. Other dependents wait for the epic PR to
 merge. Approval or pending integration never means done. Human review flags
 and checked-by-human criteria retain D5/D28 routing before integration.
+
+## Integrating (COR-288)
+
+`TaskIntegrator` (`apps/server/src/task-integration.ts`) runs in the merge pass.
+The server decides and the runner does the git, in the bare clone
+(`apps/runner/src/integration.ts`), so the reviewed task branch and worktree are
+never touched. Only a runner saying `taskIntegrationExecutor` in its hello gets
+these jobs, so a build that only submits and reviews is never asked.
+
+Each epic has at most one active operation, enforced by the partial unique index
+`task_integration_one_active_per_epic`, and tasks go oldest first. Each tick
+rebuilds the position from the journal and the remote, so a restart loses nothing:
+
+1. `pending`: the operation is written with the epic head it expects and a new
+   `leaseEpoch`, before any git.
+2. `running`: `integration_prepare` builds one commit on the expected head, a
+   three-way merge of the task's own change, carrying the trailer
+   `Corral-Submission: <submission id>`. Nothing shared moves. It answers `moved`,
+   `conflict`, `empty` or `integrated` instead when that's what it finds.
+3. The gate re-checks the task is still approved and in Ready to merge, then
+   looks at required checks for that exact candidate. With required checks set,
+   the candidate is on `corral/candidates/<operation id>` so push-triggered CI
+   sees it. A failure goes to the developer (`ci_failed`). Pending waits, for up to
+   an hour, then blocks. A check that hasn't appeared after three minutes doesn't run
+   on such a commit (a PR-only workflow), so it's recorded as `checks_deferred` and
+   left to the epic PR's merge gate. That's how task-only CI needs no task PR.
+4. `reconciling` is written **before** `integration_push`: the result is unknown
+   until read. The push is `--force-with-lease=<ref>:<expected>`, which GitHub
+   evaluates, so a stale runner or stale clone can't overwrite anything.
+5. `integration_inspect` fetches and searches the remote for the trailer. Only
+   that puts the operation, the submission's `integratedCommitSha` and the task's
+   `integrated` transition (with `mergeCommitSha`) in one transaction. What a push
+   reported doesn't matter: a push that claimed success but left no commit fails
+   the operation.
+
+The trailer is what makes this exactly once. Prepare and inspect both look for it
+first, so a retry after a lost answer, or a stale push landing behind a newer
+operation, records the commit that's there instead of adding another. It survives
+the epic branch being rebased, which a SHA wouldn't.
+
+A moved branch ends the operation (`The epic branch moved`) and the next takes a
+fresh head, up to five per pass. A conflict ends it and starts a D24 rebase-only
+round: the developer reports `commit_submitted`, which is a new submission, and the
+rebase review carries approval over. A clean three-way onto a moved epic is a
+mechanical update and keeps its approval; the epic's integration review and CI
+still see the result.
+
+Failures are sorted by whose they are. A moved branch, an interrupted or cancelled
+operation retries at once. A job the runner couldn't finish (a rejected prepare or
+push: offline, timed out, fetch failed) doesn't count and retries on a later pass,
+so an outage can't fail a task. Prepare only throws for that; a candidate it can't
+build comes back as `failed`. Anything else counts, one per pass, and three fail
+the task. A push git itself refused looks the same as any other refusal and counts.
+
+Pausing the task or project stops `#prepare` and the gate before the push, leaving
+the operation where it is to carry on later. Reconcile still runs: it only reads,
+and a commit already on the branch is a fact. A task sent back during its push lands
+anyway: the commit stands, the task stays open and gets a comment.
+
+Dependents: `claim.ts` treats a dependency on a build task in another epic as met
+only when that epic is done, and `publishEpicDependents` wakes those tasks when the
+epic PR merges. Same-epic dependents wake on Merged through `publishDependents`.

@@ -19,6 +19,8 @@ export type TransitionDetail =
   | { event: 'merged', pr: number, mergeCommitSha: string | null, outside?: true }
   // An epic rebase task with nothing left to merge
   | { event: 'merged', headSha: string | null }
+  // A PR-free task, confirmed on the epic branch (D27)
+  | { event: 'integrated', submissionId: string, integratedCommitSha: string }
   | { event: 'require_human_check' }
   | { event: 'ci_failed', checks: string[] }
   | { event: 'base_conflict', mergeableState?: string | null }
@@ -56,6 +58,7 @@ export interface AuditDetails {
   'design.submitted': { runId: string, version: number, headSha: string, screenshots: number }
   'epic.pr': { epicId: string } & (EpicPrDetail | { event: 'rebase_requested' | 'rebase_handed_off', headSha: string | null } | { event: 'ci_failed', summary: string } | { event: 'merged', pr: number, mergeCommitSha: string | null })
   'epic.updated': Changed & { epicId: string, dependsOn?: string[] }
+  'integration.operation': { operationId: string, submissionId: string, event: 'started' | 'succeeded' | 'failed' | 'checks_deferred', expectedTargetSha: string, leaseEpoch: number, commitSha?: string, error?: string }
   'merge.refused': { pr: number, message: string, attempt: number, epicId?: string }
   'plan.approved': { planId: string, version: number, to: string, viaPmRun?: string }
   'plan.discarded': { planId: string, version: number, deleted: number }
