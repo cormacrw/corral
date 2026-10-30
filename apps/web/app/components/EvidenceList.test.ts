@@ -20,7 +20,7 @@ const review: Review = {
   criteria: [{ criterionId: 'c', met: true, note: 'Reviewer first' }]
 }
 // Nuxt UI is auto-imported in the app, so stand-ins are registered here
-const Stub = defineComponent({ props: { open: Boolean, title: String }, setup: p => () => h('div', { 'data-open': p.open, 'data-title': p.title }) })
+const Stub = defineComponent({ props: { open: Boolean, title: String }, setup: (p, { slots }) => () => h('div', { 'data-open': p.open, 'data-title': p.title }, slots.body?.()) })
 const render = (items = [...evidence('c'), ...evidence(null)]) => mount(EvidenceList, {
   props: { evidence: items, criteria: [{ id: 'c', text: 'Criterion', position: 0, met: true }], reviews: [review] },
   global: { components: { MarkdownText, UIcon: Stub, UModal: Stub } }
@@ -53,6 +53,17 @@ describe('EvidenceList', () => {
     expect(html.indexOf('request.file')).toBeLessThan(html.indexOf('Explained'))
     await humanButtons[0]!.trigger('click')
     expect(wrapper.get('[data-title="screenshot.file"]').attributes('data-open')).toBe('true')
+  })
+
+  it('shows a Download link for the file under the video player', async () => {
+    const wrapper = render(evidence('c').filter(e => e.kind === 'video'))
+    await wrapper.findAll('button').find(b => b.text().startsWith('video.file'))!.trigger('click')
+    const link = wrapper.get('a')
+    expect(wrapper.find('video').exists()).toBe(true)
+    expect(link.text()).toBe('Download')
+    expect(link.attributes('href')).toBe('/video')
+    expect(link.attributes('download')).toBe('video.file')
+    expect(wrapper.find('video + a').exists()).toBe(true)
   })
 
   it('leaves artifact-only main areas empty and distinguishes missing evidence', () => {
