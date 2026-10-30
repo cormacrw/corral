@@ -30,6 +30,10 @@ Without systemd, a cron line does the same:
 */20 * * * * /path/to/corral/scripts/deploy/auto-deploy.sh >>/path/to/corral/.corral/deploy/log 2>&1
 ```
 
+## Build identity
+
+The deploy script exports `CORRAL_BUILD_SHA` from the checked-out target commit before building. Compose passes it as a build argument to both server and runner images. For manual builds, run `export CORRAL_BUILD_SHA=$(git rev-parse HEAD)` before `docker compose build` and `docker compose up -d`. Remote runners pull from GitHub after draining; set `CORRAL_RUNNER_AUTO_UPDATE=true` to drain automatically when the server reports a different commit. The host updater reads the runner data directory's `update-status.json` before replacing it.
+
 ## Operating it
 
 - Logs: `journalctl -u corral-deploy -f`
