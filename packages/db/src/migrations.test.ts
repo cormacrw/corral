@@ -623,6 +623,41 @@ describe('migrations', () => {
     await db.execute(sql`update evidence set size = 0 where kind <> 'note'`)
   })
 
+  it.for([
+    { driver: 'pglite' as const },
+    { driver: 'postgres' as const }
+  ])('0051 preserves existing task PRs, approvals, evidence and direct epics on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+    requireDatabase(driver, context)
+    const before = await migrationsBefore('0051_premium_chameleon')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db, migrate } = await open(driver)
+    await migrate(before)
+    const actor = sql`'{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb`
+    await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('Test app', 'test-app', 'TA', 'cormacrw/test-app', 'main')`)
+    await db.execute(sql`insert into epics (project_id, title, review_mode, created_by) select id, 'Existing direct epic', 'direct', ${actor} from projects`)
+    await db.execute(sql`insert into tasks (project_id, epic_id, number, title, type, status, branch, pr_number, pr_url, head_sha, approved_head_sha, created_by)
+      select project_id, id, 1, 'Existing open PR', 'task', 'human_review', 'corral/existing', 42, 'https://github.com/cormacrw/test-app/pull/42', 'approved-head', 'approved-head', ${actor} from epics`)
+    await db.execute(sql`insert into agents (name, role) values ('Vera', 'reviewer')`)
+    await db.execute(sql`insert into runs (project_id, task_id, agent_id, role, state, outcome, ended_at)
+      select t.project_id, t.id, a.id, 'reviewer', 'completed', 'approved', now() from tasks t, agents a`)
+    await db.execute(sql`insert into acceptance_criteria (task_id, position, text) select id, 0, 'Preserve the result' from tasks`)
+    await db.execute(sql`insert into evidence (task_id, run_id, criterion_id, round, kind, note, blob, file_name, content_type, size)
+      select t.id, r.id, c.id, 0, 'screenshot', 'Original evidence', 'blob-hash', 'original.png', 'image/png', 42 from tasks t, runs r, acceptance_criteria c`)
+    await db.execute(sql`insert into reviews (task_id, run_id, round, head_sha, verdict, summary, criteria, author)
+      select t.id, r.id, 0, 'approved-head', 'approved', 'Original approval', jsonb_build_array(jsonb_build_object('criterionId', c.id, 'met', true, 'note', 'Verified')), ${actor} from tasks t, runs r, acceptance_criteria c`)
+    const snapshot = async () => ({
+      tasks: (await db.execute(sql`select id, branch, pr_number, pr_url, head_sha, approved_head_sha, status from tasks`)).rows,
+      epics: (await db.execute(sql`select * from epics`)).rows,
+      reviews: (await db.execute(sql`select * from reviews`)).rows,
+      evidence: (await db.execute(sql`select * from evidence`)).rows
+    })
+    const original = await snapshot()
+    await migrate(migrationsFolder)
+    expect(await snapshot()).toEqual(original)
+    expect((await db.execute(sql`select integration_protocol from tasks`)).rows).toEqual([{ integration_protocol: 0 }])
+    expect((await db.execute(sql`select * from task_submissions`)).rows).toEqual([])
+  })
+
   // A database at `before` holding what `seed` wrote, then opened the way the
   // server opens it at startup. `warnings` is what that printed.
   async function startServerOn(driver: 'pglite' | 'postgres', before: string, seed: (db: RowsDatabase) => Promise<unknown>) {

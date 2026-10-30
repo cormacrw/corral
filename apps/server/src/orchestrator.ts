@@ -1,6 +1,6 @@
 import { appendAudit, auditEvent } from './audit.ts'
 import { EpicPullRequests, epicReviewContext } from './epic-prs.ts'
-import { RUNNER_HEARTBEAT_MS, epicReviewReportSchema, isPmDirectTool, pmDirectTools, evidenceInputSchema, outcomeReportSchema, rebaseReviewReportSchema, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type PmRunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
+import { integrationCompatibilityReason, RUNNER_HEARTBEAT_MS, epicReviewReportSchema, isPmDirectTool, pmDirectTools, evidenceInputSchema, outcomeReportSchema, rebaseReviewReportSchema, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type PmRunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
 import {
   ACTIVE_RUN_STATES,
   LEASE_DURATION_MS,
@@ -257,8 +257,8 @@ export class Orchestrator implements RunnerHandlers {
   // The runner a run goes to: an online one that takes the role, has a
   // signed-in CLI for the runtime and a free slot, the emptiest first. A run
   // with a previous runner that's still online waits for that one.
-  async #pickRunner(tx: Executor, role: RunnerRole, runtime: string, previous: string | null): Promise<string | null> {
-    const fit = this.#d.runner.available().filter(r => r.roles.includes(role) && r.runtimes.includes(runtime))
+  async #pickRunner(tx: Executor, role: RunnerRole, runtime: string, previous: string | null, integrationProtocol = 0): Promise<string | null> {
+    const fit = this.#d.runner.available().filter(r => r.roles.includes(role) && r.runtimes.includes(runtime) && !integrationCompatibilityReason(integrationProtocol, r.taskIntegrationProtocols))
     if (!fit.length) return null
     const busy = await tx.select({ runnerId: runs.runnerId, n: count() }).from(runs)
       .where(and(inArray(runs.state, [...ACTIVE_RUN_STATES]), inArray(runs.runnerId, fit.map(r => r.id))))
@@ -436,7 +436,7 @@ export class Orchestrator implements RunnerHandlers {
       const place: Place = async (tx, task) => {
         const role: RunnerRole = agent.role === 'designer' ? 'design' : agent.role
         const previous = agent.role !== 'reviewer' ? await this.#previousAuthorRun(tx, task.id, agent.id, agent.role) : null
-        return this.#pickRunner(tx, role, agent.runtime, previous?.runnerId ?? null)
+        return this.#pickRunner(tx, role, agent.runtime, previous?.runnerId ?? null, task.integrationProtocol)
       }
       const claimNext = () => this.#exclusive(() => claimNextTask(db, agent.id, this.#now(), only, skip, place))
       for (let claim = await claimNext(); claim; claim = await claimNext()) {
@@ -569,6 +569,7 @@ export class Orchestrator implements RunnerHandlers {
       baseBranch,
       taskId: task.id,
       taskRef: ref,
+      integrationProtocol: task.integrationProtocol,
       taskType: task.type,
       designPinned: pin !== null,
       branch: spike ? null : task.branch,
@@ -648,6 +649,7 @@ export class Orchestrator implements RunnerHandlers {
       baseBranch,
       taskId: task.id,
       taskRef: ref,
+      integrationProtocol: task.integrationProtocol,
       taskType: task.type,
       designPinned: pin !== null,
       branch: spike ? null : task.branch,

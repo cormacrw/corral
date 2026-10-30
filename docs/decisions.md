@@ -83,6 +83,8 @@ For ordinary tasks without the exceptions below, only the task flag sends a task
 
 **Amended by D27:** in an `each_task` epic every task goes to *Human review*, whatever its flag; in an `epic` epic the flag works as above but tasks merge into the epic branch; and every epic PR goes to the human.
 
+**Amended by COR-286:** for PR-free epic submissions, the same approval routing applies. Ready to merge authorizes integration into the epic branch, not a task PR merge or release to the target branch. Agent approval alone is never task completion.
+
 **Amended by D28 (COR-249):** any criterion marked **Checked by a human** sends an approved task to *Human review*, whatever the task flag or epic mode. Adding a human check while *Ready to merge* returns it to *Human review*.
 
 ---
@@ -644,6 +646,8 @@ A design task whose earlier authoring runs used a developer moves to an eligible
 
 **Decision:** When an approved task PR conflicts with its moved base (`base_conflict`), **Ready to merge → In progress** starts a **rebase-only round**. This round, including its rebase review, does not count against `reviewRoundCap`.
 
+**PR-free epic submissions (COR-286):** a moved epic head uses the same rebase-only and review rules without requiring a PR number. Persist the submitted head and its base, the exact agent-approved head, and an operation's expected target head before attempting integration. A rewritten head is a new submission; it cannot inherit approval merely because its branch name is unchanged. Carryover requires the mechanical-rebase or rebase-review checks below. Unknown push results enter reconciliation: read the remote ref before retrying or marking integrated. A failed or conflicted operation does not complete the task or unblock dependencies.
+
 ### Developer mode
 
 The developer's prompt for this round is limited to fetching and rebasing onto `origin/<default>` (the project's configured `defaultBranch`), resolving conflicts while preserving **both sides' intent**, and re-running the project's gates (lint, typecheck, tests and build, D21). Never revert what main just merged to make the old task pass. Feature changes are not allowed. For a task PR based on an epic branch, use `origin/<base branch>` instead (D27); “main” here means the PR's actual base, not a hard-coded branch name. D27's separate epic-PR conflict-task flow is unchanged.
@@ -719,17 +723,29 @@ This decision was first numbered D23. Migration `0027_epic_review_modes.sql` sti
 
 **Decision:**
 
+### PR-free task integration and rollout (COR-286)
+
+This amendment takes precedence over the task-PR descriptions below for eligible new submissions. In `epic` mode, an ordinary task or bug submits a pushed task-branch commit for agent review without opening a task PR. Review is bound to the submitted commit, never the mutable branch tip. After the required agent and human approvals (D5, D28), Corral integrates the approved work as one commit on the epic branch. Only the epic has a PR into the target branch. The epic integration review, human review and final CI gates remain mandatory.
+
+- Persist each submission's sequence, protocol, task branch, submitted head, base commit and target epic branch. Persist its exact agent-approved head separately from its eventual integrated commit and timestamp; squash/rebase can make these commits different. Review records and criterion verdicts remain tied to their reviewed head. A revision creates another submission rather than overwriting the old one.
+- Journal each integration/rebase operation before execution with a durable operation ID, submission ID, expected target head, runner identity and lease epoch. States are `pending`, `running`, `reconciling`, `succeeded`, `failed`. Permit at most one active operation per submission. Use a compare-and-swap push against the expected epic head; reconcile an ambiguous result against the remote before replay. Record success and the integrated commit before marking the task Merged.
+- **Completion:** Agent review and Ready to merge are not integration. Merged means the approved submission is confirmed on the epic branch, with its integrated commit recorded. Same-epic dependent work may start then. Dependents outside the epic, and dependent epics, wait for the epic PR to merge into the target branch. Submission, approval, a queued operation or a failed push never unblocks work.
+- **Rollout boundary:** existing tasks with a task PR finish on the old PR path, including revisions and rebase rounds. Preserve their branch, PR number/URL, evidence and approvals. Eligible new submissions with no task PR in `epic` mode use integration protocol 1. Do not infer conversion just from a null PR: standalone, `direct`, `each_task`, spike, design and epic conflict tasks are explicit exceptions. Persist selection on the task; never migrate existing PR records into submissions automatically.
+- **Compatibility:** the WebSocket envelope remains protocol 3. Hello may advertise `taskIntegrationProtocols`; omission means legacy only. A task with a positive `integrationProtocol` may only be claimed or dispatched to a runner advertising that exact version. Welcome and runner status provide an actionable update reason to a legacy-only runner; it stays available for legacy work. New execution support must opt in, never claim support based only on build age.
+- **Staged implementation:** COR-286 supplies the durable schema, submission recorder and negotiation gate. It does not activate the PR-free report/push/review/integration executor. That executor must use this rollout boundary when enabled; until then runners advertise no integration protocols and existing dispatch remains on the PR path. No background conversion is authorized.
+- **Explicit paths:** `direct` epics and standalone build tasks keep task PRs into the target branch. `each_task` is retained as a legacy compatibility mode: task PRs into the epic branch with human approval per task. Spikes submit findings and complete on human approval; designs submit versioned prototypes and complete as Approved. Epic conflict tasks continue to repair the epic branch itself through the existing handoff. Existing `direct` epics stay direct: never create a feature branch or change their mode silently.
+
 ### Review modes
 
 Each epic has a **review mode**. The PM can set it per epic in `propose_plan`; when the plan doesn't, the epic takes the project's **default review mode** (a project setting). The setting starts at `direct` for every project, so nothing changes until the human picks another mode.
 
-| Mode | Where task PRs merge | When a task goes to Human review |
+| Mode | Where task work lands | When a task goes to Human review |
 |---|---|---|
-| `epic` | The epic branch | Only when the task's own `humanReview` flag is set. Otherwise it merges on the reviewer's approval. |
+| `epic` | The epic branch (new eligible submissions integrate without a task PR) | Only when the task's own `humanReview` flag is set. Otherwise it merges on the reviewer's approval. |
 | `each_task` | The epic branch | Always, whatever the flag. |
 | `direct` | The target branch | Only when flagged (D5, today's behaviour). No epic branch and no epic PR. |
 
-Tasks without an epic are unchanged: they merge straight into the target branch, by D5. Changing an epic's mode is only allowed before any of its tasks has opened a PR or merged *(narrowed by COR-169; previously before any had merged)*.
+Tasks without an epic are unchanged: they merge straight into the target branch, by D5. Changing an epic's mode is only allowed before any of its tasks has submitted a PR-free commit, opened a PR or merged *(narrowed by COR-169; previously before any had merged)*.
 
 ### The epic branch
 
@@ -776,5 +792,7 @@ Epic PR review state is kept on the epic (open, agent review, human review, chan
 - **D5:** reviewer approval with any such criterion always goes to **Human review**, even with `humanReview: false` and in any epic review mode. The task's own flag is unchanged. Tasks with no human-check criteria keep their existing routing.
 - **D10:** reviewer approval takes **Agent review → Human review** when any criterion needs a human check. Adding a new human check after approval takes **Ready to merge → Human review** (`require_human_check`). Rebase-only approval carryover remains as in D24.
 - The Inbox lists the criteria with **Needs human check** and a checkbox per criterion. The human ticks each before approving; ticks are local to the selected item. Approval resolves the Inbox item and follows the existing human approval and merge gates, excluding these criteria from the agent-evidence gate. Requesting changes remains available.
+
+**PR-free epic submissions (COR-286):** human-check flags and criterion IDs survive submission and integration. Agent-approved head means agent approval only; it cannot stand in for the human checks. The same Human review requirement applies before integration. The final epic human review remains required independently.
 
 **Why:** checks requiring a person or a real device must reach the human, rather than trapping developers and reviewers in a loop over evidence no runner can produce.
