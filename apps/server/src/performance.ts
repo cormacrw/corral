@@ -89,7 +89,7 @@ export function apiTiming(samples: PerformanceSamples): MiddlewareHandler {
     const streaming = c.res.headers.get('content-type')?.split(';')[0]?.trim() === 'text/event-stream'
       || c.req.header('upgrade')?.toLowerCase() === 'websocket'
       || c.res.status === 101
-    if (streaming || route === '/api/health') return
+    if (streaming || route === '/api/health' || route === '/api/perf/client') return
 
     if (durationMs > samples.slowRequestMs) {
       console.warn(`Slow API request: method=${c.req.method} route=${route} status=${c.res.status} durationMs=${durationMs}`)

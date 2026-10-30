@@ -2,3 +2,5 @@
 export * from './api.ts'
 export * from './events.ts'
 export * from './runner.ts'
+
+export * from './performance.ts'

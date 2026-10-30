@@ -513,6 +513,8 @@ export const deployments = pgTable('deployments', {
 
 // Shared timing samples; names are patterns, never URLs or request data.
 export const perfSamples = pgTable('perf_samples', {
+  metric: text(),
+  sessionId: uuid('session_id'),
   id: uuid().primaryKey().defaultRandom(),
   kind: text().notNull(),
   name: text().notNull(),
