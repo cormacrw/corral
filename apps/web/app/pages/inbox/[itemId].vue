@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import type { InboxActionInput, TaskInboxItem } from '@corral/contracts'
+import type { InboxActionInput, PmActivityItem, TaskInboxItem } from '@corral/contracts'
 import { reactive } from 'vue'
 import { actionOpensComposer, type InboxPanelContext, type InboxPanelTab, type ResolveTo } from '~/composables/useInboxPanel'
 import { isOwnPane, isTaskItem, useInboxView } from '~/composables/useInboxView'
@@ -143,7 +143,7 @@ async function act(value: InboxActionInput['action']) {
   }
 }
 const panel = reactive({
-  item: computed(() => selected.value as TaskInboxItem),
+  item: computed(() => selected.value as TaskInboxItem | PmActivityItem),
   task, evidence, reviews, alreadyResolved, taskLoading, taskLoadFailed,
   evidenceLoading: computed(() => address.value !== null && evidenceResult.isPending.value),
   actions, action, resolveTo, text, busy, actionError: failedAction, placeholder, submitLabel, needsText, tab, checkedHumanCriteria,

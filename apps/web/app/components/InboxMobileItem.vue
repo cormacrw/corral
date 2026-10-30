@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Inbox, PlanThreadItem, TaskInboxItem, ReleaseNotesItem } from '@corral/contracts'
+import type { Inbox, PlanThreadItem, PmActivityItem, TaskInboxItem, ReleaseNotesItem } from '@corral/contracts'
 import type { InboxPanelContext } from '~/composables/useInboxPanel'
 
 // An Inbox item on a phone (design/inbox.md, design/mobile.md), a screen of its
@@ -9,7 +9,7 @@ defineProps<{
   planThread: PlanThreadItem | null
   inbox: Inbox | null
   error: string | null
-  selected: TaskInboxItem | ReleaseNotesItem | null
+  selected: TaskInboxItem | PmActivityItem | ReleaseNotesItem | null
   ctx: InboxPanelContext
   onRetry: () => unknown
 }>()

@@ -112,7 +112,8 @@ export const eventDependencies: EventDependencies = {
       cache.set<Project[]>(keys.projects.list(), upsertInto(project))
       cache.set<Project>(keys.projects.detail(project.slug), current => current && project)
     },
-    invalidates: () => []
+    // Inbox rows carry the project's name
+    invalidates: () => [keys.inbox()]
   },
   'project.deleted': {
     write: ({ projectId }, cache) => cache.clearProject(projectId),

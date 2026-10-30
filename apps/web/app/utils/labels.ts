@@ -145,6 +145,11 @@ export function cliLoginCommand(id: CliStatus['id']): string {
 }
 
 // design/inbox.md item type badges
+// PM activity about a project or the factory has no task to name
+export function inboxProjectLine(item: InboxItem): string {
+  return item.taskRef ? `${item.project.name} · ${item.taskRef}` : item.project.name
+}
+
 export function inboxTypeBadge(type: InboxItem['type']): { label: string, color: Color } {
   return ({
     release_notes: { label: 'Release notes', color: 'neutral' as const },

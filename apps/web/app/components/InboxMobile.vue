@@ -2,7 +2,7 @@
 import { needsAttention } from '@corral/contracts'
 import type { InboxItem } from '@corral/contracts'
 import { useInboxView } from '~/composables/useInboxView'
-import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
+import { inboxProjectLine, inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
 
 // The Inbox list on a phone (design/inbox.md, design/mobile.md), a screen of
@@ -143,7 +143,7 @@ const tabs = computed(() => [
                 <ProjectThumbnail
                   :project="item.project"
                   :size="16"
-                />{{ item.project.name }} · {{ item.taskRef }}
+                />{{ inboxProjectLine(item) }}
               </span>
             </span>
           </span>

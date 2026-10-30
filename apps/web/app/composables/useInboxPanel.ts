@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/vue-query'
-import type { Evidence, InboxActionInput, Review, Task, TaskInboxItem } from '@corral/contracts'
+import type { Evidence, InboxActionInput, PmActivityItem, Review, Task, TaskInboxItem } from '@corral/contracts'
 import { taskDesignsQuery } from '~/queries/tasks'
 import { markdownToPlainText } from '~/utils/markdown'
 
@@ -10,7 +10,7 @@ type Action = InboxActionInput['action']
 export type ResolveTo = 'backlog' | 'ready' | 'in_progress'
 export type InboxPanelTab = 'overview' | 'criteria' | 'review' | 'message'
 export interface InboxPanelContext {
-  item: TaskInboxItem
+  item: TaskInboxItem | PmActivityItem
   task: Task | null
   evidence: Evidence[]
   reviews: Review[]

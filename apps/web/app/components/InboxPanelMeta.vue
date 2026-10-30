@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { InboxPanel } from '~/composables/useInboxPanel'
-import { timeAgo } from '~/utils/labels'
+import { inboxProjectLine, timeAgo } from '~/utils/labels'
 
 // What the item is, as one quiet line: kind, project · ref, who and when
 defineProps<{ p: InboxPanel }>()
@@ -21,6 +21,6 @@ defineProps<{ p: InboxPanel }>()
       :project="p.item.value.project"
       :size="14"
     />
-    <span class="truncate">{{ p.item.value.project.name }} · {{ p.item.value.taskRef }} · {{ p.item.value.sender.name }} · {{ timeAgo(p.item.value.at) }}</span>
+    <span class="truncate">{{ inboxProjectLine(p.item.value) }} · {{ p.item.value.sender.name }} · {{ timeAgo(p.item.value.at) }}</span>
   </p>
 </template>

@@ -42,6 +42,10 @@ The PM can also call `attach_evidence` to attach a scratch file to the conversat
 | `propose_plan` | Create or revise a draft plan: epics, tasks, acceptance criteria, dependencies, priority, task type (`task`, `bug`, `spike` or `design`, D19, D20), human-review flag, and for build tasks the design version and screens they pin (D20) |
 | `approve_plan` | Approve the current plan (to the board or the Backlog) when the human asks in chat. Recorded as the human's approval; refused unless the human has written since the plan was proposed |
 | `delete_task` | Propose deletion with a durable Confirm / Cancel card. Confirm revalidates the target and uses the human deletion rules, recording the proposing PM session; results reach the PM on its next turn |
+| `list_projects`, `get_project`, `update_project`, `create_project` | Read and change projects across Corral. `create_project` runs the same repository checks as setup and creates nothing unless all pass |
+| `list_runs`, `get_run`, `message_run` | Read runs by project, task and status, read a run's outcome and the end of its transcript up to a character limit, and message a live developer or reviewer run. Long results are capped with a note |
+| `get_status`, `set_update_hold`, `clear_update_hold` | The factory and runner state the web app shows, and the update hold |
+| `delete_project`, `stop_run`, `stop_all`, `resume_all` | Proposed on the same Confirm / Cancel card as `delete_task`. `stop_all` also ends PM turns, and no PM turn starts while Corral is stopped, so the human resumes it from the app unless a `resume_all` card was already waiting |
 | `flag_stale_docs` | Create a documentation task (PRD §7.10) |
 | `get_design` | A design version's `design.md` spec, screen ids, screenshots, branch and commit, and its sandboxed preview URL (D20). Takes a design task's ref (its latest version by default, or a given `version`) or a build task's ref (its pinned version and screens). The runner saves the spec and screenshots in the agent's scratch folder and extracts the bundle (a tar) there, and returns the paths. Developers, designers and reviewers have it too |
 
