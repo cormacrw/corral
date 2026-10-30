@@ -117,7 +117,7 @@ describe('checkPlan with refs', () => {
   it.each(['COR-3', 'cor-3'])('resolves existing dependency %s regardless of map key case', (dep) => {
     const plan = { title: 'x', summary: '', epics, tasks: [task('a', { dependsOn: [dep] })] }
     expect(checkPlan(plan, refs)).toEqual([])
-    expect(checkPlan(plan, new Map([['cor-3', { kind: 'task', status: 'in_progress' }]]))).toEqual([])
+    expect(checkPlan(plan, new Map([['cor-3', { kind: 'task', status: 'in_progress', pickedUp: true }]]))).toEqual([])
   })
 
   it('validates lowercase refs and detects duplicate revisions case-insensitively', () => {
