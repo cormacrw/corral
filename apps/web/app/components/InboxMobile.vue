@@ -348,7 +348,10 @@ const tabs = computed(() => [
             draggable="false"
             class="flex gap-3 border-b border-default px-4 py-3 active:bg-elevated"
           >
-            <PlanThreadRow :item="item" />
+            <PlanThreadRow
+              :item="item"
+              mobile
+            />
           </NuxtLink>
         </SwipeToDelete>
         <NuxtLink
