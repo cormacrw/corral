@@ -40,4 +40,4 @@ it('seeds the missing designer even when another role already uses its default n
   } finally {
     await handle.close()
   }
-})
+}, 30_000) // Opening and migrating PGlite here, as in hooks (hookTimeout)
