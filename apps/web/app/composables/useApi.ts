@@ -12,6 +12,7 @@ import type {
   DesignVersion,
   Epic,
   EpicDetail,
+  EpicReviewActionInput,
   Evidence,
   GlobalStatus,
   ServerStatus,
@@ -190,6 +191,7 @@ export const api = {
   },
 
   epics: {
+    review: (id: string, input: EpicReviewActionInput) => call<{ ok: boolean }>('POST', `/epics/${id}/review`, input),
     setDependencies: (id: string, dependsOn: string[]) => call<Epic>('PUT', `/epics/${id}/dependencies`, { dependsOn }),
     list: (slug: string) => call<Epic[]>('GET', `/projects/${slug}/epics`),
     get: (id: string) => call<EpicDetail>('GET', `/epics/${id}`),

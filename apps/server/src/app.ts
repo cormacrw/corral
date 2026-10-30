@@ -12,6 +12,7 @@ import {
   deleteProjectInput,
   humanTransitionInput,
   inboxActionInput,
+  epicReviewActionInput,
   patchAgentInput,
   patchEpicInput,
   setEpicDependenciesInput,
@@ -279,6 +280,8 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       const project = await findProjectBySlug(db, c.req.param('slug'))
       return c.json(await plans.listDrafts(project.id))
     })
+
+    .post('/epics/:id/review', validate('json', epicReviewActionInput), async c => c.json(await orchestrator.epicPrs.humanAction(c.req.param('id'), c.req.valid('json'), actor)))
 
     .get('/epics/:id', async c => c.json(await getEpic(db, c.req.param('id'))))
 

@@ -53,8 +53,9 @@ async function checkOut(dataDir: string, bare: string, job: RunJob): Promise<{ w
     return { workspace: { path, bare }, error: null }
   }
 
-  if (!job.taskId) return { workspace: null, error: 'The job has no task' }
-  const path = worktreePath(dataDir, job.taskId, job.role)
+  const workId = job.taskId ?? (job.role === 'reviewer' && job.epicId ? `epic-${job.epicId}` : null)
+  if (!workId) return { workspace: null, error: 'The job has no task' }
+  const path = worktreePath(dataDir, workId, job.role)
 
   // A spike has no branch or commit (D19): both its developer and its
   // reviewer get a detached checkout of the default branch. The developer's

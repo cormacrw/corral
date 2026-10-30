@@ -22,7 +22,7 @@ it('uses the epic base throughout claim, review, merge and dependent claims on d
   t.github.setBranch(project.repository, 'develop', 'target-tip')
   const [epic] = await t.db.insert(schema.epics).values({ projectId: project.id, createdBy: t.actor, title: 'Feature', reviewMode: 'epic' }).returning()
   const first = await t.createTask(project.slug, { epicId: epic!.id, humanReview: false })
-  const second = await t.createTask(project.slug, { epicId: epic!.id, dependsOn: [first.number] })
+  const second = await t.createTask(project.slug, { epicId: epic!.id, dependsOn: [first.number], humanReview: false })
   for (const task of [first, second]) expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'approve' })).status).toBe(200)
   await t.orchestrator.schedule()
   const dev = (await runner.next('run.assign', m => m.job.taskId === first.id)).job
@@ -49,6 +49,22 @@ it('uses the epic base throughout claim, review, merge and dependent claims on d
   const next = (await runner.next('run.assign', m => m.job.taskId === second.id)).job
   expect(next.baseBranch).toBe(dev.baseBranch)
   expect(await t.github.branchHead(project.repository, next.baseBranch!)).toBe('merge-sha')
+  // The final task's normal submit/review/merge automatically opens the
+  // epic PR; no human action or separate "open epic" endpoint is involved.
+  t.github.setBranch(project.repository, next.branch!, 'second-head')
+  for (const c of second.acceptanceCriteria) await runner.call(next.runId, next.leaseEpoch, 'attach_evidence', { criterionId: c.id, kind: 'note', note: 'Second backend change' })
+  expect(await runner.call(next.runId, next.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', summary: 'Second feature', headSha: 'second-head' })).toMatchObject({ ok: true })
+  await t.orchestrator.schedule()
+  const secondReview = (await runner.next('run.assign', m => m.job.taskId === second.id && m.job.role === 'reviewer')).job
+  expect(await runner.call(secondReview.runId, secondReview.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Approved', criteria: second.acceptanceCriteria.map(c => ({ criterionId: c.id, met: true, note: 'Checked' })) })).toMatchObject({ ok: true })
+  await t.orchestrator.tick()
+  const epicPr = [...t.github.pulls.values()].find(p => p.head === saved!.branch)!
+  expect(epicPr).toMatchObject({ head: saved!.branch, base: 'develop' })
+  expect(epicPr.body).toContain(first.ref)
+  expect(epicPr.body).toContain(second.ref)
+  const integration = (await runner.next('run.assign', m => m.job.epicId === epic!.id)).job
+  expect(integration.headSha).toBe(epicPr.headSha)
+  expect(await runner.call(integration.runId, integration.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'The API and dependent work integrate correctly.' })).toMatchObject({ ok: true })
   await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 

@@ -1,6 +1,8 @@
+import { EpicPullRequests, epicReviewContext } from './epic-prs.ts'
 import { EVIDENCE_KINDS, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
 import {
   ACTIVE_RUN_STATES,
+  LEASE_DURATION_MS,
   feedbackSimilarity,
   nextDesignVersion,
   reviewFeedbackText,
@@ -126,12 +128,14 @@ export class Orchestrator implements RunnerHandlers {
   // Picking a runner and recording the run on it happen one at a time, so
   // PM turns and claims never both take a runner's last slot
   #placing: Promise<unknown> = Promise.resolve()
+  readonly epicPrs: EpicPullRequests
   readonly merges: MergeOrchestrator
   // Set once the plan service exists (it needs the orchestrator to start runs)
   plans: PlanService | null = null
 
   constructor(deps: OrchestratorDeps) {
     this.#d = deps
+    this.epicPrs = new EpicPullRequests(deps)
     this.merges = new MergeOrchestrator({
       db: deps.db,
       events: deps.events,
@@ -388,6 +392,8 @@ export class Orchestrator implements RunnerHandlers {
     // only wait here while the PM was paused or the runner was away
     await this.#startPmTurns()
     if (this.#updating) return
+    await this.epicPrs.reconcile()
+    if (this.#stopped || this.#updating) return
     const workers = await db.select().from(agents).where(ne(agents.role, 'pm')).orderBy(asc(agents.createdAt))
     // Tasks whose run couldn't start wait for the next pass rather than
     // burning their failed-run cap in a tight loop
@@ -396,6 +402,19 @@ export class Orchestrator implements RunnerHandlers {
       // An agent with a wake interval starts at most one task of its own
       // choosing per interval, counted from its last run however that one
       // started. Tasks an event is about start regardless.
+      if (agent.role === 'reviewer' && (agent.wakeIntervalSeconds === null || await this.#awake(agent))) {
+        const claimEpic = () => this.#exclusive(() => this.epicPrs.claim(agent.id, tx => this.#pickRunner(tx, 'reviewer', agent.runtime, null)))
+        for (let job = await claimEpic(); job; job = await claimEpic()) {
+          const ctx = await this.#load(job.runId)
+          if (!ctx) break
+          if (!runner.send({ type: 'run.assign', job }, ctx.run.runnerId)) {
+            await this.#endRun(ctx, { state: 'interrupted', error: 'The runner went offline before the run started' })
+            break
+          }
+          if (this.#stopped || this.#updating) return
+          if (agent.wakeIntervalSeconds !== null) break
+        }
+      }
       let only = agent.wakeIntervalSeconds === null || (await this.#awake(agent)) ? undefined : urgent
       const place: Place = async (tx, task) => {
         const role: RunnerRole = agent.role === 'developer' && task.type === 'design' ? 'design' : agent.role
@@ -615,6 +634,14 @@ export class Orchestrator implements RunnerHandlers {
   // Expired leases: the runner stopped heartbeating (e.g. the laptop slept).
   // The run is Interrupted, not Failed, and the task waits for a retry (D10).
   async sweepLeases(): Promise<void> {
+    const expiredEpics = await this.#d.db.select().from(runs).where(and(isNotNull(runs.epicId), inArray(runs.state, [...ACTIVE_RUN_STATES]), lt(runs.leaseExpiresAt, this.#now())))
+    for (const run of expiredEpics) {
+      const ctx = await this.#load(run.id)
+      if (ctx) {
+        await this.#endRun(ctx, { state: 'interrupted', error: 'Epic review lease expired' })
+        this.#d.runner.send({ type: 'run.stop', runId: run.id, reason: 'Lease expired' }, run.runnerId)
+      }
+    }
     const expired = await this.#d.db.select({ runId: tasks.leaseRunId }).from(tasks)
       .where(and(isNotNull(tasks.leaseRunId), lt(tasks.leaseExpiresAt, this.#now())))
     for (const { runId } of expired) {
@@ -661,6 +688,7 @@ export class Orchestrator implements RunnerHandlers {
         this.#d.runner.send({ type: 'run.stop', runId: active.runId, reason: 'This run no longer holds its lease' }, runnerId)
         continue
       }
+      if (ctx.run.epicId) await this.#d.db.update(runs).set({ leaseExpiresAt: new Date(now.getTime() + LEASE_DURATION_MS) }).where(eq(runs.id, ctx.run.id))
       if (ctx.task) {
         await this.#d.db.update(tasks).set({
           leaseHeartbeatAt: now,
@@ -1021,6 +1049,20 @@ export class Orchestrator implements RunnerHandlers {
       return this.plans.tool(ctx.run.planSessionId, ctx.run.id, tool, input, this.#actor(ctx))
     }
 
+    if (ctx.run.epicId) {
+      if (tool === 'get_task') {
+        const [epic] = await this.#d.db.select().from(schema.epics).where(eq(schema.epics.id, ctx.run.epicId))
+        if (!epic) throw new ToolError('Epic no longer exists')
+        return epicReviewContext(this.#d.db, epic, ctx.project)
+      }
+      if (tool === 'get_evidence') return this.#getEvidence(ctx, z.object({ evidenceId: z.string().optional() }).parse(input))
+      if (tool === 'report_outcome') {
+        await this.epicPrs.report(ctx.run, reportSchema.parse(input) as OutcomeReport)
+        this.#finished(ctx, 'Epic integration review recorded')
+        return { ok: true }
+      }
+      throw new ToolError('Epic integration reviews use get_task, get_evidence and report_outcome')
+    }
     switch (tool) {
       case 'get_task':
         return this.#getTask(ctx)
@@ -1097,11 +1139,12 @@ export class Orchestrator implements RunnerHandlers {
   // Evidence for the reviewer: a listing, or one item with its content.
   // Images come back as MCP image content so the reviewer can look at them.
   async #getEvidence(ctx: RunContext, input: { evidenceId?: string | undefined }) {
-    const task = ctx.task!
-    const items = await listEvidence(this.#d.db, task.id)
+    const task = ctx.task
+    const board = ctx.run.epicId ? await this.#d.db.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.epicId, ctx.run.epicId), isNull(tasks.deletedAt))) : []
+    const items = task ? await listEvidence(this.#d.db, task.id) : (await Promise.all(board.map(t => listEvidence(this.#d.db, t.id)))).flat()
     if (!input.evidenceId) {
       return {
-        round: task.reviewRounds,
+        round: task?.reviewRounds ?? 0,
         evidence: items.map(e => ({ id: e.id, criterionId: e.criterionId, kind: e.kind, note: e.note, fileName: e.fileName, contentType: e.contentType, size: e.size, round: e.round }))
       }
     }

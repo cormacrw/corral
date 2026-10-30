@@ -43,7 +43,7 @@ async function load() {
 onMounted(() => {
   void load()
   const stop = live.subscribe((event) => {
-    if (['task.updated', 'task.deleted', 'task.created', 'run.updated', 'plan.session'].includes(event.type)) void load()
+    if (['task.updated', 'task.deleted', 'task.created', 'run.updated', 'epic.updated', 'plan.session'].includes(event.type)) void load()
   })
   onBeforeUnmount(stop)
 })
@@ -78,7 +78,7 @@ watch(selected, async (item, previous) => {
   actionError.value = null
   // Nothing selected (e.g. the last item was just resolved): nothing to show beside it
   if (!item) flyout.close()
-  if (item?.type === 'plan_thread') {
+  if (item?.type === 'plan_thread' || item?.type === 'epic_review') {
     if (previous?.id !== item.id && (flyout.ref.value || flyout.epic.value)) await flyout.close()
     task.value = null
     return
@@ -162,7 +162,7 @@ const submitLabel = computed(() => action.value ? (actions.value.find(a => a.val
 
 // Resolves false when not sent, so the composer keeps its images
 async function submit(message: string): Promise<boolean> {
-  if (!selected.value || selected.value.type === 'plan_thread') return false
+  if (!selected.value || selected.value.type === 'plan_thread' || selected.value.type === 'epic_review') return false
   busy.value = true
   actionError.value = null
   try {
@@ -210,7 +210,7 @@ watchEffect(() => {
   }
   const position = inbox.value?.needsYou.findIndex(i => i.id === selectedId.value) ?? -1
   mobileHeader.value = {
-    title: selected.value?.type === 'plan_thread' ? selected.value.subject : selected.value?.taskRef ?? '',
+    title: selected.value?.type === 'plan_thread' || selected.value?.type === 'epic_review' ? selected.value.subject : selected.value?.taskRef ?? '',
     eyebrow: position >= 0 ? `Inbox · ${position + 1} of ${inbox.value!.needsYou.length}` : 'Inbox'
   }
 })
@@ -222,8 +222,14 @@ onBeforeUnmount(() => {
 <template>
   <UDashboardPanel :ui="{ body: 'p-0' }">
     <!-- Phones get the list and the item as separate screens (design/mobile.md) -->
+    <InboxEpicReview
+      v-if="device.isMobile.value && selected?.type === 'epic_review'"
+      :key="selected.id"
+      :item="selected"
+      @resolved="nextAfterPlanResolution"
+    />
     <InboxMobile
-      v-if="device.isMobile.value"
+      v-else-if="device.isMobile.value"
       v-model:tab="tab"
       v-model:search="search"
       v-model:action="action"
@@ -235,7 +241,7 @@ onBeforeUnmount(() => {
       :error="error"
       :items="items"
       :selected-id="selectedId"
-      :selected="selected?.type === 'plan_thread' ? null : selected"
+      :selected="selected?.type === 'plan_thread' || selected?.type === 'epic_review' ? null : selected"
       :already-resolved="alreadyResolved"
       :task="task"
       :evidence="evidence"
@@ -364,8 +370,14 @@ onBeforeUnmount(() => {
         </ul>
       </div>
 
+      <InboxEpicReview
+        v-if="selected?.type === 'epic_review'"
+        :key="selected.id"
+        :item="selected"
+        @resolved="nextAfterPlanResolution"
+      />
       <InboxPlanThread
-        v-if="selected?.type === 'plan_thread'"
+        v-else-if="selected?.type === 'plan_thread'"
         :key="selected.sessionId"
         :item="selected"
         @read="load"
@@ -460,9 +472,9 @@ onBeforeUnmount(() => {
               </template>
               <NuxtLink
                 v-if="selected.type === 'activity'"
-                :to="`/tasks/${selected.taskRef}`"
+                :to="selected.epicId ? `/epics/${selected.epicId}` : `/tasks/${selected.taskRef}`"
                 class="text-sm text-primary hover:underline"
-              >Open task</NuxtLink>
+              >{{ selected.epicId ? 'Open epic' : 'Open task' }}</NuxtLink>
             </div>
           </div>
           <div

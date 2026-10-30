@@ -1,3 +1,4 @@
+import { invalidateEpicReview } from './epic-review-state.ts'
 import type { AuditEntry, Comment, CreateTaskInput, HumanTransitionInput, PatchTaskInput, Task, TaskAgent, TaskDesignPin } from '@corral/contracts'
 import { createTaskInput } from '@corral/contracts'
 import {
@@ -228,9 +229,12 @@ export async function listTasks(db: Executor, project: ProjectRow, view: TaskVie
 
 // New tasks start in Backlog, or as Drafts for the PM's plans (D10).
 // Returns the new task's ID.
-export async function createTask(db: Executor, project: ProjectRow, rawInput: CreateTaskInput, actor: Actor, options: { draft?: boolean } = {}): Promise<string> {
+export async function createTask(db: Executor, project: ProjectRow, rawInput: CreateTaskInput, actor: Actor, options: { draft?: boolean, epicFix?: boolean } = {}): Promise<string> {
   const input = createTaskInput.parse(rawInput)
-  const created = createTaskState(actor, requiresHumanReview(input.type, input.humanReview ?? project.humanReviewDefault), options.draft)
+  // D23 integration feedback creates Ready work without a separate plan approval.
+  const created: ReturnType<typeof createTaskState> = options.epicFix
+    ? { ok: true, task: { status: 'ready', humanReview: input.humanReview ?? project.humanReviewDefault, reviewRounds: 0, failedRuns: 0, reason: null } }
+    : createTaskState(actor, requiresHumanReview(input.type, input.humanReview ?? project.humanReviewDefault), options.draft)
   if (!created.ok) throw new ApiFailure(409, { code: 'transition_rejected', reason: created.error })
 
   return db.transaction(async (tx) => {
@@ -262,6 +266,7 @@ export async function createTask(db: Executor, project: ProjectRow, rawInput: Cr
     }
 
     const state = created.task
+    if (!['draft', 'backlog'].includes(state.status)) await invalidateEpicReview(tx, input.epicId)
     const [row] = await tx.insert(tasks).values({
       projectId: project.id,
       number: allocated!.number,
@@ -332,6 +337,7 @@ export async function applyTransition(
   if (!result.ok) throw new ApiFailure(409, { code: 'transition_rejected', reason: result.error })
 
   const next = result.task
+  if (['draft', 'backlog'].includes(task.status) && !['draft', 'backlog'].includes(next.status)) await invalidateEpicReview(tx, task.epicId)
   await tx.update(tasks).set({
     status: next.status,
     reviewRounds: next.reviewRounds,
@@ -384,6 +390,10 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
     }
     const descriptionChanged = fields.description !== undefined && JSON.stringify(fields.description) !== JSON.stringify(task.description)
     let criteriaChange: TaskContentEdit['criteria'] = null
+    if (fields.epicId !== undefined && fields.epicId !== task.epicId && !['draft', 'backlog'].includes(task.status)) {
+      await invalidateEpicReview(tx, task.epicId)
+      await invalidateEpicReview(tx, fields.epicId)
+    }
     if (Object.keys(fields).length > 0) {
       await tx.update(tasks).set({ ...fields, updatedAt: new Date() }).where(eq(tasks.id, taskId))
     }

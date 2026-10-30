@@ -1,3 +1,4 @@
+import { epicInboxItems } from './epic-prs.ts'
 import type { Inbox, InboxItem, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
 import { richTextToPlainText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
@@ -6,7 +7,7 @@ import { actorLabel } from './orchestrator.ts'
 import { thumbnailUrl } from './projects.ts'
 import { sessionState } from './plan.ts'
 
-const { agents, auditLog, planMessages, planSessions, plans, planEpics, planTasks, projects, reviews, runs, tasks, comments } = schema
+const { agents, auditLog, planMessages, planSessions, plans, planEpics, planTasks, projects, reviews, runs, tasks, comments, epics } = schema
 
 const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'findings_reported', 'design_submitted', 'changes_requested', 'merged', 'ci_failed', 'base_conflict', 'head_moved']
 
@@ -21,7 +22,7 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
   const taskItems = await Promise.all(open.map(({ task, project }) => needsYouItem(db, task, project)))
   const threads = await planThreads(db)
   // One list, newest first by when each item arrived (design/inbox.md)
-  const needsYou = [...taskItems, ...threads].sort((a: InboxItem, b: InboxItem) => b.at.localeCompare(a.at))
+  const needsYou = [...taskItems, ...threads, ...await epicInboxItems(db)].sort((a: InboxItem, b: InboxItem) => b.at.localeCompare(a.at))
 
   const entries = await db.select({ entry: auditLog, task: tasks, project: projects }).from(auditLog)
     .innerJoin(tasks, eq(tasks.id, auditLog.taskId))
@@ -45,6 +46,22 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     }
     if (activity.length >= limit && resolved.length >= limit) break
   }
+  const epicEvents = await db.select({ entry: auditLog, epic: epics, project: projects }).from(auditLog)
+    .innerJoin(epics, sql`${auditLog.detail}->>'epicId' = ${epics.id}::text`)
+    .innerJoin(projects, eq(projects.id, epics.projectId))
+    .where(eq(auditLog.action, 'epic.pr')).orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(limit)
+  for (const { entry, epic, project } of epicEvents) {
+    const detail = entry.detail as { event: string, summary?: string }
+    const [task] = await db.select().from(tasks).where(and(eq(tasks.epicId, epic.id), isNull(tasks.deletedAt))).limit(1)
+    if (!task) continue
+    const labels: Record<string, string> = { opened: 'Epic PR opened', review_started: 'Epic integration review started', approved: 'Epic PR approved by reviewer', changes_requested: 'Epic integration changes requested', human_approved: 'You approved the epic PR', human_changes_requested: 'You requested changes on the epic PR' }
+    const body = [labels[detail.event] ?? detail.event, detail.summary].filter(Boolean).join(': ')
+    const item: TaskInboxItem = { id: `epic-${entry.id}`, type: 'activity', epicId: epic.id, project: projectTag(project), taskId: task.id, taskRef: taskRef(project.prefix, task.number), subject: epic.title, preview: body, body, sender: senderOf(entry.actor), at: entry.createdAt.toISOString(), prUrl: epic.prNumber ? `https://github.com/${project.repository}/pull/${epic.prNumber}` : null, resolution: entry.actor.kind === 'human' ? body : null }
+    if (entry.actor.kind === 'human') resolved.push(item)
+    else activity.push(item)
+  }
+  activity.sort((a, b) => b.at.localeCompare(a.at))
+  resolved.sort((a, b) => b.at.localeCompare(a.at))
   return { needsYou, activity: activity.slice(0, limit), resolved: resolved.slice(0, limit), count: needsYou.length }
 }
 

@@ -463,7 +463,7 @@ export type ApprovePlanInput = z.input<typeof approvePlanInput>
 // ── Inbox (D11, design/inbox.md) ───────────────────────────────────────────
 
 export type TaskInboxItemType = 'human_review' | 'question' | 'blocked' | 'failed' | 'activity'
-export type InboxItemType = TaskInboxItemType | 'plan_thread'
+export type InboxItemType = TaskInboxItemType | 'plan_thread' | 'epic_review'
 
 interface InboxItemBase {
   project: { id: string, slug: string, name: string, thumbnailColor: string | null, thumbnailUrl: string | null }
@@ -475,6 +475,8 @@ interface InboxItemBase {
 
 // An item raised by a developer or reviewer run, about a task
 export interface TaskInboxItem extends InboxItemBase {
+  // Epic PR activity links to the epic while retaining task context.
+  epicId?: string
   body: string
   // The task ID for Needs-you items; the audit entry for Activity and Resolved
   id: string
@@ -511,7 +513,27 @@ export interface PlanThreadItem extends InboxItemBase {
   activeRunId: string | null
 }
 
-export type InboxItem = TaskInboxItem | PlanThreadItem
+export const epicReviewActionInput = z.object({
+  action: z.enum(['approve', 'request_changes']),
+  headSha: z.string().min(1),
+  text: z.string().trim().optional()
+}).refine(input => input.action !== 'request_changes' || Boolean(input.text), { message: 'Describe the changes needed', path: ['text'] })
+export type EpicReviewActionInput = z.input<typeof epicReviewActionInput>
+
+export interface EpicReviewItem extends InboxItemBase {
+  id: string
+  type: 'epic_review'
+  epicId: string
+  taskId: null
+  taskRef: null
+  prUrl: string
+  body: string
+  resolution: null
+  headSha: string
+  tasks: { task: Task, evidence: Evidence[] }[]
+}
+
+export type InboxItem = TaskInboxItem | PlanThreadItem | EpicReviewItem
 
 export interface Inbox {
   // Task items and Plan threads waiting on the human, one list newest first by

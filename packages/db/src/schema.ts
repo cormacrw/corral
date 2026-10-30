@@ -240,6 +240,9 @@ export const runs = pgTable('runs', {
   agentId: uuid().notNull().references(() => agents.id),
   projectId: uuid().notNull().references(() => projects.id, { onDelete: 'cascade' }),
   taskId: uuid().references(() => tasks.id, { onDelete: 'cascade' }),
+  // Integration reviews belong to an epic, independently of task reviews.
+  epicId: uuid().references(() => epics.id, { onDelete: 'cascade' }),
+  leaseExpiresAt: timestamp({ withTimezone: true }),
   role: agentRole().notNull(),
   state: runState().notNull().default('queued'),
   outcome: runOutcome(),
@@ -268,8 +271,9 @@ export const runs = pgTable('runs', {
   endedAt: timestamp({ withTimezone: true })
 }, t => [
   index().on(t.taskId),
+  index().on(t.epicId),
   index().on(t.agentId, t.state),
-  check('runs_task_unless_pm', sql`${t.taskId} is not null or ${t.role} = 'pm'`)
+  check('runs_task_unless_pm', sql`${t.taskId} is not null or ${t.role} = 'pm' or (${t.epicId} is not null and ${t.role} = 'reviewer')`)
 ])
 
 export const planStatus = pgEnum('plan_status', ['proposed', 'approved', 'superseded', 'discarded'])
