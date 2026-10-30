@@ -1,4 +1,4 @@
-import type { DraftSession, EpicDetail, Inbox, PlanSessionDetail, Project, PullRequestStatus, ServerEvent, Task } from '@corral/contracts'
+import type { DraftSession, EpicDetail, Inbox, PerfSummary, PlanSessionDetail, Project, PullRequestStatus, ServerEvent, Task } from '@corral/contracts'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
@@ -8,6 +8,15 @@ describe('prototype mock API', () => {
   it('answers everything the shell loads at startup', async () => {
     for (const path of ['/projects', '/agents', '/runner', '/status', '/inbox', '/plan/sessions', '/me']) {
       await expect(mockCall('GET', path), path).resolves.toBeTruthy()
+    }
+  })
+
+  it('serves a performance summary per window, slowest p95 first', async () => {
+    for (const window of ['1h', '24h', '7d']) {
+      const summary = await mockCall<PerfSummary>('GET', `/perf/summary?window=${window}`)
+      expect(summary.window).toBe(window)
+      expect(summary.routes.map(r => r.p95Ms)).toEqual(summary.routes.map(r => r.p95Ms).toSorted((a, b) => b - a))
+      expect(summary.pages.map(p => p.p95Ms)).toEqual(summary.pages.map(p => p.p95Ms).toSorted((a, b) => b - a))
     }
   })
 

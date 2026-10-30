@@ -1,3 +1,4 @@
+import type { PerfSummary } from '@corral/contracts'
 import { schema, type DatabaseHandle } from '@corral/db'
 import { createTestDatabase } from '@corral/db/testing'
 import { Hono } from 'hono'
@@ -42,6 +43,70 @@ describe('API timing', () => {
     await sse.body!.cancel()
     await t.performance.flush()
     expect(await t.db.select().from(schema.perfSamples)).toHaveLength(6)
+  })
+})
+
+describe('performance summary', () => {
+  let t: TestApp
+  const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000)
+  const summary = async (query: string) => {
+    const response = await t.request('GET', `/api/perf/summary${query}`)
+    expect(response.status).toBe(200)
+    return await response.json() as PerfSummary
+  }
+
+  beforeAll(async () => {
+    t = await createTestApp('pglite')
+  })
+
+  afterAll(async () => {
+    await t?.close()
+  })
+
+  it('is empty without samples, and rejects unknown windows', async () => {
+    expect(await summary('?window=1h')).toEqual({
+      window: '1h', slowThresholdMs: 500, routes: [], pages: [], vitals: { LCP: null, INP: null, CLS: null }
+    })
+    expect((await t.request('GET', '/api/perf/summary?window=30d')).status).toBe(400)
+  })
+
+  it('aggregates routes, pages and vitals for the window, slowest p95 first', async () => {
+    await t.db.delete(schema.perfSamples)
+    const session = (n: number) => `00000000-0000-4000-8000-00000000000${n}`
+    const api = (name: string, durationMs: number, minutes: number, dbTimeMs: number | null = 2, queryCount: number | null = 1) =>
+      ({ kind: 'api', name, durationMs, dbTimeMs, queryCount, status: 200, createdAt: ago(minutes) })
+    const page = (name: string, metric: string, durationMs: number, minutes: number, sessionId = session(1)) =>
+      ({ kind: 'page', name, metric, durationMs, sessionId, createdAt: ago(minutes) })
+    await t.db.insert(schema.perfSamples).values([
+      ...[10, 20, 30, 40, 1000].map(ms => api('/api/fast-median', ms, 5, 4, 3)),
+      api('/api/fast-median', 100, 5, 2, 2),
+      api('/api/steady', 300, 5, null, null),
+      api('/api/old', 9000, 120),
+      page('/tasks/[ref]', 'navigation', 100, 5),
+      page('/tasks/[ref]', 'navigation', 300, 5),
+      page('/tasks/[ref]', 'ttfb', 9000, 5),
+      page('/home', 'navigation', 900, 120),
+      // The first session's LCP grew, so 1000 must not count
+      page('/tasks/[ref]', 'LCP', 1000, 10),
+      page('/tasks/[ref]', 'LCP', 3000, 5),
+      page('/home', 'LCP', 2000, 5, session(2)),
+      page('/home', 'CLS', 0.2, 5, session(2))
+    ])
+
+    const hour = await summary('?window=1h')
+    expect(hour.routes.map(r => r.name)).toEqual(['/api/fast-median', '/api/steady'])
+    const [first, second] = hour.routes
+    expect(first).toMatchObject({ count: 6, maxMs: 1000, p50Ms: 35, avgQueries: 17 / 6 })
+    expect(first!.p95Ms).toBeCloseTo(775)
+    expect(first!.avgDbTimeMs).toBeCloseTo(22 / 6)
+    expect(second).toMatchObject({ count: 1, p95Ms: 300, avgDbTimeMs: null, avgQueries: null })
+    expect(hour.pages).toEqual([{ name: '/tasks/[ref]', count: 2, p50Ms: 200, p95Ms: 290 }])
+    expect(hour.vitals).toEqual({ LCP: 2750, INP: null, CLS: 0.2 })
+
+    const day = await summary('?window=24h')
+    expect(day.routes.map(r => r.name)).toEqual(['/api/old', '/api/fast-median', '/api/steady'])
+    expect(day.pages.map(p => p.name)).toEqual(['/home', '/tasks/[ref]'])
+    expect((await summary('')).window).toBe('24h')
   })
 })
 
