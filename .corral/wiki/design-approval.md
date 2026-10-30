@@ -15,3 +15,7 @@ Migration `0030_boring_magus.sql` only adds the enum value. It does not repair a
 - Approved version with any other legacy status (including Human review, Ready to merge or Merged): review individually. Version approval alone is not permission to rewrite task history.
 
 Any repair must be a separate, explicitly reviewed migration with the inventory, chosen task IDs, expected old statuses/version IDs, and the human's decision attached. No repair is included here. The deployed database must be inventoried by its operator; development data cannot establish which production rows need repair.
+
+A legacy design already in `merged` counts as unfinished under the type-aware rule; its dependents wait until it is repaired through the reviewed migration policy above.
+
+Inbox design reviews link to the task's design panel for version approval and Plan creation. Type changes are locked in Approved, Ready to merge and Merged. Epic progress counts type-aware completion; Approved designs leave open-work counts.

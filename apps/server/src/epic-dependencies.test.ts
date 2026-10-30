@@ -37,6 +37,18 @@ describe('epic scheduling', () => {
     return { project, a: a!, b: b!, first, second, dev: dev! }
   }
 
+  it('counts Approved designs and Merged tasks as done in both epic API views', async () => {
+    const { project, a, first, second } = await setup()
+    await t.db.update(tasks).set({ type: 'design', status: 'approved' }).where(eq(tasks.id, first.id))
+    await t.db.update(tasks).set({ epicId: a.id, status: 'merged' }).where(eq(tasks.id, second.id))
+    expect(await t.request('GET', `/api/epics/${a.id}`).then(r => r.json())).toMatchObject({ taskCount: 2, mergedCount: 2 })
+    const list = await t.request('GET', `/api/projects/${project.slug}/epics`).then(r => r.json()) as { id: string, taskCount: number, mergedCount: number }[]
+    expect(list.find(e => e.id === a.id)).toMatchObject({ taskCount: 2, mergedCount: 2 })
+    // A legacy Merged design is unfinished until repaired by a reviewed migration.
+    await t.db.update(tasks).set({ status: 'merged' }).where(eq(tasks.id, first.id))
+    expect(await t.request('GET', `/api/epics/${a.id}`).then(r => r.json())).toMatchObject({ taskCount: 2, mergedCount: 1 })
+  })
+
   it('reports unfinished prerequisite epics on API tasks and clears them in live completion updates', async () => {
     const { project, a, first, second } = await setup()
     const get = async (number: number) => (await t.request('GET', `/api/projects/${project.slug}/tasks/${number}`)).json()

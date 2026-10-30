@@ -14,11 +14,11 @@ defineProps<{ id: string, title: string, merged: number, total: number }>()
         v-else
         class="truncate font-medium"
       >{{ title }}</span>
-      <span class="shrink-0 text-xs text-muted">{{ merged }} of {{ total }} merged</span>
+      <span class="shrink-0 text-xs text-muted">{{ merged }} of {{ total }} done</span>
     </div>
     <div
       role="meter"
-      :aria-label="`${title}: ${merged} of ${total} tasks merged`"
+      :aria-label="`${title}: ${merged} of ${total} tasks done`"
       :aria-valuenow="merged"
       aria-valuemin="0"
       :aria-valuemax="total"

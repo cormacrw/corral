@@ -1,5 +1,5 @@
 import type { Epic, EpicDetail, PatchEpicInput } from '@corral/contracts'
-import { checkEpicDependencies, type Actor } from '@corral/core'
+import { checkEpicDependencies, isTaskDone, type CompletionState, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, asc, eq, isNull, or } from 'drizzle-orm'
 import { ApiFailure, notFound } from './errors.ts'
@@ -13,7 +13,7 @@ type EpicRow = typeof epics.$inferSelect
 // the board yet; the detail includes them so the canvas shows the whole plan.
 export async function listEpics(db: Executor, project: ProjectRow): Promise<Epic[]> {
   const rows = await db.select().from(epics).where(eq(epics.projectId, project.id)).orderBy(asc(epics.createdAt))
-  const counted = await db.select({ epicId: tasks.epicId, status: tasks.status }).from(tasks)
+  const counted = await db.select({ epicId: tasks.epicId, status: tasks.status, type: tasks.type }).from(tasks)
     .where(and(eq(tasks.projectId, project.id), isNull(tasks.deletedAt)))
   const edges = await db.select().from(epicDependencies)
   return rows.map(row => toEpic(row, counted.filter(t => t.epicId === row.id), edges))
@@ -47,7 +47,7 @@ async function findEpic(db: Executor, epicId: string): Promise<{ row: EpicRow, p
   return found
 }
 
-function toEpic(row: EpicRow, taskStatuses: { status: string }[], edges: { epicId: string, dependsOnEpicId: string }[]): Epic {
+function toEpic(row: EpicRow, taskStatuses: CompletionState[], edges: { epicId: string, dependsOnEpicId: string }[]): Epic {
   const counted = taskStatuses.filter(t => t.status !== 'draft' && t.status !== 'backlog')
   return {
     id: row.id,
@@ -62,7 +62,7 @@ function toEpic(row: EpicRow, taskStatuses: { status: string }[], edges: { epicI
     prHeadSha: row.prHeadSha,
     reviewState: row.reviewState,
     taskCount: counted.length,
-    mergedCount: counted.filter(t => t.status === 'merged').length,
+    mergedCount: counted.filter(isTaskDone).length,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString()
   }

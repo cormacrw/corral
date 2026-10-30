@@ -209,7 +209,7 @@ export function taskNote(task: Task, all: Task[], reviewRoundCap: number): { tex
 // Sidebar counts: the Board counts open work only, so merged tasks drop out
 export function taskCounts(tasks: Pick<Task, 'status'>[]): { board: number, backlog: number } {
   return {
-    board: tasks.filter(t => t.status !== 'backlog' && t.status !== 'merged').length,
+    board: tasks.filter(t => t.status !== 'backlog' && t.status !== 'merged' && t.status !== 'approved').length,
     backlog: tasks.filter(t => t.status === 'backlog').length
   }
 }

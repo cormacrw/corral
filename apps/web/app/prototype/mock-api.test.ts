@@ -61,7 +61,7 @@ describe('prototype mock API', () => {
       question: null, plan: { id: 'plan-1', version: 1, epicCount: 1, taskCount: 3 }
     })
     expect(threads.every(i => !('body' in i))).toBe(true)
-    expect(inbox.needsYou.filter(i => i.type !== 'plan_thread').map(i => i.type).sort()).toEqual(['blocked', 'failed', 'human_review'])
+    expect(inbox.needsYou.filter(i => i.type !== 'plan_thread').map(i => i.type).sort()).toEqual(['blocked', 'failed', 'human_review', 'human_review'])
     expect(threads.some(i => i.sessionId === 's-idle')).toBe(false)
   })
 
@@ -97,7 +97,7 @@ describe('prototype mock API', () => {
     expect((await mockCall<Project>('GET', '/projects/corral')).paused).toBe(true)
   })
 
-  it('broadcasts updated epic progress when a task merges, excluding Drafts', async () => {
+  it('broadcasts updated epic progress including Approved designs and excluding Drafts', async () => {
     const events: ServerEvent[] = []
     const stop = onMockEvent(event => events.push(event))
     try {
@@ -107,7 +107,7 @@ describe('prototype mock API', () => {
       }))
       await mockCall('PATCH', '/projects/corral/tasks/6', { status: 'merged' })
       expect(events).toContainEqual(expect.objectContaining({
-        type: 'epic.updated', epic: expect.objectContaining({ id: 'e-design', taskCount: 8, mergedCount: 3 })
+        type: 'epic.updated', epic: expect.objectContaining({ id: 'e-design', taskCount: 9, mergedCount: 4 })
       }))
     } finally {
       await mockCall('PATCH', '/projects/corral/tasks/8', { status: 'blocked' })

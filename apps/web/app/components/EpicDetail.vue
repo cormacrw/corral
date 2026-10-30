@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Epic, EpicDetail, PatchEpicInput } from '@corral/contracts'
-import type { TaskStatus } from '@corral/core'
+import { isTaskDone, type TaskStatus } from '@corral/core'
 import { api, ApiError } from '~/composables/useApi'
 import { PRIORITY, STATUS } from '~/utils/labels'
 
@@ -114,7 +114,7 @@ async function saveDescription() {
 
 // Progress counts tasks on the board or in the Backlog; Drafts aren't yet
 const placed = computed(() => epic.value?.tasks.filter(t => t.status !== 'draft') ?? [])
-const merged = computed(() => placed.value.filter(t => t.status === 'merged').length)
+const merged = computed(() => placed.value.filter(isTaskDone).length)
 const drafts = computed(() => (epic.value?.tasks.length ?? 0) - placed.value.length)
 const byStatus = computed(() => {
   const counts = new Map<TaskStatus, number>()
@@ -326,7 +326,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
               :to="`/epics/${item.id}`"
               class="min-w-0 flex-1 text-sm text-primary hover:underline"
             >
-              {{ item.title }} · {{ item.mergedCount }}/{{ item.taskCount }} merged
+              {{ item.title }} · {{ item.mergedCount }}/{{ item.taskCount }} done
             </NuxtLink>
             <UButton
               icon="i-lucide-x"
@@ -372,18 +372,18 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
             :to="`/epics/${item.id}`"
             class="block text-sm text-primary hover:underline"
           >
-            {{ item.title }} · {{ item.mergedCount }}/{{ item.taskCount }} merged
+            {{ item.title }} · {{ item.mergedCount }}/{{ item.taskCount }} done
           </NuxtLink>
         </section>
 
         <section>
           <div class="mb-1 flex items-center justify-between text-xs text-muted">
             <span class="font-medium">Progress</span>
-            <span>{{ merged }} of {{ placed.length }} merged<span v-if="drafts"> · {{ drafts }} draft{{ drafts === 1 ? '' : 's' }}</span></span>
+            <span>{{ merged }} of {{ placed.length }} done<span v-if="drafts"> · {{ drafts }} draft{{ drafts === 1 ? '' : 's' }}</span></span>
           </div>
           <div
             role="progressbar"
-            :aria-label="`${merged} of ${placed.length} tasks merged`"
+            :aria-label="`${merged} of ${placed.length} tasks done`"
             :aria-valuenow="merged"
             aria-valuemin="0"
             :aria-valuemax="placed.length"

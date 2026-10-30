@@ -1,6 +1,7 @@
 import type { AuditEntry, Comment, CreateTaskInput, HumanTransitionInput, PatchTaskInput, Task, TaskAgent, TaskDesignPin } from '@corral/contracts'
 import { createTaskInput } from '@corral/contracts'
 import {
+  canChangeTaskType,
   checkDependencies,
   createTask as createTaskState,
   DEPENDENCY_DELETED_REASON,
@@ -379,6 +380,9 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
     const { task } = await lockTask(tx, taskId)
     // Merged is final (D10): the record stays as it shipped; comments still work
     if (task.status === 'merged') throw new ApiFailure(409, { code: 'conflict', constraint: 'task_merged' })
+    if (input.type && input.type !== task.type && !canChangeTaskType(task)) {
+      throw new ApiFailure(409, { code: 'conflict', constraint: 'task_type_locked' })
+    }
     const { acceptanceCriteria: criteriaInput, dependsOn, ...fields } = input
     // D20: a design task's flag can't be turned off, by the human or a plan
     if ((fields.type ?? task.type) === 'design') fields.humanReview = true

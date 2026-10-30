@@ -72,7 +72,7 @@ export function useProjectOverview() {
       const id = task.epicId ?? 'none'
       const group = groups.get(id) ?? { id, title: id === 'none' ? 'No epic' : epicTitle(live.state.value.epics[project.value?.id ?? ''], id, groups.size), merged: 0, total: 0 }
       group.total++
-      if (task.status === 'merged') group.merged++
+      if (isTaskDone(task)) group.merged++
       groups.set(id, group)
     }
     return [...groups.values()]

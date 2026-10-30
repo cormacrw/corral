@@ -1,4 +1,4 @@
-import { checkEpicDependencies } from '@corral/core'
+import { checkEpicDependencies, isTaskDone } from '@corral/core'
 import type { CreateTaskInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, RunEvent, ServerEvent, Task } from '@corral/contracts'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
@@ -120,7 +120,7 @@ route('PATCH', '/projects/:slug/tasks/:number', ([slug, number], body) => {
     const tasks = f.tasks.filter(t => t.epicId === id && t.status !== 'draft')
     Object.assign(epic, {
       taskCount: tasks.length,
-      mergedCount: tasks.filter(t => t.status === 'merged').length,
+      mergedCount: tasks.filter(isTaskDone).length,
       updatedAt: task.updatedAt
     })
     emit({ type: 'epic.updated', epic })

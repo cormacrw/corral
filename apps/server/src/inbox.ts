@@ -37,9 +37,10 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     const event = typeof detail.event === 'string' ? detail.event : typeof detail.event === 'object' && detail.event ? String((detail.event as { type?: string }).type) : null
     const base = { id: String(entry.id), project: projectTag(project), taskId: task.id, taskRef: taskRef(project.prefix, task.number), subject: task.title, prUrl: task.prUrl, at: entry.createdAt.toISOString() }
     if (entry.actor.kind === 'human' && (entry.action === 'task.deleted' || ['resolve', 'human_approve', 'human_request_changes', 'send_back'].includes(event ?? ''))) {
-      const resolution = resolutionText(entry.action, event, detail)
+      const resolution = resolutionText(entry.action, event, detail, task.type)
       resolved.push({ ...base, type: 'activity', preview: resolution, body: resolution, sender: { name: 'You', role: 'system' }, resolution })
-    } else if (entry.action === 'review.recorded' || (entry.action === 'task.transition' && ACTIVITY_EVENTS.includes(event ?? ''))) {
+    }
+    if (entry.action === 'review.recorded' || (entry.action === 'task.transition' && (ACTIVITY_EVENTS.includes(event ?? '') || (event === 'human_approve' && task.type === 'design')))) {
       const text = activityText(entry.action, event, detail, task.prNumber, task.type)
       activity.push({ ...base, type: 'activity', preview: text, body: text, sender: senderOf(entry.actor), resolution: null })
     }
@@ -167,6 +168,7 @@ function activityText(action: string, event: string | null, detail: Record<strin
     return detail.verdict === 'approved' ? `Approved ${reviewed} (${String(detail.met)} of ${String(detail.of)} criteria met)` : `Requested changes on ${reviewed} (${String(detail.met)} of ${String(detail.of)} criteria met)`
   }
   switch (event) {
+    case 'human_approve': return 'You approved the design'
     case 'pr_opened': return `Opened ${pr}`
     case 'pr_updated': return `Pushed a revision to ${pr}`
     case 'findings_reported': return 'Reported findings; on to the reviewer'
@@ -180,9 +182,9 @@ function activityText(action: string, event: string | null, detail: Record<strin
   }
 }
 
-function resolutionText(action: string, event: string | null, detail: Record<string, unknown>): string {
+function resolutionText(action: string, event: string | null, detail: Record<string, unknown>, type: string): string {
   if (action === 'task.deleted') return 'You deleted the task'
-  if (event === 'human_approve') return 'You approved the merge'
+  if (event === 'human_approve') return type === 'design' ? 'You approved the design' : 'You approved the merge'
   if (event === 'human_request_changes') return 'You requested changes'
   if (event === 'send_back') return 'You sent the task back to Backlog'
   if (event === 'resolve') {

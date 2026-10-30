@@ -113,8 +113,8 @@ export const epics: Epic[] = [
     prNumber: null,
     prHeadSha: null,
     reviewState: null,
-    taskCount: 7,
-    mergedCount: 2,
+    taskCount: 9,
+    mergedCount: 3,
     createdAt: ago(60 * 24 * 2),
     updatedAt: ago(60)
   },
@@ -207,6 +207,7 @@ function criteria(...texts: string[]): Task['acceptanceCriteria'] {
 const [corral, site] = projects as [Project, Project]
 
 export const tasks: Task[] = [
+  task(corral, 20, { title: 'Navigation design', type: 'design', status: 'human_review', epicId: 'e-design', branch: 'design/COR-20', humanReview: true }),
   task(corral, 19, { title: 'Approved navigation prototype', type: 'design', status: 'approved', epicId: 'e-design', branch: 'design/COR-19', humanReview: true }),
   task(corral, 1, { title: 'Design task type and versions', status: 'merged', epicId: 'e-design', prNumber: 60, prUrl: 'https://github.com/cormacrw/corral/pull/60', mergedAt: ago(60 * 20), mergeCommitSha: 'da0ebe6' }),
   task(corral, 2, { title: 'Serve design bundles sandboxed', status: 'merged', epicId: 'e-design', dependsOn: ['COR-1'], prNumber: 62, prUrl: 'https://github.com/cormacrw/corral/pull/62', mergedAt: ago(60 * 3), mergeCommitSha: 'e5e8457' }),
@@ -639,6 +640,11 @@ export function inbox(): Inbox {
 
 // The Approved column's design also exercises the reopening panel.
 export const designVersions: Record<string, DesignVersion[]> = {
+  't-cor-20': [{
+    id: 'design-cor-20-v1', version: 1, status: 'submitted', branch: 'design/COR-20', commitSha: 'prototype-navigation-review',
+    spec: '# Navigation prototype\n\n## Screens\n- navigation: project links and board states',
+    screenshots: [], previewUrl: 'about:blank', feedback: null, planSessionId: null, createdAt: ago(10)
+  }],
   't-cor-19': [{
     id: 'design-cor-19-v1', version: 1, status: 'approved', branch: 'design/COR-19', commitSha: 'prototype-navigation',
     spec: '# Navigation prototype\n\n## Screens\n- navigation: project links and board states',
