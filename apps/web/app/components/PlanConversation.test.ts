@@ -122,7 +122,7 @@ describe('Inbox shared Plan conversation', () => {
     const initial = detail()
     initial.id = 'pending-session'
     initial.plans = []
-    initial.messages = [{ ...initial.messages[0]!, id: 'pending-human', role: 'human', text: 'My unsent prompt' }]
+    initial.messages = [{ ...initial.messages[0]!, id: 'pending-human', role: 'human', kind: 'message', recommendation: null, options: null, text: 'My unsent prompt' }]
     pendingEntries.value[initial.id] = { session: initial, state: 'starting', error: null, taskRef: 'TA-1' }
     const wrapper = await open(initial.id)
     expect(api.plan.session).not.toHaveBeenCalled()
