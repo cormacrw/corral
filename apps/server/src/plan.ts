@@ -3,6 +3,7 @@ import { checkPlan, EPIC_REVIEW_MODES, checkPlanEpicDependencies, designPinKey, 
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
+import { appendAudit, auditEvent, auditText } from './audit.ts'
 import { listTaskAttachments } from './attachments.ts'
 import { listEpics } from './epics.ts'
 import { ApiFailure, notFound } from './errors.ts'
@@ -217,7 +218,7 @@ export class PlanService {
         .onConflictDoNothing({ target: planSessions.id }).returning()
       if (!session) return null
       const [message] = await tx.insert(planMessages).values({ sessionId: session.id, role: 'human', text, runId: null }).returning()
-      await tx.insert(auditLog).values({ projectId, actor, action: 'plan.message', detail: { sessionId: session.id, messageId: message!.id } })
+      await appendAudit(tx, { projectId, actor }, auditEvent('plan.message', { sessionId: session.id, messageId: message!.id }))
       return { session, message: message! }
     })
     if (!created) return this.#retryStart(await this.#session(input.id!), projectId)
@@ -281,7 +282,7 @@ export class PlanService {
       const [message] = await db.select({ id: planMessages.id }).from(planMessages).where(eq(planMessages.sessionId, sessionId)).limit(1)
       if (message || session.agentSessionId) throw new ApiFailure(409, { code: 'conflict', constraint: 'plan_session_runtime_locked' })
       await db.update(planSessions).set({ runtime, updatedAt: new Date() }).where(eq(planSessions.id, sessionId))
-      await db.insert(auditLog).values({ projectId: session.projectId, actor, action: 'plan.runtime', detail: { sessionId, from: session.runtime, to: runtime } })
+      await appendAudit(db, { projectId: session.projectId, actor }, auditEvent('plan.runtime', { sessionId, from: session.runtime, to: runtime }))
     }
     const updated = await this.#toSession(await this.#session(sessionId))
     this.#d.events.publish({ type: 'plan.session', session: updated })
@@ -357,7 +358,7 @@ export class PlanService {
     const [message] = await db.insert(planMessages).values({ sessionId, role: 'human', text, runId: null }).returning()
     // A new message reopens a session closed by approving its plan
     await db.update(planSessions).set({ updatedAt: new Date(), unread: false, closedAt: null }).where(eq(planSessions.id, sessionId))
-    await db.insert(auditLog).values({ projectId: project.id, actor, action: 'plan.message', detail: { sessionId, messageId: message!.id } })
+    await appendAudit(db, { projectId: project.id, actor }, auditEvent('plan.message', { sessionId, messageId: message!.id }))
     this.#d.events.publish({ type: 'plan.message', message: toMessage(message!) })
 
     await this.#turn(session, project, {
@@ -492,7 +493,7 @@ export class PlanService {
         const [latest] = await db.select().from(plans).where(eq(plans.sessionId, sessionId)).orderBy(desc(plans.version)).limit(1)
         if (!latest || latest.status !== 'proposed') throw new ToolError('There is no plan waiting for approval in this conversation.')
         const [said] = await db.select({ actor: auditLog.actor, createdAt: auditLog.createdAt }).from(auditLog)
-          .where(and(eq(auditLog.action, 'plan.message'), sql`${auditLog.detail}->>'sessionId' = ${sessionId}`))
+          .where(and(eq(auditLog.action, 'plan.message'), sql`${auditText('plan.message', 'sessionId')} = ${sessionId}`))
           .orderBy(desc(auditLog.createdAt)).limit(1)
         if (!said || said.actor.kind !== 'human' || said.createdAt < latest.createdAt) {
           throw new ToolError('Not approved. The human hasn\'t replied since this plan was proposed; only approve when their latest message asks you to.')
@@ -676,7 +677,7 @@ export class PlanService {
         ...dropped.map((r, i) => ({ planId, key: r.key, taskId: r.revision ? r.taskId : null, change: 'removed' as const, position: proposed.tasks.length + i }))
       ])
       await tx.insert(planMessages).values({ sessionId: session.id, role: 'pm', kind: 'message', text: proposed.summary || `Proposed plan v${row!.version}: ${proposed.title}`, planId, runId })
-      await tx.insert(auditLog).values({ projectId: project.id, actor, action: 'plan.proposed', detail: { planId, version: row!.version, tasks: proposed.tasks.length, revises: revisions.size } })
+      await appendAudit(tx, { projectId: project.id, actor }, auditEvent('plan.proposed', { planId, version: row!.version, tasks: proposed.tasks.length, revises: revisions.size }))
       return row!
     })
 
@@ -743,7 +744,7 @@ export class PlanService {
       await tx.update(plans).set({ status: 'approved', approvedBy: actor, approvedAt: now }).where(eq(plans.id, planId))
       await tx.update(planSessions).set({ closedAt: now }).where(eq(planSessions.id, plan.sessionId))
     })
-    await db.insert(auditLog).values({ projectId: plan.projectId, actor, action: 'plan.approved', detail: { planId, version: plan.version, to, ...(via && { viaPmRun: via.runId }) } })
+    await appendAudit(db, { projectId: plan.projectId, actor }, auditEvent('plan.approved', { planId, version: plan.version, to, ...(via && { viaPmRun: via.runId }) }))
     const full = await this.toPlan((await db.select().from(plans).where(eq(plans.id, planId)))[0]!)
     this.#d.events.publish({ type: 'plan.updated', plan: full })
     await this.#publishTasks(full)
@@ -776,7 +777,7 @@ export class PlanService {
       if (!left) await db.delete(epics).where(eq(epics.id, epicId))
     }
     await db.update(plans).set({ status: 'discarded' }).where(eq(plans.id, planId))
-    await db.insert(auditLog).values({ projectId: plan.projectId, actor, action: 'plan.discarded', detail: { planId, version: plan.version, deleted: deleted.length } })
+    await appendAudit(db, { projectId: plan.projectId, actor }, auditEvent('plan.discarded', { planId, version: plan.version, deleted: deleted.length }))
     for (const taskId of deleted) events.publish({ type: 'task.deleted', taskId, projectId: plan.projectId })
     const full = await this.toPlan((await db.select().from(plans).where(eq(plans.id, planId)))[0]!)
     events.publish({ type: 'plan.updated', plan: full })
@@ -1070,7 +1071,7 @@ async function reviseTask(tx: Executor, project: ProjectRow, taskId: string, rev
   }, actor)
   // Revisions saved before pins existed leave the task's pin alone
   if (revision.design !== undefined) await setDesignPin(tx, taskId, revision.design)
-  await tx.insert(auditLog).values({ projectId: project.id, taskId, actor, action: 'task.revised', detail: { ...plan, fields: ['title', 'description', 'type', 'priority', 'humanReview', 'acceptanceCriteria', 'epicId', 'dependsOn', ...(revision.design !== undefined ? ['design'] : [])] } })
+  await appendAudit(tx, { projectId: project.id, taskId, actor }, auditEvent('task.revised', { ...plan, fields: ['title', 'description', 'type', 'priority', 'humanReview', 'acceptanceCriteria', 'epicId', 'dependsOn', ...(revision.design !== undefined ? ['design'] : [])] }))
 }
 
 // A task's new criteria, each with the ID of an existing one that has the

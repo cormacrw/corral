@@ -2,6 +2,7 @@ import type { CreateProjectInput, PatchProjectInput, Project } from '@corral/con
 import type { Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { asc, eq } from 'drizzle-orm'
+import { appendAudit, auditEvent } from './audit.ts'
 import { notFound } from './errors.ts'
 
 type ProjectRow = typeof schema.projects.$inferSelect
@@ -51,12 +52,10 @@ export async function patchProject(db: Executor, project: ProjectRow, input: Pat
   return db.transaction(async (tx) => {
     const [row] = await tx.update(schema.projects).set({ ...input, updatedAt: new Date() }).where(eq(schema.projects.id, project.id)).returning()
     const changed = Object.keys(input)
-    await tx.insert(schema.auditLog).values({
-      projectId: project.id,
-      actor,
-      action: input.paused !== undefined && changed.length === 1 ? (input.paused ? 'project.paused' : 'project.resumed') : 'project.updated',
-      detail: { changed }
-    })
+    const event = input.paused === undefined || changed.length > 1
+      ? auditEvent('project.updated', { changed })
+      : input.paused ? auditEvent('project.paused', { changed }) : auditEvent('project.resumed', { changed })
+    await appendAudit(tx, { projectId: project.id, actor }, event)
     return toProject(row!)
   })
 }
@@ -74,7 +73,7 @@ export async function createProject(db: Executor, input: CreateProjectInput, act
       ...(input.humanReviewDefault !== undefined && { humanReviewDefault: input.humanReviewDefault }),
       ...(input.epicReviewModeDefault && { epicReviewModeDefault: input.epicReviewModeDefault })
     }).returning()
-    await tx.insert(schema.auditLog).values({ projectId: row!.id, actor, action: 'project.created', detail: {} })
+    await appendAudit(tx, { projectId: row!.id, actor }, auditEvent('project.created', {}))
     return toProject(row!)
   })
 }
@@ -87,7 +86,7 @@ export function thumbnailUrl(project: Pick<ProjectRow, 'slug' | 'thumbnailBlob'>
 export async function setProjectThumbnail(db: Executor, project: ProjectRow, blob: string | null, actor: Actor): Promise<Project> {
   return db.transaction(async (tx) => {
     const [row] = await tx.update(schema.projects).set({ thumbnailBlob: blob, updatedAt: new Date() }).where(eq(schema.projects.id, project.id)).returning()
-    await tx.insert(schema.auditLog).values({ projectId: project.id, actor, action: 'project.updated', detail: { changed: ['thumbnailBlob'] } })
+    await appendAudit(tx, { projectId: project.id, actor }, auditEvent('project.updated', { changed: ['thumbnailBlob'] }))
     return toProject(row!)
   })
 }
