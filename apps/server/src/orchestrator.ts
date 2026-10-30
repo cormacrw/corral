@@ -701,8 +701,7 @@ export class Orchestrator implements RunnerHandlers {
         headSha: task.headSha!,
         prUrl: task.prUrl,
         evidence: items.map(e => ({ id: e.id, criterionId: e.criterionId, kind: e.kind, note: e.note, fileName: e.fileName })),
-        // No PR means no merge gate on this commit, so CI can't stand in for the gates
-        requiredChecks: prFree ? [] : ctx.project.requiredChecks,
+        requiredChecks: ctx.project.requiredChecks,
         previousFeedback: previous ? feedbackComment(previous.summary, previous.criteria, criteria) : null
       }, ctx.agent.name)
     }

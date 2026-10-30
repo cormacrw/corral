@@ -83,7 +83,8 @@ it('gives the reviewer the commit, epic base, criteria and evidence, and binds t
   expect(review.prompt).toContain('git diff epic-tip...HEAD')
   expect(review.prompt).toContain(task.acceptanceCriteria[0]!.id)
   expect(review.prompt).toContain('Evidence for head-1')
-  expect(review.prompt).toContain('no required CI checks')
+  expect(review.prompt).toContain('This project has required CI checks: `ci`')
+  expect(review.prompt).toContain('the epic PR\'s CI is the merge gate')
 
   expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', verdict(task, 'approved', 'something-else'))).toMatchObject({ ok: false, error: expect.stringContaining('the submitted commit is head-1') })
   expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', { ...verdict(task, 'approved', ''), headSha: undefined })).toMatchObject({ ok: false, error: expect.stringContaining('Not recorded') })

@@ -194,7 +194,10 @@ This is a conflict check of approved work, excluded from the review-round cap.`)
 function gatesSection(task: ReviewTask): string {
   if (task.requiredChecks.length > 0) {
     const checks = task.requiredChecks.map(c => `\`${c}\``).join(', ')
-    return section('Gates', `This project has required CI checks: ${checks}. They run on every push and the merge gate won't merge without them, so don't rerun the project's lint, typecheck, tests or build. Spend your time on the diff and the criteria.`)
+    const gate = task.prFree
+      ? 'They run on every push, including this commit. No merge gate applies to the commit itself; the epic PR\'s CI is the merge gate for this work'
+      : 'They run on every push and the merge gate won\'t merge without them'
+    return section('Gates', `This project has required CI checks: ${checks}. ${gate}, so don't rerun the project's lint, typecheck, tests or build. Spend your time on the diff and the criteria.`)
   }
   return section('Gates', `This project has no required CI checks, so nothing else verifies its gates. Run the project's lint, typecheck, tests and build yourself before reporting, without the cache: when available, use \`pnpm run check --review\` (bypasses the Turbo cache) and \`TURBO_FORCE=1 pnpm run build\`. Do not add concurrency, worker or timeout flags; use the repository's shared CPU setting. If check reports a reused clean review check for this exact head, skip the full check rerun and cite the earlier check run and commit in your summary. Otherwise run the gates without the cache using the repository's commands. Request changes if one fails. If you cannot run a check without the cache, explain which check and why in your outcome.`)
 }

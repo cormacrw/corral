@@ -50,8 +50,9 @@ from the task head (on every path, when present). On the PR-free path it also
 requires that head, requires the live branch and the latest submission to match,
 and records `agentApprovedHeadSha` with the approval. A rejected verdict leaves the
 task in Agent review with the lease held; the reviewer reports failed if the head
-won't come back. Review gates run in the reviewer whatever `requiredChecks` says:
-without a PR no merge gate covers the task commit.
+won't come back. D26 applies unchanged: the gates section follows the project's
+`requiredChecks`. With checks set, its wording says CI runs on the push and the
+epic PR's CI is the merge gate, since no merge gate covers the task commit itself.
 
 Revisions add a submission on the same branch. Comments, reviews and evidence
 rows are never rewritten; `get_task` returns all of them with `submissions`, and
