@@ -22,7 +22,7 @@ agent's configured name when available.
 This change supplies the role, persistence and seed foundation. Design task
 routing and server authoring are now covered by [designer claims](designer-claims.md)
 (COR-157). Settings authoring controls remain separate D23 work. The runner role registries include designer outcomes,
-authoring tools and a basic instructions fallback so the new shared role is
+authoring tools and a built-in instructions fallback so the new shared role is
 represented exhaustively.
 
 Verification: bootstrap tests cover existing/custom agents and repeated starts;

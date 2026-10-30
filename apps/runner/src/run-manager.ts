@@ -9,7 +9,7 @@ import type { RunnerConfig } from './config.ts'
 import type { ServerConnection } from './connection.ts'
 import { packDesign, saveDesign } from './designs.ts'
 import { convertToMp4 } from './evidence-video.ts'
-import { outcomesFor, toolsFor, type ToolOutcome, type ToolServer } from './mcp.ts'
+import { outcomesFor, toolRefusal, toolsFor, type ToolOutcome, type ToolServer } from './mcp.ts'
 import { headSha, prepareWorkspace, pushBranch, readProjectBrief, readRoleInstructions, saveStoppedWork } from './workspace.ts'
 
 // Runs on this runner (flows.md §2 steps 3–5, PRD §8.6). Each run gets a
@@ -672,7 +672,7 @@ export class RunManager {
 
   async #toolCall(run: ActiveRun, tool: AgentTool, input: Record<string, unknown>): Promise<ToolOutcome> {
     if (run.ended || run.outcomeAccepted) return { ok: false, error: 'This run is over. Stop working.' }
-    if (!toolsFor(run.job).includes(tool)) return { ok: false, error: `The ${run.job.role} can't use ${tool}${tool === 'submit_design' ? ' on a task that isn\'t a design' : ''}` }
+    if (!toolsFor(run.job).includes(tool)) return { ok: false, error: toolRefusal(run.job.role, tool) }
 
     if (tool === 'attach_evidence') {
       // No path: a note on its own, which the server checks (D21)

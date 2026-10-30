@@ -1140,9 +1140,7 @@ export class Orchestrator implements RunnerHandlers {
   async #tool(ctx: RunContext, tool: string, input: unknown): Promise<unknown> {
     const role = ctx.run.role
     const allowed: Record<string, readonly string[]> = {
-      // Keep the tool path for already-live developer-authored designs (D23).
-      // New developer claims cannot be designs; submit_design also checks type.
-      developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'submit_design', 'report_outcome'],
+      developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'report_outcome'],
       designer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'submit_design', 'report_outcome'],
       reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'get_design', 'report_outcome'],
       pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
@@ -1572,7 +1570,7 @@ export class Orchestrator implements RunnerHandlers {
     }
   }
 
-  // D20: the developer's outcome on a design task. Accepted only when a
+  // D20: the designer's outcome on a design task. Accepted only when a
   // version exists for the branch's current commit and every criterion has
   // evidence. Nothing is opened on GitHub.
   async #reportDesign(ctx: RunContext, report: OutcomeReport) {

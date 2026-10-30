@@ -467,7 +467,7 @@ describe('design tasks submit versions instead of a PR', () => {
 
     t.github.setBranch(project.repository, developer.branch!, 'abc123')
     expect(await runner.call(developer.runId, developer.leaseEpoch, 'submit_design', submission('abc123')))
-      .toMatchObject({ ok: false, error: 'Only a design task submits a design' })
+      .toMatchObject({ ok: false, error: 'The developer can’t use submit_design' })
     expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'design_submitted', note: 'Did the work', summary: 'Done', headSha: 'abc123' }))
       .toMatchObject({ ok: false, error: expect.stringContaining('Only a design task reports design_submitted') })
     expect(await versionsOf(task)).toHaveLength(0)
