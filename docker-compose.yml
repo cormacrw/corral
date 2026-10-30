@@ -41,6 +41,7 @@ services:
       CORRAL_RUNNER_TOKEN: ${CORRAL_RUNNER_TOKEN:-}
       # Where people open Corral; PR bodies link here
       CORRAL_PUBLIC_URL: ${CORRAL_PUBLIC_URL:-http://localhost:3000}
+      CORRAL_SLOW_REQUEST_MS: ${CORRAL_SLOW_REQUEST_MS:-500}
     volumes:
       - server-data:/data/server
     restart: unless-stopped

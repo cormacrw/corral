@@ -43,7 +43,7 @@ printReady(`Corral API ready in ${formatDuration(process.uptime() * 1000)}`, {
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
     services.orchestrator.stop()
-    void Promise.all([server.close(), runnerServer?.close()]).finally(() => database.close().finally(() => process.exit(0)))
+    void Promise.all([server.close(), runnerServer?.close()]).finally(() => services.performance.stop().finally(() => database.close().finally(() => process.exit(0))))
     // Never hang a stop: if something above doesn't finish, exit anyway
     setTimeout(() => process.exit(0), 5000).unref()
   })
