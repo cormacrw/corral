@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { bundleHasRootIndex } from './designs.ts'
+import { bundleProblem } from './designs.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './test-runner.ts'
 
@@ -28,12 +28,13 @@ function tarball(files: Record<string, string>): Buffer {
   }
 }
 
-describe('bundleHasRootIndex', () => {
+describe('bundleProblem', () => {
   it('finds index.html at the root of the bundle, and only there', () => {
-    expect(bundleHasRootIndex(tarball({ 'index.html': '<h1>Hi</h1>', 'assets/app.js': '1' }))).toBe(true)
-    expect(bundleHasRootIndex(tarball({ 'dist/index.html': '<h1>Hi</h1>' }))).toBe(false)
-    expect(bundleHasRootIndex(tarball({ 'main.html': '<h1>Hi</h1>' }))).toBe(false)
-    expect(bundleHasRootIndex(Buffer.from('not a tarball'))).toBe(false)
+    const noIndex = 'The bundle has no index.html at its root. Pass the folder that holds index.html and its assets, with relative paths.'
+    expect(bundleProblem(tarball({ 'index.html': '<h1>Hi</h1>', 'assets/app.js': '1' }))).toBeNull()
+    expect(bundleProblem(tarball({ 'dist/index.html': '<h1>Hi</h1>' }))).toBe(noIndex)
+    expect(bundleProblem(tarball({ 'main.html': '<h1>Hi</h1>' }))).toBe(noIndex)
+    expect(bundleProblem(Buffer.from('not a tarball'))).toBe('The bundle is not a valid tar archive. Truncated tar archive: entry 1 at offset 0 has 13 of 512 header bytes.')
   })
 })
 
@@ -164,7 +165,7 @@ describe('design tasks submit versions instead of a PR', () => {
     expect(v1).toMatchObject({ version: 1, status: 'submitted', branch: `design/${task.ref}`, commitSha: 'd1' })
     expect(v1!.screenshots.map(s => s.fileName)).toEqual(['login-desktop.png', 'login-mobile.png'])
     expect(Buffer.from((await t.blobs.get(v1!.specBlob))!).toString('utf8')).toBe(SPEC.trim())
-    expect(bundleHasRootIndex((await t.blobs.get(v1!.bundleBlob))!)).toBe(true)
+    expect(bundleProblem((await t.blobs.get(v1!.bundleBlob))!)).toBeNull()
     // The preview route serves the stored bundle as it was submitted
     const preview = await t.request('GET', `/api/designs/${v1!.id}/files/`)
     expect(preview.status).toBe(200)
@@ -213,6 +214,18 @@ describe('design tasks submit versions instead of a PR', () => {
     t.github.setBranch(project.repository, developer.branch!, 'd1')
     expect(await runner.call(developer.runId, developer.leaseEpoch, 'submit_design', submission('d1', tarball({ 'dist/index.html': '<h1>Login</h1>' }))))
       .toMatchObject({ ok: false, error: 'Not submitted. The bundle has no index.html at its root. Pass the folder that holds index.html and its assets, with relative paths.' })
+    expect(await versionsOf(task)).toHaveLength(0)
+    await pause(project)
+  })
+
+  it('rejects a corrupt bundle with an error naming where, not as a missing index.html', async () => {
+    const { project, task } = await approved()
+    const developer = await nextJob(task, 'developer')
+    t.github.setBranch(project.repository, developer.branch!, 'd1')
+    const corrupt = tarball({ 'index.html': '<h1>Login</h1>' })
+    corrupt[512 + 150] = corrupt[512 + 150]! ^ 1
+    expect(await runner.call(developer.runId, developer.leaseEpoch, 'submit_design', submission('d1', corrupt)))
+      .toMatchObject({ ok: false, error: expect.stringMatching(/^Not submitted\. The bundle is not a valid tar archive\. .*offset 512/) })
     expect(await versionsOf(task)).toHaveLength(0)
     await pause(project)
   })

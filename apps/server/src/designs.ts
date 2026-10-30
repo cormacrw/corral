@@ -1,5 +1,5 @@
 import type { DesignVersion } from '@corral/contracts'
-import { approveDesignVersion, bundlePath, designPreviewUrl, taskRef, unpackBundle, type Actor } from '@corral/core'
+import { approveDesignVersion, BundleError, bundlePath, designPreviewUrl, taskRef, unpackBundle, type Actor } from '@corral/core'
 import { schema, type Database, type Executor } from '@corral/db'
 import { and, asc, desc, eq, isNull } from 'drizzle-orm'
 import type { BlobStore } from './blob-store.ts'
@@ -188,13 +188,16 @@ export async function readDesign(db: Executor, blobs: BlobStore, project: { id: 
   }
 }
 
-// Whether a tar has index.html at its root (D20), so the preview can serve
-// it on its own. The bundle is untrusted, so this reads it in memory.
-export function bundleHasRootIndex(archive: Uint8Array): boolean {
+// Why a tar can't be a design bundle, or null when it can: it must be a sound
+// archive with index.html at its root (D20), so the preview can serve it on
+// its own. The bundle is untrusted, so this reads it in memory.
+export function bundleProblem(archive: Uint8Array): string | null {
   try {
-    return unpackBundle(archive).has('index.html')
-  } catch {
-    return false
+    if (unpackBundle(archive).has('index.html')) return null
+    return 'The bundle has no index.html at its root. Pass the folder that holds index.html and its assets, with relative paths.'
+  } catch (error) {
+    if (error instanceof BundleError) return `The bundle is not a valid tar archive. ${error.message}.`
+    throw error
   }
 }
 
