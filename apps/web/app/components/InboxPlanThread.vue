@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import type { Plan, PlanThreadItem } from '@corral/contracts'
+import { approvedPlanSummary } from '@corral/core'
 import { api } from '~/composables/useApi'
 import { runtimeLabel } from '~/utils/labels'
-import { approvedMessage } from '~/utils/plan-approval'
 import { STOP_ASKING } from '~/utils/plan-questions'
 
 // A Plan thread in the Inbox (design/inbox.md#detail-pane): only what needs
@@ -92,7 +92,7 @@ async function approve(to: 'ready' | 'backlog') {
   emit('approving', true)
   try {
     const approved = await api.plan.approve(props.item.plan.id, to)
-    toast.add({ title: 'Resolved', description: approvedMessage(approved, to), color: 'success' })
+    toast.add({ title: 'Resolved', description: approvedPlanSummary(approved.tasks), color: 'success' })
     await flyout.close()
     emit('approved')
   } catch (e) {

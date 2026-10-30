@@ -211,11 +211,23 @@ export async function setDesignPin(db: Executor, taskId: string, pin: { designVe
     .onConflictDoUpdate({ target: taskDesignPins.taskId, set: { ...pin, updatedAt: new Date() } })
 }
 
+export class TaskNotFound extends Error {}
+
 export async function findTaskId(db: Executor, projectId: string, number: number): Promise<string> {
   const [row] = await db.select({ id: tasks.id }).from(tasks)
     .where(and(eq(tasks.projectId, projectId), eq(tasks.number, number), isNull(tasks.deletedAt)))
   if (!row) throw notFound()
   return row.id
+}
+
+// An agent's task ref, from its project only. The message goes to the agent.
+export async function findTaskByRef(db: Executor, project: Pick<ProjectRow, 'id' | 'prefix'>, ref: string): Promise<TaskRow> {
+  const match = new RegExp(`^${project.prefix}-(\\d+)$`, 'i').exec(ref.trim())
+  if (!match) throw new TaskNotFound(`No task ${ref} in this project (refs look like ${project.prefix}-12)`)
+  const [task] = await db.select().from(tasks)
+    .where(and(eq(tasks.projectId, project.id), eq(tasks.number, Number(match[1])), isNull(tasks.deletedAt)))
+  if (!task) throw new TaskNotFound(`No task ${ref} in this project`)
+  return task
 }
 
 export async function listTasks(db: Executor, project: ProjectRow, view: TaskView): Promise<Task[]> {

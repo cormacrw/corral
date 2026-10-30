@@ -1,5 +1,5 @@
 import { askQuestionInput, listTasksInput, normalizeProposedPlan, proposedPlanInput, type AgentRuntime, type DraftSession, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type PmRunJob } from '@corral/contracts'
-import { checkPlan, checkPlanEpicDependencies, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, requiresHumanReview, revisionProblem, richTextToMarkdown, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
+import { approvedPlanSummary, checkPlan, checkPlanEpicDependencies, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, requiresHumanReview, revisionProblem, richTextToMarkdown, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
@@ -12,7 +12,7 @@ import type { EventBus } from './events.ts'
 import { pmFallbackPrompt, pmPrompt, questionText, sessionTitlePrompt } from './prompts.ts'
 import type { RunnerHub } from './runner-hub.ts'
 import { requireRuntimeCli } from './setup.ts'
-import { addComment, createTask, deleteTaskRows, draftSessions, findTaskId, loadTask, patchTask, pinStaleness, setDesignPin, transitionTask, type ProjectRow } from './tasks.ts'
+import { addComment, createTask, deleteTaskRows, draftSessions, findTaskByRef, loadTask, patchTask, pinStaleness, setDesignPin, transitionTask, type ProjectRow } from './tasks.ts'
 
 const { acceptanceCriteria, agents, auditLog, designVersions, epicDependencies, epics, planEpics, planMessages, planSessions, planTasks, plans, projects, runs, taskDependencies, taskDesignPins, tasks } = schema
 
@@ -489,8 +489,7 @@ export class PlanService {
           }
           throw error
         })
-        const count = approved.tasks.filter(t => t.change !== 'removed').length
-        return { ok: true, message: `Plan v${approved.version} approved for the human: ${count} task${count === 1 ? '' : 's'} added to the ${to === 'ready' ? 'board' : 'Backlog'}. Tell them it's done.` }
+        return { ok: true, message: `Plan v${approved.version} approved for the human: ${approvedPlanSummary(approved.tasks)}. Tell them it's done.` }
       }
 
       case 'flag_stale_docs': {
@@ -1016,11 +1015,7 @@ export class PlanService {
   }
 
   async #taskIdByRef(project: ProjectRow, ref: string): Promise<string> {
-    const match = new RegExp(`^${project.prefix}-(\\d+)$`, 'i').exec(ref.trim())
-    if (!match) throw new ToolError(`No task ${ref} in this project (refs look like ${project.prefix}-12)`)
-    return findTaskId(this.#d.db, project.id, Number(match[1])).catch(() => {
-      throw new ToolError(`No task ${ref} in this project`)
-    })
+    return (await findTaskByRef(this.#d.db, project, ref)).id
   }
 
   // The conversation so far, for reseeding a lost session (D9)

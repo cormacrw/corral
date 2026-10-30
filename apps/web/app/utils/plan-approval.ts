@@ -1,14 +1,9 @@
 import type { Plan } from '@corral/contracts'
+import { approvedPlanSummary } from '@corral/core'
 
 // Approving a plan from its session (design/plan.md)
 
 export type ApproveTo = 'ready' | 'backlog'
-
-// The tasks an approval adds, as the PM tells it: all but the removed ones
-export function approvedMessage(plan: Plan, to: ApproveTo): string {
-  const count = plan.tasks.filter(t => t.change !== 'removed').length
-  return `${count} task${count === 1 ? '' : 's'} added to the ${to === 'ready' ? 'board' : 'Backlog'}`
-}
 
 interface Toast {
   add: (toast: { title: string, description?: string, color?: 'success' | 'error' }) => unknown
@@ -37,7 +32,7 @@ export async function approvePlan(plan: Plan, to: ApproveTo, deps: ApproveDeps):
     return false
   }
   if (deps.mobile) {
-    deps.toast.add({ title: 'Plan approved', description: approvedMessage(approved, to), color: 'success' })
+    deps.toast.add({ title: 'Plan approved', description: approvedPlanSummary(approved.tasks), color: 'success' })
     await deps.closeSheet()
     await deps.push('/plan')
   }

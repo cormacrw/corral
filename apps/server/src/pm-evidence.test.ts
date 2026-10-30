@@ -34,7 +34,11 @@ it('attaches PM files to chat or a project task, validating scope, criteria and 
   expect(onTask).toMatchObject({ ok: true })
   const items = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/evidence`).then(r => r.json())
   expect(items).toMatchObject([{ taskId: task.id, fileName: 'research.txt', criterionId: task.acceptanceCriteria[0]!.id }])
-  expect((await runner.call(job.runId, job.leaseEpoch, 'attach_evidence', { ...upload, taskRef: 'OTHER-1' })).ok).toBe(false)
+  for (const ref of ['OTHER-1', `${project.prefix}-9999`]) {
+    const refused = await runner.call(job.runId, job.leaseEpoch, 'attach_evidence', { ...upload, taskRef: ref })
+    expect(refused).toMatchObject({ ok: false, error: expect.stringContaining(`No task ${ref} in this project`) })
+    expect(await runner.call(job.runId, job.leaseEpoch, 'add_comment', { taskRef: ref, body: 'Context' })).toMatchObject({ error: 'error' in refused ? refused.error : null })
+  }
   expect((await runner.call(job.runId, job.leaseEpoch, 'attach_evidence', { ...upload, criterionId: task.acceptanceCriteria[0]!.id })).ok).toBe(false)
   expect((await runner.call(job.runId, job.leaseEpoch, 'attach_evidence', { ...upload, taskRef: task.ref, criterionId: '00000000-0000-4000-8000-000000000000' })).ok).toBe(false)
   expect(await runner.call(job.runId, job.leaseEpoch, 'attach_evidence', { ...upload, dataBase64: Buffer.alloc(25 * 1024 * 1024 + 1).toString('base64') })).toMatchObject({ ok: false, error: 'Evidence files are limited to 25 MB' })
