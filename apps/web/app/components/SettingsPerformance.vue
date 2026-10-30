@@ -149,7 +149,7 @@ const queries = (value: number | null) => value === null ? '–' : String(Number
           >
             <thead class="text-xs text-muted">
               <tr class="border-b border-default">
-                <th class="py-2 pr-2 text-start font-medium">
+                <th class="min-w-48 px-2 py-2 text-start font-medium">
                   Route
                 </th>
                 <th
@@ -168,7 +168,7 @@ const queries = (value: number | null) => value === null ? '–' : String(Number
                 :class="{ 'bg-warning/10': slow(row.p95Ms) }"
                 :data-slow="slow(row.p95Ms) || undefined"
               >
-                <td class="py-2 pr-2">
+                <td class="px-2 py-2">
                   <span class="font-mono text-xs break-all">{{ row.name }}</span>
                   <UBadge
                     v-if="slow(row.p95Ms)"
@@ -223,7 +223,7 @@ const queries = (value: number | null) => value === null ? '–' : String(Number
           >
             <thead class="text-xs text-muted">
               <tr class="border-b border-default">
-                <th class="py-2 pr-2 text-start font-medium">
+                <th class="min-w-48 px-2 py-2 text-start font-medium">
                   Page
                 </th>
                 <th
@@ -242,7 +242,7 @@ const queries = (value: number | null) => value === null ? '–' : String(Number
                 :class="{ 'bg-warning/10': slow(row.p95Ms) }"
                 :data-slow="slow(row.p95Ms) || undefined"
               >
-                <td class="py-2 pr-2">
+                <td class="px-2 py-2">
                   <span class="font-mono text-xs break-all">{{ row.name }}</span>
                   <UBadge
                     v-if="slow(row.p95Ms)"
