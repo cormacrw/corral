@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { feedbackSimilarity, feedbackTokens, isRepeatedFeedback, REPEATED_FEEDBACK_THRESHOLD, reviewFeedbackText } from './review-feedback.ts'
+import { feedbackFixTitle, feedbackPoints, feedbackSimilarity, feedbackTokens, isRepeatedFeedback, REPEATED_FEEDBACK_THRESHOLD, reviewFeedbackText } from './review-feedback.ts'
 
 describe('feedbackTokens', () => {
   it('ignores case, punctuation, accents and repeats', () => {
@@ -64,5 +64,37 @@ describe('reviewFeedbackText', () => {
       { met: true, note: 'Looks fine' },
       { met: false, note: '' }
     ])).toBe('Still wrong\nNo message shown')
+  })
+})
+
+describe('feedbackPoints', () => {
+  it('takes the list items, joining wrapped lines and leaving out any intro', () => {
+    expect(feedbackPoints('Two things:\n\n- Ask before deleting\n  a saved search\n* Keep the toast\n1. Fix the count\n2) Update the docs')).toEqual([
+      'Ask before deleting a saved search', 'Keep the toast', 'Fix the count', 'Update the docs'
+    ])
+  })
+
+  it('takes paragraphs when there is no list', () => {
+    expect(feedbackPoints('The toast is wrong.\nIt says saved.\n\nThe count is off.')).toEqual(['The toast is wrong. It says saved.', 'The count is off.'])
+  })
+
+  it('skips headings and code blocks', () => {
+    expect(feedbackPoints('## Problems\n\n```\n- not a point\n```\n\nThe count is off')).toEqual(['The count is off'])
+  })
+
+  it('falls back to the whole feedback when no point is left', () => {
+    expect(feedbackPoints('## Problems')).toEqual(['## Problems'])
+  })
+})
+
+describe('feedbackFixTitle', () => {
+  it('uses the first sentence of the first point', () => {
+    expect(feedbackFixTitle('- Deleting does not ask for confirmation. It should.\n- Keep the toast')).toBe('Fix integration: Deleting does not ask for confirmation')
+  })
+
+  it('shortens a long point', () => {
+    const title = feedbackFixTitle('word '.repeat(60))
+    expect(title.length).toBeLessThanOrEqual('Fix integration: '.length + 100)
+    expect(title.endsWith('…')).toBe(true)
   })
 })

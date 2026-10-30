@@ -101,6 +101,9 @@ it('keeps changes requested out of Inbox and creates a Ready fix task', async ()
   expect(fix).toMatchObject({ status: 'ready', epicId: epic.id })
   await capture('changes-requested.json', { reviewerReport: { outcome: 'changes_requested', summary: 'UI sends the wrong search field; align it with the API.' }, request: { method: 'GET', url: `${t.server!.url}/api/inbox` }, status: 200, response: await inbox(), epic: await (await fetch(`${t.server!.url}/api/epics/${epic.id}`)).json(), fixTask: fix })
   expect(JSON.stringify(fix.description)).toContain('wrong search field')
+  expect(fix.title).toBe('Fix integration: UI sends the wrong search field; align it with the API')
+  const [held] = await t.db.select().from(schema.epics).where(eq(schema.epics.id, epic.id))
+  expect(held!.reviewState).toBe('changes_requested')
   // Finishing the fix reuses the PR and starts a fresh integration review.
   await t.db.update(schema.tasks).set({ status: 'merged' }).where(eq(schema.tasks.id, fix.id))
   await t.orchestrator.schedule()
@@ -131,18 +134,68 @@ it('invalidates human and in-flight reviews when Backlog work reaches the board'
   await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 
-it('human changes requested create a fix and reject stale heads', async () => {
+const reviewState = async (epicId: string) => (await t.db.select().from(schema.epics).where(eq(schema.epics.id, epicId)))[0]!.reviewState
+const fixOf = async (epicId: string) => (await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epicId))).find(t => t.title.startsWith('Fix integration:'))!
+
+it('human changes requested create a fix, hold the PR, and bring the same PR back after the fix merges', async () => {
   const { project, epic, other } = await setup()
   const job = await lastMerge(other.id, epic.id)
   expect(await report(job, 'approved')).toMatchObject({ ok: true })
+  const pullsBefore = [...t.github.pulls.values()].filter(p => p.head === epic.branch)
   const path = `/api/epics/${epic.id}/review`
   expect((await t.request('POST', path, { action: 'approve', headSha: 'old-head' })).status).toBe(409)
-  expect((await t.request('POST', path, { action: 'request_changes', headSha: job.headSha, text: 'Ask before deleting a saved search' })).status).toBe(200)
+  const feedback = 'A few problems:\n\n- Deleting a saved search does not ask for confirmation.\n- The empty state still says "No results"'
+  const requested = await t.request('POST', path, { action: 'request_changes', headSha: job.headSha, text: feedback })
+  expect(requested.status).toBe(200)
+  const after = await inbox()
+  expect(after.needsYou.some(i => i.id === epic.id)).toBe(false)
+  expect(after.resolved.some(i => i.epicId === epic.id && i.preview.includes('You requested changes'))).toBe(true)
+  expect(await reviewState(epic.id)).toBe('changes_requested')
+  const fix = await fixOf(epic.id)
+  expect(fix).toMatchObject({ status: 'ready', epicId: epic.id, title: 'Fix integration: Deleting a saved search does not ask for confirmation' })
+  expect(JSON.stringify(fix.description)).toContain('does not ask for confirmation')
+  const criteria = await t.db.select().from(schema.acceptanceCriteria).where(eq(schema.acceptanceCriteria.taskId, fix.id)).orderBy(schema.acceptanceCriteria.position)
+  expect(criteria.map(c => c.text)).toEqual(['Deleting a saved search does not ask for confirmation.', 'The empty state still says "No results"'])
+  await capture('human-changes-requested.json', { request: { method: 'POST', path, body: { action: 'request_changes', headSha: job.headSha, text: feedback } }, status: requested.status, epicReviewState: await reviewState(epic.id), fixTask: { ...fix, acceptanceCriteria: criteria.map(c => c.text) }, inboxNeedsYou: after.needsYou.filter(i => i.id === epic.id), inboxResolved: after.resolved.filter(i => i.epicId === epic.id) })
+
+  // Nothing can approve or merge the PR while the changes are outstanding,
+  // and new board work doesn't clear the state.
+  expect((await t.request('POST', path, { action: 'approve', headSha: job.headSha })).status).toBe(409)
+  const added = await t.createTask(project.slug, { epicId: epic.id, title: 'Late requirement' })
+  await t.request('POST', `/api/projects/${project.slug}/tasks/${added.number}/transitions`, { type: 'approve' })
+  await t.orchestrator.schedule()
+  expect(await reviewState(epic.id)).toBe('changes_requested')
+  expect(t.github.calls.some(c => c.method === 'merge')).toBe(false)
+  await t.db.update(schema.tasks).set({ status: 'merged' }).where(eq(schema.tasks.id, added.id))
+
+  // The fix merges into the epic branch: its head moves and review starts over.
+  t.github.setBranch(project.repository, epic.branch!, 'fixed-head')
+  await t.db.update(schema.tasks).set({ status: 'merged' }).where(eq(schema.tasks.id, fix.id))
+  await t.orchestrator.schedule()
+  const second = (await runner.next('run.assign', m => m.job.epicId === epic.id && m.job.runId !== job.runId)).job
+  expect(second.headSha).toBe('fixed-head')
+  expect(await reviewState(epic.id)).toBe('in_review')
   expect((await inbox()).needsYou.some(i => i.id === epic.id)).toBe(false)
-  const [saved] = await t.db.select().from(schema.epics).where(eq(schema.epics.id, epic.id))
-  expect(saved!.reviewState).toBe('open')
-  const fixes = await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epic.id))
-  expect(fixes.find(t => t.title.startsWith('Fix integration:'))!.status).toBe('ready')
+  expect(await report(second, 'approved')).toMatchObject({ ok: true })
+  const back = (await inbox()).needsYou.find(i => i.id === epic.id) as EpicReviewItem
+  expect(back).toMatchObject({ type: 'epic_review', headSha: 'fixed-head' })
+  expect(back.tasks.map(e => e.task.id)).toContain(fix.id)
+  const pullsAfter = [...t.github.pulls.values()].filter(p => p.head === epic.branch)
+  expect(pullsAfter.map(p => p.number)).toEqual(pullsBefore.map(p => p.number))
+  await capture('fix-merged-inbox.json', { epicReviewState: await reviewState(epic.id), prNumber: pullsAfter[0]!.number, secondReviewAssignment: { runId: second.runId, headSha: second.headSha, role: second.role }, inboxItem: { id: back.id, type: back.type, headSha: back.headSha, prUrl: back.prUrl, tasks: back.tasks.map(e => e.task.ref) } })
+  await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+})
+
+it('sends the epic PR back to review if its fix task is dropped from the board', async () => {
+  const { project, epic, other } = await setup()
+  const job = await lastMerge(other.id, epic.id)
+  expect(await report(job, 'changes_requested')).toMatchObject({ ok: true })
+  const fix = await fixOf(epic.id)
+  await t.db.update(schema.tasks).set({ deletedAt: new Date() }).where(eq(schema.tasks.id, fix.id))
+  await t.orchestrator.schedule()
+  const second = (await runner.next('run.assign', m => m.job.epicId === epic.id && m.job.runId !== job.runId)).job
+  expect(second.headSha).toBe(job.headSha)
+  expect(await reviewState(epic.id)).toBe('in_review')
   await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 
