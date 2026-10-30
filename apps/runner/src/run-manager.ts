@@ -648,7 +648,7 @@ export class RunManager {
         return { ok: false, error: `A ${run.job.role} reports one of: ${outcomesFor(run.job.role).join(', ')}` }
       }
       let payload: Record<string, unknown> = input
-      if (run.job.role === 'developer' && (outcome === 'pr_opened' || outcome === 'pr_updated' || outcome === 'design_submitted')) {
+      if (run.job.role === 'developer' && (outcome === 'pr_opened' || outcome === 'pr_updated' || outcome === 'pr_rebased' || outcome === 'design_submitted')) {
         // A spike has no branch to push (D19)
         if (!run.job.branch) return { ok: false, error: 'A spike opens no PR: report your findings with outcome findings_reported.' }
         // The runner pushes, not the agent (D8); the commit goes with the report

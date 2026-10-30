@@ -19,6 +19,7 @@ export const ACTIVE_RUN_STATES = ['queued', 'starting', 'running', 'waiting_for_
 export const RUN_OUTCOMES = [
   'pr_opened',
   'pr_updated',
+  'pr_rebased',
   // A spike's developer: findings instead of a PR (D19)
   'findings_reported',
   // A design task's developer: a new design version instead of a PR (D20)

@@ -28,3 +28,14 @@ Regression coverage lives in `claim.test.ts` (persisted round-zero states,
 submission timing, duplicate verdicts and carried approvals),
 `orchestrator.test.ts` (same-head resubmission, human resolution and the reset
 round cap), and `merge.test.ts` (carried approval and unchanged round).
+
+
+Approved task PR conflicts now persist `rebaseOnly` and `approvedHeadSha`.
+The developer receives the same narrow rebase prompt in a fresh or resumed
+session, targeting the task's actual base (including epic bases).
+Only `pr_rebased` submits this round; ordinary PR rounds reject that outcome.
+The runner pushes the rewritten head with its usual force-with-lease path.
+Conflict and resubmission leave `reviewRounds` unchanged and retain the
+approved head for rebase review. Changes requested clears rebase-only mode
+and starts a normal counted revision, reported with `pr_updated`.
+Run history displays the outcome as “PR rebased”.

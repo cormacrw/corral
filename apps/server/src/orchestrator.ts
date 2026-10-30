@@ -498,6 +498,8 @@ export class Orchestrator implements RunnerHandlers {
       pin,
       defaultBranch: baseBranch,
       reviewRounds: task.reviewRounds,
+      rebaseOnly: task.rebaseOnly,
+      approvedHeadSha: task.approvedHeadSha,
       reviewRoundCap: ctx.project.reviewRoundCap,
       criteria: criteria.map(c => ({ id: c.id, text: c.text })),
       comments: notes,
@@ -1232,6 +1234,9 @@ export class Orchestrator implements RunnerHandlers {
       switch (report.outcome) {
         case 'pr_opened':
         case 'pr_updated':
+        case 'pr_rebased':
+          if (ctx.task!.rebaseOnly && report.outcome !== 'pr_rebased') throw new ToolError('Not submitted. A rebase-only round expects pr_rebased.')
+          if (!ctx.task!.rebaseOnly && report.outcome === 'pr_rebased') throw new ToolError('Not submitted. This round expects pr_opened or pr_updated, not pr_rebased.')
           if (spike) throw new ToolError('Not submitted. A spike opens no PR: report your findings with outcome findings_reported.')
           if (design) throw new ToolError('Not submitted. A design task opens no PR: call submit_design, then report design_submitted.')
           return this.#submit(ctx, report)

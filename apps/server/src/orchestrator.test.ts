@@ -175,6 +175,8 @@ describe('orchestrator', () => {
     const { project, task, job } = await assigned({ acceptanceCriteria: ['Shows an error on a bad password', 'Logs in with the right one'] })
     const criteria = (await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}`).then(r => r.json()) as Task).acceptanceCriteria
 
+    expect(await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'pr_rebased', note: 'Rebased', summary: 'Resolved conflicts', headSha: 'abc123' }))
+      .toMatchObject({ ok: false, error: expect.stringContaining('pr_opened or pr_updated') })
     const noCommit = await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', note: 'Did the work', summary: 'Done' })
     expect(noCommit).toMatchObject({ ok: false, error: expect.stringContaining('no commit') })
 
