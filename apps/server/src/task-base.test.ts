@@ -85,3 +85,28 @@ it.each(['each_task', 'epic', 'direct', null] as const)('routes review and confl
   }
   await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
+
+it('fails the run with the cause when the epic branch cannot be created, and keeps scheduling', async () => {
+  const project = await t.createProject({ defaultBranch: 'develop' })
+  t.github.setBranch(project.repository, 'develop', 'target-tip')
+  const [epic] = await t.db.insert(schema.epics).values({ projectId: project.id, createdBy: t.actor, title: 'Broken', reviewMode: 'epic' }).returning()
+  const epicTask = await t.createTask(project.slug, { epicId: epic!.id, priority: 'urgent' })
+  const plain = await t.createTask(project.slug, {})
+  const createBranch = t.github.createBranch
+  t.github.createBranch = () => Promise.reject(new Error('GitHub said no'))
+  try {
+    for (const task of [epicTask, plain]) await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'approve' })
+    await t.orchestrator.schedule()
+    await runner.next('run.assign', m => m.job.taskId === plain.id)
+  } finally {
+    t.github.createBranch = createBranch
+  }
+  // Each scheduling pass tries the task once; approvals start passes of their own
+  const failed = await t.db.select().from(schema.runs).where(eq(schema.runs.taskId, epicTask.id))
+  expect(failed.length).toBeGreaterThan(0)
+  for (const run of failed) expect(run).toMatchObject({ state: 'failed', outcome: 'failed', error: `Could not prepare epic branch corral/epic-${epic!.id}-broken: GitHub said no` })
+  const [row] = await t.db.select().from(schema.tasks).where(eq(schema.tasks.id, epicTask.id))
+  expect(row).toMatchObject({ leaseRunId: null, failedRuns: failed.length })
+  expect(runner.received.some(m => m.type === 'run.assign' && m.job.taskId === epicTask.id)).toBe(false)
+  await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+})

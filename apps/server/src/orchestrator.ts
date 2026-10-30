@@ -22,7 +22,7 @@ import { bundleHasRootIndex, DesignNotFound, readDesign } from './designs.ts'
 import { ApiFailure } from './errors.ts'
 import type { EventBus } from './events.ts'
 import type { GitHubClient } from './github.ts'
-import { taskBase } from './task-base.ts'
+import { EpicBranchError, taskBase } from './task-base.ts'
 import { slugify } from './projects.ts'
 import { designRevisionPrompt, developerPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
 import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
@@ -335,13 +335,16 @@ export class Orchestrator implements RunnerHandlers {
     await this.#startPmTurns()
     if (this.#updating) return
     const workers = await db.select().from(agents).where(ne(agents.role, 'pm')).orderBy(asc(agents.createdAt))
+    // Tasks whose run couldn't start wait for the next pass rather than
+    // burning their failed-run cap in a tight loop
+    const skip: string[] = []
     for (const agent of workers) {
       // An agent with a wake interval starts at most one task of its own
       // choosing per interval, counted from its last run however that one
       // started. Tasks an event is about start regardless.
       let only = agent.wakeIntervalSeconds === null || (await this.#awake(agent)) ? undefined : urgent
-      for (let claim = await claimNextTask(db, agent.id, this.#now(), only); claim; claim = await claimNextTask(db, agent.id, this.#now(), only)) {
-        await this.#assign(claim)
+      for (let claim = await claimNextTask(db, agent.id, this.#now(), only, skip); claim; claim = await claimNextTask(db, agent.id, this.#now(), only, skip)) {
+        if (!await this.#assign(claim)) skip.push(claim.taskId)
         if (this.#stopped || this.#updating) return
         if (agent.wakeIntervalSeconds !== null) only = urgent
       }
@@ -355,16 +358,29 @@ export class Orchestrator implements RunnerHandlers {
     return !last || this.#now().getTime() - last.queuedAt.getTime() >= agent.wakeIntervalSeconds! * 1000
   }
 
-  async #assign(claim: Claim): Promise<void> {
+  // Whether the run was handed to the runner
+  async #assign(claim: Claim): Promise<boolean> {
     const ctx = await this.#load(claim.runId)
-    if (!ctx?.task) return
-    const job = ctx.run.role === 'reviewer' ? await this.#reviewerJob(ctx) : await this.#developerJob(ctx)
+    if (!ctx?.task) return false
+    let job: RunJob
+    try {
+      job = ctx.run.role === 'reviewer' ? await this.#reviewerJob(ctx) : await this.#developerJob(ctx)
+    } catch (error) {
+      // Preparing the epic branch calls GitHub; the run fails straight away
+      // with the cause instead of holding its lease until it expires
+      if (!(error instanceof EpicBranchError)) throw error
+      await this.#failRun(ctx, error.message)
+      await this.#publish(ctx)
+      return false
+    }
     const runnerId = this.#d.runner.pick()
     await this.#d.db.update(runs).set({ runnerId }).where(eq(runs.id, ctx.run.id))
-    if (!this.#d.runner.send({ type: 'run.assign', job }, runnerId)) {
+    const sent = this.#d.runner.send({ type: 'run.assign', job }, runnerId)
+    if (!sent) {
       await this.#endRun(ctx, { state: 'interrupted', error: 'The runner went offline before the run started' })
     }
     await this.#publish(ctx)
+    return sent
   }
 
   async #developerJob(ctx: RunContext): Promise<RunJob> {
