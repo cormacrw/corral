@@ -9,7 +9,7 @@ const { auditLog } = schema
 // the whole input as `event`; every other producer writes the event's name.
 export type TransitionDetail =
   | { event: HumanTransitionInput }
-  | { event: 'pr_opened' | 'pr_updated' | 'pr_rebased', runId: string, headSha: string | undefined, pr: number | null }
+  | { event: 'pr_opened' | 'pr_updated' | 'pr_rebased' | 'commit_submitted', runId: string, headSha: string | undefined, pr: number | null }
   | { event: 'findings_reported', runId: string, headSha: string }
   | { event: 'design_submitted', runId: string, headSha: string | undefined, version: number }
   | { event: 'review_approved', runId?: string, headSha: string | null }

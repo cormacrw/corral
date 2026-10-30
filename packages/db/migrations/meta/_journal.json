@@ -281,6 +281,13 @@
       "when": 1793391854737,
       "tag": "0039_stiff_overlord",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1793394374269,
+      "tag": "0040_striped_wilson_fisk",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,6 @@
 import { appendAudit, auditEvent } from './audit.ts'
 import { EpicPullRequests, epicReviewContext } from './epic-prs.ts'
-import { integrationCompatibilityReason, RUNNER_HEARTBEAT_MS, epicReviewReportSchema, evidenceKind, outcomeReportSchema, rebaseReviewReportSchema, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type PmRunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
+import { integrationCompatibilityReason, RUNNER_HEARTBEAT_MS, TASK_INTEGRATION_PROTOCOL, epicReviewReportSchema, evidenceKind, outcomeReportSchema, rebaseReviewReportSchema, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type PmRunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
 import {
   ACTIVE_RUN_STATES,
   LEASE_DURATION_MS,
@@ -27,6 +27,7 @@ import { ApiFailure } from './errors.ts'
 import type { EventBus } from './events.ts'
 import type { GitHubClient, PullRequest } from './github.ts'
 import { EpicBranchError, isEpicRebaseTask, taskBase } from './task-base.ts'
+import { listTaskSubmissions, recordTaskSubmission, selectPrFreeProtocol } from './task-submissions.ts'
 import { slugify } from './projects.ts'
 import { designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
 import { runExitError, withLastActivity } from './run-exit.ts'
@@ -40,7 +41,7 @@ import { addComment, applyTransition, deleteTaskRows, loadTask, lockTask, toTask
 import type { Transcripts } from './transcripts.ts'
 import { WorktreeSweep } from './worktree-sweep.ts'
 
-const { acceptanceCriteria, agents, attachments, comments, designVersions, evidence, projects, reviews, runs, settings, taskDesignPins, tasks } = schema
+const { acceptanceCriteria, agents, attachments, comments, designVersions, evidence, projects, reviews, runs, settings, taskDesignPins, taskSubmissions, tasks } = schema
 type PlanSessionRow = typeof schema.planSessions.$inferSelect
 
 const server: Actor = { kind: 'system', component: 'server' }
@@ -514,9 +515,13 @@ export class Orchestrator implements RunnerHandlers {
     // A design is built on design/<ref>, pushed but never merged (D20).
     const baseBranch = await taskBase(db, task, ctx.project, this.#d.github)
     const spike = task.type === 'spike'
+    const resumingBranch = task.branch !== null
     if (!task.branch && !spike) {
       const branch = author.branch(ref)
       ;[task] = await db.update(tasks).set({ branch }).where(eq(tasks.id, task.id)).returning() as [TaskRow]
+    }
+    if (ctx.run.role === 'developer' && !task.integrationProtocol && await this.#canSkipTaskPr(ctx, task, resumingBranch)) {
+      task = await selectPrFreeProtocol(db, task.id)
     }
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
     const notes = await this.#comments(task.id)
@@ -538,6 +543,7 @@ export class Orchestrator implements RunnerHandlers {
       design: author.design ?? null,
       pin,
       defaultBranch: baseBranch,
+      prFree: task.integrationProtocol > 0,
       reviewRounds: task.reviewRounds,
       rebaseOnly: task.rebaseOnly,
       approvedHeadSha: task.approvedHeadSha,
@@ -586,6 +592,17 @@ export class Orchestrator implements RunnerHandlers {
       timeoutSeconds: RUN_TIMEOUT_SECONDS,
       prompt: !resume ? prompt : author.revision(promptTask, feedback)
     } as RunJob
+  }
+
+  // D27 rollout: only a supporting runner may start the PR-free path, and a
+  // branch that already has a PR (one whose number was never recorded after a
+  // crash) finishes on the legacy path. When GitHub can't say, it stays legacy.
+  async #canSkipTaskPr(ctx: RunContext, task: TaskRow, resumingBranch: boolean): Promise<boolean> {
+    const runner = this.#d.runner.status().runners.find(r => r.id === ctx.run.runnerId)
+    if (!runner?.taskIntegrationProtocols?.includes(TASK_INTEGRATION_PROTOCOL)) return false
+    if (!resumingBranch || !task.branch) return true
+    const pr = await this.#d.github.findOpenPullRequest(ctx.project.repository, task.branch).catch(() => undefined)
+    return pr === null
   }
 
   // The design version a build task is pinned to (D20), for its prompt
@@ -637,6 +654,8 @@ export class Orchestrator implements RunnerHandlers {
           .where(and(eq(designVersions.taskId, task.id), eq(designVersions.commitSha, task.headSha))).orderBy(desc(designVersions.version)).limit(1)
       : []
     const pin = await this.#pinnedDesign(ctx.project.prefix, task.id)
+    const prFree = task.integrationProtocol > 0
+    const submissions = prFree ? await listTaskSubmissions(db, task.id) : []
     return {
       runId: ctx.run.id,
       runNumber: ctx.run.number,
@@ -670,6 +689,8 @@ export class Orchestrator implements RunnerHandlers {
         pin,
         underReview: version ? { version: version.version, commitSha: version.commitSha, screenshots: version.screenshots.map(s => s.fileName) } : null,
         defaultBranch: baseBranch,
+        prFree,
+        submissions: submissions.map(s => ({ sequence: s.sequence, headSha: s.submittedHeadSha, baseSha: s.baseSha, targetBranch: s.targetBranch, createdAt: s.createdAt })),
         rebaseOnly: task.rebaseOnly,
         approvedHeadSha: task.approvedHeadSha,
         reviewRounds: task.reviewRounds,
@@ -680,7 +701,8 @@ export class Orchestrator implements RunnerHandlers {
         headSha: task.headSha!,
         prUrl: task.prUrl,
         evidence: items.map(e => ({ id: e.id, criterionId: e.criterionId, kind: e.kind, note: e.note, fileName: e.fileName })),
-        requiredChecks: ctx.project.requiredChecks,
+        // No PR means no merge gate on this commit, so CI can't stand in for the gates
+        requiredChecks: prFree ? [] : ctx.project.requiredChecks,
         previousFeedback: previous ? feedbackComment(previous.summary, previous.criteria, criteria) : null
       }, ctx.agent.name)
     }
@@ -1212,6 +1234,7 @@ export class Orchestrator implements RunnerHandlers {
       status: task.status,
       description: richTextToMarkdown(task.description),
       branch: task.branch,
+      submissions: (await listTaskSubmissions(this.#d.db, task.id)).map(s => ({ sequence: s.sequence, headSha: s.submittedHeadSha, baseSha: s.baseSha, targetBranch: s.targetBranch, agentApprovedHeadSha: s.agentApprovedHeadSha, createdAt: s.createdAt.toISOString() })),
       reviewRound: task.reviewRounds,
       criteria: criteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })),
       comments: notes.map(c => ({ ...c, createdAt: c.createdAt.toISOString() })),
@@ -1312,20 +1335,26 @@ export class Orchestrator implements RunnerHandlers {
       if (problem) throw new ToolError(`Not reported. ${problem} Add \`note\`: one line of at most ${MAX_NOTE_LENGTH} characters saying what this run did, e.g. "${NOTE_EXAMPLE}". Then report again.`)
       const spike = ctx.task!.type === 'spike'
       const design = ctx.task!.type === 'design'
+      const prFree = ctx.task!.integrationProtocol > 0
+      const expected = design ? 'design_submitted' : spike ? 'findings_reported' : prFree ? 'commit_submitted' : 'pr_opened or pr_updated'
       switch (report.outcome) {
+        case 'commit_submitted':
+          if (!prFree) throw new ToolError(`Not submitted. Only an epic task without a PR submits a commit; this task reports ${ctx.task!.rebaseOnly ? 'pr_rebased' : expected}.`)
+          return this.#submitCommit(ctx, { ...report, outcome: report.outcome })
         case 'pr_opened':
         case 'pr_updated':
         case 'pr_rebased':
+          if (prFree) throw new ToolError('Not submitted. This epic task opens no PR: report commit_submitted.')
           if (ctx.task!.rebaseOnly && report.outcome !== 'pr_rebased') throw new ToolError('Not submitted. A rebase-only round expects pr_rebased.')
           if (!ctx.task!.rebaseOnly && report.outcome === 'pr_rebased') throw new ToolError('Not submitted. This round expects pr_opened or pr_updated, not pr_rebased.')
           if (spike) throw new ToolError('Not submitted. A spike opens no PR: report your findings with outcome findings_reported.')
           if (design) throw new ToolError('Not submitted. A design task opens no PR: call submit_design, then report design_submitted.')
           return this.#submit(ctx, { ...report, outcome: report.outcome })
         case 'findings_reported':
-          if (!spike) throw new ToolError(`Not submitted. Only a spike reports findings; this task reports ${design ? 'design_submitted' : 'pr_opened or pr_updated'}.`)
+          if (!spike) throw new ToolError(`Not submitted. Only a spike reports findings; this task reports ${expected}.`)
           return this.#reportFindings(ctx, report)
         case 'design_submitted':
-          if (!design) throw new ToolError(`Not submitted. Only a design task reports design_submitted; this task reports ${spike ? 'findings_reported' : 'pr_opened or pr_updated'}.`)
+          if (!design) throw new ToolError(`Not submitted. Only a design task reports design_submitted; this task reports ${expected}.`)
           return this.#reportDesign(ctx, report)
         case 'stuck':
           return this.#stuck(ctx, report.summary, report.note!)
@@ -1336,7 +1365,7 @@ export class Orchestrator implements RunnerHandlers {
       }
       throw new ToolError(spike
         ? 'A spike’s developer reports findings_reported, stuck or failed'
-        : design ? 'A design task’s designer reports design_submitted, stuck or failed' : 'A developer reports pr_opened, pr_updated, pr_rebased (rebase-only rounds), stuck or failed')
+        : design ? 'A design task’s designer reports design_submitted, stuck or failed' : prFree ? 'A developer reports commit_submitted, stuck or failed' : 'A developer reports pr_opened, pr_updated, pr_rebased (rebase-only rounds), stuck or failed')
     }
     throw new ToolError(`Outcomes for ${ctx.run.role} runs aren't supported yet`)
   }
@@ -1372,10 +1401,22 @@ export class Orchestrator implements RunnerHandlers {
     const summary = approval ? `Approval carried over a reviewed rebase from ${task.approvedHeadSha} to ${task.headSha}. ${report.summary.trim()}` : report.summary
     const feedback = task.rebaseOnly ? `Rebase review ${verdict === 'approved' ? 'approved' : 'changes requested'}: ${report.summary.trim()}` : verdict === 'approved' ? `Approved: ${kept.some(v => v.met === null) ? humanCheckTally(kept.filter(v => v.met).length, kept.filter(v => v.met === null).length) : `all ${kept.length} criteria met`}. ${report.summary.trim()}`.trim() : feedbackComment(report.summary, kept, criteria)
 
+    const prFree = task.integrationProtocol > 0
+    const branchHead = prFree ? await this.#d.github.branchHead(ctx.project.repository, task.branch!) : null
     const next = await db.transaction(async (tx) => {
       const locked = await lockTask(tx, task.id)
       if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease. Stop working.')
       const headSha = locked.task.headSha!
+      // A verdict binds to one commit. Without a PR nothing later re-checks the
+      // head, so this is where a moved branch or checkout is caught (D27).
+      const reviewed = report.headSha ?? (prFree ? null : headSha)
+      if (reviewed !== headSha) throw new ToolError(`Not recorded. This verdict is for ${reviewed ?? 'an unknown commit'}, but the submitted commit is ${headSha}. Check out the submitted commit and review it, or report failed.`)
+      if (prFree) {
+        if (branchHead !== headSha) throw new ToolError(`Not recorded. Branch ${task.branch} is at ${branchHead ?? 'nothing'}, not the submitted commit ${headSha}, so this verdict no longer applies. Report failed for a human to look at.`)
+        const [submission] = await tx.select({ id: taskSubmissions.id, submittedHeadSha: taskSubmissions.submittedHeadSha }).from(taskSubmissions).where(eq(taskSubmissions.taskId, task.id)).orderBy(desc(taskSubmissions.sequence)).limit(1)
+        if (submission?.submittedHeadSha !== headSha) throw new ToolError(`Not recorded. No submission exists for commit ${headSha}. Report failed for a human to look at.`)
+        if (verdict === 'approved') await tx.update(taskSubmissions).set({ agentApprovedHeadSha: headSha }).where(eq(taskSubmissions.id, submission.id))
+      }
       // A change request is compared with the previous round's, if that
       // one requested changes too; near-identical feedback blocks the task
       const similarity = verdict === 'changes_requested' ? await this.#feedbackSimilarity(tx, task.id, locked.task.reviewRounds, report.summary, kept) : undefined
@@ -1404,7 +1445,9 @@ export class Orchestrator implements RunnerHandlers {
           ? 'Approval recorded. The human reviews the design next. You can stop now.'
           : spike
             ? 'Approval recorded. A human reviews the findings next. You can stop now.'
-            : 'Approval recorded. Corral handles human review, CI and the merge from here. You can stop now.'
+            : prFree
+              ? 'Approval recorded for this commit. Corral handles human review and integration into the epic branch from here. You can stop now.'
+              : 'Approval recorded. Corral handles human review, CI and the merge from here. You can stop now.'
     }
   }
 
@@ -1448,13 +1491,11 @@ export class Orchestrator implements RunnerHandlers {
     return { ok: true, message: 'The task is Blocked until a human answers. You can stop now.' }
   }
 
-  // flows.md step 5: validate the developer's submission, open or update the
-  // PR, then move the task to Agent review
-  async #submit(ctx: RunContext, report: OutcomeReport & { outcome: 'pr_opened' | 'pr_updated' | 'pr_rebased' }) {
+  // What every code submission must pass before anything changes: the branch
+  // is at the pushed commit, and the criteria have this round's evidence
+  async #checkSubmission(ctx: RunContext, headSha: string) {
     const { db, github } = this.#d
     const task = ctx.task!
-    if (!report.headSha) throw new ToolError('There is no commit to submit. Commit your work, then report again.')
-
     const head = await github.branchHead(ctx.project.repository, task.branch!)
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
     const attached = await db.select({ criterionId: evidence.criterionId }).from(evidence)
@@ -1464,16 +1505,53 @@ export class Orchestrator implements RunnerHandlers {
     // Check with core before touching GitHub, so a rejected outcome leaves no trace
     const check = transition(toTaskState(task), {
       type: 'submit',
-      branchAtExpectedCommit: head === report.headSha,
+      branchAtExpectedCommit: head === headSha,
       evidenceComplete: missing.length === 0
     }, server)
     if (!check.ok) {
       const problems = [
-        head !== report.headSha ? `The branch on GitHub is at ${head ?? 'nothing'}, not your commit ${report.headSha}.` : '',
+        head !== headSha ? `The branch on GitHub is at ${head ?? 'nothing'}, not your commit ${headSha}.` : '',
         missing.length > 0 ? `No evidence yet for: ${missing.map(c => `[${c.id}] ${c.text}`).join('; ')}.` : ''
       ].filter(Boolean)
       throw new ToolError(`Not submitted. ${problems.join(' ') || JSON.stringify(check.error)} Fix this and report again.`)
     }
+    return { criteria, attached }
+  }
+
+  // D27: the pushed commit is the submission. It goes to Agent review with its
+  // own record, and nothing touches a PR or the shared epic branch.
+  async #submitCommit(ctx: RunContext, report: OutcomeReport & { outcome: 'commit_submitted' }) {
+    const { db } = this.#d
+    const task = ctx.task!
+    const { headSha, baseSha } = report
+    if (!headSha || !baseSha || headSha === baseSha) throw new ToolError('There is no commit to submit. Commit your work on this branch, then report again.')
+    await this.#checkSubmission(ctx, headSha)
+
+    const comment = await db.transaction(async (tx) => {
+      const locked = await lockTask(tx, task.id)
+      if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease while submitting. Stop working.')
+      await applyTransition(tx, locked.task, locked.project, {
+        type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true
+      }, server, { event: 'commit_submitted', runId: ctx.run.id, headSha, pr: null })
+      await recordTaskSubmission(tx, { taskId: task.id, submittedHeadSha: headSha, baseSha }).catch((error: unknown) => {
+        throw new ToolError(`Not submitted. ${error instanceof Error ? error.message : String(error)}`)
+      })
+      const comment = await this.#postNote(tx, ctx, report.note!)
+      await this.#endRunIn(tx, ctx, { state: 'completed', outcome: 'commit_submitted', summary: report.summary, headSha })
+      return comment
+    })
+    this.#d.events.publish({ type: 'comment.created', comment })
+    this.#finished(ctx, 'Outcome accepted', { handoff: true })
+    return { ok: true, commit: headSha, message: `Commit ${headSha.slice(0, 10)} on ${task.branch} is ready for review. You can stop now.` }
+  }
+
+  // flows.md step 5: validate the developer's submission, open or update the
+  // PR, then move the task to Agent review
+  async #submit(ctx: RunContext, report: OutcomeReport & { outcome: 'pr_opened' | 'pr_updated' | 'pr_rebased' }) {
+    const { db, github } = this.#d
+    const task = ctx.task!
+    if (!report.headSha) throw new ToolError('There is no commit to submit. Commit your work, then report again.')
+    const { criteria, attached } = await this.#checkSubmission(ctx, report.headSha)
 
     const ref = taskRef(ctx.project.prefix, task.number)
     const body = this.#prBody(ref, task.title, report.summary, criteria, attached)

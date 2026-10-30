@@ -107,8 +107,10 @@ export const reportOutcomeInput = z.object({
   criteria: z.array(criterionVerdict).optional().describe('Reviewer only: a verdict per acceptance criterion')
 })
 
-// Developer: the commit the runner pushed
-const reportFields = { summary: reportOutcomeInput.shape.summary, note: reportOutcomeInput.shape.note, headSha: z.string().optional() }
+// Set by the runner, never the agent. headSha: the commit a developer's run
+// pushed, or the one a reviewer's checkout is at. baseSha: where a submitted
+// commit forked from its epic branch.
+const reportFields = { summary: reportOutcomeInput.shape.summary, note: reportOutcomeInput.shape.note, headSha: z.string().optional(), baseSha: z.string().optional() }
 const taskReview = <Outcome extends z.ZodType<ReviewVerdict>>(outcome: Outcome) => z.object({ ...reportFields, outcome, criteria: z.array(criterionVerdict, { error: missingCriteria }) })
 const nonReview = z.object({ ...reportFields, outcome: NON_REVIEW_OUTCOMES })
 

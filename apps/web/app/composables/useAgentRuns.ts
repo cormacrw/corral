@@ -106,7 +106,7 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
     switch (agent.value.role) {
       case 'developer': return [
         { label: 'Runs this week', value: String(thisWeek.value.length), sub: `${today.value.length} today` },
-        { label: 'PRs opened', value: String(count('pr_opened') + count('pr_updated')), sub: 'incl. revisions' },
+        { label: 'PRs opened', value: String(count('pr_opened') + count('pr_updated') + count('commit_submitted')), sub: 'incl. revisions and commits' },
         { label: 'Stuck', value: String(count('stuck')), sub: 'asked you' },
         { label: 'Avg run', value: avgRun.value, sub: 'this week' },
         { label: 'Usage today', value: usageToday.value, sub: 'tokens' }

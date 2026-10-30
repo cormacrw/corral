@@ -166,6 +166,12 @@ export async function headSha(worktree: string): Promise<string | null> {
   return result.code === 0 ? result.stdout.trim() : null
 }
 
+// Where HEAD forked from a branch; null when they share no history
+export async function mergeBase(worktree: string, ref: string): Promise<string | null> {
+  const result = await git(['merge-base', 'HEAD', ref], { cwd: worktree })
+  return result.code === 0 ? result.stdout.trim() : null
+}
+
 // The runner is the only thing that pushes, and only to the branch the run
 // holds a lease for (D8). Returns the pushed commit.
 export async function pushBranch(worktree: string, branch: string, timeoutMs = 5 * 60_000): Promise<{ sha: string, error: null } | { sha: null, error: string }> {
