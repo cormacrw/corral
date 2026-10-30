@@ -5,6 +5,7 @@ dist
 .env
 .env.*
 !.env.example
+!.env.docker.example
 *.log
 # Local dev data lives in .corral/; the agent instructions and project notes
 # there are part of the repo (D13)
