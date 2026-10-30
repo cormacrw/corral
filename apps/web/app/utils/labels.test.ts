@@ -1,6 +1,6 @@
 import type { TaskStatus } from '@corral/core'
 import { describe, expect, it } from 'vitest'
-import { agentStatus, cliLoginCommand, detectedRuntimes, runtimeLabel, runTokens, taskCounts, taskTypeBadge, taskNote } from './labels.ts'
+import { agentStatus, cliLoginCommand, detectedRuntimes, formatMs, runtimeLabel, runTokens, taskCounts, taskTypeBadge, taskNote } from './labels.ts'
 import { projects, task } from '../prototype/fixtures'
 
 const tasks = (...statuses: TaskStatus[]) => statuses.map(status => ({ status }))
@@ -104,5 +104,12 @@ describe('Ready waiting notes', () => {
   it('preserves task dependency notes for epics without prerequisites', () => {
     const ready = task(projects[0]!, 99, { title: 'Waiting', status: 'ready', dependsOn: ['COR-98'] })
     expect(taskNote(ready, [ready], 5)).toEqual({ text: 'Waiting on COR-98', color: 'neutral' })
+  })
+})
+
+describe('formatMs', () => {
+  it('scales from milliseconds to days', () => {
+    expect([0, 400, 9000, 60_000, 125_000, 3_599_600, 5_400_000, 86_400_000, 129_600_000].map(formatMs))
+      .toEqual(['0 ms', '400 ms', '9.0 s', '1m 0s', '2m 5s', '1h', '1.5h', '1d', '1.5d'])
   })
 })

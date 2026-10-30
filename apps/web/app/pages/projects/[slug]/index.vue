@@ -108,7 +108,10 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
         </dl>
       </div>
 
-      <ProjectFlow :slug="project.slug" />
+      <ProjectFlow
+        :slug="project.slug"
+        :project-id="project.id"
+      />
 
       <div class="grid grid-cols-[repeat(auto-fit,minmax(340px,1fr))] gap-6">
         <div class="flex flex-col gap-6">

@@ -1,44 +1,70 @@
 <script setup lang="ts">
 import type { FlowMetrics, FlowMetricsQuery } from '@corral/contracts'
 import { api } from '~/composables/useApi'
-import { ROLE, STATUS } from '~/utils/labels'
+import { QUEUE_WAIT_LABEL, ROLE, STATUS, formatMs } from '~/utils/labels'
 
-const props = defineProps<{ slug: string }>()
+// Coalesces the run.updated and task.updated of one lifecycle change, and
+// still refreshes under a steady stream of events.
+const REFRESH_DELAY_MS = 1000
+
+const props = defineProps<{ slug: string, projectId: string }>()
 const window = ref<FlowMetricsQuery['window']>('30d')
 const metrics = ref<FlowMetrics | null>(null)
 const loading = ref(true)
 const error = ref<string | null>(null)
 let request = 0
-async function load() {
+let refreshTimer: ReturnType<typeof setTimeout> | null = null
+function cancelRefresh() {
+  if (refreshTimer) clearTimeout(refreshTimer)
+  refreshTimer = null
+}
+async function fetchMetrics() {
   const current = ++request
-  loading.value = true
-  error.value = null
-  metrics.value = null
   try {
     const result = await api.projects.flow(props.slug, window.value)
-    if (current === request) metrics.value = result
+    if (current === request) {
+      metrics.value = result
+      error.value = null
+    }
   } catch (e) {
-    if (current === request) error.value = e instanceof Error ? e.message : String(e)
+    // A failed live refresh keeps the figures already on screen
+    if (current === request && !metrics.value) error.value = e instanceof Error ? e.message : String(e)
   } finally {
     if (current === request) loading.value = false
   }
+}
+function load() {
+  cancelRefresh()
+  loading.value = true
+  error.value = null
+  metrics.value = null
+  return fetchMetrics()
+}
+function refresh() {
+  refreshTimer ??= setTimeout(() => {
+    refreshTimer = null
+    void fetchMetrics()
+  }, REFRESH_DELAY_MS)
 }
 watch([() => props.slug, window], load, { immediate: true })
 const live = useLive()
 onMounted(() => {
   const stop = live.subscribe((event) => {
-    if (event.type === 'task.updated' || event.type === 'task.deleted' || event.type === 'run.updated') void load()
+    const projectId = event.type === 'task.updated'
+      ? event.task.projectId
+      : event.type === 'run.updated'
+        ? event.run.projectId
+        : event.type === 'task.deleted'
+          ? event.projectId
+          : null
+    if (projectId === props.projectId) refresh()
   })
-  onBeforeUnmount(stop)
+  onBeforeUnmount(() => {
+    stop()
+    cancelRefresh()
+  })
 })
 const maxStatus = computed(() => Math.max(1, ...metrics.value?.timeInStatus.map(s => s.medianMs) ?? []))
-function elapsed(ms: number) {
-  if (ms === 0) return '0m'
-  if (ms < 60_000) return '<1m'
-  if (ms < 3_600_000) return `${Number((ms / 60_000).toFixed(1))}m`
-  if (ms < 86_400_000) return `${Number((ms / 3_600_000).toFixed(1))}h`
-  return `${Number((ms / 86_400_000).toFixed(1))}d`
-}
 function category(status: string) {
   if (status === 'human_review') return 'Human wait'
   if (status === 'in_progress' || status === 'agent_review') return 'Agent time'
@@ -107,10 +133,10 @@ function category(status: string) {
                 {{ tile.label }}
               </dt>
               <dd class="text-2xl font-semibold tabular-nums">
-                {{ elapsed(tile.value.medianMs) }}
+                {{ formatMs(tile.value.medianMs) }}
               </dd>
               <dd class="text-xs text-muted">
-                Median · p90 {{ elapsed(tile.value.p90Ms) }}
+                Median · p90 {{ formatMs(tile.value.p90Ms) }}
               </dd>
             </dl>
           </div>
@@ -129,7 +155,7 @@ function category(status: string) {
                 >
                   <div class="flex flex-wrap justify-between gap-x-2 text-xs">
                     <span>{{ STATUS[row.status].label }} · {{ category(row.status) }}</span>
-                    <span class="tabular-nums">{{ elapsed(row.medianMs) }} · p90 {{ elapsed(row.p90Ms) }}</span>
+                    <span class="tabular-nums">{{ formatMs(row.medianMs) }} · p90 {{ formatMs(row.p90Ms) }}</span>
                   </div>
                   <div
                     class="mt-1 h-2 rounded-full bg-accented"
@@ -161,10 +187,10 @@ function category(status: string) {
                     {{ ROLE[row.role] }}
                   </dt>
                   <dd class="mt-1 text-xs text-muted">
-                    Run duration: {{ elapsed(row.duration.medianMs) }} · p90 {{ elapsed(row.duration.p90Ms) }}
+                    Run duration: {{ formatMs(row.duration.medianMs) }} · p90 {{ formatMs(row.duration.p90Ms) }}
                   </dd>
                   <dd class="text-xs text-muted">
-                    Queue wait: {{ elapsed(row.queueWait.medianMs) }} · p90 {{ elapsed(row.queueWait.p90Ms) }}
+                    {{ QUEUE_WAIT_LABEL }}: {{ formatMs(row.queueWait.medianMs) }} · p90 {{ formatMs(row.queueWait.p90Ms) }}
                   </dd>
                 </div>
               </dl>
@@ -187,7 +213,7 @@ function category(status: string) {
                     class="flex flex-wrap justify-between gap-2 py-2 text-sm hover:text-primary hover:underline"
                   >
                     <span class="font-mono">{{ task.ref }}</span>
-                    <span class="text-xs text-muted">{{ elapsed(task.leadTimeMs) }} lead · {{ STATUS[task.dominantStatus].label }}</span>
+                    <span class="text-xs text-muted">{{ formatMs(task.leadTimeMs) }} lead · {{ STATUS[task.dominantStatus].label }}</span>
                   </NuxtLink>
                 </li>
               </ul>

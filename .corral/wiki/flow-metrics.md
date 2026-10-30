@@ -21,11 +21,13 @@ without a recorded start contributes zero cycle time.
 sample is a task's total time in that status, summed across repeated visits;
 tasks that never visited it aren't samples. Human review (`human_review`) is
 separate from agent review and development. Self-transitions do not reset or
-lose time. Initial status comes from the first transition's `from`; absent
+lose time. Merged is terminal and never gets a sample, even though the merge
+audit row can predate `mergedAt` within its transaction. Initial status comes from the first transition's `from`; absent
 history defaults to Backlog. Time after `mergedAt` is excluded.
 
 `runsByRole` contains `{ role, queueWait, duration }`. Queue wait uses
-`startedAt - queuedAt` for started runs. Duration uses `endedAt - startedAt`
+`startedAt - queuedAt` for started runs, so it includes worktree and session
+preparation (`startedAt` is recorded after them). Duration uses `endedAt - startedAt`
 for ended runs, rather than the runner's phase timings (see `run-timings.md`).
 Missing or inverted timestamps are omitted from the corresponding sample.
 Only runs of cohort tasks queued by merge count; queue samples require a start
@@ -43,12 +45,15 @@ prefix, as the rest of the API does.
 
 Desktop and mobile share `ProjectFlow.vue`, defaulting to 30d with 7d/30d/90d
 buttons. Changing project or window clears the previous figures while loading;
-stale responses cannot overwrite the latest selection. Task/run live events
-refresh the cohort. Errors offer retry; zero merged tasks show an empty state.
+stale responses cannot overwrite the latest selection. `task.updated`,
+`task.deleted` and `run.updated` events for this project refresh the cohort in
+place at most once a second, keeping the current figures (also if the refresh
+fails); other projects' events are ignored. Errors offer retry; zero merged tasks show an empty state.
 
 Status bars compare median durations on a shared scale. Human review is labelled
 Human wait (warning), development and agent review Agent time (primary), and
 remaining statuses Other wait (neutral). These are status residence times, not
-measured active execution. Run duration and queue wait have separate percentiles.
+measured active execution. Run duration and queue wait have separate percentiles;
+queue wait uses the same label as the run page, `QUEUE_WAIT_LABEL`.
 Slowest task refs link to task pages. Prototype fixtures vary all figures by
 window; Marketing site's 7d window demonstrates no merges.
