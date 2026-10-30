@@ -367,7 +367,11 @@ export const plans = pgTable('plans', {
   approvedBy: jsonb('approved_by').$type<Actor>(),
   approvedAt: timestamp({ withTimezone: true }),
   createdAt: createdAt()
-}, t => [unique('plans_session_version_unique').on(t.sessionId, t.version)])
+}, t => [
+  unique('plans_session_version_unique').on(t.sessionId, t.version),
+  // Superseding an approved version preserves its approval history.
+  check('plans_approval_tuple', sql`(${t.approvedBy} is null) = (${t.approvedAt} is null) and (${t.status} <> 'approved' or (${t.approvedBy} is not null and ${t.approvedAt} is not null))`)
+])
 
 export const planTasks = pgTable('plan_tasks', {
   planId: uuid().notNull().references(() => plans.id, { onDelete: 'cascade' }),
@@ -380,7 +384,13 @@ export const planTasks = pgTable('plan_tasks', {
   // Set when the item revises an existing Backlog task (or a Draft from
   // elsewhere): the proposed edits, written to the task only on approval
   revision: jsonb().$type<PlanRevision>()
-}, t => [primaryKey({ columns: [t.planId, t.key] })])
+}, t => [
+  primaryKey({ columns: [t.planId, t.key] }),
+  // Change is a version diff, not whether this item references an existing
+  // task: even an added or unchanged item can stage edits. FK deletion may
+  // clear taskId later without clearing the historical revision.
+  check('plan_tasks_revision_change', sql`${t.revision} is null or ${t.change} in ('added', 'changed', 'unchanged')`)
+])
 
 export interface PlanRevision {
   title: string
