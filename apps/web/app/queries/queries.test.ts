@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { useMutation, useQuery } from '@tanstack/vue-query'
-import type { ServerEvent, ServerEventType, Task } from '@corral/contracts'
+import type { ServerEvent, Task } from '@corral/contracts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h, nextTick, ref } from 'vue'
 import { useLive } from '~/composables/useLive'
@@ -12,8 +12,6 @@ import { keys } from './keys'
 import { connectQueries, MAX_WAIT_MS, QUIET_MS } from './live'
 import { mountWithQuery, testQueryClient } from './mount-with-query'
 
-// A new ServerEvent type must fail typecheck here and at eventDependencies
-const everyEvent: Record<ServerEventType, true> = Object.fromEntries(serverEventTypes.map(t => [t, true])) as Record<ServerEventType, true>
 // @ts-expect-error A type missing from the map must not compile
 const incomplete: typeof eventDependencies = { 'deployment.updated': { invalidates: () => [] } }
 
@@ -74,9 +72,10 @@ describe('query layer', () => {
     vi.unstubAllGlobals()
   })
 
-  it('has an entry for every ServerEvent type', () => {
-    expect(Object.keys(everyEvent)).toHaveLength(19)
+  it('subscribes the stream to every event in the map', () => {
     expect(incomplete).toBeDefined()
+    useLive().connect()
+    expect([...FakeEventSource.last.handlers.keys()]).toEqual(expect.arrayContaining(serverEventTypes))
   })
 
   it('coalesces a burst of task events into one refetch of each affected query', async () => {
