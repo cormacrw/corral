@@ -1,3 +1,4 @@
+import type { Task } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, expect, it } from 'vitest'
@@ -65,7 +66,7 @@ it.each(['each_task', 'epic', 'direct', null] as const)('routes review and confl
   await t.orchestrator.schedule()
   const review = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'reviewer')).job
   expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Approved', criteria: task.acceptanceCriteria.map(c => ({ criterionId: c.id, met: true, note: '' })) })).toMatchObject({ ok: true })
-  const get = async () => (await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}`)).json()
+  const get = async () => (await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}`)).json() as Promise<Task>
   expect((await get()).status).toBe(mode === 'each_task' ? 'human_review' : 'ready_to_merge')
   const pr = [...t.github.pulls.values()].find(p => p.head === dev.branch)!
   expect(pr.base).toBe(mode === 'direct' || !mode ? 'develop' : dev.baseBranch)
