@@ -1,4 +1,4 @@
-import { schema, type Database } from '@corral/db'
+import { requestQueryTiming, schema, type Database } from '@corral/db'
 import { lt } from 'drizzle-orm'
 import type { MiddlewareHandler } from 'hono'
 import { matchedRoutes } from 'hono/route'
@@ -79,13 +79,16 @@ export class PerformanceSamples {
 export function apiTiming(samples: PerformanceSamples): MiddlewareHandler {
   return async (c, next) => {
     const start = performance.now()
-    await next()
+    const routePattern = () => c.get('performanceRoute') ?? matchedRoutes(c).findLast(route => route.method !== 'ALL')?.path ?? '/api/*'
+    const timing = { queryCount: 0, dbTimeMs: 0, route: routePattern }
+    await requestQueryTiming.run(timing, next)
     const durationMs = Number((performance.now() - start).toFixed(3))
-    c.header('Server-Timing', `total;dur=${durationMs}`)
+    const dbTimeMs = Number(timing.dbTimeMs.toFixed(3))
+    c.header('Server-Timing', `total;dur=${durationMs}, db;dur=${dbTimeMs};desc="${timing.queryCount} queries"`)
 
     // ALL routes are middleware. The last concrete handler also covers early
     // validation responses; unknown URLs retain a fixed label without IDs.
-    const route = c.get('performanceRoute') ?? matchedRoutes(c).findLast(route => route.method !== 'ALL')?.path ?? '/api/*'
+    const route = routePattern()
     const streaming = c.res.headers.get('content-type')?.split(';')[0]?.trim() === 'text/event-stream'
       || c.req.header('upgrade')?.toLowerCase() === 'websocket'
       || c.res.status === 101
@@ -94,6 +97,6 @@ export function apiTiming(samples: PerformanceSamples): MiddlewareHandler {
     if (durationMs > samples.slowRequestMs) {
       console.warn(`Slow API request: method=${c.req.method} route=${route} status=${c.res.status} durationMs=${durationMs}`)
     }
-    samples.record({ kind: 'api', name: route, durationMs, status: c.res.status, createdAt: new Date() })
+    samples.record({ kind: 'api', name: route, durationMs, queryCount: timing.queryCount, dbTimeMs, status: c.res.status, createdAt: new Date() })
   }
 }
