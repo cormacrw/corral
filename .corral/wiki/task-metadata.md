@@ -14,7 +14,7 @@ independent `prNumber` and `prUrl` properties. They expose
 derived from Plan history, never stored on a task. Historical Plan links stay
 intact after approval, but are not exposed as a non-Draft task's session.
 
-Migration 0035 checks every existing task (including deleted tasks) before
+Migration 0036 checks every existing task (including deleted tasks) before
 adding reason/status and PR-pair checks. It stops with offending task IDs if
 old rows are inconsistent; it does not invent reasons or discard data.
 An operator must repair those rows before retrying the migration. No existing
@@ -25,3 +25,7 @@ retry without a lease (D10). Merged tasks need no PR: spikes, designs and
 epic conflict work can finish without one. Board links and task properties
 read the grouped PR object. Task detail displays the current Blocked/Failed
 reason, and the board uses its existing error note.
+
+The reason check uses `U&` escapes, so these migrations need a UTF8 database.
+`postgres:17` and CI are UTF8 by default, and test-setup.ts passes UTF8 to initdb
+because embedded-postgres can otherwise fall back to SQL_ASCII.
