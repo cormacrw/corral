@@ -1,3 +1,4 @@
+import { appendAudit, auditEvent, type TransitionDetail } from './audit.ts'
 import { invalidateEpicReview } from './epic-review-state.ts'
 import type { AuditEntry, Comment, CreateTaskInput, HumanTransitionInput, PatchTaskInput, Task, TaskAgent, TaskDesignPin } from '@corral/contracts'
 import { createTaskInput } from '@corral/contracts'
@@ -291,7 +292,7 @@ export async function createTask(db: Executor, project: ProjectRow, rawInput: Cr
     if (dependencies.length > 0) {
       await tx.insert(taskDependencies).values(dependencies.map(d => ({ taskId, dependsOnId: d.id })))
     }
-    await tx.insert(auditLog).values({ projectId: project.id, taskId, actor, action: 'task.created', detail: { number: row!.number } })
+    await appendAudit(tx, { projectId: project.id, taskId, actor }, auditEvent('task.created', { number: row!.number }))
     return taskId
   })
 }
@@ -325,7 +326,7 @@ export async function applyTransition(
   project: ProjectRow,
   event: TaskEvent,
   actor: Actor,
-  detail: Record<string, unknown> = { event: event.type }
+  detail: TransitionDetail
 ): Promise<TaskState> {
   const state = toTaskState(task)
   if (task.epicId) {
@@ -361,13 +362,7 @@ export async function applyTransition(
         .where(eq(designVersions.id, latest.id))
     }
   }
-  await tx.insert(auditLog).values({
-    projectId: project.id,
-    taskId: task.id,
-    actor,
-    action: 'task.transition',
-    detail: { ...detail, from: task.status, to: next.status satisfies TaskStatus }
-  })
+  await appendAudit(tx, { projectId: project.id, taskId: task.id, actor }, auditEvent('task.transition', { ...detail, from: task.status, to: next.status satisfies TaskStatus }))
   return next
 }
 
@@ -419,7 +414,7 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
       }
     }
     if (dependsOn) await setDependencies(tx, project, task, dependsOn)
-    await tx.insert(auditLog).values({ projectId: project.id, taskId, actor, action: 'task.updated', detail: { changed: Object.keys(input) } })
+    await appendAudit(tx, { projectId: project.id, taskId, actor }, auditEvent('task.updated', { changed: Object.keys(input) }))
     return descriptionChanged || criteriaChange ? { description: descriptionChanged, criteria: criteriaChange } : null
   })
 }
@@ -495,7 +490,7 @@ export async function deleteTaskRows(db: Executor, taskId: string, actor: Actor,
       if (!check.ok) continue // e.g. Backlog: nothing to block yet
       await applyTransition(tx, dependent, project, { type: 'block', reason: DEPENDENCY_DELETED_REASON }, { kind: 'system', component: 'server' }, { event: 'dependency_deleted', dependency: taskRef(project.prefix, task.number) })
     }
-    await tx.insert(auditLog).values({ projectId: project.id, taskId, actor, action: 'task.deleted', detail: { mode, number: task.number, title: task.title, reason } })
+    await appendAudit(tx, { projectId: project.id, taskId, actor }, auditEvent('task.deleted', { mode, number: task.number, title: task.title, reason }))
     if (mode === 'hard') await tx.delete(tasks).where(eq(tasks.id, taskId))
     else await tx.update(tasks).set({ deletedAt: new Date(), updatedAt: new Date() }).where(eq(tasks.id, taskId))
     return dependents.map(d => d.task.id)

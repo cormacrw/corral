@@ -15,5 +15,16 @@ export default tseslint.config(
       // Keep `type X =` on its own line above a multi-line union
       '@stylistic/operator-linebreak': ['error', 'before', { overrides: { '=': 'after' } }]
     }
+  },
+  {
+    files: ['apps/server/src/**/*.ts'],
+    ignores: ['apps/server/src/audit.ts', '**/*.test.ts'],
+    rules: {
+      // Entries go through appendAudit, which links an action to its detail
+      'no-restricted-syntax': ['error', {
+        selector: 'CallExpression[callee.property.name=/^(insert|update|delete)$/] > :matches(Identifier[name="auditLog"], MemberExpression[property.name="auditLog"])',
+        message: 'Write audit entries with appendAudit from audit.ts. The audit log is append-only.'
+      }]
+    }
   }
 )

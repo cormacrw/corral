@@ -2,10 +2,11 @@ import type { Epic, EpicDetail, PatchEpicInput } from '@corral/contracts'
 import { checkEpicDependencies, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, asc, eq, isNull, or } from 'drizzle-orm'
+import { appendAudit, auditEvent } from './audit.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import { toTasks, type ProjectRow } from './tasks.ts'
 
-const { auditLog, epics, epicDependencies, taskDependencies, projects, tasks } = schema
+const { epics, epicDependencies, taskDependencies, projects, tasks } = schema
 
 type EpicRow = typeof epics.$inferSelect
 
@@ -33,7 +34,7 @@ export async function patchEpic(db: Executor, epicId: string, input: PatchEpicIn
   const changed = (Object.keys(input) as (keyof PatchEpicInput)[]).filter(k => input[k] !== undefined && input[k] !== row[k])
   if (changed.length > 0) {
     await db.update(epics).set({ ...input, updatedAt: new Date() }).where(eq(epics.id, epicId))
-    await db.insert(auditLog).values({ projectId: row.projectId, actor, action: 'epic.updated', detail: { epicId, changed } })
+    await appendAudit(db, { projectId: row.projectId, actor }, auditEvent('epic.updated', { epicId, changed }))
   }
   return (await listEpics(db, project)).find(e => e.id === epicId)!
 }
@@ -87,7 +88,7 @@ export async function setEpicDependencies(db: Executor, epicId: string, dependsO
     await tx.delete(epicDependencies).where(eq(epicDependencies.epicId, epicId))
     if (dependsOn.length) await tx.insert(epicDependencies).values([...new Set(dependsOn)].map(id => ({ epicId, dependsOnEpicId: id })))
     await tx.update(epics).set({ updatedAt: new Date() }).where(eq(epics.id, epicId))
-    await tx.insert(auditLog).values({ projectId: project.id, actor, action: 'epic.updated', detail: { epicId, changed: ['dependsOn'], dependsOn } })
+    await appendAudit(tx, { projectId: project.id, actor }, auditEvent('epic.updated', { epicId, changed: ['dependsOn'], dependsOn }))
     return listEpics(tx, project)
   })
 }

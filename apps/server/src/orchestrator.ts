@@ -1,3 +1,4 @@
+import { appendAudit, auditEvent } from './audit.ts'
 import { EpicPullRequests, epicReviewContext } from './epic-prs.ts'
 import { EVIDENCE_KINDS, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type PmRunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
 import {
@@ -36,7 +37,7 @@ import { getRun, listAgents, listEvidence } from './runs.ts'
 import { addComment, applyTransition, deleteTaskRows, loadTask, lockTask, toTaskState, type ProjectRow, type TaskContentEdit, type TaskRow } from './tasks.ts'
 import type { Transcripts } from './transcripts.ts'
 
-const { acceptanceCriteria, agents, attachments, auditLog, comments, designVersions, evidence, projects, reviews, runs, settings, taskDesignPins, tasks } = schema
+const { acceptanceCriteria, agents, attachments, comments, designVersions, evidence, projects, reviews, runs, settings, taskDesignPins, tasks } = schema
 type PlanSessionRow = typeof schema.planSessions.$inferSelect
 
 const server: Actor = { kind: 'system', component: 'server' }
@@ -343,7 +344,7 @@ export class Orchestrator implements RunnerHandlers {
     this.#stopped = stopped
     this.merges.stopped = stopped || this.#updating
     await this.#d.db.insert(settings).values({ key: 'stopped', value: stopped }).onConflictDoUpdate({ target: settings.key, set: { value: stopped, updatedAt: this.#now() } })
-    await this.#d.db.insert(auditLog).values({ actor, action: stopped ? 'corral.stopped' : 'corral.resumed', detail: {} })
+    await appendAudit(this.#d.db, { actor }, stopped ? auditEvent('corral.stopped', {}) : auditEvent('corral.resumed', {}))
     this.#d.events.publish({ type: 'global.status', status: this.status })
   }
 
@@ -860,13 +861,7 @@ export class Orchestrator implements RunnerHandlers {
       await tx.update(tasks).set({ leaseRunId: null, leaseRole: null, leaseExpiresAt: null, leaseHeartbeatAt: null, updatedAt: this.#now() })
         .where(and(eq(tasks.id, ctx.task.id), eq(tasks.leaseRunId, ctx.run.id)))
     }
-    await tx.insert(auditLog).values({
-      projectId: ctx.project.id,
-      taskId: ctx.task?.id ?? null,
-      actor: server,
-      action: 'run.ended',
-      detail: { runId: ctx.run.id, runNumber: ctx.run.number, state: fields.state, outcome: fields.outcome ?? null, error: fields.error ?? null }
-    })
+    await appendAudit(tx, { projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor: server }, auditEvent('run.ended', { runId: ctx.run.id, runNumber: ctx.run.number, state: fields.state, outcome: fields.outcome ?? null, error: fields.error ?? null }))
   }
 
   // A human stops a run: the process tree is killed, the run is Interrupted
@@ -878,7 +873,7 @@ export class Orchestrator implements RunnerHandlers {
     await this.#d.db.transaction(async (tx) => {
       await this.#endRunIn(tx, ctx, { state: 'interrupted', error: 'Stopped by a human' })
       if (ctx.task) await tx.update(tasks).set({ paused: true }).where(eq(tasks.id, ctx.task.id))
-      await tx.insert(auditLog).values({ projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor, action: 'run.stopped', detail: { runId } })
+      await appendAudit(tx, { projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor }, auditEvent('run.stopped', { runId }))
     })
     await this.#publish(ctx)
   }
@@ -893,7 +888,7 @@ export class Orchestrator implements RunnerHandlers {
         .where(and(eq(tasks.id, taskId), eq(tasks.paused, true), isNull(tasks.deletedAt)))
         .returning({ projectId: tasks.projectId })
       if (!task) throw new ApiFailure(409, { code: 'conflict', constraint: 'task_not_paused' })
-      await tx.insert(auditLog).values({ projectId: task.projectId, taskId, actor, action: 'task.resumed', detail: {} })
+      await appendAudit(tx, { projectId: task.projectId, taskId, actor }, auditEvent('task.resumed', {}))
     })
   }
 
@@ -927,10 +922,7 @@ export class Orchestrator implements RunnerHandlers {
 
     const comment = await db.transaction(async (tx) => {
       const comment = await addComment(tx, task.id, { body, pinned: false }, actor)
-      await tx.insert(auditLog).values({
-        projectId, taskId: task.id, actor, action: 'run.message_sent',
-        detail: { runId: run.id, runNumber: run.number, commentId: comment.id, attachments: input.attachments }
-      })
+      await appendAudit(tx, { projectId, taskId: task.id, actor }, auditEvent('run.message_sent', { runId: run.id, runNumber: run.number, commentId: comment.id, attachments: input.attachments }))
       // Sent last, so a runner that dropped off rolls the comment back
       if (!runner.send({ type: 'run.message', runId: run.id, leaseEpoch: run.leaseEpoch!, text: body }, run.runnerId)) {
         throw notLive('No runner is connected to deliver the message')
@@ -977,10 +969,7 @@ export class Orchestrator implements RunnerHandlers {
     }
     const comment = await db.transaction(async (tx) => {
       const comment = await addComment(tx, taskId, { body: body(`The ${what} of ${ref} changed during run #${run.number}, which couldn't be told while it ran. Work to the new text below.`), pinned: true }, actor)
-      await tx.insert(auditLog).values({
-        projectId: project.id, taskId, actor, action: 'task.edit_pinned',
-        detail: { runId: run.id, runNumber: run.number, commentId: comment.id }
-      })
+      await appendAudit(tx, { projectId: project.id, taskId, actor }, auditEvent('task.edit_pinned', { runId: run.id, runNumber: run.number, commentId: comment.id }))
       return comment
     })
     events.publish({ type: 'comment.created', comment })
@@ -1045,7 +1034,7 @@ export class Orchestrator implements RunnerHandlers {
       const [row] = await tx.delete(projects).where(eq(projects.id, projectId)).returning()
       if (!row) throw new ApiFailure(404, { code: 'not_found' })
       // Not tied to the project, or it would go too
-      await tx.insert(auditLog).values({ projectId: null, actor, action: 'project.deleted', detail: { projectId, name: row.name, repository: row.repository } })
+      await appendAudit(tx, { projectId: null, actor }, auditEvent('project.deleted', { projectId, name: row.name, repository: row.repository }))
       return row
     })
     this.#d.events.publish({ type: 'project.deleted', projectId })
@@ -1247,7 +1236,7 @@ export class Orchestrator implements RunnerHandlers {
           if (!ctx.task!.rebaseOnly && report.outcome === 'pr_rebased') throw new ToolError('Not submitted. This round expects pr_opened or pr_updated, not pr_rebased.')
           if (spike) throw new ToolError('Not submitted. A spike opens no PR: report your findings with outcome findings_reported.')
           if (design) throw new ToolError('Not submitted. A design task opens no PR: call submit_design, then report design_submitted.')
-          return this.#submit(ctx, report)
+          return this.#submit(ctx, { ...report, outcome: report.outcome })
         case 'findings_reported':
           if (!spike) throw new ToolError(`Not submitted. Only a spike reports findings; this task reports ${design ? 'design_submitted' : 'pr_opened or pr_updated'}.`)
           return this.#reportFindings(ctx, report)
@@ -1308,10 +1297,7 @@ export class Orchestrator implements RunnerHandlers {
         taskId: task.id, runId: ctx.run.id, round: locked.task.reviewRounds, headSha, verdict, summary, criteria: kept, author: this.#actor(ctx)
       })
       await tx.insert(comments).values({ taskId: task.id, author: this.#actor(ctx), body: feedback })
-      await tx.insert(auditLog).values({
-        projectId: ctx.project.id, taskId: task.id, actor: this.#actor(ctx), action: 'review.recorded',
-        detail: { runId: ctx.run.id, verdict, headSha, round: locked.task.reviewRounds, met: kept.filter(v => v.met).length, of: kept.length, ...(similarity !== undefined && { similarity }) }
-      })
+      await appendAudit(tx, { projectId: ctx.project.id, taskId: task.id, actor: this.#actor(ctx) }, auditEvent('review.recorded', { runId: ctx.run.id, verdict, headSha, round: locked.task.reviewRounds, met: kept.filter(v => v.met).length, of: kept.length, ...(similarity !== undefined && { similarity }) }))
       // Changes requested → the developer; approved → Human review when
       // flagged, otherwise Ready to merge (D10)
       const state = await applyTransition(tx, locked.task, locked.project, verdict === 'approved' ? { type: 'review_approved' } : { type: 'changes_requested', similarity }, server, { event: verdict === 'approved' ? 'review_approved' : 'changes_requested', runId: ctx.run.id, headSha, ...(similarity !== undefined && { similarity }) })
@@ -1378,7 +1364,7 @@ export class Orchestrator implements RunnerHandlers {
 
   // flows.md step 5: validate the developer's submission, open or update the
   // PR, then move the task to Agent review
-  async #submit(ctx: RunContext, report: OutcomeReport) {
+  async #submit(ctx: RunContext, report: OutcomeReport & { outcome: 'pr_opened' | 'pr_updated' | 'pr_rebased' }) {
     const { db, github } = this.#d
     const task = ctx.task!
     if (!report.headSha) throw new ToolError('There is no commit to submit. Commit your work, then report again.')
@@ -1490,10 +1476,7 @@ export class Orchestrator implements RunnerHandlers {
       const [row] = await tx.insert(designVersions).values({
         taskId: task.id, version: nextDesignVersion(existing), bundleBlob, specBlob, screenshots, branch: task.branch!, commitSha: submission.headSha
       }).returning()
-      await tx.insert(auditLog).values({
-        projectId: ctx.project.id, taskId: task.id, actor: this.#actor(ctx), action: 'design.submitted',
-        detail: { runId: ctx.run.id, version: row!.version, headSha: submission.headSha, screenshots: screenshots.length }
-      })
+      await appendAudit(tx, { projectId: ctx.project.id, taskId: task.id, actor: this.#actor(ctx) }, auditEvent('design.submitted', { runId: ctx.run.id, version: row!.version, headSha: submission.headSha, screenshots: screenshots.length }))
       return row!
     })
     return {

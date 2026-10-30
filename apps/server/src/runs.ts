@@ -2,10 +2,11 @@ import type { Agent, CreateAgentInput, Evidence, PatchAgentInput, Review, Run } 
 import { ACTIVE_RUN_STATES, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, count, desc, eq, inArray, type SQL } from 'drizzle-orm'
+import { appendAudit, auditEvent } from './audit.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import { avatarUrl } from './avatars.ts'
 
-const { agents, auditLog, evidence, projects, reviews, runs, tasks } = schema
+const { agents, evidence, projects, reviews, runs, tasks } = schema
 
 const runColumns = {
   run: runs,
@@ -119,7 +120,7 @@ export function toEvidence(row: typeof evidence.$inferSelect): Evidence {
 // like the defaults: any free agent of the role claims the next task.
 export async function createAgent(db: Executor, input: CreateAgentInput, actor: Actor): Promise<Agent> {
   const [row] = await db.insert(agents).values(input).returning()
-  await db.insert(auditLog).values({ actor, action: 'agent.created', detail: { agentId: row!.id, role: row!.role, runtime: row!.runtime } })
+  await appendAudit(db, { actor }, auditEvent('agent.created', { agentId: row!.id, role: row!.role, runtime: row!.runtime }))
   return (await listAgents(db)).find(a => a.id === row!.id)!
 }
 
@@ -139,7 +140,11 @@ export async function patchAgent(db: Executor, agentId: string, input: PatchAgen
       if (active!.n > 0) throw new ApiFailure(409, { code: 'conflict', constraint: 'agent_has_active_runs' })
     }
     await tx.update(agents).set({ ...input, updatedAt: new Date() }).where(eq(agents.id, agentId))
-    await tx.insert(auditLog).values({ actor, action: input.paused !== undefined ? (input.paused ? 'agent.paused' : 'agent.resumed') : 'agent.updated', detail: { agentId, changed: Object.keys(input) } })
+    const detail = { agentId, changed: Object.keys(input) }
+    const event = input.paused === undefined
+      ? auditEvent('agent.updated', detail)
+      : input.paused ? auditEvent('agent.paused', detail) : auditEvent('agent.resumed', detail)
+    await appendAudit(tx, { actor }, event)
   })
   return (await listAgents(db)).find(a => a.id === agentId)!
 }
