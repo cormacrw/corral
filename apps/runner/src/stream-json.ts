@@ -133,7 +133,9 @@ export class StreamJsonParser {
 
       case 'rate_limit_event': {
         const info = data.rate_limit_info
-        if (info && info.status && info.status !== 'allowed') {
+        // Only `rejected` refuses requests; `allowed_warning` is a heads-up that
+        // comes with the window's reset time while the agent keeps working
+        if (info?.status === 'rejected') {
           out.rateLimit = { resetsAt: info.resetsAt ? new Date(info.resetsAt * 1000).toISOString() : null }
           out.events.push({ type: 'system', text: `Usage limit hit${out.rateLimit.resetsAt ? `; resets at ${out.rateLimit.resetsAt}` : ''}` })
         }

@@ -16,6 +16,7 @@ See what an agent is doing right now, attach to its live run, and look back at p
 - the name and a status badge only for **Working** (`success`), **Paused** (neutral) or **Waiting on usage limit** (neutral). Idle agents have no marker. Explicit `paused` means Paused; only a future `pausedUntil` means Waiting on usage limit. Expired cooldowns are idle. All agent screens use `agentStatus` in `utils/labels.ts`
 - a role badge: PM, Developer, Designer or Reviewer (D23)
 - "{Role} · {runtime} · {summary}" (Claude Code or Codex, D18), e.g. "6 runs today"
+- **Resume now** (outline), only while Waiting on usage limit: clears the wait so the agent can run again. If the limit is real, its next run pauses it again
 - **Agent settings** (outline; goes to Settings › Agents)
 
 ### Info and stats (bottom border)

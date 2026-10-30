@@ -141,6 +141,15 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
       toast.add({ title: 'Could not stop', description: e instanceof Error ? e.message : String(e), color: 'error' })
     }
   }
+  // Ends a usage-limit wait early; a real limit just pauses the agent again
+  async function resume() {
+    if (!agent.value) return
+    try {
+      await api.agents.patch(agent.value.id, { paused: false })
+    } catch (e) {
+      toast.add({ title: 'Could not resume', description: e instanceof Error ? e.message : String(e), color: 'error' })
+    }
+  }
   const project = (run: Run) => live.state.value.projects.find(p => p.id === run.projectId) ?? null
   const projectName = (run: Run) => project(run)?.name ?? ''
 
@@ -162,7 +171,7 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
     }
   }
 
-  return { name, agent, runs, error, events, now, selected, current, load, today, tiles, facts, stop, project, projectName, runnerOnline, sent, message }
+  return { name, agent, runs, error, events, now, selected, current, load, today, tiles, facts, stop, resume, project, projectName, runnerOnline, sent, message }
 }
 
 export type AgentRuns = ReturnType<typeof useAgentRuns>
