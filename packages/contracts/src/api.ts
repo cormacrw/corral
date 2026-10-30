@@ -63,6 +63,7 @@ export interface Project {
   slug: string
   prefix: string
   thumbnailColor: string | null
+  thumbnailUrl: string | null
   nextTaskNumber: number
   repository: string
   defaultBranch: string
@@ -443,7 +444,7 @@ export type TaskInboxItemType = 'human_review' | 'question' | 'blocked' | 'faile
 export type InboxItemType = TaskInboxItemType | 'plan_thread'
 
 interface InboxItemBase {
-  project: { id: string, slug: string, name: string, thumbnailColor: string | null }
+  project: { id: string, slug: string, name: string, thumbnailColor: string | null, thumbnailUrl: string | null }
   subject: string
   preview: string
   sender: { name: string, role: AgentRole | 'system' }

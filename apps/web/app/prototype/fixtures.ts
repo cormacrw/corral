@@ -51,6 +51,7 @@ export const projects: Project[] = [
     name: 'Corral',
     slug: 'corral',
     prefix: 'COR',
+    thumbnailUrl: null,
     thumbnailColor: '#14b8a6',
     nextTaskNumber: 13,
     repository: 'cormacrw/corral',
@@ -69,6 +70,7 @@ export const projects: Project[] = [
     name: 'Marketing site',
     slug: 'marketing-site',
     prefix: 'WEB',
+    thumbnailUrl: null,
     thumbnailColor: '#8b5cf6',
     nextTaskNumber: 3,
     repository: 'cormacrw/site',
@@ -576,7 +578,7 @@ export function inbox(): Inbox {
       return {
         id: t.id,
         type,
-        project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor },
+        project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
         taskId: t.id,
         taskRef: t.ref,
         subject,
@@ -598,7 +600,7 @@ export function inbox(): Inbox {
     if (session.status === 'none' && !reply) continue
     needsYou.push({
       id: session.id, type: 'plan_thread', sessionId: session.id,
-      project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor },
+      project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
       subject: session.title, preview: session.preview ?? '',
       question: session.status === 'question' && last ? { text: last.text, recommendation: last.recommendation, options: last.options } : null,
       reply: reply?.text ?? null,

@@ -13,6 +13,7 @@ export function toProject(row: ProjectRow): Project {
     slug: row.slug,
     prefix: row.prefix,
     thumbnailColor: row.thumbnailColor,
+    thumbnailUrl: thumbnailUrl(row),
     nextTaskNumber: row.nextTaskNumber,
     repository: row.repository,
     defaultBranch: row.defaultBranch,
@@ -72,6 +73,19 @@ export async function createProject(db: Executor, input: CreateProjectInput, act
       ...(input.humanReviewDefault !== undefined && { humanReviewDefault: input.humanReviewDefault })
     }).returning()
     await tx.insert(schema.auditLog).values({ projectId: row!.id, actor, action: 'project.created', detail: {} })
+    return toProject(row!)
+  })
+}
+
+// Content hashes version the URL without adding a second source of truth.
+export function thumbnailUrl(project: Pick<ProjectRow, 'slug' | 'thumbnailBlob'>): string | null {
+  return project.thumbnailBlob ? `/api/projects/${encodeURIComponent(project.slug)}/thumbnail?v=${project.thumbnailBlob.slice(0, 12)}` : null
+}
+
+export async function setProjectThumbnail(db: Executor, project: ProjectRow, blob: string | null, actor: Actor): Promise<Project> {
+  return db.transaction(async (tx) => {
+    const [row] = await tx.update(schema.projects).set({ thumbnailBlob: blob, updatedAt: new Date() }).where(eq(schema.projects.id, project.id)).returning()
+    await tx.insert(schema.auditLog).values({ projectId: project.id, actor, action: 'project.updated', detail: { changed: ['thumbnailBlob'] } })
     return toProject(row!)
   })
 }
