@@ -39,6 +39,7 @@ export const agentLimit = (agent: Pick<Agent, 'role' | 'concurrency'>): string =
 
 const WHERE: Record<Agent['role'], string> = {
   developer: 'one worktree per task',
+  designer: 'one worktree per task',
   reviewer: 'a read-only task worktree',
   pm: 'a read-only checkout of the default branch'
 }

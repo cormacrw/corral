@@ -77,9 +77,9 @@ export async function getRun(db: Executor, runId: string): Promise<Run> {
 }
 
 export async function listAgents(db: Executor): Promise<Agent[]> {
-  // PM, developer, reviewer, then by age: the default agents share one
+  // PM, developer, designer, reviewer, then by age: the default agents share one
   // creation time, so that alone would let them shuffle
-  const order = { pm: 0, developer: 1, reviewer: 2 } as const
+  const order = { pm: 0, developer: 1, designer: 2, reviewer: 3 } as const
   const rows = (await db.select().from(agents).orderBy(agents.createdAt, agents.name)).sort((a, b) => order[a.role] - order[b.role])
   const active = await db.select({ agentId: runs.agentId, n: count() }).from(runs)
     .where(inArray(runs.state, [...ACTIVE_RUN_STATES]))

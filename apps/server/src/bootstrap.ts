@@ -12,13 +12,19 @@ export async function ensureOwner(db: Database): Promise<Actor> {
   return { kind: 'human', userId: user.id }
 }
 
-// The three global agents (D13). Onboarding names them; until then these
+// The four global agents (D13, D23). Onboarding names them; until then these
 // defaults let the scheduler and PM run.
 export async function ensureAgents(db: Database): Promise<void> {
-  const existing = await db.select({ role: schema.agents.role }).from(schema.agents)
-  const missing = ([['Juno', 'pm'], ['Atlas', 'developer'], ['Vera', 'reviewer']] as const)
+  const existing = await db.select({ role: schema.agents.role, name: schema.agents.name }).from(schema.agents)
+  const missing = ([['Juno', 'pm'], ['Atlas', 'developer'], ['Iris', 'designer'], ['Vera', 'reviewer']] as const)
     .filter(([, role]) => !existing.some(a => a.role === role))
+  const names = new Set(existing.map(a => a.name))
   if (missing.length > 0) {
-    await db.insert(schema.agents).values(missing.map(([name, role]) => ({ name, role }))).onConflictDoNothing()
+    await db.insert(schema.agents).values(missing.map(([preferred, role]) => {
+      let name: string = preferred
+      for (let suffix = 2; names.has(name); suffix++) name = `${preferred} ${suffix}`
+      names.add(name)
+      return { name, role, runtime: 'claude-code' }
+    })).onConflictDoNothing()
   }
 }
