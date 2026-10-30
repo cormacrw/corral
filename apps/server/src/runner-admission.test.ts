@@ -20,7 +20,7 @@ it('reconciles the hello snapshot before accepting new assignments', async () =>
     onToolCall: async () => null
   })
   const connection = hub.connect({ send: raw => sent.push(JSON.parse(raw)), close: () => {} })
-  const hello = connection.onMessage(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, runnerId: 'B', name: 'Gaming PC', activeRuns: [] }))
+  const hello = connection.onMessage(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, runnerId: 'B', name: 'Gaming PC', activeRuns: [], slots: 1, runtimes: ['claude-code'], roles: ['developer'] }))
   expect(hub.online).toBe(false)
   expect(hub.pick()).toBeNull()
   expect(sent).toEqual([])

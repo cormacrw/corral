@@ -1,6 +1,8 @@
 import {
   RUNNER_HEARTBEAT_MS,
   RUNNER_PROTOCOL_VERSION,
+  RUNNER_ROLES,
+  type RunnerInfo,
   type RunnerMessage,
   type RunnerStatus,
   type ServerMessage,
@@ -107,7 +109,12 @@ export class RunnerHub {
           }
           this.#cliCache.delete(runnerId)
           const now = new Date().toISOString()
-          this.#runners.set(runnerId, { socket, status: { id: runnerId, name: message.name, online: false, connectedAt: now, lastHeartbeatAt: now } })
+          const capacity = {
+            slots: Number.isInteger(message.slots) && message.slots > 0 ? message.slots : 1,
+            runtimes: Array.isArray(message.runtimes) ? message.runtimes.filter(r => typeof r === 'string') : [],
+            roles: Array.isArray(message.roles) ? message.roles.filter(r => (RUNNER_ROLES as readonly string[]).includes(r)) : []
+          }
+          this.#runners.set(runnerId, { socket, status: { id: runnerId, name: message.name, online: false, connectedAt: now, lastHeartbeatAt: now, ...capacity } })
           // Don't dispatch into this socket until its hello snapshot has been
           // reconciled: a newly assigned run isn't in that snapshot.
           await this.#handlers?.onConnected(message.activeRuns, runnerId).catch(error => console.error('Runner reconciliation failed', error))
@@ -144,6 +151,12 @@ export class RunnerHub {
 
   pick(): string | null {
     return [...this.#runners.entries()].filter(([, r]) => r.socket && r.status.online).sort((a, b) => a[1].status.connectedAt.localeCompare(b[1].status.connectedAt))[0]?.[0] ?? null
+  }
+
+  // Online runners ready for dispatch, longest connected first
+  available(): RunnerInfo[] {
+    return [...this.#runners.values()].filter(r => r.socket && r.status.online).map(r => ({ ...r.status }))
+      .sort((a, b) => a.connectedAt.localeCompare(b.connectedAt))
   }
 
   isOnline(runnerId: string | null): boolean {

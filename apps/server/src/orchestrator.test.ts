@@ -55,10 +55,10 @@ describe('orchestrator', () => {
   }
 
   it('names the claiming agent’s runtime in the job (D15)', async () => {
-    await t.db.update(agents).set({ runtime: 'other-cli' }).where(eq(agents.role, 'developer'))
+    await t.db.update(agents).set({ runtime: 'codex' }).where(eq(agents.role, 'developer'))
     try {
       const { project, job } = await assigned()
-      expect(job.runtime).toBe('other-cli')
+      expect(job.runtime).toBe('codex')
       await pause(project)
     } finally {
       await t.db.update(agents).set({ runtime: 'claude-code' }).where(eq(agents.role, 'developer'))

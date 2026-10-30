@@ -2,6 +2,7 @@ import {
   RUNNER_HEARTBEAT_MS,
   RUNNER_PATH,
   RUNNER_PROTOCOL_VERSION,
+  type RunnerCapacity,
   type RunnerMessage,
   type ServerMessage
 } from '@corral/contracts'
@@ -9,6 +10,8 @@ import WebSocket from 'ws'
 
 export interface ConnectionHandlers {
   activeRuns(): { runId: string, leaseEpoch: number }[]
+  // Read on every connect, so a CLI signed in since then is advertised
+  capacity(): Promise<RunnerCapacity>
   onMessage(message: ServerMessage): void
   onStatus(status: 'connected' | 'disconnected', detail?: string): void
 }
@@ -64,9 +67,11 @@ export class ServerConnection {
     const socket = new WebSocket(this.#url, { headers: this.#token ? { authorization: `Bearer ${this.#token}` } : {} })
     this.#socket = socket
 
-    socket.on('open', () => {
+    socket.on('open', async () => {
       this.#backoff = 1000
-      this.send({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, ...this.#identity, activeRuns: this.#handlers.activeRuns() })
+      const capacity = await this.#handlers.capacity()
+      if (this.#socket !== socket) return
+      this.send({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, ...this.#identity, ...capacity, activeRuns: this.#handlers.activeRuns() })
       this.#heartbeat = setInterval(() => {
         this.send({ type: 'heartbeat', activeRuns: this.#handlers.activeRuns() })
         // Keeps proxies from dropping an idle socket (D12)

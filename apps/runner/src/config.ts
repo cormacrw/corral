@@ -1,5 +1,6 @@
 import { homedir, hostname } from 'node:os'
 import { join, resolve } from 'node:path'
+import { RUNNER_ROLES, type RunnerRole } from '@corral/contracts'
 
 // Everything environment-specific comes from env vars (D12). The defaults are
 // for local development only; the Docker images set every value explicitly.
@@ -23,6 +24,10 @@ export interface RunnerConfig {
   pmWarmSeconds: number
   // The model that writes Plan session titles: the smallest one (COR-40)
   titleModel: string
+  // Most agent runs this machine runs at once; the server never assigns more
+  slots: number
+  // The roles this runner takes runs for; 'design' is a design task's developer
+  roles: RunnerRole[]
 }
 
 export interface GitAuthor {
@@ -42,7 +47,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RunnerConfig {
       ? { name: env.CORRAL_GIT_AUTHOR_NAME, email: env.CORRAL_GIT_AUTHOR_EMAIL }
       : null,
     pmWarmSeconds: parseSeconds(env.CORRAL_PM_WARM_SECONDS, 300),
-    titleModel: env.CORRAL_TITLE_MODEL || 'haiku'
+    titleModel: env.CORRAL_TITLE_MODEL || 'haiku',
+    slots: parseSlots(env.CORRAL_RUNNER_SLOTS),
+    roles: parseRoles(env.CORRAL_RUNNER_ROLES)
   }
 }
 
@@ -59,6 +66,26 @@ function parseSeconds(value: string | undefined, fallback: number): number {
     throw new Error(`CORRAL_PM_WARM_SECONDS must be a whole number of seconds, got "${value}"`)
   }
   return seconds
+}
+
+function parseSlots(value: string | undefined): number {
+  if (value === undefined || value === '') return 4
+  const slots = Number(value)
+  if (!Number.isInteger(slots) || slots < 1) {
+    throw new Error(`CORRAL_RUNNER_SLOTS must be a whole number of at least 1, got "${value}"`)
+  }
+  return slots
+}
+
+// A comma-separated list, e.g. "developer,reviewer". Unset takes every role.
+function parseRoles(value: string | undefined): RunnerRole[] {
+  if (value === undefined || value.trim() === '') return [...RUNNER_ROLES]
+  const roles = [...new Set(value.split(',').map(r => r.trim()).filter(Boolean))]
+  const unknown = roles.filter(r => !(RUNNER_ROLES as readonly string[]).includes(r))
+  if (unknown.length || !roles.length) {
+    throw new Error(`CORRAL_RUNNER_ROLES must list roles from ${RUNNER_ROLES.join(', ')}, got "${value}"`)
+  }
+  return roles as RunnerRole[]
 }
 
 function parseUrl(value: string): URL {
