@@ -60,12 +60,17 @@ function eventLine(event: RunEvent): string | null {
   }
 }
 
-// The end of a transcript as text, never longer than the limit
+// The end of a transcript as text, never longer than the limit. It's empty
+// when the agent produced nothing, even if the runner noted what it was doing.
 export function transcriptExcerpt(events: RunEvent[], limit: number, ended: boolean) {
   const text = events.map(eventLine).filter(line => line !== null).join('\n\n')
-  if (text.length === 0) return { excerpt: '', truncated: false, empty: true, note: ended ? 'This run has no transcript: the agent produced nothing before the run ended.' : 'This run has no transcript yet.' }
-  if (text.length <= limit) return { excerpt: text, truncated: false, empty: false }
-  return { excerpt: text.slice(-limit), truncated: true, empty: false, note: `Transcript cut to its last ${limit} of ${text.length} characters.` }
+  const truncated = text.length > limit
+  const empty = !events.some(event => event.type === 'message' || event.type === 'tool_call' || event.type === 'tool_result')
+  const notes = [
+    ...(empty ? [ended ? 'This run has no agent transcript: the agent produced nothing before the run ended.' : 'This run has no agent transcript yet.'] : []),
+    ...(truncated ? [`Transcript cut to its last ${limit} of ${text.length} characters.`] : [])
+  ]
+  return { excerpt: truncated ? text.slice(-limit) : text, truncated, empty, ...(notes.length > 0 && { note: notes.join(' ') }) }
 }
 
 // A failure in words the PM can act on; the API's codes alone say little

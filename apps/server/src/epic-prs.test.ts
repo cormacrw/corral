@@ -65,6 +65,7 @@ it.each(['epic', 'each_task'] as const)('opens %s PR only after the last board t
   expect(pr.body).not.toContain('Future backlog work')
   if (mode === 'epic') await capture('epic-open.json', { scope: 'Isolated server with simulated GitHub, no remote PR created', board: [task.ref, other.ref], githubRequest: t.github.calls.find(c => c.method === 'openPullRequest' && c.args[0] === project.repository), githubResponse: pr, reviewerAssignment: job })
   expect(job).toMatchObject({ role: 'reviewer', taskId: null, branch: epic.branch, headSha: pr.headSha, baseBranch: 'develop' })
+  expect((await t.db.select().from(schema.runs).where(eq(schema.runs.id, job.runId)))[0]?.runnerName).toBeTruthy()
   expect(job.prompt).toContain('git diff origin/develop...HEAD')
   expect(job.prompt).toContain('WITHOUT THE CACHE')
   expect(job.prompt).toContain('Search API returns saved searches')

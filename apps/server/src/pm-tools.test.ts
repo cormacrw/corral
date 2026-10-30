@@ -95,7 +95,7 @@ describe('list_runs and get_run', () => {
       excerpt: '',
       truncated: false,
       empty: true,
-      note: 'This run has no transcript: the agent produced nothing before the run ended.'
+      note: 'This run has no agent transcript: the agent produced nothing before the run ended.'
     })
   })
 
@@ -166,7 +166,11 @@ describe('transcriptExcerpt', () => {
   })
 
   it('tells a live run with no output yet from one that ended without any', () => {
-    expect(transcriptExcerpt([], 100, false).note).toBe('This run has no transcript yet.')
+    expect(transcriptExcerpt([], 100, false).note).toBe('This run has no agent transcript yet.')
+  })
+
+  it('counts a transcript of only the runner\'s notes as empty, and keeps the notes', () => {
+    expect(transcriptExcerpt([{ type: 'system', text: 'Preparing a worktree' }], 100, true)).toMatchObject({ excerpt: '[system] Preparing a worktree', truncated: false, empty: true })
   })
 
   it('keeps the defaults within the schema\'s limits', () => {

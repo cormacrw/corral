@@ -431,6 +431,7 @@ export class Orchestrator implements RunnerHandlers {
         for (let job = await claimEpic(); job; job = await claimEpic()) {
           const ctx = await this.#load(job.runId)
           if (!ctx) break
+          if (ctx.run.runnerId) await this.#d.db.update(runs).set({ runnerName: runner.name(ctx.run.runnerId) }).where(eq(runs.id, job.runId))
           if (!runner.send({ type: 'run.assign', job }, ctx.run.runnerId)) {
             await this.#endRun(ctx, { state: 'interrupted', error: 'The runner went offline before the run started' })
             break
