@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import pg from 'pg'
 import { openDatabase, type DatabaseHandle } from './client.ts'
+import { attemptAll, operationError, runAll } from './failures.ts'
 
 // A fresh, migrated, throwaway database for one test file.
 //
@@ -17,29 +18,47 @@ export async function createTestDatabase(driver: 'pglite' | 'postgres'): Promise
   if (!adminUrl) return null
 
   const name = `corral_test_${randomUUID().replaceAll('-', '')}`
-  await withAdmin(adminUrl, admin => admin.query(`create database ${name}`))
-  const url = new URL(adminUrl)
-  url.pathname = `/${name}`
+  const drop = () => withAdmin(
+    adminUrl,
+    `Dropping test database ${name}`,
+    admin => admin.query(`drop database if exists ${name} with (force)`)
+  )
 
-  const handle = await openDatabase({ driver: 'postgres', url: url.href })
-  return {
-    db: handle.db,
-    async close() {
-      await handle.close()
-      await withAdmin(adminUrl, admin => admin.query(`drop database if exists ${name} with (force)`))
+  // Only this run's generated database is ever dropped, and only once it exists
+  let created = false
+  try {
+    const url = new URL(adminUrl)
+    url.pathname = `/${name}`
+    await withAdmin(adminUrl, `Creating test database ${name}`, async (admin) => {
+      await admin.query(`create database ${name}`)
+      created = true
+    })
+
+    const handle = await openDatabase({ driver: 'postgres', url: url.href })
+    return {
+      db: handle.db,
+      close: () => runAll(`Closing test database ${name}`, adminUrl, [() => handle.close(), drop])
     }
+  } catch (error) {
+    throw operationError(
+      `Initialising test database ${name}`,
+      error,
+      await attemptAll(created ? [drop] : []),
+      adminUrl
+    )
   }
 }
 
 // Whether the Postgres-only tests can run here
 export const postgresAvailable = Boolean(process.env.CORRAL_DATABASE_URL)
 
-async function withAdmin(url: string, fn: (client: pg.Client) => Promise<unknown>): Promise<void> {
+async function withAdmin(url: string, operation: string, fn: (client: pg.Client) => Promise<unknown>): Promise<void> {
   const client = new pg.Client({ connectionString: url })
-  await client.connect()
-  try {
-    await fn(client)
-  } finally {
-    await client.end()
-  }
+  await runAll(operation, url, [
+    async () => {
+      await client.connect()
+      await fn(client)
+    },
+    () => client.end()
+  ])
 }
