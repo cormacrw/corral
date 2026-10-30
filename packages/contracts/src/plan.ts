@@ -3,7 +3,7 @@ import { z } from 'zod'
 
 const proposedTask = z.object({
   key: z.string().trim().min(1).describe('A short handle used by dependsOn, e.g. t1'),
-  ref: z.string().trim().toUpperCase().optional().transform(ref => ref || undefined).describe('The ref of an existing Backlog task this revises, e.g. COR-4; leave out for a new task'),
+  ref: z.string().trim().toUpperCase().optional().transform(ref => ref || undefined).describe('The ref of an existing Backlog or unclaimed Ready task this revises, e.g. COR-4; leave out for a new task'),
   epic: z.string().trim().optional().describe('The key of its epic in epics; leave it out for a task with no epic'),
   title: z.string().trim().min(1),
   description: z.string().trim(),
