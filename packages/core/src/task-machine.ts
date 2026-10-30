@@ -58,6 +58,9 @@ export type TaskEvent =
   // Agent review → Human review for a flagged task, otherwise Ready to
   // merge (a spike: Merged, its findings accepted)
   | { type: 'review_approved' }
+  // In progress or Agent review → Ready to merge: a rebase kept the earlier
+  // approval, so the human isn't asked again (D24)
+  | { type: 'approval_carried' }
   // Human review → Ready to merge (a spike: Merged)
   | { type: 'human_approve' }
   // Ready to merge → In progress: CI failed or the branch conflicts with the base
@@ -94,6 +97,7 @@ export const TRANSITION_RULES: Readonly<Record<TaskEventType, Rule>> = {
   submit: { from: ['in_progress'], actors: ['server'] },
   changes_requested: { from: ['agent_review'], actors: ['server'] },
   review_approved: { from: ['agent_review'], actors: ['server'] },
+  approval_carried: { from: ['in_progress', 'agent_review'], actors: ['server'] },
   human_approve: { from: ['human_review'], actors: ['human'] },
   ci_failed: { from: ['ready_to_merge'], actors: ['server'] },
   base_conflict: { from: ['ready_to_merge'], actors: ['server'] },
@@ -197,7 +201,10 @@ export function transition(
     // always goes to one (D20). A spike has no PR to merge, so accepting its
     // findings finishes it.
     case 'review_approved':
-      return ok({ ...task, ...(task.rebaseOnly && { rebaseOnly: false }), status: requiresHumanReview(task.type ?? 'task', task.humanReview) ? 'human_review' : 'ready_to_merge' })
+      return ok({ ...task, status: requiresHumanReview(task.type ?? 'task', task.humanReview) ? 'human_review' : 'ready_to_merge' })
+
+    case 'approval_carried':
+      return ok({ ...task, rebaseOnly: false, status: 'ready_to_merge' })
 
     case 'human_approve':
       return ok({ ...task, status: task.type === 'spike' ? 'merged' : 'ready_to_merge' })

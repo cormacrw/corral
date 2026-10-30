@@ -40,8 +40,8 @@ approved head for rebase review. Changes requested clears rebase-only mode
 and starts a normal counted revision, reported with `pr_updated`.
 Run history displays the outcome as “PR rebased”.
 
-Rebase review approval clears `rebaseOnly` before Ready to merge or Human
-review, while retaining `approvedHeadSha`. Later merge failures resolved to
+Rebase review approval clears `rebaseOnly` before Ready to merge, while
+retaining `approvedHeadSha`. Later merge failures resolved to
 In progress therefore start ordinary developer rounds. Blocking an unfinished
 rebase and resolving it to In progress preserves rebase-only mode. The Inbox
 activity feed records `pr_rebased` as a rebase handed to the reviewer.
@@ -51,11 +51,20 @@ and submitted head SHAs, range-diff instructions, and checks against the base
 commits and changed binding docs. Approval copies the approval at
 `approvedHeadSha`, including its criterion notes, onto the submitted head; missing
 or no-longer-applicable criteria reject carry-over. The recorded review summary
-identifies the reviewed rebase. Human-review routing still follows D5/D23.
+identifies the reviewed rebase. The task always returns to Ready to merge, even
+with `humanReview` set or in an `each_task` epic (D24): the `approval_carried`
+event skips D5/D23's routing. `carryOverApproval` in `rebase-review.ts` is the one
+place that records the carried review and applies that event, for the server
+check as well as the reviewer; it works from In progress too, and writes nothing
+when the approval can't carry over.
 Rebase comments contain only the verdict and the reviewer's conflict summary.
 Changes requested still supplies normal criterion verdicts and consumes one round.
+`checkFailures` (`{ condition, files }`) on the latest `pr_rebased`
+`task.transition` audit entry adds a prompt section naming what the server check
+failed.
 The rebase-only reviewer outcome `blocked` preserves the round count and posts
-the changed binding decision as the task reason for the human. It is a run outcome,
+the substantial change or changed binding decision as the task reason for the
+human. It is a run outcome,
 not a criterion review verdict. `rebase-review.test.ts` exercises all three paths
 through runner WebSocket reports and task HTTP responses.
 
