@@ -488,3 +488,24 @@ export const taskDesignPins = pgTable('task_design_pins', {
   createdAt: createdAt(),
   updatedAt: updatedAt()
 }, t => [index().on(t.designVersionId)])
+
+export const deploymentNotesStatus = pgEnum('deployment_notes_status', ['pending', 'ready', 'failed'])
+
+// What a deploy of a project shipped, reported by scripts/deploy/auto-deploy.sh
+// after `docker compose up -d` (D16). One per deployed commit: posting the
+// same toSha again returns the existing row. The PM writes the release notes
+// later; they're an Inbox item until read (D11).
+export const deployments = pgTable('deployments', {
+  id: uuid().primaryKey().defaultRandom(),
+  projectId: uuid().notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  // Null for a project's first deploy
+  fromSha: text(),
+  toSha: text().notNull(),
+  // Newest first, as `git log` lists them
+  commits: jsonb().$type<{ sha: string, subject: string }[]>().notNull().default([]),
+  // Markdown release notes
+  notes: text(),
+  notesStatus: deploymentNotesStatus().notNull().default('pending'),
+  readAt: timestamp('read_at', { withTimezone: true }),
+  createdAt: createdAt()
+}, t => [unique('deployments_project_to_sha_unique').on(t.projectId, t.toSha)])

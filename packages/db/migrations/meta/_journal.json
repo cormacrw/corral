@@ -204,6 +204,13 @@
       "when": 1793322079646,
       "tag": "0028_complex_clint_barton",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1793328374483,
+      "tag": "0029_thin_exiles",
+      "breakpoints": true
     }
   ]
 }

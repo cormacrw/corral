@@ -27,12 +27,53 @@ log() { echo "$(date +%Y-%m-%dT%H:%M:%S%z) $*"; }
 # ls-remote, which then fail confusingly; rev-parse says why
 git rev-parse --git-dir >/dev/null || { log "git can't use this checkout; run the service as the user who owns it (User= in the unit)"; exit 1; }
 
-# Calls the server API from inside its container; the API is never published
+# Calls the server API from inside its container; the API is never published.
+# An optional third argument is sent as the JSON body. It goes through stdin,
+# because a long commit list would pass Linux's 128 KiB limit on one argument.
 api() {
-  docker compose exec -T server node -e "
-    fetch('http://127.0.0.1:' + (process.env.CORRAL_SERVER_PORT || 4100) + '/api$2', { method: '$1' })
+  printf '%s' "${3:-}" | docker compose exec -T server node -e "
+    let body = ''
+    process.stdin.setEncoding('utf8')
+    process.stdin.on('data', d => { body += d })
+    process.stdin.on('end', () => fetch('http://127.0.0.1:' + (process.env.CORRAL_SERVER_PORT || 4100) + '/api$2', {
+      method: '$1',
+      ...(body && { body, headers: { 'content-type': 'application/json' } }),
+      signal: AbortSignal.timeout(30000)
+    })
       .then(async r => { if (!r.ok) process.exit(1); process.stdout.write(await r.text()) })
-      .catch(() => process.exit(1))"
+      .catch(() => process.exit(1)))"
+}
+
+# A JSON string. Commit subjects are one line, so only quotes, backslashes
+# and control characters need escaping.
+json_string() {
+  local s=$1
+  s=${s//\\/\\\\}
+  s=${s//\"/\\\"}
+  s=${s//$'\t'/\\t}
+  printf '"%s"' "$(tr -d '\000-\037' <<<"$s")"
+}
+
+# Tells the new server what this deploy shipped (POST /api/deployments), so
+# the PM can write release notes. Every commit since the last deploy, or
+# just the new one when nothing was deployed before (or that commit is gone).
+report_deployment() {
+  local log_lines line commits='' from=null tries=0
+  if [ -z "$deployed_sha" ] || ! log_lines=$(git log --format='%H %s' "$deployed_sha..$remote_sha" 2>/dev/null); then
+    log_lines=$(git log -1 --format='%H %s' "$remote_sha")
+  fi
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    commits+="${commits:+,}{\"sha\":\"${line%% *}\",\"subject\":$(json_string "${line#* }")}"
+  done <<<"$log_lines"
+  if [ -n "$deployed_sha" ]; then from="\"$deployed_sha\""; fi
+  # The new server runs its migrations before it answers
+  until api GET /health >/dev/null 2>&1; do
+    tries=$((tries + 1))
+    [ "$tries" -lt "${CORRAL_DEPLOY_REPORT_TRIES:-30}" ] || return 1
+    sleep "${CORRAL_DEPLOY_REPORT_WAIT:-5}"
+  done
+  api POST /deployments "{\"repository\":$(json_string "$repo"),\"fromSha\":$from,\"toSha\":\"$remote_sha\",\"commits\":[$commits]}" >/dev/null
 }
 
 # Restarting web doesn't touch runs; restarting any other service might.
@@ -65,7 +106,8 @@ skipped_sha=$(cat "$state_dir/skipped" 2>/dev/null || true)
 [ "$remote_sha" = "$skipped_sha" ] && exit 0
 
 # Only deploy commits whose CI passed. The repo is public, so no token is needed.
-repo=$(git remote get-url origin | sed -E 's#^(https://github\.com/|git@github\.com:)##; s#\.git$##')
+# The configured URL, as written: get-url would apply any insteadOf rewrite.
+repo=$(git config --get remote.origin.url | sed -E 's#^(https://github\.com/|git@github\.com:)##; s#\.git$##')
 checks=$(curl -fsS "https://api.github.com/repos/$repo/commits/$remote_sha/check-runs?check_name=ci")
 conclusions=$(grep -o '"conclusion": *"[a-z_]*"' <<<"$checks" | sed -E 's/.*"([a-z_]*)"$/\1/' || true)
 statuses=$(grep -o '"status": *"[a-z_]*"' <<<"$checks" | sed -E 's/.*"([a-z_]*)"$/\1/' || true)
@@ -120,3 +162,6 @@ trap - EXIT
 docker image prune -f >/dev/null
 echo "$remote_sha" >"$state_dir/deployed"
 log "deployed $remote_sha"
+
+# The deploy has happened whatever this says, so a failure is only a warning
+report_deployment || log "warning: could not record the deployment on the server; release notes for it won't be written"

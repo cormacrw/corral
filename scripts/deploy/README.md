@@ -40,6 +40,19 @@ Without systemd, a cron line does the same:
 - The checkout is left detached at the deployed commit. Don't keep local
   changes in it; `.env` is untracked and is never touched.
 
+## Recording what each deploy shipped
+
+After `docker compose up -d` succeeds and `deployed` is written, the script
+waits for the new server to answer (up to `CORRAL_DEPLOY_REPORT_TRIES`
+attempts, 30 by default, `CORRAL_DEPLOY_REPORT_WAIT` seconds apart, 5 by
+default) and posts `POST /api/deployments` with the repository, the previous
+and new commit and every commit between them with its subject (just the new
+commit on a first deploy). The PM writes release notes from it (D11).
+Posting the same commit twice keeps one record. If the server can't be
+reached, or no project uses this repository, the script logs a warning and
+the deploy still counts as done. A deploy that stops before `up -d` records
+nothing.
+
 ## Agent runs are never cut off
 
 Restarting `server` or `runner` would interrupt agent runs: the runner loses
