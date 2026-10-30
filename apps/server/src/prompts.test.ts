@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { developerPrompt, developerRevisionPrompt, isGrillRequest, pmFallbackPrompt, pmPrompt, questionText, reviewerPrompt, type PromptTask } from './prompts.ts'
+import { designRevisionPrompt, developerPrompt, developerRevisionPrompt, isGrillRequest, pmFallbackPrompt, pmPrompt, questionText, reviewerPrompt, type PromptTask } from './prompts.ts'
 
 const turn = { text: 'hi', attachedTask: null, projectName: 'Test app', prefix: 'TA' }
 
@@ -394,5 +394,38 @@ describe('rebase-only developer prompts', () => {
       expect(prompt).not.toContain('pr_updated')
       expect(prompt).not.toContain('requested changes')
     }
+  })
+})
+
+describe('continuing a stopped run', () => {
+  const task: PromptTask = {
+    ref: 'TA-1', title: 'Add login', description: null, branch: 'corral/ta-1', defaultBranch: 'main', reviewRounds: 0, reviewRoundCap: 3, criteria: [], comments: [], attachments: []
+  }
+  const stoppedRun = { number: 12, reason: 'The run hit its time limit of 60 minutes', wipSha: 'abc123def' }
+
+  it('says nothing after a run that reported', () => {
+    expect(developerPrompt(task, 'Dev')).not.toContain('stopped')
+    expect(developerRevisionPrompt(task, [])).not.toContain('stopped')
+  })
+
+  it('names the run, the stop reason and the WIP commit in every developer prompt', () => {
+    const prompts = [
+      developerPrompt({ ...task, stoppedRun }, 'Dev'),
+      developerPrompt({ ...task, stoppedRun, design: { version: null } }, 'Dev'),
+      developerRevisionPrompt({ ...task, stoppedRun }, []),
+      designRevisionPrompt({ ...task, stoppedRun, design: { version: 1 } }, [])
+    ]
+    for (const prompt of prompts) {
+      expect(prompt).toContain('## Continuing a stopped run')
+      expect(prompt).toContain('You are continuing run #12, which stopped before it reported an outcome. Stop reason: The run hit its time limit of 60 minutes')
+      expect(prompt).toContain('WIP commit `abc123def`')
+    }
+  })
+
+  it('names no commit when the stopped run saved none', () => {
+    const prompt = developerPrompt({ ...task, stoppedRun: { ...stoppedRun, wipSha: null } }, 'Dev')
+    expect(prompt).toContain('Stop reason: The run hit its time limit')
+    expect(prompt).toContain('No WIP commit is recorded yet')
+    expect(prompt).toContain('Check the branch log')
   })
 })

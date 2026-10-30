@@ -209,6 +209,7 @@ A design task follows steps 1–7 with these differences: the developer builds a
 | Laptop sleeps / runner disconnects | Heartbeat stops → lease expires → stale writes rejected by epoch → reconcile, then retry |
 | Usage limit hit | Run outcome `rate_limited`; group paused until reset; not counted as a failure (D3) |
 | Human stops a run | Process tree killed, run → Interrupted; the task is **paused** so the scheduler doesn't restart it until the human presses **Resume** on the task (`POST /projects/:slug/tasks/:number/resume`, human only). That clears the pause and asks for a scheduling pass for the task right away, and the run that starts depends on its status: a developer run in In progress, a reviewer run in Agent review |
+| A developer run stops before reporting | The runner commits uncommitted changes as a WIP commit and pushes the task branch. The next developer run starts from that commit, and its prompt says it continues a stopped run and gives the stop reason and the commit |
 | Agent reports `stuck` | Task → **Blocked** |
 | Review cap reached | Task → **Blocked** |
 | Unrecoverable error / unsafe merge failure | Task → **Failed** |
