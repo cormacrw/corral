@@ -5,6 +5,7 @@ import { agentRuntime, type AgentRuntime } from './agent-runtimes.ts'
 // ── Plan (D9, design/plan.md) ─────────────────────────────────────────────
 
 export interface PlanSession {
+  parentSessionId?: string | null
   id: string
   projectId: string | null
   title: string
@@ -26,8 +27,10 @@ export interface PlanSession {
 export interface PlanMessage {
   id: string
   sessionId: string
-  role: 'human' | 'pm'
-  kind: 'message' | 'question' | 'error' | 'confirmation' | 'action_result'
+  role: 'human' | 'pm' | 'thread'
+  senderSessionId?: string | null
+  senderTitle?: string | null
+  kind: 'message' | 'question' | 'error' | 'confirmation' | 'action_result' | 'notification'
   pendingAction?: import('@corral/core').PmAction | null
   text: string
   // Set only on questions, and only when the PM gave them

@@ -47,7 +47,7 @@ import { humanTransitionInput } from '@corral/contracts'
 import type { Transcripts } from './transcripts.ts'
 import { WorktreeSweep } from './worktree-sweep.ts'
 
-const { acceptanceCriteria, agents, attachments, comments, designVersions, evidence, projects, reviews, runs, settings, taskDesignPins, tasks } = schema
+const { acceptanceCriteria, agents, attachments, comments, designVersions, evidence, planSessions, projects, reviews, runs, settings, taskDesignPins, tasks } = schema
 type PlanSessionRow = typeof schema.planSessions.$inferSelect
 
 const server: Actor = { kind: 'system', component: 'server' }
@@ -234,9 +234,16 @@ export class Orchestrator implements RunnerHandlers {
   async startPmRun(session: PlanSessionRow, job: Omit<PmRunJob, 'runId' | 'runNumber' | 'leaseEpoch'>): Promise<string> {
     const { db } = this.#d
     const pm = await this.assertPmRunPossible()
-    const [run] = await db.insert(runs).values({
-      agentId: pm.id, projectId: job.projectId, taskId: null, role: 'pm', leaseEpoch: 1, planSessionId: session.id, pmJob: job, queuedAt: this.#now()
-    }).returning()
+    const run = await db.transaction(async (tx) => {
+      // A delayed initial turn must not start after close. Serialize its run
+      // insertion with the close transaction's session lock.
+      const [current] = await tx.select({ closedAt: planSessions.closedAt }).from(planSessions).where(eq(planSessions.id, session.id)).for('update')
+      if (!current || current.closedAt) throw new ApiFailure(409, { code: 'conflict', constraint: 'plan_session_closed' })
+      const [created] = await tx.insert(runs).values({
+        agentId: pm.id, projectId: job.projectId, taskId: null, role: 'pm', leaseEpoch: 1, planSessionId: session.id, pmJob: job, queuedAt: this.#now()
+      }).returning()
+      return created!
+    })
     const ctx = await this.#load(run!.id)
     if (!ctx) throw new Error('PM run vanished')
     await this.#publish(ctx)
@@ -997,6 +1004,9 @@ export class Orchestrator implements RunnerHandlers {
 
   async #endRun(ctx: RunContext, end: RunEnd): Promise<void> {
     await this.#d.db.transaction(tx => this.#endRunIn(tx, ctx, end))
+    if (ctx.run.role === 'pm' && ctx.run.planSessionId && end.state === 'interrupted') {
+      await this.plans?.notifyParent(ctx.run.planSessionId, ctx.run.id, true)
+    }
   }
 
   // Ends the run and releases its lease, if it still holds one
@@ -1020,6 +1030,7 @@ export class Orchestrator implements RunnerHandlers {
       if (ctx.task) await tx.update(tasks).set({ paused: true }).where(eq(tasks.id, ctx.task.id))
       await appendAudit(tx, { projectId: ctx.run.projectId, taskId: ctx.task?.id ?? null, actor }, auditEvent('run.stopped', { runId }))
     })
+    if (ctx.run.role === 'pm' && ctx.run.planSessionId) await this.plans?.notifyParent(ctx.run.planSessionId, runId, true)
     await this.#publish(ctx)
   }
 
@@ -1278,10 +1289,6 @@ export class Orchestrator implements RunnerHandlers {
       pm: ['attach_evidence', 'list_tasks', 'get_task', 'add_comment', 'get_run_outcomes', 'get_agent_activity', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs', ...Object.keys(pmActionTools), ...Object.keys(pmDirectTools)]
     }
     if (!allowed[role]?.includes(tool)) throw new ToolError(`The ${role} can’t use ${tool}`)
-    if (role === 'pm' && isPmDirectTool(tool)) {
-      if (!ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
-      return this.pmTools.call(tool, input, this.#actor(ctx), { sessionId: ctx.run.planSessionId, runId: ctx.run.id, projectId: ctx.project.id })
-    }
     if (role === 'pm' && requiresPmConfirmation(tool, input)) {
       if (!this.plans || !ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
       return this.pmActions.propose(ctx.run.planSessionId, ctx.run.id, tool, input, this.#actor(ctx))

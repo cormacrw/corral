@@ -1,7 +1,7 @@
 import { askQuestionInput, listTasksInput, normalizeProposedPlan, proposedPlanInput, type AgentRuntime, type DraftSession, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type PmRunJob } from '@corral/contracts'
 import { approvedPlanSummary, checkPlan, checkPlanEpicDependencies, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, revisionProblem, richTextToMarkdown, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
-import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { appendAudit, auditEvent, auditText } from './audit.ts'
 import { agentActivity, UnknownAgent } from './agent-activity.ts'
@@ -120,12 +120,17 @@ export class PlanService {
     const { db, events } = this.#d
     const session = await this.#session(sessionId)
     if (session.closedAt) return this.#toSession(session)
-    const active = await db.select({ id: runs.id }).from(runs)
-      .where(and(eq(runs.planSessionId, sessionId), eq(runs.role, 'pm'), inArray(runs.state, ['queued', 'starting', 'running', 'stopping'])))
-    for (const run of active) await this.#d.stopRun(run.id, actor)
+    await this.#assertCloseAllowed(db, sessionId, actor)
+    const stopTurns = async () => {
+      const active = await db.select({ id: runs.id }).from(runs)
+        .where(and(eq(runs.planSessionId, sessionId), eq(runs.role, 'pm'), inArray(runs.state, ['queued', 'starting', 'running', 'stopping'])))
+      for (const run of active) await this.#d.stopRun(run.id, actor)
+    }
+    await stopTurns()
     const deleted = await db.transaction(async (tx) => {
       const [locked] = await tx.select().from(planSessions).where(eq(planSessions.id, sessionId)).for('update')
       if (locked!.closedAt) return null
+      await this.#assertCloseAllowed(tx, sessionId, actor)
       const drafts = await tx.select({ id: tasks.id, projectId: tasks.projectId }).from(tasks)
         .where(and(eq(tasks.status, 'draft'), isNull(tasks.deletedAt), inArray(tasks.id, tx.select({ id: planTasks.taskId }).from(planTasks)
           .innerJoin(plans, eq(plans.id, planTasks.planId)).where(eq(plans.sessionId, sessionId))))).for('update')
@@ -141,6 +146,9 @@ export class PlanService {
       await tx.update(planSessions).set({ closedAt: now, updatedAt: now, unread: false }).where(eq(planSessions.id, sessionId))
       return { owned, detached: [...detached].filter(id => !owned.some(t => t.id === id)) }
     })
+    // Catch a turn inserted between the first stop and the session lock.
+    // startPmRun's same lock now refuses every insertion after close.
+    await stopTurns()
     const closed = await this.#toSession(await this.#session(sessionId))
     if (deleted) {
       for (const task of deleted.owned) events.publish({ type: 'task.deleted', taskId: task.id, projectId: task.projectId })
@@ -153,8 +161,23 @@ export class PlanService {
     return closed
   }
 
+  // An agent may stop an empty thread, but discarding human-owned work
+  // requires the human's confirmed close flow (D11/D27).
+  async #assertCloseAllowed(db: Executor, sessionId: string, actor: Actor): Promise<void> {
+    if (actor.kind === 'human') return
+    const [proposed] = await db.select({ id: plans.id }).from(plans)
+      .where(and(eq(plans.sessionId, sessionId), eq(plans.status, 'proposed'))).limit(1)
+    const drafts = await db.select({ id: tasks.id }).from(tasks)
+      .where(and(eq(tasks.status, 'draft'), isNull(tasks.deletedAt), inArray(tasks.id, db.select({ id: planTasks.taskId }).from(planTasks)
+        .innerJoin(plans, eq(plans.id, planTasks.planId)).where(eq(plans.sessionId, sessionId)))))
+    const owners = await draftSessions(db, drafts.map(t => t.id))
+    if (proposed || drafts.some(t => owners.get(t.id)?.id === sessionId)) {
+      throw new ToolError('This thread has a proposed plan or owned Drafts. Ask the human to close it using Close thread and confirm the discard; agents cannot discard this work.')
+    }
+  }
+
   // design/plan.md: the project and runtime are locked once the session has messages
-  async start(projectId: string | null, input: { id?: string | undefined, text: string, taskRef?: string | undefined, runtime?: AgentRuntime }, actor: Actor): Promise<PlanSessionDetail> {
+  async start(projectId: string | null, input: { id?: string | undefined, text: string, taskRef?: string | undefined, runtime?: AgentRuntime, title?: string, parentSessionId?: string }, actor: Actor): Promise<PlanSessionDetail> {
     this.assertTurnPossible()
     const { db, events } = this.#d
     // A retry returns the original thread without interpreting a new message.
@@ -173,13 +196,14 @@ export class PlanService {
       attached = `${task.ref} ${task.title}`
     }
     const text = input.text || `Refine ${attached}`
-    const fallback = titleFrom(input.text || `Refine ${input.taskRef}`)
+    const sender = input.parentSessionId ? await this.#session(input.parentSessionId) : null
+    const fallback = input.title ?? titleFrom(input.text || `Refine ${input.taskRef}`)
     const created = await db.transaction(async (tx) => {
       this.assertTurnPossible()
-      const [session] = await tx.insert(planSessions).values({ ...(input.id ? { id: input.id } : {}), projectId, title: fallback, runtime: input.runtime ?? 'claude-code', createdBy: actor })
+      const [session] = await tx.insert(planSessions).values({ ...(input.id ? { id: input.id } : {}), projectId, title: fallback, parentSessionId: sender?.id ?? null, runtime: input.runtime ?? 'claude-code', createdBy: actor })
         .onConflictDoNothing({ target: planSessions.id }).returning()
       if (!session) return null
-      const [message] = await tx.insert(planMessages).values({ sessionId: session.id, role: 'human', text, runId: null }).returning()
+      const [message] = await tx.insert(planMessages).values({ sessionId: session.id, role: sender ? 'thread' : 'human', senderSessionId: sender?.id ?? null, senderTitle: sender?.title ?? null, text, runId: null }).returning()
       await appendAudit(tx, { projectId, actor }, auditEvent('plan.message', { sessionId: session.id, messageId: message!.id }))
       return { session, message: message! }
     })
@@ -192,8 +216,8 @@ export class PlanService {
     // Leave the response independent of runner/orchestrator work, including
     // synchronous failures. The durable message remains the turn's record.
     setImmediate(() => {
-      void this.#queueInitialTurn(session, project, text, attached).catch(error => console.error(`Recording failed PM turn for ${session.id} failed`, error)).finally(() => this.#pendingTurns.delete(session.id))
-      void this.#generateTitle(session.id, fallback, { text, attachedTask: attached })
+      void this.#queueInitialTurn(session, project, sender ? threadText(sender, text) : text, attached).catch(error => console.error(`Recording failed PM turn for ${session.id} failed`, error)).finally(() => this.#pendingTurns.delete(session.id))
+      if (!input.title) void this.#generateTitle(session.id, fallback, { text, attachedTask: attached })
     })
     return detail
   }
@@ -210,6 +234,7 @@ export class PlanService {
         fallbackPrompt: pmFallbackPrompt({ text, attachedTask: attached, projectName: project?.name ?? null, prefix: project?.prefix ?? null, history: await this.#history(session.id) })
       })
     } catch (error) {
+      if ((await this.#session(session.id)).closedAt) return
       const { db, events } = this.#d
       const [message] = await db.insert(planMessages).values({ sessionId: session.id, role: 'pm', kind: 'error', text: `Could not queue the PM turn: ${error instanceof Error ? error.message : String(error)}`, runId: null }).returning()
       await db.update(planSessions).set({ updatedAt: new Date(), unread: true }).where(eq(planSessions.id, session.id))
@@ -303,7 +328,7 @@ export class PlanService {
   }
 
   // A human message starts one PM turn (D9)
-  async message(sessionId: string, input: { text: string, taskRef?: string | undefined }, actor: Actor): Promise<PlanMessage> {
+  async message(sessionId: string, input: { text: string, taskRef?: string | undefined, senderSessionId?: string }, actor: Actor): Promise<PlanMessage> {
     const { db } = this.#d
     const session = await this.#session(sessionId)
     const [project] = session.projectId ? await db.select().from(projects).where(eq(projects.id, session.projectId)) : []
@@ -321,20 +346,29 @@ export class PlanService {
       const task = await loadTask(db, await this.#taskIdByRef(project, input.taskRef))
       attached = `${task.ref} ${task.title}`
     }
+    const [previousInput] = await db.select({ createdAt: planMessages.createdAt }).from(planMessages)
+      .where(and(eq(planMessages.sessionId, sessionId), inArray(planMessages.role, ['human', 'thread']), eq(planMessages.kind, 'message')))
+      .orderBy(desc(planMessages.createdAt)).limit(1)
     const text = input.text || `Refine ${attached}`
-    const [message] = await db.insert(planMessages).values({ sessionId, role: 'human', text, runId: null }).returning()
+    const sender = input.senderSessionId ? await this.#session(input.senderSessionId) : null
+    const [message] = await db.insert(planMessages).values({ sessionId, role: sender ? 'thread' : 'human', senderSessionId: sender?.id ?? null, senderTitle: sender?.title ?? null, text, runId: null }).returning()
     // A new message reopens a session closed by approving its plan
     await db.update(planSessions).set({ updatedAt: new Date(), unread: false, closedAt: null }).where(eq(planSessions.id, sessionId))
     await appendAudit(db, { projectId: session.projectId, actor }, auditEvent('plan.message', { sessionId, messageId: message!.id }))
     this.#d.events.publish({ type: 'plan.message', message: toMessage(message!) })
 
     // Warm agent sessions do not replay database history. Include the saved
-    // confirmation ledger explicitly, as well as in cold-start history.
-    // Replaying it also prevents a result racing a turn start from being lost.
-    const results = await db.select({ text: planMessages.text }).from(planMessages)
-      .where(and(eq(planMessages.sessionId, sessionId), eq(planMessages.kind, 'action_result')))
+    // confirmation ledger in full, plus notices since the preceding input.
+    // The current input is already saved, so notices racing this query remain
+    // after its timestamp and are delivered with the next turn.
+    const results = await db.select().from(planMessages)
+      .where(and(eq(planMessages.sessionId, sessionId), or(
+        eq(planMessages.kind, 'action_result'),
+        and(eq(planMessages.kind, 'notification'), lte(planMessages.createdAt, message!.createdAt), previousInput ? gt(planMessages.createdAt, previousInput.createdAt) : undefined)
+      )))
       .orderBy(asc(planMessages.createdAt))
-    const turnText = results.length ? `${text}\n\nRecorded tool confirmation results:\n${results.map(r => r.text).join('\n')}` : text
+    const attributedText = sender ? threadText(sender, text) : text
+    const turnText = results.length ? `${attributedText}\n\nRecorded tool results and thread notifications:\n${results.map(r => r.role === 'thread' ? threadText({ id: r.senderSessionId ?? 'removed', title: r.senderTitle ?? 'Removed thread' }, r.text) : r.text).join('\n')}` : attributedText
     await this.#turn(session, project, {
       prompt: pmPrompt({ text: turnText, attachedTask: attached, projectName: project?.name ?? null, prefix: project?.prefix ?? null, fresh: session.agentSessionId === null }),
       fallbackPrompt: pmFallbackPrompt({ text, attachedTask: attached, projectName: project?.name ?? null, prefix: project?.prefix ?? null, history: await this.#history(sessionId) })
@@ -382,6 +416,33 @@ export class PlanService {
     // Every finished turn (reply, question or plan) waits for the human to read it
     await db.update(planSessions).set({ updatedAt: new Date(), unread: true }).where(eq(planSessions.id, sessionId))
     events.publish({ type: 'plan.session', session: await this.#toSession(await this.#session(sessionId), null) })
+    await this.notifyParent(sessionId, runId, false, Boolean(error))
+  }
+
+  // Stop paths fence the run before its eventual runner exit, so they must
+  // notify here rather than waiting for onRunEnded. One notice per child run.
+  async notifyParent(sessionId: string, runId: string, stopped = false, error = false): Promise<void> {
+    const { db, events } = this.#d
+    const child = await this.#session(sessionId)
+    if (!child.parentSessionId) return
+    const notification = await db.transaction(async (tx) => {
+      await tx.select({ id: runs.id }).from(runs).where(eq(runs.id, runId)).for('update')
+      const [existing] = await tx.select({ id: planMessages.id }).from(planMessages)
+        .where(and(eq(planMessages.sessionId, child.parentSessionId!), eq(planMessages.runId, runId), eq(planMessages.kind, 'notification'))).limit(1)
+      if (existing) return null
+      const [message] = await tx.insert(planMessages).values({
+        sessionId: child.parentSessionId!, role: 'thread', kind: 'notification',
+        senderSessionId: child.id, senderTitle: child.title,
+        text: `Thread “${child.title}” ${stopped ? 'was stopped' : `finished its turn${error ? ' with an error' : ''}`}.`, runId
+      }).returning()
+      // Child activity isn't a new PM reply waiting for the human (D11).
+      await tx.update(planSessions).set({ updatedAt: new Date() }).where(eq(planSessions.id, child.parentSessionId!))
+      return message!
+    })
+    if (notification) {
+      events.publish({ type: 'plan.message', message: toMessage(notification) })
+      events.publish({ type: 'plan.session', session: await this.#toSession(await this.#session(child.parentSessionId)) })
+    }
   }
 
   // ── PM tools (flows.md §1) ─────────────────────────────────────────────────
@@ -1050,7 +1111,7 @@ export class PlanService {
   // The conversation so far, for reseeding a lost session (D9)
   async #history(sessionId: string): Promise<{ role: string, text: string }[]> {
     const rows = await this.#d.db.select().from(planMessages).where(eq(planMessages.sessionId, sessionId)).orderBy(asc(planMessages.createdAt))
-    return rows.map(m => ({ role: m.role === 'human' ? 'Human' : m.kind === 'question' ? 'PM (question)' : 'PM', text: m.kind === 'question' ? questionText(m) : m.text }))
+    return rows.map(m => ({ role: m.role === 'thread' ? `Thread ${m.senderTitle ?? 'Removed thread'} (${m.senderSessionId ?? 'removed'})` : m.role === 'human' ? 'Human' : m.kind === 'question' ? 'PM (question)' : 'PM', text: m.kind === 'question' ? questionText(m) : m.text }))
   }
 
   async #toSession(row: SessionRow, activeRunId?: string | null): Promise<PlanSession> {
@@ -1060,8 +1121,13 @@ export class PlanService {
 
 // A session as the API shows it, with the plan waiting for approval and its
 // latest message, which the Inbox's Plan thread items also need (D11)
-export async function sessionState(db: Executor, row: SessionRow, activeRunId?: string | null): Promise<{ session: PlanSession, planId: string | null, last: typeof planMessages.$inferSelect | null }> {
+export async function sessionState(db: Executor, row: SessionRow, activeRunId?: string | null): Promise<{ session: PlanSession, planId: string | null, last: typeof planMessages.$inferSelect | null, question: typeof planMessages.$inferSelect | null }> {
   const [last] = await db.select().from(planMessages).where(eq(planMessages.sessionId, row.id)).orderBy(desc(planMessages.createdAt)).limit(1)
+  // Completion notices add context; they do not answer a pending question.
+  const [latestConversation] = last?.kind === 'notification'
+    ? await db.select().from(planMessages)
+        .where(and(eq(planMessages.sessionId, row.id), ne(planMessages.kind, 'notification'))).orderBy(desc(planMessages.createdAt)).limit(1)
+    : [last]
   const [proposed] = await db.select({ id: plans.id }).from(plans).where(and(eq(plans.sessionId, row.id), eq(plans.status, 'proposed'))).limit(1)
   let runId = activeRunId ?? null
   if (activeRunId === undefined) {
@@ -1071,18 +1137,19 @@ export async function sessionState(db: Executor, row: SessionRow, activeRunId?: 
   }
   const session: PlanSession = {
     id: row.id,
+    parentSessionId: row.parentSessionId,
     projectId: row.projectId,
     title: row.title,
     runtime: row.runtime as AgentRuntime,
     preview: last?.text.slice(0, 160) ?? '',
     unread: row.unread,
     closed: row.closedAt !== null,
-    status: proposed ? 'needs_approval' : last?.kind === 'question' ? 'question' : 'none',
+    status: proposed ? 'needs_approval' : latestConversation?.kind === 'question' ? 'question' : 'none',
     activeRunId: runId,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString()
   }
-  return { session, planId: proposed?.id ?? null, last: last ?? null }
+  return { session, planId: proposed?.id ?? null, last: last ?? null, question: session.status === 'question' ? latestConversation ?? null : null }
 }
 
 // Whether an agent holds the task now or has ever run on it
@@ -1127,7 +1194,9 @@ export function toMessage(row: typeof planMessages.$inferSelect): PlanMessage {
   return {
     id: row.id,
     sessionId: row.sessionId,
-    role: row.role as 'human' | 'pm',
+    role: row.role as PlanMessage['role'],
+    senderSessionId: row.senderSessionId,
+    senderTitle: row.senderTitle,
     kind: row.kind as PlanMessage['kind'],
     text: row.text,
     pendingAction: row.pendingAction,
@@ -1172,3 +1241,7 @@ function designBuildMessage(ref: string, title: string, version: number, note: s
 }
 
 const STATUS_NAMES: Record<string, string> = { draft: 'Draft', backlog: 'Backlog', ready: 'Ready' }
+
+function threadText(sender: { id: string, title: string }, text: string): string {
+  return `Message from PM thread “${sender.title}” (${sender.id}), not from the human:\n${text}`
+}

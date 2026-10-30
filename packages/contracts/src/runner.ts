@@ -55,7 +55,7 @@ const taskJobContext = {
   continueFrom: z.string().nullish()
 }
 export const pmRunJobSchema = z.object({
-  ...runJobCommon, role: z.literal('pm'), planSessionId: z.string().min(1),
+  ...runJobCommon, projectId: z.string().nullable(), role: z.literal('pm'), planSessionId: z.string().min(1),
   taskId: z.null(), taskRef: z.null(), branch: z.null(), headSha: z.null(),
   baseBranch: z.never().optional(), epicId: z.never().optional(),
   taskType: z.null().optional(), designPinned: z.never().optional(), continueFrom: z.never().optional()
@@ -276,6 +276,7 @@ export const runExitSchema = z.discriminatedUnion('kind', [
 
 export const agentToolSchema = z.enum([
   'list_inbox', 'act_on_inbox', 'approve_design', 'request_design_changes', 'list_agents', 'update_agent', 'create_agent',
+  'start_thread', 'list_threads', 'read_thread', 'message_thread', 'close_thread',
   'delete_project', 'stop_run', 'stop_all', 'resume_all', 'list_projects', 'get_project', 'update_project', 'create_project', 'message_run', 'get_status', 'set_update_hold', 'clear_update_hold',
   'delete_task', 'create_task', 'update_task', 'move_task', 'approve_task', 'update_epic',
   'get_task', 'add_comment', 'attach_evidence', 'get_evidence', 'get_attachment',

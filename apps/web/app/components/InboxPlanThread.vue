@@ -95,9 +95,10 @@ async function approve(to: 'ready' | 'backlog') {
           <div class="flex items-center gap-2 overflow-hidden text-xs whitespace-nowrap text-muted">
             <span><span class="font-medium text-default">{{ item.sender.name }}</span> · PM</span>
             <span class="flex items-center gap-1"><ProjectThumbnail
+              v-if="item.project"
               :project="item.project"
               :size="16"
-            />{{ item.project.name }}</span>
+            />{{ item.project?.name ?? 'Global' }}</span>
             <UBadge
               v-if="item.status !== 'none'"
               :label="item.status === 'needs_approval' ? 'Needs approval' : 'Question'"

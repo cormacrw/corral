@@ -119,6 +119,23 @@ describe('ToolServer', () => {
     await client.close()
   })
 
+  it('registers thread tools only for the PM and validates their inputs over MCP', async () => {
+    const { client, calls } = await connect('pm')
+    const listed = (await client.listTools()).tools
+    for (const name of ['start_thread', 'list_threads', 'read_thread', 'message_thread', 'close_thread']) {
+      expect(listed.some(t => t.name === name)).toBe(true)
+      expect(ROLE_TOOLS.developer).not.toContain(name)
+      expect(ROLE_TOOLS.reviewer).not.toContain(name)
+    }
+    const input = { title: 'Inspect code', message: 'Read the entry point', project: 'test-app', runtime: 'codex' }
+    expect((await client.callTool({ name: 'start_thread', arguments: input })).isError).not.toBe(true)
+    expect(calls).toEqual([{ tool: 'start_thread', input }])
+    expect((await client.callTool({ name: 'start_thread', arguments: { title: 'Missing message' } })).isError).toBe(true)
+    expect((await client.callTool({ name: 'read_thread', arguments: { threadId: attachmentId, limit: 101 } })).isError).toBe(true)
+    expect(calls).toHaveLength(1)
+    await client.close()
+  })
+
   it('gives the PM a get_task that takes a required taskRef and passes it through', async () => {
     const { client, calls } = await connect('pm')
     const { tools: listed } = await client.listTools()

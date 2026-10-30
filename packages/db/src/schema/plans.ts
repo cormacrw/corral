@@ -24,6 +24,7 @@ import { tasks } from './tasks.ts'
 // The agent CLI's session ID is only a cache: the messages here are the
 // source of truth, and a lost session is reseeded from them.
 export const planSessions = pgTable('plan_sessions', {
+  parentSessionId: uuid().references((): AnyPgColumn => planSessions.id, { onDelete: 'set null' }),
   id: uuid().primaryKey().defaultRandom(),
   projectId: uuid().references(() => projects.id, { onDelete: 'cascade' }),
   title: text().notNull(),
@@ -43,6 +44,8 @@ export const planSessions = pgTable('plan_sessions', {
 }, t => [index().on(t.projectId, t.updatedAt)])
 
 export const planMessages = pgTable('plan_messages', {
+  senderSessionId: uuid().references(() => planSessions.id, { onDelete: 'set null' }),
+  senderTitle: text(),
   id: uuid().primaryKey().defaultRandom(),
   sessionId: uuid().notNull().references(() => planSessions.id, { onDelete: 'cascade' }),
   // 'human' or 'pm'; questions are PM messages flagged as such
