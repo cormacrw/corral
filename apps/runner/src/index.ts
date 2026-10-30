@@ -1,3 +1,4 @@
+import { detectResources } from './resources.ts'
 import { printReady, shortenHome } from './banner.ts'
 import { gitAuthorWarning, loadConfig } from './config.ts'
 import { ServerConnection } from './connection.ts'
@@ -8,7 +9,7 @@ import { UpdateStatus } from './update-status.ts'
 import { RunManager } from './run-manager.ts'
 import { installSkills, pinnedSkillsDir, skillTargets } from './skills.ts'
 
-const config = loadConfig()
+const config = loadConfig(process.env, await detectResources())
 const warning = gitAuthorWarning(config)
 if (warning) console.warn(`Warning: ${warning}`)
 await installSkills(pinnedSkillsDir, skillTargets())
@@ -20,7 +21,7 @@ let announced = false
 const connection: ServerConnection = new ServerConnection(config.serverUrl, { runnerId, name: config.name }, {
   activeRuns: () => runs.activeRuns(),
   activeRunCount: () => runs.activeRunCount(),
-  capacity: async () => ({ slots: config.slots, roles: config.roles, runtimes: await signedInRuntimes(config) }),
+  capacity: async () => ({ slots: config.slots, slotSource: config.slotSource, roles: config.roles, runtimes: await signedInRuntimes(config) }),
   onStatus(status, detail) {
     if (status === 'connected') {
       printReady('Corral runner connected', {

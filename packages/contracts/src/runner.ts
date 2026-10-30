@@ -192,7 +192,17 @@ export type ServerMessage =
 
 // What a runner takes on, sent in its hello. The server only assigns a run
 // to a runner that takes its role, has its runtime and has a free slot.
+export type SlotSource = { kind: 'explicit' } | {
+  kind: 'derived'
+  cpus: number
+  memoryBytes: number
+  slotCpus: number
+  slotMemoryBytes: number
+}
+
 export interface RunnerCapacity {
+  // Optional for runners deployed before resource-based sizing.
+  slotSource?: SlotSource | undefined
   // Most agent runs the machine runs at once (CORRAL_RUNNER_SLOTS)
   slots: number
   // Runtime ids with a signed-in CLI, e.g. 'claude-code', 'codex'

@@ -8,6 +8,7 @@ import {
   type RunnerStatus,
   type ServerMessage,
   type SetupJob,
+  type SlotSource,
   type SetupJobResult
 } from '@corral/contracts'
 import { randomUUID } from 'node:crypto'
@@ -334,10 +335,19 @@ export class RunnerHub {
 // A hello's capacity, checked: anything missing falls back to `fallback`
 function parseCapacity(message: Extract<RunnerMessage, { type: 'hello' }>, fallback?: RunnerCapacity): RunnerCapacity {
   return {
+    slotSource: parseSlotSource(message.slotSource),
     slots: Number.isInteger(message.slots) && message.slots > 0 ? message.slots : fallback?.slots ?? 1,
     runtimes: Array.isArray(message.runtimes) ? message.runtimes.filter(r => typeof r === 'string') : fallback?.runtimes ?? [],
     roles: Array.isArray(message.roles) ? message.roles.filter(r => (RUNNER_ROLES as readonly string[]).includes(r)) : fallback?.roles ?? []
   }
+}
+
+function parseSlotSource(source: SlotSource | undefined): SlotSource | undefined {
+  if (source?.kind === 'explicit') return { kind: 'explicit' }
+  if (source?.kind !== 'derived') return undefined
+  const { cpus, memoryBytes, slotCpus, slotMemoryBytes } = source
+  if (![cpus, memoryBytes, slotCpus, slotMemoryBytes].every(n => Number.isFinite(n) && n > 0)) return undefined
+  return { kind: 'derived', cpus, memoryBytes, slotCpus, slotMemoryBytes }
 }
 
 export function runnerOffline(): ApiFailure {
