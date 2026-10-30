@@ -69,7 +69,7 @@ describe.each([
       where table_schema = 'public' order by table_name`) as unknown as { rows: { table_name: string }[] }
     expect(result.rows.map(r => r.table_name)).toEqual([
       'acceptance_criteria', 'agents', 'attachments', 'audit_log', 'comments', 'deployments', 'design_versions', 'epic_dependencies', 'epics', 'evidence', 'plan_epics', 'plan_messages', 'plan_sessions', 'plan_tasks', 'plans',
-      'projects', 'reviews', 'runs', 'settings', 'task_dependencies', 'task_design_pins', 'tasks', 'users'
+      'projects', 'reviews', 'runs', 'settings', 'task_dependencies', 'task_design_pins', 'task_integration_operations', 'task_submissions', 'tasks', 'users'
     ])
   })
 
