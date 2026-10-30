@@ -391,6 +391,7 @@ export async function applyTransition(
 // when the description and criteria are as they were
 export interface TaskContentEdit {
   description: boolean
+  fields?: string[]
   criteria: { added: number, removed: number, reworded: number } | null
 }
 
@@ -444,7 +445,9 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
     }
     if (dependsOn) await setDependencies(tx, project, task, dependsOn)
     await appendAudit(tx, { projectId: project.id, taskId, actor }, auditEvent('task.updated', { changed: Object.keys(input) }))
-    return descriptionChanged || criteriaChange ? { description: descriptionChanged, criteria: criteriaChange } : null
+    const changedFields = Object.keys(fields).filter(k => JSON.stringify(fields[k as keyof typeof fields]) !== JSON.stringify(task[k as keyof TaskRow]))
+    if (dependsOn !== undefined) changedFields.push('dependsOn')
+    return descriptionChanged || criteriaChange || changedFields.length ? { description: descriptionChanged, criteria: criteriaChange, fields: changedFields.filter(k => k !== 'description') } : null
   })
 }
 

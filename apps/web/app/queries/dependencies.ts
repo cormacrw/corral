@@ -156,7 +156,7 @@ export const eventDependencies: EventDependencies = {
       const slug = cache.slug(epic.projectId)
       if (slug) cache.set<Epic[]>(keys.epics.list(slug), upsertInto(epic))
     },
-    invalidates: ({ epic }, cache) => [keys.inbox(), ...(cache.slug(epic.projectId) ? [] : [keys.epics.lists()])]
+    invalidates: ({ epic }, cache) => [keys.inbox(), keys.epics.history(epic.id), ...(cache.slug(epic.projectId) ? [] : [keys.epics.lists()])]
   },
   'agent.updated': {
     write: ({ agent }, cache) => cache.set<Agent[]>(keys.agents.list(), upsertInto(agent)),
@@ -285,7 +285,7 @@ function eventCache(client: QueryClient, raced: QueryKey[]): EventCache {
     get: key => client.getQueryData(key),
     slug: projectId => client.getQueryData<Project[]>(keys.projects.list())?.find(p => p.id === projectId)?.slug,
     taskRef: taskId => cachedTasks(client).find(t => t.id === taskId)?.ref,
-    epicsWith: taskId => client.getQueriesData<EpicDetail>({ queryKey: keys.epics.details() })
+    epicsWith: taskId => client.getQueriesData<EpicDetail>({ queryKey: keys.epics.details(), predicate: query => query.queryKey.length === keys.epics.detail('').length })
       .filter(([, epic]) => epic?.tasks.some(t => t.id === taskId))
       .map(([, epic]) => epic!.id),
     clearProject: projectId => clearProject(client, projectId)

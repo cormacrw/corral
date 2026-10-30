@@ -143,7 +143,7 @@ export const ROLE_TOOLS: Record<AgentRole, AgentTool[]> = {
   designer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'submit_design', 'report_outcome'],
   developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'report_outcome'],
   reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'get_design', 'report_outcome'],
-  pm: ['attach_evidence', 'list_tasks', 'get_task', 'add_comment', 'get_run_outcomes', 'get_agent_activity', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs', 'delete_task', ...Object.keys(pmDirectTools) as PmDirectTool[]]
+  pm: ['attach_evidence', 'list_tasks', 'get_task', 'add_comment', 'get_run_outcomes', 'get_agent_activity', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs', 'delete_task', 'create_task', 'update_task', 'move_task', 'approve_task', 'update_epic', ...Object.keys(pmDirectTools) as PmDirectTool[]]
 }
 
 // The tools a run gets: its role's alone. Only a designer submits designs (D23)

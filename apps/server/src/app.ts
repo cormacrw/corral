@@ -47,7 +47,7 @@ import { recordDeployment, updateDeploymentInbox, type ReleaseNotes } from './de
 import { flowMetrics } from './flow-metrics.ts'
 import { approveDesign, DESIGN_BUNDLE_HEADERS, listDesignVersions, readDesignFile, readDesignScreenshot } from './designs.ts'
 import { checkAvatar, getProfile, patchProfile, readAvatar, setAgentAvatar, setUserAvatar } from './avatars.ts'
-import { getEpic, listEpics, patchEpic, setEpicDependencies } from './epics.ts'
+import { getEpic, listEpicHistory, listEpics, patchEpic, setEpicDependencies } from './epics.ts'
 import type { EventBus } from './events.ts'
 import { loadInbox } from './inbox.ts'
 import { listPullRequests } from './pull-requests.ts'
@@ -303,6 +303,8 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     })
 
     .post('/epics/:id/review', validate('json', epicReviewActionInput), async c => c.json(await orchestrator.epicPrs.humanAction(c.req.param('id'), c.req.valid('json'), actor)))
+
+    .get('/epics/:id/history', async c => c.json(await listEpicHistory(db, c.req.param('id'))))
 
     .get('/epics/:id', async c => c.json(await getEpic(db, c.req.param('id'))))
 
