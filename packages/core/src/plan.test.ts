@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkPlan, designPinKey, diffPlans, type DesignPinTarget, type PlanRef, type ProposedTask } from './plan.ts'
+import { checkPlan, checkPlanEpicDependencies, designPinKey, diffPlans, type DesignPinTarget, type PlanRef, type ProposedTask } from './plan.ts'
 import { checkDefinitionOfReady, type TaskContent } from './ready.ts'
 
 const task = (key: string, overrides: Partial<ProposedTask> = {}): ProposedTask => ({
@@ -104,6 +104,29 @@ describe('checkPlan with refs', () => {
       task('b', { ref: 'COR-2', dependsOn: ['COR-1'] }),
       task('c', { dependsOn: ['a', 'b'] })
     ] }, refs)).toEqual([])
+  })
+
+  it.each(['COR-4', 'cor-4'])('rejects ref-shaped task key %s with a clear problem', (key) => {
+    expect(checkPlan({ title: 'x', summary: '', epics, tasks: [task(key), task('consumer', { dependsOn: ['COR-4'] })] }, refs))
+      .toContainEqual({ code: 'key_shaped_like_ref', key, message: expect.stringContaining('Choose a key') })
+  })
+
+  it.each(['COR-3', 'cor-3'])('resolves existing dependency %s regardless of map key case', (dep) => {
+    const plan = { title: 'x', summary: '', epics, tasks: [task('a', { dependsOn: [dep] })] }
+    expect(checkPlan(plan, refs)).toEqual([])
+    expect(checkPlan(plan, new Map([['cor-3', { kind: 'task', status: 'in_progress' }]]))).toEqual([])
+  })
+
+  it('validates lowercase refs and detects duplicate revisions case-insensitively', () => {
+    expect(checkPlan({ title: 'x', summary: '', epics, tasks: [task('a', { ref: 'cor-1' }), task('b', { ref: 'COR-1' })] }, refs))
+      .toEqual([{ code: 'duplicate_ref', key: 'a', ref: 'cor-1' }])
+    expect(checkPlan({ title: 'x', summary: '', epics, tasks: [task('a', { dependsOn: ['cor-4'] })] }, refs))
+      .toEqual([expect.objectContaining({ code: 'deleted_ref', ref: 'cor-4' })])
+  })
+
+  it.each([['COR-1', 'cor-1'], ['cor-1', 'COR-1']])('finds revised-node cycles with ref %s and dependency %s', (ref, dep) => {
+    expect(checkPlan({ title: 'x', summary: '', epics, tasks: [task('a', { ref, dependsOn: ['b'] }), task('b', { dependsOn: [dep] })] }, refs))
+      .toEqual([{ code: 'dependency', problem: { code: 'cycle', path: ['a', 'b', 'a'] } }])
   })
 
   it('says why each ref it can\'t revise is wrong', () => {
@@ -232,6 +255,21 @@ describe('plan epic dependency validation', () => {
   it('rejects combined task/epic deadlocks with both epic titles', () => {
     expect(checkPlan({ ...proposal, tasks: [task('a', { dependsOn: ['b'] }), task('b', { epic: 'e2' })] })).toContainEqual({ code: 'epic_task_deadlock', path: expect.any(Array), epics: expect.arrayContaining(['Mobile PWA', 'Offline']) })
   })
+  it.each(['COR-4', 'cor-4'])('overlays revised nodes and existing refs in the epic graph for %s', (dep) => {
+    const context = {
+      epics: new Map([['existing', [] as string[]]]), titles: new Map([['existing', 'Existing']]),
+      epicIds: new Map<string, string>(), taskIds: new Map<string, string>(), refIds: new Map([['cor-4', 'existing-task']]),
+      tasks: [{ type: 'task' as const, id: 'existing-task', epicId: 'existing', status: 'ready' as const, dependsOn: ['plan-task:b'] }]
+    }
+    const plan = { ...proposal, tasks: [task('b', { dependsOn: [dep] })], epics: [proposal.epics[0]!] }
+    expect(checkPlanEpicDependencies(plan, context)).toContainEqual(expect.objectContaining({ code: 'epic_task_deadlock' }))
+    // Revising COR-4 replaces its old edges instead of leaving a phantom node.
+    plan.tasks.push(task('revision', { ref: 'CoR-4' }))
+    expect(checkPlanEpicDependencies(plan, context)).toEqual([])
+    plan.tasks[1]!.dependsOn = ['b']
+    expect(checkPlanEpicDependencies(plan, context)).toContainEqual(expect.objectContaining({ code: 'epic_task_deadlock' }))
+  })
+
   it('includes existing project tasks and epic edges in the wait graph', () => {
     const context = {
       epics: new Map([['existing', [] as string[]]]), titles: new Map([['existing', 'Existing foundation']]),
