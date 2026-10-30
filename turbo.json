@@ -1,5 +1,7 @@
 {
   "$schema": "https://turborepo.com/schema.json",
+  "globalDependencies": ["scripts/check-cpus.ts"],
+  "globalPassThroughEnv": ["CORRAL_CHECK_CPUS"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

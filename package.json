@@ -8,7 +8,8 @@
     "lint": "turbo run lint && eslint scripts",
     "typecheck": "turbo run typecheck && tsc",
     "test": "turbo run test",
-    "test:exit-codes": "node scripts/test-exit-codes.ts"
+    "test:exit-codes": "node scripts/test-exit-codes.ts",
+    "check": "node scripts/check.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

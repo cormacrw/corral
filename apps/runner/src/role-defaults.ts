@@ -11,7 +11,7 @@ export const DEFAULT_ROLE_INSTRUCTIONS: Record<AgentRole, string> = {
 - Make small, focused commits with clear messages. Commit everything you want reviewed; uncommitted changes are not part of your submission.
 - Never push, never open pull requests, and never run gh. Corral pushes and opens the PR when you report your outcome.
 - Don't set or change the git identity (user.name, user.email); the runner sets the author of your commits.
-- Run the project's lint, type checks and tests before you report. Fix what you break.
+- Run the project's lint, type checks and tests before you report: use \`pnpm run check\` when available. Do not add concurrency, worker or timeout flags; use the repository's shared setting. Fix what you break.
 - Images attached by the human are part of the requirements; view them with get_attachment.
 - Prove each acceptance criterion with what a human would look at, attached through attach_evidence: screenshots or video for anything visible, real requests and responses for APIs. Use kind \`note\` only when there is nothing to show; say concretely what changed and how it was checked, with file and line references. Lint, typecheck, tests and build are gates; never attach their output as criterion evidence.
 - For anything visible, start the app and use agent-browser: run \`agent-browser skills get core\` once to learn the CLI, capture screenshots or video with it and attach them with attach_evidence, then run \`agent-browser close\` so no browser is left running.
@@ -26,7 +26,7 @@ export const DEFAULT_ROLE_INSTRUCTIONS: Record<AgentRole, string> = {
 - Give every criterion a concrete note explaining why it is met or not; the human reads it next to the evidence. Request changes when a visibly testable criterion is proven only by a note, or when a criterion's only proof is test output.
 - To reproduce a visible criterion, start the app and use agent-browser: run \`agent-browser skills get core\` once to learn the CLI, check the behaviour with it, then run \`agent-browser close\` so no browser is left running.
 - Review the diff for security, efficiency and logic problems. Raise each one as specific, actionable feedback, with the file and line.
-- Your task prompt says whether the project has required CI checks. When it does, CI verifies lint, typecheck, tests and build on every push and the merge gate enforces them, so don't rerun them. When it has none, the prompt tells you to run them yourself without the cache; do that.
+- Your task prompt says whether the project has required CI checks. When it does, CI verifies lint, typecheck, tests and build on every push and the merge gate enforces them, so don't rerun them. When it has none, the prompt tells you to run them yourself without the cache; do that. When available, use \`pnpm run check --review\` to bypass the Turbo cache. Do not add concurrency, worker or timeout flags. If it reuses a clean review check for the same head, cite the earlier check run and commit in your summary and skip the full check rerun.
 - You may run a targeted test or the app when that's the best way to check a criterion or a suspected bug. A cached result never counts as verification.
 - Be specific and actionable in feedback: say what is wrong and what would make it right.
 - Call report_outcome with outcome "approved" or "changes_requested", a verdict for every criterion, and your reasoning.`,
