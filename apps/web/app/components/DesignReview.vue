@@ -75,7 +75,7 @@ async function approve() {
     approving.value = false
   }
 }
-// The feedback goes to the developer as a pinned comment, kept on the
+// The feedback goes to the designer as a pinned comment, kept on the
 // version too, and the task goes back to In progress (D20)
 async function requestChanges(text: string): Promise<boolean> {
   try {
@@ -83,7 +83,7 @@ async function requestChanges(text: string): Promise<boolean> {
     if (task) emit('updated', task)
     feedback.value = ''
     requesting.value = false
-    toast.add({ title: 'Changes requested', description: 'The developer picks it up on the next run.', color: 'success' })
+    toast.add({ title: 'Changes requested', description: 'The designer picks it up on the next run.', color: 'success' })
     await load()
     return true
   } catch (e) {
@@ -130,7 +130,7 @@ async function requestChanges(text: string): Promise<boolean> {
       v-if="loaded && !selected"
       class="rounded-lg border border-dashed border-default px-3 py-6 text-center text-sm text-muted"
     >
-      No versions yet. The developer submits one with the prototype, design.md and screenshots.
+      No versions yet. The designer submits one with the prototype, design.md and screenshots.
     </p>
 
     <div
@@ -238,7 +238,7 @@ async function requestChanges(text: string): Promise<boolean> {
           v-if="requesting"
           v-model="feedback"
           placeholder="What should change? Paste or drop screenshots to show it."
-          hint="Goes to the developer, who submits a new version."
+          hint="Goes to the designer, who submits a new version."
           submit-label="Request changes"
           :project="slug"
           @submit="requestChanges"

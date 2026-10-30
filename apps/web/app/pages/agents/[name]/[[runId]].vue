@@ -53,6 +53,11 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
               {{ agent.name }}
             </h1>
             <UBadge
+              :label="ROLE[agent.role]"
+              color="neutral"
+              variant="subtle"
+            />
+            <UBadge
               v-if="agentStatus(agent, now)"
               v-bind="agentStatus(agent, now)"
               variant="subtle"
