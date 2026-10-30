@@ -232,15 +232,26 @@ wake a sleeping PC. The host updater below handles code and image updates.
 ## Enable the host updater
 
 The checkout is dedicated to deployment: do not edit tracked files there. The
-updater checks out the server's exact SHA, including older commits, rather than
-following main. GitHub checkout authentication must work unattended for root
-(the system service user); for a public repo HTTPS needs no credentials. Runner
-CLI authentication remains separate. No registry or image publishing is used.
+updater obtains the server's exact SHA directly from the authenticated
+`/runner/version` endpoint, using the server URL and token in Docker's host-owned
+container configuration. It does not trust a target supplied by agent-writable
+volume files. Before checkout it fetches only `origin/main` and requires the
+server SHA to be an ancestor of that reviewed branch. An unmerged task-branch
+server build is deliberately refused; the existing runner keeps running.
+The SHA need not be the newest commit on main. GitHub checkout authentication
+must work unattended for root (the system service user); for a public repo HTTPS needs no credentials. Runner
+CLI authentication remains separate. Keep this deployment checkout and its
+`.git`/`.env` configuration outside all container mounts and writable only by
+trusted host administrators. Never bind-mount the checkout into agent containers.
+The default runner-data Docker volume path must have real directory components;
+symlinked mount paths are refused. Feedback uses an exclusively created temporary
+file and a pinned directory handle, so malicious volume symlinks cannot redirect
+root writes or chmods to host files. No registry or image publishing is used.
 
-Install `jq` and the timer inside Ubuntu, adjusting the service's checkout path:
+Install Python 3, `jq` and the timer inside Ubuntu, adjusting the service's checkout path:
 
 ```sh
-sudo apt-get install -y jq
+sudo apt-get install -y jq python3
 sudo cp scripts/deploy/corral-runner-update.{service,timer} /etc/systemd/system/
 sudo systemctl edit --full corral-runner-update.service
 # Set ExecStart to the absolute path of scripts/deploy/runner-update.sh in this checkout.

@@ -34,7 +34,7 @@ Three processes. In development they're all started together by `turbo dev`; whe
 - Owns task state, locks/leases, role permissions, merge eligibility, the scheduler, the merge orchestrator, and the GitHub API client.
 - **The only process that opens the database.** The web app and runner never touch it directly.
 - **Exactly one instance.** The scheduler and orchestrator are long-running loops inside this process. That's the reason it isn't folded into Nuxt's Nitro server: the web layer should be free to scale or redeploy on its own.
-- Serves the HTTP API (for web), SSE (to web), and the internal `/runner` WebSocket endpoint. An optional separate runner-only listener serves `/runner` and returns 404 for all other paths, including `/api/**` (D25). Both endpoints authenticate before registering a runner when a shared token is configured.
+- Serves the HTTP API (for web), SSE (to web), and the internal `/runner` WebSocket endpoint. An optional separate runner-only listener serves `/runner` and the authenticated, read-only `/runner/version` release metadata route, and returns 404 for other paths, including `/api/**` (D25). Both endpoints authenticate before registering a runner when a shared token is configured.
 - Project thumbnails: `PUT /api/projects/:slug/thumbnail` accepts one multipart `file`, PNG/JPEG/WebP/GIF with matching signature, at most 2 MiB. The existing `thumbnailBlob` stores its content hash; no image metadata migration is needed. `GET` infers the raster content type from the same signatures, sends `nosniff` and `private, no-cache`, and rejects stale `v` hashes. Project and inbox summaries expose nullable `thumbnailUrl` with a short hash query. `DELETE` clears the pointer while preserving the colour; upload and removal audit and broadcast `project.updated`. Blobs remain immutable and may be shared, so removal does not delete their bytes.
 - Inbox Needs you is one list, newest first by `at`: when a task entered its current status (its latest `task.transition` into it, else `updatedAt`), or when a Plan thread started waiting. Plan threads include only open sessions with a pending question, a proposed plan or an unread PM reply. Each carries a nullable question (text, recommendation, options), plan summary (id, version, title, summary, epicCount, taskCount) and reply (the latest PM message, set only when listed for an unread reply), rather than a last-message body. The Needs you count equals all listed task items and Plan threads.
 
@@ -70,10 +70,18 @@ Protocol 3 hello reports `commit` (`CORRAL_BUILD_SHA`, baked into both images us
 The runner atomically replaces `<dataDir>/update-status.json` at startup, on connection and protocol refusal, on drain and on run changes. It contains `commit`, `serverCommit` (null until known), `behind`, `draining`, `updateRequested`, `activeRunCount` and `idle` (zero active runs). The host updater reads this file; there is no updater port. Drain survives socket reconnects in the same process. A restarted process starts clear, so a runner restarted on the server commit takes work again. `GET /api/status` and runner status events include both commits and all three flags for every runner.
 
 The WSL host runs `scripts/deploy/runner-update.sh` from a systemd timer. It reads
-that status from the Docker data mount, fetches the exact server commit and builds
+that status from the Docker data mount as advisory drain/liveness information.
+It obtains the target independently from authenticated `/runner/version`, using
+Docker's host-owned container URL/token configuration, fetches only `origin/main`,
+and requires the target to be in that reviewed history before checking out any
+Dockerfile, Compose or updater code. It checks the running image commit through
+Docker configuration rather than the writable status file, and builds
 locally while the old container runs, then replaces only an idle, draining runner.
 No image registry or Docker socket mount is involved. Host feedback is atomically
-written to `updater-result.json` (target, state, error, attempt); the runner polls it and
+written to `updater-result.json` (target, state, error, attempt) through exclusive
+random temporary files and dirfd-relative rename. Every mount-path component is
+opened without following symlinks, and the directory handle stays pinned during
+writes/chmods/rename even if a parent is concurrently replaced; the runner polls it and
 sends `runner.update-status` with active count, drain/request flags and build/error
 state. Build failures release the drain on the old process. Settings shows these
 states and requests updates through the existing runner update endpoint.

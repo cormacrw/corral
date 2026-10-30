@@ -8,7 +8,12 @@ The host updater (separate task) reads `<runner data dir>/update-status.json`, a
 
 COR-188 adds the WSL host updater: `scripts/deploy/runner-update.sh` runs under
 `corral-runner-update.timer` every minute and at boot. It inspects the existing
-runner's data mount on the host, fetches/checks out the exact `serverCommit`,
+runner's data mount on the host for advisory liveness. It reads the authoritative
+target directly from authenticated `/runner/version`, with the immutable Docker
+container configuration supplying the server URL/token, then fetches only
+`origin/main` and refuses targets outside its reviewed history. A forged status
+SHA never selects deployment code. It checks the running image SHA via Docker,
+checks out the authenticated and reviewed server target,
 builds locally with that SHA, then waits for draining + idle + zero active runs
 (including terminal reports) before runner-only `up -d --no-build`. A lock avoids
 overlap. Current runners log and exit without Git or Compose mutations. The
@@ -22,3 +27,11 @@ Settings shares `RunnerUpdate` on desktop/mobile, including retry, remaining run
 waiting/building, offline replacement, failure and the online commit. Prototype
 fixtures expose each state. See `docs/runner-wsl2.md` for root service installation,
 checkout ownership, journald and the Windows startup task needed to boot WSL.
+
+Review hardening: `runner-update-io.py` handles untrusted volume I/O. It walks
+absolute mount paths with directory descriptors and O_NOFOLLOW, reads only a
+bounded regular status file, creates random O_EXCL/O_NOFOLLOW feedback files,
+fchmods the open file descriptor, and renames relative to the pinned directory.
+Pre-created temporary/destination symlinks and concurrent parent replacement
+cannot overwrite or chmod external host files. The dedicated host checkout must
+not be mounted into agent containers. Host Python 3 is a documented prerequisite.
