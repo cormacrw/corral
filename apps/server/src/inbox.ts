@@ -1,7 +1,7 @@
 import { needsAttention, type ReleaseNotesItem } from '@corral/contracts'
 import { epicInboxItems } from './epic-prs.ts'
 import type { Inbox, InboxItem, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
-import { richTextToPlainText, taskRef, type Actor } from '@corral/core'
+import { humanCheckTally, richTextToPlainText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, count, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { actorLabel } from './orchestrator.ts'
@@ -184,7 +184,7 @@ async function humanReviewNote(db: Executor, task: typeof tasks.$inferSelect): P
   const humanChecks = humanCriteria.length
   if (humanChecks > 0) {
     const met = review?.criteria.filter(c => c.met && !humanCriteria.some(h => h.id === c.criterionId)).length ?? 0
-    return `Approved, ${met} ${met === 1 ? 'criterion' : 'criteria'} met; ${humanChecks} ${humanChecks === 1 ? 'criterion needs' : 'criteria need'} a human check. These checks need your OK before the task merges.`
+    return `Approved, ${humanCheckTally(met, humanChecks)}. These checks need your OK before the task merges.`
   }
   const met = review ? `, ${review.criteria.length === 1 ? '1 criterion' : `all ${review.criteria.length} criteria`} met` : ''
   return `Approved${met}. This task is marked for human review, so it needs your OK before it merges.`

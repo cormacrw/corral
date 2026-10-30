@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { feedbackFixTitle, feedbackPoints, feedbackSimilarity, feedbackTokens, isRepeatedFeedback, REPEATED_FEEDBACK_THRESHOLD, reviewFeedbackText } from './review-feedback.ts'
+import { feedbackFixTitle, feedbackPoints, feedbackSimilarity, feedbackTokens, humanCheckTally, isRepeatedFeedback, REPEATED_FEEDBACK_THRESHOLD, reviewFeedbackText } from './review-feedback.ts'
 
 describe('feedbackTokens', () => {
   it('ignores case, punctuation, accents and repeats', () => {
@@ -96,5 +96,12 @@ describe('feedbackFixTitle', () => {
     const title = feedbackFixTitle('word '.repeat(60))
     expect(title.length).toBeLessThanOrEqual('Fix integration: '.length + 100)
     expect(title.endsWith('…')).toBe(true)
+  })
+})
+
+describe('humanCheckTally', () => {
+  it('uses the singular and plural for each count', () => {
+    expect(humanCheckTally(1, 1)).toBe('1 criterion met; 1 criterion needs a human check')
+    expect(humanCheckTally(0, 2)).toBe('0 criteria met; 2 criteria need a human check')
   })
 })

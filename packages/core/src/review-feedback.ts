@@ -82,3 +82,8 @@ export function feedbackFixTitle(feedback: string): string {
   const title = sentence.replace(/[.!;:,]+$/, '')
   return `Fix integration: ${title.length > FIX_TITLE_LENGTH ? `${title.slice(0, FIX_TITLE_LENGTH - 1).trimEnd()}…` : title}`
 }
+
+// "1 criterion met; 2 criteria need a human check", for a verdict with human checks
+export function humanCheckTally(met: number, humanChecks: number): string {
+  return `${met} ${met === 1 ? 'criterion' : 'criteria'} met; ${humanChecks} ${humanChecks === 1 ? 'criterion needs' : 'criteria need'} a human check`
+}

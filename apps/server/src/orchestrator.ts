@@ -7,6 +7,7 @@ import {
   nextDesignVersion,
   reviewFeedbackText,
   transition,
+  humanCheckTally,
   taskRef,
   richTextToMarkdown,
   type Actor,
@@ -1363,7 +1364,7 @@ export class Orchestrator implements RunnerHandlers {
     // review and shown next to the evidence. Changes requested spells out
     // every criterion for the developer, except the narrow rebase comment.
     const summary = approval ? `Approval carried over a reviewed rebase from ${task.approvedHeadSha} to ${task.headSha}. ${report.summary.trim()}` : report.summary
-    const feedback = task.rebaseOnly ? `Rebase review ${verdict === 'approved' ? 'approved' : 'changes requested'}: ${report.summary.trim()}` : verdict === 'approved' ? `Approved: ${kept.some(v => v.met === null) ? `${kept.filter(v => v.met).length} criteria met; ${kept.filter(v => v.met === null).length} need human check` : `all ${kept.length} criteria met`}. ${report.summary.trim()}`.trim() : feedbackComment(report.summary, kept, criteria)
+    const feedback = task.rebaseOnly ? `Rebase review ${verdict === 'approved' ? 'approved' : 'changes requested'}: ${report.summary.trim()}` : verdict === 'approved' ? `Approved: ${kept.some(v => v.met === null) ? humanCheckTally(kept.filter(v => v.met).length, kept.filter(v => v.met === null).length) : `all ${kept.length} criteria met`}. ${report.summary.trim()}`.trim() : feedbackComment(report.summary, kept, criteria)
 
     const next = await db.transaction(async (tx) => {
       const locked = await lockTask(tx, task.id)
