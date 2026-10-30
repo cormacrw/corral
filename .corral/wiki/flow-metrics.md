@@ -38,3 +38,17 @@ including failed/interrupted/unstarted runs, divided by merged task count.
 sorted by descending lead time, then ref. Dominant status is the largest summed
 status duration; ties use first visited status. Refs use the current project
 prefix, as the rest of the API does.
+
+## Project overview
+
+Desktop and mobile share `ProjectFlow.vue`, defaulting to 30d with 7d/30d/90d
+buttons. Changing project or window clears the previous figures while loading;
+stale responses cannot overwrite the latest selection. Task/run live events
+refresh the cohort. Errors offer retry; zero merged tasks show an empty state.
+
+Status bars compare median durations on a shared scale. Human review is labelled
+Human wait (warning), development and agent review Agent time (primary), and
+remaining statuses Other wait (neutral). These are status residence times, not
+measured active execution. Run duration and queue wait have separate percentiles.
+Slowest task refs link to task pages. Prototype fixtures vary all figures by
+window; Marketing site's 7d window demonstrates no merges.

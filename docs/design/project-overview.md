@@ -44,7 +44,7 @@ The Ready tile’s waiting-on-dependency count includes each Ready task with an 
 
 ## Charts
 
-No charts here. Numbers are stat tiles, and epic progress is a single labelled meter in `primary`. Numbers and labels always use text tokens, never the series colour (see the dataviz conventions).
+The Flow section follows the stat tiles on desktop and mobile. It offers 7d / 30d / 90d windows (30d default), median and p90 lead/cycle times, median status bars with p90 labels, run duration and queue wait by role, and linked slowest tasks. Human review uses warning and the label “Human wait”; agent work uses primary and “Agent time”; other statuses use neutral and “Other wait”. Bars share a median scale and numbers use text tokens. An empty cohort shows “No tasks merged” for the selected window.
 
 ## States
 
