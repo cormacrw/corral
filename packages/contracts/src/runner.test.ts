@@ -1,5 +1,8 @@
+import { DEVELOPER_RUN_OUTCOMES, PM_RUN_OUTCOMES, REVIEWER_RUN_OUTCOMES, RUN_OUTCOMES } from '@corral/core'
 import { describe, expect, it } from 'vitest'
-import { runJobSchema, runnerMessageSchema, serverMessageSchema, type RunJob } from './runner.ts'
+import type { z } from 'zod'
+import { runLifecycleSchema } from './agents.ts'
+import { epicReviewReportSchema, outcomeReportSchema, rebaseReviewReportSchema, reportOutcomeInput, runJobSchema, runnerMessageSchema, serverMessageSchema, type RunJob } from './runner.ts'
 
 const common = {
   runId: 'run', runNumber: 1, leaseEpoch: 3, runtime: 'codex',
@@ -61,5 +64,76 @@ describe('runner protocol schemas', () => {
       expect(runnerMessageSchema.parse({ type: 'job.result', jobId: 'job', ok: true, result })).toMatchObject({ result })
     }
     expect(serverMessageSchema.parse({ type: 'tool.result', callId: 'call', ok: false, error: 'stale fence' })).toMatchObject({ error: 'stale fence' })
+  })
+})
+
+describe('outcome reports', () => {
+  const criteria = [{ criterionId: 'c1', met: true }]
+  const issues = (schema: z.ZodType, input: unknown) => {
+    const parsed = schema.safeParse(input)
+    return parsed.success ? [] : parsed.error.issues.map(i => [i.path.join('.'), i.message])
+  }
+
+  it.each(['approved', 'changes_requested'])('requires criteria on a task review reporting %s', (outcome) => {
+    expect(issues(outcomeReportSchema, { outcome, summary: 'Checked' })).toEqual([['criteria', 'Give a verdict for every acceptance criterion']])
+    expect(outcomeReportSchema.parse({ outcome, summary: 'Checked', criteria })).toMatchObject({ criteria: [{ criterionId: 'c1', met: true, note: '' }] })
+  })
+
+  it.each([outcomeReportSchema, rebaseReviewReportSchema])('rejects an unknown or missing outcome, and what only the exit can report', (schema) => {
+    for (const outcome of ['looks_fine', 'rate_limited', undefined]) {
+      expect(issues(schema, { outcome, summary: 'Done' })).toEqual([['outcome', expect.stringContaining('must be one of')]])
+    }
+  })
+
+  it('needs no criteria on outcomes that are not reviews', () => {
+    for (const outcome of ['pr_opened', 'stuck', 'blocked', 'failed']) {
+      expect(outcomeReportSchema.safeParse({ outcome, summary: 'Done' }).success).toBe(true)
+    }
+  })
+
+  it('needs no criteria on an approved rebase review, but does on its changes requested', () => {
+    expect(rebaseReviewReportSchema.safeParse({ outcome: 'approved', summary: 'Holds' }).success).toBe(true)
+    expect(issues(rebaseReviewReportSchema, { outcome: 'changes_requested', summary: 'Broken' })).toEqual([['criteria', expect.any(String)]])
+  })
+
+  it('takes only verdicts on an epic review, with no criteria', () => {
+    expect(epicReviewReportSchema.safeParse({ outcome: 'approved', summary: 'Holds' }).success).toBe(true)
+    expect(issues(epicReviewReportSchema, { outcome: 'failed', summary: 'Broken' })).toEqual([['outcome', 'must be one of approved, changes_requested']])
+  })
+
+  it('agrees with the tool\'s flat input on what an agent can report', () => {
+    expect(reportOutcomeInput.shape.outcome.options).not.toContain('rate_limited')
+    expect(reportOutcomeInput.shape.outcome.options).toHaveLength(RUN_OUTCOMES.length - 1)
+  })
+})
+
+describe('run lifecycle', () => {
+  const endedAt = '2026-10-30T10:00:00.000Z'
+  it.each([
+    { role: 'developer', state: 'running', outcome: null, endedAt: null },
+    { role: 'pm', state: 'completed', outcome: null, endedAt },
+    { role: 'pm', state: 'interrupted', outcome: null, endedAt },
+    { role: 'developer', state: 'interrupted', outcome: null, endedAt },
+    { role: 'reviewer', state: 'completed', outcome: 'approved', endedAt },
+    { role: 'developer', state: 'completed', outcome: 'rate_limited', endedAt }
+  ])('accepts $role $state with outcome $outcome', (run) => {
+    expect(runLifecycleSchema.safeParse(run).success).toBe(true)
+  })
+
+  it.each([
+    { role: 'developer', state: 'running', outcome: 'approved', endedAt },
+    { role: 'developer', state: 'running', outcome: null, endedAt },
+    { role: 'developer', state: 'completed', outcome: null, endedAt: null },
+    { role: 'developer', state: 'completed', outcome: 'approved', endedAt },
+    { role: 'pm', state: 'completed', outcome: 'stuck', endedAt }
+  ])('rejects $role $state with outcome $outcome', (run) => {
+    expect(runLifecycleSchema.safeParse(run).success).toBe(false)
+  })
+})
+
+describe('role outcomes', () => {
+  it('covers every outcome, with only the shared ones in more than one role', () => {
+    expect(new Set([...DEVELOPER_RUN_OUTCOMES, ...REVIEWER_RUN_OUTCOMES, ...PM_RUN_OUTCOMES])).toEqual(new Set(RUN_OUTCOMES))
+    expect(DEVELOPER_RUN_OUTCOMES.filter(o => (REVIEWER_RUN_OUTCOMES as readonly string[]).includes(o))).toEqual(PM_RUN_OUTCOMES)
   })
 })

@@ -458,12 +458,35 @@ describe('orchestrator', () => {
     const { project, task, review } = await underReview()
     const criterion = task.acceptanceCriteria[0]!
     const none = await runner.call(review.runId, review.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Looks good' })
-    expect(none).toMatchObject({ ok: false, error: expect.stringContaining(criterion.text) })
+    expect(none).toMatchObject({ ok: false, error: expect.stringContaining('criteria: Give a verdict for every acceptance criterion') })
+    const partial = await runner.call(review.runId, review.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Looks good', criteria: [] })
+    expect(partial).toMatchObject({ ok: false, error: expect.stringContaining(criterion.text) })
+    const unknown = await runner.call(review.runId, review.leaseEpoch, 'report_outcome', { outcome: 'looks_fine', summary: 'Looks good' })
+    expect(unknown).toMatchObject({ ok: false, error: expect.stringContaining('outcome: must be one of pr_opened') })
+    const blank = await runner.call(review.runId, review.leaseEpoch, 'report_outcome', { outcome: 'blocked', summary: ' ' })
+    expect(blank).toMatchObject({ ok: false, error: expect.stringContaining('summary: Add a summary') })
     const unmet = await runner.call(review.runId, review.leaseEpoch, 'report_outcome', {
       outcome: 'approved', summary: 'Looks good', criteria: [{ criterionId: criterion.id, met: false, note: 'nope' }]
     })
     expect(unmet).toMatchObject({ ok: false, error: expect.stringContaining('every criterion met') })
     expect(await taskRow(task.id)).toMatchObject({ status: 'agent_review', leaseRunId: review.runId })
+    await pause(project)
+  })
+
+  it('still checks the role after the report parses: a reviewer can\'t open a PR', async () => {
+    const { project, task, review } = await underReview()
+    const result = await runner.call(review.runId, review.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', summary: 'Opened' })
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('A reviewer reports') })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'agent_review', leaseRunId: review.runId })
+    await pause(project)
+  })
+
+  it('leaves a run the server stopped ended when run.started arrives late', async () => {
+    const { project, job } = await assigned()
+    await t.orchestrator.stopRun(job.runId, t.actor)
+    runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'late' })
+    await sleep(50)
+    expect(await runRow(job.runId)).toMatchObject({ state: 'interrupted', outcome: null, agentSessionId: null })
     await pause(project)
   })
 

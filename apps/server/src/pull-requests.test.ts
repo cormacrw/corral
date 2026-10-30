@@ -31,7 +31,7 @@ describe('project pull requests', () => {
     const pr = await t.github.openPullRequest(project.repository, { head: branch, base: 'main', title, body: '' })
     await t.db.update(tasks).set({ status: options.status ?? 'ready_to_merge', branch, prNumber: pr.number, prUrl: pr.url, headSha: sha }).where(eq(tasks.id, task.id))
     const [developer] = await t.db.select().from(agents).where(eq(agents.role, 'developer'))
-    const [run] = await t.db.insert(runs).values({ agentId: developer!.id, projectId: project.id, taskId: task.id, role: 'developer', state: 'completed' }).returning()
+    const [run] = await t.db.insert(runs).values({ agentId: developer!.id, projectId: project.id, taskId: task.id, role: 'developer', state: 'completed', endedAt: new Date() }).returning()
     if (options.evidence !== false) {
       for (const criterion of task.acceptanceCriteria) {
         await t.db.insert(evidence).values({ taskId: task.id, criterionId: criterion.id, runId: run!.id, round: 0, kind: 'test_output', blob: 'x', fileName: 't.txt', contentType: 'text/plain', size: 2 })

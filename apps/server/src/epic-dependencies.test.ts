@@ -60,7 +60,7 @@ describe('epic scheduling', () => {
     expect((await put(b.id, [])).status).toBe(200)
     const claim = await claimNextTask(t.db, dev.id, new Date(), [second.id])
     expect(claim?.taskId).toBe(second.id)
-    await t.db.update(schema.runs).set({ state: 'completed' }).where(eq(schema.runs.id, claim!.runId))
+    await t.db.update(schema.runs).set({ state: 'completed', endedAt: new Date() }).where(eq(schema.runs.id, claim!.runId))
     await t.db.update(tasks).set({ status: 'ready', leaseRunId: null, leaseRole: null, leaseExpiresAt: null }).where(eq(tasks.id, second.id))
     expect((await put(b.id, [a.id])).status).toBe(200)
     expect(await claimNextTask(t.db, dev.id, new Date(), [second.id])).toBeNull()
@@ -95,7 +95,7 @@ describe('epic scheduling', () => {
       await t.db.update(tasks).set({ status }).where(eq(tasks.id, first.id))
       const claim = await claimNextTask(t.db, dev.id, new Date(), [second.id])
       expect(claim?.taskId).toBe(second.id)
-      await t.db.update(schema.runs).set({ state: 'completed' }).where(eq(schema.runs.id, claim!.runId))
+      await t.db.update(schema.runs).set({ state: 'completed', endedAt: new Date() }).where(eq(schema.runs.id, claim!.runId))
       await t.db.update(tasks).set({ leaseRunId: null, leaseRole: null, leaseExpiresAt: null }).where(eq(tasks.id, second.id))
     }
     await t.db.update(tasks).set({ status: 'blocked', deletedAt: new Date() }).where(eq(tasks.id, first.id))
@@ -122,7 +122,7 @@ describe('epic scheduling', () => {
     const { project, b, first, second, dev } = await setup()
     runner = await FakeRunner.connect(t.server!.url)
     await t.db.update(agents).set({ wakeIntervalSeconds: 3600 }).where(eq(agents.id, dev.id))
-    await t.db.insert(schema.runs).values({ agentId: dev.id, projectId: project.id, taskId: first.id, role: 'developer', state: 'completed', queuedAt: t.clock.now })
+    await t.db.insert(schema.runs).values({ agentId: dev.id, projectId: project.id, taskId: first.id, role: 'developer', state: 'completed', endedAt: new Date(), queuedAt: t.clock.now })
     await t.orchestrator.schedule()
     expect((await t.db.select().from(tasks).where(eq(tasks.id, second.id)))[0]?.leaseRunId).toBeNull()
     const response = await t.request('PUT', `/api/epics/${b.id}/dependencies`, { dependsOn: [] })
@@ -161,7 +161,7 @@ describe('epic scheduling', () => {
     runner = await FakeRunner.connect(t.server!.url)
     await t.db.update(agents).set({ wakeIntervalSeconds: 3600 }).where(eq(agents.id, dev.id))
     // A recent run puts this developer inside its wake interval.
-    await t.db.insert(schema.runs).values({ agentId: dev.id, projectId: project.id, taskId: first.id, role: 'developer', state: 'completed', queuedAt: t.clock.now })
+    await t.db.insert(schema.runs).values({ agentId: dev.id, projectId: project.id, taskId: first.id, role: 'developer', state: 'completed', endedAt: new Date(), queuedAt: t.clock.now })
     t.github.setBranch(project.repository, 'fixture', 'abc')
     const pr = await t.github.openPullRequest(project.repository, { head: 'fixture', base: 'main', title: 'Foundation', body: '' })
     const live = t.github.pulls.get(pr.number)!

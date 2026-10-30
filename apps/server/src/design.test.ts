@@ -328,7 +328,7 @@ describe('design tasks submit versions instead of a PR', () => {
       await t.db.update(tasks).set({ status }).where(eq(tasks.id, created.id))
       if (ran) {
         const [agent] = await t.db.select().from(agents).where(eq(agents.role, 'developer')).limit(1)
-        await t.db.insert(runs).values({ agentId: agent!.id, projectId: project.id, taskId: created.id, role: 'developer', state: 'completed' })
+        await t.db.insert(runs).values({ agentId: agent!.id, projectId: project.id, taskId: created.id, role: 'developer', state: 'completed', endedAt: new Date() })
       }
       return created
     }

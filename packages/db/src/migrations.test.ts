@@ -54,8 +54,8 @@ describe('migrations', () => {
     await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('Test app', 'test-app', 'TA', 'cormacrw/test-app', 'main')`)
     await db.execute(sql`insert into agents (name, role) values ('Developer', 'developer')`)
     await db.execute(sql`insert into tasks (project_id, number, title, type, created_by) select id, 1, 'Historical task', 'task', '{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb from projects`)
-    await db.execute(sql`insert into runs (project_id, agent_id, task_id, role, state)
-      select p.id, a.id, t.id, 'developer', 'completed' from projects p, agents a, tasks t`)
+    await db.execute(sql`insert into runs (project_id, agent_id, task_id, role, state, ended_at)
+      select p.id, a.id, t.id, 'developer', 'completed', now() from projects p, agents a, tasks t`)
 
     await migrate(migrationsFolder)
     expect((await db.execute(sql`select data_type, is_nullable from information_schema.columns where table_name = 'runs' and column_name = 'runner_name'`)).rows).toEqual([{ data_type: 'text', is_nullable: 'YES' }])
@@ -82,8 +82,8 @@ describe('migrations', () => {
     await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('Test app', 'test-app', 'TA', 'cormacrw/test-app', 'main')`)
     await db.execute(sql`insert into agents (name, role) values ('Developer', 'developer')`)
     await db.execute(sql`insert into tasks (project_id, number, title, type, created_by) select id, 1, 'Historical task', 'task', '{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb from projects`)
-    await db.execute(sql`insert into runs (project_id, agent_id, task_id, role, state)
-      select p.id, a.id, t.id, 'developer', 'completed' from projects p, agents a, tasks t`)
+    await db.execute(sql`insert into runs (project_id, agent_id, task_id, role, state, ended_at)
+      select p.id, a.id, t.id, 'developer', 'completed', now() from projects p, agents a, tasks t`)
     await migrate(db, { migrationsFolder })
     expect((await db.execute(sql`select state, runner_id from runs`)).rows).toEqual([{ state: 'completed', runner_id: null }])
     await db.execute(sql`insert into runs (project_id, agent_id, task_id, role, runner_id)
@@ -255,6 +255,63 @@ describe('migrations', () => {
     const projects = await db.execute(sql`select epic_review_mode_default::text as mode from projects`)
     expect(projects.rows).toEqual([{ mode: 'epic' }])
   }, 60_000)
+
+  describe('0034 run lifecycle checks', () => {
+    const tag = '0034_material_fantastic_four'
+    async function historical(driver: 'pglite' | 'postgres') {
+      const before = await migrationsBefore(tag)
+      cleanup.push(() => rm(before, { recursive: true, force: true }))
+      const { db, migrate } = await open(driver)
+      await migrate(before)
+      const actor = sql`'{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb`
+      await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('P', 'p', 'PA', 'o/r', 'main')`)
+      await db.execute(sql`insert into tasks (project_id, number, title, type, created_by) select id, 1, 'T', 'task', ${actor} from projects`)
+      await db.execute(sql`insert into agents (name, role) values ('Juno', 'pm'), ('Atlas', 'developer')`)
+      return { db, migrate }
+    }
+    const insertDeveloperRun = (state: string, outcome: string | null, endedAt: boolean) => sql`insert into runs (project_id, agent_id, task_id, role, state, outcome, ended_at)
+      select t.project_id, a.id, t.id, 'developer', ${state}::run_state, ${outcome}::run_outcome, ${endedAt ? sql`now()` : null} from tasks t, agents a where a.role = 'developer'`
+
+    it.each([
+      { driver: 'pglite' as const, enabled: true },
+      { driver: 'postgres' as const, enabled: postgresAvailable }
+    ])('lists rows that break the checks and stops, changing nothing, on $driver', async ({ driver, enabled }) => {
+      if (!enabled) return
+      const { db, migrate } = await historical(driver)
+      await db.execute(insertDeveloperRun('running', 'approved', true))
+      await db.execute(insertDeveloperRun('completed', 'pr_opened', false))
+      await db.execute(insertDeveloperRun('completed', 'pr_opened', true))
+      const rows = () => db.execute(sql`select number, state::text as state, outcome::text as outcome, ended_at is not null as ended from runs order by number`)
+      const stored = (await rows()).rows
+
+      const failure = await migrate(migrationsFolder).then(() => null, (error: Error & { cause?: Error }) => error.cause?.message ?? error.message)
+      expect(failure).toContain('4 check violation(s) in runs')
+      expect(failure).toMatch(/run #1 \([0-9a-f-]+\): runs_ended_at_matches_state, role=developer state=running outcome=approved/)
+      expect(failure).toMatch(/run #1 .*: runs_outcome_only_when_ended/)
+      expect(failure).toMatch(/run #1 .*: runs_outcome_matches_role/)
+      expect(failure).toMatch(/run #2 .*: runs_ended_at_matches_state, role=developer state=completed outcome=pr_opened/)
+      expect(failure).not.toContain('run #3')
+      expect((await rows()).rows).toEqual(stored)
+      expect((await db.execute(sql`select count(*)::int as n from pg_constraint where conname like 'runs_%' and conname <> 'runs_task_unless_pm' and contype = 'c'`)).rows).toEqual([{ n: 0 }])
+    }, 60_000)
+
+    it.each([
+      { driver: 'pglite' as const, enabled: true },
+      { driver: 'postgres' as const, enabled: postgresAvailable }
+    ])('passes outcome-less PM turns and interrupted runs through, on $driver', async ({ driver, enabled }) => {
+      if (!enabled) return
+      const { db, migrate } = await historical(driver)
+      await db.execute(sql`insert into runs (project_id, agent_id, role, state, ended_at)
+        select p.id, a.id, 'pm', s.state::run_state, now() from projects p, agents a, (values ('completed'), ('interrupted')) s(state) where a.role = 'pm'`)
+      await db.execute(insertDeveloperRun('interrupted', null, true))
+      await db.execute(insertDeveloperRun('running', null, false))
+
+      await migrate(migrationsFolder)
+
+      expect((await db.execute(sql`select count(*)::int as n from runs`)).rows).toEqual([{ n: 4 }])
+      await expect(db.execute(insertDeveloperRun('running', null, true))).rejects.toThrow()
+    }, 60_000)
+  })
 
   // An empty database to migrate step by step: PGlite in memory, or a
   // throwaway database on the test Postgres server

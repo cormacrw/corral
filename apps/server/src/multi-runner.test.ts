@@ -63,7 +63,7 @@ describe('multiple runners', () => {
     await vi.waitFor(async () => expect((await t.db.select().from(schema.tasks).where(eq(schema.tasks.id, taskA.id)))[0]!.leaseExpiresAt!.getTime()).toBeGreaterThan(before!.getTime()))
     expect((await t.request('POST', `/api/runs/${jobs[0]!.runId}/stop`)).status).toBe(200)
     expect(await a.next('run.stop')).toMatchObject({ runId: jobs[0]!.runId })
-    const [legacy] = await t.db.insert(schema.runs).values({ projectId: project.id, agentId: agent!.id, taskId: taskA.id, role: 'developer', state: 'completed' }).returning()
+    const [legacy] = await t.db.insert(schema.runs).values({ projectId: project.id, agentId: agent!.id, taskId: taskA.id, role: 'developer', state: 'completed', endedAt: new Date() }).returning()
     expect(await (await t.request('GET', `/api/runs/${legacy!.id}`)).json()).toMatchObject({ runnerId: null, state: 'completed' })
   }, 30000)
 

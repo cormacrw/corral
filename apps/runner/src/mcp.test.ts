@@ -61,6 +61,26 @@ describe('ToolServer', () => {
     await client.close()
   })
 
+  it('rejects an unknown outcome before it reaches the server, naming the field', async () => {
+    const { client, calls } = await connect('reviewer')
+    const result = await client.callTool({ name: 'report_outcome', arguments: { outcome: 'looks_fine', summary: 'Looks good' } })
+    expect(result.isError).toBe(true)
+    expect(JSON.stringify(result.content)).toContain('outcome')
+    expect(calls).toEqual([])
+    await client.close()
+  })
+
+  // Claude's API refuses a tool whose input is a top-level union
+  it('lists report_outcome with a plain object input', async () => {
+    const { client } = await connect('reviewer')
+    const { tools } = await client.listTools()
+    const schema = tools.find(tool => tool.name === 'report_outcome')!.inputSchema
+    expect(schema).toMatchObject({ type: 'object', properties: { outcome: { enum: expect.arrayContaining(['approved', 'pr_opened']) } } })
+    expect(schema).not.toHaveProperty('oneOf')
+    expect(schema).not.toHaveProperty('anyOf')
+    await client.close()
+  })
+
   it('exposes blocked to reviewers and forwards it over MCP', async () => {
     const { client, calls } = await connect('reviewer')
     const input = { outcome: 'blocked', summary: 'main changed a binding decision used by the criteria' }

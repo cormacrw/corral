@@ -63,7 +63,7 @@ describe('two-phase update hold', () => {
     const reply = (await runner.next('run.assign', m => m.job.planSessionId === session.id && m.job.runId !== job.runId)).job
     runner.send({ type: 'run.started', runId: reply.runId, leaseEpoch: reply.leaseEpoch, agentSessionId: 'pm-session' })
     await vi.waitFor(async () => expect((await row(reply.runId)).state).toBe('running'))
-    await t.db.update(runs).set({ state: 'completed' }).where(eq(runs.id, worker!.id))
+    await t.db.update(runs).set({ state: 'completed', endedAt: new Date() }).where(eq(runs.id, worker!.id))
     expect(await hold()).toEqual({ busy: 1 })
     expect(await hold()).toEqual({ busy: 1 })
     await end(reply)
@@ -137,7 +137,7 @@ describe('two-phase update hold', () => {
     const merge = await t.createTask(project.slug)
     await t.db.update(tasks).set({ status: 'ready_to_merge', prNumber: 42, headSha: 'abc' }).where(eq(tasks.id, merge.id))
     for (const phase of ['draining', 'finishing']) {
-      if (phase === 'finishing') await t.db.update(runs).set({ state: 'completed' }).where(eq(runs.id, worker!.id))
+      if (phase === 'finishing') await t.db.update(runs).set({ state: 'completed', endedAt: new Date() }).where(eq(runs.id, worker!.id))
       await hold()
       await t.orchestrator.schedule()
       await t.orchestrator.merges.tick()

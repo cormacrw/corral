@@ -12,6 +12,7 @@ import {
   uuid,
   type AnyPgColumn
 } from 'drizzle-orm/pg-core'
+import { DEVELOPER_RUN_OUTCOMES, PM_RUN_OUTCOMES, REVIEWER_RUN_OUTCOMES, TERMINAL_RUN_STATES } from '@corral/core'
 import { createdAt, updatedAt } from './columns.ts'
 import { agentRole, runOutcome, runState } from './enums.ts'
 import { epics } from './epics.ts'
@@ -45,6 +46,9 @@ export const agents = pgTable('agents', {
   check('agents_concurrency_positive', sql`${t.concurrency} > 0`),
   check('agents_wake_interval_positive', sql`${t.wakeIntervalSeconds} > 0`)
 ])
+
+const sqlList = (values: readonly string[]) => sql.raw(`(${values.map(v => `'${v}'`).join(', ')})`)
+const terminalStates = sqlList(TERMINAL_RUN_STATES)
 
 // One agent session (PRD §4.5). PM turns have no task.
 export const runs = pgTable('runs', {
@@ -90,5 +94,21 @@ export const runs = pgTable('runs', {
   index().on(t.taskId),
   index().on(t.epicId),
   index().on(t.agentId, t.state),
-  check('runs_task_unless_pm', sql`${t.taskId} is not null or ${t.role} = 'pm' or (${t.epicId} is not null and ${t.role} = 'reviewer')`)
+  check('runs_task_unless_pm', sql`${t.taskId} is not null or ${t.role} = 'pm' or (${t.epicId} is not null and ${t.role} = 'reviewer')`),
+  // A PM turn belongs to neither a task nor an epic, a developer never to an
+  // epic, and a reviewer to one or the other. planSessionId isn't checked: it
+  // goes null when its session is deleted.
+  check('runs_role_context', sql`case ${t.role}
+    when 'pm' then ${t.taskId} is null and ${t.epicId} is null
+    when 'developer' then ${t.epicId} is null
+    else ${t.taskId} is null or ${t.epicId} is null
+  end`),
+  check('runs_ended_at_matches_state', sql`(${t.state} in ${terminalStates}) = (${t.endedAt} is not null)`),
+  check('runs_outcome_only_when_ended', sql`${t.outcome} is null or ${t.state} in ${terminalStates}`),
+  // As text: a migration can't use an enum value added in its own transaction
+  check('runs_outcome_matches_role', sql`${t.outcome} is null or case ${t.role}
+    when 'developer' then ${t.outcome}::text in ${sqlList(DEVELOPER_RUN_OUTCOMES)}
+    when 'reviewer' then ${t.outcome}::text in ${sqlList(REVIEWER_RUN_OUTCOMES)}
+    else ${t.outcome}::text in ${sqlList(PM_RUN_OUTCOMES)}
+  end`)
 ])
