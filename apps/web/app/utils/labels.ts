@@ -220,7 +220,7 @@ export function taskNote(task: Task, all: Task[], reviewRoundCap: number): { tex
     const waiting = task.dependsOn.filter(ref => all.find(t => t.ref === ref)?.status !== 'merged')
     if (waiting.length > 0) return { text: `Waiting on ${waiting.join(', ')}`, color: 'neutral' }
   }
-  if (task.status === 'blocked' || task.status === 'failed') return { text: task.statusReason ?? STATUS[task.status].label, color: 'error' }
+  if (task.status === 'blocked' || task.status === 'failed') return { text: task.statusReason, color: 'error' }
   if (task.status === 'human_review') return { text: 'Waiting for you', color: 'warning' }
   if (task.status === 'ready_to_merge') return { text: 'Merges when checks pass', color: 'neutral' }
   if (task.reviewRounds > 0 && (task.status === 'in_progress' || task.status === 'agent_review')) {

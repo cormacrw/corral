@@ -260,6 +260,13 @@
       "when": 1793377319156,
       "tag": "0036_robust_jackpot",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1793390012562,
+      "tag": "0037_nostalgic_thanos",
+      "breakpoints": true
     }
   ]
 }

@@ -133,7 +133,7 @@ describe('spikes deliver findings instead of a PR', () => {
     const comments = await commentsOf(project, task)
     expect(comments.find(c => c.body.startsWith('## Findings'))).toMatchObject({ author: { kind: 'agent', role: 'developer' }, body: `## Findings\n\n${FINDINGS}` })
     const detail = await full(project, task)
-    expect(detail).toMatchObject({ status: 'merged', prUrl: null })
+    expect(detail).toMatchObject({ status: 'merged', pr: null })
     expect(detail.acceptanceCriteria.every(c => c.met)).toBe(true)
 
     // Finishing the spike releases its dependent for developer work.

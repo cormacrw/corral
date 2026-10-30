@@ -249,14 +249,14 @@ route('GET', '/plan/sessions/:id', ([id]) => session(id!))
 function drafts(projectId: string): DraftSession[] {
   const rows = f.tasks.filter(t => t.projectId === projectId && t.status === 'draft').toSorted((a, b) => a.number - b.number)
   return f.planSessions
-    .filter(s => rows.some(t => t.planSessionId === s.id))
+    .filter(s => rows.some(t => t.draftSession?.id === s.id))
     .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .map(s => ({
       sessionId: s.id,
       title: s.title,
       updatedAt: s.updatedAt,
       planStatus: f.plans[s.id]?.at(-1)?.status ?? null,
-      drafts: rows.filter(t => t.planSessionId === s.id).map(t => ({ taskId: t.id, ref: t.ref, title: t.title, type: t.type, priority: t.priority }))
+      drafts: rows.filter(t => t.draftSession?.id === s.id).map(t => ({ taskId: t.id, ref: t.ref, title: t.title, type: t.type, priority: t.priority }))
     }))
 }
 route('GET', '/projects/:slug/drafts', ([slug]) => drafts(project(slug!).id))
@@ -266,7 +266,7 @@ route('POST', '/plan/plans/:id/approve', ([id], body) => {
   const { to } = body as { to: 'ready' | 'backlog' }
   Object.assign(plan, { status: 'approved', approvedAt: new Date().toISOString(), tasks: plan.tasks.map(p => p.status === 'draft' ? { ...p, status: to } : p) })
   for (const t of f.tasks.filter(t => plan.tasks.some(p => p.taskId === t.id) && t.status === 'draft')) {
-    Object.assign(t, { status: to, planSessionId: null, planSessionTitle: null })
+    Object.assign(t, { status: to, draftSession: null })
     emit({ type: 'task.updated', task: t })
   }
   const s = f.planSessions.find(x => x.id === plan.sessionId)
@@ -278,12 +278,12 @@ route('POST', '/plan/plans/:id/approve', ([id], body) => {
 // Closing discards only Drafts and unapproved plans, as the real endpoint does.
 route('POST', '/plan/sessions/:id/close', ([id]) => {
   const s = f.planSessions.find(x => x.id === id) ?? notFound()
-  for (const task of f.tasks.filter(t => t.planSessionId === s.id)) {
+  for (const task of f.tasks.filter(t => t.draftSession?.id === s.id)) {
     if (task.status === 'draft') {
       f.tasks.splice(f.tasks.indexOf(task), 1)
       emit({ type: 'task.deleted', taskId: task.id, projectId: task.projectId })
     } else {
-      Object.assign(task, { planSessionId: null, planSessionTitle: null })
+      Object.assign(task, { draftSession: null })
     }
   }
   for (const plan of f.plans[s.id] ?? []) {

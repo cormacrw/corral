@@ -210,12 +210,12 @@ const dotClass = (status: TaskStatus) => ({
 
       <template v-else-if="row.key === 'pr'">
         <a
-          v-if="props.task.prUrl"
-          :href="props.task.prUrl"
+          v-if="props.task.pr?.url"
+          :href="props.task.pr?.url"
           target="_blank"
           rel="noopener"
           class="text-primary hover:underline"
-        >#{{ props.task.prNumber }}</a>
+        >#{{ props.task.pr?.number }}</a>
         <span
           v-else
           class="text-muted"
