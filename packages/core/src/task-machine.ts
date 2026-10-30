@@ -196,8 +196,9 @@ export function transition(
     case 'human_request_changes':
       return ok({ ...task, ...(task.rebaseOnly && { rebaseOnly: false }), status: 'in_progress' })
 
-    // D5: only the task's own flag sends it to a human, except that a design
-    // always goes to one (D20). A spike has no PR to merge, so accepting its
+    // D5: the task's flag sends it to a human, which the server also sets for
+    // an each_task epic (D23) or a human check (D27), and a design always goes
+    // to one (D20). A spike has no PR to merge, so accepting its
     // findings finishes it.
     case 'review_approved':
       return ok({ ...task, ...(task.rebaseOnly && { rebaseOnly: false }), status: requiresHumanReview(task.type ?? 'task', task.humanReview) ? 'human_review' : 'ready_to_merge' })

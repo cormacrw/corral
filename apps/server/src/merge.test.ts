@@ -82,6 +82,8 @@ describe('merge orchestrator and human controls', () => {
     expect(item.body).toBe(`Approved, 1 criterion met; ${humanChecks} ${humanChecks === 1 ? 'criterion needs' : 'criteria need'} a human check. These checks need your OK before the task merges.`)
     await t.orchestrator.merges.tick()
     expect(t.github.pulls.get(pr.number)?.merged).toBe(false)
+    const statuses = await t.request('GET', `/api/projects/${project.slug}/pull-requests`).then(r => r.json()) as { humanReviewOutstanding: boolean }[]
+    expect(statuses[0]?.humanReviewOutstanding).toBe(true)
     const res = await t.request('POST', `/api/inbox/${item.id}/actions`, { action: 'approve' })
     expect(res.status).toBe(200)
     await t.orchestrator.merges.tick()
