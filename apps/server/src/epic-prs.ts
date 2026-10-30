@@ -149,7 +149,7 @@ export class EpicPullRequests {
     return { ok: true }
   }
 
-  // D23: the human hands a conflict to a developer run. The task's branch is
+  // D27: the human hands a conflict to a developer run. The task's branch is
   // the epic branch, so its run rebases and force-pushes that branch. When
   // the task is Merged, the head has moved and integration review starts over.
   private async handOffRebase(epicId: string, headSha: string, actor: Actor) {

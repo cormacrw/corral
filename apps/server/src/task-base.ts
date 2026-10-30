@@ -6,7 +6,7 @@ import type { ProjectRow, TaskRow } from './tasks.ts'
 
 export class EpicBranchError extends Error {}
 
-// A task handed an epic PR's rebase (D23): its branch is the epic branch, so
+// A task handed an epic PR's rebase (D27): its branch is the epic branch, so
 // it opens no PR of its own
 export async function isEpicRebaseTask(db: Executor, task: TaskRow): Promise<boolean> {
   if (!task.epicId || !task.branch) return false

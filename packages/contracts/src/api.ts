@@ -553,7 +553,7 @@ export function needsAttention(item: InboxItem): boolean {
   return item.type !== 'release_notes'
 }
 
-// An epic PR that couldn't rebase onto the target branch (D23)
+// An epic PR that couldn't rebase onto the target branch (D27)
 export interface EpicConflictItem extends InboxItemBase {
   id: string
   type: 'epic_conflict'

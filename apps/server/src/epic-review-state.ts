@@ -5,7 +5,7 @@ import type { AnyPgColumn } from 'drizzle-orm/pg-core'
 
 const { epics, runs } = schema
 
-// True for a board task that keeps its epic from being done (D22, D23). An
+// True for a board task that keeps its epic from being done (D22, D27). An
 // epic with a branch is done when its PR has merged; a `direct` epic, or one
 // that never needed a branch, when its board tasks have. Join tasks to epics.
 export function holdsEpicOpen(task: { deletedAt: AnyPgColumn, status: AnyPgColumn }, epic: { reviewMode: AnyPgColumn, branch: AnyPgColumn, reviewState: AnyPgColumn }): SQL {
