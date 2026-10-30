@@ -572,9 +572,11 @@ The bundle, spec and screenshots are content-addressed blobs and the database st
 
 **Status:** Accepted 2026-10-29. Amends D4 and D19 and overrides PRD §7.7's "test results" evidence.
 
+**Amended by D26:** reviewers rerun the gates only when the project has no required checks.
+
 **Decision:**
 
-- **Checks aren't evidence.** Lint, typecheck, tests and build are gates: the developer runs them, the reviewer reruns them without the cache, and the project's required CI checks gate merge. They are never attached as evidence for a criterion.
+- **Checks aren't evidence.** Lint, typecheck, tests and build are gates: the developer runs them and the project's required CI checks gate merge. The reviewer runs them without the cache only when the project has no required checks (D26). They are never attached as evidence for a criterion.
 - **Human evidence** is what a person would look at to judge a criterion: screenshots and video, real requests and responses, before/after metrics, and the reviewer's per-criterion note.
 - **Agent artifacts** are logs, test output and other raw files. They are kept for the reviewer and for debugging, and are collapsed in the UI.
 - **Note-only evidence:** a criterion with nothing visual to show (a refactor with no behaviour change, for example) can be covered by a written explanation without a file. The reviewer judges the explanation, and its verdict note is the proof.
@@ -598,6 +600,8 @@ The core helper validates epic dependency cycles and cycles in the combined task
 ## D23 — Epic review modes and epic branches
 
 **Status:** Accepted 2026-10-29 (COR-163). Amends D5, D10, D11 and D22.
+
+**Amended by D26:** integration review leaves the gates to required CI, and runs them without the cache only when the project has no required checks.
 
 **Principle:** the project's **target branch**, `defaultBranch` in project settings, only receives approved work. Corral assumes nothing about the target branch's name or how the project releases from it. Docs, prompts and code say "target branch" and read it from the project, never a hard-coded name.
 
@@ -625,7 +629,7 @@ Tasks without an epic are unchanged: they merge straight into the target branch,
 ### The epic PR
 
 - When every board task of the epic has merged (non-deleted tasks outside Draft and Backlog; spikes and approved designs count as done, as in D22), Corral opens the **epic PR** from the epic branch into the target branch.
-- **Integration review:** the reviewer agent reviews the epic PR as an integration check. It judges the combined diff against the epic's goal and its tasks' criteria, looks for problems between tasks that each passed review alone, and runs the project's checks as gates (D21) without the cache. It doesn't re-judge each task's evidence.
+- **Integration review:** the reviewer agent reviews the epic PR as an integration check. It judges the combined diff against the epic's goal and its tasks' criteria, looks for problems between tasks that each passed review alone, and follows D26 for the gates. It doesn't re-judge each task's evidence.
 - **Human review:** after the reviewer approves, the epic PR always goes to the human, whatever the mode or the tasks' flags.
 - **Fix-task loop:** if the reviewer or the human requests changes, Corral creates a **fix task** in the epic, in Ready, with the feedback as its description and criteria. It goes through the epic's review mode like any other task and merges into the epic branch. When it has merged, and every other board task of the epic has too, the epic PR goes back to integration review and then to the human.
 - **Rebase before merge:** once the human approves, the epic PR waits for CI. Just before it merges, if the target branch has moved, Corral rebases the epic branch onto the target branch (GraphQL `updatePullRequestBranch` with `updateMethod: REBASE`, as for task PRs). A clean rebase keeps the approval and CI runs again on the new head.
@@ -655,6 +659,8 @@ Epic PR review state is kept on the epic (open, agent review, human review, read
 
 **Status:** Accepted 2026-10-29 (COR-151). Amends D10's task-PR conflict path and review-round accounting.
 
+**Amended by D26:** rebase review leaves the gates to required CI, and runs them without the cache only when the project has no required checks.
+
 **Decision:** When an approved task PR conflicts with its moved base (`base_conflict`), **Ready to merge → In progress** starts a **rebase-only round**. This round, including its rebase review, does not count against `reviewRoundCap`.
 
 ### Developer mode
@@ -669,7 +675,7 @@ The reviewer:
 
 - Compares the approved head with the new head using `git range-diff` over the old and new commit ranges, so rewritten commits can be checked against the approved work.
 - Checks each conflicted hunk against main's change, verifying that the resolution preserves both sides' intent and introduces no feature changes.
-- Checks the branch against any binding documentation main changed, and independently re-runs the gates without the cache (D21).
+- Checks the branch against any binding documentation main changed, and follows D26 for the gates.
 
 If the resolution is clean, the reviewer approves the new head. The **previous criteria verdicts and approval carry over** to that head; a rebase review does not re-judge the feature or require a fresh human approval solely because of the rebase. The task returns to **Ready to merge**, where CI and the live merge gates must pass for the new head.
 
@@ -690,3 +696,20 @@ Corral supports runners on multiple machines over a private tailnet. The server 
 For the POC, all runners share `CORRAL_RUNNER_TOKEN`. Both runner endpoints require it when configured; the runner sends it in the WebSocket Authorization header, and the server compares it in constant time before registering the runner. The token is never logged. Without a token, only the existing internal endpoint is available; configuring the external listener fails at startup. Shared authentication is separate from runner identity and job scheduling: connections for distinct runner identities remain independent, and a newer authenticated connection replaces only the connection with the same runner identity.
 
 Per-runner pairing and revocation come later with hosting. Remote runners run under WSL2 or Linux and update themselves by pulling from GitHub (see the runner updater task), rather than receiving executable updates from the control plane.
+
+---
+
+## D26 — Reviewers review the code; required CI runs the gates
+
+**Status:** Accepted 2026-10-30 (COR-254). Amends D21 and D24's requirement that the reviewer reruns the gates without the cache, and the same requirement in D23's integration review.
+
+**Decision:**
+
+- **With required checks,** the reviewer doesn't rerun lint, typecheck, tests or build. The project's required checks run them on every push, and the merge gate won't merge without them.
+- **Without required checks,** nothing else verifies the gates, so the reviewer still runs all of them itself, without the cache. If a check can't be run without the cache, it explains which and why in its outcome. `requiredChecks` defaults to empty, so this is the default for a new project.
+- **The reviewer's prompt says which case applies**, naming the required checks or stating that there are none. The server builds this from the project's `requiredChecks`. Role instructions, including a repo's override (D13), defer to it.
+- **The review looks at the code.** The reviewer reads the diff for security, efficiency and logic problems and raises them as specific, actionable feedback. It may run a targeted test or the app when that's the best way to check a criterion or a suspected bug. A cached result never counts as verification.
+- **The same rule covers every review of a diff:** agent review, epic integration review (D23) and rebase review (D24). Spike and design reviews have no diff and no gates to run.
+- **Unchanged:** a verdict and concrete note for every criterion, and D21's evidence rules. Developers still run the gates before reporting.
+
+**Why:** The rerun duplicated CI and was slow: on COR-59 a reviewer's third full test run hit the background time limit. The reviewer's value is the judgement CI can't give, so its time goes on the diff.

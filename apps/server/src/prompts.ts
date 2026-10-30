@@ -77,6 +77,8 @@ export interface ReviewTask extends PromptTask {
   previousFeedback: string | null
   // A spike's latest findings, which are what's under review
   findings?: string | null
+  // The project's required CI checks: with none, the reviewer runs the gates
+  requiredChecks: string[]
 }
 
 // The design version under review (D20)
@@ -101,17 +103,28 @@ export function reviewerPrompt(task: ReviewTask & { underReview?: DesignUnderRev
     commentsSection(task),
     attachmentsSection(task),
     pinSection(task, 'reviewer'),
+    gatesSection(task),
     section('How to review', `
 - You are in a read-only checkout of the commit under review. Do not edit, commit or push. Run \`git diff ${task.defaultBranch}...HEAD\` or \`git log\` to see the change; \`origin/${task.defaultBranch}\` is available locally.
 - Use the supplied project brief and wiki file list, and check the wiki was updated where behaviour changed.
-- Judge every acceptance criterion: is it implemented, and does the evidence actually show it? Use \`get_evidence\` to list items and fetch screenshots by ID. Reproduce at least one criterion yourself when you can (run the tests, start the app).
+- Judge every acceptance criterion: is it implemented, and does the evidence actually show it? Use \`get_evidence\` to list items and fetch screenshots by ID. Reproduce at least one criterion yourself when you can (a targeted test, the app).
+- Review the diff for security, efficiency and logic problems, and raise each one as specific, actionable feedback with the file and line. A cached result never counts as verification.
 - Give every criterion a concrete note explaining why it is met or not; the human reads it next to the evidence. Request changes when a visibly testable criterion is proven only by a note, or when a criterion's only proof is test output.
-- Check the project's lint, typecheck and tests pass on this commit.
 - Call \`report_outcome\` with outcome "approved" or "changes_requested" and a \`criteria\` verdict for every criterion ID above (met true/false with a note).
 - When you approve, keep it short: the summary is one or two sentences (what you checked and anything worth knowing), and each criterion note must explain concretely why it is met or not, because the human reads it next to the evidence. Don't restate the task or the developer's summary.
 - When you request changes, the summary is posted to the developer as a comment: make every point specific and actionable.
 - Always finish by calling \`report_outcome\`.`)
   ].join('\n')
+}
+
+// Required CI verifies the gates on every push; without it nothing else does,
+// so the reviewer runs them (D26)
+function gatesSection(task: ReviewTask): string {
+  if (task.requiredChecks.length > 0) {
+    const checks = task.requiredChecks.map(c => `\`${c}\``).join(', ')
+    return section('Gates', `This project has required CI checks: ${checks}. They run on every push and the merge gate won't merge without them, so don't rerun the project's lint, typecheck, tests or build. Spend your time on the diff and the criteria.`)
+  }
+  return section('Gates', `This project has no required CI checks, so nothing else verifies its gates. Run the project's lint, typecheck, tests and build yourself before reporting, without the cache: for Turbo projects, use \`TURBO_FORCE=1 pnpm run lint\`, \`TURBO_FORCE=1 pnpm run typecheck\`, \`TURBO_FORCE=1 pnpm run test\` and \`TURBO_FORCE=1 pnpm run build\`. Request changes if one fails. If you cannot run a check without the cache, explain which check and why in your outcome.`)
 }
 
 // A note has no file (D21): its text is the evidence, so it goes in whole,
