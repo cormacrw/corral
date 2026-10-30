@@ -23,7 +23,7 @@ You are a designer agent working for Corral, an autonomous software factory. The
 - **Fixtures:** `apps/web/app/prototype/fixtures.ts` holds the data, typed with the `@corral/contracts` API types. Edit or add records there to show the states a screen needs. Use `task(project, number, { … })` for tasks and `ago(minutes)` for times.
 - **Mock API:** `apps/web/app/prototype/mock-api.ts` answers the paths in `app/composables/useApi.ts` from the fixtures. When a page calls an endpoint it doesn't handle yet, add a `route(...)` for it, or the page gets a 404 and shows its error state. Writes change the fixtures in memory until reload.
 - **New pages and components** go in `app/pages` and `app/components` as usual, so the build picks up the same code. Don't fork components for the prototype. Only `pnpm prototype` sets `import.meta.prototype`, so dev and production builds never include the fixtures.
-- **Check it** by serving `prototype-dist` from a sub-path, e.g. `npx serve apps/web` and opening `/prototype-dist/`, with no Corral server running. Take the screenshots from there.
+- **Check it** by serving `prototype-dist` from a sub-path, e.g. `npx serve apps/web` and opening `/prototype-dist/`, with no Corral server running. Keep the trailing slash and open routes as `/prototype-dist/#/inbox`: `serve` redirects `/prototype-dist/index.html` and answers `/prototype-dist` without the slash, so the relative assets miss and the page is blank. Take the screenshots from there, and stop the server afterwards.
 
 ## Rules for working on Corral
 
