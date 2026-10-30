@@ -1,4 +1,4 @@
-import type { Agent, CreateAgentInput, Evidence, PatchAgentInput, Review, Run } from '@corral/contracts'
+import type { Agent, CreateAgentInput, Evidence, PatchAgentInput, Review, Run, RunTimings } from '@corral/contracts'
 import { ACTIVE_RUN_STATES, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, count, desc, eq, inArray, type SQL } from 'drizzle-orm'
@@ -46,7 +46,8 @@ function toRun({ run, agentName, prefix, taskNumber, taskTitle }: RunJoin): Run 
     rateLimitResetAt: run.rateLimitResetAt?.toISOString() ?? null,
     queuedAt: run.queuedAt.toISOString(),
     startedAt: run.startedAt?.toISOString() ?? null,
-    endedAt: run.endedAt?.toISOString() ?? null
+    endedAt: run.endedAt?.toISOString() ?? null,
+    timings: run.timings as RunTimings | null
   }
 }
 
