@@ -5,6 +5,15 @@ const one = [{ slug: 'test-app' }]
 const at = (path: string, query: Record<string, string> = {}) => ({ path, query })
 
 describe('onboardingRedirect', () => {
+  it('opens Home on mobile once onboarding is complete', () => {
+    expect(onboardingRedirect(at('/'), one, 'mobile')).toBe('/home')
+    expect(onboardingRedirect(at('/setup'), one, 'mobile')).toBe('/home')
+    expect(onboardingRedirect(at('/setup/you'), one, 'mobile')).toBe('/home')
+    expect(onboardingRedirect(at('/setup', { add: '1' }), one, 'mobile')).toBeUndefined()
+    expect(onboardingRedirect(at('/'), [], 'mobile')).toBe('/setup')
+    expect(onboardingRedirect(at('/'), null, 'mobile')).toBeUndefined()
+  })
+
   it('sends / to the first project once the server has one', () => {
     expect(onboardingRedirect(at('/'), one)).toBe('/projects/test-app')
     expect(onboardingRedirect(at('/'), [{ slug: 'a' }, { slug: 'b' }])).toBe('/projects/a')
