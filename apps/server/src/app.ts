@@ -1,5 +1,7 @@
 import {
   addCommentInput,
+  clientPerfInput,
+  CLIENT_PERF_MAX_BYTES,
   ATTACHMENT_MAX_BYTES,
   AVATAR_MAX_BYTES,
   approveDesignInput,
@@ -202,6 +204,21 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       const file = await readDesignFile(db, blobs, match[1]!, match[2]!)
       if (!file) throw new ApiFailure(404, { code: 'not_found' })
       return c.body(new Uint8Array(file.data), 200, { ...DESIGN_BUNDLE_HEADERS, 'content-type': file.type })
+    })
+
+    .post('/perf/client', bodyLimit({
+      maxSize: CLIENT_PERF_MAX_BYTES,
+      onError: c => c.json({ error: { code: 'invalid_input' } }, 400)
+    }), async (c) => {
+      // Parse text as well as application/json: sendBeacon can use either.
+      const input = clientPerfInput.safeParse(await c.req.json().catch(() => null))
+      if (!input.success) return c.json({ error: { code: 'invalid_input' } }, 400)
+      const createdAt = new Date()
+      for (const sample of input.data.samples) {
+        performance.record({ kind: 'page', name: sample.name, metric: sample.metric,
+          durationMs: sample.value, sessionId: input.data.sessionId, createdAt })
+      }
+      return c.body(null, 204)
     })
 
     .get('/health', c => c.json({ ok: true }))
