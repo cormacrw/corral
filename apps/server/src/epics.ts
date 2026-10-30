@@ -56,7 +56,7 @@ async function findEpic(db: Executor, epicId: string): Promise<{ row: EpicRow, p
 }
 
 // A deleted task counts here: its PR may already have merged into the epic branch.
-function reviewModeLocked(epic: { prNumber: number | null }, taskRows: { status: string, prNumber: number | null }[]): boolean {
+export function reviewModeLocked(epic: { prNumber: number | null }, taskRows: { status: string, prNumber: number | null }[]): boolean {
   return epic.prNumber !== null || taskRows.some(t => t.prNumber !== null || t.status === 'merged')
 }
 

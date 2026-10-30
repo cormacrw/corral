@@ -4,7 +4,7 @@ import { schema, type Database, type Executor, type PlanRevision } from '@corral
 import { and, asc, desc, eq, gt, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { listTaskAttachments } from './attachments.ts'
-import { listEpics } from './epics.ts'
+import { listEpics, reviewModeLocked } from './epics.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
 import { pmFallbackPrompt, pmPrompt, questionText, sessionTitlePrompt } from './prompts.ts'
@@ -644,6 +644,11 @@ export class PlanService {
         // A revision that leaves the mode out keeps the epic's; a new epic
         // without one takes the project's default (D23)
         if (current) {
+          const [row] = await tx.select().from(epics).where(eq(epics.id, current)).for('update')
+          if (epic.reviewMode && epic.reviewMode !== row!.reviewMode) {
+            const taskRows = await tx.select({ status: tasks.status, prNumber: tasks.prNumber }).from(tasks).where(eq(tasks.epicId, current))
+            if (reviewModeLocked(row!, taskRows)) throw new ToolError('The plan was not saved: the review mode can\'t change once a task in the epic has opened a PR.')
+          }
           await tx.update(epics).set({ title: epic.title, description: epic.summary, ...(epic.reviewMode && { reviewMode: epic.reviewMode }), updatedAt: new Date() }).where(eq(epics.id, current))
           epicIds.set(epic.key, current)
         } else {
