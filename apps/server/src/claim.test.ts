@@ -85,7 +85,7 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
   })
 
   it('lets a Codex developer added through the API claim Ready tasks like Atlas', async () => {
-    vi.spyOn(t.runner, 'request').mockResolvedValue({ kind: 'detect_clis', clis: [
+    vi.spyOn(t.runner, 'detectClis').mockResolvedValue({ kind: 'detect_clis', clis: [
       { id: 'claude', version: '2.1.312', signedIn: true },
       { id: 'codex', version: '0.165.0', signedIn: true }
     ] } as never)

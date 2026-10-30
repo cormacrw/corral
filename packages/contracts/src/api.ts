@@ -413,7 +413,9 @@ export interface PlanSessionDetail extends PlanSession {
   plans: Plan[]
 }
 
+// A client UUID makes a start safe to retry within the same project.
 export const startPlanSessionInput = z.object({
+  id: z.uuid().optional(),
   projectId: z.uuid(),
   // The PM's runtime for this session (D18); only a CLI the runner has
   runtime: agentRuntime.default('claude-code'),

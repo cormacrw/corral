@@ -515,8 +515,7 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
 
     .post('/plan/sessions', validate('json', startPlanSessionInput), async (c) => {
       const input = c.req.valid('json')
-      await requireRuntimeCli(runner, input.runtime)
-      return c.json(await plans.start(input.projectId, { text: input.text, taskRef: input.taskRef, runtime: input.runtime }, actor), 201)
+      return c.json(await plans.start(input.projectId, input, actor), 201)
     })
 
     .get('/plan/sessions/:id', async c => c.json(await plans.getSession(c.req.param('id'))))

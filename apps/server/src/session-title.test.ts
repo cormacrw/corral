@@ -46,7 +46,7 @@ describe('session titles', () => {
     expect(res.status).toBe(201)
     const created = await res.json() as PlanSessionDetail
     expect(created.title).toBe('We need a login page with email and password, plus a forg…')
-    expect(created.activeRunId).not.toBeNull()
+    expect(created.activeRunId).toBeNull()
 
     // The PM turn is assigned while the title job is still unanswered
     const request = await titleJob()

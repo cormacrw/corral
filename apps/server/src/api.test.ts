@@ -282,10 +282,7 @@ describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
   describe('agents', () => {
     // What the runner's detect_clis reports
     function runnerClis(clis: { id: 'claude' | 'codex', version: string | null }[]) {
-      vi.spyOn(t.runner, 'request').mockImplementation(async (job) => {
-        if (job.kind !== 'detect_clis') throw new Error(`unexpected job ${job.kind}`)
-        return { kind: 'detect_clis', clis: clis.map(c => ({ ...c, signedIn: c.version !== null })) } as never
-      })
+      vi.spyOn(t.runner, 'detectClis').mockResolvedValue({ kind: 'detect_clis', clis: clis.map(c => ({ ...c, signedIn: c.version !== null })) })
     }
     const both = [{ id: 'claude', version: '2.1.312' }, { id: 'codex', version: '0.165.0' }] as const
 

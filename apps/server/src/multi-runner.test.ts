@@ -71,6 +71,11 @@ describe('multiple runners', () => {
     t = await createTestApp('pglite', { listen: true })
     const a = await connect('A')
     const b = await connect('B')
+    // Consume the automatic connection detections before testing manual jobs.
+    await a.next('job.request', m => m.job.kind === 'detect_clis')
+    await b.next('job.request', m => m.job.kind === 'detect_clis')
+    await t.runner.detectClis(false, 'A')
+    await t.runner.detectClis(false, 'B')
     a.onJob = () => null
     b.onJob = () => null
     const pendingA = t.runner.request({ kind: 'detect_clis' }).catch(e => e.message)
