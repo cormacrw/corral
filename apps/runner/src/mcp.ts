@@ -1,4 +1,4 @@
-import { askQuestionInput, EVIDENCE_KINDS, type AgentTool, type RunJob } from '@corral/contracts'
+import { pmActionTools, askQuestionInput, EVIDENCE_KINDS, type AgentTool, type RunJob } from '@corral/contracts'
 import { EPIC_REVIEW_MODES, TASK_TYPES, type AgentRole } from '@corral/core'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -29,11 +29,14 @@ const outcomes: Record<AgentRole, readonly string[]> = {
 }
 
 interface ToolDefinition {
+  confirmRequired?: boolean
   description: string
   input: z.ZodRawShape
 }
 
 const toolDefinitions = {
+  // The confirm-required flag is shared with the server dispatcher.
+  ...pmActionTools,
   get_task: {
     description: 'The task you are working on: title, description, acceptance criteria with their IDs, comments and evidence attached so far.',
     input: {}
@@ -157,7 +160,7 @@ const roleToolDefinitions: Record<AgentRole, Partial<Record<AgentTool, ToolDefin
 export const ROLE_TOOLS: Record<AgentRole, AgentTool[]> = {
   developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'report_outcome'],
   reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'get_design', 'report_outcome'],
-  pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs']
+  pm: ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs', 'delete_task']
 }
 
 // The tools a run gets: its role's, plus submit_design for a design task's

@@ -1,7 +1,7 @@
 // Who did something. Recorded on every transition and audit entry (D1), so
 // nothing here assumes there is only one user.
 export type Actor =
-  | { kind: 'human', userId: string }
+  | { kind: 'human', userId: string, viaPm?: { sessionId: string, runId: string } }
   | { kind: 'agent', role: AgentRole, runId: string }
   | { kind: 'system', component: SystemComponent }
 

@@ -143,6 +143,7 @@ export type AgentTool =
   | 'propose_plan'
   | 'approve_plan'
   | 'flag_stale_docs'
+  | 'delete_task'
 
 export interface OutcomeReport {
   outcome: RunOutcome
