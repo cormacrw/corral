@@ -13,7 +13,7 @@ export class FakeRunner {
   // Answers setup jobs the server sends (e.g. cleanup_worktrees). Both CLIs
   // are installed and signed in unless a test says otherwise. Throwing
   // answers with an error; session titles fail unless a test says otherwise,
-  // so the fallback title stays.
+  // so the fallback title stays. Release notes jobs are left to each test.
   onJob: (job: Extract<ServerMessage, { type: 'job.request' }>['job']) => SetupJobResult | null = (job) => {
     if (job.kind === 'cleanup_worktrees') return { kind: 'cleanup_worktrees', removed: [`worktrees/${job.taskId}`], kept: [] }
     if (job.kind === 'session_title') throw new Error('No title in tests')

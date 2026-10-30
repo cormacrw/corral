@@ -41,7 +41,7 @@ import { ApiFailure, fromDatabaseError } from './errors.ts'
 import { checkThumbnail, readThumbnail, THUMBNAIL_MAX_BYTES } from './thumbnails.ts'
 import { byteRange } from './byte-range.ts'
 import { createAttachment, readAttachment } from './attachments.ts'
-import { recordDeployment } from './deployments.ts'
+import { recordDeployment, type ReleaseNotes } from './deployments.ts'
 import { approveDesign, DESIGN_BUNDLE_HEADERS, listDesignVersions, readDesignFile, readDesignScreenshot } from './designs.ts'
 import { checkAvatar, getProfile, patchProfile, readAvatar, setAgentAvatar, setUserAvatar } from './avatars.ts'
 import { getEpic, listEpics, patchEpic, setEpicDependencies } from './epics.ts'
@@ -81,6 +81,7 @@ export interface AppDeps {
   blobs: BlobStore
   transcripts: Transcripts
   plans: PlanService
+  releaseNotes: ReleaseNotes
 }
 
 // Validation failures get the same error shape as every other API error
@@ -98,7 +99,7 @@ const taskNumber = (value: string) => {
   return number
 }
 
-export function createApp({ db, events, actor, runner, orchestrator, blobs, transcripts, plans }: AppDeps) {
+export function createApp({ db, events, actor, runner, orchestrator, blobs, transcripts, plans, releaseNotes }: AppDeps) {
   const repos = new RepoCatalog(db, runner)
 
   const publishTask = async (taskId: string) => {
@@ -601,6 +602,8 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     // answers. 201 when recorded, 200 when this toSha already was.
     .post('/deployments', validate('json', createDeploymentInput), async (c) => {
       const { deployment, created } = await recordDeployment(db, c.req.valid('json'))
+      // The response doesn't wait for the notes
+      if (created) setImmediate(() => void releaseNotes.sweep())
       return c.json(deployment, created ? 201 : 200)
     })
 

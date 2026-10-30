@@ -40,6 +40,9 @@ export type SetupJob =
   // A Plan session's short title: the runner's `claude` CLI answers the
   // prompt with its smallest model and no tools (COR-40). Never a PM slot.
   | { kind: 'session_title', prompt: string }
+  // A deployment's release notes: the `runtime` CLI answers the prompt once,
+  // with no tools (COR-128). Never a PM slot.
+  | { kind: 'release_notes', runtime: string, prompt: string }
 
 export type SetupJobResult =
   | { kind: 'list_repos', signedIn: false }
@@ -50,6 +53,7 @@ export type SetupJobResult =
   | { kind: 'cleanup_worktrees', removed: string[], kept: string[] }
   // The model's raw answer; the server cleans it up
   | { kind: 'session_title', title: string }
+  | { kind: 'release_notes', notes: string }
 
 // ── Runs ─────────────────────────────────────────────────────────────────────
 

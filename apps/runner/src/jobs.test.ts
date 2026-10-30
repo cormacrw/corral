@@ -140,3 +140,45 @@ describe('session_title', () => {
     await expect(runSetupJob(config, { kind: 'session_title', prompt: 'x' })).rejects.toThrow(/code 0/)
   })
 })
+
+describe('release_notes', () => {
+  let root: string
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'corral-release-notes-'))
+  })
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true })
+  })
+
+  async function fakeCli(name: string, script: string): Promise<string> {
+    const path = join(root, name)
+    await writeFile(path, `#!/bin/sh\nprintf '%s\\n' "$@" > "${root}/args"\ncat > "${root}/stdin"\n${script}\n`)
+    await chmod(path, 0o755)
+    return path
+  }
+
+  it('asks claude with no tools and the prompt on stdin', async () => {
+    const config = { ...loadConfig({}), claudeBin: await fakeCli('claude', 'echo "## Features"') }
+    expect(await runSetupJob(config, { kind: 'release_notes', runtime: 'claude-code', prompt: 'Write notes' })).toEqual({ kind: 'release_notes', notes: '## Features' })
+    expect((await readFile(join(root, 'args'), 'utf8')).split('\n').slice(0, 3)).toEqual(['-p', '--tools', ''])
+    expect(await readFile(join(root, 'stdin'), 'utf8')).toBe('Write notes')
+  })
+
+  it('asks codex when that is the runtime', async () => {
+    const config = { ...loadConfig({}), codexBin: await fakeCli('codex', 'echo "## Fixes"') }
+    expect(await runSetupJob(config, { kind: 'release_notes', runtime: 'codex', prompt: 'Write notes' })).toEqual({ kind: 'release_notes', notes: '## Fixes' })
+    const args = (await readFile(join(root, 'args'), 'utf8')).trim().split('\n')
+    expect(args[0]).toBe('exec')
+    expect(args.at(-1)).toBe('-')
+    expect(await readFile(join(root, 'stdin'), 'utf8')).toBe('Write notes')
+  })
+
+  it('fails when the CLI fails or prints nothing', async () => {
+    const config = { ...loadConfig({}), claudeBin: await fakeCli('claude', 'echo "Not logged in" >&2; exit 1') }
+    await expect(runSetupJob(config, { kind: 'release_notes', runtime: 'claude-code', prompt: 'x' })).rejects.toThrow('Not logged in')
+    config.claudeBin = await fakeCli('claude', 'exit 0')
+    await expect(runSetupJob(config, { kind: 'release_notes', runtime: 'claude-code', prompt: 'x' })).rejects.toThrow(/code 0/)
+  })
+})
