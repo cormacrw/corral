@@ -33,7 +33,9 @@ Once every non-deleted board task is Merged, the scheduler opens (or recovers)
 the epic branch's PR into the configured target. Drafts and Backlog tasks don't
 hold it back. The PR body links each board task's PR and evidence page.
 
-Epic integration reviews are reviewer runs with `runs.epicId` and no task ID.
+Epic integration reviews are reviewer runs with `runs.epicId` and no task ID,
+placed like any other run on a runner that takes the reviewer role and has a
+free slot; without one the epic stays `in_review` for the next pass.
 Their detached checkout is the epic PR head, their diff base is the project's
 target, and their prompt includes the epic goal plus every board task's criteria
 and evidence. They rerun lint, typecheck, tests and build without cached results,
