@@ -8,5 +8,8 @@ export const inboxQuery = () => queryOptions({ queryKey: keys.inbox(), queryFn: 
 
 export const actOnInboxItem = defineMutation<{ task: Task | null }, { taskId: string, input: InboxActionInput }>({
   mutationFn: ({ taskId, input }) => api.inbox.act(taskId, input),
-  invalidates: [keys.inbox()]
+  write: (client, { task }) => {
+    if (task) client.setQueryData(keys.tasks.detail(task.ref), task)
+  },
+  invalidates: ({ task }) => [keys.inbox(), keys.tasks.lists(), ...(task ? [keys.tasks.detail(task.ref)] : [])]
 })

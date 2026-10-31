@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { useMutation } from '@tanstack/vue-query'
-import { patchTask, moveTask, removeTask } from '~/queries/tasks'
-import type { AuditEntry, Comment, Evidence, Review, Run, Task } from '@corral/contracts'
+import { useMutation, useQuery } from '@tanstack/vue-query'
+import { commentOnTask, moveTask, patchTask, removeTask, resumeTask, taskCommentsQuery, taskEvidenceQuery, taskHistoryQuery, taskQuery, taskReviewsQuery, type TaskAddress } from '~/queries/tasks'
+import { uploadAttachment } from '~/queries/attachments'
+import { runsQuery } from '~/queries/runs'
+import type { AuditEntry, Comment, HumanTransitionInput, PatchTaskInput, Task } from '@corral/contracts'
 import type { EditorToolbarItem } from '@nuxt/ui'
 import type { EditorView } from '@tiptap/pm/view'
 import type { TaskPriority, TaskStatus } from '@corral/core'
 import { availableEvents } from '@corral/core'
-import { api, ApiError } from '~/composables/useApi'
+import { ApiError } from '~/composables/useApi'
 import { PRIORITY, runBadge, STATUS, TASK_TYPE, timeAgo } from '~/utils/labels'
 import { attachmentProblem } from '~/utils/attachments'
 import { AttachmentImage, imageFiles, insertImages } from '~/utils/editor-image'
@@ -23,15 +25,11 @@ const toast = useToast()
 const patchMutation = useMutation(patchTask)
 const transitionMutation = useMutation(moveTask)
 const removeMutation = useMutation(removeTask)
-const task = ref<Task | null>(null)
-const comments = ref<Comment[]>([])
-const history = ref<AuditEntry[]>([])
-const evidence = ref<Evidence[]>([])
-const reviews = ref<Review[]>([])
-// The task's runs, so activity names the agent that acted
-const runs = ref<Run[]>([])
-const error = ref<string | null>(null)
-const loading = ref(true)
+const resumeMutation = useMutation(resumeTask)
+const commentMutation = useMutation(commentOnTask)
+const uploadMutation = useMutation(uploadAttachment)
+const taskResult = useQuery(computed(() => taskQuery(props.taskRef)))
+const task = computed(() => taskResult.data.value ?? null)
 const saved = ref(false)
 const resuming = ref(false)
 const placing = ref(false)
@@ -56,44 +54,35 @@ const number = computed(() => task.value?.number ?? 0)
 const epic = computed(() => task.value?.epicId ? epicList.value.find(e => e.id === task.value!.epicId) ?? null : null)
 const slug = computed(() => project.value?.slug ?? '')
 const { tasks: projectTasks, epics: epicList } = useProjectLists(slug)
+const address = computed((): TaskAddress => ({ slug: slug.value, number: number.value, ref: props.taskRef }))
 
-async function load() {
-  const requested = props.taskRef
-  loading.value = true
-  error.value = null
-  try {
-    const loaded = await api.tasks.byRef(requested)
-    if (requested !== props.taskRef) return
-    task.value = loaded
-    await loadSide()
-  } catch (e) {
-    if (requested !== props.taskRef) return
-    error.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    if (requested === props.taskRef) loading.value = false
-  }
+// Each part of the task is its own query, so an event refetches only its part
+function side<T>(query: (task: TaskAddress) => T) {
+  return computed(() => ({ ...query(address.value), enabled: Boolean(task.value && project.value) }))
 }
-async function loadSide() {
-  if (!task.value || !project.value) return
-  const requested = task.value.id
-  const [c, h, ev, r, ru] = await Promise.all([
-    api.tasks.comments(slug.value, number.value),
-    api.tasks.history(slug.value, number.value),
-    api.tasks.evidence(slug.value, number.value),
-    api.tasks.reviews(slug.value, number.value),
-    api.runs.list({ taskId: task.value.id })
-  ])
-  if (task.value?.id !== requested) return
-  comments.value = c
-  history.value = h
-  evidence.value = ev
-  reviews.value = r
-  runs.value = ru
-}
-watch(() => props.taskRef, () => {
+const commentsResult = useQuery(side(taskCommentsQuery))
+const historyResult = useQuery(side(taskHistoryQuery))
+const evidenceResult = useQuery(side(taskEvidenceQuery))
+const reviewsResult = useQuery(side(taskReviewsQuery))
+// The task's runs, so activity names the agent that acted
+const runsResult = useQuery(computed(() => ({ ...runsQuery({ taskId: task.value?.id }), enabled: Boolean(task.value) })))
+const comments = computed(() => commentsResult.data.value ?? [])
+const history = computed(() => historyResult.data.value ?? [])
+const evidence = computed(() => evidenceResult.data.value ?? [])
+const reviews = computed(() => reviewsResult.data.value ?? [])
+const runs = computed(() => runsResult.data.value ?? [])
+const results = [taskResult, commentsResult, historyResult, evidenceResult, reviewsResult, runsResult]
+// A failed background refetch leaves what's cached on screen
+const error = computed(() => results.find(r => r.isLoadingError.value)?.error.value?.message ?? null)
+const retry = () => Promise.all(results.filter(r => r.isLoadingError.value).map(r => r.refetch()))
+
+// A comment that failed after moving on, put back on returning to its task
+const unsent = new Map<string, string>()
+watch(() => props.taskRef, (ref) => {
   tab.value = route.query.evidence ? 'evidence' : 'activity'
   mobileTab.value = route.query.evidence ? 'criteria' : 'details'
-  draft.value = ''
+  draft.value = unsent.get(ref) ?? ''
+  unsent.delete(ref)
   editingDescription.value = false
   descriptionDraft.value = { type: 'doc', content: [] }
   newCriterion.value = ''
@@ -102,32 +91,7 @@ watch(() => props.taskRef, () => {
   resuming.value = false
   placing.value = false
   if (savedTimer) clearTimeout(savedTimer)
-  task.value = null
-  comments.value = []
-  history.value = []
-  evidence.value = []
-  reviews.value = []
-  runs.value = []
-  void load()
 }, { immediate: true })
-// Live updates for this task
-onMounted(() => {
-  const stop = live.subscribe((event) => {
-    if (event.type === 'task.updated' && task.value && event.task.id === task.value.id) {
-      task.value = event.task
-      void loadSide()
-    }
-    if (event.type === 'comment.created' && task.value && event.comment.taskId === task.value.id) {
-      if (!comments.value.some(c => c.id === event.comment.id)) comments.value.push(event.comment)
-    }
-    if (event.type === 'run.updated' && task.value && event.run.taskId === task.value.id) void loadSide()
-    if (event.type === 'project.deleted' && task.value?.projectId === event.projectId) {
-      task.value = null
-      void load()
-    }
-  })
-  onBeforeUnmount(stop)
-})
 
 function flashSaved() {
   saved.value = true
@@ -139,20 +103,18 @@ function flashSaved() {
 function fail(e: unknown) {
   toast.add({ title: 'Not saved', description: e instanceof ApiError ? e.message : String(e), color: 'error' })
 }
-// The response of an action on this task, unless another task replaced it
-// while the request ran. Slug and number follow task, so it must stay current.
-async function applyTask(request: Promise<Task>): Promise<Task | null> {
+// Confirms an action on this task, unless another task replaced it while the
+// request ran
+async function confirm(request: Promise<Task>) {
   const requested = props.taskRef
-  const updated = await request
-  if (requested !== props.taskRef) return null
-  task.value = updated
-  return updated
+  await request
+  if (requested === props.taskRef) flashSaved()
 }
 
-async function patch(input: Parameters<typeof api.tasks.patch>[2]) {
+async function patch(input: PatchTaskInput) {
   if (!task.value) return
   try {
-    if (await applyTask(patchMutation.mutateAsync({ task: { slug: slug.value, number: number.value, ref: props.taskRef }, input }))) flashSaved()
+    await confirm(patchMutation.mutateAsync({ task: address.value, input }))
   } catch (e) {
     fail(e)
   }
@@ -176,12 +138,11 @@ const statusEditable = computed(() => statusOptions.value.length > 1)
 async function changeStatus(value: string) {
   if (!task.value || value === 'current') return
   try {
-    const transition = (input: Parameters<typeof api.tasks.transition>[2], status: TaskStatus) => applyTask(transitionMutation.mutateAsync({ task: { slug: slug.value, number: number.value, ref: props.taskRef }, input, status }))
+    const transition = (input: HumanTransitionInput, status: TaskStatus) => confirm(transitionMutation.mutateAsync({ task: address.value, input, status }))
     const moves = { approve: 'ready', send_back: 'backlog', human_request_changes: 'in_progress' } as const
-    const updated = value === 'approve' || value === 'send_back' || value === 'human_request_changes'
-      ? await transition({ type: value }, moves[value])
-      : await transition({ type: 'resolve', to: value.slice(8) as 'backlog' | 'ready' | 'in_progress' }, value.slice(8) as 'backlog' | 'ready' | 'in_progress')
-    if (updated) flashSaved()
+    await (value === 'approve' || value === 'send_back' || value === 'human_request_changes'
+      ? transition({ type: value }, moves[value])
+      : transition({ type: 'resolve', to: value.slice(8) as 'backlog' | 'ready' | 'in_progress' }, value.slice(8) as 'backlog' | 'ready' | 'in_progress'))
   } catch (e) {
     if (e instanceof ApiError && e.body?.code === 'transition_rejected' && e.body.reason.code === 'not_ready') {
       toast.add({ title: 'Not ready yet', description: `Needs: ${e.body.reason.problems.map(p => p.replaceAll('_', ' ')).join(', ')}`, color: 'warning' })
@@ -194,7 +155,7 @@ async function resume() {
   const requested = props.taskRef
   resuming.value = true
   try {
-    if (await applyTask(api.tasks.resume(slug.value, number.value))) flashSaved()
+    await confirm(resumeMutation.mutateAsync({ task: address.value }))
   } catch (e) {
     fail(e)
   } finally {
@@ -275,7 +236,7 @@ async function uploadImage(file: File): Promise<{ id: string } | null> {
   }
   uploadingImages.value++
   try {
-    return await api.attachments.upload(slug.value, file, name)
+    return await uploadMutation.mutateAsync({ slug: slug.value, file, name })
   } catch (e) {
     toast.add({ title: `Couldn't upload ${name}`, description: e instanceof Error ? e.message : String(e), color: 'error' })
     return null
@@ -338,9 +299,8 @@ async function place() {
   const requested = props.taskRef
   placing.value = true
   try {
-    const added = await transitionMutation.mutateAsync({ task: { slug: slug.value, number: number.value, ref: props.taskRef }, input: { type: 'approve' }, status: 'ready' })
+    const added = await transitionMutation.mutateAsync({ task: address.value, input: { type: 'approve' }, status: 'ready' })
     toast.add({ title: `${added.ref} added to the board`, color: 'success' })
-    if (requested === props.taskRef) task.value = added
   } catch (e) {
     if (e instanceof ApiError && e.body?.code === 'transition_rejected' && e.body.reason.code === 'not_ready') {
       toast.add({ title: 'Not ready yet', description: `Needs: ${e.body.reason.problems.map(p => p.replaceAll('_', ' ')).join(', ')}`, color: 'warning' })
@@ -354,17 +314,19 @@ const agentHolds = computed(() => task.value && ['in_progress', 'blocked', 'agen
 const composerHint = computed(() => agentHolds.value
   ? `${developer.value?.name ?? (task.value?.type === 'design' ? 'The designer' : 'The developer')} gets this on its next step.`
   : 'No agent is working on this task, so this is saved as a note.')
-// Resolves false when not sent, so the composer keeps its images
-async function sendComment(text: string): Promise<boolean> {
+// The comment shows at once, so the box empties at once; a failure puts the
+// text back and resolves false, so the composer keeps its images
+async function sendComment(body: string): Promise<boolean> {
   if (!task.value) return false
   const requested = props.taskRef
+  const text = draft.value
+  draft.value = ''
   try {
-    const comment = await api.tasks.comment(slug.value, number.value, text)
-    if (requested !== props.taskRef) return true
-    if (!comments.value.some(c => c.id === comment.id)) comments.value.push(comment)
-    draft.value = ''
+    await commentMutation.mutateAsync({ task: { ...address.value, id: task.value.id }, body })
     return true
   } catch (e) {
+    if (requested !== props.taskRef) unsent.set(requested, text)
+    else draft.value = draft.value ? `${text}\n\n${draft.value}` : text
     fail(e)
     return false
   }
@@ -374,7 +336,7 @@ async function remove() {
   if (!task.value) return
   const requested = props.taskRef
   try {
-    await removeMutation.mutateAsync({ task: { slug: slug.value, number: number.value, ref: props.taskRef } })
+    await removeMutation.mutateAsync({ task: address.value })
     toast.add({ title: `${requested} deleted`, color: 'neutral' })
     if (requested !== props.taskRef) return
     confirmDelete.value = false
@@ -561,7 +523,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
     </header>
 
     <div
-      v-if="loading && !task"
+      v-if="taskResult.isPending.value"
       class="flex flex-col gap-3 p-4"
     >
       <USkeleton class="h-6 w-2/3" />
@@ -575,7 +537,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
       variant="subtle"
       :title="error"
       class="m-4"
-      :actions="[{ label: 'Retry', onClick: load }]"
+      :actions="[{ label: 'Retry', onClick: retry }]"
     />
 
     <div
@@ -709,7 +671,6 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
           :task="task"
           :slug="slug"
           :mobile="mobile"
-          @updated="task = $event"
         />
 
         <section v-if="shows('details')">

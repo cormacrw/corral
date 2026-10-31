@@ -16,6 +16,8 @@ export interface EventCache {
   get: <T>(key: QueryKey) => T | undefined
   slug: (projectId: string) => string | undefined
   taskRef: (taskId: string) => string | undefined
+  // The cached epics listing a task, so it can leave one as well as join one
+  epicsWith: (taskId: string) => string[]
   clearProject: (projectId: string) => void
 }
 
@@ -44,9 +46,20 @@ const addLines = (offset: number, events: RunEvent[]): Update<RunEvent[]> => (li
   return [...lines, ...events.slice(lines.length - offset)]
 }
 
+// A posted comment's event can beat its response, so either one replaces the
+// temporary entry
+export const withComment = (comments: Comment[], comment: Comment): Comment[] =>
+  upsert(comments.filter(c => !(c.id.startsWith('pending-') && c.body === comment.body)), comment)
+
+const taskEpics = (task: Task, cache: EventCache): string[] =>
+  [...new Set([...(task.epicId ? [task.epicId] : []), ...cache.epicsWith(task.id)])]
+
 // Drafts live only in their plan, not in the project's task list
 function writeTask(task: Task, cache: EventCache): void {
   cache.set<Task>(keys.tasks.detail(task.ref), current => current && task)
+  for (const id of taskEpics(task, cache)) {
+    cache.set<EpicDetail>(keys.epics.detail(id), epic => epic && { ...epic, tasks: task.epicId === id ? upsert(epic.tasks, task) : epic.tasks.filter(t => t.id !== task.id) })
+  }
   const slug = cache.slug(task.projectId)
   if (!slug) return
   cache.set<Task[]>(keys.tasks.list(slug), list => list && (task.status === 'draft' ? list.filter(t => t.id !== task.id) : upsert(list, task)))
@@ -66,7 +79,7 @@ function taskStale(task: Task, cache: EventCache): QueryKey[] {
     keys.tasks.evidence(task.ref),
     keys.tasks.reviews(task.ref),
     keys.tasks.designs(task.ref),
-    ...(task.epicId ? [keys.epics.detail(task.epicId)] : []),
+    ...taskEpics(task, cache).map(keys.epics.detail),
     ...(cache.slug(task.projectId) ? [] : [keys.tasks.lists()]),
     ...projectStale(task.projectId, cache)
   ]
@@ -121,12 +134,10 @@ export const eventDependencies: EventDependencies = {
   'comment.created': {
     write: ({ comment }, cache) => {
       const ref = cache.taskRef(comment.taskId)
-      if (ref) cache.set<Comment[]>(keys.tasks.comments(ref), upsertInto(comment))
+      if (ref) cache.set<Comment[]>(keys.tasks.comments(ref), comments => comments && withComment(comments, comment))
     },
-    invalidates: ({ comment }, cache) => {
-      const ref = cache.taskRef(comment.taskId)
-      return ref ? [keys.tasks.history(ref)] : [keys.tasks.details()]
-    }
+    // A comment adds no audit entry, so history and evidence stay as they are
+    invalidates: ({ comment }, cache) => cache.taskRef(comment.taskId) ? [] : [keys.tasks.details()]
   },
   'epic.updated': {
     write: ({ epic }, cache) => {
@@ -145,10 +156,11 @@ export const eventDependencies: EventDependencies = {
       cache.set<Run>(keys.runs.detail(run.id), current => current && run)
       cache.set<Run[]>(keys.runs.list({ agentId: run.agentId }), runs => runs && (runs.some(r => r.id === run.id) ? upsert(runs, run) : [run, ...runs]))
     },
-    // Lease changes show as counts on agents, and a designer's run can add a version
+    // Lease changes show as counts on agents, a run's end goes in the task's
+    // history, and it can add evidence, a review or a design version
     invalidates: ({ run }, cache) => [
       keys.runs.lists(), keys.agents.list(), keys.inbox(),
-      ...(run.taskRef ? [keys.tasks.designs(run.taskRef)] : []),
+      ...(run.taskRef ? [keys.tasks.history(run.taskRef), keys.tasks.evidence(run.taskRef), keys.tasks.reviews(run.taskRef), keys.tasks.designs(run.taskRef)] : []),
       ...projectStale(run.projectId, cache)
     ]
   },
@@ -259,6 +271,9 @@ function eventCache(client: QueryClient, raced: QueryKey[]): EventCache {
     get: key => client.getQueryData(key),
     slug: projectId => client.getQueryData<Project[]>(keys.projects.list())?.find(p => p.id === projectId)?.slug,
     taskRef: taskId => cachedTasks(client).find(t => t.id === taskId)?.ref,
+    epicsWith: taskId => client.getQueriesData<EpicDetail>({ queryKey: keys.epics.details() })
+      .filter(([, epic]) => epic?.tasks.some(t => t.id === taskId))
+      .map(([, epic]) => epic!.id),
     clearProject: projectId => clearProject(client, projectId)
   }
 }

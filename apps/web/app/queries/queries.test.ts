@@ -326,6 +326,12 @@ describe('query layer', () => {
     expect(client.getQueryData(keys.tasks.comments('COR-1'))).toEqual([comment])
   })
 
+  it('refetches a task\'s history, evidence and reviews when one of its runs changes', () => {
+    client.setQueryData(keys.projects.list(), [{ id: 'p-1', slug: 'corral' }])
+    const stale = applyEvent(client, { type: 'run.updated', run: { id: 'r-1', agentId: 'a-1', projectId: 'p-1', taskRef: 'COR-1' } as Extract<ServerEvent, { type: 'run.updated' }>['run'] })
+    for (const key of [keys.tasks.history('COR-1'), keys.tasks.evidence('COR-1'), keys.tasks.reviews('COR-1'), keys.tasks.designs('COR-1')]) expect(stale).toContainEqual(key)
+  })
+
   it('uses defaults that show cached data at once and do not retry a 4xx', () => {
     const defaults = createQueryClient().getDefaultOptions().queries!
     expect(defaults.staleTime).toBeGreaterThan(0)

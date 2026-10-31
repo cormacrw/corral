@@ -323,4 +323,18 @@ describe('prototype mock API', () => {
       vi.useRealTimers()
     }
   })
+
+  // Last: it moves fixtures the tests above read
+  it('moves a task and approves a design through the same live events as the server', async () => {
+    const events: ServerEvent[] = []
+    const stop = onMockEvent(event => events.push(event))
+    try {
+      expect(await mockCall<Task>('POST', '/projects/corral/tasks/9/transitions', { type: 'resolve', to: 'ready' })).toMatchObject({ status: 'ready' })
+      expect(await mockCall<Task>('POST', '/projects/corral/tasks/41/designs/1/approve', {})).toMatchObject({ status: 'approved' })
+      expect(events.map(e => e.type)).toEqual(['task.updated', 'task.updated'])
+      await expect(mockCall('POST', '/projects/corral/tasks/41/designs/9/approve', {})).rejects.toThrow(ApiError)
+    } finally {
+      stop()
+    }
+  })
 })
