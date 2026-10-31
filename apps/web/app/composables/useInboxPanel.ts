@@ -29,6 +29,8 @@ export interface InboxPanelContext {
   needsText: boolean
   tab: InboxPanelTab
   checkedHumanCriteria: string[]
+  // An action has taken over the composer
+  composerChosen: boolean
   taskOpen: boolean
   submit: (text: string) => Promise<boolean>
   // One click: most actions send at once, resolving true when sent; the others
@@ -46,6 +48,9 @@ export interface InboxPanelContext {
 // Text is required for two. Delete isn't undone, so it waits for the composer too.
 const OPENS_COMPOSER: Action[] = ['request_changes', 'clarify', 'delete']
 export const actionOpensComposer = (value: Action) => OPENS_COMPOSER.includes(value)
+// Approval needs the task for its human-criteria check; the rest only wait
+// while it's still loading.
+export const actionDisabled = (ctx: InboxPanelContext, value: string) => ctx.busy || ctx.taskLoading || (value === 'approve' && ctx.taskLoadFailed)
 
 export function useInboxPanel(ctx: InboxPanelContext) {
   const router = useRouter()
