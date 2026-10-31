@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { useMutation } from '@tanstack/vue-query'
 import type { PatchProjectInput, Project } from '@corral/contracts'
 import { DEFAULT_LIMITS } from '@corral/core'
 import { api, ApiError } from '~/composables/useApi'
+import { removeProject, setProjectThumbnail } from '~/queries/projects'
 import { EPIC_REVIEW_MODE, THUMBNAIL_COLORS } from '~/utils/labels'
 
 // Project settings (design/project-settings.md): form fields save together; pause and images apply immediately.
@@ -9,6 +11,8 @@ import { EPIC_REVIEW_MODE, THUMBNAIL_COLORS } from '~/utils/labels'
 const route = useRoute()
 const device = useDevice()
 const live = useLive()
+const thumbnail = useMutation(setProjectThumbnail)
+const removal = useMutation(removeProject)
 const toast = useToast()
 const slug = computed(() => String(route.params.slug))
 const project = computed(() => live.state.value.projects.find(p => p.slug === slug.value) ?? null)
@@ -74,8 +78,7 @@ async function changeThumbnail(image: File | null) {
   if (!p || thumbnailBusy.value) return
   thumbnailBusy.value = true
   try {
-    const updated = image ? await api.projects.setThumbnail(p.slug, image) : await api.projects.clearThumbnail(p.slug)
-    live.state.value.projects = live.state.value.projects.map(item => item.id === updated.id ? updated : item)
+    await thumbnail.mutateAsync({ slug: p.slug, image })
   } catch (e) {
     toast.add({ title: image ? 'Image not uploaded' : 'Image not removed', description: e instanceof Error ? e.message : String(e), color: 'error' })
   } finally {
@@ -115,12 +118,10 @@ async function remove() {
   if (!p || removeConfirm.value !== p.name) return
   removing.value = true
   try {
-    await api.projects.remove(p.slug, removeConfirm.value)
-    // Drop it now rather than waiting for the project.deleted event
-    live.state.value.projects = live.state.value.projects.filter(x => x.id !== p.id)
+    await removal.mutateAsync({ slug: p.slug, confirm: removeConfirm.value })
     removeOpen.value = false
     toast.add({ title: `Removed ${p.name}`, color: 'success' })
-    const next = live.state.value.projects[0]
+    const next = live.state.value.projects.find(x => x.id !== p.id)
     await navigateTo(next ? `/projects/${next.slug}` : '/setup')
   } catch (e) {
     toast.add({ title: 'Not removed', description: e instanceof Error ? e.message : String(e), color: 'error' })

@@ -1,16 +1,18 @@
 import type { RouteLocationNormalized } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { keys } from '~/queries/keys'
+import { testQueryClient } from '~/queries/mount-with-query'
 
-// The middleware with Nuxt's auto-imports stubbed: a fresh browser (live
-// state not loaded, nothing in storage) and the server's project list
-const live = { state: { value: { loaded: false, projects: [] as { slug: string }[] } } }
+// The middleware with Nuxt's auto-imports stubbed: a fresh browser (nothing
+// cached, nothing in storage) and the server's project list
+const client = testQueryClient()
+vi.mock('@tanstack/vue-query', async original => ({ ...await original<typeof import('@tanstack/vue-query')>(), useQueryClient: () => client }))
 let projects: unknown = []
 let reachable = true
 const mode = { value: 'web' as 'web' | 'mobile' }
 vi.stubGlobal('useDevice', () => ({ mode }))
 
 vi.stubGlobal('defineNuxtRouteMiddleware', (fn: unknown) => fn)
-vi.stubGlobal('useLive', () => live)
 vi.stubGlobal('navigateTo', (to: string) => ({ redirect: to }))
 
 const { default: middleware } = await import('./setup.global.ts') as unknown as {
@@ -19,7 +21,7 @@ const { default: middleware } = await import('./setup.global.ts') as unknown as 
 const visit = (path: string, query: Record<string, string> = {}) => middleware({ path, query })
 
 beforeEach(() => {
-  live.state.value = { loaded: false, projects: [] }
+  client.clear()
   reachable = true
   mode.value = 'web'
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
@@ -61,10 +63,17 @@ describe('setup middleware with a project on the server', () => {
     expect(await visit('/setup', { step: 'repo', add: '1' })).toBeUndefined()
   })
 
-  it('uses the live state once it has loaded', async () => {
-    live.state.value = { loaded: true, projects: [{ slug: 'live' }] }
+  it('uses the cached list once there is one', async () => {
+    client.setQueryData(keys.projects.list(), [{ slug: 'live' }])
     expect(await visit('/setup', { step: 'you' })).toEqual({ redirect: '/projects/live' })
     expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('caches the list for the shell and asks only once', async () => {
+    await visit('/')
+    await visit('/home')
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(client.getQueryData(keys.projects.list())).toEqual([{ slug: 'test-app' }])
   })
 })
 
@@ -91,11 +100,13 @@ describe('setup middleware when the server cannot say', () => {
     reachable = false
     expect(await visit('/')).toBeUndefined()
     expect(await visit('/setup')).toBeUndefined()
+    // One attempt each: a cold launch doesn't wait out query retries
+    expect(fetch).toHaveBeenCalledTimes(2)
   })
 
   it('sends nowhere when the answer is not a project list', async () => {
     projects = null
     expect(await visit('/')).toBeUndefined()
-    expect(live.state.value.projects).toEqual([])
+    expect(client.getQueryData(keys.projects.list())).toBeUndefined()
   })
 })

@@ -10,6 +10,10 @@ export const createAgent = defineMutation<Agent, CreateAgentInput>({
   mutationFn: input => api.agents.create(input),
   invalidates: [keys.agents.list()]
 })
+export const setAgentAvatar = defineMutation<Agent, { id: string, image: Blob | null }>({
+  mutationFn: ({ id, image }) => image ? api.agents.setAvatar(id, image) : api.agents.clearAvatar(id),
+  invalidates: [keys.agents.list()]
+})
 export const patchAgent = defineMutation<Agent, { id: string, input: PatchAgentInput }>({
   mutationFn: ({ id, input }) => api.agents.patch(id, input),
   invalidates: [keys.agents.list()]

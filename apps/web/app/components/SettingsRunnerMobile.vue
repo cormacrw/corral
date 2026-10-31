@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import type { CliStatus } from '@corral/contracts'
+import { reloadShell } from '~/queries/shell'
 import { cliLoginCommand } from '~/utils/labels'
 
 // Settings · Runner on mobile (design/settings.md, design/mobile.md): every
 // runner's live status, the data directory and the logins inside it
 const props = defineProps<{ clis: CliStatus[] | null, cliError: string | null }>()
 const emit = defineEmits<{ scan: [] }>()
-const live = useLive()
 const toast = useToast()
 
 // The browser can't restart the runner; this fetches its status again and
@@ -15,7 +15,7 @@ const reconnecting = ref(false)
 async function reconnect() {
   reconnecting.value = true
   try {
-    await live.load()
+    await reloadShell()
     emit('scan')
   } finally {
     reconnecting.value = false

@@ -1,4 +1,7 @@
+import { useQueryClient } from '@tanstack/vue-query'
+import type { Project } from '@corral/contracts'
 import { api } from '~/composables/useApi'
+import { keys } from '~/queries/keys'
 import { onboardingRedirect } from '~/utils/onboarding'
 
 // First run: with no projects, everything leads to onboarding; once the
@@ -7,18 +10,21 @@ export default defineNuxtRouteMiddleware(async (to) => {
   // Resolve media queries and the saved override before choosing a landing page.
   // useDevice initializes synchronously, including on a cold standalone launch.
   const { mode } = useDevice()
-  const live = useLive()
-  if (!live.state.value.loaded) {
+  const client = useQueryClient()
+  let projects = client.getQueryData<Project[]>(keys.projects.list())
+  if (!projects) {
+    // One attempt, not the query's: a cold launch can't wait out retries. The
+    // shell finds the list cached and doesn't ask again.
     try {
-      const projects = await api.projects.list()
+      const list = await api.projects.list()
       // Anything but a list (say, a proxy's HTML page) says nothing either way
-      if (!Array.isArray(projects)) return
-      live.state.value.projects = projects
+      if (!Array.isArray(list)) return
+      projects = client.setQueryData<Project[]>(keys.projects.list(), list)!
     } catch {
       // The server is unreachable; pages show the error themselves
       return
     }
   }
-  const target = onboardingRedirect(to, live.state.value.projects, mode.value)
+  const target = onboardingRedirect(to, projects, mode.value)
   if (target) return navigateTo(target)
 })

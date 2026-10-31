@@ -1,12 +1,14 @@
 // @vitest-environment happy-dom
+import { VueQueryPlugin } from '@tanstack/vue-query'
 import { mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { testQueryClient } from '~/queries/mount-with-query'
 
 vi.stubGlobal('useDarkNeutral', () => {})
 vi.stubGlobal('useHead', () => {})
 vi.stubGlobal('useSeoMeta', () => {})
-vi.stubGlobal('useLive', () => ({ load: vi.fn(), connect: vi.fn() }))
+vi.stubGlobal('useLive', () => ({ connect: vi.fn() }))
 vi.stubGlobal('useDevice', () => ({ isMobile: ref(true) }))
 vi.stubGlobal('useRoute', () => ({ meta: {} }))
 vi.stubGlobal('computed', computed)
@@ -14,7 +16,7 @@ vi.stubGlobal('onMounted', onMounted)
 vi.stubGlobal('onUnmounted', onUnmounted)
 
 const { default: App } = await import('./app.vue')
-const global = { stubs: { UApp: { template: '<div><slot /></div>' }, NuxtLayout: true, NuxtPage: true, InstallSheet: true } }
+const global = { plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }]] as [never], stubs: { UApp: { template: '<div><slot /></div>' }, NuxtLayout: true, NuxtPage: true, InstallSheet: true } }
 
 function gesture(type: string): boolean {
   return document.dispatchEvent(new Event(type, { cancelable: true, bubbles: true }))

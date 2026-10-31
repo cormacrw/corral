@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { useQueryClient } from '@tanstack/vue-query'
+import { startShell } from '~/queries/shell'
+
 useDarkNeutral()
 
 useHead({
@@ -20,10 +23,8 @@ useSeoMeta({
 
 // One live connection for the whole app (design/app-shell.md)
 const live = useLive()
-onMounted(() => {
-  void live.load()
-  live.connect()
-})
+onUnmounted(startShell(useQueryClient()))
+onMounted(() => live.connect())
 
 // Safari on iOS ignores the viewport pinch restriction. Keep this in the
 // app shell so navigation never adds more listeners; leave desktop gestures alone.

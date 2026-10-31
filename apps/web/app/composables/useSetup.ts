@@ -1,6 +1,10 @@
+import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import type { CliStatus, RepoCheck, RepoChoice, RepoList } from '@corral/contracts'
 import { suggestPrefix } from '~/utils/prefix'
 import { ApiError, api } from '~/composables/useApi'
+import { agentsQuery, patchAgent } from '~/queries/agents'
+import { createProject, projectsQuery } from '~/queries/projects'
+import { patchProfile, profileQuery } from '~/queries/system'
 import { cliLoginCommand } from '~/utils/labels'
 
 // Onboarding state and actions (design/onboarding.md), shared by the web
@@ -9,7 +13,10 @@ import { cliLoginCommand } from '~/utils/labels'
 export function useSetup() {
   const route = useRoute()
   const router = useRouter()
-  const live = useLive()
+  const client = useQueryClient()
+  const profileMutation = useMutation(patchProfile)
+  const projectMutation = useMutation(createProject)
+  const agentMutation = useMutation(patchAgent)
   const toast = useToast()
   const adding = computed(() => route.query.add === '1')
 
@@ -27,7 +34,7 @@ export function useSetup() {
   const userName = ref('')
   onMounted(async () => {
     try {
-      const profile = await api.me.get()
+      const profile = await client.fetchQuery(profileQuery())
       if (!userName.value) userName.value = profile.name
     } catch {
       // Leave the field empty; saving reports any error
@@ -37,7 +44,7 @@ export function useSetup() {
   async function saveName() {
     savingName.value = true
     try {
-      live.state.value.profile = await api.me.patch({ name: userName.value.trim() })
+      await profileMutation.mutateAsync({ name: userName.value.trim() })
       return true
     } catch (e) {
       toast.add({ title: 'Could not save your name', description: e instanceof Error ? e.message : String(e), color: 'error' })
@@ -85,7 +92,7 @@ export function useSetup() {
     checking.value = true
     check.value = null
     try {
-      const [result, projects] = await Promise.all([api.setup.checkRepo(name), api.projects.list()])
+      const [result, projects] = await Promise.all([api.setup.checkRepo(name), client.fetchQuery(projectsQuery())])
       if (version !== pickVersion) return
       setPrefix(suggestPrefix(name.split('/')[1] ?? name, projects.map(p => p.prefix)))
       check.value = result
@@ -136,14 +143,13 @@ export function useSetup() {
     finishing.value = true
     try {
       const name = picked.value.nameWithOwner.split('/')[1] ?? picked.value.nameWithOwner
-      const project = await api.projects.create({ name, prefix: prefix.value, repository: picked.value.nameWithOwner, defaultBranch: defaultBranch.value, mergeMethod: mergeMethod.value })
+      const project = await projectMutation.mutateAsync({ name, prefix: prefix.value, repository: picked.value.nameWithOwner, defaultBranch: defaultBranch.value, mergeMethod: mergeMethod.value })
       if (!adding.value) {
-        for (const agent of live.state.value.agents.length ? live.state.value.agents : await api.agents.list()) {
+        for (const agent of await client.ensureQueryData(agentsQuery())) {
           const wanted = agent.role === 'designer' ? undefined : agentNames[agent.role]
-          if (wanted && wanted !== agent.name) await api.agents.patch(agent.id, { name: wanted })
+          if (wanted && wanted !== agent.name) await agentMutation.mutateAsync({ id: agent.id, input: { name: wanted } })
         }
       }
-      await live.load()
       await router.push(`/projects/${project.slug}`)
     } catch (e) {
       if (e instanceof ApiError && e.body?.code === 'conflict' && e.body.constraint?.includes('prefix')) {

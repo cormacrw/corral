@@ -13,6 +13,14 @@ export const createProject = defineMutation<Project, CreateProjectInput>({
   mutationFn: input => api.projects.create(input),
   invalidates: [keys.projects.list()]
 })
+export const setProjectThumbnail = defineMutation<Project, { slug: string, image: File | null }>({
+  mutationFn: ({ slug, image }) => image ? api.projects.setThumbnail(slug, image) : api.projects.clearThumbnail(slug),
+  invalidates: (_, { slug }) => [keys.projects.list(), keys.projects.detail(slug)]
+})
+export const removeProject = defineMutation<null, { slug: string, confirm: string }>({
+  mutationFn: ({ slug, confirm }) => api.projects.remove(slug, confirm),
+  invalidates: [keys.projects.list()]
+})
 export const patchProject = defineMutation<Project, { slug: string, input: PatchProjectInput }>({
   mutationFn: ({ slug, input }) => api.projects.patch(slug, input),
   invalidates: (_, { slug }) => [keys.projects.list(), keys.projects.detail(slug)]

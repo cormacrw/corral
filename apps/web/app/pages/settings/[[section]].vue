@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import { useMutation } from '@tanstack/vue-query'
 import type { Agent, AgentRuntime, CliStatus } from '@corral/contracts'
 import { api } from '~/composables/useApi'
+import { patchAgent as patchAgentMutation, setAgentAvatar } from '~/queries/agents'
+import { patchProfile, setProfileAvatar } from '~/queries/system'
 import { agentLimit } from '~/utils/agents'
 import { parseOverride } from '~/utils/device'
 import { cliLoginCommand, detectedRuntimes, ROLE, runtimeLabel } from '~/utils/labels'
@@ -8,6 +11,10 @@ import { cliLoginCommand, detectedRuntimes, ROLE, runtimeLabel } from '~/utils/l
 // Global settings (design/settings.md): profile, agents, runner, appearance
 const route = useRoute()
 const live = useLive()
+const profilePatch = useMutation(patchProfile)
+const profileAvatar = useMutation(setProfileAvatar)
+const agentPatch = useMutation(patchAgentMutation)
+const agentAvatar = useMutation(setAgentAvatar)
 const toast = useToast()
 const colorMode = useColorMode()
 const device = useDevice()
@@ -25,7 +32,7 @@ async function saveName() {
   const name = userName.value.trim()
   if (name === live.state.value.profile?.name) return
   try {
-    live.state.value.profile = await api.me.patch({ name })
+    await profilePatch.mutateAsync({ name })
     toast.add({ title: 'Saved', color: 'success' })
   } catch (e) {
     toast.add({ title: 'Not saved', description: e instanceof Error ? e.message : String(e), color: 'error' })
@@ -47,10 +54,6 @@ watch(section, (s) => {
 }, { immediate: true })
 
 const adding = ref(false)
-// The live agent.updated event adds it too; this covers a slow stream
-function added(agent: Agent) {
-  if (!live.state.value.agents.some(a => a.id === agent.id)) live.state.value.agents = [...live.state.value.agents, agent]
-}
 // Existing agents can switch to any detected runtime, keeping their current one listed
 function runtimeItems(agent: Agent) {
   const values = new Set<string>([...detectedRuntimes(clis.value ?? []), agent.runtime])
@@ -59,7 +62,7 @@ function runtimeItems(agent: Agent) {
 
 async function patchAgent(agent: Agent, input: Parameters<typeof api.agents.patch>[1]) {
   try {
-    await api.agents.patch(agent.id, input)
+    await agentPatch.mutateAsync({ id: agent.id, input })
     toast.add({ title: 'Saved', color: 'success' })
   } catch (e) {
     toast.add({ title: 'Not saved', description: e instanceof Error ? e.message : String(e), color: 'error' })
@@ -71,11 +74,10 @@ function patchWakeInterval(agent: Agent, minutes: number | null | undefined) {
   if (seconds !== agent.wakeIntervalSeconds) void patchAgent(agent, { wakeIntervalSeconds: seconds })
 }
 async function saveMyAvatar(image: Blob | null) {
-  live.state.value.profile = image ? await api.me.setAvatar(image) : await api.me.clearAvatar()
+  await profileAvatar.mutateAsync(image)
 }
 async function saveAgentAvatar(agent: Agent, image: Blob | null) {
-  const updated = image ? await api.agents.setAvatar(agent.id, image) : await api.agents.clearAvatar(agent.id)
-  live.state.value.agents = live.state.value.agents.map(a => a.id === updated.id ? updated : a)
+  await agentAvatar.mutateAsync({ id: agent.id, image })
 }
 async function stopAll() {
   try {
@@ -135,7 +137,6 @@ const items = [
         v-model:open="adding"
         :clis="clis"
         :cli-error="cliError"
-        @created="added"
       />
       <SettingsRunnerMobile
         v-if="section === 'runner'"
@@ -352,7 +353,6 @@ const items = [
               v-model:open="adding"
               :clis="clis"
               :cli-error="cliError"
-              @created="added"
             />
           </UCard>
           <UCard :ui="{ root: 'ring-error/40' }">
