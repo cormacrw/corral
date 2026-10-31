@@ -1,24 +1,19 @@
 <script setup lang="ts">
 import type { EpicReviewItem } from '@corral/contracts'
-import { api } from '~/composables/useApi'
+import { useMutation } from '@tanstack/vue-query'
+import { reviewEpic } from '~/queries/epics'
+import { holdsInbox } from '~/queries/inbox'
 
 const props = defineProps<{ item: EpicReviewItem }>()
 const emit = defineEmits<{ resolved: [] }>()
 const device = useDevice()
 const feedback = ref('')
-const busy = ref(false)
-const error = ref<string | null>(null)
-async function act(action: 'approve' | 'request_changes') {
-  busy.value = true
-  error.value = null
-  try {
-    await api.epics.review(props.item.epicId, { action, headSha: props.item.headSha, ...(feedback.value.trim() && { text: feedback.value.trim() }) })
-    emit('resolved')
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    busy.value = false
-  }
+const review = useMutation({ ...reviewEpic, ...holdsInbox })
+const busy = review.isPending
+const error = computed(() => review.error.value?.message ?? null)
+function act(action: 'approve' | 'request_changes') {
+  const input = { action, headSha: props.item.headSha, ...(feedback.value.trim() && { text: feedback.value.trim() }) }
+  review.mutate({ id: props.item.epicId, input }, { onSuccess: () => emit('resolved') })
 }
 </script>
 
@@ -38,7 +33,14 @@ async function act(action: 'approve' | 'request_changes') {
       {{ item.project.name }} · {{ item.sender.name }} approved integration
     </InboxEpicHeader>
     <div class="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4">
+      <InboxMessage
+        v-if="item.message"
+        :key="item.id"
+        :item="item"
+        :evidence="item.tasks.flatMap(entry => entry.evidence)"
+      />
       <section
+        v-else
         aria-label="Integration review"
         class="rounded-lg bg-elevated p-3 break-words"
       >

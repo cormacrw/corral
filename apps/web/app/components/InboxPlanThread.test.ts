@@ -1,15 +1,20 @@
 // @vitest-environment happy-dom
+import { VueQueryPlugin } from '@tanstack/vue-query'
+import type { ServerEvent } from '@corral/contracts'
+import { applyEvent, invalidateKeys } from '~/queries/dependencies'
+import { testQueryClient } from '~/queries/mount-with-query'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import { api } from '~/composables/useApi'
 import { agents, inbox, planSessions, plans, projects } from '~/prototype/fixtures'
 import InboxPlanThread from '~/components/InboxPlanThread.vue'
-import InboxPage from '~/pages/inbox/[[itemId]].vue'
+import InboxPage from '~/pages/inbox.vue'
+import InboxItemPage from '~/pages/inbox/[itemId].vue'
 import { UNDO_MS, usePlanThreadDelete } from '~/composables/usePlanThreadDelete'
 
 vi.mock('~/composables/useApi', () => ({
-  api: { inbox: { get: vi.fn() }, plan: { session: vi.fn(), close: vi.fn() } }
+  api: { inbox: { get: vi.fn() }, plan: { session: vi.fn(), close: vi.fn(), read: vi.fn() } }
 }))
 
 afterEach(() => {
@@ -23,8 +28,10 @@ async function mountInbox() {
   const remove = vi.fn()
   const toasts: { title: string, actions?: { label: string, onClick: () => void }[] }[] = []
   const toastRemove = vi.fn()
-  vi.stubGlobal('useRoute', () => ({ params: { itemId: 's-1' } }))
+  const params = vue.reactive<{ itemId?: string }>({ itemId: 's-1' })
+  vi.stubGlobal('useRoute', () => ({ params }))
   vi.stubGlobal('useRouter', () => ({ replace }))
+  vi.stubGlobal('definePageMeta', vi.fn())
   vi.stubGlobal('useSeoMeta', vi.fn())
   vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(false) }))
   vi.stubGlobal('useMobileHeader', () => vue.ref(null))
@@ -32,14 +39,7 @@ async function mountInbox() {
   vi.stubGlobal('usePlanThreads', () => ({ add: vi.fn(), remove }))
   vi.stubGlobal('usePlanThreadDelete', usePlanThreadDelete)
   vi.stubGlobal('useTaskFlyout', () => ({ ref: vue.ref(null), epic: vue.ref(null), plan: vue.ref(false), close: vi.fn().mockResolvedValue(undefined) }))
-  const listeners: ((event: { type: string }) => void)[] = []
-  vi.stubGlobal('useLive', () => ({
-    state: vue.ref({ agents, projects, loaded: true, runner: { online: true } }),
-    subscribe: (listener: typeof listeners[number]) => {
-      listeners.push(listener)
-      return () => {}
-    }
-  }))
+  vi.stubGlobal('useLive', () => ({ state: vue.ref({ agents, projects, loaded: true, runner: { online: true } }) }))
   let data = inbox()
   vi.mocked(api.inbox.get).mockImplementation(async () => structuredClone(data))
   vi.mocked(api.plan.session).mockResolvedValue({ ...planSessions.find(s => s.id === 's-1')!, unread: false, messages: [], plans: plans['s-1']! })
@@ -51,20 +51,71 @@ async function mountInbox() {
   const button = vue.defineComponent({ props: ['label', 'ariaLabel'], setup: props => () => vue.h('button', props.label ?? props.ariaLabel) })
   const row = vue.defineComponent({ props: ['item'], setup: props => () => vue.h('span', { 'data-row': props.item.id }, props.item.subject) })
   const avatar = vue.defineComponent({ props: ['name'], setup: props => () => vue.h('i', { 'data-avatar': props.name }) })
-  const wrapper = mount(InboxPage, { global: { components: { InboxPlanThread, UDashboardPanel: plain, UButton: button, PlanThreadRow: row, AgentAvatar: avatar }, stubs: {
+  const client = testQueryClient()
+  // As Nuxt renders the child: keyed by its path
+  const NuxtPage = vue.defineComponent({ setup: () => () => params.itemId ? vue.h(InboxItemPage, { key: params.itemId }) : null })
+  const wrapper = mount(InboxPage, { global: { plugins: [[VueQueryPlugin, { queryClient: client }]], components: { NuxtPage, InboxPlanThread, UDashboardPanel: plain, UButton: button, PlanThreadRow: row, AgentAvatar: avatar }, stubs: {
     UBadge: true, UInput: true, UTabs: true,
     MarkdownText: true, TaskFlyout: true,
-    PlanConversation: true, InboxMobile: true, UAlert: true, USkeleton: true, NuxtLink: true,
+    PlanConversation: true, InboxMobile: true, InboxMobileItem: true, UAlert: true, USkeleton: true, NuxtLink: true,
     EvidenceList: true, USelectMenu: true, PromptComposer: true, UIcon: true, PlanQuestion: true, PlanDetail: true
   } } })
   await flushPromises()
+  // An event as the real stream delivers it, less the coalescing delay
+  const emitLive = (event: { type: string, session?: { id: string, unread: boolean }, markedRead?: { inboxCount: number } }) => void invalidateKeys(client, applyEvent(client, event as ServerEvent))
   const rows = () => wrapper.findAll('[data-row]').map(r => r.attributes('data-row'))
   const rename = (name: string) => {
     data = { ...data, needsYou: data.needsYou.map(i => i.type === 'plan_thread' ? { ...i, sender: { ...i.sender, name } } : i) }
-    for (const listener of listeners) listener({ type: 'agent.updated' })
+    emitLive({ type: 'agent.updated' })
   }
-  return { wrapper, replace, remove, toasts, toastRemove, rows, rename }
+  const setInbox = (next: typeof data) => {
+    data = next
+  }
+  return { wrapper, params, replace, remove, toasts, toastRemove, rows, rename, setInbox, emitLive }
 }
+
+it('reads an unread thread in place and keeps it open, without fetching the Inbox', async () => {
+  const { wrapper, rows, emitLive, setInbox } = await mountInbox()
+  try {
+    const opened = inbox().needsYou.find(i => i.id === 's-1')
+    if (opened?.type !== 'plan_thread') throw new Error('fixture')
+    setInbox({ ...inbox(), needsYou: inbox().needsYou.map(i => i.id === 's-1' ? { ...opened, status: 'none', question: null, plan: null, planId: null, unread: true, reply: 'Done' } : i) })
+    emitLive({ type: 'agent.updated' })
+    await flushPromises()
+    vi.mocked(api.inbox.get).mockClear()
+    vi.mocked(api.plan.read).mockResolvedValue({ ...planSessions.find(s => s.id === 's-1')!, unread: false })
+    expect(rows()).toContain('s-1')
+
+    emitLive({ type: 'plan.session', session: { id: 's-1', unread: true } })
+    await flushPromises()
+    expect(api.plan.read).toHaveBeenCalledWith('s-1')
+    expect(api.inbox.get).toHaveBeenCalledOnce()
+
+    vi.mocked(api.inbox.get).mockClear()
+    emitLive({ type: 'plan.session', session: { id: 's-1', unread: false }, markedRead: { inboxCount: 1 } })
+    await flushPromises()
+    expect(api.inbox.get).not.toHaveBeenCalled()
+    expect(rows()).not.toContain('s-1')
+    expect(wrapper.findComponent(InboxPlanThread).exists()).toBe(true)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('keeps a thread open after it leaves Needs you, until another item is picked', async () => {
+  const { wrapper, params, setInbox, emitLive } = await mountInbox()
+  try {
+    setInbox({ ...inbox(), needsYou: inbox().needsYou.filter(i => i.id !== 's-1') })
+    emitLive({ type: 'agent.updated' })
+    await flushPromises()
+    expect(wrapper.findComponent(InboxPlanThread).props('item')).toMatchObject({ id: 's-1' })
+    params.itemId = 's-3'
+    await flushPromises()
+    expect(wrapper.findComponent(InboxPlanThread).props('item')).toMatchObject({ id: 's-3' })
+  } finally {
+    wrapper.unmount()
+  }
+})
 
 it('shows the sender in the detail header, and a renamed PM without a reload', async () => {
   const { wrapper, rename } = await mountInbox()
@@ -94,7 +145,7 @@ it('deletes from the header at once, selects the next item, and closes when Undo
     expect(rows()).not.toContain('s-1')
     expect(toasts.at(-1)?.title).toBe('Thread deleted · its drafts were discarded')
     expect(toasts.at(-1)?.actions?.[0]?.label).toBe('Undo')
-    expect(replace).toHaveBeenCalledWith('/inbox/s-3')
+    expect(replace).toHaveBeenCalledWith({ path: '/inbox/s-3', query: {} })
     expect(api.plan.close).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(UNDO_MS)
     await flushPromises()

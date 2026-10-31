@@ -26,7 +26,9 @@ export const keys = {
     history: (ref: string) => [...keys.tasks.detail(ref), 'history'] as const,
     evidence: (ref: string) => [...keys.tasks.detail(ref), 'evidence'] as const,
     reviews: (ref: string) => [...keys.tasks.detail(ref), 'reviews'] as const,
-    designs: (ref: string) => [...keys.tasks.detail(ref), 'designs'] as const
+    designs: (ref: string) => [...keys.tasks.detail(ref), 'designs'] as const,
+    pullRequests: (ref: string) => [...keys.tasks.detail(ref), 'pull-request'] as const,
+    pullRequest: (ref: string, number: number) => [...keys.tasks.pullRequests(ref), number] as const
   },
   epics: {
     all: () => ['epics'] as const,
@@ -52,7 +54,14 @@ export const keys = {
     session: (id: string) => [...keys.plan.sessions(), id] as const,
     drafts: (slug: string) => [...keys.plan.all(), 'drafts', slug] as const
   },
+  setup: {
+    all: () => ['setup'] as const,
+    clis: () => [...keys.setup.all(), 'clis'] as const,
+    repos: () => [...keys.setup.all(), 'repos'] as const
+  },
   inbox: () => ['inbox'] as const,
+  // A mutation key: what's running, not cached data
+  inboxResolving: () => ['inbox', 'resolving'] as const,
   profile: () => ['profile'] as const,
   runner: () => ['runner'] as const,
   status: () => ['status'] as const

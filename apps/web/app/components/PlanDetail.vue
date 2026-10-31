@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { Plan, Task } from '@corral/contracts'
 import { approvedPlanSummary } from '@corral/core'
-import { api } from '~/composables/useApi'
+import { useQueries } from '@tanstack/vue-query'
+import { epicQuery } from '~/queries/epics'
 import { EPIC_REVIEW_MODE, PLAN_STATUS, PRIORITY } from '~/utils/labels'
 
 // The session's latest plan, docked in the flyout (design/plan.md). Each
@@ -10,7 +11,6 @@ import { EPIC_REVIEW_MODE, PLAN_STATUS, PRIORITY } from '~/utils/labels'
 const props = defineProps<{ plan: Plan, previous: Plan | null, busy: boolean, sheet?: boolean }>()
 const emit = defineEmits<{ approve: [to: 'ready' | 'backlog'], close: [] }>()
 const flyout = useTaskFlyout()
-const live = useLive()
 const showDiff = ref(false)
 
 const changeColor = { added: 'success', changed: 'warning', unchanged: 'neutral', removed: 'error' } as const
@@ -36,25 +36,9 @@ const epicCount = computed(() => groups.value.filter(g => g.id).length)
 
 // Each epic shows its tasks as a list or a dependency graph, remembered per epic
 const views = useLocalStorage<Record<string, 'list' | 'graph'>>('corral.plan.views', {})
-const graphTasks = ref<Record<string, Task[]>>({})
-async function loadGraph(epicId: string) {
-  try {
-    graphTasks.value[epicId] = (await api.epics.get(epicId)).tasks
-  } catch {
-    // Keep what's shown; the next update retries
-  }
-}
 const shownGraphs = computed(() => groups.value.filter(g => g.id && views.value[g.id] === 'graph').map(g => g.id))
-watch([shownGraphs, () => props.plan.id], ([ids]) => ids.forEach(id => void loadGraph(id)), { immediate: true })
-onMounted(() => {
-  const stop = live.subscribe((event) => {
-    if (event.type !== 'task.updated' && event.type !== 'task.created') return
-    for (const id of shownGraphs.value) {
-      if (event.task.epicId === id || graphTasks.value[id]?.some(t => t.id === event.task.id)) void loadGraph(id)
-    }
-  })
-  onBeforeUnmount(stop)
-})
+const graphs = useQueries({ queries: computed(() => shownGraphs.value.map(id => epicQuery(id))) })
+const graphTasks = computed<Record<string, Task[]>>(() => Object.fromEntries(graphs.value.flatMap(graph => graph.data ? [[graph.data.id, graph.data.tasks]] : [])))
 
 watch(() => props.plan.id, () => {
   showDiff.value = false

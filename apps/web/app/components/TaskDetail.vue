@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import type { AuditEntry, Comment, Evidence, Review, Run, Task } from '@corral/contracts'
+import { useMutation, useQuery } from '@tanstack/vue-query'
+import { commentOnTask, moveTask, patchTask, removeTask, resumeTask, taskCommentsQuery, taskEvidenceQuery, taskHistoryQuery, taskQuery, taskReviewsQuery, type TaskAddress } from '~/queries/tasks'
+import { uploadAttachment } from '~/queries/attachments'
+import { runsQuery } from '~/queries/runs'
+import type { AuditEntry, Comment, HumanTransitionInput, PatchTaskInput, Task } from '@corral/contracts'
 import type { EditorToolbarItem } from '@nuxt/ui'
 import type { EditorView } from '@tiptap/pm/view'
 import type { TaskPriority, TaskStatus } from '@corral/core'
 import { availableEvents } from '@corral/core'
-import { api, ApiError } from '~/composables/useApi'
+import { ApiError } from '~/composables/useApi'
 import { PRIORITY, runBadge, STATUS, TASK_TYPE, timeAgo } from '~/utils/labels'
 import { attachmentProblem } from '~/utils/attachments'
 import { AttachmentImage, imageFiles, insertImages } from '~/utils/editor-image'
@@ -18,25 +22,27 @@ const emit = defineEmits<{ close: [] }>()
 const live = useLive()
 const flyout = useTaskFlyout()
 const toast = useToast()
-const task = ref<Task | null>(null)
-const comments = ref<Comment[]>([])
-const history = ref<AuditEntry[]>([])
-const evidence = ref<Evidence[]>([])
-const reviews = ref<Review[]>([])
-// The task's runs, so activity names the agent that acted
-const runs = ref<Run[]>([])
-const error = ref<string | null>(null)
-const loading = ref(true)
+const patchMutation = useMutation(patchTask)
+const transitionMutation = useMutation(moveTask)
+const removeMutation = useMutation(removeTask)
+const resumeMutation = useMutation(resumeTask)
+const commentMutation = useMutation(commentOnTask)
+const uploadMutation = useMutation(uploadAttachment)
+const taskResult = useQuery(computed(() => taskQuery(props.taskRef)))
+const task = computed(() => taskResult.data.value ?? null)
 const saved = ref(false)
+const resuming = ref(false)
+const placing = ref(false)
 const draft = ref('')
 const editingDescription = ref(false)
 // The editor's JSON document; its inner shape is the editor's business
 const descriptionDraft = ref<{ type: 'doc', content?: never[] }>({ type: 'doc', content: [] })
 const newCriterion = ref('')
 // PR bodies link to ?evidence=1
-const tab = ref<'activity' | 'evidence' | 'history'>(useRoute().query.evidence ? 'evidence' : 'activity')
+const route = useRoute()
+const tab = ref<'activity' | 'evidence' | 'history'>('activity')
 // Mobile splits the body in two; evidence lives with criteria and activity
-const mobileTab = ref<'details' | 'criteria'>(useRoute().query.evidence ? 'criteria' : 'details')
+const mobileTab = ref<'details' | 'criteria'>('details')
 const mobile = computed(() => props.mode === 'mobile')
 // Every part shows in the flyout and page; mobile shows one tab's parts
 const shows = (part: 'details' | 'criteria') => !mobile.value || mobileTab.value === part
@@ -45,55 +51,47 @@ let savedTimer: ReturnType<typeof setTimeout> | null = null
 
 const project = computed(() => live.state.value.projects.find(p => p.id === task.value?.projectId) ?? null)
 const number = computed(() => task.value?.number ?? 0)
-const epic = computed(() => task.value?.epicId ? live.state.value.epics[task.value.projectId]?.find(e => e.id === task.value!.epicId) ?? null : null)
+const epic = computed(() => task.value?.epicId ? epicList.value.find(e => e.id === task.value!.epicId) ?? null : null)
 const slug = computed(() => project.value?.slug ?? '')
+const { tasks: projectTasks, epics: epicList } = useProjectLists(slug)
+const address = computed((): TaskAddress => ({ slug: slug.value, number: number.value, ref: props.taskRef }))
 
-async function load() {
-  loading.value = true
-  error.value = null
-  try {
-    task.value = await api.tasks.byRef(props.taskRef)
-    await loadSide()
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    loading.value = false
-  }
+// Each part of the task is its own query, so an event refetches only its part
+function side<T>(query: (task: TaskAddress) => T) {
+  return computed(() => ({ ...query(address.value), enabled: Boolean(task.value && project.value) }))
 }
-async function loadSide() {
-  if (!task.value || !project.value) return
-  const [c, h, ev, r, ru] = await Promise.all([
-    api.tasks.comments(slug.value, number.value),
-    api.tasks.history(slug.value, number.value),
-    api.tasks.evidence(slug.value, number.value),
-    api.tasks.reviews(slug.value, number.value),
-    api.runs.list({ taskId: task.value.id })
-  ])
-  comments.value = c
-  history.value = h
-  evidence.value = ev
-  reviews.value = r
-  runs.value = ru
-}
-watch(() => props.taskRef, () => {
-  draft.value = ''
+const commentsResult = useQuery(side(taskCommentsQuery))
+const historyResult = useQuery(side(taskHistoryQuery))
+const evidenceResult = useQuery(side(taskEvidenceQuery))
+const reviewsResult = useQuery(side(taskReviewsQuery))
+// The task's runs, so activity names the agent that acted
+const runsResult = useQuery(computed(() => ({ ...runsQuery({ taskId: task.value?.id }), enabled: Boolean(task.value) })))
+const comments = computed(() => commentsResult.data.value ?? [])
+const history = computed(() => historyResult.data.value ?? [])
+const evidence = computed(() => evidenceResult.data.value ?? [])
+const reviews = computed(() => reviewsResult.data.value ?? [])
+const runs = computed(() => runsResult.data.value ?? [])
+const results = [taskResult, commentsResult, historyResult, evidenceResult, reviewsResult, runsResult]
+// A failed background refetch leaves what's cached on screen
+const error = computed(() => results.find(r => r.isLoadingError.value)?.error.value?.message ?? null)
+const retry = () => Promise.all(results.filter(r => r.isLoadingError.value).map(r => r.refetch()))
+
+// A comment that failed after moving on, put back on returning to its task
+const unsent = new Map<string, string>()
+watch(() => props.taskRef, (ref) => {
+  tab.value = route.query.evidence ? 'evidence' : 'activity'
+  mobileTab.value = route.query.evidence ? 'criteria' : 'details'
+  draft.value = unsent.get(ref) ?? ''
+  unsent.delete(ref)
   editingDescription.value = false
-  void load()
+  descriptionDraft.value = { type: 'doc', content: [] }
+  newCriterion.value = ''
+  confirmDelete.value = false
+  saved.value = false
+  resuming.value = false
+  placing.value = false
+  if (savedTimer) clearTimeout(savedTimer)
 }, { immediate: true })
-// Live updates for this task
-onMounted(() => {
-  const stop = live.subscribe((event) => {
-    if (event.type === 'task.updated' && task.value && event.task.id === task.value.id) {
-      task.value = event.task
-      void loadSide()
-    }
-    if (event.type === 'comment.created' && task.value && event.comment.taskId === task.value.id) {
-      if (!comments.value.some(c => c.id === event.comment.id)) comments.value.push(event.comment)
-    }
-    if (event.type === 'run.updated' && task.value && event.run.taskId === task.value.id) void loadSide()
-  })
-  onBeforeUnmount(stop)
-})
 
 function flashSaved() {
   saved.value = true
@@ -105,12 +103,18 @@ function flashSaved() {
 function fail(e: unknown) {
   toast.add({ title: 'Not saved', description: e instanceof ApiError ? e.message : String(e), color: 'error' })
 }
+// Confirms an action on this task, unless another task replaced it while the
+// request ran
+async function confirm(request: Promise<Task>) {
+  const requested = props.taskRef
+  await request
+  if (requested === props.taskRef) flashSaved()
+}
 
-async function patch(input: Parameters<typeof api.tasks.patch>[2]) {
+async function patch(input: PatchTaskInput) {
   if (!task.value) return
   try {
-    task.value = await api.tasks.patch(slug.value, number.value, input)
-    flashSaved()
+    await confirm(patchMutation.mutateAsync({ task: address.value, input }))
   } catch (e) {
     fail(e)
   }
@@ -134,11 +138,11 @@ const statusEditable = computed(() => statusOptions.value.length > 1)
 async function changeStatus(value: string) {
   if (!task.value || value === 'current') return
   try {
-    if (value === 'approve') task.value = await api.tasks.transition(slug.value, number.value, { type: 'approve' })
-    else if (value === 'send_back') task.value = await api.tasks.transition(slug.value, number.value, { type: 'send_back' })
-    else if (value === 'human_request_changes') task.value = await api.tasks.transition(slug.value, number.value, { type: 'human_request_changes' })
-    else if (value.startsWith('resolve:')) task.value = await api.tasks.transition(slug.value, number.value, { type: 'resolve', to: value.slice(8) as 'backlog' | 'ready' | 'in_progress' })
-    flashSaved()
+    const transition = (input: HumanTransitionInput, status: TaskStatus) => confirm(transitionMutation.mutateAsync({ task: address.value, input, status }))
+    const moves = { approve: 'ready', send_back: 'backlog', human_request_changes: 'in_progress' } as const
+    await (value === 'approve' || value === 'send_back' || value === 'human_request_changes'
+      ? transition({ type: value }, moves[value])
+      : transition({ type: 'resolve', to: value.slice(8) as 'backlog' | 'ready' | 'in_progress' }, value.slice(8) as 'backlog' | 'ready' | 'in_progress'))
   } catch (e) {
     if (e instanceof ApiError && e.body?.code === 'transition_rejected' && e.body.reason.code === 'not_ready') {
       toast.add({ title: 'Not ready yet', description: `Needs: ${e.body.reason.problems.map(p => p.replaceAll('_', ' ')).join(', ')}`, color: 'warning' })
@@ -146,17 +150,16 @@ async function changeStatus(value: string) {
   }
 }
 
-const resuming = ref(false)
 async function resume() {
   if (!task.value) return
+  const requested = props.taskRef
   resuming.value = true
   try {
-    task.value = await api.tasks.resume(slug.value, number.value)
-    flashSaved()
+    await confirm(resumeMutation.mutateAsync({ task: address.value }))
   } catch (e) {
     fail(e)
   } finally {
-    resuming.value = false
+    if (requested === props.taskRef) resuming.value = false
   }
 }
 
@@ -183,13 +186,14 @@ async function removeCriterion(id: string) {
 }
 async function addCriterion() {
   if (!task.value || !newCriterion.value.trim()) return
+  const requested = props.taskRef
   await patch({ acceptanceCriteria: [...task.value.acceptanceCriteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })), { text: newCriterion.value.trim() }] })
-  newCriterion.value = ''
+  if (requested === props.taskRef) newCriterion.value = ''
 }
 
 const dependencyChoices = computed(() => {
   if (!task.value || !project.value) return []
-  return (live.state.value.tasks[project.value.id] ?? []).filter(t => t.id !== task.value!.id && !task.value!.dependsOn.includes(t.ref)).map(t => ({ label: `${t.ref} ${t.title}`, value: t.number }))
+  return projectTasks.value.filter(t => t.id !== task.value!.id && !task.value!.dependsOn.includes(t.ref)).map(t => ({ label: `${t.ref} ${t.title}`, value: t.number }))
 })
 async function addDependency(n: number | null) {
   if (!task.value || n === null) return
@@ -200,7 +204,7 @@ async function removeDependency(ref: string) {
   if (!task.value) return
   await patch({ dependsOn: task.value.dependsOn.filter(r => r !== ref).map(r => Number(r.split('-')[1])) })
 }
-const dependencyTask = (ref: string) => (project.value ? live.state.value.tasks[project.value.id] ?? [] : []).find(t => t.ref === ref)
+const dependencyTask = (ref: string) => (project.value ? projectTasks.value : []).find(t => t.ref === ref)
 
 function startEditDescription() {
   descriptionDraft.value = structuredClone(toRaw(task.value?.description ?? { type: 'doc', content: [] })) as { type: 'doc' }
@@ -232,7 +236,7 @@ async function uploadImage(file: File): Promise<{ id: string } | null> {
   }
   uploadingImages.value++
   try {
-    return await api.attachments.upload(slug.value, file, name)
+    return await uploadMutation.mutateAsync({ slug: slug.value, file, name })
   } catch (e) {
     toast.add({ title: `Couldn't upload ${name}`, description: e instanceof Error ? e.message : String(e), color: 'error' })
     return null
@@ -280,8 +284,9 @@ async function saveDescription() {
   // Enter at the end leaves empty paragraphs behind
   const content = [...(descriptionDraft.value.content ?? [])] as { type: string, content?: unknown[] }[]
   while (content.length > 0 && content.at(-1)!.type === 'paragraph' && !content.at(-1)!.content?.length) content.pop()
+  const requested = props.taskRef
   await patch({ description: { ...descriptionDraft.value, content } as { type: 'doc' } })
-  editingDescription.value = false
+  if (requested === props.taskRef) editingDescription.value = false
 }
 
 // A Draft from a plan: the task itself, without the work around it. It's
@@ -289,19 +294,19 @@ async function saveDescription() {
 const isDraft = computed(() => task.value?.status === 'draft')
 // Merged is final (D10): the task reads as it shipped; only comments change
 const readonly = computed(() => task.value?.status === 'merged')
-const placing = ref(false)
 async function place() {
   if (!task.value) return
+  const requested = props.taskRef
   placing.value = true
   try {
-    task.value = await api.tasks.transition(slug.value, number.value, { type: 'approve' })
-    toast.add({ title: `${task.value.ref} added to the board`, color: 'success' })
+    const added = await transitionMutation.mutateAsync({ task: address.value, input: { type: 'approve' }, status: 'ready' })
+    toast.add({ title: `${added.ref} added to the board`, color: 'success' })
   } catch (e) {
     if (e instanceof ApiError && e.body?.code === 'transition_rejected' && e.body.reason.code === 'not_ready') {
       toast.add({ title: 'Not ready yet', description: `Needs: ${e.body.reason.problems.map(p => p.replaceAll('_', ' ')).join(', ')}`, color: 'warning' })
     } else fail(e)
   } finally {
-    placing.value = false
+    if (requested === props.taskRef) placing.value = false
   }
 }
 
@@ -309,15 +314,19 @@ const agentHolds = computed(() => task.value && ['in_progress', 'blocked', 'agen
 const composerHint = computed(() => agentHolds.value
   ? `${developer.value?.name ?? (task.value?.type === 'design' ? 'The designer' : 'The developer')} gets this on its next step.`
   : 'No agent is working on this task, so this is saved as a note.')
-// Resolves false when not sent, so the composer keeps its images
-async function sendComment(text: string): Promise<boolean> {
+// The comment shows at once, so the box empties at once; a failure puts the
+// text back and resolves false, so the composer keeps its images
+async function sendComment(body: string): Promise<boolean> {
   if (!task.value) return false
+  const requested = props.taskRef
+  const text = draft.value
+  draft.value = ''
   try {
-    const comment = await api.tasks.comment(slug.value, number.value, text)
-    if (!comments.value.some(c => c.id === comment.id)) comments.value.push(comment)
-    draft.value = ''
+    await commentMutation.mutateAsync({ task: { ...address.value, id: task.value.id }, body })
     return true
   } catch (e) {
+    if (requested !== props.taskRef) unsent.set(requested, text)
+    else draft.value = draft.value ? `${text}\n\n${draft.value}` : text
     fail(e)
     return false
   }
@@ -325,11 +334,13 @@ async function sendComment(text: string): Promise<boolean> {
 
 async function remove() {
   if (!task.value) return
+  const requested = props.taskRef
   try {
-    await api.tasks.remove(slug.value, number.value)
+    await removeMutation.mutateAsync({ task: address.value })
+    toast.add({ title: `${requested} deleted`, color: 'neutral' })
+    if (requested !== props.taskRef) return
     confirmDelete.value = false
     emit('close')
-    toast.add({ title: `${task.value.ref} deleted`, color: 'neutral' })
   } catch (e) {
     fail(e)
   }
@@ -512,7 +523,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
     </header>
 
     <div
-      v-if="loading && !task"
+      v-if="taskResult.isPending.value"
       class="flex flex-col gap-3 p-4"
     >
       <USkeleton class="h-6 w-2/3" />
@@ -526,7 +537,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
       variant="subtle"
       :title="error"
       class="m-4"
-      :actions="[{ label: 'Retry', onClick: load }]"
+      :actions="[{ label: 'Retry', onClick: retry }]"
     />
 
     <div
@@ -602,7 +613,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
             name="i-lucide-lock"
             class="size-3.5"
           />
-          Merged, so read-only. You can still comment.
+          Complete, so read-only. You can still comment.
         </p>
 
         <div
@@ -656,10 +667,10 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
 
         <DesignReview
           v-if="task.type === 'design' && !isDraft && shows('details')"
+          :key="task.id"
           :task="task"
           :slug="slug"
           :mobile="mobile"
-          @updated="task = $event"
         />
 
         <section v-if="shows('details')">
@@ -941,6 +952,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
               No comments yet.
             </p>
             <PromptComposer
+              :key="props.taskRef"
               v-model="draft"
               placeholder="Comment…"
               :hint="composerHint"

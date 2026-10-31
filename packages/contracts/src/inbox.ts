@@ -14,12 +14,54 @@ interface InboxItemBase {
   project: { id: string, slug: string, name: string, thumbnailColor: string | null, thumbnailUrl: string | null }
   subject: string
   preview: string
+  // Short stored prose for task and epic items needing the human.
+  message?: string
   sender: { name: string, role: AgentRole | 'system' }
   at: string
 }
 
-// An item raised by a developer or reviewer run, about a task
-export interface TaskInboxItem extends InboxItemBase {
+// A developer's one-line work note, posted as a task comment. taskRef names
+// the task on an epic item, where the notes come from several tasks.
+export interface InboxNote {
+  text: string
+  taskRef: string | null
+  at: string
+}
+
+// What happened after the human last acted on an item
+export interface InboxSince {
+  // Their latest request for changes or answer
+  at: string
+  // What they said; null when they resolved the task without a word
+  text: string | null
+  notes: InboxNote[]
+  // Always empty on a task item
+  fixTasks: { id: string, ref: string, title: string }[]
+}
+
+// A file or link added since then. The kind is the evidence's, or `design`
+// for a design version, whose url is its preview. Written notes have no file
+// and are never listed.
+export interface InboxArtifact {
+  id: string
+  kind: Exclude<Evidence['kind'], 'note'> | 'design'
+  name: string
+  url: string
+  // The task it came from, on an epic item
+  taskRef: string | null
+  at: string
+}
+
+interface ReviewChanges {
+  // Null when the human has never acted on the item
+  since: InboxSince | null
+  // Everything, when since is null
+  newArtifacts: InboxArtifact[]
+}
+
+// An item raised by a developer or reviewer run, about a task. Needs-you
+// items carry the review changes; Activity and Resolved ones don't.
+export interface TaskInboxItem extends InboxItemBase, Partial<ReviewChanges> {
   // Epic PR activity links to the epic while retaining task context.
   epicId?: string
   body: string
@@ -66,7 +108,7 @@ export const epicReviewActionInput = z.object({
 }).refine(input => input.action !== 'request_changes' || Boolean(input.text), { message: 'Describe the changes needed', path: ['text'] })
 export type EpicReviewActionInput = z.input<typeof epicReviewActionInput>
 
-export interface EpicReviewItem extends InboxItemBase {
+export interface EpicReviewItem extends InboxItemBase, ReviewChanges {
   id: string
   type: 'epic_review'
   epicId: string
@@ -99,7 +141,7 @@ export function needsAttention(item: InboxItem): boolean {
 }
 
 // An epic PR that couldn't rebase onto the target branch (D27)
-export interface EpicConflictItem extends InboxItemBase {
+export interface EpicConflictItem extends InboxItemBase, ReviewChanges {
   id: string
   type: 'epic_conflict'
   epicId: string
@@ -134,7 +176,7 @@ export const inboxActionInput = z.discriminatedUnion('action', [
   // Failed or Blocked: resolve to a status (D10)
   z.object({ action: z.literal('resolve'), to: z.enum(['backlog', 'ready', 'in_progress']), text: z.string().trim().optional() }),
   // Human review
-  z.object({ action: z.literal('approve') }),
+  z.object({ action: z.literal('approve'), text: z.string().trim().optional() }),
   z.object({ action: z.literal('request_changes'), text: z.string().trim().min(1) }),
   z.object({ action: z.literal('delete'), text: z.string().trim().optional() })
 ])

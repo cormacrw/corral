@@ -9,6 +9,9 @@ import type { BlobStore } from './blob-store.ts'
 export class Transcripts {
   #dir: string
   #blobs: BlobStore
+  // Each live run's line count. Appends to a run wait for each other, so every
+  // one knows where its lines land.
+  #lengths = new Map<string, Promise<number>>()
 
   constructor(dir: string, blobs: BlobStore) {
     this.#dir = dir
@@ -19,15 +22,29 @@ export class Transcripts {
     return join(this.#dir, `${runId}.jsonl`)
   }
 
-  async append(runId: string, events: RunEvent[]): Promise<void> {
-    if (events.length === 0) return
-    await mkdir(this.#dir, { recursive: true })
-    await appendFile(this.#path(runId), events.map(e => JSON.stringify(e)).join('\n') + '\n')
+  // After a restart the spool is the only record of how long it is
+  async #spooledLines(runId: string): Promise<number> {
+    const data = await readFile(this.#path(runId), 'utf8').catch(() => '')
+    return data.split('\n').length - 1
+  }
+
+  // Returns where the first event landed in the transcript
+  append(runId: string, events: RunEvent[]): Promise<number> {
+    const length = this.#lengths.get(runId) ?? this.#spooledLines(runId)
+    if (events.length === 0) return length
+    const written = length.then(async (offset) => {
+      await mkdir(this.#dir, { recursive: true })
+      await appendFile(this.#path(runId), events.map(e => JSON.stringify(e)).join('\n') + '\n')
+      return offset
+    })
+    this.#lengths.set(runId, written.then(offset => offset + events.length, () => length))
+    return written
   }
 
   // Moves the spool into the blob store; returns the blob hash, or null if
   // the run produced no events
   async finish(runId: string): Promise<string | null> {
+    this.#lengths.delete(runId)
     const data = await readFile(this.#path(runId)).catch(() => null)
     if (!data) return null
     const hash = await this.#blobs.put(data)

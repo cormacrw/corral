@@ -6,7 +6,7 @@ import { projectCardSummary, projectNeedsYou } from './projects.ts'
 const now = Date.parse('2026-10-29T12:00:00Z')
 type Status = 'approved' | 'backlog' | 'ready' | 'in_progress' | 'agent_review' | 'human_review' | 'ready_to_merge' | 'blocked' | 'failed' | 'merged'
 const task = (ref: string, status: Status, lease: 'developer' | 'reviewer' | null = null) => ({
-  ref, status, mergedAt: status === 'merged' ? new Date(now - 60 * 60 * 1000).toISOString() : null,
+  ref, status, type: status === 'approved' ? 'design' as const : 'task' as const, updatedAt: new Date(now).toISOString(), mergedAt: status === 'merged' ? new Date(now - 60 * 60 * 1000).toISOString() : null,
   lease: lease ? { agentId: lease === 'developer' ? 'bolt' : 'vera', runId: 'r', role: lease, expiresAt: '' } : null,
   developer: lease ? { id: 'bolt', name: 'Bolt' } : null,
   reviewer: lease === 'reviewer' ? { id: 'vera', name: 'Vera' } : null

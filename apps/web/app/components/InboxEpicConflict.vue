@@ -1,22 +1,16 @@
 <script setup lang="ts">
 import type { EpicConflictItem } from '@corral/contracts'
-import { api } from '~/composables/useApi'
+import { useMutation } from '@tanstack/vue-query'
+import { reviewEpic } from '~/queries/epics'
+import { holdsInbox } from '~/queries/inbox'
 
 const props = defineProps<{ item: EpicConflictItem }>()
 const emit = defineEmits<{ resolved: [] }>()
-const busy = ref(false)
-const error = ref<string | null>(null)
-async function handOff() {
-  busy.value = true
-  error.value = null
-  try {
-    await api.epics.review(props.item.epicId, { action: 'rebase', headSha: props.item.headSha })
-    emit('resolved')
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    busy.value = false
-  }
+const review = useMutation({ ...reviewEpic, ...holdsInbox })
+const busy = review.isPending
+const error = computed(() => review.error.value?.message ?? null)
+function handOff() {
+  review.mutate({ id: props.item.epicId, input: { action: 'rebase', headSha: props.item.headSha } }, { onSuccess: () => emit('resolved') })
 }
 </script>
 
@@ -36,7 +30,15 @@ async function handOff() {
       {{ item.project.name }} · the target branch {{ item.targetBranch }} is unchanged
     </InboxEpicHeader>
     <div class="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4">
-      <p class="break-words">
+      <InboxMessage
+        v-if="item.message"
+        :key="item.id"
+        :item="item"
+      />
+      <p
+        v-else
+        class="break-words"
+      >
         The epic PR can't rebase onto {{ item.targetBranch }}.
       </p>
       <section

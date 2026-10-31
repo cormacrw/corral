@@ -9,23 +9,27 @@ export type ServerEvent =
   | { type: 'task.updated', task: Task }
   | { type: 'runner.status', status: RunnerStatus }
   | { type: 'run.updated', run: Run }
-  // Live transcript lines for the agent page
-  | { type: 'run.events', runId: string, events: RunEvent[] }
+  // Live transcript lines for the agent page. `offset` is where the first one
+  // sits in the run's transcript, so web can tell a line it already fetched
+  // from one it missed.
+  | { type: 'run.events', runId: string, offset: number, events: RunEvent[] }
   | { type: 'agent.updated', agent: Agent }
   | { type: 'task.deleted', taskId: string, projectId: string }
   | { type: 'comment.created', comment: Comment }
   | { type: 'project.updated', project: Project }
   | { type: 'project.deleted', projectId: string }
   | { type: 'global.status', status: GlobalStatus }
-  | { type: 'plan.session', session: PlanSession }
+  // markedRead: only the unread flag changed, so clients needn't refetch the
+  // Inbox. It carries the server's new count.
+  | { type: 'plan.session', session: PlanSession, markedRead?: { inboxCount: number } }
   | { type: 'plan.message', message: PlanMessage }
   | { type: 'plan.updated', plan: Plan }
   // A project's Drafts changed by plan: proposed, approved or discarded
   | { type: 'plan.drafts', projectId: string, sessions: DraftSession[] }
   | { type: 'epic.updated', epic: Epic }
   | { type: 'profile.updated', profile: Profile }
-  // A deployment's release notes were written
-  | { type: 'deployment.updated', deployment: Deployment }
+  // A deployment's release notes were written. markedRead: only its read time changed
+  | { type: 'deployment.updated', deployment: Deployment, markedRead?: true }
 
 export type ServerEventType = ServerEvent['type']
 

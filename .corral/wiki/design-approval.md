@@ -2,7 +2,7 @@
 
 Design tasks finish at `approved`, after human approval of a submitted version. Other types finish at `merged`; spikes have no PR. `packages/core/src/completion.ts` defines the type-aware completion and immutability rules, and `apps/server/src/completion.ts` derives the database completion predicate from that mapping. Task and epic dependencies use these rules. An Approved design remains soft-deletable, retaining its versions and blobs.
 
-Approval updates the version and task together through core. Reopening uses `human_request_changes` with required feedback, keeps a pinned task comment and audit detail, and preserves the approved version until another is approved. The board has Approved after Merged; the design panel offers Reopen design.
+Approval updates the version and task together through core. Reopening uses `human_request_changes` with required feedback, keeps a pinned task comment and audit detail, and preserves the approved version until another is approved. The Board combines stored approved and merged statuses in one Complete column after Blocked & failed, showing the last three days by mergedAt (or updatedAt for approved designs), newest first; the design panel offers Reopen design.
 
 ## Existing designs: review before repair
 
@@ -22,7 +22,7 @@ Type changes are locked in Approved, Ready to merge and Merged. Epic PR readines
 
 ## Approving from the Inbox (COR-320)
 
-The Inbox's **Approve design** action (desktop and mobile) approves the latest submitted version under the task lock, through the same path as the version endpoint: approve the version, supersede earlier versions, move the task to Approved, and open a Plan session with the human's message. The PM gets a turn to propose the build with pins to that version. **Review design** still links to the task's design panel. The Inbox waits for its old task panel to close before advancing to the next Needs-you item, so a live refresh cannot cancel that navigation. Approval preflights runner and PM availability (including pause and stop controls) before changing the version.
+The Inbox's **Approve design** action (desktop and mobile) approves the latest submitted version under the task lock, through the same path as the version endpoint: approve the version, supersede earlier versions, move the task to Approved, and open a Plan session with the human's message. The PM gets a turn to propose the build with pins to that version. **Review design** still links to the task's design panel. The Inbox holds the `selected` watcher's flyout close while the action runs and advances to the next Needs-you item through `itemRoute`, so a live refresh cannot cancel that navigation. Approval preflights runner and PM availability (including pause and stop controls) before changing the version.
 
 `human_approve` on a design only comes from `approveDesign`; the generic approve path refuses designs, because it can't approve a version. The merge pass skips designs even if they have PR metadata.
 
@@ -34,3 +34,11 @@ These never run on their own: each is a human's explicit approval of one task, r
 - **Human review whose latest version is already approved** (a task-page approval from before the Approved status): if no version is submitted, the Inbox action, the version endpoint and the task page finish the task in Approved, reusing its build Plan session or starting one if absent. A newer submitted version always takes priority.
 
 Approval needs an online runner to start the PM's build session.
+
+## Approval notes (COR-347)
+
+A nonblank approval note from the design review panel or Inbox is trimmed and saved as a normal, unpinned comment by the human in the same transaction as the design approval. The note also stays in the PM build session's opening message, including Inbox approvals. Rejected approvals do not leave comments; retrying an already approved version does not append another approval comment. Requested changes still produce exactly one pinned feedback comment through the task transition.
+
+Task status badges display Complete for both merged and approved; version and plan badges retain Approved. Home and project completion tiles count approved designs using the same completion timestamp. Reopening returns a design to its active column.
+
+Backlog’s Show completed option includes finished tasks, spikes and designs of any age, with Complete badges and no Move to board action for finished rows. It is off by default on desktop and mobile.

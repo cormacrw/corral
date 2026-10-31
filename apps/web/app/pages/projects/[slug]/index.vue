@@ -4,8 +4,9 @@ import { duration, STATUS, timeAgo } from '~/utils/labels'
 // Project overview (design/project-overview.md). Mobile gets
 // MobileProjectOverview (design/mobile.md) over the same data.
 const device = useDevice()
-const overview = useProjectOverview()
+const { overview } = useProject()
 const { project, tasks, runs, history, error, load, DOT, count, needsYou, mergedThisWeek, firstPass, waitingOnDependency, developer, reviewer, pmName, epics, taskOf, actorName, taskRefOf, activityText } = overview
+useSeoMeta({ title: () => `${project.value?.name ?? 'Project'} · Corral` })
 </script>
 
 <template>
@@ -88,7 +89,7 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
             { label: 'In progress', color: STATUS.in_progress.color, value: count('in_progress'), sub: developer ? `${developer} working` : 'no run active' },
             { label: 'Agent review', color: STATUS.agent_review.color, value: count('agent_review'), sub: reviewer ? `${reviewer} reviewing` : 'waiting' },
             { label: 'Needs you', color: STATUS.human_review.color, value: needsYou.length, sub: `${count('human_review')} review · ${count('blocked')} blocked · ${count('failed')} failed` },
-            { label: 'Merged this week', color: STATUS.merged.color, value: mergedThisWeek.length, sub: firstPass === null ? 'no merges yet' : `first-pass approval ${firstPass}%` }
+            { label: 'Completed this week', color: STATUS.merged.color, value: mergedThisWeek.length, sub: firstPass === null ? 'no merges yet' : `first-pass approval ${firstPass}%` }
           ]"
           :key="tile.label"
           class="rounded-lg border border-default p-3"
@@ -110,7 +111,6 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
 
       <ProjectFlow
         :slug="project.slug"
-        :project-id="project.id"
       />
 
       <div class="grid grid-cols-[repeat(auto-fit,minmax(340px,1fr))] gap-6">

@@ -1,27 +1,30 @@
-import { needsAttention, type ReleaseNotesItem } from '@corral/contracts'
+import { needsAttention, type InboxArtifact, type InboxSince, type ReleaseNotesItem } from '@corral/contracts'
 import { auditText, readAudit, type AuditView } from './audit.ts'
 import { epicInboxItems } from './epic-prs.ts'
+import { fileArtifacts, isNew, workNotes } from './inbox-changes.ts'
 import type { Inbox, InboxItem, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
-import { humanCheckTally, richTextToPlainText, taskRef, type Actor } from '@corral/core'
+import { withMessage } from './inbox-message.ts'
+import { designPreviewUrl, humanCheckTally, richTextToPlainText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, count, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { actorLabel } from './orchestrator.ts'
 import { thumbnailUrl } from './projects.ts'
 import { sessionState } from './plan.ts'
+import { listEvidence } from './runs.ts'
+import { listComments } from './tasks.ts'
 
 const { deployments, agents, auditLog, planMessages, planSessions, plans, planEpics, planTasks, projects, reviews, runs, tasks, comments, epics } = schema
 
+// A request for changes, or an answer: a clarify is a resolve with a pinned comment
+const HUMAN_ACTIONS = ['human_request_changes', 'resolve']
 const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'pr_rebased', 'findings_reported', 'design_submitted', 'changes_requested', 'merged', 'ci_failed', 'base_conflict', 'head_moved']
 
 // The Inbox (D11, design/inbox.md): what developer and reviewer runs need
 // from the human, plus what they did, and Plan sessions waiting on the human as a Plan
 // thread (D11, amended). Items are derived from tasks, Plan sessions and the
-// audit log and deployments, so there's nothing to keep in sync.
+// audit log and deployments; only their short conversational prose is stored.
 export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
-  const open = await db.select({ task: tasks, project: projects }).from(tasks)
-    .innerJoin(projects, eq(projects.id, tasks.projectId))
-    .where(and(inArray(tasks.status, ['human_review', 'blocked', 'failed']), isNull(tasks.deletedAt)))
-  const taskItems = await Promise.all(open.map(({ task, project }) => needsYouItem(db, task, project)))
+  const taskItems = await taskMessageItems(db)
   const threads = await planThreads(db)
   const epicItems = await epicInboxItems(db)
 
@@ -137,6 +140,13 @@ async function planThreads(db: Executor): Promise<PlanThreadItem[]> {
   return items.filter((item): item is NonNullable<typeof item> => item !== null)
 }
 
+export async function taskMessageItems(db: Executor, taskId?: string): Promise<TaskInboxItem[]> {
+  const open = await db.select({ task: tasks, project: projects }).from(tasks)
+    .innerJoin(projects, eq(projects.id, tasks.projectId))
+    .where(and(inArray(tasks.status, ['human_review', 'blocked', 'failed']), isNull(tasks.deletedAt), taskId ? eq(tasks.id, taskId) : undefined))
+  return Promise.all(open.map(({ task, project }) => needsYouItem(db, task, project)))
+}
+
 async function needsYouItem(db: Executor, task: typeof tasks.$inferSelect, project: typeof projects.$inferSelect): Promise<TaskInboxItem> {
   // The last run on the task is the sender
   const [last] = await db.select({ run: runs, agent: agents }).from(runs).innerJoin(agents, eq(agents.id, runs.agentId))
@@ -155,7 +165,7 @@ async function needsYouItem(db: Executor, task: typeof tasks.$inferSelect, proje
   const body = task.status === 'human_review'
     ? await humanReviewNote(db, task)
     : (task.statusReason ?? '')
-  return {
+  return withMessage(db, {
     id: task.id,
     type,
     project: projectTag(project),
@@ -167,8 +177,32 @@ async function needsYouItem(db: Executor, task: typeof tasks.$inferSelect, proje
     sender,
     at: (entered?.createdAt ?? task.updatedAt).toISOString(),
     prUrl: task.prUrl,
-    resolution: null
+    resolution: null,
+    ...await taskChanges(db, task)
+  })
+}
+
+// What's new on a task since the human's last action (design/inbox.md)
+async function taskChanges(db: Executor, task: typeof tasks.$inferSelect): Promise<{ since: InboxSince | null, newArtifacts: InboxArtifact[] }> {
+  const history = await db.select({ actor: auditLog.actor, detail: auditLog.detail, createdAt: auditLog.createdAt }).from(auditLog)
+    .where(and(eq(auditLog.taskId, task.id), eq(auditLog.action, 'task.transition')))
+    .orderBy(desc(auditLog.createdAt), desc(auditLog.id))
+  const index = history.findIndex(e => e.actor.kind === 'human' && HUMAN_ACTIONS.includes(readAudit(e.detail).event ?? ''))
+  const action = history[index]
+  const at = action?.createdAt.toISOString() ?? null
+  const newArtifacts = fileArtifacts(await listEvidence(db, task.id), at)
+  if (task.type === 'design') {
+    const [latest] = await db.select().from(schema.designVersions).where(eq(schema.designVersions.taskId, task.id))
+      .orderBy(desc(schema.designVersions.version)).limit(1)
+    if (latest && isNew(latest.createdAt.toISOString(), at)) newArtifacts.unshift({ id: latest.id, kind: 'design', name: `Design v${latest.version}`, url: designPreviewUrl(latest.id), taskRef: null, at: latest.createdAt.toISOString() })
   }
+  if (!action || !at) return { since: null, newArtifacts }
+  const notes = await listComments(db, task.id)
+  // An answer is the pinned comment the human wrote while the task waited for it
+  const waitingSince = history[index + 1]?.createdAt.toISOString() ?? ''
+  const answer = notes.findLast(c => c.author.kind === 'human' && c.pinned && c.createdAt > waitingSince && c.createdAt <= at)
+  const text = readAudit(action.detail).feedback ?? answer?.body ?? null
+  return { since: { at, text, notes: workNotes(notes, at), fixTasks: [] }, newArtifacts }
 }
 
 async function humanReviewNote(db: Executor, task: typeof tasks.$inferSelect): Promise<string> {

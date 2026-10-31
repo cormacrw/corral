@@ -1,9 +1,15 @@
 // @vitest-environment happy-dom
+import { VueQueryPlugin } from '@tanstack/vue-query'
+import { testQueryClient } from '~/queries/mount-with-query'
+import { keys } from '~/queries/keys'
+import { api } from '~/composables/useApi'
 import { mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Ref } from 'vue'
 import { computed, defineComponent, effectScope, h, nextTick, reactive, ref, watch } from 'vue'
 import type { PlanSession } from '@corral/contracts'
+
+vi.mock('~/composables/useApi', () => ({ api: { plan: { sessions: vi.fn() } } }))
 
 const session = (id: string, closed = false): PlanSession => ({
   id, closed, projectId: 'p-1', title: id, preview: '', runtime: 'codex',
@@ -11,6 +17,7 @@ const session = (id: string, closed = false): PlanSession => ({
 })
 
 describe('open Plan threads', () => {
+  let client = testQueryClient()
   let state: Ref<{ loaded: boolean, planSessions: PlanSession[] }>
   let route: { params: { sessionId?: string } }
   let stored: Ref<string[]>
@@ -18,7 +25,13 @@ describe('open Plan threads', () => {
 
   beforeEach(() => {
     vi.resetModules()
+    client = testQueryClient()
     state = ref({ loaded: false, planSessions: [session('a'), session('b'), session('closed', true)] })
+    vi.mocked(api.plan.sessions).mockImplementation(() => new Promise(() => {}))
+    watch(() => state.value.planSessions, sessions => client.setQueryData(keys.plan.sessions(), sessions), { flush: 'sync' })
+    watch(() => state.value.loaded, (loaded) => {
+      if (loaded) client.setQueryData(keys.plan.sessions(), state.value.planSessions)
+    }, { flush: 'sync' })
     route = reactive({ params: {} })
     stored = ref(['a', 'b', 'missing', 'closed'])
     vi.stubGlobal('computed', computed)
@@ -43,7 +56,7 @@ describe('open Plan threads', () => {
     wrappers.push(mount(defineComponent({ setup() {
       result = useOpenPlanSessions()
       return () => h('div')
-    } })))
+    } }), { global: { plugins: [[VueQueryPlugin, { queryClient: client }]] } }))
     return result
   }
 
@@ -57,6 +70,7 @@ describe('open Plan threads', () => {
   })
 
   it('shares the list, closes only the nav entry, and reopens on navigation', async () => {
+    state.value.loaded = true
     route.params.sessionId = 'a'
     const first = await setup()
     const second = await setup()
@@ -70,6 +84,7 @@ describe('open Plan threads', () => {
   })
 
   it('removes a closing session live, stays on its page, and reopens when a message reactivates it', async () => {
+    state.value.loaded = true
     route.params.sessionId = 'a'
     const threads = await setup()
     state.value.planSessions = [session('a', true), session('b')]
@@ -80,6 +95,7 @@ describe('open Plan threads', () => {
   })
 
   it('keeps an explicitly reopened closed session through read acknowledgements', async () => {
+    state.value.loaded = true
     route.params.sessionId = 'closed'
     const threads = await setup()
     state.value.loaded = true

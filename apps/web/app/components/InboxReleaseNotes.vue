@@ -1,35 +1,20 @@
 <script setup lang="ts">
 import type { ReleaseNotesItem } from '@corral/contracts'
-import { api } from '~/composables/useApi'
+import { useMutation } from '@tanstack/vue-query'
+import { dismissDeployment, readDeployment } from '~/queries/inbox'
 import { timeAgo } from '~/utils/labels'
 
 const props = defineProps<{ item: ReleaseNotesItem }>()
-const emit = defineEmits<{ refresh: [] }>()
-const error = ref<string | null>(null)
-const busy = ref(false)
+const read = useMutation(readDeployment)
+const dismiss = useMutation(dismissDeployment)
+const error = computed(() => (dismiss.error.value ?? read.error.value)?.message ?? null)
 const { state } = useLive()
 const taskPrefixes = computed(() => state.value.projects.map(p => p.prefix))
-watch(() => props.item.unread && props.item.deploymentId, async () => {
-  if (!props.item.unread) return
-  try {
-    await api.deployments.read(props.item.deploymentId)
-    emit('refresh')
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  }
+// By deployment, not its unread flag: a failed read restores the flag, and
+// must not try again in a loop
+watch(() => props.item.deploymentId, (id) => {
+  if (props.item.unread) read.mutate(id)
 }, { immediate: true })
-async function dismiss() {
-  busy.value = true
-  error.value = null
-  try {
-    await api.deployments.dismiss(props.item.deploymentId)
-    emit('refresh')
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    busy.value = false
-  }
-}
 </script>
 
 <template>
@@ -96,8 +81,8 @@ async function dismiss() {
         label="Dismiss"
         color="neutral"
         variant="outline"
-        :loading="busy"
-        @click="dismiss"
+        :loading="dismiss.isPending.value"
+        @click="dismiss.mutate(item.deploymentId)"
       />
     </footer>
   </section>

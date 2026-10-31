@@ -1,3 +1,4 @@
+import { requireDatabase } from '@corral/db/testing'
 import type { PlanSessionDetail, RunJob } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
@@ -11,7 +12,8 @@ const { agents, runs, tasks } = schema
 describe('two-phase update hold', () => {
   let t: TestApp
   let runner: FakeRunner
-  beforeEach(async () => {
+  beforeEach(async ({ skip }) => {
+    requireDatabase('postgres', { skip })
     t = await createTestApp('postgres', { listen: true })
     runner = await FakeRunner.connect(t.server!.url)
   })

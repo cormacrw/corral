@@ -330,12 +330,13 @@ export class MergeOrchestrator {
   // Human review → Ready to merge (design/inbox.md "Approve and merge").
   // The human's part ends here; CI, the gates and the merge follow in the
   // background, and any failure sends the task back like any other.
-  async humanApprove(taskId: string, actor: Actor): Promise<void> {
+  async humanApprove(taskId: string, actor: Actor, note?: string): Promise<void> {
     const { db } = this.#d
     await db.transaction(async (tx) => {
       const { task, project } = await lockTask(tx, taskId)
       if (task.type === 'design') throw new ApiFailure(409, { code: 'conflict', constraint: 'approve_design_version' })
       await applyTransition(tx, task, project, { type: 'human_approve' }, actor, { event: 'human_approve', headSha: task.headSha })
+      if (note?.trim()) await tx.insert(comments).values({ taskId, author: actor, body: note.trim(), pinned: false })
     })
     await this.#publish(taskId)
     const [row] = await db.select({ task: tasks, project: schema.projects }).from(tasks)

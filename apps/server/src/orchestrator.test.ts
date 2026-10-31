@@ -1,7 +1,8 @@
+import { databaseFixture } from '@corral/db/testing'
 import type { Inbox, Project, Run, RunJob, RunTimings, Task } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { and, asc, eq, ne } from 'drizzle-orm'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner, sleep } from './test-runner.ts'
 
@@ -12,7 +13,7 @@ describe('orchestrator', () => {
   let t: TestApp
   let runner: FakeRunner
 
-  beforeAll(async () => {
+  databaseFixture('postgres', async () => {
     t = await createTestApp('postgres', { listen: true })
     // Each test leaves its run live, so the developer and runner need room for all of them
     await t.db.update(agents).set({ concurrency: 50 }).where(ne(agents.role, 'pm'))

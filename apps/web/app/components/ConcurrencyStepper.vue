@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { useQueryClient } from '@tanstack/vue-query'
+import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import type { Agent } from '@corral/contracts'
-import { api, ApiError } from '~/composables/useApi'
+import { ApiError } from '~/composables/useApi'
+import { patchAgent } from '~/queries/agents'
 import { keys } from '~/queries/keys'
 
 // A big − n + control for a developer or reviewer agent's concurrency (the
@@ -14,6 +15,7 @@ const SAVED_NOTE_MS = 2000
 
 const client = useQueryClient()
 const toast = useToast()
+const patch = useMutation(patchAgent)
 
 // What the server last confirmed, to go back to when a save fails
 let saved = props.agent.concurrency
@@ -55,7 +57,7 @@ async function save(): Promise<void> {
   inFlight = true
   const savingRevision = revision
   try {
-    await api.agents.patch(props.agent.id, { concurrency })
+    await patch.mutateAsync({ id: props.agent.id, input: { concurrency } })
     saved = concurrency
     // Keep newer optimistic taps visible until their own serialized write finishes.
     if (revision !== savingRevision) return

@@ -60,6 +60,9 @@ export async function runSetupJob(config: RunnerConfig, job: SetupJob, pmTurnRun
     case 'sweep_worktrees':
       return { kind: 'sweep_worktrees', ...await sweepWorktrees(config.dataDir, job, pmTurnRunning) }
 
+    case 'inbox_message':
+      return { kind: 'inbox_message', message: await sessionTitle(config, job.prompt) }
+
     case 'session_title':
       return { kind: 'session_title', title: await sessionTitle(config, job.prompt) }
 

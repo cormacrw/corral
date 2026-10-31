@@ -13,10 +13,25 @@ export const STATUS: Record<TaskStatus, { label: string, color: Color }> = {
   agent_review: { label: 'Agent review', color: 'primary' },
   human_review: { label: 'Human review', color: 'warning' },
   ready_to_merge: { label: 'Ready to merge', color: 'success' },
-  approved: { label: 'Approved', color: 'success' },
-  merged: { label: 'Merged', color: 'success' },
+  approved: { label: 'Complete', color: 'success' },
+  merged: { label: 'Complete', color: 'success' },
   blocked: { label: 'Blocked', color: 'error' },
   failed: { label: 'Failed', color: 'error' }
+}
+
+// Tasks counted by status label, in STATUS order, so merged tasks and approved
+// designs share one Complete count.
+export function statusCounts(tasks: Pick<Task, 'status'>[]): { status: TaskStatus, label: string, count: number }[] {
+  const counts = new Map<string, { status: TaskStatus, label: string, count: number }>()
+  for (const status of Object.keys(STATUS) as TaskStatus[]) {
+    const count = tasks.filter(t => t.status === status).length
+    if (count === 0) continue
+    const { label } = STATUS[status]
+    const seen = counts.get(label)
+    if (seen) seen.count += count
+    else counts.set(label, { status, label, count })
+  }
+  return [...counts.values()]
 }
 
 // A design version's state (D20)

@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+import { VueQueryPlugin } from '@tanstack/vue-query'
+import { testQueryClient } from '~/queries/mount-with-query'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed, defineComponent, h, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
@@ -10,7 +12,7 @@ import PlanDetail from './PlanDetail.vue'
 
 const mocks = vi.hoisted(() => ({
   message: vi.fn(), close: vi.fn(), session: vi.fn(), read: vi.fn(), approve: vi.fn(),
-  replace: vi.fn(), refresh: vi.fn(), remove: vi.fn(), add: vi.fn(), toast: vi.fn(), deleteThread: vi.fn()
+  replace: vi.fn(), remove: vi.fn(), add: vi.fn(), toast: vi.fn(), deleteThread: vi.fn()
 }))
 vi.mock('~/composables/useApi', () => ({ api: { plan: mocks } }))
 
@@ -39,8 +41,8 @@ const UDropdownMenu = defineComponent({
 })
 function screen(item = question) {
   return mount(InboxMobilePlanThread, {
-    props: { item, onRefresh: mocks.refresh },
-    global: {
+    props: { item },
+    global: { plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }]],
       components: {
         UButton, UDrawer, UDropdownMenu,
         MobilePageHeader: defineComponent({ setup: (_, { slots }) => () => h('header', slots.actions?.()) }),
@@ -79,10 +81,9 @@ describe('focused mobile Plan thread', () => {
     const w = screen()
     expect(w.text()).toContain('Which service?')
     expect(w.find('textarea').exists()).toBe(true)
-    expect(mocks.session).not.toHaveBeenCalled()
+    expect(mocks.session).toHaveBeenCalledWith('s-2')
     await click(w, 'Which service?')
-    expect(mocks.message).toHaveBeenCalledWith('s-2', 'ntfy')
-    expect(mocks.refresh).toHaveBeenCalledOnce()
+    expect(mocks.message).toHaveBeenCalledWith('s-2', 'ntfy', undefined)
     expect(mocks.replace).toHaveBeenCalledWith('/inbox')
   })
 
@@ -115,7 +116,7 @@ describe('focused mobile Plan thread', () => {
     const w = screen()
     await click(w, 'Delete thread')
     expect(w.text()).not.toContain('Close this thread?')
-    expect(mocks.deleteThread).toHaveBeenCalledWith(question.sessionId, mocks.refresh)
+    expect(mocks.deleteThread).toHaveBeenCalledWith(question.sessionId)
     // The session is closed later, after the Undo window
     expect(mocks.close).not.toHaveBeenCalled()
     expect(mocks.replace).toHaveBeenCalledWith('/inbox')
@@ -150,9 +151,8 @@ describe('a task opened from the mobile plan sheet', () => {
     mocks.session.mockResolvedValue({ plans: [planned], messages: [] })
     const stub = (tag = 'span') => defineComponent({ props: ['label'], setup: p => () => h(tag, p.label) })
     const w = mount(InboxMobilePlanThread, {
-      props: { item: { ...planItem, planId: planned.id }, onRefresh: mocks.refresh },
-      global: {
-        plugins: [router],
+      props: { item: { ...planItem, planId: planned.id } },
+      global: { plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }], router],
         components: {
           UButton, UDrawer, UDropdownMenu, PlanDetail,
           UBadge: stub(), UIcon: stub(), UTabs: stub(), USkeleton: stub(), EpicGraph: stub('div'),

@@ -1,5 +1,14 @@
+import type { QueryClient } from '@tanstack/vue-query'
+import { keys } from '~/queries/keys'
 import type { AgentRuntime, PlanSessionDetail, ServerEvent } from '@corral/contracts'
 import { api } from './useApi'
+
+let queryClient: QueryClient | null = null
+
+// Installed by the client plugin, so reconciliation also runs after navigation.
+export function connectPendingPlanCache(client: QueryClient) {
+  queryClient = client
+}
 
 interface PendingPlan {
   session: PlanSessionDetail
@@ -27,6 +36,7 @@ export function usePendingPlan() {
         messages: [{ id: `pending-${id}`, sessionId: id, role: 'human', kind: 'message', text: message || `Refine ${taskRef}`, recommendation: null, options: null, planId: null, runId: null, createdAt: now }], plans: []
       }
     }
+    queryClient?.setQueryData(keys.plan.session(id), JSON.parse(JSON.stringify(entries.value[id]!.session)))
     return id
   }
 
@@ -38,10 +48,13 @@ export function usePendingPlan() {
     for (const message of entry.session.messages) {
       if (!message.id.startsWith('pending-')) messages.set(message.id, message)
     }
-    entry.session = { ...session, ...(entry.sessionReceived ? entry.session : {}), messages: [...messages.values()] }
+    const plans = new Map(session.plans.map(plan => [plan.id, plan]))
+    for (const plan of entry.session.plans) plans.set(plan.id, plan)
+    entry.session = { ...session, ...(entry.sessionReceived ? entry.session : {}), messages: [...messages.values()], plans: [...plans.values()] }
     entry.sessionReceived = true
     entry.state = 'accepted'
     entry.error = null
+    queryClient?.setQueryData(keys.plan.session(id), JSON.parse(JSON.stringify(entry.session)))
   }
 
   async function start(id: string) {

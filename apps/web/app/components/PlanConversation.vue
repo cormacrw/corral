@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import type { Plan, PlanMessage, PlanSessionDetail } from '@corral/contracts'
+import type { Plan, PlanMessage } from '@corral/contracts'
 import { approvedPlanSummary } from '@corral/core'
-import { api } from '~/composables/useApi'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { approvePlan as approvePlanMutation, planSessionQuery, markPlanRead, sendPlanMessage } from '~/queries/plan'
+import { runTranscriptQuery } from '~/queries/runs'
 import { reloadShell } from '~/queries/shell'
 import { projectColor, runtimeLabel } from '~/utils/labels'
 import { approvePlan } from '~/utils/plan-approval'
@@ -22,18 +24,28 @@ const device = useDevice()
 const id = computed(() => props.sessionId)
 const pending = usePendingPlan()
 const starting = computed(() => pending.entries.value[id.value])
-const loadedSession = ref<PlanSessionDetail | null>(null)
-const session = computed({
-  get: () => starting.value?.session ?? loadedSession.value,
-  set: (value) => { loadedSession.value = value }
-})
+const client = useQueryClient()
+const sending = useMutation(sendPlanMessage)
+const approval = useMutation(approvePlanMutation)
+const detail = useQuery(computed(() => ({
+  ...planSessionQuery(id.value),
+  enabled: !starting.value || starting.value.state === 'accepted'
+})))
+const session = computed(() => starting.value && starting.value.state !== 'accepted' ? starting.value.session : detail.data.value ?? starting.value?.session ?? null)
+watch(() => session.value?.unread, (unread) => {
+  if (unread) {
+    markPlanRead(client, id.value)
+    emit('read')
+  }
+}, { immediate: true })
 const waitingForStart = computed(() => Boolean(starting.value && starting.value.state !== 'failed' && !session.value?.activeRunId && !session.value?.messages.some(m => m.role === 'pm')))
 async function backToPrompt() {
   if (!starting.value) return
   pending.restored.value = starting.value
   await router.push('/plan')
 }
-const error = ref<string | null>(null)
+const error = computed(() => detail.error.value?.message ?? null)
+const load = () => detail.refetch()
 const text = ref('')
 const taskRef = ref<string | null>(null)
 const busy = ref(false)
@@ -53,50 +65,12 @@ async function reconnect() {
 }
 useSeoMeta({ title: () => props.inbox ? 'Inbox · Corral' : `${session.value?.title ?? 'Plan'} · Corral` })
 
-async function load() {
-  error.value = null
-  const requested = id.value
-  try {
-    const loaded = await api.plan.session(requested)
-    if (requested !== id.value) return
-    session.value = loaded
-    if (starting.value) starting.value.session = loaded
-    if (session.value.unread) {
-      await api.plan.read(requested)
-      if (session.value?.id !== requested) return
-      session.value.unread = false
-      emit('read')
-    }
-  } catch (e) {
-    if (requested !== id.value) return
-    error.value = e instanceof Error ? e.message : String(e)
-  }
-}
 watch(id, () => {
-  session.value = null
-  error.value = null
   text.value = ''
+  taskRef.value = null
+  busy.value = false
+  approving.value = null
   approvalTarget.value = null
-  if (!starting.value || starting.value.state === 'accepted') void load()
-}, { immediate: true })
-onMounted(() => {
-  const stop = live.subscribe((event) => {
-    if (!session.value) return
-    if (event.type === 'plan.message' && event.message.sessionId === session.value.id) {
-      if (event.message.role === 'human') session.value.messages = session.value.messages.filter(m => !m.id.startsWith('pending-'))
-      if (!session.value.messages.some(m => m.id === event.message.id)) session.value.messages.push(event.message)
-    }
-    if (event.type === 'plan.updated' && event.plan.sessionId === session.value.id) {
-      const i = session.value.plans.findIndex(p => p.id === event.plan.id)
-      if (i >= 0) session.value.plans.splice(i, 1, event.plan)
-      else session.value.plans.push(event.plan)
-    }
-    if (event.type === 'plan.session' && event.session.id === session.value.id) {
-      Object.assign(session.value, event.session)
-      if (event.session.unread) void api.plan.read(id.value).then(() => emit('read'))
-    }
-  })
-  onBeforeUnmount(stop)
 })
 
 const planOf = (message: PlanMessage): Plan | null => session.value?.plans.find(p => p.id === message.planId) ?? null
@@ -107,8 +81,9 @@ const previous = computed(() => latest.value ? session.value?.plans.find(p => p.
 // Desktop opens a waiting plan on arrival; phones keep the conversation visible.
 watch(() => latest.value?.id, (planId) => {
   if (!device.isMobile.value && planId && latest.value?.status === 'proposed' && !flyout.ref.value && !flyout.epic.value && !flyout.plan.value) flyout.openPlan({ replace: true })
-})
-const backlog = computed(() => project.value ? (live.state.value.tasks[project.value.id] ?? []).filter(t => t.status === 'backlog') : [])
+}, { immediate: true })
+const { tasks: projectTasks } = useProjectLists(() => project.value?.slug ?? '')
+const backlog = computed(() => project.value ? projectTasks.value.filter(t => t.status === 'backlog') : [])
 
 // Resolves false when not sent, so the composer keeps its images
 async function send(message: string): Promise<boolean> {
@@ -116,7 +91,7 @@ async function send(message: string): Promise<boolean> {
   const sendingTo = session.value.id
   busy.value = true
   try {
-    await api.plan.message(sendingTo, message, taskRef.value ?? undefined)
+    await sending.mutateAsync({ id: sendingTo, text: message, taskRef: taskRef.value ?? undefined })
     threads.add(sendingTo)
     if (session.value?.id === sendingTo) {
       text.value = ''
@@ -127,7 +102,7 @@ async function send(message: string): Promise<boolean> {
     toast.add({ title: 'Could not send', description: e instanceof Error ? e.message : String(e), color: 'error' })
     return false
   } finally {
-    busy.value = false
+    if (id.value === sendingTo) busy.value = false
   }
 }
 // One-tap answers and Grill me send straight away. An answer leaves the
@@ -141,29 +116,31 @@ async function submit(message: string): Promise<boolean> {
   return send(message)
 }
 async function quick(message: string, keepDraft = true) {
+  const sendingTo = id.value
   const draft = text.value
   const task = taskRef.value
   if (keepDraft) taskRef.value = null
   const sent = await send(message)
-  if (keepDraft) {
+  if (keepDraft && id.value === sendingTo) {
     taskRef.value = task
     if (sent) text.value = draft
   }
 }
 async function approve(plan: Plan, to: 'ready' | 'backlog') {
   if (cantApprove.value) return false
+  const approvingIn = id.value
   approving.value = plan.id
   emit('approving', true)
   try {
     if (props.inbox) {
-      const approved = await api.plan.approve(plan.id, to)
+      const approved = await approval.mutateAsync({ planId: plan.id, to })
       toast.add({ title: 'Resolved', description: approvedPlanSummary(approved.tasks), color: 'success' })
       await flyout.close()
       emit('approved')
       return true
     }
     return await approvePlan(plan, to, {
-      approve: api.plan.approve,
+      approve: (planId, to) => approval.mutateAsync({ planId, to }),
       toast,
       mobile: device.isMobile.value,
       closeSheet: flyout.close,
@@ -173,25 +150,18 @@ async function approve(plan: Plan, to: 'ready' | 'backlog') {
     toast.add({ title: 'Could not approve', description: e instanceof Error ? e.message : String(e), color: 'error' })
     return false
   } finally {
-    approving.value = null
-    emit('approving', false)
+    if (id.value === approvingIn) {
+      approving.value = null
+      emit('approving', false)
+    }
   }
 }
 // The PM's turn as it happens: the saved part, then live run.events
 const activeRunId = computed(() => session.value?.activeRunId ?? null)
-watch(activeRunId, async (runId) => {
-  if (!runId) return
-  live.watchRun(runId, [])
-  try {
-    const saved = await api.runs.transcript(runId)
-    if (activeRunId.value === runId) live.watchRun(runId, saved)
-  } catch {
-    // The live events still arrive
-  }
-}, { immediate: true })
+const transcript = useQuery(computed(() => ({ ...runTranscriptQuery(activeRunId.value ?? ''), enabled: Boolean(activeRunId.value) })))
 // What the turn has posted to the log already (a question, a plan) isn't repeated in its transcript
 const repliesOf = (runId: string) => session.value?.messages.filter(m => m.role === 'pm' && m.runId === runId).map(m => m.text) ?? []
-const liveEvents = computed(() => activeRunId.value ? withoutMessages(live.state.value.runEvents[activeRunId.value] ?? [], repliesOf(activeRunId.value)) : [])
+const liveEvents = computed(() => activeRunId.value ? withoutMessages(transcript.data.value ?? [], repliesOf(activeRunId.value)) : [])
 // A finished turn's steps sit above its first message
 const firstOfTurn = (message: PlanMessage) => message.role === 'pm' && message.runId !== null && message.runId !== activeRunId.value
   && session.value?.messages.find(m => m.role === 'pm' && m.runId === message.runId)?.id === message.id
@@ -215,7 +185,7 @@ const detailSheet = computed({
 // Follows the conversation. When the PM's next question arrives it scrolls
 // to the question's top, so a long one isn't cut off above its answers.
 const log = ref<HTMLElement | null>(null)
-watch(() => [session.value?.messages.length, liveEvents.value.length], async () => {
+watch([() => session.value?.id, () => session.value?.messages.length, () => liveEvents.value.length], async () => {
   await nextTick()
   if (!log.value) return
   const last = session.value?.messages.at(-1)
@@ -299,7 +269,7 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
         </header>
 
         <UAlert
-          v-if="error"
+          v-if="error && !session"
           color="error"
           variant="subtle"
           :title="error"
@@ -307,14 +277,14 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
           :actions="[{ label: 'Retry', onClick: load }]"
         />
         <div
-          v-else-if="!session"
+          v-else-if="detail.isPending.value && !session"
           class="flex flex-col gap-3 p-6"
         >
           <USkeleton class="h-10 w-2/3" />
           <USkeleton class="h-24 w-full" />
         </div>
         <div
-          v-else
+          v-else-if="session"
           ref="log"
           role="log"
           aria-live="polite"
@@ -533,6 +503,7 @@ watch(() => [session.value?.messages.length, liveEvents.value.length], async () 
               class="mb-2"
             />
             <PromptComposer
+              :key="id"
               ref="composer"
               v-model="text"
               :placeholder="runnerOffline && device.isMobile.value ? `${pm?.name ?? 'The PM'} is unavailable while the runner is offline` : `Reply to ${pm?.name ?? 'the PM'}…`"

@@ -1,5 +1,10 @@
-import type { DesignVersion, Run, RunEvent } from '@corral/contracts'
+import { useMutation, useQueries, useQuery } from '@tanstack/vue-query'
+import type { Run } from '@corral/contracts'
 import { api } from '~/composables/useApi'
+import { patchAgent } from '~/queries/agents'
+import { runsQuery, runTranscriptQuery, stopRun } from '~/queries/runs'
+import { shell } from '~/queries/shell'
+import { taskDesignsQuery } from '~/queries/tasks'
 import { agentFacts, designerStats } from '~/utils/agents'
 import { isLiveRun, tokens } from '~/utils/labels'
 
@@ -10,14 +15,15 @@ import { isLiveRun, tokens } from '~/utils/labels'
 // does; mobile only shows a transcript for a run in the URL.
 export function useAgentRuns(options: { autoSelect: () => boolean }) {
   const route = useRoute()
-  const live = useLive()
   const toast = useToast()
   const name = computed(() => String(route.params.name))
-  const agent = computed(() => live.state.value.agents.find(a => a.name.toLowerCase() === name.value.toLowerCase()) ?? null)
-  const runs = ref<Run[]>([])
-  const error = ref<string | null>(null)
-  const events = ref<RunEvent[]>([])
+  const projects = computed(() => shell()?.projects.data.value ?? [])
+  const agent = computed(() => shell()?.agents.data.value?.find(a => a.name.toLowerCase() === name.value.toLowerCase()) ?? null)
   const now = ref(Date.now())
+
+  const list = useQuery(computed(() => ({ ...runsQuery({ agentId: agent.value?.id }), enabled: !!agent.value })))
+  const runs = computed(() => list.data.value ?? [])
+  const pending = list.isPending
 
   const selectedId = computed(() => typeof route.params.runId === 'string' ? route.params.runId : null)
   const current = computed(() => runs.value.find(isLiveRun) ?? null)
@@ -26,68 +32,39 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
     if (named || !options.autoSelect()) return named ?? null
     return current.value ?? runs.value[0] ?? null
   })
+  // Live events append to this same query
+  const transcript = useQuery(computed(() => ({ ...runTranscriptQuery(selected.value?.id ?? ''), enabled: !!selected.value })))
+  const events = computed(() => transcript.data.value ?? [])
 
-  const designs = ref<{ taskId: string, versions: DesignVersion[] }[]>([])
-  async function loadDesigns() {
-    if (agent.value?.role !== 'designer') return
-    const agentId = agent.value.id
-    const authored = runs.value.filter(r => r.role === 'designer' && r.taskId && r.taskRef)
-    const unique = [...new Map(authored.map(r => [r.taskId!, r])).values()]
-    const loaded = await Promise.all(unique.map(async (run) => {
-      const project = live.state.value.projects.find(p => p.id === run.projectId)
-      if (!project) throw new Error('Design project not found')
-      return { taskId: run.taskId!, versions: await api.tasks.designs(project.slug, Number(run.taskRef!.split('-').at(-1))) }
-    }))
-    if (agent.value?.id === agentId) designs.value = loaded
-  }
+  // One entry per task a designer authored
+  const authored = computed(() => {
+    if (agent.value?.role !== 'designer') return []
+    const designed = runs.value.filter(r => r.role === 'designer' && r.taskId && r.taskRef)
+    return [...new Map(designed.map(r => [r.taskId!, r])).values()]
+  })
+  const designTasks = computed(() => authored.value.flatMap((run) => {
+    const slug = projects.value.find(p => p.id === run.projectId)?.slug
+    return slug ? [{ taskId: run.taskId!, slug, ref: run.taskRef!, number: Number(run.taskRef!.split('-').at(-1)) }] : []
+  }))
+  const designQueries = useQueries({ queries: computed(() => designTasks.value.map(task => taskDesignsQuery(task))) })
+  const designs = computed(() => designTasks.value.flatMap(({ taskId }, i) => {
+    const versions = designQueries.value[i]?.data
+    return versions ? [{ taskId, versions }] : []
+  }))
+  const error = computed(() => {
+    const failed = list.error.value ?? designQueries.value.find(query => query.error)?.error
+    if (failed) return failed.message
+    return designTasks.value.length < authored.value.length && projects.value.length ? 'Design project not found' : null
+  })
   async function load() {
-    if (!agent.value) return
-    error.value = null
-    try {
-      runs.value = await api.runs.list({ agentId: agent.value.id })
-      designs.value = []
-      await loadDesigns()
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
-    }
+    await Promise.all([list.refetch(), ...designQueries.value.map(query => query.refetch())])
   }
-  watch(agent, () => void load(), { immediate: true })
-  watch(selected, async (run, old) => {
-    if (!run || run.id === old?.id) return
-    try {
-      events.value = await api.runs.transcript(run.id)
-    } catch {
-      events.value = []
-    }
-    // The live connection appends the run's new events to this same list
-    live.watchRun(run.id, events.value)
-  }, { immediate: true })
+
   onMounted(() => {
     const timer = setInterval(() => {
       now.value = Date.now()
     }, 1000)
-    const stop = live.subscribe((event) => {
-      if (event.type === 'task.updated' && designs.value.some(d => d.taskId === event.task.id)) {
-        void loadDesigns().catch((e) => {
-          error.value = String(e)
-        })
-      }
-      if (event.type === 'run.updated' && event.run.agentId === agent.value?.id) {
-        const i = runs.value.findIndex(r => r.id === event.run.id)
-        const previous = runs.value[i]
-        if (i >= 0) runs.value.splice(i, 1, event.run)
-        else runs.value.unshift(event.run)
-        if (!previous || previous.headSha !== event.run.headSha || previous.outcome !== event.run.outcome) {
-          void loadDesigns().catch((e) => {
-            error.value = String(e)
-          })
-        }
-      }
-    })
-    onBeforeUnmount(() => {
-      clearInterval(timer)
-      stop()
-    })
+    onBeforeUnmount(() => clearInterval(timer))
   })
 
   const weekAgo = computed(() => now.value - 7 * 86_400_000)
@@ -133,30 +110,32 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
     }
   })
   const facts = computed(() => agent.value ? agentFacts(agent.value) : '')
+  const stopping = useMutation(stopRun)
   async function stop(run: Run) {
     try {
-      await api.runs.stop(run.id)
+      await stopping.mutateAsync(run.id)
       toast.add({ title: 'Run stopped', description: 'The task is paused until you resume it.', color: 'neutral' })
     } catch (e) {
       toast.add({ title: 'Could not stop', description: e instanceof Error ? e.message : String(e), color: 'error' })
     }
   }
   // Ends a usage-limit wait early; a real limit just pauses the agent again
+  const patch = useMutation(patchAgent)
   async function resume() {
     if (!agent.value) return
     try {
-      await api.agents.patch(agent.value.id, { paused: false })
+      await patch.mutateAsync({ id: agent.value.id, input: { paused: false } })
     } catch (e) {
       toast.add({ title: 'Could not resume', description: e instanceof Error ? e.message : String(e), color: 'error' })
     }
   }
-  const project = (run: Run) => live.state.value.projects.find(p => p.id === run.projectId) ?? null
+  const project = (run: Run) => projects.value.find(p => p.id === run.projectId) ?? null
   const projectName = (run: Run) => project(run)?.name ?? ''
 
   // Mid-run messages (design/agent.md). The runner shows a delivered one as
   // a message event with the text the server sent, so the transcript marks
   // the ones sent from here as yours.
-  const runnerOnline = computed(() => !!live.state.value.runner?.online)
+  const runnerOnline = computed(() => !!shell()?.runner.data.value?.online)
   const sent = ref<Record<string, string[]>>({})
   async function message(run: Run, text: string): Promise<boolean> {
     const slug = project(run)?.slug
@@ -171,7 +150,7 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
     }
   }
 
-  return { name, agent, runs, error, events, now, selected, current, load, today, tiles, facts, stop, resume, project, projectName, runnerOnline, sent, message }
+  return { name, agent, runs, pending, error, events, now, selected, current, load, today, tiles, facts, stop, resume, project, projectName, runnerOnline, sent, message }
 }
 
 export type AgentRuns = ReturnType<typeof useAgentRuns>

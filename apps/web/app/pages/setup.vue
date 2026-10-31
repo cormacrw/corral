@@ -88,7 +88,7 @@ const { adding, steps, step, index, userName, savingName, repos, reposError, rep
             color="error"
             variant="subtle"
             :title="reposError"
-            :actions="[{ label: 'Try again', onClick: () => loadRepos(true) }]"
+            :actions="[{ label: 'Try again', onClick: () => loadRepos() }]"
           />
           <UAlert
             v-else-if="repos && !repos.signedIn"
@@ -106,7 +106,7 @@ const { adding, steps, step, index, userName, savingName, repos, reposError, rep
                 label="Check again"
                 size="xs"
                 class="mt-2"
-                @click="loadRepos(true)"
+                @click="loadRepos()"
               />
             </template>
           </UAlert>
@@ -119,7 +119,7 @@ const { adding, steps, step, index, userName, savingName, repos, reposError, rep
                 variant="ghost"
                 color="neutral"
                 icon="i-lucide-refresh-cw"
-                @click="loadRepos(true)"
+                @click="loadRepos()"
               />
             </div>
             <div class="rounded-md border border-default">

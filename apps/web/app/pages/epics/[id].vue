@@ -1,6 +1,8 @@
 <script setup lang="ts">
 // An epic with room for its dependency tree; tasks open in the flyout. On
 // mobile it's the epic screen, and tasks open as pages (design/mobile.md)
+definePageMeta({ taskFlyout: true })
+
 const route = useRoute()
 const id = computed(() => String(route.params.id))
 const device = useDevice()
@@ -32,7 +34,6 @@ useSeoMeta({ title: 'Epic · Corral' })
           mode="page"
         />
       </main>
-      <TaskFlyout />
     </div>
   </UDashboardPanel>
 </template>

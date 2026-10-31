@@ -230,6 +230,7 @@ export const setupJobSchema = z.discriminatedUnion('kind', [
   // checkout of a PM turn running on the runner.
   z.object({ kind: z.literal('sweep_worktrees'), keepTaskIds: z.array(z.string()), keepPlanSessionIds: z.array(z.string()) }),
   z.object({ kind: z.literal('session_title'), prompt: z.string() }),
+  z.object({ kind: z.literal('inbox_message'), prompt: z.string() }),
   z.object({ kind: z.literal('release_notes'), runtime: z.string(), prompt: z.string() })
 ])
 
@@ -246,6 +247,7 @@ export const setupJobResultSchema = z.discriminatedUnion('kind', [
   // `kept` is only what stayed because it holds uncommitted changes
   z.object({ kind: z.literal('sweep_worktrees'), removed: z.array(z.string()), kept: z.array(z.string()) }),
   z.object({ kind: z.literal('session_title'), title: z.string() }),
+  z.object({ kind: z.literal('inbox_message'), message: z.string() }),
   z.object({ kind: z.literal('release_notes'), notes: z.string() })
 ])
 

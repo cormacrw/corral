@@ -8,7 +8,7 @@ import { duration, isLiveRun, runBadge, runRef, runTitle, runTokens } from '~/ut
 // and a footer with the composer while it's live. The layout drops its
 // header and tab bar here.
 const props = defineProps<{ view: AgentRuns }>()
-const { name, agent, runs, events, now, selected, stop, sent } = props.view
+const { name, agent, pending, events, now, selected, stop, sent } = props.view
 const live = computed(() => !!selected.value && isLiveRun(selected.value))
 </script>
 
@@ -72,8 +72,10 @@ const live = computed(() => !!selected.value && isLiveRun(selected.value))
       </div>
     </header>
 
+    <!-- Keyed so a run's scroll, steps and draft stay with that run -->
     <div
       v-if="selected && agent"
+      :key="selected.id"
       :class="selected.timings ? 'min-h-0 flex-1 overflow-y-auto overscroll-contain p-3' : 'flex min-h-0 flex-1 flex-col'"
     >
       <RunTimingBreakdown
@@ -89,7 +91,7 @@ const live = computed(() => !!selected.value && isLiveRun(selected.value))
       />
     </div>
     <p
-      v-else-if="agent && runs.length > 0"
+      v-else-if="agent && !pending"
       class="flex-1 p-4 text-sm text-muted"
     >
       This run isn't in {{ agent.name }}'s recent runs.
@@ -106,6 +108,7 @@ const live = computed(() => !!selected.value && isLiveRun(selected.value))
       class="shrink-0 border-t border-default px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]"
     >
       <RunComposer
+        :key="selected.id"
         :view="props.view"
         :run="selected"
       />

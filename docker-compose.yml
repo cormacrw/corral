@@ -61,6 +61,7 @@ services:
       args:
         CORRAL_BUILD_SHA: ${CORRAL_BUILD_SHA:-development}
     container_name: corral-runner
+    init: true
     stop_grace_period: 20s
     depends_on:
       - server

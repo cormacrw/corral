@@ -1,33 +1,31 @@
 <script setup lang="ts">
-import type { DesignVersion, Task } from '@corral/contracts'
-import { api, ApiError } from '~/composables/useApi'
+import { useMutation, useQuery } from '@tanstack/vue-query'
+import { actOnInboxItem } from '~/queries/inbox'
+import { approveDesign, moveTask, taskDesignsQuery } from '~/queries/tasks'
+import type { Task } from '@corral/contracts'
+import { ApiError } from '~/composables/useApi'
 import { DESIGN_VERSION_STATUS, timeAgo } from '~/utils/labels'
 
 // A design task's versions in task detail (D20): the live prototype in its
 // sandboxed iframe at a desktop or mobile viewport, the version's design.md
 // and screenshots, and the human's Approve and Request changes.
 const props = defineProps<{ task: Task, slug: string, mobile?: boolean }>()
-const emit = defineEmits<{ updated: [task: Task] }>()
 const toast = useToast()
+const transition = useMutation(moveTask)
+const act = useMutation(actOnInboxItem)
+const approval = useMutation(approveDesign)
 
-const versions = ref<DesignVersion[]>([])
-const loaded = ref(false)
+const designs = useQuery(computed(() => ({ ...taskDesignsQuery({ ...props.task, slug: props.slug }), enabled: Boolean(props.slug) })))
+const versions = computed(() => designs.data.value ?? [])
+const loaded = computed(() => !designs.isPending.value)
 const selectedId = ref<string | undefined>()
 const selected = computed(() => versions.value.find(v => v.id === selectedId.value) ?? versions.value[0] ?? null)
-
-async function load() {
-  if (!props.slug) return
-  try {
-    versions.value = await api.tasks.designs(props.slug, props.task.number)
-    if (!versions.value.some(v => v.id === selectedId.value)) selectedId.value = versions.value[0]?.id
-  } catch (e) {
-    toast.add({ title: 'Couldn\'t load the design', description: e instanceof Error ? e.message : String(e), color: 'error' })
-  } finally {
-    loaded.value = true
-  }
-}
-// A new submission or a decision changes the task, and so its versions
-watch(() => [props.slug, props.task.updatedAt], load, { immediate: true })
+watch(versions, () => {
+  if (!versions.value.some(v => v.id === selectedId.value)) selectedId.value = versions.value[0]?.id
+}, { immediate: true })
+watch(designs.error, (e) => {
+  if (e) toast.add({ title: 'Couldn\'t load the design', description: e.message, color: 'error' })
+})
 
 const versionItems = computed(() => versions.value.map(v => ({ label: `v${v.version} · ${DESIGN_VERSION_STATUS[v.status].label}`, value: v.id })))
 
@@ -56,24 +54,20 @@ const decidable = computed(() => ['human_review', 'ready_to_merge'].includes(pro
 const reopenable = computed(() => props.task.status === 'approved')
 const requesting = ref(false)
 const feedback = ref('')
-const approving = ref(false)
-// Goes to the PM in the Plan session the approval opens for the build
+// Saved on the task and sent to the PM in the build Plan session
 const note = ref('')
 function fail(e: unknown) {
   toast.add({ title: 'Not saved', description: e instanceof ApiError ? e.message : String(e), color: 'error' })
 }
 async function approve() {
   if (!selected.value) return
-  approving.value = true
+  const { version } = selected.value
   try {
-    emit('updated', await api.tasks.approveDesign(props.slug, props.task.number, selected.value.version, note.value.trim() || undefined))
-    toast.add({ title: `Design v${selected.value.version} approved`, description: 'The PM is planning the build.', color: 'success' })
+    await approval.mutateAsync({ task: { ...props.task, slug: props.slug }, version, note: note.value.trim() || undefined })
+    toast.add({ title: `Design v${version} approved`, description: 'The PM is planning the build.', color: 'success' })
     note.value = ''
-    await load()
   } catch (e) {
     fail(e)
-  } finally {
-    approving.value = false
   }
 }
 // The feedback goes to the designer as a pinned comment, kept on the
@@ -81,15 +75,13 @@ async function approve() {
 async function requestChanges(text: string): Promise<boolean> {
   try {
     if (reopenable.value) {
-      emit('updated', await api.tasks.transition(props.slug, props.task.number, { type: 'human_request_changes', feedback: text }))
+      await transition.mutateAsync({ task: { ...props.task, slug: props.slug }, input: { type: 'human_request_changes', feedback: text }, status: 'in_progress' })
     } else {
-      const { task } = await api.inbox.act(props.task.id, { action: 'request_changes', text })
-      if (task) emit('updated', task)
+      await act.mutateAsync({ taskId: props.task.id, input: { action: 'request_changes', text } })
     }
     feedback.value = ''
     requesting.value = false
     toast.add({ title: 'Changes requested', description: 'The designer picks it up on the next run.', color: 'success' })
-    await load()
     return true
   } catch (e) {
     fail(e)
@@ -229,7 +221,7 @@ async function requestChanges(text: string): Promise<boolean> {
             :label="`Approve v${selected.version}`"
             icon="i-lucide-check"
             size="sm"
-            :loading="approving"
+            :loading="approval.isPending.value"
             @click="approve"
           />
         </div>

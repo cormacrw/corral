@@ -1,69 +1,13 @@
 <script setup lang="ts">
-import type { FlowMetrics, FlowMetricsQuery } from '@corral/contracts'
-import { api } from '~/composables/useApi'
+import { useQuery } from '@tanstack/vue-query'
+import type { FlowMetricsQuery } from '@corral/contracts'
+import { DEFAULT_FLOW_WINDOW, flowQuery } from '~/queries/projects'
 import { QUEUE_WAIT_LABEL, ROLE, STATUS, formatMs } from '~/utils/labels'
 
-// Coalesces the run.updated and task.updated of one lifecycle change, and
-// still refreshes under a steady stream of events.
-const REFRESH_DELAY_MS = 1000
-
-const props = defineProps<{ slug: string, projectId: string }>()
-const window = ref<FlowMetricsQuery['window']>('30d')
-const metrics = ref<FlowMetrics | null>(null)
-const loading = ref(true)
-const error = ref<string | null>(null)
-let request = 0
-let refreshTimer: ReturnType<typeof setTimeout> | null = null
-function cancelRefresh() {
-  if (refreshTimer) clearTimeout(refreshTimer)
-  refreshTimer = null
-}
-async function fetchMetrics() {
-  const current = ++request
-  try {
-    const result = await api.projects.flow(props.slug, window.value)
-    if (current === request) {
-      metrics.value = result
-      error.value = null
-    }
-  } catch (e) {
-    // A failed live refresh keeps the figures already on screen
-    if (current === request && !metrics.value) error.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    if (current === request) loading.value = false
-  }
-}
-function load() {
-  cancelRefresh()
-  loading.value = true
-  error.value = null
-  metrics.value = null
-  return fetchMetrics()
-}
-function refresh() {
-  refreshTimer ??= setTimeout(() => {
-    refreshTimer = null
-    void fetchMetrics()
-  }, REFRESH_DELAY_MS)
-}
-watch([() => props.slug, window], load, { immediate: true })
-const live = useLive()
-onMounted(() => {
-  const stop = live.subscribe((event) => {
-    const projectId = event.type === 'task.updated'
-      ? event.task.projectId
-      : event.type === 'run.updated'
-        ? event.run.projectId
-        : event.type === 'task.deleted'
-          ? event.projectId
-          : null
-    if (projectId === props.projectId) refresh()
-  })
-  onBeforeUnmount(() => {
-    stop()
-    cancelRefresh()
-  })
-})
+const props = defineProps<{ slug: string }>()
+const window = ref<FlowMetricsQuery['window']>(DEFAULT_FLOW_WINDOW)
+// The project parent route keeps the default window current; events invalidate the rest
+const { data: metrics, error, isPending, isPlaceholderData, refetch } = useQuery(computed(() => ({ ...flowQuery(props.slug, window.value), refetchOnMount: false })))
 const maxStatus = computed(() => Math.max(1, ...metrics.value?.timeInStatus.map(s => s.medianMs) ?? []))
 function category(status: string) {
   if (status === 'human_review') return 'Human wait'
@@ -100,29 +44,29 @@ function category(status: string) {
     </header>
     <div
       aria-live="polite"
-      :aria-busy="loading"
+      :aria-busy="isPending || isPlaceholderData"
     >
       <USkeleton
-        v-if="loading"
+        v-if="isPending"
         class="mt-4 h-32 w-full"
       />
       <UAlert
-        v-else-if="error"
+        v-else-if="error && !metrics"
         class="mt-4"
         color="error"
-        :title="error"
-        :actions="[{ label: 'Retry', onClick: load }]"
+        :title="error.message"
+        :actions="[{ label: 'Retry', onClick: () => refetch() }]"
       />
       <template v-else-if="metrics">
         <p
           v-if="metrics.mergedTaskCount === 0"
           class="py-6 text-sm text-muted"
         >
-          No tasks merged in the last {{ window }}. Flow metrics will appear when tasks merge.
+          No tasks merged in the last {{ metrics.window }}. Flow metrics will appear when tasks merge.
         </p>
         <template v-else>
           <p class="mt-2 text-xs text-muted">
-            {{ metrics.mergedTaskCount }} tasks merged in the last {{ window }} · Lifetime through merge
+            {{ metrics.mergedTaskCount }} tasks merged in the last {{ metrics.window }} · Lifetime through merge
           </p>
           <div class="mt-4 grid grid-cols-2 gap-4">
             <dl

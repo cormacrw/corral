@@ -7,6 +7,7 @@ import { migrate as migratePglite } from 'drizzle-orm/pglite/migrator'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import pg from 'pg'
+import { attemptAll, operationError } from './failures.ts'
 import * as schema from './schema.ts'
 
 // Postgres when deployed and in CI; PGlite in development and tests (D14)
@@ -38,8 +39,7 @@ export async function openDatabase(location: DatabaseLocation): Promise<Database
     try {
       await migrateNodePg(db, { migrationsFolder })
     } catch (error) {
-      await pool.end()
-      throw error
+      throw operationError('Migrating the Postgres database', error, await attemptAll([() => pool.end()]), location.url)
     }
     return { db, close: () => pool.end() }
   }
@@ -51,8 +51,7 @@ export async function openDatabase(location: DatabaseLocation): Promise<Database
   try {
     await migratePglite(db, { migrationsFolder })
   } catch (error) {
-    await client.close()
-    throw error
+    throw operationError('Migrating the PGlite database', error, await attemptAll([() => client.close()]))
   }
   return { db, close: () => client.close() }
 }

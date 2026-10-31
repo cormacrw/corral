@@ -1,6 +1,6 @@
 import { flowMetricsQuery } from '@corral/contracts'
 import { checkEpicDependencies, isTaskDone } from '@corral/core'
-import type { CreateAgentInput, CreateTaskInput, EpicReviewActionInput, InboxActionInput, PatchEpicInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
+import type { CreateAgentInput, CreateTaskInput, EpicReviewActionInput, HumanTransitionInput, InboxActionInput, PatchEpicInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
 import * as f from './fixtures'
@@ -131,6 +131,22 @@ route('POST', '/projects/:slug/tasks/:number/resume', ([slug, number]) => {
   emit({ type: 'task.updated', task })
   return task
 })
+route('POST', '/projects/:slug/tasks/:number/transitions', ([slug, number], body) => {
+  const task = taskIn(slug!, number!)
+  const input = body as HumanTransitionInput
+  const to = { approve: 'ready', send_back: 'backlog', human_request_changes: 'in_progress' } as const
+  Object.assign(task, { status: input.type === 'resolve' ? input.to : to[input.type as keyof typeof to], statusReason: null, updatedAt: new Date().toISOString() })
+  emit({ type: 'task.updated', task })
+  return task
+})
+route('POST', '/projects/:slug/tasks/:number/designs/:version/approve', ([slug, number, version]) => {
+  const task = taskIn(slug!, number!)
+  const design = f.designVersions[task.id]?.find(v => v.version === Number(version)) ?? notFound()
+  design.status = 'approved'
+  Object.assign(task, { status: 'approved', updatedAt: new Date().toISOString() })
+  emit({ type: 'task.updated', task })
+  return task
+})
 route('PATCH', '/projects/:slug/tasks/:number', ([slug, number], body) => {
   const task = taskIn(slug!, number!)
   const previousEpicId = task.epicId
@@ -252,8 +268,9 @@ route('POST', '/projects/:slug/runs/:runId/messages', ([slug, runId], body) => {
   ;(f.comments[run.taskId!] ??= []).push(comment)
   emit({ type: 'comment.created', comment })
   const deliver = (events: RunEvent[]) => {
-    ;(f.runEvents[run.id] ??= []).push(...events)
-    emit({ type: 'run.events', runId: run.id, events })
+    const offset = (f.runEvents[run.id] ??= []).length
+    f.runEvents[run.id]!.push(...events)
+    emit({ type: 'run.events', runId: run.id, offset, events })
   }
   setTimeout(() => deliver([{ type: 'message', text: comment.body }]), 300)
   setTimeout(() => deliver([{ type: 'message', text: 'Got it, I\'ll do that next.' }]), 1200)
@@ -295,7 +312,7 @@ route('POST', '/inbox/:taskId/actions', ([taskId], body) => {
     task.statusReason = input.text
   }
   const resolution = approvedDesign ? 'You approved the design' : accepted ? (task.type === 'spike' ? 'You accepted the findings' : 'You approved the merge') : 'You requested changes'
-  f.resolvedInbox.unshift({ ...item, id: `resolved-${task.id}-${Date.now()}`, type: 'activity', sender: { name: 'You', role: 'system' }, body: resolution, preview: resolution, resolution, at: now })
+  f.resolvedInbox.unshift({ ...item, message: undefined, since: undefined, newArtifacts: undefined, id: `resolved-${task.id}-${Date.now()}`, type: 'activity', sender: { name: 'You', role: 'system' }, body: resolution, preview: resolution, resolution, at: now })
   emit({ type: 'task.updated', task })
   return { task }
 })
@@ -438,8 +455,9 @@ route('POST', '/plan/sessions/:id/messages', ([id], body) => {
   for (let i = 1; i <= updates.length; i++) {
     setTimeout(() => {
       const events: RunEvent[] = [updates[i - 1]!]
-      ;(f.runEvents[runId] ??= []).push(...events)
-      emit({ type: 'run.events', runId, events })
+      const offset = (f.runEvents[runId] ??= []).length
+      f.runEvents[runId]!.push(...events)
+      emit({ type: 'run.events', runId, offset, events })
     }, i * 400)
   }
   setTimeout(() => {

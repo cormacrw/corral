@@ -1,12 +1,14 @@
 <script setup lang="ts">
+import { useQuery } from '@tanstack/vue-query'
+import { runnerQuery } from '~/queries/system'
 import { runnerRoles, runnerState, runtimeLabel, timeAgo } from '~/utils/labels'
 
 // Every runner the server knows (design/settings.md, Runner): its state,
 // slots in use, runtimes and roles. Offline runners stay listed, and one
 // turned away for an old protocol shows the version the server expects.
-const state = useLive().state
-const runners = computed(() => state.value.runner?.runners ?? [])
-const expected = computed(() => state.value.runner?.protocol)
+const { data: status } = useQuery(runnerQuery())
+const runners = computed(() => status.value?.runners ?? [])
+const expected = computed(() => status.value?.protocol)
 </script>
 
 <template>

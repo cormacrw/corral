@@ -21,7 +21,7 @@ The page scrolls, in a column up to 1200px wide with 24px padding.
    - In progress, e.g. "Atlas working"
    - Agent review, e.g. "Vera reviewing"
    - Needs you, e.g. "1 review · 2 blocked"
-   - Merged this week, e.g. "first-pass approval 56%"
+   - Completed this week (merged tasks and approved designs), e.g. "first-pass approval 56%"
 3. **Two columns**, auto-fit with a 340px minimum. They stack when narrow.
    - **Left:**
      - **Needs you:** a bordered card with its header, a count badge and an **Open Inbox** link. Rows show a type badge, the task ref and title, and the time. Clicking a row opens that item in the Inbox. Empty state: "Nothing is waiting on you."
@@ -35,7 +35,7 @@ The Ready tile’s waiting-on-dependency count includes each Ready task with an 
 ## Data
 
 - **Project:** name, slug, prefix, thumbnail, remote, default branch, paused.
-- **Counts:** by status, merged this week, first-pass approval rate.
+- **Counts:** by status, completed this week, first-pass approval rate.
 - **Needs you:** this project's open Inbox items.
 - **Active runs:** agent, task, run id, elapsed time, status.
 - **Epics:** name, merged count, total.
@@ -54,4 +54,4 @@ The Flow section follows the stat tiles on desktop and mobile. It offers 7d / 30
 ## Open questions
 
 - Should first-pass approval and merge throughput get a small trend (a sparkline over 4 weeks)?
-- Is "Merged this week" the right window for a single user, or should it be the last 7 days?
+- Is "Completed this week" the right window for a single user, or should it be the last 7 days?

@@ -1,4 +1,8 @@
 // @vitest-environment happy-dom
+import { VueQueryPlugin } from '@tanstack/vue-query'
+import { keys } from '~/queries/keys'
+import { applyEvent } from '~/queries/dependencies'
+import { testQueryClient } from '~/queries/mount-with-query'
 import type { PlanSessionDetail, ServerEvent } from '@corral/contracts'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -14,13 +18,13 @@ vi.mock('~/composables/useApi', () => ({
   }
 }))
 
+let client = testQueryClient()
 let listener: (event: ServerEvent) => void
 const pendingEntries = vue.ref<Record<string, { session: PlanSessionDetail, state: string, error: string | null, taskRef?: string }>>({})
 const retryStart = vi.fn()
 const restored = vue.ref(null)
 const state = vue.ref({
-  loaded: true, runner: { online: true }, agents, projects,
-  tasks: {}, runEvents: {} as Record<string, import('@corral/contracts').RunEvent[]>
+  loaded: true, runner: { online: true }, agents, projects
 })
 const flyout = {
   ref: vue.ref<string | null>(null), epic: vue.ref<string | null>(null), plan: vue.ref(false),
@@ -52,6 +56,7 @@ async function open(id = 's-1', mobile = false) {
   const wrapper = mount(PlanConversation, {
     props: { sessionId: id, inbox: true, onApproved, onApproving },
     global: {
+      plugins: [[VueQueryPlugin, { queryClient: client }]],
       stubs: {
         PromptComposer: true, PlanQuestion: true,
         AgentAvatar: true, PlanTurnSteps: true, PlanDetail: true,
@@ -80,6 +85,10 @@ async function open(id = 's-1', mobile = false) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  client = testQueryClient()
+  listener = (event) => {
+    applyEvent(client, event)
+  }
   for (const name of ['ref', 'computed', 'watch', 'nextTick', 'onMounted', 'onBeforeUnmount'] as const) vi.stubGlobal(name, vue[name])
   vi.stubGlobal('useRouter', () => ({ push }))
   vi.stubGlobal('useSeoMeta', vi.fn())
@@ -88,16 +97,15 @@ beforeEach(() => {
   vi.stubGlobal('usePlanThreads', () => ({ add: vi.fn() }))
   vi.stubGlobal('useTaskFlyout', () => flyout)
   vi.stubGlobal('useToast', () => toast)
+  vi.stubGlobal('useProjectLists', () => ({ tasks: vue.ref([]) }))
   vi.stubGlobal('useLive', () => ({
     state,
     subscribe: (callback: typeof listener) => {
       listener = callback
       return stop
-    },
-    watchRun: (id: string, events: import('@corral/contracts').RunEvent[]) => { state.value.runEvents[id] = events }
+    }
   }))
   state.value.runner.online = true
-  state.value.runEvents = {}
   flyout.plan.value = false
   vi.mocked(api.plan.session).mockImplementation(async id => detail(id))
   vi.mocked(api.plan.read).mockResolvedValue({ ...planSessions[0]!, unread: false })
@@ -144,6 +152,20 @@ describe('Inbox shared Plan conversation', () => {
     expect(wrapper.text()).toContain('Plan design tasks: prototypes the human approves before the build.')
   })
 
+  it('switches sessions in place and replaces the composer so drafts and attachments are isolated', async () => {
+    const wrapper = await open()
+    const composer = wrapper.findComponent({ name: 'PromptComposer' })
+    const previous = composer.element
+    composer.vm.$emit('update:modelValue', 'A reply for the first thread')
+    await wrapper.setProps({ sessionId: 's-2' })
+    await flushPromises()
+    expect(api.plan.session).toHaveBeenLastCalledWith('s-2')
+    expect(wrapper.findComponent({ name: 'PromptComposer' }).element).not.toBe(previous)
+    expect(wrapper.findComponent({ name: 'PromptComposer' }).vm.$attrs.modelValue).toBe('')
+    expect(wrapper.text()).toContain(detail('s-2').title)
+    expect(wrapper.text()).not.toContain(detail('s-1').title)
+  })
+
   it('sends a reply through Plan and renders live run events before the saved reply', async () => {
     const wrapper = await open()
     const composer = wrapper.findComponent({ name: 'PromptComposer' })
@@ -152,7 +174,7 @@ describe('Inbox shared Plan conversation', () => {
     expect(api.plan.message).toHaveBeenCalledWith('s-1', 'Keep this small.', undefined)
     listener({ type: 'plan.session', session: { ...planSessions.find(s => s.id === 's-1')!, activeRunId: 'live-run' } })
     await flushPromises()
-    state.value.runEvents['live-run'] = [{ type: 'message', text: 'I am checking the scope.' }]
+    applyEvent(client, { type: 'run.events', runId: 'live-run', offset: 0, events: [{ type: 'message', text: 'I am checking the scope.' }] })
     await vue.nextTick()
     expect(wrapper.get('[data-transcript]').text()).toContain('I am checking the scope.')
     expect(wrapper.findComponent({ name: 'PromptComposer' }).vm.$attrs.disabled).toBe(true)
@@ -163,11 +185,62 @@ describe('Inbox shared Plan conversation', () => {
     expect(wrapper.text()).toContain('The scope is small.')
   })
 
+  it('opens a cached proposal on mount before a background snapshot returns', async () => {
+    client.setQueryData(keys.plan.session('s-1'), detail())
+    vi.mocked(api.plan.session).mockImplementation(() => new Promise(() => {}))
+    await open()
+    expect(flyout.openPlan).toHaveBeenCalledWith({ replace: true })
+  })
+
+  it('keeps scroll position when read echoes or background snapshots change metadata only', async () => {
+    const wrapper = await open()
+    const log = wrapper.get('[role="log"]').element as HTMLElement
+    Object.defineProperty(log, 'scrollHeight', { value: 1000 })
+    log.scrollTop = 120
+    listener({ type: 'plan.session', session: { ...planSessions.find(s => s.id === 's-1')!, title: 'Updated thread title', unread: false } })
+    await vue.nextTick()
+    await vue.nextTick()
+    expect(log.scrollTop).toBe(120)
+  })
+
+  it('shows a previously opened conversation immediately while its stale snapshot is delayed', async () => {
+    const wrapper = await open()
+    const second = detail('s-2')
+    client.setQueryData(keys.plan.session('s-2'), second, { updatedAt: 1 })
+    vi.mocked(api.plan.session).mockImplementation(() => new Promise(() => {}))
+    await wrapper.setProps({ sessionId: 's-2' })
+    expect(wrapper.text()).toContain(second.messages[0]!.text)
+    expect(wrapper.findComponent({ name: 'USkeleton' }).exists()).toBe(false)
+    await wrapper.setProps({ sessionId: 's-1' })
+    expect(wrapper.text()).toContain(detail().messages[0]!.text)
+  })
+
   it('sends a one-tap answer immediately without submitting the composer draft', async () => {
     const wrapper = await open('s-2')
     wrapper.findComponent({ name: 'PlanQuestion' }).vm.$emit('answer', 'Web Push')
     await flushPromises()
     expect(api.plan.message).toHaveBeenCalledWith('s-2', 'Web Push', undefined)
+  })
+
+  it('does not restore a one-tap answer draft into a different thread after the request finishes', async () => {
+    const wrapper = await open('s-2')
+    let finish!: () => void
+    vi.mocked(api.plan.message).mockReturnValueOnce(new Promise((resolve) => {
+      finish = () => resolve(detail('s-2').messages[0]!)
+    }))
+    wrapper.findComponent({ name: 'PromptComposer' }).vm.$emit('update:modelValue', 'Old draft')
+    await vue.nextTick()
+    wrapper.findComponent({ name: 'PlanQuestion' }).vm.$emit('answer', 'Web Push')
+    await vue.nextTick()
+    await wrapper.setProps({ sessionId: 's-1' })
+    await flushPromises()
+    const composer = wrapper.findComponent({ name: 'PromptComposer' })
+    expect(composer.vm.$attrs.busy).toBe(false)
+    composer.vm.$emit('update:modelValue', 'New draft')
+    await vue.nextTick()
+    finish()
+    await flushPromises()
+    expect(composer.vm.$attrs.modelValue).toBe('New draft')
   })
 
   it.each(['ready', 'backlog'] as const)('confirms an approval to %s and signals advancement without navigating to Plan', async (to) => {

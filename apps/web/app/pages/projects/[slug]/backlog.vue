@@ -1,42 +1,32 @@
 <script setup lang="ts">
+import { useMutation } from '@tanstack/vue-query'
+import { createTask, transitionTask } from '~/queries/tasks'
 import { isTaskDone } from '@corral/core'
 import type { Task } from '@corral/contracts'
-import { api, ApiError } from '~/composables/useApi'
+import { ApiError } from '~/composables/useApi'
 import { epicTitle, PRIORITY, timeAgo } from '~/utils/labels'
 
 // Backlog (design/backlog.md): proposed tasks grouped by epic
-const route = useRoute()
 const live = useLive()
 const flyout = useTaskFlyout()
 const device = useDevice()
 const router = useRouter()
 const toast = useToast()
-const slug = computed(() => String(route.params.slug))
-const project = computed(() => live.state.value.projects.find(p => p.slug === slug.value) ?? null)
-const all = computed<Task[]>(() => project.value ? live.state.value.tasks[project.value.id] ?? [] : [])
-const loading = computed(() => Boolean(project.value) && !live.state.value.tasks[project.value!.id])
-const error = ref<string | null>(null)
+const transition = useMutation(transitionTask)
+const create = useMutation(createTask)
+const { slug, project, tasks: all, epics: epicList, loading, error } = useProject()
 const pmName = computed(() => live.state.value.agents.find(a => a.role === 'pm')?.name ?? 'the PM')
 useSeoMeta({ title: () => `Backlog · ${project.value?.name ?? ''} · Corral` })
 
-watch(project, async (p) => {
-  if (p && !live.state.value.tasks[p.id]) {
-    try {
-      await live.loadTasks(p)
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
-    }
-  }
-}, { immediate: true })
-
 const search = ref('')
+const showCompleted = ref(false)
 const collapsed = useLocalStorage<Record<string, boolean>>('corral.backlog.collapsed', {})
-const backlog = computed(() => all.value.filter(t => t.status === 'backlog' && (!search.value || `${t.ref} ${t.title}`.toLowerCase().includes(search.value.toLowerCase()))))
+const backlog = computed(() => all.value.filter(t => (t.status === 'backlog' || (showCompleted.value && isTaskDone(t))) && (!search.value || `${t.ref} ${t.title}`.toLowerCase().includes(search.value.toLowerCase()))))
 const groups = computed(() => {
   const ids = [...new Set(all.value.map(t => t.epicId ?? 'none'))]
   return ids.map((id, i) => ({
     id,
-    title: id === 'none' ? 'No epic' : epicTitle(live.state.value.epics[project.value?.id ?? ''], id, i),
+    title: id === 'none' ? 'No epic' : epicTitle(epicList.value, id, i),
     rows: backlog.value.filter(t => (t.epicId ?? 'none') === id),
     merged: all.value.filter(t => (t.epicId ?? 'none') === id && isTaskDone(t)).length,
     total: all.value.filter(t => (t.epicId ?? 'none') === id).length
@@ -56,7 +46,7 @@ async function moveToBoard(tasks: Task[]) {
   for (const task of tasks) moving.value.add(task.id)
   for (const task of tasks) {
     try {
-      await api.tasks.transition(slug.value, task.number, { type: 'approve' })
+      await transition.mutateAsync({ task: { ...task, slug: slug.value }, input: { type: 'approve' } })
       moved.push(task.ref)
     } catch (e) {
       if (e instanceof ApiError && e.body?.code === 'transition_rejected' && e.body.reason.code === 'not_ready') {
@@ -81,7 +71,7 @@ function moveEpic(group: { id: string, title: string }) {
 async function newTask() {
   if (!project.value) return
   try {
-    const task = await api.tasks.create(slug.value, { title: 'New task', type: 'task', description: null })
+    const task = await create.mutateAsync({ slug: slug.value, input: { title: 'New task', type: 'task', description: null } })
     // A phone has no room for the flyout, so the task opens on its own page
     if (device.isMobile.value) void router.push(`/tasks/${task.ref}`)
     else flyout.open(task.ref)
@@ -96,6 +86,7 @@ async function newTask() {
     <BacklogMobile
       v-if="device.isMobile.value"
       v-model:search="search"
+      v-model:show-completed="showCompleted"
       v-model:collapsed="collapsed"
       :groups="groups"
       :count="backlog.length"
@@ -123,6 +114,10 @@ async function newTask() {
             class="w-60"
           />
           <span class="text-sm text-muted">{{ backlog.length }} tasks · never scheduled until approved</span>
+          <UCheckbox
+            v-model="showCompleted"
+            label="Show completed"
+          />
           <div class="ms-auto flex gap-2">
             <UButton
               label="Collapse all"
@@ -208,7 +203,8 @@ async function newTask() {
                 class="ms-auto"
               />
               <UButton
-                :label="group.rows.length === 1 ? 'Move to board' : 'Move all to board'"
+                v-if="group.rows.some(t => t.status === 'backlog')"
+                :label="group.rows.filter(t => t.status === 'backlog').length === 1 ? 'Move to board' : 'Move all to board'"
                 icon="i-lucide-kanban"
                 variant="outline"
                 color="neutral"
@@ -231,11 +227,12 @@ async function newTask() {
                 >
                   <span class="w-14 shrink-0 font-mono text-xs text-muted">{{ task.ref }}</span>
                   <TaskTypeBadge :type="task.type" />
+                  <StatusBadge :status="task.status" />
                   <DesignChangedBadge :design="task.design" />
                   <span class="min-w-0 flex-1 truncate">
                     {{ task.title }}
                     <UBadge
-                      v-if="inPlan.get(task.projectId)"
+                      v-if="task.status === 'backlog' && inPlan.get(task.projectId)"
                       label="In plan"
                       size="xs"
                       variant="subtle"
@@ -248,6 +245,7 @@ async function newTask() {
                   <span class="hidden w-16 text-end text-xs text-dimmed md:inline">{{ timeAgo(task.createdAt) }}</span>
                 </button>
                 <UButton
+                  v-if="task.status === 'backlog'"
                   label="Move to board"
                   icon="i-lucide-kanban"
                   variant="ghost"
@@ -269,7 +267,6 @@ async function newTask() {
           </p>
         </div>
       </div>
-      <TaskFlyout />
     </div>
     <UModal
       :open="Boolean(confirmEpic)"

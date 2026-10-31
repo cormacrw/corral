@@ -1,4 +1,4 @@
-import type { Agent, Epic, GlobalStatus, PlanSession, Profile, Project, RunEvent, RunnerStatus, ServerEvent, Task } from '@corral/contracts'
+import type { Agent, GlobalStatus, PlanSession, Profile, Project, RunnerStatus, ServerEvent } from '@corral/contracts'
 import { serverEventTypes } from '~/queries/dependencies'
 import { shell } from '~/queries/shell'
 import { api } from './useApi'
@@ -8,12 +8,6 @@ import { api } from './useApi'
 // connection"). Reconnects after drops (D12).
 export interface LiveState {
   connection: 'connecting' | 'open' | 'reconnecting'
-  // Tasks by project ID, every status, filled in as pages ask for them
-  tasks: Record<string, Task[]>
-  // Epics by project ID, loaded with the project's tasks
-  epics: Record<string, Epic[]>
-  // Live transcript lines by run, for the agent page
-  runEvents: Record<string, RunEvent[]>
   // Compatibility getters over queries/shell.ts, until pages read queries
   readonly loaded: boolean
   readonly error: string | null
@@ -53,9 +47,6 @@ export function useLive() {
   const pending = usePendingPlan()
   const state = useState<LiveState>('live', () => ({
     connection: 'connecting',
-    tasks: {},
-    epics: {},
-    runEvents: {},
     get loaded() { return shell()?.loaded.value ?? false },
     get error() { return shell()?.error.value ?? null },
     get projects() { return shell()?.projects.data.value ?? [] },
@@ -67,54 +58,9 @@ export function useLive() {
     get planSessions() { return shell()?.planSessions.data.value ?? [] }
   }))
 
-  async function loadTasks(project: Project): Promise<Task[]> {
-    const [tasks, epics] = await Promise.all([api.tasks.list(project.slug, 'all'), api.epics.list(project.slug)])
-    state.value.tasks[project.id] = tasks
-    state.value.epics[project.id] = epics
-    return tasks
-  }
-
-  // Drafts live only in their plan, not in the project's task list
-  function upsertTask(task: Task): void {
-    const list = state.value.tasks[task.projectId]
-    if (!list) return
-    const index = list.findIndex(t => t.id === task.id)
-    if (task.status === 'draft') {
-      if (index >= 0) list.splice(index, 1)
-    } else if (index >= 0) list.splice(index, 1, task)
-    else list.push(task)
-  }
-
   function apply(event: ServerEvent): void {
-    const s = state.value
     pending.apply(event)
     switch (event.type) {
-      case 'project.deleted':
-        s.tasks = Object.fromEntries(Object.entries(s.tasks).filter(([id]) => id !== event.projectId))
-        s.epics = Object.fromEntries(Object.entries(s.epics).filter(([id]) => id !== event.projectId))
-        break
-      case 'task.created':
-      case 'task.updated':
-        upsertTask(event.task)
-        break
-      case 'epic.updated': {
-        const list = s.epics[event.epic.projectId]
-        if (!list) break
-        const index = list.findIndex(e => e.id === event.epic.id)
-        if (index >= 0) list.splice(index, 1, event.epic)
-        else list.push(event.epic)
-        break
-      }
-      case 'task.deleted': {
-        const list = s.tasks[event.projectId]
-        if (list) s.tasks[event.projectId] = list.filter(t => t.id !== event.taskId)
-        break
-      }
-      case 'run.events': {
-        const lines = s.runEvents[event.runId]
-        if (lines) lines.push(...event.events)
-        break
-      }
       case 'plan.session':
         // Before the listeners, so the query cache gets the session as read
         if (event.session.unread && route.params.sessionId === event.session.id) {
@@ -164,9 +110,5 @@ export function useLive() {
   }
 
   // Pages subscribe for events they render themselves (plan messages, comments)
-  function watchRun(runId: string, initial: RunEvent[]): void {
-    state.value.runEvents[runId] = initial
-  }
-
-  return { state, loadTasks, connect, subscribe: subscribeLive, watchRun }
+  return { state, connect, subscribe: subscribeLive }
 }

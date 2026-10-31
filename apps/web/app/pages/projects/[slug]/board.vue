@@ -1,31 +1,20 @@
 <script setup lang="ts">
+import { useMutation } from '@tanstack/vue-query'
+import { moveTask } from '~/queries/tasks'
 import type { Task } from '@corral/contracts'
 import { DEFAULT_LIMITS, type TaskStatus } from '@corral/core'
 import type { BoardFilters } from '~/utils/board'
-import { BOARD_COLUMNS, filtersFromQuery, filtersToQuery, matchesFilter, onBoard, sortColumn, taskAgentIds } from '~/utils/board'
+import { BOARD_COLUMNS, boardMove, filtersFromQuery, filtersToQuery, matchesFilter, onBoard, sortColumn, taskAgentIds } from '~/utils/board'
 import { epicInProgress, epicTitle, epicWithLiveCounts, PRIORITY, STATUS, taskNote } from '~/utils/labels'
 
-// The board (design/board.md): approved work by status, no drag and drop
+// The Board: approved work by status, with human moves through the same
+// actions as the Status menu. The server remains authoritative.
 const route = useRoute()
 const live = useLive()
 const flyout = useTaskFlyout()
 const device = useDevice()
-const slug = computed(() => String(route.params.slug))
-const project = computed(() => live.state.value.projects.find(p => p.slug === slug.value) ?? null)
-const all = computed<Task[]>(() => project.value ? live.state.value.tasks[project.value.id] ?? [] : [])
-const loading = computed(() => Boolean(project.value) && !live.state.value.tasks[project.value!.id])
-const error = ref<string | null>(null)
+const { slug, project, tasks: all, epics: epicList, loading, error } = useProject()
 useSeoMeta({ title: () => `Board · ${project.value?.name ?? ''} · Corral` })
-
-watch(project, async (p) => {
-  if (p && !live.state.value.tasks[p.id]) {
-    try {
-      await live.loadTasks(p)
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
-    }
-  }
-}, { immediate: true })
 
 // The filters live in the URL query, so a filtered Board reloads and shares
 const router = useRouter()
@@ -64,14 +53,51 @@ const DOT = { neutral: 'bg-neutral-400', info: 'bg-info', primary: 'bg-primary',
 const inColumn = (column: { key: string, statuses: TaskStatus[] }) => sortColumn(column.key, visible.value.filter(t => column.statuses.includes(t.status)))
 const mobileColumns = computed(() => columns.value.map(c => ({ ...c, color: DOT[STATUS[c.statuses[0]!].color], tasks: inColumn(c) })))
 const agentFor = (task: Task) => task.lease ? live.state.value.agents.find(a => a.id === task.lease!.agentId) : null
-const epicLabel = (id: string) => epicTitle(live.state.value.epics[project.value?.id ?? ''], id, epics.value.indexOf(id))
+const epicLabel = (id: string) => epicTitle(epicList.value, id, epics.value.indexOf(id))
 const epicOptions = computed(() => epics.value.map(id => ({ id, label: epicLabel(id) })))
 // Epics with work left or tasks on the Board, so one waiting on its epic PR
-// stays here after its tasks leave the Merged column. The Epic filter applies.
-const boardEpics = computed(() => (live.state.value.epics[project.value?.id ?? ''] ?? [])
+// stays here after its tasks leave the Complete column. The Epic filter applies.
+const boardEpics = computed(() => epicList.value
   .map(epic => epicWithLiveCounts(epic, all.value))
   .filter(epic => epicInProgress(epic) || all.value.some(t => t.epicId === epic.id && onBoard(t)))
   .filter(epic => filters.value.epics.length === 0 || filters.value.epics.includes(epic.id)))
+
+const toast = useToast()
+const move = useMutation(moveTask)
+const moving = ref(new Set<string>())
+const dragged = ref<Task | null>(null)
+const canDrag = (task: Task) => BOARD_COLUMNS.some(column => boardMove(task, column.statuses[0]!))
+function startDrag(event: DragEvent, task: Task) {
+  if (moving.value.has(task.id)) {
+    event.preventDefault()
+    return
+  }
+  dragged.value = task
+  event.dataTransfer?.setData('text/plain', task.ref)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+}
+function allowDrop(event: DragEvent, status: TaskStatus) {
+  if (dragged.value && boardMove(dragged.value, status)) {
+    event.preventDefault()
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+  }
+}
+async function dropTask(event: DragEvent, status: TaskStatus) {
+  event.preventDefault()
+  const task = dragged.value
+  dragged.value = null
+  if (!task || moving.value.has(task.id)) return
+  const input = boardMove(task, status)
+  if (!input) return
+  moving.value.add(task.id)
+  try {
+    await move.mutateAsync({ task: { ...task, slug: slug.value }, input, status })
+  } catch (e) {
+    toast.add({ title: `Could not move ${task.ref}`, description: e instanceof Error ? e.message : String(e), color: 'error' })
+  } finally {
+    moving.value.delete(task.id)
+  }
+}
 </script>
 
 <template>
@@ -158,7 +184,9 @@ const boardEpics = computed(() => (live.state.value.epics[project.value?.id ?? '
             v-for="column in columns"
             :key="column.label"
             :aria-label="`${column.label}, ${inColumn(column).length}`"
-            class="flex max-h-full w-[272px] shrink-0 flex-col rounded-lg border border-default bg-muted"
+            :class="['flex max-h-full w-[272px] shrink-0 flex-col rounded-lg border bg-muted', dragged && boardMove(dragged, column.statuses[0]!) ? 'border-primary' : 'border-default']"
+            @dragover="allowDrop($event, column.statuses[0]!)"
+            @drop="dropTask($event, column.statuses[0]!)"
           >
             <header class="flex shrink-0 items-center gap-2 px-3 py-2.5 text-sm">
               <span
@@ -188,17 +216,24 @@ const boardEpics = computed(() => (live.state.value.epics[project.value?.id ?? '
                 <button
                   type="button"
                   :aria-pressed="flyout.ref.value === task.ref"
+                  :draggable="!moving.has(task.id) && canDrag(task)"
                   :class="[
                     'flex shrink-0 flex-col gap-1.5 rounded-md border border-default bg-default px-3 py-2.5 text-start text-sm hover:border-accented',
                     task.lease && 'border-primary/60',
                     flyout.ref.value === task.ref && 'border-primary ring-1 ring-primary'
                   ]"
+                  @dragstart="startDrag($event, task)"
+                  @dragend="dragged = null"
                   @click="flyout.toggle(task.ref)"
                 >
                   <span class="flex items-center gap-2 text-xs">
                     <span class="shrink-0 font-mono text-muted">{{ task.ref }}</span>
                     <span :class="task.priority === 'urgent' ? 'text-error' : task.priority === 'high' ? 'text-warning' : 'text-muted'">{{ PRIORITY[task.priority].label }}</span>
                     <TaskTypeBadge :type="task.type" />
+                    <StatusBadge
+                      v-if="task.status === 'merged' || task.status === 'approved'"
+                      :status="task.status"
+                    />
                     <DesignChangedBadge :design="task.design" />
                     <a
                       v-if="task.prUrl"
@@ -243,7 +278,6 @@ const boardEpics = computed(() => (live.state.value.epics[project.value?.id ?? '
           </section>
         </div>
       </div>
-      <TaskFlyout />
     </div>
   </UDashboardPanel>
 </template>

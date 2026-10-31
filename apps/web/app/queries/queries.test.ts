@@ -1,16 +1,19 @@
 // @vitest-environment happy-dom
 import { useMutation, useQuery } from '@tanstack/vue-query'
-import type { ServerEvent, Task } from '@corral/contracts'
+import type { Agent, Epic, Project, Run, ServerEvent, Task } from '@corral/contracts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h, nextTick, ref } from 'vue'
 import { useLive } from '~/composables/useLive'
-import { ApiError } from '~/composables/useApi'
+import { ApiError, api } from '~/composables/useApi'
 import type { eventDependencies } from './dependencies'
 import { applyEvent, defineMutation, serverEventTypes } from './dependencies'
 import { createQueryClient } from './client'
 import { keys } from './keys'
+import { createAgent } from './agents'
 import { connectQueries, MAX_WAIT_MS, QUIET_MS } from './live'
 import { mountWithQuery, testQueryClient } from './mount-with-query'
+import { removeProject } from './projects'
+import { clisQuery, refreshRepos, reposQuery } from './setup'
 
 // @ts-expect-error A type missing from the map must not compile
 const incomplete: typeof eventDependencies = { 'deployment.updated': { invalidates: () => [] } }
@@ -50,6 +53,73 @@ function onScreen(client: ReturnType<typeof testQueryClient>, queryKey: readonly
   return { queryFn, shown, wrapper }
 }
 
+describe('run transcripts', () => {
+  const line = (text: string) => ({ type: 'system', text }) as const
+  const lines = (...texts: string[]) => texts.map(line)
+  const key = keys.runs.transcript('r1')
+  const event = (offset: number, ...texts: string[]): ServerEvent => ({ type: 'run.events', runId: 'r1', offset, events: lines(...texts) })
+  const stale = (client: ReturnType<typeof testQueryClient>, e: ServerEvent) => applyEvent(client, e)
+
+  it('appends a line at the end, active or not', () => {
+    const client = testQueryClient()
+    client.setQueryData(key, lines('a'))
+    expect(stale(client, event(1, 'b', 'c'))).toEqual([])
+    expect(client.getQueryData(key)).toEqual(lines('a', 'b', 'c'))
+  })
+
+  it('skips lines a fetch already returned, keeping any new ones in the same event', () => {
+    const client = testQueryClient()
+    client.setQueryData(key, lines('a', 'b'))
+    expect(stale(client, event(0, 'a'))).toEqual([])
+    expect(client.getQueryData(key)).toEqual(lines('a', 'b'))
+    expect(stale(client, event(1, 'b', 'c'))).toEqual([])
+    expect(client.getQueryData(key)).toEqual(lines('a', 'b', 'c'))
+  })
+
+  it('refetches rather than leave a gap, and doesn\'t mark a stale transcript fresh', async () => {
+    const client = testQueryClient()
+    client.setQueryData(key, lines('a'))
+    await client.invalidateQueries({ queryKey: key })
+    expect(stale(client, event(3, 'd'))).toEqual([key])
+    expect(client.getQueryData(key)).toEqual(lines('a'))
+    expect(client.getQueryState(key)?.isInvalidated).toBe(true)
+  })
+
+  it('starts nothing for a transcript nobody has loaded, and retries one that failed', () => {
+    const client = testQueryClient()
+    expect(stale(client, event(0, 'a'))).toEqual([key])
+    expect(client.getQueryData(key)).toBeUndefined()
+  })
+
+  it('keeps a run going through switching away and back without a gap or duplicate', async () => {
+    const client = testQueryClient()
+    const server = lines('a', 'b')
+    const queryFn = vi.fn(async () => [...server])
+    const view = defineComponent({ setup() {
+      const query = useQuery({ queryKey: key, queryFn })
+      return () => h('p', query.data.value?.map(l => l.text).join('') ?? 'empty')
+    } })
+    const first = mountWithQuery(view, { client })
+    await vi.waitFor(() => expect(first.wrapper.text()).toBe('ab'))
+    const emitLine = async (text: string, delivered = true) => {
+      const offset = server.length
+      server.push(line(text))
+      if (delivered) stale(client, event(offset, text))
+    }
+    await emitLine('c')
+    await nextTick()
+    expect(first.wrapper.text()).toBe('abc')
+    first.wrapper.unmount()
+    await emitLine('d')
+    const back = mountWithQuery(view, { client })
+    expect(back.wrapper.text()).toBe('abcd')
+    await emitLine('e')
+    await nextTick()
+    expect(back.wrapper.text()).toBe('abcde')
+    back.wrapper.unmount()
+  })
+})
+
 describe('query layer', () => {
   let client: ReturnType<typeof testQueryClient>
   let stop: () => void
@@ -76,6 +146,24 @@ describe('query layer', () => {
     expect(incomplete).toBeDefined()
     useLive().connect()
     expect([...FakeEventSource.last.handlers.keys()]).toEqual(expect.arrayContaining(serverEventTypes))
+  })
+
+  it('keeps read-only Inbox events out of refetches and writes the count into the cache', async () => {
+    useLive().connect()
+    const inbox = onScreen(client, keys.inbox(), () => ({ count: 2, needsYou: [] }))
+    await vi.advanceTimersByTimeAsync(0)
+    FakeEventSource.last.emit('plan.session', {
+      type: 'plan.session', session: { id: 's-1', unread: false }, markedRead: { inboxCount: 1 }
+    })
+    FakeEventSource.last.emit('deployment.updated', { type: 'deployment.updated', deployment: { id: 'd-1' }, markedRead: true })
+    await vi.advanceTimersByTimeAsync(MAX_WAIT_MS + QUIET_MS)
+    expect(client.getQueryData(keys.inbox())).toEqual({ count: 1, needsYou: [] })
+    expect(inbox.queryFn).toHaveBeenCalledTimes(1)
+    // Content changes still invalidate the derived Inbox, as on main.
+    FakeEventSource.last.emit('deployment.updated', { type: 'deployment.updated' })
+    await vi.advanceTimersByTimeAsync(MAX_WAIT_MS + QUIET_MS)
+    expect(inbox.queryFn).toHaveBeenCalledTimes(2)
+    inbox.wrapper.unmount()
   })
 
   it('coalesces a burst of task events into one refetch of each affected query', async () => {
@@ -238,6 +326,12 @@ describe('query layer', () => {
     expect(client.getQueryData(keys.tasks.comments('COR-1'))).toEqual([comment])
   })
 
+  it('refetches a task\'s history, evidence and reviews when one of its runs changes', () => {
+    client.setQueryData(keys.projects.list(), [{ id: 'p-1', slug: 'corral' }])
+    const stale = applyEvent(client, { type: 'run.updated', run: { id: 'r-1', agentId: 'a-1', projectId: 'p-1', taskRef: 'COR-1' } as Extract<ServerEvent, { type: 'run.updated' }>['run'] })
+    for (const key of [keys.tasks.history('COR-1'), keys.tasks.evidence('COR-1'), keys.tasks.reviews('COR-1'), keys.tasks.designs('COR-1')]) expect(stale).toContainEqual(key)
+  })
+
   it('uses defaults that show cached data at once and do not retry a 4xx', () => {
     const defaults = createQueryClient().getDefaultOptions().queries!
     expect(defaults.staleTime).toBeGreaterThan(0)
@@ -246,5 +340,178 @@ describe('query layer', () => {
     expect(retry(0, new ApiError(404, null, 'Not found'))).toBe(false)
     expect(retry(0, new ApiError(503, null, 'Down'))).toBe(true)
     expect(retry(2, new Error('network'))).toBe(false)
+  })
+})
+
+vi.mock('~/composables/useApi', async original => ({ ...await original<typeof import('~/composables/useApi')>(), api: {
+  agents: { list: vi.fn(), create: vi.fn() },
+  projects: { list: vi.fn(), remove: vi.fn() },
+  setup: { clis: vi.fn(), repos: vi.fn() }
+} }))
+
+// Mounts a mutation's useMutation and hands back its mutateAsync
+function mutation<D, V>(definition: Parameters<typeof useMutation<D, Error, V>>[0], client: ReturnType<typeof testQueryClient>) {
+  let mutate!: (variables: V) => Promise<D>
+  mountWithQuery(defineComponent({ setup() {
+    mutate = useMutation(definition).mutateAsync
+    return () => h('div')
+  } }), { client })
+  return mutate
+}
+
+describe('a new agent', () => {
+  const orion = { id: 'a-2', name: 'Orion' } as Agent
+  const juno = { id: 'a-1', name: 'Juno' } as Agent
+  function listed() {
+    const client = testQueryClient()
+    client.setQueryData(keys.agents.list(), [juno])
+    onScreen(client, keys.agents.list(), () => server)
+    return client
+  }
+  let server: Agent[] = []
+  beforeEach(() => {
+    server = [juno]
+    vi.mocked(api.agents.create).mockImplementation(async () => {
+      server = [juno, orion]
+      return orion
+    })
+  })
+  const event = { type: 'agent.updated', agent: orion } as ServerEvent
+
+  it('is listed once with no event at all', async () => {
+    const client = listed()
+    await mutation(createAgent, client)(orion as never)
+    expect(client.getQueryData(keys.agents.list())).toEqual([juno, orion])
+  })
+  it('is listed once when the event comes after the response', async () => {
+    const client = listed()
+    await mutation(createAgent, client)(orion as never)
+    applyEvent(client, event)
+    expect(client.getQueryData(keys.agents.list())).toEqual([juno, orion])
+  })
+  it('is listed once when the event beats the response', async () => {
+    const client = listed()
+    applyEvent(client, event)
+    await mutation(createAgent, client)(orion as never)
+    expect(client.getQueryData(keys.agents.list())).toEqual([juno, orion])
+  })
+})
+
+describe('removing a project', () => {
+  const gone = { id: 'p-1', slug: 'corral', name: 'Corral' } as Project
+  const kept = { id: 'p-2', slug: 'other', name: 'Other' } as Project
+  const goneRun = { id: 'r-1', projectId: 'p-1' } as Run
+  const keptRun = { id: 'r-2', projectId: 'p-2' } as Run
+  const session = (id: string, projectId: string) => ({ id, projectId })
+  function cached() {
+    const client = testQueryClient()
+    client.setQueryData(keys.projects.list(), [gone, kept])
+    client.setQueryData(keys.projects.detail('corral'), gone)
+    client.setQueryData(keys.projects.flow('corral', '30d'), {})
+    client.setQueryData(keys.projects.pullRequests('corral'), [])
+    client.setQueryData(keys.tasks.list('corral'), [task()])
+    client.setQueryData(keys.tasks.detail('COR-1'), task())
+    client.setQueryData(keys.tasks.comments('COR-1'), [])
+    client.setQueryData(keys.tasks.detail('COR-2'), task({ id: 't-2', ref: 'COR-2' }))
+    client.setQueryData(keys.epics.list('corral'), [])
+    client.setQueryData(keys.epics.detail('e-1'), { id: 'e-1', projectId: 'p-1' } as Epic)
+    client.setQueryData(keys.runs.detail('r-1'), goneRun)
+    client.setQueryData(keys.runs.transcript('r-1'), [])
+    client.setQueryData(keys.runs.list({ active: true }), [goneRun, keptRun])
+    client.setQueryData(keys.plan.sessions(), [session('s-1', 'p-1'), session('s-2', 'p-2')])
+    client.setQueryData(keys.plan.session('s-1'), session('s-1', 'p-1'))
+    client.setQueryData(keys.plan.drafts('corral'), [])
+    client.setQueryData(keys.tasks.list('other'), [task({ id: 't-9', ref: 'OTH-1', projectId: 'p-2' })])
+    client.setQueryData(keys.runs.detail('r-2'), keptRun)
+    return client
+  }
+  function expectCleared(client: ReturnType<typeof testQueryClient>) {
+    const left = client.getQueryCache().getAll().map(query => JSON.stringify(query.queryKey))
+    expect(left.sort()).toEqual([keys.projects.list(), keys.runs.list({ active: true }), keys.plan.sessions(), keys.tasks.list('other'), keys.runs.detail('r-2')].map(key => JSON.stringify(key)).sort())
+    expect(client.getQueryData(keys.projects.list())).toEqual([kept])
+    expect(client.getQueryData(keys.runs.list({ active: true }))).toEqual([keptRun])
+    expect(client.getQueryData(keys.plan.sessions())).toEqual([session('s-2', 'p-2')])
+  }
+
+  it('clears everything cached for it on the response, with no event', async () => {
+    vi.mocked(api.projects.remove).mockResolvedValue(null as never)
+    const client = cached()
+    await mutation(removeProject, client)({ id: 'p-1', slug: 'corral', confirm: 'Corral' })
+    expectCleared(client)
+  })
+  it('marks the repository list stale, whose rows name the project', async () => {
+    vi.mocked(api.projects.remove).mockResolvedValue(null as never)
+    const client = cached()
+    client.setQueryData(keys.setup.repos(), { signedIn: true, repos: [] })
+    await mutation(removeProject, client)({ id: 'p-1', slug: 'corral', confirm: 'Corral' })
+    expect(client.getQueryState(keys.setup.repos())?.isInvalidated).toBe(true)
+    client.setQueryData(keys.setup.repos(), { signedIn: true, repos: [] })
+    expect(applyEvent(client, { type: 'project.deleted', projectId: 'p-1' })).toContainEqual(keys.setup.repos())
+    expect(applyEvent(client, { type: 'project.created', project: gone })).toContainEqual(keys.setup.repos())
+  })
+  it('takes the data off a page still showing it and refetches to the 404', async () => {
+    const client = cached()
+    let found = true
+    const queryFn = vi.fn(async () => {
+      if (!found) throw new ApiError(404, { code: 'not_found' } as never, 'Not found')
+      return session('s-1', 'p-1')
+    })
+    const { wrapper } = mountWithQuery(defineComponent({ setup() {
+      const query = useQuery({ queryKey: keys.plan.session('s-1'), queryFn, staleTime: Infinity })
+      return () => h('div', query.error.value?.message ?? (query.data.value ? 'data' : 'nothing'))
+    } }), { client })
+    expect(wrapper.text()).toBe('data')
+    found = false
+    applyEvent(client, { type: 'project.deleted', projectId: 'p-1' })
+    await vi.waitFor(() => expect(wrapper.text()).toBe('Not found'))
+  })
+  it('clears the same from the event alone', () => {
+    const client = cached()
+    applyEvent(client, { type: 'project.deleted', projectId: 'p-1' })
+    expectCleared(client)
+  })
+  it('is settled whichever of event and response comes second', async () => {
+    vi.mocked(api.projects.remove).mockResolvedValue(null as never)
+    const client = cached()
+    applyEvent(client, { type: 'project.deleted', projectId: 'p-1' })
+    await mutation(removeProject, client)({ id: 'p-1', slug: 'corral', confirm: 'Corral' })
+    expectCleared(client)
+  })
+})
+
+describe('setup data', () => {
+  it('shows the last CLI scan at once on a return and rescans behind it', async () => {
+    const client = testQueryClient()
+    vi.mocked(api.setup.clis).mockResolvedValueOnce([{ id: 'claude', signedIn: false }] as never)
+    const shown: unknown[] = []
+    const visit = () => mountWithQuery(defineComponent({ setup() {
+      const scan = useQuery(clisQuery())
+      shown.push({ pending: scan.isPending.value, data: scan.data.value })
+      return () => h('div', String(scan.data.value?.[0]?.signedIn))
+    } }), { client }).wrapper
+    const first = visit()
+    await vi.waitFor(() => expect(first.text()).toBe('false'))
+    first.unmount()
+    let finish!: (value: never) => void
+    vi.mocked(api.setup.clis).mockReturnValueOnce(new Promise((resolve) => {
+      finish = resolve
+    }))
+    const second = visit()
+    expect(shown.at(-1)).toEqual({ pending: false, data: [{ id: 'claude', signedIn: false }] })
+    expect(second.text()).toBe('false')
+    expect(api.setup.clis).toHaveBeenCalledTimes(2)
+    finish([{ id: 'claude', signedIn: true }] as never)
+    await vi.waitFor(() => expect(second.text()).toBe('true'))
+  })
+  it('refreshes repositories into the one cached list', async () => {
+    const client = testQueryClient()
+    const before = { signedIn: true, repos: [] }
+    const after = { signedIn: true, repos: [{ nameWithOwner: 'a/b' }] }
+    client.setQueryData(reposQuery().queryKey, before as never)
+    vi.mocked(api.setup.repos).mockResolvedValue(after as never)
+    await mutation(refreshRepos, client)()
+    expect(api.setup.repos).toHaveBeenCalledWith(true)
+    expect(client.getQueryData(keys.setup.repos())).toEqual(after)
+    expect(client.getQueryCache().getAll()).toHaveLength(1)
   })
 })

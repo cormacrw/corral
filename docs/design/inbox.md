@@ -15,7 +15,7 @@ Items come from two places:
 
 There's no separate notifications feed.
 
-A criterion marked **Checked by a human** always sends an approved task here, even if its task-level human-review flag is off. Its evidence card says **Needs human check** and has a checkbox for the human. Tick every such criterion before **Approve and merge**; requesting changes remains available. These ticks are local to the selected item; approval uses the usual merge gates.
+A criterion marked **Checked by a human** always sends an approved task here, even if its task-level human-review flag is off. Its evidence card says **Needs human check** and has a checkbox for the human. Tick every such criterion, in the **Criteria** tab, before **Approve and merge**; approving with one unticked sends nothing, opens that tab and says each check must be ticked. Requesting changes remains available. These ticks are local to the selected item; approval uses the usual merge gates.
 
 ## Layout
 
@@ -40,16 +40,45 @@ There are three columns. The list divider can be resized (280–560px, default 3
 
 ### 2. Selected message
 
+Task items on desktop (human review, question, blocked, failed, Activity and Resolved) use **Option D** (`InboxPanel`, with `useInboxPanel` deriving what it shows). What's needed to decide sits up front, and everything else is one click away in tabs. Phones, Plan threads, epic items and release notes have their own layouts; the **Mobile item** section below is what phones still use.
+
+- **Top block**, which fits at 1280×800 without scrolling:
+  - one quiet line (`InboxPanelMeta`): kind (Code, Design or Spike review, Question, Blocked, Failed, Activity, Resolved) · project · ref · sender · time
+  - the title, and a **Task details** icon button (`aria-pressed`). The flyout is closed whenever an item opens, and one click opens it.
+  - shared `InboxMessage` in place of a TL;DR: the short `message` clamped to three lines, and its **New** row on one line that scrolls sideways. Items with no message show **TL;DR** and the first paragraph of the body, cut to two lines.
+  - the verdict on reviews (`InboxPanelVerdict`): reviewer and round, gates passed, criteria met. It's red only when a criterion is unmet; a human check waiting for its tick isn't unmet.
+  - the actions (`InboxPanelActions`) on the left, and the links (`InboxPanelArtifacts`) on the right: **PR #n**, or **Preview vN** and **Review design** on a design, or **Open task** or **Open epic** on Activity. Spikes have no PR link.
+- **Tabs:** **Overview · Criteria n/m · Review · PR description · Code diff N · Message**. Criteria and Review show on reviews that have them. The tab resets when another item opens.
+- **PR tabs:** PR description and Code diff show on an item with a PR, once its task says it isn't a design or spike, whatever the item's type. N is the PR's changed files, and is left off until the PR arrives. Each file shows its additions and deletions and opens to its diff, the first starting open. Past the [cap](../../.corral/wiki/pull-request-detail.md), the tab says how much is shown and links to the PR on GitHub. If the PR can't be loaded, both tabs show the error with **Retry** and the rest of the panel carries on.
+  - **Overview:** on a review, a screenshot grid and the other files; one click opens either in the evidence viewer. On other items, or a review with no evidence, what each action does. A read-only item shows its resolution, or "For your information. Nothing to do."
+  - **Criteria:** `EvidenceList`, with its notes, evidence and human checks.
+  - **Review:** every round's verdict and summary, newest first.
+  - **Message:** the full `body`, including spike findings.
+- **Actions:**
+
+  | Item | Actions | One click |
+  |---|---|---|
+  | Human review | Approve and merge (Accept findings on spikes, Approve design on designs) · Request changes | Approve sends, with the composer’s text and attached images as its note (waiting for pending uploads), and the Inbox moves on. An unmet criterion doesn't stop it. |
+  | Question, Blocked | Answer · Send back to Backlog · Delete task | Send back sends |
+  | Failed | Retry, with its status picker beside it · Send back to Backlog · Delete task | Retry and Send back send |
+  | Activity, Resolved | None, and no composer | |
+
+  **Request changes**, **Answer** and **Delete task** open the composer instead, with **Cancel** above it. Delete waits for it because it can't be undone, and takes an optional reason.
+- **Composer** (`InboxPanelTray`), pinned to the bottom of an item you can act on: with no action chosen it's the reply box, "Reply to {sender}…", which adds a comment to the task and leaves the item where it is.
+
+### Mobile item
+
 - **Header:**
   - the sender avatar and subject
   - the type badge, project tag, and "{sender} · {role} · {time}"
-  - a **Task details** toggle (`aria-pressed`) that shows or hides the flyout
 - **Body:**
   - After it's resolved, a green "Resolved" `UAlert` with what happened.
-  - The agent's message in plain English.
+  - Needs-you task and epic items start with shared `InboxMessage`: the short `message` as plain text, then a **New** row directly below it when `newArtifacts` is nonempty. Screenshots are thumbnails; other files use icons and names. One click opens the same evidence viewer used by the criteria list. Design versions link directly to that version's preview. Epic artifacts include their task ref. Evidence is untrusted, so the viewer never frames HTML: images, video and text show in the app, a PDF in an iframe, and anything else is a download link.
+  - The row uses only the server's `newArtifacts`, already filtered since the human's last review or answer. Older files remain in the evidence list without a New marker. With no new artifacts there is no row.
+  - The complete `body` is behind a collapsed **Full message** disclosure, including spike findings. It starts closed whenever a different item opens. Items without `message` keep their existing rendering, including Plan threads, release notes, Activity and Resolved.
   - Type-specific context:
     - **Human review:** the PR link (`#41`), passing-check badges, and a card of acceptance criteria. Each criterion shows a met icon, the reviewer’s note, screenshot/video/request cards, then inline markdown notes. Agent artifacts are collapsed separately; see [Evidence review](task.md#evidence-review-d21).
-    - **Spikes always stop in Human review**, whatever their human-review flag says. They appear under Needs you and add one to its count. The message body renders the latest `## Findings` comment as markdown above the criteria verdicts and evidence. Desktop and mobile label approval **Accept findings**, keep **Request changes**, and hide PR links and check badges. The success toast and Resolved entry say **You accepted the findings**. The preview is the start of that comment; approval finishes the spike in Merged; requesting changes returns it to the developer with the feedback.
+    - **Spikes always stop in Human review**, whatever their human-review flag says. They appear under Needs you and add one to its count. The collapsed **Full message** renders the latest `## Findings` comment as markdown; criteria verdicts and evidence remain below it. Desktop and mobile label approval **Accept findings**, keep **Request changes**, and hide PR links and check badges. The success toast and Resolved entry say **You accepted the findings**. The preview is the start of the short message; approval finishes the spike in Merged; requesting changes returns it to the developer with the feedback.
     - **Designs** use **Approve design** on desktop and mobile. Approval marks the latest submitted version Approved, supersedes earlier versions and moves the task to Approved, then advances to the next item. There is no PR to merge; approval opens a Plan session and starts the PM’s build-planning turn.
     - **Blocked:** the reviewer's and developer's positions side by side (2 columns, `bg-muted`).
     - **Question:** the question itself. The answers live in the tray.
@@ -62,18 +91,18 @@ There are three columns. The list divider can be resized (280–560px, default 3
     | Item type | Actions | Needs text |
     |---|---|---|
     | Human review | ✓ Approve and merge (Accept findings for spikes; Approve design for designs) · ✎ Request changes | Request changes only |
-    | Blocked / Question | 💬 Clarify and continue · ↩ Send back to Backlog · 🗑 Delete task (`error`) | Clarify only |
+    | Blocked / Question | 💬 Answer · ↩ Send back to Backlog · 🗑 Delete task (`error`) | Answer only |
     | Failed | ↻ Retry · ↩ Send back to Backlog · 🗑 Delete task (`error`) | None |
 
   - **Composer:**
     - The placeholder follows the selected action, e.g. "What should Atlas change?" or "Reason for deleting (optional)". Items without quick actions use "Reply to {sender}…".
     - The submit button becomes labelled with the action and turns `error` for Delete.
-    - Items without quick actions keep their plain reply behavior. Items with quick actions always send the selected action. Mobile questions have no chips and send the composer answer with Clarify and continue.
+    - Items without quick actions keep their plain reply behavior. Items with quick actions always send the selected action. Mobile questions have no chips and send the composer answer with Answer.
   - Switching items clears the draft and selects the new item’s first action, including after a successful send advances to the next item.
 
 ### 3. Task flyout
 
-Docked, stacked layout, from [task.md](task.md). It's open by default and closes with its own × or the Task details toggle.
+Docked, stacked layout, from [task.md](task.md). It's closed when an item opens, including when acting moves on to the next one; **Task details** opens it, and it closes with its own × or the same button. A shared link with `?task=` still opens it.
 
 ## Plan threads
 
@@ -163,7 +192,7 @@ An epic PR in human review and an epic PR rebase conflict have their own layout 
 | Answer (question) | In progress | The answer is added to the task's acceptance criteria and sent to the developer |
 | Approve and merge / Accept findings | Merged (PR gates are re-checked for non-spikes) | Only on Human review; spikes finish without a merge |
 | Request changes | In progress | The text becomes the change request for the developer |
-| Clarify and continue | In progress | The guidance is added to the task; the review-round counter resets |
+| Answer (blocked) | In progress | The guidance is added to the task; the review-round counter resets |
 | Send back to Backlog | Backlog | Leaves the board |
 | Delete task | Soft-deleted | Stops the run, closes the PR, deletes the branch when safe; dependents become Blocked |
 
@@ -171,14 +200,15 @@ An epic PR in human review and an epic PR rebase conflict have their own layout 
 
 - **Items:** id, project, task ref, type (question / human review / blocked / failed / activity / plan thread), sender agent and role, time, subject, preview, body, unread, resolved outcome.
 - **Type-specific fields:** PR, checks, criteria with evidence, positions, suggested answers. A plan thread has the session id, title, status (needs approval / question / none with an unread reply), `activeRunId`, preview, `reply` and the time it started waiting; its question and plan come from the Plan session endpoints.
+- **What changed since the last review:** a needs-you task or epic item carries `since` and `newArtifacts`. `since` is null until the human has acted, then holds when they last requested changes or answered, what they said, the developers' one-line notes after it, and an epic's fix tasks. `newArtifacts` lists the files added after that action, plus a design's latest version with its preview link, and on an epic each file names its task. Before any action everything is new. Written (`note`) evidence is never listed. Actions and artifacts are compared by time, because review rounds reset when a task is resolved.
 - **Counts per filter.**
 - New items stream in over SSE; plan threads follow `plan.session` events.
 
 ## States
 
-- **Loading:** skeleton rows.
-- **An action fails:** an inline error in the tray. The draft and selected action are kept.
-- **The task fails to load:** an inline error in the tray with **Retry**, instead of a spinner. Approval stays blocked, because its human-criteria check needs the task, and its action reads **Task not loaded**. The other actions still work.
+- **Loading:** skeleton rows in the list. An item's top block shows at once from the Inbox data, with skeletons for its verdict and tab body until the task and its evidence arrive; Approve reads **Loading task…** and the actions wait.
+- **An action fails:** an inline error above the composer. The draft is kept, and an action that opens the composer stays chosen.
+- **The task fails to load:** an inline error under the actions with **Retry**, instead of a spinner (in the tray on a phone). Approval stays blocked, because its human-criteria check needs the task, and its action reads **Task not loaded**. The other actions and the reply box still work.
 - **A task changed status elsewhere:** the item shows "Already resolved" and the tray is disabled.
 
 ## Responsive
@@ -195,7 +225,6 @@ An epic PR in human review and an epic PR rebase conflict have their own layout 
 
 ## Open questions
 
-- Approve could be one click instead of select-then-send. Two steps are safer; decide after testing.
 - Should Activity items expire, or stay forever?
 
 Mobile Plan threads reuse Plan's `PlanQuestion`, composer and `PlanDetail` bottom sheet, without `PlanConversation`. `InboxMobile` renders its focused Plan thread through `InboxMobilePlanThread`; the Inbox header keeps Back to Inbox and Open in Plan (the session route), with Delete thread in the overflow menu. Deleting returns to `/inbox` at once and closes the session after the 5-second Undo toast (`usePlanThreadDelete`); list rows use `SwipeToDelete` for the same action. A waiting plan has View plan and side-by-side approval destinations. The thread provides `FLYOUT_SHEETS`, so `useTaskFlyout` keeps a task or epic opened from the plan sheet on the Inbox route (`?task=`/`?epic=`) in a taller sheet over the plan, and dismissing it goes back to the plan; either successful approval closes the sheet and returns to `/inbox`. Failed approvals keep the screen and sheet open.

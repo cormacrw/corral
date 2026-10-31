@@ -9,7 +9,7 @@
 | `page` | `/tasks/:ref`, e.g. `/tasks/COR-29` | Split: content on the left, a 260px properties rail on the right, centred up to 1200px |
 | `mobile` | `/tasks/:ref` under the mobile layout | A full page with Details and Criteria and activity tabs, see [mobile.md](mobile.md#task-and-epic) |
 
-The flyout opens with `?task=COR-29` on the current page's URL, so it survives reloads and links can be shared. Pages decide what opens it (a row click, a card click, a chip link). Clicking the same row again closes it. Opening a task or epic adds a browser history entry, so Back returns to whatever the flyout showed before (an epic, after opening one of its tasks). The Inbox, which opens the selected item's task by itself, replaces the entry instead. Closing the flyout doesn't add one.
+The flyout opens with `?task=COR-29` on the current page's URL, so it survives reloads and links can be shared. One host in the default layout serves pages that set the `taskFlyout` page meta: every project tab, the epic page and Agent pages. It sits beside the page at full height. Inbox and Plan host their own, because they fill its plan slot from page state and the Inbox swaps it with the selected item. Phones have no flyout. Pages decide what opens it (a row click, a card click, a chip link). Clicking the same row again closes it. Opening a task or epic adds a browser history entry, so Back returns to whatever the flyout showed before (an epic, after opening one of its tasks). The Inbox, which opens the selected item's task by itself, replaces the entry instead. Closing the flyout doesn't add one.
 
 ## Purpose
 
@@ -98,9 +98,9 @@ Ready tasks whose epic has unfinished prerequisites show **Waiting on epic: <tit
 - Should "Open full page" replace the current page or open a new tab?
 - Should humans be able to reorder acceptance criteria?
 
-## Merged tasks
+## Complete tasks
 
-Merged is final (D10). The task reads as it shipped: title, properties, dependencies, description and criteria are shown but not editable (a lock note says "Merged, so read-only. You can still comment."), and the server rejects edits with `409 task_merged`. Comments still work.
+A merged task reads as **Complete**. Merged is final (D10). The task reads as it shipped: title, properties, dependencies, description and criteria are shown but not editable (a lock note says "Complete, so read-only. You can still comment."), and the server rejects edits with `409 task_merged`. Comments still work.
 
 ## Evidence review (D21)
 

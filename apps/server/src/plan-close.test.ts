@@ -1,13 +1,14 @@
+import { databaseFixture } from '@corral/db/testing'
 import type { PlanSessionDetail } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
-import { afterAll, beforeAll, expect, it } from 'vitest'
+import { afterAll, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './test-runner.ts'
 
 let t: TestApp
 let runner: FakeRunner
-beforeAll(async () => {
+databaseFixture('postgres', async () => {
   t = await createTestApp('postgres', { listen: true })
   runner = await FakeRunner.connect(t.server!.url)
 })

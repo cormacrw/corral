@@ -1,21 +1,27 @@
-import { queryOptions } from '@tanstack/vue-query'
+import { queryOptions, type QueryClient } from '@tanstack/vue-query'
 import type { Comment, CreateTaskInput, HumanTransitionInput, PatchTaskInput, Task } from '@corral/contracts'
 import { api } from '~/composables/useApi'
-import { defineMutation } from './dependencies'
+import { defineMutation, withComment } from './dependencies'
 import { keys } from './keys'
 
 // The API addresses a task by project and number; the cache by ref
 export type TaskAddress = Pick<Task, 'ref' | 'number'> & { slug: string }
 
-export const tasksQuery = (slug: string) => queryOptions({ queryKey: keys.tasks.list(slug), queryFn: () => api.tasks.list(slug, 'all') })
+export const tasksQuery = (slug: string) => queryOptions({ queryKey: keys.tasks.list(slug), queryFn: async () => (await api.tasks.list(slug, 'all')).filter(task => task.status !== 'draft') })
 export const taskQuery = (ref: string) => queryOptions({ queryKey: keys.tasks.detail(ref), queryFn: () => api.tasks.byRef(ref) })
 export const taskCommentsQuery = ({ slug, number, ref }: TaskAddress) => queryOptions({ queryKey: keys.tasks.comments(ref), queryFn: () => api.tasks.comments(slug, number) })
 export const taskHistoryQuery = ({ slug, number, ref }: TaskAddress) => queryOptions({ queryKey: keys.tasks.history(ref), queryFn: () => api.tasks.history(slug, number) })
 export const taskEvidenceQuery = ({ slug, number, ref }: TaskAddress) => queryOptions({ queryKey: keys.tasks.evidence(ref), queryFn: () => api.tasks.evidence(slug, number) })
 export const taskReviewsQuery = ({ slug, number, ref }: TaskAddress) => queryOptions({ queryKey: keys.tasks.reviews(ref), queryFn: () => api.tasks.reviews(slug, number) })
 export const taskDesignsQuery = ({ slug, number, ref }: TaskAddress) => queryOptions({ queryKey: keys.tasks.designs(ref), queryFn: () => api.tasks.designs(slug, number) })
+// By the item's PR, not the task's: an epic's Activity item links the epic PR.
+// A run ending refreshes it, as does a change the human makes to the task.
+export const taskPullRequestQuery = ({ slug, ref }: Pick<TaskAddress, 'slug' | 'ref'>, number: number) => queryOptions({ queryKey: keys.tasks.pullRequest(ref, number), queryFn: () => api.projects.pullRequest(slug, number) })
 
 const changed = (slug: string, ref: string) => [keys.tasks.list(slug), keys.tasks.detail(ref), keys.inbox()]
+// The response is the task as it now stands, so the open task needn't wait for
+// the refetch
+const writeDetail = (client: QueryClient, task: Task) => client.setQueryData(keys.tasks.detail(task.ref), task)
 
 export const createTask = defineMutation<Task, { slug: string, input: CreateTaskInput }>({
   mutationFn: ({ slug, input }) => api.tasks.create(slug, input),
@@ -23,13 +29,66 @@ export const createTask = defineMutation<Task, { slug: string, input: CreateTask
 })
 export const patchTask = defineMutation<Task, { task: TaskAddress, input: PatchTaskInput }>({
   mutationFn: ({ task, input }) => api.tasks.patch(task.slug, task.number, input),
+  write: writeDetail,
   invalidates: (_, { task }) => changed(task.slug, task.ref)
 })
 export const transitionTask = defineMutation<Task, { task: TaskAddress, input: HumanTransitionInput }>({
   mutationFn: ({ task, input }) => api.tasks.transition(task.slug, task.number, input),
+  write: writeDetail,
   invalidates: (_, { task }) => changed(task.slug, task.ref)
 })
-export const commentOnTask = defineMutation<Comment, { task: TaskAddress, body: string, pinned?: boolean }>({
-  mutationFn: ({ task, body, pinned }) => api.tasks.comment(task.slug, task.number, body, pinned),
-  invalidates: (_, { task }) => [keys.tasks.comments(task.ref), keys.tasks.history(task.ref)]
+export const resumeTask = defineMutation<Task, { task: TaskAddress }>({
+  mutationFn: ({ task }) => api.tasks.resume(task.slug, task.number),
+  write: writeDetail,
+  invalidates: (_, { task }) => changed(task.slug, task.ref)
 })
+export const approveDesign = defineMutation<Task, { task: TaskAddress, version: number, note?: string }>({
+  mutationFn: ({ task, version, note }) => api.tasks.approveDesign(task.slug, task.number, version, note),
+  write: writeDetail,
+  invalidates: (_, { task }) => changed(task.slug, task.ref)
+})
+
+// Shows at once as a temporary entry, which the response or its event replaces
+// and a failure removes
+export const commentOnTask = {
+  ...defineMutation<Comment, { task: TaskAddress & Pick<Task, 'id'>, body: string }>({
+    mutationFn: ({ task, body }) => api.tasks.comment(task.slug, task.number, body),
+    write: (client, comment, { task }) => client.setQueryData<Comment[]>(keys.tasks.comments(task.ref), comments => comments && withComment(comments, comment)),
+    invalidates: (_, { task }) => [keys.tasks.comments(task.ref)]
+  }),
+  onMutate: async ({ task, body }: { task: TaskAddress & Pick<Task, 'id'>, body: string }, { client }: { client: QueryClient }) => {
+    const key = keys.tasks.comments(task.ref)
+    // A fetch already running started before this comment and would drop it
+    await client.cancelQueries({ queryKey: key })
+    const pending: Comment = { id: `pending-${crypto.randomUUID()}`, taskId: task.id, author: { kind: 'human', userId: 'me' }, body, pinned: false, createdAt: new Date().toISOString() }
+    client.setQueryData<Comment[]>(key, comments => comments && [...comments, pending])
+    return { pending }
+  },
+  onError: (_error: Error, { task }: { task: TaskAddress }, context: { pending: Comment } | undefined, { client }: { client: QueryClient }) => {
+    client.setQueryData<Comment[]>(keys.tasks.comments(task.ref), comments => comments?.filter(c => c.id !== context?.pending.id))
+  }
+}
+
+export const removeTask = defineMutation<null, { task: TaskAddress }>({
+  mutationFn: ({ task }) => api.tasks.remove(task.slug, task.number),
+  invalidates: (_, { task }) => [...changed(task.slug, task.ref), keys.epics.lists()]
+})
+
+// Only the moved card is restored on rejection: rolling back a whole list
+// would also undo unrelated SSE updates or another card's successful move.
+export const moveTask = {
+  ...transitionTask,
+  onMutate: async ({ task, status }: { task: TaskAddress, input: HumanTransitionInput, status: Task['status'] }, { client }: { client: QueryClient }) => {
+    const key = keys.tasks.list(task.slug)
+    await client.cancelQueries({ queryKey: key })
+    const previous = client.getQueryData<Task[]>(key)?.find(t => t.ref === task.ref)
+    const optimistic = previous && { ...previous, status, statusReason: null }
+    if (optimistic) client.setQueryData<Task[]>(key, list => list?.map(t => t.id === optimistic.id ? optimistic : t))
+    return { previous, optimistic: client.getQueryData<Task[]>(key)?.find(t => t.ref === task.ref) }
+  },
+  onError: (_error: Error, { task }: { task: TaskAddress }, context: { previous?: Task, optimistic?: Task } | undefined, { client }: { client: QueryClient }) => {
+    if (!context?.previous) return
+    const { previous, optimistic } = context
+    client.setQueryData<Task[]>(keys.tasks.list(task.slug), list => list?.map(t => t === optimistic ? previous : t))
+  }
+}

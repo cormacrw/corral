@@ -27,6 +27,7 @@ const emit = defineEmits<{
   moveEpic: [group: Group]
   newTask: []
 }>()
+const showCompleted = defineModel<boolean>('showCompleted', { required: true })
 const search = defineModel<string>('search', { required: true })
 const collapsed = defineModel<Record<string, boolean>>('collapsed', { required: true })
 </script>
@@ -57,6 +58,10 @@ const collapsed = defineModel<Record<string, boolean>>('collapsed', { required: 
       <p class="text-xs text-muted">
         {{ count }} tasks · never scheduled until approved
       </p>
+      <UCheckbox
+        v-model="showCompleted"
+        label="Show completed"
+      />
     </div>
 
     <UAlert
@@ -118,7 +123,8 @@ const collapsed = defineModel<Record<string, boolean>>('collapsed', { required: 
               block
             />
             <UButton
-              :label="group.rows.length === 1 ? 'Move to board' : 'Move all to board'"
+              v-if="group.rows.some(t => t.status === 'backlog')"
+              :label="group.rows.filter(t => t.status === 'backlog').length === 1 ? 'Move to board' : 'Move all to board'"
               icon="i-lucide-kanban"
               variant="outline"
               color="neutral"
@@ -144,7 +150,7 @@ const collapsed = defineModel<Record<string, boolean>>('collapsed', { required: 
               </span>
               <span class="flex items-center gap-2 text-xs">
                 <UBadge
-                  v-if="inPlan(task)"
+                  v-if="task.status === 'backlog' && inPlan(task)"
                   label="In plan"
                   size="xs"
                   variant="subtle"
@@ -152,10 +158,12 @@ const collapsed = defineModel<Record<string, boolean>>('collapsed', { required: 
                 />
                 <span :class="task.priority === 'urgent' ? 'text-error' : task.priority === 'high' ? 'text-warning' : 'text-muted'">{{ PRIORITY[task.priority].label }}</span>
                 <TaskTypeBadge :type="task.type" />
+                <StatusBadge :status="task.status" />
                 <DesignChangedBadge :design="task.design" />
               </span>
             </NuxtLink>
             <UButton
+              v-if="task.status === 'backlog'"
               icon="i-lucide-kanban"
               variant="ghost"
               color="neutral"

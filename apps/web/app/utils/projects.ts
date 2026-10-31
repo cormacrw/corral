@@ -21,7 +21,7 @@ const VERB: Record<Agent['role'], string> = { pm: 'planning', developer: 'buildi
 
 export function projectCardSummary(
   project: { paused: boolean },
-  tasks: Pick<Task, 'ref' | 'status' | 'mergedAt' | 'lease' | 'developer' | 'reviewer'>[],
+  tasks: Pick<Task, 'ref' | 'type' | 'status' | 'mergedAt' | 'updatedAt' | 'lease' | 'developer' | 'reviewer'>[],
   needsYou: number,
   now = Date.now()
 ): ProjectCardSummary {

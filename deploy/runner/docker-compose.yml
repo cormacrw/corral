@@ -12,6 +12,7 @@ services:
       args:
         CORRAL_BUILD_SHA: ${CORRAL_BUILD_SHA:-development}
     container_name: corral-remote-runner
+    init: true
     # The agent's 5 s to exit, then 5 s to save and push a stopped run's work
     stop_grace_period: 20s
     environment:

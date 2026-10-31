@@ -1,5 +1,6 @@
 import type { Run, Task } from '@corral/contracts'
-import type { TaskStatus } from '@corral/core'
+import { isTaskDone, type TaskStatus } from '@corral/core'
+import { completedAt } from './completion.ts'
 import { runTitle } from './labels.ts'
 
 // The Home dashboard's numbers (design/mobile.md), all counted from the live
@@ -20,7 +21,8 @@ export interface DashboardCounts {
   // Human review
   waitingForReview: number
   mergedToday: number
-  // Merged today without the reviewer asking for changes
+  // Merged tasks among those, without the reviewer asking for changes. Approved
+  // designs have no PR review to pass, matching the project overview's rate.
   firstPassToday: number
 }
 
@@ -31,7 +33,7 @@ export function isToday(iso: string | null, now = new Date()): boolean {
   return at.getFullYear() === now.getFullYear() && at.getMonth() === now.getMonth() && at.getDate() === now.getDate()
 }
 
-export function dashboardCounts(tasks: Pick<Task, 'status' | 'mergedAt' | 'reviewRounds'>[], now = new Date()): DashboardCounts {
+export function dashboardCounts(tasks: Pick<Task, 'type' | 'status' | 'mergedAt' | 'updatedAt' | 'reviewRounds'>[], now = new Date()): DashboardCounts {
   const stages = Object.fromEntries(IN_PROGRESS_STAGES.map(s => [s, 0])) as Record<InProgressStage, number>
   const counts: DashboardCounts = { todo: 0, inProgress: 0, stages, blocked: 0, waitingForReview: 0, mergedToday: 0, firstPassToday: 0 }
   for (const task of tasks) {
@@ -40,9 +42,9 @@ export function dashboardCounts(tasks: Pick<Task, 'status' | 'mergedAt' | 'revie
       counts.inProgress++
       stages[task.status as InProgressStage]++
     } else if (task.status === 'blocked' || task.status === 'failed') counts.blocked++
-    else if (task.status === 'merged' && isToday(task.mergedAt, now)) {
+    else if (isTaskDone(task) && isToday(completedAt(task), now)) {
       counts.mergedToday++
-      if (task.reviewRounds === 0) counts.firstPassToday++
+      if (task.status === 'merged' && task.reviewRounds === 0) counts.firstPassToday++
     }
   }
   counts.waitingForReview = stages.human_review
