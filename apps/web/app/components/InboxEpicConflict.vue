@@ -38,7 +38,15 @@ async function handOff() {
       {{ item.project.name }} · the target branch {{ item.targetBranch }} is unchanged
     </InboxEpicHeader>
     <div class="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4">
-      <p class="break-words">
+      <InboxMessage
+        v-if="item.message"
+        :key="item.id"
+        :item="item"
+      />
+      <p
+        v-else
+        class="break-words"
+      >
         The epic PR can't rebase onto {{ item.targetBranch }}.
       </p>
       <section

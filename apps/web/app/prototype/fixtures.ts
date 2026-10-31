@@ -585,7 +585,7 @@ export const evidence: Record<string, Evidence[]> = {
     fileEvidence('ev-shot', 0, 'screenshot', 'approved-version.svg', 'image/svg+xml', screenshotUrl),
     fileEvidence('ev-log', 0, 'log', 'approval.log', 'text/plain', logUrl),
     { ...fileEvidence('ev-note', 1, 'note', '', '', ''), fileName: null, contentType: null, url: null, size: 0, note: '**Earlier versions are superseded.** The approval transaction updates previous versions atomically. See `approveDesignVersion` in the design service.' },
-    fileEvidence('ev-request', 2, 'request', 'approval-response.txt', 'text/plain', requestUrl),
+    { ...fileEvidence('ev-request', 2, 'request', 'approval-response.txt', 'text/plain', requestUrl), createdAt: ago(40) },
     fileEvidence('ev-output', 3, 'test_output', 'diagnostics.txt', 'text/plain', logUrl),
     fileEvidence('ev-text', null, 'text', 'agent-summary.txt', 'text/plain', logUrl),
     fileEvidence('ev-other', null, 'other', 'debug.json', 'application/json', 'data:application/json,%7B%22version%22%3A1%7D')
@@ -806,6 +806,9 @@ export function inbox(): Inbox {
       const type = t.status === 'human_review' ? 'human_review' as const : t.status === 'blocked' ? 'blocked' as const : 'failed' as const
       const subject = type === 'human_review' ? `Review ${t.title}` : t.title
       const body = (t.type === 'spike' ? comments[t.id]?.findLast(c => c.body.startsWith('## Findings'))?.body : null) ?? t.statusReason ?? 'The reviewer approved this change and it needs your review.'
+      const message = t.ref === 'COR-5'
+        ? 'I fixed the approval flow you flagged. Approving a version now supersedes earlier versions in the same transaction. The reviewer approved the change; it is ready for your review.'
+        : t.type === 'spike' ? 'I recommend exponential backoff with jitter and replay from the last event ID. The findings are ready for you to accept.' : body
       return {
         id: t.id,
         type,
@@ -813,7 +816,13 @@ export function inbox(): Inbox {
         taskId: t.id,
         taskRef: t.ref,
         subject,
-        preview: body,
+        preview: message.slice(0, 200),
+        message,
+        since: t.ref === 'COR-5' ? { at: ago(30), text: 'Keep earlier evidence and show the approval result.', notes: [], fixTasks: [] } : null,
+        newArtifacts: [
+          ...(t.type === 'design' ? (designVersions[t.id] ?? []).slice(0, 1).map(v => ({ id: v.id, kind: 'design' as const, name: `Design v${v.version}`, url: v.previewUrl, taskRef: null, at: v.createdAt })) : []),
+          ...(evidence[t.id] ?? []).filter(e => e.kind !== 'note' && e.url && e.createdAt > (t.ref === 'COR-5' ? ago(30) : '')).map(e => ({ id: e.id, kind: e.kind as Exclude<Evidence['kind'], 'note'>, name: e.fileName!, url: e.url!, taskRef: null, at: e.createdAt }))
+        ],
         body,
         sender: type === 'failed' ? { name: 'Corral', role: 'system' as const } : { name: type === 'blocked' ? 'Victor' : 'Rita', role: type === 'blocked' ? 'developer' as const : 'reviewer' as const },
         at: t.updatedAt,
@@ -851,7 +860,7 @@ export function inbox(): Inbox {
     needsYou.push({
       id: review.id, type: 'epic_review', epicId: review.id, taskId: null, taskRef: null, subject: review.title,
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
-      preview: body, body, sender: { name: 'Rita', role: 'reviewer' }, at: review.updatedAt,
+      preview: body, body, message: body, sender: { name: 'Rita', role: 'reviewer' }, at: review.updatedAt,
       prUrl: review.prUrl!, resolution: null, headSha: review.prHeadSha!,
       tasks: tasks.filter(t => t.epicId === review.id).map(task => ({ task, evidence: evidence[task.id] ?? [] })),
       since: null, newArtifacts: []
@@ -865,7 +874,7 @@ export function inbox(): Inbox {
     needsYou.push({
       id: conflict.id, type: 'epic_conflict', epicId: conflict.id, taskId: null, taskRef: null, subject: conflict.title,
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
-      preview: body, body, sender: { name: 'Corral', role: 'system' }, at: conflict.updatedAt,
+      preview: body, body, message: body, sender: { name: 'Corral', role: 'system' }, at: conflict.updatedAt,
       prUrl: conflict.prUrl!, resolution: null, headSha: conflict.prHeadSha!, targetBranch: 'main', files, since: null, newArtifacts: []
     })
   }
@@ -925,9 +934,10 @@ export function flowMetrics(slug: string, window: FlowMetricsQuery['window']): F
 // The Approved column's design also exercises the reopening panel.
 export const designVersions: Record<string, DesignVersion[]> = {
   't-cor-41': [{
-    id: 'design-cor-41-v1', version: 1, status: 'submitted', branch: 'design/COR-41', commitSha: 'prototype-navigation-review',
+    id: 'design-cor-41-v2', version: 2, status: 'submitted', branch: 'design/COR-41', commitSha: 'prototype-navigation-review',
     spec: '# Navigation prototype\n\n## Screens\n- navigation: project links and board states',
-    screenshots: [], previewUrl: 'about:blank', feedback: null, planSessionId: null, createdAt: ago(10)
+    // In the static fixture, the same app's board is the submitted preview.
+    screenshots: [], previewUrl: './#/projects/corral/board', feedback: null, planSessionId: null, createdAt: ago(10)
   }],
   't-cor-40': [{
     id: 'design-cor-40-v1', version: 1, status: 'approved', branch: 'design/COR-40', commitSha: 'prototype-navigation',

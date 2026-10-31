@@ -161,8 +161,10 @@ const tabs = computed(() => [
             title="Already resolved"
             description="This task changed status elsewhere."
           />
-          <MarkdownText
-            :text="selected.body"
+          <InboxMessage
+            :key="selected.id"
+            :item="selected"
+            :evidence="evidence"
             class="text-base"
           />
           <div

@@ -35,3 +35,15 @@ The insert also claims the job: updates and restarts never retry that arrival.
 Inbox reads only select stored prose or derive a readable fallback from the same
 facts, never dispatch a model. Successful jobs publish an entity update so the
 Inbox refreshes through its existing event dependencies.
+
+## Message presentation
+
+`InboxMessage.vue` is shared by desktop/mobile task panels and epic review and
+conflict panels. It shows `message` as plain text and only `newArtifacts` in a
+New row immediately below. Files open `EvidenceViewer.vue` (also used by
+`EvidenceList.vue`); design links open the version preview. Evidence metadata
+provides MIME types where available, with kind/name fallbacks while loading.
+The existing full `body`, including spike findings, is collapsed under Full
+message. Keying by selected item resets the disclosure on navigation. Items
+without `message` retain the existing markdown body; Plan/release components
+remain separate. No New markers are added to the criteria evidence lists.
