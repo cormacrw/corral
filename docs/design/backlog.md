@@ -13,7 +13,7 @@ The page spans the full content width.
 
 1. **Toolbar** (bottom border):
    - a search input ("Search Backlog")
-   - "N tasks · never scheduled until approved"
+   - "N tasks" and **Show completed**, off by default, which includes completed work of any age in the epic groups. Rows show status badges; only Backlog tasks offer Move to board.
    - on the right: **Collapse all / Expand all** (outline) and **New task** (solid primary, plus icon)
 2. **Epic groups:** one bordered card per epic.
    - **Header** (`bg-muted`):

@@ -40,3 +40,5 @@ Approval needs an online runner to start the PM's build session.
 A nonblank approval note from the design review panel or Inbox is trimmed and saved as a normal, unpinned comment by the human in the same transaction as the design approval. The note also stays in the PM build session's opening message, including Inbox approvals. Rejected approvals do not leave comments; retrying an already approved version does not append another approval comment. Requested changes still produce exactly one pinned feedback comment through the task transition.
 
 Task status badges display Complete for both merged and approved; version and plan badges retain Approved. Home and project completion tiles count approved designs using the same completion timestamp. Reopening returns a design to its active column.
+
+Backlog’s Show completed option includes finished tasks, spikes and designs of any age, with Complete badges and no Move to board action for finished rows. It is off by default on desktop and mobile.

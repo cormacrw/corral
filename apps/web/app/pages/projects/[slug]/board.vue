@@ -58,7 +58,7 @@ const agentFor = (task: Task) => task.lease ? live.state.value.agents.find(a => 
 const epicLabel = (id: string) => epicTitle(epicList.value, id, epics.value.indexOf(id))
 const epicOptions = computed(() => epics.value.map(id => ({ id, label: epicLabel(id) })))
 // Epics with work left or tasks on the Board, so one waiting on its epic PR
-// stays here after its tasks leave the Merged column. The Epic filter applies.
+// stays here after its tasks leave the Complete column. The Epic filter applies.
 const boardEpics = computed(() => epicList.value
   .map(epic => epicWithLiveCounts(epic, all.value))
   .filter(epic => epicInProgress(epic) || all.value.some(t => t.epicId === epic.id && onBoard(t)))
@@ -232,10 +232,10 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
                     <span class="shrink-0 font-mono text-muted">{{ task.ref }}</span>
                     <span :class="task.priority === 'urgent' ? 'text-error' : task.priority === 'high' ? 'text-warning' : 'text-muted'">{{ PRIORITY[task.priority].label }}</span>
                     <TaskTypeBadge :type="task.type" />
-                <StatusBadge
-                  v-if="task.status === 'merged' || task.status === 'approved'"
-                  :status="task.status"
-                />
+                    <StatusBadge
+                      v-if="task.status === 'merged' || task.status === 'approved'"
+                      :status="task.status"
+                    />
                     <DesignChangedBadge :design="task.design" />
                     <a
                       v-if="task.prUrl"
