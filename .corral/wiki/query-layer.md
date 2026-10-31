@@ -26,7 +26,7 @@ Pull requests have no event for CI or base branch changes, so `pullRequestsQuery
 
 Task events update loaded lists immediately. Drafts are excluded both on fetch and on event writes, since they live only in their plan. Deleting a project empties its cached lists and removes its observers/search entries by deriving those from the current project list.
 
-Board/Backlog and their task/epic flyouts use `defineMutation` for task creation, patching, transitions and deletion, epic patching and epic dependencies. Desktop drag moves use `moveTask` on top of the transition mutation: cancel an older list fetch, optimistically move the single card, then invalidate on success or restore just that card on rejection. A newer event for the card wins over rollback; other cards' live changes are preserved. Drag targets follow D10's existing human actions, and Board filters remain in the URL.
+Board/Backlog and their task/epic flyouts use `defineMutation` for task creation, patching, transitions and deletion, epic patching and epic dependencies. Desktop drag moves and task Status actions (including mobile) use `moveTask` on top of the transition mutation: cancel an older list fetch, optimistically move the single card, then invalidate on success or restore just that card on rejection. A newer event for the card wins over rollback; other cards' live changes are preserved. Drag targets follow D10's existing human actions, and Board filters remain in the URL.
 
 ## Rules
 

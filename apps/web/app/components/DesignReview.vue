@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useMutation } from '@tanstack/vue-query'
-import { transitionTask } from '~/queries/tasks'
+import { moveTask } from '~/queries/tasks'
 import type { DesignVersion, Task } from '@corral/contracts'
 import { api, ApiError } from '~/composables/useApi'
 import { DESIGN_VERSION_STATUS, timeAgo } from '~/utils/labels'
@@ -11,7 +11,7 @@ import { DESIGN_VERSION_STATUS, timeAgo } from '~/utils/labels'
 const props = defineProps<{ task: Task, slug: string, mobile?: boolean }>()
 const emit = defineEmits<{ updated: [task: Task] }>()
 const toast = useToast()
-const transition = useMutation(transitionTask)
+const transition = useMutation(moveTask)
 
 const versions = ref<DesignVersion[]>([])
 const loaded = ref(false)
@@ -84,7 +84,7 @@ async function approve() {
 async function requestChanges(text: string): Promise<boolean> {
   try {
     if (reopenable.value) {
-      emit('updated', await transition.mutateAsync({ task: { ...props.task, slug: props.slug }, input: { type: 'human_request_changes', feedback: text } }))
+      emit('updated', await transition.mutateAsync({ task: { ...props.task, slug: props.slug }, input: { type: 'human_request_changes', feedback: text }, status: 'in_progress' }))
     } else {
       const { task } = await api.inbox.act(props.task.id, { action: 'request_changes', text })
       if (task) emit('updated', task)

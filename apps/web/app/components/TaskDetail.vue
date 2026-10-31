@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useMutation } from '@tanstack/vue-query'
-import { patchTask, transitionTask, removeTask } from '~/queries/tasks'
+import { patchTask, moveTask, removeTask } from '~/queries/tasks'
 import type { AuditEntry, Comment, Evidence, Review, Run, Task } from '@corral/contracts'
 import type { EditorToolbarItem } from '@nuxt/ui'
 import type { EditorView } from '@tiptap/pm/view'
@@ -21,7 +21,7 @@ const live = useLive()
 const flyout = useTaskFlyout()
 const toast = useToast()
 const patchMutation = useMutation(patchTask)
-const transitionMutation = useMutation(transitionTask)
+const transitionMutation = useMutation(moveTask)
 const removeMutation = useMutation(removeTask)
 const task = ref<Task | null>(null)
 const comments = ref<Comment[]>([])
@@ -172,10 +172,11 @@ const statusEditable = computed(() => statusOptions.value.length > 1)
 async function changeStatus(value: string) {
   if (!task.value || value === 'current') return
   try {
-    const transition = (input: Parameters<typeof api.tasks.transition>[2]) => applyTask(transitionMutation.mutateAsync({ task: { slug: slug.value, number: number.value, ref: props.taskRef }, input }))
-    const updated = value === 'approve' || value === 'send_back' || value === 'human_request_changes'
-      ? await transition({ type: value })
-      : await transition({ type: 'resolve', to: value.slice(8) as 'backlog' | 'ready' | 'in_progress' })
+    const transition = (input: Parameters<typeof api.tasks.transition>[2], status: TaskStatus) => applyTask(transitionMutation.mutateAsync({ task: { slug: slug.value, number: number.value, ref: props.taskRef }, input, status }))
+    const updated = value === 'approve' ? await transition({ type: value }, 'ready')
+      : value === 'send_back' ? await transition({ type: value }, 'backlog')
+        : value === 'human_request_changes' ? await transition({ type: value }, 'in_progress')
+          : await transition({ type: 'resolve', to: value.slice(8) as 'backlog' | 'ready' | 'in_progress' }, value.slice(8) as 'backlog' | 'ready' | 'in_progress')
     if (updated) flashSaved()
   } catch (e) {
     if (e instanceof ApiError && e.body?.code === 'transition_rejected' && e.body.reason.code === 'not_ready') {
@@ -333,7 +334,7 @@ async function place() {
   const requested = props.taskRef
   placing.value = true
   try {
-    const added = await transitionMutation.mutateAsync({ task: { slug: slug.value, number: number.value, ref: props.taskRef }, input: { type: 'approve' } })
+    const added = await transitionMutation.mutateAsync({ task: { slug: slug.value, number: number.value, ref: props.taskRef }, input: { type: 'approve' }, status: 'ready' })
     toast.add({ title: `${added.ref} added to the board`, color: 'success' })
     if (requested === props.taskRef) task.value = added
   } catch (e) {
