@@ -1,5 +1,5 @@
-import { failedMergeGates, type Actor, type MergeGateFacts } from '@corral/core'
-import { schema, type Database } from '@corral/db'
+import { failedMergeGates, TRANSITION_RULES, type Actor, type MergeGateFacts, type TaskStatus } from '@corral/core'
+import { schema, type Database, type Executor } from '@corral/db'
 import { and, asc, desc, eq, isNull } from 'drizzle-orm'
 import { EpicMerger } from './epic-merge.ts'
 import { appendAudit, auditEvent, type TransitionDetail } from './audit.ts'
@@ -20,6 +20,8 @@ const server: Actor = { kind: 'system', component: 'server' }
 // How many ambiguous merge failures before the task is failed rather than
 // retried (D10: "GitHub merge failed and retrying isn't safe")
 const MAX_MERGE_ATTEMPTS = 3
+
+const MERGED_OUTSIDE_FROM: readonly TaskStatus[] = TRANSITION_RULES.merged_outside.from
 
 // Developers always rebase; a merge of the base would put merge commits on
 // the branch (and Corral pushes with --force-with-lease, so rebases push)
@@ -187,7 +189,7 @@ export class MergeOrchestrator {
 
     if (pr.merged) {
       // Merged outside Corral (or an earlier ambiguous merge did go through)
-      await this.#recordMerged(task.id, pr, true)
+      await this.#recordMerged(task.id, pr)
       return
     }
     if (pr.state === 'closed') {
@@ -268,66 +270,86 @@ export class MergeOrchestrator {
   }
 
   // flows.md step 9. Re-reads the PR when GitHub's answer is ambiguous, and
-  // never marks Merged without seeing it merged.
+  // never marks Merged without seeing it merged. The task's row stays locked
+  // from the last check through to recording the result, as an epic's does, so
+  // a human's veto either lands before the merge is asked for and stops it, or
+  // waits for the merge and finds the task Merged.
   async merge(taskId: string, project: ProjectRow, report: GateReport): Promise<void> {
-    const { github } = this.#d
-    const attempt = (this.#attempts.get(taskId) ?? 0) + 1
-    this.#attempts.set(taskId, attempt)
-    let result: { merged: boolean, sha: string | null, message: string }
-    try {
-      result = await github.merge(project.repository, report.pr.number, project.mergeMethod, report.pr.headSha)
-    } catch (error) {
-      // Ambiguous (timeout, 5xx): look before deciding anything
-      const again = await github.getPullRequest(project.repository, report.pr.number).catch(() => null)
-      if (again?.merged) {
-        await this.#recordMerged(taskId, again, false)
-        return
+    const { db, github } = this.#d
+    const { pr } = report
+    const merged = await db.transaction(async (tx) => {
+      const locked = await lockTask(tx, taskId).catch(() => null)
+      if (!locked || !this.#mayMerge(locked.task, locked.project, pr)) return false
+      const attempt = (this.#attempts.get(taskId) ?? 0) + 1
+      this.#attempts.set(taskId, attempt)
+      let result: { merged: boolean, sha: string | null, message: string }
+      try {
+        result = await github.merge(project.repository, pr.number, project.mergeMethod, pr.headSha)
+      } catch (error) {
+        // Ambiguous (timeout, 5xx): look before deciding anything
+        const again = await github.getPullRequest(project.repository, pr.number).catch(() => null)
+        if (again?.merged) return this.#recordMergedIn(tx, locked, again, report.facts)
+        if (attempt >= MAX_MERGE_ATTEMPTS) {
+          await applyTransition(tx, locked.task, locked.project, { type: 'fail', reason: `GitHub merge failed ${attempt} times and retrying isn't safe: ${error instanceof Error ? error.message : String(error)}` }, server, { event: 'merge_failed' })
+          this.#attempts.delete(taskId)
+        }
+        return false
       }
+      if (result.merged) {
+        const seen = await github.getPullRequest(project.repository, pr.number)
+        if (!seen.merged) return false // GitHub said merged but doesn't show it yet; next tick re-reads
+        return this.#recordMergedIn(tx, locked, { ...seen, mergeCommitSha: result.sha ?? seen.mergeCommitSha }, report.facts)
+      }
+      // A plain refusal (405/409): the head moved or a check turned red. The
+      // next tick re-evaluates from live state.
+      await appendAudit(tx, { projectId: project.id, taskId, actor: server }, auditEvent('merge.refused', { pr: pr.number, message: result.message, attempt }))
       if (attempt >= MAX_MERGE_ATTEMPTS) {
-        await this.#transition(taskId, { type: 'fail', reason: `GitHub merge failed ${attempt} times and retrying isn't safe: ${error instanceof Error ? error.message : String(error)}` }, { event: 'merge_failed' })
+        await applyTransition(tx, locked.task, locked.project, { type: 'fail', reason: `GitHub refused the merge ${attempt} times: ${result.message}` }, server, { event: 'merge_failed' })
         this.#attempts.delete(taskId)
       }
-      return
-    }
-    if (result.merged) {
-      const merged = await github.getPullRequest(project.repository, report.pr.number)
-      if (!merged.merged) return // GitHub said merged but doesn't show it yet; next tick re-reads
-      await this.#recordMerged(taskId, { ...merged, mergeCommitSha: result.sha ?? merged.mergeCommitSha }, false)
-      return
-    }
-    // A plain refusal (405/409): the head moved or a check turned red. The
-    // next tick re-evaluates from live state.
-    await appendAudit(this.#d.db, { projectId: project.id, taskId, actor: server }, auditEvent('merge.refused', { pr: report.pr.number, message: result.message, attempt }))
-    if (attempt >= MAX_MERGE_ATTEMPTS) {
-      await this.#transition(taskId, { type: 'fail', reason: `GitHub refused the merge ${attempt} times: ${result.message}` }, { event: 'merge_failed' })
-      this.#attempts.delete(taskId)
-    }
+      return false
+    })
+    await this.#publish(taskId)
+    if (merged) await this.cleanup(taskId)
   }
 
-  // `outside`: GitHub shows the PR merged but Corral may not have merged it
-  async #recordMerged(taskId: string, pr: PullRequest, outside: boolean): Promise<void> {
-    const { db } = this.#d
-    let merged = false
-    await db.transaction(async (tx) => {
-      const { task, project } = await lockTask(tx, taskId)
-      if (task.status === 'merged') return
-      const detail = { pr: pr.number, mergeCommitSha: pr.mergeCommitSha }
-      if (outside || task.status !== 'ready_to_merge') {
-        await applyTransition(tx, task, project, { type: 'merged_outside' }, server, { event: 'merged', ...detail, outside: true })
-      } else {
-        // Core re-checks the gates; GitHub has already confirmed the merge,
-        // so the facts describe the merged commit
-        const report = await this.gates(task, project)
-        const facts: MergeGateFacts = { ...report.facts, mergeable: true }
-        await applyTransition(tx, task, project, { type: 'merged', gates: facts }, server, { event: 'merged', ...detail })
+  // The last check before GitHub is asked to merge, on the locked rows: the
+  // pass read the task a while ago, and anything may have vetoed it since
+  #mayMerge(task: TaskRow, project: ProjectRow, pr: PullRequest): boolean {
+    return !this.stopped && task.status === 'ready_to_merge' && !task.leaseRunId && !task.paused && !task.deletedAt && !project.paused && task.headSha === pr.headSha
+  }
+
+  // GitHub shows a PR merged that Corral didn't merge just now
+  async #recordMerged(taskId: string, pr: PullRequest): Promise<void> {
+    const merged = await this.#d.db.transaction(async (tx) => {
+      const locked = await lockTask(tx, taskId)
+      if (locked.task.status === 'merged') return false
+      if (MERGED_OUTSIDE_FROM.includes(locked.task.status)) return this.#recordMergedIn(tx, locked, pr, null)
+      // A human sent it back in the meantime. The work has landed all the same,
+      // so a developer must not start on it: the human decides what's next.
+      if (!locked.task.leaseRunId) {
+        await applyTransition(tx, locked.task, locked.project, { type: 'block', reason: `PR #${pr.number} merged on GitHub after this task left Ready to merge` }, server, { event: 'merged_after_veto' })
       }
-      await tx.update(tasks).set({ mergeCommitSha: pr.mergeCommitSha, mergedAt: this.#now(), updatedAt: this.#now() }).where(eq(tasks.id, taskId))
-      merged = true
+      return false
     })
     this.#attempts.delete(taskId)
-    if (!merged) return
     await this.#publish(taskId)
-    await this.cleanup(taskId)
+    if (merged) await this.cleanup(taskId)
+  }
+
+  // `gates` are the facts Corral merged on; null means it may not have merged it
+  async #recordMergedIn(tx: Executor, { task, project }: { task: TaskRow, project: ProjectRow }, pr: PullRequest, gates: MergeGateFacts | null): Promise<true> {
+    const detail = { pr: pr.number, mergeCommitSha: pr.mergeCommitSha }
+    if (gates) {
+      // Core re-checks the gates; GitHub has already confirmed the merge, so
+      // the facts describe the merged commit
+      await applyTransition(tx, task, project, { type: 'merged', gates: { ...gates, mergeable: true } }, server, { event: 'merged', ...detail })
+    } else {
+      await applyTransition(tx, task, project, { type: 'merged_outside' }, server, { event: 'merged', ...detail, outside: true })
+    }
+    await tx.update(tasks).set({ mergeCommitSha: pr.mergeCommitSha, mergedAt: this.#now(), updatedAt: this.#now() }).where(eq(tasks.id, task.id))
+    this.#attempts.delete(task.id)
+    return true
   }
 
   // flows.md step 10: the runner removes the worktrees, keeping any with

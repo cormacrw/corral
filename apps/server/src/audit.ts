@@ -31,7 +31,7 @@ export type TransitionDetail =
   | { event: 'require_human_check' }
   | { event: 'ci_failed', checks: string[] }
   | { event: 'base_conflict', mergeableState?: string | null }
-  | { event: 'pr_closed' | 'merge_failed' }
+  | { event: 'pr_closed' | 'merge_failed' | 'merged_after_veto' }
   | { event: 'run_failed', runId: string, error: string }
   | { event: 'blocked' | 'stuck', runId: string }
   | { event: 'dependency_deleted', dependency: string }

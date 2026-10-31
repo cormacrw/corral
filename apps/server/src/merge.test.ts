@@ -359,6 +359,78 @@ describe('merge orchestrator and human controls', () => {
     await pause(project)
   })
 
+  describe('a veto while the merge pass is reading GitHub', () => {
+    const vetoes: [string, (project: Project, task: Task) => Promise<unknown>][] = [
+      ['the human requests changes', (project, task) => t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'human_request_changes' })],
+      ['the human adds a human check', (project, task) => t.request('PATCH', `/api/projects/${project.slug}/tasks/${task.number}`, { acceptanceCriteria: task.acceptanceCriteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: true })) })],
+      ['the task is paused', (_project, task) => t.db.update(tasks).set({ paused: true }).where(eq(tasks.id, task.id))],
+      ['the task is deleted', (project, task) => t.request('DELETE', `/api/projects/${project.slug}/tasks/${task.number}`)],
+      ['the project is paused', project => pause(project)],
+      ['the kill switch fires', () => t.request('POST', '/api/stop-all')]
+    ]
+
+    it.each(vetoes)('never merges when %s', async (_name, veto) => {
+      const { project, task, pr } = await approved()
+      t.github.setChecks('abc123', [{ name: 'lint', conclusion: 'success', url: null }])
+      const merges = () => t.github.calls.filter(c => c.method === 'merge' && c.args[0] === project.repository)
+      const live = t.github.checks.bind(t.github)
+      // The pass has read the task; the veto lands while it's asking GitHub
+      const spy = vi.spyOn(t.github, 'checks').mockImplementationOnce(async (...args) => {
+        await veto(project, task)
+        return live(...args)
+      })
+      await t.orchestrator.merges.tick()
+      spy.mockRestore()
+      expect(merges()).toHaveLength(0)
+      expect(t.github.pulls.get(pr.number)).toMatchObject({ merged: false })
+      expect((await taskRow(task.id)).status).not.toBe('merged')
+      await t.request('POST', '/api/resume-all')
+      await pause(project)
+    })
+
+    it('makes a veto sent during the merge wait for it, then find the task Merged', async () => {
+      const { project, task, pr } = await approved()
+      t.github.setChecks('abc123', [{ name: 'lint', conclusion: 'success', url: null }])
+      let veto: Promise<Response> | null = null
+      let settled = false
+      const original = t.github.merge.bind(t.github)
+      t.github.merge = async (...args) => {
+        veto = t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'human_request_changes' })
+        void veto.then(() => { settled = true })
+        await sleep(100)
+        expect(settled).toBe(false)
+        return original(...args)
+      }
+      await t.orchestrator.merges.tick()
+      t.github.merge = original
+      expect((await veto!).status).toBe(409)
+      expect(await taskRow(task.id)).toMatchObject({ status: 'merged', mergeCommitSha: 'merge-sha' })
+      expect(t.github.pulls.get(pr.number)).toMatchObject({ merged: true })
+      await pause(project)
+    })
+
+    it('blocks a task sent back while GitHub shows its PR merged, rather than handing it to a developer', async () => {
+      const { project, task, pr } = await approved()
+      await pause(project)
+      await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'human_request_changes' })
+      expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress' })
+      const live = t.github.pulls.get(pr.number)!
+      Object.assign(live, { merged: true, state: 'closed', mergeCommitSha: 'outside-sha' })
+      const row = await taskRow(task.id)
+      await t.db.update(tasks).set({ status: 'ready_to_merge' }).where(eq(tasks.id, task.id))
+      await t.db.update(schema.projects).set({ paused: false }).where(eq(schema.projects.id, project.id))
+      // The pass reads Ready to merge; the human's change lands before it records anything
+      const spy = vi.spyOn(t.github, 'getPullRequest').mockImplementationOnce(async () => {
+        await t.db.update(tasks).set({ status: row.status }).where(eq(tasks.id, task.id))
+        return { ...live }
+      })
+      await t.orchestrator.merges.tick()
+      spy.mockRestore()
+      expect(await taskRow(task.id)).toMatchObject({ status: 'blocked', statusReason: expect.stringContaining(`PR #${pr.number} merged`) })
+      await pause(project)
+    })
+  })
+
   it('deletes a Backlog task outright and keeps its audit entry', async () => {
     const project = await t.createProject()
     const task = await t.createTask(project.slug)
