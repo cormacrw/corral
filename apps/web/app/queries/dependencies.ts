@@ -65,6 +65,17 @@ function writeTask(task: Task, cache: EventCache): void {
   cache.set<Task[]>(keys.tasks.list(slug), list => list && (task.status === 'draft' ? list.filter(t => t.id !== task.id) : upsert(list, task)))
 }
 
+// Reading changes one row, so it needs no refetch. As on the server, a thread
+// listed only for its unread reply leaves Needs you; a read release note stays.
+export function inboxWithRead(current: Inbox, id: string): Inbox {
+  const item = current.needsYou.find(i => i.id === id)
+  if (item?.type === 'plan_thread' && item.status === 'none') {
+    return { ...current, needsYou: current.needsYou.filter(i => i.id !== id), count: current.count - 1 }
+  }
+  if (item?.type !== 'plan_thread' && item?.type !== 'release_notes') return current
+  return { ...current, needsYou: current.needsYou.map(i => i === item ? { ...item, unread: false } : i) }
+}
+
 // What a change to a project's tasks or runs leaves stale. A project not
 // cached yet has no slug, so its lists go stale across all projects.
 function projectStale(projectId: string, cache: EventCache): QueryKey[] {
@@ -182,7 +193,7 @@ export const eventDependencies: EventDependencies = {
   },
   'plan.session': {
     write: ({ session, markedRead }, cache) => {
-      if (markedRead) cache.set<Inbox>(keys.inbox(), inbox => inbox && { ...inbox, count: markedRead.inboxCount })
+      if (markedRead) cache.set<Inbox>(keys.inbox(), inbox => inbox && { ...inboxWithRead(inbox, session.id), count: markedRead.inboxCount })
       cache.set<PlanSession[]>(keys.plan.sessions(), (list) => {
         if (!list) return list
         const previous = list.find(s => s.id === session.id)
@@ -214,6 +225,9 @@ export const eventDependencies: EventDependencies = {
   },
   'deployment.updated': {
     // The Inbox is the only thing showing deployments; reading changes no content
+    write: ({ deployment, markedRead }, cache) => {
+      if (markedRead) cache.set<Inbox>(keys.inbox(), inbox => inbox && inboxWithRead(inbox, deployment.id))
+    },
     invalidates: ({ markedRead }) => markedRead ? [] : [keys.inbox()]
   }
 }

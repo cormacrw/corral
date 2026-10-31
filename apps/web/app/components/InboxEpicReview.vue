@@ -1,26 +1,19 @@
 <script setup lang="ts">
-import { useMutation } from '@tanstack/vue-query'
 import type { EpicReviewItem } from '@corral/contracts'
+import { useMutation } from '@tanstack/vue-query'
 import { reviewEpic } from '~/queries/epics'
+import { holdsInbox } from '~/queries/inbox'
 
 const props = defineProps<{ item: EpicReviewItem }>()
 const emit = defineEmits<{ resolved: [] }>()
 const device = useDevice()
 const feedback = ref('')
-const review = useMutation(reviewEpic)
-const busy = ref(false)
-const error = ref<string | null>(null)
-async function act(action: 'approve' | 'request_changes') {
-  busy.value = true
-  error.value = null
-  try {
-    await review.mutateAsync({ id: props.item.epicId, input: { action, headSha: props.item.headSha, ...(feedback.value.trim() && { text: feedback.value.trim() }) } })
-    emit('resolved')
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    busy.value = false
-  }
+const review = useMutation({ ...reviewEpic, ...holdsInbox })
+const busy = review.isPending
+const error = computed(() => review.error.value?.message ?? null)
+function act(action: 'approve' | 'request_changes') {
+  const input = { action, headSha: props.item.headSha, ...(feedback.value.trim() && { text: feedback.value.trim() }) }
+  review.mutate({ id: props.item.epicId, input }, { onSuccess: () => emit('resolved') })
 }
 </script>
 

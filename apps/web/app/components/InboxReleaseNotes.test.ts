@@ -1,9 +1,12 @@
 // @vitest-environment happy-dom
+import { VueQueryPlugin } from '@tanstack/vue-query'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { api } from '~/composables/useApi'
+import { keys } from '~/queries/keys'
+import { testQueryClient } from '~/queries/mount-with-query'
 import { releaseNotes } from '~/prototype/fixtures'
 import InboxReleaseNotes from './InboxReleaseNotes.vue'
 import MarkdownText from './MarkdownText.vue'
@@ -14,23 +17,37 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
+it('shows the error when reading fails, without retrying in a loop', async () => {
+  for (const name of ['ref', 'watch', 'computed'] as const) vi.stubGlobal(name, vue[name])
+  vi.stubGlobal('useLive', () => ({ state: vue.ref({ projects: [] }) }))
+  vi.mocked(api.deployments.read).mockRejectedValueOnce(new Error('Server unavailable'))
+  const client = testQueryClient()
+  const wrapper = mount(InboxReleaseNotes, {
+    props: { item: releaseNotes[0]! },
+    global: { plugins: [[VueQueryPlugin, { queryClient: client }]], components: { MarkdownText, UAlert: vue.defineComponent({ props: ['title'], setup: props => () => vue.h('p', props.title) }) }, stubs: { UButton: true, AgentAvatar: true, ProjectThumbnail: true } }
+  })
+  await flushPromises()
+  expect(wrapper.text()).toContain('Server unavailable')
+  await wrapper.setProps({ item: { ...releaseNotes[0]! } })
+  expect(api.deployments.read).toHaveBeenCalledOnce()
+  wrapper.unmount()
+})
+
 it('marks an opened item read, replaces pending notes live, links task refs and dismisses', async () => {
   for (const name of ['ref', 'watch', 'computed'] as const) vi.stubGlobal(name, vue[name])
   vi.stubGlobal('useLive', () => ({ state: vue.ref({ projects: [{ prefix: 'COR' }] }) }))
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/tasks/:ref', component: { template: '<div>Task</div>' } }] })
   const button = vue.defineComponent({ props: ['label'], emits: ['click'], setup: (props, { emit }) => () => vue.h('button', { onClick: () => emit('click') }, props.label) })
-  // Observe the parent's event listener directly: Vue Test Utils' emitted()
-  // tracking relies on devtools hooks, which Vue disables in NODE_ENV=production.
-  const onRefresh = vi.fn()
-  const onRead = vi.fn()
+  const note = releaseNotes[0]!
+  const client = testQueryClient()
+  client.setQueryData(keys.inbox(), { count: 0, needsYou: [note], activity: [], resolved: [] })
   const wrapper = mount(InboxReleaseNotes, {
-    props: { onRefresh, onRead, item: { ...releaseNotes[0]!, notesStatus: 'pending', notes: null } },
-    global: { plugins: [router], components: { MarkdownText, UButton: button }, stubs: { UAlert: true, AgentAvatar: true, ProjectThumbnail: true, UModal: true } }
+    props: { item: { ...releaseNotes[0]!, notesStatus: 'pending', notes: null } },
+    global: { plugins: [router, [VueQueryPlugin, { queryClient: client }]], components: { MarkdownText, UButton: button }, stubs: { UAlert: true, AgentAvatar: true, ProjectThumbnail: true, UModal: true } }
   })
   await flushPromises()
   expect(api.deployments.read).toHaveBeenCalledWith('release-demo')
-  expect(onRead).toHaveBeenCalledTimes(1)
-  expect(onRefresh).not.toHaveBeenCalled()
+  expect(client.getQueryData<{ needsYou: { unread: boolean }[] }>(keys.inbox())?.needsYou[0]?.unread).toBe(false)
   expect(wrapper.text()).toContain('Writing release notes…')
   await wrapper.setProps({ item: { ...releaseNotes[0]!, unread: false } })
   expect(wrapper.text()).not.toContain('Writing release notes…')
@@ -41,6 +58,5 @@ it('marks an opened item read, replaces pending notes live, links task refs and 
   await wrapper.get('button').trigger('click')
   await flushPromises()
   expect(api.deployments.dismiss).toHaveBeenCalledWith('release-demo')
-  expect(onRefresh).toHaveBeenCalledTimes(1)
   wrapper.unmount()
 })

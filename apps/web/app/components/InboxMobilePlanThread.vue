@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Plan, PlanThreadItem } from '@corral/contracts'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { holdsInbox } from '~/queries/inbox'
 import { approvePlan as approvePlanMutation, planSessionQuery, markPlanRead, sendPlanMessage } from '~/queries/plan'
 import { FLYOUT_SHEETS } from '~/composables/useTaskFlyout'
 import { approvePlan } from '~/utils/plan-approval'
@@ -9,7 +10,7 @@ import { STOP_ASKING } from '~/utils/plan-questions'
 
 // Inbox shows the decision only. The session is loaded for the plan sheet;
 // its messages and run transcript belong in Plan, never on this screen.
-const props = defineProps<{ item: PlanThreadItem, onRefresh: () => Promise<void>, onRead: (id: string) => void }>()
+const props = defineProps<{ item: PlanThreadItem }>()
 const router = useRouter()
 const live = useLive()
 const threads = usePlanThreads()
@@ -24,7 +25,7 @@ const busy = ref(false)
 const actionError = ref<string | null>(null)
 const client = useQueryClient()
 const sending = useMutation(sendPlanMessage)
-const approval = useMutation(approvePlanMutation)
+const approval = useMutation({ ...approvePlanMutation, ...holdsInbox })
 const detail = useQuery(computed(() => planSessionQuery(props.item.sessionId)))
 const error = computed(() => actionError.value ?? detail.error.value?.message ?? null)
 const session = detail.data
@@ -62,10 +63,7 @@ const loadPlan = () => {
   return detail.refetch()
 }
 watch([() => props.item.sessionId, () => props.item.unread || detail.data.value?.unread], ([id, unread]) => {
-  if (unread) {
-    markPlanRead(client, id)
-    props.onRead(id)
-  }
+  if (unread) markPlanRead(client, id)
 }, { immediate: true })
 async function send(message: string): Promise<boolean> {
   if (cantSend.value) return false
@@ -75,7 +73,6 @@ async function send(message: string): Promise<boolean> {
     await sending.mutateAsync({ id: props.item.sessionId, text: message })
     threads.add(props.item.sessionId)
     text.value = ''
-    await props.onRefresh()
     await router.replace('/inbox')
     return true
   } catch (e) {
@@ -94,10 +91,7 @@ async function approve(plan: Plan, to: 'ready' | 'backlog') {
       toast,
       mobile: true,
       closeSheet: flyout.close,
-      push: async () => {
-        await props.onRefresh()
-        await router.replace('/inbox')
-      }
+      push: () => router.replace('/inbox')
     })
   } finally {
     busy.value = false
@@ -106,7 +100,7 @@ async function approve(plan: Plan, to: 'ready' | 'backlog') {
 // Deleting waits five seconds for Undo before closing the session; the
 // thread leaves the list at once (design/inbox.md#mobile)
 async function deleteThread() {
-  deleting.remove(props.item.sessionId, props.onRefresh)
+  deleting.remove(props.item.sessionId)
   await flyout.close()
   await router.replace('/inbox')
 }
