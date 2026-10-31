@@ -34,6 +34,13 @@ const props = withDefaults(defineProps<{
   duration: 4
 })
 
+// Keep SSR and the first client render identical; choose a phase per mount.
+const lapOffset = ref(0)
+onMounted(() => {
+  lapOffset.value = Math.random()
+})
+const animationDelay = computed(() => `${-lapOffset.value * props.duration}s`)
+
 function parseHSL(hslStr: string): { h: number, s: number, l: number } {
   const match = hslStr.match(/([\d.]+)\s*([\d.]+)%?\s*([\d.]+)%?/)
   if (!match) return { h: 172, s: 66, l: 50 }
@@ -96,7 +103,7 @@ const glowCone = 'conic-gradient(from var(--glow-angle) at center, black 2.5%, t
   <div
     v-if="props.active"
     class="relative isolate flex flex-col motion-safe:animate-glow-spin"
-    :style="{ borderRadius: `${props.borderRadius}px`, animationDuration: `${props.duration}s` }"
+    :style="{ borderRadius: `${props.borderRadius}px`, animationDuration: `${props.duration}s`, animationDelay }"
   >
     <slot />
 
