@@ -5,7 +5,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import { api } from '~/composables/useApi'
-import { agents, inbox, projects, tasks } from '~/prototype/fixtures'
+import { agents, inbox, projects, pullRequestDetails, tasks } from '~/prototype/fixtures'
 import { applyEvent, invalidateKeys } from '~/queries/dependencies'
 import { keys } from '~/queries/keys'
 import { testQueryClient } from '~/queries/mount-with-query'
@@ -14,6 +14,7 @@ import InboxPanel from '~/components/InboxPanel.vue'
 import InboxPanelActions from '~/components/InboxPanelActions.vue'
 import InboxPanelArtifacts from '~/components/InboxPanelArtifacts.vue'
 import InboxPanelDetails from '~/components/InboxPanelDetails.vue'
+import InboxPanelDiff from '~/components/InboxPanelDiff.vue'
 import InboxPanelMeta from '~/components/InboxPanelMeta.vue'
 import InboxPanelTray from '~/components/InboxPanelTray.vue'
 import InboxPanelVerdict from '~/components/InboxPanelVerdict.vue'
@@ -25,6 +26,7 @@ import InboxItemPage from '~/pages/inbox/[itemId].vue'
 vi.mock('~/composables/useApi', () => ({
   api: {
     inbox: { get: vi.fn(), act: vi.fn() },
+    projects: { pullRequest: vi.fn() },
     tasks: { byRef: vi.fn(), evidence: vi.fn(), reviews: vi.fn(), designs: vi.fn(), comment: vi.fn() },
     deployments: { read: vi.fn() },
     attachments: { upload: vi.fn() }
@@ -69,7 +71,7 @@ const alertStub = vue.defineComponent({
   setup: props => () => vue.h('div', { 'data-alert': true }, [props.title, ...(props.actions ?? []).map((a: { label: string, onClick: () => void }) => vue.h('button', { onClick: a.onClick }, a.label))])
 })
 
-async function mountInbox(type: 'human_review' | 'failed', taskRef?: string, dockedTask: string | null = null, selection = true, editTask = (task: (typeof tasks)[number]) => task, realComposer = false) {
+async function mountInbox(type: 'human_review' | 'failed', taskRef?: string, dockedTask: string | null = null, selection = true, editTask = (task: (typeof tasks)[number]) => task, realComposer = false, editApi = () => {}) {
   for (const name of ['ref', 'shallowRef', 'computed', 'watch', 'watchEffect', 'onMounted', 'onBeforeUnmount', 'nextTick'] as const) vi.stubGlobal(name, vue[name])
   const item = inbox().needsYou.find(i => i.type === type && (taskRef ? i.taskRef === taskRef : tasks.find(t => t.id === i.taskId)?.type !== 'design'))!
   const params = vue.reactive<{ itemId?: string }>({ itemId: selection ? item.id : undefined })
@@ -99,12 +101,14 @@ async function mountInbox(type: 'human_review' | 'failed', taskRef?: string, doc
   vi.mocked(api.tasks.evidence).mockResolvedValue([])
   vi.mocked(api.tasks.reviews).mockResolvedValue([])
   vi.mocked(api.tasks.designs).mockResolvedValue([])
+  vi.mocked(api.projects.pullRequest).mockReset().mockResolvedValue(pullRequestDetails[0]!)
+  editApi()
   const client = testQueryClient()
   // As Nuxt renders the child: keyed by its path
   const NuxtPage = vue.defineComponent({ setup: () => () => params.itemId ? vue.h(InboxItemPage, { key: params.itemId }) : null })
   const wrapper = mount(InboxPage, { global: {
     plugins: [[VueQueryPlugin, { queryClient: client }]],
-    components: { NuxtPage, InboxPanel, InboxPanelActions, InboxPanelArtifacts, InboxPanelDetails, InboxPanelMeta, InboxPanelTray, InboxPanelVerdict, InboxReleaseNotes, EvidenceList: evidenceStub, PromptComposer: realComposer ? PromptComposer : composerStub, UChatPrompt: vue.defineComponent({ setup: (_, { slots }) => () => vue.h('div', [slots.header?.(), slots.footer?.()]) }), UAlert: alertStub, UButton: buttonStub, UTabs: tabsStub, UDashboardPanel: plain },
+    components: { NuxtPage, InboxPanel, InboxPanelActions, InboxPanelArtifacts, InboxPanelDetails, InboxPanelDiff, InboxPanelMeta, InboxPanelTray, InboxPanelVerdict, InboxReleaseNotes, EvidenceList: evidenceStub, PromptComposer: realComposer ? PromptComposer : composerStub, UChatPrompt: vue.defineComponent({ setup: (_, { slots }) => () => vue.h('div', [slots.header?.(), slots.footer?.()]) }), UAlert: alertStub, UButton: buttonStub, UTabs: tabsStub, UDashboardPanel: plain },
     stubs: { UModal: true, EvidenceViewer: true, InboxMessage: true, InboxDesignReviewLink: true, UBadge: true, UInput: true, UIcon: true, USkeleton: true, USelectMenu: true, MarkdownText: true, TaskFlyout: true, AgentAvatar: true, ProjectThumbnail: true, PlanThreadRow: true, NuxtLink: true, InboxMobile: true, InboxMobileItem: true }
   } })
   await flushPromises()
@@ -620,3 +624,89 @@ for (const type of ['human_review', 'failed'] as const) {
     }
   })
 }
+
+it('shows PR description and Code diff N on a code review, counting every changed file', async () => {
+  const { wrapper, openTab } = await mountInbox('human_review', 'COR-5')
+  try {
+    expect(api.projects.pullRequest).toHaveBeenCalledWith('corral', 64)
+    vi.mocked(api.projects.pullRequest).mockClear()
+    expect(wrapper.get('[data-tab="diff"]').text()).toBe(`Code diff ${pullRequestDetails[0]!.totalFiles}`)
+    await openTab('pr')
+    expect(wrapper.get('[data-testid="inbox-pr-description"]').text()).toContain('#64')
+    await openTab('diff')
+    expect(wrapper.findAll('[data-testid="inbox-diff-file"]')).toHaveLength(pullRequestDetails[0]!.files.length)
+    expect(api.projects.pullRequest).not.toHaveBeenCalled()
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it.each([
+  ['a design', 'design'],
+  ['a spike', 'spike']
+] as const)('shows neither PR tab on %s, even with a PR', async (_, type) => {
+  const { wrapper } = await mountInbox('human_review', 'COR-5', null, true, task => ({ ...task, type }))
+  try {
+    expect(wrapper.find('[data-tab="overview"]').exists()).toBe(true)
+    expect(wrapper.find('[data-tab="pr"]').exists()).toBe(false)
+    expect(wrapper.find('[data-tab="diff"]').exists()).toBe(false)
+    expect(api.projects.pullRequest).not.toHaveBeenCalled()
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('shows neither PR tab on an item without a PR', async () => {
+  const item = inbox().needsYou.find(i => i.type === 'failed' && !i.prUrl)!
+  const { wrapper } = await mountInbox('failed', item.taskRef!)
+  try {
+    expect(wrapper.find('[data-tab="overview"]').exists()).toBe(true)
+    expect(wrapper.find('[data-tab="pr"]').exists()).toBe(false)
+    expect(wrapper.find('[data-tab="diff"]').exists()).toBe(false)
+    expect(api.projects.pullRequest).not.toHaveBeenCalled()
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('shows the error and Retry in the PR tabs with the rest of the panel working', async () => {
+  const { wrapper, item, primary, openTab, alert } = await mountInbox('human_review', 'COR-5', null, true, task => task, false, () => {
+    vi.mocked(api.projects.pullRequest).mockRejectedValue(new Error('GitHub couldn\'t return PR #64'))
+  })
+  try {
+    expect(wrapper.get('[data-tab="diff"]').text()).toBe('Code diff')
+    await openTab('diff')
+    expect(alert().text()).toContain('Couldn\'t load this pull request')
+    await openTab('pr')
+    expect(alert().text()).toContain('Retry')
+    await openTab('overview')
+    expect(alert().exists()).toBe(false)
+    await primary().trigger('click')
+    await flushPromises()
+    expect(api.inbox.act).toHaveBeenCalledWith((item as { taskId: string }).taskId, expect.objectContaining({ action: 'approve' }))
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('reloads the PR through Retry, back through its loading state', async () => {
+  const { wrapper, openTab, alert } = await mountInbox('human_review', 'COR-5', null, true, task => task, false, () => {
+    vi.mocked(api.projects.pullRequest).mockRejectedValue(new Error('Runner offline'))
+  })
+  try {
+    await openTab('pr')
+    let finish = (_: (typeof pullRequestDetails)[number]) => {}
+    vi.mocked(api.projects.pullRequest).mockReturnValue(new Promise((resolve) => {
+      finish = resolve
+    }))
+    await alert().find('button').trigger('click')
+    expect(wrapper.find('[data-testid="inbox-pr-loading"]').exists()).toBe(true)
+    finish(pullRequestDetails[0]!)
+    await flushPromises()
+    expect(alert().exists()).toBe(false)
+    expect(wrapper.find('[data-testid="inbox-pr-description"]').exists()).toBe(true)
+    expect(wrapper.get('[data-tab="diff"]').text()).toBe(`Code diff ${pullRequestDetails[0]!.totalFiles}`)
+  } finally {
+    wrapper.unmount()
+  }
+})

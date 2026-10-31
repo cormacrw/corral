@@ -26,7 +26,8 @@ export const keys = {
     history: (ref: string) => [...keys.tasks.detail(ref), 'history'] as const,
     evidence: (ref: string) => [...keys.tasks.detail(ref), 'evidence'] as const,
     reviews: (ref: string) => [...keys.tasks.detail(ref), 'reviews'] as const,
-    designs: (ref: string) => [...keys.tasks.detail(ref), 'designs'] as const
+    designs: (ref: string) => [...keys.tasks.detail(ref), 'designs'] as const,
+    pullRequest: (ref: string, number: number) => [...keys.tasks.detail(ref), 'pull-request', number] as const
   },
   epics: {
     all: () => ['epics'] as const,

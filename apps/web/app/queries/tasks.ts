@@ -14,6 +14,9 @@ export const taskHistoryQuery = ({ slug, number, ref }: TaskAddress) => queryOpt
 export const taskEvidenceQuery = ({ slug, number, ref }: TaskAddress) => queryOptions({ queryKey: keys.tasks.evidence(ref), queryFn: () => api.tasks.evidence(slug, number) })
 export const taskReviewsQuery = ({ slug, number, ref }: TaskAddress) => queryOptions({ queryKey: keys.tasks.reviews(ref), queryFn: () => api.tasks.reviews(slug, number) })
 export const taskDesignsQuery = ({ slug, number, ref }: TaskAddress) => queryOptions({ queryKey: keys.tasks.designs(ref), queryFn: () => api.tasks.designs(slug, number) })
+// By the item's PR, not the task's: an epic's Activity item links the epic PR.
+// Under the task, so a run ending or the task changing refreshes the diff.
+export const taskPullRequestQuery = ({ slug, ref }: Pick<TaskAddress, 'slug' | 'ref'>, number: number) => queryOptions({ queryKey: keys.tasks.pullRequest(ref, number), queryFn: () => api.projects.pullRequest(slug, number) })
 
 const changed = (slug: string, ref: string) => [keys.tasks.list(slug), keys.tasks.detail(ref), keys.inbox()]
 // The response is the task as it now stands, so the open task needn't wait for

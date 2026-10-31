@@ -1,6 +1,7 @@
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Evidence, InboxActionInput, Review, Task, TaskInboxItem } from '@corral/contracts'
-import { taskDesignsQuery } from '~/queries/tasks'
+import { keys } from '~/queries/keys'
+import { taskDesignsQuery, taskPullRequestQuery } from '~/queries/tasks'
 import { markdownToPlainText } from '~/utils/markdown'
 
 // The Inbox message panel, Option D (design/inbox.md). The page owns the data
@@ -8,7 +9,7 @@ import { markdownToPlainText } from '~/utils/markdown'
 // the verdict and the artifacts.
 type Action = InboxActionInput['action']
 export type ResolveTo = 'backlog' | 'ready' | 'in_progress'
-export type InboxPanelTab = 'overview' | 'criteria' | 'review' | 'message'
+export type InboxPanelTab = 'overview' | 'criteria' | 'review' | 'pr' | 'diff' | 'message'
 export interface InboxPanelContext {
   item: TaskInboxItem
   task: Task | null
@@ -49,6 +50,7 @@ export const actionOpensComposer = (value: Action) => OPENS_COMPOSER.includes(va
 
 export function useInboxPanel(ctx: InboxPanelContext) {
   const router = useRouter()
+  const client = useQueryClient()
   const item = computed(() => ctx.item)
   const task = computed(() => ctx.task)
   const isReview = computed(() => item.value.type === 'human_review')
@@ -109,6 +111,22 @@ export function useInboxPanel(ctx: InboxPanelContext) {
     return latest ? { url: router.resolve(`/designs/${latest.id}`).href, label: `Preview v${latest.version}` } : null
   })
 
+  // The PR tabs wait for the task, which says whether it's a design or a spike.
+  // Set up once per item, like the designs above.
+  const taskRef = ctx.item.taskRef
+  const prNumber = computed(() => task.value && !isDesign.value ? Number(pr.value?.number) || null : null)
+  const pullRequest = useQuery(computed(() => ({ ...taskPullRequestQuery({ slug, ref: taskRef }, prNumber.value ?? 0), enabled: prNumber.value !== null })))
+  const hasPullRequest = computed(() => prNumber.value !== null)
+  const prDetail = computed(() => pullRequest.data.value ?? null)
+  const prLoading = computed(() => hasPullRequest.value && pullRequest.isPending.value)
+  // As with the task: a PR already showing stays through a failed refetch
+  const prFailed = computed(() => hasPullRequest.value && pullRequest.isError.value && !prDetail.value)
+  const prError = computed(() => prFailed.value ? pullRequest.error.value?.message ?? null : null)
+  const retryPullRequest = () => {
+    // Back to pending, for the loading state and a fresh failure
+    if (prNumber.value !== null) void client.resetQueries({ queryKey: keys.tasks.pullRequest(taskRef, prNumber.value), exact: true })
+  }
+
   const primary = computed(() => canAct.value ? ctx.actions[0] ?? null : null)
   const secondary = computed(() => canAct.value ? ctx.actions.slice(1) : [])
   // What each action does, for items with nothing else to show
@@ -121,6 +139,6 @@ export function useInboxPanel(ctx: InboxPanelContext) {
     resolve: 'Starts the task again from the status you pick.'
   }))
 
-  return { item, task, isReview, isDesign, canAct, kind, readOnlyNote, tldr, latestReview, history, criteria, met, gates, images, others, hasVerdict, pr, preview, primary, secondary, explanations }
+  return { item, task, isReview, isDesign, canAct, kind, readOnlyNote, tldr, latestReview, history, criteria, met, gates, images, others, hasVerdict, pr, hasPullRequest, prDetail, prLoading, prFailed, prError, retryPullRequest, preview, primary, secondary, explanations }
 }
 export type InboxPanel = ReturnType<typeof useInboxPanel>

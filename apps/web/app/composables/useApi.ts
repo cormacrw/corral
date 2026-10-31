@@ -33,7 +33,7 @@ import type {
   PlanSessionDetail,
   Profile,
   Project,
-  PullRequestStatus,
+  PullRequestDetail, PullRequestStatus,
   RepoCheck,
   RepoList,
   Review,
@@ -137,7 +137,8 @@ export const api = {
     },
     clearThumbnail: (slug: string) => call<Project>('DELETE', `/projects/${slug}/thumbnail`),
     // Open PRs and their merge gates, read live from GitHub
-    pullRequests: (slug: string) => call<PullRequestStatus[]>('GET', `/projects/${slug}/pull-requests`)
+    pullRequests: (slug: string) => call<PullRequestStatus[]>('GET', `/projects/${slug}/pull-requests`),
+    pullRequest: (slug: string, number: number) => call<PullRequestDetail>('GET', `/projects/${slug}/pull-requests/${number}`)
   },
 
   tasks: {
