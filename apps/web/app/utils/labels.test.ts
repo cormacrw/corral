@@ -1,6 +1,6 @@
 import type { TaskStatus } from '@corral/core'
 import { describe, expect, it } from 'vitest'
-import { agentStatus, cliLoginCommand, detectedRuntimes, doneRefs, formatMs, epicInProgress, epicReviewStatus, epicWithLiveCounts, runtimeLabel, runBadge, runRef, runTitle, runTokens, statusCounts, taskCounts, taskTypeBadge, taskNote } from './labels.ts'
+import { agentStatus, cliLoginCommand, detectedRuntimes, doneRefs, formatMs, epicInProgress, epicReviewStatus, epicWithLiveCounts, inboxItemLink, plural, prNumberLabel, runtimeLabel, runBadge, runRef, runTitle, runTokens, statusCounts, taskCounts, taskTypeBadge, taskNote } from './labels.ts'
 import { projects, task } from '../prototype/fixtures'
 
 const tasks = (...statuses: TaskStatus[]) => statuses.map(status => ({ status }))
@@ -186,4 +186,25 @@ describe('runRef and runTitle', () => {
     expect(runRef(task)).toBe('COR-3')
     expect(runTitle(task)).toBe('Prototype build')
   })
+})
+
+describe('inboxItemLink', () => {
+  it('opens the epic for an epic\'s item, not the task the server named for it', () => {
+    expect(inboxItemLink({ taskRef: 'COR-3', epicId: 'e-1' })).toEqual({ to: '/epics/e-1', label: 'Epic' })
+  })
+  it('opens the task otherwise, and nothing without one', () => {
+    expect(inboxItemLink({ taskRef: 'COR-3' })).toEqual({ to: '/tasks/COR-3', label: 'Task' })
+    expect(inboxItemLink({ taskRef: null })).toBeNull()
+  })
+})
+
+it('counts in the singular and the plural', () => {
+  expect(plural(1, 'task')).toBe('1 task')
+  expect(plural(0, 'task')).toBe('0 tasks')
+  expect(plural(2, 'run')).toBe('2 runs')
+})
+
+it('names a PR by number when its URL has one', () => {
+  expect(prNumberLabel('https://github.com/o/r/pull/41')).toBe('#41')
+  expect(prNumberLabel(null)).toBe('Open PR')
 })

@@ -216,6 +216,22 @@ export function runBadge(run: Pick<Run, 'state' | 'outcome' | 'role'>): { label:
   return { label: run.role === 'pm' ? 'Answered' : 'Completed', color: 'success' }
 }
 
+// The dot beside a status, spelled out so Tailwind sees every class
+export const STATUS_DOT: Record<Color, string> = { neutral: 'bg-neutral-400', info: 'bg-info', primary: 'bg-primary', warning: 'bg-warning', error: 'bg-error', success: 'bg-success', secondary: 'bg-secondary' }
+
+// Where an Inbox item's task lives: an epic's activity is about the epic, and
+// its taskRef is only one of the epic's tasks
+export function inboxItemLink(item: { taskRef: string | null, epicId?: string | null }) {
+  if (item.epicId) return { to: `/epics/${item.epicId}`, label: 'Epic' }
+  return item.taskRef ? { to: `/tasks/${item.taskRef}`, label: 'Task' } : null
+}
+export const prNumberLabel = (prUrl: string | null | undefined) => {
+  const number = prUrl?.match(/\/pull\/(\d+)/)?.[1]
+  return number ? `#${number}` : 'Open PR'
+}
+
+export const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`
+
 export function initials(name: string): string {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]!.toUpperCase()).join('')
 }

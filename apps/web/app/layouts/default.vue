@@ -2,6 +2,7 @@
 import type { Project } from '@corral/contracts'
 import { agentStatus, isWorking, projectColor, ROLE, runnerSummary, taskCounts } from '~/utils/labels'
 import { searchPages } from '~/utils/search'
+import { shellTitle } from '~/utils/shell'
 
 // The app shell (design/app-shell.md): global nav, projects, agents, runner
 const shell = useShell()
@@ -64,6 +65,8 @@ const searchGroups = computed(() => searchOpen.value
   : [])
 
 const isActive = (path: string) => route.path === path || route.path.startsWith(`${path}/`)
+// Below 1024px the sidebar is an overlay, and this bar names the page (design/app-shell.md)
+const title = computed(() => shellTitle(route.path, state.value.projects, state.value.agents))
 </script>
 
 <template>
@@ -100,25 +103,31 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
             aria-label="Global"
             class="flex flex-col gap-0.5"
           >
-            <UButton
-              to="/plan"
-              icon="i-lucide-message-square"
-              :label="collapsed ? undefined : 'Plan'"
-              variant="ghost"
-              :color="isActive('/plan') ? 'primary' : 'neutral'"
-              :class="['relative justify-start', isActive('/plan') && 'bg-elevated']"
-              :aria-current="isActive('/plan') ? 'page' : undefined"
+            <UTooltip
+              text="Plan"
+              :disabled="!collapsed"
             >
-              <template #trailing>
-                <UBadge
-                  v-if="attentionCount"
-                  :class="collapsed ? 'absolute -end-1 -top-1 px-1 text-[10px]' : 'ms-auto'"
-                  :aria-label="`${attentionCount} threads need attention`"
-                  :label="String(attentionCount)"
-                  size="sm"
-                />
-              </template>
-            </UButton>
+              <UButton
+                to="/plan"
+                icon="i-lucide-message-square"
+                :label="collapsed ? undefined : 'Plan'"
+                :aria-label="collapsed ? 'Plan' : undefined"
+                variant="ghost"
+                :color="isActive('/plan') ? 'primary' : 'neutral'"
+                :class="['relative justify-start', isActive('/plan') && 'bg-elevated']"
+                :aria-current="isActive('/plan') ? 'page' : undefined"
+              >
+                <template #trailing>
+                  <UBadge
+                    v-if="attentionCount"
+                    :class="collapsed ? 'absolute -end-1 -top-1 px-1 text-[10px]' : 'ms-auto'"
+                    :aria-label="`${attentionCount} threads need attention`"
+                    :label="String(attentionCount)"
+                    size="sm"
+                  />
+                </template>
+              </UButton>
+            </UTooltip>
             <div
               v-if="!collapsed && threads.length"
               aria-label="Open Plan threads"
@@ -173,25 +182,31 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
                 />
               </div>
             </div>
-            <UButton
-              to="/inbox"
-              icon="i-lucide-inbox"
-              :label="collapsed ? undefined : 'Inbox'"
-              variant="ghost"
-              :color="isActive('/inbox') ? 'primary' : 'neutral'"
-              :class="['justify-start', isActive('/inbox') && 'bg-elevated']"
-              :aria-current="isActive('/inbox') ? 'page' : undefined"
+            <UTooltip
+              text="Inbox"
+              :disabled="!collapsed"
             >
-              <template #trailing>
-                <UBadge
-                  v-if="shell.inboxCount > 0"
-                  :label="String(shell.inboxCount)"
-                  color="primary"
-                  size="sm"
-                  class="ms-auto"
-                />
-              </template>
-            </UButton>
+              <UButton
+                to="/inbox"
+                icon="i-lucide-inbox"
+                :label="collapsed ? undefined : 'Inbox'"
+                :aria-label="collapsed ? 'Inbox' : undefined"
+                variant="ghost"
+                :color="isActive('/inbox') ? 'primary' : 'neutral'"
+                :class="['relative justify-start', isActive('/inbox') && 'bg-elevated']"
+                :aria-current="isActive('/inbox') ? 'page' : undefined"
+              >
+                <template #trailing>
+                  <UBadge
+                    v-if="state.inboxCount > 0"
+                    :class="collapsed ? 'absolute -end-1 -top-1 px-1 text-[10px]' : 'ms-auto'"
+                    :label="String(state.inboxCount)"
+                    color="primary"
+                    size="sm"
+                  />
+                </template>
+              </UButton>
+            </UTooltip>
           </nav>
 
           <div class="flex flex-col gap-0.5">
@@ -222,9 +237,10 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
                 >
                   <UButton
                     :to="`/projects/${project.slug}`"
+                    :aria-label="collapsed ? project.name : undefined"
                     variant="ghost"
                     color="neutral"
-                    :class="[collapsed ? 'p-1.5' : 'flex-1 justify-start', currentSlug === project.slug && 'text-highlighted']"
+                    :class="[collapsed ? 'p-1.5' : 'min-w-0 flex-1 justify-start', currentSlug === project.slug && 'text-highlighted']"
                   >
                     <ProjectThumbnail
                       :project="project"
@@ -236,7 +252,7 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
                     >{{ project.name }}</span>
                     <span
                       v-if="!collapsed && project.paused"
-                      class="ms-1 text-xs text-warning"
+                      class="ms-1 shrink-0 text-xs text-warning"
                     >Paused</span>
                   </UButton>
                 </UTooltip>
@@ -310,6 +326,7 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
             >
               <UButton
                 :to="`/agents/${agent.name.toLowerCase()}`"
+                :aria-label="collapsed ? `${agent.name} · ${ROLE[agent.role]}` : undefined"
                 variant="ghost"
                 :color="isActive(`/agents/${agent.name.toLowerCase()}`) ? 'primary' : 'neutral'"
                 :class="[collapsed ? 'p-1.5' : 'w-full justify-start', isActive(`/agents/${agent.name.toLowerCase()}`) && 'bg-elevated']"
@@ -322,25 +339,32 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
                 />
                 <span
                   v-if="!collapsed"
-                  class="truncate"
+                  class="min-w-0 truncate"
                 >{{ agent.name }} <span class="text-muted">· {{ ROLE[agent.role] }}</span></span>
                 <span
                   v-if="!collapsed && agentStatus(agent, now)"
-                  class="ms-auto text-xs text-muted"
+                  class="ms-auto min-w-0 truncate text-xs text-muted"
+                  :title="agentStatus(agent, now)?.label"
                 >{{ agentStatus(agent, now)?.label }}</span>
               </UButton>
             </UTooltip>
           </div>
 
           <div class="mt-auto">
-            <UButton
-              to="/settings/profile"
-              icon="i-lucide-settings"
-              :label="collapsed ? undefined : 'Settings'"
-              variant="ghost"
-              :color="isActive('/settings') ? 'primary' : 'neutral'"
-              :class="['w-full justify-start', isActive('/settings') && 'bg-elevated']"
-            />
+            <UTooltip
+              text="Settings"
+              :disabled="!collapsed"
+            >
+              <UButton
+                to="/settings/profile"
+                icon="i-lucide-settings"
+                :label="collapsed ? undefined : 'Settings'"
+                :aria-label="collapsed ? 'Settings' : undefined"
+                variant="ghost"
+                :color="isActive('/settings') ? 'primary' : 'neutral'"
+                :class="['w-full justify-start', isActive('/settings') && 'bg-elevated']"
+              />
+            </UTooltip>
           </div>
         </template>
 
@@ -383,11 +407,26 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
         </template>
       </UDashboardSidebar>
 
-      <slot />
-      <TaskFlyout
-        v-if="flyoutHosted"
-        class="border-s-0!"
-      />
+      <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+        <UDashboardNavbar
+          :title="title"
+          :ui="{ root: 'h-12 lg:hidden' }"
+          data-testid="shell-bar"
+        />
+        <!-- Panels whose content is in the default slot have no scroller of
+             their own, so the panel is it. The glow around active runs stays
+             clipped sideways. -->
+        <div
+          class="flex min-h-0 flex-1 max-[1100px]:flex-col [&>[data-slot=root]]:overflow-x-hidden [&>[data-slot=root]]:overflow-y-auto [&>[data-slot=root]]:overscroll-contain"
+          data-testid="shell-page"
+        >
+          <slot />
+          <TaskFlyout
+            v-if="flyoutHosted"
+            class="border-s-0!"
+          />
+        </div>
+      </div>
     </UDashboardGroup>
 
     <UDashboardSearch

@@ -12,7 +12,8 @@ let startWidth = 0
 function onPointerDown(event: PointerEvent) {
   dragging.value = true
   startX = event.clientX
-  startWidth = width.value
+  // What's on screen: the width can be held down by the room available
+  startWidth = (event.target as HTMLElement).parentElement?.offsetWidth ?? width.value
   ;(event.target as HTMLElement).setPointerCapture(event.pointerId)
 }
 function onPointerMove(event: PointerEvent) {
@@ -35,8 +36,8 @@ function onKey(event: KeyboardEvent) {
     v-if="flyout.ref.value || flyout.epic.value || (flyout.plan.value && $slots.plan)"
     role="complementary"
     :aria-label="flyout.ref.value ? `Task ${flyout.ref.value}` : flyout.epic.value ? 'Epic' : 'Plan'"
-    class="relative flex h-full shrink-0 flex-col border-s border-default bg-default max-[1100px]:w-full max-[1100px]:border-s-0 max-[1100px]:border-t"
-    :style="{ width: `${width}px` }"
+    class="relative flex h-full max-w-[calc(100%-20rem)] shrink-0 flex-col border-s border-default bg-default max-[1100px]:h-1/2 max-[1100px]:w-full max-[1100px]:max-w-full max-[1100px]:border-s-0 max-[1100px]:border-t min-[1101px]:w-(--flyout-width)"
+    :style="{ '--flyout-width': `${width}px` }"
   >
     <div
       role="separator"
