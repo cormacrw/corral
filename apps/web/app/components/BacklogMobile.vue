@@ -58,7 +58,10 @@ const collapsed = defineModel<Record<string, boolean>>('collapsed', { required: 
       <p class="text-xs text-muted">
         {{ count }} tasks
       </p>
-      <UCheckbox v-model="showCompleted" label="Show completed" />
+      <UCheckbox
+        v-model="showCompleted"
+        label="Show completed"
+      />
     </div>
 
     <UAlert

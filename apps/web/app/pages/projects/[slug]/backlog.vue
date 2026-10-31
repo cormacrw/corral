@@ -117,7 +117,10 @@ async function newTask() {
             class="w-60"
           />
           <span class="text-sm text-muted">{{ backlog.length }} tasks</span>
-          <UCheckbox v-model="showCompleted" label="Show completed" />
+          <UCheckbox
+            v-model="showCompleted"
+            label="Show completed"
+          />
           <div class="ms-auto flex gap-2">
             <UButton
               label="Collapse all"
