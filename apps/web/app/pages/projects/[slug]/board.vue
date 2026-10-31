@@ -147,7 +147,6 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
             :items="VIEW_ITEMS"
             :content="false"
             size="xs"
-            aria-label="Board view"
             class="w-auto shrink-0"
           />
           <UInput
