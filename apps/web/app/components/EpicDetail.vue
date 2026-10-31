@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { useMutation } from '@tanstack/vue-query'
-import { patchEpic, setEpicDependencies } from '~/queries/epics'
-import type { EpicDetail, PatchEpicInput } from '@corral/contracts'
+import { useMutation, useQuery } from '@tanstack/vue-query'
+import { epicQuery, patchEpic, setEpicDependencies } from '~/queries/epics'
+import type { PatchEpicInput } from '@corral/contracts'
 import { isTaskDone, type EpicReviewMode, type TaskStatus } from '@corral/core'
-import { api, ApiError } from '~/composables/useApi'
+import { ApiError } from '~/composables/useApi'
 import { EPIC_REVIEW_MODE, EPIC_REVIEW_STATE, EPIC_STATUS_TEXT, epicReviewStatus, epicWithLiveCounts, PRIORITY, STATUS } from '~/utils/labels'
 
 // An epic: its title, description and progress, and the dependency tree of
@@ -17,8 +17,10 @@ const flyout = useTaskFlyout()
 const toast = useToast()
 const patchMutation = useMutation(patchEpic)
 const dependenciesMutation = useMutation(setEpicDependencies)
-const epic = ref<EpicDetail | null>(null)
-const error = ref<string | null>(null)
+const epicResult = useQuery(computed(() => epicQuery(props.epicId)))
+const epic = computed(() => epicResult.data.value ?? null)
+// A failed background refetch leaves what's cached on screen
+const error = computed(() => epicResult.isLoadingError.value ? epicResult.error.value?.message ?? null : null)
 const saved = ref(false)
 const project = computed(() => live.state.value.projects.find(p => p.id === epic.value?.projectId) ?? null)
 const { tasks: projectTasks, epics: epicList } = useProjectLists(() => project.value?.slug ?? '')
@@ -37,8 +39,7 @@ async function setDependencies(ids: string[]) {
   savingDependencies.value = true
   dependencyError.value = null
   try {
-    const updated = await dependenciesMutation.mutateAsync({ id: epic.value.id, dependsOn: ids })
-    epic.value = { ...epic.value, ...updated }
+    await dependenciesMutation.mutateAsync({ id: epic.value.id, dependsOn: ids })
     selectedDependency.value = ''
   } catch (e) {
     dependencyError.value = e instanceof Error ? e.message : String(e)
@@ -51,42 +52,16 @@ const descriptionDraft = ref('')
 const tab = useLocalStorage<'tasks' | 'graph'>('corral.epic.tab', 'tasks')
 let savedTimer: ReturnType<typeof setTimeout> | null = null
 
-async function load() {
-  error.value = null
-  try {
-    epic.value = await api.epics.get(props.epicId)
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  }
-}
 watch(() => props.epicId, () => {
-  epic.value = null
   selectedDependency.value = ''
   dependencyError.value = null
   editingDescription.value = false
-  void load()
-}, { immediate: true })
-// The tree follows its tasks live
-onMounted(() => {
-  const stop = live.subscribe((event) => {
-    if (!epic.value) return
-    if (event.type === 'project.deleted' && epic.value.projectId === event.projectId) {
-      epic.value = null
-      void load()
-      return
-    }
-    if (event.type === 'epic.updated' && event.epic.id === epic.value.id) epic.value = { ...epic.value, ...event.epic }
-    if ((event.type === 'task.updated' || event.type === 'task.created') && (event.task.epicId === epic.value.id || epic.value.tasks.some(t => t.id === event.task.id))) void load()
-    if (event.type === 'task.deleted' && epic.value.tasks.some(t => t.id === event.taskId)) void load()
-  })
-  onBeforeUnmount(stop)
 })
 
 async function patch(input: PatchEpicInput) {
   if (!epic.value) return
   try {
-    const updated = await patchMutation.mutateAsync({ id: epic.value.id, input })
-    epic.value = { ...epic.value, ...updated }
+    await patchMutation.mutateAsync({ id: epic.value.id, input })
     saved.value = true
     if (savedTimer) clearTimeout(savedTimer)
     savedTimer = setTimeout(() => {
@@ -228,7 +203,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
       variant="subtle"
       :title="error"
       class="m-4"
-      :actions="[{ label: 'Retry', onClick: load }]"
+      :actions="[{ label: 'Retry', onClick: () => epicResult.refetch() }]"
     />
     <div
       v-else-if="!epic"
