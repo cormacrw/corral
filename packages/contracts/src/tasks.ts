@@ -89,6 +89,22 @@ export interface TaskAgent {
   name: string
 }
 
+export interface TaskCommit {
+  sha: string
+  url: string
+}
+
+// The latest PR-free submission of an epic task (D27), which has no task PR.
+// Agent-approved and integrated are separate commits: integration can rewrite it.
+export interface TaskSubmissionSummary {
+  sequence: number
+  targetBranch: string
+  submitted: TaskCommit
+  approved: TaskCommit | null
+  integrated: TaskCommit | null
+  integratedAt: string | null
+}
+
 export interface Task {
   id: string
   projectId: string
@@ -126,6 +142,7 @@ export interface Task {
   latestReview: Review | null
   mergeCommitSha: string | null
   mergedAt: string | null
+  submission: TaskSubmissionSummary | null
   // Required checks seen passing when the task reached Human review
   gateChecks: { name: string, url: string | null }[] | null
   // The approved design version a build task builds, and the screens it

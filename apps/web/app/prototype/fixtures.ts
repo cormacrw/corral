@@ -260,6 +260,7 @@ export function task(project: Project, number: number, fields: Partial<Task> & P
     latestReview: null,
     mergeCommitSha: null,
     mergedAt: null,
+    submission: null,
     gateChecks: null,
     design: null,
     planSessionId: null,
@@ -791,7 +792,7 @@ export function inbox(): Inbox {
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
       preview: body, body, sender: { name: 'Rita', role: 'reviewer' }, at: review.updatedAt,
       prUrl: review.prUrl!, resolution: null, headSha: review.prHeadSha!,
-      tasks: tasks.filter(t => t.epicId === review.id).map(task => ({ task, evidence: evidence[task.id] ?? [] }))
+      tasks: tasks.filter(t => t.epicId === review.id).map(task => ({ task, evidence: evidence[task.id] ?? [], humanReview: false, humanChecks: [] }))
     })
   }
   const conflict = epics.find(e => e.reviewState === 'conflict')

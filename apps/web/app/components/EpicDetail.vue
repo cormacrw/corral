@@ -359,7 +359,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
             v-else-if="epic.reviewMode !== 'direct'"
             class="text-xs text-muted"
           >
-            The epic PR opens once every task has merged.
+            The epic PR opens once every task has merged. Human checks are confirmed there.
           </p>
         </section>
 
@@ -515,6 +515,11 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
                 size="xs"
               />
             </button>
+            <TaskCommitLinks
+              v-if="task.submission"
+              :task="task"
+              class="px-2 pb-1 text-xs"
+            />
           </li>
         </ul>
         <div

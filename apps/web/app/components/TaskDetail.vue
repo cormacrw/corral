@@ -872,7 +872,9 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
           </form>
           <p class="mt-1 text-xs text-muted">
             {{ task.acceptanceCriteria.some(c => c.checkedByHuman)
-              ? 'The reviewer checks other criteria from evidence. Human checks are completed in the Inbox.'
+              ? epic?.reviewMode === 'epic' && !task.prNumber
+                ? 'The reviewer checks other criteria from evidence. Human checks are completed on the epic review, once the epic is ready.'
+                : 'The reviewer checks other criteria from evidence. Human checks are completed in the Inbox.'
               : 'The reviewer marks criteria met from evidence.' }}
           </p>
         </section>
