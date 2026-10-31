@@ -1051,15 +1051,21 @@ describe('plan sessions', () => {
       const first = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
       const resetsAt = '2030-01-01T00:00:00.000Z'
       runner.send({ type: 'run.ended', runId: first.runId, leaseEpoch: first.leaseEpoch, exit: { kind: 'rate_limited', resetsAt }, headSha: null })
-      await sleep(150)
-      expect((await session(created.id)).messages.at(-1)).toMatchObject({ role: 'pm', kind: 'error', text: `Renamed PM hit a usage limit; try again after ${resetsAt}` })
+      await vi.waitFor(async () => {
+        const detail = await session(created.id)
+        expect(detail.messages.at(-1)).toMatchObject({ role: 'pm', kind: 'error', text: `Renamed PM hit a usage limit; try again after ${resetsAt}` })
+        expect(detail.activeRunId).toBeNull()
+      })
 
       await t.db.update(agents).set({ pausedUntil: null }).where(eq(agents.id, pm!.id))
-      await t.request('POST', `/api/plan/sessions/${created.id}/messages`, { text: 'Again' })
+      expect((await t.request('POST', `/api/plan/sessions/${created.id}/messages`, { text: 'Again' })).status).toBe(201)
       const second = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.planSessionId === created.id)).job
       runner.send({ type: 'run.ended', runId: second.runId, leaseEpoch: second.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
-      await sleep(150)
-      expect((await session(created.id)).messages.at(-1)).toMatchObject({ role: 'pm', kind: 'error', text: 'Renamed PM finished without replying' })
+      await vi.waitFor(async () => {
+        const detail = await session(created.id)
+        expect(detail.messages.at(-1)).toMatchObject({ role: 'pm', kind: 'error', text: 'Renamed PM finished without replying' })
+        expect(detail.activeRunId).toBeNull()
+      })
     } finally {
       await t.db.update(agents).set({ name: pm!.name, pausedUntil: null }).where(eq(agents.id, pm!.id))
     }
