@@ -44,6 +44,8 @@ describe.each(['pglite', 'postgres'] as const)('the data layer on %s', (driver) 
   it('still finds an answer pinned in the same transaction as its transition', async () => {
     const task = await t.createTask(project.slug)
     await setStatus(task.id, 'blocked', 'in_progress')
+    // Comparisons are to the millisecond, and no human answers within one
+    await new Promise(resolve => setTimeout(resolve, 2))
     expect((await t.request('POST', `/api/inbox/${task.id}/actions`, { action: 'clarify', text: 'Use Postgres' })).status).toBe(200)
     // Stamped with the audit entry's time; a later clock would lose the answer
     await setStatus(task.id, 'blocked', 'in_progress')
