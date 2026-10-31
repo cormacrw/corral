@@ -379,7 +379,7 @@ export const tasks: Task[] = [
 
 function epicTasks(epicId: string, first: number, titles: string[], mergedMinutesAgo = 60 * 24 * 5): Task[] {
   return titles.map((title, i) => task(corral, first + i, {
-    title, status: 'merged', epicId, prNumber: first + 100 + i, prUrl: `https://github.com/cormacrw/corral/pull/${first + 100 + i}`,
+    title, status: 'merged', epicId, pr: { number: first + 100 + i, url: `https://github.com/cormacrw/corral/pull/${first + 100 + i}` },
     mergedAt: ago(mergedMinutesAgo), mergeCommitSha: `${first + i}e8457`
   }))
 }
@@ -603,7 +603,7 @@ export const evidence: Record<string, Evidence[]> = {
 const alertTask = at('COR-23')
 evidence[alertTask.id] = [
   fileEvidence('ev-alert-log', null, 'log', 'failed-run-alert-delivered-to-every-open-browser-session.log', 'text/plain', logUrl),
-  { ...fileEvidence('ev-alert-note', null, 'note', '', '', ''), fileName: null, contentType: null, url: null, size: 0, note: 'Checked with https://github.com/cormacrw/corral/blob/main/apps/server/src/notifications/failed-run-alerts.test.ts and a stopped runner.' }
+  { id: 'ev-alert-note', taskId: alertTask.id, criterionId: null, runId: 'r-2', round: 0, kind: 'note', createdAt: ago(20), fileName: null, contentType: null, url: null, size: 0, note: 'Checked with https://github.com/cormacrw/corral/blob/main/apps/server/src/notifications/failed-run-alerts.test.ts and a stopped runner.' }
 ]
 
 export const reviews: Record<string, Review[]> = {

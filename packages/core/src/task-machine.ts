@@ -21,7 +21,8 @@ interface TaskStateFields {
   // Failed runs since the task was last un-failed. Rate-limited, stopped and
   // interrupted runs don't count (D3, D10).
   failedRuns: number
-  // Normalised state always identifies the deliverable.
+  // Normalised state always identifies the deliverable. D19: a spike delivers
+  // findings, not a PR, so human approval ends it without a merge.
   type: TaskType
 }
 
@@ -279,7 +280,7 @@ export function transition(
 
 // The events this actor may attempt on this task right now. Guards can still
 // reject them; this is for showing or hiding actions in the UI.
-export function availableEvents(task: Pick<TaskState, 'status'>, actor: Actor): TaskEventType[] {
+export function availableEvents(task: Pick<TaskState, 'status' | 'type'>, actor: Actor): TaskEventType[] {
   const type = actorType(actor)
   if (type === null) return []
   return (Object.keys(TRANSITION_RULES) as TaskEventType[]).filter((event) => {

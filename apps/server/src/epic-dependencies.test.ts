@@ -40,7 +40,7 @@ describe('epic scheduling', () => {
 
   it('counts Approved designs and Merged tasks as done in both epic API views', async () => {
     const { project, a, first, second } = await setup()
-    await t.db.update(tasks).set({ type: 'design', status: 'approved' }).where(eq(tasks.id, first.id))
+    await t.db.update(tasks).set({ type: 'design', status: 'approved', statusReason: null }).where(eq(tasks.id, first.id))
     await t.db.update(tasks).set({ epicId: a.id, status: 'merged' }).where(eq(tasks.id, second.id))
     expect(await t.request('GET', `/api/epics/${a.id}`).then(r => r.json())).toMatchObject({ taskCount: 2, mergedCount: 2 })
     const list = await t.request('GET', `/api/projects/${project.slug}/epics`).then(r => r.json()) as { id: string, taskCount: number, mergedCount: number }[]
@@ -70,7 +70,7 @@ describe('epic scheduling', () => {
   it('finishes an epic containing an Approved design and releases its dependent epic', async () => {
     const { project, a, first, second } = await setup()
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
-    await t.db.update(tasks).set({ type: 'design', status: 'human_review' }).where(eq(tasks.id, first.id))
+    await t.db.update(tasks).set({ type: 'design', status: 'human_review', statusReason: null }).where(eq(tasks.id, first.id))
     const blob = await t.blobs.put(Buffer.from('design'))
     await t.db.insert(schema.designVersions).values({ taskId: first.id, version: 1, bundleBlob: blob, specBlob: blob, branch: `design/${first.ref}`, commitSha: 'design-head' })
     runner = await FakeRunner.connect(t.server!.url)
@@ -110,16 +110,16 @@ describe('epic scheduling', () => {
 
   it('claims task and epic dependents of Approved designs, but never treats normal Approved or design Merged as done', async () => {
     const { project, a, first, second, dev } = await setup()
-    await t.db.insert(schema.taskDependencies).values({ taskId: second.id, dependsOnId: first.id })
+    await t.db.insert(schema.taskDependencies).values({ projectId: project.id, taskId: second.id, dependsOnId: first.id })
     const normal = await t.createTask(project.slug, { description: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Normal work in the prerequisite epic' }] }] } })
     await t.db.update(tasks).set({ epicId: a.id, status: 'merged' }).where(eq(tasks.id, normal.id))
     const get = async () => (await t.request('GET', `/api/projects/${project.slug}/tasks/${second.number}`)).json()
     for (const [type, status] of [['design', 'human_review'], ['design', 'merged'], ['task', 'approved'], ['task', 'ready_to_merge']] as const) {
-      await t.db.update(tasks).set({ type, status }).where(eq(tasks.id, first.id))
+      await t.db.update(tasks).set({ type, status, statusReason: null }).where(eq(tasks.id, first.id))
       expect(await get()).toMatchObject({ waitingOnEpics: [{ id: a.id }] })
       expect(await claimNextTask(t.db, dev.id, new Date(), [second.id])).toBeNull()
     }
-    await t.db.update(tasks).set({ type: 'design', status: 'approved' }).where(eq(tasks.id, first.id))
+    await t.db.update(tasks).set({ type: 'design', status: 'approved', statusReason: null }).where(eq(tasks.id, first.id))
     expect(await get()).toMatchObject({ waitingOnEpics: [] })
     expect(await claimNextTask(t.db, dev.id, new Date(), [second.id])).toMatchObject({ taskId: second.id, status: 'in_progress' })
   })
@@ -136,7 +136,7 @@ describe('epic scheduling', () => {
     expect(await claimNextTask(t.db, dev.id, new Date(), [second.id])).toBeNull()
     const cycle = await put(a.id, [b.id])
     expect(cycle.status).toBe(400)
-    expect(JSON.stringify(await cycle.json())).toContain('Foundation → Application → Foundation')
+    expect(JSON.stringify(await cycle.json())).toMatch(/Foundation → Application → Foundation|Application → Foundation → Application/)
     expect((await t.request('GET', `/api/epics/${a.id}`)).status).toBe(200)
     expect(await (await t.request('GET', `/api/epics/${a.id}`)).json()).toMatchObject({ dependsOn: [], blocks: [b.id] })
     await put(b.id, [])

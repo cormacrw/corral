@@ -1,20 +1,22 @@
+import { databaseFixture } from '@corral/db/testing'
 import type { Task } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { afterAll, afterEach, beforeAll, expect, it } from 'vitest'
+import { afterAll, afterEach, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './test-runner.ts'
 
 let t: TestApp
 let runner: FakeRunner
 const transcript: unknown[] = []
-beforeAll(async () => {
+databaseFixture('postgres', async () => {
   t = await createTestApp('postgres', { listen: true })
   runner = await FakeRunner.connect(t.server!.url)
 })
 afterEach(async () => {
+  if (!t) return
   await t.orchestrator.schedule()
   await t.db.delete(schema.projects)
 })

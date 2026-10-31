@@ -2,7 +2,7 @@ import type { AgentRole } from '@corral/core'
 import { z } from 'zod'
 import type { AgentRuntime } from './agent-runtimes.ts'
 import type { Deployment } from './deployments.ts'
-import type { Plan, PlanMessage, PlanQuestion, PlanSession } from './plans.ts'
+import type { Plan, PlanQuestion } from './plans.ts'
 import type { Evidence, Task } from './tasks.ts'
 
 // ── Inbox (D11, design/inbox.md) ───────────────────────────────────────────

@@ -125,7 +125,7 @@ describe('prototype mock API', () => {
     const spike = await mockCall<Task>('GET', '/tasks/COR-39')
     const before = await mockCall<Inbox>('GET', '/inbox')
     expect(before.needsYou.find(i => i.taskId === spike.id)).toMatchObject({ body: expect.stringContaining('**exponential backoff**'), prUrl: null })
-    await expect(mockCall('POST', `/inbox/${spike.id}/actions`, { action: 'request_changes', text: 'Explain jitter sizing' })).resolves.toMatchObject({ task: { status: 'in_progress', statusReason: 'Explain jitter sizing' } })
+    await expect(mockCall('POST', `/inbox/${spike.id}/actions`, { action: 'request_changes', text: 'Explain jitter sizing' })).resolves.toMatchObject({ task: { status: 'in_progress', statusReason: null } })
     await expect(mockCall('GET', '/projects/corral/tasks/39/comments')).resolves.toContainEqual(expect.objectContaining({ body: 'Explain jitter sizing', author: expect.objectContaining({ kind: 'human' }) }))
     await mockCall('PATCH', '/projects/corral/tasks/39', { status: 'human_review' })
     await expect(mockCall('POST', `/inbox/${spike.id}/actions`, { action: 'approve' })).resolves.toMatchObject({ task: { status: 'merged', mergedAt: expect.any(String) } })

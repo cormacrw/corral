@@ -297,15 +297,15 @@ describe('normalized task state', () => {
   it('requires a nonblank reason when loading blocked or failed state', () => {
     for (const status of ['blocked', 'failed'] as const) {
       for (const reason of [null, '', ' \t\n']) {
-        expect(() => normalizeTaskState({ status, reason, humanReview: false, reviewRounds: 0, failedRuns: 0 })).toThrow('require a reason')
+        expect(() => normalizeTaskState({ type: 'task', status, reason, humanReview: false, reviewRounds: 0, failedRuns: 0 })).toThrow('require a reason')
       }
-      expect(normalizeTaskState({ status, reason: '  Which provider?  ', humanReview: false, reviewRounds: 0, failedRuns: 0 }).reason).toBe('Which provider?')
+      expect(normalizeTaskState({ type: 'task', status, reason: '  Which provider?  ', humanReview: false, reviewRounds: 0, failedRuns: 0 }).reason).toBe('Which provider?')
     }
   })
 
   it('clears irrelevant reasons when normalizing ordinary states', () => {
     for (const status of TASK_STATUSES.filter(s => s !== 'blocked' && s !== 'failed')) {
-      expect(normalizeTaskState({ status, reason: 'Old reason', humanReview: false, reviewRounds: 0, failedRuns: 0 }).reason).toBeNull()
+      expect(normalizeTaskState({ type: 'task', status, reason: 'Old reason', humanReview: false, reviewRounds: 0, failedRuns: 0 }).reason).toBeNull()
     }
   })
 })

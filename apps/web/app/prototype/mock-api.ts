@@ -296,7 +296,7 @@ route('POST', '/inbox/:taskId/actions', ([taskId], body) => {
   Object.assign(task, { status: approvedDesign ? 'approved' : accepted ? 'merged' : 'in_progress', mergedAt: accepted && !approvedDesign ? now : null, updatedAt: now })
   if (input.action === 'request_changes') {
     ;(f.comments[task.id] ??= []).push({ id: `cm-${Date.now()}`, taskId: task.id, author: { kind: 'human', userId: f.profile.id }, body: input.text, pinned: false, createdAt: now })
-    task.statusReason = input.text
+    task.statusReason = null
   }
   const resolution = approvedDesign ? 'You approved the design' : accepted ? (task.type === 'spike' ? 'You accepted the findings' : 'You approved the merge') : 'You requested changes'
   f.resolvedInbox.unshift({ ...item, message: undefined, since: undefined, newArtifacts: undefined, id: `resolved-${task.id}-${Date.now()}`, type: 'activity', sender: { name: 'You', role: 'system' }, body: resolution, preview: resolution, resolution, at: now })

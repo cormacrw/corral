@@ -233,7 +233,7 @@ it('counts a PR merged on GitHub, and leaves a closed one to the human', async (
 it('holds tasks in a dependent epic until the epic PR merges, though every task is Merged', async () => {
   const { project, epic, head } = await approved()
   const [dependent] = await t.db.insert(schema.epics).values({ projectId: project.id, createdBy: t.actor, title: 'Search sharing', reviewMode: 'direct' }).returning()
-  await t.db.insert(schema.epicDependencies).values({ epicId: dependent!.id, dependsOnEpicId: epic.id })
+  await t.db.insert(schema.epicDependencies).values({ projectId: project.id, epicId: dependent!.id, dependsOnEpicId: epic.id })
   const waiting = await t.createTask(project.slug, { title: 'Share a search', epicId: dependent!.id, acceptanceCriteria: ['Sharing works'] })
   expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${waiting.number}/transitions`, { type: 'approve' })).status).toBe(200)
   const get = async () => (await t.request('GET', `/api/projects/${project.slug}/tasks/${waiting.number}`)).json() as Promise<Task>
