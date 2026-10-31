@@ -95,7 +95,7 @@ Ready tasks held by epic dependencies use the same neutral waiting note as task 
 
 - **Tasks** (status other than Backlog, and merged within the last 3 days): ref, title, type, status, priority, epic, PR, review round, assigned agent, working (lease), note.
 - **Epics** and **agents** for the filters.
-- Live updates over SSE. Cards move between columns without a reload.
+- Live updates over SSE. Cards move between columns without a reload. Task mutations that reopen epic review publish the updated epic after committing, including both epics when a board task moves between them; the card's review state and progress both refresh.
 
 ## Responsive
 
