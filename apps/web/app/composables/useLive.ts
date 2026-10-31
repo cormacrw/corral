@@ -1,4 +1,4 @@
-import type { Agent, Epic, GlobalStatus, PlanSession, Profile, Project, RunEvent, RunnerStatus, ServerEvent, Task } from '@corral/contracts'
+import type { Agent, Epic, GlobalStatus, PlanSession, Profile, Project, RunnerStatus, ServerEvent, Task } from '@corral/contracts'
 import { serverEventTypes } from '~/queries/dependencies'
 import { shell } from '~/queries/shell'
 import { api } from './useApi'
@@ -12,8 +12,6 @@ export interface LiveState {
   tasks: Record<string, Task[]>
   // Epics by project ID, loaded with the project's tasks
   epics: Record<string, Epic[]>
-  // Live transcript lines by run, for the agent page
-  runEvents: Record<string, RunEvent[]>
   // Compatibility getters over queries/shell.ts, until pages read queries
   readonly loaded: boolean
   readonly error: string | null
@@ -55,7 +53,6 @@ export function useLive() {
     connection: 'connecting',
     tasks: {},
     epics: {},
-    runEvents: {},
     get loaded() { return shell()?.loaded.value ?? false },
     get error() { return shell()?.error.value ?? null },
     get projects() { return shell()?.projects.data.value ?? [] },
@@ -110,11 +107,6 @@ export function useLive() {
         if (list) s.tasks[event.projectId] = list.filter(t => t.id !== event.taskId)
         break
       }
-      case 'run.events': {
-        const lines = s.runEvents[event.runId]
-        if (lines) lines.push(...event.events)
-        break
-      }
       case 'plan.session':
         // Before the listeners, so the query cache gets the session as read
         if (event.session.unread && route.params.sessionId === event.session.id) {
@@ -164,9 +156,5 @@ export function useLive() {
   }
 
   // Pages subscribe for events they render themselves (plan messages, comments)
-  function watchRun(runId: string, initial: RunEvent[]): void {
-    state.value.runEvents[runId] = initial
-  }
-
-  return { state, loadTasks, connect, subscribe: subscribeLive, watchRun }
+  return { state, loadTasks, connect, subscribe: subscribeLive }
 }

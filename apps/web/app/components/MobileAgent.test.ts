@@ -19,7 +19,7 @@ function links(runs: Run[]) {
   vi.stubGlobal('computed', computed)
   const view = {
     name: ref('Juno'), agent: ref({ name: 'Juno', role: runs[0]!.role, activeRuns: 0 }),
-    runs: ref(runs), current: ref(runs.find(r => r.state === 'running') ?? null),
+    runs: ref(runs), pending: ref(false), current: ref(runs.find(r => r.state === 'running') ?? null),
     error: ref(null), now: ref(Date.now()), today: ref([]), tiles: ref([]), facts: ref(''),
     load: vi.fn(), resume: vi.fn(), project: () => null
   } as unknown as AgentRuns

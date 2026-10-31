@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { PullRequestStatus } from '@corral/contracts'
-import { api } from '~/composables/useApi'
+import { useQuery } from '@tanstack/vue-query'
+import { pullRequestsQuery } from '~/queries/projects'
 import type { Color } from '~/utils/labels'
 import { ciCell, evidenceCell, mergeCell, rebaseCell, reviewCell } from '~/utils/pull-requests'
 
@@ -14,56 +14,8 @@ const slug = computed(() => String(route.params.slug))
 const project = computed(() => live.state.value.projects.find(p => p.slug === slug.value) ?? null)
 useSeoMeta({ title: () => `Pull requests · ${project.value?.name ?? ''} · Corral` })
 
-const prs = ref<PullRequestStatus[] | null>(null)
-const error = ref<string | null>(null)
-const refreshing = ref(false)
-
-let loadingSlug: string | null = null
-async function load() {
-  const current = slug.value
-  if (loadingSlug === current) return
-  loadingSlug = current
-  refreshing.value = true
-  try {
-    const next = await api.projects.pullRequests(current)
-    if (current !== slug.value) return
-    prs.value = next
-    error.value = null
-  } catch (e) {
-    if (current === slug.value) error.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    if (loadingSlug === current) loadingSlug = null
-    refreshing.value = false
-  }
-}
-watch(slug, () => {
-  prs.value = null
-  error.value = null
-  void load()
-}, { immediate: true })
-
-// Live: a task change in this project can change its PR's gates, and CI and
-// the base branch move on GitHub without an event, so it also re-reads
-// every 30 seconds while the page is open
-let debounce: ReturnType<typeof setTimeout> | null = null
-const reload = () => {
-  if (debounce) clearTimeout(debounce)
-  debounce = setTimeout(() => void load(), 500)
-}
-onMounted(() => {
-  const stop = live.subscribe((event) => {
-    if ((event.type === 'task.updated' || event.type === 'task.created') && event.task.projectId === project.value?.id) reload()
-    else if (event.type === 'task.deleted' && event.projectId === project.value?.id) reload()
-  })
-  const timer = setInterval(() => {
-    if (document.visibilityState === 'visible') void load()
-  }, 30_000)
-  onBeforeUnmount(() => {
-    stop()
-    clearInterval(timer)
-    if (debounce) clearTimeout(debounce)
-  })
-})
+// Task and run events refetch it too (queries/dependencies.ts)
+const { data: prs, error, isFetching, refetch } = useQuery(computed(() => pullRequestsQuery(slug.value)))
 
 const rows = computed(() => (prs.value ?? []).map(pr => ({
   pr,
@@ -107,8 +59,8 @@ const summary = computed(() => {
             color="neutral"
             size="sm"
             class="ms-auto"
-            :loading="refreshing"
-            @click="load"
+            :loading="isFetching"
+            @click="refetch()"
           />
         </div>
 
@@ -116,7 +68,7 @@ const summary = computed(() => {
           v-if="error && !prs"
           color="error"
           variant="subtle"
-          :title="error"
+          :title="error.message"
           class="m-4"
         />
         <div

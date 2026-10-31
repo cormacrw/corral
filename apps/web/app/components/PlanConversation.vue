@@ -158,12 +158,9 @@ async function approve(plan: Plan, to: 'ready' | 'backlog') {
 // The PM's turn as it happens: the saved part, then live run.events
 const activeRunId = computed(() => session.value?.activeRunId ?? null)
 const transcript = useQuery(computed(() => ({ ...runTranscriptQuery(activeRunId.value ?? ''), enabled: Boolean(activeRunId.value) })))
-watch([activeRunId, transcript.data], ([runId, saved]) => {
-  if (runId) live.watchRun(runId, (saved ?? []).map(event => ({ ...event })))
-}, { immediate: true })
 // What the turn has posted to the log already (a question, a plan) isn't repeated in its transcript
 const repliesOf = (runId: string) => session.value?.messages.filter(m => m.role === 'pm' && m.runId === runId).map(m => m.text) ?? []
-const liveEvents = computed(() => activeRunId.value ? withoutMessages(live.state.value.runEvents[activeRunId.value] ?? [], repliesOf(activeRunId.value)) : [])
+const liveEvents = computed(() => activeRunId.value ? withoutMessages(transcript.data.value ?? [], repliesOf(activeRunId.value)) : [])
 // A finished turn's steps sit above its first message
 const firstOfTurn = (message: PlanMessage) => message.role === 'pm' && message.runId !== null && message.runId !== activeRunId.value
   && session.value?.messages.find(m => m.role === 'pm' && m.runId === message.runId)?.id === message.id

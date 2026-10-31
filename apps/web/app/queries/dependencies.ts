@@ -13,6 +13,7 @@ type Update<T> = (current: T | undefined) => T | undefined
 export interface EventCache {
   // Changes a cached entry. Returning undefined leaves it uncached.
   set: <T>(key: QueryKey, update: Update<T>) => void
+  get: <T>(key: QueryKey) => T | undefined
   slug: (projectId: string) => string | undefined
   taskRef: (taskId: string) => string | undefined
 }
@@ -33,6 +34,14 @@ const upsert = <T extends { id: string }>(list: T[], item: T): T[] =>
 // complete
 const upsertInto = <T extends { id: string }>(item: T): Update<T[]> => list => list && upsert(list, item)
 const merge = <T>(patch: Partial<T>): Update<T> => current => current && { ...current, ...patch }
+
+// A fetch can already hold lines whose event is still on its way, so a line
+// counts by where it sits. Undefined when there is nothing to add: writing
+// would mark the transcript fresh.
+const addLines = (offset: number, events: RunEvent[]): Update<RunEvent[]> => (lines) => {
+  if (!lines || offset > lines.length || offset + events.length <= lines.length) return undefined
+  return [...lines, ...events.slice(lines.length - offset)]
+}
 
 // Drafts live only in their plan, not in the project's task list
 function writeTask(task: Task, cache: EventCache): void {
@@ -126,13 +135,24 @@ export const eventDependencies: EventDependencies = {
     invalidates: () => [keys.inbox()]
   },
   'run.updated': {
-    write: ({ run }, cache) => cache.set<Run>(keys.runs.detail(run.id), current => current && run),
-    // Lease changes show as counts on agents
-    invalidates: ({ run }, cache) => [keys.runs.lists(), keys.agents.list(), keys.inbox(), ...projectStale(run.projectId, cache)]
+    write: ({ run }, cache) => {
+      cache.set<Run>(keys.runs.detail(run.id), current => current && run)
+      cache.set<Run[]>(keys.runs.list({ agentId: run.agentId }), runs => runs && (runs.some(r => r.id === run.id) ? upsert(runs, run) : [run, ...runs]))
+    },
+    // Lease changes show as counts on agents, and a designer's run can add a version
+    invalidates: ({ run }, cache) => [
+      keys.runs.lists(), keys.agents.list(), keys.inbox(),
+      ...(run.taskRef ? [keys.tasks.designs(run.taskRef)] : []),
+      ...projectStale(run.projectId, cache)
+    ]
   },
   'run.events': {
-    write: ({ runId, events }, cache) => cache.set<RunEvent[]>(keys.runs.transcript(runId), lines => lines && [...lines, ...events]),
-    invalidates: () => []
+    write: ({ runId, offset, events }, cache) => cache.set<RunEvent[]>(keys.runs.transcript(runId), addLines(offset, events)),
+    // Lines were missed, or the first fetch failed: only a fetch can fill in
+    invalidates: ({ runId, offset }, cache) => {
+      const lines = cache.get<RunEvent[]>(keys.runs.transcript(runId))
+      return lines && offset <= lines.length ? [] : [keys.runs.transcript(runId)]
+    }
   },
   'runner.status': {
     write: ({ status }, cache) => cache.set(keys.runner(), () => status),
@@ -197,6 +217,7 @@ function eventCache(client: QueryClient, raced: QueryKey[]): EventCache {
       // overwrite it, so the key needs a fetch that starts after
       if (client.getQueryState(key)?.fetchStatus === 'fetching') raced.push(key)
     },
+    get: key => client.getQueryData(key),
     slug: projectId => client.getQueryData<Project[]>(keys.projects.list())?.find(p => p.id === projectId)?.slug,
     taskRef: (taskId) => {
       const details = client.getQueriesData<Task>({ queryKey: keys.tasks.details(), predicate: query => query.queryKey.length === keys.tasks.detail('').length })

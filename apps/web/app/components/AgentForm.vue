@@ -24,19 +24,15 @@ watch([open, runtimes], ([isOpen], [wasOpen]) => {
   if (isOpen && !wasOpen) Object.assign(form, { name: '', role: 'developer', concurrency: 1, runtime: undefined })
   if (!form.runtime || !runtimes.value.some(r => r.value === form.runtime)) form.runtime = runtimes.value[0]?.value
 })
-const saving = ref(false)
 const canSave = computed(() => form.name.trim().length > 0 && form.runtime !== undefined && form.concurrency >= 1)
 async function save() {
   if (!canSave.value || !form.runtime) return
-  saving.value = true
   try {
     const agent = await create.mutateAsync({ name: form.name.trim(), role: form.role, runtime: form.runtime, concurrency: form.concurrency })
     toast.add({ title: `Added ${agent.name}`, color: 'success' })
     open.value = false
   } catch (e) {
     toast.add({ title: 'Not added', description: e instanceof Error ? e.message : String(e), color: 'error' })
-  } finally {
-    saving.value = false
   }
 }
 </script>
@@ -120,7 +116,7 @@ async function save() {
           label="Add agent"
           type="submit"
           form="add-agent"
-          :loading="saving"
+          :loading="create.isPending.value"
           :disabled="!canSave"
           data-testid="add-agent-save"
         />
