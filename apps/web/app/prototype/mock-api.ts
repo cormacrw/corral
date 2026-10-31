@@ -302,6 +302,19 @@ route('POST', '/plan/sessions/:id/close', ([id]) => {
   if (s.projectId) emit({ type: 'plan.drafts', projectId: s.projectId, sessions: drafts(s.projectId) })
   return s
 })
+// Decides a confirm card as the real endpoint does, without running the tool
+route('POST', '/plan/sessions/:id/actions/:actionId', ([id, actionId], body) => {
+  const s = f.planSessions.find(x => x.id === id) ?? notFound()
+  const message = f.planMessages[s.id]?.find(m => m.id === actionId && m.pendingAction) ?? notFound()
+  const action = message.pendingAction!
+  if (action.status !== 'pending') return message
+  const { decision } = body as { decision: 'confirm' | 'cancel' }
+  Object.assign(action, decision === 'confirm' ? { status: 'confirmed', result: 'Done.' } : { status: 'cancelled' })
+  emit({ type: 'plan.message', message })
+  postMessage(s.id, { role: 'pm', kind: 'action_result', text: decision === 'confirm' ? `Confirmed: ${action.summary}. Done.` : `Cancelled: ${action.summary}. Nothing was changed.` })
+  emit({ type: 'plan.session', session: Object.assign(s, { unread: true, updatedAt: new Date().toISOString() }) })
+  return message
+})
 route('POST', '/plan/sessions/:id/read', ([id]) => {
   const s = Object.assign(f.planSessions.find(s => s.id === id) ?? notFound(), { unread: false })
   emit({ type: 'plan.session', session: s })

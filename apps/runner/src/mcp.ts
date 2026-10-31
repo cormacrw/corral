@@ -158,17 +158,17 @@ const roleToolDefinitions: Record<AgentRole, Partial<Record<AgentTool, ToolDefin
   }
 }
 
-const PM_AREA_TOOLS = [...Object.keys(pmDirectTools), 'delete_project', 'stop_run', 'stop_all', 'resume_all', 'act_on_inbox', 'approve_design', 'request_design_changes'] as AgentTool[]
-
 export const ROLE_TOOLS: Record<AgentRole, AgentTool[]> = {
   developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'report_outcome'],
   reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'get_design', 'report_outcome'],
   pm: PM_TOOL_NAMES
 }
 
-// PM tools that act on the conversation or on Corral as a whole. The rest take
-// a `project` slug (or name one themselves, like delete_project and list_runs).
-const PM_UNSCOPED_TOOLS: readonly AgentTool[] = ['ask_question', 'approve_plan', ...PM_AREA_TOOLS]
+// PM tools that get the optional `project` input. Every other PM tool acts on
+// the conversation or on Corral as a whole, or names its project in its own
+// input like delete_project and list_runs. Their inputs are strict on the
+// server, so a tool is only listed here if the server accepts `project` for it.
+const PM_PROJECT_TOOLS: readonly AgentTool[] = ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'propose_plan', 'flag_stale_docs', 'create_task', 'update_task', 'move_task', 'approve_task', 'delete_task', 'update_epic']
 
 // The tools a run gets: its role's, plus submit_design for a design task's
 // developer (D20)
@@ -226,7 +226,7 @@ export class ToolServer {
     const server = new McpServer({ name: 'corral', version: '1' })
     for (const name of route.tools) {
       const definition = roleToolDefinitions[route.role][name] ?? toolDefinitions[name]
-      server.registerTool(name, { description: definition.description, inputSchema: route.role === 'pm' && !PM_UNSCOPED_TOOLS.includes(name) ? { ...definition.input, project: z.string().min(1).optional().describe('Project slug. Required in global sessions; defaults to the session project in project sessions. Name another project to act there.') } : definition.input }, async (input: Record<string, unknown>) => {
+      server.registerTool(name, { description: definition.description, inputSchema: route.role === 'pm' && PM_PROJECT_TOOLS.includes(name) ? { ...definition.input, project: z.string().min(1).optional().describe('Project slug. Required in global sessions; defaults to the session project in project sessions. Name another project to act there.') } : definition.input }, async (input: Record<string, unknown>) => {
         const outcome = await route.handler(name, input).catch((error: unknown): ToolOutcome => ({ ok: false, error: error instanceof Error ? error.message : String(error) }))
         return toContent(outcome)
       })
