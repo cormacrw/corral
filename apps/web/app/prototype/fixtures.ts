@@ -883,7 +883,8 @@ export function inbox(): Inbox {
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
       preview: body, body, sender: { name: 'Rita', role: 'reviewer' }, at: review.updatedAt,
       prUrl: review.prUrl!, resolution: null, headSha: review.prHeadSha!,
-      tasks: tasks.filter(t => t.epicId === review.id).map(task => ({ task, evidence: evidence[task.id] ?? [] }))
+      tasks: tasks.filter(t => t.epicId === review.id).map(task => ({ task, evidence: evidence[task.id] ?? [] })),
+      since: null, newArtifacts: []
     })
   }
   const conflict = epics.find(e => e.reviewState === 'conflict')
@@ -895,7 +896,7 @@ export function inbox(): Inbox {
       id: conflict.id, type: 'epic_conflict', epicId: conflict.id, taskId: null, taskRef: null, subject: conflict.title,
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
       preview: body, body, sender: { name: 'Corral', role: 'system' }, at: conflict.updatedAt,
-      prUrl: conflict.prUrl!, resolution: null, headSha: conflict.prHeadSha!, targetBranch: 'main', files
+      prUrl: conflict.prUrl!, resolution: null, headSha: conflict.prHeadSha!, targetBranch: 'main', files, since: null, newArtifacts: []
     })
   }
   const completed = tasks.find(t => t.status === 'merged')!
