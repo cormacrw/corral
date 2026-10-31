@@ -4,7 +4,7 @@ import { and, asc, desc, eq, exists, isNull, sql } from 'drizzle-orm'
 import { EpicMerger } from './epic-merge.ts'
 import { appendAudit, auditEvent, type TransitionDetail } from './audit.ts'
 import { verdictForSubmission } from './claim.ts'
-import { evidenceMissing, taskBase } from './task-base.ts'
+import { evidenceState, taskBase } from './task-base.ts'
 import { ApiFailure } from './errors.ts'
 import { publishDependents } from './dependent-tasks.ts'
 import { TaskIntegrator } from './task-integration.ts'
@@ -201,7 +201,7 @@ export class MergeOrchestrator {
       facts: {
         approvalIsForHeadCommit: approval !== null && approval.headSha === pr.headSha,
         requiredChecksPassed: requiredPassing.length === required.length,
-        evidenceComplete: (await evidenceMissing(db, task)).length === 0,
+        evidenceComplete: (await evidenceState(db, task)).missing.length === 0,
         mergeable: pr.mergeable === true && pr.state === 'open'
       }
     }

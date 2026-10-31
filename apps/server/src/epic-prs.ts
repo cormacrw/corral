@@ -1,6 +1,6 @@
 import { arrivalKey, storedMessages, withMessages, type PreparedItem } from './inbox-message.ts'
 import type { EpicConflictItem, EpicReviewActionInput, EpicReviewItem, EpicReviewReport, EpicReviewTask, InboxSince, RunJob } from '@corral/contracts'
-import { ACTIVE_RUN_STATES, feedbackFixTitle, FIX_TITLE_PREFIX, feedbackPoints, isTaskDone, LEASE_DURATION_MS, markdownToRichText, taskRef, type Actor, type CompletionState } from '@corral/core'
+import { ACTIVE_RUN_STATES, isActiveRun, feedbackFixTitle, FIX_TITLE_PREFIX, feedbackPoints, isTaskDone, LEASE_DURATION_MS, markdownToRichText, taskRef, type Actor, type CompletionState } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm'
 import { appendAudit, auditEvent, auditText, readAudit } from './audit.ts'
@@ -10,7 +10,7 @@ import { loadEpic } from './epics.ts'
 import type { PullRequest } from './github.ts'
 import { Backoff } from './retries.ts'
 import { fileArtifacts, workNotes } from './inbox-changes.ts'
-import { runEndValues } from './run-lifecycle.ts'
+import { runEndValues, RUN_TIMEOUT_SECONDS } from './run-lifecycle.ts'
 import { listEvidenceFor } from './runs.ts'
 import { thumbnailUrl } from './projects.ts'
 import { EPIC_REBASE_NO_GATES, EPIC_SQUASH_KEEPS_MIGRATIONS, EPIC_SQUASH_KEEPS_TRAILERS } from './prompts.ts'
@@ -138,7 +138,7 @@ export class EpicPullRequests {
           runId: run!.id, runNumber: run!.number, leaseEpoch: 1, role: 'reviewer', runtime: agent.runtime,
           projectId: project.id, repository: project.repository, defaultBranch: project.defaultBranch, baseBranch: project.defaultBranch,
           taskId: null, taskRef: null, epicId: epic.id, branch: epic.branch, headSha: epic.prHeadSha,
-          planSessionId: null, agentSessionId: null, fallbackPrompt: null, model: null, timeoutSeconds: 3600,
+          planSessionId: null, agentSessionId: null, fallbackPrompt: null, model: null, timeoutSeconds: RUN_TIMEOUT_SECONDS,
           prompt: `You are ${agent.name}, reviewing the integration of epic "${epic.title}".\n\n${JSON.stringify(context, null, 2)}\n\nReview the whole combined diff with git diff origin/${project.defaultBranch}...HEAD at commit ${epic.prHeadSha}. This is a read-only checkout: do not edit, commit or push. Check the epic goal and every task's criteria, looking for integration problems between tasks (API/UI mismatches, inconsistent docs, duplicate helpers). The evidence is context; do not re-judge individual task evidence. Criteria checked by a human and tasks flagged humanReview wait for the human at this epic's approval: do not attempt them, produce evidence or verdicts for them, or request changes over them. Use get_task for the whole epic and get_evidence to fetch any listed evidence ID. Rerun the project's lint, typecheck, tests and build as gates WITHOUT THE CACHE (for Turbo use --force). Always finish with report_outcome, outcome approved or changes_requested, and specific reasoning in summary. No per-task criteria verdicts are required. Changes requested create a fix task in the epic; approval sends the epic PR to human review.`
         }
       }
@@ -159,7 +159,7 @@ export class EpicPullRequests {
       const [project] = await tx.select().from(projects).where(eq(projects.id, run.projectId)).for('update')
       const [epic] = await tx.select().from(epics).where(eq(epics.id, run.epicId!)).for('update')
       const [current] = await tx.select().from(runs).where(eq(runs.id, run.id)).for('update')
-      if (!project || !epic || !current || !ACTIVE_RUN_STATES.includes(current.state as typeof ACTIVE_RUN_STATES[number]) || epic.reviewState !== 'in_review' || epic.prHeadSha !== run.headSha || !complete(await epicBoard(tx, epic.id))) throw new Error('Epic changed during review; this verdict is stale')
+      if (!project || !epic || !current || !isActiveRun(current.state) || epic.reviewState !== 'in_review' || epic.prHeadSha !== run.headSha || !complete(await epicBoard(tx, epic.id))) throw new Error('Epic changed during review; this verdict is stale')
       const actor: Actor = { kind: 'agent', role: 'reviewer', runId: run.id }
       await tx.update(runs).set(runEndValues({ state: 'completed', outcome, summary: report.summary }, this.now())).where(eq(runs.id, run.id))
       await tx.update(epics).set({ reviewState: report.outcome === 'approved' ? 'human_review' : 'changes_requested', updatedAt: this.now() }).where(eq(epics.id, epic.id))

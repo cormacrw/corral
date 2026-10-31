@@ -6,6 +6,7 @@ import { listTaskAttachments } from './attachments.ts'
 import { slugify } from './projects.ts'
 import { designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
 import { latestRebaseCheckFailures } from './rebase-review.ts'
+import { RUN_TIMEOUT_SECONDS } from './run-lifecycle.ts'
 import { listEvidence } from './runs.ts'
 import { isEpicRebaseTask, taskBase } from './task-base.ts'
 import { listTaskSubmissions, selectPrFreeProtocol } from './task-submissions.ts'
@@ -14,8 +15,6 @@ import { type AgentRow, type RunContext, type RunCore } from './run-context.ts'
 import { feedbackComment } from './run-outcomes.ts'
 
 const { acceptanceCriteria, comments, designVersions, reviews, runs, taskDesignPins, tasks } = schema
-
-const RUN_TIMEOUT_SECONDS = 60 * 60
 
 export function actorLabel(actor: Actor): string {
   switch (actor.kind) {

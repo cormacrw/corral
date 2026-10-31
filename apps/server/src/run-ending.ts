@@ -92,6 +92,13 @@ export class RunEnding {
   }
 
   // Slots in use on each runner, for the runner list (design/settings.md)
+  // Ends a run and tells the runner, in that order: see Scheduler.dispatch
+  async stop(ctx: RunContext, error: string, stop: { reason: string, keepWork?: true }): Promise<void> {
+    await this.interrupted(ctx, error)
+    this.#c.d.runner.send({ type: 'run.stop', runId: ctx.run.id, ...stop }, ctx.run.runnerId)
+    await this.publish(ctx)
+  }
+
   async refreshLoad(): Promise<void> {
     const busy = await this.#c.d.db.select({ runnerId: runs.runnerId, n: count() }).from(runs)
       .where(and(inArray(runs.state, [...ACTIVE_RUN_STATES]), isNotNull(runs.runnerId)))

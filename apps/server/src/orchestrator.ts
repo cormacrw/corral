@@ -159,9 +159,7 @@ export class Orchestrator implements RunnerHandlers {
     for (const { id } of live) {
       const ctx = await this.#c.runs.load(id)
       if (!ctx) continue
-      await this.#c.ending.interrupted(ctx, KILL_SWITCH_STOP)
-      this.#c.d.runner.send({ type: 'run.stop', runId: id, reason: 'Corral was stopped', keepWork: true }, ctx.run.runnerId)
-      await this.#c.ending.publish(ctx)
+      await this.#c.ending.stop(ctx, KILL_SWITCH_STOP, { reason: 'Corral was stopped', keepWork: true })
     }
   }
 

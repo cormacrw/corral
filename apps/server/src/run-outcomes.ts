@@ -7,12 +7,12 @@ import { appendAudit, auditEvent } from './audit.ts'
 import { bundleProblem } from './designs.ts'
 import type { PullRequest } from './github.ts'
 import { carryOverApproval, checkTrivialRebase } from './rebase-review.ts'
-import { isEpicRebaseTask, taskBase } from './task-base.ts'
+import { evidenceState, isEpicRebaseTask, taskBase } from './task-base.ts'
 import { recordTaskSubmission } from './task-submissions.ts'
-import { addComment, applyTransition, lockTask, toTaskState, type ProjectRow, type TaskRow } from './tasks.ts'
+import { addComment, applyTransition, toTaskState, type ProjectRow, type TaskRow } from './tasks.ts'
 import { ToolError, server, type RunContext, type RunCore } from './run-context.ts'
 
-const { acceptanceCriteria, comments, designVersions, evidence, reviews, taskSubmissions, tasks } = schema
+const { acceptanceCriteria, comments, designVersions, reviews, taskSubmissions, tasks } = schema
 
 // The developer's one-line work note, posted as a comment on every outcome
 export const MAX_NOTE_LENGTH = 200
@@ -149,8 +149,7 @@ export class RunOutcomes {
     const prFree = task.integrationProtocol > 0
     const branchHead = prFree ? await this.#c.d.github.branchHead(ctx.project.repository, task.branch!) : null
     const next = await db.transaction(async (tx) => {
-      const locked = await lockTask(tx, task.id)
-      if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease. Stop working.')
+      const locked = await this.#c.runs.lockHeld(tx, ctx)
       const headSha = locked.task.headSha!
       await this.#bindVerdict(tx, locked.task, report, verdict, branchHead)
       // A change request is compared with the previous round's, if that
@@ -217,8 +216,7 @@ export class RunOutcomes {
     const task = ctx.task!
     const branchHead = task.integrationProtocol > 0 ? await this.#c.d.github.branchHead(ctx.project.repository, task.branch!) : null
     await this.#c.d.db.transaction(async (tx) => {
-      const locked = await lockTask(tx, task.id)
-      if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease. Stop working.')
+      const locked = await this.#c.runs.lockHeld(tx, ctx)
       await this.#bindVerdict(tx, locked.task, report, 'approved', branchHead)
       const carried = await carryOverApproval(tx, locked, { actor: this.#c.runs.actor(ctx), runId: ctx.run.id, via: 'a reviewed rebase', note: report.summary })
       if (!carried.ok) throw new ToolError(`Not recorded. ${carried.problem}`)
@@ -233,8 +231,7 @@ export class RunOutcomes {
   async #blockedRebaseReview(ctx: RunContext, reason: string) {
     if (!reason.trim()) throw new ToolError('Explain the substantial change and the affected criteria for the human.')
     await this.#c.d.db.transaction(async (tx) => {
-      const { task, project } = await lockTask(tx, ctx.task!.id)
-      if (task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease. Stop working.')
+      const { task, project } = await this.#c.runs.lockHeld(tx, ctx)
       await tx.insert(comments).values({ taskId: task.id, author: this.#c.runs.actor(ctx), body: `Rebase review blocked: ${reason.trim()}` })
       await applyTransition(tx, task, project, { type: 'block', reason }, server, { event: 'blocked', runId: ctx.run.id })
       await this.#c.ending.endRunIn(tx, ctx, { state: 'completed', outcome: 'blocked', summary: reason })
@@ -246,8 +243,7 @@ export class RunOutcomes {
   // Asks a human: the task becomes Blocked with the question as its reason (D11)
   async #stuck(ctx: RunContext, question: string, note: string) {
     const comment = await this.#c.d.db.transaction(async (tx) => {
-      const { task, project } = await lockTask(tx, ctx.task!.id)
-      if (task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease. Stop working.')
+      const { task, project } = await this.#c.runs.lockHeld(tx, ctx)
       const comment = await this.#c.ending.postNote(tx, ctx, note)
       await applyTransition(tx, task, project, { type: 'block', reason: question }, server, { event: 'stuck', runId: ctx.run.id })
       await this.#c.ending.endRunIn(tx, ctx, { state: 'completed', outcome: 'stuck', summary: question })
@@ -264,10 +260,7 @@ export class RunOutcomes {
     const { db, github } = this.#c.d
     const task = ctx.task!
     const head = await github.branchHead(ctx.project.repository, task.branch!)
-    const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
-    const attached = await db.select({ criterionId: evidence.criterionId }).from(evidence)
-      .where(and(eq(evidence.taskId, task.id), eq(evidence.round, task.reviewRounds)))
-    const missing = criteria.filter(c => !c.checkedByHuman && !attached.some(e => e.criterionId === c.id))
+    const { criteria, attached, missing } = await evidenceState(db, task)
 
     // Check with core before touching GitHub, so a rejected outcome leaves no trace
     const check = transition(toTaskState(task), {
@@ -295,8 +288,7 @@ export class RunOutcomes {
     await this.#checkSubmission(ctx, headSha)
 
     const comment = await db.transaction(async (tx) => {
-      const locked = await lockTask(tx, task.id)
-      if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease while submitting. Stop working.')
+      const locked = await this.#c.runs.lockHeld(tx, ctx, 'This run lost its lease while submitting. Stop working.')
       await applyTransition(tx, locked.task, locked.project, {
         type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true
       }, server, { event: 'commit_submitted', runId: ctx.run.id, headSha, pr: null })
@@ -345,8 +337,7 @@ export class RunOutcomes {
       : null
 
     const { posted, verified } = await db.transaction(async (tx) => {
-      const locked = await lockTask(tx, task.id)
-      if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease while submitting. Stop working.')
+      const locked = await this.#c.runs.lockHeld(tx, ctx, 'This run lost its lease while submitting. Stop working.')
       await tx.update(tasks).set({ headSha: report.headSha, ...(pr && { prNumber: pr.number, prUrl: pr.url }) }).where(eq(tasks.id, task.id))
       const carried = rebaseCheck && !rebaseCheck.error && rebaseCheck.failures.length === 0
         ? await this.#carryVerifiedRebase(tx, ctx, { task: { ...locked.task, headSha: report.headSha!, prNumber: pr?.number ?? locked.task.prNumber }, project: locked.project }, report)
@@ -392,17 +383,13 @@ export class RunOutcomes {
   async #reportFindings(ctx: RunContext, report: OutcomeReport) {
     const { db } = this.#c.d
     const task = ctx.task!
-    const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
-    const attached = await db.select({ criterionId: evidence.criterionId }).from(evidence)
-      .where(and(eq(evidence.taskId, task.id), eq(evidence.round, task.reviewRounds)))
-    const missing = criteria.filter(c => !c.checkedByHuman && !attached.some(e => e.criterionId === c.id))
+    const { missing } = await evidenceState(db, task)
     if (missing.length > 0) {
       throw new ToolError(`Not submitted. No evidence yet for: ${missing.map(c => `[${c.id}] ${c.text}`).join('; ')}. Attach it and report again.`)
     }
     const marker = findingsMarker(ctx.run.id)
     const posted = await db.transaction(async (tx) => {
-      const locked = await lockTask(tx, task.id)
-      if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease while submitting. Stop working.')
+      const locked = await this.#c.runs.lockHeld(tx, ctx, 'This run lost its lease while submitting. Stop working.')
       await applyTransition(tx, locked.task, locked.project, {
         type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true
       }, server, { event: 'findings_reported', runId: ctx.run.id, headSha: marker })
@@ -440,8 +427,7 @@ export class RunOutcomes {
     const screenshots: { blob: string, fileName: string, contentType: string }[] = []
     for (const shot of shots) screenshots.push({ blob: await blobs.put(shot.data), fileName: shot.fileName, contentType: shot.contentType })
     const version = await db.transaction(async (tx) => {
-      const locked = await lockTask(tx, task.id)
-      if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease while submitting. Stop working.')
+      await this.#c.runs.lockHeld(tx, ctx, 'This run lost its lease while submitting. Stop working.')
       const existing = await tx.select({ version: designVersions.version, status: designVersions.status }).from(designVersions).where(eq(designVersions.taskId, task.id))
       const [row] = await tx.insert(designVersions).values({
         taskId: task.id, version: nextDesignVersion(existing), bundleBlob, specBlob, screenshots, branch: task.branch!, commitSha: submission.headSha
@@ -467,10 +453,7 @@ export class RunOutcomes {
     const head = await github.branchHead(ctx.project.repository, task.branch!)
     const [version] = await db.select().from(designVersions)
       .where(and(eq(designVersions.taskId, task.id), eq(designVersions.commitSha, report.headSha))).orderBy(desc(designVersions.version)).limit(1)
-    const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
-    const attached = await db.select({ criterionId: evidence.criterionId }).from(evidence)
-      .where(and(eq(evidence.taskId, task.id), eq(evidence.round, task.reviewRounds)))
-    const missing = criteria.filter(c => !c.checkedByHuman && !attached.some(e => e.criterionId === c.id))
+    const { missing } = await evidenceState(db, task)
     const problems = [
       head !== report.headSha ? `The branch on GitHub is at ${head ?? 'nothing'}, not your commit ${report.headSha}.` : '',
       !version ? `No design version was submitted at your latest commit ${report.headSha}: call submit_design first.` : '',
@@ -479,8 +462,7 @@ export class RunOutcomes {
     if (problems.length > 0) throw new ToolError(`Not submitted. ${problems.join(' ')} Fix this and report again.`)
 
     const comment = await db.transaction(async (tx) => {
-      const locked = await lockTask(tx, task.id)
-      if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease while submitting. Stop working.')
+      const locked = await this.#c.runs.lockHeld(tx, ctx, 'This run lost its lease while submitting. Stop working.')
       await applyTransition(tx, locked.task, locked.project, {
         type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true
       }, server, { event: 'design_submitted', runId: ctx.run.id, headSha: report.headSha, version: version!.version })

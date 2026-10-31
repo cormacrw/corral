@@ -1,6 +1,8 @@
 import type { RebaseReview, RunOutcome } from '@corral/core'
 import type { schema } from '@corral/db'
 
+export const RUN_TIMEOUT_SECONDS = 60 * 60
+
 // Every way a run ends, as one write. The checks on the runs table reject
 // other combinations; the outcome a role may report is checked there too.
 export type RunEnd =

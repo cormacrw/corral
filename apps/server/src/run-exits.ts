@@ -1,5 +1,5 @@
 import type { RunEvent, RunExit, RunnerMessage } from '@corral/contracts'
-import { ACTIVE_RUN_STATES, type RunState } from '@corral/core'
+import { isActiveRun } from '@corral/core'
 import { schema } from '@corral/db'
 import { and, eq, inArray, isNull, lt, or } from 'drizzle-orm'
 import { LAST_ACTIVITY, runExitError, withLastActivity } from './run-exit.ts'
@@ -69,7 +69,7 @@ export class RunExits {
     // run.ended
     const ctx = await this.#c.runs.load(message.runId)
     if (!ctx) return
-    const live = (ACTIVE_RUN_STATES as readonly RunState[]).includes(ctx.run.state) && ctx.run.leaseEpoch === message.leaseEpoch
+    const live = isActiveRun(ctx.run.state) && ctx.run.leaseEpoch === message.leaseEpoch
     if (live && ctx.run.role === 'pm') await this.#pmExited(ctx, message.exit, message.lastActivityAt)
     else if (live) await this.#runExited(ctx, message.exit, message.lastActivityAt, message.wipSha ?? null)
     else if (reconciled(ctx.run, message.leaseEpoch)) await this.#restoreExit(ctx, message.exit, message.lastActivityAt)

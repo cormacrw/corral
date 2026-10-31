@@ -19,6 +19,10 @@ export type RunState = typeof RUN_STATES[number]
 // Runs in these states count against their agent's concurrency
 export const ACTIVE_RUN_STATES = ['queued', 'starting', 'running', 'waiting_for_input', 'stopping'] as const satisfies readonly RunState[]
 
+export function isActiveRun(state: RunState): boolean {
+  return (ACTIVE_RUN_STATES as readonly RunState[]).includes(state)
+}
+
 // A run in one of these states has ended, and only then has an end time
 export const TERMINAL_RUN_STATES = ['completed', 'failed', 'interrupted'] as const satisfies readonly RunState[]
 export type ActiveRunState = typeof ACTIVE_RUN_STATES[number]

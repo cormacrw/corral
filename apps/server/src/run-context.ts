@@ -1,5 +1,5 @@
-import { ACTIVE_RUN_STATES, type Actor, type RunState } from '@corral/core'
-import { schema, type Database } from '@corral/db'
+import { isActiveRun, type Actor } from '@corral/core'
+import { schema, type Database, type Executor } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import type { AgentTools } from './agent-tools.ts'
 import type { BlobStore } from './blob-store.ts'
@@ -19,7 +19,7 @@ import type { RunJobs } from './run-jobs.ts'
 import type { RunOutcomes } from './run-outcomes.ts'
 import type { RunnerHub } from './runner-hub.ts'
 import type { Scheduler } from './scheduler.ts'
-import type { ProjectRow, TaskRow } from './tasks.ts'
+import { lockTask, type ProjectRow, type TaskRow } from './tasks.ts'
 import type { Transcripts } from './transcripts.ts'
 import type { WorktreeSweep } from './worktree-sweep.ts'
 
@@ -116,9 +116,16 @@ export class RunContexts {
   async fenced(runId: string, leaseEpoch: number): Promise<RunContext | null> {
     const ctx = await this.load(runId)
     if (!ctx || ctx.run.leaseEpoch !== leaseEpoch) return null
-    if (!(ACTIVE_RUN_STATES as readonly RunState[]).includes(ctx.run.state)) return null
+    if (!isActiveRun(ctx.run.state)) return null
     if (ctx.task && (ctx.task.leaseRunId !== runId || ctx.task.leaseEpoch !== leaseEpoch)) return null
     return ctx
+  }
+
+  // Locks the run's task, in `tx`, if the run still holds it
+  async lockHeld(tx: Executor, ctx: RunContext, lost = 'This run lost its lease. Stop working.') {
+    const locked = await lockTask(tx, ctx.task!.id)
+    if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError(lost)
+    return locked
   }
 
   actor(ctx: RunContext): Actor {

@@ -1,10 +1,9 @@
 import { RUNTIMES_TAKING_MESSAGES, type Comment } from '@corral/contracts'
-import { ACTIVE_RUN_STATES, taskRef, richTextToMarkdown, type Actor, type RunState } from '@corral/core'
+import { ACTIVE_RUN_STATES, isActiveRun, taskRef, richTextToMarkdown, type Actor } from '@corral/core'
 import { schema } from '@corral/db'
 import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
 import { ApiFailure } from './errors.ts'
-import { getRun } from './runs.ts'
 import { addComment, deleteTaskRows, loadTask, type TaskContentEdit } from './tasks.ts'
 import { HUMAN_STOP, type RunCore } from './run-context.ts'
 
@@ -21,7 +20,7 @@ export class HumanActions {
   // and the task is paused so the scheduler doesn't restart it (flows.md §3)
   async stopRun(runId: string, actor: Actor): Promise<void> {
     const ctx = await this.#c.runs.load(runId)
-    if (!ctx || !(ACTIVE_RUN_STATES as readonly RunState[]).includes(ctx.run.state)) throw new ApiFailure(409, { code: 'conflict', constraint: 'run_not_active' })
+    if (!ctx || !isActiveRun(ctx.run.state)) throw new ApiFailure(409, { code: 'conflict', constraint: 'run_not_active' })
     await this.#c.d.db.transaction(async (tx) => {
       await this.#c.ending.endRunIn(tx, ctx, { state: 'interrupted', error: HUMAN_STOP })
       if (ctx.task) await tx.update(tasks).set({ paused: true }).where(eq(tasks.id, ctx.task.id))
@@ -58,7 +57,7 @@ export class HumanActions {
     const { run, task } = ctx
     if (!task || (run.role !== 'developer' && run.role !== 'designer' && run.role !== 'reviewer')) throw notLive(`Run #${run.number} is a ${run.role} run; only developer, designer and reviewer runs take messages`)
     if (run.state === 'queued') throw notLive(`Run #${run.number} hasn't started yet`)
-    if (!(ACTIVE_RUN_STATES as readonly RunState[]).includes(run.state) || run.state === 'stopping') throw notLive(`Run #${run.number} has ended`)
+    if (!isActiveRun(run.state) || run.state === 'stopping') throw notLive(`Run #${run.number} has ended`)
     if (task.leaseRunId !== run.id || task.leaseEpoch !== run.leaseEpoch) throw notLive(`Run #${run.number} no longer holds ${taskRef(ctx.project.prefix, task.number)}`)
     if (!runner.isOnline(run.runnerId)) throw notLive('No runner is connected to deliver the message')
 
@@ -98,7 +97,7 @@ export class HumanActions {
     if (!ctx || ctx.run.leaseEpoch !== task.leaseEpoch) return
     const { run, project } = ctx
     if (run.role !== 'developer' && run.role !== 'designer' && run.role !== 'reviewer') return
-    if (!(ACTIVE_RUN_STATES as readonly RunState[]).includes(run.state) || run.state === 'stopping') return
+    if (!isActiveRun(run.state) || run.state === 'stopping') return
 
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, taskId)).orderBy(asc(acceptanceCriteria.position))
     const ref = taskRef(project.prefix, task.number)
@@ -131,7 +130,7 @@ export class HumanActions {
   // D10 "Deleting": stop the run, close the PR, delete the branch when safe,
   // then hide the task. Backlog tasks are simply removed.
   async deleteTask(taskId: string, actor: Actor, reason: string | null): Promise<void> {
-    const { db, github, runner } = this.#c.d
+    const { db, github } = this.#c.d
     const [row] = await db.select({ task: tasks, project: projects }).from(tasks)
       .innerJoin(projects, eq(projects.id, tasks.projectId)).where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt)))
     if (!row) throw new ApiFailure(404, { code: 'not_found' })
@@ -144,10 +143,7 @@ export class HumanActions {
     if (paused?.leaseRunId) {
       const ctx = await this.#c.runs.load(paused.leaseRunId)
       if (ctx) {
-        runner.send({ type: 'run.stop', runId: ctx.run.id, reason: 'The task was deleted' }, ctx.run.runnerId)
-        await this.#c.ending.endRun(ctx, { state: 'interrupted', error: 'The task was deleted' })
-        this.#c.d.events.publish({ type: 'run.updated', run: await getRun(db, ctx.run.id) })
-        await this.#c.ending.refreshLoad()
+        await this.#c.ending.stop(ctx, 'The task was deleted', { reason: 'The task was deleted' })
       }
     }
     if (task.prNumber) {
@@ -179,9 +175,7 @@ export class HumanActions {
     for (const { id } of live) {
       const ctx = await this.#c.runs.load(id)
       if (!ctx) continue
-      runner.send({ type: 'run.stop', runId: id, reason: 'The project was removed' }, ctx.run.runnerId)
-      await this.#c.ending.endRun(ctx, { state: 'interrupted', error: 'The project was removed' })
-      this.#c.d.events.publish({ type: 'run.updated', run: await getRun(db, id) })
+      await this.#c.ending.stop(ctx, 'The project was removed', { reason: 'The project was removed' })
     }
     await this.#c.ending.refreshLoad()
     const worked = await db.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.projectId, projectId), ne(tasks.status, 'backlog')))

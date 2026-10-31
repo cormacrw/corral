@@ -13,12 +13,13 @@ export class EpicBranchError extends Error {
   }
 }
 
-// The agent-checkable criteria with no evidence this round (D21, D28)
-export async function evidenceMissing(db: Executor, task: { id: string, reviewRounds: number }) {
+// A task's criteria and this round's evidence, and the agent-checkable
+// criteria with none yet (D21, D28)
+export async function evidenceState(db: Executor, task: { id: string, reviewRounds: number }) {
   const criteria = await db.select().from(schema.acceptanceCriteria).where(eq(schema.acceptanceCriteria.taskId, task.id)).orderBy(asc(schema.acceptanceCriteria.position))
   const attached = await db.select({ criterionId: schema.evidence.criterionId }).from(schema.evidence)
     .where(and(eq(schema.evidence.taskId, task.id), eq(schema.evidence.round, task.reviewRounds)))
-  return criteria.filter(c => !c.checkedByHuman && !attached.some(e => e.criterionId === c.id))
+  return { criteria, attached, missing: criteria.filter(c => !c.checkedByHuman && !attached.some(e => e.criterionId === c.id)) }
 }
 
 // A task handed an epic PR's rebase (D27): its branch is the epic branch, so
