@@ -61,7 +61,10 @@ const loading = computed(() => props.ctx.taskLoading || (p.isReview.value && pro
         v-else
         class="line-clamp-2 text-sm"
       >
-        <span class="font-medium">TL;DR</span> <span class="text-muted">{{ p.tldr.value }}</span>
+        <span class="font-medium">TL;DR</span> <TaskRefText
+          :text="p.tldr.value"
+          class="text-muted"
+        />
       </p>
       <USkeleton
         v-if="ctx.taskLoading && p.isReview.value"

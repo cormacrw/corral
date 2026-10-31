@@ -17,6 +17,8 @@ const textNode = useTaskRefText()
 const safeHref = (href: unknown): href is string => typeof href === 'string' && /^(https?:|mailto:|\/|#)/i.test(href)
 const safeImageSrc = (src: unknown): src is string => typeof src === 'string' && /^(https?:|attachment:|data:image\/|\/)/i.test(src)
 const headingSize: Record<number, string> = { 1: 'text-lg', 2: 'text-base', 3: 'text-sm' }
+const placeholder = () => h('p', { class: 'text-dimmed' }, 'Add a description…')
+const isBlank = (node: Node) => node.type === 'paragraph' && !node.content?.length
 
 function render(node: Node): VNodeChild {
   if (node.type === 'text') {
@@ -35,8 +37,10 @@ function render(node: Node): VNodeChild {
   const children = (node.content ?? []).map(render)
   switch (node.type) {
     case 'doc': {
-      const empty = !node.content?.some(child => child.type !== 'paragraph' || child.content?.length)
-      return h('div', { class: 'flex min-w-0 flex-col gap-2 wrap-anywhere' }, empty ? [h('p', { class: 'text-dimmed' }, 'Add a description…')] : children)
+      const empty = !node.content?.some(child => !isBlank(child))
+      // The editor keeps a blank last paragraph to type in; it isn't content
+      const shown = children.length > 1 && isBlank(node.content!.at(-1)!) ? children.slice(0, -1) : children
+      return h('div', { class: 'flex min-w-0 flex-col gap-2 wrap-anywhere' }, empty ? [placeholder()] : shown)
     }
     case 'paragraph': return h('p', children.length ? children : [h('br')])
     case 'heading': {
@@ -58,7 +62,7 @@ function render(node: Node): VNodeChild {
     default: return h('span', children)
   }
 }
-const Rendered = () => props.doc ? render(props.doc as Node) : h('p', 'Add a description…')
+const Rendered = () => props.doc ? render(props.doc as Node) : placeholder()
 </script>
 
 <template>

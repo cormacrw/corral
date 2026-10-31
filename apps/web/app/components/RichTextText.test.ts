@@ -52,3 +52,20 @@ it('preserves underline marks around linked task refs', () => {
   expect(wrapper.get('u').text()).toBe('Follow COR-12')
   expect(wrapper.get('u a').attributes('href')).toBe('/tasks/COR-12')
 })
+
+it('shows the placeholder dimmed for a missing description and an empty document', () => {
+  for (const doc of [null, { type: 'doc', content: [] }, { type: 'doc', content: [{ type: 'paragraph' }] }]) {
+    const wrapper = mount(RichTextText, { props: { doc } })
+    expect(wrapper.text()).toBe('Add a description…')
+    expect(wrapper.find('p.text-dimmed').exists()).toBe(true)
+  }
+})
+
+it('hides only a trailing blank paragraph', () => {
+  const blank = { type: 'paragraph' }
+  const text = (value: string) => ({ type: 'paragraph', content: [{ type: 'text', text: value }] })
+  const paragraphs = (content: unknown[]) => mount(RichTextText, { props: { doc: { type: 'doc', content } } }).findAll('p').map(p => p.text())
+  expect(paragraphs([text('One'), blank])).toEqual(['One'])
+  expect(paragraphs([text('One'), blank, text('Two')])).toEqual(['One', '', 'Two'])
+  expect(paragraphs([blank, text('One')])).toEqual(['', 'One'])
+})
