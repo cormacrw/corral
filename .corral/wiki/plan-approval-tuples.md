@@ -6,4 +6,4 @@
 
 The `plan_tasks_revision_change` check forbids revisions on removed items. It deliberately does not require task or epic IDs: foreign keys clear those on deletion, and historical plans must still load. Read rows remain separate from the stricter new-write payloads.
 
-Migration 0048 adds both checks NOT VALID, enforcing new inserts/updates after scanning history and warning with every offending plan/session and plan-task/plan ID. `openDatabase` forwards them to the server's output as `Database warning: ...` lines, so operators find them with `docker compose logs server`. Historical rows stay readable and are not repaired or attributed to an invented approver.
+Migration 0049 adds both checks NOT VALID, enforcing new inserts/updates after scanning history and warning with every offending plan/session and plan-task/plan ID. `openDatabase` forwards them to the server's output as `Database warning: ...` lines, so operators find them with `docker compose logs server`. Historical rows stay readable and are not repaired or attributed to an invented approver.

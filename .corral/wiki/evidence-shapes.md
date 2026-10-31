@@ -8,7 +8,7 @@ Notes require non-blank text and reject file fields; files require non-blank
 names and content types plus uploaded bytes. The server calculates the size
 from those bytes; clients cannot supply it. Empty files (size zero) are valid.
 
-Migration 0046 locks and checks existing rows before changing constraints.
+Migration 0047 locks and checks existing rows before changing constraints.
 It stops with the offending IDs if historical rows violate the invariant;
 it never deletes files, rewrites notes or invents metadata. Inspect and resolve
 those rows before retrying. Valid screenshots, video, notes and raw artifacts
