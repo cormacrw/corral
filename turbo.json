@@ -1,10 +1,9 @@
 {
   "$schema": "https://turborepo.com/schema.json",
-  "globalDependencies": ["scripts/check-cpus.ts"],
+  "globalDependencies": ["eslint.config.mjs", "scripts/check-cpus.ts"],
   "globalPassThroughEnv": ["CORRAL_CHECK_CPUS", "VITEST_MAX_WORKERS"],
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
       "outputs": [".output/**", "dist/**"]
     },
     "dev": {
@@ -13,16 +12,10 @@
       "passThroughEnv": ["CORRAL_*"]
     },
     "lint": {},
-    "typecheck": {
-      "dependsOn": ["^build"]
-    },
+    "typecheck": {},
     "test": {
       "cache": false,
       "env": ["CORRAL_DATABASE_URL"]
-    },
-    "@corral/runner#test": {
-      "cache": false,
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/scripts/deploy/runner-update.sh", "$TURBO_ROOT$/scripts/deploy/runner-update-io.py"]
     }
   }
 }

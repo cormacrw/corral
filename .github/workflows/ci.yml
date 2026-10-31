@@ -2,9 +2,18 @@ name: ci
 
 on: push
 
+permissions:
+  contents: read
+
+# Never cancelled on main: auto-deploy.sh reads this check for each commit there
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   ci:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     # Database tests run on PGlite and, through CORRAL_DATABASE_URL, on real
     # Postgres. Concurrency is only proven here (D14).
@@ -81,3 +90,5 @@ jobs:
         run: pnpm run test
         env:
           CORRAL_DATABASE_URL: postgres://corral:corral@localhost:5432/corral
+          # GitHub's standard runner for public repositories has 4 vCPUs
+          CORRAL_CHECK_CPUS: 4
