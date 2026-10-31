@@ -149,7 +149,7 @@ export const eventDependencies: EventDependencies = {
     invalidates: ({ run }, cache) => [
       keys.runs.lists(), keys.agents.list(), keys.inbox(),
       ...(run.taskRef ? [keys.tasks.designs(run.taskRef)] : []),
-      ...projectStale(run.projectId, cache)
+      ...(run.projectId ? projectStale(run.projectId, cache) : [])
     ]
   },
   'run.events': {
@@ -226,7 +226,7 @@ function cachedTasks(client: QueryClient): Task[] {
 // finds nothing left.
 export function clearProject(client: QueryClient, projectId: string): void {
   const slug = client.getQueryData<Project[]>(keys.projects.list())?.find(p => p.id === projectId)?.slug
-  const owned = (queryKey: QueryKey) => client.getQueriesData<{ projectId?: string }>({ queryKey })
+  const owned = (queryKey: QueryKey) => client.getQueriesData<{ projectId?: string | null }>({ queryKey })
     .filter(([, data]) => data?.projectId === projectId)
     .map(([key]) => key)
   const removed = [
@@ -242,7 +242,7 @@ export function clearProject(client: QueryClient, projectId: string): void {
   // screen loses it and refetches to the server's 404
   void client.resetQueries({ predicate: isRemoved })
   // These lists span projects, so they lose its rows and stay
-  const others = <T extends { projectId: string }>(list: T[] | undefined) => list?.filter(item => item.projectId !== projectId)
+  const others = <T extends { projectId: string | null }>(list: T[] | undefined) => list?.filter(item => item.projectId !== projectId)
   client.setQueriesData<Run[]>({ queryKey: keys.runs.lists() }, others)
   client.setQueryData<PlanSession[]>(keys.plan.sessions(), others)
   client.setQueryData<Project[]>(keys.projects.list(), list => list?.filter(p => p.id !== projectId))

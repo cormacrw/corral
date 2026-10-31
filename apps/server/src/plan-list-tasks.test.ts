@@ -56,6 +56,8 @@ describe('list_tasks', { timeout: 30_000 }, () => {
       { ref: ref(2), title: 'Logout button', status: 'ready', type: 'bug', priority: 'medium', epicId: null, dependsOn: [ref(1)] }
     ])
     expect(board.epics).toEqual(expect.arrayContaining([expect.objectContaining({ id: second.id, dependsOn: [first.id] })]))
+    await t.db.update(schema.tasks).set({ humanReview: true, statusReason: 'Needs a decision', prUrl: 'https://github.com/cormacrw/test-app/pull/1' }).where(eq(schema.tasks.epicId, first.id))
+    expect((await list()).tasks[0]).toMatchObject({ humanReview: true, statusReason: 'Needs a decision', pr: 'https://github.com/cormacrw/test-app/pull/1' })
   })
 
   it('filters by status, epic and query, and combines them', async () => {

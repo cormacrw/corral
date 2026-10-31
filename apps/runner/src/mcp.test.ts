@@ -1,4 +1,4 @@
-import { proposedPlanInput, type AgentTool } from '@corral/contracts'
+import { pmActionTools, pmDirectTools, proposedPlanInput, type AgentTool } from '@corral/contracts'
 import { TASK_TYPES, type AgentRole } from '@corral/core'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
@@ -103,6 +103,40 @@ describe('ToolServer', () => {
     await client.close()
   })
 
+  it('exposes typed PM mutations and forwards their inputs', async () => {
+    const { client, calls } = await connect('pm')
+    const listed = (await client.listTools()).tools
+    for (const name of ['create_task', 'update_task', 'move_task', 'approve_task', 'delete_task', 'update_epic']) {
+      expect(listed.some(t => t.name === name)).toBe(true)
+      expect(ROLE_TOOLS.developer).not.toContain(name)
+      expect(ROLE_TOOLS.reviewer).not.toContain(name)
+    }
+    const update = listed.find(t => t.name === 'update_task')!
+    expect(update.inputSchema).toMatchObject({ required: ['taskRef'], properties: { paused: { type: 'boolean' }, acceptanceCriteria: { type: 'array' } } })
+    const input = { taskRef: 'COR-4', title: 'New title', priority: 'high', paused: true }
+    expect((await client.callTool({ name: 'update_task', arguments: input })).isError).not.toBe(true)
+    expect(calls).toEqual([{ tool: 'update_task', input }])
+    expect(listed.find(t => t.name === 'approve_task')!.description).toContain('confirmation')
+    await client.close()
+  })
+
+  it('registers thread tools only for the PM and validates their inputs over MCP', async () => {
+    const { client, calls } = await connect('pm')
+    const listed = (await client.listTools()).tools
+    for (const name of ['start_thread', 'list_threads', 'read_thread', 'message_thread', 'close_thread']) {
+      expect(listed.some(t => t.name === name)).toBe(true)
+      expect(ROLE_TOOLS.developer).not.toContain(name)
+      expect(ROLE_TOOLS.reviewer).not.toContain(name)
+    }
+    const input = { title: 'Inspect code', message: 'Read the entry point', project: 'test-app', runtime: 'codex' }
+    expect((await client.callTool({ name: 'start_thread', arguments: input })).isError).not.toBe(true)
+    expect(calls).toEqual([{ tool: 'start_thread', input }])
+    expect((await client.callTool({ name: 'start_thread', arguments: { title: 'Missing message' } })).isError).toBe(true)
+    expect((await client.callTool({ name: 'read_thread', arguments: { threadId: attachmentId, limit: 101 } })).isError).toBe(true)
+    expect(calls).toHaveLength(1)
+    await client.close()
+  })
+
   it('gives the PM a get_task that takes a required taskRef and passes it through', async () => {
     const { client, calls } = await connect('pm')
     const { tools: listed } = await client.listTools()
@@ -145,6 +179,31 @@ describe('ToolServer', () => {
       expect((await client.callTool({ name: 'attach_evidence', arguments: input })).isError).not.toBe(true)
       expect(calls.at(-1)).toEqual({ tool: 'attach_evidence', input })
     }
+    await client.close()
+  })
+
+  it('passes project slugs through every project-scoped PM tool', async () => {
+    const { client, calls } = await connect('pm')
+    const tools = (await client.listTools()).tools
+    const scoped = ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'propose_plan', 'flag_stale_docs', 'create_task', 'update_task', 'move_task', 'approve_task', 'delete_task', 'update_epic']
+    for (const name of scoped) {
+      expect(tools.find(t => t.name === name)?.inputSchema.properties, name).toHaveProperty('project')
+    }
+    // The server's inputs are strict: an advertised `project` it doesn't take is refused
+    for (const [name, { input }] of Object.entries({ ...pmActionTools, ...pmDirectTools })) {
+      if (scoped.includes(name) || 'project' in input) continue
+      expect(tools.find(t => t.name === name)?.inputSchema.properties ?? {}, name).not.toHaveProperty('project')
+    }
+    expect(tools.find(t => t.name === 'set_update_hold')?.inputSchema.properties ?? {}).not.toHaveProperty('project')
+    expect(tools.find(t => t.name === 'ask_question')?.inputSchema.properties).not.toHaveProperty('project')
+    expect((tools.find(t => t.name === 'delete_project')?.inputSchema as { required?: string[] }).required).toContain('project')
+    expect(tools.find(t => t.name === 'list_projects')?.inputSchema.properties).not.toHaveProperty('project')
+    await client.callTool({ name: 'list_tasks', arguments: { project: 'another-project' } })
+    await client.callTool({ name: 'get_task', arguments: { project: 'another-project', taskRef: 'OTH-1' } })
+    expect(calls).toEqual([
+      { tool: 'list_tasks', input: { project: 'another-project', includeMerged: false } },
+      { tool: 'get_task', input: { project: 'another-project', taskRef: 'OTH-1' } }
+    ])
     await client.close()
   })
 

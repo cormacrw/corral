@@ -1,0 +1,7 @@
+# PM API route coverage (COR-247)
+
+D29's coverage inventory lives in `apps/server/src/pm-route-coverage.ts`: `pmRouteTools` maps exact `METHOD /path` keys to PM tool names; `pmRouteExclusions` gives each excluded route its own written reason. No wildcard prefix matching is used. Unsupported human operations (such as detailed audit views) are explicitly excluded rather than attributed to tools that cannot perform them.
+
+`apps/server/src/pm-route-coverage.test.ts` builds the actual server registration via `createServerApp`, without a database or listening socket, and checks Hono's registered routes. Duplicate validation/body-limit handlers count once. The runner WebSocket and raw-path design-file middleware are included. Normal server tests run this in CI; add an existing PM tool mapping or a reasoned exclusion when adding a route, and remove entries when removing one. The check also rejects unknown tool names, empty mappings, blank reasons, stale entries and overlapping entries.
+
+`PM_TOOL_NAMES` in `packages/contracts/src/pm-tools.ts` is shared with the runner's PM role registration. It includes the typed action/direct tools and the older planning/read tools whose definitions remain in `apps/runner/src/mcp.ts`. A nonexistent legacy definition fails the runner's exhaustive tool-definition type check; a nonexistent route mapping fails the server coverage check at runtime with its route, tool name and repair instructions.

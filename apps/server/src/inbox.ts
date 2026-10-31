@@ -2,7 +2,7 @@ import { needsAttention, type InboxArtifact, type InboxSince, type ReleaseNotesI
 import { auditText, readAudit, type AuditView } from './audit.ts'
 import { epicInboxItems } from './epic-prs.ts'
 import { fileArtifacts, isNew, workNotes } from './inbox-changes.ts'
-import type { Inbox, InboxItem, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
+import type { Inbox, InboxItem, PlanThreadItem, PmActivityItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
 import { withMessage } from './inbox-message.ts'
 import { designPreviewUrl, humanCheckTally, richTextToPlainText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
@@ -50,13 +50,13 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     .orderBy(desc(auditLog.createdAt), desc(auditLog.id))
     .limit(limit * 3)
 
-  const activity: TaskInboxItem[] = []
+  const activity: (TaskInboxItem | PmActivityItem)[] = []
   const resolved: (TaskInboxItem | ReleaseNotesItem)[] = []
   for (const { entry, task, project } of entries) {
     const detail = readAudit(entry.detail)
     const { event } = detail
     const base = { id: String(entry.id), project: projectTag(project), taskId: task.id, taskRef: taskRef(project.prefix, task.number), subject: task.title, prUrl: task.prUrl, at: entry.createdAt.toISOString() }
-    if (entry.actor.kind === 'human' && (entry.action === 'task.deleted' || ['resolve', 'human_approve', 'human_request_changes', 'send_back'].includes(event ?? ''))) {
+    if (entry.actor.kind === 'human' && !entry.actor.viaPm && (entry.action === 'task.deleted' || ['resolve', 'human_approve', 'human_request_changes', 'send_back'].includes(event ?? ''))) {
       const resolution = resolutionText(entry.action, detail, task.type)
       resolved.push({ ...base, type: 'activity', preview: resolution, body: resolution, sender: { name: 'You', role: 'system' }, resolution })
     }
@@ -80,6 +80,22 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     if (entry.actor.kind === 'human') resolved.push(item)
     else activity.push(item)
   }
+  // Read PM calls independently of tasks: deleting a Backlog task removes its
+  // row, but its PM attribution and conversation must survive. Removing a
+  // project clears the entry's project, so that join is a left join.
+  const pmCalls = await db.select({ entry: auditLog, project: projects, session: planSessions }).from(auditLog)
+    .leftJoin(projects, eq(projects.id, auditLog.projectId))
+    .leftJoin(planSessions, sql`${planSessions.id}::text = ${auditLog.detail}->>'sessionId'`)
+    .where(inArray(auditLog.action, [...PM_ACTIVITY]))
+    .orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(limit)
+  for (const { entry, project, session } of pmCalls) {
+    const detail = entry.detail as { targetId?: string | null, summary?: string, sessionId: string, input?: { taskRef?: string } }
+    const text = pmActivityText(entry.action, detail.summary ?? 'A PM action')
+    const base = { id: `pm-${entry.id}`, type: 'activity' as const, subject: text, preview: text, body: session ? `${text}. [PM conversation](/plan/${session.id})` : `${text}.`, sender: { name: 'PM', role: 'pm' as const }, at: entry.createdAt.toISOString(), prUrl: null, resolution: null }
+    const tag = project ? projectTag(project) : { id: '', slug: '', name: session && session.projectId === null ? 'Global' : 'Removed project', thumbnailColor: null, thumbnailUrl: null }
+    if (project && detail.targetId && detail.input?.taskRef) activity.push({ ...base, project: tag, taskId: detail.targetId, taskRef: detail.input.taskRef })
+    else activity.push({ ...base, project: tag, taskId: null, taskRef: null })
+  }
   resolved.push(...releases.filter(d => d.resolution))
   activity.sort((a, b) => b.at.localeCompare(a.at))
   resolved.sort((a, b) => b.at.localeCompare(a.at))
@@ -91,13 +107,13 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
 // started waiting.
 async function planThreads(db: Executor): Promise<PlanThreadItem[]> {
   const rows = await db.select({ session: planSessions, project: projects }).from(planSessions)
-    .innerJoin(projects, eq(projects.id, planSessions.projectId))
+    .leftJoin(projects, eq(projects.id, planSessions.projectId))
     .where(isNull(planSessions.closedAt))
   if (rows.length === 0) return []
   const [pm] = await db.select({ name: agents.name }).from(agents).where(eq(agents.role, 'pm')).limit(1)
   const sender = { name: pm?.name ?? 'PM', role: 'pm' as const }
   const items = await Promise.all(rows.map(async ({ session: row, project }) => {
-    const { session, planId, last } = await sessionState(db, row)
+    const { session, planId, question } = await sessionState(db, row)
     const waitingOnReply = session.status === 'none' && session.unread
     if (session.status !== 'question' && session.status !== 'needs_approval' && !waitingOnReply) return null
     const [reply] = waitingOnReply
@@ -105,7 +121,7 @@ async function planThreads(db: Executor): Promise<PlanThreadItem[]> {
       : []
     if (waitingOnReply && !reply) return null
     const [waiting] = planId ? await db.select().from(plans).where(eq(plans.id, planId)) : []
-    const since = session.status === 'needs_approval' ? waiting!.createdAt : session.status === 'question' ? last!.createdAt : reply!.createdAt
+    const since = session.status === 'needs_approval' ? waiting!.createdAt : session.status === 'question' ? question!.createdAt : reply!.createdAt
     // Tasks dropped in a revision keep a 'removed' row and aren't part of the plan. Plans saved before
     // plan_epics existed have no epic rows, only plans.epicId, so count that as one epic.
     const [epics, tasks] = waiting
@@ -117,12 +133,12 @@ async function planThreads(db: Executor): Promise<PlanThreadItem[]> {
     return {
       id: session.id,
       type: 'plan_thread' as const,
-      project: projectTag(project),
+      project: project ? projectTag(project) : null,
       sessionId: session.id,
       runtime: session.runtime,
       subject: session.title,
       preview: session.preview,
-      question: session.status === 'question' && last ? { text: last.text, recommendation: last.recommendation, options: last.options } : null,
+      question: question ? { text: question.text, recommendation: question.recommendation, options: question.options } : null,
       reply: reply ? reply.text : null,
       plan: waiting ? { id: waiting.id, version: waiting.version, title: waiting.title, summary: waiting.summary, epicCount: epics[0]?.rows === 0 && waiting.epicId ? 1 : epics[0]?.count ?? 0, taskCount: tasks[0]?.count ?? 0 } : null,
       sender,
@@ -232,11 +248,24 @@ async function humanReviewNote(db: Executor, task: typeof tasks.$inferSelect): P
   return `Approved${met}. This task is marked for human review, so it needs your OK before it merges.`
 }
 
+const PM_ACTIVITY = ['pm.tool_called', 'pm.action_proposed', 'pm.action_confirmed', 'pm.action_cancelled', 'pm.action_failed'] as const
+
+function pmActivityText(action: string, summary: string): string {
+  switch (action) {
+    case 'pm.action_proposed': return `Proposed: ${summary}`
+    case 'pm.action_confirmed': return `${summary}, confirmed by you`
+    case 'pm.action_cancelled': return `${summary}, cancelled by you`
+    case 'pm.action_failed': return `Could not confirm: ${summary}`
+    default: return summary
+  }
+}
+
 function projectTag(project: typeof projects.$inferSelect) {
   return { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: thumbnailUrl(project) }
 }
 
 function senderOf(actor: Actor): TaskInboxItem['sender'] {
+  if (actor.kind === 'human' && actor.viaPm) return { name: 'PM', role: 'pm' }
   if (actor.kind === 'agent') return { name: actorLabel(actor), role: actor.role }
   return { name: actorLabel(actor), role: 'system' }
 }

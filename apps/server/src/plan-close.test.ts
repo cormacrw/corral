@@ -130,3 +130,14 @@ it('detaches accepted dependents from discarded drafts instead of blocking them'
   expect(await t.db.select().from(schema.auditLog).where(eq(schema.auditLog.taskId, accepted!.id))).toEqual([])
   expect(t.events).toContainEqual({ type: 'task.updated', task: expect.objectContaining({ id: accepted!.id, status: 'ready', dependsOn: [] }) })
 })
+
+it('refuses a delayed first turn after close even with a stale open session snapshot', async () => {
+  const [session] = await t.db.insert(schema.planSessions).values({ title: 'Delayed child', createdBy: t.actor }).returning()
+  await t.plans.close(session!.id, t.actor)
+  await expect(t.orchestrator.startPmRun(session!, {
+    role: 'pm', projectId: null, repository: '', defaultBranch: '', taskId: null, taskRef: null,
+    branch: null, headSha: null, planSessionId: session!.id, agentSessionId: null,
+    runtime: 'claude-code', model: null, timeoutSeconds: 60, prompt: 'Delayed first message', fallbackPrompt: null
+  })).rejects.toMatchObject({ body: { code: 'conflict', constraint: 'plan_session_closed' } })
+  expect(await t.db.select().from(schema.runs).where(eq(schema.runs.planSessionId, session!.id))).toEqual([])
+})

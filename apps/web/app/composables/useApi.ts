@@ -113,6 +113,7 @@ export const api = {
   runner: () => call<RunnerStatus>('GET', '/runner'),
   status: () => call<ServerStatus>('GET', '/status'),
   stopAll: () => call<GlobalStatus>('POST', '/stop-all'),
+  liftUpdateHold: () => call<GlobalStatus>('DELETE', '/update-hold'),
   resumeAll: () => call<GlobalStatus>('POST', '/resume-all'),
 
   setup: {
@@ -203,6 +204,7 @@ export const api = {
   },
 
   epics: {
+    history: (id: string) => call<AuditEntry[]>('GET', `/epics/${id}/history`),
     review: (id: string, input: EpicReviewActionInput) => call<{ ok: boolean }>('POST', `/epics/${id}/review`, input),
     setDependencies: (id: string, dependsOn: string[]) => call<Epic>('PUT', `/epics/${id}/dependencies`, { dependsOn }),
     list: (slug: string) => call<Epic[]>('GET', `/projects/${slug}/epics`),
@@ -210,9 +212,10 @@ export const api = {
     patch: (id: string, input: PatchEpicInput) => call<Epic>('PATCH', `/epics/${id}`, input)
   },
   plan: {
+    resolveAction: (sessionId: string, actionId: string, decision: 'confirm' | 'cancel') => call<PlanMessage>('POST', `/plan/sessions/${sessionId}/actions/${actionId}`, { decision }),
     sessions: () => call<PlanSession[]>('GET', '/plan/sessions'),
     session: (id: string) => call<PlanSessionDetail>('GET', `/plan/sessions/${id}`),
-    start: (projectId: string, text: string, taskRef?: string, runtime?: AgentRuntime, id?: string) => call<PlanSessionDetail>('POST', '/plan/sessions', { projectId, text, ...(id && { id }), ...(taskRef && { taskRef }), ...(runtime && { runtime }) }),
+    start: (projectId: string | null, text: string, taskRef?: string, runtime?: AgentRuntime, id?: string) => call<PlanSessionDetail>('POST', '/plan/sessions', { projectId, text, ...(id && { id }), ...(taskRef && { taskRef }), ...(runtime && { runtime }) }),
     message: (id: string, text: string, taskRef?: string) => call<PlanMessage>('POST', `/plan/sessions/${id}/messages`, { text, ...(taskRef && { taskRef }) }),
     close: (id: string, options?: { keepalive?: boolean }) => call<PlanSession>('POST', `/plan/sessions/${id}/close`, undefined, options),
     read: (id: string) => call<PlanSession>('POST', `/plan/sessions/${id}/read`),

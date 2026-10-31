@@ -85,6 +85,7 @@ async function go(to: string) {
                     aria-hidden="true"
                   />
                   <span :class="['truncate', session.unread && 'font-semibold text-highlighted']">{{ session.title }}</span>
+                  <span class="text-xs text-muted">{{ projectOf(session)?.name ?? 'Global' }}</span>
                   <UIcon
                     v-if="session.activeRunId"
                     name="i-lucide-loader-circle"
@@ -151,6 +152,7 @@ async function go(to: string) {
                     aria-hidden="true"
                   />
                   <span class="min-w-0 flex-1 truncate">{{ session.title }}</span>
+                  <span class="text-xs text-muted">{{ projectOf(session)?.name ?? 'Global' }}</span>
                   <span class="shrink-0 text-xs text-dimmed">{{ timeAgo(session.updatedAt) }}</span>
                 </button>
               </li>

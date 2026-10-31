@@ -2,7 +2,7 @@
 import type { Evidence, Inbox, InboxActionInput, Review, Task, TaskInboxItem, InboxItem, PlanThreadItem } from '@corral/contracts'
 import { inboxActions } from '~/utils/inbox-actions'
 import { api } from '~/composables/useApi'
-import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
+import { inboxProjectLine as projectLine, inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
 import { moveRadioSelection } from '~/utils/radio'
 
@@ -72,7 +72,7 @@ onMounted(() => {
   void load()
   const stop = live.subscribe((event) => {
     if ((event.type === 'plan.session' || event.type === 'deployment.updated') && event.markedRead) markRead(event.type === 'plan.session' ? event.session.id : event.deployment.id)
-    else if (['task.updated', 'task.deleted', 'task.created', 'run.updated', 'epic.updated', 'plan.session', 'deployment.updated', 'agent.updated'].includes(event.type)) void load()
+    else if (['task.updated', 'task.deleted', 'task.created', 'run.updated', 'epic.updated', 'plan.session', 'deployment.updated', 'agent.updated', 'project.updated', 'project.deleted'].includes(event.type)) void load()
   })
   onBeforeUnmount(stop)
 })
@@ -166,7 +166,7 @@ watch(selected, async (item, previous) => {
     loadedTask.value = null
     return
   }
-  await loadTask(item)
+  await loadTask(isTaskItem(item) ? item : null)
 }, { immediate: true })
 // Capture before the request: plan.session can remove the row before it resolves.
 // Hold refreshes through both the request and flyout close, as for approval.
@@ -264,7 +264,7 @@ async function submit(message: string): Promise<boolean> {
               ? { action: 'delete', ...(message && { text: message }) }
               : action.value === 'send_back' ? { action: 'send_back' } : { action: 'approve', text: message }
       const description = action.value === 'approve' && isSpike.value ? 'You accepted the findings' : submitLabel.value
-      await api.inbox.act(actedOn.taskId, input)
+      await api.inbox.act(actedOn.taskId!, input)
       toast.add({ title: 'Done', description, color: 'success' })
     }
     if (selectedId.value === actedOn.id) text.value = ''
@@ -529,11 +529,12 @@ onBeforeUnmount(() => {
                 <span class="flex items-center gap-1"><ProjectThumbnail
                   :project="selected.project"
                   :size="16"
-                />{{ selected.project.name }} · {{ selected.taskRef }}</span>
+                />{{ projectLine(selected) }}</span>
                 <span>{{ selected.sender.name }} · {{ selected.sender.role }} · {{ timeAgo(selected.at) }}</span>
               </div>
             </div>
             <UButton
+              v-if="task"
               label="Task details"
               variant="outline"
               color="neutral"
@@ -598,7 +599,7 @@ onBeforeUnmount(() => {
                 />
               </template>
               <NuxtLink
-                v-if="selected.type === 'activity'"
+                v-if="selected.type === 'activity' && task"
                 :to="selected.epicId ? `/epics/${selected.epicId}` : `/tasks/${selected.taskRef}`"
                 class="text-sm text-primary hover:underline"
               >{{ selected.epicId ? 'Open epic' : 'Open task' }}</NuxtLink>

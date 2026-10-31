@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -15,6 +15,16 @@ describe('prepareWorkspace for PM turns', () => {
 
   afterEach(async () => {
     await rm(dirname(dataDir), { recursive: true, force: true })
+  })
+
+  it('runs a global session in a stable empty directory without fetching a repository', async () => {
+    const job = pmJob({ projectId: null, repository: 'invalid/no-repository', defaultBranch: '', planSessionId: 'global' })
+    const first = await prepareWorkspace(dataDir, job)
+    expect(first.error).toBeNull()
+    expect(first.workspace).toEqual({ path: join(dataDir, 'sessions', 'global'), bare: null })
+    expect(await readdir(first.workspace!.path)).toEqual([])
+    expect((await git(['rev-parse', '--is-inside-work-tree'], { cwd: first.workspace!.path })).code).not.toBe(0)
+    expect(await prepareWorkspace(dataDir, job)).toEqual(first)
   })
 
   it('checks out each Plan session at its own path under the data dir', async () => {

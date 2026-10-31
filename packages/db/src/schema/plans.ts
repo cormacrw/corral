@@ -1,4 +1,4 @@
-import type { Actor, PlanTaskContent } from '@corral/core'
+import type { Actor, PmAction, PlanTaskContent } from '@corral/core'
 import {
   boolean,
   index,
@@ -20,12 +20,13 @@ import { projects } from './projects.ts'
 import { runs } from './runs.ts'
 import { tasks } from './tasks.ts'
 
-// A conversation with the PM (D9, design/plan.md). Belongs to one project.
+// A conversation with the PM (D9, D29, design/plan.md), global or in one project.
 // The agent CLI's session ID is only a cache: the messages here are the
 // source of truth, and a lost session is reseeded from them.
 export const planSessions = pgTable('plan_sessions', {
   id: uuid().primaryKey().defaultRandom(),
-  projectId: uuid().notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  parentSessionId: uuid().references((): AnyPgColumn => planSessions.id, { onDelete: 'set null' }),
+  projectId: uuid().references(() => projects.id, { onDelete: 'cascade' }),
   title: text().notNull(),
   agentSessionId: text(),
   // The PM's runtime for this session (D18), picked in the composer and
@@ -43,12 +44,15 @@ export const planSessions = pgTable('plan_sessions', {
 }, t => [index().on(t.projectId, t.updatedAt)])
 
 export const planMessages = pgTable('plan_messages', {
+  senderSessionId: uuid().references(() => planSessions.id, { onDelete: 'set null' }),
+  senderTitle: text(),
   id: uuid().primaryKey().defaultRandom(),
   sessionId: uuid().notNull().references(() => planSessions.id, { onDelete: 'cascade' }),
   // 'human' or 'pm'; questions are PM messages flagged as such
   role: text().notNull(),
   kind: text().notNull().default('message'),
   text: text().notNull(),
+  pendingAction: jsonb().$type<PmAction>(),
   // A question's suggested answer and answer choices (ask_question)
   recommendation: text(),
   options: jsonb().$type<string[]>(),

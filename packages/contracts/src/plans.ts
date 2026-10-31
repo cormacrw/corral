@@ -5,8 +5,9 @@ import { agentRuntime, type AgentRuntime } from './agent-runtimes.ts'
 // ── Plan (D9, design/plan.md) ─────────────────────────────────────────────
 
 export interface PlanSession {
+  parentSessionId?: string | null
   id: string
-  projectId: string
+  projectId: string | null
   title: string
   // The PM's runtime (D18), e.g. 'claude-code' or 'codex'. Locked once the
   // session has messages.
@@ -26,8 +27,11 @@ export interface PlanSession {
 export interface PlanMessage {
   id: string
   sessionId: string
-  role: 'human' | 'pm'
-  kind: 'message' | 'question' | 'error'
+  role: 'human' | 'pm' | 'thread'
+  senderSessionId?: string | null
+  senderTitle?: string | null
+  kind: 'message' | 'question' | 'error' | 'confirmation' | 'action_result' | 'notification'
+  pendingAction?: import('@corral/core').PmAction | null
   text: string
   // Set only on questions, and only when the PM gave them
   recommendation: string | null
@@ -96,7 +100,7 @@ export interface PlanSessionDetail extends PlanSession {
 // A client UUID makes a start safe to retry within the same project.
 export const startPlanSessionInput = z.object({
   id: z.uuid().optional(),
-  projectId: z.uuid(),
+  projectId: z.uuid().nullable().default(null),
   // The PM's runtime for this session (D18); only a CLI the runner has
   runtime: agentRuntime.default('claude-code'),
   text: z.string().trim().default(''),

@@ -2,7 +2,7 @@
 
 **Canvas frames:** `App shell · Plan`, `Plan (component)` (the canvas still shows the plan as a card in the log; this spec moves it to the flyout)
 **Route:** `/plan` (new session) and `/plan/:sessionId`
-**Scope:** global. Each session belongs to one project.
+**Scope:** global. Sessions can be Global or belong to one project (D29).
 
 ## Purpose
 
@@ -29,17 +29,17 @@ Everything is centred vertically and horizontally, in a column up to 720px wide:
 1. **Greeting:** the PM’s avatar (a `primary`-tinted circle) and "What should we plan?".
 2. **Composer** (large; see shared pattern): a 3-row minimum and 15px text, with a soft shadow. Toolbar, left to right:
    - **Attach** (paperclip).
-   - **Project picker:** the project's colour dot, name and a chevron. Opens a listbox of projects, each with thumbnail, name, prefix and a check on the current one. It defaults to the project you were last in. It's locked once a session has messages, because a session belongs to one project.
+   - **Project picker:** the project's colour dot, name and a chevron. Opens a listbox of projects, each with thumbnail, name, prefix and a check on the current one. It includes **Global**, which has no repository checkout. It remembers the last scope picked, defaulting to Global. The scope is locked once a session has messages.
    - **Runtime picker** (D18): which CLI Juno runs on for this session, "Claude" or "Codex". It lists only the CLIs the runner has, and remembers the last one picked (Claude until the runner answers). Like the project, it's locked once the session has messages, because an agent session only resumes on the vendor that made it: the conversation's composer shows it as a disabled button with a lock, and `PATCH /plan/sessions/:id` refuses to change it (409 `plan_session_runtime_locked`).
    - **Refine a task:** opens a searchable popover listing that project's Backlog (ref, title, epic). Picking a task attaches it as a chip at the top of the composer: "Refining COR-18 Billing settings page". The task name is a link that opens the task flyout, and an × removes the chip. With a task attached you can send without typing, and the placeholder becomes "What should change about COR-18? (optional)".
    - **Grill me:** asks Juno to question you. With an empty composer it sends "Grill me"; with a draft it sends "Grill me on this: {draft}". It's on the conversation's composer too, and is disabled while Juno is working.
-   - **Resume:** opens a searchable popover of all past sessions (title and time). Picking one opens it.
+   - **Resume:** opens a searchable popover of all past sessions (title, project name or **Global**, and time). Picking one opens it.
    - The Enter hint and the Send button.
 3. **Drafts:** shown only when the project has Drafts (`GET /projects/:slug/drafts`), in the same bordered list style. Drafts are grouped by the Plan session they belong to: a header row with the session title, "Needs approval" in `primary` while its plan waits, and the time, then one row per draft with its ref, type icon, title and priority. The header opens the session; a draft opens the session with that task in the flyout (`/plan/:id?task=COR-13`), or the task sheet on phones, where every row is full width and at least 48px tall. `plan.drafts` keeps it current, so approving a plan to the board or the Backlog takes its drafts out straight away. A Draft's task detail banner has an **Open plan session** link back to its session.
 
 ### Conversation
 
-- **Header** (48px): the project dot and name, the session title, a neutral badge naming the session's runtime ("Claude" or "Codex"), **Close thread** (ghost) and a **New session** ghost button.
+- **Header** (48px): the project dot and name (or **Global**), the session title, a neutral badge naming the session's runtime ("Claude" or "Codex"), **Close thread** (ghost) and a **New session** ghost button.
 - **Close thread:** asks for confirmation ("Close this thread?", with **Close thread** in `error` and **Cancel**), then discards the session's Draft tasks and its unapproved plan, stops a running Juno turn and closes the session, the same action as in the Inbox ([inbox.md](inbox.md#close-thread)). The thread leaves the side nav and the Inbox at once; closing the current session navigates to `/plan` (the new-session view). Closing another session from its side nav menu keeps the current page open. Sending a message to a closed session reopens it, without the discarded drafts and plan. Tasks already added to the board or Backlog are left as they are; any dependency they had on a discarded draft is dropped rather than blocking them. It's hidden on a session that's already closed.
 - **Message log** (`UChatMessages`, `role="log"`), centred and up to 768px wide:
   - **Your messages:** right-aligned, in a `bg-elevated` bubble.
@@ -48,6 +48,7 @@ Everything is centred vertically and horizontally, in a column up to 720px wide:
     - **Past turns:** a finished turn's first message has a collapsed "Steps" disclosure above it. Opening it loads that run's saved transcript (`GET /runs/:id/transcript`) and the label becomes "N steps". The count isn't stored anywhere, so it's only known once loaded.
     - The turn's own messages (its reply, a question, a plan summary) are shown once, as messages in the log, and left out of its transcript.
   - **Questions:** Juno's questions sit in an `info`-tinted card. When Juno gave a recommendation or options, the card shows "Recommended: …" with **Accept recommendation**, one button per option, **Other…** (puts the cursor in the composer for a free-text reply) and **Stop and propose the plan** (sends "Stop asking questions and propose the plan now."). A tap sends that answer as your message straight away and starts Juno's next turn; any draft in the composer stays. Only the latest question you haven't replied to is live, and only while Juno isn't working; older and answered cards keep their buttons disabled, with the answer you gave marked (Other… for a typed reply). Questions without a recommendation or options are just the card.
+  - **Confirm-required actions:** a bordered card shows the PM’s one-line summary and **Confirm** / **Cancel** buttons. Nothing runs until Confirm. Decisions remain visible with disabled buttons; invalid targets show an inline error. Cards survive reloads, and results are appended to the conversation for the PM’s next turn.
   - **Plan link** (inside Juno's message, when the message proposed or revised a plan): a compact bordered button, "Plan v2 · {epic}" and "Open plan" (or "Now v3" on an older version's message). It toggles the plan flyout. The plan itself is never drawn in the log, so revisions don't stack up cards.
 - **Composer:** pinned to the bottom of the conversation, with a top divider. Same tools as above; the popovers open upwards.
 
@@ -57,7 +58,7 @@ Docked on the right (`?plan`), the same flyout as tasks and epics; the conversat
 
 - **Header:** a "Plan v2" badge, a status badge ("Waiting for approval" in `primary`, or "Approved" in `success`), and Close.
 - **Title:** the plan title and "2 epics · 4 tasks" (the epic count only when the plan has epics, "1 epic" for one).
-- **One section per epic**, in the order Juno gave them: the epic title (opens the epic), "N tasks · Review: {mode}" (Epic PR, Each task or Direct, D27), an "After: {epic titles}" line when it depends on other epics, and **List** / **Graph** tabs, remembered per epic.
+- **One section per epic**, in the order Juno gave them: the epic title (opens the epic), "N tasks · Review: {mode}" (Epic PR, Each task or Direct, D29), an "After: {epic titles}" line when it depends on other epics, and **List** / **Graph** tabs, remembered per epic.
   - **List:** one row per task: the ref and title, a subline with the priority (Urgent in `error`, High in `warning`, Medium and Low muted), "· Human review" with a user-check icon when the task needs human review, and "· after {dependency}", and a **New** (`success`) or **Revised** (`warning`) badge. A Revised row is an existing Backlog task or unclaimed Ready task the plan refines by its ref; it shows the plan's proposed title, priority, human review and dependencies, while the task itself (opened from the row) is unchanged until approval. A revised Ready task stays in Ready with either button. Rows open the task in the flyout, with a back arrow to the plan.
   - **Graph:** the epic's dependency tree, top to bottom, as on the epic flyout ([epic.md](epic.md)). A dependency in another epic shows as a dashed placeholder. Clicking a node opens the task.
   - Tasks with no epic, and a Draft moved to another epic by hand, are listed last, under **Other tasks** (just **Tasks** when the plan has no epics).

@@ -4,6 +4,7 @@ import type { AuditEntry, Comment, CreateTaskInput, HumanTransitionInput, PatchT
 import { createTaskInput } from '@corral/contracts'
 import {
   canChangeTaskType,
+  canChangeType,
   checkDependencies,
   createTask as createTaskState,
   DEPENDENCY_DELETED_REASON,
@@ -391,6 +392,7 @@ export async function applyTransition(
 // when the description and criteria are as they were
 export interface TaskContentEdit {
   description: boolean
+  fields?: string[]
   criteria: { added: number, removed: number, reworded: number } | null
 }
 
@@ -404,7 +406,12 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
     if (input.type && input.type !== task.type && !canChangeTaskType(task)) {
       throw new ApiFailure(409, { code: 'conflict', constraint: 'task_type_locked' })
     }
+    // D27: PM metadata edits must not remove the work that locks epic review mode.
+    if (actor.kind === 'agent' && actor.role === 'pm' && input.epicId !== undefined && input.epicId !== task.epicId && task.prNumber !== null) {
+      throw new ApiFailure(409, { code: 'conflict', constraint: 'task_epic_locked' })
+    }
     const { acceptanceCriteria: criteriaInput, dependsOn, ...fields } = input
+    if (fields.type && !canChangeType(task.status, task.type, fields.type)) throw new ApiFailure(409, { code: 'conflict', constraint: 'task_type_locked' })
     // D20: a design task's flag can't be turned off, by the human or a plan
     if ((fields.type ?? task.type) === 'design') fields.humanReview = true
     if (fields.epicId) {
@@ -444,7 +451,9 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
     }
     if (dependsOn) await setDependencies(tx, project, task, dependsOn)
     await appendAudit(tx, { projectId: project.id, taskId, actor }, auditEvent('task.updated', { changed: Object.keys(input) }))
-    return descriptionChanged || criteriaChange ? { description: descriptionChanged, criteria: criteriaChange } : null
+    const changedFields = Object.keys(fields).filter(k => JSON.stringify(fields[k as keyof typeof fields]) !== JSON.stringify(task[k as keyof TaskRow]))
+    if (dependsOn !== undefined) changedFields.push('dependsOn')
+    return descriptionChanged || criteriaChange || changedFields.length ? { description: descriptionChanged, criteria: criteriaChange, fields: changedFields.filter(k => k !== 'description') } : null
   })
 }
 
