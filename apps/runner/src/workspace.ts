@@ -161,8 +161,8 @@ export async function readProjectBrief(worktree: string): Promise<string> {
   ].join('\n')
 }
 
-export async function headSha(worktree: string): Promise<string | null> {
-  const result = await git(['rev-parse', 'HEAD'], { cwd: worktree })
+export async function headSha(worktree: string, timeoutMs?: number): Promise<string | null> {
+  const result = await git(['rev-parse', 'HEAD'], { cwd: worktree, ...(timeoutMs === undefined ? {} : { timeoutMs }) })
   return result.code === 0 ? result.stdout.trim() : null
 }
 
@@ -201,7 +201,7 @@ export async function saveStoppedWork(worktree: string, branch: string, message:
   const remaining = () => Math.max(deadline - Date.now(), 1)
   const options = () => ({ cwd: worktree, timeoutMs: remaining() })
 
-  if (!(await hasUncommittedChanges(worktree))) return { sha: null, pushed: false, error: null }
+  if (!(await hasUncommittedChanges(worktree, remaining()))) return { sha: null, pushed: false, error: null }
   // In a rebase HEAD is a half-replayed commit, not the task branch
   const head = await git(['symbolic-ref', '--quiet', 'HEAD'], options())
   if (head.stdout.trim() !== `refs/heads/${branch}`) return failed(`the worktree is not on ${branch}`)
@@ -225,8 +225,8 @@ export async function saveStoppedWork(worktree: string, branch: string, message:
   return { sha: pushed.sha, pushed: true, error: null }
 }
 
-export async function hasUncommittedChanges(worktree: string): Promise<boolean> {
-  const status = await git(['status', '--porcelain'], { cwd: worktree })
+export async function hasUncommittedChanges(worktree: string, timeoutMs?: number): Promise<boolean> {
+  const status = await git(['status', '--porcelain'], { cwd: worktree, ...(timeoutMs === undefined ? {} : { timeoutMs }) })
   return status.code !== 0 || status.stdout.trim().length > 0
 }
 

@@ -23,6 +23,7 @@ const connection: ServerConnection = new ServerConnection(config.serverUrl, { ru
   activeRunCount: () => runs.activeRunCount(),
   capacity: async () => ({ slots: config.slots, slotSource: config.slotSource, roles: config.roles, runtimes: await signedInRuntimes(config) }),
   onStatus(status, detail) {
+    if (status === 'disconnected') runs.connectionLost()
     if (status === 'connected') {
       printReady('Corral runner connected', {
         Server: config.serverUrl.href,

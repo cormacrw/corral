@@ -8,6 +8,7 @@ import { createRuntimeRegistry, STOP_GRACE_MS, type AgentExit, type AgentProcess
 import type { RunnerConfig } from './config.ts'
 import type { ServerConnection } from './connection.ts'
 import { packDesign, saveDesign } from './designs.ts'
+import { batchEvents, capEvent } from './event-limits.ts'
 import { convertToMp4 } from './evidence-video.ts'
 import { outcomesFor, toolRefusal, toolsFor, type ToolOutcome, type ToolServer } from './mcp.ts'
 import { headSha, mergeBase, prepareWorkspace, pushBranch, readProjectBrief, readRoleInstructions, saveStoppedWork } from './workspace.ts'
@@ -30,6 +31,10 @@ const EVENT_BATCH_MS = 500
 const TOOL_CALL_TIMEOUT_MS = 120_000
 const OUTCOME_EXIT_GRACE_MS = 20_000
 const MAX_EVIDENCE_BYTES = 25 * 1024 * 1024
+// What a run may hold for a server that's out of reach. Past this the oldest
+// transcript events go, with a note saying so; run.started and run.ended stay.
+const OUTBOX_MAX_BYTES = 16 * 1024 * 1024
+const UNREACHABLE = 'Corral is unreachable right now. Wait a moment and try again.'
 
 const CONTENT_TYPES: Record<string, string> = {
   '.png': 'image/png',
@@ -61,6 +66,13 @@ interface SpawnOptions {
 
 type StopReason = Extract<RunExit, { kind: 'stopped' | 'timed_out' | 'runner_shutdown' }>['kind']
 
+type RunTraffic = Extract<RunnerMessage, { type: 'run.started' | 'run.events' | 'run.ended' }>
+
+interface Outgoing {
+  message: RunTraffic
+  bytes: number
+}
+
 interface ActiveRun {
   job: RunJob
   // Null when the runner has no adapter for job.runtime; the run ends at once
@@ -74,6 +86,10 @@ interface ActiveRun {
   outcomeAccepted: boolean
   // Settles when the server answers a report_outcome call that is still open
   reportingOutcome: Promise<unknown> | null
+  // The report_outcome call under way, push included; a retry joins it
+  outcomeCall: Promise<ToolOutcome> | null
+  // Pushes under way for a report or a design, ahead of telling the server
+  pushes: number
   // Set when the server, the timeout or a runner shutdown asked for the process
   // to die. The first one wins: it's what cut the run off.
   stopping: StopReason | null
@@ -100,6 +116,13 @@ interface ActiveRun {
   // The last agent exit code, or the turn's when a warm PM process answered it
   exitCode: number | null
   events: RunEvent[]
+  // Run traffic the connection couldn't take yet, oldest first. The run stays
+  // here and in hello until run.ended has gone out.
+  outbox: Outgoing[]
+  outboxBytes: number
+  // The note standing in for events the outbox had to drop, and how many
+  dropNote: Outgoing | null
+  droppedEvents: number
   flushTimer: NodeJS.Timeout | null
   timeoutTimer: NodeJS.Timeout | null
   spool: WriteStream | null
@@ -145,9 +168,11 @@ export class RunManager {
   }
 
   // Sent with hello and every heartbeat, so the server can renew leases and
-  // tell this runner about runs it no longer recognises
+  // tell this runner about runs it no longer recognises. A run that ended but
+  // hasn't said so is still listed: without it, a reconnect would call the run
+  // lost and replace its real exit.
   activeRuns(): { runId: string, leaseEpoch: number }[] {
-    return [...this.#runs.values()].filter(r => !r.ended).map(r => ({ runId: r.job.runId, leaseEpoch: r.job.leaseEpoch }))
+    return [...this.#runs.values()].map(r => ({ runId: r.job.runId, leaseEpoch: r.job.leaseEpoch }))
   }
 
   activeRunCount(): number {
@@ -161,6 +186,9 @@ export class RunManager {
 
   handle(message: ServerMessage): void {
     switch (message.type) {
+      case 'welcome':
+        for (const run of [...this.#runs.values()]) this.#drain(run)
+        return
       case 'run.assign':
         this.assign(message.job)
         return
@@ -201,6 +229,8 @@ export class RunManager {
       started: false,
       outcomeAccepted: false,
       reportingOutcome: null,
+      outcomeCall: null,
+      pushes: 0,
       stopping: null,
       stopDetail: '',
       keepWork: false,
@@ -218,6 +248,10 @@ export class RunManager {
       closed: Promise.withResolvers<void>(),
       exitCode: null,
       events: [],
+      outbox: [],
+      outboxBytes: 0,
+      dropNote: null,
+      droppedEvents: 0,
       flushTimer: null,
       timeoutTimer: null,
       spool: null,
@@ -252,14 +286,15 @@ export class RunManager {
     // arrive before the tool result: wait for the answer before signalling
     const process = run.process
     const reporting = run.reportingOutcome
-    if (reporting && reason !== 'timed_out') void reporting.then(() => this.#signal(run, process, reason))
+    if (reporting && reason === 'stopped') void reporting.then(() => this.#signal(run, process, reason))
     else this.#signal(run, process, reason)
   }
 
   #signal(run: ActiveRun, process: AgentProcess, reason: StopReason): void {
     // After an accepted outcome the agent is just finishing its last reply;
-    // let it see the tool result and exit on its own before signalling
-    const delay = run.outcomeAccepted && reason !== 'timed_out' ? OUTCOME_EXIT_GRACE_MS : 0
+    // let it see the tool result and exit on its own before signalling. The
+    // time limit and a runner shutdown don't wait (runner rule 2).
+    const delay = run.outcomeAccepted && reason === 'stopped' ? OUTCOME_EXIT_GRACE_MS : 0
     const soft = setTimeout(() => process.kill('SIGTERM'), delay)
     const hard = setTimeout(() => process.kill('SIGKILL'), delay + STOP_GRACE_MS)
     void process.exited.then(() => {
@@ -327,8 +362,18 @@ export class RunManager {
     for (const run of live) {
       if (!run.ended) this.#end(run, this.#stopExit(run))
     }
-    // The caller closes the connection next, and run.ended has to go out first
-    await Promise.all(live.map(run => run.closing))
+    // The caller closes the connection next, and run.ended has to go out
+    // first, including for a run that was already saving its work
+    await Promise.all([...this.#runs.values()].map(run => run.closing))
+  }
+
+  // A tool.result can't come back on the next socket, so nothing waits for one
+  connectionLost(): void {
+    for (const [callId, pending] of this.#pendingCalls) {
+      clearTimeout(pending.timer)
+      this.#pendingCalls.delete(callId)
+      pending.resolve({ ok: false, error: UNREACHABLE })
+    }
   }
 
   async #start(run: ActiveRun): Promise<void> {
@@ -611,7 +656,7 @@ export class RunManager {
 
   #started(run: ActiveRun): void {
     run.started = true
-    this.#connection.send({ type: 'run.started', sentAt: Date.now(), runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, agentSessionId: run.sessionId })
+    this.#post(run, { type: 'run.started', sentAt: Date.now(), runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, agentSessionId: run.sessionId })
   }
 
   #note(run: ActiveRun, text: string): void {
@@ -620,7 +665,7 @@ export class RunManager {
 
   #queue(run: ActiveRun, events: RunEvent[]): void {
     if (events.length === 0 || run.ended) return
-    run.events.push(...events)
+    for (const event of events) run.events.push(capEvent(event))
     run.flushTimer ??= setTimeout(() => this.#flush(run), EVENT_BATCH_MS)
   }
 
@@ -630,7 +675,60 @@ export class RunManager {
     if (run.events.length === 0) return
     const events = run.events
     run.events = []
-    this.#connection.send({ type: 'run.events', runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, events })
+    for (const batch of batchEvents(events)) this.#post(run, { type: 'run.events', runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, events: batch })
+  }
+
+  // Everything a run tells the server goes through here, in order. There's no
+  // ack: once the socket takes a message it counts as sent, so a message lost
+  // in a half-dead socket stays lost. A replay after a reconnect only repeats
+  // what never reached a socket.
+  #post(run: ActiveRun, message: RunTraffic): void {
+    if (run.outbox.length === 0 && this.#connection.send(message)) {
+      if (message.type === 'run.ended') this.#finished(run)
+      return
+    }
+    const bytes = JSON.stringify(message).length
+    run.outbox.push({ message, bytes })
+    run.outboxBytes += bytes
+    this.#trimOutbox(run)
+  }
+
+  #drain(run: ActiveRun): void {
+    for (let next = run.outbox[0]; next; next = run.outbox[0]) {
+      if (!this.#connection.send(next.message)) return
+      run.outbox.shift()
+      run.outboxBytes -= next.bytes
+      if (next === run.dropNote) {
+        run.dropNote = null
+        run.droppedEvents = 0
+      }
+      if (next.message.type === 'run.ended') this.#finished(run)
+    }
+  }
+
+  // The newest events are the ones to keep: they hold how the run ended, and a
+  // PM turn's reply is its last message
+  #trimOutbox(run: ActiveRun): void {
+    while (run.outboxBytes > OUTBOX_MAX_BYTES) {
+      const index = run.outbox.findIndex(o => o.message.type === 'run.events' && o !== run.dropNote)
+      if (index < 0) break
+      const [oldest] = run.outbox.splice(index, 1) as [Outgoing]
+      run.outboxBytes -= oldest.bytes
+      run.droppedEvents += oldest.message.type === 'run.events' ? oldest.message.events.length : 0
+      if (!run.dropNote) {
+        run.dropNote = { message: { type: 'run.events', runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, events: [] }, bytes: 0 }
+        run.outbox.splice(index, 0, run.dropNote)
+      }
+    }
+    if (run.dropNote?.message.type === 'run.events') {
+      run.dropNote.message.events = [{ type: 'system', text: `${run.droppedEvents} transcript events were dropped here: the server was out of reach for too long` }]
+    }
+  }
+
+  // The server has been told, or as told as it can be without an ack
+  #finished(run: ActiveRun): void {
+    this.#runs.delete(run.job.runId)
+    this.#connection.refreshUpdateStatus?.()
   }
 
   #end(run: ActiveRun, exit: RunExit): void {
@@ -645,14 +743,13 @@ export class RunManager {
     run.unregisterTools?.()
     run.spool?.end()
     const finish = (sha: string | null, wipSha: string | null = null) => {
-      this.#connection.send({ type: 'run.ended', runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, exit, headSha: sha, lastActivityAt: run.lastActivityAt, wipSha, timings: run.timer.finish() })
-      this.#runs.delete(run.job.runId)
-      this.#connection.refreshUpdateStatus?.()
+      this.#post(run, { type: 'run.ended', runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, exit, headSha: sha, lastActivityAt: run.lastActivityAt, wipSha, timings: run.timer.finish() })
+      // A retry waits for the saved work, not for the server to hear about it
       run.closed.resolve()
     }
     const worktree = run.worktree
     if (worktree && (run.job.role === 'developer' || run.job.role === 'designer')) {
-      run.closing = run.timer.during('finish', () => this.#saveWork(run, worktree, exit).then(wipSha => headSha(worktree).then(sha => ({ sha, wipSha })))).then(({ sha, wipSha }) => finish(sha, wipSha), () => finish(null))
+      run.closing = run.timer.during('finish', () => this.#saveWork(run, worktree, exit).then(wipSha => headSha(worktree, STOP_GRACE_MS).then(sha => ({ sha, wipSha })))).then(({ sha, wipSha }) => finish(sha, wipSha), () => finish(null))
     } else {
       finish(null)
     }
@@ -664,7 +761,7 @@ export class RunManager {
   async #saveWork(run: ActiveRun, worktree: string, exit: RunExit): Promise<string | null> {
     const { job } = run
     const stopped = run.keepWork || exit.kind === 'signalled'
-    if (!stopped || !job.branch || run.outcomeAccepted || run.reportingOutcome) return null
+    if (!stopped || !job.branch || run.outcomeAccepted || run.reportingOutcome || run.pushes > 0) return null
     const saved = await saveStoppedWork(worktree, job.branch, wipMessage(job, exit, run.stopDetail), this.#config.gitAuthor, STOP_GRACE_MS, () => this.#connection.connected && run.leaseConfirmedUntil > Date.now() + STOP_GRACE_MS)
     const short = saved.sha?.slice(0, 10)
     const note = saved.pushed
@@ -673,7 +770,7 @@ export class RunManager {
         ? `Saved the uncommitted work as WIP commit ${short} in the worktree, but could not push it: ${saved.error}`
         : saved.error ? `Could not save the uncommitted work: ${saved.error}` : null
     // The run has ended, so this goes straight out, ahead of run.ended
-    if (note) this.#connection.send({ type: 'run.events', runId: job.runId, leaseEpoch: job.leaseEpoch, events: [{ type: 'system', text: note }] })
+    if (note) this.#post(run, { type: 'run.events', runId: job.runId, leaseEpoch: job.leaseEpoch, events: [{ type: 'system', text: note }] })
     return saved.pushed ? saved.sha : null
   }
 
@@ -710,47 +807,63 @@ export class RunManager {
     }
 
     if (tool === 'report_outcome') {
-      const outcome = String(input.outcome ?? '')
-      if (!outcomesFor(run.job.role).includes(outcome)) {
-        return { ok: false, error: `A ${run.job.role} reports one of: ${outcomesFor(run.job.role).join(', ')}` }
-      }
-      let payload: Record<string, unknown> = input
-      if ((run.job.role === 'developer' || run.job.role === 'designer') && (outcome === 'pr_opened' || outcome === 'pr_updated' || outcome === 'pr_rebased' || outcome === 'commit_submitted' || outcome === 'design_submitted')) {
-        // A spike has no branch to push (D19)
-        if (!run.job.branch) return { ok: false, error: 'A spike opens no PR: report your findings with outcome findings_reported.' }
-        // The runner pushes, not the agent (D8); the commit goes with the report
-        const pushed = await this.#push(run)
-        if (!pushed.ok) return pushed
-        payload = { ...input, headSha: pushed.result }
-        if (outcome === 'commit_submitted') {
-          const baseSha = await mergeBase(run.worktree!, `origin/${run.job.baseBranch ?? run.job.defaultBranch}`)
-          if (!baseSha) return { ok: false, error: `Corral could not find where your branch forked from ${run.job.baseBranch ?? run.job.defaultBranch}. Rebase onto it and try again.` }
-          payload = { ...payload, baseSha }
-        }
-      } else if (run.job.role === 'reviewer' && run.job.headSha) {
-        // What the verdict actually judged, so the server can refuse a moved head
-        payload = { ...input, headSha: await headSha(run.worktree!) ?? 'unknown' }
-      }
-      const reporting = this.#forward(run, tool, payload).then((result) => {
-        if (result.ok) run.outcomeAccepted = true
-        return result
+      // An agent that gave up waiting calls again while the first call runs:
+      // a second push and report would race it
+      run.outcomeCall ??= this.#reportOutcome(run, input).finally(() => {
+        run.outcomeCall = null
       })
-      run.reportingOutcome = reporting
-      try {
-        return await reporting
-      } finally {
-        if (run.reportingOutcome === reporting) run.reportingOutcome = null
-      }
+      return run.outcomeCall
     }
 
     return this.#forward(run, tool, input)
   }
 
+  async #reportOutcome(run: ActiveRun, input: Record<string, unknown>): Promise<ToolOutcome> {
+    const outcome = String(input.outcome ?? '')
+    if (!outcomesFor(run.job.role).includes(outcome)) {
+      return { ok: false, error: `A ${run.job.role} reports one of: ${outcomesFor(run.job.role).join(', ')}` }
+    }
+    let payload: Record<string, unknown> = input
+    if ((run.job.role === 'developer' || run.job.role === 'designer') && (outcome === 'pr_opened' || outcome === 'pr_updated' || outcome === 'pr_rebased' || outcome === 'commit_submitted' || outcome === 'design_submitted')) {
+      // A spike has no branch to push (D19)
+      if (!run.job.branch) return { ok: false, error: 'A spike opens no PR: report your findings with outcome findings_reported.' }
+      // The runner pushes, not the agent (D8); the commit goes with the report
+      const pushed = await this.#push(run)
+      if (!pushed.ok) return pushed
+      payload = { ...input, headSha: pushed.result }
+      if (outcome === 'commit_submitted') {
+        const baseSha = await mergeBase(run.worktree!, `origin/${run.job.baseBranch ?? run.job.defaultBranch}`)
+        if (!baseSha) return { ok: false, error: `Corral could not find where your branch forked from ${run.job.baseBranch ?? run.job.defaultBranch}. Rebase onto it and try again.` }
+        payload = { ...payload, baseSha }
+      }
+    } else if (run.job.role === 'reviewer' && run.job.headSha) {
+      // What the verdict actually judged, so the server can refuse a moved head
+      payload = { ...input, headSha: await headSha(run.worktree!) ?? 'unknown' }
+    }
+    const reporting = this.#forward(run, 'report_outcome', payload).then((result) => {
+      if (result.ok) run.outcomeAccepted = true
+      return result
+    })
+    run.reportingOutcome = reporting
+    try {
+      return await reporting
+    } finally {
+      if (run.reportingOutcome === reporting) run.reportingOutcome = null
+    }
+  }
+
+  // Kept apart from reportingOutcome: a human's stop waits for the server's
+  // answer, but not for a push that can take minutes
   async #push(run: ActiveRun): Promise<{ ok: true, result: string } | { ok: false, error: string }> {
     if (!run.job.branch) return { ok: false, error: 'This run has no branch to push' }
     const branch = run.job.branch
-    const pushed = await run.timer.during('push', () => pushBranch(run.worktree!, branch))
+    run.pushes += 1
+    const pushed = await run.timer.during('push', () => pushBranch(run.worktree!, branch)).finally(() => {
+      run.pushes -= 1
+    })
     if (pushed.sha === null) return { ok: false, error: `Corral could not push your branch: ${pushed.error}. Commit your work and try again.` }
+    // The run can end during a push; what follows would reach the server after run.ended
+    if (run.ended) return { ok: false, error: 'This run is over. Stop working.' }
     this.#note(run, `Pushed ${pushed.sha.slice(0, 10)} to ${run.job.branch}`)
     return { ok: true, result: pushed.sha }
   }
@@ -758,9 +871,7 @@ export class RunManager {
   #forward(run: ActiveRun, tool: AgentTool, input: unknown): Promise<ToolOutcome> {
     const callId = randomUUID()
     const message: RunnerMessage = { type: 'tool.call', callId, runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, tool, input }
-    if (!this.#connection.send(message)) {
-      return Promise.resolve({ ok: false, error: 'Corral is unreachable right now. Wait a moment and try again.' })
-    }
+    if (!this.#connection.send(message)) return Promise.resolve({ ok: false, error: UNREACHABLE })
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.#pendingCalls.delete(callId)

@@ -12,7 +12,7 @@ describe('codexArgs', () => {
     expect(args).toEqual([
       'exec', '--json', '--dangerously-bypass-approvals-and-sandbox',
       '-c', 'mcp_servers.corral.url="http://127.0.0.1:4321/runs/secret"',
-      '-c', 'mcp_servers.corral.tool_timeout_sec=180',
+      '-c', 'mcp_servers.corral.tool_timeout_sec=450',
       '-c', 'developer_instructions="Be \\"careful\\"\\nand quick"',
       '--', 'Do the task'
     ])

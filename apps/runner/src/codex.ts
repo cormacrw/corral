@@ -30,8 +30,8 @@ type ArgOptions = Pick<RuntimeOptions, 'prompt' | 'model' | 'resumeSessionId'> &
 }
 
 // Corral answers a tool call within two minutes, and report_outcome pushes
-// first; Codex's own default of 60 s would give up before then
-const MCP_TOOL_TIMEOUT_SECONDS = 180
+// for up to five first; Codex's own default of 60 s would give up before then
+const MCP_TOOL_TIMEOUT_SECONDS = 450
 
 // `codex exec --json`, or `codex exec resume --json … <session>` to resume.
 // No approval prompts and no sandbox, like bypassPermissions for Claude: the
