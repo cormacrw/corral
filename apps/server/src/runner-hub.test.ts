@@ -1,7 +1,7 @@
 import { RUNNER_PROTOCOL_VERSION, type RunnerMessage, type ServerMessage } from '@corral/contracts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import WebSocket from 'ws'
-import type { RunnerHub } from './runner-hub.ts'
+import { RunnerDisconnected, RUNNER_STALE_MS, type RunnerHub } from './runner-hub.ts'
 import type { RunningServer } from './server.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 
@@ -26,6 +26,26 @@ describe('runner connection', () => {
     }
     socket = undefined
     await t?.close()
+  })
+
+  it('drops a runner that stopped heartbeating without closing its socket', async () => {
+    const connection = new WebSocket(`${server.url.replace('http', 'ws')}/runner`)
+    socket = connection
+    const closed = new Promise<number>(resolve => connection.once('close', resolve))
+    const welcomed = new Promise<void>(resolve => connection.on('message', data => JSON.parse(String(data)).type === 'welcome' && resolve()))
+    await new Promise(resolve => connection.once('open', resolve))
+    connection.send(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, commit: 'development', runnerId: 'silent', name: 'silent', activeRuns: [], slots: 1, runtimes: ['claude-code'], roles: ['developer'] }))
+    await welcomed
+    const job = hub.request({ kind: 'detect_clis' })
+    const lastHeard = Date.parse(hub.status().runners[0]!.lastHeartbeatAt)
+
+    hub.dropSilent(lastHeard + RUNNER_STALE_MS)
+    expect(hub.isOnline('silent')).toBe(true)
+    hub.dropSilent(lastHeard + RUNNER_STALE_MS + 1)
+    expect(hub.isOnline('silent')).toBe(false)
+    expect(hub.online).toBe(false)
+    await expect(job).rejects.toBeInstanceOf(RunnerDisconnected)
+    expect(await closed).toBe(4002)
   })
 
   async function connectRunner(onJob: (message: Extract<ServerMessage, { type: 'job.request' }>) => RunnerMessage) {

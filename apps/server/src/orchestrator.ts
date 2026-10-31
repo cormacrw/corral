@@ -16,7 +16,7 @@ import {
   type RunState
 } from '@corral/core'
 import { schema, type Database, type Executor } from '@corral/db'
-import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lt, ne } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, or } from 'drizzle-orm'
 import { z } from 'zod'
 import { listTaskAttachments, readProjectAttachment } from './attachments.ts'
 import type { BlobStore } from './blob-store.ts'
@@ -52,6 +52,8 @@ const server: Actor = { kind: 'system', component: 'server' }
 const HUMAN_STOP = 'Stopped by a human'
 const KILL_SWITCH_STOP = 'Stopped: Corral was stopped'
 const KEEP_WORK_STOPS: ReadonlySet<string> = new Set([HUMAN_STOP, KILL_SWITCH_STOP])
+const RUNNER_WENT_OFFLINE = 'The runner went offline before the run started'
+const RUNNER_RESTARTED = 'The runner restarted during the run: it shut down before it could report'
 
 type RunRow = typeof runs.$inferSelect
 type AgentRow = typeof agents.$inferSelect
@@ -119,6 +121,7 @@ class ToolError extends Error {}
 export class Orchestrator implements RunnerHandlers {
   #d: OrchestratorDeps
   #timer: NodeJS.Timeout | null = null
+  #ticking: Promise<void> | null = null
   #scheduling: Promise<void> | null = null
   #again = false
   // Tasks an event made workable (approval, a pushed PR, a review): the
@@ -199,6 +202,9 @@ export class Orchestrator implements RunnerHandlers {
 
   async #dispatchPmTurns(): Promise<void> {
     const { db, runner } = this.#d
+    // Set with the job, so a turn whose run.assign is lost or whose server
+    // crashes here expires; every heartbeat that lists it renews it
+    const leaseExpiresAt = new Date(this.#now().getTime() + LEASE_DURATION_MS)
     await this.#updatePhase()
     if (!runner.online || this.#stopped || this.#finishingUpdate) return
     const due = await this.#exclusive(() => db.transaction(async (tx) => {
@@ -230,23 +236,40 @@ export class Orchestrator implements RunnerHandlers {
             job = { ...job, agentSessionId: null, prompt: job.fallbackPrompt ?? job.prompt, fallbackPrompt: null }
             note = `This session's earlier turns ran on ${this.#runnerName(previous.runnerId)}, which is offline: starting a fresh session on ${this.#runnerName(runnerId)} from the saved conversation`
           }
-          await tx.update(runs).set({ pmJob: null, runnerId, runnerName: this.#d.runner.name(runnerId) }).where(eq(runs.id, w.id))
+          await tx.update(runs).set({ pmJob: null, runnerId, runnerName: this.#d.runner.name(runnerId), leaseExpiresAt }).where(eq(runs.id, w.id))
           picked.push({ id: w.id, runnerId, note, job })
         }
       }
       return picked
     }))
-    for (const { id, runnerId, note, job } of due) {
-      const ctx = await this.#load(id)
+    for (const { id, note, job } of due) {
+      // Its job is gone from the row, so a turn that can't start must end
+      // here; one bad turn must not strand the ones behind it
+      const ctx = await this.#load(id).catch(() => null)
       if (!ctx) continue
-      if (note) await this.#note(id, note)
-      if (!runner.send({ type: 'run.assign', job: { ...job, runId: id, runNumber: ctx.run.number, leaseEpoch: ctx.run.leaseEpoch! } }, runnerId)) {
-        const error = 'The runner went offline before the turn started'
-        await this.#endRun(ctx, { state: 'interrupted', error })
-        if (ctx.run.planSessionId) await this.plans?.onRunEnded(ctx.run.planSessionId, id, null, error)
+      try {
+        if (note) await this.#note(id, note)
+        await this.#dispatch(ctx, { ...job, runId: id, runNumber: ctx.run.number, leaseEpoch: ctx.run.leaseEpoch! } as RunJob, 'The runner went offline before the turn started')
+      } catch (error) {
+        console.error(`Starting PM turn ${id} failed`, error)
+        await this.#interrupted(ctx, `The turn couldn't start: ${errorText(error)}`).catch(failure => console.error(`Ending PM turn ${id} failed`, failure))
       }
-      await this.#publish(ctx)
     }
+  }
+
+  // The last step of every assignment. Preparing a job can take a while, and
+  // the kill switch or a human stop may have ended the run meanwhile: nothing
+  // would ever stop an assignment sent after that, because the runner ignores
+  // a run.stop for a run it doesn't know yet. Stops end the run before they
+  // send run.stop, and there's no await between this check and the send, so
+  // a stop either reaches this check or follows the assignment over the socket.
+  async #dispatch(ctx: RunContext, job: RunJob, offline: string): Promise<boolean> {
+    const live = await this.#fenced(ctx.run.id, ctx.run.leaseEpoch!)
+    if (live && this.#stopped) await this.#interrupted(live, KILL_SWITCH_STOP)
+    const sent = live !== null && !this.#stopped && this.#d.runner.send({ type: 'run.assign', job }, ctx.run.runnerId)
+    if (live && !sent && !this.#stopped) await this.#interrupted(live, offline)
+    await this.#publish(ctx)
+    return sent
   }
 
   #exclusive<T>(fn: () => Promise<T>): Promise<T> {
@@ -331,12 +354,20 @@ export class Orchestrator implements RunnerHandlers {
   // stopped. Resuming lets the scheduler carry on; stopped runs retry.
   async stopAll(actor: Actor): Promise<void> {
     await this.#setStopped(true, actor)
+    await this.#stopLive()
+    // A pass already claiming can commit a run after that read
+    await this.#scheduling
+    await this.#pmStarting
+    await this.#stopLive()
+  }
+
+  async #stopLive(): Promise<void> {
     const live = await this.#d.db.select({ id: runs.id }).from(runs).where(inArray(runs.state, [...ACTIVE_RUN_STATES]))
     for (const { id } of live) {
       const ctx = await this.#load(id)
       if (!ctx) continue
+      await this.#interrupted(ctx, KILL_SWITCH_STOP)
       this.#d.runner.send({ type: 'run.stop', runId: id, reason: 'Corral was stopped', keepWork: true }, ctx.run.runnerId)
-      await this.#endRun(ctx, { state: 'interrupted', error: KILL_SWITCH_STOP })
       await this.#publish(ctx)
     }
   }
@@ -369,8 +400,19 @@ export class Orchestrator implements RunnerHandlers {
     this.sweep.stop()
   }
 
-  async tick(): Promise<void> {
-    await this.sweepLeases()
+  // One at a time: a slow GitHub call can outlast the interval, and a second
+  // pass would work from older rows than the first has already acted on.
+  // Silent runners are dropped even so, since they're what makes a pass slow.
+  tick(): Promise<void> {
+    this.#d.runner.dropSilent()
+    this.#ticking ??= this.#tickOnce().finally(() => {
+      this.#ticking = null
+    })
+    return this.#ticking
+  }
+
+  async #tickOnce(): Promise<void> {
+    await this.sweepLeases().catch(error => console.error('Lease sweep failed', error))
     await this.merges.tick().catch(error => console.error('Merge pass failed', error))
     await this.schedule()
   }
@@ -425,10 +467,7 @@ export class Orchestrator implements RunnerHandlers {
           const ctx = await this.#load(job.runId)
           if (!ctx) break
           if (ctx.run.runnerId) await this.#d.db.update(runs).set({ runnerName: runner.name(ctx.run.runnerId) }).where(eq(runs.id, job.runId))
-          if (!runner.send({ type: 'run.assign', job }, ctx.run.runnerId)) {
-            await this.#endRun(ctx, { state: 'interrupted', error: 'The runner went offline before the run started' })
-            break
-          }
+          if (!await this.#dispatch(ctx, job, RUNNER_WENT_OFFLINE)) break
           if (this.#stopped || this.#updating) return
           if (agent.wakeIntervalSeconds !== null) break
         }
@@ -460,23 +499,17 @@ export class Orchestrator implements RunnerHandlers {
     if (claim.runnerId) await this.#d.db.update(runs).set({ runnerName: this.#d.runner.name(claim.runnerId) }).where(eq(runs.id, claim.runId))
     const ctx = await this.#load(claim.runId)
     if (!ctx?.task) return false
-    let job: RunJob
     try {
-      job = ctx.run.role === 'reviewer' ? await this.#reviewerJob(ctx) : ctx.run.role === 'designer' ? await this.#designerJob(ctx) : await this.#developerJob(ctx)
+      const job = ctx.run.role === 'reviewer' ? await this.#reviewerJob(ctx) : ctx.run.role === 'designer' ? await this.#designerJob(ctx) : await this.#developerJob(ctx)
+      return await this.#dispatch(ctx, job, RUNNER_WENT_OFFLINE)
     } catch (error) {
-      // Preparing the epic branch calls GitHub; the run fails straight away
-      // with the cause instead of holding its lease until it expires
-      if (!(error instanceof EpicBranchError)) throw error
-      await this.#failRun(ctx, error.message)
+      // The run fails straight away with the cause, instead of pinning its
+      // agent until the lease expires and being claimed again uncounted
+      console.error(`Assigning run ${claim.runId} failed`, error)
+      await this.#failRun(ctx, errorText(error))
       await this.#publish(ctx)
       return false
     }
-    const sent = this.#d.runner.send({ type: 'run.assign', job }, ctx.run.runnerId)
-    if (!sent) {
-      await this.#endRun(ctx, { state: 'interrupted', error: 'The runner went offline before the run started' })
-    }
-    await this.#publish(ctx)
-    return sent
   }
 
   async #developerJob(ctx: RunContext): Promise<RunJob> {
@@ -720,21 +753,22 @@ export class Orchestrator implements RunnerHandlers {
   // Expired leases: the runner stopped heartbeating (e.g. the laptop slept).
   // The run is Interrupted, not Failed, and the task waits for a retry (D10).
   async sweepLeases(): Promise<void> {
-    const expiredEpics = await this.#d.db.select().from(runs).where(and(isNotNull(runs.epicId), inArray(runs.state, [...ACTIVE_RUN_STATES]), lt(runs.leaseExpiresAt, this.#now())))
-    for (const run of expiredEpics) {
-      const ctx = await this.#load(run.id)
-      if (ctx) {
-        await this.#endRun(ctx, { state: 'interrupted', error: 'Epic review lease expired' })
-        this.#d.runner.send({ type: 'run.stop', runId: run.id, reason: 'Lease expired' }, run.runnerId)
-      }
-    }
+    const now = this.#now()
+    // Epic reviews and PM turns hold their lease on the run. A turn still
+    // holding its job was never sent, and a turn sent before PM leases
+    // existed has none, so it's timed from when it was queued.
+    const expiredRuns = await this.#d.db.select({ id: runs.id }).from(runs).where(and(
+      inArray(runs.state, [...ACTIVE_RUN_STATES]),
+      isNull(runs.pmJob),
+      or(lt(runs.leaseExpiresAt, now), and(eq(runs.role, 'pm'), isNull(runs.leaseExpiresAt), lt(runs.queuedAt, new Date(now.getTime() - LEASE_DURATION_MS))))
+    ))
     const expired = await this.#d.db.select({ runId: tasks.leaseRunId }).from(tasks)
-      .where(and(isNotNull(tasks.leaseRunId), lt(tasks.leaseExpiresAt, this.#now())))
-    for (const { runId } of expired) {
-      const ctx = runId ? await this.#load(runId) : null
+      .where(and(isNotNull(tasks.leaseRunId), lt(tasks.leaseExpiresAt, now)))
+    for (const id of [...expiredRuns.map(r => r.id), ...expired.map(r => r.runId!)]) {
+      const ctx = await this.#load(id)
       if (!ctx) continue
-      await this.#endRun(ctx, { state: 'interrupted', error: 'Lease expired: no heartbeat from the runner' })
-      this.#d.runner.send({ type: 'run.stop', runId: ctx.run.id, reason: 'Lease expired' }, ctx.run.runnerId)
+      await this.#interrupted(ctx, ctx.run.epicId ? 'Epic review lease expired' : ctx.run.role === 'pm' ? 'PM turn lease expired: no heartbeat from the runner' : 'Lease expired: no heartbeat from the runner')
+      this.#d.runner.send({ type: 'run.stop', runId: id, reason: 'Lease expired' }, ctx.run.runnerId)
       await this.#publish(ctx)
     }
   }
@@ -750,7 +784,7 @@ export class Orchestrator implements RunnerHandlers {
       if (activeRuns.some(a => a.runId === run.id && a.leaseEpoch === run.leaseEpoch)) continue
       const ctx = await this.#load(run.id)
       if (!ctx) continue
-      await this.#endRun(ctx, { state: 'interrupted', error: 'The runner restarted during the run: it shut down before it could report' })
+      await this.#interrupted(ctx, RUNNER_RESTARTED)
       await this.#publish(ctx)
     }
     await this.refreshLoad()
@@ -779,7 +813,7 @@ export class Orchestrator implements RunnerHandlers {
         this.#d.runner.send({ type: 'run.stop', runId: active.runId, reason: 'This run no longer holds its lease' }, runnerId)
         continue
       }
-      if (ctx.run.epicId) await this.#d.db.update(runs).set({ leaseExpiresAt: new Date(now.getTime() + LEASE_DURATION_MS) }).where(eq(runs.id, ctx.run.id))
+      if (ctx.run.epicId || ctx.run.role === 'pm') await this.#d.db.update(runs).set({ leaseExpiresAt: new Date(now.getTime() + LEASE_DURATION_MS) }).where(eq(runs.id, ctx.run.id))
       if (ctx.task) {
         await this.#d.db.update(tasks).set({
           leaseHeartbeatAt: now,
@@ -794,11 +828,13 @@ export class Orchestrator implements RunnerHandlers {
   // lists it until the agent has exited. It was told to keep its work, so a
   // keepWork-less stop would wrongly revoke the push, unless the task moved on.
   // A lost lease also leaves a run interrupted: only these two stops count.
+  // A run that never started has no work to save, and its stop may have
+  // reached the runner before the assignment did, so it's stopped again.
   async #savingWork(runId: string, leaseEpoch: number, runnerId: string): Promise<boolean> {
     const ctx = await this.#load(runId)
     if (!ctx?.task || ctx.task.deletedAt || ctx.task.leaseRunId !== null) return false
     const { run } = ctx
-    return (run.role === 'developer' || run.role === 'designer') && run.state === 'interrupted' && run.leaseEpoch === leaseEpoch && run.runnerId === runnerId && KEEP_WORK_STOPS.has(run.error ?? '')
+    return (run.role === 'developer' || run.role === 'designer') && run.state === 'interrupted' && run.startedAt !== null && run.leaseEpoch === leaseEpoch && run.runnerId === runnerId && KEEP_WORK_STOPS.has(run.error ?? '')
   }
 
   #confirmLease(ctx: RunContext, sentAt: number | undefined): void {
@@ -867,7 +903,7 @@ export class Orchestrator implements RunnerHandlers {
   // A PM turn has no outcome to report: its reply is the last thing it said
   async #pmExited(ctx: RunContext, exit: RunExit, lastActivityAt: string | null | undefined): Promise<void> {
     const events = await this.#d.transcripts.read(ctx.run.id, null)
-    const reply = events.filter((e): e is Extract<RunEvent, { type: 'message' }> => e.type === 'message').at(-1)?.text ?? null
+    const reply = lastPmReply(events)
     let error: string | null = null
     switch (exit.kind) {
       case 'rate_limited': {
@@ -953,18 +989,31 @@ export class Orchestrator implements RunnerHandlers {
     return addComment(tx, ctx.task!.id, { body: note, pinned: false }, this.#actor(ctx))
   }
 
-  async #endRun(ctx: RunContext, end: RunEnd): Promise<void> {
-    await this.#d.db.transaction(tx => this.#endRunIn(tx, ctx, end))
+  async #endRun(ctx: RunContext, end: RunEnd): Promise<boolean> {
+    return this.#d.db.transaction(tx => this.#endRunIn(tx, ctx, end))
   }
 
-  // Ends the run and releases its lease, if it still holds one
-  async #endRunIn(tx: Executor, ctx: RunContext, end: RunEnd): Promise<void> {
-    await tx.update(runs).set(runEndValues(end, this.#now())).where(eq(runs.id, ctx.run.id))
+  // Ends the run and releases its lease, if it still holds one. Whether this
+  // ended it: an outcome accepted since `ctx` was read stands, and isn't
+  // overwritten or audited twice.
+  async #endRunIn(tx: Executor, ctx: RunContext, end: RunEnd): Promise<boolean> {
+    const [ended] = await tx.update(runs).set(runEndValues(end, this.#now()))
+      .where(and(eq(runs.id, ctx.run.id), inArray(runs.state, [...ACTIVE_RUN_STATES]))).returning({ id: runs.id })
     if (ctx.task) {
       await tx.update(tasks).set({ leaseRunId: null, leaseRole: null, leaseExpiresAt: null, leaseHeartbeatAt: null, updatedAt: this.#now() })
         .where(and(eq(tasks.id, ctx.task.id), eq(tasks.leaseRunId, ctx.run.id)))
     }
-    await appendAudit(tx, { projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor: server }, auditEvent('run.ended', { runId: ctx.run.id, runNumber: ctx.run.number, state: end.state, outcome: end.outcome ?? null, error: 'error' in end ? end.error : null, ...(end.outcome === 'pr_rebased' ? { review: end.review, conflictedFiles: end.conflictedFiles } : {}) }))
+    if (ended) await appendAudit(tx, { projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor: server }, auditEvent('run.ended', { runId: ctx.run.id, runNumber: ctx.run.number, state: end.state, outcome: end.outcome ?? null, error: 'error' in end ? end.error : null, ...(end.outcome === 'pr_rebased' ? { review: end.review, conflictedFiles: end.conflictedFiles } : {}) }))
+    return ended !== undefined
+  }
+
+  // The server ends a run the agent didn't finish, on every path but a human's
+  // stop (the Plan thread's close handles its own). Its run.ended won't count
+  // any more, so a PM turn's session hears now: whatever it said, or why not.
+  async #interrupted(ctx: RunContext, error: string): Promise<void> {
+    if (!await this.#endRun(ctx, { state: 'interrupted', error })) return
+    if (ctx.run.role !== 'pm' || !ctx.run.planSessionId) return
+    await this.plans?.onRunEnded(ctx.run.planSessionId, ctx.run.id, lastPmReply(await this.#d.transcripts.read(ctx.run.id, null)), error)
   }
 
   // A human stops a run: the process tree is killed, the run is Interrupted
@@ -972,12 +1021,12 @@ export class Orchestrator implements RunnerHandlers {
   async stopRun(runId: string, actor: Actor): Promise<void> {
     const ctx = await this.#load(runId)
     if (!ctx || !(ACTIVE_RUN_STATES as readonly RunState[]).includes(ctx.run.state)) throw new ApiFailure(409, { code: 'conflict', constraint: 'run_not_active' })
-    this.#d.runner.send({ type: 'run.stop', runId, reason: 'Stopped by a human', keepWork: true }, ctx.run.runnerId)
     await this.#d.db.transaction(async (tx) => {
       await this.#endRunIn(tx, ctx, { state: 'interrupted', error: HUMAN_STOP })
       if (ctx.task) await tx.update(tasks).set({ paused: true }).where(eq(tasks.id, ctx.task.id))
       await appendAudit(tx, { projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor }, auditEvent('run.stopped', { runId }))
     })
+    this.#d.runner.send({ type: 'run.stop', runId, reason: 'Stopped by a human', keepWork: true }, ctx.run.runnerId)
     await this.#publish(ctx)
   }
 
@@ -1799,7 +1848,9 @@ export class Orchestrator implements RunnerHandlers {
   // handoff (a pushed PR, a verdict) lets the next agent start the task now.
   #finished(ctx: RunContext, reason: string, { handoff = false } = {}): void {
     this.#d.runner.send({ type: 'run.stop', runId: ctx.run.id, reason }, ctx.run.runnerId)
-    void this.#publish(ctx).then(() => this.poke(handoff && ctx.task ? [ctx.task.id] : []))
+    // The outcome stands whatever happens here: the project may be going with its runs
+    void this.#publish(ctx).catch(error => console.error(`Publishing run ${ctx.run.id} failed`, error))
+      .then(() => this.poke(handoff && ctx.task ? [ctx.task.id] : []))
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -1843,6 +1894,13 @@ export class Orchestrator implements RunnerHandlers {
     if (task) events.publish({ type: 'task.updated', task })
     if (task?.status === 'merged') this.poke(await publishDependents(db, events, task.id))
   }
+}
+
+const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
+
+// A PM turn's reply is the last thing it said (D9)
+function lastPmReply(events: RunEvent[]): string | null {
+  return events.filter((e): e is Extract<RunEvent, { type: 'message' }> => e.type === 'message').at(-1)?.text ?? null
 }
 
 // What stands in for a commit on a spike's submission: reviews are kept per

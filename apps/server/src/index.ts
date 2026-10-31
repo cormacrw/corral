@@ -7,6 +7,12 @@ import { EventBus } from './events.ts'
 import { startServer } from './server.ts'
 import { createServices } from './services.ts'
 
+// Node's default is to exit. Every known source handles its own failure, so
+// one that gets through must not drop open tool calls and every runner with it.
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection', reason)
+})
+
 const config = loadConfig()
 
 // Opening the database applies pending migrations (D14)
@@ -23,11 +29,13 @@ const services = createServices({
 })
 
 const deps = { db: database.db, events, actor: await ensureOwner(database.db), ...services }
+// Before the listeners: a runner connecting sooner could start work while
+// Corral is stopped
+await services.orchestrator.init()
 const server = await startServer(deps, { host: config.host, port: config.port, runnerToken: config.runnerToken })
 const runnerServer = config.runnerListen
   ? await startServer(deps, { ...config.runnerListen, runnerToken: config.runnerToken, runnerOnly: true })
   : undefined
-await services.orchestrator.init()
 services.orchestrator.start()
 printReady(`Corral API ready in ${formatDuration(process.uptime() * 1000)}`, {
   API: `${server.url}/api`,

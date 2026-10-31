@@ -356,10 +356,10 @@ export class MergeOrchestrator {
   // uncommitted changes and flagging them
   async cleanup(taskId: string): Promise<void> {
     const { db, runner } = this.#d
-    const [row] = await db.select({ task: tasks, project: schema.projects }).from(tasks)
-      .innerJoin(schema.projects, eq(schema.projects.id, tasks.projectId)).where(eq(tasks.id, taskId))
-    if (!row) return
     try {
+      const [row] = await db.select({ task: tasks, project: schema.projects }).from(tasks)
+        .innerJoin(schema.projects, eq(schema.projects.id, tasks.projectId)).where(eq(tasks.id, taskId))
+      if (!row) return
       const result = await runner.request({ kind: 'cleanup_worktrees', repository: row.project.repository, taskId })
       await appendAudit(db, { projectId: row.project.id, taskId, actor: server }, auditEvent('worktrees.cleaned', result))
       if (result.kept.length > 0) {

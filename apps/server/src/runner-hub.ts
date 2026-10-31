@@ -175,12 +175,30 @@ export class RunnerHub {
         if (!runnerId) return
         const runner = this.#runners.get(runnerId)
         if (runner?.socket !== socket) return
-        runner.socket = null
-        runner.status.online = false
-        this.#rejectJobs(runnerId)
-        this.#publishStatus()
-        await this.#handlers?.onDisconnected()
+        await this.#disconnected(runnerId, runner)
       }
+    }
+  }
+
+  async #disconnected(runnerId: string, runner: { socket: RunnerSocket | null, status: RunnerStatus['runners'][number] }): Promise<void> {
+    runner.socket = null
+    runner.status.online = false
+    this.#rejectJobs(runnerId)
+    this.#publishStatus()
+    await this.#handlers?.onDisconnected()
+  }
+
+  // A runner that vanished without a TCP FIN (a sleeping PC, D25) still looks
+  // connected until the OS gives up on the socket, and every job and run sent
+  // to it is lost in the meantime. If it was only slow, closing makes it
+  // reconnect, and its hello reconciles the runs.
+  dropSilent(now = Date.now()): void {
+    for (const [id, runner] of this.#runners) {
+      if (!runner.socket || !runner.status.online || now - Date.parse(runner.status.lastHeartbeatAt) <= RUNNER_STALE_MS) continue
+      console.warn(`Runner ${runner.status.name} has sent no heartbeat for ${RUNNER_STALE_MS / 1000} s; dropping it`)
+      const { socket } = runner
+      void this.#disconnected(id, runner).catch(error => console.error('Runner disconnect failed', error))
+      socket.close(4002, 'No heartbeat')
     }
   }
 
