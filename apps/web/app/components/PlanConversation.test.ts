@@ -7,11 +7,8 @@ import type { PlanSessionDetail, ServerEvent } from '@corral/contracts'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
-import { VueQueryPlugin } from '@tanstack/vue-query'
 import { agents, planMessages, plans, planSessions, projects } from '~/prototype/fixtures'
 import { api } from '~/composables/useApi'
-import { applyEvent } from '~/queries/dependencies'
-import { testQueryClient } from '~/queries/mount-with-query'
 import PlanConversation from './PlanConversation.vue'
 
 vi.mock('~/composables/useApi', () => ({
@@ -35,7 +32,6 @@ const flyout = {
   openPlan: vi.fn(), close: vi.fn()
 }
 const toast = { add: vi.fn() }
-const client = testQueryClient()
 const stop = vi.fn()
 const push = vi.fn()
 const onApproved = vi.fn()
@@ -110,7 +106,6 @@ beforeEach(() => {
     }
   }))
   state.value.runner.online = true
-  client.clear()
   flyout.plan.value = false
   vi.mocked(api.plan.session).mockImplementation(async id => detail(id))
   vi.mocked(api.plan.read).mockResolvedValue({ ...planSessions[0]!, unread: false })
