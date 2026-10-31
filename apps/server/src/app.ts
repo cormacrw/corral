@@ -38,7 +38,7 @@ import { Hono, type Context, type ValidationTargets } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { streamSSE } from 'hono/streaming'
 import type { ZodType } from 'zod'
-import { publishInvalidatedEpics } from './epic-review-state.ts'
+import { publishInvalidatedEpics, type InvalidatedEpics } from './epic-review-state.ts'
 import { publishDependents } from './dependent-tasks.ts'
 import { ApiFailure, fromDatabaseError } from './errors.ts'
 import { checkThumbnail, readThumbnail, THUMBNAIL_MAX_BYTES } from './thumbnails.ts'
@@ -131,7 +131,7 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
 
   // design/inbox.md: what the tray does, all through D10 transitions
   const inboxAction = async (taskId: string, input: InboxActionInput) => {
-    const invalidatedEpics = new Set<string>()
+    const invalidatedEpics: InvalidatedEpics = new Map()
     switch (input.action) {
       case 'clarify': {
         await addComment(db, taskId, { body: input.text, pinned: true }, actor)
@@ -338,7 +338,7 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
 
     .post('/projects/:slug/tasks', validate('json', createTaskInput), async (c) => {
       const project = await findProjectBySlug(db, c.req.param('slug'))
-      const invalidatedEpics = new Set<string>()
+      const invalidatedEpics: InvalidatedEpics = new Map()
       const task = await loadTask(db, await createTask(db, project, c.req.valid('json'), actor, { invalidatedEpics }))
       await publishInvalidatedEpics(db, events, invalidatedEpics)
       events.publish({ type: 'task.created', task })
@@ -353,7 +353,7 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     .post('/projects/:slug/tasks/:number/transitions', validate('json', humanTransitionInput), async (c) => {
       const project = await findProjectBySlug(db, c.req.param('slug'))
       const taskId = await findTaskId(db, project.id, taskNumber(c.req.param('number')))
-      const invalidatedEpics = new Set<string>()
+      const invalidatedEpics: InvalidatedEpics = new Map()
       await transitionTask(db, taskId, c.req.valid('json'), actor, invalidatedEpics)
       await publishInvalidatedEpics(db, events, invalidatedEpics)
       // Published after the commit, so listeners never see a rolled-back state
@@ -367,7 +367,7 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     .patch('/projects/:slug/tasks/:number', validate('json', patchTaskInput), async (c) => {
       const project = await findProjectBySlug(db, c.req.param('slug'))
       const taskId = await findTaskId(db, project.id, taskNumber(c.req.param('number')))
-      const invalidatedEpics = new Set<string>()
+      const invalidatedEpics: InvalidatedEpics = new Map()
       const edit = await patchTask(db, project, taskId, c.req.valid('json'), actor, invalidatedEpics)
       await publishInvalidatedEpics(db, events, invalidatedEpics)
       // The edit is saved either way; telling the run is best effort (PRD §7.3)

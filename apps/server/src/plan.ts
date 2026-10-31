@@ -6,7 +6,7 @@ import { z } from 'zod'
 import { appendAudit, auditEvent, auditText } from './audit.ts'
 import { agentActivity, UnknownAgent } from './agent-activity.ts'
 import { listTaskAttachments } from './attachments.ts'
-import { publishInvalidatedEpics } from './epic-review-state.ts'
+import { publishInvalidatedEpics, type InvalidatedEpics } from './epic-review-state.ts'
 import { listEpics } from './epics.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
@@ -705,7 +705,7 @@ export class PlanService {
     if (!project) throw notFound()
     const items = await db.select().from(planTasks).where(and(eq(planTasks.planId, planId), ne(planTasks.change, 'removed')))
     const proposed = await this.#planProposal(plan, project)
-    const invalidatedEpics = new Set<string>()
+    const invalidatedEpics: InvalidatedEpics = new Map()
     await db.transaction(async (tx) => {
       await tx.select().from(planSessions).where(eq(planSessions.id, plan.sessionId)).for('update')
       const [current] = await tx.select().from(plans).where(eq(plans.id, planId)).for('update')
@@ -1070,7 +1070,7 @@ async function pickedUp(db: Executor, taskId: string, leaseRunId: string | null)
 
 // Writes a plan's staged edits to the task it revises, keeping criterion IDs
 // where the text is unchanged
-async function reviseTask(tx: Executor, project: ProjectRow, taskId: string, revision: PlanRevision, plan: { planId: string, version: number }, actor: Actor, invalidatedEpics: Set<string>): Promise<void> {
+async function reviseTask(tx: Executor, project: ProjectRow, taskId: string, revision: PlanRevision, plan: { planId: string, version: number }, actor: Actor, invalidatedEpics: InvalidatedEpics): Promise<void> {
   await patchTask(tx, project, taskId, {
     title: revision.title,
     description: markdownToRichText(revision.description),

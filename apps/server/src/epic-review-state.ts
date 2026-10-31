@@ -6,6 +6,7 @@ import { getEpic } from './epics.ts'
 import type { EventBus } from './events.ts'
 import { unfinishedTask } from './completion.ts'
 import { runEndValues } from './run-lifecycle.ts'
+import { getRun } from './runs.ts'
 
 const { epics, runs } = schema
 
@@ -23,22 +24,27 @@ export function holdsEpicOpen(task: { deletedAt: AnyPgColumn, status: AnyPgColum
   )!
 }
 
+// Epics whose review a mutation reset, with the runs that reset interrupted
+export type InvalidatedEpics = Map<string, string[]>
+
 // Called in the task mutation transaction, before the new board membership
 // becomes visible. The epic lock serializes this with claiming/reporting review.
-export async function invalidateEpicReview(db: Executor, epicId: string | null): Promise<string | null> {
-  if (!epicId) return null
+export async function invalidateEpicReview(db: Executor, epicId: string | null, invalidated?: InvalidatedEpics): Promise<void> {
+  if (!epicId) return
   const [epic] = await db.select().from(epics).where(eq(epics.id, epicId)).for('update')
   // Changes requested stands until the epic's fix work has merged
-  if (!epic?.prNumber || epic.reviewState === 'merged' || epic.reviewState === 'changes_requested') return null
+  if (!epic?.prNumber || epic.reviewState === 'merged' || epic.reviewState === 'changes_requested') return
   await db.update(epics).set({ reviewState: 'open', rebaseRequested: false, conflictFiles: null, updatedAt: new Date() }).where(eq(epics.id, epicId))
-  await db.update(runs).set(runEndValues({ state: 'interrupted', error: 'Epic board changed; integration review must run again' }, new Date()))
+  const interrupted = await db.update(runs).set(runEndValues({ state: 'interrupted', error: 'Epic board changed; integration review must run again' }, new Date()))
     .where(and(eq(runs.epicId, epicId), inArray(runs.state, [...ACTIVE_RUN_STATES])))
-  return epicId
+    .returning({ id: runs.id })
+  invalidated?.set(epicId, [...invalidated.get(epicId) ?? [], ...interrupted.map(run => run.id)])
 }
 
 // Flush only after the enclosing transaction commits, never from a savepoint.
-export async function publishInvalidatedEpics(db: Executor, events: EventBus, ids: Set<string>): Promise<void> {
-  for (const id of ids) {
+export async function publishInvalidatedEpics(db: Executor, events: EventBus, invalidated: InvalidatedEpics): Promise<void> {
+  for (const [id, runIds] of invalidated) {
     events.publish({ type: 'epic.updated', epic: await getEpic(db, id) })
+    for (const runId of runIds) events.publish({ type: 'run.updated', run: await getRun(db, runId) })
   }
 }
