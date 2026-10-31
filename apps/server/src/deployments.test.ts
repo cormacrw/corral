@@ -1,7 +1,8 @@
+import { databaseFixture } from '@corral/db/testing'
 import { needsAttention, type Inbox, type Deployment } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 
 const sha = (c: string) => c.repeat(40)
@@ -9,7 +10,7 @@ const sha = (c: string) => c.repeat(40)
 describe.each(['pglite', 'postgres'] as const)('POST /api/deployments on %s', (driver) => {
   let t: TestApp
 
-  beforeAll(async () => {
+  databaseFixture(driver, async () => {
     t = await createTestApp(driver)
   })
 

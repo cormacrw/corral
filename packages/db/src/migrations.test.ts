@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import pg from 'pg'
 import { afterEach, describe, expect, it } from 'vitest'
-import { postgresAvailable } from './testing.ts'
+import { requireDatabase } from './testing.ts'
 
 const migrationsFolder = join(import.meta.dirname, '..', 'migrations')
 
@@ -36,11 +36,11 @@ describe('migrations', () => {
     for (const fn of cleanup.splice(0)) await fn()
   })
 
-  it.each([
-    { driver: 'pglite' as const, enabled: true },
-    { driver: 'postgres' as const, enabled: postgresAvailable }
-  ])('0035 adds designer without changing existing agents or runs on $driver', async ({ driver, enabled }) => {
-    if (!enabled) return
+  it.for([
+    { driver: 'pglite' as const },
+    { driver: 'postgres' as const }
+  ])('0035 adds designer without changing existing agents or runs on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+    requireDatabase(driver, context)
     const before = await migrationsBefore('0035_amused_bloodaxe')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
     const { db, migrate } = await open(driver)
@@ -56,13 +56,13 @@ describe('migrations', () => {
     expect((await db.execute(sql`select * from runs order by id`)).rows).toEqual(runs.map(run => ({ ...run, timings: null })))
     await db.execute(sql`insert into agents (name, role) values ('Iris', 'designer')`)
     expect((await db.execute(sql`select role from agents where name = 'Iris'`)).rows).toEqual([{ role: 'designer' }])
-  }, 60_000)
+  })
 
-  it.each([
-    { driver: 'pglite' as const, enabled: true },
-    { driver: 'postgres' as const, enabled: postgresAvailable }
-  ])('upgrades historical runs and tasks after 0030 without data loss, on $driver', async ({ driver, enabled }) => {
-    if (!enabled) return
+  it.for([
+    { driver: 'pglite' as const },
+    { driver: 'postgres' as const }
+  ])('upgrades historical runs and tasks after 0030 without data loss, on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+    requireDatabase(driver, context)
     const before = await migrationsBefore('0031_omniscient_firedrake')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
     const { db, migrate } = await open(driver)
@@ -92,13 +92,13 @@ describe('migrations', () => {
     expect(Number((await db.execute(sql`select max(created_at) as latest from drizzle.__drizzle_migrations`)).rows[0]!.latest)).toBe(journal.entries.at(-1)!.when)
     await migrate(migrationsFolder)
     expect((await db.execute(sql`select runner_name from runs`)).rows).toEqual([{ runner_name: 'home-server' }])
-  }, 60_000)
+  })
 
-  it.each([
-    { driver: 'pglite' as const, enabled: true },
-    { driver: 'postgres' as const, enabled: postgresAvailable }
-  ])('0034 adds dismissal without changing historical deployment notes or read state on $driver', async ({ driver, enabled }) => {
-    if (!enabled) return
+  it.for([
+    { driver: 'pglite' as const },
+    { driver: 'postgres' as const }
+  ])('0034 adds dismissal without changing historical deployment notes or read state on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+    requireDatabase(driver, context)
     const before = await migrationsBefore('0034_typical_prowler')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
     const { db, migrate } = await open(driver)
@@ -111,7 +111,7 @@ describe('migrations', () => {
       .toEqual([{ notes: 'Existing release notes', notes_status: 'ready', read: true, dismissed_at: null }])
     await migrate(migrationsFolder)
     expect((await db.execute(sql`select count(*)::int as count from deployments`)).rows).toEqual([{ count: 1 }])
-  }, 60_000)
+  })
 
   it('0028 preserves historical runs with null runner ownership', async () => {
     const before = await migrationsBefore('0028_complex_clint_barton')
@@ -230,11 +230,11 @@ describe('migrations', () => {
 
   // On both drivers: Postgres can't use an enum value in the transaction
   // that adds it, so the check compares the kind as text
-  it.each([
-    { driver: 'pglite' as const, enabled: true },
-    { driver: 'postgres' as const, enabled: postgresAvailable }
-  ])('0024 makes evidence files optional for notes, keeping existing evidence, on $driver (D21)', async ({ driver, enabled }) => {
-    if (!enabled) return
+  it.for([
+    { driver: 'pglite' as const },
+    { driver: 'postgres' as const }
+  ])('0024 makes evidence files optional for notes, keeping existing evidence, on $driver (D21)', { timeout: 60_000 }, async ({ driver }, context) => {
+    requireDatabase(driver, context)
     const before = await migrationsBefore('0024_evidence_note')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
     const { db, migrate } = await open(driver)
@@ -260,13 +260,13 @@ describe('migrations', () => {
     await expect(insert('screenshot')).rejects.toThrow()
     const notes = await db.execute(sql`select note, blob, file_name, content_type from evidence where kind = 'note'`)
     expect(notes.rows).toEqual([{ note: 'No visible change', blob: null, file_name: null, content_type: null }])
-  }, 60_000)
+  })
 
-  it.each([
-    { driver: 'pglite' as const, enabled: true },
-    { driver: 'postgres' as const, enabled: postgresAvailable }
-  ])('0027 makes epics already on the board direct and new ones take the project default, on $driver (D27)', async ({ driver, enabled }) => {
-    if (!enabled) return
+  it.for([
+    { driver: 'pglite' as const },
+    { driver: 'postgres' as const }
+  ])('0027 makes epics already on the board direct and new ones take the project default, on $driver (D27)', { timeout: 60_000 }, async ({ driver }, context) => {
+    requireDatabase(driver, context)
     const before = await migrationsBefore('0027_epic_review_modes')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
     const { db, migrate } = await open(driver)
@@ -295,7 +295,7 @@ describe('migrations', () => {
     ])
     const projects = await db.execute(sql`select epic_review_mode_default::text as mode from projects`)
     expect(projects.rows).toEqual([{ mode: 'epic' }])
-  }, 60_000)
+  })
 
   describe('0038 run lifecycle checks', () => {
     const tag = '0038_loving_daimon_hellstrom'
@@ -313,11 +313,11 @@ describe('migrations', () => {
     const insertDeveloperRun = (state: string, outcome: string | null, endedAt: boolean) => sql`insert into runs (project_id, agent_id, task_id, role, state, outcome, ended_at)
       select t.project_id, a.id, t.id, 'developer', ${state}::run_state, ${outcome}::run_outcome, ${endedAt ? sql`now()` : null} from tasks t, agents a where a.role = 'developer'`
 
-    it.each([
-      { driver: 'pglite' as const, enabled: true },
-      { driver: 'postgres' as const, enabled: postgresAvailable }
-    ])('lists rows that break the checks and stops, changing nothing, on $driver', async ({ driver, enabled }) => {
-      if (!enabled) return
+    it.for([
+      { driver: 'pglite' as const },
+      { driver: 'postgres' as const }
+    ])('lists rows that break the checks and stops, changing nothing, on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+      requireDatabase(driver, context)
       const { db, migrate } = await historical(driver)
       await db.execute(insertDeveloperRun('running', 'approved', true))
       await db.execute(insertDeveloperRun('completed', 'pr_opened', false))
@@ -334,13 +334,13 @@ describe('migrations', () => {
       expect(failure).not.toContain('run #3')
       expect((await rows()).rows).toEqual(stored)
       expect((await db.execute(sql`select count(*)::int as n from pg_constraint where conname like 'runs_%' and conname <> 'runs_task_unless_pm' and contype = 'c'`)).rows).toEqual([{ n: 0 }])
-    }, 60_000)
+    })
 
-    it.each([
-      { driver: 'pglite' as const, enabled: true },
-      { driver: 'postgres' as const, enabled: postgresAvailable }
-    ])('passes outcome-less PM turns and interrupted runs through, on $driver', async ({ driver, enabled }) => {
-      if (!enabled) return
+    it.for([
+      { driver: 'pglite' as const },
+      { driver: 'postgres' as const }
+    ])('passes outcome-less PM turns and interrupted runs through, on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+      requireDatabase(driver, context)
       const { db, migrate } = await historical(driver)
       await db.execute(sql`insert into runs (project_id, agent_id, role, state, ended_at)
         select p.id, a.id, 'pm', s.state::run_state, now() from projects p, agents a, (values ('completed'), ('interrupted')) s(state) where a.role = 'pm'`)
@@ -351,7 +351,7 @@ describe('migrations', () => {
 
       expect((await db.execute(sql`select count(*)::int as n from runs`)).rows).toEqual([{ n: 4 }])
       await expect(db.execute(insertDeveloperRun('running', null, true))).rejects.toThrow()
-    }, 60_000)
+    })
   })
 
   // An empty database to migrate step by step: PGlite in memory, or a

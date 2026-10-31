@@ -1,7 +1,8 @@
+import { databaseFixture } from '@corral/db/testing'
 import type { FlowMetrics } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { flowMetrics, percentiles } from './flow-metrics.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 
@@ -11,7 +12,7 @@ const at = (hours: number) => new Date(now.getTime() + hours * hour)
 
 describe.each(['pglite', 'postgres'] as const)('flow metrics on %s', (driver) => {
   let t: TestApp
-  beforeAll(async () => {
+  databaseFixture(driver, async () => {
     t = await createTestApp(driver)
   })
   afterAll(async () => {

@@ -1,15 +1,16 @@
+import { databaseFixture } from '@corral/db/testing'
 import type { Attachment, Task } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { asc, eq } from 'drizzle-orm'
 import { randomBytes } from 'node:crypto'
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { readProjectAttachment } from './attachments.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 
 describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
   let t: TestApp
 
-  beforeAll(async () => {
+  databaseFixture(driver, async () => {
     t = await createTestApp(driver)
   })
 
