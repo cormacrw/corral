@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatMs, formatVital, vitalRating } from './performance'
+import { formatLatency, formatVital, vitalRating } from './performance'
 
 describe('vitalRating', () => {
   it.each([
@@ -13,10 +13,10 @@ describe('vitalRating', () => {
 
 describe('formatting', () => {
   it('shows durations in milliseconds, then seconds', () => {
-    expect(formatMs(1.44)).toBe('1.4 ms')
-    expect(formatMs(212.4)).toBe('212 ms')
-    expect(formatMs(1240)).toBe('1.24 s')
-    expect(formatMs(null)).toBe('–')
+    expect(formatLatency(1.44)).toBe('1.4 ms')
+    expect(formatLatency(212.4)).toBe('212 ms')
+    expect(formatLatency(1240)).toBe('1.24 s')
+    expect(formatLatency(null)).toBe('–')
   })
 
   it('shows CLS as a score', () => {

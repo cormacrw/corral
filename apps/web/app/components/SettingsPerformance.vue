@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { PERF_WINDOWS, type PerfSummary, type PerfVitals, type PerfWindow } from '@corral/contracts'
 import { api } from '~/composables/useApi'
-import { formatMs, formatVital, VITAL_RATING, vitalRating } from '~/utils/performance'
+import { formatLatency, formatVital, VITAL_RATING, vitalRating } from '~/utils/performance'
 
 // Settings → Performance (design/settings.md): how the app has been responding
 const range = ref<PerfWindow>('24h')
@@ -47,7 +47,7 @@ const queries = (value: number | null) => value === null ? '–' : String(Number
           <p class="text-xs text-muted">
             How quickly the app has been responding.
             <template v-if="summary">
-              Rows with a p95 above {{ formatMs(summary.slowThresholdMs) }} are marked slow.
+              Rows with a p95 above {{ formatLatency(summary.slowThresholdMs) }} are marked slow.
             </template>
           </p>
         </div>
@@ -183,16 +183,16 @@ const queries = (value: number | null) => value === null ? '–' : String(Number
                   {{ row.count }}
                 </td>
                 <td class="px-2 py-2 text-end tabular-nums whitespace-nowrap">
-                  {{ formatMs(row.p50Ms) }}
+                  {{ formatLatency(row.p50Ms) }}
                 </td>
                 <td class="px-2 py-2 text-end font-medium tabular-nums whitespace-nowrap">
-                  {{ formatMs(row.p95Ms) }}
+                  {{ formatLatency(row.p95Ms) }}
                 </td>
                 <td class="px-2 py-2 text-end tabular-nums whitespace-nowrap">
-                  {{ formatMs(row.maxMs) }}
+                  {{ formatLatency(row.maxMs) }}
                 </td>
                 <td class="px-2 py-2 text-end tabular-nums whitespace-nowrap">
-                  {{ formatMs(row.avgDbTimeMs) }}
+                  {{ formatLatency(row.avgDbTimeMs) }}
                 </td>
                 <td class="px-2 py-2 text-end tabular-nums">
                   {{ queries(row.avgQueries) }}
@@ -257,10 +257,10 @@ const queries = (value: number | null) => value === null ? '–' : String(Number
                   {{ row.count }}
                 </td>
                 <td class="px-2 py-2 text-end tabular-nums whitespace-nowrap">
-                  {{ formatMs(row.p50Ms) }}
+                  {{ formatLatency(row.p50Ms) }}
                 </td>
                 <td class="px-2 py-2 text-end font-medium tabular-nums whitespace-nowrap">
-                  {{ formatMs(row.p95Ms) }}
+                  {{ formatLatency(row.p95Ms) }}
                 </td>
               </tr>
             </tbody>
