@@ -39,9 +39,9 @@ describe('migrations', () => {
   it.for([
     { driver: 'pglite' as const },
     { driver: 'postgres' as const }
-  ])('0041 reports all ownership violations without rewriting rows on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+  ])('0049 reports all ownership violations without rewriting rows on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
     requireDatabase(driver, context)
-    const before = await migrationsBefore('0041_odd_malcolm_colcord')
+    const before = await migrationsBefore('0049_odd_malcolm_colcord')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
     const { db, migrate } = await open(driver)
     await migrate(before)
@@ -77,9 +77,9 @@ describe('migrations', () => {
   it.for([
     { driver: 'pglite' as const },
     { driver: 'postgres' as const }
-  ])('0040 checks future writes without rewriting approval or staged history on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+  ])('0048 checks future writes without rewriting approval or staged history on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
     requireDatabase(driver, context)
-    const before = await migrationsBefore('0040_plan_approval_tuples')
+    const before = await migrationsBefore('0048_plan_approval_tuples')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
     const { db, migrate } = await open(driver)
     await migrate(before)
@@ -101,9 +101,9 @@ describe('migrations', () => {
   it.for([
     { driver: 'pglite' as const },
     { driver: 'postgres' as const }
-  ])('0039 reports all inconsistent avatars and preserves them on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+  ])('0047 reports all inconsistent avatars and preserves them on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
     requireDatabase(driver, context)
-    const before = await migrationsBefore('0039_chunky_peter_parker')
+    const before = await migrationsBefore('0047_chunky_peter_parker')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
     const { db, migrate } = await open(driver)
     await migrate(before)
@@ -205,11 +205,11 @@ describe('migrations', () => {
     expect((await db.execute(sql`select count(*)::int as count from deployments`)).rows).toEqual([{ count: 1 }])
   })
 
-  describe('0036 project-scoped edges', () => {
+  describe('0044 project-scoped edges', () => {
     const actor = sql`'{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb`
     // Two projects, each with two epics and two tasks, in the old shape
     async function seed(driver: 'pglite' | 'postgres') {
-      const before = await migrationsBefore('0036_robust_jackpot')
+      const before = await migrationsBefore('0044_robust_jackpot')
       cleanup.push(() => rm(before, { recursive: true, force: true }))
       const { db, migrate } = await open(driver)
       await migrate(before)
@@ -225,11 +225,11 @@ describe('migrations', () => {
       return { db, migrate, task, epic }
     }
 
-    it.each([
-      { driver: 'pglite' as const, enabled: true },
-      { driver: 'postgres' as const, enabled: postgresAvailable }
-    ])('fills in the project of every same-project row on $driver', async ({ driver, enabled }) => {
-      if (!enabled) return
+    it.for([
+      { driver: 'pglite' as const },
+      { driver: 'postgres' as const }
+    ])('fills in the project of every same-project row on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+      requireDatabase(driver, context)
       const { db, migrate, task, epic } = await seed(driver)
       await db.execute(sql`update tasks set epic_id = ${epic('AA1')} where id = ${task('AA', 1)}`)
       await db.execute(sql`insert into task_dependencies (task_id, depends_on_id) values (${task('AA', 1)}, ${task('AA', 2)})`)
@@ -243,13 +243,13 @@ describe('migrations', () => {
       expect((await db.execute(sql`select count(*)::int as count from tasks where epic_id is not null`)).rows).toEqual([{ count: 1 }])
       await db.execute(sql`delete from epics where title = 'AA1'`)
       expect((await db.execute(sql`select count(*)::int as count from tasks where epic_id is null`)).rows).toEqual([{ count: 4 }])
-    }, 60_000)
+    })
 
-    it.each([
-      { driver: 'pglite' as const, enabled: true },
-      { driver: 'postgres' as const, enabled: postgresAvailable }
-    ])('reports every cross-project row and stops without changing anything on $driver', async ({ driver, enabled }) => {
-      if (!enabled) return
+    it.for([
+      { driver: 'pglite' as const },
+      { driver: 'postgres' as const }
+    ])('reports every cross-project row and stops without changing anything on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+      requireDatabase(driver, context)
       const { db, migrate, task, epic } = await seed(driver)
       await db.execute(sql`update tasks set epic_id = ${epic('BB1')} where id = ${task('AA', 1)}`)
       await db.execute(sql`insert into task_dependencies (task_id, depends_on_id) values (${task('AA', 2)}, ${task('BB', 2)})`)
@@ -276,15 +276,15 @@ describe('migrations', () => {
       await db.execute(sql`delete from epic_dependencies where depends_on_epic_id = ${epic('BB2')}`)
       await migrate(migrationsFolder)
       expect((await db.execute(sql`select count(*)::int as count from epic_dependencies where project_id is not null`)).rows).toEqual([{ count: 1 }])
-    }, 60_000)
+    })
   })
 
-  it.each([
-    { driver: 'pglite' as const, enabled: true },
-    { driver: 'postgres' as const, enabled: postgresAvailable }
-  ])('0037 refuses inconsistent historical rows without rewriting them on $driver', async ({ driver, enabled }) => {
-    if (!enabled) return
-    const before = await migrationsBefore('0037_nostalgic_thanos')
+  it.for([
+    { driver: 'pglite' as const },
+    { driver: 'postgres' as const }
+  ])('0045 refuses inconsistent historical rows without rewriting them on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+    requireDatabase(driver, context)
+    const before = await migrationsBefore('0045_nostalgic_thanos')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
     const { db, migrate } = await open(driver)
     await migrate(before)
@@ -302,7 +302,7 @@ describe('migrations', () => {
     expect((await db.execute(sql`select status_reason, pr_number, pr_url from tasks`)).rows).toEqual([
       { status_reason: 'Which provider?', pr_number: 123, pr_url: 'https://github.com/cormacrw/test-app/pull/123' }
     ])
-  }, 60_000)
+  })
 
   it('0028 preserves historical runs with null runner ownership', async () => {
     const before = await migrationsBefore('0028_complex_clint_barton')
@@ -321,7 +321,7 @@ describe('migrations', () => {
     await db.execute(sql`insert into runs (project_id, agent_id, task_id, role, runner_id)
       select p.id, a.id, t.id, 'developer', 'runner-B' from projects p, agents a, tasks t`)
     expect((await db.execute(sql`select runner_id from runs order by number`)).rows).toEqual([{ runner_id: null }, { runner_id: 'runner-B' }])
-  }, 60_000)
+  })
 
   it('0015 turns every task of the four old types into a task (D19)', async () => {
     const before = await migrationsBefore('0015_task_bug_spike')
@@ -357,7 +357,7 @@ describe('migrations', () => {
     const values = await db.execute(sql`select unnest(enum_range(null::task_type))::text as value`)
     expect(values.rows.map(r => r.value)).toEqual(['task', 'bug', 'spike'])
     // Two full migration runs on PGlite
-  }, 60_000)
+  })
   it('0016 adds the design type and design versions to a database with tasks (D20)', async () => {
     const before = await migrationsBefore('0016_design_tasks')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
@@ -399,7 +399,7 @@ describe('migrations', () => {
     // Versions go with their task
     await db.execute(sql`delete from tasks where number = 4`)
     expect((await db.execute(sql`select * from design_versions`)).rows).toEqual([])
-  }, 60_000)
+  })
 
   it('0023 adds closed_at to plan sessions, leaving existing sessions open', async () => {
     const before = await migrationsBefore('0023_third_mandrill')
@@ -417,7 +417,7 @@ describe('migrations', () => {
 
     const sessions = await db.execute(sql`select title, unread, closed_at from plan_sessions`)
     expect(sessions.rows).toEqual([{ title: 'S', unread: true, closed_at: null }])
-  }, 60_000)
+  })
 
   // On both drivers: Postgres can't use an enum value in the transaction
   // that adds it, so the check compares the kind as text
@@ -545,12 +545,12 @@ describe('migrations', () => {
     })
   })
 
-  it.each([
-    { driver: 'pglite' as const, enabled: true },
-    { driver: 'postgres' as const, enabled: postgresAvailable }
-  ])('0038 checks old evidence before enforcing note/file shapes on $driver', async ({ driver, enabled }) => {
-    if (!enabled) return
-    const before = await migrationsBefore('0038_evidence_shapes')
+  it.for([
+    { driver: 'pglite' as const },
+    { driver: 'postgres' as const }
+  ])('0046 checks old evidence before enforcing note/file shapes on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+    requireDatabase(driver, context)
+    const before = await migrationsBefore('0046_evidence_shapes')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
     const { db, migrate } = await open(driver)
     await migrate(before)
@@ -581,7 +581,7 @@ describe('migrations', () => {
       await expect(db.execute(sql`update evidence set ${change} where kind <> 'note'`)).rejects.toThrow()
     }
     await db.execute(sql`update evidence set size = 0 where kind <> 'note'`)
-  }, 60_000)
+  })
 
   // An empty database to migrate step by step: PGlite in memory, or a
   // throwaway database on the test Postgres server
