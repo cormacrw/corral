@@ -152,8 +152,10 @@ it('blocks a conflicted rebase with an Inbox item and hands it to a developer ru
   const before = t.github.calls.length
   await t.mergePass()
   await t.mergePass()
-  expect(t.github.calls.slice(before).filter(c => c.method === 'updateBranch')).toHaveLength(1)
-  expect(t.github.calls.slice(before).some(c => c.method === 'merge')).toBe(false)
+  // Epics left by earlier tests are polled in the same passes
+  const own = t.github.calls.slice(before).filter(c => c.args[0] === project.repository)
+  expect(own.filter(c => c.method === 'updateBranch')).toHaveLength(1)
+  expect(own.some(c => c.method === 'merge')).toBe(false)
   const box = await inbox()
   const item = box.needsYou.find(i => i.id === epic.id) as EpicConflictItem
   expect(item).toMatchObject({ type: 'epic_conflict', subject: epic.title, targetBranch: 'develop', files: ['src/routes/search.ts', 'docs/search.md'] })
