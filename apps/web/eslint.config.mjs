@@ -39,5 +39,14 @@ export default withNuxt(
         ]
       }
     }
+  },
+  {
+    // The main entry brings zod along. Types are fine; values come from /client.
+    // The prototype's fixtures load apart from the app.
+    files: ['app/**/*.{ts,vue}'],
+    ignores: ['app/prototype/**', 'app/**/*.test.ts'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': ['error', { paths: [{ name: '@corral/contracts', allowTypeImports: true, message: 'Import runtime values from @corral/contracts/client.' }] }]
+    }
   }
 )

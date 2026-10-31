@@ -1,6 +1,6 @@
 import type { TaskStatus } from '@corral/core'
 import { describe, expect, it } from 'vitest'
-import { agentStatus, cliLoginCommand, detectedRuntimes, formatMs, epicInProgress, epicReviewStatus, epicWithLiveCounts, runtimeLabel, runBadge, runRef, runTitle, runTokens, statusCounts, taskCounts, taskTypeBadge, taskNote } from './labels.ts'
+import { agentStatus, cliLoginCommand, detectedRuntimes, doneRefs, formatMs, epicInProgress, epicReviewStatus, epicWithLiveCounts, runtimeLabel, runBadge, runRef, runTitle, runTokens, statusCounts, taskCounts, taskTypeBadge, taskNote } from './labels.ts'
 import { projects, task } from '../prototype/fixtures'
 
 const tasks = (...statuses: TaskStatus[]) => statuses.map(status => ({ status }))
@@ -109,20 +109,20 @@ it('excludes Approved designs from open board work', () => {
 describe('Ready waiting notes', () => {
   it('marks a paused task, ahead of its other notes', () => {
     const paused = task(projects[0]!, 99, { title: 'Stopped', status: 'in_progress', reviewRounds: 1, paused: true })
-    expect(taskNote(paused, [paused], 5)).toEqual({ text: 'Paused', color: 'warning' })
-    expect(taskNote({ ...paused, paused: false }, [paused], 5)).toEqual({ text: 'Review round 1 of 5', color: 'neutral' })
+    expect(taskNote(paused, doneRefs([paused]), 5)).toEqual({ text: 'Paused', color: 'warning' })
+    expect(taskNote({ ...paused, paused: false }, doneRefs([paused]), 5)).toEqual({ text: 'Review round 1 of 5', color: 'neutral' })
   })
 
   it('shows epic prerequisites and clears the note when they finish', () => {
     const ready = task(projects[0]!, 99, { title: 'Waiting', status: 'ready', waitingOnEpics: [{ id: 'foundation', title: 'Foundation' }] })
-    expect(taskNote(ready, [ready], 5)).toEqual({ text: 'Waiting on epic: Foundation', color: 'neutral' })
-    expect(taskNote({ ...ready, waitingOnEpics: [] }, [ready], 5)).toBeNull()
-    expect(taskNote({ ...ready, status: 'in_progress', statusReason: null, draftSession: null }, [ready], 5)).toBeNull()
+    expect(taskNote(ready, doneRefs([ready]), 5)).toEqual({ text: 'Waiting on epic: Foundation', color: 'neutral' })
+    expect(taskNote({ ...ready, waitingOnEpics: [] }, doneRefs([ready]), 5)).toBeNull()
+    expect(taskNote({ ...ready, status: 'in_progress', statusReason: null, draftSession: null }, doneRefs([ready]), 5)).toBeNull()
   })
 
   it('preserves task dependency notes for epics without prerequisites', () => {
     const ready = task(projects[0]!, 99, { title: 'Waiting', status: 'ready', dependsOn: ['COR-98'] })
-    expect(taskNote(ready, [ready], 5)).toEqual({ text: 'Waiting on COR-98', color: 'neutral' })
+    expect(taskNote(ready, doneRefs([ready]), 5)).toEqual({ text: 'Waiting on COR-98', color: 'neutral' })
   })
 })
 

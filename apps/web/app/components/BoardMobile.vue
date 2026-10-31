@@ -3,7 +3,7 @@ import type { Epic, Task } from '@corral/contracts'
 import type { TaskStatus } from '@corral/core'
 import type { BoardFilters } from '~/utils/board'
 import { boardColumnKey, swipeStep } from '~/utils/board'
-import { PRIORITY, taskNote } from '~/utils/labels'
+import { doneRefs, PRIORITY, taskNote } from '~/utils/labels'
 
 // The Board on a phone (design/board.md, design/mobile.md): one column at a
 // time, picked from a row of tabs or by swiping sideways. Cards open the
@@ -79,7 +79,8 @@ function toggleSearch() {
 }
 const epicLabel = (id: string) => props.epics.find(e => e.id === id)?.label ?? ''
 const agentFor = (task: Task) => task.lease ? shell.agents.find(a => a.id === task.lease!.agentId) : null
-const note = (task: Task) => taskNote(task, props.all, props.reviewRoundCap)
+const done = computed(() => doneRefs(props.all))
+const note = (task: Task) => taskNote(task, done.value, props.reviewRoundCap)
 </script>
 
 <template>

@@ -1,4 +1,5 @@
-import { RUNTIMES_TAKING_MESSAGES, type Agent, type Run } from '@corral/contracts'
+import { RUNTIMES_TAKING_MESSAGES } from '@corral/contracts/client'
+import type { Agent, Run } from '@corral/contracts'
 import { isLiveRun, runtimeLabel } from '~/utils/labels'
 
 // What the agent page shows under a run's transcript (design/agent.md):

@@ -1,5 +1,6 @@
 import { isTaskDone } from '@corral/core'
-import { AGENT_RUNTIMES, type Agent, type AgentRuntime, type CliStatus, type Epic, type RunnerInfo, type RunnerRole, type RunnerStatus, type InboxItem, type PlanStatus, type Project, type Run, type Task } from '@corral/contracts'
+import { AGENT_RUNTIMES } from '@corral/contracts/client'
+import type { Agent, AgentRuntime, CliStatus, Epic, RunnerInfo, RunnerRole, RunnerStatus, InboxItem, PlanStatus, Project, Run, Task } from '@corral/contracts'
 import type { AgentRole, DesignVersionStatus, EpicReviewMode, EpicReviewState, RunOutcome, RunState, TaskPriority, TaskStatus } from '@corral/core'
 
 export type Color = 'primary' | 'secondary' | 'success' | 'info' | 'warning' | 'error' | 'neutral'
@@ -300,12 +301,14 @@ export function epicTitle(epics: { id: string, title: string }[] | undefined, id
   return epics?.find(e => e.id === id)?.title ?? `Epic ${fallbackIndex + 1}`
 }
 
-export function taskNote(task: Task, all: Task[], reviewRoundCap: number): { text: string, color: Color } | null {
+export const doneRefs = (tasks: Task[]): Set<string> => new Set(tasks.filter(isTaskDone).map(t => t.ref))
+
+export function taskNote(task: Task, done: Set<string>, reviewRoundCap: number): { text: string, color: Color } | null {
   // Takes the note's place: nothing else about the task moves until it's resumed
   if (task.paused) return { text: 'Paused', color: 'warning' }
   if (task.status === 'ready' && task.waitingOnEpics.length > 0) return { text: `Waiting on epic: ${task.waitingOnEpics.map(e => e.title).join(', ')}`, color: 'neutral' }
   if (task.status === 'ready' && task.dependsOn.length > 0) {
-    const waiting = task.dependsOn.filter(ref => !all.some(t => t.ref === ref && isTaskDone(t)))
+    const waiting = task.dependsOn.filter(ref => !done.has(ref))
     if (waiting.length > 0) return { text: `Waiting on ${waiting.join(', ')}`, color: 'neutral' }
   }
   if (task.status === 'blocked' || task.status === 'failed') return { text: task.statusReason, color: 'error' }

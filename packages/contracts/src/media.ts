@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { AttachmentContentType } from './client.ts'
 
 // Profile pictures: small square images, resized in the browser before upload
 export const AVATAR_CONTENT_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const
@@ -8,9 +9,7 @@ export const AVATAR_MAX_BYTES = 2 * 1024 * 1024
 // its content type (POST /projects/:slug/attachments?name=), referenced in
 // text as ![name](attachment:<id>) and served from `url`. Never SVG, which
 // can carry script.
-export const ATTACHMENT_CONTENT_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const
-export type AttachmentContentType = typeof ATTACHMENT_CONTENT_TYPES[number]
-export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
+export { ATTACHMENT_CONTENT_TYPES, ATTACHMENT_MAX_BYTES, type AttachmentContentType } from './client.ts'
 
 export const uploadAttachmentQuery = z.object({
   name: z.string().trim().max(200).optional()

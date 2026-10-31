@@ -1,4 +1,5 @@
-import { needsAttention, type Agent, type Inbox, type Task } from '@corral/contracts'
+import { needsAttention } from '@corral/contracts/client'
+import type { Agent, Inbox, Task } from '@corral/contracts'
 import { onBoard } from './board.ts'
 
 // What a project's card on the mobile Projects tab shows (design/mobile.md)

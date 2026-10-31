@@ -33,5 +33,4 @@ export type ServerEvent =
 
 export type ServerEventType = ServerEvent['type']
 
-// Sent well inside Cloudflare's ~100 s idle timeout (D12)
-export const SSE_HEARTBEAT_MS = 25_000
+export { SSE_HEARTBEAT_MS } from './client.ts'

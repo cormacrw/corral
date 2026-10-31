@@ -1,4 +1,4 @@
-import { ATTACHMENT_CONTENT_TYPES, ATTACHMENT_MAX_BYTES } from '@corral/contracts'
+import { ATTACHMENT_CONTENT_TYPES, ATTACHMENT_MAX_BYTES } from '@corral/contracts/client'
 
 // Why a file can't be attached, or null when it can. The server checks
 // again; this saves uploading something it would reject.

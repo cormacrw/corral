@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { needsAttention } from '@corral/contracts'
+import { needsAttention } from '@corral/contracts/client'
 import type { InboxItem } from '@corral/contracts'
 import { useInboxView } from '~/composables/useInboxView'
 import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
