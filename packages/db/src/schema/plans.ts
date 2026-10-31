@@ -1,6 +1,9 @@
+import { sql } from 'drizzle-orm'
 import type { Actor, PlanTaskContent } from '@corral/core'
 import {
   boolean,
+  check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -40,14 +43,14 @@ export const planSessions = pgTable('plan_sessions', {
   createdBy: actor('created_by'),
   createdAt: createdAt(),
   updatedAt: updatedAt()
-}, t => [index().on(t.projectId, t.updatedAt)])
+}, t => [index().on(t.projectId, t.updatedAt), unique('sessions_project_id_unique').on(t.projectId, t.id)])
 
 export const planMessages = pgTable('plan_messages', {
   id: uuid().primaryKey().defaultRandom(),
   sessionId: uuid().notNull().references(() => planSessions.id, { onDelete: 'cascade' }),
-  // 'human' or 'pm'; questions are PM messages flagged as such
-  role: text().notNull(),
-  kind: text().notNull().default('message'),
+  // Questions are PM messages flagged as such
+  role: text().$type<'human' | 'pm'>().notNull(),
+  kind: text().$type<'message' | 'question' | 'error'>().notNull().default('message'),
   text: text().notNull(),
   // A question's suggested answer and answer choices (ask_question)
   recommendation: text(),
@@ -55,13 +58,19 @@ export const planMessages = pgTable('plan_messages', {
   planId: uuid().references((): AnyPgColumn => plans.id, { onDelete: 'set null' }),
   runId: uuid().references(() => runs.id, { onDelete: 'set null' }),
   createdAt: createdAt()
-}, t => [index().on(t.sessionId, t.createdAt)])
+}, t => [
+  index().on(t.sessionId, t.createdAt),
+  // The migration diagnoses history, then adds these NOT VALID for future writes.
+  // History stays as written and toMessage reads it
+  check('plan_messages_role_kind', sql`(${t.role} = 'human' and ${t.kind} = 'message') or (${t.role} = 'pm' and ${t.kind} in ('message', 'question', 'error'))`),
+  check('plan_messages_question_fields', sql`${t.kind} = 'question' or (${t.recommendation} is null and ${t.options} is null)`)
+])
 
 // A versioned plan from propose_plan; its tasks live in Backlog until a
 // human approves the plan (D9, D10)
 export const plans = pgTable('plans', {
   id: uuid().primaryKey().defaultRandom(),
-  sessionId: uuid().notNull().references(() => planSessions.id, { onDelete: 'cascade' }),
+  sessionId: uuid().notNull(),
   projectId: uuid().notNull().references(() => projects.id, { onDelete: 'cascade' }),
   epicId: uuid().references(() => epics.id, { onDelete: 'set null' }),
   version: integer().notNull(),
@@ -71,7 +80,12 @@ export const plans = pgTable('plans', {
   approvedBy: jsonb('approved_by').$type<Actor>(),
   approvedAt: timestamp({ withTimezone: true }),
   createdAt: createdAt()
-}, t => [unique('plans_session_version_unique').on(t.sessionId, t.version)])
+}, t => [
+  foreignKey({ name: 'plans_session_same_project_fk', columns: [t.projectId, t.sessionId], foreignColumns: [planSessions.projectId, planSessions.id] }).onDelete('cascade'),
+  unique('plans_session_version_unique').on(t.sessionId, t.version),
+  // Superseding an approved version preserves its approval history.
+  check('plans_approval_tuple', sql`(${t.approvedBy} is null) = (${t.approvedAt} is null) and (${t.status} <> 'approved' or (${t.approvedBy} is not null and ${t.approvedAt} is not null))`)
+])
 
 export const planTasks = pgTable('plan_tasks', {
   planId: uuid().notNull().references(() => plans.id, { onDelete: 'cascade' }),
@@ -84,7 +98,13 @@ export const planTasks = pgTable('plan_tasks', {
   // Set when the item revises an existing Backlog or unclaimed Ready task (or a Draft from
   // elsewhere): the proposed edits, written to the task only on approval
   revision: jsonb().$type<PlanRevision>()
-}, t => [primaryKey({ columns: [t.planId, t.key] })])
+}, t => [
+  primaryKey({ columns: [t.planId, t.key] }),
+  // Change is a version diff, not whether this item references an existing
+  // task: even an added or unchanged item can stage edits. FK deletion may
+  // clear taskId later without clearing the historical revision.
+  check('plan_tasks_revision_change', sql`${t.revision} is null or ${t.change} in ('added', 'changed', 'unchanged')`)
+])
 
 export interface PlanRevision extends PlanTaskContent {
   // Null when the revised task has no epic

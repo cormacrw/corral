@@ -142,10 +142,7 @@ export function filterLabel(selected: string[], label: (id: string) => string, a
 // impersonate an agent or move work through scheduler-owned transitions.
 export function boardMove(task: Task, status: TaskStatus): HumanTransitionInput | null {
   if (task.status === status) return null
-  const events = availableEvents({
-    type: task.type, status: task.status, humanReview: task.humanReview,
-    reviewRounds: task.reviewRounds, failedRuns: task.failedRuns, reason: task.statusReason
-  }, { kind: 'human', userId: 'me' })
+  const events = availableEvents(task, { kind: 'human', userId: 'me' })
   if (events.includes('resolve') && (status === 'ready' || status === 'in_progress' || status === 'backlog')) return { type: 'resolve', to: status }
   if (events.includes('approve') && status === 'ready') return { type: 'approve' }
   if (events.includes('send_back') && status === 'backlog') return { type: 'send_back' }

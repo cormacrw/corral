@@ -17,6 +17,7 @@ import type {
   PlanMessage,
   Plan,
   PlanSession,
+  PlanThreadAttention,
   Profile,
   Project,
   PullRequestStatus,
@@ -234,7 +235,7 @@ function doc(...paragraphs: string[]): Task['description'] {
 }
 
 // A task with sensible defaults; give only what the screen needs
-export function task(project: Project, number: number, fields: Partial<Task> & Pick<Task, 'title' | 'status'>): Task {
+export function task(project: Project, number: number, fields: Partial<Task> & Pick<Task, 'title'> & Pick<Task, 'status'>): Task {
   return {
     id: `t-${project.prefix.toLowerCase()}-${number}`,
     projectId: project.id,
@@ -247,11 +248,9 @@ export function task(project: Project, number: number, fields: Partial<Task> & P
     humanReview: project.humanReviewDefault,
     reviewRounds: 0,
     failedRuns: 0,
-    statusReason: null,
     paused: false,
     branch: null,
-    prNumber: null,
-    prUrl: null,
+    pr: null,
     acceptanceCriteria: [],
     dependsOn: [],
     waitingOnEpics: [],
@@ -265,12 +264,20 @@ export function task(project: Project, number: number, fields: Partial<Task> & P
     mergedAt: null,
     gateChecks: null,
     design: null,
-    planSessionId: null,
-    planSessionTitle: null,
     createdAt: ago(60 * 24),
     updatedAt: ago(30),
-    ...fields
+    ...fields,
+    ...fixtureStatus(fields)
   }
+}
+
+function fixtureStatus(fields: Partial<Task> & Pick<Task, 'status'>) {
+  if (fields.status === 'draft') return { status: fields.status, statusReason: null, draftSession: fields.draftSession ?? null } as const
+  if (fields.status === 'blocked' || fields.status === 'failed') {
+    if (!fields.statusReason?.trim()) throw new Error('Fixture needs a reason')
+    return { status: fields.status, statusReason: fields.statusReason, draftSession: null } as const
+  }
+  return { status: fields.status, statusReason: null, draftSession: null } as const
 }
 
 function criteria(...texts: string[]): Task['acceptanceCriteria'] {
@@ -283,8 +290,8 @@ export const tasks: Task[] = [
   task(corral, 20, { title: 'Design the agent settings experience', type: 'design', status: 'in_progress', branch: 'design/COR-20', humanReview: true, lease: { agentId: 'a-design', runId: 'r-design', role: 'designer', expiresAt: ago(-10) }, acceptanceCriteria: criteria('Agent settings work on desktop and mobile') }),
   task(corral, 41, { title: 'Navigation design', type: 'design', status: 'human_review', epicId: 'e-design', branch: 'design/COR-41', humanReview: true }),
   task(corral, 40, { title: 'Approved navigation prototype', type: 'design', status: 'approved', epicId: 'e-design', branch: 'design/COR-40', humanReview: true }),
-  task(corral, 1, { title: 'Design task type and versions', status: 'merged', epicId: 'e-design', prNumber: 60, prUrl: 'https://github.com/cormacrw/corral/pull/60', mergedAt: ago(60 * 20), mergeCommitSha: 'da0ebe6' }),
-  task(corral, 2, { title: 'Serve design bundles sandboxed', status: 'merged', epicId: 'e-design', dependsOn: ['COR-1'], prNumber: 62, prUrl: 'https://github.com/cormacrw/corral/pull/62', mergedAt: ago(60 * 3), mergeCommitSha: 'e5e8457' }),
+  task(corral, 1, { title: 'Design task type and versions', status: 'merged', epicId: 'e-design', pr: { number: 60, url: 'https://github.com/cormacrw/corral/pull/60' }, mergedAt: ago(60 * 20), mergeCommitSha: 'da0ebe6' }),
+  task(corral, 2, { title: 'Serve design bundles sandboxed', status: 'merged', epicId: 'e-design', dependsOn: ['COR-1'], pr: { number: 62, url: 'https://github.com/cormacrw/corral/pull/62' }, mergedAt: ago(60 * 3), mergeCommitSha: 'e5e8457' }),
   task(corral, 3, {
     title: 'Static prototype build with mock data',
     status: 'in_progress',
@@ -292,8 +299,7 @@ export const tasks: Task[] = [
     epicId: 'e-design',
     dependsOn: ['COR-2'],
     branch: 'corral/cor-3-static-prototype',
-    prNumber: 66,
-    prUrl: 'https://github.com/cormacrw/corral/pull/66',
+    pr: { number: 66, url: 'https://github.com/cormacrw/corral/pull/66' },
     lease: { agentId: 'a-dev2', runId: 'r-1', role: 'developer', expiresAt: ago(-10) },
     acceptanceCriteria: criteria('`pnpm prototype` outputs index.html with fixture data', 'Works from a sub-path with no API', 'CLAUDE.md documents it')
   }),
@@ -303,8 +309,7 @@ export const tasks: Task[] = [
     type: 'design',
     epicId: 'e-design',
     branch: 'design/COR-4',
-    prNumber: 63,
-    prUrl: 'https://github.com/cormacrw/corral/pull/63',
+    pr: { number: 63, url: 'https://github.com/cormacrw/corral/pull/63' },
     lease: { agentId: 'a-rev', runId: 'r-2', role: 'reviewer', expiresAt: ago(-12) },
     reviewRounds: 1,
     acceptanceCriteria: criteria('Shows every version with its screenshots', 'Approve and request changes from the page')
@@ -315,34 +320,32 @@ export const tasks: Task[] = [
     humanReview: true,
     epicId: 'e-design',
     branch: 'corral/cor-5-approve-design',
-    prNumber: 64,
-    prUrl: 'https://github.com/cormacrw/corral/pull/64',
+    pr: { number: 64, url: 'https://github.com/cormacrw/corral/pull/64' },
     reviewRounds: 1,
     gateChecks: [{ name: 'lint', url: null }, { name: 'test', url: null }],
     acceptanceCriteria: criteria('Approve marks the version approved', 'Earlier versions are superseded', 'The approval response identifies the version', 'Diagnostic artifacts are retained').map(c => ({ ...c, met: true }))
   }),
   // Pinned to v1 of the design after v2 was approved, so it's flagged (D20)
   task(corral, 6, { title: 'Pin build tasks to a design', status: 'ready', epicId: 'e-design', dependsOn: ['COR-5'], design: { taskRef: 'COR-4', version: 1, screens: ['review', 'review-empty'], newerVersion: 2 } }),
-  task(corral, 7, { title: 'PM drafts tasks from an approved design', status: 'ready_to_merge', epicId: 'e-design', prNumber: 65, prUrl: 'https://github.com/cormacrw/corral/pull/65' }),
+  task(corral, 7, { title: 'PM drafts tasks from an approved design', status: 'ready_to_merge', epicId: 'e-design', pr: { number: 65, url: 'https://github.com/cormacrw/corral/pull/65' } }),
   task(corral, 8, { title: 'Push notifications for Needs you', status: 'blocked', epicId: 'e-mobile', statusReason: 'Which push service should the server use: Web Push with VAPID keys, or ntfy?' }),
   task(corral, 9, { title: 'Offline board', status: 'failed', type: 'bug', priority: 'urgent', epicId: 'e-mobile', failedRuns: 3, statusReason: 'The runner lost its worktree three times in a row.' }),
   task(corral, 10, { title: 'Install sheet on iOS', status: 'merged', epicId: 'e-mobile', mergedAt: ago(60 * 30) }),
   task(corral, 11, { title: 'Dark mode for the epic graph', status: 'backlog', priority: 'low' }),
   task(corral, 12, { title: 'Spike: Codex reasoning effort', status: 'backlog', type: 'spike' }),
   // Drafts from the proposed plans in planSessions s-1 and s-3
-  task(corral, 13, { title: 'Design review screen', status: 'draft', type: 'design', priority: 'high', epicId: 'e-design', planSessionId: 's-1', planSessionTitle: 'Design tasks' }),
-  task(corral, 14, { title: 'Approve a design version', status: 'draft', priority: 'urgent', epicId: 'e-design', dependsOn: ['COR-13'], planSessionId: 's-1', planSessionTitle: 'Design tasks' }),
-  task(corral, 15, { title: 'Pin a design version to a task', status: 'draft', priority: 'low', epicId: 'e-design', dependsOn: ['COR-14'], planSessionId: 's-1', planSessionTitle: 'Design tasks' }),
-  task(corral, 16, { title: 'Cards jump when a run starts', status: 'draft', type: 'bug', planSessionId: 's-3', planSessionTitle: 'Board polish' }),
-  task(corral, 17, { title: 'Spike: virtualise long columns', status: 'draft', type: 'spike', priority: 'low', planSessionId: 's-3', planSessionTitle: 'Board polish' }),
+  task(corral, 13, { title: 'Design review screen', status: 'draft', type: 'design', priority: 'high', epicId: 'e-design', draftSession: { id: 's-1', title: 'Design tasks' } }),
+  task(corral, 14, { title: 'Approve a design version', status: 'draft', priority: 'urgent', epicId: 'e-design', dependsOn: ['COR-13'], draftSession: { id: 's-1', title: 'Design tasks' } }),
+  task(corral, 15, { title: 'Pin a design version to a task', status: 'draft', priority: 'low', epicId: 'e-design', dependsOn: ['COR-14'], draftSession: { id: 's-1', title: 'Design tasks' } }),
+  task(corral, 16, { title: 'Cards jump when a run starts', status: 'draft', type: 'bug', draftSession: { id: 's-3', title: 'Board polish' } }),
+  task(corral, 17, { title: 'Spike: virtualise long columns', status: 'draft', type: 'spike', priority: 'low', draftSession: { id: 's-3', title: 'Board polish' } }),
   // Stopped by a human, one in each state a run can be stopped in
   task(corral, 18, {
     title: 'Retry webhooks after a server restart',
     status: 'agent_review',
     paused: true,
     branch: 'corral/cor-18-retry-webhooks',
-    prNumber: 67,
-    prUrl: 'https://github.com/cormacrw/corral/pull/67',
+    pr: { number: 67, url: 'https://github.com/cormacrw/corral/pull/67' },
     acceptanceCriteria: criteria('Undelivered webhooks are sent again after a restart')
   }),
   task(corral, 19, { title: 'Keep the run log open across reloads', status: 'in_progress', paused: true, branch: 'corral/cor-19-run-log' }),
@@ -376,7 +379,7 @@ export const tasks: Task[] = [
 
 function epicTasks(epicId: string, first: number, titles: string[], mergedMinutesAgo = 60 * 24 * 5): Task[] {
   return titles.map((title, i) => task(corral, first + i, {
-    title, status: 'merged', epicId, prNumber: first + 100 + i, prUrl: `https://github.com/cormacrw/corral/pull/${first + 100 + i}`,
+    title, status: 'merged', epicId, pr: { number: first + 100 + i, url: `https://github.com/cormacrw/corral/pull/${first + 100 + i}` },
     mergedAt: ago(mergedMinutesAgo), mergeCommitSha: `${first + i}e8457`
   }))
 }
@@ -571,7 +574,7 @@ export const history: Record<string, AuditEntry[]> = {
 // D21: human files, note-only proof, mixed evidence and artifact-only proof.
 const reviewTask = at('COR-5')
 const criterionId = (position: number) => reviewTask.acceptanceCriteria[position]!.id
-const fileEvidence = (id: string, position: number | null, kind: Evidence['kind'], fileName: string, contentType: string, url: string): Evidence => ({
+const fileEvidence = (id: string, position: number | null, kind: Exclude<Evidence['kind'], 'note'>, fileName: string, contentType: string, url: string): Evidence => ({
   id, taskId: reviewTask.id, criterionId: position === null ? null : criterionId(position),
   runId: 'r-2', round: 0, kind, note: '', fileName, contentType, size: 128, url, createdAt: ago(20)
 })
@@ -588,7 +591,7 @@ export const evidence: Record<string, Evidence[]> = {
   [reviewTask.id]: [
     fileEvidence('ev-shot', 0, 'screenshot', 'approved-version.svg', 'image/svg+xml', screenshotUrl),
     fileEvidence('ev-log', 0, 'log', 'approval.log', 'text/plain', logUrl),
-    { ...fileEvidence('ev-note', 1, 'note', '', '', ''), fileName: null, contentType: null, url: null, size: 0, note: '**Earlier versions are superseded.** The approval transaction updates previous versions atomically. See `approveDesignVersion` in the design service.' },
+    { id: 'ev-note', taskId: reviewTask.id, criterionId: criterionId(1), runId: 'r-2', round: 0, kind: 'note', createdAt: ago(20), fileName: null, contentType: null, url: null, size: 0, note: '**Earlier versions are superseded.** The approval transaction updates previous versions atomically. See `approveDesignVersion` in the design service.' },
     { ...fileEvidence('ev-request', 2, 'request', 'approval-response.txt', 'text/plain', requestUrl), createdAt: ago(40) },
     fileEvidence('ev-output', 3, 'test_output', 'diagnostics.txt', 'text/plain', logUrl),
     fileEvidence('ev-text', null, 'text', 'agent-summary.txt', 'text/plain', logUrl),
@@ -600,7 +603,7 @@ export const evidence: Record<string, Evidence[]> = {
 const alertTask = at('COR-23')
 evidence[alertTask.id] = [
   fileEvidence('ev-alert-log', null, 'log', 'failed-run-alert-delivered-to-every-open-browser-session.log', 'text/plain', logUrl),
-  { ...fileEvidence('ev-alert-note', null, 'note', '', '', ''), fileName: null, contentType: null, url: null, size: 0, note: 'Checked with https://github.com/cormacrw/corral/blob/main/apps/server/src/notifications/failed-run-alerts.test.ts and a stopped runner.' }
+  { id: 'ev-alert-note', taskId: alertTask.id, criterionId: null, runId: 'r-2', round: 0, kind: 'note', createdAt: ago(20), fileName: null, contentType: null, url: null, size: 0, note: 'Checked with https://github.com/cormacrw/corral/blob/main/apps/server/src/notifications/failed-run-alerts.test.ts and a stopped runner.' }
 ]
 
 export const reviews: Record<string, Review[]> = {
@@ -623,11 +626,12 @@ export const reviews: Record<string, Review[]> = {
 function pullRequest(ref: string, fields: Partial<PullRequestStatus> & Pick<PullRequestStatus, 'merge'>): PullRequestStatus {
   const t = at(ref)
   const project = projects.find(p => p.id === t.projectId)!
+  if (!t.pr) throw new Error('Pull request fixture needs PR data')
   return {
     taskRef: t.ref,
     taskTitle: t.title,
     taskStatus: t.status,
-    pr: { number: t.prNumber!, url: t.prUrl!, state: 'open', headSha: '5b030d7e1c' },
+    pr: { number: t.pr.number, url: t.pr.url, state: 'open', headSha: '5b030d7e1c' },
     review: { verdict: 'approved', headSha: '5b030d7e1c', forHeadCommit: true, createdAt: ago(40) },
     ci: { status: 'passing', checks: project.requiredChecks.map(name => ({ name, conclusion: 'success', url: null })) },
     branch: { name: t.branch, mergeable: true, mergeableState: 'clean', upToDate: true, rebase: 'not_needed' },
@@ -802,6 +806,20 @@ export const releaseNotes: ReleaseNotesItem[] = [{
 export const resolvedInbox: Inbox['resolved'] = []
 
 // The inbox is derived from the tasks above that need the human
+// What a thread waits on, or nothing when it's missing the data its status needs
+function threadAttention(status: PlanSession['status'], last?: PlanMessage, plan?: Plan, reply?: PlanMessage): PlanThreadAttention | null {
+  if (status === 'question') {
+    if (last?.kind !== 'question') return null
+    return { status, question: { text: last.text, recommendation: last.recommendation, options: last.options }, plan: null, planId: null, reply: null }
+  }
+  if (status === 'needs_approval') {
+    if (!plan) return null
+    const summary = { id: plan.id, version: plan.version, title: plan.title, summary: plan.summary, epicCount: plan.epics.length, taskCount: plan.tasks.filter(t => t.change !== 'removed').length }
+    return { status, question: null, plan: summary, planId: plan.id, reply: null }
+  }
+  return reply ? { status, question: null, plan: null, planId: null, reply: reply.text } : null
+}
+
 export function inbox(): Inbox {
   const needsYou: InboxItem[] = tasks
     .filter(t => t.status === 'human_review' || t.status === 'blocked' || t.status === 'failed')
@@ -830,7 +848,7 @@ export function inbox(): Inbox {
         body,
         sender: type === 'failed' ? { name: 'Corral', role: 'system' as const } : { name: type === 'blocked' ? 'Victor' : 'Rita', role: type === 'blocked' ? 'developer' as const : 'reviewer' as const },
         at: t.updatedAt,
-        prUrl: t.prUrl,
+        prUrl: t.pr?.url ?? null,
         resolution: null
       }
     })
@@ -840,21 +858,19 @@ export function inbox(): Inbox {
     const messages = planMessages[session.id] ?? []
     const last = messages.at(-1)
     const plan = plans[session.id]?.find(p => p.status === 'proposed')
-    const reply = session.status === 'none' ? messages.findLast(m => m.role === 'pm') : undefined
-    if (session.status === 'none' && !reply) continue
+    const reply = messages.findLast(m => m.role === 'pm')
+    const waiting = threadAttention(session.status, last, plan, reply)
+    if (!waiting) continue
     needsYou.push({
+      ...waiting,
       id: session.id, type: 'plan_thread', sessionId: session.id,
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
       subject: session.title, preview: session.preview ?? '',
-      question: session.status === 'question' && last ? { text: last.text, recommendation: last.recommendation, options: last.options } : null,
-      reply: reply?.text ?? null,
-      plan: plan ? { id: plan.id, version: plan.version, title: plan.title, summary: plan.summary, epicCount: plan.epics.length, taskCount: plan.tasks.filter(t => t.change !== 'removed').length } : null,
       // When it started waiting: the question, the plan or the reply
       sender: { name: agents.find(a => a.role === 'pm')?.name ?? 'PM', role: 'pm' }, at: (session.status === 'needs_approval' ? plan?.createdAt : session.status === 'question' ? last?.createdAt : reply?.createdAt) ?? session.updatedAt,
       taskId: null, taskRef: null, prUrl: null, resolution: null,
-      runtime: session.runtime, status: session.status, unread: session.unread,
-      activeRunId: session.activeRunId,
-      planId: plan?.id ?? null
+      runtime: session.runtime, unread: session.unread,
+      activeRunId: session.activeRunId
     })
   }
   const review = epics.find(e => e.reviewState === 'human_review')
@@ -890,7 +906,7 @@ export function inbox(): Inbox {
     taskId: completed.id, taskRef: completed.ref, subject: completed.title,
     preview: 'The task was merged.', body: 'The task was merged.',
     sender: { name: 'Corral', role: 'system' }, at: completed.updatedAt,
-    prUrl: completed.prUrl, resolution: null
+    prUrl: completed.pr?.url ?? null, resolution: null
   }]
   const count = needsYou.length
   needsYou.push(...releaseNotes.filter(r => !r.resolution))

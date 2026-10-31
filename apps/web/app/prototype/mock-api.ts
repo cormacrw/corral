@@ -1,6 +1,6 @@
-import { flowMetricsQuery } from '@corral/contracts'
+import { flowMetricsQuery, planMessageFields } from '@corral/contracts'
 import { checkEpicDependencies, isTaskDone } from '@corral/core'
-import type { CreateAgentInput, CreateTaskInput, EpicReviewActionInput, HumanTransitionInput, InboxActionInput, PatchEpicInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
+import type { CreateAgentInput, CreateTaskInput, EpicReviewActionInput, HumanTransitionInput, InboxActionInput, PatchEpicInput, DraftSession, NewPlanMessageFields, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
 import { ApiError } from '~/queries/client'
 import { STOP_ASKING } from '~/utils/plan-questions'
 import * as f from './fixtures'
@@ -296,7 +296,7 @@ route('POST', '/inbox/:taskId/actions', ([taskId], body) => {
   Object.assign(task, { status: approvedDesign ? 'approved' : accepted ? 'merged' : 'in_progress', mergedAt: accepted && !approvedDesign ? now : null, updatedAt: now })
   if (input.action === 'request_changes') {
     ;(f.comments[task.id] ??= []).push({ id: `cm-${Date.now()}`, taskId: task.id, author: { kind: 'human', userId: f.profile.id }, body: input.text, pinned: false, createdAt: now })
-    task.statusReason = input.text
+    task.statusReason = null
   }
   const resolution = approvedDesign ? 'You approved the design' : accepted ? (task.type === 'spike' ? 'You accepted the findings' : 'You approved the merge') : 'You requested changes'
   f.resolvedInbox.unshift({ ...item, message: undefined, since: undefined, newArtifacts: undefined, id: `resolved-${task.id}-${Date.now()}`, type: 'activity', sender: { name: 'You', role: 'system' }, body: resolution, preview: resolution, resolution, at: now })
@@ -326,14 +326,14 @@ route('GET', '/plan/sessions/:id', ([id]) => session(id!))
 function drafts(projectId: string): DraftSession[] {
   const rows = f.tasks.filter(t => t.projectId === projectId && t.status === 'draft').toSorted((a, b) => a.number - b.number)
   return f.planSessions
-    .filter(s => rows.some(t => t.planSessionId === s.id))
+    .filter(s => rows.some(t => t.draftSession?.id === s.id))
     .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .map(s => ({
       sessionId: s.id,
       title: s.title,
       updatedAt: s.updatedAt,
       planStatus: f.plans[s.id]?.at(-1)?.status ?? null,
-      drafts: rows.filter(t => t.planSessionId === s.id).map(t => ({ taskId: t.id, ref: t.ref, title: t.title, type: t.type, priority: t.priority }))
+      drafts: rows.filter(t => t.draftSession?.id === s.id).map(t => ({ taskId: t.id, ref: t.ref, title: t.title, type: t.type, priority: t.priority }))
     }))
 }
 route('GET', '/projects/:slug/drafts', ([slug]) => drafts(project(slug!).id))
@@ -343,7 +343,7 @@ route('POST', '/plan/plans/:id/approve', ([id], body) => {
   const { to } = body as { to: 'ready' | 'backlog' }
   Object.assign(plan, { status: 'approved', approvedAt: new Date().toISOString(), tasks: plan.tasks.map(p => p.status === 'draft' ? { ...p, status: to } : p) })
   for (const t of f.tasks.filter(t => plan.tasks.some(p => p.taskId === t.id) && t.status === 'draft')) {
-    Object.assign(t, { status: to, planSessionId: null, planSessionTitle: null })
+    Object.assign(t, { status: to, draftSession: null })
     emit({ type: 'task.updated', task: t })
   }
   const s = f.planSessions.find(x => x.id === plan.sessionId)
@@ -355,12 +355,12 @@ route('POST', '/plan/plans/:id/approve', ([id], body) => {
 // Closing discards only Drafts and unapproved plans, as the real endpoint does.
 route('POST', '/plan/sessions/:id/close', ([id]) => {
   const s = f.planSessions.find(x => x.id === id) ?? notFound()
-  for (const task of f.tasks.filter(t => t.planSessionId === s.id)) {
+  for (const task of f.tasks.filter(t => t.draftSession?.id === s.id)) {
     if (task.status === 'draft') {
       f.tasks.splice(f.tasks.indexOf(task), 1)
       emit({ type: 'task.deleted', taskId: task.id, projectId: task.projectId })
     } else {
-      Object.assign(task, { planSessionId: null, planSessionTitle: null })
+      Object.assign(task, { draftSession: null })
     }
   }
   for (const plan of f.plans[s.id] ?? []) {
@@ -391,8 +391,8 @@ function emit(event: ServerEvent): void {
 }
 
 let nextId = 0
-function postMessage(sessionId: string, message: Omit<PlanMessage, 'id' | 'sessionId' | 'createdAt' | 'runId' | 'planId' | 'recommendation' | 'options'> & Partial<PlanMessage>): PlanMessage {
-  const m: PlanMessage = { recommendation: null, options: null, planId: null, runId: null, ...message, id: `mock-m-${++nextId}`, sessionId, createdAt: new Date().toISOString() }
+function postMessage(sessionId: string, message: NewPlanMessageFields, links: { planId?: string, runId?: string } = {}): PlanMessage {
+  const m: PlanMessage = { planId: null, runId: null, ...links, ...planMessageFields.parse(message), id: `mock-m-${++nextId}`, sessionId, createdAt: new Date().toISOString() }
   ;(f.planMessages[sessionId] ??= []).push(m)
   emit({ type: 'plan.message', message: m })
   return m
@@ -417,7 +417,7 @@ export function pmReply(sessionId: string, text: string): void {
     ;(f.plans[sessionId] ??= []).push(plan)
     emit({ type: 'plan.updated', plan })
     const summary = `Here is a plan with ${plan.tasks.length} tasks. Approve it to put them on the board.`
-    postMessage(sessionId, { role: 'pm', kind: 'message', text: summary, planId: plan.id })
+    postMessage(sessionId, { role: 'pm', kind: 'message', text: summary }, { planId: plan.id })
     Object.assign(s, { status: 'needs_approval', preview: summary, updatedAt: new Date().toISOString() })
   }
   emit({ type: 'plan.session', session: s })
@@ -450,7 +450,7 @@ route('POST', '/plan/sessions/:id/messages', ([id], body) => {
   setTimeout(() => {
     if (f.grilling[s.id]) pmReply(s.id, text)
     else {
-      postMessage(s.id, { role: 'pm', kind: 'message', text: reply, runId })
+      postMessage(s.id, { role: 'pm', kind: 'message', text: reply }, { runId })
       Object.assign(s, { preview: reply, status: f.plans[s.id]?.at(-1)?.status === 'proposed' ? 'needs_approval' : 'none' })
     }
     Object.assign(s, { activeRunId: null, unread: true, updatedAt: new Date().toISOString() })

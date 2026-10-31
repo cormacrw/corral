@@ -574,8 +574,10 @@ describe('orchestrator', () => {
     const { project, task, job } = await assigned()
     const criterion = (await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}`).then(r => r.json()) as Task).acceptanceCriteria[0]!
     const noFile = await runner.call(job.runId, job.leaseEpoch, 'attach_evidence', { criterionId: criterion.id, kind: 'screenshot', note: 'The page' })
-    expect(noFile).toMatchObject({ ok: false, error: expect.stringContaining('Pass the path of the file to attach, or use kind "note"') })
-    expect((noFile as { error: string }).error).toContain('screenshot needs a file')
+    expect(noFile).toMatchObject({ ok: false, error: expect.stringContaining('Pass the path of the file to attach') })
+    for (const fields of [{ fileName: 'x' }, { contentType: 'text/plain' }, { dataBase64: '' }, { size: -1 }, { blob: 'x' }]) {
+      expect(await runner.call(job.runId, job.leaseEpoch, 'attach_evidence', { kind: 'note', note: 'Explanation', ...fields })).toMatchObject({ ok: false })
+    }
     for (const note of [undefined, '', '   ']) {
       const empty = await runner.call(job.runId, job.leaseEpoch, 'attach_evidence', { criterionId: criterion.id, kind: 'note', ...(note !== undefined && { note }) })
       expect(empty).toMatchObject({ ok: false, error: 'Not attached. A note needs its text: explain how the criterion is met.' })

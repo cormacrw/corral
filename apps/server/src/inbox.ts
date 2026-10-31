@@ -2,18 +2,18 @@ import { needsAttention, type InboxArtifact, type InboxSince, type ReleaseNotesI
 import { auditText, readAudit, type AuditView } from './audit.ts'
 import { epicInboxItems } from './epic-prs.ts'
 import { fileArtifacts, isNew, workNotes } from './inbox-changes.ts'
-import type { Inbox, InboxItem, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
+import type { Inbox, InboxItem, PlanSession, PlanThreadAttention, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
 import { withMessage } from './inbox-message.ts'
 import { designPreviewUrl, humanCheckTally, richTextToPlainText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, count, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { actorLabel } from './orchestrator.ts'
 import { thumbnailUrl } from './projects.ts'
-import { sessionState } from './plan.ts'
+import { sessionState, type SessionAttention } from './plan.ts'
 import { listEvidence } from './runs.ts'
 import { listComments } from './tasks.ts'
 
-const { deployments, agents, auditLog, planMessages, planSessions, plans, planEpics, planTasks, projects, reviews, runs, tasks, comments, epics } = schema
+const { deployments, agents, auditLog, planMessages, planSessions, planEpics, planTasks, projects, reviews, runs, tasks, comments, epics } = schema
 
 // A request for changes, or an answer: a clarify is a resolve with a pinned comment
 const HUMAN_ACTIONS = ['human_request_changes', 'resolve']
@@ -97,24 +97,12 @@ async function planThreads(db: Executor): Promise<PlanThreadItem[]> {
   const [pm] = await db.select({ name: agents.name }).from(agents).where(eq(agents.role, 'pm')).limit(1)
   const sender = { name: pm?.name ?? 'PM', role: 'pm' as const }
   const items = await Promise.all(rows.map(async ({ session: row, project }) => {
-    const { session, planId, last } = await sessionState(db, row)
-    const waitingOnReply = session.status === 'none' && session.unread
-    if (session.status !== 'question' && session.status !== 'needs_approval' && !waitingOnReply) return null
-    const [reply] = waitingOnReply
-      ? await db.select().from(planMessages).where(and(eq(planMessages.sessionId, row.id), eq(planMessages.role, 'pm'))).orderBy(desc(planMessages.createdAt)).limit(1)
-      : []
-    if (waitingOnReply && !reply) return null
-    const [waiting] = planId ? await db.select().from(plans).where(eq(plans.id, planId)) : []
-    const since = session.status === 'needs_approval' ? waiting!.createdAt : session.status === 'question' ? last!.createdAt : reply!.createdAt
-    // Tasks dropped in a revision keep a 'removed' row and aren't part of the plan. Plans saved before
-    // plan_epics existed have no epic rows, only plans.epicId, so count that as one epic.
-    const [epics, tasks] = waiting
-      ? await Promise.all([
-          db.select({ rows: count(), count: count(planEpics.epicId) }).from(planEpics).where(eq(planEpics.planId, waiting.id)),
-          db.select({ count: count() }).from(planTasks).where(and(eq(planTasks.planId, waiting.id), ne(planTasks.change, 'removed')))
-        ])
-      : [[], []]
+    const { session, attention } = await sessionState(db, row)
+    const waiting = await threadAttention(db, session, attention)
+    if (!waiting) return null
+    const { since, ...state } = waiting
     return {
+      ...state,
       id: session.id,
       type: 'plan_thread' as const,
       project: projectTag(project),
@@ -122,14 +110,9 @@ async function planThreads(db: Executor): Promise<PlanThreadItem[]> {
       runtime: session.runtime,
       subject: session.title,
       preview: session.preview,
-      question: session.status === 'question' && last ? { text: last.text, recommendation: last.recommendation, options: last.options } : null,
-      reply: reply ? reply.text : null,
-      plan: waiting ? { id: waiting.id, version: waiting.version, title: waiting.title, summary: waiting.summary, epicCount: epics[0]?.rows === 0 && waiting.epicId ? 1 : epics[0]?.count ?? 0, taskCount: tasks[0]?.count ?? 0 } : null,
       sender,
       at: since.toISOString(),
-      status: session.status,
       unread: session.unread,
-      planId,
       activeRunId: session.activeRunId,
       taskId: null,
       taskRef: null,
@@ -145,6 +128,34 @@ export async function taskMessageItems(db: Executor, taskId?: string): Promise<T
     .innerJoin(projects, eq(projects.id, tasks.projectId))
     .where(and(inArray(tasks.status, ['human_review', 'blocked', 'failed']), isNull(tasks.deletedAt), taskId ? eq(tasks.id, taskId) : undefined))
   return Promise.all(open.map(({ task, project }) => needsYouItem(db, task, project)))
+}
+
+// What a session waits on, with the data its status needs, or null when the
+// human has nothing to do there
+async function threadAttention(db: Executor, session: PlanSession, attention: SessionAttention): Promise<(PlanThreadAttention & { since: Date }) | null> {
+  switch (attention.status) {
+    case 'question': {
+      const { text, recommendation, options, createdAt } = attention.question
+      return { status: 'question', question: { text, recommendation, options }, plan: null, planId: null, reply: null, since: createdAt }
+    }
+    case 'needs_approval': {
+      const { plan } = attention
+      // Tasks dropped in a revision keep a 'removed' row and aren't part of the plan. Plans saved before
+      // plan_epics existed have no epic rows, only plans.epicId, so count that as one epic.
+      const [[epicCount], [taskCount]] = await Promise.all([
+        db.select({ rows: count(), count: count(planEpics.epicId) }).from(planEpics).where(eq(planEpics.planId, plan.id)),
+        db.select({ count: count() }).from(planTasks).where(and(eq(planTasks.planId, plan.id), ne(planTasks.change, 'removed')))
+      ])
+      const summary = { id: plan.id, version: plan.version, title: plan.title, summary: plan.summary, epicCount: epicCount?.rows === 0 && plan.epicId ? 1 : epicCount?.count ?? 0, taskCount: taskCount?.count ?? 0 }
+      return { status: 'needs_approval', question: null, plan: summary, planId: plan.id, reply: null, since: plan.createdAt }
+    }
+    case 'none': {
+      if (!session.unread) return null
+      const [reply] = await db.select().from(planMessages).where(and(eq(planMessages.sessionId, session.id), eq(planMessages.role, 'pm'))).orderBy(desc(planMessages.createdAt)).limit(1)
+      if (!reply) return null
+      return { status: 'none', question: null, plan: null, planId: null, reply: reply.text, since: reply.createdAt }
+    }
+  }
 }
 
 async function needsYouItem(db: Executor, task: typeof tasks.$inferSelect, project: typeof projects.$inferSelect): Promise<TaskInboxItem> {

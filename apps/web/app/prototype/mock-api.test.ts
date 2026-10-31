@@ -125,7 +125,7 @@ describe('prototype mock API', () => {
     const spike = await mockCall<Task>('GET', '/tasks/COR-39')
     const before = await mockCall<Inbox>('GET', '/inbox')
     expect(before.needsYou.find(i => i.taskId === spike.id)).toMatchObject({ body: expect.stringContaining('**exponential backoff**'), prUrl: null })
-    await expect(mockCall('POST', `/inbox/${spike.id}/actions`, { action: 'request_changes', text: 'Explain jitter sizing' })).resolves.toMatchObject({ task: { status: 'in_progress', statusReason: 'Explain jitter sizing' } })
+    await expect(mockCall('POST', `/inbox/${spike.id}/actions`, { action: 'request_changes', text: 'Explain jitter sizing' })).resolves.toMatchObject({ task: { status: 'in_progress', statusReason: null } })
     await expect(mockCall('GET', '/projects/corral/tasks/39/comments')).resolves.toContainEqual(expect.objectContaining({ body: 'Explain jitter sizing', author: expect.objectContaining({ kind: 'human' }) }))
     await mockCall('PATCH', '/projects/corral/tasks/39', { status: 'human_review' })
     await expect(mockCall('POST', `/inbox/${spike.id}/actions`, { action: 'approve' })).resolves.toMatchObject({ task: { status: 'merged', mergedAt: expect.any(String) } })
@@ -233,7 +233,7 @@ describe('prototype mock API', () => {
     const inbox = await mockCall<Inbox>('GET', '/inbox')
     expect(inbox.needsYou.some(i => i.id === 's-3')).toBe(false)
     await expect(mockCall<PlanSessionDetail>('GET', '/plan/sessions/s-3')).resolves.toMatchObject({ closed: true, unread: false })
-    await expect(mockCall<Task>('GET', '/tasks/COR-16')).resolves.toMatchObject({ status: 'backlog', planSessionId: null })
+    await expect(mockCall<Task>('GET', '/tasks/COR-16')).resolves.toMatchObject({ status: 'backlog', draftSession: null })
   })
   it('creates a Backlog task without reusing a draft number and makes it readable by ref', async () => {
     const before = await mockCall<Task[]>('GET', '/projects/corral/tasks')

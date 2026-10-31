@@ -7,13 +7,14 @@ import EvidenceList from './EvidenceList.vue'
 import MarkdownText from './MarkdownText.vue'
 
 const kinds = ['screenshot', 'video', 'request', 'note', 'test_output', 'log', 'text', 'other'] as const
-const evidence = (criterionId: string | null): Evidence[] => kinds.map(kind => ({
-  id: kind + criterionId, taskId: 't', criterionId, runId: 'r', round: 0, kind,
-  note: kind === 'note' ? '**Explained** with `code`.' : '',
-  fileName: kind === 'note' ? null : kind + '.file',
-  contentType: kind === 'screenshot' ? 'image/png' : kind === 'video' ? 'video/mp4' : 'text/plain',
-  url: kind === 'note' ? null : '/' + kind, size: 1, createdAt: new Date().toISOString()
+const evidence = (criterionId: string | null): Evidence[] => kinds.map((kind): Evidence => ({
+  id: kind + criterionId, taskId: 't', criterionId, runId: 'r', round: 0,
+  createdAt: new Date().toISOString(),
+  ...(kind === 'note'
+    ? { kind, note: '**Explained** with `code`.', fileName: null, contentType: null, url: null, size: 0 }
+    : { kind, note: '', fileName: kind + '.file', contentType: kind === 'screenshot' ? 'image/png' : kind === 'video' ? 'video/mp4' : 'text/plain', url: '/' + kind, size: 1 })
 }))
+
 const review: Review = {
   id: 'review', taskId: 't', runId: 'r', round: 0, headSha: 'abc', verdict: 'approved', summary: '',
   author: { kind: 'agent', role: 'reviewer', runId: 'r' }, createdAt: new Date().toISOString(),

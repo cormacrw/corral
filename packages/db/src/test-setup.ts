@@ -27,6 +27,7 @@ export async function startTestPostgres(options: { port?: number } = {}) {
       user: 'postgres',
       password: 'postgres',
       persistent: false,
+      initdbFlags: ['--encoding=UTF8', '--locale=C'],
       postgresFlags: ['-h', '127.0.0.1'],
       onLog: capture,
       onError: capture

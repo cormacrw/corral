@@ -1,7 +1,7 @@
 import type { Epic, EpicDetail, PatchEpicInput } from '@corral/contracts'
 import { checkEpicDependencies, isTaskDone, type CompletionState, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { asc, eq, or } from 'drizzle-orm'
+import { and, asc, eq, or } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import { toTasks, type ProjectRow } from './tasks.ts'
@@ -82,6 +82,13 @@ function toEpic(row: EpicRow, project: ProjectRow, taskRows: (CompletionState & 
   }
 }
 
+// The epic's whole prerequisite list. Callers have validated the graph; the
+// composite keys reject an edge that leaves `projectId`.
+export async function replaceEpicDependencies(tx: Executor, projectId: string, epicId: string, dependsOn: string[]): Promise<void> {
+  await tx.delete(epicDependencies).where(and(eq(epicDependencies.projectId, projectId), eq(epicDependencies.epicId, epicId)))
+  if (dependsOn.length) await tx.insert(epicDependencies).values([...new Set(dependsOn)].map(id => ({ projectId, epicId, dependsOnEpicId: id })))
+}
+
 // Serialize graph edits within a project so concurrent requests cannot create a cycle.
 export async function setEpicDependencies(db: Executor, epicId: string, dependsOn: string[], actor: Actor): Promise<Epic[]> {
   return db.transaction(async (tx) => {
@@ -98,8 +105,7 @@ export async function setEpicDependencies(db: Executor, epicId: string, dependsO
     if (problems.length) throw new ApiFailure(400, {
       code: 'invalid_input', issues: problems.map(p => ({ message: `Dependency cycle or deadlock: ${p.epics.join(' → ')}` }))
     })
-    await tx.delete(epicDependencies).where(eq(epicDependencies.epicId, epicId))
-    if (dependsOn.length) await tx.insert(epicDependencies).values([...new Set(dependsOn)].map(id => ({ epicId, dependsOnEpicId: id })))
+    await replaceEpicDependencies(tx, project.id, epicId, dependsOn)
     await tx.update(epics).set({ updatedAt: new Date() }).where(eq(epics.id, epicId))
     await appendAudit(tx, { projectId: project.id, actor }, auditEvent('epic.updated', { epicId, changed: ['dependsOn'], dependsOn }))
     return listEpics(tx, project)

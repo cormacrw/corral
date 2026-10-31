@@ -1,6 +1,6 @@
 import { appendAudit, auditEvent } from './audit.ts'
 import { EpicPullRequests, epicReviewContext } from './epic-prs.ts'
-import { RUNNER_HEARTBEAT_MS, epicReviewReportSchema, isPmDirectTool, pmDirectTools, evidenceKind, outcomeReportSchema, rebaseReviewReportSchema, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type PmRunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
+import { RUNNER_HEARTBEAT_MS, epicReviewReportSchema, isPmDirectTool, pmDirectTools, evidenceInputSchema, outcomeReportSchema, rebaseReviewReportSchema, RUNTIMES_TAKING_MESSAGES, type Comment, type GlobalStatus, type OutcomeReport, type RunEvent, type RunExit, type RunJob, type PmRunJob, type RunnerMessage, type RunnerRole } from '@corral/contracts'
 import {
   ACTIVE_RUN_STATES,
   LEASE_DURATION_MS,
@@ -105,22 +105,7 @@ const MAX_INLINE_TEXT = 64 * 1024
 
 // A file, or a note on its own: written evidence for a criterion with
 // nothing to show (D21)
-const evidenceSchema = z.object({
-  criterionId: z.string().uuid().nullable().default(null),
-  kind: evidenceKind,
-  note: z.string().default(''),
-  fileName: z.string().min(1).optional(),
-  contentType: z.string().min(1).optional(),
-  dataBase64: z.string().optional()
-}).superRefine((input, ctx) => {
-  if (input.dataBase64 !== undefined) {
-    if (input.kind === 'note') ctx.addIssue({ code: 'custom', message: 'A note is evidence without a file: leave out path, or pick the kind of the file' })
-    if (!input.fileName || !input.contentType) ctx.addIssue({ code: 'custom', message: 'A file needs its fileName and contentType' })
-    return
-  }
-  if (input.kind !== 'note') ctx.addIssue({ code: 'custom', path: ['path'], message: `Pass the path of the file to attach, or use kind "note" to explain in writing a criterion with nothing to show (${input.kind} needs a file)` })
-  else if (!input.note.trim()) ctx.addIssue({ code: 'custom', path: ['note'], message: 'A note needs its text: explain how the criterion is met' })
-})
+const evidenceSchema = evidenceInputSchema
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -1175,16 +1160,17 @@ export class Orchestrator implements RunnerHandlers {
       })
     }
     if (tool === 'attach_evidence') {
-      const parsed = evidenceSchema.safeParse(input)
+      const pmInput = role === 'pm' ? z.looseObject({ taskRef: z.string().optional() }).parse(input) : null
+      const { taskRef: ref, ...fields } = pmInput ?? {}
+      const parsed = evidenceSchema.safeParse(pmInput ? fields : input)
       if (!parsed.success) throw new ToolError(`Not attached. ${parsed.error.issues.map(i => i.message).join('. ')}.`)
       if (role === 'pm') {
         if (!this.plans || !ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
-        const { taskRef: ref } = z.object({ taskRef: z.string().optional() }).parse(input)
         if (ref) return this.#attachEvidence({ ...ctx, task: await findTaskByRef(this.#d.db, ctx.project, ref) }, parsed.data)
         if (parsed.data.criterionId) throw new ToolError('Pass taskRef to attach evidence for a criterion')
         const attached = await this.#attachEvidence(ctx, parsed.data)
-        const label = (parsed.data.fileName ?? 'Evidence').replace(/[[\]\\]/g, '')
-        await this.plans.attachEvidence(ctx.run.planSessionId, ctx.run.id, parsed.data.dataBase64 === undefined ? parsed.data.note : `${parsed.data.note}\n\n[${label}](/api/evidence/${attached.id}/file)`)
+        const label = (parsed.data.kind === 'note' ? 'Evidence' : parsed.data.fileName).replace(/[[\]\\]/g, '')
+        await this.plans.attachEvidence(ctx.run.planSessionId, ctx.run.id, parsed.data.kind === 'note' ? parsed.data.note : `${parsed.data.note}\n\n[${label}](/api/evidence/${attached.id}/file)`)
         return attached
       }
       return this.#attachEvidence(ctx, parsed.data)
@@ -1259,7 +1245,7 @@ export class Orchestrator implements RunnerHandlers {
       if (!criterion) throw new ToolError(`${input.criterionId} isn't one of this task's acceptance criteria`)
     }
     const row = { taskId: task?.id ?? null, criterionId: input.criterionId, runId: ctx.run.id, round: task?.reviewRounds ?? 0, kind: input.kind }
-    if (input.dataBase64 === undefined) {
+    if (input.kind === 'note') {
       // A note: no blob, the text is the evidence
       const [note] = await this.#d.db.insert(evidence).values({ ...row, note: input.note.trim(), size: 0 }).returning()
       return { id: note!.id }
@@ -1271,8 +1257,8 @@ export class Orchestrator implements RunnerHandlers {
       ...row,
       note: input.note,
       blob,
-      fileName: input.fileName!,
-      contentType: input.contentType!,
+      fileName: input.fileName,
+      contentType: input.contentType,
       size: data.length
     }).returning()
     return { id: file!.id, sha256: blob }

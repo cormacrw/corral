@@ -67,7 +67,7 @@ describe('worktree sweep', () => {
     const open = []
     for (const status of statuses) {
       const task = await t.createTask(project.slug)
-      await t.db.update(tasks).set({ status }).where(eq(tasks.id, task.id))
+      await t.db.update(tasks).set({ status, statusReason: status === 'blocked' || status === 'failed' ? 'Waiting for a decision' : null }).where(eq(tasks.id, task.id))
       open.push(task.id)
     }
     const merged = await t.createTask(project.slug)

@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -43,6 +44,7 @@ export const agents = pgTable('agents', {
   createdAt: createdAt(),
   updatedAt: updatedAt()
 }, t => [
+  check('agents_avatar_paired', sql`(${t.avatarBlob} is null) = (${t.avatarContentType} is null)`),
   check('agents_concurrency_positive', sql`${t.concurrency} > 0`),
   check('agents_wake_interval_positive', sql`${t.wakeIntervalSeconds} > 0`)
 ])
@@ -60,7 +62,7 @@ export const runs = pgTable('runs', {
   number: bigint({ mode: 'number' }).notNull().generatedAlwaysAsIdentity().unique(),
   agentId: uuid().notNull().references(() => agents.id),
   projectId: uuid().notNull().references(() => projects.id, { onDelete: 'cascade' }),
-  taskId: uuid().references(() => tasks.id, { onDelete: 'cascade' }),
+  taskId: uuid(),
   // Integration reviews belong to an epic, independently of task reviews.
   epicId: uuid().references(() => epics.id, { onDelete: 'cascade' }),
   leaseExpiresAt: timestamp({ withTimezone: true }),
@@ -95,6 +97,7 @@ export const runs = pgTable('runs', {
   startedAt: timestamp({ withTimezone: true }),
   endedAt: timestamp({ withTimezone: true })
 }, t => [
+  foreignKey({ name: 'runs_task_same_project_fk', columns: [t.projectId, t.taskId], foreignColumns: [tasks.projectId, tasks.id] }).onDelete('cascade'),
   index().on(t.taskId),
   index().on(t.epicId),
   index().on(t.agentId, t.state),

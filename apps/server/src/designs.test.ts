@@ -231,7 +231,7 @@ describe('design versions in the task view', () => {
   it('recovers a stuck design through its version endpoint and never inspects its PR in the merge pass', async () => {
     const { project, task } = await designTask(5)
     // Even a legacy design with PR metadata must be left alone.
-    await t.db.update(schema.tasks).set({ status: 'ready_to_merge', prNumber: 999, headSha: 'design-head' }).where(eq(schema.tasks.id, task.id))
+    await t.db.update(schema.tasks).set({ status: 'ready_to_merge', prNumber: 999, prUrl: 'https://github.com/cormacrw/test-app/pull/999', headSha: 'design-head' }).where(eq(schema.tasks.id, task.id))
     const calls = t.github.calls.length
     await t.orchestrator.merges.tick()
     expect(t.github.calls.slice(calls)).toEqual([])

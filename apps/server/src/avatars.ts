@@ -9,6 +9,18 @@ const { agents, users } = schema
 
 type AvatarType = typeof AVATAR_CONTENT_TYPES[number]
 
+// The write boundary accepts a complete image or removal, never separate fields.
+export type AvatarImage = { data: Uint8Array, type: AvatarType } | null
+type AvatarColumns =
+  | { avatarBlob: string, avatarContentType: AvatarType }
+  | { avatarBlob: null, avatarContentType: null }
+
+async function storeAvatar(blobs: BlobStore, image: AvatarImage): Promise<AvatarColumns> {
+  return image
+    ? { avatarBlob: await blobs.put(image.data), avatarContentType: image.type }
+    : { avatarBlob: null, avatarContentType: null }
+}
+
 // Profile pictures for the human and the agents. The bytes go in the blob
 // store like evidence; the row keeps the hash and type. URLs carry part of
 // the hash, so a new picture is a new URL and the old one can be cached.
@@ -37,20 +49,20 @@ export async function patchProfile(db: Executor, userId: string, input: PatchPro
   return getProfile(db, userId)
 }
 
-export async function setUserAvatar(db: Executor, blobs: BlobStore, userId: string, image: { data: Uint8Array, type: AvatarType } | null): Promise<Profile> {
-  const blob = image ? await blobs.put(image.data) : null
-  await db.update(users).set({ avatarBlob: blob, avatarContentType: image?.type ?? null }).where(eq(users.id, userId))
+export async function setUserAvatar(db: Executor, blobs: BlobStore, userId: string, image: AvatarImage): Promise<Profile> {
+  const avatar = await storeAvatar(blobs, image)
+  await db.update(users).set(avatar).where(eq(users.id, userId))
   return getProfile(db, userId)
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-export async function setAgentAvatar(db: Executor, blobs: BlobStore, agentId: string, image: { data: Uint8Array, type: AvatarType } | null): Promise<void> {
+export async function setAgentAvatar(db: Executor, blobs: BlobStore, agentId: string, image: AvatarImage): Promise<void> {
   if (!UUID.test(agentId)) throw notFound()
   const [agent] = await db.select({ id: agents.id }).from(agents).where(eq(agents.id, agentId))
   if (!agent) throw notFound()
-  const blob = image ? await blobs.put(image.data) : null
-  await db.update(agents).set({ avatarBlob: blob, avatarContentType: image?.type ?? null, updatedAt: new Date() }).where(eq(agents.id, agentId))
+  const avatar = await storeAvatar(blobs, image)
+  await db.update(agents).set({ ...avatar, updatedAt: new Date() }).where(eq(agents.id, agentId))
 }
 
 // The stored picture, for the avatar endpoints
