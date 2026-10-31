@@ -23,7 +23,7 @@ describe('dashboardCounts', () => {
     expect(counts.inProgress).toBe(1)
   })
 
-  it('counts merges from today only, and the first-pass ones among them', () => {
+  it('counts work completed today, and the first-pass merges among them', () => {
     const today = new Date(2026, 9, 29, 9, 30).toISOString()
     const yesterday = new Date(2026, 9, 28, 23, 59).toISOString()
     const counts = dashboardCounts([
@@ -36,7 +36,7 @@ describe('dashboardCounts', () => {
       task('in_progress', { type: 'design', updatedAt: today })
     ], now)
     expect(counts.mergedToday).toBe(3)
-    expect(counts.firstPassToday).toBe(2)
+    expect(counts.firstPassToday).toBe(1)
   })
 
   it('is all zeros with no tasks', () => {

@@ -2,9 +2,9 @@
 import { useMutation, useQuery } from '@tanstack/vue-query'
 import { epicQuery, patchEpic, setEpicDependencies } from '~/queries/epics'
 import type { PatchEpicInput } from '@corral/contracts'
-import { isTaskDone, type EpicReviewMode, type TaskStatus } from '@corral/core'
+import { isTaskDone, type EpicReviewMode } from '@corral/core'
 import { ApiError } from '~/composables/useApi'
-import { EPIC_REVIEW_MODE, EPIC_REVIEW_STATE, EPIC_STATUS_TEXT, epicReviewStatus, epicWithLiveCounts, PRIORITY, STATUS } from '~/utils/labels'
+import { EPIC_REVIEW_MODE, EPIC_REVIEW_STATE, EPIC_STATUS_TEXT, epicReviewStatus, epicWithLiveCounts, PRIORITY, statusCounts } from '~/utils/labels'
 
 // An epic: its title, description and progress, and the dependency tree of
 // its tasks. Docked in the flyout, as a page with room for a big tree, or
@@ -87,11 +87,7 @@ async function saveDescription() {
 const placed = computed(() => epic.value?.tasks.filter(t => t.status !== 'draft') ?? [])
 const merged = computed(() => placed.value.filter(isTaskDone).length)
 const drafts = computed(() => (epic.value?.tasks.length ?? 0) - placed.value.length)
-const byStatus = computed(() => {
-  const counts = new Map<TaskStatus, number>()
-  for (const t of epic.value?.tasks ?? []) counts.set(t.status, (counts.get(t.status) ?? 0) + 1)
-  return (Object.keys(STATUS) as TaskStatus[]).filter(s => counts.has(s)).map(s => ({ status: s, count: counts.get(s)! }))
-})
+const byStatus = computed(() => statusCounts(epic.value?.tasks ?? []))
 
 const reviewModes = Object.entries(EPIC_REVIEW_MODE).map(([value, mode]) => ({ value, label: mode.label }))
 const reviewStatus = computed(() => epic.value && epicReviewStatus(epicWithLiveCounts(epic.value, epic.value.tasks)))
@@ -424,9 +420,9 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
           <div class="mt-2 flex flex-wrap gap-1">
             <StatusBadge
               v-for="s in byStatus"
-              :key="s.status"
+              :key="s.label"
               :status="s.status"
-              :label="`${STATUS[s.status].label} ${s.count}`"
+              :label="`${s.label} ${s.count}`"
               size="xs"
             />
           </div>

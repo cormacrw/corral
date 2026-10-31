@@ -49,8 +49,8 @@ export function sortColumn<T extends Pick<Task, 'ref' | 'type' | 'status' | 'mer
   return [...tasks].sort((a, b) => time(b) - time(a) || a.ref.localeCompare(b.ref, undefined, { numeric: true }))
 }
 
-// Preserve saved mobile Board links from before the combined column.
-export function boardColumnKey(key: unknown): unknown {
+// Preserve saved Board links from before the combined column.
+export function boardColumnKey<T>(key: T): T | 'complete' {
   return key === 'merged' || key === 'approved' ? 'complete' : key
 }
 
@@ -115,7 +115,7 @@ export function filtersFromQuery(query: Query): BoardFilters {
   return {
     search: first(query.q),
     epics: list(QUERY.epics),
-    statuses: list(QUERY.statuses).filter(key => BOARD_COLUMNS.some(c => c.key === key)),
+    statuses: [...new Set(list(QUERY.statuses).map(boardColumnKey))].filter(key => BOARD_COLUMNS.some(c => c.key === key)),
     priorities: list(QUERY.priorities).filter((p): p is TaskPriority => (TASK_PRIORITIES as readonly string[]).includes(p)),
     agents: list(QUERY.agents)
   }

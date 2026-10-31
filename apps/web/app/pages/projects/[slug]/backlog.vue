@@ -116,7 +116,7 @@ async function newTask() {
             size="sm"
             class="w-60"
           />
-          <span class="text-sm text-muted">{{ backlog.length }} tasks</span>
+          <span class="text-sm text-muted">{{ backlog.length }} tasks · never scheduled until approved</span>
           <UCheckbox
             v-model="showCompleted"
             label="Show completed"

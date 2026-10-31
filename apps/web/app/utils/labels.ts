@@ -19,6 +19,21 @@ export const STATUS: Record<TaskStatus, { label: string, color: Color }> = {
   failed: { label: 'Failed', color: 'error' }
 }
 
+// Tasks counted by status label, in STATUS order, so merged tasks and approved
+// designs share one Complete count.
+export function statusCounts(tasks: Pick<Task, 'status'>[]): { status: TaskStatus, label: string, count: number }[] {
+  const counts = new Map<string, { status: TaskStatus, label: string, count: number }>()
+  for (const status of Object.keys(STATUS) as TaskStatus[]) {
+    const count = tasks.filter(t => t.status === status).length
+    if (count === 0) continue
+    const { label } = STATUS[status]
+    const seen = counts.get(label)
+    if (seen) seen.count += count
+    else counts.set(label, { status, label, count })
+  }
+  return [...counts.values()]
+}
+
 // A design version's state (D20)
 export const DESIGN_VERSION_STATUS: Record<DesignVersionStatus, { label: string, color: Color }> = {
   submitted: { label: 'Submitted', color: 'warning' },

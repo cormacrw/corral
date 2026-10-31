@@ -188,6 +188,12 @@ describe('filters in the URL query', () => {
     expect(filtersFromQuery({ status: 'nope,complete', priority: 'huge,low' })).toEqual({ ...NO_FILTERS, statuses: ['complete'], priorities: ['low'] })
   })
 
+  it('maps saved merged and approved filters to the Complete column once', () => {
+    expect(filtersFromQuery({ status: 'merged' }).statuses).toEqual(['complete'])
+    expect(filtersFromQuery({ status: 'approved' }).statuses).toEqual(['complete'])
+    expect(filtersFromQuery({ status: 'merged,ready,approved,complete' }).statuses).toEqual(['complete', 'ready'])
+  })
+
   it('knows when anything is filtered', () => {
     expect(hasFilters(NO_FILTERS)).toBe(false)
     expect(hasFilters({ ...NO_FILTERS, agents: ['a1'] })).toBe(true)

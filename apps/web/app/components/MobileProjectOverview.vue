@@ -101,7 +101,7 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
             { label: 'Completed this week', color: STATUS.merged.color, value: mergedThisWeek.length, sub: firstPass === null ? 'no merges yet' : `first-pass approval ${firstPass}%` }
           ]"
           :key="tile.label"
-          class="w-33 shrink-0 snap-start rounded-lg border border-default p-3"
+          class="w-40 shrink-0 snap-start rounded-lg border border-default p-3"
         >
           <dt class="flex items-center gap-1.5 truncate text-xs text-muted">
             <span

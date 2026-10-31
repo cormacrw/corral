@@ -21,7 +21,8 @@ export interface DashboardCounts {
   // Human review
   waitingForReview: number
   mergedToday: number
-  // Merged today without the reviewer asking for changes
+  // Merged tasks among those, without the reviewer asking for changes. Approved
+  // designs have no PR review to pass, matching the project overview's rate.
   firstPassToday: number
 }
 
@@ -43,7 +44,7 @@ export function dashboardCounts(tasks: Pick<Task, 'type' | 'status' | 'mergedAt'
     } else if (task.status === 'blocked' || task.status === 'failed') counts.blocked++
     else if (isTaskDone(task) && isToday(completedAt(task), now)) {
       counts.mergedToday++
-      if (task.reviewRounds === 0) counts.firstPassToday++
+      if (task.status === 'merged' && task.reviewRounds === 0) counts.firstPassToday++
     }
   }
   counts.waitingForReview = stages.human_review

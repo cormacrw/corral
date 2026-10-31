@@ -56,7 +56,7 @@ const collapsed = defineModel<Record<string, boolean>>('collapsed', { required: 
         class="w-full"
       />
       <p class="text-xs text-muted">
-        {{ count }} tasks
+        {{ count }} tasks · never scheduled until approved
       </p>
       <UCheckbox
         v-model="showCompleted"
