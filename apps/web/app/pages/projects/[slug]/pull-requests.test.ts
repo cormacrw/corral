@@ -29,7 +29,7 @@ const pr = (taskRef: string) => ({
 
 function hideTab(hidden: boolean): void {
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue(hidden ? 'hidden' : 'visible')
-  document.dispatchEvent(new Event('visibilitychange'))
+  document.dispatchEvent(new Event('visibilitychange', { bubbles: true }))
 }
 
 let client: ReturnType<typeof testQueryClient>
@@ -66,8 +66,8 @@ it('reads GitHub every 30 seconds while the tab is visible and stops while hidde
   await vi.advanceTimersByTimeAsync(5 * PULL_REQUESTS_POLL_MS)
   expect(pullRequests).toHaveBeenCalledTimes(3)
   hideTab(false)
-  await vi.advanceTimersByTimeAsync(PULL_REQUESTS_POLL_MS)
-  expect(pullRequests.mock.calls.length).toBeGreaterThan(3)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(pullRequests).toHaveBeenCalledTimes(4)
   wrapper.unmount()
   const stopped = pullRequests.mock.calls.length
   await vi.advanceTimersByTimeAsync(5 * PULL_REQUESTS_POLL_MS)
