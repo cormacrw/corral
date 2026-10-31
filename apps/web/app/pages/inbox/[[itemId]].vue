@@ -489,7 +489,7 @@ onBeforeUnmount(() => {
                 <span class="flex items-center gap-1"><ProjectThumbnail
                   :project="selected.project"
                   :size="16"
-                />{{ selected.project.name }}<template v-if="selected.taskRef"> · <TaskLink :task-ref="selected.taskRef" /></template></span>
+                />{{ selected.project.name }} · <TaskLink :task-ref="selected.taskRef" /></span>
                 <span>{{ selected.sender.name }} · {{ selected.sender.role }} · {{ timeAgo(selected.at) }}</span>
               </div>
             </div>
