@@ -181,6 +181,22 @@ describe('PM tools for the Inbox, designs and agents', () => {
       expect(approved!.actor).toMatchObject({ kind: 'human', viaPm: { sessionId: session.id } })
     })
 
+    it('names human checks on the approve_design card and refuses a stale one', async () => {
+      const created = await design()
+      const input = { taskRef: created.ref, version: 1, note: 'Ship it' }
+      expect((await propose('approve_design', input)).summary).toBe(`Approve v1 of ${created.ref}: ${created.title}. Note: Ship it`)
+      await t.db.insert(schema.acceptanceCriteria).values({ taskId: created.id, position: 0, text: 'Reads well on a phone', checkedByHuman: true })
+      const card = await propose('approve_design', input)
+      expect(card.summary).toBe(`Approve v1 of ${created.ref}: ${created.title}. Note: Ship it. Confirming says you checked: Reads well on a phone`)
+      await t.db.insert(schema.acceptanceCriteria).values({ taskId: created.id, position: 1, text: 'Contrast passes in daylight', checkedByHuman: true })
+      expect(await (await resolve(card.actionId, 'confirm')).json()).toMatchObject({ pendingAction: { status: 'failed', error: expect.stringContaining('changed') } })
+      expect(await version(created.id)).toMatchObject({ status: 'submitted', planSessionId: null })
+      const fresh = await propose('approve_design', input)
+      expect(fresh.summary).toContain('Reads well on a phone; Contrast passes in daylight')
+      expect(await (await resolve(fresh.actionId, 'confirm')).json()).toMatchObject({ pendingAction: { status: 'confirmed' } })
+      expect(await version(created.id)).toMatchObject({ status: 'approved' })
+    })
+
     it('can approve again after the build could not start', async () => {
       const created = await design()
       const [pm] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'pm'))
