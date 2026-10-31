@@ -118,7 +118,7 @@ function back() {
           color="error"
           variant="subtle"
           :title="reposError"
-          :actions="[{ label: 'Try again', onClick: () => loadRepos(true) }]"
+          :actions="[{ label: 'Try again', onClick: () => loadRepos() }]"
         />
         <UAlert
           v-else-if="repos && !repos.signedIn"
@@ -136,7 +136,7 @@ function back() {
               label="Check again"
               size="sm"
               class="mt-2"
-              @click="loadRepos(true)"
+              @click="loadRepos()"
             />
           </template>
         </UAlert>
@@ -155,7 +155,7 @@ function back() {
               variant="ghost"
               color="neutral"
               icon="i-lucide-refresh-cw"
-              @click="loadRepos(true)"
+              @click="loadRepos()"
             />
           </div>
           <div class="overflow-hidden rounded-md border border-default">

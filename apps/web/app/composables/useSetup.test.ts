@@ -7,7 +7,7 @@ import { mountWithQuery } from '../queries/mount-with-query'
 import { suggestPrefix } from '../utils/prefix'
 
 vi.mock('./useApi', async original => ({ ...await original<typeof import('./useApi')>(), api: {
-  setup: { repos: vi.fn(), checkRepo: vi.fn() },
+  setup: { repos: vi.fn(), checkRepo: vi.fn(), clis: vi.fn() },
   projects: { list: vi.fn(), create: vi.fn() }
 } }))
 const push = vi.fn()
@@ -23,6 +23,8 @@ beforeEach(() => {
   })) vi.stubGlobal(name, value)
   vi.mocked(api.projects.list).mockResolvedValue([{ prefix: 'COR' }] as never)
   vi.mocked(api.setup.checkRepo).mockResolvedValue({ ready: true } as never)
+  vi.mocked(api.setup.repos).mockResolvedValue({ signedIn: true, repos: [] } as never)
+  vi.mocked(api.setup.clis).mockResolvedValue([{ id: 'claude', signedIn: true }] as never)
 })
 
 function mountSetup() {
@@ -88,4 +90,22 @@ it('ignores an earlier repository check that completes after another selection',
   await first
   expect(setup.prefix.value).toBe('TES')
   expect(setup.picked.value?.nameWithOwner).toBe('cormacrw/test-app')
+})
+it('loads each step\'s list as it opens, and Refresh replaces that list', async () => {
+  adding = false
+  const setup = mountSetup()
+  expect(api.setup.repos).not.toHaveBeenCalled()
+  setup.step.value = 'repo'
+  await vi.waitFor(() => expect(setup.repos.value).toEqual({ signedIn: true, repos: [] }))
+  vi.mocked(api.setup.repos).mockRejectedValueOnce(new Error('GitHub is down'))
+  await setup.loadRepos()
+  expect(setup.reposError.value).toBe('GitHub is down')
+  vi.mocked(api.setup.repos).mockResolvedValueOnce({ signedIn: false } as never)
+  await setup.loadRepos()
+  expect(api.setup.repos).toHaveBeenLastCalledWith(true)
+  expect(setup.reposError.value).toBeNull()
+  expect(setup.repos.value).toEqual({ signedIn: false })
+  expect(api.setup.clis).not.toHaveBeenCalled()
+  setup.step.value = 'agents'
+  await vi.waitFor(() => expect(setup.clis.value).toHaveLength(1))
 })
