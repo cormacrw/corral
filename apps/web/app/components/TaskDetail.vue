@@ -36,9 +36,10 @@ const editingDescription = ref(false)
 const descriptionDraft = ref<{ type: 'doc', content?: never[] }>({ type: 'doc', content: [] })
 const newCriterion = ref('')
 // PR bodies link to ?evidence=1
-const tab = ref<'activity' | 'evidence' | 'history'>(useRoute().query.evidence ? 'evidence' : 'activity')
+const route = useRoute()
+const tab = ref<'activity' | 'evidence' | 'history'>('activity')
 // Mobile splits the body in two; evidence lives with criteria and activity
-const mobileTab = ref<'details' | 'criteria'>(useRoute().query.evidence ? 'criteria' : 'details')
+const mobileTab = ref<'details' | 'criteria'>('details')
 const mobile = computed(() => props.mode === 'mobile')
 // Every part shows in the flyout and page; mobile shows one tab's parts
 const shows = (part: 'details' | 'criteria') => !mobile.value || mobileTab.value === part
@@ -84,6 +85,8 @@ async function loadSide() {
   runs.value = ru
 }
 watch(() => props.taskRef, () => {
+  tab.value = route.query.evidence ? 'evidence' : 'activity'
+  mobileTab.value = route.query.evidence ? 'criteria' : 'details'
   draft.value = ''
   editingDescription.value = false
   descriptionDraft.value = { type: 'doc', content: [] }

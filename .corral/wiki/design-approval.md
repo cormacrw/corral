@@ -22,7 +22,7 @@ Type changes are locked in Approved, Ready to merge and Merged. Epic PR readines
 
 ## Approving from the Inbox (COR-320)
 
-The Inbox's **Approve design** action (desktop and mobile) approves the latest submitted version under the task lock, through the same path as the version endpoint: approve the version, supersede earlier versions, move the task to Approved, and open a Plan session with the human's message. The PM gets a turn to propose the build with pins to that version. **Review design** still links to the task's design panel. The Inbox waits for its old task panel to close before advancing to the next Needs-you item, so a live refresh cannot cancel that navigation. Approval preflights runner and PM availability (including pause and stop controls) before changing the version.
+The Inbox's **Approve design** action (desktop and mobile) approves the latest submitted version under the task lock, through the same path as the version endpoint: approve the version, supersede earlier versions, move the task to Approved, and open a Plan session with the human's message. The PM gets a turn to propose the build with pins to that version. **Review design** still links to the task's design panel. The Inbox holds the `selected` watcher's flyout close while the action runs and advances to the next Needs-you item through `itemRoute`, so a live refresh cannot cancel that navigation. Approval preflights runner and PM availability (including pause and stop controls) before changing the version.
 
 `human_approve` on a design only comes from `approveDesign`; the generic approve path refuses designs, because it can't approve a version. The merge pass skips designs even if they have PR metadata.
 

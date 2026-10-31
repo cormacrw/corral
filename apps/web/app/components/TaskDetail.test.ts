@@ -26,6 +26,7 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
+const tabs = vue.defineComponent({ name: 'UTabs', props: ['modelValue'], setup: () => () => vue.h('nav') })
 const composer = vue.defineComponent({
   name: 'PromptComposer',
   props: ['modelValue'],
@@ -54,11 +55,22 @@ async function mountDetail() {
   const wrapper = mount(TaskDetail, {
     props: { taskRef: 'COR-1', mode: 'page' },
     shallow: true,
-    global: { components: { PromptComposer: composer }, stubs: { PromptComposer: false, teleport: true } }
+    global: { components: { PromptComposer: composer, UTabs: tabs }, stubs: { PromptComposer: false, UTabs: false, teleport: true } }
   })
   await flushPromises()
   return wrapper
 }
+
+it('opens the next task on the default tab', async () => {
+  const wrapper = await mountDetail()
+  const activityTabs = () => wrapper.findAllComponents(tabs).at(-1)!
+  ;(activityTabs().vm.$attrs['onUpdate:modelValue'] as (tab: string) => void)('evidence')
+  await flushPromises()
+  expect(activityTabs().props('modelValue')).toBe('evidence')
+  await wrapper.setProps({ taskRef: 'COR-2' })
+  await flushPromises()
+  expect(activityTabs().props('modelValue')).toBe('activity')
+})
 
 it('drops a save that finishes after moving to another task', async () => {
   const wrapper = await mountDetail()

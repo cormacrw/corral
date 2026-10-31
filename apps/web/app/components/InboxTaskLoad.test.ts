@@ -76,6 +76,61 @@ async function mountInbox(type: 'human_review' | 'failed', taskRef?: string, doc
   return { wrapper, item, params, replace: router.replace, close: closeFlyout, composer, submit, alert, router, closeFlyout, emitLive: (event: typeof listeners[number] extends (e: infer E) => void ? E : never) => listeners.forEach(l => l(event)), refresh: () => listeners.forEach(l => l({ type: 'task.updated' })) }
 }
 
+it('keeps the dock when an action moves on to the next task, even if the item left the list first', async () => {
+  const { wrapper, item, replace, close, submit, emitLive } = await mountInbox('failed', undefined, 'COR-1')
+  try {
+    const next = inbox().needsYou.find(i => i.taskRef && i.id !== item.id)!
+    let finish = (_: { task: null }) => {}
+    vi.mocked(api.inbox.act).mockReturnValue(new Promise((resolve) => {
+      finish = resolve
+    }))
+    vi.mocked(api.inbox.get).mockImplementation(async () => ({ ...inbox(), needsYou: [next], resolved: [], activity: [] }))
+    close.mockClear()
+    const sending = submit()
+    // The live update of the task usually beats the action's response
+    emitLive({ type: 'task.updated' })
+    await flushPromises()
+    finish({ task: null })
+    await sending
+    expect(close).not.toHaveBeenCalled()
+    expect(replace).toHaveBeenCalledWith({ path: `/inbox/${next.id}`, query: { task: next.taskRef } })
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('closes the dock when the item left the list and its action failed', async () => {
+  const { wrapper, item, close, submit, emitLive } = await mountInbox('failed', undefined, 'COR-1')
+  try {
+    let fail = (_: Error) => {}
+    vi.mocked(api.inbox.act).mockReturnValue(new Promise((_, reject) => {
+      fail = reject
+    }))
+    vi.mocked(api.inbox.get).mockImplementation(async () => ({ ...inbox(), needsYou: inbox().needsYou.filter(i => i.id !== item.id), resolved: [], activity: [] }))
+    close.mockClear()
+    const sending = submit()
+    emitLive({ type: 'task.updated' })
+    await flushPromises()
+    expect(close).not.toHaveBeenCalled()
+    fail(new Error('Conflict'))
+    expect(await sending).toBe(false)
+    expect(close).toHaveBeenCalledOnce()
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('opens the empty state without a task once the last item is resolved', async () => {
+  const { wrapper, replace, submit } = await mountInbox('failed', undefined, 'COR-1')
+  try {
+    vi.mocked(api.inbox.get).mockImplementation(async () => ({ ...inbox(), needsYou: [], resolved: [], activity: [] }))
+    await submit()
+    expect(replace).toHaveBeenCalledWith({ path: '/inbox', query: {} })
+  } finally {
+    wrapper.unmount()
+  }
+})
+
 it('opens the next item at the top of a new detail scroller', async () => {
   const { wrapper, item, params } = await mountInbox('human_review')
   try {
@@ -184,31 +239,25 @@ it('recovers through Retry, and keeps the error while a live refresh fetches aga
   }
 })
 
-it('labels a design approval and waits for the old flyout to close before advancing', async () => {
-  const { wrapper, item, composer, submit, alert, router, closeFlyout } = await mountInbox('human_review')
+it('labels a design approval and advances without a live refresh closing the flyout', async () => {
+  const { wrapper, item, composer, submit, alert, router, closeFlyout, refresh } = await mountInbox('human_review')
   try {
     const original = tasks.find(t => t.id === (item as { taskId: string }).taskId)!
     vi.mocked(api.tasks.byRef).mockResolvedValue({ ...original, type: 'design', acceptanceCriteria: [] })
     await alert().find('button').trigger('click')
     await flushPromises()
     expect(composer().props('submitLabel')).toBe('Approve design')
-    let finishClose = () => {}
-    const closed = new Promise<void>((resolve) => {
-      finishClose = resolve
-    })
-    closeFlyout.mockReturnValue(closed)
+    closeFlyout.mockClear()
     const remaining = structuredClone(inbox())
     remaining.needsYou = remaining.needsYou.filter(i => i.id !== item.id)
     vi.mocked(api.inbox.get).mockResolvedValue(remaining)
     const sent = submit()
-    await flushPromises()
-    expect(closeFlyout).toHaveBeenCalled()
-    expect(router.replace).not.toHaveBeenCalled()
-    finishClose()
+    refresh()
     expect(await sent).toBe(true)
+    expect(closeFlyout).not.toHaveBeenCalled()
     const position = inbox().needsYou.findIndex(i => i.id === item.id)
     const next = remaining.needsYou[Math.min(position, remaining.needsYou.length - 1)]!
-    expect(router.replace).toHaveBeenCalledWith(`/inbox/${next.id}`)
+    expect(router.replace).toHaveBeenCalledWith({ path: `/inbox/${next.id}`, query: {} })
   } finally {
     wrapper.unmount()
   }

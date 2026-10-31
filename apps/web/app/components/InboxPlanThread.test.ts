@@ -128,7 +128,7 @@ it('deletes from the header at once, selects the next item, and closes when Undo
     expect(rows()).not.toContain('s-1')
     expect(toasts.at(-1)?.title).toBe('Thread deleted · its drafts were discarded')
     expect(toasts.at(-1)?.actions?.[0]?.label).toBe('Undo')
-    expect(replace).toHaveBeenCalledWith('/inbox/s-3')
+    expect(replace).toHaveBeenCalledWith({ path: '/inbox/s-3', query: {} })
     expect(api.plan.close).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(UNDO_MS)
     await flushPromises()

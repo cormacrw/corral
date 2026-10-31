@@ -35,6 +35,7 @@ const showTask = ref(true)
 const planResolving = ref(false)
 let resolutionPosition = 0
 let taskRequest = 0
+let actingOn: string | null = null
 // Items read while each load is in flight: its response may predate the read
 const readDuringLoads = new Set<Set<string>>()
 
@@ -156,8 +157,9 @@ watch(selected, async (item, previous) => {
   // A live refresh keeps a failed load's error and Retry until a fetch settles it
   if (previous?.id !== item?.id) taskLoadFailed.value = false
   if (!taskLoadFailed.value) actionError.value = null
-  // Nothing selected (e.g. the last item was just resolved): nothing to show beside it
-  if (!item) flyout.close()
+  // Nothing selected (e.g. the last item was just resolved): nothing to show
+  // beside it. An action's item can leave the list first, but submit then moves on.
+  if (!item && actingOn !== selectedId.value) flyout.close()
   if (item?.type === 'plan_thread' || item?.type === 'epic_review' || item?.type === 'release_notes' || item?.type === 'epic_conflict') {
     taskRequest++
     if (previous?.id !== item.id && (flyout.ref.value || flyout.epic.value)) await flyout.close()
@@ -178,7 +180,7 @@ async function nextAfterPlanResolution() {
   await load()
   const remaining = inbox.value?.needsYou ?? []
   const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
-  await router.replace(next ? `/inbox/${next.id}` : '/inbox')
+  await router.replace(itemRoute(next))
 }
 const count = computed(() => (inbox.value?.count ?? 0) - (inbox.value?.needsYou.filter(i => deletes.pending.value.includes(i.id)).length ?? 0))
 // Delete thread, from its row or its header: no confirmation, Undo instead.
@@ -191,14 +193,17 @@ async function deleteThread(item: PlanThreadItem) {
   await flyout.close()
   const remaining = items.value
   const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
-  await router.replace(next ? `/inbox/${next.id}` : '/inbox')
+  await router.replace(itemRoute(next))
+}
+function itemRoute(item: InboxItem | undefined) {
+  return {
+    path: item ? `/inbox/${item.id}` : '/inbox',
+    // Keep the dock mounted while its task changes.
+    query: flyout.ref.value && isTaskItem(item ?? null) ? { task: item!.taskRef! } : {}
+  }
 }
 function select(item: InboxItem) {
-  void router.push({
-    path: `/inbox/${item.id}`,
-    // Keep the dock mounted while its task changes.
-    query: flyout.ref.value && isTaskItem(item) ? { task: item.taskRef } : {}
-  })
+  void router.push(itemRoute(item))
 }
 function toggleTask() {
   showTask.value = !showTask.value
@@ -242,6 +247,7 @@ async function submit(message: string): Promise<boolean> {
   // A live task update may remove this item before the action response arrives.
   const actedOn = selected.value
   const position = items.value.findIndex(i => i.id === actedOn.id)
+  actingOn = actedOn.id
   busy.value = true
   actionError.value = null
   try {
@@ -268,16 +274,16 @@ async function submit(message: string): Promise<boolean> {
     if (selectedId.value === actedOn.id && !inbox.value?.needsYou.some(i => i.id === actedOn.id)) {
       const remaining = inbox.value?.needsYou ?? []
       const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
-      // Finish removing the old task query before selecting the next row.
-      // A live update can start that close before the action returns.
-      await flyout.close()
-      await router.replace(next ? `/inbox/${next.id}` : '/inbox')
+      await router.replace(itemRoute(next))
     }
     return true
   } catch (e) {
     if (selectedId.value === actedOn.id) actionError.value = e instanceof Error ? e.message : String(e)
+    // Nothing to move on to, so the dock kept for that move has nothing beside it
+    if (selectedId.value === actedOn.id && !selected.value) flyout.close()
     return false
   } finally {
+    actingOn = null
     if (selectedId.value === actedOn.id) busy.value = false
   }
 }
