@@ -163,10 +163,11 @@ const statusEditable = computed(() => statusOptions.value.length > 1)
 async function changeStatus(value: string) {
   if (!task.value || value === 'current') return
   try {
-    const event = value === 'approve' || value === 'send_back' || value === 'human_request_changes'
-      ? { type: value }
-      : { type: 'resolve' as const, to: value.slice(8) as 'backlog' | 'ready' | 'in_progress' }
-    if (await applyTask(api.tasks.transition(slug.value, number.value, event))) flashSaved()
+    const transition = (input: Parameters<typeof api.tasks.transition>[2]) => applyTask(api.tasks.transition(slug.value, number.value, input))
+    const updated = value === 'approve' || value === 'send_back' || value === 'human_request_changes'
+      ? await transition({ type: value })
+      : await transition({ type: 'resolve', to: value.slice(8) as 'backlog' | 'ready' | 'in_progress' })
+    if (updated) flashSaved()
   } catch (e) {
     if (e instanceof ApiError && e.body?.code === 'transition_rejected' && e.body.reason.code === 'not_ready') {
       toast.add({ title: 'Not ready yet', description: `Needs: ${e.body.reason.problems.map(p => p.replaceAll('_', ' ')).join(', ')}`, color: 'warning' })
