@@ -34,7 +34,7 @@ export class PmDecisions {
   constructor(deps: Deps) { this.#d = deps }
 
   async prepare(tool: DecisionTool, input: unknown): Promise<PreparedPmAction> {
-    const parsed = z.object(pmActionTools[tool].input as z.ZodRawShape).strict().parse(input) as { taskRef: string, version: number, feedback?: string }
+    const parsed = z.object(pmActionTools[tool].input as z.ZodRawShape).strict().parse(input) as { taskRef: string, version: number, feedback?: string, note?: string }
     const { task, project, ref } = await this.#task(parsed.taskRef)
     const prepared = { input: { ...parsed, taskRef: ref }, targetId: task.id, taskId: task.id, projectId: project.id }
     if (tool === 'act_on_inbox') {
@@ -44,7 +44,7 @@ export class PmDecisions {
       if (action.action === 'approve' && task.type === 'design') throw new ToolError('Use approve_design to approve a design')
       return { ...prepared, summary: inboxSummary(action, ref, task) }
     }
-    const { version, feedback } = parsed
+    const { version, feedback, note } = parsed
     if (task.type !== 'design') throw new ToolError(`${ref} is not a design task`)
     if (task.status !== 'human_review') throw new ToolError(`${ref} is ${task.status}, not waiting on a design decision`)
     const [row] = await this.#d.db.select({ status: designVersions.status }).from(designVersions).where(and(eq(designVersions.taskId, task.id), eq(designVersions.version, version)))
@@ -58,7 +58,8 @@ export class PmDecisions {
         .where(and(eq(designVersions.taskId, task.id), eq(designVersions.status, 'submitted'))).orderBy(desc(designVersions.version)).limit(1)
       if (latest?.version !== version) throw new ToolError(`Version ${version} of ${ref} is no longer the latest submitted version; request changes on v${latest?.version} instead`)
     }
-    return { ...prepared, summary: tool === 'approve_design' ? `Approve v${version} of ${ref}: ${task.title}` : `Request changes on v${version} of ${ref} (${task.title}): ${feedback}` }
+    // The note goes to the build's Plan session as the human's words, so they see it first
+    return { ...prepared, summary: tool === 'approve_design' ? `Approve v${version} of ${ref}: ${task.title}${note ? `. Note: ${note}` : ''}` : `Request changes on v${version} of ${ref} (${task.title}): ${feedback}` }
   }
 
   async execute(tool: DecisionTool, prepared: PreparedPmAction, actor: Actor): Promise<string> {

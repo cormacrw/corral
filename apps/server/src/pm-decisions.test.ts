@@ -141,6 +141,7 @@ describe('PM tools for the Inbox, designs and agents', () => {
       expect(await call('act_on_inbox', { taskRef: created.ref, action: 'approve' })).toMatchObject({ ok: false })
       const { actionId, summary } = await propose('approve_design', { taskRef: created.ref, version: 1, note: 'Ship it' })
       expect(summary).toContain(`v1 of ${created.ref}`)
+      expect(summary).toContain('Note: Ship it')
       expect(await version(created.id)).toMatchObject({ status: 'submitted', planSessionId: null })
       expect(await (await resolve(actionId, 'confirm')).json()).toMatchObject({ pendingAction: { status: 'confirmed' } })
       expect(await version(created.id)).toMatchObject({ status: 'approved', planSessionId: expect.any(String) })
