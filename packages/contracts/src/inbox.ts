@@ -14,6 +14,8 @@ interface InboxItemBase {
   project: { id: string, slug: string, name: string, thumbnailColor: string | null, thumbnailUrl: string | null }
   subject: string
   preview: string
+  // Short stored prose for task and epic items needing the human.
+  message?: string
   sender: { name: string, role: AgentRole | 'system' }
   at: string
 }
