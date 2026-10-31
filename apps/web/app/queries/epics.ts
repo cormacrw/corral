@@ -11,3 +11,8 @@ export const patchEpic = defineMutation<Epic, { id: string, input: PatchEpicInpu
   mutationFn: ({ id, input }) => api.epics.patch(id, input),
   invalidates: (_, { id }) => [keys.epics.lists(), keys.epics.detail(id)]
 })
+
+export const setEpicDependencies = defineMutation<Epic, { id: string, dependsOn: string[] }>({
+  mutationFn: ({ id, dependsOn }) => api.epics.setDependencies(id, dependsOn),
+  invalidates: (_, { id }) => [keys.epics.lists(), keys.epics.detail(id), keys.tasks.lists()]
+})

@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
+import { VueQueryPlugin } from '@tanstack/vue-query'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import type { Comment, Task } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { projects, tasks } from '~/prototype/fixtures'
+import { testQueryClient } from '~/queries/mount-with-query'
 import TaskDetail from './TaskDetail.vue'
 
 vi.mock('~/composables/useApi', () => ({
@@ -40,9 +42,10 @@ beforeEach(() => {
   vi.stubGlobal('useTaskFlyout', () => ({ close: vi.fn(), open: vi.fn() }))
   vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(false) }))
   vi.stubGlobal('useLive', () => ({
-    state: vue.ref({ projects: [{ ...projects[0]!, id: taskA.projectId }], tasks: {}, epics: {}, agents: [] }),
+    state: vue.ref({ projects: [{ ...projects[0]!, id: taskA.projectId }], agents: [] }),
     subscribe: () => () => {}
   }))
+  vi.stubGlobal('useProjectLists', () => ({ tasks: vue.ref([]), epics: vue.ref([]) }))
   vi.mocked(api.tasks.byRef).mockImplementation(async ref => ref === 'COR-1' ? taskA : taskB)
   for (const side of [api.tasks.comments, api.tasks.history, api.tasks.evidence, api.tasks.reviews, api.runs.list]) vi.mocked(side).mockResolvedValue([])
 })
@@ -55,7 +58,7 @@ async function mountDetail() {
   const wrapper = mount(TaskDetail, {
     props: { taskRef: 'COR-1', mode: 'page' },
     shallow: true,
-    global: { components: { PromptComposer: composer, UTabs: tabs }, stubs: { PromptComposer: false, UTabs: false, teleport: true } }
+    global: { plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }]], components: { PromptComposer: composer, UTabs: tabs }, stubs: { PromptComposer: false, UTabs: false, teleport: true } }
   })
   await flushPromises()
   return wrapper

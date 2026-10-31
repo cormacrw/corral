@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useMutation } from '@tanstack/vue-query'
+import { patchTask, moveTask, removeTask } from '~/queries/tasks'
 import type { AuditEntry, Comment, Evidence, Review, Run, Task } from '@corral/contracts'
 import type { EditorToolbarItem } from '@nuxt/ui'
 import type { EditorView } from '@tiptap/pm/view'
@@ -18,6 +20,9 @@ const emit = defineEmits<{ close: [] }>()
 const live = useLive()
 const flyout = useTaskFlyout()
 const toast = useToast()
+const patchMutation = useMutation(patchTask)
+const transitionMutation = useMutation(moveTask)
+const removeMutation = useMutation(removeTask)
 const task = ref<Task | null>(null)
 const comments = ref<Comment[]>([])
 const history = ref<AuditEntry[]>([])
@@ -48,8 +53,9 @@ let savedTimer: ReturnType<typeof setTimeout> | null = null
 
 const project = computed(() => live.state.value.projects.find(p => p.id === task.value?.projectId) ?? null)
 const number = computed(() => task.value?.number ?? 0)
-const epic = computed(() => task.value?.epicId ? live.state.value.epics[task.value.projectId]?.find(e => e.id === task.value!.epicId) ?? null : null)
+const epic = computed(() => task.value?.epicId ? epicList.value.find(e => e.id === task.value!.epicId) ?? null : null)
 const slug = computed(() => project.value?.slug ?? '')
+const { tasks: projectTasks, epics: epicList } = useProjectLists(slug)
 
 async function load() {
   const requested = props.taskRef
@@ -142,7 +148,7 @@ async function applyTask(request: Promise<Task>): Promise<Task | null> {
 async function patch(input: Parameters<typeof api.tasks.patch>[2]) {
   if (!task.value) return
   try {
-    if (await applyTask(api.tasks.patch(slug.value, number.value, input))) flashSaved()
+    if (await applyTask(patchMutation.mutateAsync({ task: { slug: slug.value, number: number.value, ref: props.taskRef }, input }))) flashSaved()
   } catch (e) {
     fail(e)
   }
@@ -166,10 +172,11 @@ const statusEditable = computed(() => statusOptions.value.length > 1)
 async function changeStatus(value: string) {
   if (!task.value || value === 'current') return
   try {
-    const transition = (input: Parameters<typeof api.tasks.transition>[2]) => applyTask(api.tasks.transition(slug.value, number.value, input))
+    const transition = (input: Parameters<typeof api.tasks.transition>[2], status: TaskStatus) => applyTask(transitionMutation.mutateAsync({ task: { slug: slug.value, number: number.value, ref: props.taskRef }, input, status }))
+    const moves = { approve: 'ready', send_back: 'backlog', human_request_changes: 'in_progress' } as const
     const updated = value === 'approve' || value === 'send_back' || value === 'human_request_changes'
-      ? await transition({ type: value })
-      : await transition({ type: 'resolve', to: value.slice(8) as 'backlog' | 'ready' | 'in_progress' })
+      ? await transition({ type: value }, moves[value])
+      : await transition({ type: 'resolve', to: value.slice(8) as 'backlog' | 'ready' | 'in_progress' }, value.slice(8) as 'backlog' | 'ready' | 'in_progress')
     if (updated) flashSaved()
   } catch (e) {
     if (e instanceof ApiError && e.body?.code === 'transition_rejected' && e.body.reason.code === 'not_ready') {
@@ -221,7 +228,7 @@ async function addCriterion() {
 
 const dependencyChoices = computed(() => {
   if (!task.value || !project.value) return []
-  return (live.state.value.tasks[project.value.id] ?? []).filter(t => t.id !== task.value!.id && !task.value!.dependsOn.includes(t.ref)).map(t => ({ label: `${t.ref} ${t.title}`, value: t.number }))
+  return projectTasks.value.filter(t => t.id !== task.value!.id && !task.value!.dependsOn.includes(t.ref)).map(t => ({ label: `${t.ref} ${t.title}`, value: t.number }))
 })
 async function addDependency(n: number | null) {
   if (!task.value || n === null) return
@@ -232,7 +239,7 @@ async function removeDependency(ref: string) {
   if (!task.value) return
   await patch({ dependsOn: task.value.dependsOn.filter(r => r !== ref).map(r => Number(r.split('-')[1])) })
 }
-const dependencyTask = (ref: string) => (project.value ? live.state.value.tasks[project.value.id] ?? [] : []).find(t => t.ref === ref)
+const dependencyTask = (ref: string) => (project.value ? projectTasks.value : []).find(t => t.ref === ref)
 
 function startEditDescription() {
   descriptionDraft.value = structuredClone(toRaw(task.value?.description ?? { type: 'doc', content: [] })) as { type: 'doc' }
@@ -327,7 +334,7 @@ async function place() {
   const requested = props.taskRef
   placing.value = true
   try {
-    const added = await api.tasks.transition(slug.value, number.value, { type: 'approve' })
+    const added = await transitionMutation.mutateAsync({ task: { slug: slug.value, number: number.value, ref: props.taskRef }, input: { type: 'approve' }, status: 'ready' })
     toast.add({ title: `${added.ref} added to the board`, color: 'success' })
     if (requested === props.taskRef) task.value = added
   } catch (e) {
@@ -363,7 +370,7 @@ async function remove() {
   if (!task.value) return
   const requested = props.taskRef
   try {
-    await api.tasks.remove(slug.value, number.value)
+    await removeMutation.mutateAsync({ task: { slug: slug.value, number: number.value, ref: props.taskRef } })
     toast.add({ title: `${requested} deleted`, color: 'neutral' })
     if (requested !== props.taskRef) return
     confirmDelete.value = false

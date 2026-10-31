@@ -1,4 +1,4 @@
-import { queryOptions } from '@tanstack/vue-query'
+import { queryOptions, type QueryClient } from '@tanstack/vue-query'
 import type { Comment, CreateTaskInput, HumanTransitionInput, PatchTaskInput, Task } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { defineMutation } from './dependencies'
@@ -7,7 +7,7 @@ import { keys } from './keys'
 // The API addresses a task by project and number; the cache by ref
 export type TaskAddress = Pick<Task, 'ref' | 'number'> & { slug: string }
 
-export const tasksQuery = (slug: string) => queryOptions({ queryKey: keys.tasks.list(slug), queryFn: () => api.tasks.list(slug, 'all') })
+export const tasksQuery = (slug: string) => queryOptions({ queryKey: keys.tasks.list(slug), queryFn: async () => (await api.tasks.list(slug, 'all')).filter(task => task.status !== 'draft') })
 export const taskQuery = (ref: string) => queryOptions({ queryKey: keys.tasks.detail(ref), queryFn: () => api.tasks.byRef(ref) })
 export const taskCommentsQuery = ({ slug, number, ref }: TaskAddress) => queryOptions({ queryKey: keys.tasks.comments(ref), queryFn: () => api.tasks.comments(slug, number) })
 export const taskHistoryQuery = ({ slug, number, ref }: TaskAddress) => queryOptions({ queryKey: keys.tasks.history(ref), queryFn: () => api.tasks.history(slug, number) })
@@ -33,3 +33,27 @@ export const commentOnTask = defineMutation<Comment, { task: TaskAddress, body: 
   mutationFn: ({ task, body, pinned }) => api.tasks.comment(task.slug, task.number, body, pinned),
   invalidates: (_, { task }) => [keys.tasks.comments(task.ref), keys.tasks.history(task.ref)]
 })
+
+export const removeTask = defineMutation<null, { task: TaskAddress }>({
+  mutationFn: ({ task }) => api.tasks.remove(task.slug, task.number),
+  invalidates: (_, { task }) => [...changed(task.slug, task.ref), keys.epics.lists()]
+})
+
+// Only the moved card is restored on rejection: rolling back a whole list
+// would also undo unrelated SSE updates or another card's successful move.
+export const moveTask = {
+  ...transitionTask,
+  onMutate: async ({ task, status }: { task: TaskAddress, input: HumanTransitionInput, status: Task['status'] }, { client }: { client: QueryClient }) => {
+    const key = keys.tasks.list(task.slug)
+    await client.cancelQueries({ queryKey: key })
+    const previous = client.getQueryData<Task[]>(key)?.find(t => t.ref === task.ref)
+    const optimistic = previous && { ...previous, status, statusReason: null }
+    if (optimistic) client.setQueryData<Task[]>(key, list => list?.map(t => t.id === optimistic.id ? optimistic : t))
+    return { previous, optimistic: client.getQueryData<Task[]>(key)?.find(t => t.ref === task.ref) }
+  },
+  onError: (_error: Error, { task }: { task: TaskAddress }, context: { previous?: Task, optimistic?: Task } | undefined, { client }: { client: QueryClient }) => {
+    if (!context?.previous) return
+    const { previous, optimistic } = context
+    client.setQueryData<Task[]>(keys.tasks.list(task.slug), list => list?.map(t => t === optimistic ? previous : t))
+  }
+}
