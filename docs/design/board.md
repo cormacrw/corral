@@ -5,11 +5,12 @@
 
 ## Purpose
 
-A simple kanban of a project's **approved** work, grouped by status (D10). Backlog tasks are never shown here; they have their own page.
+A simple kanban of a project's **approved** work, grouped by status (D10). Backlog tasks are never shown here; they have their own page. On desktop, a **Tasks / Epics** toggle swaps the task cards for one card per epic.
 
 ## Layout
 
 1. **Toolbar** (bottom border):
+   - the **Tasks / Epics** toggle (desktop only; see [Epics view](#epics-view))
    - a search input (240px, "Search tasks")
    - four **filters** (`components/BoardFilters.vue`), each a multi-select dropdown (`components/BoardFilter.vue`, `USelectMenu` with `multiple`) with a tick by each selected item. "All …" at the top of the menu clears the selection. The trigger reads "All epics" when nothing is selected, the item's name when one is, and "N epics" when several are:
      - **Epic:** every epic on the Board
@@ -43,13 +44,41 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
 3. **Epics** (`components/BoardEpics.vue`): a row above the columns, scrolling sideways, with a 272px card for each epic that has tasks on the Board or work left, including an epic PR still to merge (D27). The Epic filter narrows it. A card shows the epic's name (linking to it), "N of M merged", the meter, "Review: <mode>", the **Epic PR #N** link, and the review status, such as "All tasks merged, awaiting your review". On mobile the same row sits above the column tabs.
 4. **Task flyout:** docked on the right when a card is open. The columns area narrows and scrolls sideways.
 
+## Epics view
+
+The toggle's view lives in `?view=` (`tasks` or `epics`) and the last one used is remembered in `localStorage` (`corral.board.view`). A URL value wins over the remembered one; Tasks is the first-time default. Mobile has no toggle and always shows tasks.
+
+Each card is an epic, and no task cards or the Epics row are shown. Tasks with no epic don't appear.
+
+**Columns.** `epicStage` in `apps/web/app/utils/board.ts` puts each epic in exactly one column, from the first row that matches:
+
+| Column | When | Hint |
+|---|---|---|
+| Blocked | `reviewState` is `conflict`, or any task is Blocked or Failed | You |
+| Done | Tasks past Backlog and nothing left in progress (`epicInProgress`) | Last 3 days |
+| Ready to merge | `reviewState` is `ready_to_merge` | Corral |
+| Human review | `reviewState` is `human_review` | You |
+| Agent review | All tasks merged, `reviewState` is null, `open` or `in_review` | Reviewer |
+| Ready | No task has started | Scheduled next |
+| In progress | Everything else, including `changes_requested` | Developer |
+
+The columns are shown in the order Ready, In progress, Agent review, Human review, Ready to merge, Blocked, Done. `direct` epics have no epic PR, so they go from In progress to Done.
+
+An epic is shown under `epicOnBoard`: it has work left, or it finished within `MERGED_WINDOW_DAYS`, counted from its latest task merge or, for an epic PR, the PR's merge. An epic waiting on its PR stays however old its tasks are. Approved designs alone don't keep a finished epic on the Board.
+
+**Card** (`components/BoardEpicCard.vue`): the title and the meter with "N of M merged". Tags, review mode and the PR link stay in the epic flyout. An unfinished epic held by unfinished prerequisite epics shows the amber `i-lucide-ban` icon beside the title. It opens a "Waiting on" popover listing each prerequisite with its progress, and clicking a row opens that epic. Clicking the icon doesn't open the card's own flyout.
+
+Clicking a card opens the epic in the flyout; clicking it again closes it. The title is the card's keyboard button, and the selected card has the `primary` outline.
+
+**Toolbar.** The search reads "Search epics" and matches epic titles, and the Epic filter applies. Status, Priority and Agent are hidden, stay in the URL and return on switching back; Clear filters resets only the search and Epic filter here. The count reads "N epics".
+
 ## Interactions
 
 - Clicking a card opens it in the flyout; clicking it again closes the flyout.
 - Each filter shows tasks matching any of its selected items; with nothing selected it doesn't filter. Search and the filters combine with AND (`matchesFilter` in `apps/web/app/utils/board.ts`).
   - **Status** hides the columns that aren't selected (and their tabs on mobile).
   - **Agent** matches the agent holding the task's lease, or the agent it's assigned to. Tasks aren't assigned ahead of time (D15), so a task belongs to the agent of its latest run of the role whose turn it is (`task.developer` / `task.reviewer`): the developer in Ready and In progress, the reviewer in Agent review (`taskAgentIds`). A task no agent of that role has claimed matches no agent.
-- The search and filters live in the URL query, so a filtered Board reloads and can be shared: `?q=`, and comma-separated `?epics=` (epic ids), `?status=` (column keys), `?priority=` and `?agent=` (agent ids). `?epic=` is taken by the epic flyout.
+- The search and filters live in the URL query, so a filtered Board reloads and can be shared: `?q=`, and comma-separated `?epics=` (epic ids), `?status=` (column keys), `?priority=` and `?agent=` (agent ids). `?epic=` is taken by the epic flyout, and `?view=` by the Tasks / Epics toggle.
 - On desktop, cards with a permitted human move to another Board column can be dragged there. Valid target columns are highlighted. The move appears immediately; a rejected request restores the card and shows an error toast. These use the same D10 actions as the flyout's Status menu: for example, resolving Blocked to Ready or requesting changes from Human review. Agent and scheduler transitions remain server-owned. Sending work to Backlog stays in the Status menu or Inbox.
 
 ## Rules
@@ -65,7 +94,7 @@ Ready tasks held by epic dependencies use the same neutral waiting note as task 
 
 - **Tasks** (status other than Backlog, and completed within the last 3 days): ref, title, type, status, priority, epic, PR, review round, assigned agent, working (lease), note.
 - **Epics** and **agents** for the filters.
-- Live updates over SSE. Cards move between columns without a reload.
+- Live updates over SSE. Cards move between columns without a reload. Task mutations that reopen epic review publish the updated epic after committing, including both epics when a board task moves between them; the card's review state and progress both refresh.
 
 ## Responsive
 
