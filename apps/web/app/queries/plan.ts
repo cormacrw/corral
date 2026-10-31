@@ -33,10 +33,6 @@ export const approvePlan = defineMutation<Plan, { planId: string, to: 'ready' | 
   mutationFn: ({ planId, to }) => api.plan.approve(planId, to),
   invalidates: [keys.plan.all(), keys.tasks.lists(), keys.inbox()]
 })
-export const discardPlan = defineMutation<Plan, string>({
-  mutationFn: planId => api.plan.discard(planId),
-  invalidates: [keys.plan.all(), keys.inbox()]
-})
 
 // Not a mutation: its result reconciles usePendingPlan's entry, which outlives
 // any component

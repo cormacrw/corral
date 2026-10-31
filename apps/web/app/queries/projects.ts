@@ -10,7 +10,6 @@ export const DEFAULT_FLOW_WINDOW = '30d' satisfies FlowMetricsQuery['window']
 export const projectsQuery = () => queryOptions({ queryKey: keys.projects.list(), queryFn: () => api.projects.list() })
 // One attempt, without the query's retries: a cold launch can't wait them out
 export const fetchProjectsOnce = () => api.projects.list()
-export const projectQuery = (slug: string) => queryOptions({ queryKey: keys.projects.detail(slug), queryFn: () => api.projects.get(slug) })
 // Keeps the chart on screen while another window loads, but not another project's
 export const flowQuery = (slug: string, window: FlowMetricsQuery['window']) => queryOptions({
   queryKey: keys.projects.flow(slug, window),

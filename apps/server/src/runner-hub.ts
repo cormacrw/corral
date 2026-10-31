@@ -1,5 +1,4 @@
 import {
-  RUNNER_HEARTBEAT_MS,
   TASK_INTEGRATION_PROTOCOL,
   integrationCompatibilityReason,
   runnerMessageSchema,
@@ -396,7 +395,3 @@ function parseSlotSource(source: SlotSource | undefined): SlotSource | undefined
 export function runnerOffline(): ApiFailure {
   return new ApiFailure(503, { code: 'runner_offline' })
 }
-
-// How long without a heartbeat before the server treats the runner as gone,
-// even if the socket hasn't closed (e.g. a sleeping laptop)
-export const RUNNER_STALE_MS = RUNNER_HEARTBEAT_MS * 3

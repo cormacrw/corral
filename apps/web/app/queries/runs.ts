@@ -6,7 +6,6 @@ import type { RunFilter } from './keys'
 import { keys } from './keys'
 
 export const runsQuery = (filter: RunFilter = {}) => queryOptions({ queryKey: keys.runs.list(filter), queryFn: () => api.runs.list(filter) })
-export const runQuery = (id: string) => queryOptions({ queryKey: keys.runs.detail(id), queryFn: () => api.runs.get(id) })
 // Only ever grows at the end, so comparing it all on each line finds nothing
 export const runTranscriptQuery = (id: string) => queryOptions({ queryKey: keys.runs.transcript(id), queryFn: () => api.runs.transcript(id), structuralSharing: false })
 

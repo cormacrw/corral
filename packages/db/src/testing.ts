@@ -26,7 +26,7 @@ export async function createTestDatabase(driver: 'pglite'): Promise<DatabaseHand
 export async function createTestDatabase(driver: 'postgres'): Promise<DatabaseHandle | null>
 export async function createTestDatabase(driver: 'pglite' | 'postgres'): Promise<DatabaseHandle | null> {
   if (driver === 'pglite') {
-    return openDatabase({ driver: 'pglite', dataDir: null, loadDataDir: new Blob([await migratedPglite()]) })
+    return openDatabase({ driver: 'pglite', dataDir: null, loadDataDir: await migratedPglite() })
   }
 
   const adminUrl = process.env.CORRAL_DATABASE_URL
@@ -142,31 +142,31 @@ async function whileInUse<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
-let pgliteDump: Promise<Uint8Array> | undefined
+let pgliteDump: Promise<Blob> | undefined
 
-function migratedPglite(): Promise<Uint8Array> {
+function migratedPglite(): Promise<Blob> {
   pgliteDump ??= loadPgliteDump()
   return pgliteDump
 }
 
 // A dump of a migrated PGlite, on disk because each test file has its own copy
 // of this module. It depends on the PGlite build as well as the migrations.
-async function loadPgliteDump(): Promise<Uint8Array> {
+async function loadPgliteDump(): Promise<Blob> {
   const build = createRequire(import.meta.url).resolve('@electric-sql/pglite')
   const key = createHash('sha256').update(await migrationsKey()).update(build).digest('hex').slice(0, 16)
   const dir = join(import.meta.dirname, '..', 'node_modules', '.cache', 'corral')
   const name = `pglite-${key}.tar`
   const cached = await readFile(join(dir, name)).catch(() => null)
-  if (cached) return cached
+  if (cached) return new Blob([cached])
 
   const client = new PGlite()
   try {
     await migrate(drizzle(client), { migrationsFolder })
-    const dump = new Uint8Array(await (await client.dumpDataDir('none')).arrayBuffer())
+    const dump = await client.dumpDataDir('none')
     await mkdir(dir, { recursive: true })
     // Renamed into place: workers race here, and half a dump must never load
     const partial = join(dir, `${name}.${randomUUID()}`)
-    await writeFile(partial, dump)
+    await writeFile(partial, await dump.bytes())
     await rename(partial, join(dir, name))
     const stale = (await readdir(dir)).filter(file => file.startsWith('pglite-') && file.endsWith('.tar') && file !== name)
     await Promise.all(stale.map(file => rm(join(dir, file), { force: true })))

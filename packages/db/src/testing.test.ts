@@ -46,7 +46,7 @@ async function journalEntries(): Promise<number> {
   return journal.entries.length
 }
 
-it.for([{ driver: 'pglite' as const }, { driver: 'postgres' as const }])('gives each $driver database every migration and none of the rows of another', async ({ driver }, context) => {
+it.for([{ driver: 'pglite' as const }, { driver: 'postgres' as const }])('gives each $driver database every migration and none of the rows of another', { timeout: 30_000 }, async ({ driver }, context) => {
   requireDatabase(driver, context)
   const first = driver === 'pglite' ? await createTestDatabase('pglite') : (await createTestDatabase('postgres'))!
   try {
@@ -65,7 +65,7 @@ it.for([{ driver: 'pglite' as const }, { driver: 'postgres' as const }])('gives 
   } finally {
     await first.close()
   }
-}, 30_000)
+})
 
 it('never leaves a connection on the template, which would block every copy', async (context) => {
   requireDatabase('postgres', context)
