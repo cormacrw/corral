@@ -30,18 +30,24 @@ export default defineNuxtPlugin((app) => {
   }
 
   let start = 0
+  let begun = 0
   let initial = true
   let initialPattern: ClientPerfSample['name'] | undefined
   router.beforeEach(() => {
-    start = performance.now()
+    begun = performance.now()
   })
+  // Armed only once the navigation is confirmed: Nuxt also fires
+  // page:loading:end for failed navigations, before this hook and after errors.
   router.afterEach((_to, _from, failure) => {
-    if (failure) start = -1
+    start = failure ? -1 : begun
   })
-  app.hook('page:finish', () => {
+  // page:finish needs a Suspense, which a page keeping its key skips.
+  // page:loading:end covers both, and the guard keeps it to one sample.
+  app.hook('page:loading:end', () => {
+    if (start < 0) return
     const name = pattern()
     if (initial) initialPattern = name
-    if (start >= 0) record(name, 'navigation', performance.now() - (initial ? 0 : start))
+    record(name, 'navigation', performance.now() - (initial ? 0 : start))
     initial = false
     start = -1
   })
