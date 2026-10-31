@@ -3,7 +3,7 @@ import type { Epic, Task } from '@corral/contracts'
 import type { TaskStatus } from '@corral/core'
 import type { BoardFilters } from '~/utils/board'
 import { boardColumnKey, swipeStep } from '~/utils/board'
-import { doneRefs, PRIORITY, taskNote } from '~/utils/labels'
+import { doneRefs, plural, taskNote } from '~/utils/labels'
 
 // The Board on a phone (design/board.md, design/mobile.md): one column at a
 // time, picked from a row of tabs or by swiping sideways. Cards open the
@@ -20,6 +20,7 @@ const props = defineProps<{
   loading: boolean
   error: string | null
 }>()
+const emit = defineEmits<{ retry: [] }>()
 const search = defineModel<string>('search', { required: true })
 const filters = defineModel<BoardFilters>('filters', { required: true })
 
@@ -78,7 +79,7 @@ function toggleSearch() {
   if (!searching.value) search.value = ''
 }
 const epicLabel = (id: string) => props.epics.find(e => e.id === id)?.label ?? ''
-const agentFor = (task: Task) => task.lease ? shell.agents.find(a => a.id === task.lease!.agentId) : null
+const agentFor = (task: Task) => task.lease ? shell.agents.find(a => a.id === task.lease!.agentId) ?? null : null
 const done = computed(() => doneRefs(props.all))
 const note = (task: Task) => taskNote(task, done.value, props.reviewRoundCap)
 </script>
@@ -138,7 +139,7 @@ const note = (task: Task) => taskNote(task, done.value, props.reviewRoundCap)
           :agents="agents"
           item-class="w-[calc(50%-0.25rem)]"
         />
-        <span class="ms-auto text-sm text-muted">{{ total }} tasks</span>
+        <span class="ms-auto text-sm text-muted">{{ plural(total, 'task') }}</span>
       </div>
       <BoardEpics
         v-if="boardEpics.length"
@@ -183,6 +184,7 @@ const note = (task: Task) => taskNote(task, done.value, props.reviewRoundCap)
       variant="subtle"
       :title="error"
       class="m-4"
+      :actions="[{ label: 'Retry', onClick: () => emit('retry') }]"
     />
     <div
       v-else-if="loading"
@@ -213,61 +215,13 @@ const note = (task: Task) => taskNote(task, done.value, props.reviewRoundCap)
           v-for="task in column.tasks"
           :key="task.id"
         >
-          <BorderGlow
-            :active="Boolean(task.lease)"
-            :glow-radius="8"
-          >
-            <NuxtLink
-              :to="`/tasks/${task.ref}`"
-              :class="[
-                'flex flex-col gap-1.5 rounded-md border border-default bg-default px-3 py-2.5 text-sm active:bg-elevated',
-                task.lease && 'border-primary/60'
-              ]"
-            >
-              <span class="flex items-center gap-2 text-xs">
-                <span class="shrink-0 font-mono text-muted">{{ task.ref }}</span>
-                <span :class="task.priority === 'urgent' ? 'text-error' : task.priority === 'high' ? 'text-warning' : 'text-muted'">{{ PRIORITY[task.priority].label }}</span>
-                <TaskTypeBadge :type="task.type" />
-                <StatusBadge
-                  v-if="task.status === 'merged' || task.status === 'approved'"
-                  :status="task.status"
-                />
-                <DesignChangedBadge :design="task.design" />
-                <span
-                  v-if="task.pr?.number"
-                  class="ms-auto flex items-center gap-0.5 text-muted"
-                ><UIcon
-                  name="i-lucide-git-pull-request"
-                  class="size-3"
-                />#{{ task.pr?.number }}</span>
-              </span>
-              <span class="font-medium text-highlighted">{{ task.title }}</span>
-              <span
-                v-if="note(task)"
-                :class="['text-xs', note(task)!.color === 'error' ? 'text-error' : note(task)!.color === 'warning' ? 'text-warning' : 'text-muted']"
-              >{{ note(task)!.text }}</span>
-              <span class="flex items-center gap-2 text-xs text-muted">
-                <UBadge
-                  v-if="task.epicId"
-                  :label="epicLabel(task.epicId)"
-                  size="sm"
-                  variant="outline"
-                  color="neutral"
-                />
-                <span
-                  v-if="agentFor(task)"
-                  class="ms-auto flex items-center gap-1 font-medium text-default"
-                >
-                  {{ task.type === 'design' && agentFor(task)!.role === 'designer' ? 'Designer · ' : '' }}{{ agentFor(task)!.name }}
-                  <AgentAvatar
-                    :name="agentFor(task)!.name"
-                    working
-                    size="xs"
-                  />
-                </span>
-              </span>
-            </NuxtLink>
-          </BorderGlow>
+          <BoardCard
+            :task="task"
+            :note="note(task)"
+            :epic="task.epicId ? epicLabel(task.epicId) : null"
+            :agent="agentFor(task)"
+            mobile
+          />
         </li>
       </ul>
       <p

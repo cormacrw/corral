@@ -16,7 +16,8 @@ export function useProjectLists(slug: MaybeRefOrGetter<string>) {
     // A failed refresh must not replace cached content, including in Overview.
     // Cold-load failures still surface so an unavailable list isn't shown empty.
     error: computed(() => (tasks.isLoadingError.value ? tasks.error.value?.message : null)
-      ?? (epics.isLoadingError.value ? epics.error.value?.message : null) ?? null)
+      ?? (epics.isLoadingError.value ? epics.error.value?.message : null) ?? null),
+    refetch: () => Promise.all([tasks.refetch(), epics.refetch()])
   }
 }
 

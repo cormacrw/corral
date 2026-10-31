@@ -8,13 +8,13 @@ import { duration, isLiveRun, runBadge, runRef, runTitle, runTokens } from '~/ut
 // and a footer with the composer while it's live. The layout drops its
 // header and tab bar here.
 const props = defineProps<{ view: AgentRuns }>()
-const { name, agent, pending, events, now, selected, stop, sent } = props.view
+const { name, agent, pending, events, now, selected, stop, stopping, sent } = props.view
 const live = computed(() => !!selected.value && isLiveRun(selected.value))
 </script>
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <header class="shrink-0 border-b border-default pt-[env(safe-area-inset-top)] ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]">
+    <header class="shrink-0 border-b border-default pt-(--shell-top) ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]">
       <div class="flex min-h-14 items-center gap-2 px-2 py-1">
         <UButton
           :to="`/agents/${name}`"
@@ -22,6 +22,7 @@ const live = computed(() => !!selected.value && isLiveRun(selected.value))
           variant="ghost"
           color="neutral"
           aria-label="Back"
+          class="tap-target"
         />
         <div class="min-w-0 flex-1">
           <p class="truncate text-xs text-muted">
@@ -45,6 +46,7 @@ const live = computed(() => !!selected.value && isLiveRun(selected.value))
           variant="ghost"
           color="neutral"
           aria-label="Open task"
+          class="tap-target"
         />
       </div>
       <div
@@ -67,6 +69,7 @@ const live = computed(() => !!selected.value && isLiveRun(selected.value))
           color="error"
           variant="subtle"
           block
+          :loading="stopping"
           @click="stop(selected)"
         />
       </div>

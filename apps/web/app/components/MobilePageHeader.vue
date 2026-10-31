@@ -82,7 +82,7 @@ const title = computed(() => {
 <template>
   <div
     data-testid="mobile-page-header"
-    :class="['shrink-0 bg-default pt-[env(safe-area-inset-top)] ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]', compact && 'border-b border-default']"
+    :class="['shrink-0 bg-default pt-(--shell-top) ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]', compact && 'border-b border-default']"
   >
     <div :class="['flex items-center gap-2 px-4', compact ? 'min-h-14 py-2' : 'py-5']">
       <UButton
@@ -92,12 +92,12 @@ const title = computed(() => {
         variant="ghost"
         color="neutral"
         :aria-label="back.label"
-        class="-ms-2"
+        class="tap-target -ms-2"
       />
       <div class="min-w-0 flex-1">
         <p
           v-if="subPage?.eyebrow"
-          class="flex items-center gap-1.5 truncate text-xs text-muted"
+          class="flex items-center gap-1.5 text-xs text-muted"
         >
           <span
             v-if="subPage.dot"
@@ -105,7 +105,7 @@ const title = computed(() => {
             :style="{ background: subPage.dot }"
             aria-hidden="true"
           />
-          {{ subPage.eyebrow }}
+          <span class="truncate">{{ subPage.eyebrow }}</span>
         </p>
         <h1 :class="['truncate font-semibold text-highlighted', compact ? 'text-lg leading-tight' : 'text-2xl']">
           {{ title }}
@@ -123,6 +123,7 @@ const title = computed(() => {
           variant="ghost"
           color="neutral"
           :aria-label="action.label"
+          class="tap-target"
         />
       </div>
     </div>

@@ -63,16 +63,21 @@ const parts = computed(() => route.path.split('/').filter(Boolean))
 const fullScreen = computed(() => parts.value[0] === 'agents' && parts.value.length >= 3)
 const ownHeader = computed(() => isActive('/tasks', '/epics'))
 const focused = computed(() => ['plan', 'inbox'].includes(parts.value[0] ?? '') && parts.value.length >= 2)
+// The top inset applies once: above a banner when one shows, otherwise through
+// --shell-top on whatever starts the page
 </script>
 
 <template>
-  <div class="flex h-svh flex-col bg-default text-default">
+  <div class="flex h-svh flex-col bg-default text-default [--shell-top:env(safe-area-inset-top)] has-[[data-shell-banners]>*]:[--shell-top:0px]">
     <div
       v-if="ownHeader"
-      class="shrink-0 pt-[env(safe-area-inset-top)]"
+      class="shrink-0 pt-(--shell-top)"
     />
 
-    <div class="shrink-0 has-[*]:pt-[env(safe-area-inset-top)]">
+    <div
+      class="shrink-0 has-[*]:pt-[env(safe-area-inset-top)]"
+      data-shell-banners
+    >
       <ShellBanners />
     </div>
 
@@ -81,7 +86,7 @@ const focused = computed(() => ['plan', 'inbox'].includes(parts.value[0] ?? '') 
          leaving the compact title row and composer in place. -->
     <UDashboardGroup
       class="relative inset-auto min-h-0 flex-1 overflow-x-auto overscroll-contain *:min-h-0 *:overflow-y-auto *:overscroll-contain"
-      :class="tabRoot && 'pt-[env(safe-area-inset-top)]'"
+      :class="tabRoot && 'pt-(--shell-top)'"
       storage-key="mobile-dashboard"
     >
       <slot />

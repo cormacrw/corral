@@ -18,6 +18,8 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
   const name = computed(() => String(route.params.name))
   const projects = computed(() => shell()?.projects.data.value ?? [])
   const agent = computed(() => shell()?.agents.data.value?.find(a => a.name.toLowerCase() === name.value.toLowerCase()) ?? null)
+  // The agents have loaded, and none has this name
+  const missing = computed(() => Boolean(shell()?.agents.data.value) && !agent.value)
   const now = ref(Date.now())
 
   const list = useQuery(computed(() => ({ ...runsQuery({ agentId: agent.value?.id }), enabled: !!agent.value })))
@@ -113,6 +115,7 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
   const facts = computed(() => agent.value ? agentFacts(agent.value) : '')
   const stopping = useMutation(stopRun)
   async function stop(run: Run) {
+    if (stopping.isPending.value) return
     try {
       await stopping.mutateAsync(run.id)
       toast.add({ title: 'Run stopped', description: 'The task is paused until you resume it.', color: 'neutral' })
@@ -151,7 +154,7 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
     }
   }
 
-  return { name, agent, runs, pending, error, events, now, selected, current, load, today, tiles, facts, stop, resume, project, projectName, runnerOnline, sent, message }
+  return { name, agent, missing, runs, pending, error, events, now, selected, current, load, today, tiles, facts, stop, stopping: stopping.isPending, resume, project, projectName, runnerOnline, sent, message }
 }
 
 export type AgentRuns = ReturnType<typeof useAgentRuns>

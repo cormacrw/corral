@@ -4,6 +4,7 @@ import { epicQuery, patchEpic, setEpicDependencies } from '~/queries/epics'
 import type { PatchEpicInput } from '@corral/contracts'
 import { isTaskDone, type EpicReviewMode } from '@corral/core'
 import { ApiError } from '~/queries/client'
+import DetailHeader from './DetailHeader.vue'
 import { EPIC_REVIEW_MODE, EPIC_REVIEW_STATE, EPIC_STATUS_TEXT, epicReviewStatus, epicWithLiveCounts, PRIORITY, statusCounts } from '~/utils/labels'
 
 // An epic: its title, description and progress, and the dependency tree of
@@ -58,8 +59,9 @@ watch(() => props.epicId, () => {
   editingDescription.value = false
 })
 
-async function patch(input: PatchEpicInput) {
-  if (!epic.value) return
+// Resolves false when not saved, so an edit in progress stays open
+async function patch(input: PatchEpicInput): Promise<boolean> {
+  if (!epic.value) return false
   try {
     await patchMutation.mutateAsync({ id: epic.value.id, input })
     saved.value = true
@@ -67,8 +69,10 @@ async function patch(input: PatchEpicInput) {
     savedTimer = setTimeout(() => {
       saved.value = false
     }, 1800)
+    return true
   } catch (e) {
     toast.add({ title: 'Not saved', description: e instanceof ApiError ? e.message : String(e), color: 'error' })
+    return false
   }
 }
 
@@ -79,8 +83,7 @@ function startEditDescription(event?: MouseEvent) {
   editingDescription.value = true
 }
 async function saveDescription() {
-  await patch({ description: descriptionDraft.value.trim() })
-  editingDescription.value = false
+  if (await patch({ description: descriptionDraft.value.trim() })) editingDescription.value = false
 }
 
 // Progress counts tasks on the board or in the Backlog; Drafts aren't yet
@@ -94,104 +97,48 @@ const reviewStatus = computed(() => epic.value && epicReviewStatus(epicWithLiveC
 
 // Mobile has no flyout, so a task opens as its own page
 const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/${ref}`) : flyout.open(ref)
-const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/${props.epicId}`)
 </script>
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <header class="flex h-14 shrink-0 items-center gap-2 border-b border-default px-4">
+    <DetailHeader
+      :mode="props.mode"
+      :path="`/epics/${props.epicId}`"
+      :saved="saved"
+      @close="emit('close')"
+    >
       <template v-if="props.mode === 'flyout'">
-        <UButton
-          v-if="flyout.canGoBack.value"
-          icon="i-lucide-arrow-left"
-          variant="ghost"
-          color="neutral"
-          size="sm"
-          aria-label="Back"
-          class="-ms-2"
-          @click="flyout.back()"
-        />
         <UBadge
           label="Epic"
           color="neutral"
           variant="subtle"
           size="sm"
         />
-        <span class="truncate text-sm text-muted">{{ project?.name }}</span>
-        <span
-          v-if="saved"
-          class="text-xs text-success"
-        >✓ Saved</span>
-        <div class="ms-auto flex items-center gap-1">
-          <UButton
-            icon="i-lucide-link"
-            variant="ghost"
-            color="neutral"
-            size="sm"
-            aria-label="Copy link"
-            @click="copyLink"
-          />
-          <UButton
-            :to="`/epics/${props.epicId}`"
-            icon="i-lucide-maximize-2"
-            variant="ghost"
-            color="neutral"
-            size="sm"
-            aria-label="Open full page"
-          />
-          <UButton
-            icon="i-lucide-x"
-            variant="ghost"
-            color="neutral"
-            size="sm"
-            aria-label="Close"
-            @click="emit('close')"
-          />
-        </div>
+        <span class="min-w-0 truncate text-sm text-muted">{{ project?.name }}</span>
       </template>
       <template v-else-if="props.mode === 'mobile'">
-        <UButton
-          icon="i-lucide-arrow-left"
-          variant="ghost"
-          color="neutral"
-          aria-label="Back"
-          class="-ms-2"
-          @click="emit('close')"
-        />
-        <div class="min-w-0 flex-1 leading-tight">
-          <div class="flex items-center gap-1.5 text-xs text-muted">
-            <UBadge
-              label="Epic"
-              color="neutral"
-              variant="subtle"
-              size="sm"
-            />
-            <span class="truncate">{{ project?.name }}</span>
-          </div>
-          <h1 class="flex items-center gap-2 truncate text-base font-semibold text-highlighted">
-            {{ epic?.title ?? 'Epic' }}
-            <span
-              v-if="saved"
-              class="text-xs font-normal text-success"
-            >✓ Saved</span>
-          </h1>
+        <div class="flex items-center gap-1.5 text-xs text-muted">
+          <UBadge
+            label="Epic"
+            color="neutral"
+            variant="subtle"
+            size="sm"
+          />
+          <span class="truncate">{{ project?.name }}</span>
         </div>
-        <UButton
-          icon="i-lucide-link"
-          variant="ghost"
-          color="neutral"
-          aria-label="Copy link"
-          @click="copyLink"
-        />
+        <h1 class="flex items-center gap-2 text-base font-semibold text-highlighted">
+          <span class="min-w-0 truncate">{{ epic?.title ?? 'Epic' }}</span>
+          <span
+            v-if="saved"
+            class="shrink-0 text-xs font-normal text-success"
+          >✓ Saved</span>
+        </h1>
       </template>
-      <template v-else>
-        <UBreadcrumb :items="[{ label: project?.name ?? 'Project', to: project ? `/projects/${project.slug}` : '/' }, { label: epic?.title ?? 'Epic' }]" />
-        <span
-          v-if="saved"
-          class="ms-2 text-xs text-success"
-        >✓ Saved</span>
-      </template>
-    </header>
+      <UBreadcrumb
+        v-else
+        :items="[{ label: project?.name ?? 'Project', to: project ? `/projects/${project.slug}` : '/' }, { label: epic?.title ?? 'Epic' }]"
+      />
+    </DetailHeader>
 
     <UAlert
       v-if="error"
@@ -265,6 +212,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
             class="-mx-2 cursor-text rounded-md px-2 py-1 text-sm hover:bg-elevated focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
             @click="startEditDescription($event)"
             @keydown.enter.self.prevent="startEditDescription()"
+            @keydown.space.self.prevent="startEditDescription()"
           >
             <MarkdownText
               v-if="epic.description"
@@ -435,9 +383,9 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
         </section>
       </div>
 
-      <!-- On mobile the tasks follow the details in the one scroll, so the
-           list never shrinks into a scroll of its own -->
-      <section :class="['flex min-w-0 flex-col', props.mode === 'page' ? 'min-h-0 flex-1 max-[900px]:h-[560px]' : props.mode === 'mobile' ? 'shrink-0 px-4 pb-4' : 'min-h-0 px-4 pb-4']">
+      <!-- In a stacked column the tasks follow the details in the one scroll,
+           so the list never shrinks into a scroll of its own -->
+      <section :class="['flex min-w-0 flex-col', props.mode === 'page' ? 'min-h-0 flex-1 max-[900px]:h-[560px]' : 'shrink-0 px-4 pb-4']">
         <UTabs
           v-model="tab"
           :items="[{ label: `Tasks (${epic.tasks.length})`, value: 'tasks', icon: 'i-lucide-list' }, { label: 'Graph', value: 'graph', icon: 'i-lucide-network' }]"
@@ -455,7 +403,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
         </p>
         <ul
           v-else-if="tab === 'tasks'"
-          :class="[props.mode !== 'mobile' && 'min-h-0 overflow-y-auto overscroll-contain', props.mode === 'page' ? 'flex-1 px-4 py-2' : 'mt-2']"
+          :class="props.mode === 'page' ? 'min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2' : 'mt-2'"
         >
           <li
             v-for="task in epic.tasks"

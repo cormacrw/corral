@@ -6,7 +6,10 @@ import type { AuditEntry, Comment, HumanTransitionInput, PatchTaskInput, Task } 
 import type { TaskPriority, TaskStatus } from '@corral/core'
 import { availableEvents } from '@corral/core'
 import { ApiError } from '~/queries/client'
-import { PRIORITY, runBadge, STATUS, TASK_TYPE, timeAgo } from '~/utils/labels'
+import { clearDraftsExcept, useDraft } from '~/composables/useDraft'
+import { PRIORITY, runBadge, STATUS, TASK_TYPE } from '~/utils/labels'
+import DetailHeader from './DetailHeader.vue'
+import TimeAgo from './TimeAgo.vue'
 
 // One TaskDetail with three modes (design/task.md): docked flyout, the
 // task page with a properties rail, or the full mobile page with Details
@@ -28,7 +31,7 @@ const task = computed(() => taskResult.data.value ?? null)
 const saved = ref(false)
 const resuming = ref(false)
 const placing = ref(false)
-const draft = ref('')
+const draft = useDraft(() => `task:${props.taskRef}`)
 const composerDraft = { text: draft }
 const editingDescription = ref(false)
 // The editor's JSON document; its inner shape is the editor's business
@@ -74,11 +77,15 @@ const retry = () => Promise.all(results.filter(r => r.isLoadingError.value).map(
 
 // A comment that failed after moving on, put back on returning to its task
 const unsent = new Map<string, string>()
-watch(() => props.taskRef, (ref) => {
+watch(() => props.taskRef, (ref, previous) => {
   tab.value = route.query.evidence ? 'evidence' : 'activity'
   mobileTab.value = route.query.evidence ? 'criteria' : 'details'
-  draft.value = unsent.get(ref) ?? ''
-  unsent.delete(ref)
+  // Switching tasks resets the draft; returning to this one keeps it
+  if (previous) {
+    clearDraftsExcept(`task:${previous}`, `task:${ref}`)
+    draft.value = unsent.get(ref) ?? ''
+    unsent.delete(ref)
+  }
   editingDescription.value = false
   descriptionDraft.value = { type: 'doc', content: [] }
   newCriterion.value = ''
@@ -107,12 +114,15 @@ async function confirm(request: Promise<Task>) {
   if (requested === props.taskRef) flashSaved()
 }
 
-async function patch(input: PatchTaskInput) {
-  if (!task.value) return
+// Resolves false when not saved, so an edit in progress stays open
+async function patch(input: PatchTaskInput): Promise<boolean> {
+  if (!task.value) return false
   try {
     await confirm(patchMutation.mutateAsync({ task: address.value, input }))
+    return true
   } catch (e) {
     fail(e)
+    return false
   }
 }
 
@@ -183,8 +193,8 @@ async function removeCriterion(id: string) {
 async function addCriterion() {
   if (!task.value || !newCriterion.value.trim()) return
   const requested = props.taskRef
-  await patch({ acceptanceCriteria: [...task.value.acceptanceCriteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })), { text: newCriterion.value.trim() }] })
-  if (requested === props.taskRef) newCriterion.value = ''
+  const saved = await patch({ acceptanceCriteria: [...task.value.acceptanceCriteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })), { text: newCriterion.value.trim() }] })
+  if (saved && requested === props.taskRef) newCriterion.value = ''
 }
 
 const dependencyChoices = computed(() => {
@@ -218,8 +228,8 @@ async function saveDescription() {
   const content = [...(descriptionDraft.value.content ?? [])] as { type: string, content?: unknown[] }[]
   while (content.length > 0 && content.at(-1)!.type === 'paragraph' && !content.at(-1)!.content?.length) content.pop()
   const requested = props.taskRef
-  await patch({ description: { ...descriptionDraft.value, content } as { type: 'doc' } })
-  if (requested === props.taskRef) editingDescription.value = false
+  const saved = await patch({ description: { ...descriptionDraft.value, content } as { type: 'doc' } })
+  if (saved && requested === props.taskRef) editingDescription.value = false
 }
 
 // A Draft from a plan: the task itself, without the work around it. It's
@@ -266,7 +276,7 @@ async function sendComment(body: string): Promise<boolean> {
 }
 
 async function remove() {
-  if (!task.value) return
+  if (!task.value || removeMutation.isPending.value) return
   const requested = props.taskRef
   try {
     await removeMutation.mutateAsync({ task: address.value })
@@ -318,122 +328,75 @@ function historyText(entry: AuditEntry): string {
   }
 }
 const workingAgent = computed(() => task.value?.lease ? shell.agents.find(a => a.id === task.value!.lease!.agentId) ?? null : null)
-const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/${props.taskRef}`)
 </script>
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <header class="flex h-14 shrink-0 items-center gap-2 border-b border-default px-4">
-      <template v-if="props.mode === 'flyout'">
-        <UButton
-          v-if="flyout.canGoBack.value"
-          icon="i-lucide-arrow-left"
-          variant="ghost"
-          color="neutral"
-          size="sm"
-          aria-label="Back"
-          class="-ms-2"
-          @click="flyout.back()"
-        />
-        <nav
-          aria-label="Breadcrumb"
-          class="flex min-w-0 items-center gap-1 text-sm text-muted"
-        >
-          <template v-if="epic">
-            <button
-              type="button"
-              class="max-w-48 truncate hover:text-highlighted hover:underline"
-              :title="epic.title"
-              @click="flyout.openEpic(epic.id)"
-            >
-              {{ epic.title }}
-            </button>
-            <UIcon
-              name="i-lucide-chevron-right"
-              class="size-4 shrink-0"
-              aria-hidden="true"
-            />
-          </template>
-          <span
-            class="shrink-0"
-            aria-current="page"
-          >{{ props.taskRef }}</span>
-        </nav>
-        <UBadge
-          v-if="isDraft"
-          label="Draft"
-          color="neutral"
-          variant="subtle"
-          size="sm"
-        />
+    <DetailHeader
+      :mode="props.mode"
+      :path="`/tasks/${props.taskRef}`"
+      :saved="saved"
+      @close="emit('close')"
+    >
+      <nav
+        v-if="props.mode === 'flyout'"
+        aria-label="Breadcrumb"
+        class="flex min-w-0 items-center gap-1 text-sm text-muted"
+      >
+        <template v-if="epic">
+          <button
+            type="button"
+            class="max-w-48 min-w-0 truncate hover:text-highlighted hover:underline"
+            :title="epic.title"
+            @click="flyout.openEpic(epic.id)"
+          >
+            {{ epic.title }}
+          </button>
+          <UIcon
+            name="i-lucide-chevron-right"
+            class="size-4 shrink-0"
+            aria-hidden="true"
+          />
+        </template>
         <span
-          v-if="saved"
-          class="text-xs text-success"
-        >✓ Saved</span>
-        <div class="ms-auto flex items-center gap-1">
-          <UButton
-            icon="i-lucide-link"
-            variant="ghost"
-            color="neutral"
-            size="sm"
-            aria-label="Copy link"
-            @click="copyLink"
-          />
-          <UButton
-            :to="`/tasks/${props.taskRef}`"
-            icon="i-lucide-maximize-2"
-            variant="ghost"
-            color="neutral"
-            size="sm"
-            aria-label="Open full page"
-          />
-          <UButton
-            icon="i-lucide-x"
-            variant="ghost"
-            color="neutral"
-            size="sm"
-            aria-label="Close"
-            @click="emit('close')"
-          />
-        </div>
-      </template>
+          class="shrink-0"
+          aria-current="page"
+        >{{ props.taskRef }}</span>
+      </nav>
       <template v-else-if="mobile">
-        <UButton
-          icon="i-lucide-arrow-left"
-          variant="ghost"
-          color="neutral"
-          aria-label="Back"
-          class="-ms-2"
-          @click="emit('close')"
-        />
-        <div class="min-w-0 flex-1 leading-tight">
-          <NuxtLink
-            v-if="epic"
-            :to="`/epics/${epic.id}`"
-            class="block truncate text-xs text-muted underline"
-          >{{ epic.title }} ›</NuxtLink>
-          <h1 class="flex items-center gap-2 text-base font-semibold text-highlighted">
-            {{ props.taskRef }}
-            <UBadge
-              v-if="isDraft"
-              label="Draft"
-              color="neutral"
-              variant="subtle"
-              size="sm"
-            />
-            <span
-              v-if="saved"
-              class="text-xs font-normal text-success"
-            >✓ Saved</span>
-          </h1>
-        </div>
-        <UButton
-          icon="i-lucide-link"
-          variant="ghost"
-          color="neutral"
-          aria-label="Copy link"
-          @click="copyLink"
-        />
+        <NuxtLink
+          v-if="epic"
+          :to="`/epics/${epic.id}`"
+          class="block truncate text-xs text-muted underline"
+        >{{ epic.title }} ›</NuxtLink>
+        <h1 class="flex items-center gap-2 text-base font-semibold text-highlighted">
+          {{ props.taskRef }}
+          <UBadge
+            v-if="isDraft"
+            label="Draft"
+            color="neutral"
+            variant="subtle"
+            size="sm"
+          />
+          <span
+            v-if="saved"
+            class="text-xs font-normal text-success"
+          >✓ Saved</span>
+        </h1>
+      </template>
+      <UBreadcrumb
+        v-else
+        :items="[{ label: 'Board', to: project ? `/projects/${project.slug}/board` : '/' }, ...(epic ? [{ label: epic.title, to: `/epics/${epic.id}` }] : []), { label: props.taskRef }]"
+      />
+      <UBadge
+        v-if="isDraft && props.mode === 'flyout'"
+        label="Draft"
+        color="neutral"
+        variant="subtle"
+        size="sm"
+        class="shrink-0"
+      />
+      <template #actions>
         <UDropdownMenu
           v-if="task && task.status !== 'merged'"
           :items="[{ label: 'Delete task', icon: 'i-lucide-trash-2', color: 'error', onSelect: () => { confirmDelete = true } }]"
@@ -444,17 +407,11 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
             variant="ghost"
             color="neutral"
             aria-label="More"
+            class="tap-target"
           />
         </UDropdownMenu>
       </template>
-      <template v-else>
-        <UBreadcrumb :items="[{ label: 'Board', to: project ? `/projects/${project.slug}/board` : '/' }, ...(epic ? [{ label: epic.title, to: `/epics/${epic.id}` }] : []), { label: props.taskRef }]" />
-        <span
-          v-if="saved"
-          class="ms-2 text-xs text-success"
-        >✓ Saved</span>
-      </template>
-    </header>
+    </DetailHeader>
 
     <DetailLoading v-if="taskResult.isPending.value" />
     <UAlert
@@ -623,7 +580,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
               class="flex items-center gap-2 text-sm"
             >
               <NuxtLink
-                :to="mobile ? `/tasks/${ref}` : { query: { ...$route.query, task: ref } }"
+                :to="props.mode === 'flyout' ? { query: { ...$route.query, task: ref } } : `/tasks/${ref}`"
                 class="font-mono text-muted"
               >{{ ref }}</NuxtLink>
               <span class="truncate">{{ dependencyTask(ref)?.title ?? '' }}</span>
@@ -638,7 +595,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
                 size="xs"
                 variant="ghost"
                 color="neutral"
-                class="ms-auto"
+                class="tap-target ms-auto shrink-0"
                 :aria-label="`Remove dependency ${ref}`"
                 @click="removeDependency(ref)"
               />
@@ -702,6 +659,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
             :class="['-mx-2 rounded-md px-2 py-1', !readonly && 'cursor-text hover:bg-elevated focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none']"
             @click="!readonly && onDescriptionClick($event)"
             @keydown.enter.self.prevent="!readonly && startEditDescription()"
+            @keydown.space.self.prevent="!readonly && startEditDescription()"
           >
             <AsyncTaskDescription :doc="task.description" />
           </div>
@@ -764,6 +722,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
                 size="xs"
                 variant="ghost"
                 color="neutral"
+                class="tap-target"
                 aria-label="Remove criterion"
                 @click="removeCriterion(criterion.id)"
               />
@@ -828,7 +787,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
                 <div class="min-w-0 flex-1 rounded-lg bg-elevated px-3 py-2 text-sm">
                   <div class="mb-0.5 flex items-center gap-2 text-xs text-muted">
                     <span class="font-medium text-default">{{ authorLabel(item.comment.author) }}</span>
-                    <span>{{ timeAgo(item.comment.createdAt) }}</span>
+                    <span><TimeAgo :at="item.comment.createdAt" /></span>
                     <UBadge
                       v-if="item.comment.pinned"
                       label="Pinned"
@@ -851,7 +810,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
                 <p class="min-w-0 flex-1 text-muted">
                   <span class="font-medium text-default">{{ item.run.agentName }}</span>
                   run #{{ item.run.number }} ended {{ runBadge(item.run).label.toLowerCase() }}: {{ item.run.error }}
-                  <span class="text-xs">· {{ timeAgo(item.run.endedAt!) }}</span>
+                  <span class="text-xs">· <TimeAgo :at="item.run.endedAt!" /></span>
                 </p>
               </div>
             </template>
@@ -867,6 +826,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
               placeholder="Comment…"
               :hint="composerHint"
               :project="slug || null"
+              :draft-key="`task:${props.taskRef}`"
               @submit="sendComment"
             />
           </div>
@@ -896,7 +856,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
               <div class="min-w-0">
                 <span class="font-medium">{{ authorLabel(entry.actor) }}</span>
                 <span class="text-muted"> {{ historyText(entry) }}</span>
-                <span class="ms-2 text-xs text-dimmed">{{ timeAgo(entry.createdAt) }}</span>
+                <span class="ms-2 text-xs text-dimmed"><TimeAgo :at="entry.createdAt" /></span>
                 <template v-if="entry.action === 'run.ended' && entry.detail.outcome === 'pr_rebased' && entry.detail.review">
                   <p class="mt-1 text-toned">
                     Review choice: {{ entry.detail.review }}
@@ -946,6 +906,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
               <UButton
                 label="Delete"
                 color="error"
+                :loading="removeMutation.isPending.value"
                 @click="remove"
               />
             </template>

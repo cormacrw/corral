@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { DraftSession } from '@corral/contracts'
-import { PRIORITY, TASK_TYPE, taskTypeIcon, timeAgo } from '~/utils/labels'
+import { PRIORITY, TASK_TYPE, taskTypeIcon } from '~/utils/labels'
+import TimeAgo from '~/components/TimeAgo.vue'
 
 // The project's Drafts on the Plan tab, under the session they belong to
 // (design/plan.md). A session or draft opens that session; a draft also
@@ -42,7 +43,7 @@ defineProps<{ sessions: DraftSession[], mobile?: boolean }>()
               size="xs"
             />
           </span>
-          <span class="shrink-0 text-xs text-dimmed">{{ timeAgo(session.updatedAt) }}</span>
+          <span class="shrink-0 text-xs text-dimmed"><TimeAgo :at="session.updatedAt" /></span>
         </NuxtLink>
         <ul>
           <li

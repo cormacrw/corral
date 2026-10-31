@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import type { ProjectOverview } from '~/composables/useProjectOverview'
-import { duration, inboxTypeBadge, STATUS, timeAgo } from '~/utils/labels'
+import { inboxTypeBadge } from '~/utils/labels'
+import TimeAgo from '~/components/TimeAgo.vue'
 
 // Project overview on mobile (design/mobile.md, frame "Project overview").
 // The same sections as the web page in one column, with links to the
 // Board and Backlog. The in-page title row holds Back and Settings.
 const props = defineProps<{ overview: ProjectOverview }>()
-const { project, tasks, runs, history, error, load, DOT, count, needsYou, mergedThisWeek, firstPass, waitingOnDependency, developer, reviewer, pmName, epics, taskOf, actorName, taskRefOf, activityText } = props.overview
+const { project, tasks, loading, inboxLoading, runs, history, error, load, needsYou, pmName, epics, taskOf, actorName, taskRefOf, activityText } = props.overview
 </script>
 
 <template>
@@ -78,7 +79,7 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
       />
 
       <div
-        v-if="tasks.length === 0"
+        v-if="!loading && tasks.length === 0"
         class="mx-4 rounded-lg border border-default p-6 text-center"
       >
         <p class="mb-3 text-muted">
@@ -90,33 +91,10 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
         />
       </div>
 
-      <!-- Stat tiles scroll sideways rather than wrap -->
-      <div class="flex snap-x scroll-px-4 gap-2 overflow-x-auto overscroll-x-contain px-4">
-        <dl
-          v-for="tile in [
-            { label: 'Ready', color: STATUS.ready.color, value: count('ready'), sub: waitingOnDependency ? `${waitingOnDependency} waiting on a dependency` : 'scheduled next' },
-            { label: 'In progress', color: STATUS.in_progress.color, value: count('in_progress'), sub: developer ? `${developer} working` : 'no run active' },
-            { label: 'Agent review', color: STATUS.agent_review.color, value: count('agent_review'), sub: reviewer ? `${reviewer} reviewing` : 'waiting' },
-            { label: 'Needs you', color: STATUS.human_review.color, value: needsYou.length, sub: `${count('human_review')} review · ${count('blocked')} blocked · ${count('failed')} failed` },
-            { label: 'Completed this week', color: STATUS.merged.color, value: mergedThisWeek.length, sub: firstPass === null ? 'no merges yet' : `first-pass approval ${firstPass}%` }
-          ]"
-          :key="tile.label"
-          class="w-40 shrink-0 snap-start rounded-lg border border-default p-3"
-        >
-          <dt class="flex items-center gap-1.5 truncate text-xs text-muted">
-            <span
-              :class="['size-2 shrink-0 rounded-full', DOT[tile.color]]"
-              aria-hidden="true"
-            />{{ tile.label }}
-          </dt>
-          <dd class="text-2xl font-semibold tabular-nums">
-            {{ tile.value }}
-          </dd>
-          <dd class="text-xs text-muted">
-            {{ tile.sub }}
-          </dd>
-        </dl>
-      </div>
+      <OverviewTiles
+        :overview="overview"
+        mobile
+      />
 
       <ProjectFlow
         :slug="project.slug"
@@ -165,7 +143,7 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
                     variant="subtle"
                     size="sm"
                   />
-                  <span class="text-xs text-dimmed">{{ timeAgo(item.at) }}</span>
+                  <span class="text-xs text-dimmed"><TimeAgo :at="item.at" /></span>
                 </span>
               </span>
               <UIcon
@@ -175,6 +153,10 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
             </NuxtLink>
           </li>
         </ul>
+        <USkeleton
+          v-else-if="inboxLoading"
+          class="mx-4 h-12"
+        />
         <p
           v-else
           class="px-4 text-sm text-muted"
@@ -209,7 +191,7 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
                   <span class="font-medium">{{ run.agentName }}</span> is {{ run.role === 'reviewer' ? 'reviewing' : run.role === 'pm' ? 'planning' : 'building' }} {{ run.taskRef ?? (run.epicId ? 'epic' : '') }} {{ taskOf(run)?.title ?? run.epicTitle ?? '' }}
                 </p>
                 <p class="text-xs text-muted">
-                  Run #{{ run.number }} · {{ duration(run.startedAt ?? run.queuedAt, null) }} · {{ run.state.replace('_', ' ') }}
+                  Run #{{ run.number }} · <ElapsedTime :from="run.startedAt ?? run.queuedAt" /> · {{ run.state.replace('_', ' ') }}
                 </p>
               </div>
             </NuxtLink>
@@ -248,8 +230,11 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
               :epic="epic.epic"
             />
           </li>
+          <li v-if="loading">
+            <USkeleton class="h-8 w-full" />
+          </li>
           <li
-            v-if="epics.length === 0"
+            v-else-if="epics.length === 0"
             class="text-sm text-muted"
           >
             No epics yet.
@@ -278,7 +263,7 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
                 :to="`/tasks/${taskRefOf(entry)}`"
                 class="font-mono text-xs text-muted"
               >{{ taskRefOf(entry) }}</NuxtLink>
-              <span class="ms-2 text-xs text-dimmed">{{ timeAgo(entry.createdAt) }}</span>
+              <span class="ms-2 text-xs text-dimmed"><TimeAgo :at="entry.createdAt" /></span>
             </span>
           </li>
           <li

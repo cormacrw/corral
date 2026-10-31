@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { isTaskDone } from '@corral/core'
+import { STATUS_DOT, PRIORITY, STATUS } from '~/utils/labels'
 
 import type { Task } from '@corral/contracts'
 import { Background } from '@vue-flow/background'
@@ -10,7 +11,6 @@ import { MiniMap } from '@vue-flow/minimap'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/controls/dist/style.css'
 import '@vue-flow/minimap/dist/style.css'
-import { PRIORITY, STATUS } from '~/utils/labels'
 
 // An epic's tasks as a dependency tree: a task sits one step after the last
 // task it depends on. Left to right on a page, top to bottom in the narrow
@@ -112,8 +112,6 @@ const { fitView } = useVueFlow(flowId)
 watch(() => `${props.direction}|${props.tasks.map(t => `${t.ref}:${t.dependsOn.join(',')}`).join('|')}`, () => {
   void nextTick(() => fitView(FIT))
 })
-
-const DOT = { neutral: 'bg-neutral-400', info: 'bg-info', primary: 'bg-primary', warning: 'bg-warning', error: 'bg-error', success: 'bg-success', secondary: 'bg-secondary' } as const
 </script>
 
 <template>
@@ -157,7 +155,7 @@ const DOT = { neutral: 'bg-neutral-400', info: 'bg-info', primary: 'bg-primary',
           <span class="flex items-center gap-1.5">
             <span class="font-mono text-muted">{{ data.task.ref }}</span>
             <span
-              :class="['size-2 shrink-0 rounded-full', DOT[STATUS[data.task.status as keyof typeof STATUS].color]]"
+              :class="['size-2 shrink-0 rounded-full', STATUS_DOT[STATUS[data.task.status as keyof typeof STATUS].color]]"
               aria-hidden="true"
             />
             <span class="truncate text-muted">{{ STATUS[data.task.status as keyof typeof STATUS].label }}</span>

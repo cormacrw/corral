@@ -4,7 +4,8 @@ import { createTask, transitionTask } from '~/queries/tasks'
 import { isTaskDone } from '@corral/core'
 import type { Task } from '@corral/contracts'
 import { ApiError } from '~/queries/client'
-import { epicTitle, PRIORITY, timeAgo } from '~/utils/labels'
+import { epicTitle, plural, PRIORITY } from '~/utils/labels'
+import TimeAgo from '~/components/TimeAgo.vue'
 
 // Backlog (design/backlog.md): proposed tasks grouped by epic
 const shell = useShell()
@@ -15,7 +16,7 @@ const toast = useToast()
 const prefetch = useTaskPrefetch()
 const transition = useMutation(transitionTask)
 const create = useMutation(createTask)
-const { slug, project, tasks: all, epics: epicList, loading, error } = useProject()
+const { slug, project, tasks: all, epics: epicList, loading, error, refetch } = useProject()
 const pmName = computed(() => shell.agents.find(a => a.role === 'pm')?.name ?? 'the PM')
 useSeoMeta({ title: () => `Backlog · ${project.value?.name ?? ''} · Corral` })
 
@@ -62,15 +63,20 @@ async function moveToBoard(tasks: Task[]) {
   if (moved.length > 0) toast.add({ title: moved.length === 1 ? `${moved[0]} moved to the board` : `${moved.length} tasks moved to the board`, color: 'success' })
   if (notReady.length > 0) toast.add({ title: notReady.length === 1 ? 'Not ready yet' : `${notReady.length} tasks not ready yet`, description: notReady.join('; '), color: 'warning' })
 }
+// Separate from what it holds, which stays through the close animation
+const confirmOpen = ref(false)
 const confirmEpic = ref<{ title: string, tasks: Task[] } | null>(null)
 function moveEpic(group: { id: string, title: string }) {
   const tasks = all.value.filter(t => t.status === 'backlog' && (t.epicId ?? 'none') === group.id)
   if (tasks.length === 1) void moveToBoard(tasks)
-  else confirmEpic.value = { title: group.title, tasks }
+  else {
+    confirmEpic.value = { title: group.title, tasks }
+    confirmOpen.value = true
+  }
 }
 
 async function newTask() {
-  if (!project.value) return
+  if (!project.value || create.isPending.value) return
   try {
     const task = await create.mutateAsync({ slug: slug.value, input: { title: 'New task', type: 'task', description: null } })
     // A phone has no room for the flyout, so the task opens on its own page
@@ -97,6 +103,8 @@ async function newTask() {
       :plan-to="`/plan?project=${project?.id}`"
       :loading="loading"
       :error="error"
+      :creating="create.isPending.value"
+      @retry="refetch"
       @move-task="moveToBoard([$event])"
       @move-epic="moveEpic"
       @new-task="newTask"
@@ -114,7 +122,7 @@ async function newTask() {
             size="sm"
             class="w-60"
           />
-          <span class="text-sm text-muted">{{ backlog.length }} tasks · never scheduled until approved</span>
+          <span class="text-sm text-muted">{{ plural(backlog.length, 'task') }} · never scheduled until approved</span>
           <UCheckbox
             v-model="showCompleted"
             label="Show completed"
@@ -138,6 +146,7 @@ async function newTask() {
               label="New task"
               icon="i-lucide-plus"
               size="sm"
+              :loading="create.isPending.value"
               @click="newTask"
             />
           </div>
@@ -149,6 +158,7 @@ async function newTask() {
           variant="subtle"
           :title="error"
           class="m-4"
+          :actions="[{ label: 'Retry', onClick: refetch }]"
         />
         <div
           v-else-if="loading"
@@ -166,18 +176,18 @@ async function newTask() {
             :key="group.id"
             class="rounded-lg border border-default"
           >
-            <header class="flex items-center gap-2 rounded-t-lg bg-muted px-3 py-2 text-sm">
+            <header class="flex flex-wrap items-center gap-2 rounded-t-lg bg-muted px-3 py-2 text-sm">
               <button
                 type="button"
-                class="flex items-center gap-1 font-medium"
+                class="flex max-w-full min-w-0 items-center gap-1 font-medium"
                 :aria-expanded="!collapsed[group.id]"
                 @click="collapsed = { ...collapsed, [group.id]: !collapsed[group.id] }"
               >
                 <UIcon
                   name="i-lucide-chevron-right"
-                  :class="['size-4 transition-transform', !collapsed[group.id] && 'rotate-90']"
+                  :class="['size-4 shrink-0 transition-transform', !collapsed[group.id] && 'rotate-90']"
                 />
-                {{ group.title }}
+                <span class="truncate">{{ group.title }}</span>
               </button>
               <UBadge
                 :label="String(group.rows.length)"
@@ -244,7 +254,7 @@ async function newTask() {
                   </span>
                   <span class="hidden w-24 text-xs text-muted md:inline">{{ task.acceptanceCriteria.length ? `${task.acceptanceCriteria.length} criteria` : 'No criteria' }}</span>
                   <span :class="['w-16 text-xs', task.priority === 'urgent' ? 'text-error' : task.priority === 'high' ? 'text-warning' : 'text-muted']">{{ PRIORITY[task.priority].label }}</span>
-                  <span class="hidden w-16 text-end text-xs text-dimmed md:inline">{{ timeAgo(task.createdAt) }}</span>
+                  <span class="hidden w-16 text-end text-xs text-dimmed md:inline"><TimeAgo :at="task.createdAt" /></span>
                 </button>
                 <UButton
                   v-if="task.status === 'backlog'"
@@ -271,22 +281,21 @@ async function newTask() {
       </div>
     </div>
     <UModal
-      :open="Boolean(confirmEpic)"
+      v-model:open="confirmOpen"
       :title="`Move ${confirmEpic?.tasks.length} tasks to the board?`"
       :description="`Every Backlog task in ${confirmEpic?.title} becomes Ready, and agents start on them in dependency order. Tasks missing a description or acceptance criteria stay in the Backlog.`"
-      @update:open="confirmEpic = $event ? confirmEpic : null"
     >
       <template #footer>
         <UButton
           label="Cancel"
           variant="outline"
           color="neutral"
-          @click="confirmEpic = null"
+          @click="confirmOpen = false"
         />
         <UButton
           label="Move to board"
           icon="i-lucide-kanban"
-          @click="moveToBoard(confirmEpic!.tasks); confirmEpic = null"
+          @click="moveToBoard(confirmEpic!.tasks); confirmOpen = false"
         />
       </template>
     </UModal>

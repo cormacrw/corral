@@ -55,6 +55,13 @@ async function resumeAll() {
     toast.add({ title: 'Could not resume', description: e instanceof Error ? e.message : String(e), color: 'error' })
   }
 }
+// A blank name is refused, so the field goes back to the one it had
+function renameAgent(agent: Agent, event: Event) {
+  const input = event.target as HTMLInputElement
+  const name = input.value.trim()
+  if (name) void patchAgent(agent, { name })
+  else input.value = agent.name
+}
 </script>
 
 <template>
@@ -141,9 +148,10 @@ async function resumeAll() {
             >
               <UInput
                 :model-value="agent.name"
+                :maxlength="80"
                 size="xs"
                 class="w-32"
-                @change="patchAgent(agent, { name: String(($event.target as HTMLInputElement).value).trim() })"
+                @change="renameAgent(agent, $event)"
               />
             </UFormField>
             <UFormField

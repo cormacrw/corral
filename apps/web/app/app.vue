@@ -2,8 +2,6 @@
 import { useQueryClient } from '@tanstack/vue-query'
 import { startShell } from '~/queries/shell'
 
-useDarkNeutral()
-
 useHead({
   meta: [
     { name: 'viewport', content: 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover' }
@@ -20,6 +18,17 @@ useHead({
 useSeoMeta({
   title: 'Corral'
 })
+
+// The static theme-color tags follow the system. This follows the app's own
+// colour mode and dark palette, by the background they actually produced.
+const colorMode = useColorMode()
+const { palette } = useDarkNeutral()
+function matchThemeColor() {
+  const background = getComputedStyle(document.body).backgroundColor
+  for (const tag of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) tag.content = background
+}
+watch([() => colorMode.value, palette], () => nextTick(matchThemeColor))
+onMounted(matchThemeColor)
 
 // One live connection for the whole app (design/app-shell.md)
 const live = useLive()

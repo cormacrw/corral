@@ -25,33 +25,35 @@ function back() {
 
 <template>
   <div class="flex h-svh flex-col">
-    <header class="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-default px-4 pt-[env(safe-area-inset-top)]">
-      <template v-if="index === 0 && !adding">
-        <span class="flex items-center gap-2 text-lg font-semibold">
-          <span class="flex size-7 items-center justify-center rounded-md bg-primary text-inverted"><UIcon
-            name="i-lucide-fence"
-            class="size-4"
-          /></span>
-          Corral
-        </span>
-        <UBadge
-          label="Self-hosted"
-          color="neutral"
-          variant="subtle"
-        />
-      </template>
-      <template v-else>
-        <UButton
-          icon="i-lucide-arrow-left"
-          variant="ghost"
-          color="neutral"
-          aria-label="Back"
-          @click="back"
-        />
-        <h1 class="min-w-0 flex-1 truncate text-lg font-semibold">
-          {{ title }}
-        </h1>
-      </template>
+    <header class="shrink-0 border-b border-default pt-[env(safe-area-inset-top)]">
+      <div class="flex min-h-14 items-center justify-between gap-2 px-4">
+        <template v-if="index === 0 && !adding">
+          <span class="flex items-center gap-2 text-lg font-semibold">
+            <span class="flex size-7 items-center justify-center rounded-md bg-primary text-inverted"><UIcon
+              name="i-lucide-fence"
+              class="size-4"
+            /></span>
+            Corral
+          </span>
+          <UBadge
+            label="Self-hosted"
+            color="neutral"
+            variant="subtle"
+          />
+        </template>
+        <template v-else>
+          <UButton
+            icon="i-lucide-arrow-left"
+            variant="ghost"
+            color="neutral"
+            aria-label="Back"
+            @click="back"
+          />
+          <h1 class="min-w-0 flex-1 truncate text-lg font-semibold">
+            {{ title }}
+          </h1>
+        </template>
+      </div>
     </header>
 
     <main class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-4 pt-5 pb-6">

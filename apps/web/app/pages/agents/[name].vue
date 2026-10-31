@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { agentStatus, duration, isLiveRun as isLive, ROLE, runBadge, runRef, runTitle, runtimeLabel, timeAgo } from '~/utils/labels'
+import { agentStatus, duration, isLiveRun as isLive, plural, ROLE, runBadge, runRef, runTitle, runtimeLabel, timeAgo } from '~/utils/labels'
 
 // An agent's page (design/agent.md): the header, stats and runs list, with
 // the transcript in the child route. Mobile shows the agent and its runs at
@@ -11,7 +11,7 @@ const route = useRoute()
 const router = useRouter()
 const device = useDevice()
 const view = useAgentRuns({ autoSelect: () => !device.isMobile.value })
-const { name, agent, runs, error, now, selected, load, today, tiles, facts, resume, projectName } = view
+const { name, agent, missing, runs, error, now, selected, load, today, tiles, facts, resume, projectName } = view
 useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
 </script>
 
@@ -33,8 +33,9 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
     v-else
     :ui="{ body: 'p-0' }"
   >
+    <AgentNotFound v-if="missing" />
     <div
-      v-if="!agent"
+      v-else-if="!agent"
       class="p-6"
     >
       <USkeleton class="h-8 w-48" />
@@ -50,8 +51,8 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
           size="lg"
         />
         <div class="min-w-0 flex-1">
-          <div class="flex items-center gap-2">
-            <h1 class="text-lg font-semibold">
+          <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <h1 class="min-w-0 truncate text-lg font-semibold">
               {{ agent.name }}
             </h1>
             <UBadge
@@ -66,7 +67,7 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
             />
           </div>
           <p class="text-sm text-muted">
-            {{ ROLE[agent.role] }} · <span data-testid="agent-runtime-label">{{ runtimeLabel(agent.runtime) }}</span> · {{ today.length }} runs today
+            {{ ROLE[agent.role] }} · <span data-testid="agent-runtime-label">{{ runtimeLabel(agent.runtime) }}</span> · {{ plural(today.length, 'run') }} today
             <span v-if="agentStatus(agent, now)?.label === 'Waiting on usage limit'"> · Waiting on usage limit until {{ new Date(agent.pausedUntil!).toLocaleTimeString() }}</span>
           </p>
         </div>

@@ -36,7 +36,7 @@ const artifacts = computed(() => props.evidence.filter(e => ['test_output', 'log
     v-if="artifacts.length"
     class="mt-2"
   >
-    <summary class="cursor-pointer rounded-md text-xs text-muted focus-visible:outline-2 focus-visible:outline-primary">
+    <summary class="tap-target flex cursor-pointer items-center rounded-md text-xs text-muted focus-visible:outline-2 focus-visible:outline-primary">
       Agent artifacts ({{ artifacts.length }})
     </summary>
     <EvidenceFiles

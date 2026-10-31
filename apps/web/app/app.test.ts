@@ -2,10 +2,13 @@
 import { VueQueryPlugin } from '@tanstack/vue-query'
 import { mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { testQueryClient } from '~/queries/mount-with-query'
 
-vi.stubGlobal('useDarkNeutral', () => {})
+vi.stubGlobal('useDarkNeutral', () => ({ palette: ref('default') }))
+vi.stubGlobal('useColorMode', () => ({ value: 'light' }))
+vi.stubGlobal('watch', watch)
+vi.stubGlobal('nextTick', nextTick)
 vi.stubGlobal('useHead', () => {})
 vi.stubGlobal('useSeoMeta', () => {})
 vi.stubGlobal('useLive', () => ({ connect: vi.fn() }))

@@ -2,12 +2,12 @@
 import type { CliStatus } from '@corral/contracts'
 import { reloadShell } from '~/queries/shell'
 import { cliLoginCommand } from '~/utils/labels'
+import { useCopy } from '~/composables/useCopy'
 
 // Settings · Runner on mobile (design/settings.md, design/mobile.md): every
 // runner's live status, the data directory and the logins inside it
 const props = defineProps<{ clis: CliStatus[] | null, cliError: string | null }>()
 const emit = defineEmits<{ scan: [] }>()
-const toast = useToast()
 
 // The browser can't restart the runner; this fetches its status again and
 // scans the logins, like the live stream does after a reconnect
@@ -28,10 +28,7 @@ const commands = computed(() => {
   const signedOut = (props.clis ?? []).filter(cli => cli.version && !cli.signedIn).map(cli => cliLoginCommand(cli.id))
   return signedOut.length ? signedOut : [cliLoginCommand('claude')]
 })
-async function copy(command: string) {
-  await navigator.clipboard?.writeText(command)
-  toast.add({ title: 'Copied', color: 'success' })
-}
+const copy = useCopy()
 </script>
 
 <template>
@@ -138,6 +135,7 @@ async function copy(command: string) {
           color="neutral"
           size="sm"
           aria-label="Copy command"
+          class="tap-target shrink-0"
           @click="copy(command)"
         />
       </div>

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { useQuery } from '@tanstack/vue-query'
 import { runnerQuery } from '~/queries/system'
-import { runnerRoles, runnerState, runtimeLabel, timeAgo } from '~/utils/labels'
+import { runnerRoles, runnerState, runtimeLabel } from '~/utils/labels'
+import TimeAgo from '~/components/TimeAgo.vue'
 
 // Every runner the server knows (design/settings.md, Runner): its state,
 // slots in use, runtimes and roles. Offline runners stay listed, and one
@@ -74,7 +75,7 @@ const expected = computed(() => status.value?.protocol)
           </template>
         </p>
         <p class="text-xs text-muted">
-          {{ runner.needsUpdate ? 'Turned away' : 'Last heartbeat' }} {{ timeAgo(runner.lastHeartbeatAt) }}
+          {{ runner.needsUpdate ? 'Turned away' : 'Last heartbeat' }} <TimeAgo :at="runner.lastHeartbeatAt" />
         </p>
         <RunnerUpdate
           v-if="!runner.needsUpdate || runner.behind"

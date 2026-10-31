@@ -5,6 +5,7 @@ import { runsQuery } from '~/queries/runs'
 import { todayStats } from '~/utils/agents'
 import { dashboardCounts, elapsed, IN_PROGRESS_STAGES, liveRunTitle } from '~/utils/dashboard'
 import { agentStatus, epicInProgress, epicWithLiveCounts, isLiveRun, isWorking, projectColor, ROLE, STATUS, tokens } from '~/utils/labels'
+import { useNow } from '~/composables/useNow'
 
 // Home, the global dashboard (design/mobile.md). Counts come from the live
 // task lists the shell loads; runs come from the shared query, which events
@@ -27,7 +28,7 @@ const epics = computed(() => scope.value
   .sort((a, b) => Date.parse(b.epic.updatedAt) - Date.parse(a.epic.updatedAt)))
 
 // Re-render the "today" and elapsed numbers as time passes
-const now = ref(Date.now())
+const now = useNow()
 const counts = computed(() => dashboardCounts(scope.value.flatMap(p => lists.tasks.value[p.id] ?? []), new Date(now.value)))
 const loading = computed(() => !shell.loaded || scope.value.some(p => lists.pending.value[p.id] ?? true))
 
@@ -44,20 +45,15 @@ const attention = computed(() => {
   return parts.length ? parts.join(', ') : null
 })
 
-// Until they load, the agents show without their current run
-const { data: runList } = useQuery(runsQuery())
-const runs = computed(() => runList.value ?? [])
+// If they fail, the agents still show, just without their current run
+const runsResult = useQuery(runsQuery())
+const runs = computed(() => runsResult.data.value ?? [])
+const runsFailed = runsResult.isLoadingError
 const today = computed(() => todayStats(
   runs.value.filter(r => scope.value.some(p => p.id === r.projectId)),
   [],
   now.value
 ))
-onMounted(() => {
-  const timer = setInterval(() => {
-    now.value = Date.now()
-  }, 30_000)
-  onBeforeUnmount(() => clearInterval(timer))
-})
 
 const taskOf = (run: Run) => run.taskId ? lists.tasks.value[run.projectId]?.find(t => t.id === run.taskId) : undefined
 const projectOf = (id: string) => shell.projects.find(p => p.id === id)
@@ -148,7 +144,7 @@ const agents = computed(() => shell.agents
       <section class="flex flex-col gap-2">
         <div class="grid grid-cols-2 gap-2">
           <dl
-            v-for="tile in [{ key: 'runs', label: 'Runs', value: String(today.runs) }, { key: 'usage', label: 'Usage', value: tokens(today.tokens) }]"
+            v-for="tile in [{ key: 'runs', label: 'Runs', value: runsFailed ? '—' : String(today.runs) }, { key: 'usage', label: 'Usage', value: runsFailed ? '—' : tokens(today.tokens) }]"
             :key="tile.key"
             class="rounded-lg border border-default p-3"
             :data-testid="`home-${tile.key}`"
@@ -167,6 +163,15 @@ const agents = computed(() => shell.agents
       </section>
 
       <!-- In progress by stage -->
+      <UAlert
+        v-if="runsResult.isLoadingError.value"
+        color="error"
+        variant="subtle"
+        title="Couldn't load today's runs"
+        :description="runsResult.error.value?.message"
+        :actions="[{ label: 'Retry', onClick: () => runsResult.refetch() }]"
+        data-testid="home-runs-error"
+      />
       <section
         class="flex flex-col gap-3 rounded-lg border border-default p-3"
         data-testid="home-stages"

@@ -105,7 +105,7 @@ async function save() {
       </form>
     </template>
     <template #footer>
-      <div class="flex w-full justify-end gap-2">
+      <div class="flex w-full justify-end gap-2 pb-[env(safe-area-inset-bottom)]">
         <UButton
           label="Cancel"
           variant="outline"

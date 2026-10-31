@@ -4,7 +4,8 @@ import { actOnInboxItem } from '~/queries/inbox'
 import { approveDesign, moveTask, taskDesignsQuery } from '~/queries/tasks'
 import type { Task } from '@corral/contracts'
 import { ApiError } from '~/queries/client'
-import { DESIGN_VERSION_STATUS, timeAgo } from '~/utils/labels'
+import { DESIGN_VERSION_STATUS } from '~/utils/labels'
+import TimeAgo from '~/components/TimeAgo.vue'
 
 // A design task's versions in task detail (D20): the live prototype in its
 // sandboxed iframe at a desktop or mobile viewport, the version's design.md
@@ -17,7 +18,7 @@ const approval = useMutation(approveDesign)
 
 const designs = useQuery(computed(() => ({ ...taskDesignsQuery({ ...props.task, slug: props.slug }), enabled: Boolean(props.slug) })))
 const versions = computed(() => designs.data.value ?? [])
-const loaded = computed(() => !designs.isPending.value)
+const loaded = computed(() => designs.isSuccess.value)
 const selectedId = ref<string | undefined>()
 const selected = computed(() => versions.value.find(v => v.id === selectedId.value) ?? versions.value[0] ?? null)
 watch(versions, () => {
@@ -123,8 +124,16 @@ async function requestChanges(text: string): Promise<boolean> {
       </template>
     </div>
 
+    <UAlert
+      v-if="designs.isLoadingError.value"
+      color="error"
+      variant="subtle"
+      title="Couldn't load the design"
+      :description="designs.error.value?.message"
+      :actions="[{ label: 'Retry', onClick: () => designs.refetch() }]"
+    />
     <p
-      v-if="loaded && !selected"
+      v-else-if="loaded && !selected"
       class="rounded-lg border border-dashed border-default px-3 py-6 text-center text-sm text-muted"
     >
       No versions yet. The designer submits one with the prototype, design.md and screenshots.
@@ -141,7 +150,7 @@ async function requestChanges(text: string): Promise<boolean> {
           variant="subtle"
           size="sm"
         />
-        <span>v{{ selected.version }} · {{ timeAgo(selected.createdAt) }} · <span class="font-mono">{{ selected.branch }}@{{ selected.commitSha.slice(0, 7) }}</span></span>
+        <span>v{{ selected.version }} · <TimeAgo :at="selected.createdAt" /> · <span class="font-mono">{{ selected.branch }}@{{ selected.commitSha.slice(0, 7) }}</span></span>
         <span
           v-if="selected.status === 'superseded'"
           class="text-warning"

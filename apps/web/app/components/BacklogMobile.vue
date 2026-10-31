@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Task } from '@corral/contracts'
-import { PRIORITY } from '~/utils/labels'
+import { plural, PRIORITY } from '~/utils/labels'
 
 // The Backlog on a phone (design/backlog.md, design/mobile.md): the same epic
 // groups as the web page, stacked, with rows that open the task's page. The
@@ -21,8 +21,10 @@ defineProps<{
   planTo: string
   loading: boolean
   error: string | null
+  creating: boolean
 }>()
 const emit = defineEmits<{
+  retry: []
   moveTask: [task: Task]
   moveEpic: [group: Group]
   newTask: []
@@ -41,6 +43,7 @@ const collapsed = defineModel<Record<string, boolean>>('collapsed', { required: 
           variant="ghost"
           color="neutral"
           aria-label="New task"
+          :loading="creating"
           @click="emit('newTask')"
         />
       </template>
@@ -56,7 +59,7 @@ const collapsed = defineModel<Record<string, boolean>>('collapsed', { required: 
         class="w-full"
       />
       <p class="text-xs text-muted">
-        {{ count }} tasks · never scheduled until approved
+        {{ plural(count, 'task') }} · never scheduled until approved
       </p>
       <UCheckbox
         v-model="showCompleted"
@@ -70,6 +73,7 @@ const collapsed = defineModel<Record<string, boolean>>('collapsed', { required: 
       variant="subtle"
       :title="error"
       class="m-4"
+      :actions="[{ label: 'Retry', onClick: () => emit('retry') }]"
     />
     <div
       v-else-if="loading"
@@ -169,7 +173,7 @@ const collapsed = defineModel<Record<string, boolean>>('collapsed', { required: 
               color="neutral"
               :loading="moving.has(task.id)"
               :aria-label="`Move ${task.ref} to board`"
-              class="shrink-0"
+              class="tap-target shrink-0"
               @click="emit('moveTask', task)"
             />
           </li>

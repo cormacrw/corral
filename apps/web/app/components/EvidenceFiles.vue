@@ -11,7 +11,7 @@ const emit = defineEmits<{ open: [item: Evidence] }>()
       v-for="item in evidence"
       :key="item.id"
       type="button"
-      class="flex max-w-56 items-center gap-2 rounded-md border border-default p-1.5 text-start text-xs hover:bg-elevated"
+      class="tap-target flex max-w-56 items-center gap-2 rounded-md border border-default p-1.5 text-start text-xs hover:bg-elevated"
       @click="emit('open', item)"
     >
       <img

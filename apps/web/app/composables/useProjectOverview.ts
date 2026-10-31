@@ -67,7 +67,6 @@ export function useProjectOverview({ slug, project, tasks, epics: epicList, load
     await Promise.all([...failed.value, ...failedActivity.value].map(query => query.refetch()))
   }
 
-  const DOT = { neutral: 'bg-neutral-400', info: 'bg-info', primary: 'bg-primary', warning: 'bg-warning', error: 'bg-error', success: 'bg-success', secondary: 'bg-secondary' } as const
   const count = (status: Task['status']) => tasks.value.filter(t => t.status === status).length
   const needsYou = computed(() => projectNeedsYou(inbox.value, project.value?.id))
   const weekAgo = Date.now() - 7 * 86_400_000
@@ -115,7 +114,7 @@ export function useProjectOverview({ slug, project, tasks, epics: epicList, load
     return entry.action.replace('task.', '').replaceAll('.', ' ')
   }
 
-  return { project, tasks, inbox, runs, history, error, load, DOT, count, needsYou, mergedThisWeek, firstPass, waitingOnDependency, developer, reviewer, pmName, epics, taskOf, actorName, taskRefOf, activityText }
+  return { project, tasks, loading, inboxLoading: inboxResult.isPending, inbox, runs, history, error, load, count, needsYou, mergedThisWeek, firstPass, waitingOnDependency, developer, reviewer, pmName, epics, taskOf, actorName, taskRefOf, activityText }
 }
 
 export type ProjectOverview = ReturnType<typeof useProjectOverview>

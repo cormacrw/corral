@@ -5,7 +5,7 @@ import type { Task } from '@corral/contracts'
 import { DEFAULT_LIMITS, type TaskStatus } from '@corral/core'
 import type { BoardFilters } from '~/utils/board'
 import { BOARD_COLUMNS, boardMove, filtersFromQuery, filtersToQuery, matchesFilter, onBoard, sortColumn, taskAgentIds } from '~/utils/board'
-import { doneRefs, epicInProgress, epicTitle, epicWithLiveCounts, STATUS, taskNote } from '~/utils/labels'
+import { doneRefs, epicInProgress, epicTitle, epicWithLiveCounts, plural, STATUS, STATUS_DOT, taskNote } from '~/utils/labels'
 
 // The Board: approved work by status, with human moves through the same
 // actions as the Status menu. The server remains authoritative.
@@ -13,7 +13,7 @@ const route = useRoute()
 const shell = useShell()
 const flyout = useTaskFlyout()
 const device = useDevice()
-const { slug, project, tasks: all, epics: epicList, loading, error } = useProject()
+const { slug, project, tasks: all, epics: epicList, loading, error, refetch } = useProject()
 useSeoMeta({ title: () => `Board · ${project.value?.name ?? ''} · Corral` })
 
 // The filters live in the URL query, so a filtered Board reloads and shares
@@ -60,8 +60,7 @@ const single = computed(() => filters.value.epics.length === 1 ? filters.value.e
 
 // The Status filter hides the columns it doesn't select
 const columns = computed(() => filters.value.statuses.length > 0 ? BOARD_COLUMNS.filter(c => filters.value.statuses.includes(c.key)) : BOARD_COLUMNS)
-const DOT = { neutral: 'bg-neutral-400', info: 'bg-info', primary: 'bg-primary', warning: 'bg-warning', error: 'bg-error', success: 'bg-success', secondary: 'bg-secondary' } as const
-const boardColumns = computed(() => columns.value.map(c => ({ ...c, color: DOT[STATUS[c.statuses[0]!].color], tasks: sortColumn(c.key, visible.value.filter(t => c.statuses.includes(t.status))) })))
+const boardColumns = computed(() => columns.value.map(c => ({ ...c, color: STATUS_DOT[STATUS[c.statuses[0]!].color], tasks: sortColumn(c.key, visible.value.filter(t => c.statuses.includes(t.status))) })))
 const notes = computed(() => {
   const done = doneRefs(all.value)
   const cap = project.value?.reviewRoundCap ?? DEFAULT_LIMITS.reviewRoundCap
@@ -131,6 +130,7 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
       :review-round-cap="project?.reviewRoundCap ?? DEFAULT_LIMITS.reviewRoundCap"
       :loading="loading"
       :error="error"
+      @retry="refetch"
     />
     <div
       v-else
@@ -162,7 +162,7 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
             :aria-pressed="flyout.epic.value === single"
             @click="flyout.toggleEpic(single)"
           />
-          <span class="ms-auto text-sm text-muted">{{ visible.length }} tasks</span>
+          <span class="ms-auto text-sm text-muted">{{ plural(visible.length, 'task') }}</span>
         </div>
 
         <BoardEpics
@@ -177,6 +177,7 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
           variant="subtle"
           :title="error"
           class="m-4"
+          :actions="[{ label: 'Retry', onClick: refetch }]"
         />
         <div
           v-else-if="loading"

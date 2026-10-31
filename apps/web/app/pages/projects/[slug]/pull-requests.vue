@@ -47,7 +47,25 @@ const summary = computed(() => {
   <UDashboardPanel :ui="{ body: 'p-0' }">
     <div class="flex h-full min-h-0">
       <div :class="['flex min-w-0 flex-1 flex-col', device.isMobile.value && 'overflow-y-auto overscroll-contain']">
-        <MobilePageHeader v-if="device.isMobile.value" />
+        <MobilePageHeader v-if="device.isMobile.value">
+          <template #actions>
+            <UButton
+              icon="i-lucide-refresh-cw"
+              variant="ghost"
+              color="neutral"
+              aria-label="Refresh"
+              class="tap-target"
+              :loading="refreshing"
+              @click="refresh"
+            />
+          </template>
+        </MobilePageHeader>
+        <p
+          v-if="device.isMobile.value && prs"
+          class="px-4 text-sm text-muted"
+        >
+          {{ summary }} · live from GitHub
+        </p>
         <div
           v-if="!device.isMobile.value"
           class="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b border-default px-4 py-2"
@@ -77,6 +95,7 @@ const summary = computed(() => {
           variant="subtle"
           :title="error.message"
           class="m-4"
+          :actions="[{ label: 'Retry', onClick: () => refetch() }]"
         />
         <div
           v-else-if="!prs"

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { PlanThreadItem } from '@corral/contracts'
-import { timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
+import TimeAgo from '~/components/TimeAgo.vue'
 
 // Laid out like the other Inbox rows, which differ by layout
 defineProps<{ item: PlanThreadItem, mobile?: boolean }>()
@@ -27,7 +27,7 @@ defineProps<{ item: PlanThreadItem, mobile?: boolean }>()
           class="size-3 animate-spin"
           aria-label="PM working"
         />
-        {{ timeAgo(item.at) }}
+        <TimeAgo :at="item.at" />
       </span>
     </span>
     <span :class="mobile ? 'font-semibold text-highlighted' : 'block truncate text-sm font-medium'">{{ item.subject }}</span>
@@ -40,11 +40,12 @@ defineProps<{ item: PlanThreadItem, mobile?: boolean }>()
         variant="subtle"
         :size="mobile ? 'sm' : 'xs'"
       />
-      <span class="flex min-w-0 items-center gap-1 truncate text-xs text-muted">
+      <span class="flex min-w-0 items-center gap-1 text-xs text-muted">
         <ProjectThumbnail
           :project="item.project"
           :size="16"
-        />{{ item.project.name }}
+        />
+        <span class="truncate">{{ item.project.name }}</span>
       </span>
     </span>
   </span>

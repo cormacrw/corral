@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import type { Run } from '@corral/contracts'
 import type { AgentRuns } from '~/composables/useAgentRuns'
-import { agentStatus, duration, isLiveRun, projectColor, ROLE, runBadge, runRef, runTitle, runtimeLabel, timeAgo } from '~/utils/labels'
+import { agentStatus, duration, isLiveRun, plural, projectColor, ROLE, runBadge, runRef, runTitle, runtimeLabel, timeAgo } from '~/utils/labels'
 
 // An agent's page on mobile (design/agent.md, design/mobile.md): the
 // header and stat tiles, then the current run and previous runs. Each run
 // opens its transcript, or its linked Plan conversation for a PM turn.
 const props = defineProps<{ view: AgentRuns }>()
-const { name, agent, runs, pending, error, now, current, today, tiles, facts, load, project, resume } = props.view
+const { name, agent, missing, runs, pending, error, now, current, today, tiles, facts, load, project, resume } = props.view
 
 const previous = computed(() => runs.value.filter(r => !isLiveRun(r)))
 const status = computed(() => agent.value ? agentStatus(agent.value, now.value) : null)
@@ -19,8 +19,9 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
 
 <template>
   <MobilePageHeader />
+  <AgentNotFound v-if="missing" />
   <div
-    v-if="!agent"
+    v-else-if="!agent"
     class="p-4"
   >
     <USkeleton class="h-16 w-48" />
@@ -36,8 +37,8 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
         size="3xl"
       />
       <div class="min-w-0 flex-1">
-        <div class="flex items-center gap-2">
-          <h2 class="text-2xl font-semibold text-highlighted">
+        <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <h2 class="min-w-0 truncate text-2xl font-semibold text-highlighted">
             {{ agent.name }}
           </h2>
           <UBadge
@@ -52,7 +53,7 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
           />
         </div>
         <p class="text-sm text-muted">
-          {{ ROLE[agent.role] }} · {{ runtimeLabel(agent.runtime) }} · {{ today.length }} {{ today.length === 1 ? 'run' : 'runs' }} today
+          {{ ROLE[agent.role] }} · {{ runtimeLabel(agent.runtime) }} · {{ plural(today.length, 'run') }} today
         </p>
         <p
           v-if="status?.label === 'Waiting on usage limit'"

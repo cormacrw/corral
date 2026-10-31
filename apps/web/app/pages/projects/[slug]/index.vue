@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { duration, STATUS, timeAgo } from '~/utils/labels'
+import { inboxTypeBadge } from '~/utils/labels'
+import TimeAgo from '~/components/TimeAgo.vue'
 
 // Project overview (design/project-overview.md). Mobile gets
 // MobileProjectOverview (design/mobile.md) over the same data.
 const device = useDevice()
 const { overview } = useProject()
-const { project, tasks, runs, history, error, load, DOT, count, needsYou, mergedThisWeek, firstPass, waitingOnDependency, developer, reviewer, pmName, epics, taskOf, actorName, taskRefOf, activityText } = overview
+const { project, tasks, loading, inboxLoading, runs, history, error, load, needsYou, pmName, epics, taskOf, actorName, taskRefOf, activityText } = overview
 useSeoMeta({ title: () => `${project.value?.name ?? 'Project'} · Corral` })
 </script>
 
@@ -70,7 +71,7 @@ useSeoMeta({ title: () => `${project.value?.name ?? 'Project'} · Corral` })
       />
 
       <div
-        v-if="tasks.length === 0"
+        v-if="!loading && tasks.length === 0"
         class="rounded-lg border border-default p-8 text-center"
       >
         <p class="mb-3 text-muted">
@@ -82,32 +83,7 @@ useSeoMeta({ title: () => `${project.value?.name ?? 'Project'} · Corral` })
         />
       </div>
 
-      <div class="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3">
-        <dl
-          v-for="tile in [
-            { label: 'Ready', color: STATUS.ready.color, value: count('ready'), sub: waitingOnDependency ? `${waitingOnDependency} waiting on a dependency` : 'scheduled next' },
-            { label: 'In progress', color: STATUS.in_progress.color, value: count('in_progress'), sub: developer ? `${developer} working` : 'no run active' },
-            { label: 'Agent review', color: STATUS.agent_review.color, value: count('agent_review'), sub: reviewer ? `${reviewer} reviewing` : 'waiting' },
-            { label: 'Needs you', color: STATUS.human_review.color, value: needsYou.length, sub: `${count('human_review')} review · ${count('blocked')} blocked · ${count('failed')} failed` },
-            { label: 'Completed this week', color: STATUS.merged.color, value: mergedThisWeek.length, sub: firstPass === null ? 'no merges yet' : `first-pass approval ${firstPass}%` }
-          ]"
-          :key="tile.label"
-          class="rounded-lg border border-default p-3"
-        >
-          <dt class="flex items-center gap-1.5 text-xs text-muted">
-            <span
-              :class="['size-2 rounded-full', DOT[tile.color]]"
-              aria-hidden="true"
-            />{{ tile.label }}
-          </dt>
-          <dd class="text-2xl font-semibold tabular-nums">
-            {{ tile.value }}
-          </dd>
-          <dd class="truncate text-xs text-muted">
-            {{ tile.sub }}
-          </dd>
-        </dl>
-      </div>
+      <OverviewTiles :overview="overview" />
 
       <ProjectFlow
         :slug="project.slug"
@@ -144,17 +120,25 @@ useSeoMeta({ title: () => `${project.value?.name ?? 'Project'} · Corral` })
                   class="flex items-center gap-2 px-3 py-2 text-sm hover:bg-elevated"
                 >
                   <UBadge
-                    :label="item.type.replace('_', ' ')"
+                    :label="inboxTypeBadge(item.type).label"
+                    :color="inboxTypeBadge(item.type).color"
                     size="xs"
                     variant="subtle"
-                    :color="item.type === 'human_review' ? 'warning' : 'error'"
+                    class="shrink-0"
                   />
-                  <span class="font-mono text-xs text-muted">{{ item.taskRef }}</span>
+                  <span class="shrink-0 font-mono text-xs text-muted">{{ item.taskRef }}</span>
                   <span class="min-w-0 flex-1 truncate">{{ item.subject }}</span>
-                  <span class="text-xs text-dimmed">{{ timeAgo(item.at) }}</span>
+                  <span class="shrink-0 text-xs text-dimmed"><TimeAgo :at="item.at" /></span>
                 </NuxtLink>
               </li>
             </ul>
+            <div
+              v-else-if="inboxLoading"
+              class="flex flex-col gap-2 p-3"
+            >
+              <USkeleton class="h-5 w-full" />
+              <USkeleton class="h-5 w-2/3" />
+            </div>
             <p
               v-else
               class="px-3 py-4 text-sm text-muted"
@@ -189,7 +173,7 @@ useSeoMeta({ title: () => `${project.value?.name ?? 'Project'} · Corral` })
                       {{ run.agentName }} is {{ run.role === 'reviewer' ? 'reviewing' : run.role === 'pm' ? 'planning' : 'building' }} {{ run.taskRef ?? (run.epicId ? 'epic' : '') }} {{ taskOf(run)?.title ?? run.epicTitle ?? '' }}
                     </p>
                     <p class="text-xs text-muted">
-                      Run #{{ run.number }} · {{ duration(run.startedAt ?? run.queuedAt, null) }} · {{ run.state.replace('_', ' ') }}
+                      Run #{{ run.number }} · <ElapsedTime :from="run.startedAt ?? run.queuedAt" /> · {{ run.state.replace('_', ' ') }}
                     </p>
                   </div>
                 </NuxtLink>
@@ -223,39 +207,19 @@ useSeoMeta({ title: () => `${project.value?.name ?? 'Project'} · Corral` })
                 v-for="epic in epics"
                 :key="epic.id"
               >
-                <div class="flex justify-between text-sm">
-                  <NuxtLink
-                    v-if="epic.id !== 'none'"
-                    :to="`/epics/${epic.id}`"
-                    class="hover:text-primary hover:underline"
-                  >{{ epic.title }}</NuxtLink>
-                  <span v-else>{{ epic.title }}</span>
-                  <span class="text-muted">{{ epic.merged }} of {{ epic.total }} done</span>
-                </div>
-                <div
-                  role="meter"
-                  :aria-label="`${epic.title}: ${epic.merged} of ${epic.total} tasks done`"
-                  :aria-valuenow="epic.merged"
-                  aria-valuemin="0"
-                  :aria-valuemax="epic.total"
-                  class="mt-1 flex h-1.5 gap-0.5"
-                >
-                  <span
-                    class="rounded-full bg-primary"
-                    :style="{ flex: epic.merged }"
-                  />
-                  <span
-                    class="rounded-full bg-accented"
-                    :style="{ flex: epic.total - epic.merged }"
-                  />
-                </div>
-                <EpicReviewLine
-                  v-if="epic.epic"
+                <EpicProgressRow
+                  :id="epic.id"
+                  :title="epic.title"
+                  :merged="epic.merged"
+                  :total="epic.total"
                   :epic="epic.epic"
                 />
               </li>
+              <li v-if="loading">
+                <USkeleton class="h-8 w-full" />
+              </li>
               <li
-                v-if="epics.length === 0"
+                v-else-if="epics.length === 0"
                 class="text-sm text-muted"
               >
                 No epics yet.
@@ -284,7 +248,7 @@ useSeoMeta({ title: () => `${project.value?.name ?? 'Project'} · Corral` })
                     :to="`/tasks/${taskRefOf(entry)}`"
                     class="font-mono text-xs text-muted hover:underline"
                   >{{ taskRefOf(entry) }}</NuxtLink>
-                  <span class="ms-2 text-xs text-dimmed">{{ timeAgo(entry.createdAt) }}</span>
+                  <span class="ms-2 text-xs text-dimmed"><TimeAgo :at="entry.createdAt" /></span>
                 </span>
               </li>
               <li

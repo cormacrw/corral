@@ -142,7 +142,7 @@ describe('mobile layout', () => {
     const wrapper = mount(MobileLayout, { global, slots: { default: () => h(UDashboardPanel, () => h('p', 'Content')) } })
     expect(wrapper.find('h1').exists()).toBe(false)
     expect(wrapper.get('nav [aria-current="page"]').text()).toBe(title)
-    expect(wrapper.get('[storage-key="mobile-dashboard"]').classes()).toContain('pt-[env(safe-area-inset-top)]')
+    expect(wrapper.get('[storage-key="mobile-dashboard"]').classes()).toContain('pt-(--shell-top)')
     wrapper.unmount()
   })
 
@@ -163,7 +163,7 @@ describe('mobile layout', () => {
       global, props: { compact: true },
       slots: { actions: () => h('button', { onClick: click }, 'Action') }
     })
-    expect(wrapper.classes()).toContain('pt-[env(safe-area-inset-top)]')
+    expect(wrapper.classes()).toContain('pt-(--shell-top)')
     expect(wrapper.classes()).toContain('shrink-0')
     expect(wrapper.classes()).toContain('border-b')
     await wrapper.get('[data-testid="mobile-page-actions"] button').trigger('click')

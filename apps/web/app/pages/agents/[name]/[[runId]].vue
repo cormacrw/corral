@@ -11,7 +11,7 @@ import { duration, isLiveRun as isLive, runBadge, runRef, runTokens } from '~/ut
 definePageMeta({ key: 'agent-run' })
 
 const props = defineProps<{ view: AgentRuns }>()
-const { agent, events, now, selected, stop, sent } = props.view
+const { agent, events, now, selected, stop, stopping, sent } = props.view
 const flyout = useTaskFlyout()
 const device = useDevice()
 </script>
@@ -52,6 +52,7 @@ const device = useDevice()
             color="error"
             variant="subtle"
             size="xs"
+            :loading="stopping"
             @click="stop(selected)"
           />
         </div>
