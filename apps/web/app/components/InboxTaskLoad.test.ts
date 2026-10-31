@@ -1,11 +1,10 @@
 // @vitest-environment happy-dom
-import type { InboxArtifact } from '@corral/contracts'
+import type { InboxArtifact, ServerEvent } from '@corral/contracts'
 import { VueQueryPlugin } from '@tanstack/vue-query'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import { api } from '~/composables/useApi'
-import type { ServerEvent } from '@corral/contracts'
 import { agents, inbox, projects, tasks } from '~/prototype/fixtures'
 import { applyEvent, invalidateKeys } from '~/queries/dependencies'
 import { keys } from '~/queries/keys'
