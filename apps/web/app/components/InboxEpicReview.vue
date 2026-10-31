@@ -38,7 +38,14 @@ async function act(action: 'approve' | 'request_changes') {
       {{ item.project.name }} · {{ item.sender.name }} approved integration
     </InboxEpicHeader>
     <div class="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4">
+      <InboxMessage
+        v-if="item.message"
+        :key="item.id"
+        :item="item"
+        :evidence="item.tasks.flatMap(entry => entry.evidence)"
+      />
       <section
+        v-else
         aria-label="Integration review"
         class="rounded-lg bg-elevated p-3 break-words"
       >
