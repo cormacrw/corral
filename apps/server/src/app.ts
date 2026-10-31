@@ -351,8 +351,8 @@ export function createApp({ db, events, actor, runner, orchestrator, github, blo
     .get('/projects/:slug/tasks/:number/pull-request', async (c) => {
       const project = await findProjectBySlug(db, c.req.param('slug'))
       const task = await loadTask(db, await findTaskId(db, project.id, taskNumber(c.req.param('number'))))
-      if (task.prNumber === null) throw new ApiFailure(404, { code: 'no_pull_request' })
-      return c.json(await readPullRequest(github, project, task.prNumber))
+      if (task.pr === null) throw new ApiFailure(404, { code: 'no_pull_request' })
+      return c.json(await readPullRequest(github, project, task.pr.number))
     })
 
     .get('/projects/:slug/tasks/:number', async (c) => {

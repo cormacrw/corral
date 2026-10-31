@@ -191,10 +191,10 @@ route('GET', '/projects/:slug/pull-requests/:number', ([slug, number]) => {
   return detail
 })
 route('GET', '/projects/:slug/tasks/:number/pull-request', ([slug, number]) => {
-  const { prNumber } = taskIn(slug!, number!)
-  if (prNumber === null) throw new ApiError(404, { code: 'no_pull_request' }, 'This task has no pull request yet')
-  const detail = f.pullRequestDetails.find(pr => pr.number === prNumber)
-  if (!detail) throw new ApiError(404, { code: 'pull_request_unavailable', number: prNumber, message: 'Not Found' }, `GitHub couldn't return PR #${prNumber}`)
+  const { pr } = taskIn(slug!, number!)
+  if (pr === null) throw new ApiError(404, { code: 'no_pull_request' }, 'This task has no pull request yet')
+  const detail = f.pullRequestDetails.find(d => d.number === pr.number)
+  if (!detail) throw new ApiError(404, { code: 'pull_request_unavailable', number: pr.number, message: 'Not Found' }, `GitHub couldn't return PR #${pr.number}`)
   return detail
 })
 route('GET', '/projects/:slug/epics', ([slug]) => f.epics.filter(e => e.projectId === project(slug!).id))
