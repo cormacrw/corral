@@ -154,6 +154,13 @@ export function taskTypeBadge(type: Task['type']): { label: string, color: Color
   if (type === 'design') return { label: TASK_TYPE.design, color: 'secondary', icon: 'i-lucide-palette' }
   return null
 }
+// The muted icon on a Board card, which leaves colour to the priority. Plain tasks get none.
+export function cardTypeIcon(type: Task['type']): { name: string, label: string } | null {
+  if (type === 'bug') return { name: 'i-lucide-bug', label: TASK_TYPE.bug }
+  if (type === 'design') return { name: 'i-lucide-paintbrush', label: TASK_TYPE.design }
+  if (type === 'spike') return { name: 'i-lucide-flask-conical', label: TASK_TYPE.spike }
+  return null
+}
 // Every type's icon, plain tasks included, for rows that show it on its own
 export function taskTypeIcon(type: Task['type']): string {
   return taskTypeBadge(type)?.icon ?? 'i-lucide-square-check'
@@ -282,23 +289,6 @@ export function agentStatus(agent: Pick<Agent, 'paused' | 'pausedUntil' | 'activ
 // An epic's name for display; numbered when it isn't loaded yet
 export function epicTitle(epics: { id: string, title: string }[] | undefined, id: string, fallbackIndex: number): string {
   return epics?.find(e => e.id === id)?.title ?? `Epic ${fallbackIndex + 1}`
-}
-
-export function taskNote(task: Task, all: Task[], reviewRoundCap: number): { text: string, color: Color } | null {
-  // Takes the note's place: nothing else about the task moves until it's resumed
-  if (task.paused) return { text: 'Paused', color: 'warning' }
-  if (task.status === 'ready' && task.waitingOnEpics.length > 0) return { text: `Waiting on epic: ${task.waitingOnEpics.map(e => e.title).join(', ')}`, color: 'neutral' }
-  if (task.status === 'ready' && task.dependsOn.length > 0) {
-    const waiting = task.dependsOn.filter(ref => !all.some(t => t.ref === ref && isTaskDone(t)))
-    if (waiting.length > 0) return { text: `Waiting on ${waiting.join(', ')}`, color: 'neutral' }
-  }
-  if (task.status === 'blocked' || task.status === 'failed') return { text: task.statusReason ?? STATUS[task.status].label, color: 'error' }
-  if (task.status === 'human_review') return { text: 'Waiting for you', color: 'warning' }
-  if (task.status === 'ready_to_merge') return { text: 'Merges when checks pass', color: 'neutral' }
-  if (task.reviewRounds > 0 && (task.status === 'in_progress' || task.status === 'agent_review')) {
-    return { text: `Review round ${task.reviewRounds} of ${reviewRoundCap}`, color: 'neutral' }
-  }
-  return null
 }
 
 // Sidebar counts: the Board counts open work only, so merged tasks drop out
