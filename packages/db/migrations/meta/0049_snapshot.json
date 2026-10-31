@@ -1591,10 +1591,6 @@
         "evidence_note_or_file": {
           "name": "evidence_note_or_file",
           "value": "(\n    (\"evidence\".\"kind\"::text = 'note' and \"evidence\".\"note\" ~ '[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]' and \"evidence\".\"blob\" is null and \"evidence\".\"file_name\" is null and \"evidence\".\"content_type\" is null and \"evidence\".\"size\" = 0)\n    or (\"evidence\".\"kind\"::text <> 'note' and \"evidence\".\"blob\" is not null and \"evidence\".\"blob\" ~ '[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]' and \"evidence\".\"file_name\" is not null and \"evidence\".\"file_name\" ~ '[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]' and \"evidence\".\"content_type\" is not null and \"evidence\".\"content_type\" ~ '[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]' and \"evidence\".\"size\" >= 0)\n  )"
-        },
-        "evidence_criterion_requires_task": {
-          "name": "evidence_criterion_requires_task",
-          "value": "\"evidence\".\"criterion_id\" is null or \"evidence\".\"task_id\" is not null"
         }
       },
       "isRLSEnabled": false
