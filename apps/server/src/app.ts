@@ -155,8 +155,7 @@ export function createApp({ db, events, actor, runner, orchestrator, github, blo
   const inboxAction = async (taskId: string, input: InboxActionInput) => {
     switch (input.action) {
       case 'clarify': {
-        await addComment(db, taskId, { body: input.text, pinned: true }, actor)
-        await transitionTask(db, taskId, { type: 'resolve', to: 'in_progress' }, actor)
+        await transitionTask(db, taskId, { type: 'resolve', to: 'in_progress' }, actor, input.text)
         break
       }
       case 'send_back': {
@@ -165,8 +164,7 @@ export function createApp({ db, events, actor, runner, orchestrator, github, blo
         break
       }
       case 'resolve':
-        if (input.text) await addComment(db, taskId, { body: input.text, pinned: true }, actor)
-        await transitionTask(db, taskId, { type: 'resolve', to: input.to }, actor)
+        await transitionTask(db, taskId, { type: 'resolve', to: input.to }, actor, input.text)
         break
       case 'approve': {
         const [row] = await db.select({ type: schema.tasks.type }).from(schema.tasks).where(eq(schema.tasks.id, taskId))

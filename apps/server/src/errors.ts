@@ -21,6 +21,8 @@ export function fromDatabaseError(error: unknown): ApiFailure | null {
   for (let e: unknown = error; typeof e === 'object' && e !== null; e = (e as { cause?: unknown }).cause) {
     const { code, constraint } = e as { code?: unknown, constraint?: unknown }
     const name = typeof constraint === 'string' ? constraint : null
+    // IDs come from URLs; a malformed one is simply unknown
+    if (code === '22P02') return notFound()
     if (code === '23505') return new ApiFailure(409, { code: 'conflict', constraint: name })
     if (code === '23514' || code === '23503') {
       return new ApiFailure(400, { code: 'invalid_input', issues: [{ constraint: name }] })

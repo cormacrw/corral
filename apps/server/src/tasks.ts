@@ -382,10 +382,14 @@ export async function createTask(db: Executor, project: ProjectRow, rawInput: Cr
 
 // Applies a D10 transition the human asked for. The row is locked for the
 // whole check-and-write, and core decides whether the transition is allowed.
-export async function transitionTask(db: Executor, taskId: string, input: HumanTransitionInput, actor: Actor): Promise<void> {
+// A pinned `comment` is the human's answer: it stands or falls with the
+// transition, stamped with the transaction's time like the audit entry, which
+// is how the Inbox finds it again.
+export async function transitionTask(db: Executor, taskId: string, input: HumanTransitionInput, actor: Actor, comment?: string): Promise<void> {
   await db.transaction(async (tx) => {
     const { task, project } = await lockTask(tx, taskId)
     await applyTransition(tx, task, project, await humanEvent(tx, task, input), actor, { event: input })
+    if (comment) await tx.insert(comments).values({ taskId, author: actor, body: comment, pinned: true })
   })
 }
 
@@ -471,6 +475,11 @@ export interface TaskContentEdit {
 // evidence and verdicts) when passed back with the same ID.
 export async function patchTask(db: Executor, project: ProjectRow, taskId: string, input: PatchTaskInput, actor: Actor): Promise<TaskContentEdit | null> {
   return db.transaction(async (tx) => {
+    // Serializes dependency edits, so concurrent patches can't each pass the
+    // cycle check against the old graph. Taken before the task, the order
+    // createTask needs. FOR UPDATE here would deadlock with any transaction
+    // holding the task, as its audit insert takes KEY SHARE on the project.
+    if (input.dependsOn) await tx.select({ id: projects.id }).from(projects).where(eq(projects.id, project.id)).for('no key update')
     const { task } = await lockTask(tx, taskId)
     // Merged is final (D10): the record stays as it shipped; comments still work
     if (task.status === 'merged') throw new ApiFailure(409, { code: 'conflict', constraint: 'task_merged' })
@@ -595,9 +604,12 @@ export async function deleteTaskRows(db: Executor, taskId: string, actor: Actor,
     const { task, project } = await lockTask(tx, taskId)
     const mode = options.soft && task.status === 'draft' ? 'soft' : deletionFor(task)
     if (mode === 'not_allowed') throw new ApiFailure(409, { code: 'conflict', constraint: 'merged_tasks_are_immutable' })
-    const dependents = await tx.select({ task: tasks }).from(taskDependencies)
+    const dependentRows = tx.select({ task: tasks }).from(taskDependencies)
       .innerJoin(tasks, eq(tasks.id, taskDependencies.taskId))
       .where(and(eq(taskDependencies.dependsOnId, taskId), isNull(tasks.deletedAt)))
+      .orderBy(asc(tasks.id))
+    // Blocking writes each dependent from this read, so it must be locked
+    const dependents = await (options.detachDependents ? dependentRows : dependentRows.for('update', { of: tasks }))
     if (options.detachDependents) await tx.delete(taskDependencies).where(eq(taskDependencies.dependsOnId, taskId))
     else for (const { task: dependent } of dependents) {
       const check = transition(toTaskState(dependent), { type: 'block', reason: DEPENDENCY_DELETED_REASON }, { kind: 'system', component: 'server' })

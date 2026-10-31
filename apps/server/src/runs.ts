@@ -135,9 +135,12 @@ export function toEvidence(row: typeof evidence.$inferSelect): Evidence {
 // A new developer or reviewer (design/settings.md). The scheduler treats it
 // like the defaults: any free agent of the role claims the next task.
 export async function createAgent(db: Executor, input: CreateAgentInput, actor: Actor): Promise<Agent> {
-  const [row] = await db.insert(agents).values(input).returning()
-  await appendAudit(db, { actor }, auditEvent('agent.created', { agentId: row!.id, role: row!.role, runtime: row!.runtime }))
-  return (await listAgents(db)).find(a => a.id === row!.id)!
+  const row = await db.transaction(async (tx) => {
+    const [created] = await tx.insert(agents).values(input).returning()
+    await appendAudit(tx, { actor }, auditEvent('agent.created', { agentId: created!.id, role: created!.role, runtime: created!.runtime }))
+    return created!
+  })
+  return (await listAgents(db)).find(a => a.id === row.id)!
 }
 
 // Agent pause, concurrency, wake interval and runtime (PRD §7.11 control panel, design/settings.md)
