@@ -10,7 +10,8 @@ import { applyEvent, invalidateKeys } from '~/queries/dependencies'
 import { keys } from '~/queries/keys'
 import { testQueryClient } from '~/queries/mount-with-query'
 import InboxReleaseNotes from '~/components/InboxReleaseNotes.vue'
-import InboxPage from '~/pages/inbox/[[itemId]].vue'
+import InboxPage from '~/pages/inbox.vue'
+import InboxItemPage from '~/pages/inbox/[itemId].vue'
 
 vi.mock('~/composables/useApi', () => ({
   api: {
@@ -30,6 +31,12 @@ const composerStub = vue.defineComponent({
   props: ['busy', 'disabled', 'submitLabel', 'modelValue'],
   emits: ['update:modelValue'],
   setup: () => () => vue.h('form')
+})
+const evidenceStub = vue.defineComponent({
+  name: 'EvidenceList',
+  props: ['checked'],
+  emits: ['update:checked'],
+  setup: () => () => vue.h('div')
 })
 const alertStub = vue.defineComponent({
   name: 'UAlert',
@@ -66,10 +73,12 @@ async function mountInbox(type: 'human_review' | 'failed', taskRef?: string, doc
   vi.mocked(api.tasks.evidence).mockResolvedValue([])
   vi.mocked(api.tasks.reviews).mockResolvedValue([])
   const client = testQueryClient()
+  // As Nuxt renders the child: keyed by its path
+  const NuxtPage = vue.defineComponent({ setup: () => () => params.itemId ? vue.h(InboxItemPage, { key: params.itemId }) : null })
   const wrapper = mount(InboxPage, { global: {
     plugins: [[VueQueryPlugin, { queryClient: client }]],
-    components: { InboxReleaseNotes, PromptComposer: composerStub, UAlert: alertStub, UDashboardPanel: plain },
-    stubs: { InboxReleaseNotes: false, UAlert: false, UModal: true, UButton: true, UBadge: true, UInput: true, UTabs: true, UIcon: true, USkeleton: true, USelectMenu: true, MarkdownText: true, EvidenceList: true, TaskFlyout: true, AgentAvatar: true, ProjectThumbnail: true, PlanThreadRow: true, NuxtLink: true, InboxMobile: true }
+    components: { NuxtPage, InboxReleaseNotes, EvidenceList: evidenceStub, PromptComposer: composerStub, UAlert: alertStub, UDashboardPanel: plain },
+    stubs: { UModal: true, UButton: true, UBadge: true, UInput: true, UTabs: true, UIcon: true, USkeleton: true, USelectMenu: true, MarkdownText: true, TaskFlyout: true, AgentAvatar: true, ProjectThumbnail: true, PlanThreadRow: true, NuxtLink: true, InboxMobile: true, InboxMobileItem: true }
   } })
   await flushPromises()
   const composer = () => wrapper.getComponent(composerStub)
@@ -180,6 +189,47 @@ it('moves on without waiting out a next task that won\'t load', async () => {
     vi.mocked(api.tasks.byRef).mockReturnValue(new Promise(() => {}))
     await submit()
     await vi.waitFor(() => expect(replace).toHaveBeenCalledOnce(), { timeout: 2000 })
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('resets the draft and checked criteria between items, and has neither after Back', async () => {
+  const { wrapper, item, params, composer } = await mountInbox('human_review', 'COR-41')
+  try {
+    const evidence = () => wrapper.getComponent(evidenceStub)
+    await (composer().vm.$emit('update:modelValue', 'my note'), vue.nextTick())
+    evidence().vm.$emit('update:checked', ['c1'])
+    await vue.nextTick()
+    expect(evidence().props('checked')).toEqual(['c1'])
+    const other = inbox().needsYou.find(i => i.type === 'failed')!
+    params.itemId = other.id
+    await flushPromises()
+    expect(composer().props('modelValue')).toBe('')
+    params.itemId = item.id
+    await flushPromises()
+    expect(composer().props('modelValue')).toBe('')
+    expect(evidence().props('checked')).toEqual([])
+    await (composer().vm.$emit('update:modelValue', 'my note'), vue.nextTick())
+    params.itemId = undefined
+    await flushPromises()
+    params.itemId = item.id
+    await flushPromises()
+    expect(composer().props('modelValue')).toBe('')
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('keeps the list mounted while the selection changes', async () => {
+  const { wrapper, params } = await mountInbox('human_review')
+  try {
+    const list = wrapper.get('ul').element
+    params.itemId = inbox().needsYou.find(i => i.type === 'failed')!.id
+    await flushPromises()
+    params.itemId = undefined
+    await flushPromises()
+    expect(wrapper.get('ul').element).toBe(list)
   } finally {
     wrapper.unmount()
   }
