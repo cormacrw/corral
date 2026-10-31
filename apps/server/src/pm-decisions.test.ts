@@ -130,6 +130,27 @@ describe('PM tools for the Inbox, designs and agents', () => {
     expect(comment).toMatchObject({ body: text, author: { kind: 'human', viaPm: { sessionId: session.id } } })
   })
 
+  it('names human checks and refuses stale Inbox approval cards', async () => {
+    const review = await task({ status: 'human_review' }, { type: 'spike' })
+    expect((await propose('act_on_inbox', { taskRef: review.ref, action: 'approve' })).summary)
+      .toBe(`Approve and merge ${review.ref}: ${review.title}`)
+    await t.db.insert(schema.acceptanceCriteria).values([
+      { taskId: review.id, position: 0, text: 'Agent check' },
+      { taskId: review.id, position: 1, text: 'Playback works on a real iPhone', checkedByHuman: true },
+      { taskId: review.id, position: 2, text: 'Audio is clear', checkedByHuman: true }
+    ])
+    const input = { taskRef: review.ref, action: 'approve' }
+    const card = await propose('act_on_inbox', input)
+    expect(card.summary).toBe(`Approve and merge ${review.ref}: ${review.title}. Confirming says you checked: Playback works on a real iPhone; Audio is clear`)
+    await t.db.update(schema.acceptanceCriteria).set({ text: 'Audio is clear on device' })
+      .where(and(eq(schema.acceptanceCriteria.taskId, review.id), eq(schema.acceptanceCriteria.position, 2)))
+    expect(await (await resolve(card.actionId, 'confirm')).json()).toMatchObject({ pendingAction: { status: 'failed', error: expect.stringContaining('changed') } })
+    expect(await statusOf(review.id)).toMatchObject({ status: 'human_review' })
+    const fresh = await propose('act_on_inbox', input)
+    expect(await (await resolve(fresh.actionId, 'confirm')).json()).toMatchObject({ pendingAction: { status: 'confirmed' } })
+    expect(await statusOf(review.id)).toMatchObject({ status: 'merged' })
+  })
+
   it('refuses a confirmation when the PR moved on after the card was shown', async () => {
     const review = await task({ status: 'human_review', prNumber: 7, headSha: 'a'.repeat(40) })
     const { actionId } = await propose('act_on_inbox', { taskRef: review.ref, action: 'approve' })

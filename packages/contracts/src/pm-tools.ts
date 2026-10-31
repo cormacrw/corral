@@ -170,7 +170,7 @@ export const pmDirectTools = {
   },
   message_run: {
     confirmRequired: false,
-    description: 'Send a message to a live developer or reviewer run. The agent sees it in its run, and it\'s kept as your comment on the task. Fails if the run isn\'t live.',
+    description: 'Send a message to a live developer, reviewer or designer run. The agent sees it in its run, and it\'s kept as your comment on the task. Fails if the run isn\'t live.',
     input: { runId, text: runMessageInput.shape.text }
   },
   get_status: {
@@ -200,7 +200,7 @@ export const pmDirectTools = {
   },
   create_agent: {
     confirmRequired: false,
-    description: 'Add a developer or reviewer agent. Takes effect straight away: the agent can claim work as soon as it exists.',
+    description: 'Add a developer, reviewer or designer agent. Takes effect straight away: the agent can claim work as soon as it exists.',
     input: createAgentInput.shape
   }
 } satisfies Partial<Record<AgentTool, PmToolDefinition>>
