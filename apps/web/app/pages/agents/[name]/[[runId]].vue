@@ -159,7 +159,10 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
           <template v-if="selected">
             <!-- One line at the flyout header's height; long titles truncate -->
             <header class="flex h-14 shrink-0 items-center gap-2 border-b border-default px-4 text-sm">
-              <span class="min-w-0 truncate font-medium">{{ runRef(selected) }} {{ selected.taskTitle ?? selected.epicTitle ?? '' }}</span>
+              <span class="min-w-0 truncate font-medium"><TaskLink
+                v-if="selected.taskRef"
+                :task-ref="selected.taskRef"
+              /><template v-else>{{ runRef(selected) }}</template> {{ selected.taskTitle ?? selected.epicTitle ?? '' }}</span>
               <UBadge
                 class="shrink-0"
                 :label="runBadge(selected).label"

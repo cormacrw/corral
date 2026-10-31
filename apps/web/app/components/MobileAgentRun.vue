@@ -31,7 +31,12 @@ const live = computed(() => !!selected.value && isLiveRun(selected.value))
           </p>
           <h1 class="truncate font-semibold text-highlighted">
             <template v-if="selected">
-              {{ runRef(selected) }} {{ runTitle(selected) }}
+              <TaskLink
+                v-if="selected.taskRef"
+                :task-ref="selected.taskRef"
+              /><template v-else>
+                {{ runRef(selected) }}
+              </template> {{ runTitle(selected) }}
             </template>
             <template v-else>
               Run
