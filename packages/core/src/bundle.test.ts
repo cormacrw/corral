@@ -7,6 +7,10 @@ import { bundlePath, BundleError, packBundle, unpackBundle } from './bundle.ts'
 
 const text = (s: string) => new TextEncoder().encode(s)
 
+// macOS's tar has other format names, and adds ._ files unless told not to
+const tarOptions = { env: { ...process.env, COPYFILE_DISABLE: '1' } }
+const tarFormats = execFileSync('tar', ['--version']).includes('GNU tar') ? ['gnu', 'oldgnu', 'pax', 'posix'] : ['gnutar', 'pax']
+
 const BLOCK = 512
 const END = new Uint8Array(BLOCK * 2)
 
@@ -97,7 +101,7 @@ describe('bundle archives', () => {
     mkdirSync(join(src, 'assets', 'x'.repeat(90)), { recursive: true })
     writeFileSync(join(src, 'index.html'), '<p>tar</p>')
     writeFileSync(join(src, 'assets', 'x'.repeat(90), 'y'.repeat(40) + '.css'), 'p{}')
-    const archive = execFileSync('tar', ['-cf', '-', '-C', src, '.'])
+    const archive = execFileSync('tar', ['-cf', '-', '-C', src, '.'], tarOptions)
     const unpacked = unpackBundle(new Uint8Array(archive))
     expect(new TextDecoder().decode(unpacked.get('index.html'))).toBe('<p>tar</p>')
     expect(new TextDecoder().decode(unpacked.get(`assets/${'x'.repeat(90)}/${'y'.repeat(40)}.css`))).toBe('p{}')
@@ -128,7 +132,7 @@ describe('bundle archives', () => {
     symlinkSync('index.html', join(dir, `${'l'.repeat(120)}`))
     linkSync(join(dir, 'index.html'), join(dir, 'hard'))
     mkdirSync(join(dir, 'folder'))
-    const archive = new Uint8Array(execFileSync('tar', ['-cf', '-', '-C', dir, '.']))
+    const archive = new Uint8Array(execFileSync('tar', ['-cf', '-', '-C', dir, '.'], tarOptions))
     const paths = [...unpackBundle(archive).keys()]
     expect(paths).toHaveLength(1)
     expect(['index.html', 'hard']).toContain(paths[0])
@@ -155,14 +159,14 @@ describe('bundle archives', () => {
     mkdirSync(join(src, 'c'.repeat(80)), { recursive: true })
     writeFileSync(join(src, 'index.html'), 'home')
     writeFileSync(join(src, prefixed), 'prefixed')
-    const ustar = new Uint8Array(execFileSync('tar', ['--format=ustar', '-cf', '-', '-C', src, '.']))
+    const ustar = new Uint8Array(execFileSync('tar', ['--format=ustar', '-cf', '-', '-C', src, '.'], tarOptions))
     expect([...unpackBundle(ustar).keys()].sort()).toEqual(['index.html', prefixed].sort())
     expect(new TextDecoder().decode(unpackBundle(ustar).get(prefixed))).toBe('prefixed')
 
     mkdirSync(join(src, 'a'.repeat(120)))
     writeFileSync(join(src, longFile), 'long')
-    for (const format of ['gnu', 'oldgnu', 'pax', 'posix']) {
-      const unpacked = unpackBundle(new Uint8Array(execFileSync('tar', [`--format=${format}`, '-cf', '-', '-C', src, '.'])))
+    for (const format of tarFormats) {
+      const unpacked = unpackBundle(new Uint8Array(execFileSync('tar', [`--format=${format}`, '-cf', '-', '-C', src, '.'], tarOptions)))
       expect([...unpacked.keys()].sort(), format).toEqual(['index.html', prefixed, longFile].sort())
       expect(new TextDecoder().decode(unpacked.get(longFile)), format).toBe('long')
     }
