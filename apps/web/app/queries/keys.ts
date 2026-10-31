@@ -52,6 +52,11 @@ export const keys = {
     session: (id: string) => [...keys.plan.sessions(), id] as const,
     drafts: (slug: string) => [...keys.plan.all(), 'drafts', slug] as const
   },
+  setup: {
+    all: () => ['setup'] as const,
+    clis: () => [...keys.setup.all(), 'clis'] as const,
+    repos: () => [...keys.setup.all(), 'repos'] as const
+  },
   inbox: () => ['inbox'] as const,
   profile: () => ['profile'] as const,
   runner: () => ['runner'] as const,

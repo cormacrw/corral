@@ -28,6 +28,14 @@ Task events update loaded lists immediately. EpicDetail derives prerequisite and
 
 Board/Backlog and their task/epic flyouts use `defineMutation` for task creation, patching, transitions and deletion, epic patching and epic dependencies. Desktop drag moves and task Status actions (including mobile) use `moveTask` on top of the transition mutation: cancel an older list fetch, optimistically move the single card, then invalidate on success or restore just that card on rejection. A newer event for the card wins over rollback; other cards' live changes are preserved. Drag targets follow D10's existing human actions, and Board filters remain in the URL.
 
+## Settings, Setup and removal
+
+`queries/setup.ts` holds the CLI scan and repository list. `clisQuery` has `staleTime: 0`: a login changes on the runner with no event, so each visit shows the last scan and rescans behind it. Refresh on the repository step is the `refreshRepos` mutation, which asks past the server's cache and writes the result to the one `keys.setup.repos()` entry.
+
+Removing a project goes through `clearProject`, from both `removeProject` and the `project.deleted` event, in either order. It removes the project's own queries, by slug and by the `projectId` in cached tasks, epics, runs and sessions, and filters the lists that span projects. A query still on screen is reset instead, since a removed query stays with its observer, so the page refetches to its 404. The repository list refetches too: its rows name the project using them, on creation as well as removal. Add a query holding project data and it needs to be covered there. `TaskDetail` and `EpicDetail` keep their record in local refs, so they drop it and reload on `project.deleted`.
+
+`pages/projects/[slug].vue` wraps every project route and shows `ProjectNotFound` once the list lacks the slug. It's a parent route because leaving `<NuxtPage />` out of `app.vue` stalls the first navigation. `useRemovingProject` holds that back while Settings removes the project and moves on.
+
 ## Rules
 
 - Skeletons depend on `isPending` only. It stays false for a query with data, so background refetches show no loading state. Never use `isFetching` for a skeleton.
@@ -52,7 +60,7 @@ export const patchEpic = defineMutation<Epic, { id: string, input: PatchEpicInpu
 const patch = useMutation(patchEpic)
 ```
 
-`invalidates` is a list of keys, or a function of the result and variables. It runs only on success, at once rather than through the event queue, and `isPending` lasts until the refetch ends. On failure nothing is invalidated, `mutateAsync` rejects and `error` is set.
+`invalidates` is a list of keys, or a function of the result and variables. An optional `write(client, data, variables)` runs first, for what a refetch can't do, such as dropping a removed project. It runs only on success, at once rather than through the event queue, and `isPending` lasts until the refetch ends. On failure nothing is invalidated, `mutateAsync` rejects and `error` is set.
 
 ## Add a dependency
 

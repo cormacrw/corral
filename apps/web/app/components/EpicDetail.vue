@@ -70,6 +70,11 @@ watch(() => props.epicId, () => {
 onMounted(() => {
   const stop = live.subscribe((event) => {
     if (!epic.value) return
+    if (event.type === 'project.deleted' && epic.value.projectId === event.projectId) {
+      epic.value = null
+      void load()
+      return
+    }
     if (event.type === 'epic.updated' && event.epic.id === epic.value.id) epic.value = { ...epic.value, ...event.epic }
     if ((event.type === 'task.updated' || event.type === 'task.created') && (event.task.epicId === epic.value.id || epic.value.tasks.some(t => t.id === event.task.id))) void load()
     if (event.type === 'task.deleted' && epic.value.tasks.some(t => t.id === event.taskId)) void load()

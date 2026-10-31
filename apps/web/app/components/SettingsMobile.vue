@@ -1,16 +1,20 @@
 <script setup lang="ts">
+import { useQuery } from '@tanstack/vue-query'
+import { agentsQuery } from '~/queries/agents'
+import { profileQuery, runnerQuery } from '~/queries/system'
 import { parseOverride } from '~/utils/device'
 import { ROLE, runnerSummary, runtimeLabel } from '~/utils/labels'
 
 // Settings on mobile (design/settings.md, design/mobile.md): one screen that
 // lists the sections, each opening its own screen, with Appearance (colour
 // mode and the layout override) set right here
-const live = useLive()
-const state = live.state
+const { data: profile } = useQuery(profileQuery())
+const { data: runner } = useQuery(runnerQuery())
+const { data: agents } = useQuery(agentsQuery())
 const colorMode = useColorMode()
 const device = useDevice()
 const install = useInstall()
-const name = computed(() => state.value.profile?.name || 'You')
+const name = computed(() => profile.value?.name || 'You')
 </script>
 
 <template>
@@ -21,7 +25,7 @@ const name = computed(() => state.value.profile?.name || 'You')
     >
       <AgentAvatar
         :name="name"
-        :src="state.profile?.avatarUrl ?? null"
+        :src="profile?.avatarUrl ?? null"
         size="3xl"
       />
       <span class="min-w-0 flex-1">
@@ -59,10 +63,10 @@ const name = computed(() => state.value.profile?.name || 'You')
           />
           <span class="min-w-0 flex-1">
             <span class="block text-highlighted">Runners</span>
-            <span class="block truncate text-xs text-muted">{{ state.runner?.online ? 'Online' : 'Offline' }} · {{ runnerSummary(state.runner) }}</span>
+            <span class="block truncate text-xs text-muted">{{ runner?.online ? 'Online' : 'Offline' }} · {{ runnerSummary(runner ?? null) }}</span>
           </span>
           <span
-            :class="['size-2.5 shrink-0 rounded-full', state.runner?.online ? 'bg-success' : 'bg-error']"
+            :class="['size-2.5 shrink-0 rounded-full', runner?.online ? 'bg-success' : 'bg-error']"
             aria-hidden="true"
           />
           <UIcon
@@ -81,7 +85,7 @@ const name = computed(() => state.value.profile?.name || 'You')
     </div>
     <ul class="divide-y divide-default border-y border-default">
       <li
-        v-for="agent in state.agents"
+        v-for="agent in agents"
         :key="agent.id"
         class="flex items-center gap-2 pr-4"
       >
