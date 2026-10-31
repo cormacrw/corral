@@ -2,6 +2,7 @@ import { isTaskDone } from '@corral/core'
 import type { AuditEntry, Epic, Inbox, Run, Task } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { epicTitle, epicWithLiveCounts } from '~/utils/labels'
+import { completedAt } from '~/utils/completion'
 import { projectNeedsYou } from '~/utils/projects'
 
 // Project overview data (design/project-overview.md), shared by the web page
@@ -51,7 +52,10 @@ export function useProjectOverview() {
   const count = (status: Task['status']) => tasks.value.filter(t => t.status === status).length
   const needsYou = computed(() => projectNeedsYou(inbox.value, project.value?.id))
   const weekAgo = Date.now() - 7 * 86_400_000
-  const mergedThisWeek = computed(() => tasks.value.filter(t => t.mergedAt && new Date(t.mergedAt).getTime() > weekAgo))
+  const mergedThisWeek = computed(() => tasks.value.filter((t) => {
+    const at = completedAt(t)
+    return isTaskDone(t) && at !== null && new Date(at).getTime() > weekAgo
+  }))
   const firstPass = computed(() => {
     const merged = tasks.value.filter(t => t.status === 'merged')
     if (merged.length === 0) return null

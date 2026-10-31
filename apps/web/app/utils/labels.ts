@@ -13,8 +13,8 @@ export const STATUS: Record<TaskStatus, { label: string, color: Color }> = {
   agent_review: { label: 'Agent review', color: 'primary' },
   human_review: { label: 'Human review', color: 'warning' },
   ready_to_merge: { label: 'Ready to merge', color: 'success' },
-  approved: { label: 'Approved', color: 'success' },
-  merged: { label: 'Merged', color: 'success' },
+  approved: { label: 'Complete', color: 'success' },
+  merged: { label: 'Complete', color: 'success' },
   blocked: { label: 'Blocked', color: 'error' },
   failed: { label: 'Failed', color: 'error' }
 }

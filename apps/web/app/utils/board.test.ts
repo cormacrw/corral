@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { Task } from '@corral/contracts'
-import { BOARD_COLUMNS, boardMove, filterLabel, filtersFromQuery, filtersToQuery, hasFilters, matchesFilter, MERGED_WINDOW_DAYS, NO_FILTERS, onBoard, sortColumn, swipeStep, taskAgentIds } from './board.ts'
+import { BOARD_COLUMNS, boardMove, filterLabel, filtersFromQuery, filtersToQuery, hasFilters, matchesFilter, COMPLETE_WINDOW_DAYS, NO_FILTERS, onBoard, sortColumn, boardColumnKey, swipeStep, taskAgentIds } from './board.ts'
 
 const DAY = 24 * 60 * 60 * 1000
 const now = Date.parse('2026-10-29T12:00:00Z')
-const mergedAgo = (ms: number) => ({ status: 'merged' as const, mergedAt: new Date(now - ms).toISOString() })
+const mergedAgo = (ms: number) => ({ type: 'task' as const, updatedAt: '', status: 'merged' as const, mergedAt: new Date(now - ms).toISOString() })
 
 describe('onBoard', () => {
   it('uses a 3-day window', () => {
-    expect(MERGED_WINDOW_DAYS).toBe(3)
+    expect(COMPLETE_WINDOW_DAYS).toBe(3)
   })
 
   it('shows a task merged 2 days ago and hides one merged 4 days ago', () => {
@@ -23,14 +23,14 @@ describe('onBoard', () => {
   })
 
   it('hides merged tasks with no merge time', () => {
-    expect(onBoard({ status: 'merged', mergedAt: null }, now)).toBe(false)
+    expect(onBoard({ type: 'task', updatedAt: '', status: 'merged', mergedAt: null }, now)).toBe(false)
   })
 
   it('leaves other statuses alone and keeps Backlog off the board', () => {
-    expect(onBoard({ status: 'ready', mergedAt: null }, now)).toBe(true)
-    expect(onBoard({ status: 'blocked', mergedAt: null }, now)).toBe(true)
-    expect(onBoard({ status: 'backlog', mergedAt: null }, now)).toBe(false)
-    expect(onBoard({ status: 'draft', mergedAt: null }, now)).toBe(false)
+    expect(onBoard({ type: 'task', updatedAt: '', status: 'ready', mergedAt: null }, now)).toBe(true)
+    expect(onBoard({ type: 'task', updatedAt: '', status: 'blocked', mergedAt: null }, now)).toBe(true)
+    expect(onBoard({ type: 'task', updatedAt: '', status: 'backlog', mergedAt: null }, now)).toBe(false)
+    expect(onBoard({ type: 'task', updatedAt: '', status: 'draft', mergedAt: null }, now)).toBe(false)
   })
 })
 
@@ -63,7 +63,7 @@ describe('swipeStep', () => {
 })
 
 describe('sortColumn', () => {
-  const task = (ref: string, mergedAt: string | null) => ({ ref, mergedAt })
+  const task = (ref: string, mergedAt: string | null) => ({ ref, mergedAt, type: 'task' as const, status: 'merged' as const, updatedAt: '' })
   const refs = (tasks: { ref: string }[]) => tasks.map(t => t.ref)
 
   it('lists merged tasks newest first', () => {
@@ -72,30 +72,30 @@ describe('sortColumn', () => {
       task('COR-2', '2026-10-29T09:00:00Z'),
       task('COR-3', '2026-10-28T09:00:00Z')
     ]
-    expect(refs(sortColumn('merged', tasks))).toEqual(['COR-2', 'COR-3', 'COR-1'])
+    expect(refs(sortColumn('complete', tasks))).toEqual(['COR-2', 'COR-3', 'COR-1'])
   })
 
   it('puts tasks with no merge time last', () => {
     const tasks = [task('COR-1', null), task('COR-2', '2026-10-27T09:00:00Z'), task('COR-3', null), task('COR-4', '2026-10-28T09:00:00Z')]
-    expect(refs(sortColumn('merged', tasks))).toEqual(['COR-4', 'COR-2', 'COR-1', 'COR-3'])
+    expect(refs(sortColumn('complete', tasks))).toEqual(['COR-4', 'COR-2', 'COR-1', 'COR-3'])
   })
 
   it('breaks ties by ref, whatever order they came in', () => {
     const at = '2026-10-28T09:00:00Z'
     const expected = ['COR-2', 'COR-10', 'COR-11']
-    expect(refs(sortColumn('merged', [task('COR-11', at), task('COR-2', at), task('COR-10', at)]))).toEqual(expected)
-    expect(refs(sortColumn('merged', [task('COR-10', at), task('COR-11', at), task('COR-2', at)]))).toEqual(expected)
+    expect(refs(sortColumn('complete', [task('COR-11', at), task('COR-2', at), task('COR-10', at)]))).toEqual(expected)
+    expect(refs(sortColumn('complete', [task('COR-10', at), task('COR-11', at), task('COR-2', at)]))).toEqual(expected)
   })
 
   it('does not change the input', () => {
     const tasks = [task('COR-1', '2026-10-27T09:00:00Z'), task('COR-2', '2026-10-29T09:00:00Z')]
-    sortColumn('merged', tasks)
+    sortColumn('complete', tasks)
     expect(refs(tasks)).toEqual(['COR-1', 'COR-2'])
   })
 
   it('leaves other columns in the order they came', () => {
     const tasks = [task('COR-3', '2026-10-27T09:00:00Z'), task('COR-1', null), task('COR-2', '2026-10-29T09:00:00Z')]
-    for (const column of BOARD_COLUMNS.filter(c => c.key !== 'merged')) {
+    for (const column of BOARD_COLUMNS.filter(c => c.key !== 'complete')) {
       expect(refs(sortColumn(column.key, tasks))).toEqual(['COR-3', 'COR-1', 'COR-2'])
     }
   })
@@ -137,7 +137,7 @@ describe('matchesFilter', () => {
 
   it('shows only the selected columns, with Blocked & failed covering both statuses', () => {
     expect(match({ statuses: ['blocked'] })).toEqual(['TA-3', 'TA-4'])
-    expect(match({ statuses: ['ready', 'merged'] })).toEqual(['TA-1', 'TA-5'])
+    expect(match({ statuses: ['ready', 'complete'] })).toEqual(['TA-1', 'TA-5'])
   })
 
   it('shows only tasks one of the selected agents holds or is assigned', () => {
@@ -185,7 +185,7 @@ describe('filters in the URL query', () => {
 
   it('drops empty filters from the query and ignores unknown values', () => {
     expect(filtersToQuery(NO_FILTERS, { column: 'ready', status: 'ready' })).toEqual({ column: 'ready', q: undefined, epics: undefined, status: undefined, priority: undefined, agent: undefined })
-    expect(filtersFromQuery({ status: 'nope,merged', priority: 'huge,low' })).toEqual({ ...NO_FILTERS, statuses: ['merged'], priorities: ['low'] })
+    expect(filtersFromQuery({ status: 'nope,complete', priority: 'huge,low' })).toEqual({ ...NO_FILTERS, statuses: ['complete'], priorities: ['low'] })
   })
 
   it('knows when anything is filtered', () => {
@@ -224,5 +224,29 @@ describe('boardMove', () => {
 
   it('keeps approved-design changes in the feedback action', () => {
     expect(boardMove(task('approved', 'design'), 'in_progress')).toBeNull()
+  })
+})
+
+describe('completed designs', () => {
+  const design = (days: number) => ({ type: 'design' as const, status: 'approved' as const, mergedAt: null, updatedAt: new Date(now - days * DAY).toISOString(), ref: 'TA-10' })
+
+  it('windows approvals and removes reopened designs from Complete', () => {
+    expect(onBoard(design(2), now)).toBe(true)
+    expect(onBoard(design(4), now)).toBe(false)
+    expect(onBoard({ ...design(4), status: 'in_progress' }, now)).toBe(true)
+    expect(matchesFilter({ ...design(1), title: '', epicId: null, priority: 'medium' }, { ...NO_FILTERS, statuses: ['complete'] })).toBe(true)
+    expect(matchesFilter({ ...design(1), status: 'in_progress', title: '', epicId: null, priority: 'medium' }, { ...NO_FILTERS, statuses: ['complete'] })).toBe(false)
+  })
+
+  it('sorts approvals among merges by finish time', () => {
+    expect(sortColumn('complete', [{ ...mergedAgo(DAY), ref: 'TA-1' }, design(0), design(2)]).map(t => t.ref)).toEqual(['TA-10', 'TA-1', 'TA-10'])
+  })
+
+  it('combines finished statuses after Blocked and preserves saved column links', () => {
+    expect(BOARD_COLUMNS.slice(-2).map(c => c.key)).toEqual(['blocked', 'complete'])
+    expect(BOARD_COLUMNS.at(-1)?.statuses).toEqual(['merged', 'approved'])
+    expect(boardColumnKey('merged')).toBe('complete')
+    expect(boardColumnKey('approved')).toBe('complete')
+    expect(boardColumnKey('ready')).toBe('ready')
   })
 })

@@ -613,7 +613,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
             name="i-lucide-lock"
             class="size-3.5"
           />
-          Merged, so read-only. You can still comment.
+          Complete, so read-only. You can still comment.
         </p>
 
         <div

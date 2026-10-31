@@ -232,6 +232,10 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
                     <span class="shrink-0 font-mono text-muted">{{ task.ref }}</span>
                     <span :class="task.priority === 'urgent' ? 'text-error' : task.priority === 'high' ? 'text-warning' : 'text-muted'">{{ PRIORITY[task.priority].label }}</span>
                     <TaskTypeBadge :type="task.type" />
+                <StatusBadge
+                  v-if="task.status === 'merged' || task.status === 'approved'"
+                  :status="task.status"
+                />
                     <DesignChangedBadge :design="task.design" />
                     <a
                       v-if="task.prUrl"

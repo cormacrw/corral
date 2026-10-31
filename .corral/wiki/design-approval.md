@@ -2,7 +2,7 @@
 
 Design tasks finish at `approved`, after human approval of a submitted version. Other types finish at `merged`; spikes have no PR. `packages/core/src/completion.ts` defines the type-aware completion and immutability rules, and `apps/server/src/completion.ts` derives the database completion predicate from that mapping. Task and epic dependencies use these rules. An Approved design remains soft-deletable, retaining its versions and blobs.
 
-Approval updates the version and task together through core. Reopening uses `human_request_changes` with required feedback, keeps a pinned task comment and audit detail, and preserves the approved version until another is approved. The board has Approved after Merged; the design panel offers Reopen design.
+Approval updates the version and task together through core. Reopening uses `human_request_changes` with required feedback, keeps a pinned task comment and audit detail, and preserves the approved version until another is approved. The Board combines stored approved and merged statuses in one Complete column after Blocked & failed, showing the last three days by mergedAt (or updatedAt for approved designs), newest first; the design panel offers Reopen design.
 
 ## Existing designs: review before repair
 
@@ -38,3 +38,5 @@ Approval needs an online runner to start the PM's build session.
 ## Approval notes (COR-347)
 
 A nonblank approval note from the design review panel or Inbox is trimmed and saved as a normal, unpinned comment by the human in the same transaction as the design approval. The note also stays in the PM build session's opening message, including Inbox approvals. Rejected approvals do not leave comments; retrying an already approved version does not append another approval comment. Requested changes still produce exactly one pinned feedback comment through the task transition.
+
+Task status badges display Complete for both merged and approved; version and plan badges retain Approved. Home and project completion tiles count approved designs using the same completion timestamp. Reopening returns a design to its active column.

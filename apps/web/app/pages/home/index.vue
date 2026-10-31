@@ -130,7 +130,7 @@ const agents = computed(() => state.value.agents
           v-for="tile in [
             { key: 'todo', label: 'To do', dot: 'bg-info', value: counts.todo, sub: 'Ready, not started' },
             { key: 'in-progress', label: 'In progress', dot: 'bg-primary', value: counts.inProgress, sub: 'Building to merge' },
-            { key: 'merged', label: 'Merged today', dot: 'bg-success', value: counts.mergedToday, sub: `${counts.firstPassToday} first-pass` }
+            { key: 'merged', label: 'Completed today', dot: 'bg-success', value: counts.mergedToday, sub: `${counts.firstPassToday} first-pass` }
           ]"
           :key="tile.key"
           class="flex flex-col rounded-lg border border-default p-3"
