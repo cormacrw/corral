@@ -5,7 +5,11 @@ import { STATUS } from '~/utils/labels'
 
 const props = defineProps<{ task: Task, tasks: Task[] }>()
 const blockers = computed(() => taskBlockers(props.task, props.tasks))
+const hasBlockers = computed(() => blockers.value.tasks.length > 0 || blockers.value.epics.length > 0)
 const open = ref(false)
+watch(hasBlockers, (value) => {
+  if (!value) open.value = false
+})
 const flyout = useTaskFlyout()
 function openTask(ref: string) {
   open.value = false
@@ -15,14 +19,14 @@ function openTask(ref: string) {
 
 <template>
   <UPopover
-    v-if="blockers.tasks.length || blockers.epics.length"
+    v-if="hasBlockers"
     v-model:open="open"
     :content="{ side: 'top', align: 'end', collisionPadding: 12 }"
   >
     <button
       type="button"
       :aria-label="`What ${task.ref} is waiting on`"
-      class="flex size-6 cursor-pointer items-center justify-center rounded text-warning focus-visible:outline-2 focus-visible:outline-primary"
+      class="flex size-6 cursor-pointer items-center justify-center rounded text-warning hover:bg-elevated focus-visible:outline-2 focus-visible:outline-primary"
       @click.stop
     >
       <UIcon
@@ -32,10 +36,10 @@ function openTask(ref: string) {
     </button>
     <template #content>
       <div
-        class="w-64 max-w-[calc(100vw-24px)] p-2"
+        class="w-64 max-w-[calc(100vw-24px)] p-1"
         @click.stop
       >
-        <h3 class="px-2 py-1 text-xs font-medium text-muted">
+        <h3 class="px-2 py-1.5 text-xs font-medium text-muted">
           Waiting on
         </h3>
         <ul class="max-h-[60vh] overflow-y-auto">
@@ -45,14 +49,11 @@ function openTask(ref: string) {
           >
             <button
               type="button"
-              class="flex w-full cursor-pointer flex-col gap-1 rounded p-2 text-start text-sm hover:bg-elevated focus-visible:outline-2 focus-visible:outline-primary"
+              class="flex w-full cursor-pointer flex-col gap-0.5 rounded px-2 py-1.5 text-start text-sm hover:bg-elevated focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
               @click="openTask(blocker.ref)"
             >
-              <span class="wrap-anywhere text-highlighted">{{ blocker.title }}</span>
-              <span class="flex flex-wrap gap-2 text-xs text-muted">
-                <span>{{ blocker.ref }}</span>
-                <span>{{ STATUS[blocker.status].label }}</span>
-              </span>
+              <span class="wrap-anywhere font-medium text-highlighted">{{ blocker.title }}</span>
+              <span class="text-xs text-muted">{{ blocker.ref }} · {{ STATUS[blocker.status].label }}</span>
             </button>
           </li>
           <li
@@ -61,10 +62,10 @@ function openTask(ref: string) {
           >
             <NuxtLink
               :to="`/epics/${epic.id}`"
-              class="flex flex-col gap-1 rounded p-2 text-sm hover:bg-elevated focus-visible:outline-2 focus-visible:outline-primary"
+              class="flex flex-col gap-0.5 rounded px-2 py-1.5 text-sm hover:bg-elevated focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
               @click="open = false"
             >
-              <span class="wrap-anywhere text-highlighted">{{ epic.title }}</span>
+              <span class="wrap-anywhere font-medium text-highlighted">{{ epic.title }}</span>
               <span class="text-xs text-muted">Epic</span>
             </NuxtLink>
           </li>
