@@ -26,10 +26,10 @@ export function useProjectLists(slug: MaybeRefOrGetter<string>) {
 export function useAllProjectLists(projects: MaybeRefOrGetter<Project[]>) {
   const tasks = useQueries({ queries: computed(() => toValue(projects).map(p => ({
     ...tasksQuery(p.slug), select: (list: Task[]) => ({ projectId: p.id, list })
-  }))) })
+  }))), shallow: true })
   const epics = useQueries({ queries: computed(() => toValue(projects).map(p => ({
     ...epicsQuery(p.slug), select: (list: Epic[]) => ({ projectId: p.id, list })
-  }))) })
+  }))), shallow: true })
   return {
     tasks: computed(() => projectMap(toValue(projects), tasks.value)),
     epics: computed(() => projectMap(toValue(projects), epics.value)),

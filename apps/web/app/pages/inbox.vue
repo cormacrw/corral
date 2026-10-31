@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { InboxItem } from '@corral/contracts'
-import { provideInboxView } from '~/composables/useInboxView'
+import { isTaskItem, provideInboxView } from '~/composables/useInboxView'
 import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
 
@@ -9,12 +9,14 @@ import { markdownToPlainText } from '~/utils/markdown'
 // selections, so it keeps its tab, search and scroll.
 const router = useRouter()
 const device = useDevice()
+const prefetch = useTaskPrefetch()
 useSeoMeta({ title: 'Inbox · Corral' })
 
 const { list, inbox, error, tab, search, items, count, selectedId, selected, itemRoute, deleteThread } = provideInboxView()
 function select(item: InboxItem) {
   void router.push(itemRoute(item))
 }
+const hover = (item: InboxItem) => isTaskItem(item) ? prefetch({ ref: item.taskRef, number: Number(item.taskRef.split('-').at(-1)) }, item.project.slug) : undefined
 </script>
 
 <template>
@@ -82,6 +84,7 @@ function select(item: InboxItem) {
             <button
               type="button"
               :class="['flex w-full gap-2 border-b border-default px-3 py-2 text-start', selectedId === item.id && 'bg-elevated']"
+              v-bind="hover(item)"
               @click="select(item)"
             >
               <PlanThreadRow

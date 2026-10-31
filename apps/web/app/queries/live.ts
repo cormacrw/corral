@@ -1,6 +1,6 @@
 import type { QueryClient, QueryKey } from '@tanstack/vue-query'
-import { hashKey } from '@tanstack/vue-query'
 import type { ServerEvent } from '@corral/contracts'
+import { hashKey } from '@tanstack/vue-query'
 import { api } from '~/composables/useApi'
 import { subscribeLive, subscribeReconnect } from '~/composables/useLive'
 import { applyEvent, invalidateKeys } from './dependencies'
@@ -54,9 +54,44 @@ interface ConnectOptions {
   onEvent?: (event: ServerEvent) => void
 }
 
+type RunEvents = Extract<ServerEvent, { type: 'run.events' }>
+
+// A live run sends many lines a second, and each write copies the transcript
+// and re-renders it. Lines wait for the next frame and go in together. A hidden
+// tab has no frames, and nothing to paint, so they go straight in.
+export function createLineBuffer(write: (event: RunEvents) => void) {
+  const pending = new Map<string, RunEvents>()
+  let frame: number | null = null
+  function flush(): void {
+    if (frame !== null) cancelAnimationFrame(frame)
+    frame = null
+    const events = [...pending.values()]
+    pending.clear()
+    for (const event of events) write(event)
+  }
+  return {
+    add: (event: RunEvents) => {
+      if (typeof document === 'undefined' || document.visibilityState !== 'visible') {
+        flush()
+        return write(event)
+      }
+      const held = pending.get(event.runId)
+      if (held && held.offset + held.events.length === event.offset) {
+        pending.set(event.runId, { ...held, events: [...held.events, ...event.events] })
+      } else {
+        if (held) flush()
+        pending.set(event.runId, event)
+      }
+      frame ??= requestAnimationFrame(flush)
+    },
+    flush
+  }
+}
+
 // Feeds useLive's stream, real or mock, into the query cache. Returns a stop.
 export function connectQueries(client: QueryClient, { openSession, onEvent }: ConnectOptions = {}): () => void {
   const queue = createInvalidationQueue(client)
+  const lines = createLineBuffer(event => queue.add(applyEvent(client, event)))
   const stopEvents = subscribeLive((event) => {
     onEvent?.(event)
     // Before the cache, so it gets the session as read
@@ -64,17 +99,20 @@ export function connectQueries(client: QueryClient, { openSession, onEvent }: Co
       event.session = { ...event.session, unread: false }
       void api.plan.read(event.session.id).catch(() => {})
     }
-    queue.add(applyEvent(client, event))
+    if (event.type === 'run.events') lines.add(event)
+    else queue.add(applyEvent(client, event))
   })
   // Anything could have been missed while disconnected. Queries with data
   // refetch behind it: isFetching changes, isPending doesn't.
   const stopReconnect = subscribeReconnect(() => {
+    lines.flush()
     queue.clear()
     void client.invalidateQueries()
   })
   return () => {
     stopEvents()
     stopReconnect()
+    lines.flush()
     queue.clear()
   }
 }

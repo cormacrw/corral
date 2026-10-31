@@ -18,11 +18,13 @@ export const flowQuery = (slug: string, window: FlowMetricsQuery['window']) => q
   placeholderData: (previous, query) => query && partialMatchKey(query.queryKey, keys.projects.flow(slug)) ? previous : undefined
 })
 // CI and the base branch move on GitHub without an event, so this polls, only
-// while the tab is visible (refetchIntervalInBackground defaults to false)
+// while the tab is visible (refetchIntervalInBackground defaults to false), and
+// is the one query that refreshes on return
 export const pullRequestsQuery = (slug: string) => queryOptions({
   queryKey: keys.projects.pullRequests(slug),
   queryFn: () => api.projects.pullRequests(slug),
-  refetchInterval: PULL_REQUESTS_POLL_MS
+  refetchInterval: PULL_REQUESTS_POLL_MS,
+  refetchOnWindowFocus: true
 })
 
 export const createProject = defineMutation<Project, CreateProjectInput>({

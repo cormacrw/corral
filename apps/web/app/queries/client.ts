@@ -21,10 +21,15 @@ export function createQueryClient(): QueryClient {
         // no network, and must not pause as if it were offline
         networkMode: 'always',
         refetchOnReconnect: false,
+        // Events keep the cache current. The stream is what can go wrong on
+        // return, so useLive checks that instead of refetching everything.
+        refetchOnWindowFocus: false,
+        // Data is always replaced whole, so tracking inside it does nothing
+        shallow: true,
         // A 4xx is an answer; repeating it won't change it
         retry: (failures, error) => failures < RETRIES && !(error instanceof ApiError && error.status < 500)
       },
-      mutations: { networkMode: 'always' }
+      mutations: { networkMode: 'always', shallow: true }
     }
   })
 }

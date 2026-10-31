@@ -7,7 +7,7 @@ import { isOwnPane, isTaskItem, useInboxView } from '~/composables/useInboxView'
 import { inboxActions } from '~/utils/inbox-actions'
 import { actOnInboxItem, holdsInbox } from '~/queries/inbox'
 import { keys } from '~/queries/keys'
-import { commentOnTask, taskEvidenceQuery, taskQuery, taskReviewsQuery } from '~/queries/tasks'
+import { commentOnTask, seededTaskQuery, taskEvidenceQuery, taskReviewsQuery } from '~/queries/tasks'
 
 // The selected Inbox item (design/inbox.md): its panes, action tray and
 // composer. Nuxt keys this page by its path, so the next item is a new instance
@@ -32,7 +32,7 @@ const tab = ref<InboxPanelTab>('overview')
 
 // The key ties the task to the selection, so nothing of the last item shows
 const taskRef = computed(() => isTaskItem(selected.value) ? selected.value.taskRef : null)
-const taskResult = useQuery(computed(() => ({ ...taskQuery(taskRef.value ?? ''), enabled: taskRef.value !== null })))
+const taskResult = useQuery(computed(() => ({ ...seededTaskQuery(client, taskRef.value ?? ''), enabled: taskRef.value !== null })))
 const task = computed(() => taskResult.data.value ?? null)
 // Human reviews show evidence; New artifacts need the files' real types
 const address = computed(() => isTaskItem(selected.value) && (selected.value.type === 'human_review' || selected.value.newArtifacts?.length) && task.value ? { slug: selected.value.project.slug, number: task.value.number, ref: task.value.ref } : null)

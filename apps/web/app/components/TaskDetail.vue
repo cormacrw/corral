@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { commentOnTask, listedTask, moveTask, patchTask, removeTask, resumeTask, taskCommentsQuery, taskEvidenceQuery, taskHistoryQuery, taskQuery, taskReviewsQuery, type TaskAddress } from '~/queries/tasks'
+import { commentOnTask, moveTask, patchTask, removeTask, resumeTask, seededTaskQuery, taskCommentsQuery, taskEvidenceQuery, taskHistoryQuery, taskReviewsQuery, type TaskAddress } from '~/queries/tasks'
 import { runsQuery } from '~/queries/runs'
 import type { AuditEntry, Comment, HumanTransitionInput, PatchTaskInput, Task } from '@corral/contracts'
 import type { TaskPriority, TaskStatus } from '@corral/core'
@@ -23,7 +23,7 @@ const removeMutation = useMutation(removeTask)
 const resumeMutation = useMutation(resumeTask)
 const commentMutation = useMutation(commentOnTask)
 const client = useQueryClient()
-const taskResult = useQuery(computed(() => ({ ...taskQuery(props.taskRef), placeholderData: () => listedTask(client, props.taskRef) })))
+const taskResult = useQuery(computed(() => seededTaskQuery(client, props.taskRef)))
 const task = computed(() => taskResult.data.value ?? null)
 const saved = ref(false)
 const resuming = ref(false)

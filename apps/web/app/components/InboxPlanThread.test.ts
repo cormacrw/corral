@@ -35,6 +35,7 @@ async function mountInbox() {
   vi.stubGlobal('useSeoMeta', vi.fn())
   vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(false) }))
   vi.stubGlobal('useMobileHeader', () => vue.ref(null))
+  vi.stubGlobal('useTaskPrefetch', () => () => undefined)
   vi.stubGlobal('useToast', () => ({ add: (t: typeof toasts[number]) => (toasts.push(t), { id: toasts.length }), remove: toastRemove }))
   vi.stubGlobal('usePlanThreads', () => ({ add: vi.fn(), remove }))
   vi.stubGlobal('usePlanThreadDelete', usePlanThreadDelete)

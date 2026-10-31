@@ -95,6 +95,7 @@ async function mountInbox(type: 'human_review' | 'failed' | 'question', taskRef?
   vi.stubGlobal('useSeoMeta', vi.fn())
   vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(mobile) }))
   vi.stubGlobal('useMobileHeader', () => vue.ref(null))
+  vi.stubGlobal('useTaskPrefetch', () => () => undefined)
   vi.stubGlobal('useToast', () => ({ add: vi.fn() }))
   vi.stubGlobal('usePlanThreadDelete', () => ({ pending: vue.ref([]), remove: vi.fn() }))
   const closeFlyout = vi.fn().mockResolvedValue(undefined)

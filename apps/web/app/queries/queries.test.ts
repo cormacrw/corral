@@ -1,19 +1,20 @@
 // @vitest-environment happy-dom
 import { useMutation, useQuery } from '@tanstack/vue-query'
-import type { Agent, Epic, Project, Run, ServerEvent, Task } from '@corral/contracts'
+import type { Agent, Epic, Project, Run, RunEvent, ServerEvent, Task } from '@corral/contracts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h, nextTick, ref } from 'vue'
 import { useLive } from '~/composables/useLive'
 import { ApiError, api } from '~/composables/useApi'
 import type { eventDependencies } from './dependencies'
-import { applyEvent, defineMutation, serverEventTypes } from './dependencies'
+import { applyEvent, defineMutation, serverEventTypes, writeTaskResponse } from './dependencies'
 import { createQueryClient } from './client'
 import { keys } from './keys'
 import { createAgent } from './agents'
-import { connectQueries, MAX_WAIT_MS, QUIET_MS } from './live'
+import { connectQueries, createLineBuffer, MAX_WAIT_MS, QUIET_MS } from './live'
 import { mountWithQuery, testQueryClient } from './mount-with-query'
 import { removeProject } from './projects'
 import { clisQuery, refreshRepos, reposQuery } from './setup'
+import { moveTask, patchTask, seededTaskQuery } from './tasks'
 
 // @ts-expect-error A type missing from the map must not compile
 const incomplete: typeof eventDependencies = { 'deployment.updated': { invalidates: () => [] } }
@@ -361,7 +362,8 @@ vi.mock('~/composables/useApi', async original => ({ ...await original<typeof im
   plan: { read: vi.fn(async () => ({})) },
   agents: { list: vi.fn(), create: vi.fn() },
   projects: { list: vi.fn(), remove: vi.fn() },
-  setup: { clis: vi.fn(), repos: vi.fn() }
+  setup: { clis: vi.fn(), repos: vi.fn() },
+  tasks: { patch: vi.fn(), transition: vi.fn() }
 } }))
 
 // Mounts a mutation's useMutation and hands back its mutateAsync
@@ -528,5 +530,147 @@ describe('setup data', () => {
     expect(api.setup.repos).toHaveBeenCalledWith(true)
     expect(client.getQueryData(keys.setup.repos())).toEqual(after)
     expect(client.getQueryCache().getAll()).toHaveLength(1)
+  })
+})
+
+describe('task edits', () => {
+  const saved = (over: Partial<Task> = {}) => task({ updatedAt: '2026-01-02T00:00:00Z', title: 'Saved', ...over })
+  const seeded = () => {
+    const client = testQueryClient()
+    client.setQueryData(keys.projects.list(), [project])
+    client.setQueryData(keys.tasks.list('corral'), [task({ updatedAt: '2026-01-01T00:00:00Z' })])
+    client.setQueryData(keys.tasks.detail('COR-1'), task({ updatedAt: '2026-01-01T00:00:00Z' }))
+    return client
+  }
+
+  it('writes the response to the list and detail, and ends without waiting for a refetch', async () => {
+    const client = seeded()
+    const list = onScreen(client, keys.tasks.list('corral'), () => [])
+    const inbox = vi.fn<() => Promise<unknown>>(() => new Promise(() => {})).mockResolvedValueOnce({})
+    mountWithQuery(defineComponent({ setup: () => {
+      useQuery({ queryKey: keys.inbox(), queryFn: inbox, staleTime: Infinity })
+      return () => null
+    } }), { client })
+    vi.mocked(api.tasks.patch).mockResolvedValue(saved())
+    await vi.waitFor(() => expect(inbox).toHaveBeenCalledTimes(1))
+    await client.getMutationCache().build(client, patchTask).execute({ task: { slug: 'corral', number: 1, ref: 'COR-1' }, input: { title: 'Saved' } })
+    expect(client.getQueryData<Task[]>(keys.tasks.list('corral'))?.[0]?.title).toBe('Saved')
+    expect(client.getQueryData<Task>(keys.tasks.detail('COR-1'))?.title).toBe('Saved')
+    expect(list.queryFn).not.toHaveBeenCalled()
+    // The Inbox still refreshes, behind the save
+    await vi.waitFor(() => expect(inbox).toHaveBeenCalledTimes(2))
+  })
+
+  it('keeps an event that beat an older response', () => {
+    const client = seeded()
+    client.setQueryData(keys.tasks.detail('COR-1'), saved({ updatedAt: '2026-01-03T00:00:00Z', title: 'Newer' }))
+    writeTaskResponse(client, saved())
+    expect(client.getQueryData<Task>(keys.tasks.detail('COR-1'))?.title).toBe('Newer')
+    expect(client.getQueryData<Task[]>(keys.tasks.list('corral'))?.[0]?.title).toBe('One')
+  })
+
+  it('shows a listed task while its own copy loads', () => {
+    const client = seeded()
+    client.removeQueries({ queryKey: keys.tasks.detail('COR-1'), exact: true })
+    const seed = seededTaskQuery(client, 'COR-1')
+    expect(seed.placeholderData()?.title).toBe('One')
+    expect(seededTaskQuery(client, 'COR-2').placeholderData()).toBeUndefined()
+  })
+
+  it('refetches a list whose fetch a move stopped', async () => {
+    const client = seeded()
+    let release = () => {}
+    const queryFn = vi.fn(() => new Promise<Task[]>((resolve) => {
+      release = () => resolve([task()])
+    }))
+    mountWithQuery(defineComponent({ setup: () => {
+      useQuery({ queryKey: keys.tasks.list('corral'), queryFn, staleTime: 0 })
+      return () => null
+    } }), { client })
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(1))
+    vi.mocked(api.tasks.transition).mockResolvedValue(saved())
+    await client.getMutationCache().build(client, moveTask).execute({ task: { slug: 'corral', number: 1, ref: 'COR-1' }, input: { type: 'approve' }, status: 'ready' })
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+    release()
+  })
+})
+
+describe('run.updated', () => {
+  const run = (over: Partial<Run> = {}) => ({ id: 'r-1', agentId: 'a-1', projectId: 'p-1', taskId: 't-1', taskRef: 'COR-1', state: 'running', ...over }) as Run
+  const event = (r: Run) => ({ type: 'run.updated', run: r }) as Extract<ServerEvent, { type: 'run.updated' }>
+
+  it('places the run in every loaded list it belongs to, and refetches none', () => {
+    const client = testQueryClient()
+    client.setQueryData(keys.runs.list(), [])
+    client.setQueryData(keys.runs.list({ active: true }), [])
+    client.setQueryData(keys.runs.list({ taskId: 't-1' }), [])
+    client.setQueryData(keys.runs.list({ taskId: 't-2' }), [])
+    client.setQueryData(keys.runs.list({ agentId: 'a-2' }), [])
+    const stale = applyEvent(client, event(run()))
+    expect(client.getQueryData(keys.runs.list())).toEqual([run()])
+    expect(client.getQueryData(keys.runs.list({ active: true }))).toEqual([run()])
+    expect(client.getQueryData(keys.runs.list({ taskId: 't-1' }))).toEqual([run()])
+    expect(client.getQueryData(keys.runs.list({ taskId: 't-2' }))).toEqual([])
+    expect(client.getQueryData(keys.runs.list({ agentId: 'a-2' }))).toEqual([])
+    expect(client.getQueryData(keys.runs.list({ agentId: 'a-1' }))).toBeUndefined()
+    expect(stale).not.toContainEqual(keys.runs.lists())
+  })
+
+  it('drops an ended run from active lists and keeps it in the others', () => {
+    const client = testQueryClient()
+    client.setQueryData(keys.runs.list(), [run()])
+    client.setQueryData(keys.runs.list({ active: true }), [run(), run({ id: 'r-2' })])
+    applyEvent(client, event(run({ state: 'succeeded' as Run['state'] })))
+    expect(client.getQueryData<Run[]>(keys.runs.list({ active: true }))?.map(r => r.id)).toEqual(['r-2'])
+    expect(client.getQueryData<Run[]>(keys.runs.list())?.[0]?.state).toBe('succeeded')
+  })
+
+  it('keeps a list to the server\'s limit', () => {
+    const client = testQueryClient()
+    const full = Array.from({ length: 50 }, (_, i) => run({ id: `old-${i}` }))
+    client.setQueryData(keys.runs.list(), full)
+    applyEvent(client, event(run()))
+    const list = client.getQueryData<Run[]>(keys.runs.list())!
+    expect(list).toHaveLength(50)
+    expect(list[0]?.id).toBe('r-1')
+  })
+})
+
+describe('run transcripts', () => {
+  const line = (text: string) => ({ type: 'message', text }) as RunEvent
+  const lines = (offset: number, ...texts: string[]) => ({ type: 'run.events', runId: 'r-1', offset, events: texts.map(line) }) as Extract<ServerEvent, { type: 'run.events' }>
+
+  it('holds lines for a frame and writes contiguous ones together', () => {
+    const frames: FrameRequestCallback[] = []
+    vi.stubGlobal('requestAnimationFrame', (run: FrameRequestCallback) => frames.push(run))
+    const write = vi.fn()
+    const buffer = createLineBuffer(write)
+    buffer.add(lines(0, 'a'))
+    buffer.add(lines(1, 'b', 'c'))
+    expect(write).not.toHaveBeenCalled()
+    frames[0]!(0)
+    expect(write).toHaveBeenCalledTimes(1)
+    expect(write).toHaveBeenCalledWith(lines(0, 'a', 'b', 'c'))
+    vi.unstubAllGlobals()
+  })
+
+  it('keeps lines apart when one is out of place, so the gap still refetches', () => {
+    vi.stubGlobal('requestAnimationFrame', () => 1)
+    vi.stubGlobal('cancelAnimationFrame', () => {})
+    const write = vi.fn()
+    const buffer = createLineBuffer(write)
+    buffer.add(lines(0, 'a'))
+    buffer.add(lines(5, 'f'))
+    buffer.flush()
+    expect(write.mock.calls.map(([event]) => event.offset)).toEqual([0, 5])
+    vi.unstubAllGlobals()
+  })
+
+  it('writes straight away in a hidden tab, which has no frames', () => {
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+    const write = vi.fn()
+    createLineBuffer(write).add(lines(0, 'a'))
+    expect(write).toHaveBeenCalledTimes(1)
+    vi.restoreAllMocks()
   })
 })

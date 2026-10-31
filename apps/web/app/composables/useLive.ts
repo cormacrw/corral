@@ -1,3 +1,4 @@
+import { SSE_HEARTBEAT_MS } from '@corral/contracts/client'
 import type { ServerEvent } from '@corral/contracts'
 import { serverEventTypes } from '~/queries/dependencies'
 
@@ -13,6 +14,12 @@ const reconnectListeners = new Set<() => void>()
 let source: EventSource | null = null
 let retryTimer: ReturnType<typeof setTimeout> | null = null
 let retryMs = 1000
+let lastHeard = 0
+let checksOnReturn = false
+
+// A phone asleep can leave the stream looking open with nothing arriving. The
+// server's heartbeat tells them apart: two missed beats and it's gone.
+export const STREAM_SILENCE_MS = 2 * SSE_HEARTBEAT_MS + 5000
 
 // Every event on the stream, real or mock. For the query layer's plugin.
 export function subscribeLive(listener: Listener): () => void {
@@ -43,12 +50,24 @@ export function useLive() {
       return
     }
     source = new EventSource('/api/events')
+    if (!checksOnReturn) {
+      checksOnReturn = true
+      document.addEventListener('visibilitychange', checkStream)
+      window.addEventListener('pageshow', checkStream)
+    }
+    lastHeard = Date.now()
+    const heard = () => {
+      lastHeard = Date.now()
+    }
     for (const type of serverEventTypes) {
       source.addEventListener(type, (message) => {
+        heard()
         apply(JSON.parse((message as MessageEvent).data) as ServerEvent)
       })
     }
+    source.addEventListener('ping', heard)
     source.addEventListener('ready', () => {
+      heard()
       const wasReconnecting = connection.value === 'reconnecting'
       connection.value = 'open'
       retryMs = 1000
@@ -65,6 +84,20 @@ export function useLive() {
       retryTimer = setTimeout(connect, retryMs)
       retryMs = Math.min(retryMs * 2, 15_000)
     }
+  }
+
+  // Coming back to the app: reconnecting invalidates everything, so a stream
+  // that's still alive costs nothing and a dead one misses nothing
+  function checkStream(): void {
+    if (document.visibilityState !== 'visible') return
+    if (source?.readyState === EventSource.OPEN && Date.now() - lastHeard < STREAM_SILENCE_MS) return
+    source?.close()
+    source = null
+    if (retryTimer) clearTimeout(retryTimer)
+    retryTimer = null
+    retryMs = 1000
+    connection.value = 'reconnecting'
+    connect()
   }
 
   return { connection, connect }

@@ -2,7 +2,7 @@ import { matchMutation, queryOptions, useQuery, useQueryClient } from '@tanstack
 import type { Inbox, InboxActionInput, Task } from '@corral/contracts'
 import { computed, onScopeDispose, shallowRef } from 'vue'
 import { api } from '~/composables/useApi'
-import { defineMutation, inboxWithRead, invalidateKeys } from './dependencies'
+import { defineMutation, inboxWithRead, invalidateKeys, writeTaskResponse } from './dependencies'
 import { keys } from './keys'
 
 // Reads land in the cache as they happen, and a response can predate them
@@ -21,9 +21,11 @@ export const inboxQuery = () => queryOptions({
 export const actOnInboxItem = defineMutation<{ task: Task | null }, { taskId: string, input: InboxActionInput }>({
   mutationFn: ({ taskId, input }) => api.inbox.act(taskId, input),
   write: (client, { task }) => {
-    if (task) client.setQueryData(keys.tasks.detail(task.ref), task)
+    if (task) writeTaskResponse(client, task)
   },
-  invalidates: ({ task }) => [keys.inbox(), keys.tasks.lists(), ...(task ? [keys.tasks.detail(task.ref)] : [])]
+  // Awaited: the page moves on with the fresh list (moveToNext)
+  invalidates: [keys.inbox()],
+  refreshes: ({ task }) => task ? [] : [keys.tasks.lists()]
 })
 
 // Clears the dot before the request. A failure refetches the true state.

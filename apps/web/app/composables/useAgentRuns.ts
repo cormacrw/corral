@@ -45,7 +45,7 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
     const slug = projects.value.find(p => p.id === run.projectId)?.slug
     return slug ? [{ taskId: run.taskId!, slug, ref: run.taskRef!, number: Number(run.taskRef!.split('-').at(-1)) }] : []
   }))
-  const designQueries = useQueries({ queries: computed(() => designTasks.value.map(task => taskDesignsQuery(task))) })
+  const designQueries = useQueries({ queries: computed(() => designTasks.value.map(task => taskDesignsQuery(task))), shallow: true })
   const designs = computed(() => designTasks.value.flatMap(({ taskId }, i) => {
     const versions = designQueries.value[i]?.data
     return versions ? [{ taskId, versions }] : []
@@ -66,7 +66,9 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
     onBeforeUnmount(() => clearInterval(timer))
   })
 
-  const weekAgo = computed(() => now.value - 7 * 86_400_000)
+  // The tiles count by day and week, so they needn't follow every second
+  const minute = computed(() => Math.floor(now.value / 60_000) * 60_000)
+  const weekAgo = computed(() => minute.value - 7 * 86_400_000)
   const thisWeek = computed(() => runs.value.filter(r => new Date(r.queuedAt).getTime() > weekAgo.value))
   const avgRun = computed(() => {
     const done = thisWeek.value.filter(r => r.startedAt && r.endedAt)
@@ -74,7 +76,7 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
     const ms = done.reduce((n, r) => n + new Date(r.endedAt!).getTime() - new Date(r.startedAt!).getTime(), 0) / done.length
     return `${Math.round(ms / 60_000)}m`
   })
-  const today = computed(() => runs.value.filter(r => new Date(r.queuedAt).toDateString() === new Date(now.value).toDateString()))
+  const today = computed(() => runs.value.filter(r => new Date(r.queuedAt).toDateString() === new Date(minute.value).toDateString()))
   const usageToday = computed(() => tokens(today.value.reduce((n, r) => n + (r.inputTokens ?? 0) + (r.outputTokens ?? 0), 0)))
   const tiles = computed(() => {
     if (!agent.value) return []

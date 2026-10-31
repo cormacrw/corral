@@ -12,6 +12,7 @@ const flyout = useTaskFlyout()
 const device = useDevice()
 const router = useRouter()
 const toast = useToast()
+const prefetch = useTaskPrefetch()
 const transition = useMutation(transitionTask)
 const create = useMutation(createTask)
 const { slug, project, tasks: all, epics: epicList, loading, error } = useProject()
@@ -223,6 +224,7 @@ async function newTask() {
                   type="button"
                   class="flex min-w-0 flex-1 items-center gap-3 px-3 py-2 text-start text-sm"
                   :aria-pressed="flyout.ref.value === task.ref"
+                  v-bind="prefetch(task, slug)"
                   @click="flyout.toggle(task.ref)"
                 >
                   <span class="w-14 shrink-0 font-mono text-xs text-muted">{{ task.ref }}</span>

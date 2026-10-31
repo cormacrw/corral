@@ -1,7 +1,8 @@
 import type { Query, QueryClient, QueryKey } from '@tanstack/vue-query'
 import { partialMatchKey } from '@tanstack/vue-query'
+import { ACTIVE_RUN_STATES } from '@corral/core'
 import type { Agent, Comment, Epic, EpicDetail, Inbox, PlanSession, PlanSessionDetail, Project, Run, RunEvent, ServerEvent, ServerEventType, Task } from '@corral/contracts'
-import { keys } from './keys'
+import { keys, type RunFilter } from './keys'
 
 // What depends on what: the single place that says which queries an event or
 // a mutation affects (wiki: query-layer).
@@ -18,6 +19,7 @@ export interface EventCache {
   taskRef: (taskId: string) => string | undefined
   // The cached epics listing a task, so it can leave one as well as join one
   epicsWith: (taskId: string) => string[]
+  runLists: () => QueryKey[]
   clearProject: (projectId: string) => void
 }
 
@@ -50,6 +52,17 @@ const addLines = (offset: number, events: RunEvent[]): Update<RunEvent[]> => (li
 // temporary entry
 export const withComment = (comments: Comment[], comment: Comment): Comment[] =>
   upsert(comments.filter(c => !(c.id.startsWith('pending-') && c.body === comment.body)), comment)
+
+// Keeps a filtered list as the server would return it, newest first. The server
+// returns the latest 50, so one that's full can't say what fell off the end.
+const RUN_LIST_LIMIT = 50
+const runMatches = (run: Run, { agentId, taskId, active }: RunFilter) =>
+  (!agentId || run.agentId === agentId) && (!taskId || run.taskId === taskId) && (!active || (ACTIVE_RUN_STATES as readonly string[]).includes(run.state))
+const placeRun = (run: Run, filter: RunFilter): Update<Run[]> => (runs) => {
+  if (!runs) return runs
+  if (!runMatches(run, filter)) return runs.some(r => r.id === run.id) ? runs.filter(r => r.id !== run.id) : runs
+  return runs.some(r => r.id === run.id) ? upsert(runs, run) : [run, ...runs].slice(0, RUN_LIST_LIMIT)
+}
 
 const taskEpics = (task: Task, cache: EventCache): string[] =>
   [...new Set([...(task.epicId ? [task.epicId] : []), ...cache.epicsWith(task.id)])]
@@ -165,13 +178,14 @@ export const eventDependencies: EventDependencies = {
   'run.updated': {
     write: ({ run }, cache) => {
       cache.set<Run>(keys.runs.detail(run.id), current => current && run)
-      cache.set<Run[]>(keys.runs.list({ agentId: run.agentId }), runs => runs && (runs.some(r => r.id === run.id) ? upsert(runs, run) : [run, ...runs]))
+      for (const key of cache.runLists()) cache.set<Run[]>(key, placeRun(run, key.at(-1) as RunFilter))
     },
-    // Lease changes show as counts on agents, a run's end goes in the task's
-    // history, and it can add evidence, a review, a design version or a push to
-    // the PR. Only the end: the PR is a GitHub read through the runner.
+    // Lists take the run above. Lease changes show as counts on agents, a run's
+    // end goes in the task's history, and it can add evidence, a review, a design
+    // version or a push to the PR. Only the end: the PR is a GitHub read through
+    // the runner.
     invalidates: ({ run }, cache) => [
-      keys.runs.lists(), keys.agents.list(), keys.inbox(),
+      keys.agents.list(), keys.inbox(),
       ...(run.taskRef ? [keys.tasks.history(run.taskRef), keys.tasks.evidence(run.taskRef), keys.tasks.reviews(run.taskRef), keys.tasks.designs(run.taskRef), ...(run.endedAt ? [keys.tasks.pullRequests(run.taskRef)] : [])] : []),
       ...projectStale(run.projectId, cache)
     ]
@@ -289,12 +303,20 @@ function eventCache(client: QueryClient, raced: QueryKey[]): EventCache {
     epicsWith: taskId => client.getQueriesData<EpicDetail>({ queryKey: keys.epics.details() })
       .filter(([, epic]) => epic?.tasks.some(t => t.id === taskId))
       .map(([, epic]) => epic!.id),
+    runLists: () => client.getQueriesData({ queryKey: keys.runs.lists() }).map(([key]) => key),
     clearProject: projectId => clearProject(client, projectId)
   }
 }
 
 // Writes the event's entity and returns the keys it leaves stale. The keys are
 // read first: a write can remove what they're looked up from.
+// A mutation's response, written everywhere the task shows, as its event will
+// be. The event can arrive first, so a response older than the cache is dropped.
+export function writeTaskResponse(client: QueryClient, task: Task): void {
+  if (cachedTasks(client).some(known => known.id === task.id && known.updatedAt > task.updatedAt)) return
+  writeTask(task, eventCache(client, []))
+}
+
 export function applyEvent(client: QueryClient, event: ServerEvent): QueryKey[] {
   const raced: QueryKey[] = []
   const cache = eventCache(client, raced)
@@ -304,24 +326,30 @@ export function applyEvent(client: QueryClient, event: ServerEvent): QueryKey[] 
   return [...stale, ...raced]
 }
 
+type Stale<TData, TVariables> = readonly QueryKey[] | ((data: TData, variables: TVariables) => readonly QueryKey[])
+
 export interface MutationDefinition<TData, TVariables> {
   mutationFn: (variables: TVariables) => Promise<TData>
   // Puts in the cache what a refetch can't get, before anything is invalidated
   write?: (client: QueryClient, data: TData, variables: TVariables) => void
   // Either fixed keys, or keys that depend on the result
-  invalidates: readonly QueryKey[] | ((data: TData, variables: TVariables) => readonly QueryKey[])
+  invalidates: Stale<TData, TVariables>
+  // The same, without holding up the caller: data the screen isn't waiting on
+  refreshes?: Stale<TData, TVariables>
 }
 
 // Options for useMutation. A mutation says what it changes; nothing reloads by
-// hand. Invalidation runs only on success, and waits for the refetch, so a
-// caller's pending state ends once the screen is current. A failure rejects
-// mutateAsync and sets `error`.
-export function defineMutation<TData, TVariables = void>({ mutationFn, write, invalidates }: MutationDefinition<TData, TVariables>) {
+// hand. Invalidation runs only on success, and `invalidates` waits for the
+// refetch, so a caller's pending state ends once the screen is current. A
+// failure rejects mutateAsync and sets `error`.
+export function defineMutation<TData, TVariables = void>({ mutationFn, write, invalidates, refreshes = [] }: MutationDefinition<TData, TVariables>) {
+  const stale = (keys: Stale<TData, TVariables>, data: TData, variables: TVariables) => typeof keys === 'function' ? keys(data, variables) : keys
   return {
     mutationFn,
     onSuccess: (data: TData, variables: TVariables, _result: unknown, { client }: { client: QueryClient }) => {
       write?.(client, data, variables)
-      return invalidateKeys(client, typeof invalidates === 'function' ? invalidates(data, variables) : invalidates)
+      void invalidateKeys(client, stale(refreshes, data, variables))
+      return invalidateKeys(client, stale(invalidates, data, variables))
     }
   }
 }
