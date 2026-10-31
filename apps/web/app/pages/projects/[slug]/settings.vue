@@ -1,21 +1,23 @@
 <script setup lang="ts">
-import { useMutation } from '@tanstack/vue-query'
+import { useMutation, useQuery } from '@tanstack/vue-query'
 import type { PatchProjectInput, Project } from '@corral/contracts'
 import { DEFAULT_LIMITS } from '@corral/core'
-import { api, ApiError } from '~/composables/useApi'
-import { removeProject, setProjectThumbnail } from '~/queries/projects'
+import { ApiError } from '~/composables/useApi'
+import { patchProject, projectsQuery, removeProject, setProjectThumbnail } from '~/queries/projects'
 import { EPIC_REVIEW_MODE, THUMBNAIL_COLORS } from '~/utils/labels'
 
 // Project settings (design/project-settings.md): form fields save together; pause and images apply immediately.
 // On mobile the sections stack under the mobile header, which holds Save (design/mobile.md).
 const route = useRoute()
 const device = useDevice()
-const live = useLive()
+const router = useRouter()
+const { data: projects } = useQuery(projectsQuery())
+const patch = useMutation(patchProject)
 const thumbnail = useMutation(setProjectThumbnail)
 const removal = useMutation(removeProject)
 const toast = useToast()
 const slug = computed(() => String(route.params.slug))
-const project = computed(() => live.state.value.projects.find(p => p.slug === slug.value) ?? null)
+const project = computed(() => projects.value?.find(p => p.slug === slug.value) ?? null)
 useSeoMeta({ title: () => `Settings · ${project.value?.name ?? ''} · Corral` })
 
 const form = reactive<Required<Omit<PatchProjectInput, 'paused'>>>({
@@ -51,7 +53,7 @@ async function save() {
   saving.value = true
   prefixError.value = ''
   try {
-    await api.projects.patch(slug.value, { ...form })
+    await patch.mutateAsync({ slug: slug.value, input: { ...form } })
     saved.value = true
     setTimeout(() => {
       saved.value = false
@@ -66,7 +68,7 @@ async function save() {
 async function setPaused(paused: boolean) {
   if (!project.value) return
   try {
-    await api.projects.patch(slug.value, { paused })
+    await patch.mutateAsync({ slug: slug.value, input: { paused } })
   } catch (e) {
     toast.add({ title: 'Could not change pause', description: e instanceof Error ? e.message : String(e), color: 'error' })
   }
@@ -108,7 +110,7 @@ const customCheck = ref('')
 // Remove: the server wants the exact name echoed back, so the confirm button waits for it
 const removeOpen = ref(false)
 const removeConfirm = ref('')
-const removing = ref(false)
+const removing = useRemovingProject()
 function openRemove() {
   removeConfirm.value = ''
   removeOpen.value = true
@@ -116,17 +118,17 @@ function openRemove() {
 async function remove() {
   const p = project.value
   if (!p || removeConfirm.value !== p.name) return
-  removing.value = true
+  removing.value = p.slug
   try {
-    await removal.mutateAsync({ slug: p.slug, confirm: removeConfirm.value })
+    await removal.mutateAsync({ id: p.id, slug: p.slug, confirm: removeConfirm.value })
     removeOpen.value = false
     toast.add({ title: `Removed ${p.name}`, color: 'success' })
-    const next = live.state.value.projects.find(x => x.id !== p.id)
-    await navigateTo(next ? `/projects/${next.slug}` : '/setup')
+    const next = projects.value?.find(x => x.id !== p.id)
+    await router.push(next ? `/projects/${next.slug}` : '/setup')
   } catch (e) {
     toast.add({ title: 'Not removed', description: e instanceof Error ? e.message : String(e), color: 'error' })
   } finally {
-    removing.value = false
+    removing.value = null
   }
 }
 </script>
@@ -497,7 +499,7 @@ async function remove() {
             :label="`Remove ${project.name}`"
             color="error"
             :disabled="removeConfirm !== project.name"
-            :loading="removing"
+            :loading="Boolean(removing)"
           />
         </template>
       </UModal>

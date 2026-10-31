@@ -1,4 +1,4 @@
-import type { QueryClient, QueryKey } from '@tanstack/vue-query'
+import type { Query, QueryClient, QueryKey } from '@tanstack/vue-query'
 import { partialMatchKey } from '@tanstack/vue-query'
 import type { Agent, Comment, Epic, EpicDetail, Inbox, PlanSession, PlanSessionDetail, Project, Run, RunEvent, ServerEvent, ServerEventType, Task } from '@corral/contracts'
 import { keys } from './keys'
@@ -16,6 +16,7 @@ export interface EventCache {
   get: <T>(key: QueryKey) => T | undefined
   slug: (projectId: string) => string | undefined
   taskRef: (taskId: string) => string | undefined
+  clearProject: (projectId: string) => void
 }
 
 interface EventEffect<E extends ServerEvent> {
@@ -71,11 +72,16 @@ function taskStale(task: Task, cache: EventCache): QueryKey[] {
   ]
 }
 
+// What refetches once a project is gone. The list is here because a fetch in
+// flight started before the removal and would bring the project back.
+export const removedProjectStale = [keys.projects.list(), keys.inbox(), keys.tasks.lists(), keys.epics.lists(), keys.plan.all(), keys.runs.lists(), keys.setup.repos()]
+
 // Typed by event, so a ServerEvent without an entry here doesn't compile
 export const eventDependencies: EventDependencies = {
   'project.created': {
     write: ({ project }, cache) => cache.set<Project[]>(keys.projects.list(), upsertInto(project)),
-    invalidates: () => []
+    // Rows say which project uses them
+    invalidates: () => [keys.setup.repos()]
   },
   'project.updated': {
     write: ({ project }, cache) => {
@@ -85,15 +91,8 @@ export const eventDependencies: EventDependencies = {
     invalidates: () => []
   },
   'project.deleted': {
-    write: ({ projectId }, cache) => {
-      const slug = cache.slug(projectId)
-      if (slug) {
-        cache.set<Task[]>(keys.tasks.list(slug), list => list && [])
-        cache.set<Epic[]>(keys.epics.list(slug), list => list && [])
-      }
-      cache.set<Project[]>(keys.projects.list(), list => list?.filter(p => p.id !== projectId))
-    },
-    invalidates: () => [keys.inbox(), keys.plan.all()]
+    write: ({ projectId }, cache) => cache.clearProject(projectId),
+    invalidates: () => removedProjectStale
   },
   'task.created': {
     write: ({ task }, cache) => writeTask(task, cache),
@@ -216,6 +215,39 @@ export function invalidateKeys(client: QueryClient, stale: readonly QueryKey[]):
   return client.invalidateQueries({ predicate: query => stale.some(key => partialMatchKey(query.queryKey, key)) })
 }
 
+function cachedTasks(client: QueryClient): Task[] {
+  const details = client.getQueriesData<Task>({ queryKey: keys.tasks.details(), predicate: query => query.queryKey.length === keys.tasks.detail('').length })
+  const lists = client.getQueriesData<Task[]>({ queryKey: keys.tasks.lists() })
+  return [...details.flatMap(([, task]) => task ?? []), ...lists.flatMap(([, list]) => list ?? [])]
+}
+
+// Drops everything cached for a project, so none of it can show again. The
+// removal's response and its event both land here, in either order; the second
+// finds nothing left.
+export function clearProject(client: QueryClient, projectId: string): void {
+  const slug = client.getQueryData<Project[]>(keys.projects.list())?.find(p => p.id === projectId)?.slug
+  const owned = (queryKey: QueryKey) => client.getQueriesData<{ projectId?: string }>({ queryKey })
+    .filter(([, data]) => data?.projectId === projectId)
+    .map(([key]) => key)
+  const removed = [
+    ...(slug ? [keys.projects.detail(slug), keys.tasks.list(slug), keys.epics.list(slug), keys.plan.drafts(slug)] : []),
+    ...cachedTasks(client).filter(task => task.projectId === projectId).map(task => keys.tasks.detail(task.ref)),
+    ...owned(keys.epics.details()),
+    ...owned(keys.runs.all()),
+    ...owned(keys.plan.sessions())
+  ]
+  const isRemoved = (query: Query) => removed.some(key => partialMatchKey(query.queryKey, key))
+  client.removeQueries({ predicate: query => isRemoved(query) && !query.isActive() })
+  // A mounted observer keeps showing a removed query's data, so one still on
+  // screen loses it and refetches to the server's 404
+  void client.resetQueries({ predicate: isRemoved })
+  // These lists span projects, so they lose its rows and stay
+  const others = <T extends { projectId: string }>(list: T[] | undefined) => list?.filter(item => item.projectId !== projectId)
+  client.setQueriesData<Run[]>({ queryKey: keys.runs.lists() }, others)
+  client.setQueryData<PlanSession[]>(keys.plan.sessions(), others)
+  client.setQueryData<Project[]>(keys.projects.list(), list => list?.filter(p => p.id !== projectId))
+}
+
 function eventCache(client: QueryClient, raced: QueryKey[]): EventCache {
   return {
     set: (key, update) => {
@@ -226,11 +258,8 @@ function eventCache(client: QueryClient, raced: QueryKey[]): EventCache {
     },
     get: key => client.getQueryData(key),
     slug: projectId => client.getQueryData<Project[]>(keys.projects.list())?.find(p => p.id === projectId)?.slug,
-    taskRef: (taskId) => {
-      const details = client.getQueriesData<Task>({ queryKey: keys.tasks.details(), predicate: query => query.queryKey.length === keys.tasks.detail('').length })
-      const lists = client.getQueriesData<Task[]>({ queryKey: keys.tasks.lists() })
-      return [...details.flatMap(([, task]) => task ?? []), ...lists.flatMap(([, list]) => list ?? [])].find(t => t.id === taskId)?.ref
-    }
+    taskRef: taskId => cachedTasks(client).find(t => t.id === taskId)?.ref,
+    clearProject: projectId => clearProject(client, projectId)
   }
 }
 
@@ -247,6 +276,8 @@ export function applyEvent(client: QueryClient, event: ServerEvent): QueryKey[] 
 
 export interface MutationDefinition<TData, TVariables> {
   mutationFn: (variables: TVariables) => Promise<TData>
+  // Puts in the cache what a refetch can't get, before anything is invalidated
+  write?: (client: QueryClient, data: TData, variables: TVariables) => void
   // Either fixed keys, or keys that depend on the result
   invalidates: readonly QueryKey[] | ((data: TData, variables: TVariables) => readonly QueryKey[])
 }
@@ -255,10 +286,12 @@ export interface MutationDefinition<TData, TVariables> {
 // hand. Invalidation runs only on success, and waits for the refetch, so a
 // caller's pending state ends once the screen is current. A failure rejects
 // mutateAsync and sets `error`.
-export function defineMutation<TData, TVariables = void>({ mutationFn, invalidates }: MutationDefinition<TData, TVariables>) {
+export function defineMutation<TData, TVariables = void>({ mutationFn, write, invalidates }: MutationDefinition<TData, TVariables>) {
   return {
     mutationFn,
-    onSuccess: (data: TData, variables: TVariables, _result: unknown, { client }: { client: QueryClient }) =>
-      invalidateKeys(client, typeof invalidates === 'function' ? invalidates(data, variables) : invalidates)
+    onSuccess: (data: TData, variables: TVariables, _result: unknown, { client }: { client: QueryClient }) => {
+      write?.(client, data, variables)
+      return invalidateKeys(client, typeof invalidates === 'function' ? invalidates(data, variables) : invalidates)
+    }
   }
 }

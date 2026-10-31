@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { useMutation } from '@tanstack/vue-query'
-import type { Agent, AgentRuntime, CliStatus } from '@corral/contracts'
-import { api } from '~/composables/useApi'
-import { patchAgent as patchAgentMutation, setAgentAvatar } from '~/queries/agents'
-import { patchProfile, setProfileAvatar } from '~/queries/system'
+import { useMutation, useQuery } from '@tanstack/vue-query'
+import type { Agent, AgentRuntime } from '@corral/contracts'
+import type { api } from '~/composables/useApi'
+import { agentsQuery, patchAgent as patchAgentMutation, setAgentAvatar } from '~/queries/agents'
+import { clisQuery } from '~/queries/setup'
+import { patchProfile, profileQuery, resumeAll as resumeAllMutation, setProfileAvatar, statusQuery, stopAll as stopAllMutation } from '~/queries/system'
 import { agentLimit } from '~/utils/agents'
 import { parseOverride } from '~/utils/device'
 import { cliLoginCommand, detectedRuntimes, ROLE, runtimeLabel } from '~/utils/labels'
@@ -12,7 +13,11 @@ definePageMeta({ key: 'settings' })
 
 // Global settings (design/settings.md): profile, agents, runner, appearance
 const route = useRoute()
-const live = useLive()
+const { data: profile } = useQuery(profileQuery())
+const { data: agents } = useQuery(agentsQuery())
+const { data: status } = useQuery(statusQuery())
+const stopping = useMutation(stopAllMutation)
+const resuming = useMutation(resumeAllMutation)
 const profilePatch = useMutation(patchProfile)
 const profileAvatar = useMutation(setProfileAvatar)
 const agentPatch = useMutation(patchAgentMutation)
@@ -26,13 +31,13 @@ const section = computed(() => (typeof route.params.section === 'string' ? route
 useSeoMeta({ title: 'Settings · Corral' })
 
 // Kept on the server with the picture, so every browser shows the same name
-const userName = ref(live.state.value.profile?.name ?? '')
-watch(() => live.state.value.profile?.name, (name) => {
+const userName = ref(profile.value?.name ?? '')
+watch(() => profile.value?.name, (name) => {
   if (name !== undefined) userName.value = name
 })
 async function saveName() {
   const name = userName.value.trim()
-  if (name === live.state.value.profile?.name) return
+  if (name === profile.value?.name) return
   try {
     await profilePatch.mutateAsync({ name })
     toast.add({ title: 'Saved', color: 'success' })
@@ -40,20 +45,17 @@ async function saveName() {
     toast.add({ title: 'Not saved', description: e instanceof Error ? e.message : String(e), color: 'error' })
   }
 }
-const clis = ref<CliStatus[] | null>(null)
-const cliError = ref<string | null>(null)
-async function scan() {
-  cliError.value = null
-  try {
-    clis.value = await api.setup.clis()
-  } catch (e) {
-    cliError.value = e instanceof Error ? e.message : String(e)
-  }
-}
 // The runner page shows the logins; the agents page needs them for the runtime menu
-watch(section, (s) => {
-  if (s === 'runner' || s === 'agents') void scan()
-}, { immediate: true })
+const usesClis = (s: string | null) => s === 'runner' || s === 'agents'
+const cliScan = useQuery(computed(() => ({ ...clisQuery(), enabled: usesClis(section.value) })))
+const clis = computed(() => cliScan.data.value ?? null)
+const cliError = computed(() => cliScan.error.value?.message ?? null)
+const scan = () => cliScan.refetch()
+// The page stays mounted between sections, and the query only rescans by itself
+// when it turns on, so a move straight from one of these to the other asks here
+watch(section, (s, previous) => {
+  if (usesClis(s) && usesClis(previous)) void scan()
+})
 
 const adding = ref(false)
 // Existing agents can switch to any detected runtime, keeping their current one listed
@@ -83,14 +85,14 @@ async function saveAgentAvatar(agent: Agent, image: Blob | null) {
 }
 async function stopAll() {
   try {
-    await api.stopAll()
+    await stopping.mutateAsync()
   } catch (e) {
     toast.add({ title: 'Could not stop', description: e instanceof Error ? e.message : String(e), color: 'error' })
   }
 }
 async function resumeAll() {
   try {
-    await api.resumeAll()
+    await resuming.mutateAsync()
   } catch (e) {
     toast.add({ title: 'Could not resume', description: e instanceof Error ? e.message : String(e), color: 'error' })
   }
@@ -125,8 +127,8 @@ const items = [
       <SettingsMobile v-if="section === null" />
       <SettingsAgentsMobile
         v-else-if="section === 'agents'"
-        :agents="live.state.value.agents"
-        :stopped="live.state.value.status.stopped"
+        :agents="agents ?? []"
+        :stopped="status?.stopped ?? false"
         :runtime-items="runtimeItems"
         :patch-agent="patchAgent"
         :patch-wake-interval="patchWakeInterval"
@@ -209,7 +211,7 @@ const items = [
             </div>
             <AvatarUpload
               name="You"
-              :avatar-url="live.state.value.profile?.avatarUrl ?? null"
+              :avatar-url="profile?.avatarUrl ?? null"
               :save="(image: Blob) => saveMyAvatar(image)"
               :remove="() => saveMyAvatar(null)"
             />
@@ -256,7 +258,7 @@ const items = [
             </template>
             <ul class="divide-y divide-default">
               <li
-                v-for="agent in live.state.value.agents"
+                v-for="agent in agents"
                 :key="agent.id"
                 class="flex flex-wrap items-center gap-3 py-3"
               >
@@ -371,7 +373,7 @@ const items = [
                 </p>
               </div>
               <UButton
-                v-if="live.state.value.status.stopped"
+                v-if="status?.stopped"
                 label="Resume everything"
                 @click="resumeAll"
               />

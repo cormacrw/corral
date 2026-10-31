@@ -1,9 +1,10 @@
-import { useMutation, useQueryClient } from '@tanstack/vue-query'
-import type { CliStatus, RepoCheck, RepoChoice, RepoList } from '@corral/contracts'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import type { CliStatus, RepoCheck, RepoChoice } from '@corral/contracts'
 import { suggestPrefix } from '~/utils/prefix'
 import { ApiError, api } from '~/composables/useApi'
 import { agentsQuery, patchAgent } from '~/queries/agents'
 import { createProject, projectsQuery } from '~/queries/projects'
+import { clisQuery, refreshRepos, reposQuery } from '~/queries/setup'
 import { patchProfile, profileQuery } from '~/queries/system'
 import { cliLoginCommand } from '~/utils/labels'
 
@@ -55,8 +56,10 @@ export function useSetup() {
   }
 
   // Step 2
-  const repos = ref<RepoList | null>(null)
-  const reposError = ref<string | null>(null)
+  const reposList = useQuery(computed(() => ({ ...reposQuery(), enabled: step.value === 'repo' })))
+  const repoRefresh = useMutation(refreshRepos)
+  const repos = computed(() => reposList.data.value ?? null)
+  const reposError = computed(() => (repoRefresh.error.value ?? reposList.error.value)?.message ?? null)
   const repoSearch = ref('')
   const picked = ref<RepoChoice | null>(null)
   const pasted = ref('')
@@ -73,14 +76,8 @@ export function useSetup() {
   }
   const defaultBranch = ref('main')
   const mergeMethod = ref<'squash' | 'merge' | 'rebase'>('squash')
-  async function loadRepos(refresh = false) {
-    reposError.value = null
-    try {
-      repos.value = await api.setup.repos(refresh)
-    } catch (e) {
-      reposError.value = e instanceof Error ? e.message : String(e)
-    }
-  }
+  // Asks GitHub again, past the server's cached list; `error` reports a failure
+  const loadRepos = () => repoRefresh.mutateAsync().catch(() => {})
   const repoRows = computed(() => repos.value?.signedIn ? repos.value.repos.filter(r => !repoSearch.value || r.nameWithOwner.toLowerCase().includes(repoSearch.value.toLowerCase())) : [])
   let pickVersion = 0
   async function pick(repo: RepoChoice | string) {
@@ -104,22 +101,12 @@ export function useSetup() {
       if (version === pickVersion) checking.value = false
     }
   }
-  watch(step, (s) => {
-    if (s === 'repo' && !repos.value) void loadRepos()
-    if (s === 'agents' && !clis.value) void scan()
-  }, { immediate: true })
 
   // Step 3
-  const clis = ref<CliStatus[] | null>(null)
-  const cliError = ref<string | null>(null)
-  async function scan() {
-    cliError.value = null
-    try {
-      clis.value = await api.setup.clis()
-    } catch (e) {
-      cliError.value = e instanceof Error ? e.message : String(e)
-    }
-  }
+  const cliScan = useQuery(computed(() => ({ ...clisQuery(), enabled: step.value === 'agents' })))
+  const clis = computed(() => cliScan.data.value ?? null)
+  const cliError = computed(() => cliScan.error.value?.message ?? null)
+  const scan = () => cliScan.refetch()
   // Claude Code runs the default agents; Codex runs only agents set to it
   const cliReady = computed(() => clis.value?.some(c => c.id === 'claude' && c.signedIn) ?? false)
   function cliDetail(cli: CliStatus): string {

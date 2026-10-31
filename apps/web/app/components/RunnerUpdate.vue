@@ -1,11 +1,10 @@
 <script setup lang="ts">
+import { useMutation } from '@tanstack/vue-query'
 import type { RunnerInfo } from '@corral/contracts'
-import { api } from '~/composables/useApi'
-import { reloadShell } from '~/queries/shell'
+import { updateRunner } from '~/queries/system'
 
 const props = defineProps<{ runner: RunnerInfo }>()
-const pending = ref(false)
-const error = ref('')
+const request = useMutation(updateRunner)
 const label = computed(() => {
   const r = props.runner
   if (r.updateState === 'failed') return `Update failed · ${r.updateError || 'Please retry'}`
@@ -16,18 +15,6 @@ const label = computed(() => {
   if (r.behind) return 'Behind server'
   return `Up to date · ${r.commit.slice(0, 7)}`
 })
-async function update() {
-  pending.value = true
-  error.value = ''
-  try {
-    await api.updateRunner(props.runner.id)
-    await reloadShell()
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Update request failed'
-  } finally {
-    pending.value = false
-  }
-}
 </script>
 
 <template>
@@ -45,12 +32,12 @@ async function update() {
       label="Update now"
       size="xs"
       variant="soft"
-      :loading="pending"
-      @click="update"
+      :loading="request.isPending.value"
+      @click="request.mutate(runner.id)"
     />
     <span
-      v-if="error"
+      v-if="request.error.value"
       class="text-error"
-    >{{ error }}</span>
+    >{{ request.error.value.message || 'Update request failed' }}</span>
   </div>
 </template>
