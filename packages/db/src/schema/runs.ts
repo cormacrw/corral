@@ -101,6 +101,12 @@ export const runs = pgTable('runs', {
   index().on(t.taskId),
   index().on(t.epicId),
   index().on(t.agentId, t.state),
+  index().on(t.agentId, t.queuedAt),
+  index().on(t.planSessionId),
+  index().on(t.projectId),
+  // The few live runs among many finished ones. Lists ACTIVE_RUN_STATES.
+  index('runs_active_number_index').on(t.number)
+    .where(sql`${t.state} in ('queued', 'starting', 'running', 'waiting_for_input', 'stopping')`),
   check('runs_task_unless_pm', sql`${t.taskId} is not null or ${t.role} = 'pm' or (${t.epicId} is not null and ${t.role} = 'reviewer')`),
   // A PM turn belongs to neither a task nor an epic, a developer or designer
   // never to an epic, and a reviewer to one or the other. planSessionId isn't checked: it

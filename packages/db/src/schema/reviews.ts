@@ -21,7 +21,7 @@ export const reviews = pgTable('reviews', {
   // Who gave the verdict: the reviewer agent, or a human in Human review
   author: actor('author'),
   createdAt: createdAt()
-}, t => [index().on(t.taskId, t.headSha)])
+}, t => [index().on(t.taskId, t.headSha), index().on(t.runId)])
 
 // Proof for acceptance criteria (PRD §7.7). The file is an immutable blob;
 // this row says what it proves. `round` is the task's review round when it
@@ -48,6 +48,8 @@ export const evidence = pgTable('evidence', {
   // Migration uses SET NULL (criterion_id) to preserve task_id.
   foreignKey({ name: 'evidence_criterion_same_task_fk', columns: [t.taskId, t.criterionId], foreignColumns: [acceptanceCriteria.taskId, acceptanceCriteria.id] }).onDelete('set null'),
   index().on(t.taskId, t.round),
+  index().on(t.runId),
+  index().on(t.criterionId),
   // ECMAScript trim whitespace, including NBSP and BOM, matches the API.
   check('evidence_note_or_file', sql`(
     (${t.kind}::text = 'note' and ${t.note} ~ '[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]' and ${t.blob} is null and ${t.fileName} is null and ${t.contentType} is null and ${t.size} = 0)

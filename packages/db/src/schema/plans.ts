@@ -60,6 +60,7 @@ export const planMessages = pgTable('plan_messages', {
   createdAt: createdAt()
 }, t => [
   index().on(t.sessionId, t.createdAt),
+  index().on(t.runId),
   // The migration diagnoses history, then adds these NOT VALID for future writes.
   // History stays as written and toMessage reads it
   check('plan_messages_role_kind', sql`(${t.role} = 'human' and ${t.kind} = 'message') or (${t.role} = 'pm' and ${t.kind} in ('message', 'question', 'error'))`),
@@ -100,6 +101,7 @@ export const planTasks = pgTable('plan_tasks', {
   revision: jsonb().$type<PlanRevision>()
 }, t => [
   primaryKey({ columns: [t.planId, t.key] }),
+  index().on(t.taskId),
   // Change is a version diff, not whether this item references an existing
   // task: even an added or unchanged item can stage edits. FK deletion may
   // clear taskId later without clearing the historical revision.

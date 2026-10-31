@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm'
 import { bigint, index, jsonb, pgTable, text, uuid } from 'drizzle-orm/pg-core'
 import { actor, createdAt, updatedAt } from './columns.ts'
 import { projects } from './projects.ts'
@@ -21,4 +22,12 @@ export const auditLog = pgTable('audit_log', {
   action: text().notNull(),
   detail: jsonb().notNull().default({}),
   createdAt: createdAt()
-}, t => [index().on(t.taskId), index().on(t.projectId, t.createdAt)])
+}, t => [
+  index().on(t.taskId),
+  index().on(t.projectId, t.createdAt),
+  index().on(t.action, t.createdAt, t.id),
+  // The Inbox's Activity and Resolved history. Plain ascending keys, as a
+  // backward scan is what serves ORDER BY ... DESC (NULLS FIRST)
+  index('audit_log_inbox_history_index').on(t.createdAt, t.id)
+    .where(sql`${t.action} in ('task.transition', 'review.recorded', 'task.deleted')`)
+])
