@@ -45,7 +45,7 @@ const MERGE_GATE_NAMES: Record<MergeGate, string> = {
 }
 
 const words = (code: string) => code.replaceAll('_', ' ')
-const statusName = (status: string) => { const name = words(status); return name[0]!.toUpperCase() + name.slice(1) }
+const statusName = (status: string) => words(status).replace(/^./, first => first.toUpperCase())
 
 function transitionReason(reason: TransitionError): string {
   switch (reason.code) {

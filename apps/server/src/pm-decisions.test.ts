@@ -202,7 +202,7 @@ describe('PM tools for the Inbox, designs and agents', () => {
       const [pm] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'pm'))
       await t.db.update(schema.agents).set({ paused: true }).where(eq(schema.agents.id, pm!.id))
       const failed = await propose('approve_design', { taskRef: created.ref, version: 1 })
-      expect(await (await resolve(failed.actionId, 'confirm')).json()).toMatchObject({ pendingAction: { status: 'failed', error: expect.stringContaining('pm_paused') } })
+      expect(await (await resolve(failed.actionId, 'confirm')).json()).toMatchObject({ pendingAction: { status: 'failed', error: 'conflict: pm paused' } })
       await t.db.update(schema.agents).set({ paused: false }).where(eq(schema.agents.id, pm!.id))
       const retry = await propose('approve_design', { taskRef: created.ref, version: 1 })
       expect(await (await resolve(retry.actionId, 'confirm')).json()).toMatchObject({ pendingAction: { status: 'confirmed' } })
