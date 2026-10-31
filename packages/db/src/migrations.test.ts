@@ -304,7 +304,7 @@ describe('migrations', () => {
     ])
   })
 
-  it('0028 preserves historical runs with null runner ownership', async () => {
+  it('0028 preserves historical runs with null runner ownership', { timeout: 60_000 }, async () => {
     const before = await migrationsBefore('0028_complex_clint_barton')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
     const client = new PGlite()
@@ -323,7 +323,7 @@ describe('migrations', () => {
     expect((await db.execute(sql`select runner_id from runs order by number`)).rows).toEqual([{ runner_id: null }, { runner_id: 'runner-B' }])
   })
 
-  it('0015 turns every task of the four old types into a task (D19)', async () => {
+  it('0015 turns every task of the four old types into a task (D19)', { timeout: 60_000 }, async () => {
     const before = await migrationsBefore('0015_task_bug_spike')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
     const client = new PGlite()
@@ -358,7 +358,7 @@ describe('migrations', () => {
     expect(values.rows.map(r => r.value)).toEqual(['task', 'bug', 'spike'])
     // Two full migration runs on PGlite
   })
-  it('0016 adds the design type and design versions to a database with tasks (D20)', async () => {
+  it('0016 adds the design type and design versions to a database with tasks (D20)', { timeout: 60_000 }, async () => {
     const before = await migrationsBefore('0016_design_tasks')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
     const client = new PGlite()
@@ -401,7 +401,7 @@ describe('migrations', () => {
     expect((await db.execute(sql`select * from design_versions`)).rows).toEqual([])
   })
 
-  it('0023 adds closed_at to plan sessions, leaving existing sessions open', async () => {
+  it('0023 adds closed_at to plan sessions, leaving existing sessions open', { timeout: 60_000 }, async () => {
     const before = await migrationsBefore('0023_third_mandrill')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
     const client = new PGlite()

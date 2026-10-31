@@ -75,8 +75,8 @@ describe.each(['pglite', 'postgres'] as const)('claimNextTask on %s', (driver) =
     const [downstream] = await t.db.insert(schema.epics).values({ projectId: project.id, title: 'Downstream', createdBy: t.actor }).returning()
     await t.db.update(tasks).set({ epicId: upstream!.id }).where(eq(tasks.id, dependency.id))
     await t.db.update(tasks).set({ type: 'design', status, epicId: downstream!.id }).where(eq(tasks.id, design.id))
-    await t.db.insert(schema.taskDependencies).values({ taskId: design.id, dependsOnId: dependency.id })
-    await t.db.insert(schema.epicDependencies).values({ epicId: downstream!.id, dependsOnEpicId: upstream!.id })
+    await t.db.insert(schema.taskDependencies).values({ projectId: project.id, taskId: design.id, dependsOnId: dependency.id })
+    await t.db.insert(schema.epicDependencies).values({ projectId: project.id, epicId: downstream!.id, dependsOnEpicId: upstream!.id })
     const designer = await developer(5, { role: 'designer' })
     expect(await claimNextTask(t.db, designer)).toBeNull()
     // Remove the task dependency: the epic dependency still blocks it.

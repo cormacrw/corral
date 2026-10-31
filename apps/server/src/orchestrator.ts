@@ -1153,16 +1153,17 @@ export class Orchestrator implements RunnerHandlers {
       })
     }
     if (tool === 'attach_evidence') {
-      const parsed = evidenceSchema.safeParse(input)
+      const pmInput = role === 'pm' ? z.looseObject({ taskRef: z.string().optional() }).parse(input) : null
+      const { taskRef: ref, ...fields } = pmInput ?? {}
+      const parsed = evidenceSchema.safeParse(pmInput ? fields : input)
       if (!parsed.success) throw new ToolError(`Not attached. ${parsed.error.issues.map(i => i.message).join('. ')}.`)
       if (role === 'pm') {
         if (!this.plans || !ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
-        const { taskRef: ref } = z.object({ taskRef: z.string().optional() }).parse(input)
         if (ref) return this.#attachEvidence({ ...ctx, task: await findTaskByRef(this.#d.db, ctx.project, ref) }, parsed.data)
         if (parsed.data.criterionId) throw new ToolError('Pass taskRef to attach evidence for a criterion')
         const attached = await this.#attachEvidence(ctx, parsed.data)
-        const label = (parsed.data.fileName ?? 'Evidence').replace(/[[\]\\]/g, '')
-        await this.plans.attachEvidence(ctx.run.planSessionId, ctx.run.id, parsed.data.dataBase64 === undefined ? parsed.data.note : `${parsed.data.note}\n\n[${label}](/api/evidence/${attached.id}/file)`)
+        const label = (parsed.data.kind === 'note' ? 'Evidence' : parsed.data.fileName).replace(/[[\]\\]/g, '')
+        await this.plans.attachEvidence(ctx.run.planSessionId, ctx.run.id, parsed.data.kind === 'note' ? parsed.data.note : `${parsed.data.note}\n\n[${label}](/api/evidence/${attached.id}/file)`)
         return attached
       }
       return this.#attachEvidence(ctx, parsed.data)

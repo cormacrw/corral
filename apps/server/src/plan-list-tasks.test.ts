@@ -31,7 +31,7 @@ describe('list_tasks', { timeout: 30_000 }, () => {
     await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
     const [first] = await t.db.insert(schema.epics).values({ projectId: project.id, title: 'First', createdBy: t.actor }).returning()
     const [second] = await t.db.insert(schema.epics).values({ projectId: project.id, title: 'Second', createdBy: t.actor }).returning()
-    await t.db.insert(schema.epicDependencies).values({ epicId: second!.id, dependsOnEpicId: first!.id })
+    await t.db.insert(schema.epicDependencies).values({ projectId: project.id, epicId: second!.id, dependsOnEpicId: first!.id })
     const login = await t.createTask(project.slug, { title: 'Login form', type: 'task', priority: 'high', epicId: first!.id })
     const logout = await t.createTask(project.slug, { title: 'Logout button', type: 'bug', dependsOn: [login.number] })
     const shipped = await t.createTask(project.slug, { title: 'Shipped work' })

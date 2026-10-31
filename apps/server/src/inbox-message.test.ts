@@ -51,9 +51,9 @@ describe('stored conversational Inbox messages', () => {
   async function item(id: string, label = 'Inbox read') {
     return (await inbox(label)).needsYou.find(i => i.id === id) as TaskInboxItem
   }
-  async function enter(id: string, status: 'human_review' | 'blocked' | 'failed', event = 'review_approved', createdAt = at()) {
+  async function enter(id: string, status: 'human_review' | 'blocked' | 'failed', event = 'review_approved', createdAt = at(), statusReason: string | null = null) {
     const [before] = await t.db.select().from(tasks).where(eq(tasks.id, id))
-    await t.db.update(tasks).set({ status, updatedAt: createdAt }).where(eq(tasks.id, id))
+    await t.db.update(tasks).set({ status, statusReason, updatedAt: createdAt }).where(eq(tasks.id, id))
     await t.db.insert(auditLog).values({ projectId: project.id, taskId: id, actor: developer, action: 'task.transition', detail: { from: before!.status, to: status, event }, createdAt })
     t.bus.publish({ type: 'task.updated', task: await loadTask(t.db, id) })
   }
@@ -130,9 +130,8 @@ describe('stored conversational Inbox messages', () => {
     }
     for (const kind of ['spike', 'failed', 'blocked', 'question'] as const) {
       const task = await t.createTask(project.slug, { title: `Investigate ${kind} sign-in issue`, type: kind === 'spike' ? 'spike' : 'task' })
-      await t.db.update(tasks).set({ statusReason: long }).where(eq(tasks.id, task.id))
       if (kind === 'spike') await t.db.insert(comments).values({ taskId: task.id, author: developer, body: `## Findings\n${long}` })
-      await enter(task.id, kind === 'spike' ? 'human_review' : kind === 'failed' ? 'failed' : 'blocked', kind === 'question' ? 'stuck' : 'review_approved')
+      await enter(task.id, kind === 'spike' ? 'human_review' : kind === 'failed' ? 'failed' : 'blocked', kind === 'question' ? 'stuck' : 'review_approved', at(), kind === 'spike' ? null : long)
       const failedJob = await nextJob()
       // The reply to this barrier follows the model error on the same socket.
       await t.runner.request({ kind: 'detect_clis' })

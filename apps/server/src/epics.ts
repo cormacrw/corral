@@ -1,7 +1,7 @@
 import type { Epic, EpicDetail, PatchEpicInput } from '@corral/contracts'
 import { checkEpicDependencies, isTaskDone, type CompletionState, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { asc, eq, or } from 'drizzle-orm'
+import { and, asc, eq, or } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import { toTasks, type ProjectRow } from './tasks.ts'

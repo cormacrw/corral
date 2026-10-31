@@ -131,6 +131,7 @@ interface TaskFields {
   createdAt: string
   updatedAt: string
 }
+
 // Draft ownership follows the latest proposed plan that includes the task.
 // Draft ownership and status reasons cannot leak into unrelated statuses.
 export type Task = TaskFields & (
@@ -184,7 +185,6 @@ export const evidenceInputSchema = z.discriminatedUnion('kind', [
   }).strict()
 ])
 export type EvidenceInput = z.infer<typeof evidenceInputSchema>
-
 
 export const reviewVerdict = z.enum(REVIEW_VERDICTS)
 
