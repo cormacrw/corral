@@ -80,6 +80,26 @@ describe('PM task and epic tools', () => {
     await t?.close()
   })
 
+  it('keeps epic review mode locked after PM attempts to detach PR or merged work', async () => {
+    const [epic] = await t.db.insert(schema.epics).values({ projectId, title: 'Locked review', reviewMode: 'epic', createdBy: t.actor }).returning()
+    const [other] = await t.db.insert(schema.epics).values({ projectId, title: 'Other epic', createdBy: t.actor }).returning()
+    const task = (await call('create_task', { title: 'Keep on epic branch', type: 'task', epicId: epic!.id }) as { result: Task }).result
+    for (const state of [{ status: 'in_progress' as const, prNumber: 77 }, { status: 'merged' as const, prNumber: 77 }, { status: 'merged' as const, prNumber: null }]) {
+      await t.db.update(schema.tasks).set(state).where(eq(schema.tasks.id, task.id))
+      expect(await call('update_epic', { epicId: epic!.id, reviewMode: 'direct' })).toMatchObject({ ok: false })
+      if (state.status === 'merged') {
+        expect(await request('PATCH', `/api/projects/${slug}/tasks/${task.number}`, { epicId: null })).toMatchObject({ status: 409, body: { error: { constraint: 'task_merged' } } })
+      }
+      for (const epicId of [null, other!.id]) {
+        expect(await call('update_task', { taskRef: task.ref, epicId })).toMatchObject({ ok: false, error: 'conflict' })
+      }
+      expect(await call('update_task', { taskRef: task.ref, epicId: epic!.id, title: 'Allowed metadata' })).toMatchObject({ ok: true })
+      expect((await get(task)).epicId).toBe(epic!.id)
+      expect(await call('update_epic', { epicId: epic!.id, reviewMode: 'direct' })).toMatchObject({ ok: false })
+      expect((await request('GET', `/api/epics/${epic!.id}`)).body).toMatchObject({ reviewMode: 'epic' })
+    }
+  })
+
   it('creates outside a plan, edits every status and preserves criterion ids with PM session attribution', async () => {
     const created = await call('create_task', { title: 'A task outside a plan', type: 'task' })
     expect(created).toMatchObject({ ok: true, result: { status: 'backlog' } })
