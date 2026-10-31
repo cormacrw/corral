@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { RunEvent } from '@corral/contracts'
-import { api } from '~/composables/useApi'
+import { useQuery } from '@tanstack/vue-query'
+import { runTranscriptQuery } from '~/queries/runs'
 import { countSteps, withoutMessages } from '~/utils/tool-steps'
 
 // A finished PM turn's work, collapsed above its reply (design/plan.md).
@@ -9,9 +9,11 @@ import { countSteps, withoutMessages } from '~/utils/tool-steps'
 const props = defineProps<{ runId: string, replies: string[], agentName: string }>()
 
 const open = ref(false)
-const events = ref<RunEvent[] | null>(null)
-const loading = ref(false)
-const error = ref<string | null>(null)
+const transcript = useQuery(computed(() => ({ ...runTranscriptQuery(props.runId), enabled: open.value })))
+const events = transcript.data
+const loading = computed(() => open.value && transcript.isPending.value)
+const error = computed(() => transcript.error.value?.message ?? null)
+const load = () => transcript.refetch()
 const shown = computed(() => events.value ? withoutMessages(events.value, props.replies) : [])
 const label = computed(() => {
   if (!events.value) return 'Steps'
@@ -19,20 +21,8 @@ const label = computed(() => {
   return n === 1 ? '1 step' : `${n} steps`
 })
 
-async function load() {
-  loading.value = true
-  error.value = null
-  try {
-    events.value = await api.runs.transcript(props.runId)
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    loading.value = false
-  }
-}
-async function toggle() {
+function toggle() {
   open.value = !open.value
-  if (open.value && !events.value && !loading.value) await load()
 }
 </script>
 

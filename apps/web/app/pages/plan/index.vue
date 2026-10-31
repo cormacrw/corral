@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import type { AgentRuntime, CliStatus, DraftSession } from '@corral/contracts'
+import type { AgentRuntime, CliStatus } from '@corral/contracts'
+import { useQuery } from '@tanstack/vue-query'
+import { planDraftsQuery, planSessionsQuery } from '~/queries/plan'
 import { api } from '~/composables/useApi'
 import { reloadShell } from '~/queries/shell'
 import { detectedRuntimes, projectColor, runtimeLabel } from '~/utils/labels'
@@ -66,23 +68,9 @@ async function reconnect() {
 const backlog = computed(() => project.value ? (live.state.value.tasks[project.value.id] ?? []).filter(t => t.status === 'backlog') : [])
 // The project's Drafts by session, kept current by plan.drafts, which
 // follows every propose, approve and discard
-const drafts = ref<DraftSession[]>([])
-watch(() => project.value?.slug, async (slug) => {
-  drafts.value = []
-  if (!slug) return
-  try {
-    const sessions = await api.plan.drafts(slug)
-    if (project.value?.slug === slug) drafts.value = sessions
-  } catch {
-    // The section stays hidden; the rest of the page still works
-  }
-}, { immediate: true })
-onMounted(() => {
-  const stop = live.subscribe((event) => {
-    if (event.type === 'plan.drafts' && event.projectId === project.value?.id) drafts.value = event.sessions
-  })
-  onBeforeUnmount(stop)
-})
+const sessions = useQuery(planSessionsQuery()).data
+const draftsQuery = useQuery(computed(() => ({ ...planDraftsQuery(project.value?.slug ?? ''), enabled: Boolean(project.value) })))
+const drafts = computed(() => draftsQuery.data.value ?? [])
 // Resolves false when not started, so the composer keeps its images
 async function start(message: string): Promise<boolean> {
   if (!project.value) return false
@@ -225,7 +213,7 @@ async function start(message: string): Promise<boolean> {
             />
             <USelectMenu
               v-if="!device.isMobile.value"
-              :items="live.state.value.planSessions.map(s => ({ label: s.title, value: s.id }))"
+              :items="(sessions ?? []).map(s => ({ label: s.title, value: s.id }))"
               value-key="value"
               size="xs"
               variant="ghost"

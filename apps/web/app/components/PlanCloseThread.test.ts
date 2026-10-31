@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+import { VueQueryPlugin } from '@tanstack/vue-query'
+import { testQueryClient } from '~/queries/mount-with-query'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, ref, resolveComponent } from 'vue'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -21,7 +23,7 @@ function setup(current = 's1') {
   vi.stubGlobal('useRouter', () => ({ push }))
   vi.stubGlobal('usePlanThreads', () => ({ remove }))
   vi.stubGlobal('useToast', () => ({ add }))
-  return mount(PlanCloseThread, { props: { session }, global: { components: { UButton: Button, UModal: Dialog } } })
+  return mount(PlanCloseThread, { props: { session }, global: { plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }]], components: { UButton: Button, UModal: Dialog } } })
 }
 afterEach(() => {
   vi.unstubAllGlobals()

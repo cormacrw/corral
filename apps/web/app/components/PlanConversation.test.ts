@@ -1,4 +1,8 @@
 // @vitest-environment happy-dom
+import { VueQueryPlugin } from '@tanstack/vue-query'
+import { keys } from '~/queries/keys'
+import { applyEvent } from '~/queries/dependencies'
+import { testQueryClient } from '~/queries/mount-with-query'
 import type { PlanSessionDetail, ServerEvent } from '@corral/contracts'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -14,6 +18,7 @@ vi.mock('~/composables/useApi', () => ({
   }
 }))
 
+let client = testQueryClient()
 let listener: (event: ServerEvent) => void
 const pendingEntries = vue.ref<Record<string, { session: PlanSessionDetail, state: string, error: string | null, taskRef?: string }>>({})
 const retryStart = vi.fn()
@@ -51,7 +56,7 @@ async function open(id = 's-1', mobile = false) {
   vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(mobile) }))
   const wrapper = mount(PlanConversation, {
     props: { sessionId: id, inbox: true, onApproved, onApproving },
-    global: {
+    global: { plugins: [[VueQueryPlugin, { queryClient: client }]],
       stubs: {
         PromptComposer: true, PlanQuestion: true,
         AgentAvatar: true, PlanTurnSteps: true, PlanDetail: true,
@@ -80,6 +85,10 @@ async function open(id = 's-1', mobile = false) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  client = testQueryClient()
+  listener = (event) => {
+    applyEvent(client, event)
+  }
   for (const name of ['ref', 'computed', 'watch', 'nextTick', 'onMounted', 'onBeforeUnmount'] as const) vi.stubGlobal(name, vue[name])
   vi.stubGlobal('useRouter', () => ({ push }))
   vi.stubGlobal('useSeoMeta', vi.fn())
@@ -161,6 +170,36 @@ describe('Inbox shared Plan conversation', () => {
     listener({ type: 'plan.session', session: { ...planSessions.find(s => s.id === 's-1')!, activeRunId: null } })
     await vue.nextTick()
     expect(wrapper.text()).toContain('The scope is small.')
+  })
+
+  it('opens a cached proposal on mount before a background snapshot returns', async () => {
+    client.setQueryData(keys.plan.session('s-1'), detail())
+    vi.mocked(api.plan.session).mockImplementation(() => new Promise(() => {}))
+    await open()
+    expect(flyout.openPlan).toHaveBeenCalledWith({ replace: true })
+  })
+
+  it('keeps scroll position when read echoes or background snapshots change metadata only', async () => {
+    const wrapper = await open()
+    const log = wrapper.get('[role="log"]').element as HTMLElement
+    Object.defineProperty(log, 'scrollHeight', { value: 1000 })
+    log.scrollTop = 120
+    listener({ type: 'plan.session', session: { ...planSessions.find(s => s.id === 's-1')!, title: 'Updated thread title', unread: false } })
+    await vue.nextTick()
+    await vue.nextTick()
+    expect(log.scrollTop).toBe(120)
+  })
+
+  it('shows a previously opened conversation immediately while its stale snapshot is delayed', async () => {
+    const wrapper = await open()
+    const second = detail('s-2')
+    client.setQueryData(keys.plan.session('s-2'), second, { updatedAt: 1 })
+    vi.mocked(api.plan.session).mockImplementation(() => new Promise(() => {}))
+    await wrapper.setProps({ sessionId: 's-2' })
+    expect(wrapper.text()).toContain(second.messages[0]!.text)
+    expect(wrapper.findComponent({ name: 'USkeleton' }).exists()).toBe(false)
+    await wrapper.setProps({ sessionId: 's-1' })
+    expect(wrapper.text()).toContain(detail().messages[0]!.text)
   })
 
   it('sends a one-tap answer immediately without submitting the composer draft', async () => {

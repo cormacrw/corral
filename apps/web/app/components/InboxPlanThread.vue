@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import type { Plan, PlanThreadItem } from '@corral/contracts'
+import type { PlanThreadItem } from '@corral/contracts'
 import { approvedPlanSummary } from '@corral/core'
-import { api } from '~/composables/useApi'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { approvePlan, planSessionQuery, markPlanRead, sendPlanMessage } from '~/queries/plan'
 import { runtimeLabel } from '~/utils/labels'
 import { STOP_ASKING } from '~/utils/plan-questions'
 
@@ -17,38 +18,17 @@ const threads = usePlanThreads()
 const runnerOffline = computed(() => live.state.value.loaded && !live.state.value.runner?.online)
 
 // The plan itself, for View plan and approving; the item only has its summary
-const plans = ref<Plan[]>([])
-async function loadPlans() {
-  const requested = props.item.sessionId
-  try {
-    const session = await api.plan.session(requested)
-    if (requested !== props.item.sessionId) return
-    plans.value = session.plans
-    if (session.unread) {
-      await api.plan.read(requested)
-      emit('read')
-    }
-  } catch {
-    // The summary still shows; View plan waits for the next update
+const client = useQueryClient()
+const sending = useMutation(sendPlanMessage)
+const approval = useMutation(approvePlan)
+const detail = useQuery(computed(() => planSessionQuery(props.item.sessionId)))
+const plans = computed(() => detail.data.value?.plans ?? [])
+watch(() => detail.data.value?.unread, (unread) => {
+  if (unread) {
+    markPlanRead(client, props.item.sessionId)
+    emit('read')
   }
-}
-watch(() => props.item.sessionId, () => {
-  plans.value = []
-  void loadPlans()
 }, { immediate: true })
-onMounted(() => {
-  const stop = live.subscribe((event) => {
-    // A reply arriving while the thread is open has been seen
-    if (event.type === 'plan.session' && event.session.id === props.item.sessionId && event.session.unread) {
-      void api.plan.read(props.item.sessionId).then(() => emit('read'))
-    }
-    if (event.type !== 'plan.updated' || event.plan.sessionId !== props.item.sessionId) return
-    const i = plans.value.findIndex(p => p.id === event.plan.id)
-    if (i >= 0) plans.value.splice(i, 1, event.plan)
-    else plans.value.push(event.plan)
-  })
-  onBeforeUnmount(stop)
-})
 const plan = computed(() => props.item.plan ? plans.value.find(p => p.id === props.item.plan!.id) ?? null : null)
 const previous = computed(() => plan.value ? plans.value.find(p => p.version === plan.value!.version - 1) ?? null : null)
 const counts = computed(() => {
@@ -72,7 +52,7 @@ async function send(message: string): Promise<boolean> {
   if (cantSend.value) return false
   busy.value = true
   try {
-    await api.plan.message(props.item.sessionId, message)
+    await sending.mutateAsync({ id: props.item.sessionId, text: message })
     threads.add(props.item.sessionId)
     sent.value = true
     text.value = ''
@@ -91,7 +71,7 @@ async function approve(to: 'ready' | 'backlog') {
   approving.value = to
   emit('approving', true)
   try {
-    const approved = await api.plan.approve(props.item.plan.id, to)
+    const approved = await approval.mutateAsync({ planId: props.item.plan.id, to })
     toast.add({ title: 'Resolved', description: approvedPlanSummary(approved.tasks), color: 'success' })
     await flyout.close()
     emit('approved')
