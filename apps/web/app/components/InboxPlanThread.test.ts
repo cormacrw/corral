@@ -9,7 +9,8 @@ import * as vue from 'vue'
 import { api } from '~/composables/useApi'
 import { agents, inbox, planSessions, plans, projects } from '~/prototype/fixtures'
 import InboxPlanThread from '~/components/InboxPlanThread.vue'
-import InboxPage from '~/pages/inbox/[[itemId]].vue'
+import InboxPage from '~/pages/inbox.vue'
+import InboxItemPage from '~/pages/inbox/[itemId].vue'
 import { UNDO_MS, usePlanThreadDelete } from '~/composables/usePlanThreadDelete'
 
 vi.mock('~/composables/useApi', () => ({
@@ -27,7 +28,8 @@ async function mountInbox() {
   const remove = vi.fn()
   const toasts: { title: string, actions?: { label: string, onClick: () => void }[] }[] = []
   const toastRemove = vi.fn()
-  vi.stubGlobal('useRoute', () => ({ params: { itemId: 's-1' } }))
+  const params = vue.reactive<{ itemId?: string }>({ itemId: 's-1' })
+  vi.stubGlobal('useRoute', () => ({ params }))
   vi.stubGlobal('useRouter', () => ({ replace }))
   vi.stubGlobal('definePageMeta', vi.fn())
   vi.stubGlobal('useSeoMeta', vi.fn())
@@ -50,10 +52,12 @@ async function mountInbox() {
   const row = vue.defineComponent({ props: ['item'], setup: props => () => vue.h('span', { 'data-row': props.item.id }, props.item.subject) })
   const avatar = vue.defineComponent({ props: ['name'], setup: props => () => vue.h('i', { 'data-avatar': props.name }) })
   const client = testQueryClient()
-  const wrapper = mount(InboxPage, { global: { plugins: [[VueQueryPlugin, { queryClient: client }]], components: { InboxPlanThread, UDashboardPanel: plain, UButton: button, PlanThreadRow: row, AgentAvatar: avatar }, stubs: {
+  // As Nuxt renders the child: keyed by its path
+  const NuxtPage = vue.defineComponent({ setup: () => () => params.itemId ? vue.h(InboxItemPage, { key: params.itemId }) : null })
+  const wrapper = mount(InboxPage, { global: { plugins: [[VueQueryPlugin, { queryClient: client }]], components: { NuxtPage, InboxPlanThread, UDashboardPanel: plain, UButton: button, PlanThreadRow: row, AgentAvatar: avatar }, stubs: {
     UBadge: true, UInput: true, UTabs: true,
     MarkdownText: true, TaskFlyout: true,
-    PlanConversation: true, InboxMobile: true, UAlert: true, USkeleton: true, NuxtLink: true,
+    PlanConversation: true, InboxMobile: true, InboxMobileItem: true, UAlert: true, USkeleton: true, NuxtLink: true,
     EvidenceList: true, USelectMenu: true, PromptComposer: true, UIcon: true, PlanQuestion: true, PlanDetail: true
   } } })
   await flushPromises()
@@ -67,7 +71,7 @@ async function mountInbox() {
   const setInbox = (next: typeof data) => {
     data = next
   }
-  return { wrapper, replace, remove, toasts, toastRemove, rows, rename, setInbox, emitLive }
+  return { wrapper, params, replace, remove, toasts, toastRemove, rows, rename, setInbox, emitLive }
 }
 
 it('reads an unread thread in place and keeps it open, without fetching the Inbox', async () => {
@@ -93,6 +97,21 @@ it('reads an unread thread in place and keeps it open, without fetching the Inbo
     expect(api.inbox.get).not.toHaveBeenCalled()
     expect(rows()).not.toContain('s-1')
     expect(wrapper.findComponent(InboxPlanThread).exists()).toBe(true)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('keeps a thread open after it leaves Needs you, until another item is picked', async () => {
+  const { wrapper, params, setInbox, emitLive } = await mountInbox()
+  try {
+    setInbox({ ...inbox(), needsYou: inbox().needsYou.filter(i => i.id !== 's-1') })
+    emitLive({ type: 'agent.updated' })
+    await flushPromises()
+    expect(wrapper.findComponent(InboxPlanThread).props('item')).toMatchObject({ id: 's-1' })
+    params.itemId = 's-3'
+    await flushPromises()
+    expect(wrapper.findComponent(InboxPlanThread).props('item')).toMatchObject({ id: 's-3' })
   } finally {
     wrapper.unmount()
   }
