@@ -1,3 +1,4 @@
+import type { Task } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -81,6 +82,44 @@ describe('epic scheduling', () => {
     expect(await t.request('GET', `/api/tasks/${second.ref}`).then(r => r.json())).toMatchObject({ waitingOnEpics: [] })
     expect(t.events).toContainEqual(expect.objectContaining({ type: 'task.updated', task: expect.objectContaining({ id: second.id, waitingOnEpics: [] }) }))
     expect(await t.request('GET', `/api/epics/${a.id}`).then(r => r.json())).toMatchObject({ taskCount: 1, mergedCount: 1 })
+  })
+
+  it('names the epic that holds a task behind a Merged dependency, under the claim\'s rule', async () => {
+    const { project, a, first, second, dev } = await setup()
+    await t.db.delete(epicDependencies)
+    await t.db.update(epics).set({ reviewMode: 'epic', branch: 'corral/epic-foundation', prNumber: 12, reviewState: 'open' }).where(eq(epics.id, a.id))
+    await t.db.update(tasks).set({ status: 'merged', statusReason: null }).where(eq(tasks.id, first.id))
+    await t.db.insert(schema.taskDependencies).values({ projectId: project.id, taskId: second.id, dependsOnId: first.id })
+    const get = async () => (await (await t.request('GET', `/api/projects/${project.slug}/tasks/${second.number}`)).json()) as Task
+    const held = { id: a.id, title: a.title }
+
+    expect(await get()).toMatchObject({ status: 'ready', dependsOn: [first.ref], waitingOnEpics: [held] })
+    expect(await claimNextTask(t.db, dev.id, new Date(), [second.id])).toBeNull()
+    const [listed] = (await (await t.request('GET', `/api/projects/${project.slug}/tasks?view=all`)).json() as Task[]).filter(task => task.id === second.id)
+    expect(listed!.waitingOnEpics).toEqual([held])
+
+    // An epic dependency on the same epic names it once
+    await t.db.insert(epicDependencies).values({ projectId: project.id, epicId: second.epicId ?? (await get()).epicId!, dependsOnEpicId: a.id })
+    expect((await get()).waitingOnEpics).toEqual([held])
+    await t.db.delete(epicDependencies)
+
+    // The dependency's own status is the reason until it merges
+    await t.db.update(tasks).set({ status: 'agent_review', statusReason: null }).where(eq(tasks.id, first.id))
+    expect((await get()).waitingOnEpics).toEqual([])
+    await t.db.update(tasks).set({ status: 'merged', statusReason: null }).where(eq(tasks.id, first.id))
+
+    // The same exceptions as the claim: a spike and a task in the same epic don't wait
+    await t.db.update(tasks).set({ type: 'spike' }).where(eq(tasks.id, first.id))
+    expect((await get()).waitingOnEpics).toEqual([])
+    await t.db.update(tasks).set({ type: 'task' }).where(eq(tasks.id, first.id))
+    await t.db.update(tasks).set({ epicId: a.id }).where(eq(tasks.id, second.id))
+    expect((await get()).waitingOnEpics).toEqual([])
+    await t.db.update(tasks).set({ epicId: null }).where(eq(tasks.id, second.id))
+    expect((await get()).waitingOnEpics).toEqual([held])
+
+    await t.db.update(epics).set({ reviewState: 'merged' }).where(eq(epics.id, a.id))
+    expect(await get()).toMatchObject({ status: 'ready', waitingOnEpics: [] })
+    expect(await claimNextTask(t.db, dev.id, new Date(), [second.id])).not.toBeNull()
   })
 
   it('changes the review mode until a task has opened a PR, and says so on the epic', async () => {

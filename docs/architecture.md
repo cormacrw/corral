@@ -146,6 +146,7 @@ Each kind of data has exactly one source of truth.
 | **Blob store** (local folder → S3) | Screenshots, videos, test/CI logs, run transcripts. Immutable, content-addressed (sha256). | — | **R/W** (stores uploads, serves files) | — | — |
 | **Target repo: default branch** (GitHub) | Merged code, `CORRAL.md`, wiki, agent role instructions. Canonical docs = default branch. | — | — | **R** (`git fetch`) | **R**, PM only, through a read-only checkout (D9) |
 | **Target repo: task branches** (GitHub) | Work in progress per task | — | **R** (diffs for PR/gate checks) | **R/W** (`git push`, only to the branch it holds a lease for) | — |
+| **Target repo: epic branches and candidate refs** (GitHub) | Integrated epic work; `corral/candidates/<operation>` for CI on a candidate | — | **R** (heads, checks; deletes candidate refs) | **R/W** (`git push` with no task lease, D8's exception: only under an integration operation journal, with a compare-and-swap on the expected SHA for the epic branch) | — |
 | **GitHub PRs / CI** | PR state, CI results, mergeability, merges | — | **R/W** (open/update PR, read CI, merge) | — | — |
 | **Runner disk** | Bare clone, worktrees, dependency store, transcript spool. **Not** a source of truth; losing it costs at most uncommitted work. | — | — | **R/W** | **R/W**, own worktree + scratch only |
 

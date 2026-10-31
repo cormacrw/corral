@@ -255,9 +255,10 @@ function senderOf(actor: Actor): TaskInboxItem['sender'] {
 function activityText(action: string, event: string | null, detail: AuditView, prNumber: number | null, type: string): string {
   const pr = prNumber ? `PR #${prNumber}` : 'the PR'
   if (action === 'rebase.verified') return `Verified the rebase of ${pr} without review`
+  const commit = prNumber ? pr : 'the commit'
   if (action === 'review.recorded') {
     // A spike's findings (D19), a design (D20) and an epic task's commit (D27) are reviewed without a PR
-    const reviewed = prNumber ? pr : type === 'design' ? 'the design' : type === 'spike' ? 'the findings' : 'the commit'
+    const reviewed = !prNumber && type === 'design' ? 'the design' : !prNumber && type === 'spike' ? 'the findings' : commit
     return detail.verdict === 'approved' ? `Approved ${reviewed} (${String(detail.met)} of ${String(detail.of)} criteria met)` : `Requested changes on ${reviewed} (${String(detail.met)} of ${String(detail.of)} criteria met)`
   }
   switch (event) {
@@ -271,9 +272,9 @@ function activityText(action: string, event: string | null, detail: AuditView, p
     case 'changes_requested': return detail.to === 'blocked' ? 'Changes requested; Blocked for you' : 'Changes requested; back to the developer'
     case 'merged': return `Merged ${pr}`
     case 'integrated': return `Integrated ${String(detail.integratedCommitSha).slice(0, 10)} into the epic branch`
-    case 'ci_failed': return `CI failed on ${pr}; back to the developer`
-    case 'base_conflict': return `${pr} conflicts with the base branch; back to the developer`
-    case 'head_moved': return `New commits on ${pr}; back to the reviewer`
+    case 'ci_failed': return `CI failed on ${commit}; back to the developer`
+    case 'base_conflict': return prNumber ? `${pr} conflicts with the base branch; back to the developer` : 'The commit conflicts with the epic branch; back to the developer'
+    case 'head_moved': return prNumber ? `New commits on ${pr}; back to the reviewer` : 'New commits on the task branch; back to the reviewer'
     default: return event ?? action
   }
 }

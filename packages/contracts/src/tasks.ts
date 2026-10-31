@@ -126,7 +126,8 @@ interface TaskFields {
   acceptanceCriteria: { id: string, position: number, text: string, checkedByHuman?: boolean, met: boolean | null }[]
   // Refs of the tasks this one waits on
   dependsOn: string[]
-  // Unfinished prerequisite epics, with titles for display and IDs for links.
+  // Unfinished prerequisite epics, and unfinished epics of Merged dependencies
+  // in another epic, with titles for display and IDs for links.
   waitingOnEpics: { id: string, title: string }[]
   lease: Lease | null
   // The agents of the task's latest authoring (designer for design tasks) and reviewer runs. Tasks aren't

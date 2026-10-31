@@ -2,7 +2,7 @@ import { ACTIVE_RUN_STATES, LEASE_DURATION_MS, transition, type Actor, type Task
 import { schema, type Executor } from '@corral/db'
 import { and, asc, count, eq, gt, inArray, isNotNull, isNull, ne, notInArray, notExists, or, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
-import { holdsEpicOpen } from './epic-review-state.ts'
+import { holdsAcrossEpics, holdsEpicOpen } from './epic-review-state.ts'
 import { appendAudit, auditEvent, auditText } from './audit.ts'
 import { toTaskState, type TaskRow } from './tasks.ts'
 import { unfinishedTask } from './completion.ts'
@@ -74,7 +74,7 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
             .leftJoin(dependencyEpic, eq(dependencyEpic.id, dependency.epicId))
             .where(and(eq(taskDependencies.taskId, tasks.id), or(
               unfinishedTask(dependency),
-              and(inArray(dependency.type, ['task', 'bug']), isNotNull(dependencyEpic.id), sql`${dependency.epicId} is distinct from ${tasks.epicId}`, holdsEpicOpen(dependency, dependencyEpic))
+              holdsAcrossEpics(dependency, dependencyEpic, tasks.epicId)
             )))),
           notExists(tx.select({ one: sql`1` }).from(epicDependencies)
             .innerJoin(epics, eq(epics.id, epicDependencies.dependsOnEpicId))
