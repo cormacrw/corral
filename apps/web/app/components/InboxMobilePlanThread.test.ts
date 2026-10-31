@@ -9,6 +9,7 @@ import type { Plan, PlanThreadItem } from '@corral/contracts'
 import { useTaskFlyout } from '~/composables/useTaskFlyout'
 import InboxMobilePlanThread from './InboxMobilePlanThread.vue'
 import PlanDetail from './PlanDetail.vue'
+import PlanSheets from './PlanSheets.vue'
 
 const mocks = vi.hoisted(() => ({
   message: vi.fn(), close: vi.fn(), session: vi.fn(), read: vi.fn(), approve: vi.fn(),
@@ -44,7 +45,7 @@ function screen(item = question) {
     props: { item },
     global: { plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }]],
       components: {
-        UButton, UDrawer, UDropdownMenu,
+        UButton, UDrawer, UDropdownMenu, PlanSheets,
         MobilePageHeader: defineComponent({ setup: (_, { slots }) => () => h('header', slots.actions?.()) }),
         PlanQuestion: defineComponent({ props: ['message', 'disabled'], emits: ['answer'], setup: (p, { emit }) => () => h('button', { disabled: p.disabled, onClick: () => emit('answer', 'ntfy') }, p.message.text) }),
         PromptComposer: defineComponent({ setup: () => () => h('textarea') }),
@@ -102,6 +103,7 @@ describe('focused mobile Plan thread', () => {
   })
 
   it('shows an unread reply with a reply box that messages its session', async () => {
+    mocks.session.mockResolvedValue({ unread: true, plans: [], messages: [] })
     const reply: PlanThreadItem = { ...question, question: null, status: 'none', unread: true, reply: 'The flaky test is the SSE reconnect one.' }
     mocks.read.mockResolvedValue(undefined)
     const w = screen(reply)
@@ -131,6 +133,24 @@ describe('focused mobile Plan thread', () => {
 
 // The real router, flyout composable and PlanDetail on a phone, so a task
 // tapped in the plan sheet takes the route PlanDetail really gives it
+describe('while Juno is working', () => {
+  it('disables approving, on the screen and for the plan sheet', async () => {
+    const w = screen({ ...planItem, activeRunId: 'r-1' })
+    await flushPromises()
+    const approve = w.findAll('button').filter(b => b.text().startsWith('Approve to'))
+    expect(approve).toHaveLength(2)
+    for (const button of approve) expect(button.attributes('disabled')).toBeDefined()
+    expect(mocks.approve).not.toHaveBeenCalled()
+  })
+
+  it('goes by the session when the item is an old snapshot', async () => {
+    mocks.session.mockResolvedValue({ activeRunId: 'r-1', plans: [plan], messages: [] })
+    const w = screen(planItem)
+    await flushPromises()
+    expect(w.findAll('button').find(b => b.text() === 'Approve to board')!.attributes('disabled')).toBeDefined()
+  })
+})
+
 describe('a task opened from the mobile plan sheet', () => {
   const planned = { ...plan, epics: [], tasks: [{ key: 't1', change: 'added', revises: false, taskId: 't1', epicId: null, ref: 'TA-7', title: 'Send push', status: 'draft', priority: 'medium', humanReview: false, dependsOn: [] }] } as unknown as Plan
   const sheets = (w: ReturnType<typeof mount>) => w.findAll('[data-sheet]').map(s => s.attributes('data-sheet'))
@@ -154,7 +174,7 @@ describe('a task opened from the mobile plan sheet', () => {
       props: { item: { ...planItem, status: 'needs_approval', question: null, plan: { id: planned.id, version: planned.version, title: planned.title, summary: planned.summary, epicCount: 0, taskCount: 0 }, planId: planned.id, reply: null } },
       global: { plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }], router],
         components: {
-          UButton, UDrawer, UDropdownMenu, PlanDetail,
+          UButton, UDrawer, UDropdownMenu, PlanDetail, PlanSheets,
           UBadge: stub(), UIcon: stub(), UTabs: stub(), USkeleton: stub(), AsyncEpicGraph: stub('div'),
           MobilePageHeader: defineComponent({ setup: (_, { slots }) => () => h('header', slots.actions?.()) }),
           MarkdownText: defineComponent({ props: ['text'], setup: p => () => h('p', p.text) }),

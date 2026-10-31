@@ -32,8 +32,6 @@ const flyout = {
 }
 const toast = { add: vi.fn() }
 const push = vi.fn()
-const onApproved = vi.fn()
-const onApproving = vi.fn()
 const mounted: { unmount: () => void }[] = []
 const button = vue.defineComponent({
   props: { label: String, to: String, disabled: Boolean },
@@ -53,13 +51,13 @@ function detail(id = 's-1'): PlanSessionDetail {
 async function open(id = 's-1', mobile = false) {
   vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(mobile) }))
   const wrapper = mount(PlanConversation, {
-    props: { sessionId: id, inbox: true, onApproved, onApproving },
+    props: { sessionId: id },
     global: {
       plugins: [[VueQueryPlugin, { queryClient: client }]],
       stubs: {
         PromptComposer: true, PlanQuestion: true,
         AgentAvatar: true, PlanTurnSteps: true, PlanDetail: true,
-        TaskFlyout: true, UDrawer: true, UBadge: true, UIcon: true,
+        TaskFlyout: true, PlanSheets: true, UDrawer: true, UBadge: true, UIcon: true,
         USkeleton: true, UTooltip: true, USelectMenu: true,
         PlanSessionSwitcher: true, PlanGrillButton: true
       },
@@ -83,6 +81,7 @@ async function open(id = 's-1', mobile = false) {
 }
 
 beforeEach(() => {
+  sessionStorage.clear()
   vi.clearAllMocks()
   client = testQueryClient()
   listener = (event) => {
@@ -110,7 +109,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('Inbox shared Plan conversation', () => {
+describe('Plan conversation', () => {
   it('renders a pending start without fetching a nonexistent session, including working and failure recovery', async () => {
     const initial = detail()
     initial.id = 'pending-session'
@@ -136,12 +135,12 @@ describe('Inbox shared Plan conversation', () => {
     expect(push).toHaveBeenCalledWith('/plan')
   })
 
-  it('loads the selected session, marks it read, opens its plan and links to Plan', async () => {
+  it('loads the selected session, marks it read and opens its plan', async () => {
     const wrapper = await open()
     expect(api.plan.session).toHaveBeenCalledWith('s-1')
     expect(api.plan.read).toHaveBeenCalledWith('s-1')
     expect(flyout.openPlan).toHaveBeenCalledWith({ replace: true })
-    expect(wrapper.find('a').attributes('href')).toBe('/plan/s-1')
+    expect(wrapper.find('a').attributes('href')).toBe('/plan')
     expect(wrapper.text()).toContain('Plan design tasks: prototypes the human approves before the build.')
   })
 
@@ -236,45 +235,43 @@ describe('Inbox shared Plan conversation', () => {
     expect(composer.vm.$attrs.modelValue).toBe('New draft')
   })
 
-  it.each(['ready', 'backlog'] as const)('confirms an approval to %s and signals advancement without navigating to Plan', async (to) => {
-    const wrapper = await open()
-    const approved = { ...detail().plans[0]!, status: 'approved' as const }
-    vi.mocked(api.plan.approve).mockResolvedValue(approved)
-    const label = to === 'ready' ? 'Approve to board' : 'Approve to Backlog'
-    await wrapper.findAll('button').find(b => b.text() === label)!.trigger('click')
-    expect(api.plan.approve).not.toHaveBeenCalled()
-    wrapper.findComponent({ name: 'PromptComposer' }).vm.$emit('submit', '')
-    await flushPromises()
-    expect(api.plan.approve).toHaveBeenCalledWith(approved.id, to)
-    expect(onApproving.mock.calls).toEqual([[true], [false]])
-    expect(onApproved).toHaveBeenCalledOnce()
-    expect(flyout.close).toHaveBeenCalled()
-    expect(push).not.toHaveBeenCalled()
-  })
-
-  it('approves with one tap on phones and signals advancement', async () => {
-    document.body.innerHTML = '<div id="mobile-header-actions"></div>'
+  it('approves from the plan sheet on phones', async () => {
     const wrapper = await open('s-1', true)
     expect(flyout.openPlan).not.toHaveBeenCalled()
-    expect(wrapper.findAll('button').some(b => b.text() === 'Approve to board')).toBe(true)
     await wrapper.get('[data-testid="plan-pill"]').trigger('click')
     expect(flyout.openPlan).toHaveBeenCalledOnce()
     vi.mocked(api.plan.approve).mockResolvedValue({ ...detail().plans[0]!, status: 'approved' as const })
-    await wrapper.findAll('button').find(b => b.text() === 'Approve to Backlog')!.trigger('click')
+    wrapper.findComponent({ name: 'PlanSheets' }).vm.$emit('approve', 'backlog')
     await flushPromises()
     expect(api.plan.approve).toHaveBeenCalledWith(detail().plans[0]!.id, 'backlog')
-    expect(onApproved).toHaveBeenCalledOnce()
-    expect(push).not.toHaveBeenCalled()
   })
 
   it('keeps a failed approval in place for retry', async () => {
-    const wrapper = await open()
+    const wrapper = await open('s-1', true)
     vi.mocked(api.plan.approve).mockRejectedValue(new Error('Approval failed'))
-    await wrapper.findAll('button').find(b => b.text() === 'Approve to board')!.trigger('click')
-    wrapper.findComponent({ name: 'PromptComposer' }).vm.$emit('submit', '')
+    wrapper.findComponent({ name: 'PlanSheets' }).vm.$emit('approve', 'ready')
     await flushPromises()
-    expect(onApproved).not.toHaveBeenCalled()
-    expect(onApproving.mock.calls).toEqual([[true], [false]])
+    expect(push).not.toHaveBeenCalled()
     expect(toast.add).toHaveBeenCalledWith(expect.objectContaining({ title: 'Could not approve', color: 'error' }))
+  })
+
+  it('disables Add to board while Juno is working, rather than ignoring the click', async () => {
+    vi.mocked(api.plan.session).mockResolvedValue({ ...detail(), activeRunId: 'r-1' })
+    const wrapper = await open('s-1', true)
+    expect(wrapper.findComponent({ name: 'PlanSheets' }).attributes('disabled')).toBe('true')
+  })
+
+  it('keeps a draft through leaving the conversation and clears it once sent', async () => {
+    const first = await open()
+    first.findComponent({ name: 'PromptComposer' }).vm.$emit('update:modelValue', 'Half a thought')
+    await vue.nextTick()
+    first.unmount()
+    const again = await open()
+    const composer = again.findComponent({ name: 'PromptComposer' })
+    expect(composer.vm.$attrs.modelValue).toBe('Half a thought')
+    vi.mocked(api.plan.message).mockResolvedValue({ id: 'm', text: 'x' } as never)
+    composer.vm.$emit('submit', 'Half a thought')
+    await flushPromises()
+    expect(sessionStorage.length).toBe(0)
   })
 })

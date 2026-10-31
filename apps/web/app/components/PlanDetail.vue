@@ -3,12 +3,13 @@ import type { Plan, Task } from '@corral/contracts'
 import { approvedPlanSummary } from '@corral/core'
 import { useQueries } from '@tanstack/vue-query'
 import { epicQuery } from '~/queries/epics'
-import { EPIC_REVIEW_MODE, PLAN_STATUS, PRIORITY } from '~/utils/labels'
+import { EPIC_REVIEW_MODE, PLAN_STATUS, plural, PRIORITY } from '~/utils/labels'
 
 // The session's latest plan, docked in the flyout (design/plan.md). Each
 // revision replaces it here rather than adding another card to the chat.
-// `sheet`: in the mobile bottom sheet, where the approve buttons share the width
-const props = defineProps<{ plan: Plan, previous: Plan | null, busy: boolean, sheet?: boolean }>()
+// `sheet`: in the mobile bottom sheet, where the approve buttons share the width.
+// `disabled`: nothing can be approved for now, as while Juno is working.
+const props = defineProps<{ plan: Plan, previous: Plan | null, busy: boolean, disabled?: boolean, sheet?: boolean }>()
 const emit = defineEmits<{ approve: [to: 'ready' | 'backlog'], close: [] }>()
 const flyout = useTaskFlyout()
 const showDiff = ref(false)
@@ -91,8 +92,8 @@ watch(() => props.plan.id, () => {
         </h2>
         <p class="text-xs text-muted">
           <template v-if="epicCount > 0">
-            {{ epicCount }} {{ epicCount === 1 ? 'epic' : 'epics' }} ·
-          </template>{{ tasks.length }} tasks
+            {{ plural(epicCount, 'epic') }} ·
+          </template>{{ plural(tasks.length, 'task') }}
         </p>
       </div>
       <section
@@ -124,7 +125,7 @@ watch(() => props.plan.id, () => {
               After: {{ group.dependsOn.map(e => e.title).join(', ') }}
             </p>
             <p class="text-xs text-muted">
-              {{ group.tasks.length }} tasks<template v-if="group.reviewMode">
+              {{ plural(group.tasks.length, 'task') }}<template v-if="group.reviewMode">
                 · <span :title="EPIC_REVIEW_MODE[group.reviewMode].description">Review: {{ EPIC_REVIEW_MODE[group.reviewMode].label }}</span>
               </template>
             </p>
@@ -232,7 +233,7 @@ watch(() => props.plan.id, () => {
             v-if="removed"
             class="text-muted"
           >
-            {{ removed }} {{ removed === 1 ? 'task' : 'tasks' }} from v{{ props.previous.version }} removed.
+            {{ plural(removed, 'task') }} from v{{ props.previous.version }} removed.
           </li>
           <li
             v-for="task in changed"
@@ -260,6 +261,7 @@ watch(() => props.plan.id, () => {
             icon="i-lucide-kanban"
             :class="props.sheet && 'flex-1 justify-center'"
             :loading="props.busy"
+            :disabled="props.disabled"
             @click="emit('approve', 'ready')"
           />
           <UButton
@@ -268,7 +270,7 @@ watch(() => props.plan.id, () => {
             variant="outline"
             color="neutral"
             :class="props.sheet && 'flex-1 justify-center'"
-            :disabled="props.busy"
+            :disabled="props.busy || props.disabled"
             @click="emit('approve', 'backlog')"
           />
         </div>

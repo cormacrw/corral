@@ -4,6 +4,8 @@ import { useMutation } from '@tanstack/vue-query'
 import { closePlanThread } from '~/queries/plan'
 
 const props = defineProps<{ session: PlanSession, menu?: boolean }>()
+const shell = useShell()
+const pmName = computed(() => shell.agents.find(a => a.role === 'pm')?.name ?? 'PM')
 const device = useDevice()
 const route = useRoute()
 const router = useRouter()
@@ -56,11 +58,11 @@ async function close() {
       :is="device.isMobile.value ? UDrawer : UModal"
       v-model:open="open"
       title="Close this thread?"
-      description="This discards the thread’s Draft tasks and unapproved plan and stops any running Juno turn. Tasks already on the board or in the Backlog are kept."
+      :description="`This discards the thread’s Draft tasks and unapproved plan and stops any running ${pmName} turn. Tasks already on the board or in the Backlog are kept.`"
       :dismissible="!busy"
     >
       <template #body>
-        <div class="flex justify-end gap-2">
+        <div class="flex justify-end gap-2 pb-[env(safe-area-inset-bottom)]">
           <UButton
             label="Cancel"
             color="neutral"

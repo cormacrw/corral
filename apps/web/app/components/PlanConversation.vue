@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import type { Plan } from '@corral/contracts'
-import { approvedPlanSummary } from '@corral/core'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { approvePlan as approvePlanMutation, planSessionQuery, markPlanRead, sendPlanMessage } from '~/queries/plan'
 import { runTranscriptQuery } from '~/queries/runs'
 import { reloadShell } from '~/queries/shell'
+import { useDraft, writeDraft } from '~/composables/useDraft'
 import { projectColor, runtimeLabel } from '~/utils/labels'
 import { approvePlan } from '~/utils/plan-approval'
 import { STOP_ASKING } from '~/utils/plan-questions'
@@ -12,8 +12,8 @@ import { withoutMessages } from '~/utils/tool-steps'
 import PlanMessages from './PlanMessages.vue'
 
 // A Plan conversation (design/plan.md)
-const props = defineProps<{ sessionId: string, inbox?: boolean }>()
-const emit = defineEmits<{ read: [], approved: [], approving: [value: boolean] }>()
+const props = defineProps<{ sessionId: string }>()
+const emit = defineEmits<{ read: [] }>()
 const router = useRouter()
 const shell = useShell()
 const threads = usePlanThreads()
@@ -47,11 +47,10 @@ async function backToPrompt() {
 }
 const error = computed(() => detail.error.value?.message ?? null)
 const load = () => detail.refetch()
-const text = ref('')
+const text = useDraft(() => `plan:${props.sessionId}`)
 const taskRef = ref<string | null>(null)
 const busy = ref(false)
 const approving = ref<string | null>(null)
-const approvalTarget = ref<'ready' | 'backlog' | null>(null)
 const project = computed(() => shell.projects.find(p => p.id === session.value?.projectId) ?? null)
 const runnerOffline = computed(() => shell.loaded && !shell.runner?.online)
 const reconnecting = ref(false)
@@ -64,14 +63,12 @@ async function reconnect() {
     reconnecting.value = false
   }
 }
-useSeoMeta({ title: () => props.inbox ? 'Inbox · Corral' : `${session.value?.title ?? 'Plan'} · Corral` })
+useSeoMeta({ title: () => `${session.value?.title ?? 'Plan'} · Corral` })
 
 watch(id, () => {
-  text.value = ''
   taskRef.value = null
   busy.value = false
   approving.value = null
-  approvalTarget.value = null
 })
 
 // The flyout always shows the newest version; the chat only links to it
@@ -93,6 +90,7 @@ async function send(message: string): Promise<boolean> {
   try {
     await sending.mutateAsync({ id: sendingTo, text: message, taskRef: taskRef.value ?? undefined })
     threads.add(sendingTo)
+    writeDraft(`plan:${sendingTo}`, '')
     if (session.value?.id === sendingTo) {
       text.value = ''
       taskRef.value = null
@@ -110,10 +108,6 @@ async function send(message: string): Promise<boolean> {
 const composer = ref<{ focus: () => void } | null>(null)
 const cantApprove = computed(() => Boolean(starting.value && (starting.value.state !== 'accepted' || waitingForStart.value)) || busy.value || approving.value !== null || Boolean(session.value?.activeRunId))
 const cantSend = computed(() => cantApprove.value || runnerOffline.value)
-async function submit(message: string): Promise<boolean> {
-  if (props.inbox && approvalTarget.value && latest.value) return approve(latest.value, approvalTarget.value)
-  return send(message)
-}
 async function quick(message: string, keepDraft = true) {
   const sendingTo = id.value
   const draft = text.value
@@ -129,15 +123,7 @@ async function approve(plan: Plan, to: 'ready' | 'backlog') {
   if (cantApprove.value) return false
   const approvingIn = id.value
   approving.value = plan.id
-  emit('approving', true)
   try {
-    if (props.inbox) {
-      const approved = await approval.mutateAsync({ planId: plan.id, to })
-      toast.add({ title: 'Resolved', description: approvedPlanSummary(approved.tasks), color: 'success' })
-      await flyout.close()
-      emit('approved')
-      return true
-    }
     return await approvePlan(plan, to, {
       approve: (planId, to) => approval.mutateAsync({ planId, to }),
       toast,
@@ -149,10 +135,7 @@ async function approve(plan: Plan, to: 'ready' | 'backlog') {
     toast.add({ title: 'Could not approve', description: e instanceof Error ? e.message : String(e), color: 'error' })
     return false
   } finally {
-    if (id.value === approvingIn) {
-      approving.value = null
-      emit('approving', false)
-    }
+    if (id.value === approvingIn) approving.value = null
   }
 }
 // The PM's turn as it happens: the saved part, then live run.events
@@ -161,22 +144,6 @@ const transcript = useQuery(computed(() => ({ ...runTranscriptQuery(activeRunId.
 // What the turn has posted to the log already (a question, a plan) isn't repeated in its transcript
 const repliesOf = (runId: string) => session.value?.messages.filter(m => m.role === 'pm' && m.runId === runId).map(m => m.text) ?? []
 const liveEvents = computed(() => activeRunId.value ? withoutMessages(transcript.data.value ?? [], repliesOf(activeRunId.value)) : [])
-
-// On phones the plan opens in a bottom sheet, and a task or epic from it
-// in a taller one over it; closing either clears ?plan, ?task and ?epic.
-// The drawers also report closing when the route closed them, so check first.
-const planSheet = computed({
-  get: () => flyout.plan.value && !flyout.ref.value && !flyout.epic.value,
-  set: (open) => {
-    if (!open && flyout.plan.value) flyout.close()
-  }
-})
-const detailSheet = computed({
-  get: () => Boolean(flyout.ref.value || flyout.epic.value),
-  set: (open) => {
-    if (!open && (flyout.ref.value || flyout.epic.value)) flyout.close()
-  }
-})
 
 // Follows the conversation. When the PM's next question arrives it scrolls
 // to the question's top, so a long one isn't cut off above its answers.
@@ -208,21 +175,13 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
       compact
     >
       <template #actions>
-        <PlanSessionSwitcher v-if="!props.inbox" />
-        <UButton
-          v-if="props.inbox"
-          :to="`/plan/${id}`"
-          label="Open in Plan"
-          variant="ghost"
-          color="neutral"
-        />
+        <PlanSessionSwitcher />
         <PlanCloseThread
           v-if="session && (!starting || starting.state === 'accepted')"
           :session="session"
           menu
         />
         <UButton
-          v-if="!props.inbox"
           to="/plan"
           icon="i-lucide-plus"
           variant="ghost"
@@ -231,18 +190,18 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
         />
       </template>
     </MobilePageHeader>
-    <div class="flex min-h-0 flex-1">
-      <div class="flex min-w-0 flex-1 flex-col">
+    <div class="flex min-h-0 flex-1 max-[1100px]:flex-col">
+      <div class="flex min-h-0 min-w-0 flex-1 flex-col">
         <header
           v-if="!device.isMobile.value"
           class="flex h-14 shrink-0 items-center gap-2 border-b border-default px-4 text-sm"
         >
           <span
             v-if="project"
-            class="size-2.5 rounded-full"
+            class="size-2.5 shrink-0 rounded-full"
             :style="{ background: projectColor(project) }"
           />
-          <span class="text-muted">{{ project?.name }}</span>
+          <span class="max-w-48 shrink-0 truncate text-muted">{{ project?.name }}</span>
           <span class="truncate font-medium">{{ session?.title }}</span>
           <UBadge
             v-if="session"
@@ -252,21 +211,14 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
             size="sm"
             data-testid="plan-session-runtime"
           />
-          <UBadge
-            v-if="inbox && session && session.status !== 'none'"
-            :label="session.status === 'needs_approval' ? 'Needs approval' : 'Question'"
-            :color="session.status === 'needs_approval' ? 'primary' : 'info'"
-            variant="subtle"
-            size="xs"
-          />
           <div class="ms-auto flex shrink-0 items-center gap-2">
             <PlanCloseThread
               v-if="session && (!starting || starting.state === 'accepted')"
               :session="session"
             />
             <UButton
-              :to="inbox ? `/plan/${id}` : '/plan'"
-              :label="inbox ? 'Open in Plan' : 'New session'"
+              to="/plan"
+              label="New session"
               variant="ghost"
               color="neutral"
               size="sm"
@@ -363,61 +315,6 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
 
         <div :class="['shrink-0 border-t border-default p-3', device.isMobile.value && 'pb-[max(0.75rem,env(safe-area-inset-bottom))]']">
           <div class="mx-auto w-full max-w-[768px]">
-            <!-- Phones view the plan in a sheet and approve with one tap (design/inbox.md) -->
-            <template v-if="inbox && device.isMobile.value">
-              <UButton
-                v-if="latest"
-                label="View plan"
-                variant="ghost"
-                class="mb-2 min-h-11"
-                @click="flyout.openPlan()"
-              />
-              <div
-                v-if="latest?.status === 'proposed'"
-                class="mb-2 flex min-w-0 gap-2"
-              >
-                <UButton
-                  class="min-h-11 min-w-0 flex-1 justify-center text-xs"
-                  label="Approve to board"
-                  :loading="approving !== null"
-                  :disabled="cantApprove"
-                  @click="approve(latest, 'ready')"
-                />
-                <UButton
-                  class="min-h-11 min-w-0 flex-1 justify-center text-xs"
-                  label="Approve to Backlog"
-                  variant="outline"
-                  :loading="approving !== null"
-                  :disabled="cantApprove"
-                  @click="approve(latest, 'backlog')"
-                />
-              </div>
-            </template>
-            <div
-              v-else-if="inbox && latest?.status === 'proposed'"
-              role="radiogroup"
-              aria-label="Plan actions"
-              class="mb-2 flex flex-wrap gap-2"
-            >
-              <UButton
-                label="Approve to board"
-                size="sm"
-                role="radio"
-                :aria-checked="approvalTarget === 'ready'"
-                :variant="approvalTarget === 'ready' ? 'subtle' : 'outline'"
-                :disabled="cantApprove"
-                @click="approvalTarget = approvalTarget === 'ready' ? null : 'ready'"
-              />
-              <UButton
-                label="Approve to Backlog"
-                role="radio"
-                :aria-checked="approvalTarget === 'backlog'"
-                :variant="approvalTarget === 'backlog' ? 'subtle' : 'outline'"
-                size="sm"
-                :disabled="cantApprove"
-                @click="approvalTarget = approvalTarget === 'backlog' ? null : 'backlog'"
-              />
-            </div>
             <UAlert
               v-if="runnerOffline && device.isMobile.value"
               color="error"
@@ -444,10 +341,10 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
               :placeholder="runnerOffline && device.isMobile.value ? `${pm?.name ?? 'The PM'} is unavailable while the runner is offline` : `Reply to ${pm?.name ?? 'the PM'}…`"
               :disabled="runnerOffline || Boolean(session?.activeRunId)"
               :busy="busy || approving !== null"
-              :submit-label="inbox && approvalTarget ? approvalTarget === 'ready' ? 'Approve to board' : 'Approve to Backlog' : ''"
-              :allow-empty="taskRef !== null || (inbox && approvalTarget !== null)"
+              :allow-empty="taskRef !== null"
               :project="project?.slug"
-              @submit="submit"
+              :draft-key="`plan:${id}`"
+              @submit="send"
             >
               <template #header>
                 <div
@@ -512,55 +409,14 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
           </div>
         </div>
       </div>
-      <template v-if="device.isMobile.value">
-        <UDrawer
-          v-model:open="planSheet"
-          :title="latest ? `Plan v${latest.version}` : 'Plan'"
-          :ui="{ content: 'h-[88svh]' }"
-        >
-          <template #content>
-            <div
-              v-if="latest"
-              class="flex min-h-0 flex-1 flex-col pb-[env(safe-area-inset-bottom)]"
-              data-testid="plan-sheet"
-            >
-              <PlanDetail
-                class="flex-1"
-                :plan="latest"
-                :previous="previous"
-                :busy="approving === latest.id"
-                sheet
-                @approve="approve(latest, $event)"
-                @close="flyout.close()"
-              />
-            </div>
-          </template>
-        </UDrawer>
-        <UDrawer
-          v-model:open="detailSheet"
-          :title="flyout.ref.value ? `Task ${flyout.ref.value}` : 'Epic'"
-          :ui="{ content: 'h-[94svh]' }"
-        >
-          <template #content>
-            <div class="flex min-h-0 flex-1 flex-col pb-[env(safe-area-inset-bottom)]">
-              <AsyncTaskDetail
-                v-if="flyout.ref.value"
-                class="flex-1"
-                :task-ref="flyout.ref.value"
-                mode="flyout"
-                @close="flyout.close()"
-              />
-              <AsyncEpicDetail
-                v-else-if="flyout.epic.value"
-                class="flex-1"
-                :epic-id="flyout.epic.value"
-                mode="flyout"
-                @close="flyout.close()"
-              />
-            </div>
-          </template>
-        </UDrawer>
-      </template>
+      <PlanSheets
+        v-if="device.isMobile.value"
+        :plan="latest"
+        :previous="previous"
+        :busy="approving !== null"
+        :disabled="cantApprove"
+        @approve="latest && approve(latest, $event)"
+      />
       <TaskFlyout v-else>
         <template
           v-if="latest"
@@ -570,6 +426,7 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
             :plan="latest"
             :previous="previous"
             :busy="approving === latest.id"
+            :disabled="cantApprove"
             @approve="approve(latest, $event)"
             @close="flyout.close()"
           />

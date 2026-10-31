@@ -1,89 +1,44 @@
 <script setup lang="ts">
 import type { Plan, PlanThreadItem } from '@corral/contracts'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { holdsInbox } from '~/queries/inbox'
-import { approvePlan as approvePlanMutation, planSessionQuery, markPlanRead, sendPlanMessage } from '~/queries/plan'
-import { FLYOUT_SHEETS } from '~/composables/useTaskFlyout'
+import { usePlanThread } from '~/composables/usePlanThread'
 import { approvePlan } from '~/utils/plan-approval'
-import { timeAgo } from '~/utils/labels'
 import { STOP_ASKING } from '~/utils/plan-questions'
+import TimeAgo from '~/components/TimeAgo.vue'
 
 // Inbox shows the decision only. The session is loaded for the plan sheet;
 // its messages and run transcript belong in Plan, never on this screen.
 const props = defineProps<{ item: PlanThreadItem }>()
 const router = useRouter()
-const shell = useShell()
-const threads = usePlanThreads()
 const deleting = usePlanThreadDelete()
 const flyout = useTaskFlyout()
-// A task or epic opened from the plan sheet opens in a taller sheet over it,
-// on this route, rather than on its own page (design/inbox.md#mobile)
-provide(FLYOUT_SHEETS, true)
 const toast = useToast()
-const text = ref('')
-const busy = ref(false)
+const { approval, detail, plan: latest, previous, counts, text, busy, offline, working, cantSend, send: sendMessage } = usePlanThread(() => props.item)
 const actionError = ref<string | null>(null)
-const client = useQueryClient()
-const sending = useMutation(sendPlanMessage)
-const approval = useMutation({ ...approvePlanMutation, ...holdsInbox })
-const detail = useQuery(computed(() => planSessionQuery(props.item.sessionId)))
 const error = computed(() => actionError.value ?? detail.error.value?.message ?? null)
-const session = detail.data
 const loadingPlan = detail.isPending
 const composer = ref<{ focus: () => void } | null>(null)
-const offline = computed(() => shell.loaded && !shell.runner?.online)
-const working = computed(() => Boolean(props.item.activeRunId))
-const cantSend = computed(() => busy.value || offline.value || working.value)
 // A question or an unread reply is answered here; a plan is approved instead
 const canReply = computed(() => Boolean(props.item.question || (!props.item.plan && props.item.reply)))
-const latest = computed(() => session.value?.plans.find(p => p.id === props.item.planId) ?? null)
-const previous = computed(() => session.value?.plans.find(p => p.version === (latest.value?.version ?? 0) - 1) ?? null)
-// The plan sheet stays under a task or epic opened from it
-const planUnder = ref(false)
-const detailSheet = computed({
-  get: () => Boolean(flyout.ref.value || flyout.epic.value),
-  // Dismissing goes back to what the item was opened from: the plan, or another item
-  set: (open) => {
-    if (open || !detailSheet.value) return
-    if (planUnder.value || flyout.canGoBack.value) flyout.back()
-    else void flyout.close()
-  }
-})
-watch([flyout.plan, detailSheet], ([, detail], [wasPlan]) => {
-  planUnder.value = detail && (planUnder.value || wasPlan)
-})
-const planSheet = computed({
-  get: () => flyout.plan.value || (planUnder.value && detailSheet.value),
-  set: (open) => { if (!open && flyout.plan.value) void flyout.close() }
-})
 const messageOf = (e: unknown) => e instanceof Error ? e.message : String(e)
 
 const loadPlan = () => {
   actionError.value = null
   return detail.refetch()
 }
-watch([() => props.item.sessionId, () => props.item.unread || detail.data.value?.unread], ([id, unread]) => {
-  if (unread) markPlanRead(client, id)
-}, { immediate: true })
 async function send(message: string): Promise<boolean> {
   if (cantSend.value) return false
-  busy.value = true
   actionError.value = null
   try {
-    await sending.mutateAsync({ id: props.item.sessionId, text: message })
-    threads.add(props.item.sessionId)
-    text.value = ''
+    await sendMessage(message)
     await router.replace('/inbox')
     return true
   } catch (e) {
     actionError.value = messageOf(e)
     return false
-  } finally {
-    busy.value = false
   }
 }
 async function approve(plan: Plan, to: 'ready' | 'backlog') {
-  if (busy.value) return
+  if (busy.value || working.value) return
   busy.value = true
   try {
     await approvePlan(plan, to, {
@@ -142,7 +97,7 @@ async function deleteThread() {
         <PlanQuestion
           v-if="item.question"
           :message="item.question"
-          active
+          :active="!working"
           stacked
           :disabled="cantSend"
           @answer="send"
@@ -155,7 +110,7 @@ async function deleteThread() {
           </h2>
           <MarkdownText :text="item.plan.summary" />
           <p class="text-sm text-muted">
-            Plan v{{ item.plan.version }} · {{ item.plan.epicCount }} {{ item.plan.epicCount === 1 ? 'epic' : 'epics' }} · {{ item.plan.taskCount }} {{ item.plan.taskCount === 1 ? 'task' : 'tasks' }}
+            {{ counts }}
           </p>
           <UButton
             label="View plan"
@@ -178,14 +133,14 @@ async function deleteThread() {
               label="Approve to board"
               class="min-h-11 min-w-0 flex-1 justify-center text-xs"
               :loading="busy"
-              :disabled="!latest"
+              :disabled="!latest || working"
               @click="latest && approve(latest, 'ready')"
             />
             <UButton
               label="Approve to Backlog"
               variant="outline"
               class="min-h-11 min-w-0 flex-1 justify-center text-xs"
-              :disabled="!latest || busy"
+              :disabled="!latest || busy || working"
               @click="latest && approve(latest, 'backlog')"
             />
           </div>
@@ -197,7 +152,7 @@ async function deleteThread() {
               :name="item.sender.name"
               size="xs"
             />
-            <span class="font-medium text-default">{{ item.sender.name }}</span> · {{ timeAgo(item.at) }}
+            <span class="font-medium text-default">{{ item.sender.name }}</span> · <TimeAgo :at="item.at" />
           </span>
           <MarkdownText :text="item.reply" />
         </template>
@@ -228,55 +183,16 @@ async function deleteThread() {
         :project="item.project.slug"
         :disabled="cantSend"
         :busy="busy"
+        :draft-key="`inbox:${item.id}`"
         @submit="send"
       />
     </div>
-    <UDrawer
-      v-model:open="planSheet"
-      :title="latest ? `Plan v${latest.version}` : 'Plan'"
-      :ui="{ content: 'h-[88svh]' }"
-    >
-      <template #content>
-        <div
-          v-if="latest"
-          class="flex min-h-0 flex-1 flex-col pb-[env(safe-area-inset-bottom)]"
-          data-testid="plan-sheet"
-        >
-          <PlanDetail
-            :plan="latest"
-            :previous="previous"
-            :busy="busy"
-            sheet
-            class="flex-1"
-            @approve="approve(latest, $event)"
-            @close="flyout.close()"
-          />
-        </div>
-      </template>
-    </UDrawer>
-    <UDrawer
-      v-model:open="detailSheet"
-      :title="flyout.ref.value ? `Task ${flyout.ref.value}` : 'Epic'"
-      :ui="{ content: 'h-[94svh]' }"
-    >
-      <template #content>
-        <div class="flex min-h-0 flex-1 flex-col pb-[env(safe-area-inset-bottom)]">
-          <AsyncTaskDetail
-            v-if="flyout.ref.value"
-            :task-ref="flyout.ref.value"
-            mode="flyout"
-            class="flex-1"
-            @close="detailSheet = false"
-          />
-          <AsyncEpicDetail
-            v-else-if="flyout.epic.value"
-            :epic-id="flyout.epic.value"
-            mode="flyout"
-            class="flex-1"
-            @close="detailSheet = false"
-          />
-        </div>
-      </template>
-    </UDrawer>
+    <PlanSheets
+      :plan="latest"
+      :previous="previous"
+      :busy="busy"
+      :disabled="working"
+      @approve="latest && approve(latest, $event)"
+    />
   </div>
 </template>

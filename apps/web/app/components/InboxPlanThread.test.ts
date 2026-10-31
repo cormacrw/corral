@@ -4,7 +4,7 @@ import type { ServerEvent } from '@corral/contracts'
 import { applyEvent, invalidateKeys } from '~/queries/dependencies'
 import { testQueryClient } from '~/queries/mount-with-query'
 import { flushPromises, mount } from '@vue/test-utils'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import { api } from '~/composables/useApi'
 import { agents, inbox, planSessions, plans, projects } from '~/prototype/fixtures'
@@ -14,7 +14,7 @@ import InboxItemPage from '~/pages/inbox/[itemId].vue'
 import { UNDO_MS, usePlanThreadDelete } from '~/composables/usePlanThreadDelete'
 
 vi.mock('~/composables/useApi', () => ({
-  api: { inbox: { get: vi.fn() }, plan: { session: vi.fn(), close: vi.fn(), read: vi.fn() } }
+  api: { inbox: { get: vi.fn() }, plan: { session: vi.fn(), close: vi.fn(), read: vi.fn(), message: vi.fn() } }
 }))
 
 afterEach(() => {
@@ -22,7 +22,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-async function mountInbox() {
+async function mountInbox(sessionPlans = plans['s-1']!) {
   for (const name of ['ref', 'shallowRef', 'computed', 'watch', 'watchEffect', 'onMounted', 'onBeforeUnmount'] as const) vi.stubGlobal(name, vue[name])
   const replace = vi.fn()
   const remove = vi.fn()
@@ -43,7 +43,8 @@ async function mountInbox() {
   vi.stubGlobal('useShell', () => ({ agents, projects, loaded: true, runner: { online: true } }))
   let data = inbox()
   vi.mocked(api.inbox.get).mockImplementation(async () => structuredClone(data))
-  vi.mocked(api.plan.session).mockResolvedValue({ ...planSessions.find(s => s.id === 's-1')!, unread: false, messages: [], plans: plans['s-1']! })
+  vi.mocked(api.plan.session).mockResolvedValue({ ...planSessions.find(s => s.id === 's-1')!, unread: false, messages: [], plans: sessionPlans })
+  vi.mocked(api.plan.read).mockResolvedValue({ ...planSessions.find(s => s.id === 's-1')!, unread: false })
   vi.mocked(api.plan.close).mockReset().mockImplementation(async (id) => {
     data = { ...data, needsYou: data.needsYou.filter(i => i.id !== id), count: data.count - 1 }
     return { ...planSessions.find(s => s.id === id)!, closed: true }
@@ -63,7 +64,7 @@ async function mountInbox() {
   } } })
   await flushPromises()
   // An event as the real stream delivers it, less the coalescing delay
-  const emitLive = (event: { type: string, session?: { id: string, unread: boolean }, markedRead?: { inboxCount: number } }) => void invalidateKeys(client, applyEvent(client, event as ServerEvent))
+  const emitLive = (event: { type: string, session?: { id: string, unread: boolean, activeRunId?: string | null }, markedRead?: { inboxCount: number } }) => void invalidateKeys(client, applyEvent(client, event as ServerEvent))
   const rows = () => wrapper.findAll('[data-row]').map(r => r.attributes('data-row'))
   const rename = (name: string) => {
     data = { ...data, needsYou: data.needsYou.map(i => i.type === 'plan_thread' ? { ...i, sender: { ...i.sender, name } } : i) }
@@ -80,11 +81,11 @@ it('reads an unread thread in place and keeps it open, without fetching the Inbo
   try {
     const opened = inbox().needsYou.find(i => i.id === 's-1')
     if (opened?.type !== 'plan_thread') throw new Error('fixture')
+    vi.mocked(api.plan.read).mockResolvedValue({ ...planSessions.find(s => s.id === 's-1')!, unread: false })
     setInbox({ ...inbox(), needsYou: inbox().needsYou.map(i => i.id === 's-1' ? { ...opened, status: 'none', question: null, plan: null, planId: null, unread: true, reply: 'Done' } : i) })
     emitLive({ type: 'agent.updated' })
     await flushPromises()
     vi.mocked(api.inbox.get).mockClear()
-    vi.mocked(api.plan.read).mockResolvedValue({ ...planSessions.find(s => s.id === 's-1')!, unread: false })
     expect(rows()).toContain('s-1')
 
     emitLive({ type: 'plan.session', session: { id: 's-1', unread: true } })
@@ -176,4 +177,34 @@ it('deletes from a row, and Undo brings it back without closing', async () => {
   } finally {
     wrapper.unmount()
   }
+})
+
+describe('while a sent reply is waiting on Juno', () => {
+  it('stops saying working when the turn ended without a new message', async () => {
+    const { wrapper, emitLive } = await mountInbox()
+    try {
+      vi.mocked(api.plan.message).mockResolvedValue({ id: 'm' } as never)
+      const thread = wrapper.findComponent(InboxPlanThread)
+      await (thread.vm as unknown as { send: (text: string) => Promise<boolean> }).send('Go on')
+      await flushPromises()
+      emitLive({ type: 'plan.session', session: { id: 's-1', unread: false, activeRunId: 'r-1' } })
+      await flushPromises()
+      expect(wrapper.find('[data-testid="inbox-plan-working"]').exists()).toBe(true)
+
+      emitLive({ type: 'plan.session', session: { id: 's-1', unread: false, activeRunId: null } })
+      await flushPromises()
+      expect(wrapper.find('[data-testid="inbox-plan-working"]').exists()).toBe(false)
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('offers a retry when View plan has nothing to show', async () => {
+    const { wrapper } = await mountInbox([])
+    try {
+      expect(wrapper.find('[data-testid="inbox-plan-error"]').exists()).toBe(true)
+    } finally {
+      wrapper.unmount()
+    }
+  })
 })

@@ -2,7 +2,8 @@
 import { useQuery } from '@tanstack/vue-query'
 import { planSessionsQuery } from '~/queries/plan'
 import type { PlanSession } from '@corral/contracts'
-import { projectColor, timeAgo } from '~/utils/labels'
+import { projectColor } from '~/utils/labels'
+import TimeAgo from '~/components/TimeAgo.vue'
 
 // The mobile session switcher (design/plan.md, design/mobile.md): a header
 // button that opens a sheet of the open sessions, with their status and a
@@ -81,7 +82,7 @@ async function go(to: string) {
                 >
                   <span
                     class="size-2 shrink-0 rounded-full"
-                    :style="{ background: projectOf(session) ? projectColor(projectOf(session)!) : '#999' }"
+                    :style="{ background: projectOf(session) ? projectColor(projectOf(session)!) : 'var(--ui-text-dimmed)' }"
                     aria-hidden="true"
                   />
                   <span :class="['truncate', session.unread && 'font-semibold text-highlighted']">{{ session.title }}</span>
@@ -147,11 +148,11 @@ async function go(to: string) {
                 >
                   <span
                     class="size-2 shrink-0 rounded-full"
-                    :style="{ background: projectOf(session) ? projectColor(projectOf(session)!) : '#999' }"
+                    :style="{ background: projectOf(session) ? projectColor(projectOf(session)!) : 'var(--ui-text-dimmed)' }"
                     aria-hidden="true"
                   />
                   <span class="min-w-0 flex-1 truncate">{{ session.title }}</span>
-                  <span class="shrink-0 text-xs text-dimmed">{{ timeAgo(session.updatedAt) }}</span>
+                  <span class="shrink-0 text-xs text-dimmed"><TimeAgo :at="session.updatedAt" /></span>
                 </button>
               </li>
             </ul>

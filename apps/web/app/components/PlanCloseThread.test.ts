@@ -2,7 +2,7 @@
 import { VueQueryPlugin } from '@tanstack/vue-query'
 import { testQueryClient } from '~/queries/mount-with-query'
 import { flushPromises, mount } from '@vue/test-utils'
-import { defineComponent, h, ref, resolveComponent } from 'vue'
+import { computed, defineComponent, h, ref, resolveComponent } from 'vue'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { PlanSession } from '@corral/contracts'
 import PlanCloseThread from './PlanCloseThread.vue'
@@ -23,6 +23,8 @@ function setup(current = 's1') {
   vi.stubGlobal('useRouter', () => ({ push }))
   vi.stubGlobal('usePlanThreads', () => ({ remove }))
   vi.stubGlobal('useToast', () => ({ add }))
+  vi.stubGlobal('useLive', () => ({ state: ref({ agents: [{ role: 'pm', name: 'Juno' }] }) }))
+  vi.stubGlobal('computed', computed)
   return mount(PlanCloseThread, { props: { session }, global: { plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }]], components: { UButton: Button, UModal: Dialog } } })
 }
 afterEach(() => {
