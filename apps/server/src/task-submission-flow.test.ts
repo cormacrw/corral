@@ -93,7 +93,7 @@ it('gives the reviewer the commit, epic base, criteria and evidence, and binds t
   expect(await t.db.select().from(schema.reviews).where(eq(schema.reviews.taskId, task.id))).toEqual([])
 
   t.github.setBranch(project.repository, dev.branch, 'head-1')
-  expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', verdict(task, 'approved', 'head-1'))).toMatchObject({ ok: true, result: { message: expect.stringContaining('integration into the epic branch') } })
+  expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', verdict(task, 'approved', 'head-1'))).toMatchObject({ ok: true, result: { message: expect.stringContaining('integrates it into the epic branch') } })
   expect(await t.db.select().from(schema.taskSubmissions).where(eq(schema.taskSubmissions.taskId, task.id))).toMatchObject([{ agentApprovedHeadSha: 'head-1', integratedCommitSha: null }])
   // Approval isn't completion: the task waits and no GitHub merge is attempted
   await t.orchestrator.merges.tick()

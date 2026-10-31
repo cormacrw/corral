@@ -15,7 +15,7 @@ Items come from two places:
 
 There's no separate notifications feed.
 
-A criterion marked **Checked by a human** always sends an approved task here, even if its task-level human-review flag is off. Its evidence card says **Needs human check** and has a checkbox for the human. Tick every such criterion before **Approve and merge**; requesting changes remains available. These ticks are local to the selected item; approval uses the usual merge gates.
+A criterion marked **Checked by a human** always sends an approved task here, even if its task-level human-review flag is off, except a PR-free epic task, whose checks appear on the epic review. Its evidence card says **Needs human check** and has a checkbox for the human. Tick every such criterion before **Approve and merge**; requesting changes remains available. These ticks are local to the selected item; approval uses the usual merge gates.
 
 ## Layout
 
@@ -149,6 +149,8 @@ On the mobile layout ([mobile.md](mobile.md#inbox)), a Plan thread opens as its 
 - **Swipe to delete:** swiping a thread row left reveals a red **Delete** button; a full swipe deletes at once, and a short one snaps back. Task items don't swipe. Deleting removes the row immediately and shows a "Thread deleted · its drafts were discarded" toast with **Undo** for 5 seconds; only then is the thread closed (as [Delete thread](#delete-thread), discarding its drafts and unapproved plan). Undo puts the row back with nothing discarded. If the close fails, the row comes back with an error toast. `usePlanThreadDelete` holds the pending deletes, shared with desktop, so a delete started on the thread screen carries on after it returns to the list or the layout changes. Reloading or closing the tab during Undo sends the close immediately with a keepalive request.
 
 ### Epic items (D27)
+
+An epic PR in human review lists every task on the epic branch with **Open task**, its integrated and approved commits (or legacy task PR), criteria and evidence. A PR-free task's **Needs human check** criteria have checkboxes, a task marked for human review has **I reviewed this task**, and those tasks stay expanded on a phone. The footer counts them; **Approve** needs them all (D27, COR-289), and the server checks too. Ticks are local to the item. Requesting changes doesn't need them.
 
 An epic PR in human review and an epic PR rebase conflict have their own layout on desktop and mobile, `InboxEpicReview` and `InboxEpicConflict`, with the action bar pinned at the bottom. Both share `InboxEpicHeader`: the badge, the epic's name linking to it, and a button to the epic PR, which goes full width under the title on a phone.
 

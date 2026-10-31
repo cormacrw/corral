@@ -35,7 +35,7 @@ export const PLAN_STATUS: Record<PlanStatus, { label: string, color: Color }> = 
 
 // An epic's review mode (D27)
 export const EPIC_REVIEW_MODE: Record<EpicReviewMode, { label: string, description: string }> = {
-  epic: { label: 'Epic PR', description: 'Tasks merge into an epic branch on approval; you review the epic PR' },
+  epic: { label: 'Epic PR', description: 'Tasks integrate into an epic branch on agent approval; you review them all, with any human checks, on the epic PR' },
   each_task: { label: 'Each task', description: 'You review every task, then the epic PR' },
   direct: { label: 'Direct', description: 'Each task merges straight into the target branch' }
 }
