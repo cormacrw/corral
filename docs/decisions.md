@@ -158,7 +158,7 @@ Full table, disk layout, flows and the known POC push limitation are in [archite
 |---|---|
 | **Draft** | Proposed by the PM in a plan and not yet confirmed. Belongs to the Plan session that proposed it, and is listed on the Plan tab under that session; never on the board or in the Backlog. A plan in another session that revises it by ref takes it over: it belongs to the session of the latest proposed plan that includes it. The PM's revisions can change or remove it (added 2026-10-28; owning session added 2026-10-29). |
 | **Backlog** | Created by the human, or a Draft the human kept for later or for refining, or sent back for rethinking. Replaces "Needs refinement" (and the earlier name "Draft"). Never scheduled. **Not shown on the board** (see below). |
-| **Ready** | Approved and fully specified. **Can still have unmerged dependencies.** The scheduler only starts it once all dependencies are Merged; until then the card shows "waiting on #12". |
+| **Ready** | Approved and fully specified. **Can still have unmerged dependencies.** The scheduler only starts it once all dependencies are Merged; until then its Board card shows an amber blocked icon, whose **Waiting on** popover lists the unfinished tasks. A task held by unfinished prerequisite epics (D22) shows the same icon, with those epics in the popover (amended 2026-10-31, COR-363; previously the card showed "waiting on #12"). |
 | **In progress** | The developer's turn. |
 | **Agent review** | The reviewer's turn. Replaces "In review". |
 | **Human review** | The reviewer approved; the task is flagged for human review and waiting on the human. |
@@ -472,6 +472,8 @@ The UI specs are in [design/](design/README.md).
 
 **Amended by D21:** checks are gates, never criterion evidence. Human evidence is chosen per criterion and may be note-only; logs and test output are agent artifacts.
 
+**Amended 2026-10-31 (COR-363):** the Board uses the Option A card (COR-154 v4), which removes the type badge, notes, ref, design-changed badge and PR link from Board cards. Bug, Spike and Design show a muted icon instead, so colour on the card belongs to the priority, and the Backlog keeps its type badges. Everything removed is still on the task: the flyout and task page show the type, ref, status reason, review round, design-changed badge and PR link, and the Paused banner. [design/board.md](design/board.md) has the card.
+
 **Decision:** A task's type says what kind of work it is, not which part of the stack it touches. There are three:
 
 | Type | What it is | Deliverable |
@@ -495,7 +497,7 @@ The UI specs are in [design/](design/README.md).
 
 **Consequences for the build:**
 - `TASK_TYPES` in `packages/core` is the single list; the database enum, API contracts, plan schema and the runner's `propose_plan` schema are built from it.
-- Board and Backlog cards show a badge for Bug and Spike only; Task cards show none.
+- Backlog rows show a badge for Bug and Spike only; Task rows show none. Board cards show a muted icon for Bug and Spike, with no badge, and nothing for Task (amended 2026-10-31, COR-363).
 
 ---
 
@@ -561,7 +563,7 @@ The bundle, spec and screenshots are content-addressed blobs and the database st
 
 ### Amendments to earlier decisions
 
-- **D19:** there are four task types. The PM picks `design` in `propose_plan` for work whose look or flow should be agreed before it's built. Board and Backlog cards show a badge for Design too. Jev (D15) gets `design` as a type value.
+- **D19:** there are four task types. The PM picks `design` in `propose_plan` for work whose look or flow should be agreed before it's built. Backlog rows show a badge for Design too, and Board cards a muted icon with no badge (amended 2026-10-31, COR-363). Jev (D15) gets `design` as a type value.
 - **D10:** a new status, **Approved**: "Design approved by the human; nothing to merge." It's on the board after Merged. New transitions: In progress → Agent review on a valid `design_submitted` (Server); Agent review → Human review for a design task, whatever its flag (Server); Human review → Approved when the human approves a design (**Human only**); Approved → In progress when the human reopens it (**Human only**). Design tasks never enter Ready to merge or Merged. A dependency on a design task counts as satisfied once it's Approved. Deleting an Approved task soft-deletes it like the others in Ready…Failed, deletes its `design/<ref>` branch when safe and keeps its versions' blobs.
 - **D5:** the human-review flag doesn't apply to design tasks; they always go to Human review.
 - **D9:** a PM turn runs when the human sends a message **or approves a design version**, which posts the human's message above. Nothing else starts one.
