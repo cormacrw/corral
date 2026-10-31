@@ -112,4 +112,6 @@ A mutation that resolves the selected item spreads `holdsInbox` into `useMutatio
 
 Reading patches the cached Inbox with `inboxWithRead`: `markPlanRead` and `readDeployment` before their requests, and the `markedRead` events on every tab. `inboxQuery` reapplies reads made during its fetch. A fetch that starts after the patch but reaches the server before the read can briefly restore the row, until the `markedRead` event removes it. A failed release-note read refetches to bring the dot back; the component reads once per deployment, so that can't loop.
 
+An open item's PR (`keys.tasks.pullRequest`) refreshes when a `run.updated` for its task has `endedAt` set, since that's when a developer's push lands. Earlier `run.updated` events skip it: each fetch is a GitHub read through the runner, and lease changes would cost one every time. `keys.tasks.pullRequests(ref)` covers every PR of the task. Task and Inbox mutations reach it through `keys.tasks.detail(ref)`, and a push from outside a run shows only after `staleTime`, on remount or window focus.
+
 A failed task load shows Retry until a fetch settles it, and only then. Retry is `resetQueries`, which puts the query back to pending so the tray shows it loading.

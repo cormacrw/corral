@@ -710,3 +710,26 @@ it('reloads the PR through Retry, back through its loading state', async () => {
     wrapper.unmount()
   }
 })
+
+it('refetches the open PR when a run on its task ends, not while one is going', async () => {
+  const { wrapper, openTab, emitLive } = await mountInbox('human_review', 'COR-5')
+  try {
+    await openTab('diff')
+    const run = { id: 'r-1', agentId: 'a-1', projectId: 'p-corral', taskRef: 'COR-5', endedAt: null }
+    vi.mocked(api.projects.pullRequest).mockClear()
+    await emitLive({ type: 'run.updated', run })
+    await flushPromises()
+    expect(api.projects.pullRequest).not.toHaveBeenCalled()
+    await emitLive({ type: 'run.updated', run: { ...run, taskRef: 'COR-6', endedAt: inbox().activity[0]!.at } })
+    await flushPromises()
+    expect(api.projects.pullRequest).not.toHaveBeenCalled()
+    const pushed = { ...pullRequestDetails[0]!, totalFiles: 9 }
+    vi.mocked(api.projects.pullRequest).mockResolvedValue(pushed)
+    await emitLive({ type: 'run.updated', run: { ...run, endedAt: inbox().activity[0]!.at } })
+    await flushPromises()
+    expect(api.projects.pullRequest).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-tab="diff"]').text()).toBe('Code diff 9')
+  } finally {
+    wrapper.unmount()
+  }
+})
