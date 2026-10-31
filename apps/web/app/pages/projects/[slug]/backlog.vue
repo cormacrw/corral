@@ -7,7 +7,6 @@ import { ApiError } from '~/composables/useApi'
 import { epicTitle, PRIORITY, timeAgo } from '~/utils/labels'
 
 // Backlog (design/backlog.md): proposed tasks grouped by epic
-const route = useRoute()
 const live = useLive()
 const flyout = useTaskFlyout()
 const device = useDevice()
@@ -15,9 +14,7 @@ const router = useRouter()
 const toast = useToast()
 const transition = useMutation(transitionTask)
 const create = useMutation(createTask)
-const slug = computed(() => String(route.params.slug))
-const project = computed(() => live.state.value.projects.find(p => p.slug === slug.value) ?? null)
-const { tasks: all, epics: epicList, loading, error } = useProjectLists(slug)
+const { slug, project, tasks: all, epics: epicList, loading, error } = useProject()
 const pmName = computed(() => live.state.value.agents.find(a => a.role === 'pm')?.name ?? 'the PM')
 useSeoMeta({ title: () => `Backlog · ${project.value?.name ?? ''} · Corral` })
 
@@ -261,7 +258,6 @@ async function newTask() {
           </p>
         </div>
       </div>
-      <TaskFlyout />
     </div>
     <UModal
       :open="Boolean(confirmEpic)"

@@ -1,21 +1,16 @@
 <script setup lang="ts">
-import { useQuery } from '@tanstack/vue-query'
-import { pullRequestsQuery } from '~/queries/projects'
 import type { Color } from '~/utils/labels'
 import { ciCell, evidenceCell, mergeCell, rebaseCell, reviewCell } from '~/utils/pull-requests'
 
 // Pull requests (design/pull-requests.md): every open PR in the project and
 // where it stands against the merge gates, read live from GitHub
-const route = useRoute()
-const live = useLive()
 const flyout = useTaskFlyout()
 const device = useDevice()
-const slug = computed(() => String(route.params.slug))
-const project = computed(() => live.state.value.projects.find(p => p.slug === slug.value) ?? null)
+const { project, pullRequests } = useProject()
 useSeoMeta({ title: () => `Pull requests · ${project.value?.name ?? ''} · Corral` })
 
 // Task and run events refetch it too (queries/dependencies.ts)
-const { data: prs, error, isFetching, refetch } = useQuery(computed(() => pullRequestsQuery(slug.value)))
+const { data: prs, error, isFetching, refetch } = pullRequests
 
 const rows = computed(() => (prs.value ?? []).map(pr => ({
   pr,
@@ -255,7 +250,6 @@ const summary = computed(() => {
           </table>
         </div>
       </div>
-      <TaskFlyout v-if="!device.isMobile.value" />
     </div>
   </UDashboardPanel>
 </template>

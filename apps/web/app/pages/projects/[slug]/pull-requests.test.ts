@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils'
-import { focusManager, VueQueryPlugin } from '@tanstack/vue-query'
+import { focusManager, useQuery, VueQueryPlugin } from '@tanstack/vue-query'
 import { computed, defineComponent, h, reactive, ref } from 'vue'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { PullRequestStatus } from '@corral/contracts'
 import { testQueryClient } from '~/queries/mount-with-query'
-import { PULL_REQUESTS_POLL_MS } from '~/queries/projects'
+import { PULL_REQUESTS_POLL_MS, pullRequestsQuery } from '~/queries/projects'
 
 const pullRequests = vi.hoisted(() => vi.fn())
 vi.mock('~/composables/useApi', () => ({ api: { projects: { pullRequests } } }))
@@ -16,8 +16,9 @@ vi.mock('~/utils/pull-requests', () => {
 
 const route = reactive({ params: { slug: 'corral' } })
 for (const [name, value] of Object.entries({
-  computed, useRoute: () => route, useSeoMeta: vi.fn(),
-  useLive: () => ({ state: ref({ projects: [] }) }),
+  computed, useSeoMeta: vi.fn(),
+  // The parent route's observer, mounted with the page here
+  useProject: () => ({ project: ref(null), pullRequests: useQuery(computed(() => pullRequestsQuery(route.params.slug))) }),
   useTaskFlyout: () => ({ ref: ref(null) }), useDevice: () => ({ isMobile: ref(true) })
 })) vi.stubGlobal(name, value)
 const { default: PullRequests } = await import('./pull-requests.vue')

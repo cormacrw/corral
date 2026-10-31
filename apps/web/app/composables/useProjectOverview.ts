@@ -1,17 +1,26 @@
 import { isTaskDone } from '@corral/core'
-import type { AuditEntry, Epic, Inbox, Run, Task } from '@corral/contracts'
+import type { AuditEntry, Epic, Inbox, Project, Run, Task } from '@corral/contracts'
+import type { ComputedRef } from 'vue'
 import { api } from '~/composables/useApi'
 import { epicTitle, epicWithLiveCounts } from '~/utils/labels'
 import { projectNeedsYou } from '~/utils/projects'
 
+interface OverviewSource {
+  slug: ComputedRef<string>
+  project: ComputedRef<Project | null>
+  tasks: ComputedRef<Task[]>
+  epics: ComputedRef<Epic[]>
+  loading: ComputedRef<boolean>
+  error: ComputedRef<string | null>
+  open: () => boolean
+}
+
 // Project overview data (design/project-overview.md), shared by the web page
-// and MobileProjectOverview. Loads and stays live while its caller is mounted.
-export function useProjectOverview() {
-  const route = useRoute()
+// and MobileProjectOverview. The project parent route holds it, so going back
+// to Overview shows it at once. It loads once for the project, stays live while
+// open, and catches up on return only if something changed in between.
+export function useProjectOverview({ slug, project, tasks, epics: epicList, loading, error: listError, open }: OverviewSource) {
   const live = useLive()
-  const slug = computed(() => String(route.params.slug))
-  const project = computed(() => live.state.value.projects.find(p => p.slug === slug.value) ?? null)
-  const { tasks, epics: epicList, error: listError } = useProjectLists(slug)
   const inbox = ref<Inbox | null>(null)
   const runs = ref<Run[]>([])
   const history = ref<AuditEntry[]>([])
@@ -19,9 +28,12 @@ export function useProjectOverview() {
   const runAgents = ref<Map<string, string>>(new Map())
   const detailError = ref<string | null>(null)
   const error = computed(() => listError.value ?? detailError.value)
-  useSeoMeta({ title: () => `${project.value?.name ?? 'Project'} · Corral` })
 
+  let loaded = false
+  let outdated = false
   async function load() {
+    outdated = false
+    loaded = Boolean(project.value) && !loading.value
     detailError.value = null
     try {
       const [i, r] = await Promise.all([api.inbox.get(), api.runs.list({ active: true })])
@@ -39,10 +51,17 @@ export function useProjectOverview() {
       detailError.value = e instanceof Error ? e.message : String(e)
     }
   }
-  watch([project, tasks], () => void load(), { immediate: true })
+  function changed() {
+    if (open() || !loaded) void load()
+    else outdated = true
+  }
+  watch([project, tasks], changed, { immediate: true })
+  watch(open, (now) => {
+    if (now && outdated) void load()
+  })
   onMounted(() => {
     const stop = live.subscribe((event) => {
-      if (event.type === 'run.updated' && event.run.projectId === project.value?.id) void load()
+      if (event.type === 'run.updated' && event.run.projectId === project.value?.id) changed()
     })
     onBeforeUnmount(stop)
   })
