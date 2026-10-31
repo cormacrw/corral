@@ -12,6 +12,14 @@ cases. Both check the environment during execution, never at import time.
 Keep cleanup hooks safe when setup was skipped. Parameterized migration tests
 use `it.for` so their second argument is the Vitest test context.
 
+Test databases aren't migrated one by one. `createTestDatabase('postgres')` clones
+`corral_template_<key>`, built once under an advisory lock and only ever connected
+to while it's built. `pglite` loads a snapshot of a migrated instance, kept in
+`packages/db/node_modules/.cache/corral/`. The key hashes every migration file (and,
+for PGlite, the installed build), so a new migration can't reuse an old copy.
+`openDatabase` still runs on each copy, and `migrations.test.ts` doesn't use either.
+Delete old `corral_template_*` databases by hand if a shared server collects them.
+
 For an explicit local Postgres check, import `startTestPostgres` from
 `@corral/db/test-setup`. It returns `{ url, close }`; pass that URL as
 `CORRAL_DATABASE_URL` to the test subprocess and call `close` in `finally`.

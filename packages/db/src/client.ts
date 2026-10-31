@@ -13,8 +13,9 @@ import * as schema from './schema.ts'
 // Postgres when deployed and in CI; PGlite in development and tests (D14)
 export type DatabaseLocation =
   | { driver: 'postgres', url: string }
-  // `dataDir: null` keeps the database in memory
-  | { driver: 'pglite', dataDir: string | null }
+  // `dataDir: null` keeps the database in memory. `loadDataDir` starts it from
+  // a dump of a migrated instance (tests only), which is much faster.
+  | { driver: 'pglite', dataDir: string | null, loadDataDir?: Blob }
 
 // Both drivers share this type, so nothing above packages/db knows which is in use
 export type Database = PgDatabase<PgQueryResultHKT, typeof schema>
@@ -27,7 +28,7 @@ export interface DatabaseHandle {
   close(): Promise<void>
 }
 
-const migrationsFolder = join(import.meta.dirname, '..', 'migrations')
+export const migrationsFolder = join(import.meta.dirname, '..', 'migrations')
 const casing = 'snake_case'
 
 // Neither driver surfaces a notice nobody listens for, and migrations report
@@ -62,7 +63,9 @@ export async function openDatabase(location: DatabaseLocation): Promise<Database
 
   // PGlite creates its own folder but not missing parents
   if (location.dataDir !== null) await mkdir(location.dataDir, { recursive: true })
-  const client = location.dataDir === null ? new PGlite() : new PGlite(location.dataDir)
+  const client = location.loadDataDir
+    ? new PGlite({ loadDataDir: location.loadDataDir })
+    : location.dataDir === null ? new PGlite() : new PGlite(location.dataDir)
   reportPgliteWarnings(client)
   const db = drizzlePglite(client, { schema, casing })
   try {
