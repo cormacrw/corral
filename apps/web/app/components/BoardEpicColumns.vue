@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import type { Epic } from '@corral/contracts'
+import type { Agent, Epic } from '@corral/contracts'
 
 // The Board's Epics view (design/board.md): the columns of epic cards
 defineProps<{
-  columns: { key: string, label: string, hint: string, dot: string, cards: { epic: Epic, waitingOn: Epic[] }[] }[]
+  columns: { key: string, label: string, hint: string, dot: string, cards: { epic: Epic, waitingOn: Epic[], workingAgents: Agent[] }[] }[]
 }>()
 </script>
 
@@ -32,6 +32,7 @@ defineProps<{
           :key="card.epic.id"
           :epic="card.epic"
           :waiting-on="card.waitingOn"
+          :working-agents="card.workingAgents"
         />
         <p
           v-if="column.cards.length === 0"

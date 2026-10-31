@@ -59,7 +59,7 @@ function toRun({ run, agentName, agentRuntime, prefix, taskNumber, taskTitle, ep
   }
 }
 
-export async function listRuns(db: Executor, filter: { agentId?: string, taskId?: string, projectId?: string, role?: AgentRole, state?: RunState, active?: boolean }, limit = 50): Promise<Run[]> {
+export async function listRuns(db: Executor, filter: { agentId?: string, taskId?: string, projectId?: string, role?: AgentRole, state?: RunState, active?: boolean }, limit?: number): Promise<Run[]> {
   const where: SQL[] = []
   if (filter.agentId) where.push(eq(runs.agentId, filter.agentId))
   if (filter.taskId) where.push(eq(runs.taskId, filter.taskId))
@@ -67,14 +67,17 @@ export async function listRuns(db: Executor, filter: { agentId?: string, taskId?
   if (filter.role) where.push(eq(runs.role, filter.role))
   if (filter.state) where.push(eq(runs.state, filter.state))
   if (filter.active) where.push(inArray(runs.state, [...ACTIVE_RUN_STATES]))
-  const rows = await db.select(runColumns).from(runs)
+  const query = db.select(runColumns).from(runs)
     .innerJoin(agents, eq(agents.id, runs.agentId))
     .innerJoin(projects, eq(projects.id, runs.projectId))
     .leftJoin(tasks, eq(tasks.id, runs.taskId))
     .leftJoin(epics, eq(epics.id, runs.epicId))
     .where(and(...where))
     .orderBy(desc(runs.number))
-    .limit(limit)
+  // Active runs are a live snapshot, not a page of history: truncating it
+  // would hide epic workers behind runs from other projects. Explicit tool
+  // limits still apply, and history keeps its default page size.
+  const rows = await (limit === undefined && filter.active ? query : query.limit(limit ?? 50))
   return rows.map(toRun)
 }
 

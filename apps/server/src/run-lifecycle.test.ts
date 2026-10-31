@@ -33,6 +33,20 @@ describe('run lifecycle', () => {
     expect(run).toMatchObject({ role: 'developer', state: 'interrupted', outcome: null, error: 'Stopped by a human', endedAt: expect.any(String) })
   })
 
+  it('returns the complete active snapshot while keeping history and explicit limits bounded', async () => {
+    const project = await t.createProject()
+    const [agent] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'reviewer')).limit(1)
+    const [epic] = await t.db.insert(schema.epics).values({ projectId: project.id, title: 'Integration review', createdBy: t.actor }).returning()
+    await t.db.insert(schema.runs).values(Array.from({ length: 51 }, () => ({
+      agentId: agent!.id, projectId: project.id, epicId: epic!.id, role: 'reviewer' as const, state: 'running' as const
+    })))
+    const active = await listRuns(t.db, { projectId: project.id, active: true })
+    expect(active).toHaveLength(51)
+    expect(active.every(run => run.epicId === epic!.id && run.taskId === null)).toBe(true)
+    expect(await listRuns(t.db, { projectId: project.id })).toHaveLength(50)
+    expect(await listRuns(t.db, { projectId: project.id, active: true }, 3)).toHaveLength(3)
+  })
+
   it('clears a waiting PM job when a turn ends', () => {
     expect(runEndValues({ state: 'failed', outcome: 'failed', error: 'x' }, new Date(0))).toMatchObject({ pmJob: null, endedAt: new Date(0), outcome: 'failed', error: 'x' })
   })

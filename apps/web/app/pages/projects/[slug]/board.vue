@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { useMutation } from '@tanstack/vue-query'
+import { useMutation, useQuery } from '@tanstack/vue-query'
+import { runsQuery } from '~/queries/runs'
 import { moveTask } from '~/queries/tasks'
 import type { Task } from '@corral/contracts'
 import { DEFAULT_LIMITS, type TaskStatus } from '@corral/core'
 import type { BoardFilters, BoardView } from '~/utils/board'
-import { BOARD_COLUMNS, boardMove, boardView, EPIC_COLUMNS, epicOnBoard, epicStage, filtersFromQuery, filtersToQuery, matchesEpicFilter, matchesFilter, onBoard, sortColumn, taskAgentIds, unfinishedPrerequisites } from '~/utils/board'
+import { BOARD_COLUMNS, boardMove, boardView, EPIC_COLUMNS, epicOnBoard, epicStage, epicWorkingAgents, filtersFromQuery, filtersToQuery, matchesEpicFilter, matchesFilter, onBoard, sortColumn, taskAgentIds, unfinishedPrerequisites } from '~/utils/board'
 import { epicTitle, epicWithLiveCounts, PRIORITY, STATUS, taskNote } from '~/utils/labels'
 
 // The Board: approved work by status, with human moves through the same
@@ -75,10 +76,11 @@ const onBoardEpics = computed(() => liveEpics.value.filter(epic => epicOnBoard(e
 const boardEpics = computed(() => onBoardEpics.value.filter(epic => filters.value.epics.length === 0 || filters.value.epics.includes(epic.id)))
 // The Epics view: one card per epic, each in the one column its stage names
 const visibleEpics = computed(() => onBoardEpics.value.filter(epic => matchesEpicFilter(epic, filters.value)))
+const activeRuns = useQuery(computed(() => ({ ...runsQuery({ active: true }), enabled: view.value === 'epics' && !device.isMobile.value })))
 const epicColumns = computed(() => {
   const staged = visibleEpics.value.map((epic) => {
     const stage = epicStage(epic, all.value.filter(t => t.epicId === epic.id && t.status !== 'draft' && t.status !== 'backlog'))
-    return { epic, stage, waitingOn: stage === 'done' ? [] : unfinishedPrerequisites(epic, liveEpics.value) }
+    return { epic, stage, workingAgents: epicWorkingAgents(epic.id, all.value, activeRuns.data.value ?? [], live.state.value.agents), waitingOn: stage === 'done' ? [] : unfinishedPrerequisites(epic, liveEpics.value) }
   })
   return EPIC_COLUMNS.map(column => ({ ...column, dot: DOT[STATUS[column.status].color], cards: staged.filter(card => card.stage === column.key) }))
 })
