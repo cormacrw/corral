@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils'
-import { focusManager, useQuery, VueQueryPlugin } from '@tanstack/vue-query'
+import { focusManager, VueQueryPlugin } from '@tanstack/vue-query'
 import { computed, defineComponent, h, reactive, ref } from 'vue'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { PullRequestStatus } from '@corral/contracts'
@@ -17,8 +17,7 @@ vi.mock('~/utils/pull-requests', () => {
 const route = reactive({ params: { slug: 'corral' } })
 for (const [name, value] of Object.entries({
   computed, useSeoMeta: vi.fn(),
-  // The parent route's observer, mounted with the page here
-  useProject: () => ({ project: ref(null), pullRequests: useQuery(computed(() => pullRequestsQuery(route.params.slug))) }),
+  useProject: () => ({ slug: computed(() => route.params.slug), project: ref({ slug: route.params.slug }) }),
   useTaskFlyout: () => ({ ref: ref(null) }), useDevice: () => ({ isMobile: ref(true) })
 })) vi.stubGlobal(name, value)
 const { default: PullRequests } = await import('./pull-requests.vue')
@@ -88,5 +87,18 @@ it('shows a project\'s cached list at once when switching back to it', async () 
   await wrapper.vm.$nextTick()
   expect(wrapper.text()).toContain('corral-1')
   expect(wrapper.text()).not.toContain('other-1')
+  wrapper.unmount()
+})
+
+it('uses the parent-prefetched list without a request on mount, even when stale', async () => {
+  await client.prefetchQuery(pullRequestsQuery('corral'))
+  await vi.advanceTimersByTimeAsync(2 * PULL_REQUESTS_POLL_MS)
+  expect(pullRequests).toHaveBeenCalledTimes(1)
+  const wrapper = mountPage()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(wrapper.text()).toContain('corral-1')
+  expect(pullRequests).toHaveBeenCalledTimes(1)
+  await vi.advanceTimersByTimeAsync(PULL_REQUESTS_POLL_MS)
+  expect(pullRequests).toHaveBeenCalledTimes(2)
   wrapper.unmount()
 })

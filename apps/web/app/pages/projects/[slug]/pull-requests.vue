@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useQuery } from '@tanstack/vue-query'
+import { pullRequestsQuery } from '~/queries/projects'
 import type { Color } from '~/utils/labels'
 import { ciCell, evidenceCell, mergeCell, rebaseCell, reviewCell } from '~/utils/pull-requests'
 
@@ -6,11 +8,14 @@ import { ciCell, evidenceCell, mergeCell, rebaseCell, reviewCell } from '~/utils
 // where it stands against the merge gates, read live from GitHub
 const flyout = useTaskFlyout()
 const device = useDevice()
-const { project, pullRequests } = useProject()
+const { slug, project } = useProject()
 useSeoMeta({ title: () => `Pull requests · ${project.value?.name ?? ''} · Corral` })
 
-// Task and run events refetch it too (queries/dependencies.ts)
-const { data: prs, error, isFetching, refetch } = pullRequests
+// The parent prefetches once. Mounting this tab shows that cache immediately;
+// polling and task/run event refetches run only while this page is mounted.
+const { data: prs, error, isFetching, refetch } = useQuery(computed(() => ({
+  ...pullRequestsQuery(slug.value), enabled: Boolean(project.value), refetchOnMount: false
+})))
 
 const rows = computed(() => (prs.value ?? []).map(pr => ({
   pr,

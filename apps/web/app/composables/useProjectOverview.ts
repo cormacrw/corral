@@ -59,6 +59,8 @@ export function useProjectOverview({ slug, project, tasks, epics: epicList, load
       detailError.value = e instanceof Error ? e.message : String(e)
     }
   }
+  // Preload once to keep the first Overview visit free of requests and an
+  // empty-activity flash. Subsequent changes wait while another tab is open.
   function changed() {
     if (open() || !loaded) void load()
     else outdated = true

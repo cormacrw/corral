@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, inject, provide, toValue, type ComputedRef, type InjectionKey, type MaybeRefOrGetter } from 'vue'
 import { DEFAULT_FLOW_WINDOW, flowQuery, projectsQuery, pullRequestsQuery } from '~/queries/projects'
 
@@ -27,11 +27,15 @@ export function provideProject(slug: ComputedRef<string>, overviewOpen: () => bo
   const project = computed(() => projects.value?.find(p => p.slug === slug.value) ?? null)
   const known = computed(() => project.value?.slug ?? '')
   const lists = useProjectLists(known)
-  // Polls while any tab of the project is open, so Pull requests opens current
-  const pullRequests = useQuery(computed(() => ({ ...pullRequestsQuery(slug.value), enabled: Boolean(known.value) })))
+  // Warm the tab once without an observer: GitHub polling and event refetches
+  // belong to the Pull requests page, not to a project open on the Board.
+  const client = useQueryClient()
+  watch(known, (current) => {
+    if (current) void client.prefetchQuery(pullRequestsQuery(current))
+  }, { immediate: true })
   useQuery(computed(() => ({ ...flowQuery(slug.value, DEFAULT_FLOW_WINDOW), enabled: Boolean(known.value) })))
   const overview = useProjectOverview({ slug, project, ...lists, open: overviewOpen })
-  const context = { slug, projects, project, ...lists, pullRequests, overview }
+  const context = { slug, projects, project, ...lists, overview }
   provide(PROJECT, context)
   return context
 }
