@@ -106,6 +106,8 @@ async function moveToNext() {
   const position = items.value.findIndex(i => i.id === selectedId.value)
   const remaining = (list.data.value?.needsYou ?? []).filter(i => !isHidden(i))
   const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
+  // Arrive with its task, so the panes never show a skeleton
+  if (next?.taskRef) await client.prefetchQuery(taskQuery(next.taskRef))
   await router.replace(itemRoute(next))
   list.release()
 }
