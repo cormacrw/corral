@@ -98,10 +98,10 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
             { label: 'In progress', color: STATUS.in_progress.color, value: count('in_progress'), sub: developer ? `${developer} working` : 'no run active' },
             { label: 'Agent review', color: STATUS.agent_review.color, value: count('agent_review'), sub: reviewer ? `${reviewer} reviewing` : 'waiting' },
             { label: 'Needs you', color: STATUS.human_review.color, value: needsYou.length, sub: `${count('human_review')} review · ${count('blocked')} blocked · ${count('failed')} failed` },
-            { label: 'Merged this week', color: STATUS.merged.color, value: mergedThisWeek.length, sub: firstPass === null ? 'no merges yet' : `first-pass approval ${firstPass}%` }
+            { label: 'Completed this week', color: STATUS.merged.color, value: mergedThisWeek.length, sub: firstPass === null ? 'no merges yet' : `first-pass approval ${firstPass}%` }
           ]"
           :key="tile.label"
-          class="w-33 shrink-0 snap-start rounded-lg border border-default p-3"
+          class="w-40 shrink-0 snap-start rounded-lg border border-default p-3"
         >
           <dt class="flex items-center gap-1.5 truncate text-xs text-muted">
             <span

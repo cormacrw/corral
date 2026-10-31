@@ -19,8 +19,9 @@ const pmName = computed(() => live.state.value.agents.find(a => a.role === 'pm')
 useSeoMeta({ title: () => `Backlog · ${project.value?.name ?? ''} · Corral` })
 
 const search = ref('')
+const showCompleted = ref(false)
 const collapsed = useLocalStorage<Record<string, boolean>>('corral.backlog.collapsed', {})
-const backlog = computed(() => all.value.filter(t => t.status === 'backlog' && (!search.value || `${t.ref} ${t.title}`.toLowerCase().includes(search.value.toLowerCase()))))
+const backlog = computed(() => all.value.filter(t => (t.status === 'backlog' || (showCompleted.value && isTaskDone(t))) && (!search.value || `${t.ref} ${t.title}`.toLowerCase().includes(search.value.toLowerCase()))))
 const groups = computed(() => {
   const ids = [...new Set(all.value.map(t => t.epicId ?? 'none'))]
   return ids.map((id, i) => ({
@@ -85,6 +86,7 @@ async function newTask() {
     <BacklogMobile
       v-if="device.isMobile.value"
       v-model:search="search"
+      v-model:show-completed="showCompleted"
       v-model:collapsed="collapsed"
       :groups="groups"
       :count="backlog.length"
@@ -112,6 +114,10 @@ async function newTask() {
             class="w-60"
           />
           <span class="text-sm text-muted">{{ backlog.length }} tasks · never scheduled until approved</span>
+          <UCheckbox
+            v-model="showCompleted"
+            label="Show completed"
+          />
           <div class="ms-auto flex gap-2">
             <UButton
               label="Collapse all"
@@ -197,7 +203,8 @@ async function newTask() {
                 class="ms-auto"
               />
               <UButton
-                :label="group.rows.length === 1 ? 'Move to board' : 'Move all to board'"
+                v-if="group.rows.some(t => t.status === 'backlog')"
+                :label="group.rows.filter(t => t.status === 'backlog').length === 1 ? 'Move to board' : 'Move all to board'"
                 icon="i-lucide-kanban"
                 variant="outline"
                 color="neutral"
@@ -220,11 +227,12 @@ async function newTask() {
                 >
                   <span class="w-14 shrink-0 font-mono text-xs text-muted">{{ task.ref }}</span>
                   <TaskTypeBadge :type="task.type" />
+                  <StatusBadge :status="task.status" />
                   <DesignChangedBadge :design="task.design" />
                   <span class="min-w-0 flex-1 truncate">
                     {{ task.title }}
                     <UBadge
-                      v-if="inPlan.get(task.projectId)"
+                      v-if="task.status === 'backlog' && inPlan.get(task.projectId)"
                       label="In plan"
                       size="xs"
                       variant="subtle"
@@ -237,6 +245,7 @@ async function newTask() {
                   <span class="hidden w-16 text-end text-xs text-dimmed md:inline">{{ timeAgo(task.createdAt) }}</span>
                 </button>
                 <UButton
+                  v-if="task.status === 'backlog'"
                   label="Move to board"
                   icon="i-lucide-kanban"
                   variant="ghost"

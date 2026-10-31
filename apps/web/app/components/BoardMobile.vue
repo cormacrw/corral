@@ -2,7 +2,7 @@
 import type { Epic, Task } from '@corral/contracts'
 import type { TaskStatus } from '@corral/core'
 import type { BoardFilters } from '~/utils/board'
-import { swipeStep } from '~/utils/board'
+import { boardColumnKey, swipeStep } from '~/utils/board'
 import { PRIORITY, taskNote } from '~/utils/labels'
 
 // The Board on a phone (design/board.md, design/mobile.md): one column at a
@@ -28,7 +28,7 @@ const route = useRoute()
 const router = useRouter()
 
 // The open column lives in ?column= so Back from a task returns to it
-const index = computed(() => Math.max(0, props.columns.findIndex(c => c.key === route.query.column)))
+const index = computed(() => Math.max(0, props.columns.findIndex(c => c.key === boardColumnKey(route.query.column))))
 const column = computed(() => props.columns[index.value]!)
 function select(i: number) {
   const next = props.columns[Math.min(props.columns.length - 1, Math.max(0, i))]!
@@ -37,10 +37,12 @@ function select(i: number) {
 
 // Keep the open tab in view as it changes
 const tabs = useTemplateRef<HTMLElement[]>('tabs')
-watch(index, async (i) => {
+async function scrollTab(i: number) {
   await nextTick()
   tabs.value?.[i]?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' })
-})
+}
+watch(index, scrollTab)
+onMounted(() => void scrollTab(index.value))
 
 let start: { x: number, y: number } | null = null
 function onTouchStart(event: TouchEvent) {
@@ -225,6 +227,10 @@ const note = (task: Task) => taskNote(task, props.all, props.reviewRoundCap)
                 <span class="shrink-0 font-mono text-muted">{{ task.ref }}</span>
                 <span :class="task.priority === 'urgent' ? 'text-error' : task.priority === 'high' ? 'text-warning' : 'text-muted'">{{ PRIORITY[task.priority].label }}</span>
                 <TaskTypeBadge :type="task.type" />
+                <StatusBadge
+                  v-if="task.status === 'merged' || task.status === 'approved'"
+                  :status="task.status"
+                />
                 <DesignChangedBadge :design="task.design" />
                 <span
                   v-if="task.prNumber"

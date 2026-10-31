@@ -961,7 +961,7 @@ export function flowMetrics(slug: string, window: FlowMetricsQuery['window']): F
   }
 }
 
-// The Approved column's design also exercises the reopening panel.
+// The Complete column's approved design also exercises the reopening panel.
 export const designVersions: Record<string, DesignVersion[]> = {
   't-cor-41': [{
     id: 'design-cor-41-v2', version: 2, status: 'submitted', branch: 'design/COR-41', commitSha: 'prototype-navigation-review',

@@ -61,7 +61,7 @@ Tasks are shown as `PREFIX-NUMBER`, e.g. `COR-29`. Each project sets its own pre
 | Human review | warning |
 | Ready to merge | success |
 | Blocked, Failed | error |
-| Merged | success |
+| Complete | success |
 
 A status is always shown with its label. Colour is never the only signal.
 
