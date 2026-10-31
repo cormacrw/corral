@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import type { Evidence, Inbox, InboxActionInput, Review, Task, TaskInboxItem, InboxItem, PlanThreadItem } from '@corral/contracts'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import type { InboxActionInput, TaskInboxItem, InboxItem, PlanThreadItem } from '@corral/contracts'
 import { inboxActions } from '~/utils/inbox-actions'
-import { api } from '~/composables/useApi'
+import { actOnInboxItem, holdsInbox, useHeldInbox } from '~/queries/inbox'
+import { keys } from '~/queries/keys'
+import { commentOnTask, taskEvidenceQuery, taskQuery, taskReviewsQuery } from '~/queries/tasks'
 import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
 import { moveRadioSelection } from '~/utils/radio'
@@ -11,83 +14,34 @@ definePageMeta({ key: 'inbox' })
 // The Inbox (design/inbox.md, D11): list, selected item, action tray, task flyout
 const route = useRoute()
 const router = useRouter()
-const live = useLive()
 const flyout = useTaskFlyout()
 const toast = useToast()
 const device = useDevice()
 const deletes = usePlanThreadDelete()
 useSeoMeta({ title: 'Inbox · Corral' })
 
-const inbox = ref<Inbox | null>(null)
-const error = ref<string | null>(null)
+const client = useQueryClient()
+const list = useHeldInbox()
+const inbox = list.inbox
+const acting = useMutation({ ...actOnInboxItem, ...holdsInbox })
+const commenting = useMutation({ ...commentOnTask, ...holdsInbox })
+// A failed refetch keeps the list it has
+const error = computed(() => inbox.value ? null : list.error.value?.message ?? null)
 const tab = ref<'needsYou' | 'activity' | 'resolved'>('needsYou')
 const search = ref('')
 const action = ref<InboxActionInput['action'] | null>(null)
 const resolveTo = ref<'backlog' | 'ready' | 'in_progress'>('in_progress')
 const text = ref('')
 const busy = ref(false)
-const actionError = ref<string | null>(null)
-const loadedTask = ref<Task | null>(null)
-const taskLoadFailed = ref(false)
-const evidence = ref<Evidence[]>([])
-const reviews = ref<Review[]>([])
+const failedAction = ref<string | null>(null)
 const showTask = ref(true)
-const planResolving = ref(false)
-let resolutionPosition = 0
-let taskRequest = 0
-let actingOn: string | null = null
-// Items read while each load is in flight: its response may predate the read
-const readDuringLoads = new Set<Set<string>>()
 
-async function load() {
-  if (planResolving.value) return
-  error.value = null
-  const readDuringLoad = new Set<string>()
-  readDuringLoads.add(readDuringLoad)
-  try {
-    const loaded = await api.inbox.get()
-    if (!planResolving.value) inbox.value = [...readDuringLoad].reduce(inboxWithRead, loaded)
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    readDuringLoads.delete(readDuringLoad)
-  }
-}
-// Reading changes one row, so it needs no refetch. As on the server, a thread
-// listed only for its unread reply leaves Needs you; a read release note stays.
-function inboxWithRead(current: Inbox, id: string): Inbox {
-  const item = current.needsYou.find(i => i.id === id)
-  if (item?.type === 'plan_thread' && item.status === 'none') {
-    return { ...current, needsYou: current.needsYou.filter(i => i.id !== id), count: current.count - 1 }
-  }
-  if (item?.type !== 'plan_thread' && item?.type !== 'release_notes') return current
-  return { ...current, needsYou: current.needsYou.map(i => i === item ? { ...item, unread: false } : i) }
-}
-function markRead(id: string) {
-  for (const reads of readDuringLoads) reads.add(id)
-  if (inbox.value) inbox.value = inboxWithRead(inbox.value, id)
-  if (openThread.value?.id === id) openThread.value = { ...openThread.value, unread: false }
-}
-onMounted(() => {
-  void load()
-  const stop = live.subscribe((event) => {
-    if ((event.type === 'plan.session' || event.type === 'deployment.updated') && event.markedRead) markRead(event.type === 'plan.session' ? event.session.id : event.deployment.id)
-    else if (['task.updated', 'task.deleted', 'task.created', 'run.updated', 'epic.updated', 'plan.session', 'deployment.updated', 'agent.updated'].includes(event.type)) void load()
-  })
-  onBeforeUnmount(stop)
-})
-
+const isHidden = (item: InboxItem) => deletes.pending.value.includes(item.id)
 // In the server's order (newest first, D11), less threads waiting out their Undo
-const items = computed<InboxItem[]>(() => (inbox.value?.[tab.value] ?? []).filter(i => !deletes.pending.value.includes(i.id)).filter(i => !search.value || `${i.taskRef ?? ''} ${i.subject} ${i.preview}`.toLowerCase().includes(search.value.toLowerCase())))
+const items = computed<InboxItem[]>(() => (inbox.value?.[tab.value] ?? []).filter(i => !isHidden(i)).filter(i => !search.value || `${i.taskRef ?? ''} ${i.subject} ${i.preview}`.toLowerCase().includes(search.value.toLowerCase())))
 const selectedId = computed(() => typeof route.params.itemId === 'string' ? route.params.itemId : null)
-watch(selectedId, () => {
-  // Leaving during approval or close unmounts the thread before it can
-  // release the hold. Resume live refreshes for the new selection.
-  if (planResolving.value) {
-    planResolving.value = false
-    void load()
-  }
-})
+// Leaving during an action hands the list to the new selection
+watch(selectedId, list.release)
 // A thread leaves Needs you once it's answered or replied to (D11), while
 // the PM's turn is still running. Keep its conversation open so the turn
 // streams in, until another item is picked.
@@ -98,98 +52,69 @@ watch(() => inbox.value?.needsYou.find(i => i.id === selectedId.value), (item) =
 const selected = computed<InboxItem | null>(() => {
   if (!inbox.value || !selectedId.value) return null
   return [...inbox.value.needsYou, ...inbox.value.activity, ...inbox.value.resolved].find(i => i.id === selectedId.value)
-    ?? (openThread.value?.id === selectedId.value ? openThread.value : null)
+    ?? (openThread.value?.id === selectedId.value ? { ...openThread.value, unread: false } : null)
 })
-// Task details may arrive after the selection changes. Never reuse the previous item's data.
-const task = computed(() => loadedTask.value?.id === selected.value?.taskId ? loadedTask.value : null)
+const isOwnPane = (item: InboxItem | null) => item?.type === 'plan_thread' || item?.type === 'epic_review' || item?.type === 'release_notes' || item?.type === 'epic_conflict'
+const isTaskItem = (item: InboxItem | null): item is TaskInboxItem => item?.taskId != null
+// The key ties the task to the selection, so nothing of the last item shows
+const taskRef = computed(() => isTaskItem(selected.value) ? selected.value.taskRef : null)
+const taskResult = useQuery(computed(() => ({ ...taskQuery(taskRef.value ?? ''), enabled: taskRef.value !== null })))
+const task = computed(() => taskResult.data.value ?? null)
+// Human reviews show evidence; New artifacts need the files' real types
+const address = computed(() => isTaskItem(selected.value) && (selected.value.type === 'human_review' || selected.value.newArtifacts?.length) && task.value ? { slug: selected.value.project.slug, number: task.value.number, ref: task.value.ref } : null)
+const evidenceOptions = computed(() => ({ ...taskEvidenceQuery(address.value ?? { slug: '', number: 0, ref: '' }), enabled: address.value !== null }))
+const reviewsOptions = computed(() => ({ ...taskReviewsQuery(address.value ?? { slug: '', number: 0, ref: '' }), enabled: address.value !== null && selected.value?.type === 'human_review' }))
+const evidenceResult = useQuery(evidenceOptions)
+const reviewsResult = useQuery(reviewsOptions)
+const evidence = computed(() => evidenceResult.data.value ?? [])
+const reviews = computed(() => reviewsResult.data.value ?? [])
 const isSpike = computed(() => task.value?.type === 'spike')
-const taskLoading = computed(() => Boolean(selected.value?.taskId) && !task.value && !taskLoadFailed.value)
+const taskLoading = computed(() => taskRef.value !== null && taskResult.isPending.value)
+// Stays until a fetch settles it, whatever refetches meanwhile. A query with
+// data keeps showing it through a failed refetch.
+const taskLoadFailed = computed(() => taskRef.value !== null && taskResult.isError.value && !task.value)
 // Approval needs the task for its human-criteria check. The other actions don't.
 const approveBlocked = computed(() => taskLoadFailed.value && action.value === 'approve')
 const alreadyResolved = computed(() => selected.value !== null && selected.value.type !== 'activity' && !inbox.value?.needsYou.some(i => i.id === selected.value!.id))
-const isTaskItem = (item: InboxItem | null): item is TaskInboxItem => item?.taskId != null
 const TASK_LOAD_ERROR = 'Couldn\'t load this task'
-async function loadTask(item: TaskInboxItem | null) {
-  const request = ++taskRequest
-  const isCurrent = () => request === taskRequest && selected.value?.id === item?.id
-  const fetchedTask = item ? await api.tasks.byRef(item.taskRef).catch(() => null) : null
-  if (!isCurrent()) return
-  loadedTask.value = fetchedTask
-  if (item && !fetchedTask) {
-    taskLoadFailed.value = true
-    actionError.value = TASK_LOAD_ERROR
-  } else if (taskLoadFailed.value) {
-    taskLoadFailed.value = false
-    actionError.value = null
-  }
-  // A human review carries its evidence in the message (design/inbox.md), and
-  // any item's New row needs the files' real types
-  const slug = live.state.value.projects.find(p => p.id === task.value?.projectId)?.slug
-  const isReview = item?.type === 'human_review'
-  if ((isReview || item?.newArtifacts?.length) && task.value && slug) {
-    const [loadedEvidence, loadedReviews] = await Promise.all([
-      api.tasks.evidence(slug, task.value.number).catch(() => []),
-      isReview ? api.tasks.reviews(slug, task.value.number).catch(() => []) : []
-    ])
-    if (!isCurrent()) return
-    evidence.value = loadedEvidence
-    reviews.value = loadedReviews
-  } else {
-    evidence.value = []
-    reviews.value = []
-  }
-  // Following the selection, not a click of its own: no extra history entry.
-  // Phones open the task as its own page instead.
-  if (!isCurrent()) return
-  if (item && showTask.value && !device.isMobile.value) flyout.open(item.taskRef, { replace: true })
-}
+const actionError = computed(() => failedAction.value ?? (taskLoadFailed.value ? TASK_LOAD_ERROR : null))
 function retryTask() {
-  taskLoadFailed.value = false
-  actionError.value = null
-  void loadTask(isTaskItem(selected.value) ? selected.value : null)
+  failedAction.value = null
+  // Back to pending, for the loading state and a fresh failure
+  if (taskRef.value) void client.resetQueries({ queryKey: keys.tasks.detail(taskRef.value), exact: true })
 }
-watch(selected, async (item, previous) => {
-  if (previous?.id !== item?.id) {
-    text.value = ''
-    busy.value = false
-    resolveTo.value = 'in_progress'
-    evidence.value = []
-    reviews.value = []
-  }
-  // A live refresh keeps a failed load's error and Retry until a fetch settles it
-  if (previous?.id !== item?.id) taskLoadFailed.value = false
-  if (!taskLoadFailed.value) actionError.value = null
+watch(() => selected.value?.id, async () => {
+  const item = selected.value
+  text.value = ''
+  busy.value = false
+  resolveTo.value = 'in_progress'
+  failedAction.value = null
   // Nothing selected (e.g. the last item was just resolved): nothing to show
-  // beside it. An action's item can leave the list first, but submit then moves on.
-  if (!item && actingOn !== selectedId.value) flyout.close()
-  if (item?.type === 'plan_thread' || item?.type === 'epic_review' || item?.type === 'release_notes' || item?.type === 'epic_conflict') {
-    taskRequest++
-    if (previous?.id !== item.id && (flyout.ref.value || flyout.epic.value)) await flyout.close()
-    loadedTask.value = null
-    return
+  // beside it
+  if (!item) void flyout.close()
+  else if (isOwnPane(item)) {
+    if (flyout.ref.value || flyout.epic.value) await flyout.close()
+  } else if (item.taskRef && showTask.value && !device.isMobile.value) {
+    // Following the selection, not a click of its own: no extra history entry.
+    // Phones open the task as its own page instead.
+    flyout.open(item.taskRef, { replace: true })
   }
-  await loadTask(item)
 }, { immediate: true })
-// Capture before the request: plan.session can remove the row before it resolves.
-// Hold refreshes through both the request and flyout close, as for approval.
-function setPlanResolving(value: boolean) {
-  planResolving.value = value
-  if (value) resolutionPosition = items.value.findIndex(i => i.id === selectedId.value)
-}
-async function nextAfterPlanResolution() {
-  planResolving.value = false
-  const position = resolutionPosition
-  await load()
-  const remaining = inbox.value?.needsYou ?? []
+// Resolving moves to the item at the same position, or to the empty state when
+// that was the last one. The held list still has the old position.
+async function moveToNext() {
+  const position = items.value.findIndex(i => i.id === selectedId.value)
+  const remaining = (list.data.value?.needsYou ?? []).filter(i => !isHidden(i))
   const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
   await router.replace(itemRoute(next))
+  list.release()
 }
-const count = computed(() => (inbox.value?.count ?? 0) - (inbox.value?.needsYou.filter(i => deletes.pending.value.includes(i.id)).length ?? 0))
+const count = computed(() => (inbox.value?.count ?? 0) - (inbox.value?.needsYou.filter(isHidden).length ?? 0))
 // Delete thread, from its row or its header: no confirmation, Undo instead.
 // Deleting the selected thread moves on to the next item, as resolving does.
 async function deleteThread(item: PlanThreadItem) {
   const position = items.value.findIndex(i => i.id === item.id)
-  deletes.remove(item.sessionId, load)
+  deletes.remove(item.sessionId)
   if (selectedId.value !== item.id) return
   if (openThread.value?.id === item.id) openThread.value = null
   await flyout.close()
@@ -236,25 +161,18 @@ const submitLabel = computed(() => action.value ? (actions.value.find(a => a.val
 
 // Resolves false when not sent, so the composer keeps its images
 async function submit(message: string): Promise<boolean> {
-  if (!selected.value || selected.value.type === 'plan_thread' || selected.value.type === 'epic_review' || selected.value.type === 'release_notes' || selected.value.type === 'epic_conflict') return false
-  if (taskLoading.value) return false
-  if (approveBlocked.value) {
-    actionError.value = TASK_LOAD_ERROR
-    return false
-  }
+  if (!selected.value || isOwnPane(selected.value)) return false
+  if (taskLoading.value || approveBlocked.value) return false
   if (action.value === 'approve' && task.value?.acceptanceCriteria.some(c => c.checkedByHuman && !checkedHumanCriteria.value.includes(c.id))) {
-    actionError.value = 'Check each human criterion before approving.'
+    failedAction.value = 'Check each human criterion before approving.'
     return false
   }
-  // A live task update may remove this item before the action response arrives.
   const actedOn = selected.value
-  const position = items.value.findIndex(i => i.id === actedOn.id)
-  actingOn = actedOn.id
   busy.value = true
-  actionError.value = null
+  failedAction.value = null
   try {
     if (!action.value) {
-      if (task.value) await api.tasks.comment(live.state.value.projects.find(p => p.id === task.value!.projectId)!.slug, task.value.number, message)
+      if (task.value) await commenting.mutateAsync({ task: { slug: actedOn.project.slug, number: task.value.number, ref: task.value.ref }, body: message })
     } else {
       const input: InboxActionInput = action.value === 'clarify'
         ? { action: 'clarify', text: message }
@@ -266,26 +184,19 @@ async function submit(message: string): Promise<boolean> {
               ? { action: 'delete', ...(message && { text: message }) }
               : action.value === 'send_back' ? { action: 'send_back' } : { action: 'approve', text: message }
       const description = action.value === 'approve' && isSpike.value ? 'You accepted the findings' : submitLabel.value
-      await api.inbox.act(actedOn.taskId, input)
+      await acting.mutateAsync({ taskId: actedOn.taskId, input })
       toast.add({ title: 'Done', description, color: 'success' })
     }
-    if (selectedId.value === actedOn.id) text.value = ''
-    await load()
-    // Resolved: move on to the next item that needs you, or to the empty
-    // state when that was the last one
-    if (selectedId.value === actedOn.id && !inbox.value?.needsYou.some(i => i.id === actedOn.id)) {
-      const remaining = inbox.value?.needsYou ?? []
-      const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
-      await router.replace(itemRoute(next))
-    }
+    // A send finishing for an older selection leaves the new one alone
+    if (selectedId.value !== actedOn.id) return true
+    text.value = ''
+    if (list.data.value?.needsYou.some(i => i.id === actedOn.id)) list.release()
+    else await moveToNext()
     return true
   } catch (e) {
-    if (selectedId.value === actedOn.id) actionError.value = e instanceof Error ? e.message : String(e)
-    // Nothing to move on to, so the dock kept for that move has nothing beside it
-    if (selectedId.value === actedOn.id && !selected.value) flyout.close()
+    if (selectedId.value === actedOn.id) failedAction.value = e instanceof Error ? e.message : String(e)
     return false
   } finally {
-    actingOn = null
     if (selectedId.value === actedOn.id) busy.value = false
   }
 }
@@ -298,7 +209,7 @@ watchEffect(() => {
   }
   const position = inbox.value?.needsYou.findIndex(i => i.id === selectedId.value) ?? -1
   mobileHeader.value = {
-    title: selected.value?.type === 'plan_thread' || selected.value?.type === 'epic_review' || selected.value?.type === 'release_notes' || selected.value?.type === 'epic_conflict' ? selected.value.subject : selected.value?.taskRef ?? '',
+    title: isOwnPane(selected.value) ? selected.value!.subject : selected.value?.taskRef ?? '',
     eyebrow: position >= 0 ? `Inbox · ${position + 1} of ${inbox.value!.needsYou.length}` : 'Inbox'
   }
 })
@@ -314,13 +225,13 @@ onBeforeUnmount(() => {
       v-if="device.isMobile.value && selected?.type === 'epic_review'"
       :key="selected.id"
       :item="selected"
-      @resolved="nextAfterPlanResolution"
+      @resolved="moveToNext"
     />
     <InboxEpicConflict
       v-else-if="device.isMobile.value && selected?.type === 'epic_conflict'"
       :key="selected.id"
       :item="selected"
-      @resolved="nextAfterPlanResolution"
+      @resolved="moveToNext"
     />
     <InboxMobile
       v-else-if="device.isMobile.value"
@@ -331,8 +242,6 @@ onBeforeUnmount(() => {
       v-model:resolve-to="resolveTo"
       v-model:text="text"
       :plan-thread="selected?.type === 'plan_thread' ? selected : null"
-      :on-refresh="load"
-      :on-read="markRead"
       :inbox="inbox"
       :error="error"
       :items="items"
@@ -353,7 +262,7 @@ onBeforeUnmount(() => {
       :action-error="actionError"
       :type-badge="typeBadge"
       :on-submit="submit"
-      :on-retry="load"
+      :on-retry="list.refetch"
       :on-retry-task="retryTask"
     />
     <div
@@ -390,7 +299,7 @@ onBeforeUnmount(() => {
           variant="subtle"
           :title="error"
           class="m-3"
-          :actions="[{ label: 'Retry', onClick: load }]"
+          :actions="[{ label: 'Retry', onClick: () => list.refetch() }]"
         />
         <div
           v-else-if="!inbox"
@@ -483,28 +392,24 @@ onBeforeUnmount(() => {
         v-if="selected?.type === 'epic_review'"
         :key="selected.id"
         :item="selected"
-        @resolved="nextAfterPlanResolution"
+        @resolved="moveToNext"
       />
       <InboxReleaseNotes
         v-else-if="selected?.type === 'release_notes'"
         :key="selected.id"
         :item="selected"
-        @read="markRead(selected.id)"
-        @refresh="load"
       />
       <InboxEpicConflict
         v-else-if="selected?.type === 'epic_conflict'"
         :key="selected.id"
         :item="selected"
-        @resolved="nextAfterPlanResolution"
+        @resolved="moveToNext"
       />
       <InboxPlanThread
         v-else-if="selected?.type === 'plan_thread'"
         :key="selected.sessionId"
         :item="selected"
-        @read="markRead(selected.id)"
-        @approved="nextAfterPlanResolution"
-        @approving="setPlanResolving"
+        @approved="moveToNext"
         @delete="deleteThread(selected)"
       />
       <div

@@ -102,4 +102,14 @@ Plan, Inbox Plan panes, session navigation, drafts and finished turn steps now r
 
 `usePendingPlan` keeps its retry/restoration state and seeds the query cache before navigation. The client plugin connects it to the cache so the reconciled POST result is written even after navigation away. Only starting/failed entries override the query; accepted threads use the shared session cache. Server human messages remove the temporary bubble, including when an event beats the POST response. See [optimistic-plan-starts.md](optimistic-plan-starts.md).
 
-`markPlanRead` patches unread flags in place and sends a fire-and-forget acknowledgement, without invalidating queries. A `plan.session` echo with the same `updatedAt` keeps the session's list position. Approvals and thread closes use mutations to invalidate Plan and Inbox queries; approval also invalidates task lists. The Inbox page still owns its legacy refresh callbacks until its own migration.
+`markPlanRead` patches unread flags in place and sends a fire-and-forget acknowledgement, without invalidating queries. A `plan.session` echo with the same `updatedAt` keeps the session's list position. Approvals and thread closes use mutations to invalidate Plan and Inbox queries; approval also invalidates task lists.
+
+## Inbox
+
+The page reads `useHeldInbox()`, and the selected task, evidence and reviews through queries keyed by the selection, so a revisit shows cached data and no response can land on the wrong item. `TaskDetail` shows a task already in the cache while it loads its own copy.
+
+A mutation that resolves the selected item spreads `holdsInbox` into `useMutation`, on the page or in a child. While one runs, the list stays as it was when it started: events still update the cache, but a removed row can't move the selection. A failure lets go. On success the page takes the same position from the fresh list with `moveToNext`, then releases, so nothing shows between the two. Changing selection also releases. The `holdsInbox` key lives on the Inbox's `useMutation` calls, not on the shared definitions, so approving from Plan holds nothing.
+
+Reading patches the cached Inbox with `inboxWithRead`: `markPlanRead` and `readDeployment` before their requests, and the `markedRead` events on every tab. `inboxQuery` reapplies reads made during its fetch. A fetch that starts after the patch but reaches the server before the read can briefly restore the row, until the `markedRead` event removes it. A failed release-note read refetches to bring the dot back; the component reads once per deployment, so that can't loop.
+
+A failed task load shows Retry until a fetch settles it, and only then. Retry is `resetQueries`, which puts the query back to pending so the tray shows it loading.

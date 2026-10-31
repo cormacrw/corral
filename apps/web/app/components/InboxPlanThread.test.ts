@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { VueQueryPlugin } from '@tanstack/vue-query'
-import type { PlanSessionDetail } from '@corral/contracts'
-import { keys } from '~/queries/keys'
+import type { ServerEvent } from '@corral/contracts'
+import { applyEvent, invalidateKeys } from '~/queries/dependencies'
 import { testQueryClient } from '~/queries/mount-with-query'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -37,14 +37,7 @@ async function mountInbox() {
   vi.stubGlobal('usePlanThreads', () => ({ add: vi.fn(), remove }))
   vi.stubGlobal('usePlanThreadDelete', usePlanThreadDelete)
   vi.stubGlobal('useTaskFlyout', () => ({ ref: vue.ref(null), epic: vue.ref(null), plan: vue.ref(false), close: vi.fn().mockResolvedValue(undefined) }))
-  const listeners: ((event: { type: string, session?: { id: string, unread: boolean }, markedRead?: { inboxCount: number } }) => void)[] = []
-  vi.stubGlobal('useLive', () => ({
-    state: vue.ref({ agents, projects, loaded: true, runner: { online: true } }),
-    subscribe: (listener: typeof listeners[number]) => {
-      listeners.push(listener)
-      return () => {}
-    }
-  }))
+  vi.stubGlobal('useLive', () => ({ state: vue.ref({ agents, projects, loaded: true, runner: { online: true } }) }))
   let data = inbox()
   vi.mocked(api.inbox.get).mockImplementation(async () => structuredClone(data))
   vi.mocked(api.plan.session).mockResolvedValue({ ...planSessions.find(s => s.id === 's-1')!, unread: false, messages: [], plans: plans['s-1']! })
@@ -64,19 +57,15 @@ async function mountInbox() {
     EvidenceList: true, USelectMenu: true, PromptComposer: true, UIcon: true, PlanQuestion: true, PlanDetail: true
   } } })
   await flushPromises()
+  // An event as the real stream delivers it, less the coalescing delay
+  const emitLive = (event: { type: string, session?: { id: string, unread: boolean }, markedRead?: { inboxCount: number } }) => void invalidateKeys(client, applyEvent(client, event as ServerEvent))
   const rows = () => wrapper.findAll('[data-row]').map(r => r.attributes('data-row'))
   const rename = (name: string) => {
     data = { ...data, needsYou: data.needsYou.map(i => i.type === 'plan_thread' ? { ...i, sender: { ...i.sender, name } } : i) }
-    for (const listener of listeners) listener({ type: 'agent.updated' })
+    emitLive({ type: 'agent.updated' })
   }
   const setInbox = (next: typeof data) => {
     data = next
-  }
-  const emitLive = (event: Parameters<typeof listeners[number]>[0]) => {
-    if (event.session) {
-      client.setQueryData<PlanSessionDetail>(keys.plan.session(event.session.id), detail => detail && { ...detail, ...event.session })
-    }
-    listeners.forEach(l => l(event))
   }
   return { wrapper, replace, remove, toasts, toastRemove, rows, rename, setInbox, emitLive }
 }
@@ -97,13 +86,13 @@ it('reads an unread thread in place and keeps it open, without fetching the Inbo
     await flushPromises()
     expect(api.plan.read).toHaveBeenCalledWith('s-1')
     expect(api.inbox.get).toHaveBeenCalledOnce()
-    expect(rows()).not.toContain('s-1')
-    expect(wrapper.findComponent(InboxPlanThread).exists()).toBe(true)
 
     vi.mocked(api.inbox.get).mockClear()
     emitLive({ type: 'plan.session', session: { id: 's-1', unread: false }, markedRead: { inboxCount: 1 } })
     await flushPromises()
     expect(api.inbox.get).not.toHaveBeenCalled()
+    expect(rows()).not.toContain('s-1')
+    expect(wrapper.findComponent(InboxPlanThread).exists()).toBe(true)
   } finally {
     wrapper.unmount()
   }
