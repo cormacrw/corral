@@ -79,7 +79,6 @@ export const tasks = pgTable('tasks', {
   // Migration uses SET NULL (epic_id) to preserve the required project.
   foreignKey({ name: 'tasks_epic_same_project_fk', columns: [t.projectId, t.epicId], foreignColumns: [epics.projectId, epics.id] }).onDelete('set null'),
   index().on(t.projectId, t.status),
-  check('tasks_counters_non_negative', sql`${t.reviewRounds} >= 0 and ${t.failedRuns} >= 0 and ${t.leaseEpoch} >= 0`),
   // Match JavaScript trim's whitespace, including Unicode, on both drivers.
   check('tasks_status_reason', sql`case when ${t.status} in ('blocked', 'failed')
     then ${t.statusReason} is not null and btrim(${t.statusReason}, U&'\\0009\\000A\\000B\\000C\\000D\\0020\\00A0\\1680\\2000\\2001\\2002\\2003\\2004\\2005\\2006\\2007\\2008\\2009\\200A\\2028\\2029\\202F\\205F\\3000\\FEFF') <> ''

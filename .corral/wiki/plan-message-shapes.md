@@ -1,6 +1,6 @@
 # Plan message shapes
 
-Plan messages are discriminated by role and kind (`planMessageFields` in `packages/contracts/src/api.ts`): only a PM question carries `recommendation` or `options`. The server writes every message through `insertMessage` in `apps/server/src/plan.ts`.
+Plan messages are discriminated by role and kind (`planMessageFields` in `packages/contracts/src/plans.ts`): only a PM question carries `recommendation` or `options`. The server writes every message through `insertMessage` in `apps/server/src/plan.ts`.
 
 The `plan_messages` CHECK constraints were added `NOT VALID`, so old rows were neither rewritten nor scanned. Keep that when changing them. Old rows are normalised when read by `toMessage`; an unknown PM kind shows as a plain message.
 

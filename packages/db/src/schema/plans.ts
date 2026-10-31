@@ -1,6 +1,9 @@
+import { sql } from 'drizzle-orm'
 import type { Actor, PlanTaskContent } from '@corral/core'
 import {
   boolean,
+  check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -44,7 +47,7 @@ export const planSessions = pgTable('plan_sessions', {
 
 export const planMessages = pgTable('plan_messages', {
   id: uuid().primaryKey().defaultRandom(),
-  sessionId: uuid().notNull(),
+  sessionId: uuid().notNull().references(() => planSessions.id, { onDelete: 'cascade' }),
   // Questions are PM messages flagged as such
   role: text().$type<'human' | 'pm'>().notNull(),
   kind: text().$type<'message' | 'question' | 'error'>().notNull().default('message'),
@@ -67,7 +70,7 @@ export const planMessages = pgTable('plan_messages', {
 // human approves the plan (D9, D10)
 export const plans = pgTable('plans', {
   id: uuid().primaryKey().defaultRandom(),
-  sessionId: uuid().notNull().references(() => planSessions.id, { onDelete: 'cascade' }),
+  sessionId: uuid().notNull(),
   projectId: uuid().notNull().references(() => projects.id, { onDelete: 'cascade' }),
   epicId: uuid().references(() => epics.id, { onDelete: 'set null' }),
   version: integer().notNull(),

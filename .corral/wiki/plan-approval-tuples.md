@@ -6,4 +6,4 @@
 
 The `plan_tasks_revision_change` check forbids revisions on removed items. It deliberately does not require task or epic IDs: foreign keys clear those on deletion, and historical plans must still load. Read rows remain separate from the stricter new-write payloads.
 
-Migration 0040 adds both checks NOT VALID, enforcing new inserts/updates without rewriting or scanning historical rows. Existing invalid history is not repaired or attributed to an invented approver.
+Migration 0048 adds both checks NOT VALID, enforcing new inserts/updates without rewriting or scanning historical rows. Existing invalid history is not repaired or attributed to an invented approver.

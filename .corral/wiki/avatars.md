@@ -5,7 +5,7 @@ User and agent avatar writes share `AvatarImage` and `storeAvatar` in
 type together; null removes both stored columns. Upload, replacement, cached
 URLs and removal retain their existing API behavior.
 
-Migration `0039_chunky_peter_parker.sql` checks both tables under a write lock
+Migration `0048_chunky_peter_parker.sql` checks both tables under a write lock
 before adding `users_avatar_paired` and `agents_avatar_paired`. If either
 column alone is null, migration stops with an “Inconsistent avatars” error
 listing every affected table and ID, plus presence flags and a repair hint.
