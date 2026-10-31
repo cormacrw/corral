@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import type { Task } from '@corral/contracts'
 import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed } from 'vue'
@@ -13,11 +14,10 @@ beforeEach(() => navigate.mockClear())
 
 const dana = { id: 'dana', name: 'Dana' }
 const rita = { id: 'rita', name: 'Rita' }
-const task = (overrides: Parameters<typeof fixture>[2] = { title: 'Fix the login' }) =>
-  fixture(projects[0]!, 99, { title: 'Fix the login', ...overrides })
-const lease = (agentId: string) => ({ agentId }) as ReturnType<typeof task>['lease']
+const task = (overrides: Partial<Task> = {}) => fixture(projects[0]!, 99, { title: 'Fix the login', status: 'ready', ...overrides })
+const lease = (agentId: string): Task['lease'] => ({ agentId, runId: 'r-1', role: 'developer', expiresAt: '' })
 
-const render = (props: { task: ReturnType<typeof task>, epic?: string | null, to?: string, pressed?: boolean, onOpen?: () => void }) => mount(TaskCard, {
+const render = (props: { task: Task, epic?: string | null, to?: string, pressed?: boolean, onOpen?: () => void }) => mount(TaskCard, {
   props,
   global: {
     components: {
