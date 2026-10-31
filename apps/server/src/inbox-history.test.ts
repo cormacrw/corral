@@ -42,6 +42,8 @@ describe('inbox over stored audit rows', () => {
     const stringEvent = await task('String event', { status: 'failed', statusReason: 'Gave up' })
     const moved = await task('Activity', { prNumber: 7, type: 'design' })
     const human = await task('Resolved')
+    const prFree = await task('PR-free')
+    const withPr = await task('With a PR', { prNumber: 8 })
 
     await t.db.insert(auditLog).values([
       row(stuck, 50, { event: 'stuck', runId: 'r', from: 'in_progress', to: 'blocked' }),
@@ -61,6 +63,13 @@ describe('inbox over stored audit rows', () => {
       row(moved, 14, { verdict: 'approved', met: 2, of: 3 }, 'review.recorded'),
       row(moved, 13, { verdict: 'changes_requested', met: 1, of: 3 }, 'review.recorded'),
       row(moved, 12, { event: 'review_approved', from: 'agent_review', to: 'ready_to_merge' }),
+
+      row(prFree, 2.8, { event: 'ci_failed', checks: [], from: 'ready_to_merge', to: 'in_progress' }),
+      row(prFree, 2.7, { event: 'base_conflict', from: 'ready_to_merge', to: 'in_progress' }),
+      row(prFree, 2.6, { event: 'head_moved', from: 'ready_to_merge', to: 'agent_review' }),
+      row(withPr, 2.5, { event: 'ci_failed', checks: [], from: 'ready_to_merge', to: 'in_progress' }),
+      row(withPr, 2.4, { event: 'base_conflict', from: 'ready_to_merge', to: 'in_progress' }),
+      row(withPr, 2.3, { event: 'head_moved', from: 'ready_to_merge', to: 'agent_review' }),
 
       row(human, 11, { event: { type: 'resolve', to: 'ready' }, from: 'blocked', to: 'ready' }, 'task.transition', t.actor),
       row(human, 10, { event: 'resolve', from: 'blocked', to: 'in_progress' }, 'task.transition', t.actor),
@@ -82,7 +91,13 @@ describe('inbox over stored audit rows', () => {
       ['Stuck', 'question', at(50).toISOString()]
     ])
     expect(mine(activity).map(i => [i.body, i.at])).toEqual([
-      ['New commits on the PR; back to the reviewer', at(5).toISOString()],
+      ['New commits on PR #8; back to the reviewer', at(2.3).toISOString()],
+      ['PR #8 conflicts with the base branch; back to the developer', at(2.4).toISOString()],
+      ['CI failed on PR #8; back to the developer', at(2.5).toISOString()],
+      ['New commits on the task branch; back to the reviewer', at(2.6).toISOString()],
+      ['The commit conflicts with the epic branch; back to the developer', at(2.7).toISOString()],
+      ['CI failed on the commit; back to the developer', at(2.8).toISOString()],
+      ['New commits on the task branch; back to the reviewer', at(5).toISOString()],
       ['Requested changes on PR #7 (1 of 3 criteria met)', at(13).toISOString()],
       ['Approved PR #7 (2 of 3 criteria met)', at(14).toISOString()],
       ['Submitted design v2; on to the reviewer', at(15).toISOString()],

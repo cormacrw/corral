@@ -120,7 +120,7 @@ Full details, runner rules and resource estimates are in [architecture.md](archi
 **Decision:**
 
 - The **server** is the only process that reads or writes the database and the blob store, and the only one that talks to the GitHub PR/CI API.
-- The **runner** owns its local disk (clone, worktrees, spool) and is the only thing that pushes, and only to branches it holds a lease for.
+- The **runner** owns its local disk (clone, worktrees, spool) and is the only thing that pushes, and only to branches it holds a lease for. **Exception (COR-288):** task integration (`integration_prepare`, `integration_push`) holds no task lease. It pushes a candidate to `corral/candidates/<operation>` and advances the shared epic branch under the integration operation journal, with the push a compare-and-swap on the operation's expected epic head (D27).
 - **Agents** reach Corral only through per-run MCP tools.
 - **web** only talks to the server API.
 - Evidence and transcripts are immutable, content-addressed blobs; the database stores pointers.

@@ -58,7 +58,8 @@ export class TaskIntegrator {
   #d: IntegrationDeps
   #settled: Settled
   #busy = new Set<string>()
-  // Operations whose candidate is waiting on CI, which needs no remote read
+  // Operations whose candidate is waiting on CI or a pause, neither of which
+  // needs a remote read. The push's compare-and-swap catches a branch that moved.
   #awaitingChecks = new Set<string>()
 
   constructor(deps: IntegrationDeps, settled: Settled) {
@@ -221,7 +222,10 @@ export class TaskIntegrator {
     if (stopped()) return false
     if (task.status !== 'ready_to_merge' || task.deletedAt || task.headSha !== submission.agentApprovedHeadSha) return this.#fail(operation, ctx, CANCELLED)
     // Nothing shared moves while paused; the operation carries on afterwards
-    if (task.paused || project.paused) return false
+    if (task.paused || project.paused) {
+      this.#awaitingChecks.add(operation.id)
+      return false
+    }
     const verdict = await this.#checks(project, operation)
     if (verdict.state === 'waiting') {
       this.#awaitingChecks.add(operation.id)
