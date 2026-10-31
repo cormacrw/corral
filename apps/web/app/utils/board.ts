@@ -1,7 +1,7 @@
-import type { Epic, HumanTransitionInput, Task } from '@corral/contracts'
+import type { Agent, Epic, HumanTransitionInput, Run, Task } from '@corral/contracts'
 import type { AgentRole, TaskPriority, TaskStatus } from '@corral/core'
 import { availableEvents, isTaskDone, TASK_PRIORITIES } from '@corral/core'
-import { epicInProgress } from './labels.ts'
+import { epicInProgress, isLiveRun } from './labels.ts'
 
 import { completedAt } from './completion.ts'
 
@@ -220,4 +220,14 @@ export function boardMove(task: Task, status: TaskStatus): HumanTransitionInput 
   if (events.includes('send_back') && status === 'backlog') return { type: 'send_back' }
   if (events.includes('human_request_changes') && task.status !== 'approved' && status === 'in_progress') return { type: 'human_request_changes' }
   return null
+}
+
+// Task leases and taskless epic runs are independent sources of working agents.
+// Keep shell order stable as leases/runs arrive, and deduplicate by identity.
+export function epicWorkingAgents(epicId: string, tasks: Pick<Task, 'epicId' | 'lease'>[], runs: Pick<Run, 'epicId' | 'agentId' | 'state'>[], agents: Agent[]): Agent[] {
+  const ids = new Set(tasks.filter(task => task.epicId === epicId && task.lease).map(task => task.lease!.agentId))
+  for (const run of runs) {
+    if (run.epicId === epicId && isLiveRun(run)) ids.add(run.agentId)
+  }
+  return agents.filter(agent => ids.has(agent.id))
 }

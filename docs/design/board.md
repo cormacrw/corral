@@ -68,6 +68,8 @@ An epic is shown under `epicOnBoard`: it has work left, or it finished within `M
 
 **Card** (`components/BoardEpicCard.vue`): the title and the meter with "N of M merged". Tags, review mode and the PR link stay in the epic flyout. An unfinished epic held by unfinished prerequisite epics shows the amber `i-lucide-ban` icon beside the title. It opens a "Waiting on" popover listing each prerequisite with its progress, and clicking a row opens that epic. Clicking the icon doesn't open the card's own flyout.
 
+**Working agents.** The card shows overlapping `AgentAvatar` pictures (initials as fallback), with no visible names: distinct task lease holders plus agents with active runs whose `epicId` matches the epic, including taskless epic reviews. Each agent appears once, in stable agent order. Show at most three avatars, then "+N" for the rest. Hover or keyboard focus shows the agent name in a tooltip; each avatar has an accessible name and the group announces all working agents, including those behind "+N". While any agent is working, wrap the card in the shared `BorderGlow` treatment. With none, show neither avatars nor glow. Task and run SSE updates refresh this without a reload.
+
 Clicking a card opens the epic in the flyout; clicking it again closes it. The title is the card's keyboard button, and the selected card has the `primary` outline.
 
 **Toolbar.** The search reads "Search epics" and matches epic titles, and the Epic filter applies. Status, Priority and Agent are hidden, stay in the URL and return on switching back; Clear filters resets only the search and Epic filter here. The count reads "N epics".
@@ -93,7 +95,7 @@ Ready tasks held by epic dependencies use the same neutral waiting note as task 
 ## Data
 
 - **Tasks** (status other than Backlog, and completed within the last 3 days): ref, title, type, status, priority, epic, PR, review round, assigned agent, working (lease), note.
-- **Epics** and **agents** for the filters.
+- **Epics** and **agents** for the filters. The Epics view also observes the complete active-runs snapshot (including `epicId`) for epic-level workers.
 - Live updates over SSE. Cards move between columns without a reload. Task mutations that reopen epic review publish the updated epic after committing, including both epics when a board task moves between them; the card's review state and progress both refresh.
 
 ## Responsive

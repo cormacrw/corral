@@ -717,6 +717,7 @@ export class Orchestrator implements RunnerHandlers {
       if (ctx) {
         await this.#endRun(ctx, { state: 'interrupted', error: 'Epic review lease expired' })
         this.#d.runner.send({ type: 'run.stop', runId: run.id, reason: 'Lease expired' }, run.runnerId)
+        await this.#publish(ctx)
       }
     }
     const expired = await this.#d.db.select({ runId: tasks.leaseRunId }).from(tasks)

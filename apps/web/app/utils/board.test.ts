@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Task } from '@corral/contracts'
 import type { BoardFilters } from './board.ts'
-import { BOARD_COLUMNS, boardMove, boardColumnKey, boardView, EPIC_COLUMNS, epicOnBoard, epicStage, filterLabel, filtersFromQuery, filtersToQuery, hasEpicFilters, hasFilters, matchesEpicFilter, matchesFilter, COMPLETE_WINDOW_DAYS, NO_FILTERS, onBoard, sortColumn, swipeStep, taskAgentIds, unfinishedPrerequisites } from './board.ts'
+import { BOARD_COLUMNS, boardMove, boardColumnKey, boardView, EPIC_COLUMNS, epicOnBoard, epicStage, epicWorkingAgents, filterLabel, filtersFromQuery, filtersToQuery, hasEpicFilters, hasFilters, matchesEpicFilter, matchesFilter, COMPLETE_WINDOW_DAYS, NO_FILTERS, onBoard, sortColumn, swipeStep, taskAgentIds, unfinishedPrerequisites } from './board.ts'
 
 const DAY = 24 * 60 * 60 * 1000
 const now = Date.parse('2026-10-29T12:00:00Z')
@@ -387,5 +387,22 @@ describe('matchesEpicFilter', () => {
     const hidden: BoardFilters = { ...NO_FILTERS, statuses: ['ready'] }
     expect(hasEpicFilters(hidden)).toBe(false)
     expect(hasEpicFilters({ ...NO_FILTERS, epics: ['e1'] })).toBe(true)
+  })
+})
+
+describe('epicWorkingAgents', () => {
+  const agents = [{ id: 'a', name: 'Atlas' }, { id: 'b', name: 'Vera' }, { id: 'c', name: 'Tam' }] as import('@corral/contracts').Agent[]
+  const task = (epicId: string, agentId: string | null) => ({ epicId, lease: agentId ? { agentId } : null }) as Pick<Task, 'epicId' | 'lease'>
+  const run = (epicId: string, agentId: string, state = 'running') => ({ epicId, agentId, state }) as Pick<import('@corral/contracts').Run, 'epicId' | 'agentId' | 'state'>
+
+  it('unions leases with taskless epic runs once per agent in stable order', () => {
+    expect(epicWorkingAgents('epic', [task('epic', 'a'), task('epic', 'a'), task('other', 'c')], [run('epic', 'b'), run('epic', 'a'), run('other', 'c')], agents)).toEqual(agents.slice(0, 2))
+  })
+
+  it('includes every active state and excludes finished runs and unleased tasks', () => {
+    for (const state of ['queued', 'starting', 'running', 'waiting_for_input', 'stopping']) {
+      expect(epicWorkingAgents('epic', [], [run('epic', 'b', state)], agents)).toEqual([agents[1]])
+    }
+    expect(epicWorkingAgents('epic', [task('epic', null)], [run('epic', 'b', 'completed')], agents)).toEqual([])
   })
 })
