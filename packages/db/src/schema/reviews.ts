@@ -44,6 +44,7 @@ export const evidence = pgTable('evidence', {
   size: integer().notNull(),
   createdAt: createdAt()
 }, t => [
+  check('evidence_criterion_requires_task', sql`${t.criterionId} is null or ${t.taskId} is not null`),
   // Migration uses SET NULL (criterion_id) to preserve task_id.
   foreignKey({ name: 'evidence_criterion_same_task_fk', columns: [t.taskId, t.criterionId], foreignColumns: [acceptanceCriteria.taskId, acceptanceCriteria.id] }).onDelete('set null'),
   index().on(t.taskId, t.round),

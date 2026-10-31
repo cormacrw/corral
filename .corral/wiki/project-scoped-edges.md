@@ -22,7 +22,7 @@ references tasks and `plans(project_id, session_id)` references plan sessions.
 Both keep their original cascade-on-delete behavior. PM runs may still have a
 null task; deleting a session still nulls its PM runs' `plan_session_id`.
 Evidence pairs `(task_id, criterion_id)` with acceptance criteria, including
-criteria on different tasks in the same project. Deleting a criterion clears
+criteria on different tasks in the same project. A non-null criterion requires a task owner; task-less PM evidence remains valid when both references are null. The preflight includes null task owners. Deleting a criterion clears
 only `criterion_id`, preserving task-wide evidence. Migration 0049 manually
 uses `SET NULL ("criterion_id")`; preserve that column list if recreating the
 constraint (Drizzle cannot express it). Task deletion still cascades runs and

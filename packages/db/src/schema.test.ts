@@ -1,5 +1,6 @@
 import type { Actor } from '@corral/core'
 import { eq, sql } from 'drizzle-orm'
+import { randomUUID } from 'node:crypto'
 import { afterAll, describe, expect, it } from 'vitest'
 import type { Database, DatabaseHandle } from './client.ts'
 import { acceptanceCriteria, evidence, agents, attachments, epicDependencies, epics, planEpics, planTasks, plans, planMessages, planSessions, projects, runs, taskDependencies, tasks, users } from './schema.ts'
@@ -363,7 +364,12 @@ describe.each([
     for (const c of criteria.slice(1)) {
       await expectViolation(db.insert(evidence).values({ ...base, criterionId: c.id }), 'evidence_criterion_same_task_fk')
     }
+    for (const criterionId of [criteria[0]!.id, randomUUID()]) {
+      await expectViolation(db.insert(evidence).values({ ...base, taskId: null, criterionId }), 'evidence_criterion_requires_task')
+    }
+    await db.insert(evidence).values({ ...base, taskId: null })
     const [e] = await db.insert(evidence).values({ ...base, criterionId: criteria[0]!.id }).returning()
+    await expectViolation(db.update(evidence).set({ taskId: null }).where(eq(evidence.id, e!.id)), 'evidence_criterion_requires_task')
     await expectViolation(db.update(evidence).set({ taskId: other.id }).where(eq(evidence.id, e!.id)), 'evidence_criterion_same_task_fk')
     await expectViolation(db.update(acceptanceCriteria).set({ taskId: other.id }).where(eq(acceptanceCriteria.id, criteria[0]!.id)), 'evidence_criterion_same_task_fk')
     await db.delete(acceptanceCriteria).where(eq(acceptanceCriteria.id, criteria[0]!.id))
