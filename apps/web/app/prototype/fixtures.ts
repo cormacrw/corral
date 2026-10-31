@@ -19,6 +19,8 @@ import type {
   PlanSession,
   Profile,
   Project,
+  PullRequestDetail,
+  PullRequestFile,
   PullRequestStatus,
   RepoList,
   Review,
@@ -632,6 +634,34 @@ function pullRequest(ref: string, fields: Partial<PullRequestStatus> & Pick<Pull
     ...fields
   }
 }
+// PR descriptions and diffs by task (GET /projects/:slug/tasks/:number/pull-request)
+const approvePatch = [
+  '@@ -41,5 +41,8 @@ export async function approveDesignVersion(db: Database, taskId: string, version: number) {',
+  '-  await db.update(designVersions).set({ status: \'approved\' }).where(eq(designVersions.version, version))',
+  '+  return db.transaction(async (tx) => {',
+  '+    await tx.update(designVersions).set({ status: \'superseded\' }).where(eq(designVersions.taskId, taskId))',
+  '+    return tx.update(designVersions).set({ status: \'approved\' }).where(eq(designVersions.version, version))',
+  '+  })'
+].join('\n')
+const approveFiles: PullRequestFile[] = [
+  { path: 'apps/server/src/designs.ts', status: 'modified', additions: 4, deletions: 1, patch: approvePatch },
+  { path: 'apps/server/src/designs.test.ts', status: 'added', additions: 1, deletions: 0, patch: '@@ -0,0 +1 @@\n+it(\'supersedes earlier versions in the same transaction\')' }
+]
+function prDetail(ref: string, body: string, fields: Partial<PullRequestDetail> = {}): PullRequestDetail {
+  const t = at(ref)
+  return {
+    number: t.prNumber!, url: t.prUrl!, title: t.title, body, headBranch: t.branch ?? `corral/${t.ref.toLowerCase()}`,
+    // In an `epic` or `each_task` epic, a task PR's base is the epic branch (D23)
+    baseBranch: epics.find(e => e.id === t.epicId)?.branch ?? 'main',
+    files: approveFiles, totalFiles: approveFiles.length, truncated: false, ...fields
+  }
+}
+export const pullRequestDetails: PullRequestDetail[] = [
+  prDetail('COR-5', '## What\n\nApproving a design version supersedes earlier versions in the same transaction.\n\n## How it was checked\n\n- New `designs.test.ts` covers supersede-on-approve'),
+  // Over the cap: the rest of the diff is on GitHub
+  prDetail('COR-7', '## What\n\nThe PM drafts tasks from an approved design.', { totalFiles: 34, truncated: true })
+]
+
 const eligible = { eligible: true, failingGate: null, failedGates: [] }
 
 export const pullRequests: PullRequestStatus[] = [
