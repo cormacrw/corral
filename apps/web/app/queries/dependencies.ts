@@ -168,10 +168,11 @@ export const eventDependencies: EventDependencies = {
       cache.set<Run[]>(keys.runs.list({ agentId: run.agentId }), runs => runs && (runs.some(r => r.id === run.id) ? upsert(runs, run) : [run, ...runs]))
     },
     // Lease changes show as counts on agents, a run's end goes in the task's
-    // history, and it can add evidence, a review or a design version
+    // history, and it can add evidence, a review, a design version or a push to
+    // the PR. Only the end: the PR is a GitHub read through the runner.
     invalidates: ({ run }, cache) => [
       keys.runs.lists(), keys.agents.list(), keys.inbox(),
-      ...(run.taskRef ? [keys.tasks.history(run.taskRef), keys.tasks.evidence(run.taskRef), keys.tasks.reviews(run.taskRef), keys.tasks.designs(run.taskRef)] : []),
+      ...(run.taskRef ? [keys.tasks.history(run.taskRef), keys.tasks.evidence(run.taskRef), keys.tasks.reviews(run.taskRef), keys.tasks.designs(run.taskRef), ...(run.endedAt ? [keys.tasks.pullRequests(run.taskRef)] : [])] : []),
       ...projectStale(run.projectId, cache)
     ]
   },
