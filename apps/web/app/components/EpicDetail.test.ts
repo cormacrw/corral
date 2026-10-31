@@ -86,3 +86,55 @@ it('updates prerequisite and blocks progress and the waiting alert from task eve
     client.clear()
   }
 })
+
+it('keeps an open epic\'s task list live as its tasks change, join and leave', async () => {
+  const client = testQueryClient()
+  client.setDefaultOptions({ queries: { staleTime: Infinity, retry: false, gcTime: Infinity } })
+  const project = projects[0]!
+  const task = (over: Partial<Task> = {}) => ({ id: 't1', number: 1, ref: 'TA-1', title: 'First', projectId: project.id, epicId: 'own', status: 'ready', type: 'task', priority: 'medium', dependsOn: [], ...over }) as Task
+  const own: EpicDetail = { ...epics[0]!, id: 'own', projectId: project.id, reviewMode: 'direct', branch: null, prNumber: null, reviewState: null, dependsOn: [], blocks: [], tasks: [task()] }
+  client.setQueryData(keys.projects.list(), [project])
+  client.setQueryData(keys.tasks.list(project.slug), [task()])
+  client.setQueryData(keys.epics.list(project.slug), [own])
+  client.setQueryData(keys.epics.detail('own'), own)
+  const get = vi.spyOn(api.epics, 'get').mockImplementation(async () => client.getQueryData<EpicDetail>(keys.epics.detail('own'))!)
+  for (const name of ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount'] as const) vi.stubGlobal(name, vue[name])
+  vi.stubGlobal('useLocalStorage', (_key: string, initial: unknown) => vue.ref(initial))
+  vi.stubGlobal('useProjectLists', useProjectLists)
+  vi.stubGlobal('useLive', () => ({ state: vue.ref({ projects: [project] }) }))
+  vi.stubGlobal('useTaskFlyout', () => ({ ref: vue.ref(null) }))
+  vi.stubGlobal('useToast', () => ({ add: vi.fn() }))
+  const Badge = vue.defineComponent({ props: ['status'], setup: props => () => vue.h('i', { 'data-testid': 'status' }, props.status) })
+  const wrapper = mount(EpicDetailView, {
+    props: { epicId: 'own', mode: 'page' },
+    global: {
+      plugins: [[VueQueryPlugin, { queryClient: client }]],
+      components: { StatusBadge: Badge },
+      stubs: { UButton: true, UIcon: true, UBadge: true, UAlert: true, UTextarea: true, UBreadcrumb: true, USelect: true, UTabs: true, EpicGraph: true, MarkdownText: true, NuxtLink: true }
+    }
+  })
+  const statuses = () => wrapper.findAll('li [data-testid="status"]').map(s => s.text())
+  try {
+    await flushPromises()
+    expect(statuses()).toEqual(['ready'])
+
+    const stale = applyEvent(client, { type: 'task.updated', task: task({ status: 'in_progress' }) })
+    await flushPromises()
+    expect(statuses()).toEqual(['in_progress'])
+    expect(get).not.toHaveBeenCalled()
+    expect(stale).toContainEqual(keys.epics.detail('own'))
+
+    applyEvent(client, { type: 'task.created', task: task({ id: 't2', ref: 'TA-2', status: 'backlog' }) })
+    await flushPromises()
+    expect(statuses()).toEqual(['in_progress', 'backlog'])
+
+    // Leaving the epic carries no epic ID for it, so the epic is found by its tasks
+    const left = applyEvent(client, { type: 'task.updated', task: task({ id: 't2', ref: 'TA-2', epicId: null, status: 'backlog' }) })
+    await flushPromises()
+    expect(statuses()).toEqual(['in_progress'])
+    expect(left).toContainEqual(keys.epics.detail('own'))
+  } finally {
+    wrapper.unmount()
+    client.clear()
+  }
+})

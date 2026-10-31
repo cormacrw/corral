@@ -28,11 +28,25 @@ Task events update loaded lists immediately. EpicDetail derives prerequisite and
 
 Board/Backlog and their task/epic flyouts use `defineMutation` for task creation, patching, transitions and deletion, epic patching and epic dependencies. Desktop drag moves and task Status actions (including mobile) use `moveTask` on top of the transition mutation: cancel an older list fetch, optimistically move the single card, then invalidate on success or restore just that card on rejection. A newer event for the card wins over rollback; other cards' live changes are preserved. Drag targets follow D10's existing human actions, and Board filters remain in the URL.
 
+## Task and epic details
+
+`TaskDetail` reads the task, comments, history, evidence, reviews and runs as separate queries, and `DesignReview` reads the designs; `EpicDetail` reads `epicQuery`. Reopening within the 30-minute cache lifetime shows the cached entries at once. Past `staleTime` they refetch behind that, and only a cold-load failure shows the error, with Retry refetching what failed.
+
+A `comment.created` event is written into the comments and invalidates nothing, since a comment adds no audit entry. Don't add its history or evidence back: only comments on a task that isn't cached (so no ref to find) fall back to `keys.tasks.details()`. `run.updated` refreshes the run's task, because a run's end changes its history and can add evidence, reviews or a design version. `keys.tasks.detail(ref)` covers the task's side queries, so invalidate it only for something that changes them.
+
+`commentOnTask` shows a `pending-` entry straight away. `withComment` replaces it, whichever of the response and the event comes first, and a failure removes it. `TaskDetail` empties the box when sending and puts the text back on failure; a failure after moving to another task is held until you return to that task, for as long as the component stays mounted.
+
+`writeTask` also writes the task into its cached epic details, so an open epic's list and graph follow status changes at once. It finds them through `task.epicId` and `cache.epicsWith`, the second because a task that left an epic no longer names it. The epic then refetches through the queue, for the fields only the server derives, such as `reviewModeLocked`.
+
+Task patches, transitions, resume and design approval write their response into the task's detail entry before invalidating `changed`, so the open task doesn't wait for the refetch. `actOnInboxItem` does the same when it returns a task, and `reviewEpic` covers the Inbox's epic actions. The Inbox page itself still acts through `api` and reloads on events until its own migration.
+
+`uploadAttachment` is the only way images upload, from `PromptComposer` and the description editor.
+
 ## Settings, Setup and removal
 
 `queries/setup.ts` holds the CLI scan and repository list. `clisQuery` has `staleTime: 0`: a login changes on the runner with no event, so each visit shows the last scan and rescans behind it. Refresh on the repository step is the `refreshRepos` mutation, which asks past the server's cache and writes the result to the one `keys.setup.repos()` entry.
 
-Removing a project goes through `clearProject`, from both `removeProject` and the `project.deleted` event, in either order. It removes the project's own queries, by slug and by the `projectId` in cached tasks, epics, runs and sessions, and filters the lists that span projects. A query still on screen is reset instead, since a removed query stays with its observer, so the page refetches to its 404. The repository list refetches too: its rows name the project using them, on creation as well as removal. Add a query holding project data and it needs to be covered there. `TaskDetail` and `EpicDetail` keep their record in local refs, so they drop it and reload on `project.deleted`.
+Removing a project goes through `clearProject`, from both `removeProject` and the `project.deleted` event, in either order. It removes the project's own queries, by slug and by the `projectId` in cached tasks, epics, runs and sessions, and filters the lists that span projects. A query still on screen is reset instead, since a removed query stays with its observer, so the page refetches to its 404. The repository list refetches too: its rows name the project using them, on creation as well as removal. Add a query holding project data and it needs to be covered there.
 
 `pages/projects/[slug].vue` wraps every project route and shows `ProjectNotFound` once the list lacks the slug. It's a parent route because leaving `<NuxtPage />` out of `app.vue` stalls the first navigation. `useRemovingProject` holds that back while Settings removes the project and moves on.
 

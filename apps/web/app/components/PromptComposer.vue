@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { useMutation } from '@tanstack/vue-query'
 import { attachmentUrl } from '@corral/core'
-import { api } from '~/composables/useApi'
+import { uploadAttachment } from '~/queries/attachments'
 import { attachmentProblem, withAttachments } from '~/utils/attachments'
 
 // The shared prompt composer (design/README.md): an auto-growing textarea
@@ -28,6 +29,7 @@ const props = withDefaults(defineProps<{
 
 const text = defineModel<string>({ default: '' })
 const toast = useToast()
+const upload = useMutation(uploadAttachment)
 
 interface Image {
   key: number
@@ -72,7 +74,7 @@ function attach(files: Iterable<File>) {
     const name = file.name || `image.${file.type.slice(6)}`
     images.value.push({ key: nextKey++, name, preview: URL.createObjectURL(file), status: 'uploading' })
     const image = images.value[images.value.length - 1]!
-    api.attachments.upload(slug, file, name).then((attachment) => {
+    upload.mutateAsync({ slug, file, name }).then((attachment) => {
       image.status = 'done'
       image.id = attachment.id
     }, (e: unknown) => {

@@ -1,16 +1,18 @@
 <script setup lang="ts">
+import { useMutation } from '@tanstack/vue-query'
 import type { EpicConflictItem } from '@corral/contracts'
-import { api } from '~/composables/useApi'
+import { reviewEpic } from '~/queries/epics'
 
 const props = defineProps<{ item: EpicConflictItem }>()
 const emit = defineEmits<{ resolved: [] }>()
+const review = useMutation(reviewEpic)
 const busy = ref(false)
 const error = ref<string | null>(null)
 async function handOff() {
   busy.value = true
   error.value = null
   try {
-    await api.epics.review(props.item.epicId, { action: 'rebase', headSha: props.item.headSha })
+    await review.mutateAsync({ id: props.item.epicId, input: { action: 'rebase', headSha: props.item.headSha } })
     emit('resolved')
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)

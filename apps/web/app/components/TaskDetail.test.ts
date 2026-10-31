@@ -1,11 +1,13 @@
 // @vitest-environment happy-dom
 import { VueQueryPlugin } from '@tanstack/vue-query'
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import type { Comment, Task } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { projects, tasks } from '~/prototype/fixtures'
+import { applyEvent } from '~/queries/dependencies'
+import { keys } from '~/queries/keys'
 import { testQueryClient } from '~/queries/mount-with-query'
 import TaskDetail from './TaskDetail.vue'
 
@@ -54,11 +56,11 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-async function mountDetail() {
+async function mountDetail(client = testQueryClient()) {
   const wrapper = mount(TaskDetail, {
     props: { taskRef: 'COR-1', mode: 'page' },
     shallow: true,
-    global: { plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }]], components: { PromptComposer: composer, UTabs: tabs }, stubs: { PromptComposer: false, UTabs: false, teleport: true } }
+    global: { plugins: [[VueQueryPlugin, { queryClient: client }]], components: { PromptComposer: composer, UTabs: tabs }, stubs: { PromptComposer: false, UTabs: false, teleport: true } }
   })
   await flushPromises()
   return wrapper
@@ -107,4 +109,102 @@ it('leaves the next task\'s comments and draft alone when an older comment lands
   await flushPromises()
   expect(wrapper.getComponent(composer).props('modelValue')).toBe('Draft for B')
   expect(wrapper.text()).not.toContain('For task A')
+})
+
+const submitComment = (wrapper: VueWrapper, text: string) => {
+  const box = wrapper.getComponent(composer)
+  ;(box.vm.$attrs['onUpdate:modelValue'] as (text: string) => void)(text)
+  return (box.vm.$attrs.onSubmit as (text: string) => Promise<boolean>)(text)
+}
+const comment = (over: Partial<Comment> = {}) => ({ id: 'c-1', taskId: taskA.id, author: { kind: 'human', userId: 'me' }, body: 'Hello', pinned: false, createdAt: new Date().toISOString(), ...over }) as Comment
+
+it('reopens from cache at once and refetches nothing while the data is fresh', async () => {
+  const client = testQueryClient()
+  client.setDefaultOptions({ queries: { ...client.getDefaultOptions().queries, staleTime: 30_000 } })
+  const first = await mountDetail(client)
+  first.unmount()
+  vi.clearAllMocks()
+  const reopened = mount(TaskDetail, {
+    props: { taskRef: 'COR-1', mode: 'page' },
+    shallow: true,
+    global: { plugins: [[VueQueryPlugin, { queryClient: client }]], components: { PromptComposer: composer, UTabs: tabs }, stubs: { PromptComposer: false, UTabs: false, teleport: true } }
+  })
+  // Before anything has had a chance to resolve
+  expect(reopened.find('[aria-label="Title"]').exists()).toBe(true)
+  expect(reopened.findComponent({ name: 'USkeleton' }).exists()).toBe(false)
+  await flushPromises()
+  expect(api.tasks.byRef).not.toHaveBeenCalled()
+  expect(api.tasks.comments).not.toHaveBeenCalled()
+})
+
+it('shows an agent\'s comment without refetching history or evidence', async () => {
+  const client = testQueryClient()
+  await mountDetail(client)
+  vi.clearAllMocks()
+  const stale = applyEvent(client, { type: 'comment.created', comment: comment({ author: { kind: 'agent', agentId: 'a', runId: 'r', role: 'developer' } as Comment['author'] }) })
+  expect(stale).toEqual([])
+  await flushPromises()
+  expect(client.getQueryData<Comment[]>(keys.tasks.comments('COR-1'))).toHaveLength(1)
+  expect(api.tasks.history).not.toHaveBeenCalled()
+  expect(api.tasks.evidence).not.toHaveBeenCalled()
+})
+
+it('shows a posted comment and empties the box before the server answers', async () => {
+  const client = testQueryClient()
+  const wrapper = await mountDetail(client)
+  const sent = deferred<Comment>()
+  vi.mocked(api.tasks.comment).mockReturnValue(sent.promise)
+  const sending = submitComment(wrapper, 'Hello')
+  await flushPromises()
+  expect(client.getQueryData<Comment[]>(keys.tasks.comments('COR-1'))?.map(c => c.body)).toEqual(['Hello'])
+  expect(wrapper.getComponent(composer).props('modelValue')).toBe('')
+
+  // The event can beat the response; only one comment ever stays
+  applyEvent(client, { type: 'comment.created', comment: comment() })
+  vi.mocked(api.tasks.comments).mockResolvedValue([comment()])
+  sent.resolve(comment())
+  expect(await sending).toBe(true)
+  await flushPromises()
+  expect(client.getQueryData<Comment[]>(keys.tasks.comments('COR-1'))?.map(c => c.id)).toEqual(['c-1'])
+})
+
+it('removes a comment whose post failed and puts its draft back', async () => {
+  const client = testQueryClient()
+  const wrapper = await mountDetail(client)
+  vi.mocked(api.tasks.comment).mockRejectedValue(new Error('Offline'))
+  expect(await submitComment(wrapper, 'Keep me')).toBe(false)
+  await flushPromises()
+  expect(client.getQueryData(keys.tasks.comments('COR-1'))).toEqual([])
+  expect(wrapper.getComponent(composer).props('modelValue')).toBe('Keep me')
+})
+
+it('keeps a failed comment\'s draft for when you return to its task', async () => {
+  const wrapper = await mountDetail()
+  const sent = deferred<Comment>()
+  vi.mocked(api.tasks.comment).mockReturnValue(sent.promise.then(() => {
+    throw new Error('Offline')
+  }))
+  const sending = submitComment(wrapper, 'For task A')
+  await flushPromises()
+  await wrapper.setProps({ taskRef: 'COR-2' })
+  await flushPromises()
+  sent.resolve(comment())
+  expect(await sending).toBe(false)
+  await flushPromises()
+  expect(wrapper.getComponent(composer).props('modelValue')).toBe('')
+  await wrapper.setProps({ taskRef: 'COR-1' })
+  await flushPromises()
+  expect(wrapper.getComponent(composer).props('modelValue')).toBe('For task A')
+})
+
+it('shows a resume in the open task from its response', async () => {
+  const client = testQueryClient()
+  vi.mocked(api.tasks.byRef).mockResolvedValue({ ...taskA, paused: true })
+  const wrapper = await mountDetail(client)
+  const resumed = { ...taskA, paused: false }
+  vi.mocked(api.tasks.resume).mockResolvedValue(resumed)
+  vi.mocked(api.tasks.byRef).mockResolvedValue(resumed)
+  await wrapper.get('[data-testid="task-paused"] ubutton').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('[data-testid="task-paused"]').exists()).toBe(false)
 })
