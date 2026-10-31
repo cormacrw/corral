@@ -6,7 +6,7 @@ import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
 
 // The Inbox list on a phone (design/inbox.md, design/mobile.md), a screen of
-// its own at /inbox. The item is InboxMobileItem.
+// its own at /inbox. Task items open in InboxPanel, others in InboxMobileItem.
 const { list, inbox, error, tab, search, items } = useInboxView()
 
 const searching = ref(Boolean(search.value))

@@ -6,7 +6,7 @@
 
 ## Purpose
 
-One place for everything an agent needs you to decide, from every project, with the means to resolve it right there (D11). It works like an email client: a list on the left, the selected message on the right, and an action tray at the bottom.
+One place for everything an agent needs you to decide, from every project, with the means to resolve it right there (D11). It works like an email client: a list on the left, the selected message on the right, with its actions and a composer.
 
 Items come from two places:
 
@@ -40,7 +40,7 @@ There are three columns. The list divider can be resized (280–560px, default 3
 
 ### 2. Selected message
 
-Task items on desktop (human review, question, blocked, failed, Activity and Resolved) use **Option D** (`InboxPanel`, with `useInboxPanel` deriving what it shows). What's needed to decide sits up front, and everything else is one click away in tabs. Phones, Plan threads, epic items and release notes have their own layouts; the **Mobile item** section below is what phones still use.
+Task items (human review, question, blocked, failed, Activity and Resolved) use **Option D** (`InboxPanel`, with `useInboxPanel` deriving what it shows). What's needed to decide sits up front, and everything else is one click away in tabs. **Mobile item** below says what changes on a phone. Plan threads, epic items and release notes have their own layouts.
 
 - **Top block**, which fits at 1280×800 without scrolling:
   - one quiet line (`InboxPanelMeta`): kind (Code, Design or Spike review, Question, Blocked, Failed, Activity, Resolved) · project · ref · sender · time
@@ -65,40 +65,30 @@ Task items on desktop (human review, question, blocked, failed, Activity and Res
 
   **Request changes**, **Answer** and **Delete task** open the composer instead, with **Cancel** above it. Delete waits for it because it can't be undone, and takes an optional reason.
 - **Composer** (`InboxPanelTray`), pinned to the bottom of an item you can act on: with no action chosen it's the reply box, "Reply to {sender}…", which adds a comment to the task and leaves the item where it is.
+- **New row:** needs-you task and epic items show the short `message` from shared `InboxMessage`, then a **New** row directly below it when `newArtifacts` is nonempty. Screenshots are thumbnails; other files use icons and names. One click opens the same evidence viewer used by the criteria list. Design versions link directly to that version's preview. Epic artifacts include their task ref. Evidence is untrusted, so the viewer never frames HTML: images, video and text show in the app, a PDF in an iframe, and anything else is a download link.
+- The New row uses only the server's `newArtifacts`, already filtered since the human's last review or answer. Older files remain in the evidence list without a New marker. With no new artifacts there is no row.
+- **Spikes always stop in Human review**, whatever their human-review flag says. They appear under Needs you and add one to its count. The **Message** tab renders the latest `## Findings` comment as markdown; criteria verdicts and evidence remain below it. Desktop and mobile label approval **Accept findings**, keep **Request changes**, and hide PR links and check badges. The success toast and Resolved entry say **You accepted the findings**. The preview is the start of the short message; approval finishes the spike in Merged; requesting changes returns it to the developer with the feedback.
+- **Designs** use **Approve design** on desktop and mobile. Approval marks the latest submitted version Approved, supersedes earlier versions and moves the task to Approved, then advances to the next item. There is no PR to merge; approval opens a Plan session and starts the PM’s build-planning turn.
 
 ### Mobile item
 
-- **Header:**
-  - the sender avatar and subject
-  - the type badge, project tag, and "{sender} · {role} · {time}"
-- **Body:**
-  - After it's resolved, a green "Resolved" `UAlert` with what happened.
-  - Needs-you task and epic items start with shared `InboxMessage`: the short `message` as plain text, then a **New** row directly below it when `newArtifacts` is nonempty. Screenshots are thumbnails; other files use icons and names. One click opens the same evidence viewer used by the criteria list. Design versions link directly to that version's preview. Epic artifacts include their task ref. Evidence is untrusted, so the viewer never frames HTML: images, video and text show in the app, a PDF in an iframe, and anything else is a download link.
-  - The row uses only the server's `newArtifacts`, already filtered since the human's last review or answer. Older files remain in the evidence list without a New marker. With no new artifacts there is no row.
-  - The complete `body` is behind a collapsed **Full message** disclosure, including spike findings. It starts closed whenever a different item opens. Items without `message` keep their existing rendering, including Plan threads, release notes, Activity and Resolved.
-  - Type-specific context:
-    - **Human review:** the PR link (`#41`), passing-check badges, and a card of acceptance criteria. Each criterion shows a met icon, the reviewer’s note, screenshot/video/request cards, then inline markdown notes. Agent artifacts are collapsed separately; see [Evidence review](task.md#evidence-review-d21).
-    - **Spikes always stop in Human review**, whatever their human-review flag says. They appear under Needs you and add one to its count. The collapsed **Full message** renders the latest `## Findings` comment as markdown; criteria verdicts and evidence remain below it. Desktop and mobile label approval **Accept findings**, keep **Request changes**, and hide PR links and check badges. The success toast and Resolved entry say **You accepted the findings**. The preview is the start of the short message; approval finishes the spike in Merged; requesting changes returns it to the developer with the feedback.
-    - **Designs** use **Approve design** on desktop and mobile. Approval marks the latest submitted version Approved, supersedes earlier versions and moves the task to Approved, then advances to the next item. There is no PR to merge; approval opens a Plan session and starts the PM’s build-planning turn.
-    - **Blocked:** the reviewer's and developer's positions side by side (2 columns, `bg-muted`).
-    - **Question:** the question itself. The answers live in the tray.
-    - **Activity:** one link button (Open PR, Open task…).
-  - Your replies, shown as "You → Atlas" bubbles.
-- **Tray**, pinned to the bottom with a top divider. This is the only place you act.
-  - **Question:** "Suggested answers: Pick one, or write your own below" as radio cards in an auto-fit grid. Sending posts the chosen answer plus any note, resolves the item, and puts the task back In progress.
-  - **Quick actions** (a `radiogroup` of chips; see shared pattern): exactly one is selected, starting with the first action whenever an item opens. Clicking the selected chip keeps it selected; another chip replaces the selection. Arrow keys wrap between chips and select the focused chip; only the selected chip is in the Tab order.
+Task items on a phone use the same **Option D** panel (`InboxPanel` with `mobile`), reusing `useInboxPanel`, the tabs, `InboxPanelDetails` and `InboxPanelDiff`, including the PR error and **Retry**. Only these differ:
 
-    | Item type | Actions | Needs text |
-    |---|---|---|
-    | Human review | ✓ Approve and merge (Accept findings for spikes; Approve design for designs) · ✎ Request changes | Request changes only |
-    | Blocked / Question | 💬 Answer · ↩ Send back to Backlog · 🗑 Delete task (`error`) | Answer only |
-    | Failed | ↻ Retry · ↩ Send back to Backlog · 🗑 Delete task (`error`) | None |
+- **Header:** the focused header (`MobilePageHeader`): "Inbox · n of m" above the task ref, Back to the list, and a **Task** button that opens the task page in place of the Task details button. There's no flyout.
+- **Top block:** the meta line, title, `InboxMessage` or TL;DR, verdict and links, without the actions. A failed item's status picker for Retry sits here, beside the links. The block gives way when the keyboard and composer need the room.
+- **Overview:** the screenshot grid has two columns.
+- **Action bar** (`InboxPanelThumbBar`), pinned to the bottom above the safe area: one target at least 64px tall per action, the first filled, plus **Reply**. Labels shorten to **Send back** and **Delete** there.
 
-  - **Composer:**
-    - The placeholder follows the selected action, e.g. "What should Atlas change?" or "Reason for deleting (optional)". Items without quick actions use "Reply to {sender}…".
-    - The submit button becomes labelled with the action and turns `error` for Delete.
-    - Items without quick actions keep their plain reply behavior. Items with quick actions always send the selected action. Mobile questions have no chips and send the composer answer with Answer.
-  - Switching items clears the draft and selects the new item’s first action, including after a successful send advances to the next item.
+  | Item | Bar |
+  |---|---|
+  | Human review | Approve and merge (Accept findings on spikes, Approve design on designs) · Request changes · Reply |
+  | Question, Blocked | Answer · Send back · Delete · Reply |
+  | Failed | Retry · Send back · Delete · Reply |
+  | Activity, Resolved | No bar and no composer |
+
+  One-tap actions behave as the table in [Selected message](#2-selected-message) says, and Approve takes the composer's text and images as its note. **Request changes**, **Answer**, **Delete** and **Reply** open the composer above the bar. A question opens with Answer already chosen, so its composer is open from the start. Cancel closes it, unless it holds a draft: a draft stays in view, as a reply, so a one-tap action never sends text you can't see. A sent reply closes it. An action's error shows above the bar.
+
+Resolving an item moves on to the next one that needs you, as on desktop. Epic items, Plan threads and release notes keep their own layouts.
 
 ### 3. Task flyout
 
@@ -207,9 +197,9 @@ An epic PR in human review and an epic PR rebase conflict have their own layout 
 ## States
 
 - **Loading:** skeleton rows in the list. An item's top block shows at once from the Inbox data, with skeletons for its verdict and tab body until the task and its evidence arrive; Approve reads **Loading task…** and the actions wait.
-- **An action fails:** an inline error above the composer. The draft is kept, and an action that opens the composer stays chosen.
-- **The task fails to load:** an inline error under the actions with **Retry**, instead of a spinner (in the tray on a phone). Approval stays blocked, because its human-criteria check needs the task, and its action reads **Task not loaded**. The other actions and the reply box still work.
-- **A task changed status elsewhere:** the item shows "Already resolved" and the tray is disabled.
+- **An action fails:** an inline error above the composer, or above the action bar on a phone with the composer closed. The draft is kept, and an action that opens the composer stays chosen.
+- **The task fails to load:** an inline error at the end of the top block with **Retry**, instead of a spinner. Approval stays blocked, because its human-criteria check needs the task, and its action reads **Task not loaded**. The other actions and the reply box still work.
+- **A task changed status elsewhere:** the item shows "Already resolved. This task changed status elsewhere." in Overview, with no actions and no composer, and no action bar on a phone.
 
 ## Responsive
 
@@ -219,7 +209,7 @@ An epic PR in human review and an epic PR rebase conflict have their own layout 
 
 ## Accessibility
 
-- The tabs use `role="tablist"`; quick actions use `role="radiogroup"` with `aria-checked`.
+- The tabs use `role="tablist"`. Actions are plain buttons named with their full label, so a phone's **Send back** is announced as "Send back to Backlog". Reply on a phone uses `aria-pressed`.
 - Every icon-only control has an `aria-label`.
 - Pane dividers are `role="separator"` with `aria-valuenow` and work with the arrow keys.
 

@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import type { InboxActionInput, InboxArtifact, ServerEvent } from '@corral/contracts'
 import { VueQueryPlugin } from '@tanstack/vue-query'
-import { flushPromises, mount } from '@vue/test-utils'
-import { afterEach, expect, it, vi } from 'vitest'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import { api } from '~/composables/useApi'
 import { agents, inbox, projects, pullRequestDetails, tasks } from '~/prototype/fixtures'
@@ -16,6 +16,8 @@ import InboxPanelArtifacts from '~/components/InboxPanelArtifacts.vue'
 import InboxPanelDetails from '~/components/InboxPanelDetails.vue'
 import InboxPanelDiff from '~/components/InboxPanelDiff.vue'
 import InboxPanelMeta from '~/components/InboxPanelMeta.vue'
+import InboxPanelRetryInto from '~/components/InboxPanelRetryInto.vue'
+import InboxPanelThumbBar from '~/components/InboxPanelThumbBar.vue'
 import InboxPanelTray from '~/components/InboxPanelTray.vue'
 import InboxPanelVerdict from '~/components/InboxPanelVerdict.vue'
 import InboxReleaseNotes from '~/components/InboxReleaseNotes.vue'
@@ -37,13 +39,14 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+const focus = vi.fn()
 const plain = vue.defineComponent({ setup: (_, { slots }) => () => vue.h('div', slots.default?.()) })
 const composerStub = vue.defineComponent({
   name: 'PromptComposer',
   props: ['busy', 'disabled', 'submitLabel', 'modelValue', 'placeholder', 'allowEmpty', 'onSubmit'],
   emits: ['update:modelValue'],
   setup: (props, { expose }) => {
-    expose({ focus: vi.fn(), send: () => props.onSubmit(props.modelValue) })
+    expose({ focus, send: () => props.onSubmit(props.modelValue) })
     return () => vue.h('form')
   }
 })
@@ -65,13 +68,14 @@ const evidenceStub = vue.defineComponent({
   emits: ['update:checked'],
   setup: () => () => vue.h('div')
 })
+const headerStub = vue.defineComponent({ setup: (_, { slots }) => () => vue.h('header', slots.actions?.()) })
 const alertStub = vue.defineComponent({
   name: 'UAlert',
   props: ['title', 'actions'],
   setup: props => () => vue.h('div', { 'data-alert': true }, [props.title, ...(props.actions ?? []).map((a: { label: string, onClick: () => void }) => vue.h('button', { onClick: a.onClick }, a.label))])
 })
 
-async function mountInbox(type: 'human_review' | 'failed', taskRef?: string, dockedTask: string | null = null, selection = true, editTask = (task: (typeof tasks)[number]) => task, realComposer = false, editApi = () => {}) {
+async function mountInbox(type: 'human_review' | 'failed', taskRef?: string, dockedTask: string | null = null, selection = true, editTask = (task: (typeof tasks)[number]) => task, realComposer = false, editApi = () => {}, mobile = false) {
   for (const name of ['ref', 'shallowRef', 'computed', 'watch', 'watchEffect', 'onMounted', 'onBeforeUnmount', 'nextTick'] as const) vi.stubGlobal(name, vue[name])
   const item = inbox().needsYou.find(i => i.type === type && (taskRef ? i.taskRef === taskRef : tasks.find(t => t.id === i.taskId)?.type !== 'design'))!
   const params = vue.reactive<{ itemId?: string }>({ itemId: selection ? item.id : undefined })
@@ -86,7 +90,7 @@ async function mountInbox(type: 'human_review' | 'failed', taskRef?: string, doc
   vi.stubGlobal('useRouter', () => router)
   vi.stubGlobal('definePageMeta', vi.fn())
   vi.stubGlobal('useSeoMeta', vi.fn())
-  vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(false) }))
+  vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(mobile) }))
   vi.stubGlobal('useMobileHeader', () => vue.ref(null))
   vi.stubGlobal('useToast', () => ({ add: vi.fn() }))
   vi.stubGlobal('usePlanThreadDelete', () => ({ pending: vue.ref([]), remove: vi.fn() }))
@@ -108,7 +112,7 @@ async function mountInbox(type: 'human_review' | 'failed', taskRef?: string, doc
   const NuxtPage = vue.defineComponent({ setup: () => () => params.itemId ? vue.h(InboxItemPage, { key: params.itemId }) : null })
   const wrapper = mount(InboxPage, { global: {
     plugins: [[VueQueryPlugin, { queryClient: client }]],
-    components: { NuxtPage, InboxPanel, InboxPanelActions, InboxPanelArtifacts, InboxPanelDetails, InboxPanelDiff, InboxPanelMeta, InboxPanelTray, InboxPanelVerdict, InboxReleaseNotes, EvidenceList: evidenceStub, PromptComposer: realComposer ? PromptComposer : composerStub, UChatPrompt: vue.defineComponent({ setup: (_, { slots }) => () => vue.h('div', [slots.header?.(), slots.footer?.()]) }), UAlert: alertStub, UButton: buttonStub, UTabs: tabsStub, UDashboardPanel: plain },
+    components: { NuxtPage, InboxPanel, InboxPanelActions, InboxPanelArtifacts, InboxPanelDetails, InboxPanelDiff, InboxPanelMeta, InboxPanelRetryInto, InboxPanelThumbBar, InboxPanelTray, InboxPanelVerdict, InboxReleaseNotes, EvidenceList: evidenceStub, MobilePageHeader: headerStub, PromptComposer: realComposer ? PromptComposer : composerStub, UChatPrompt: vue.defineComponent({ setup: (_, { slots }) => () => vue.h('div', [slots.header?.(), slots.footer?.()]) }), UAlert: alertStub, UButton: buttonStub, UTabs: tabsStub, UDashboardPanel: plain },
     stubs: { UModal: true, EvidenceViewer: true, InboxMessage: true, InboxDesignReviewLink: true, UBadge: true, UInput: true, UIcon: true, USkeleton: true, USelectMenu: true, MarkdownText: true, TaskFlyout: true, AgentAvatar: true, ProjectThumbnail: true, PlanThreadRow: true, NuxtLink: true, InboxMobile: true, InboxMobileItem: true }
   } })
   await flushPromises()
@@ -732,4 +736,182 @@ it('refetches the open PR when a run on its task ends, not while one is going', 
   } finally {
     wrapper.unmount()
   }
+})
+
+describe('on a phone', () => {
+  const mountPhone = (type: 'human_review' | 'failed', ref: string | undefined, edit = (task: (typeof tasks)[number]) => task, editApi = () => {}) => mountInbox(type, ref, null, true, edit, false, editApi, true)
+  const button = (wrapper: VueWrapper, label: string) => wrapper.get('[data-testid="inbox-thumb-bar"]').findAll('button').find(b => b.attributes('aria-label') === label)!
+  const composerOpen = (wrapper: VueWrapper) => (wrapper.get('[data-testid="inbox-thumb-bar"] > div').element as HTMLElement).style.display !== 'none'
+
+  it('opens a task item in the panel with its tabs, and every action in a 64px bar with Reply', async () => {
+    const { wrapper } = await mountPhone('human_review', 'COR-5')
+    try {
+      expect(wrapper.find('[data-testid="inbox-panel-option-d"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="inbox-actions"]').exists()).toBe(false)
+      expect(wrapper.find('[aria-label="Task details"]').exists()).toBe(false)
+      expect(wrapper.get('header a').attributes('href')).toBe('/tasks/COR-5')
+      expect(wrapper.get('[data-tab="diff"]').text()).toBe(`Code diff ${pullRequestDetails[0]!.totalFiles}`)
+      const bar = wrapper.get('[data-testid="inbox-thumb-bar"]').findAll('button')
+      expect(bar.map(b => b.text())).toEqual(['Approve and merge', 'Request changes', 'Reply'])
+      for (const b of bar) expect(b.classes()).toContain('min-h-16')
+      expect(composerOpen(wrapper)).toBe(false)
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('sends approval on one tap, through the closed composer', async () => {
+    const { wrapper, item, primary } = await mountPhone('human_review', 'COR-5')
+    try {
+      await primary().trigger('click')
+      await flushPromises()
+      expect(api.inbox.act).toHaveBeenCalledWith((item as { taskId: string }).taskId, { action: 'approve', text: '' })
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('opens the composer above the bar for Request changes, and Cancel closes it', async () => {
+    const { wrapper, composer } = await mountPhone('human_review', 'COR-5')
+    try {
+      await button(wrapper, 'Request changes').trigger('click')
+      expect(api.inbox.act).not.toHaveBeenCalled()
+      expect(composerOpen(wrapper)).toBe(true)
+      expect(composer().props('submitLabel')).toBe('Request changes')
+      await wrapper.findAll('button').find(b => b.text() === 'Cancel')!.trigger('click')
+      expect(composerOpen(wrapper)).toBe(false)
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('keeps a cancelled draft in view rather than sending it unseen with a one-tap action', async () => {
+    const { wrapper, composer } = await mountPhone('human_review', 'COR-5')
+    try {
+      await button(wrapper, 'Request changes').trigger('click')
+      await (composer().vm.$emit('update:modelValue', 'my note'), vue.nextTick())
+      await wrapper.findAll('button').find(b => b.text() === 'Cancel')!.trigger('click')
+      expect(composerOpen(wrapper)).toBe(true)
+      expect(composer().props('placeholder')).toMatch(/^Reply to/)
+      await wrapper.get('[data-testid="inbox-reply"]').trigger('click')
+      expect(composerOpen(wrapper)).toBe(true)
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('replies from the bar, focusing the composer, and closes it once sent', async () => {
+    const { wrapper, composer } = await mountPhone('human_review', 'COR-5')
+    try {
+      vi.mocked(api.tasks.comment).mockResolvedValue({ id: 'c1' } as never)
+      focus.mockClear()
+      const reply = wrapper.get('[data-testid="inbox-reply"]')
+      await reply.trigger('click')
+      await vue.nextTick()
+      expect(reply.attributes('aria-pressed')).toBe('true')
+      expect(composerOpen(wrapper)).toBe(true)
+      expect(focus).toHaveBeenCalledOnce()
+      await (composer().props('onSubmit') as (message: string) => Promise<boolean>)('Any news?')
+      await flushPromises()
+      expect(api.tasks.comment).toHaveBeenCalledOnce()
+      expect(composerOpen(wrapper)).toBe(false)
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('opens a question with Answer chosen, and leaves the others to their first tap', async () => {
+    const question = inbox().needsYou.find(i => i.type === 'question')!
+    const { wrapper, params, composer } = await mountPhone('human_review', 'COR-5')
+    try {
+      focus.mockClear()
+      params.itemId = question.id
+      await flushPromises()
+      expect(composerOpen(wrapper)).toBe(true)
+      expect(composer().props('submitLabel')).toBe('Answer')
+      expect(focus).not.toHaveBeenCalled()
+      await button(wrapper, 'Answer').trigger('click')
+      await vue.nextTick()
+      expect(focus).toHaveBeenCalled()
+      expect(api.inbox.act).not.toHaveBeenCalled()
+      expect(wrapper.get('[data-testid="inbox-thumb-bar"]').findAll('button').map(b => b.text())).toEqual(['Cancel', 'Answer', 'Send back', 'Delete', 'Reply'])
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('keeps Retry\'s status picker, and sends the status it\'s set to', async () => {
+    const { wrapper, item, panel, primary } = await mountPhone('failed', undefined)
+    try {
+      expect(wrapper.findComponent(InboxPanelRetryInto).exists()).toBe(true)
+      panel().setResolveTo('ready')
+      await primary().trigger('click')
+      await flushPromises()
+      expect(api.inbox.act).toHaveBeenCalledWith((item as { taskId: string }).taskId, expect.objectContaining({ action: 'resolve', to: 'ready' }))
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('shows an action\'s error above the closed bar, with the task\'s load error and Retry up top', async () => {
+    const { wrapper, primary, alert } = await mountPhone('human_review', undefined)
+    try {
+      expect(alert().text()).toContain('Couldn\'t load this task')
+      expect(wrapper.findAll('[data-alert]')).toHaveLength(1)
+      expect(primary().attributes('disabled')).toBeDefined()
+      expect(button(wrapper, 'Request changes').attributes('disabled')).toBeUndefined()
+    } finally {
+      wrapper.unmount()
+    }
+    const approval = await mountPhone('human_review', 'COR-5')
+    try {
+      vi.mocked(api.inbox.act).mockRejectedValue(new Error('Conflict'))
+      await approval.primary().trigger('click')
+      await flushPromises()
+      const bar = approval.wrapper.get('[data-testid="inbox-thumb-bar"]')
+      expect(bar.findAll('[data-alert]').at(-1)!.text()).toContain('Conflict')
+    } finally {
+      approval.wrapper.unmount()
+    }
+  })
+
+  it('shows the PR error and Retry in its tabs', async () => {
+    const { wrapper, openTab, alert } = await mountPhone('human_review', 'COR-5', task => task, () => {
+      vi.mocked(api.projects.pullRequest).mockRejectedValue(new Error('Runner offline'))
+    })
+    try {
+      await openTab('diff')
+      expect(alert().text()).toContain('Couldn\'t load this pull request')
+      expect(alert().text()).toContain('Retry')
+      expect(wrapper.find('[data-testid="inbox-thumb-bar"]').exists()).toBe(true)
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('shows no action bar on a read-only item', async () => {
+    const { wrapper, params } = await mountPhone('human_review', 'COR-5')
+    try {
+      for (const read of [inbox().activity[0]!, inbox().resolved[0]!]) {
+        params.itemId = read.id
+        await flushPromises()
+        expect(wrapper.find('[data-testid="inbox-panel-option-d"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="inbox-thumb-bar"]').exists()).toBe(false)
+        expect(wrapper.findComponent(composerStub).exists()).toBe(false)
+      }
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('leaves release notes to their own layout', async () => {
+    const { wrapper, params } = await mountPhone('human_review', 'COR-5')
+    try {
+      params.itemId = inbox().needsYou.find(i => i.type === 'release_notes')!.id
+      await flushPromises()
+      expect(wrapper.find('[data-testid="inbox-panel-option-d"]').exists()).toBe(false)
+    } finally {
+      wrapper.unmount()
+    }
+  })
 })
