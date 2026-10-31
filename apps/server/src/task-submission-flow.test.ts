@@ -93,7 +93,7 @@ it('gives the reviewer the commit, epic base, criteria and evidence, and binds t
   expect(await t.db.select().from(schema.reviews).where(eq(schema.reviews.taskId, task.id))).toEqual([])
 
   t.github.setBranch(project.repository, dev.branch, 'head-1')
-  expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', verdict(task, 'approved', 'head-1'))).toMatchObject({ ok: true, result: { message: expect.stringContaining('integration into the epic branch') } })
+  expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', verdict(task, 'approved', 'head-1'))).toMatchObject({ ok: true, result: { message: expect.stringContaining('integrates it into the epic branch') } })
   expect(await t.db.select().from(schema.taskSubmissions).where(eq(schema.taskSubmissions.taskId, task.id))).toMatchObject([{ agentApprovedHeadSha: 'head-1', integratedCommitSha: null }])
   // Approval isn't completion: the task waits and no GitHub merge is attempted
   await t.orchestrator.merges.tick()
@@ -123,6 +123,21 @@ it('binds an approved rebase review to the new commit and carries the approval t
   expect(await runner.call(check.runId, check.leaseEpoch, 'report_outcome', report)).toMatchObject({ ok: true })
   expect(await row(task)).toMatchObject({ status: 'ready_to_merge', headSha: 'head-2' })
   expect(await t.db.select().from(schema.taskSubmissions).where(eq(schema.taskSubmissions.taskId, task.id)).orderBy(schema.taskSubmissions.sequence)).toMatchObject([{ agentApprovedHeadSha: 'head-1' }, { agentApprovedHeadSha: 'head-2' }])
+})
+
+it('leaves a human check open through a rebase review, for the epic approval', async () => {
+  const { project, task } = await epicTask('epic', { acceptanceCriteria: ['It works', { text: 'On a real iPhone', checkedByHuman: true }] })
+  const dev = await assigned(task, 'developer')
+  await submit(dev, project.repository, task, 'head-1')
+  const review = await assigned(task, 'reviewer')
+  await runner.call(review.runId, review.leaseEpoch, 'report_outcome', verdict(task, 'approved', 'head-1'))
+  expect(await row(task)).toMatchObject({ status: 'ready_to_merge' })
+  await t.db.update(schema.tasks).set({ status: 'in_progress', rebaseOnly: true, approvedHeadSha: 'head-1' }).where(eq(schema.tasks.id, task.id))
+
+  await submit(await assigned(task, 'developer'), project.repository, task, 'head-2')
+  const check = await assigned(task, 'reviewer')
+  expect(await runner.call(check.runId, check.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'The resolution holds', headSha: 'head-2' })).toMatchObject({ ok: true })
+  expect(await row(task)).toMatchObject({ status: 'ready_to_merge', rebaseOnly: false, headSha: 'head-2' })
 })
 
 it('returns requested changes to the same branch and keeps the discussion, evidence and earlier submission', async () => {

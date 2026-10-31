@@ -217,6 +217,10 @@ const dotClass = (status: TaskStatus) => ({
           rel="noopener"
           class="text-primary hover:underline"
         >#{{ props.task.pr?.number }}</a>
+        <TaskCommitLinks
+          v-else-if="props.task.submission"
+          :task="props.task"
+        />
         <span
           v-else
           class="text-muted"

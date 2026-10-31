@@ -39,7 +39,7 @@ export type TransitionDetail =
 // The epic PR events that go with a review state change
 export type EpicPrDetail =
   | { event: 'opened' | 'review_started', prNumber: number }
-  | { event: 'approved' | 'changes_requested' | 'human_approved' | 'human_changes_requested', headSha: string | null, summary: string }
+  | { event: 'approved' | 'changes_requested' | 'human_approved' | 'human_changes_requested', headSha: string | null, summary: string, confirmedCriteria?: string[], confirmedTasks?: string[] }
   | { event: 'closed' }
   | { event: 'rebased', from: string | null, to: string }
   | { event: 'conflict', summary: string, files: string[] }
@@ -127,6 +127,7 @@ export interface AuditView {
   version?: number
   summary?: string
   feedback?: string
+  integratedCommitSha?: string
 }
 
 // Reads a stored detail, whatever its age. `event` was written as a name by

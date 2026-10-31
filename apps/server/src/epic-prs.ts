@@ -1,5 +1,5 @@
 import { withMessage } from './inbox-message.ts'
-import type { EpicConflictItem, EpicReviewActionInput, EpicReviewItem, EpicReviewReport, InboxSince, RunJob } from '@corral/contracts'
+import type { EpicConflictItem, EpicReviewActionInput, EpicReviewItem, EpicReviewReport, EpicReviewTask, InboxSince, RunJob } from '@corral/contracts'
 import { ACTIVE_RUN_STATES, feedbackFixTitle, FIX_TITLE_PREFIX, feedbackPoints, isTaskDone, LEASE_DURATION_MS, markdownToRichText, taskRef, type Actor, type CompletionState } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm'
@@ -11,9 +11,9 @@ import { fileArtifacts, workNotes } from './inbox-changes.ts'
 import { runEndValues } from './run-lifecycle.ts'
 import { listEvidence } from './runs.ts'
 import { thumbnailUrl } from './projects.ts'
-import { createTask, listComments, loadTask, toTasks, type ProjectRow } from './tasks.ts'
+import { commitUrl, createTask, listComments, loadTask, toTasks, type ProjectRow } from './tasks.ts'
 
-const { agents, auditLog, epics, projects, runs, tasks } = schema
+const { acceptanceCriteria, agents, auditLog, epics, projects, runs, tasks } = schema
 const system: Actor = { kind: 'system', component: 'server' }
 type EpicRow = typeof epics.$inferSelect
 type RunRow = typeof runs.$inferSelect
@@ -51,13 +51,13 @@ export class EpicPullRequests {
             : await this.d.github.findOpenPullRequest(project.repository, epic.branch!)
               ?? await this.d.github.openPullRequest(project.repository, {
                 head: epic.branch!, base: project.defaultBranch, title: epic.title,
-                body: this.body(epic, board, project)
+                body: await this.body(tx, epic, board, project)
               })
           if (pr.state !== 'open' || pr.merged) return
           if (epic.prNumber && epic.prHeadSha === pr.headSha && epic.reviewState !== 'open' && epic.reviewState !== 'changes_requested') return
           // Corral asked for this new head; the merge pass keeps the approval
           if (epic.reviewState === 'ready_to_merge' && epic.rebaseRequested) return
-          await this.d.github.updatePullRequest(project.repository, pr.number, { body: this.body(epic, board, project) })
+          await this.d.github.updatePullRequest(project.repository, pr.number, { body: await this.body(tx, epic, board, project) })
           // A moved epic head invalidates approval, even if board membership
           // didn't change. Active runs on the old head are fenced by state.
           await tx.update(runs).set(runEndValues({ state: 'interrupted', error: 'Epic PR changed' }, this.now()))
@@ -73,11 +73,17 @@ export class EpicPullRequests {
     }
   }
 
-  private body(epic: EpicRow, board: Awaited<ReturnType<typeof epicBoard>>, project: ProjectRow) {
+  private async body(db: Executor, epic: EpicRow, board: Awaited<ReturnType<typeof epicBoard>>, project: ProjectRow) {
+    const criteria = await humanCriteria(db, board)
+    const obligations = board.flatMap((t) => {
+      const ref = taskRef(project.prefix, t.number)
+      if (t.integrationProtocol === 0) return []
+      return [...t.humanReview ? [`- [ ] ${ref}: reviewed by a human`] : [], ...criteria.filter(c => c.taskId === t.id).map(c => `- [ ] ${ref}: ${c.text}`)]
+    })
     return [epic.description, '## Tasks and evidence', ...board.map((t) => {
       const ref = taskRef(project.prefix, t.number)
-      return `- ${ref}: ${t.title}${t.prUrl ? ` ([PR](${t.prUrl}))` : t.mergeCommitSha ? ` (${t.mergeCommitSha.slice(0, 10)})` : ''} — [criteria and evidence](${this.d.publicUrl}/tasks/${ref})`
-    })].join('\n\n')
+      return `- ${ref}: ${t.title}${t.prUrl ? ` ([PR](${t.prUrl}))` : t.mergeCommitSha ? ` ([${t.mergeCommitSha.slice(0, 10)}](${commitUrl(project, t.mergeCommitSha)}))` : ''} — [criteria and evidence](${this.d.publicUrl}/tasks/${ref})`
+    }), ...obligations.length ? ['## Human checks for epic approval', 'Confirmed in Corral when approving the epic, not on this list.', obligations.join('\n')] : []].join('\n\n')
   }
 
   async claim(agentId: string, place: (tx: Executor) => Promise<string | null>): Promise<RunJob | null> {
@@ -103,7 +109,7 @@ export class EpicPullRequests {
           projectId: project.id, repository: project.repository, defaultBranch: project.defaultBranch, baseBranch: project.defaultBranch,
           taskId: null, taskRef: null, epicId: epic.id, branch: epic.branch, headSha: epic.prHeadSha,
           planSessionId: null, agentSessionId: null, fallbackPrompt: null, model: null, timeoutSeconds: 3600,
-          prompt: `You are ${agent.name}, reviewing the integration of epic "${epic.title}".\n\n${JSON.stringify(context, null, 2)}\n\nReview the whole combined diff with git diff origin/${project.defaultBranch}...HEAD at commit ${epic.prHeadSha}. This is a read-only checkout: do not edit, commit or push. Check the epic goal and every task's criteria, looking for integration problems between tasks (API/UI mismatches, inconsistent docs, duplicate helpers). The evidence is context; do not re-judge individual task evidence. Use get_task for the whole epic and get_evidence to fetch any listed evidence ID. Rerun the project's lint, typecheck, tests and build as gates WITHOUT THE CACHE (for Turbo use --force). Always finish with report_outcome, outcome approved or changes_requested, and specific reasoning in summary. No per-task criteria verdicts are required. Changes requested create a fix task in the epic; approval sends the epic PR to human review.`
+          prompt: `You are ${agent.name}, reviewing the integration of epic "${epic.title}".\n\n${JSON.stringify(context, null, 2)}\n\nReview the whole combined diff with git diff origin/${project.defaultBranch}...HEAD at commit ${epic.prHeadSha}. This is a read-only checkout: do not edit, commit or push. Check the epic goal and every task's criteria, looking for integration problems between tasks (API/UI mismatches, inconsistent docs, duplicate helpers). The evidence is context; do not re-judge individual task evidence. Criteria checked by a human and tasks flagged humanReview wait for the human at this epic's approval: do not attempt them, produce evidence or verdicts for them, or request changes over them. Use get_task for the whole epic and get_evidence to fetch any listed evidence ID. Rerun the project's lint, typecheck, tests and build as gates WITHOUT THE CACHE (for Turbo use --force). Always finish with report_outcome, outcome approved or changes_requested, and specific reasoning in summary. No per-task criteria verdicts are required. Changes requested create a fix task in the epic; approval sends the epic PR to human review.`
         }
       }
       return null
@@ -144,9 +150,17 @@ export class EpicPullRequests {
       const pr = await this.d.github.getPullRequest(project.repository, epic.prNumber!)
       if (pr.headSha !== input.headSha || pr.state !== 'open' || pr.merged) throw new ApiFailure(409, { code: 'conflict', constraint: 'epic_pr_changed' })
       if (input.action === 'request_changes' && !input.text?.trim()) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ message: 'Describe the changes needed' }] })
+      // D27: flagged tasks and human checks are obligations of this approval.
+      // Read under the epic lock, so a later change to the board can't slip past.
+      const required = await humanObligations(tx, await epicBoard(tx, epic.id))
+      const confirmedCriteria = input.confirmedCriteria ?? []
+      const confirmedTasks = input.confirmedTasks ?? []
+      if (input.action === 'approve' && required.some(r => (r.humanReview && !confirmedTasks.includes(r.taskId)) || r.humanChecks.some(id => !confirmedCriteria.includes(id)))) {
+        throw new ApiFailure(409, { code: 'conflict', constraint: 'human_checks_unconfirmed' })
+      }
       await tx.update(epics).set({ reviewState: input.action === 'approve' ? 'ready_to_merge' : 'changes_requested', updatedAt: this.now() }).where(eq(epics.id, epic.id))
       if (input.action === 'request_changes') fixId = await createEpicFixTask(tx, project, epic, input.text!.trim(), actor)
-      await appendAudit(tx, { projectId: project.id, actor }, auditEvent('epic.pr', { epicId, event: input.action === 'approve' ? 'human_approved' : 'human_changes_requested', headSha: input.headSha, summary: input.text ?? '' }))
+      await appendAudit(tx, { projectId: project.id, actor }, auditEvent('epic.pr', { epicId, event: input.action === 'approve' ? 'human_approved' : 'human_changes_requested', headSha: input.headSha, summary: input.text ?? '', ...(input.action === 'approve' && { confirmedCriteria: required.flatMap(r => r.humanChecks), confirmedTasks: required.filter(r => r.humanReview).map(r => r.taskId) }) }))
     })
     if (fixId) this.d.events.publish({ type: 'task.created', task: await loadTask(this.d.db, fixId) })
     await this.publish(epicId)
@@ -187,10 +201,28 @@ export async function createEpicFixTask(tx: Executor, project: ProjectRow, epic:
   return createTask(tx, project, { type: 'task', title: feedbackFixTitle(feedback), description: markdownToRichText(feedback), epicId: epic.id, acceptanceCriteria: feedbackPoints(feedback) }, actor, { epicFix: true })
 }
 
+function humanCriteria(db: Executor, board: Awaited<ReturnType<typeof epicBoard>>) {
+  if (board.length === 0) return Promise.resolve([])
+  return db.select({ id: acceptanceCriteria.id, taskId: acceptanceCriteria.taskId, text: acceptanceCriteria.text }).from(acceptanceCriteria)
+    .where(and(inArray(acceptanceCriteria.taskId, board.map(t => t.id)), eq(acceptanceCriteria.checkedByHuman, true))).orderBy(asc(acceptanceCriteria.position))
+}
+
+// What each PR-free task leaves for the epic's human approval. Task-PR tasks
+// had human review on their own path. Agent approval can't stand in (D28).
+export async function humanObligations(db: Executor, board: Awaited<ReturnType<typeof epicBoard>>) {
+  const criteria = await humanCriteria(db, board)
+  return board.filter(t => t.integrationProtocol > 0).map(t => ({ taskId: t.id, humanReview: t.humanReview, humanChecks: criteria.filter(c => c.taskId === t.id).map(c => c.id) }))
+}
+
 export async function epicReviewContext(db: Executor, epic: EpicRow, project: ProjectRow) {
-  const board = await toTasks(db, project, await epicBoard(db, epic.id))
+  const rows = await epicBoard(db, epic.id)
+  const board = await toTasks(db, project, rows)
+  const required = await humanObligations(db, rows)
   return { epicId: epic.id, title: epic.title, goal: epic.description, branch: epic.branch, headSha: epic.prHeadSha,
-    tasks: await Promise.all(board.map(async task => ({ task, evidence: await listEvidence(db, task.id) }))) }
+    tasks: await Promise.all(board.map(async (task): Promise<EpicReviewTask> => {
+      const owed = required.find(r => r.taskId === task.id)
+      return { task, evidence: await listEvidence(db, task.id), humanReview: owed?.humanReview ?? false, humanChecks: owed?.humanChecks ?? [] }
+    })) }
 }
 
 // What's new on an epic since the human last requested changes on its PR

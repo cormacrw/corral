@@ -1436,7 +1436,8 @@ export class Orchestrator implements RunnerHandlers {
       await tx.insert(comments).values({ taskId: task.id, author: this.#actor(ctx), body: feedback })
       await appendAudit(tx, { projectId: ctx.project.id, taskId: task.id, actor: this.#actor(ctx) }, auditEvent('review.recorded', { runId: ctx.run.id, verdict, headSha, round: locked.task.reviewRounds, met: kept.filter(v => v.met).length, of: kept.length, ...(similarity !== undefined && { similarity }) }))
       // Changes requested → the developer; approved → Human review when
-      // flagged, otherwise Ready to merge (D10)
+      // flagged, otherwise Ready to merge (D10). PR-free work always takes
+      // Ready to merge: the human sees it at the epic review (D27)
       const state = await applyTransition(tx, locked.task, locked.project, verdict === 'approved' ? { type: 'review_approved' } : { type: 'changes_requested', similarity }, server, { event: verdict === 'approved' ? 'review_approved' : 'changes_requested', runId: ctx.run.id, headSha, ...(similarity !== undefined && { similarity }) })
       await this.#endRunIn(tx, ctx, { state: 'completed', outcome: verdict, summary: report.summary, headSha })
       return state
@@ -1454,7 +1455,7 @@ export class Orchestrator implements RunnerHandlers {
           : spike
             ? 'Approval recorded. A human reviews the findings next. You can stop now.'
             : prFree
-              ? 'Approval recorded for this commit. Corral handles human review and integration into the epic branch from here. You can stop now.'
+              ? 'Approval recorded for this commit. Corral integrates it into the epic branch, and any human checks go to the human at the epic review. You can stop now.'
               : 'Approval recorded. Corral handles human review, CI and the merge from here. You can stop now.'
     }
   }

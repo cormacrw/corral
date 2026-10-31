@@ -60,8 +60,22 @@ the reviewer prompt lists earlier submissions. Stopped-run recovery is unchanged
 
 Merged on the PR-free path means confirmed integration into the epic branch;
 same-epic dependents can then start. Other dependents wait for the epic PR to
-merge. Approval or pending integration never means done. Human review flags
-and checked-by-human criteria retain D5/D28 routing before integration.
+merge. Approval or pending integration never means done.
+
+## Human review at the epic (COR-289)
+
+`applyTransition` clears the in-memory flag for `integrationProtocol > 0`, so
+`review_approved` always lands in Ready to merge; the row keeps `humanReview`
+and the criteria keep `checkedByHuman`. `humanObligations` in `epic-prs.ts` turns
+those into the epic approval's obligations, for PR-free tasks only. The Inbox gets
+them as `humanReview` and `humanChecks` on each `EpicReviewTask`. Approve must send
+`confirmedCriteria` and `confirmedTasks` covering the board read under the epic
+lock, or it's a 409 `human_checks_unconfirmed`, and the audit entry records them.
+`met` stays null: confirming is the human's approval, not a verdict.
+
+`Task.submission` carries the latest submission's commits with GitHub URLs, shown by
+`TaskCommitLinks`. An integrated SHA is as recorded; a later epic rebase rewrites the
+branch but GitHub still serves the commit.
 
 ## Integrating (COR-288)
 

@@ -61,7 +61,7 @@ Ready tasks whose epic has unfinished prerequisites show **Waiting on epic: <tit
    - Editing shows a toolbar: bold, italic, inline code | heading, bulleted list, numbered list, code block, link.
    - It also shows a `primary` focus ring, **Cancel** and **Save**.
    - Supported content: paragraphs, headings, lists, inline code, code blocks, links, bold and italic.
-5. **Acceptance criteria:** a count ("2 of 3 met") and one row per criterion, each with a met or open icon, an expanding, inline-editable text area and a remove button. The **Checked by a human** toggle sits below the text so complete criteria remain readable on mobile. There's an **Add criterion** button and the note "The reviewer marks criteria met from evidence." Each row has a **Checked by a human** toggle. Those criteria are reserved for the human, excluded from agent evidence and verdict requirements, and show **Needs human check** alongside the evidence. The Inbox provides their checkboxes before approval.
+5. **Acceptance criteria:** a count ("2 of 3 met") and one row per criterion, each with a met or open icon, an expanding, inline-editable text area and a remove button. The **Checked by a human** toggle sits below the text so complete criteria remain readable on mobile. There's an **Add criterion** button and the note "The reviewer marks criteria met from evidence." Each row has a **Checked by a human** toggle. Those criteria are reserved for the human, excluded from agent evidence and verdict requirements, and show **Needs human check** alongside the evidence. The Inbox provides their checkboxes before approval, on the task or, for a PR-free epic task, on the epic review.
 6. **Activity:**
    - **Events:** a dot, the actor, the text and the time. A run that ended with an error shows here with that error.
    - **Comments:** an avatar and a bubble.
@@ -78,7 +78,7 @@ Ready tasks whose epic has unfinished prerequisites show **Waiting on epic: <tit
 
 ## Data
 
-- **Task:** ref, project, title, status, priority, type (Task / Bug / Spike / Design, D19, D20), epic, developer, reviewer, human review flag, branch, PR, review round, description (rich text JSON), criteria (text, met), dependencies, activity.
+- **Task:** ref, project, title, status, priority, type (Task / Bug / Spike / Design, D19, D20), epic, developer, reviewer, human review flag, branch, PR (or, with no task PR, integrated and approved commit links), review round, description (rich text JSON), criteria (text, met), dependencies, activity.
 - **Writes:** a `PATCH` per field, saved as you go. Description saves on Save. Comments are a `POST`.
 
 ## Responsive

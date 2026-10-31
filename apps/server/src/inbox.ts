@@ -17,7 +17,7 @@ const { deployments, agents, auditLog, planMessages, planSessions, planEpics, pl
 
 // A request for changes, or an answer: a clarify is a resolve with a pinned comment
 const HUMAN_ACTIONS = ['human_request_changes', 'resolve']
-const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'pr_rebased', 'commit_submitted', 'findings_reported', 'design_submitted', 'changes_requested', 'merged', 'ci_failed', 'base_conflict', 'head_moved']
+const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'pr_rebased', 'commit_submitted', 'integrated', 'findings_reported', 'design_submitted', 'changes_requested', 'merged', 'ci_failed', 'base_conflict', 'head_moved']
 
 // The Inbox (D11, design/inbox.md): what developer and reviewer runs need
 // from the human, plus what they did, and Plan sessions waiting on the human as a Plan
@@ -270,6 +270,7 @@ function activityText(action: string, event: string | null, detail: AuditView, p
     case 'design_submitted': return `Submitted design v${String(detail.version)}; on to the reviewer`
     case 'changes_requested': return detail.to === 'blocked' ? 'Changes requested; Blocked for you' : 'Changes requested; back to the developer'
     case 'merged': return `Merged ${pr}`
+    case 'integrated': return `Integrated ${String(detail.integratedCommitSha).slice(0, 10)} into the epic branch`
     case 'ci_failed': return `CI failed on ${pr}; back to the developer`
     case 'base_conflict': return `${pr} conflicts with the base branch; back to the developer`
     case 'head_moved': return `New commits on ${pr}; back to the reviewer`
