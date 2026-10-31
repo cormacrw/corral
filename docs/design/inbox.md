@@ -40,7 +40,7 @@ There are three columns. The list divider can be resized (280–560px, default 3
 
 ### 2. Selected message
 
-Task items on desktop (human review, question, blocked, failed, Activity and Resolved) use **Option D** (`InboxPanel`, with `useInboxPanel` deriving what it shows). What's needed to decide sits up front, and everything else is one click away in tabs. Phones, Plan threads, epic items and release notes have their own layouts; the **Mobile item** section below is what phones still use.
+Task items (human review, question, blocked, failed, Activity and Resolved) use **Option D** (`InboxPanel`, with `useInboxPanel` deriving what it shows). What's needed to decide sits up front, and everything else is one click away in tabs. On a phone the actions and composer move to a bottom bar ([mobile.md](mobile.md#inbox)). Plan threads, epic items and release notes have their own layouts.
 
 - **Top block**, which fits at 1280×800 without scrolling:
   - one quiet line (`InboxPanelMeta`): kind (Code, Design or Spike review, Question, Blocked, Failed, Activity, Resolved) · project · ref · sender · time
@@ -65,39 +65,12 @@ Task items on desktop (human review, question, blocked, failed, Activity and Res
   **Request changes**, **Answer** and **Delete task** open the composer instead, with **Cancel** above it. Delete waits for it because it can't be undone, and takes an optional reason.
 - **Composer** (`InboxPanelTray`), pinned to the bottom of an item you can act on: with no action chosen it's the reply box, "Reply to {sender}…", which adds a comment to the task and leaves the item where it is.
 
-### Mobile item
+### What each kind shows
 
-- **Header:**
-  - the sender avatar and subject
-  - the type badge, project tag, and "{sender} · {role} · {time}"
-- **Body:**
-  - After it's resolved, a green "Resolved" `UAlert` with what happened.
-  - Needs-you task and epic items start with shared `InboxMessage`: the short `message` as plain text, then a **New** row directly below it when `newArtifacts` is nonempty. Screenshots are thumbnails; other files use icons and names. One click opens the same evidence viewer used by the criteria list. Design versions link directly to that version's preview. Epic artifacts include their task ref. Evidence is untrusted, so the viewer never frames HTML: images, video and text show in the app, a PDF in an iframe, and anything else is a download link.
-  - The row uses only the server's `newArtifacts`, already filtered since the human's last review or answer. Older files remain in the evidence list without a New marker. With no new artifacts there is no row.
-  - The complete `body` is behind a collapsed **Full message** disclosure, including spike findings. It starts closed whenever a different item opens. Items without `message` keep their existing rendering, including Plan threads, release notes, Activity and Resolved.
-  - Type-specific context:
-    - **Human review:** the PR link (`#41`), passing-check badges, and a card of acceptance criteria. Each criterion shows a met icon, the reviewer’s note, screenshot/video/request cards, then inline markdown notes. Agent artifacts are collapsed separately; see [Evidence review](task.md#evidence-review-d21).
-    - **Spikes always stop in Human review**, whatever their human-review flag says. They appear under Needs you and add one to its count. The collapsed **Full message** renders the latest `## Findings` comment as markdown; criteria verdicts and evidence remain below it. Desktop and mobile label approval **Accept findings**, keep **Request changes**, and hide PR links and check badges. The success toast and Resolved entry say **You accepted the findings**. The preview is the start of the short message; approval finishes the spike in Merged; requesting changes returns it to the developer with the feedback.
-    - **Designs** use **Approve design** on desktop and mobile. Approval marks the latest submitted version Approved, supersedes earlier versions and moves the task to Approved, then advances to the next item. There is no PR to merge; approval opens a Plan session and starts the PM’s build-planning turn.
-    - **Blocked:** the reviewer's and developer's positions side by side (2 columns, `bg-muted`).
-    - **Question:** the question itself. The answers live in the tray.
-    - **Activity:** one link button (Open PR, Open task…).
-  - Your replies, shown as "You → Atlas" bubbles.
-- **Tray**, pinned to the bottom with a top divider. This is the only place you act.
-  - **Question:** "Suggested answers: Pick one, or write your own below" as radio cards in an auto-fit grid. Sending posts the chosen answer plus any note, resolves the item, and puts the task back In progress.
-  - **Quick actions** (a `radiogroup` of chips; see shared pattern): exactly one is selected, starting with the first action whenever an item opens. Clicking the selected chip keeps it selected; another chip replaces the selection. Arrow keys wrap between chips and select the focused chip; only the selected chip is in the Tab order.
-
-    | Item type | Actions | Needs text |
-    |---|---|---|
-    | Human review | ✓ Approve and merge (Accept findings for spikes; Approve design for designs) · ✎ Request changes | Request changes only |
-    | Blocked / Question | 💬 Answer · ↩ Send back to Backlog · 🗑 Delete task (`error`) | Answer only |
-    | Failed | ↻ Retry · ↩ Send back to Backlog · 🗑 Delete task (`error`) | None |
-
-  - **Composer:**
-    - The placeholder follows the selected action, e.g. "What should Atlas change?" or "Reason for deleting (optional)". Items without quick actions use "Reply to {sender}…".
-    - The submit button becomes labelled with the action and turns `error` for Delete.
-    - Items without quick actions keep their plain reply behavior. Items with quick actions always send the selected action. Mobile questions have no chips and send the composer answer with Answer.
-  - Switching items clears the draft and selects the new item’s first action, including after a successful send advances to the next item.
+- The row uses only the server's `newArtifacts`, already filtered since the human's last review or answer. Older files remain in the evidence list without a New marker. With no new artifacts there is no row.
+- The complete `body`, including spike findings, is in the **Message** tab, and the tab resets when another item opens. Items without `message` keep their existing rendering, including Plan threads, release notes, Activity and Resolved.
+- **Spikes always stop in Human review**, whatever their human-review flag says. They appear under Needs you and add one to its count. The **Message** tab renders the latest `## Findings` comment as markdown; criteria verdicts and evidence remain below it. Desktop and mobile label approval **Accept findings**, keep **Request changes**, and hide PR links and check badges. The success toast and Resolved entry say **You accepted the findings**. The preview is the start of the short message; approval finishes the spike in Merged; requesting changes returns it to the developer with the feedback.
+- **Designs** use **Approve design** on desktop and mobile. Approval marks the latest submitted version Approved, supersedes earlier versions and moves the task to Approved, then advances to the next item. There is no PR to merge; approval opens a Plan session and starts the PM’s build-planning turn.
 
 ### 3. Task flyout
 

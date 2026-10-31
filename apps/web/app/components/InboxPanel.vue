@@ -3,8 +3,9 @@ import type { Evidence } from '@corral/contracts'
 import { useInboxPanel, type InboxPanelContext, type InboxPanelTab } from '~/composables/useInboxPanel'
 
 // The Inbox message panel, Option D (design/inbox.md): what's needed to decide
-// up front, then tabs for everything else. Phones keep InboxMobileItem.
-const props = defineProps<{ ctx: InboxPanelContext }>()
+// up front, then tabs for everything else. On a phone (design/mobile.md) the
+// actions and the composer move to the bottom bar.
+const props = defineProps<{ ctx: InboxPanelContext, mobile?: boolean }>()
 const p = useInboxPanel(props.ctx)
 const tray = ref<{ send: () => Promise<boolean> } | null>(null)
 defineExpose({ send: () => tray.value?.send() ?? Promise.resolve(false) })
@@ -30,7 +31,7 @@ const loading = computed(() => props.ctx.taskLoading || (p.isReview.value && pro
     class="flex min-h-0 min-w-0 flex-1 flex-col"
     data-testid="inbox-panel-option-d"
   >
-    <div class="flex max-h-[60%] shrink-0 flex-col gap-2 overflow-y-auto border-b border-default px-5 pt-4 pb-3">
+    <div :class="['flex max-h-[60%] shrink-0 flex-col gap-2 overflow-y-auto border-b border-default', mobile ? 'p-3' : 'px-5 pt-4 pb-3']">
       <div class="flex items-start gap-3">
         <div class="min-w-0 flex-1">
           <InboxPanelMeta :p="p" />
@@ -39,6 +40,7 @@ const loading = computed(() => props.ctx.taskLoading || (p.isReview.value && pro
           </h1>
         </div>
         <UButton
+          v-if="!mobile"
           icon="i-lucide-panel-right"
           aria-label="Task details"
           title="Task details"
@@ -72,6 +74,7 @@ const loading = computed(() => props.ctx.taskLoading || (p.isReview.value && pro
       />
       <div class="flex flex-wrap items-center justify-between gap-2">
         <InboxPanelActions
+          v-if="!mobile"
           :ctx="ctx"
           :p="p"
         />
@@ -95,17 +98,17 @@ const loading = computed(() => props.ctx.taskLoading || (p.isReview.value && pro
       variant="link"
       size="sm"
       :ui="{ list: 'overflow-x-auto', trigger: 'shrink-0' }"
-      class="shrink-0 px-3"
+      :class="['shrink-0', mobile ? 'px-1' : 'px-3']"
       data-testid="inbox-tabs"
       @update:model-value="ctx.setTab($event as InboxPanelTab)"
     />
     <div
-      class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5"
+      :class="['min-h-0 flex-1 overflow-y-auto overscroll-contain', mobile ? 'p-3' : 'p-5']"
       data-testid="inbox-detail-scroller"
     >
       <div
         v-if="openTab === 'overview' && loading"
-        class="grid grid-cols-3 gap-2"
+        :class="['grid gap-2', mobile ? 'grid-cols-2' : 'grid-cols-3']"
         data-testid="inbox-overview-loading"
       >
         <USkeleton
@@ -127,7 +130,7 @@ const loading = computed(() => props.ctx.taskLoading || (p.isReview.value && pro
         </p>
         <div
           v-if="p.isReview.value && p.images.value.length"
-          class="grid grid-cols-3 gap-2"
+          :class="['grid gap-2', mobile ? 'grid-cols-2' : 'grid-cols-3']"
         >
           <button
             v-for="e in p.images.value"
@@ -188,8 +191,13 @@ const loading = computed(() => props.ctx.taskLoading || (p.isReview.value && pro
         :section="details"
       />
     </div>
+    <InboxPanelThumbBar
+      v-if="p.canAct.value && mobile"
+      ref="tray"
+      :ctx="ctx"
+    />
     <div
-      v-if="p.canAct.value"
+      v-else-if="p.canAct.value"
       class="shrink-0 border-t border-default p-3"
     >
       <InboxPanelTray
