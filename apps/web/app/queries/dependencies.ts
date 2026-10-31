@@ -1,6 +1,6 @@
 import type { QueryClient, QueryKey } from '@tanstack/vue-query'
 import { partialMatchKey } from '@tanstack/vue-query'
-import type { Agent, Comment, Epic, EpicDetail, PlanSession, PlanSessionDetail, Project, Run, RunEvent, ServerEvent, ServerEventType, Task } from '@corral/contracts'
+import type { Agent, Comment, Epic, EpicDetail, Inbox, PlanSession, PlanSessionDetail, Project, Run, RunEvent, ServerEvent, ServerEventType, Task } from '@corral/contracts'
 import { keys } from './keys'
 
 // What depends on what: the single place that says which queries an event or
@@ -143,7 +143,8 @@ export const eventDependencies: EventDependencies = {
     invalidates: () => []
   },
   'plan.session': {
-    write: ({ session }, cache) => {
+    write: ({ session, markedRead }, cache) => {
+      if (markedRead) cache.set<Inbox>(keys.inbox(), inbox => inbox && { ...inbox, count: markedRead.inboxCount })
       cache.set<PlanSession[]>(keys.plan.sessions(), (list) => {
         if (!list) return list
         const previous = list.find(s => s.id === session.id)
@@ -152,7 +153,7 @@ export const eventDependencies: EventDependencies = {
       })
       cache.set<PlanSessionDetail>(keys.plan.session(session.id), merge<PlanSessionDetail>(session))
     },
-    invalidates: () => [keys.inbox()]
+    invalidates: ({ markedRead }) => markedRead ? [] : [keys.inbox()]
   },
   'plan.message': {
     write: ({ message }, cache) => cache.set<PlanSessionDetail>(keys.plan.session(message.sessionId), detail => detail && { ...detail, messages: upsert(message.role === 'human' ? detail.messages.filter(m => !m.id.startsWith('pending-')) : detail.messages, message) }),
@@ -174,8 +175,8 @@ export const eventDependencies: EventDependencies = {
     invalidates: () => []
   },
   'deployment.updated': {
-    // The Inbox is the only thing showing deployments
-    invalidates: () => [keys.inbox()]
+    // The Inbox is the only thing showing deployments; reading changes no content
+    invalidates: ({ markedRead }) => markedRead ? [] : [keys.inbox()]
   }
 }
 

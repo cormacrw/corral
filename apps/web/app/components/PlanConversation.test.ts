@@ -153,6 +153,20 @@ describe('Inbox shared Plan conversation', () => {
     expect(wrapper.text()).toContain('Plan design tasks: prototypes the human approves before the build.')
   })
 
+  it('switches sessions in place and replaces the composer so drafts and attachments are isolated', async () => {
+    const wrapper = await open()
+    const composer = wrapper.findComponent({ name: 'PromptComposer' })
+    const previous = composer.element
+    composer.vm.$emit('update:modelValue', 'A reply for the first thread')
+    await wrapper.setProps({ sessionId: 's-2' })
+    await flushPromises()
+    expect(api.plan.session).toHaveBeenLastCalledWith('s-2')
+    expect(wrapper.findComponent({ name: 'PromptComposer' }).element).not.toBe(previous)
+    expect(wrapper.findComponent({ name: 'PromptComposer' }).vm.$attrs.modelValue).toBe('')
+    expect(wrapper.text()).toContain(detail('s-2').title)
+    expect(wrapper.text()).not.toContain(detail('s-1').title)
+  })
+
   it('sends a reply through Plan and renders live run events before the saved reply', async () => {
     const wrapper = await open()
     const composer = wrapper.findComponent({ name: 'PromptComposer' })
@@ -207,6 +221,27 @@ describe('Inbox shared Plan conversation', () => {
     wrapper.findComponent({ name: 'PlanQuestion' }).vm.$emit('answer', 'Web Push')
     await flushPromises()
     expect(api.plan.message).toHaveBeenCalledWith('s-2', 'Web Push', undefined)
+  })
+
+  it('does not restore a one-tap answer draft into a different thread after the request finishes', async () => {
+    const wrapper = await open('s-2')
+    let finish!: () => void
+    vi.mocked(api.plan.message).mockReturnValueOnce(new Promise((resolve) => {
+      finish = () => resolve(detail('s-2').messages[0]!)
+    }))
+    wrapper.findComponent({ name: 'PromptComposer' }).vm.$emit('update:modelValue', 'Old draft')
+    await vue.nextTick()
+    wrapper.findComponent({ name: 'PlanQuestion' }).vm.$emit('answer', 'Web Push')
+    await vue.nextTick()
+    await wrapper.setProps({ sessionId: 's-1' })
+    await flushPromises()
+    const composer = wrapper.findComponent({ name: 'PromptComposer' })
+    expect(composer.vm.$attrs.busy).toBe(false)
+    composer.vm.$emit('update:modelValue', 'New draft')
+    await vue.nextTick()
+    finish()
+    await flushPromises()
+    expect(composer.vm.$attrs.modelValue).toBe('New draft')
   })
 
   it.each(['ready', 'backlog'] as const)('confirms an approval to %s and signals advancement without navigating to Plan', async (to) => {

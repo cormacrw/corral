@@ -1176,9 +1176,10 @@ describe('plan sessions', () => {
     const startJobs = await Promise.all(atStart.map(id => runner.next('run.assign', m => m.job.runId === id).then(m => m.job)))
     expect(startJobs).toHaveLength(3)
     for (const job of startJobs) runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: `claude-${job.runId}` })
-    await sleep(150)
-    const started = await t.db.select().from(runs).where(inArray(runs.id, atStart))
-    expect(started.map(r => [r.state, r.pmJob])).toEqual([['running', null], ['running', null], ['running', null]])
+    await expect.poll(async () => {
+      const started = await t.db.select().from(runs).where(inArray(runs.id, atStart))
+      return started.map(r => [r.state, r.pmJob])
+    }).toEqual([['running', null], ['running', null], ['running', null]])
 
     for (const job of [...resumedJobs, ...startJobs]) await endTurn(job, 'Noted.')
     await t.db.update(agents).set({ concurrency: 50 }).where(eq(agents.role, 'pm'))

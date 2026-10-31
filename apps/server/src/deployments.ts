@@ -66,7 +66,7 @@ export async function updateDeploymentInbox(db: Executor, events: EventBus, id: 
     : { readAt: sql`coalesce(${deployments.readAt}, now())` }).where(eq(deployments.id, id)).returning()
   if (!row) throw new ApiFailure(404, { code: 'not_found' })
   const deployment = toDeployment(row)
-  events.publish({ type: 'deployment.updated', deployment })
+  events.publish({ type: 'deployment.updated', deployment, ...(!dismiss && { markedRead: true as const }) })
   return deployment
 }
 

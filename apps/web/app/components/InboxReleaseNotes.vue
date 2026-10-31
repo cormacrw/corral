@@ -4,7 +4,7 @@ import { api } from '~/composables/useApi'
 import { timeAgo } from '~/utils/labels'
 
 const props = defineProps<{ item: ReleaseNotesItem }>()
-const emit = defineEmits<{ refresh: [] }>()
+const emit = defineEmits<{ read: [], refresh: [] }>()
 const error = ref<string | null>(null)
 const busy = ref(false)
 const { state } = useLive()
@@ -13,7 +13,7 @@ watch(() => props.item.unread && props.item.deploymentId, async () => {
   if (!props.item.unread) return
   try {
     await api.deployments.read(props.item.deploymentId)
-    emit('refresh')
+    emit('read')
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   }

@@ -9,7 +9,7 @@ import { STOP_ASKING } from '~/utils/plan-questions'
 
 // Inbox shows the decision only. The session is loaded for the plan sheet;
 // its messages and run transcript belong in Plan, never on this screen.
-const props = defineProps<{ item: PlanThreadItem, onRefresh: () => Promise<void> }>()
+const props = defineProps<{ item: PlanThreadItem, onRefresh: () => Promise<void>, onRead: (id: string) => void }>()
 const router = useRouter()
 const live = useLive()
 const threads = usePlanThreads()
@@ -62,7 +62,10 @@ const loadPlan = () => {
   return detail.refetch()
 }
 watch([() => props.item.sessionId, () => props.item.unread || detail.data.value?.unread], ([id, unread]) => {
-  if (unread) markPlanRead(client, id)
+  if (unread) {
+    markPlanRead(client, id)
+    props.onRead(id)
+  }
 }, { immediate: true })
 async function send(message: string): Promise<boolean> {
   if (cantSend.value) return false

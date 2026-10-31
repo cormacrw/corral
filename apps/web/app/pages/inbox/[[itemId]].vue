@@ -6,6 +6,8 @@ import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
 import { moveRadioSelection } from '~/utils/radio'
 
+definePageMeta({ key: 'inbox' })
+
 // The Inbox (design/inbox.md, D11): list, selected item, action tray, task flyout
 const route = useRoute()
 const router = useRouter()
@@ -33,21 +35,44 @@ const showTask = ref(true)
 const planResolving = ref(false)
 let resolutionPosition = 0
 let taskRequest = 0
+let actingOn: string | null = null
+// Items read while each load is in flight: its response may predate the read
+const readDuringLoads = new Set<Set<string>>()
 
 async function load() {
   if (planResolving.value) return
   error.value = null
+  const readDuringLoad = new Set<string>()
+  readDuringLoads.add(readDuringLoad)
   try {
     const loaded = await api.inbox.get()
-    if (!planResolving.value) inbox.value = loaded
+    if (!planResolving.value) inbox.value = [...readDuringLoad].reduce(inboxWithRead, loaded)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    readDuringLoads.delete(readDuringLoad)
   }
+}
+// Reading changes one row, so it needs no refetch. As on the server, a thread
+// listed only for its unread reply leaves Needs you; a read release note stays.
+function inboxWithRead(current: Inbox, id: string): Inbox {
+  const item = current.needsYou.find(i => i.id === id)
+  if (item?.type === 'plan_thread' && item.status === 'none') {
+    return { ...current, needsYou: current.needsYou.filter(i => i.id !== id), count: current.count - 1 }
+  }
+  if (item?.type !== 'plan_thread' && item?.type !== 'release_notes') return current
+  return { ...current, needsYou: current.needsYou.map(i => i === item ? { ...item, unread: false } : i) }
+}
+function markRead(id: string) {
+  for (const reads of readDuringLoads) reads.add(id)
+  if (inbox.value) inbox.value = inboxWithRead(inbox.value, id)
+  if (openThread.value?.id === id) openThread.value = { ...openThread.value, unread: false }
 }
 onMounted(() => {
   void load()
   const stop = live.subscribe((event) => {
-    if (['task.updated', 'task.deleted', 'task.created', 'run.updated', 'epic.updated', 'plan.session', 'deployment.updated', 'agent.updated'].includes(event.type)) void load()
+    if ((event.type === 'plan.session' || event.type === 'deployment.updated') && event.markedRead) markRead(event.type === 'plan.session' ? event.session.id : event.deployment.id)
+    else if (['task.updated', 'task.deleted', 'task.created', 'run.updated', 'epic.updated', 'plan.session', 'deployment.updated', 'agent.updated'].includes(event.type)) void load()
   })
   onBeforeUnmount(stop)
 })
@@ -100,10 +125,13 @@ async function loadTask(item: TaskInboxItem | null) {
   // A human review carries its evidence in the message (design/inbox.md)
   const slug = live.state.value.projects.find(p => p.id === task.value?.projectId)?.slug
   if (item?.type === 'human_review' && task.value && slug) {
-    ;[evidence.value, reviews.value] = await Promise.all([
+    const [loadedEvidence, loadedReviews] = await Promise.all([
       api.tasks.evidence(slug, task.value.number).catch(() => []),
       api.tasks.reviews(slug, task.value.number).catch(() => [])
     ])
+    if (!isCurrent()) return
+    evidence.value = loadedEvidence
+    reviews.value = loadedReviews
   } else {
     evidence.value = []
     reviews.value = []
@@ -119,12 +147,19 @@ function retryTask() {
   void loadTask(isTaskItem(selected.value) ? selected.value : null)
 }
 watch(selected, async (item, previous) => {
-  text.value = ''
+  if (previous?.id !== item?.id) {
+    text.value = ''
+    busy.value = false
+    resolveTo.value = 'in_progress'
+    evidence.value = []
+    reviews.value = []
+  }
   // A live refresh keeps a failed load's error and Retry until a fetch settles it
   if (previous?.id !== item?.id) taskLoadFailed.value = false
   if (!taskLoadFailed.value) actionError.value = null
-  // Nothing selected (e.g. the last item was just resolved): nothing to show beside it
-  if (!item) flyout.close()
+  // Nothing selected (e.g. the last item was just resolved): nothing to show
+  // beside it. An action's item can leave the list first, but submit then moves on.
+  if (!item && actingOn !== selectedId.value) flyout.close()
   if (item?.type === 'plan_thread' || item?.type === 'epic_review' || item?.type === 'release_notes' || item?.type === 'epic_conflict') {
     taskRequest++
     if (previous?.id !== item.id && (flyout.ref.value || flyout.epic.value)) await flyout.close()
@@ -145,7 +180,7 @@ async function nextAfterPlanResolution() {
   await load()
   const remaining = inbox.value?.needsYou ?? []
   const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
-  await router.replace(next ? `/inbox/${next.id}` : '/inbox')
+  await router.replace(itemRoute(next))
 }
 const count = computed(() => (inbox.value?.count ?? 0) - (inbox.value?.needsYou.filter(i => deletes.pending.value.includes(i.id)).length ?? 0))
 // Delete thread, from its row or its header: no confirmation, Undo instead.
@@ -158,10 +193,17 @@ async function deleteThread(item: PlanThreadItem) {
   await flyout.close()
   const remaining = items.value
   const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
-  await router.replace(next ? `/inbox/${next.id}` : '/inbox')
+  await router.replace(itemRoute(next))
+}
+function itemRoute(item: InboxItem | undefined) {
+  return {
+    path: item ? `/inbox/${item.id}` : '/inbox',
+    // Keep the dock mounted while its task changes.
+    query: flyout.ref.value && isTaskItem(item ?? null) ? { task: item!.taskRef! } : {}
+  }
 }
 function select(item: InboxItem) {
-  void router.push(`/inbox/${item.id}`)
+  void router.push(itemRoute(item))
 }
 function toggleTask() {
   showTask.value = !showTask.value
@@ -205,6 +247,7 @@ async function submit(message: string): Promise<boolean> {
   // A live task update may remove this item before the action response arrives.
   const actedOn = selected.value
   const position = items.value.findIndex(i => i.id === actedOn.id)
+  actingOn = actedOn.id
   busy.value = true
   actionError.value = null
   try {
@@ -224,24 +267,24 @@ async function submit(message: string): Promise<boolean> {
       await api.inbox.act(actedOn.taskId, input)
       toast.add({ title: 'Done', description, color: 'success' })
     }
-    text.value = ''
+    if (selectedId.value === actedOn.id) text.value = ''
     await load()
     // Resolved: move on to the next item that needs you, or to the empty
     // state when that was the last one
-    if (!inbox.value?.needsYou.some(i => i.id === actedOn.id)) {
+    if (selectedId.value === actedOn.id && !inbox.value?.needsYou.some(i => i.id === actedOn.id)) {
       const remaining = inbox.value?.needsYou ?? []
       const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
-      // Finish removing the old task query before selecting the next row.
-      // A live update can start that close before the action returns.
-      await flyout.close()
-      await router.replace(next ? `/inbox/${next.id}` : '/inbox')
+      await router.replace(itemRoute(next))
     }
     return true
   } catch (e) {
-    actionError.value = e instanceof Error ? e.message : String(e)
+    if (selectedId.value === actedOn.id) actionError.value = e instanceof Error ? e.message : String(e)
+    // Nothing to move on to, so the dock kept for that move has nothing beside it
+    if (selectedId.value === actedOn.id && !selected.value) flyout.close()
     return false
   } finally {
-    busy.value = false
+    actingOn = null
+    if (selectedId.value === actedOn.id) busy.value = false
   }
 }
 // On a phone the shell's header names the item and where it sits in the list
@@ -287,6 +330,7 @@ onBeforeUnmount(() => {
       v-model:text="text"
       :plan-thread="selected?.type === 'plan_thread' ? selected : null"
       :on-refresh="load"
+      :on-read="markRead"
       :inbox="inbox"
       :error="error"
       :items="items"
@@ -441,7 +485,9 @@ onBeforeUnmount(() => {
       />
       <InboxReleaseNotes
         v-else-if="selected?.type === 'release_notes'"
+        :key="selected.id"
         :item="selected"
+        @read="markRead(selected.id)"
         @refresh="load"
       />
       <InboxEpicConflict
@@ -454,7 +500,7 @@ onBeforeUnmount(() => {
         v-else-if="selected?.type === 'plan_thread'"
         :key="selected.sessionId"
         :item="selected"
-        @read="load"
+        @read="markRead(selected.id)"
         @approved="nextAfterPlanResolution"
         @approving="setPlanResolving"
         @delete="deleteThread(selected)"
@@ -496,7 +542,12 @@ onBeforeUnmount(() => {
               @click="toggleTask"
             />
           </header>
-          <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
+          <!-- Keyed so the next item opens at its top -->
+          <div
+            :key="selected.id"
+            class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4"
+            data-testid="inbox-detail-scroller"
+          >
             <div class="mx-auto flex max-w-[720px] flex-col gap-4">
               <UAlert
                 v-if="selected.resolution"
@@ -595,6 +646,7 @@ onBeforeUnmount(() => {
                 :actions="taskLoadFailed ? [{ label: 'Retry', onClick: retryTask }] : []"
               />
               <PromptComposer
+                :key="selected.id"
                 v-model="text"
                 :placeholder="placeholder"
                 :submit-label="submitLabel"
