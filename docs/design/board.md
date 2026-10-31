@@ -5,12 +5,12 @@
 
 ## Purpose
 
-A simple kanban of a project's **approved** work, grouped by status (D10). Backlog tasks are never shown here; they have their own page. On desktop, a **Tasks / Epics** toggle swaps the task cards for one card per epic.
+A simple kanban of a project's **approved** work, grouped by status (D10). Backlog tasks are never shown here; they have their own page. On desktop and mobile, a **Tasks / Epics** toggle swaps the task cards for one card per epic.
 
 ## Layout
 
 1. **Toolbar** (bottom border):
-   - the **Tasks / Epics** toggle (desktop only; see [Epics view](#epics-view))
+   - the **Tasks / Epics** toggle (see [Epics view](#epics-view))
    - a search input (240px, "Search tasks")
    - four **filters** (`components/BoardFilters.vue`), each a multi-select dropdown (`components/BoardFilter.vue`, `USelectMenu` with `multiple`) with a tick by each selected item. "All …" at the top of the menu clears the selection. The trigger reads "All epics" when nothing is selected, the item's name when one is, and "N epics" when several are:
      - **Epic:** every epic on the Board
@@ -41,14 +41,13 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
      - **Working cards pulse** (shared working indicator): the outline breathes in `primary` and the avatar dot pings.
      - The selected card has a 2px `primary` outline.
    - **Empty column:** "Nothing here".
-3. **Epics** (`components/BoardEpics.vue`): a row above the columns, scrolling sideways, with a 272px card for each epic that has tasks on the Board or work left, including an epic PR still to merge (D27). The Epic filter narrows it. A card shows the epic's name (linking to it), "N of M merged", the meter, "Review: <mode>", the **Epic PR #N** link, and the review status, such as "All tasks merged, awaiting your review". On mobile the same row sits above the column tabs.
-4. **Task flyout:** docked on the right when a card is open. The columns area narrows and scrolls sideways.
+3. **Task flyout:** docked on the right when a card is open. The columns area narrows and scrolls sideways.
 
 ## Epics view
 
-The toggle's view lives in `?view=` (`tasks` or `epics`) and the last one used is remembered in `localStorage` (`corral.board.view`). A URL value wins over the remembered one; Tasks is the first-time default. Mobile has no toggle and always shows tasks.
+The toggle's view lives in `?view=` (`tasks` or `epics`) and the last one used is remembered in `localStorage` (`corral.board.view`). A URL value wins over the remembered one; Tasks is the first-time default. Both layouts share this preference and URL behaviour.
 
-Each card is an epic, and no task cards or the Epics row are shown. Tasks with no epic don't appear.
+Each card is an epic, and no task cards are shown. Tasks with no epic don't appear.
 
 **Columns.** `epicStage` in `apps/web/app/utils/board.ts` puts each epic in exactly one column, from the first row that matches:
 
@@ -64,13 +63,13 @@ Each card is an epic, and no task cards or the Epics row are shown. Tasks with n
 
 The columns are shown in the order Ready, In progress, Agent review, Human review, Ready to merge, Blocked, Done. `direct` epics have no epic PR, so they go from In progress to Done.
 
-An epic is shown under `epicOnBoard`: it has work left, or it finished within `MERGED_WINDOW_DAYS`, counted from its latest task merge or, for an epic PR, the PR's merge. An epic waiting on its PR stays however old its tasks are. Approved designs alone don't keep a finished epic on the Board.
+An epic is shown under `epicOnBoard`: it has work left, or it finished within `COMPLETE_WINDOW_DAYS`, counted from its latest task merge or, for an epic PR, the PR's merge. An epic waiting on its PR stays however old its tasks are. Approved designs alone don't keep a finished epic on the Board.
 
 **Card** (`components/BoardEpicCard.vue`): the title and the meter with "N of M merged". Tags, review mode and the PR link stay in the epic flyout. An unfinished epic held by unfinished prerequisite epics shows the amber `i-lucide-ban` icon beside the title. It opens a "Waiting on" popover listing each prerequisite with its progress, and clicking a row opens that epic. Clicking the icon doesn't open the card's own flyout.
 
 **Working agents.** The card shows overlapping `AgentAvatar` pictures (initials as fallback), with no visible names: distinct task lease holders plus agents with active runs whose `epicId` matches the epic, including taskless epic reviews. Each agent appears once, in stable agent order. Show at most three avatars, then "+N" for the rest. Hover or keyboard focus shows the agent name in a tooltip; each avatar has an accessible name and the group announces all working agents, including those behind "+N". While any agent is working, wrap the card in the shared `BorderGlow` treatment. With none, show neither avatars nor glow. Task and run SSE updates refresh this without a reload.
 
-Clicking a card opens the epic in the flyout; clicking it again closes it. The title is the card's keyboard button, and the selected card has the `primary` outline.
+On desktop, clicking a card opens the epic in the flyout; clicking it again closes it. On mobile it opens `/epics/<id>`; Back returns to the same stage. The title is the card's keyboard button, and the selected card has the `primary` outline.
 
 **Toolbar.** The search reads "Search epics" and matches epic titles, and the Epic filter applies. Status, Priority and Agent are hidden, stay in the URL and return on switching back; Clear filters resets only the search and Epic filter here. The count reads "N epics".
 
@@ -103,14 +102,16 @@ Ready tasks held by epic dependencies use the same neutral waiting note as task 
 - On the web layout, columns scroll sideways at every width.
 - On the mobile layout (D17, `components/BoardMobile.vue`), the Board shows **one column at a time**, from the `Board · one column at a time` frame:
   - the header's Search button shows the search input. The **Filters** icon button (`list-filter`) beside it toggles the filter row, **collapsed by default**, with an accessible label and pressed/expanded state
-  - the expanded row contains the same Epic, Status, Priority and Agent filters as the web Board, two to a row, plus Clear filters while anything is filtered and "N tasks". Collapsing it keeps the selections and URL query unchanged
+  - in Tasks, the expanded row contains the same Epic, Status, Priority and Agent filters as the web Board, two to a row, plus Clear filters while anything is filtered and "N tasks". Collapsing it keeps the selections and URL query unchanged
   - the Filters button shows a dot while any of the four filters is set, open or closed (search alone does not add a dot). Filters from the URL apply immediately without expanding the row
-  - column tabs sit directly under the header, or the search input when open, while filters are collapsed
+  - the Tasks / Epics toggle stays visible above the column tabs. Search and filters follow the active view: Epics shows only the Epic filter and counts epics; task-only filters stay saved for returning to Tasks
+  - there is no epic carousel in either view or layout
   - a row of pill tabs (`role="tablist"`), one per column, each with its status dot, name and count. The open tab is `primary` subtle and scrolls into view. Left and right arrow keys move between tabs
   - the open column: its name, "Whose turn: {hint}", and its cards, full width. "Nothing here" when empty
   - **swiping** left or right on the column moves to the next or previous column (at least 50px sideways, and more sideways than vertical)
-  - the open column is kept in `?column=` (`ready`, `in_progress`, `agent_review`, `human_review`, `ready_to_merge`, `blocked`, `complete`), so Back from a task returns to it. Legacy `merged` and `approved` column links open Complete. It defaults to Ready
-  - tapping a card opens the task's page, `/tasks/<ref>`, instead of the flyout. The PR number is shown but isn't a link
+  - the open column is kept in `?column=` (`ready`, `in_progress`, `agent_review`, `human_review`, `ready_to_merge`, `blocked`, `complete`) in Tasks, or an epic stage key (`ready`, `in_progress`, `agent_review`, `human_review`, `ready_to_merge`, `blocked`, `done`) in Epics, so Back from a detail page returns to it. A key missing from the active view falls back to its first visible column, including when switching views. Legacy `merged` and `approved` links open Complete in Tasks. It defaults to Ready
+  - tapping a task card opens `/tasks/<ref>`; tapping an epic card opens `/epics/<id>`, instead of the flyout. Epic cards reuse `BoardEpicCard`, full width, including the stacked working-agent avatars and prerequisite popover. Task PR numbers are shown but aren't links
+  - with exactly one epic selected, **Epic details** in the expanded filter row opens its page
 
 ## Accessibility
 
