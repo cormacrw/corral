@@ -5,6 +5,8 @@ import { agentStatus, duration, isLiveRun as isLive, ROLE, runBadge, runRef, run
 // the transcript in the child route. Mobile shows the agent and its runs at
 // /agents/:name, and only the transcript at /agents/:name/:runId
 // (design/mobile.md).
+definePageMeta({ taskFlyout: true })
+
 const route = useRoute()
 const router = useRouter()
 const device = useDevice()
@@ -156,7 +158,6 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
         </div>
 
         <NuxtPage :view="view" />
-        <TaskFlyout />
       </div>
     </div>
   </UDashboardPanel>

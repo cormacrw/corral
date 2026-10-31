@@ -13,9 +13,7 @@ const route = useRoute()
 const live = useLive()
 const flyout = useTaskFlyout()
 const device = useDevice()
-const slug = computed(() => String(route.params.slug))
-const project = computed(() => live.state.value.projects.find(p => p.slug === slug.value) ?? null)
-const { tasks: all, epics: epicList, loading, error } = useProjectLists(slug)
+const { slug, project, tasks: all, epics: epicList, loading, error } = useProject()
 useSeoMeta({ title: () => `Board · ${project.value?.name ?? ''} · Corral` })
 
 // The filters live in the URL query, so a filtered Board reloads and shares
@@ -276,7 +274,6 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
           </section>
         </div>
       </div>
-      <TaskFlyout />
     </div>
   </UDashboardPanel>
 </template>

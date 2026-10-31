@@ -26,6 +26,8 @@ One card per PR: ref, PR number and status badge; the title; Review, CI, Rebase 
 
 The page re-reads the list when a task in the project is created, updated or deleted, and every 30 seconds while the tab is visible, because CI results and base-branch moves happen on GitHub without a Corral event.
 
+Opening the tab shows its cached list immediately without a mount-time refresh. The first poll updates stale GitHub results within 30 seconds; other project tabs do not poll this list.
+
 ## Empty and error states
 
 - No open PRs: "No open pull requests. They show here once a developer opens one."

@@ -1,12 +1,13 @@
 // @vitest-environment happy-dom
 import type { Project } from '@corral/contracts'
-import { VueQueryPlugin } from '@tanstack/vue-query'
+import { useQuery, VueQueryPlugin } from '@tanstack/vue-query'
 import { flushPromises, mount } from '@vue/test-utils'
 import { computed, defineComponent, h, reactive, ref, watch } from 'vue'
 import { afterEach, expect, it, vi } from 'vitest'
 import Settings from './settings.vue'
 import ProjectThumbnail from '~/components/ProjectThumbnail.vue'
 import { keys } from '~/queries/keys'
+import { projectsQuery } from '~/queries/projects'
 import { testQueryClient } from '~/queries/mount-with-query'
 
 const { setThumbnail, clearThumbnail, list, patch } = vi.hoisted(() => ({ setThumbnail: vi.fn(), clearThumbnail: vi.fn(), list: vi.fn(), patch: vi.fn() }))
@@ -22,7 +23,10 @@ function setup() {
   list.mockImplementation(async () => projects.value)
   const client = testQueryClient()
   client.setQueryData(keys.projects.list(), projects.value)
-  for (const [name, value] of Object.entries({ ref, reactive, computed, watch, useRoute: () => ({ params: { slug: 'test-app' } }), useDevice: () => ({ isMobile: ref(false) }), useRemovingProject: () => ref(null), useLive: () => ({ forgetProject: vi.fn() }), useRouter: () => ({ push: vi.fn() }), useToast: () => ({ add }), useSeoMeta: () => {} })) vi.stubGlobal(name, value)
+  for (const [name, value] of Object.entries({ ref, reactive, computed, watch, useProject: () => {
+    const { data } = useQuery(projectsQuery())
+    return { slug: ref('test-app'), projects: data, project: computed(() => data.value?.find(p => p.slug === 'test-app') ?? null) }
+  }, useDevice: () => ({ isMobile: ref(false) }), useRemovingProject: () => ref(null), useLive: () => ({ forgetProject: vi.fn() }), useRouter: () => ({ push: vi.fn() }), useToast: () => ({ add }), useSeoMeta: () => {} })) vi.stubGlobal(name, value)
   const wrapper = mount(Settings, { global: { plugins: [[VueQueryPlugin, { queryClient: client }]], components: { ProjectThumbnail, UButton: Button, UDashboardPanel: Container, UCard: Container }, stubs: { UInput: true, UInputNumber: true, UFormField: true, USelectMenu: true, USwitch: true, UModal: true, UIcon: true } } })
   async function choose(file: File) {
     const input = wrapper.get('input[type=file]')

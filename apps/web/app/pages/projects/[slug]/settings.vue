@@ -1,23 +1,20 @@
 <script setup lang="ts">
-import { useMutation, useQuery } from '@tanstack/vue-query'
+import { useMutation } from '@tanstack/vue-query'
 import type { PatchProjectInput, Project } from '@corral/contracts'
 import { DEFAULT_LIMITS } from '@corral/core'
 import { ApiError } from '~/composables/useApi'
-import { patchProject, projectsQuery, removeProject, setProjectThumbnail } from '~/queries/projects'
+import { patchProject, removeProject, setProjectThumbnail } from '~/queries/projects'
 import { EPIC_REVIEW_MODE, THUMBNAIL_COLORS } from '~/utils/labels'
 
 // Project settings (design/project-settings.md): form fields save together; pause and images apply immediately.
 // On mobile the sections stack under the mobile header, which holds Save (design/mobile.md).
-const route = useRoute()
 const device = useDevice()
 const router = useRouter()
-const { data: projects } = useQuery(projectsQuery())
 const patch = useMutation(patchProject)
 const thumbnail = useMutation(setProjectThumbnail)
 const removal = useMutation(removeProject)
 const toast = useToast()
-const slug = computed(() => String(route.params.slug))
-const project = computed(() => projects.value?.find(p => p.slug === slug.value) ?? null)
+const { slug, projects, project } = useProject()
 useSeoMeta({ title: () => `Settings · ${project.value?.name ?? ''} · Corral` })
 
 const form = reactive<Required<Omit<PatchProjectInput, 'paused'>>>({

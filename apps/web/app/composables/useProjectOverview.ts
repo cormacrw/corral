@@ -1,17 +1,26 @@
 import { isTaskDone } from '@corral/core'
-import type { AuditEntry, Epic, Inbox, Run, Task } from '@corral/contracts'
+import type { AuditEntry, Epic, Inbox, Project, Run, Task } from '@corral/contracts'
+import type { ComputedRef } from 'vue'
 import { api } from '~/composables/useApi'
 import { epicTitle, epicWithLiveCounts } from '~/utils/labels'
 import { projectNeedsYou } from '~/utils/projects'
 
+interface OverviewSource {
+  slug: ComputedRef<string>
+  project: ComputedRef<Project | null>
+  tasks: ComputedRef<Task[]>
+  epics: ComputedRef<Epic[]>
+  loading: ComputedRef<boolean>
+  error: ComputedRef<string | null>
+  open: () => boolean
+}
+
 // Project overview data (design/project-overview.md), shared by the web page
-// and MobileProjectOverview. Loads and stays live while its caller is mounted.
-export function useProjectOverview() {
-  const route = useRoute()
+// and MobileProjectOverview. The project parent route holds it, so going back
+// to Overview shows it at once. It loads once for the project, stays live while
+// open, and catches up on return only if something changed in between.
+export function useProjectOverview({ slug, project, tasks, epics: epicList, loading, error: listError, open }: OverviewSource) {
   const live = useLive()
-  const slug = computed(() => String(route.params.slug))
-  const project = computed(() => live.state.value.projects.find(p => p.slug === slug.value) ?? null)
-  const { tasks, epics: epicList, error: listError } = useProjectLists(slug)
   const inbox = ref<Inbox | null>(null)
   const runs = ref<Run[]>([])
   const history = ref<AuditEntry[]>([])
@@ -19,30 +28,50 @@ export function useProjectOverview() {
   const runAgents = ref<Map<string, string>>(new Map())
   const detailError = ref<string | null>(null)
   const error = computed(() => listError.value ?? detailError.value)
-  useSeoMeta({ title: () => `${project.value?.name ?? 'Project'} · Corral` })
 
+  let loaded = false
+  let outdated = false
+  let generation = 0
+  onBeforeUnmount(() => generation++)
   async function load() {
+    if (!project.value || loading.value) return
+    const current = ++generation
+    const projectId = project.value.id
+    const projectSlug = slug.value
+    const recent = [...tasks.value].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 5)
+    outdated = false
+    loaded = true
     detailError.value = null
     try {
       const [i, r] = await Promise.all([api.inbox.get(), api.runs.list({ active: true })])
-      inbox.value = i
-      runs.value = r.filter(run => run.projectId === project.value?.id)
       // Recent activity: the newest audit entries of this project's tasks
-      const recent = [...tasks.value].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 5)
       const [entries, taskRuns] = await Promise.all([
-        Promise.all(recent.map(t => api.tasks.history(slug.value, t.number))),
+        Promise.all(recent.map(t => api.tasks.history(projectSlug, t.number))),
         Promise.all(recent.map(t => api.runs.list({ taskId: t.id })))
       ])
+      if (current !== generation) return
+      inbox.value = i
+      runs.value = r.filter(run => run.projectId === projectId)
       history.value = entries.flat().sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 12)
       runAgents.value = new Map([...taskRuns.flat(), ...r].map(run => [run.id, run.agentName]))
     } catch (e) {
+      if (current !== generation) return
       detailError.value = e instanceof Error ? e.message : String(e)
     }
   }
-  watch([project, tasks], () => void load(), { immediate: true })
+  // Preload once to keep the first Overview visit free of requests and an
+  // empty-activity flash. Subsequent changes wait while another tab is open.
+  function changed() {
+    if (open() || !loaded) void load()
+    else outdated = true
+  }
+  watch([project, tasks, loading], changed, { immediate: true })
+  watch(open, (now) => {
+    if (now && outdated) void load()
+  })
   onMounted(() => {
     const stop = live.subscribe((event) => {
-      if (event.type === 'run.updated' && event.run.projectId === project.value?.id) void load()
+      if (event.type === 'run.updated' && event.run.projectId === project.value?.id) changed()
     })
     onBeforeUnmount(stop)
   })

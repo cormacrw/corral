@@ -5,6 +5,7 @@ import { clearProject, defineMutation, removedProjectStale } from './dependencie
 import { keys } from './keys'
 
 export const PULL_REQUESTS_POLL_MS = 30_000
+export const DEFAULT_FLOW_WINDOW = '30d' satisfies FlowMetricsQuery['window']
 
 export const projectsQuery = () => queryOptions({ queryKey: keys.projects.list(), queryFn: () => api.projects.list() })
 export const projectQuery = (slug: string) => queryOptions({ queryKey: keys.projects.detail(slug), queryFn: () => api.projects.get(slug) })
