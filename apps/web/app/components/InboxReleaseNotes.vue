@@ -2,7 +2,7 @@
 import type { ReleaseNotesItem } from '@corral/contracts'
 import { useMutation } from '@tanstack/vue-query'
 import { dismissDeployment, readDeployment } from '~/queries/inbox'
-import { timeAgo } from '~/utils/labels'
+import TimeAgo from '~/components/TimeAgo.vue'
 
 const props = defineProps<{ item: ReleaseNotesItem }>()
 const read = useMutation(readDeployment)
@@ -38,7 +38,7 @@ watch(() => props.item.deploymentId, (id) => {
           />{{ item.project.name }}
         </div>
         <p class="text-xs text-muted">
-          {{ item.sender.name }} · PM · {{ timeAgo(item.at) }}
+          {{ item.sender.name }} · PM · <TimeAgo :at="item.at" />
         </p>
       </div>
     </header>
@@ -75,7 +75,7 @@ watch(() => props.item.deploymentId, (id) => {
     </div>
     <footer
       v-if="!item.resolution"
-      class="shrink-0 border-t border-default p-3"
+      class="shrink-0 border-t border-default p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
     >
       <UButton
         label="Dismiss"

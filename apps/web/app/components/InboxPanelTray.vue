@@ -75,6 +75,7 @@ defineExpose({ send, hasImages: computed(() => composer.value?.hasImages ?? fals
       :busy="ctx.busy || ctx.taskLoading"
       :rows="1"
       :project="ctx.item.project.slug"
+      :draft-key="ctx.draftKey"
       :on-submit="onSubmit ?? ctx.submit"
       @update:model-value="ctx.setText"
     />

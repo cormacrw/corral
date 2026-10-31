@@ -118,7 +118,7 @@ function act(action: 'approve' | 'request_changes') {
         </details>
       </section>
     </div>
-    <footer class="space-y-3 border-t border-default p-4">
+    <footer class="shrink-0 space-y-3 border-t border-default p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
       <UAlert
         v-if="error"
         :title="error"

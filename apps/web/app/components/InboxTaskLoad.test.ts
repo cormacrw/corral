@@ -24,6 +24,7 @@ import InboxReleaseNotes from '~/components/InboxReleaseNotes.vue'
 import type { InboxPanelContext } from '~/composables/useInboxPanel'
 import InboxPage from '~/pages/inbox.vue'
 import InboxItemPage from '~/pages/inbox/[itemId].vue'
+import InboxIndexPage from '~/pages/inbox/index.vue'
 
 vi.mock('~/composables/useApi', () => ({
   api: {
@@ -113,7 +114,7 @@ async function mountInbox(type: 'human_review' | 'failed' | 'question', taskRef?
   editApi()
   const client = testQueryClient()
   // As Nuxt renders the child: keyed by its path
-  const NuxtPage = vue.defineComponent({ setup: () => () => params.itemId ? vue.h(InboxItemPage, { key: params.itemId }) : null })
+  const NuxtPage = vue.defineComponent({ setup: () => () => params.itemId ? vue.h(InboxItemPage, { key: params.itemId }) : vue.h(InboxIndexPage) })
   const wrapper = mount(InboxPage, { global: {
     plugins: [[VueQueryPlugin, { queryClient: client }]],
     components: { NuxtPage, InboxPanel, ...(mobile && { InboxMobileItem, MobilePageHeader: plain }), InboxPanelThumbBar, InboxPanelActions, InboxPanelArtifacts, InboxPanelDetails, InboxPanelDiff, InboxPanelMeta, InboxPanelTray, InboxPanelVerdict, InboxReleaseNotes, EvidenceList: evidenceStub, PromptComposer: realComposer ? PromptComposer : composerStub, UChatPrompt: vue.defineComponent({ setup: (_, { slots }) => () => vue.h('div', [slots.header?.(), slots.footer?.()]) }), UAlert: alertStub, UButton: buttonStub, UTabs: tabsStub, UDashboardPanel: plain },
@@ -263,6 +264,19 @@ it('resets the draft and checked criteria between items, and has neither after B
     expect(composer().props('modelValue')).toBe('')
   } finally {
     wrapper.unmount()
+  }
+})
+
+it('keeps the draft through leaving the Inbox and coming back to the item', async () => {
+  const first = await mountInbox('human_review', 'COR-41')
+  await (first.composer().vm.$emit('update:modelValue', 'my note'), vue.nextTick())
+  first.wrapper.unmount()
+  const again = await mountInbox('human_review', 'COR-41')
+  try {
+    expect(again.composer().props('modelValue')).toBe('my note')
+  } finally {
+    sessionStorage.clear()
+    again.wrapper.unmount()
   }
 })
 

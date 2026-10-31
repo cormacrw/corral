@@ -2,8 +2,7 @@
 import { needsAttention } from '@corral/contracts/client'
 import type { InboxItem } from '@corral/contracts'
 import { useInboxView } from '~/composables/useInboxView'
-import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
-import { markdownToPlainText } from '~/utils/markdown'
+import InboxItemRow from '~/components/InboxItemRow.vue'
 
 // The Inbox list on a phone (design/inbox.md, design/mobile.md), a screen of
 // its own at /inbox. The item is InboxMobileItem.
@@ -112,41 +111,10 @@ const tabs = computed(() => [
           :to="`/inbox/${item.id}`"
           class="flex gap-3 border-b border-default px-4 py-3 active:bg-elevated"
         >
-          <span
-            v-if="item.type === 'release_notes' && item.unread"
-            class="mt-2 size-2 shrink-0 rounded-full bg-primary"
-            aria-label="Unread"
+          <InboxItemRow
+            :item="item"
+            mobile
           />
-          <AgentAvatar
-            :name="item.sender.name"
-            size="md"
-          />
-          <span class="flex min-w-0 flex-1 flex-col gap-1">
-            <span class="flex items-center gap-2">
-              <span class="font-semibold text-highlighted">{{ item.sender.name }}</span>
-              <span class="ms-auto shrink-0 text-xs text-muted">{{ timeAgo(item.at) }}</span>
-            </span>
-            <span class="font-semibold text-highlighted">{{ item.subject }}</span>
-            <span class="line-clamp-2 text-sm text-muted">{{ markdownToPlainText(item.preview) }}</span>
-            <span
-              v-if="item.type === 'release_notes'"
-              class="font-mono text-xs text-muted"
-            >{{ item.fromSha ? `${item.fromSha}…` : '' }}{{ item.toSha }}</span>
-            <span class="mt-0.5 flex items-center gap-2">
-              <UBadge
-                :label="typeBadge(item.type).label"
-                :color="typeBadge(item.type).color"
-                variant="subtle"
-                size="sm"
-              />
-              <span class="flex min-w-0 items-center gap-1 truncate text-xs text-muted">
-                <ProjectThumbnail
-                  :project="item.project"
-                  :size="16"
-                />{{ item.project.name }} · {{ item.taskRef }}
-              </span>
-            </span>
-          </span>
         </NuxtLink>
       </li>
       <li

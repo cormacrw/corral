@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import type { InboxActionInput, TaskInboxItem } from '@corral/contracts'
+import type { EpicConflictItem, EpicReviewItem, InboxActionInput, InboxItem, ReleaseNotesItem, TaskInboxItem } from '@corral/contracts'
 import { reactive } from 'vue'
+import { clearDraftsExcept, useDraft } from '~/composables/useDraft'
 import { actionOpensComposer, type InboxPanelContext, type InboxPanelTab, type ResolveTo } from '~/composables/useInboxPanel'
 import { isOwnPane, isTaskItem, useInboxView } from '~/composables/useInboxView'
 import { inboxActions } from '~/utils/inbox-actions'
@@ -22,7 +23,10 @@ const acting = useMutation({ ...actOnInboxItem, ...holdsInbox })
 const commenting = useMutation({ ...commentOnTask, ...holdsInbox })
 const action = ref<InboxActionInput['action'] | null>(null)
 const resolveTo = ref<ResolveTo>('in_progress')
-const text = ref('')
+// One draft at a time: switching items clears it, leaving and coming back doesn't
+const draftKey = `inbox:${selectedId.value}`
+clearDraftsExcept('inbox:', draftKey)
+const text = useDraft(draftKey)
 const busy = ref(false)
 const panelView = ref<{ send: () => Promise<boolean> } | null>(null)
 let quickActionPending = false
@@ -78,6 +82,10 @@ const placeholder = computed(() => {
   }
 })
 const submitLabel = computed(() => action.value ? (actions.value.find(a => a.value === action.value)?.label ?? 'Send') : '')
+
+// What the phone's screen shows, by kind
+const isEpicItem = (item: InboxItem | null): item is EpicReviewItem | EpicConflictItem => item?.type === 'epic_review' || item?.type === 'epic_conflict'
+const mobileItem = computed(() => selected.value?.type === 'plan_thread' || isEpicItem(selected.value) ? null : selected.value as TaskInboxItem | ReleaseNotesItem | null)
 
 // Resolves false when not sent, so the composer keeps its images
 async function submit(message: string): Promise<boolean> {
@@ -146,7 +154,7 @@ const panel = reactive({
   item: computed(() => selected.value as TaskInboxItem),
   task, evidence, reviews, alreadyResolved, taskLoading, taskLoadFailed,
   evidenceLoading: computed(() => address.value !== null && evidenceResult.isPending.value),
-  actions, action, resolveTo, text, busy, actionError: failedAction, placeholder, submitLabel, needsText, tab, checkedHumanCriteria,
+  actions, action, resolveTo, text, draftKey, busy, actionError: failedAction, placeholder, submitLabel, needsText, tab, checkedHumanCriteria,
   composerChosen: computed(() => action.value !== null && actionOpensComposer(action.value)),
   taskOpen: computed(() => flyout.ref.value !== null),
   submit, act, retryTask, toggleTask,
@@ -170,8 +178,20 @@ const panel = reactive({
 </script>
 
 <template>
+  <InboxMobileItem
+    v-if="device.isMobile.value"
+    ref="panelView"
+    :plan-thread="selected?.type === 'plan_thread' ? selected : null"
+    :epic-item="isEpicItem(selected) ? selected : null"
+    :inbox="inbox"
+    :error="error"
+    :selected="mobileItem"
+    :ctx="panel"
+    :on-retry="list.refetch"
+    :on-resolved="moveToNext"
+  />
   <InboxEpicReview
-    v-if="selected?.type === 'epic_review'"
+    v-else-if="selected?.type === 'epic_review'"
     :item="selected"
     @resolved="moveToNext"
   />
@@ -179,16 +199,6 @@ const panel = reactive({
     v-else-if="selected?.type === 'epic_conflict'"
     :item="selected"
     @resolved="moveToNext"
-  />
-  <InboxMobileItem
-    v-else-if="device.isMobile.value"
-    ref="panelView"
-    :plan-thread="selected?.type === 'plan_thread' ? selected : null"
-    :inbox="inbox"
-    :error="error"
-    :selected="selected?.type === 'plan_thread' ? null : selected"
-    :ctx="panel"
-    :on-retry="list.refetch"
   />
   <InboxReleaseNotes
     v-else-if="selected?.type === 'release_notes'"
@@ -207,7 +217,7 @@ const panel = reactive({
   />
   <div
     v-else
-    class="flex min-w-0 flex-1 flex-col"
+    class="flex min-h-0 min-w-0 flex-1 flex-col"
   >
     <InboxEmpty />
   </div>

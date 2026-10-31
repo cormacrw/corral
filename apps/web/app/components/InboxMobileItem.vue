@@ -1,20 +1,24 @@
 <script setup lang="ts">
-import type { Inbox, PlanThreadItem, TaskInboxItem, ReleaseNotesItem } from '@corral/contracts'
+import type { EpicConflictItem, EpicReviewItem, Inbox, PlanThreadItem, TaskInboxItem, ReleaseNotesItem } from '@corral/contracts'
 import type { InboxPanelContext } from '~/composables/useInboxPanel'
+import { inboxItemLink } from '~/utils/labels'
 
 // An Inbox item on a phone (design/inbox.md, design/mobile.md), a screen of its
 // own at /inbox/:itemId. The page owns the data and the actions; task items are
 // the Option D panel under the focused header.
-defineProps<{
+const props = defineProps<{
   planThread: PlanThreadItem | null
+  epicItem: EpicReviewItem | EpicConflictItem | null
   inbox: Inbox | null
   error: string | null
   selected: TaskInboxItem | ReleaseNotesItem | null
   ctx: InboxPanelContext
   onRetry: () => unknown
+  onResolved: () => unknown
 }>()
 const panel = ref<{ send: () => Promise<boolean> } | null>(null)
 defineExpose({ send: () => panel.value?.send() ?? Promise.resolve(false) })
+const taskLink = computed(() => props.selected ? inboxItemLink(props.selected) : null)
 </script>
 
 <template>
@@ -22,6 +26,22 @@ defineExpose({ send: () => panel.value?.send() ?? Promise.resolve(false) })
     v-if="planThread"
     :item="planThread"
   />
+  <div
+    v-else-if="epicItem"
+    class="flex h-full min-h-0 flex-col"
+  >
+    <MobilePageHeader compact />
+    <InboxEpicReview
+      v-if="epicItem.type === 'epic_review'"
+      :item="epicItem"
+      @resolved="onResolved"
+    />
+    <InboxEpicConflict
+      v-else
+      :item="epicItem"
+      @resolved="onResolved"
+    />
+  </div>
   <div
     v-else-if="selected?.type === 'release_notes'"
     class="flex h-full min-h-0 flex-col"
@@ -39,10 +59,11 @@ defineExpose({ send: () => panel.value?.send() ?? Promise.resolve(false) })
     <MobilePageHeader compact>
       <template #actions>
         <UButton
-          v-if="selected"
-          :to="`/tasks/${selected.taskRef}`"
-          label="Task"
+          v-if="taskLink"
+          :to="taskLink.to"
+          :label="taskLink.label"
           icon="i-lucide-list"
+          class="tap-target"
           variant="ghost"
           color="neutral"
         />

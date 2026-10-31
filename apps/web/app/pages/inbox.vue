@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import type { InboxItem } from '@corral/contracts'
 import { isTaskItem, provideInboxView } from '~/composables/useInboxView'
-import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
-import { markdownToPlainText } from '~/utils/markdown'
+import InboxItemRow from '~/components/InboxItemRow.vue'
 
 // The Inbox (design/inbox.md, D11): list and task flyout, with the selected
 // item and its action tray in the child route. The list stays mounted across
@@ -91,43 +90,10 @@ const hover = (item: InboxItem) => isTaskItem(item) ? prefetch({ ref: item.taskR
                 v-if="item.type === 'plan_thread'"
                 :item="item"
               />
-              <template v-else>
-                <span
-                  v-if="item.type === 'release_notes' && item.unread"
-                  class="mt-2 size-2 shrink-0 rounded-full bg-primary"
-                  aria-label="Unread"
-                />
-                <AgentAvatar
-                  :name="item.sender.name"
-                  size="xs"
-                />
-                <span class="min-w-0 flex-1">
-                  <span class="flex items-center gap-2 text-xs text-muted">
-                    <span class="font-medium text-default">{{ item.sender.name }}</span>
-                    <span class="ms-auto">{{ timeAgo(item.at) }}</span>
-                  </span>
-                  <span class="block truncate text-sm font-medium">{{ item.subject }}</span>
-                  <span class="line-clamp-2 text-xs text-muted">{{ markdownToPlainText(item.preview) }}</span>
-                  <span
-                    v-if="item.type === 'release_notes'"
-                    class="block font-mono text-xs text-muted"
-                  >{{ item.fromSha ? `${item.fromSha}…` : '' }}{{ item.toSha }}</span>
-                  <span class="mt-1 flex items-center gap-2">
-                    <UBadge
-                      :label="typeBadge(item.type).label"
-                      :color="typeBadge(item.type).color"
-                      variant="subtle"
-                      size="xs"
-                    />
-                    <span class="flex items-center gap-1 text-xs text-muted">
-                      <ProjectThumbnail
-                        :project="item.project"
-                        :size="16"
-                      />{{ item.project.name }}
-                    </span>
-                  </span>
-                </span>
-              </template>
+              <InboxItemRow
+                v-else
+                :item="item"
+              />
             </button>
             <UButton
               v-if="item.type === 'plan_thread'"
@@ -151,8 +117,10 @@ const hover = (item: InboxItem) => isTaskItem(item) ? prefetch({ ref: item.taskR
       </div>
 
       <!-- Always rendered: the shell's route only catches up when a child finishes -->
-      <NuxtPage />
-      <TaskFlyout v-if="!device.isMobile.value && selected?.type !== 'plan_thread'" />
+      <div class="flex min-h-0 min-w-0 flex-1 max-[1100px]:flex-col">
+        <NuxtPage />
+        <TaskFlyout v-if="!device.isMobile.value && selected?.type !== 'plan_thread'" />
+      </div>
     </div>
   </UDashboardPanel>
 </template>

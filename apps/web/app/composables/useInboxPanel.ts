@@ -23,6 +23,7 @@ export interface InboxPanelContext {
   action: Action | null
   resolveTo: ResolveTo
   text: string
+  draftKey: string
   busy: boolean
   actionError: string | null
   placeholder: string
