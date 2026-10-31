@@ -168,6 +168,19 @@ route('GET', '/projects/:slug/pull-requests', ([slug]) => {
   const p = project(slug!)
   return f.pullRequests.filter(pr => pr.taskRef.startsWith(`${p.prefix}-`))
 })
+route('GET', '/projects/:slug/pull-requests/:number', ([slug, number]) => {
+  project(slug!)
+  const detail = f.pullRequestDetails.find(pr => pr.number === Number(number))
+  if (!detail) throw new ApiError(404, { code: 'pull_request_unavailable', number: Number(number), message: 'Not Found' }, `GitHub couldn't return PR #${number}`)
+  return detail
+})
+route('GET', '/projects/:slug/tasks/:number/pull-request', ([slug, number]) => {
+  const { prNumber } = taskIn(slug!, number!)
+  if (prNumber === null) throw new ApiError(404, { code: 'no_pull_request' }, 'This task has no pull request yet')
+  const detail = f.pullRequestDetails.find(pr => pr.number === prNumber)
+  if (!detail) throw new ApiError(404, { code: 'pull_request_unavailable', number: prNumber, message: 'Not Found' }, `GitHub couldn't return PR #${prNumber}`)
+  return detail
+})
 route('GET', '/projects/:slug/epics', ([slug]) => f.epics.filter(e => e.projectId === project(slug!).id))
 route('POST', '/epics/:id/review', ([id], body) => {
   const epic = f.epics.find(e => e.id === id) ?? notFound()

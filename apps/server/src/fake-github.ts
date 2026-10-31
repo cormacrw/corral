@@ -1,5 +1,6 @@
+import type { PullRequestFile } from '@corral/contracts'
 import type { MergeMethod } from '@corral/core'
-import type { CheckResult, GitHubClient, PullRequest } from './github.ts'
+import { GitHubError, type CheckResult, type GitHubClient, type PullRequest } from './github.ts'
 
 // An in-memory GitHub for tests: branches, PRs, checks and a configurable
 // merge result. Tests push a branch head with `setBranch` the way the runner
@@ -7,6 +8,8 @@ import type { CheckResult, GitHubClient, PullRequest } from './github.ts'
 export class FakeGitHub implements GitHubClient {
   branches = new Map<string, string>()
   pulls = new Map<number, PullRequest & { head: string, base: string, title: string, body: string }>()
+  // Changed files by PR number
+  pullFiles = new Map<number, PullRequestFile[]>()
   checkResults = new Map<string, CheckResult[]>()
   // Each call records what the orchestrator asked for
   calls: { method: string, args: unknown[] }[] = []
@@ -89,6 +92,23 @@ export class FakeGitHub implements GitHubClient {
     const pr = this.pulls.get(number)
     if (!pr) throw new Error(`No PR #${number}`)
     return { ...pr }
+  }
+
+  async getPullRequestDiff(repository: string, number: number, fileLimit: number) {
+    this.#record('getPullRequestDiff', repository, number, fileLimit)
+    const pr = this.pulls.get(number)
+    if (!pr) throw new GitHubError(404, 'Not Found')
+    const files = this.pullFiles.get(number) ?? []
+    return {
+      number,
+      url: pr.url,
+      title: pr.title,
+      body: pr.body,
+      baseBranch: pr.base,
+      headBranch: pr.head,
+      changedFiles: files.length,
+      files: files.slice(0, fileLimit)
+    }
   }
 
   async checks(repository: string, sha: string): Promise<CheckResult[]> {

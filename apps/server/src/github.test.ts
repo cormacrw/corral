@@ -75,3 +75,38 @@ describe('RunnerGitHub.behindBy', () => {
     expect(jobs[0]!.path).toBe('/repos/owner/repo/compare/release%2F2.x...abc123')
   })
 })
+
+describe('RunnerGitHub.getPullRequestDiff', () => {
+  const pull = { number: 7, html_url: 'https://github.com/owner/repo/pull/7', title: 'Add login', body: null, base: { ref: 'main' }, head: { ref: 'feature' }, changed_files: 25 }
+  const files = [
+    { filename: 'a.ts', status: 'added', additions: 2, deletions: 0, patch: '@@ -0,0 +1,2 @@\n+a\n+b' },
+    { filename: 'b.png', status: 'modified', additions: 0, deletions: 0 },
+    { filename: 'c.ts', status: 'copied', additions: 0, deletions: 0 },
+    { filename: 'd.ts', status: 'changed', additions: 0, deletions: 0 }
+  ]
+
+  it('reads the PR and one page of its files, filling in what GitHub leaves out', async () => {
+    const { github, jobs } = stub(job => ({ status: 200, body: job.path.includes('/files') ? files : pull }))
+    expect(await github.getPullRequestDiff('owner/repo', 7, 20)).toEqual({
+      number: 7,
+      url: 'https://github.com/owner/repo/pull/7',
+      title: 'Add login',
+      body: '',
+      baseBranch: 'main',
+      headBranch: 'feature',
+      changedFiles: 25,
+      files: [
+        { path: 'a.ts', status: 'added', additions: 2, deletions: 0, patch: '@@ -0,0 +1,2 @@\n+a\n+b' },
+        { path: 'b.png', status: 'modified', additions: 0, deletions: 0, patch: '' },
+        { path: 'c.ts', status: 'added', additions: 0, deletions: 0, patch: '' },
+        { path: 'd.ts', status: 'modified', additions: 0, deletions: 0, patch: '' }
+      ]
+    })
+    expect(jobs.map(j => j.path)).toEqual(['/repos/owner/repo/pulls/7', '/repos/owner/repo/pulls/7/files?per_page=20'])
+  })
+
+  it('throws GitHub\'s status and message', async () => {
+    const { github } = stub(() => ({ status: 404, body: { message: 'Not Found' } }))
+    await expect(github.getPullRequestDiff('owner/repo', 7, 20)).rejects.toMatchObject({ status: 404, message: 'Not Found' })
+  })
+})
