@@ -219,7 +219,7 @@ async function submit(message: string): Promise<boolean> {
             ? { action: 'resolve', to: resolveTo.value, ...(message && { text: message }) }
             : action.value === 'delete'
               ? { action: 'delete', ...(message && { text: message }) }
-              : action.value === 'send_back' ? { action: 'send_back' } : { action: 'approve' }
+              : action.value === 'send_back' ? { action: 'send_back' } : { action: 'approve', text: message }
       const description = action.value === 'approve' && isSpike.value ? 'You accepted the findings' : submitLabel.value
       await api.inbox.act(actedOn.taskId, input)
       toast.add({ title: 'Done', description, color: 'success' })

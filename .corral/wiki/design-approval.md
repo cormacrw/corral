@@ -34,3 +34,7 @@ These never run on their own: each is a human's explicit approval of one task, r
 - **Human review whose latest version is already approved** (a task-page approval from before the Approved status): if no version is submitted, the Inbox action, the version endpoint and the task page finish the task in Approved, reusing its build Plan session or starting one if absent. A newer submitted version always takes priority.
 
 Approval needs an online runner to start the PM's build session.
+
+## Approval notes (COR-347)
+
+A nonblank approval note from the design review panel or Inbox is trimmed and saved as a normal, unpinned comment by the human in the same transaction as the design approval. The note also stays in the PM build session's opening message, including Inbox approvals. Rejected approvals do not leave comments; retrying an already approved version does not append another approval comment. Requested changes still produce exactly one pinned feedback comment through the task transition.

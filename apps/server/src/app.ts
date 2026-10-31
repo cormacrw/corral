@@ -114,7 +114,7 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
   const approveDesignBuild = async (taskId: string, version?: number, note?: string) => {
     plans.assertTurnPossible()
     await orchestrator.assertPmRunPossible()
-    const versionId = await approveDesign(db, taskId, version, actor)
+    const versionId = await approveDesign(db, taskId, version, actor, note)
     orchestrator.poke(await publishDependents(db, events, taskId))
     await plans.startDesignBuild(versionId, note, actor)
   }
@@ -148,8 +148,8 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       case 'approve': {
         const [row] = await db.select({ type: schema.tasks.type }).from(schema.tasks).where(eq(schema.tasks.id, taskId))
         if (row?.type === 'design') {
-          await approveDesignBuild(taskId)
-        } else await orchestrator.merges.humanApprove(taskId, actor)
+          await approveDesignBuild(taskId, undefined, input.text)
+        } else await orchestrator.merges.humanApprove(taskId, actor, input.text)
         break
       }
       case 'request_changes':
