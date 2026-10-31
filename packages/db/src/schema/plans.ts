@@ -60,8 +60,8 @@ export const planMessages = pgTable('plan_messages', {
   createdAt: createdAt()
 }, t => [
   index().on(t.sessionId, t.createdAt),
-  // Only new and updated rows are checked: the migration adds these NOT VALID,
-  // so history stays as written and toMessage reads it
+  // The migration diagnoses history, then adds these NOT VALID for future writes.
+  // History stays as written and toMessage reads it
   check('plan_messages_role_kind', sql`(${t.role} = 'human' and ${t.kind} = 'message') or (${t.role} = 'pm' and ${t.kind} in ('message', 'question', 'error'))`),
   check('plan_messages_question_fields', sql`${t.kind} = 'question' or (${t.recommendation} is null and ${t.options} is null)`)
 ])
