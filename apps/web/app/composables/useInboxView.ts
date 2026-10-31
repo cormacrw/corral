@@ -25,7 +25,6 @@ function createInboxView() {
   const error = computed(() => inbox.value ? null : list.error.value?.message ?? null)
   const tab = ref<'needsYou' | 'activity' | 'resolved'>('needsYou')
   const search = ref('')
-  const showTask = ref(true)
 
   const isHidden = (item: InboxItem) => deletes.pending.value.includes(item.id)
   // In the server's order (newest first, D11), less threads waiting out their Undo
@@ -55,24 +54,16 @@ function createInboxView() {
       if (selectedId.value || previous) void flyout.close()
     } else if (isOwnPane(item)) {
       if (flyout.ref.value || flyout.epic.value) await flyout.close()
-    } else if (item.taskRef && showTask.value && !device.isMobile.value) {
-      // Following the selection, not a click of its own: no extra history entry.
-      // Phones open the task as its own page instead.
-      flyout.open(item.taskRef, { replace: true })
     }
   }, { immediate: true })
   function toggleTask() {
-    showTask.value = !showTask.value
-    if (showTask.value && selected.value?.taskRef) flyout.open(selected.value.taskRef, { replace: true })
-    else flyout.close()
+    if (flyout.ref.value) flyout.close()
+    else if (selected.value?.taskRef) flyout.open(selected.value.taskRef, { replace: true })
   }
 
+  // An item opens with the task flyout closed, whatever the last one had open.
   function itemRoute(item: InboxItem | undefined) {
-    return {
-      path: item ? `/inbox/${item.id}` : '/inbox',
-      // Keep the dock mounted while its task changes.
-      query: flyout.ref.value && isTaskItem(item ?? null) ? { task: item!.taskRef! } : {}
-    }
+    return { path: item ? `/inbox/${item.id}` : '/inbox', query: {} }
   }
   // Resolving moves to the item at the same position, or to the empty state when
   // that was the last one. The held list still has the old position.
@@ -120,7 +111,7 @@ function createInboxView() {
     mobileHeader.value = null
   })
 
-  return { list, inbox, error, tab, search, items, count, selectedId, selected, showTask, toggleTask, itemRoute, moveToNext, deleteThread }
+  return { list, inbox, error, tab, search, items, count, selectedId, selected, toggleTask, itemRoute, moveToNext, deleteThread }
 }
 
 const INBOX_VIEW: InjectionKey<ReturnType<typeof createInboxView>> = Symbol('inbox-view')

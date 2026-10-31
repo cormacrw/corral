@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Task } from '@corral/contracts'
 
-defineProps<{ task: Pick<Task, 'type' | 'status' | 'ref'> | null }>()
+defineProps<{ task: Pick<Task, 'type' | 'status' | 'ref'> | null, size?: 'sm' | 'md' }>()
 </script>
 
 <template>
@@ -11,5 +11,6 @@ defineProps<{ task: Pick<Task, 'type' | 'status' | 'ref'> | null }>()
     label="Review design"
     icon="i-lucide-panels-top-left"
     variant="outline"
+    :size="size"
   />
 </template>
