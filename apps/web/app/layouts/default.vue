@@ -66,7 +66,7 @@ const searchGroups = computed(() => searchOpen.value
 
 const isActive = (path: string) => route.path === path || route.path.startsWith(`${path}/`)
 // Below 1024px the sidebar is an overlay, and this bar names the page (design/app-shell.md)
-const title = computed(() => shellTitle(route.path, state.value.projects, state.value.agents))
+const title = computed(() => shellTitle(route.path, shell.projects, shell.agents))
 </script>
 
 <template>
@@ -198,9 +198,9 @@ const title = computed(() => shellTitle(route.path, state.value.projects, state.
               >
                 <template #trailing>
                   <UBadge
-                    v-if="state.inboxCount > 0"
+                    v-if="shell.inboxCount > 0"
                     :class="collapsed ? 'absolute -end-1 -top-1 px-1 text-[10px]' : 'ms-auto'"
-                    :label="String(state.inboxCount)"
+                    :label="String(shell.inboxCount)"
                     color="primary"
                     size="sm"
                   />

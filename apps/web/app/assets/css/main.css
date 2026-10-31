@@ -7,6 +7,14 @@ body {
   overscroll-behavior: none;
 }
 
+/* A 44px touch target, wherever fingers are the pointer or the screen is phone-sized */
+@utility tap-target {
+  @media (pointer: coarse), (max-width: 639px) {
+    min-height: 2.75rem;
+    min-width: 2.75rem;
+  }
+}
+
 @theme static {
   --font-sans: 'Outfit', sans-serif;
 
@@ -27,6 +35,14 @@ body {
 
 /* Keep every offered Tailwind palette in production, including swatches.
  * Nuxt UI preserves Tailwind neutral as old-neutral to free its semantic alias. */
+/* A 44px touch target, wherever fingers are the pointer or the screen is phone-sized */
+@utility tap-target {
+  @media (pointer: coarse), (max-width: 639px) {
+    min-height: 2.75rem;
+    min-width: 2.75rem;
+  }
+}
+
 @theme static {
   --dark-neutral-slate-50: var(--color-slate-50);
   --dark-neutral-slate-100: var(--color-slate-100);

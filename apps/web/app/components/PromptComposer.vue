@@ -2,6 +2,8 @@
 import { useMutation } from '@tanstack/vue-query'
 import { attachmentUrl } from '@corral/core'
 import { uploadAttachment } from '~/queries/attachments'
+import { readDraft, writeDraft } from '~/composables/useDraft'
+import { useDevice } from '~/composables/useDevice'
 import { attachmentProblem, withAttachments } from '~/utils/attachments'
 
 // The shared prompt composer (design/README.md): an auto-growing textarea
@@ -22,13 +24,16 @@ const props = withDefaults(defineProps<{
   project?: string | null
   // Already uploaded images restored from a failed Plan start.
   initialImages?: { id: string, name: string }[]
+  // Keeps uploaded images with the text's draft (useDraft)
+  draftKey?: string
   // Bound with @submit. Resolving to false means it wasn't sent, so the
   // images stay for another try.
   onSubmit?: (text: string) => unknown
-}>(), { placeholder: 'Write a message…', hint: '', disabled: false, busy: false, submitLabel: '', submitColor: 'primary', allowEmpty: false, rows: 2, project: null, onSubmit: undefined })
+}>(), { placeholder: 'Write a message…', hint: '', disabled: false, busy: false, submitLabel: '', submitColor: 'primary', allowEmpty: false, rows: 2, project: null, draftKey: '', onSubmit: undefined })
 
 const text = defineModel<string>({ default: '' })
 const toast = useToast()
+const device = useDevice()
 const upload = useMutation(uploadAttachment)
 
 interface Image {
@@ -39,11 +44,24 @@ interface Image {
   id?: string
   error?: string
 }
-const images = ref<Image[]>((props.initialImages ?? []).map((image, key) => ({ ...image, key, preview: attachmentUrl(image.id), status: 'done' })))
+const imagesKey = props.draftKey && `${props.draftKey}:images`
+function savedImages(): { id: string, name: string }[] {
+  try {
+    return JSON.parse(readDraft(imagesKey) || '[]')
+  } catch {
+    return []
+  }
+}
+const restored = props.initialImages?.length ? props.initialImages : savedImages()
+const images = ref<Image[]>(restored.map((image, key) => ({ ...image, key, preview: attachmentUrl(image.id), status: 'done' })))
 const picker = ref<HTMLInputElement | null>(null)
 const dragging = ref(false)
 const sending = ref(false)
 let nextKey = images.value.length
+function saveImages() {
+  const done = images.value.filter(i => i.status === 'done').map(i => ({ id: i.id!, name: i.name }))
+  writeDraft(imagesKey, done.length ? JSON.stringify(done) : '')
+}
 
 const uploading = computed(() => images.value.some(i => i.status === 'uploading'))
 const ready = computed(() => images.value.filter(i => i.status === 'done'))
@@ -78,6 +96,7 @@ function attach(files: Iterable<File>) {
     upload.mutateAsync({ slug, file, name }).then((attachment) => {
       image.status = 'done'
       image.id = attachment.id
+      saveImages()
     }, (e: unknown) => {
       image.status = 'failed'
       image.error = e instanceof Error ? e.message : String(e)
@@ -89,6 +108,7 @@ function attach(files: Iterable<File>) {
 function remove(image: Image) {
   URL.revokeObjectURL(image.preview)
   images.value = images.value.filter(i => i.key !== image.key)
+  saveImages()
 }
 onBeforeUnmount(() => images.value.forEach(i => URL.revokeObjectURL(i.preview)))
 
@@ -144,6 +164,7 @@ function onPick(event: Event) {
       :disabled="props.disabled"
       :rows="props.rows"
       :autofocus="false"
+      :submit-on-enter="!device.isMobile.value"
       variant="outline"
       @submit.prevent="send()"
     >
@@ -189,7 +210,7 @@ function onPick(event: Event) {
               size="xs"
               color="neutral"
               variant="solid"
-              class="absolute end-0.5 top-0.5 rounded-full p-0.5"
+              class="absolute end-0.5 top-0.5 rounded-full p-0.5 after:absolute after:-inset-2"
               :aria-label="`Remove ${image.name}`"
               @click="remove(image)"
             />
@@ -215,6 +236,7 @@ function onPick(event: Event) {
               variant="ghost"
               color="neutral"
               aria-label="Attach images"
+              class="tap-target"
               :disabled="props.disabled"
               @click="picker?.click()"
             />
@@ -230,6 +252,7 @@ function onPick(event: Event) {
           :disabled="!canSend"
           :loading="props.busy || uploading"
           size="sm"
+          class="tap-target"
           @click="send()"
         />
         <UButton
@@ -240,6 +263,7 @@ function onPick(event: Event) {
           :disabled="!canSend"
           :loading="props.busy || uploading"
           size="sm"
+          class="tap-target"
           @click="send()"
         />
       </template>

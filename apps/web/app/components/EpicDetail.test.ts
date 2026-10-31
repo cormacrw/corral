@@ -138,3 +138,48 @@ it('keeps an open epic\'s task list live as its tasks change, join and leave', a
     client.clear()
   }
 })
+
+async function mountEpic(mode: 'flyout' | 'page' | 'mobile') {
+  const client = testQueryClient()
+  client.setDefaultOptions({ queries: { staleTime: Infinity, retry: false, gcTime: Infinity } })
+  const project = projects[0]!
+  const own = { ...epics[0]!, id: 'own', projectId: project.id, reviewMode: 'direct', branch: null, prNumber: null, reviewState: null, dependsOn: [], blocks: [], tasks: [] } as unknown as EpicDetail
+  client.setQueryData(keys.projects.list(), [project])
+  client.setQueryData(keys.tasks.list(project.slug), [])
+  client.setQueryData(keys.epics.list(project.slug), [own])
+  client.setQueryData(keys.epics.detail('own'), own)
+  for (const name of ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount'] as const) vi.stubGlobal(name, vue[name])
+  vi.stubGlobal('useLocalStorage', (_key: string, initial: unknown) => vue.ref(initial))
+  vi.stubGlobal('useProjectLists', useProjectLists)
+  vi.stubGlobal('useLive', () => ({ state: vue.ref({ projects: [project] }) }))
+  vi.stubGlobal('useTaskFlyout', () => ({ ref: vue.ref(null), canGoBack: vue.ref(false) }))
+  vi.stubGlobal('useToast', () => ({ add: vi.fn() }))
+  const wrapper = mount(EpicDetailView, {
+    props: { epicId: 'own', mode },
+    global: {
+      plugins: [[VueQueryPlugin, { queryClient: client }]],
+      stubs: { UButton: true, UIcon: true, UBadge: true, UAlert: true, UTextarea: true, UBreadcrumb: true, USelect: true, UTabs: true, UTooltip: true, AsyncEpicGraph: true, MarkdownText: true, NuxtLink: true }
+    }
+  })
+  await flushPromises()
+  return wrapper
+}
+
+it('keeps the description editor open when saving fails', async () => {
+  const patch = vi.spyOn(api.epics, 'patch').mockRejectedValue(new Error('Conflict'))
+  const wrapper = await mountEpic('page')
+  const view = wrapper.vm as unknown as { startEditDescription: () => void, saveDescription: () => Promise<void>, editingDescription: boolean }
+  view.startEditDescription()
+  await view.saveDescription()
+  expect(patch).toHaveBeenCalledOnce()
+  expect(view.editingDescription).toBe(true)
+  wrapper.unmount()
+})
+
+it.each(['flyout', 'mobile'] as const)('never squeezes the tasks in the %s\'s one scroll', async (mode) => {
+  const wrapper = await mountEpic(mode)
+  const tasks = wrapper.findAll('section').at(-1)!
+  expect(tasks.classes()).toContain('shrink-0')
+  expect(tasks.classes()).not.toContain('min-h-0')
+  wrapper.unmount()
+})

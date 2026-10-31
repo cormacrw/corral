@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { VueQueryPlugin } from '@tanstack/vue-query'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import type { Comment, Task } from '@corral/contracts'
 import { api } from '~/composables/useApi'
@@ -14,7 +14,7 @@ import TaskDetail from './TaskDetail.vue'
 vi.mock('~/composables/useApi', () => ({
   ApiError: class extends Error {},
   api: {
-    tasks: { byRef: vi.fn(), comments: vi.fn(), history: vi.fn(), evidence: vi.fn(), reviews: vi.fn(), patch: vi.fn(), comment: vi.fn(), transition: vi.fn(), resume: vi.fn() },
+    tasks: { byRef: vi.fn(), comments: vi.fn(), history: vi.fn(), evidence: vi.fn(), reviews: vi.fn(), patch: vi.fn(), remove: vi.fn(), comment: vi.fn(), transition: vi.fn(), resume: vi.fn() },
     runs: { list: vi.fn() }
   }
 }))
@@ -38,7 +38,8 @@ const composer = vue.defineComponent({
 })
 
 beforeEach(() => {
-  for (const name of ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount', 'useTemplateRef'] as const) vi.stubGlobal(name, vue[name])
+  sessionStorage.clear()
+  for (const name of ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount', 'useTemplateRef', 'toRaw'] as const) vi.stubGlobal(name, vue[name])
   vi.stubGlobal('useRoute', () => ({ query: {} }))
   vi.stubGlobal('useToast', () => ({ add: vi.fn() }))
   vi.stubGlobal('useTaskFlyout', () => ({ close: vi.fn(), open: vi.fn() }))
@@ -214,4 +215,49 @@ it('shows a resume in the open task from its response', async () => {
   await wrapper.get('[data-testid="task-paused"] ubutton').trigger('click')
   await flushPromises()
   expect(wrapper.find('[data-testid="task-paused"]').exists()).toBe(false)
+})
+
+describe('a save that fails', () => {
+  it('keeps the description editor open', async () => {
+    const wrapper = await mountDetail()
+    const view = wrapper.vm as unknown as { startEditDescription: () => void, saveDescription: () => Promise<void>, editingDescription: boolean }
+    view.startEditDescription()
+    vi.mocked(api.tasks.patch).mockRejectedValue(new Error('Conflict'))
+    await view.saveDescription()
+    expect(view.editingDescription).toBe(true)
+    vi.mocked(api.tasks.patch).mockResolvedValue(taskA)
+    await view.saveDescription()
+    expect(view.editingDescription).toBe(false)
+  })
+
+  it('keeps a new criterion\'s text', async () => {
+    const wrapper = await mountDetail()
+    const view = wrapper.vm as unknown as { addCriterion: () => Promise<void>, newCriterion: string }
+    view.newCriterion = 'It works'
+    vi.mocked(api.tasks.patch).mockRejectedValue(new Error('Conflict'))
+    await view.addCriterion()
+    expect(view.newCriterion).toBe('It works')
+    vi.mocked(api.tasks.patch).mockResolvedValue(taskA)
+    await view.addCriterion()
+    expect(view.newCriterion).toBe('')
+  })
+})
+
+it('links a dependency to its own page where there is no flyout', async () => {
+  vi.mocked(api.tasks.byRef).mockImplementation(async ref => ref === 'COR-1' ? { ...taskA, dependsOn: ['COR-2'] } : taskB)
+  const wrapper = await mountDetail()
+  expect(wrapper.find('[to="/tasks/COR-2"]').exists()).toBe(true)
+})
+
+it('asks once however often Delete is pressed', async () => {
+  const wrapper = await mountDetail()
+  const removing = deferred<undefined>()
+  vi.mocked(api.tasks.remove).mockReturnValue(removing.promise as never)
+  const view = wrapper.vm as unknown as { remove: () => Promise<void> }
+  void view.remove()
+  await flushPromises()
+  await view.remove()
+  expect(api.tasks.remove).toHaveBeenCalledOnce()
+  removing.resolve(undefined)
+  await flushPromises()
 })

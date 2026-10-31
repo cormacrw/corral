@@ -89,7 +89,7 @@ function click(e: MouseEvent) {
         :style="{ width: `${REVEAL}px` }"
         :tabindex="offset === 0 ? -1 : 0"
         @click="emit('delete')"
-        @pointerdown.stop
+        @pointerdown.stop="swiped = false"
       >
         <UIcon
           name="i-lucide-trash-2"
