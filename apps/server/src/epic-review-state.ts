@@ -1,6 +1,6 @@
 import { ACTIVE_RUN_STATES } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, eq, inArray, isNotNull, isNull, ne, notInArray, or, type SQL } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, isNull, ne, notInArray, or, sql, type SQL } from 'drizzle-orm'
 import type { AnyPgColumn } from 'drizzle-orm/pg-core'
 import { runEndValues } from './run-lifecycle.ts'
 
@@ -17,6 +17,19 @@ export function holdsEpicOpen(task: { deletedAt: AnyPgColumn, status: AnyPgColum
       ne(task.status, 'merged'),
       and(ne(epic.reviewMode, 'direct'), isNotNull(epic.branch), or(isNull(epic.reviewState), ne(epic.reviewState, 'merged')))
     )
+  )!
+}
+
+// True for a dependency whose work isn't on the target branch for a task
+// outside its epic, though it may show Merged (D27). Left join epics to the
+// dependency: a dependency in no epic never holds. A spike's findings aren't
+// on the epic branch, so it never does either.
+export function holdsAcrossEpics(dependency: { type: AnyPgColumn, epicId: AnyPgColumn, deletedAt: AnyPgColumn, status: AnyPgColumn }, epic: { id: AnyPgColumn, reviewMode: AnyPgColumn, branch: AnyPgColumn, reviewState: AnyPgColumn }, dependentEpicId: AnyPgColumn): SQL {
+  return and(
+    inArray(dependency.type, ['task', 'bug']),
+    isNotNull(epic.id),
+    sql`${dependency.epicId} is distinct from ${dependentEpicId}`,
+    holdsEpicOpen(dependency, epic)
   )!
 }
 

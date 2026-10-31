@@ -1,5 +1,5 @@
 import { appendAudit, auditEvent, type TransitionDetail } from './audit.ts'
-import { holdsEpicOpen, invalidateEpicReview } from './epic-review-state.ts'
+import { holdsAcrossEpics, holdsEpicOpen, invalidateEpicReview } from './epic-review-state.ts'
 import type { AuditEntry, Comment, CreateTaskInput, HumanTransitionInput, PatchTaskInput, Task, TaskAgent, TaskDesignPin, TaskSubmissionSummary } from '@corral/contracts'
 import { createTaskInput } from '@corral/contracts'
 import {
@@ -20,6 +20,7 @@ import {
 } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, max, ne, sql } from 'drizzle-orm'
+import { alias } from 'drizzle-orm/pg-core'
 import { ApiFailure, notFound } from './errors.ts'
 import { toReview } from './runs.ts'
 
@@ -68,6 +69,20 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
     .innerJoin(tasks, eq(tasks.epicId, epics.id))
     .where(and(eq(epics.projectId, project.id), holdsEpicOpen(tasks, epics)))
     .orderBy(asc(epics.title), asc(epics.id))
+  // A Merged dependency still holds its dependents until its epic is done (the
+  // claim's rule). One that isn't Merged is its own, more exact, reason to wait.
+  const dependency = alias(tasks, 'dependency')
+  const dependencyEpics = await db.selectDistinct({ taskId: taskDependencies.taskId, id: epics.id, title: epics.title })
+    .from(taskDependencies)
+    .innerJoin(tasks, eq(tasks.id, taskDependencies.taskId))
+    .innerJoin(dependency, eq(dependency.id, taskDependencies.dependsOnId))
+    .innerJoin(epics, eq(epics.id, dependency.epicId))
+    .where(and(inArray(taskDependencies.taskId, ids), eq(dependency.status, 'merged'), holdsAcrossEpics(dependency, epics, tasks.epicId)))
+    .orderBy(asc(epics.title), asc(epics.id))
+  const waitingOn = (row: TaskRow) => [...new Map([
+    ...waitingEpics.filter(e => e.epicId === row.epicId),
+    ...dependencyEpics.filter(e => e.taskId === row.id)
+  ].map(({ id, title }) => [id, { id, title }])).values()].sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id))
   // Newest first, so the first row per task is its latest review
   const reviewRows = await db.select().from(reviews).where(inArray(reviews.taskId, ids)).orderBy(desc(reviews.createdAt))
   const pins = await db
@@ -103,7 +118,7 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
     const design = pin ? { taskRef: taskRef(project.prefix, pin.number), version: pin.version, screens: pin.screens, newerVersion: stale ? newest : null } : null
     return {
       ...toTask(project, row, criteria, dependencies, latest, current, design, owners.get(row.id) ?? null, row.leaseRunId ? leaseAgents.get(row.leaseRunId) ?? null : null, submissionSummary(project, submissionRows.find(s => s.taskId === row.id))),
-      waitingOnEpics: waitingEpics.filter(e => e.epicId === row.epicId).map(({ id, title }) => ({ id, title })),
+      waitingOnEpics: waitingOn(row),
       developer: agentOf(row.id, row.type === 'design' ? 'designer' : 'developer'),
       reviewer: agentOf(row.id, 'reviewer')
     }

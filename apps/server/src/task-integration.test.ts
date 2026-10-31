@@ -475,6 +475,35 @@ describe('while the kill switch or update hold is on', () => {
   })
 })
 
+it('reads the remote once at most while paused, and still finds a moved branch on resuming', async () => {
+  await t.db.update(schema.projects).set({ requiredChecks: ['ci'] }).where(eq(schema.projects.id, project.id))
+  const epic = await createEpic()
+  const task = await approved(epic, 'a.txt')
+  await tick()
+  const [op] = await ops(epic.id)
+  t.github.setChecks(op!.resultHeadSha!, [{ name: 'ci', conclusion: 'success', url: null }])
+  await t.db.update(schema.tasks).set({ paused: true }).where(eq(schema.tasks.id, task.id))
+  // As after a restart: nothing remembers why the operation is waiting
+  const fresh = new TaskIntegrator({ db: t.db, events: t.bus, github: t.github, runner: t.runner }, async () => {})
+  const reads: string[] = []
+  faults = async (job, real) => {
+    reads.push(job.kind)
+    return real()
+  }
+  const never = () => false
+  await fresh.tick(never)
+  await fresh.tick(never)
+  await fresh.tick(never)
+  expect(reads).toEqual(['integration_inspect'])
+
+  await git('update-ref', `refs/heads/${epic.branch}`, await git('commit-tree', `${epic.base}^{tree}`, '-p', epic.base, '-m', 'Newer epic work'))
+  await t.db.update(schema.tasks).set({ paused: false }).where(eq(schema.tasks.id, task.id))
+  await fresh.tick(never)
+  expect((await ops(epic.id))[0]).toMatchObject({ id: op!.id, state: 'failed', error: 'The epic branch moved' })
+  expect(await row(task)).toMatchObject({ status: 'ready_to_merge' })
+  expect(await trailers(epic.branch, task.submissionId)).toHaveLength(0)
+})
+
 it('leaves a pending operation alone while paused', async () => {
   const epic = await createEpic()
   const task = await approved(epic, 'a.txt')
