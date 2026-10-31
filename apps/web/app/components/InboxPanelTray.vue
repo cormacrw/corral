@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { actionOpensComposer, type InboxPanelContext } from '~/composables/useInboxPanel'
+import type { InboxPanelContext } from '~/composables/useInboxPanel'
 
 // The panel's reply box. With no action chosen it replies to the sender; an
 // action that opens the composer takes it over until it's sent or cancelled.
-const props = defineProps<{ ctx: InboxPanelContext }>()
-const composer = ref<{ focus: () => void, send: () => Promise<boolean>, uploading: boolean } | null>(null)
-const chosen = computed(() => props.ctx.action && actionOpensComposer(props.ctx.action) ? props.ctx.actions.find(a => a.value === props.ctx.action) ?? null : null)
+const props = defineProps<{
+  ctx: InboxPanelContext
+  // Sends in place of ctx.submit, for a host that follows what's sent
+  onSubmit?: (text: string) => Promise<boolean>
+}>()
+const composer = ref<{ focus: () => void, send: () => Promise<boolean>, uploading: boolean, hasImages: boolean } | null>(null)
+const chosen = computed(() => props.ctx.composerChosen ? props.ctx.actions.find(a => a.value === props.ctx.action) ?? null : null)
 watch(chosen, (value) => {
   if (value) void nextTick(() => composer.value?.focus())
 })
@@ -32,7 +36,7 @@ async function send() {
   await nextTick()
   return await composer.value?.send() ?? false
 }
-defineExpose({ send })
+defineExpose({ send, hasImages: computed(() => composer.value?.hasImages ?? false), focus: () => composer.value?.focus() })
 </script>
 
 <template>
@@ -70,8 +74,8 @@ defineExpose({ send })
       :busy="ctx.busy || ctx.taskLoading"
       :rows="1"
       :project="ctx.item.project.slug"
+      :on-submit="onSubmit ?? ctx.submit"
       @update:model-value="ctx.setText"
-      @submit="ctx.submit"
     />
   </div>
 </template>

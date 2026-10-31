@@ -8,7 +8,6 @@ import { inboxActions } from '~/utils/inbox-actions'
 import { actOnInboxItem, holdsInbox } from '~/queries/inbox'
 import { keys } from '~/queries/keys'
 import { commentOnTask, taskEvidenceQuery, taskQuery, taskReviewsQuery } from '~/queries/tasks'
-import { inboxTypeBadge as typeBadge } from '~/utils/labels'
 
 // The selected Inbox item (design/inbox.md): its panes, action tray and
 // composer. Nuxt keys this page by its path, so the next item is a new instance
@@ -51,9 +50,7 @@ const taskLoadFailed = computed(() => taskRef.value !== null && taskResult.isErr
 // Approval needs the task for its human-criteria check. The other actions don't.
 const approveBlocked = computed(() => taskLoadFailed.value && action.value === 'approve')
 const alreadyResolved = computed(() => selected.value !== null && selected.value.type !== 'activity' && !inbox.value?.needsYou.some(i => i.id === selected.value!.id))
-const TASK_LOAD_ERROR = 'Couldn\'t load this task'
 const HUMAN_CHECK_ERROR = 'Tick each human check before approving.'
-const actionError = computed(() => failedAction.value ?? (taskLoadFailed.value && device.isMobile.value ? TASK_LOAD_ERROR : null))
 watch(checkedHumanCriteria, () => {
   if (failedAction.value === HUMAN_CHECK_ERROR) failedAction.value = null
 })
@@ -64,10 +61,9 @@ function retryTask() {
 }
 
 const actions = computed(() => selected.value && selected.value.type !== 'plan_thread' ? inboxActions(selected.value.type, task.value, taskLoading.value ? 'loading' : taskLoadFailed.value ? 'failed' : null) : [])
-// Reset when the item or its type changes, including when its task loads. A
-// phone's composer always sends an action; the desktop panel's replies until
-// one is picked.
-const defaultAction = () => device.isMobile.value ? (actions.value[0]?.value as InboxActionInput['action'] | undefined) ?? null : null
+// Reset when the item or its type changes, including when its task loads. The
+// composer replies until an action is picked; on a phone a question opens on Answer.
+const defaultAction = () => device.isMobile.value && selected.value?.type === 'question' ? 'clarify' : null
 watch([() => selected.value?.id, () => selected.value?.type, () => task.value?.type], () => {
   action.value = defaultAction()
 }, { immediate: true })
@@ -150,7 +146,8 @@ const panel = reactive({
   item: computed(() => selected.value as TaskInboxItem),
   task, evidence, reviews, alreadyResolved, taskLoading, taskLoadFailed,
   evidenceLoading: computed(() => address.value !== null && evidenceResult.isPending.value),
-  actions, action, resolveTo, text, busy, actionError, placeholder, submitLabel, needsText, tab, checkedHumanCriteria,
+  actions, action, resolveTo, text, busy, actionError: failedAction, placeholder, submitLabel, needsText, tab, checkedHumanCriteria,
+  composerChosen: computed(() => action.value !== null && actionOpensComposer(action.value)),
   taskOpen: computed(() => flyout.ref.value !== null),
   submit, act, retryTask, toggleTask,
   setAction: (value: InboxActionInput['action'] | null) => {
@@ -185,31 +182,13 @@ const panel = reactive({
   />
   <InboxMobileItem
     v-else-if="device.isMobile.value"
-    v-model:checked-human-criteria="checkedHumanCriteria"
-    v-model:action="action"
-    v-model:resolve-to="resolveTo"
-    v-model:text="text"
+    ref="panelView"
     :plan-thread="selected?.type === 'plan_thread' ? selected : null"
     :inbox="inbox"
     :error="error"
     :selected="selected?.type === 'plan_thread' ? null : selected"
-    :already-resolved="alreadyResolved"
-    :task="task"
-    :is-spike="isSpike"
-    :evidence="evidence"
-    :reviews="reviews"
-    :actions="actions"
-    :placeholder="placeholder"
-    :submit-label="submitLabel"
-    :needs-text="needsText"
-    :busy="busy || taskLoading"
-    :approve-blocked="approveBlocked"
-    :task-load-failed="taskLoadFailed"
-    :action-error="actionError"
-    :type-badge="typeBadge"
-    :on-submit="submit"
+    :ctx="panel"
     :on-retry="list.refetch"
-    :on-retry-task="retryTask"
   />
   <InboxReleaseNotes
     v-else-if="selected?.type === 'release_notes'"

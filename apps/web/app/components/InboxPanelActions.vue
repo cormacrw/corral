@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import type { InboxActionInput } from '@corral/contracts'
-import type { InboxPanel, InboxPanelContext, ResolveTo } from '~/composables/useInboxPanel'
+import { actionDisabled, type InboxPanel, type InboxPanelContext, type ResolveTo } from '~/composables/useInboxPanel'
 
-// The item's actions as buttons. Approval needs the task for its human-criteria
-// check; the rest only wait while it's still loading.
+// The item's actions as buttons
 const props = defineProps<{ ctx: InboxPanelContext, p: InboxPanel }>()
-const disabled = (value: string) => props.ctx.busy || props.ctx.taskLoading || (value === 'approve' && props.ctx.taskLoadFailed)
 const act = (value: string) => props.ctx.act(value as InboxActionInput['action'])
 </script>
 
@@ -20,7 +18,7 @@ const act = (value: string) => props.ctx.act(value as InboxActionInput['action']
       :icon="p.primary.value.icon"
       size="sm"
       :loading="ctx.busy && ctx.action === p.primary.value.value"
-      :disabled="disabled(p.primary.value.value)"
+      :disabled="actionDisabled(ctx, p.primary.value.value)"
       data-testid="inbox-primary"
       @click="act(p.primary.value.value)"
     />
@@ -41,7 +39,7 @@ const act = (value: string) => props.ctx.act(value as InboxActionInput['action']
       :label="a.label"
       :icon="a.icon"
       size="sm"
-      :disabled="disabled(a.value)"
+      :disabled="actionDisabled(ctx, a.value)"
       :color="a.value === 'delete' ? 'error' : 'neutral'"
       :variant="ctx.action === a.value ? 'subtle' : 'outline'"
       @click="act(a.value)"

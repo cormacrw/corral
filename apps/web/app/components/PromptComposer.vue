@@ -94,7 +94,7 @@ onBeforeUnmount(() => images.value.forEach(i => URL.revokeObjectURL(i.preview)))
 
 // Lets a page put the cursor in the composer (e.g. Other… on a question)
 const box = ref<HTMLElement | null>(null)
-defineExpose({ focus: () => box.value?.querySelector('textarea')?.focus(), send, uploading })
+defineExpose({ focus: () => box.value?.querySelector('textarea')?.focus(), send, uploading, hasImages: computed(() => images.value.length > 0) })
 
 function filesOf(data: DataTransfer | null): File[] {
   if (!data) return []

@@ -2,7 +2,7 @@
 import type { InboxActionInput, InboxArtifact, ServerEvent } from '@corral/contracts'
 import { VueQueryPlugin } from '@tanstack/vue-query'
 import { flushPromises, mount } from '@vue/test-utils'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import { api } from '~/composables/useApi'
 import { agents, inbox, projects, tasks } from '~/prototype/fixtures'
@@ -14,7 +14,9 @@ import InboxPanel from '~/components/InboxPanel.vue'
 import InboxPanelActions from '~/components/InboxPanelActions.vue'
 import InboxPanelArtifacts from '~/components/InboxPanelArtifacts.vue'
 import InboxPanelDetails from '~/components/InboxPanelDetails.vue'
+import InboxMobileItem from '~/components/InboxMobileItem.vue'
 import InboxPanelMeta from '~/components/InboxPanelMeta.vue'
+import InboxPanelThumbBar from '~/components/InboxPanelThumbBar.vue'
 import InboxPanelTray from '~/components/InboxPanelTray.vue'
 import InboxPanelVerdict from '~/components/InboxPanelVerdict.vue'
 import InboxReleaseNotes from '~/components/InboxReleaseNotes.vue'
@@ -69,9 +71,14 @@ const alertStub = vue.defineComponent({
   setup: props => () => vue.h('div', { 'data-alert': true }, [props.title, ...(props.actions ?? []).map((a: { label: string, onClick: () => void }) => vue.h('button', { onClick: a.onClick }, a.label))])
 })
 
-async function mountInbox(type: 'human_review' | 'failed', taskRef?: string, dockedTask: string | null = null, selection = true, editTask = (task: (typeof tasks)[number]) => task, realComposer = false) {
+async function mountInbox(type: 'human_review' | 'failed' | 'question', taskRef?: string, dockedTask: string | null = null, selection = true, editTask = (task: (typeof tasks)[number]) => task, realComposer = false, mobile = false) {
   for (const name of ['ref', 'shallowRef', 'computed', 'watch', 'watchEffect', 'onMounted', 'onBeforeUnmount', 'nextTick'] as const) vi.stubGlobal(name, vue[name])
-  const item = inbox().needsYou.find(i => i.type === type && (taskRef ? i.taskRef === taskRef : tasks.find(t => t.id === i.taskId)?.type !== 'design'))!
+  const fixture = inbox()
+  if (type === 'question') {
+    const question = fixture.needsYou.find(i => i.taskRef === 'COR-8')!
+    question.type = 'question'
+  }
+  const item = fixture.needsYou.find(i => i.type === type && (taskRef ? i.taskRef === taskRef : tasks.find(t => t.id === i.taskId)?.type !== 'design'))!
   const params = vue.reactive<{ itemId?: string }>({ itemId: selection ? item.id : undefined })
   vi.stubGlobal('useRoute', () => ({ params }))
   const router = {
@@ -84,14 +91,14 @@ async function mountInbox(type: 'human_review' | 'failed', taskRef?: string, doc
   vi.stubGlobal('useRouter', () => router)
   vi.stubGlobal('definePageMeta', vi.fn())
   vi.stubGlobal('useSeoMeta', vi.fn())
-  vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(false) }))
+  vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(mobile) }))
   vi.stubGlobal('useMobileHeader', () => vue.ref(null))
   vi.stubGlobal('useToast', () => ({ add: vi.fn() }))
   vi.stubGlobal('usePlanThreadDelete', () => ({ pending: vue.ref([]), remove: vi.fn() }))
   const closeFlyout = vi.fn().mockResolvedValue(undefined)
   vi.stubGlobal('useTaskFlyout', () => ({ ref: vue.ref(dockedTask), epic: vue.ref(null), open: vi.fn(), close: closeFlyout }))
   vi.stubGlobal('useLive', () => ({ state: vue.ref({ agents, projects, loaded: true, runner: { online: true } }) }))
-  vi.mocked(api.inbox.get).mockImplementation(async () => structuredClone(inbox()))
+  vi.mocked(api.inbox.get).mockImplementation(async () => structuredClone(fixture))
   vi.mocked(api.inbox.act).mockReset().mockResolvedValue({ task: null })
   const byRef = vi.mocked(api.tasks.byRef).mockReset()
   if (taskRef) byRef.mockResolvedValue(editTask(tasks.find(t => t.ref === taskRef)!))
@@ -104,8 +111,8 @@ async function mountInbox(type: 'human_review' | 'failed', taskRef?: string, doc
   const NuxtPage = vue.defineComponent({ setup: () => () => params.itemId ? vue.h(InboxItemPage, { key: params.itemId }) : null })
   const wrapper = mount(InboxPage, { global: {
     plugins: [[VueQueryPlugin, { queryClient: client }]],
-    components: { NuxtPage, InboxPanel, InboxPanelActions, InboxPanelArtifacts, InboxPanelDetails, InboxPanelMeta, InboxPanelTray, InboxPanelVerdict, InboxReleaseNotes, EvidenceList: evidenceStub, PromptComposer: realComposer ? PromptComposer : composerStub, UChatPrompt: vue.defineComponent({ setup: (_, { slots }) => () => vue.h('div', [slots.header?.(), slots.footer?.()]) }), UAlert: alertStub, UButton: buttonStub, UTabs: tabsStub, UDashboardPanel: plain },
-    stubs: { UModal: true, EvidenceViewer: true, InboxMessage: true, InboxDesignReviewLink: true, UBadge: true, UInput: true, UIcon: true, USkeleton: true, USelectMenu: true, MarkdownText: true, TaskFlyout: true, AgentAvatar: true, ProjectThumbnail: true, PlanThreadRow: true, NuxtLink: true, InboxMobile: true, InboxMobileItem: true }
+    components: { NuxtPage, InboxPanel, ...(mobile && { InboxMobileItem, MobilePageHeader: plain }), InboxPanelThumbBar, InboxPanelActions, InboxPanelArtifacts, InboxPanelDetails, InboxPanelMeta, InboxPanelTray, InboxPanelVerdict, InboxReleaseNotes, EvidenceList: evidenceStub, PromptComposer: realComposer ? PromptComposer : composerStub, UChatPrompt: vue.defineComponent({ setup: (_, { slots }) => () => vue.h('div', [slots.header?.(), slots.footer?.()]) }), UAlert: alertStub, UButton: buttonStub, UTabs: tabsStub, UDashboardPanel: plain },
+    stubs: { UModal: true, EvidenceViewer: true, InboxMessage: true, InboxDesignReviewLink: true, UBadge: true, UInput: true, UIcon: true, USkeleton: true, USelectMenu: true, MarkdownText: true, TaskFlyout: true, AgentAvatar: true, ProjectThumbnail: true, PlanThreadRow: true, NuxtLink: true, InboxMobile: true, ...(!mobile && { InboxMobileItem: true }) }
   } })
   await flushPromises()
   const composer = () => wrapper.getComponent(composerStub)
@@ -620,3 +627,117 @@ for (const type of ['human_review', 'failed'] as const) {
     }
   })
 }
+
+describe('on a phone', () => {
+  let mounted: { unmount: () => void } | undefined
+  afterEach(() => mounted?.unmount())
+  const phone = async (type: 'human_review' | 'failed' | 'question' = 'human_review', ref = 'COR-5', edit = (t: (typeof tasks)[number]) => t) => {
+    const view = await mountInbox(type, ref, null, true, edit, false, true)
+    mounted = view.wrapper
+    return view
+  }
+  const bar = (view: Awaited<ReturnType<typeof phone>>) => view.wrapper.get('[data-testid="inbox-thumb-bar"]')
+  const button = (view: Awaited<ReturnType<typeof phone>>, label: string) => bar(view).findAll('button').find(b => b.text().includes(label))!
+  const composerOpen = (view: Awaited<ReturnType<typeof phone>>) => (view.composer().element.closest('[style]') as HTMLElement | null)?.style.display !== 'none'
+
+  it('puts the actions in the bar, not the top block, and sends Approve on the tap', async () => {
+    const view = await phone()
+    expect(view.wrapper.find('[data-testid="inbox-actions"]').exists()).toBe(false)
+    expect(bar(view).findAll('button').map(b => b.text())).toEqual(['Approve and merge', 'Request changes', 'Reply'])
+    expect(composerOpen(view)).toBe(false)
+    await view.primary().trigger('click')
+    await flushPromises()
+    expect(api.inbox.act).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: 'approve' }))
+  })
+
+  it('opens the composer above the bar for Request changes and Reply', async () => {
+    const view = await phone()
+    await button(view, 'Request changes').trigger('click')
+    await flushPromises()
+    expect(composerOpen(view)).toBe(true)
+    expect(view.panel().action).toBe('request_changes')
+    await button(view, 'Reply').trigger('click')
+    await flushPromises()
+    expect(composerOpen(view)).toBe(true)
+    expect(view.panel().action).toBeNull()
+    expect(api.inbox.act).not.toHaveBeenCalled()
+  })
+
+  it('opens a question with Answer selected and its composer visible', async () => {
+    const view = await phone('question', 'COR-8')
+    expect(view.panel().action).toBe('clarify')
+    expect(composerOpen(view)).toBe(true)
+    expect(bar(view).text()).toContain('Answer')
+    expect(api.inbox.act).not.toHaveBeenCalled()
+  })
+
+  it.each(['Cancel', 'Reply'])('keeps a draft visible after %s before approval', async (control) => {
+    const view = await phone()
+    await button(view, control === 'Cancel' ? 'Request changes' : 'Reply').trigger('click')
+    view.panel().setText('Do not merge, the migration is wrong')
+    await flushPromises()
+    await button(view, control).trigger('click')
+    await flushPromises()
+    expect(composerOpen(view)).toBe(true)
+    expect(view.composer().props('modelValue')).toBe('Do not merge, the migration is wrong')
+    expect(api.inbox.act).not.toHaveBeenCalled()
+    view.panel().setText('')
+    await flushPromises()
+    expect(composerOpen(view)).toBe(false)
+  })
+
+  it('keeps an image-only draft visible after Cancel and toggling Reply off', async () => {
+    vi.stubGlobal('URL', { createObjectURL: () => 'blob:preview', revokeObjectURL: vi.fn() })
+    const view = await mountInbox('human_review', 'COR-5', null, true, task => task, true, true)
+    mounted = view.wrapper
+    vi.mocked(api.attachments.upload).mockResolvedValue({ id: 'image' } as never)
+    await button(view, 'Request changes').trigger('click')
+    const input = view.wrapper.get('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { value: [new File(['image'], 'screen.png', { type: 'image/png' })] })
+    await input.trigger('change')
+    await flushPromises()
+    await button(view, 'Cancel').trigger('click')
+    await flushPromises()
+    const images = () => view.wrapper.get('[aria-label="Attached images"]')
+    expect(images().isVisible()).toBe(true)
+    await button(view, 'Reply').trigger('click')
+    await button(view, 'Reply').trigger('click')
+    await flushPromises()
+    expect(images().isVisible()).toBe(true)
+    expect(api.inbox.act).not.toHaveBeenCalled()
+  })
+
+  it('closes the Reply composer once the reply is sent', async () => {
+    const view = await phone()
+    vi.mocked(api.tasks.comment).mockResolvedValue({} as never)
+    await button(view, 'Reply').trigger('click')
+    await flushPromises()
+    await (view.composer().vm as unknown as { onSubmit: (text: string) => Promise<boolean> }).onSubmit('On it')
+    await flushPromises()
+    expect(api.tasks.comment).toHaveBeenCalled()
+    expect(composerOpen(view)).toBe(false)
+  })
+
+  it('stops approval on an unticked human check, as on desktop', async () => {
+    const check = { id: 'check', position: 0, text: 'Looks right', met: null, checkedByHuman: true }
+    const view = await phone('human_review', 'COR-5', t => ({ ...t, acceptanceCriteria: [check] }))
+    await view.primary().trigger('click')
+    await flushPromises()
+    expect(api.inbox.act).not.toHaveBeenCalled()
+    expect(view.panel().tab).toBe('criteria')
+    expect(view.alert().text()).toContain('Tick each human check')
+    view.panel().setCheckedHumanCriteria(['check'])
+    await flushPromises()
+    await view.primary().trigger('click')
+    await flushPromises()
+    expect(api.inbox.act).toHaveBeenCalledOnce()
+  })
+
+  it('keeps Retry\'s status in the bar', async () => {
+    const view = await phone('failed', 'COR-9')
+    expect(bar(view).findAll('button').map(b => b.text())).toEqual(['Retry', 'Send back', 'Delete', 'Reply'])
+    await view.primary().trigger('click')
+    await flushPromises()
+    expect(api.inbox.act).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: 'resolve', to: 'in_progress' }))
+  })
+})
