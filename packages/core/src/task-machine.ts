@@ -214,7 +214,7 @@ export function transition(
       return ok({ ...task, ...(task.rebaseOnly && { rebaseOnly: false }), status: 'in_progress' })
 
     // D5: the task's flag sends it to a human, which the server also sets for
-    // an each_task epic (D23) or a human check (D29), and a design always goes
+    // an each_task epic (D27) or a human check (D28), and a design always goes
     // to one (D20). Spikes always go to a human to accept their findings (D19).
     case 'review_approved':
       return ok({ ...task, status: requiresHumanReview(task.type ?? 'task', task.humanReview) ? 'human_review' : 'ready_to_merge' })
