@@ -19,7 +19,10 @@ const replyOpen = computed(() => open.value && !chosen.value)
 
 function tap(value: string) {
   replying.value = false
-  void props.ctx.act(value as InboxActionInput['action'])
+  const action = value as InboxActionInput['action']
+  void props.ctx.act(action)
+  // Already chosen on a question, so the tray has no change to focus on
+  if (actionOpensComposer(action)) void nextTick(() => tray.value?.focus())
 }
 function toggleReply() {
   replying.value = !replyOpen.value

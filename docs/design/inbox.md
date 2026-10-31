@@ -197,9 +197,9 @@ An epic PR in human review and an epic PR rebase conflict have their own layout 
 ## States
 
 - **Loading:** skeleton rows in the list. An item's top block shows at once from the Inbox data, with skeletons for its verdict and tab body until the task and its evidence arrive; Approve reads **Loading task…** and the actions wait.
-- **An action fails:** an inline error above the composer. The draft is kept, and an action that opens the composer stays chosen.
-- **The task fails to load:** an inline error under the actions with **Retry**, instead of a spinner (in the tray on a phone). Approval stays blocked, because its human-criteria check needs the task, and its action reads **Task not loaded**. The other actions and the reply box still work.
-- **A task changed status elsewhere:** the item shows "Already resolved" and the tray is disabled.
+- **An action fails:** an inline error above the composer, or above the action bar on a phone with the composer closed. The draft is kept, and an action that opens the composer stays chosen.
+- **The task fails to load:** an inline error at the end of the top block with **Retry**, instead of a spinner. Approval stays blocked, because its human-criteria check needs the task, and its action reads **Task not loaded**. The other actions and the reply box still work.
+- **A task changed status elsewhere:** the item shows "Already resolved. This task changed status elsewhere." in Overview, with no actions and no composer, and no action bar on a phone.
 
 ## Responsive
 
@@ -209,7 +209,7 @@ An epic PR in human review and an epic PR rebase conflict have their own layout 
 
 ## Accessibility
 
-- The tabs use `role="tablist"`; quick actions use `role="radiogroup"` with `aria-checked`.
+- The tabs use `role="tablist"`. Actions are plain buttons named with their full label, so a phone's **Send back** is announced as "Send back to Backlog". Reply on a phone uses `aria-pressed`.
 - Every icon-only control has an `aria-label`.
 - Pane dividers are `role="separator"` with `aria-valuenow` and work with the arrow keys.
 

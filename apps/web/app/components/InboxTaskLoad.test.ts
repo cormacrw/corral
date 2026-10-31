@@ -830,6 +830,10 @@ describe('on a phone', () => {
       expect(composerOpen(wrapper)).toBe(true)
       expect(composer().props('submitLabel')).toBe('Answer')
       expect(focus).not.toHaveBeenCalled()
+      await button(wrapper, 'Answer').trigger('click')
+      await vue.nextTick()
+      expect(focus).toHaveBeenCalled()
+      expect(api.inbox.act).not.toHaveBeenCalled()
       expect(wrapper.get('[data-testid="inbox-thumb-bar"]').findAll('button').map(b => b.text())).toEqual(['Cancel', 'Answer', 'Send back', 'Delete', 'Reply'])
     } finally {
       wrapper.unmount()
