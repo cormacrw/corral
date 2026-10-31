@@ -688,6 +688,11 @@ export const planSessions: PlanSession[] = [
     id: 's-5', projectId: 'p-corral', title: 'Flaky CI', runtime: 'claude-code',
     preview: 'The flaky test is the SSE reconnect one.', unread: true, closed: false, status: 'none', activeRunId: null,
     createdAt: ago(60 * 7), updatedAt: ago(60 * 6)
+  },
+  {
+    id: 's-6', projectId: 'p-corral', title: 'Review screen design', runtime: 'claude-code',
+    preview: 'Approve v2 of COR-4: Design review screen. Note: Start with the mobile layout', unread: false, closed: false, status: 'none', activeRunId: null,
+    createdAt: ago(60 * 3), updatedAt: ago(60 * 2)
   }
 ]
 
@@ -714,6 +719,13 @@ export const planMessages: Record<string, PlanMessage[]> = {
   's-5': [
     { id: 'm-9', sessionId: 's-5', role: 'human', kind: 'message', text: 'Why does CI keep failing on main?', recommendation: null, options: null, planId: null, runId: null, createdAt: ago(60 * 7) },
     { id: 'm-10', sessionId: 's-5', role: 'pm', kind: 'message', text: 'The flaky test is the SSE reconnect one. It waits a fixed 50 ms for the server to restart; polling for the reconnect would fix it.', recommendation: null, options: null, planId: null, runId: null, createdAt: ago(60 * 6) }
+  ],
+  's-6': [
+    { id: 'm-11', sessionId: 's-6', role: 'human', kind: 'message', text: 'v2 of the review screen looks right. Approve it and start with the mobile layout.', recommendation: null, options: null, planId: null, runId: null, createdAt: ago(60 * 3) },
+    {
+      id: 'm-12', sessionId: 's-6', role: 'pm', kind: 'confirmation', text: 'Approve v2 of COR-4: Design review screen. Note: Start with the mobile layout', recommendation: null, options: null, planId: null, runId: 'r-plan-1', createdAt: ago(60 * 2),
+      pendingAction: { tool: 'approve_design', input: { taskRef: 'COR-4', version: 2, note: 'Start with the mobile layout' }, summary: 'Approve v2 of COR-4: Design review screen. Note: Start with the mobile layout', status: 'pending', targetId: null, error: null, result: null }
+    }
   ]
 }
 

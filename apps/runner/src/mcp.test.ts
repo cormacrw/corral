@@ -1,4 +1,4 @@
-import { proposedPlanInput, type AgentTool } from '@corral/contracts'
+import { pmActionTools, pmDirectTools, proposedPlanInput, type AgentTool } from '@corral/contracts'
 import { TASK_TYPES, type AgentRole } from '@corral/core'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
@@ -183,9 +183,16 @@ describe('ToolServer', () => {
   it('passes project slugs through every project-scoped PM tool', async () => {
     const { client, calls } = await connect('pm')
     const tools = (await client.listTools()).tools
-    for (const name of ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'propose_plan', 'flag_stale_docs', 'create_task', 'update_task', 'move_task', 'approve_task', 'delete_task', 'update_epic']) {
-      expect(tools.find(t => t.name === name)?.inputSchema.properties).toHaveProperty('project')
+    const scoped = ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'propose_plan', 'flag_stale_docs', 'create_task', 'update_task', 'move_task', 'approve_task', 'delete_task', 'update_epic']
+    for (const name of scoped) {
+      expect(tools.find(t => t.name === name)?.inputSchema.properties, name).toHaveProperty('project')
     }
+    // The server's inputs are strict: an advertised `project` it doesn't take is refused
+    for (const [name, { input }] of Object.entries({ ...pmActionTools, ...pmDirectTools })) {
+      if (scoped.includes(name) || 'project' in input) continue
+      expect(tools.find(t => t.name === name)?.inputSchema.properties ?? {}, name).not.toHaveProperty('project')
+    }
+    expect(tools.find(t => t.name === 'set_update_hold')?.inputSchema.properties ?? {}).not.toHaveProperty('project')
     expect(tools.find(t => t.name === 'ask_question')?.inputSchema.properties).not.toHaveProperty('project')
     expect((tools.find(t => t.name === 'delete_project')?.inputSchema as { required?: string[] }).required).toContain('project')
     expect(tools.find(t => t.name === 'list_projects')?.inputSchema.properties).not.toHaveProperty('project')

@@ -56,6 +56,18 @@ describe('prototype mock API', () => {
     expect(inbox.needsYou.filter(i => i.project?.id === corral.id).every(i => i.project?.thumbnailUrl === corral.thumbnailUrl)).toBe(true)
   })
 
+  it('decides a confirm card once and records the result', async () => {
+    const before = await mockCall<PlanSessionDetail>('GET', '/plan/sessions/s-6')
+    expect(before.messages.at(-1)).toMatchObject({ id: 'm-12', pendingAction: { status: 'pending' } })
+    expect(await mockCall('POST', '/plan/sessions/s-6/actions/m-12', { decision: 'cancel' })).toMatchObject({ pendingAction: { status: 'cancelled' } })
+    expect(await mockCall('POST', '/plan/sessions/s-6/actions/m-12', { decision: 'confirm' })).toMatchObject({ pendingAction: { status: 'cancelled' } })
+    const after = await mockCall<PlanSessionDetail>('GET', '/plan/sessions/s-6')
+    expect(after.messages.at(-1)).toMatchObject({ kind: 'action_result', text: expect.stringContaining('Nothing was changed') })
+    expect(after.messages.filter(m => m.kind === 'action_result')).toHaveLength(1)
+    await expect(mockCall('POST', '/plan/sessions/s-6/actions/m-11', { decision: 'confirm' })).rejects.toBeInstanceOf(ApiError)
+    await mockCall('POST', '/plan/sessions/s-6/read')
+  })
+
   it('serves a project\'s open PRs, with eligible and blocked ones', async () => {
     const prs = await mockCall<PullRequestStatus[]>('GET', '/projects/corral/pull-requests')
     expect(prs.every(pr => pr.taskRef.startsWith('COR-'))).toBe(true)
