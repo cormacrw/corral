@@ -83,16 +83,17 @@ function retryTask() {
   // Back to pending, for the loading state and a fresh failure
   if (taskRef.value) void client.resetQueries({ queryKey: keys.tasks.detail(taskRef.value), exact: true })
 }
-watch(() => selected.value?.id, async () => {
+watch(() => selected.value?.id, async (_, previous) => {
   const item = selected.value
   text.value = ''
   busy.value = false
   resolveTo.value = 'in_progress'
   failedAction.value = null
-  // Nothing selected (e.g. the last item was just resolved): nothing to show
-  // beside it
-  if (!item) void flyout.close()
-  else if (isOwnPane(item)) {
+  // A selection with nothing to show (e.g. the last item was just resolved).
+  // Plain /inbox?task= has no selection to lose: its dock is a shared link.
+  if (!item) {
+    if (selectedId.value || previous) void flyout.close()
+  } else if (isOwnPane(item)) {
     if (flyout.ref.value || flyout.epic.value) await flyout.close()
   } else if (item.taskRef && showTask.value && !device.isMobile.value) {
     // Following the selection, not a click of its own: no extra history entry.
@@ -100,14 +101,19 @@ watch(() => selected.value?.id, async () => {
     flyout.open(item.taskRef, { replace: true })
   }
 }, { immediate: true })
+const PREFETCH_LIMIT_MS = 1000
 // Resolving moves to the item at the same position, or to the empty state when
 // that was the last one. The held list still has the old position.
 async function moveToNext() {
   const position = items.value.findIndex(i => i.id === selectedId.value)
   const remaining = (list.data.value?.needsYou ?? []).filter(i => !isHidden(i))
   const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
-  // Arrive with its task, so the panes never show a skeleton
-  if (next?.taskRef) await client.prefetchQuery(taskQuery(next.taskRef))
+  // Arrive with its task, so the panes never show a skeleton, but don't let a
+  // slow or failing task hold up the move
+  const leaving = selectedId.value
+  if (next?.taskRef) await Promise.race([client.prefetchQuery(taskQuery(next.taskRef)), new Promise(resolve => setTimeout(resolve, PREFETCH_LIMIT_MS))])
+  // Picked another item or left meanwhile: that selection stands
+  if (selectedId.value !== leaving) return
   await router.replace(itemRoute(next))
   list.release()
 }

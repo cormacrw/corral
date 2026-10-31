@@ -38,14 +38,14 @@ const alertStub = vue.defineComponent({
   setup: props => () => vue.h('div', { 'data-alert': true }, [props.title, ...(props.actions ?? []).map((a: { label: string, onClick: () => void }) => vue.h('button', { onClick: a.onClick }, a.label))])
 })
 
-async function mountInbox(type: 'human_review' | 'failed', taskRef?: string, dockedTask: string | null = null) {
+async function mountInbox(type: 'human_review' | 'failed', taskRef?: string, dockedTask: string | null = null, selection = true) {
   for (const name of ['ref', 'shallowRef', 'computed', 'watch', 'watchEffect', 'onMounted', 'onBeforeUnmount'] as const) vi.stubGlobal(name, vue[name])
   const item = inbox().needsYou.find(i => i.type === type && (taskRef ? i.taskRef === taskRef : tasks.find(t => t.id === i.taskId)?.type !== 'design'))!
-  const params = vue.reactive<{ itemId: string }>({ itemId: item.id })
+  const params = vue.reactive<{ itemId?: string }>({ itemId: selection ? item.id : undefined })
   vi.stubGlobal('useRoute', () => ({ params }))
   const router = {
     replace: vi.fn(async ({ path }: { path: string }) => {
-      params.itemId = path.split('/')[2]!
+      params.itemId = path.split('/')[2]
     }),
     push: vi.fn()
   }
@@ -134,6 +134,53 @@ it('opens the empty state without a task once the last item is resolved', async 
     vi.mocked(api.inbox.get).mockImplementation(async () => ({ ...inbox(), needsYou: [], resolved: [], activity: [] }))
     await submit()
     expect(replace).toHaveBeenCalledWith({ path: '/inbox', query: {} })
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('keeps a shared dock open on /inbox with nothing selected', async () => {
+  const { wrapper, close, refresh } = await mountInbox('failed', undefined, 'COR-1', false)
+  try {
+    await refresh()
+    await flushPromises()
+    expect(close).not.toHaveBeenCalled()
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('leaves a newer selection alone when one is made while the next task loads', async () => {
+  const { wrapper, item, params, replace, submit } = await mountInbox('failed')
+  try {
+    const remaining = { ...inbox(), needsYou: inbox().needsYou.filter(i => i.id !== item.id) }
+    vi.mocked(api.inbox.get).mockImplementation(async () => structuredClone(remaining))
+    let finish = (_: never) => {}
+    vi.mocked(api.tasks.byRef).mockReturnValue(new Promise((resolve) => {
+      finish = resolve as never
+    }))
+    const sending = submit()
+    await flushPromises()
+    const picked = remaining.needsYou[0]!
+    params.itemId = picked.id
+    await flushPromises()
+    finish(tasks[0] as never)
+    await sending
+    expect(replace).not.toHaveBeenCalled()
+    expect(params.itemId).toBe(picked.id)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('moves on without waiting out a next task that won\'t load', async () => {
+  const { wrapper, item, replace, submit } = await mountInbox('failed')
+  try {
+    const remaining = { ...inbox(), needsYou: inbox().needsYou.filter(i => i.id !== item.id) }
+    vi.mocked(api.inbox.get).mockImplementation(async () => structuredClone(remaining))
+    vi.mocked(api.tasks.byRef).mockReturnValue(new Promise(() => {}))
+    await submit()
+    await vi.waitFor(() => expect(replace).toHaveBeenCalledOnce(), { timeout: 2000 })
   } finally {
     wrapper.unmount()
   }
