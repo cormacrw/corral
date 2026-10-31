@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PlanMessage } from '@corral/contracts'
-import { api } from '~/composables/useApi'
+import { resolvePlanAction } from '~/queries/plan'
 
 const props = defineProps<{ message: PlanMessage }>()
 const emit = defineEmits<{ resolved: [] }>()
@@ -12,7 +12,7 @@ async function decide(decision: 'confirm' | 'cancel') {
   busy.value = true
   error.value = null
   try {
-    await api.plan.resolveAction(props.message.sessionId, props.message.id, decision)
+    await resolvePlanAction(props.message.sessionId, props.message.id, decision)
     emit('resolved')
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)

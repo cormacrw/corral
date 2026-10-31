@@ -43,6 +43,10 @@ export const discardPlan = defineMutation<Plan, string>({
 export const startPlanThread = (session: Pick<PlanSession, 'projectId' | 'runtime'>, message: string, taskRef: string | undefined, id: string) =>
   api.plan.start(session.projectId, message, taskRef, session.runtime, id)
 
+// Not a mutation: the card's parent reconciles the session once it resolves
+export const resolvePlanAction = (sessionId: string, messageId: string, decision: 'confirm' | 'cancel') =>
+  api.plan.resolveAction(sessionId, messageId, decision)
+
 // For a page being closed: the request has to outlive it, and nothing is left
 // to invalidate
 export const closePlanThreadOnExit = (id: string) => api.plan.close(id, { keepalive: true })

@@ -208,7 +208,7 @@ async function start(message: string): Promise<boolean> {
             />
             <USelectMenu
               v-if="!device.isMobile.value"
-              :items="(sessions ?? []).map(s => ({ label: `${s.title} · ${live.state.value.projects.find(p => p.id === s.projectId)?.name ?? 'Global'}`, value: s.id }))"
+              :items="(sessions ?? []).map(s => ({ label: `${s.title} · ${shell.projects.find(p => p.id === s.projectId)?.name ?? 'Global'}`, value: s.id }))"
               value-key="value"
               size="xs"
               variant="ghost"

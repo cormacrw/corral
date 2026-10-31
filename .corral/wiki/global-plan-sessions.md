@@ -1,6 +1,6 @@
 # Global Plan sessions
 
-Plan's scope picker includes Global and remembers either Global or the last project. New sessions send `projectId: null` for Global; the API also treats an omitted projectId as Global. Existing project IDs and message history are unchanged by migration 0043, whose global-session changes only drop NOT NULL on `plan_sessions.project_id` and `runs.project_id`.
+Plan's scope picker includes Global and remembers either Global or the last project. New sessions send `projectId: null` for Global; the API also treats an omitted projectId as Global. Existing project IDs and message history are unchanged by migration 0044, whose global-session changes only drop NOT NULL on `plan_sessions.project_id` and `runs.project_id`.
 
 Runner protocol 4 distinguishes these jobs from protocol 3, so an older runner cannot receive a global turn and try to fetch an empty repository.
 
