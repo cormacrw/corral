@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { computed, nextTick, reactive, ref, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, useTemplateRef, watch } from 'vue'
 import { NO_FILTERS } from '~/utils/board'
 import BoardMobile from './BoardMobile.vue'
 
@@ -12,8 +12,8 @@ function board(view: 'tasks' | 'epics', key: string) {
   const replace = vi.fn(({ query }) => {
     route.query = query
   })
-  for (const [name, value] of Object.entries({ computed, nextTick, ref, useTemplateRef, watch,
-    useLive: () => ({ state: ref({ agents: [] }) }),
+  for (const [name, value] of Object.entries({ computed, nextTick, onMounted, ref, useTemplateRef, watch,
+    useShell: () => ({ agents: [] }),
     useRoute: () => route, useRouter: () => ({ replace }),
     useTaskFlyout: () => ({ openEpic: vi.fn() })
   })) vi.stubGlobal(name, value)
@@ -22,7 +22,7 @@ function board(view: 'tasks' | 'epics', key: string) {
       view, search: '', filters: { ...NO_FILTERS }, epics: [], agents: [],
       columns: [
         { key: 'ready', label: 'Ready', statuses: ['ready'], hint: 'Scheduled next', color: 'bg-info', tasks: [] },
-        { key: 'merged', label: 'Merged', statuses: ['merged'], hint: 'Last 3 days', color: 'bg-success', tasks: [] }
+        { key: 'complete', label: 'Complete', statuses: ['merged', 'approved'], hint: 'Last 3 days', color: 'bg-success', tasks: [] }
       ],
       epicColumns: [
         { key: 'ready', label: 'Ready', hint: 'Scheduled next', dot: 'bg-info', cards: [] },
@@ -41,13 +41,18 @@ function board(view: 'tasks' | 'epics', key: string) {
 describe('mobile Board stages', () => {
   it('falls back from keys belonging to the other view in both directions', async () => {
     const { wrapper } = board('tasks', 'merged')
-    expect(wrapper.get('[role="tabpanel"]').attributes('aria-label')).toBe('Merged, 0')
+    expect(wrapper.get('[role="tabpanel"]').attributes('aria-label')).toBe('Complete, 0')
     await wrapper.setProps({ view: 'epics' })
     expect(wrapper.get('[role="tabpanel"]').attributes('aria-label')).toBe('Ready, 0')
     await wrapper.get('#board-tab-done').trigger('click')
     expect(wrapper.get('[role="tabpanel"]').attributes('aria-label')).toBe('Done, 0')
     await wrapper.setProps({ view: 'tasks' })
     expect(wrapper.get('[role="tabpanel"]').attributes('aria-label')).toBe('Ready, 0')
+  })
+
+  it('opens Complete for saved approved column links', () => {
+    const { wrapper } = board('tasks', 'approved')
+    expect(wrapper.get('[role="tabpanel"]').attributes('aria-label')).toBe('Complete, 0')
   })
 
   it('falls back for unknown stage keys and keeps epic tab selection in the query', async () => {

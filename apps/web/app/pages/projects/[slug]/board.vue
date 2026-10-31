@@ -76,7 +76,7 @@ const activeRuns = useQuery(computed(() => ({ ...runsQuery({ active: true }), en
 const epicColumns = computed(() => {
   const staged = visibleEpics.value.map((epic) => {
     const stage = epicStage(epic, all.value.filter(t => t.epicId === epic.id && t.status !== 'draft' && t.status !== 'backlog'))
-    return { epic, stage, workingAgents: epicWorkingAgents(epic.id, all.value, activeRuns.data.value ?? [], live.state.value.agents), waitingOn: stage === 'done' ? [] : unfinishedPrerequisites(epic, liveEpics.value) }
+    return { epic, stage, workingAgents: epicWorkingAgents(epic.id, all.value, activeRuns.data.value ?? [], shell.agents), waitingOn: stage === 'done' ? [] : unfinishedPrerequisites(epic, liveEpics.value) }
   })
   return EPIC_COLUMNS.map(column => ({ ...column, dot: DOT[STATUS[column.status].color], cards: staged.filter(card => card.stage === column.key) }))
 })

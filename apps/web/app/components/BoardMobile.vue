@@ -28,7 +28,7 @@ const view = defineModel<BoardView>('view', { required: true })
 const viewItems = [{ label: 'Tasks', value: 'tasks' }, { label: 'Epics', value: 'epics' }]
 const flyout = useTaskFlyout()
 const single = computed(() => filters.value.epics.length === 1 ? filters.value.epics[0]! : null)
-const live = useLive()
+const shell = useShell()
 const route = useRoute()
 const router = useRouter()
 
