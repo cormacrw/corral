@@ -38,7 +38,7 @@ A `comment.created` event is written into the comments and invalidates nothing, 
 
 `writeTask` also writes the task into its cached epic details, so an open epic's list and graph follow status changes at once. It finds them through `task.epicId` and `cache.epicsWith`, the second because a task that left an epic no longer names it. The epic then refetches through the queue, for the fields only the server derives, such as `reviewModeLocked`.
 
-Task patches, transitions, resume and design approval write their response into the task's detail entry before invalidating `changed`, so the open task doesn't wait for the refetch. `actOnInboxItem` does the same when it returns a task, and `reviewEpic` covers the Inbox's epic actions. The Inbox page itself still acts through `api` and reloads on events until its own migration.
+Task patches, transitions, resume and design approval write their response into the task's detail entry before invalidating `changed`, so the open task doesn't wait for the refetch. `actOnInboxItem` does the same when it returns a task, and `reviewEpic` covers the Inbox's epic actions.
 
 `uploadAttachment` is the only way images upload, from `PromptComposer` and the description editor.
 

@@ -320,7 +320,7 @@ describe('prototype mock API', () => {
     const stop = onMockEvent(event => events.push(event))
     try {
       expect(await mockCall<Task>('POST', '/projects/corral/tasks/9/transitions', { type: 'resolve', to: 'ready' })).toMatchObject({ status: 'ready' })
-      expect(await mockCall<Task>('POST', '/projects/corral/tasks/41/designs/1/approve', {})).toMatchObject({ status: 'approved' })
+      expect(await mockCall<Task>('POST', '/projects/corral/tasks/41/designs/2/approve', {})).toMatchObject({ status: 'approved' })
       expect(events.map(e => e.type)).toEqual(['task.updated', 'task.updated'])
       await expect(mockCall('POST', '/projects/corral/tasks/41/designs/9/approve', {})).rejects.toThrow(ApiError)
     } finally {
