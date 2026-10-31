@@ -417,7 +417,7 @@ describe('removing a project', () => {
   const kept = { id: 'p-2', slug: 'other', name: 'Other' } as Project
   const goneRun = { id: 'r-1', projectId: 'p-1' } as Run
   const keptRun = { id: 'r-2', projectId: 'p-2' } as Run
-  const session = (id: string, projectId: string) => ({ id, projectId })
+  const session = (id: string, projectId: string | null) => ({ id, projectId })
   function cached() {
     const client = testQueryClient()
     client.setQueryData(keys.projects.list(), [gone, kept])
@@ -453,6 +453,16 @@ describe('removing a project', () => {
     const client = cached()
     await mutation(removeProject, client)({ id: 'p-1', slug: 'corral', confirm: 'Corral' })
     expectCleared(client)
+  })
+  it('keeps global runs and threads when a project is removed', () => {
+    const client = cached()
+    const globalRun = { id: 'r-global', projectId: null } as Run
+    const globalSession = session('s-global', null)
+    client.setQueryData(keys.runs.list({ active: true }), [goneRun, keptRun, globalRun])
+    client.setQueryData(keys.plan.sessions(), [session('s-1', 'p-1'), session('s-2', 'p-2'), globalSession])
+    applyEvent(client, { type: 'project.deleted', projectId: 'p-1' })
+    expect(client.getQueryData(keys.runs.list({ active: true }))).toEqual([keptRun, globalRun])
+    expect(client.getQueryData(keys.plan.sessions())).toEqual([session('s-2', 'p-2'), globalSession])
   })
   it('marks the repository list stale, whose rows name the project', async () => {
     vi.mocked(api.projects.remove).mockResolvedValue(null as never)
