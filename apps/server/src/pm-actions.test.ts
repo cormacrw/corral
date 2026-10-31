@@ -1,4 +1,5 @@
-import type { PlanSessionDetail, RunJob } from '@corral/contracts'
+import { writeFile } from 'node:fs/promises'
+import type { Inbox, PlanSessionDetail, RunJob } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -48,19 +49,47 @@ describe('confirm-required PM actions', () => {
     expect((await t.request('GET', `/api/projects/${slug}/tasks/${task.number}`)).status).toBe(200)
     const [proposed] = await t.db.select().from(auditLog).where(eq(auditLog.action, 'pm.action_proposed'))
     expect(proposed).toMatchObject({ actor: { kind: 'agent', role: 'pm', runId: job.runId }, detail: { actionId: id, sessionId: session.id, input: { taskRef: task.ref } } })
+    const beforeInbox = await (await t.request('GET', '/api/inbox')).json() as Inbox
+    expect(beforeInbox.activity.find(item => item.id === `pm-${proposed!.id}`)).toMatchObject({ taskId: task.id, taskRef: task.ref })
     // Racing requests and retries run the action once.
     const results = await Promise.all([resolve(id, 'confirm'), resolve(id, 'confirm')])
     expect(results.map(r => r.status)).toEqual([200, 200])
     expect((await resolve(id, 'confirm')).status).toBe(200)
-    expect((await t.request('GET', `/api/projects/${slug}/tasks/${task.number}`)).status).toBe(404)
+    const deletedResponse = await t.request('GET', `/api/projects/${slug}/tasks/${task.number}`)
+    expect(deletedResponse.status).toBe(404)
     const deleted = await t.db.select().from(auditLog).where(eq(auditLog.action, 'task.deleted'))
     expect(deleted).toHaveLength(1)
     expect(deleted[0]!.actor).toMatchObject({ kind: 'human', viaPm: { runId: job.runId, sessionId: session.id } })
     const confirmed = await t.db.select().from(auditLog).where(eq(auditLog.action, 'pm.action_confirmed'))
     expect(confirmed).toHaveLength(1)
     expect(confirmed[0]).toMatchObject({ actor: t.actor, detail: { actionId: id, sessionId: session.id, proposer: { kind: 'agent', runId: job.runId }, result: `Deleted ${task.ref}.` } })
-    const inbox = await (await t.request('GET', '/api/inbox')).json() as { activity: { body: string, sender: { role: string } }[] }
+    const inbox = await (await t.request('GET', '/api/inbox')).json() as Inbox
+    for (const entry of [proposed!, confirmed[0]!]) {
+      expect(inbox.activity.find(item => item.id === `pm-${entry.id}`)).toMatchObject({
+        taskId: null, taskRef: null, project: { slug }, body: expect.stringContaining(`/plan/${session.id}`)
+      })
+    }
+    if (process.env.CORRAL_PM_DELETE_EVIDENCE) await writeFile(process.env.CORRAL_PM_DELETE_EVIDENCE, JSON.stringify({
+      before: { method: 'GET', path: '/api/inbox', response: beforeInbox },
+      confirmation: { method: 'POST', path: `/api/plan/sessions/${session.id}/actions/${id}`, input: { decision: 'confirm' }, statuses: results.map(r => r.status), response: await results[0]!.json() },
+      deletedTask: { method: 'GET', path: `/api/projects/${slug}/tasks/${task.number}`, status: deletedResponse.status, response: await deletedResponse.json() },
+      after: { method: 'GET', path: '/api/inbox', response: inbox }
+    }, null, 2))
     expect(inbox.activity).toContainEqual(expect.objectContaining({ sender: { name: 'PM', role: 'pm' }, body: expect.stringContaining(session.id) }))
+  })
+
+  it('keeps soft-deleted task activity without linking to the hidden task', async () => {
+    const task = await t.createTask(slug, { title: 'Retire accepted work' })
+    await t.db.update(tasks).set({ status: 'ready' }).where(eq(tasks.id, task.id))
+    const id = await propose(task.ref)
+    expect((await resolve(id, 'confirm')).status).toBe(200)
+    const [hidden] = await t.db.select().from(tasks).where(eq(tasks.id, task.id))
+    expect(hidden!.deletedAt).not.toBeNull()
+    expect((await t.request('GET', `/api/projects/${slug}/tasks/${task.number}`)).status).toBe(404)
+    const inbox = await (await t.request('GET', '/api/inbox')).json() as Inbox
+    const activity = inbox.activity.filter(item => item.subject.includes(task.ref))
+    expect(activity).toHaveLength(2)
+    for (const item of activity) expect(item).toMatchObject({ taskId: null, taskRef: null, project: { slug }, body: expect.stringContaining(`/plan/${session.id}`) })
   })
 
   it('Cancel leaves the target unchanged, records the decision, and cannot subsequently confirm it', async () => {
