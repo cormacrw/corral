@@ -6,7 +6,7 @@ import { resumeAll as resumeAllMutation, runnerQuery, statusQuery } from '~/quer
 
 // Shell-wide banners (design/app-shell.md), shared by the web and mobile
 // layouts: kill switch, update hold, paused project, runner offline
-const live = useLive().state
+const { connection } = useLive()
 const route = useRoute()
 const toast = useToast()
 const status = useQuery(statusQuery()).data
@@ -87,7 +87,7 @@ async function resumeAll() {
     :actions="[{ label: 'Runners', color: 'neutral', variant: 'outline', to: '/settings/runner' }]"
   />
   <UAlert
-    v-else-if="live.connection === 'reconnecting'"
+    v-else-if="connection === 'reconnecting'"
     color="neutral"
     variant="subtle"
     icon="i-lucide-refresh-cw"

@@ -8,5 +8,10 @@ export default defineNuxtPlugin((nuxtApp) => {
   const queryClient = createQueryClient()
   nuxtApp.vueApp.use(VueQueryPlugin, { queryClient })
   connectPendingPlanCache(queryClient)
-  connectQueries(queryClient)
+  const router = useRouter()
+  const pending = usePendingPlan()
+  connectQueries(queryClient, {
+    openSession: () => router.currentRoute.value.params.sessionId,
+    onEvent: pending.apply
+  })
 })

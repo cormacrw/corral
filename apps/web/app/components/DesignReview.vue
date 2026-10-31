@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@tanstack/vue-query'
 import { actOnInboxItem } from '~/queries/inbox'
 import { approveDesign, moveTask, taskDesignsQuery } from '~/queries/tasks'
 import type { Task } from '@corral/contracts'
-import { ApiError } from '~/composables/useApi'
+import { ApiError } from '~/queries/client'
 import { DESIGN_VERSION_STATUS, timeAgo } from '~/utils/labels'
 
 // A design task's versions in task detail (D20): the live prototype in its

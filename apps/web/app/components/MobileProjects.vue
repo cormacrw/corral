@@ -1,40 +1,26 @@
 <script setup lang="ts">
-import type { Inbox } from '@corral/contracts'
-import { api } from '~/composables/useApi'
+import { useQuery } from '@tanstack/vue-query'
+import { inboxQuery } from '~/queries/inbox'
 import { reloadShell } from '~/queries/shell'
 import { projectCardSummary, projectNeedsYou } from '~/utils/projects'
 
 // The mobile Projects tab (design/mobile.md, frame "Projects"): a card per
 // project that opens its overview, with shortcuts to Board, Backlog and Settings
-const live = useLive()
-const state = live.state
-const lists = useAllProjectLists(() => state.value.projects)
-const inbox = ref<Inbox | null>(null)
+const shell = useShell()
+const lists = useAllProjectLists(() => shell.projects)
+// The shell keeps the Inbox current, so mounting here never asks again. The
+// cards still work without the Needs-you counts.
+const { data: inbox } = useQuery({ ...inboxQuery(), refetchOnMount: false })
 
-async function loadInbox() {
-  try {
-    inbox.value = await api.inbox.get()
-  } catch {
-    // The cards still work without the Needs-you counts
-  }
-}
-onMounted(() => {
-  void loadInbox()
-  const stop = live.subscribe((event) => {
-    if (event.type === 'task.updated' || event.type === 'task.deleted' || event.type === 'plan.session') void loadInbox()
-  })
-  onBeforeUnmount(stop)
-})
-
-const cards = computed(() => state.value.projects.map((project) => {
-  const needsYou = projectNeedsYou(inbox.value, project.id).length
+const cards = computed(() => shell.projects.map((project) => {
+  const needsYou = projectNeedsYou(inbox.value ?? null, project.id).length
   return { project, loaded: !(lists.pending.value[project.id] ?? true), ...projectCardSummary(project, lists.tasks.value[project.id] ?? [], needsYou) }
 }))
 </script>
 
 <template>
   <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4">
-    <template v-if="!state.loaded">
+    <template v-if="!shell.loaded">
       <USkeleton
         v-for="n in 2"
         :key="n"
@@ -42,10 +28,10 @@ const cards = computed(() => state.value.projects.map((project) => {
       />
     </template>
     <UAlert
-      v-if="state.error"
+      v-if="shell.error"
       color="error"
       variant="subtle"
-      :title="state.error"
+      :title="shell.error"
       :actions="[{ label: 'Retry', onClick: reloadShell }]"
     />
     <article

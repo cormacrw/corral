@@ -55,7 +55,7 @@ From top to bottom:
 - Tapping any tab goes back to Corral's first history entry in the browser tab and replaces it with that tab root, including when arriving on a deep link. It never goes past that entry, so pages from other sites earlier in the browser tab are left alone. Back or an iOS edge swipe at a tab root cannot revisit earlier tabs or details. Links into projects, tasks and threads still push normally, so Back walks through detail screens until the tab root. Desktop navigation is unchanged.
 - Tab-root content, sub-page headers and the tab bar pad themselves with `env(safe-area-inset-*)`, and the viewport uses `viewport-fit=cover`, so nothing sits under a notch or the home indicator.
 - Toasts appear at the top centre on mobile, 1rem below `env(safe-area-inset-top)`, keeping the tab bar and composers clear. Desktop keeps Nuxt UI's default bottom-right position. Dismissal and automatic closing use Nuxt UI's defaults.
-- Home’s runner status and the Inbox count come from the app's one live connection (`useLive()`), so they update without a reload.
+- Home’s runner status and the Inbox count come from the shell queries (`useShell()`), which the app's one live connection keeps current, so they update without a reload.
 
 On the web, `/projects` renders in the normal shell as a plain project list.
 

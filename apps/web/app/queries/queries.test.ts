@@ -128,7 +128,6 @@ describe('query layer', () => {
     vi.useFakeTimers()
     vi.stubGlobal('EventSource', FakeEventSource)
     vi.stubGlobal('useRoute', () => ({ params: {} }))
-    vi.stubGlobal('usePendingPlan', () => ({ apply: () => {} }))
     vi.stubGlobal('useState', (_key: string, init: () => unknown) => ref(init()))
     vi.stubGlobal('fetch', vi.fn(async () => new Response('[]')))
     client = testQueryClient()
@@ -146,6 +145,23 @@ describe('query layer', () => {
     expect(incomplete).toBeDefined()
     useLive().connect()
     expect([...FakeEventSource.last.handlers.keys()]).toEqual(expect.arrayContaining(serverEventTypes))
+  })
+
+  it('reads the open thread as its session arrives, and leaves others unread', async () => {
+    stop()
+    const seen = vi.fn()
+    stop = connectQueries(client, { openSession: () => 's-1', onEvent: seen })
+    useLive().connect()
+    const session = { id: 's-1', unread: true, updatedAt: 'now' }
+    const sessions = [{ ...session }, { id: 's-2', unread: true, updatedAt: 'now' }]
+    client.setQueryData(keys.plan.sessions(), sessions)
+    vi.mocked(api.plan.read).mockClear()
+    FakeEventSource.last.emit('plan.session', { type: 'plan.session', session })
+    FakeEventSource.last.emit('plan.session', { type: 'plan.session', session: sessions[1] })
+    expect(client.getQueryData(keys.plan.sessions())).toEqual(expect.arrayContaining([expect.objectContaining({ id: 's-1', unread: false }), expect.objectContaining({ id: 's-2', unread: true })]))
+    expect(api.plan.read).toHaveBeenCalledTimes(1)
+    expect(api.plan.read).toHaveBeenCalledWith('s-1')
+    expect(seen).toHaveBeenCalledTimes(2)
   })
 
   it('keeps read-only Inbox events out of refetches and writes the count into the cache', async () => {
@@ -167,8 +183,7 @@ describe('query layer', () => {
   })
 
   it('coalesces a burst of task events into one refetch of each affected query', async () => {
-    const live = useLive()
-    live.connect()
+    useLive().connect()
     const inbox = onScreen(client, keys.inbox(), () => ({ count: 0 }))
     const history = onScreen(client, keys.tasks.history('COR-1'), () => [])
     const list = onScreen(client, keys.tasks.list('corral'), () => [task()])
@@ -229,8 +244,7 @@ describe('query layer', () => {
   })
 
   it('refetches every query on screen after a reconnect without showing loading', async () => {
-    const live = useLive()
-    live.state.value.connection = 'open'
+    useLive().connection.value = 'open'
     const a = onScreen(client, keys.inbox(), () => ({ count: 0 }))
     const b = onScreen(client, keys.agents.list(), () => [])
     await vi.advanceTimersByTimeAsync(0)
@@ -344,6 +358,7 @@ describe('query layer', () => {
 })
 
 vi.mock('~/composables/useApi', async original => ({ ...await original<typeof import('~/composables/useApi')>(), api: {
+  plan: { read: vi.fn(async () => ({})) },
   agents: { list: vi.fn(), create: vi.fn() },
   projects: { list: vi.fn(), remove: vi.fn() },
   setup: { clis: vi.fn(), repos: vi.fn() }

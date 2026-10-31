@@ -19,7 +19,7 @@ afterEach(() => {
 
 it('shows the error when reading fails, without retrying in a loop', async () => {
   for (const name of ['ref', 'watch', 'computed'] as const) vi.stubGlobal(name, vue[name])
-  vi.stubGlobal('useLive', () => ({ state: vue.ref({ projects: [] }) }))
+  vi.stubGlobal('useShell', () => ({ projects: [] }))
   vi.mocked(api.deployments.read).mockRejectedValueOnce(new Error('Server unavailable'))
   const client = testQueryClient()
   const wrapper = mount(InboxReleaseNotes, {
@@ -35,7 +35,7 @@ it('shows the error when reading fails, without retrying in a loop', async () =>
 
 it('marks an opened item read, replaces pending notes live, links task refs and dismisses', async () => {
   for (const name of ['ref', 'watch', 'computed'] as const) vi.stubGlobal(name, vue[name])
-  vi.stubGlobal('useLive', () => ({ state: vue.ref({ projects: [{ prefix: 'COR' }] }) }))
+  vi.stubGlobal('useShell', () => ({ projects: [{ prefix: 'COR' }] }))
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/tasks/:ref', component: { template: '<div>Task</div>' } }] })
   const button = vue.defineComponent({ props: ['label'], emits: ['click'], setup: (props, { emit }) => () => vue.h('button', { onClick: () => emit('click') }, props.label) })
   const note = releaseNotes[0]!

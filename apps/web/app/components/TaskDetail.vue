@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { useMutation, useQuery } from '@tanstack/vue-query'
-import { commentOnTask, moveTask, patchTask, removeTask, resumeTask, taskCommentsQuery, taskEvidenceQuery, taskHistoryQuery, taskQuery, taskReviewsQuery, type TaskAddress } from '~/queries/tasks'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { commentOnTask, listedTask, moveTask, patchTask, removeTask, resumeTask, taskCommentsQuery, taskEvidenceQuery, taskHistoryQuery, taskQuery, taskReviewsQuery, type TaskAddress } from '~/queries/tasks'
 import { uploadAttachment } from '~/queries/attachments'
 import { runsQuery } from '~/queries/runs'
 import type { AuditEntry, Comment, HumanTransitionInput, PatchTaskInput, Task } from '@corral/contracts'
@@ -8,7 +8,7 @@ import type { EditorToolbarItem } from '@nuxt/ui'
 import type { EditorView } from '@tiptap/pm/view'
 import type { TaskPriority, TaskStatus } from '@corral/core'
 import { availableEvents } from '@corral/core'
-import { ApiError } from '~/composables/useApi'
+import { ApiError } from '~/queries/client'
 import { PRIORITY, runBadge, STATUS, TASK_TYPE, timeAgo } from '~/utils/labels'
 import { attachmentProblem } from '~/utils/attachments'
 import { AttachmentImage, imageFiles, insertImages } from '~/utils/editor-image'
@@ -19,7 +19,7 @@ import { AttachmentImage, imageFiles, insertImages } from '~/utils/editor-image'
 const props = defineProps<{ taskRef: string, mode: 'flyout' | 'page' | 'mobile' }>()
 const emit = defineEmits<{ close: [] }>()
 
-const live = useLive()
+const shell = useShell()
 const flyout = useTaskFlyout()
 const toast = useToast()
 const patchMutation = useMutation(patchTask)
@@ -28,7 +28,8 @@ const removeMutation = useMutation(removeTask)
 const resumeMutation = useMutation(resumeTask)
 const commentMutation = useMutation(commentOnTask)
 const uploadMutation = useMutation(uploadAttachment)
-const taskResult = useQuery(computed(() => taskQuery(props.taskRef)))
+const client = useQueryClient()
+const taskResult = useQuery(computed(() => ({ ...taskQuery(props.taskRef), placeholderData: () => listedTask(client, props.taskRef) })))
 const task = computed(() => taskResult.data.value ?? null)
 const saved = ref(false)
 const resuming = ref(false)
@@ -49,7 +50,7 @@ const shows = (part: 'details' | 'criteria') => !mobile.value || mobileTab.value
 const confirmDelete = ref(false)
 let savedTimer: ReturnType<typeof setTimeout> | null = null
 
-const project = computed(() => live.state.value.projects.find(p => p.id === task.value?.projectId) ?? null)
+const project = computed(() => shell.projects.find(p => p.id === task.value?.projectId) ?? null)
 const number = computed(() => task.value?.number ?? 0)
 const epic = computed(() => task.value?.epicId ? epicList.value.find(e => e.id === task.value!.epicId) ?? null : null)
 const slug = computed(() => project.value?.slug ?? '')
@@ -357,7 +358,7 @@ function authorLabel(actor: Comment['author']): string {
   if (actor.kind === 'agent') {
     const run = runs.value.find(r => r.id === actor.runId)
     if (run) return run.agentName
-    return actor.role === 'pm' ? (live.state.value.agents.find(a => a.role === 'pm')?.name ?? 'PM') : actor.role === 'developer' ? 'Developer' : actor.role === 'designer' ? 'Designer' : 'Reviewer'
+    return actor.role === 'pm' ? (shell.agents.find(a => a.role === 'pm')?.name ?? 'PM') : actor.role === 'developer' ? 'Developer' : actor.role === 'designer' ? 'Designer' : 'Reviewer'
   }
   return 'Corral'
 }
@@ -384,7 +385,7 @@ function historyText(entry: AuditEntry): string {
     default: return entry.action
   }
 }
-const workingAgent = computed(() => task.value?.lease ? live.state.value.agents.find(a => a.id === task.value!.lease!.agentId) ?? null : null)
+const workingAgent = computed(() => task.value?.lease ? shell.agents.find(a => a.id === task.value!.lease!.agentId) ?? null : null)
 const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/${props.taskRef}`)
 </script>
 

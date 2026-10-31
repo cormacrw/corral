@@ -1,16 +1,14 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { computed, defineComponent, ref, watch } from 'vue'
+import { computed, defineComponent, watch } from 'vue'
 
 const replace = vi.fn()
 const go = vi.fn()
 vi.stubGlobal('useAllProjectLists', vi.fn())
 vi.stubGlobal('computed', computed)
 vi.stubGlobal('watch', watch)
-vi.stubGlobal('useLive', () => ({
-  state: ref({ projects: [], planSessions: [{ unread: true }], inboxCount: 3 })
-}))
+vi.stubGlobal('useShell', () => ({ projects: [], planSessions: [{ unread: true }], inboxCount: 3 }))
 vi.stubGlobal('useRoute', () => ({ path: '/home' }))
 vi.stubGlobal('useRouter', () => ({ replace, options: { history: { go } } }))
 

@@ -9,6 +9,9 @@ export type TaskAddress = Pick<Task, 'ref' | 'number'> & { slug: string }
 
 export const tasksQuery = (slug: string) => queryOptions({ queryKey: keys.tasks.list(slug), queryFn: async () => (await api.tasks.list(slug, 'all')).filter(task => task.status !== 'draft') })
 export const taskQuery = (ref: string) => queryOptions({ queryKey: keys.tasks.detail(ref), queryFn: () => api.tasks.byRef(ref) })
+// The copy in a loaded project list, to show while a task's own entry loads
+export const listedTask = (client: QueryClient, ref: string) =>
+  client.getQueriesData<Task[]>({ queryKey: keys.tasks.lists() }).flatMap(([, list]) => list ?? []).find(task => task.ref === ref)
 export const taskCommentsQuery = ({ slug, number, ref }: TaskAddress) => queryOptions({ queryKey: keys.tasks.comments(ref), queryFn: () => api.tasks.comments(slug, number) })
 export const taskHistoryQuery = ({ slug, number, ref }: TaskAddress) => queryOptions({ queryKey: keys.tasks.history(ref), queryFn: () => api.tasks.history(slug, number) })
 export const taskEvidenceQuery = ({ slug, number, ref }: TaskAddress) => queryOptions({ queryKey: keys.tasks.evidence(ref), queryFn: () => api.tasks.evidence(slug, number) })

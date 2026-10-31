@@ -3,10 +3,9 @@
 // bar. app.vue swaps it in for the default layout; URLs stay the same.
 import { stepsToAppStart } from '~/utils/app-history'
 
-const live = useLive()
-const state = live.state
+const shell = useShell()
 // Keep the same shared list queries warm as the desktop shell
-useAllProjectLists(() => state.value.projects)
+useAllProjectLists(() => shell.projects)
 const route = useRoute()
 const router = useRouter()
 
@@ -46,14 +45,14 @@ async function selectTab(event: MouseEvent, to: string) {
   }
 }
 
-const planUnread = computed(() => state.value.planSessions.some(s => s.unread))
+const planUnread = computed(() => shell.planSessions.some(s => s.unread))
 
 const isActive = (...paths: string[]) => paths.some(path => route.path === path || route.path.startsWith(`${path}/`))
 
 const tabs = computed(() => [
   { label: 'Home', icon: 'i-lucide-layout-grid', to: '/home', active: isActive('/home') || route.path === '/' },
   { label: 'Plan', icon: 'i-lucide-message-square', to: '/plan', active: isActive('/plan'), dot: planUnread.value },
-  { label: 'Inbox', icon: 'i-lucide-inbox', to: '/inbox', active: isActive('/inbox'), badge: state.value.inboxCount },
+  { label: 'Inbox', icon: 'i-lucide-inbox', to: '/inbox', active: isActive('/inbox'), badge: shell.inboxCount },
   // Tasks and epics belong to a project
   { label: 'Projects', icon: 'i-lucide-folder', to: '/projects', active: isActive('/projects', '/tasks', '/epics') },
   { label: 'Settings', icon: 'i-lucide-settings', to: '/settings', active: isActive('/settings') }

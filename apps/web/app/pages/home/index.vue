@@ -1,25 +1,25 @@
 <script setup lang="ts">
 import type { Agent, Run } from '@corral/contracts'
-import { api } from '~/composables/useApi'
+import { useQuery } from '@tanstack/vue-query'
+import { runsQuery } from '~/queries/runs'
 import { todayStats } from '~/utils/agents'
 import { dashboardCounts, elapsed, IN_PROGRESS_STAGES, liveRunTitle } from '~/utils/dashboard'
 import { agentStatus, epicInProgress, epicWithLiveCounts, isLiveRun, isWorking, projectColor, ROLE, STATUS, tokens } from '~/utils/labels'
 
 // Home, the global dashboard (design/mobile.md). Counts come from the live
-// task lists the shell loads; runs come from /api/runs and are
-// refetched whenever a run changes.
-const live = useLive()
-const state = live.state
-const lists = useAllProjectLists(() => state.value.projects)
+// task lists the shell loads; runs come from the shared query, which events
+// keep current.
+const shell = useShell()
+const lists = useAllProjectLists(() => shell.projects)
 useSeoMeta({ title: 'Home · Corral' })
 
 // All projects, or one project's numbers
 const projectId = ref<string>('all')
 const projectItems = computed(() => [
   { label: 'All projects', value: 'all' },
-  ...state.value.projects.map(p => ({ label: p.name, value: p.id }))
+  ...shell.projects.map(p => ({ label: p.name, value: p.id }))
 ])
-const scope = computed(() => projectId.value === 'all' ? state.value.projects : state.value.projects.filter(p => p.id === projectId.value))
+const scope = computed(() => projectId.value === 'all' ? shell.projects : shell.projects.filter(p => p.id === projectId.value))
 
 const epics = computed(() => scope.value
   .flatMap(project => (lists.epics.value[project.id] ?? []).map(epic => ({ epic: epicWithLiveCounts(epic, lists.tasks.value[project.id] ?? []), project })))
@@ -29,7 +29,7 @@ const epics = computed(() => scope.value
 // Re-render the "today" and elapsed numbers as time passes
 const now = ref(Date.now())
 const counts = computed(() => dashboardCounts(scope.value.flatMap(p => lists.tasks.value[p.id] ?? []), new Date(now.value)))
-const loading = computed(() => !state.value.loaded || scope.value.some(p => lists.pending.value[p.id] ?? true))
+const loading = computed(() => !shell.loaded || scope.value.some(p => lists.pending.value[p.id] ?? true))
 
 const STAGE_COLOR: Record<typeof IN_PROGRESS_STAGES[number], string> = {
   in_progress: 'var(--ui-primary)',
@@ -44,42 +44,30 @@ const attention = computed(() => {
   return parts.length ? parts.join(', ') : null
 })
 
-const runs = ref<Run[]>([])
+// Until they load, the agents show without their current run
+const { data: runList } = useQuery(runsQuery())
+const runs = computed(() => runList.value ?? [])
 const today = computed(() => todayStats(
   runs.value.filter(r => scope.value.some(p => p.id === r.projectId)),
   [],
   now.value
 ))
-async function loadRuns() {
-  try {
-    runs.value = await api.runs.list()
-  } catch {
-    // The agents still show, just without their current run
-  }
-}
 let timer: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
-  void loadRuns()
-  const stop = live.subscribe((event) => {
-    if (event.type === 'run.updated') void loadRuns()
-  })
   timer = setInterval(() => {
     now.value = Date.now()
   }, 30_000)
-  onBeforeUnmount(() => {
-    stop()
-    clearInterval(timer)
-  })
+  onBeforeUnmount(() => clearInterval(timer))
 })
 
 const taskOf = (run: Run) => run.taskId ? lists.tasks.value[run.projectId]?.find(t => t.id === run.taskId) : undefined
-const projectOf = (id: string) => state.value.projects.find(p => p.id === id)
+const projectOf = (id: string) => shell.projects.find(p => p.id === id)
 // One line per active run: what it's on, where, and for how long
 const runLines = (agent: Agent) => runs.value
   .filter(r => isLiveRun(r) && r.agentId === agent.id && scope.value.some(p => p.id === r.projectId))
   .map((run) => {
     const task = taskOf(run)
-    const session = run.taskId ? null : state.value.planSessions.find(s => s.activeRunId === run.id)
+    const session = run.taskId ? null : shell.planSessions.find(s => s.activeRunId === run.id)
     return {
       id: run.id,
       ref: run.taskRef ?? (run.epicId ? 'Epic' : null),
@@ -91,7 +79,7 @@ const runLines = (agent: Agent) => runs.value
       elapsed: elapsed(run.startedAt ?? run.queuedAt, now.value)
     }
   })
-const agents = computed(() => state.value.agents
+const agents = computed(() => shell.agents
   .map(agent => ({ agent, lines: runLines(agent), working: isWorking(agent) }))
   // Working agents first, in the shell's order otherwise
   .sort((a, b) => Number(b.working) - Number(a.working)))
@@ -105,10 +93,10 @@ const agents = computed(() => state.value.agents
     >
       <div class="flex flex-wrap items-center gap-1.5 text-sm text-muted">
         <span
-          :class="['size-2 rounded-full', state.runner?.online ? 'bg-success' : 'bg-error']"
+          :class="['size-2 rounded-full', shell.runner?.online ? 'bg-success' : 'bg-error']"
           aria-hidden="true"
         />
-        {{ (state.runner?.runners.length ?? 0) > 1 ? `${state.runner!.runners.filter(r => r.online).length} of ${state.runner!.runners.length} runners online` : `Runner ${state.runner?.online ? 'online' : 'offline'}` }} ·
+        {{ (shell.runner?.runners.length ?? 0) > 1 ? `${shell.runner!.runners.filter(r => r.online).length} of ${shell.runner!.runners.length} runners online` : `Runner ${shell.runner?.online ? 'online' : 'offline'}` }} ·
         <UDropdownMenu :items="projectItems.map(item => ({ label: item.label, onSelect: () => { projectId = item.value } }))">
           <UButton
             :label="projectItems.find(item => item.value === projectId)?.label ?? 'All projects'"
@@ -289,7 +277,7 @@ const agents = computed(() => state.value.agents
           </li>
         </ul>
         <p
-          v-if="state.loaded && agents.length === 0"
+          v-if="shell.loaded && agents.length === 0"
           class="text-sm text-muted"
         >
           No agents yet.

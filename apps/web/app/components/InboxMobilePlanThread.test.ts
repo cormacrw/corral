@@ -67,7 +67,7 @@ beforeEach(() => {
   vi.resetAllMocks()
   for (const [name, value] of Object.entries({ computed, ref, watch, onMounted, onBeforeUnmount, provide })) vi.stubGlobal(name, value)
   vi.stubGlobal('useRouter', () => ({ replace: mocks.replace }))
-  vi.stubGlobal('useLive', () => ({ state: ref({ loaded: true, runner: { online: true } }) }))
+  vi.stubGlobal('useShell', () => ({ loaded: true, runner: { online: true } }))
   vi.stubGlobal('usePlanThreads', () => ({ remove: mocks.remove, add: mocks.add }))
   vi.stubGlobal('useTaskFlyout', () => ({ plan: ref(false), ref: ref(null), epic: ref(null), close: vi.fn(), openPlan: vi.fn() }))
   vi.stubGlobal('useToast', () => ({ add: mocks.toast }))
@@ -147,7 +147,7 @@ describe('a task opened from the mobile plan sheet', () => {
     vi.stubGlobal('useDevice', () => ({ isMobile: computed(() => true) }))
     vi.stubGlobal('useTaskFlyout', useTaskFlyout)
     vi.stubGlobal('useLocalStorage', <T>(_key: string, fallback: T) => ref(fallback))
-    vi.stubGlobal('useLive', () => ({ state: ref({ loaded: true, runner: { online: true } }), subscribe: () => () => {} }))
+    vi.stubGlobal('useShell', () => ({ loaded: true, runner: { online: true } }))
     mocks.session.mockResolvedValue({ plans: [planned], messages: [] })
     const stub = (tag = 'span') => defineComponent({ props: ['label'], setup: p => () => h(tag, p.label) })
     const w = mount(InboxMobilePlanThread, {
