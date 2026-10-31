@@ -6,13 +6,21 @@
 #
 # First start:
 #   cp .env.docker.example .env
-#   docker compose up -d --build
+#   scripts/deploy/compose.sh up -d --build     # stamps the images, unlike plain docker compose
 #   docker exec -it corral-runner claude          # sign in to Claude, once
 #   docker exec -it corral-runner codex login --device-auth   # sign in to Codex, once
 #   docker exec -it corral-runner gh auth login   # sign in to GitHub, once
 # The logins persist on volumes. Corral never reads them (D2).
 
 name: corral
+
+# Without a size limit the default driver grows until the disk is full, which
+# takes Postgres down
+x-logging: &logging
+  driver: local
+  options:
+    max-size: 10m
+    max-file: "5"
 
 services:
   web:
@@ -22,11 +30,22 @@ services:
       args:
         CORRAL_SERVER_URL: http://server:4100
     container_name: corral-web
+    # Not service_healthy: Compose would wait with no limit on a crash-looping
+    # server, holding the deploy lock. The deploy's --wait has a timeout.
     depends_on:
       - server
     ports:
       # Point the Cloudflare Tunnel at this port; put Cloudflare Access in front
       - "${CORRAL_WEB_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    # Not measured yet: well above the estimate in architecture.md
+    mem_limit: ${CORRAL_WEB_MEMORY:-512m}
+    logging: *logging
     restart: unless-stopped
 
   server:
@@ -52,6 +71,16 @@ services:
       - "${CORRAL_RUNNER_BIND_ADDRESS:-127.0.0.1}:${CORRAL_RUNNER_PORT:-4200}:4200"
     volumes:
       - server-data:/data/server
+    # The API answers only once migrations have run, hence the long start period
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4100/api/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    # Not measured yet: well above the estimate in architecture.md
+    mem_limit: ${CORRAL_SERVER_MEMORY:-1g}
+    logging: *logging
     restart: unless-stopped
 
   runner:
@@ -92,6 +121,7 @@ services:
     mem_limit: ${CORRAL_RUNNER_MEMORY:-6g}
     # Headless Chromium needs more shared memory than Docker's default
     shm_size: 1g
+    logging: *logging
     restart: unless-stopped
 
   postgres:
@@ -108,6 +138,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    # Time to flush to disk; killed mid-shutdown it has to recover on the next start
+    stop_grace_period: 60s
+    logging: *logging
     restart: unless-stopped
 
 volumes:

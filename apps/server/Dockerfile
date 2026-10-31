@@ -14,7 +14,9 @@ COPY packages/core/package.json packages/core/
 COPY packages/contracts/package.json packages/contracts/
 COPY packages/db/package.json packages/db/
 COPY apps/server/package.json apps/server/
-RUN pnpm install --frozen-lockfile --prod --filter @corral/server...
+# The store is a BuildKit cache: a lockfile change downloads only what changed
+RUN --mount=type=cache,id=corral-pnpm,target=/pnpm/store,sharing=locked \
+  pnpm install --store-dir /pnpm/store --frozen-lockfile --prod --filter @corral/server...
 
 COPY packages/core packages/core
 COPY packages/contracts packages/contracts
@@ -22,8 +24,6 @@ COPY packages/db packages/db
 COPY apps/server apps/server
 
 # Everything environment-specific is configuration (D12); see docker-compose.yml
-ARG CORRAL_BUILD_SHA=development
-ENV CORRAL_BUILD_SHA=$CORRAL_BUILD_SHA
 ENV NODE_ENV=production
 ENV CORRAL_SERVER_HOST=0.0.0.0
 ENV CORRAL_SERVER_PORT=4100
@@ -32,6 +32,9 @@ ENV CORRAL_SERVER_DATA_DIR=/data/server
 # as root and the server can't write blobs or transcripts
 RUN mkdir -p /data/server && chown node:node /data/server
 VOLUME ["/data/server"]
+# Last, so a new SHA changes no layer that needs rebuilding
+ARG CORRAL_BUILD_SHA=development
+ENV CORRAL_BUILD_SHA=$CORRAL_BUILD_SHA
 EXPOSE 4100
 USER node
 WORKDIR /app/apps/server

@@ -16,7 +16,9 @@ COPY packages/tsconfig packages/tsconfig
 COPY packages/core/package.json packages/core/
 COPY packages/contracts/package.json packages/contracts/
 COPY apps/web/package.json apps/web/
-RUN pnpm install --frozen-lockfile --filter @corral/web...
+# The store is a BuildKit cache: a lockfile change downloads only what changed
+RUN --mount=type=cache,id=corral-pnpm,target=/pnpm/store,sharing=locked \
+  pnpm install --store-dir /pnpm/store --frozen-lockfile --filter @corral/web...
 
 COPY packages/core packages/core
 COPY packages/contracts packages/contracts

@@ -18,11 +18,15 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 # The agent CLIs (D2): installed here, logged in by the user, never configured by Corral.
-RUN npm install -g @anthropic-ai/claude-code @openai/codex
-
-# The agent browser (D4) agents capture evidence with. It drives the Debian
-# Chromium above instead of downloading its own.
-RUN npm install -g agent-browser
+# The agent browser (D4) agents capture evidence with drives the Debian Chromium
+# above instead of downloading its own. Pinned, because this layer is cached
+# forever otherwise and each machine keeps whatever it first built; to update,
+# change a version here.
+ARG CLAUDE_CODE_VERSION=2.1.316
+ARG CODEX_VERSION=0.166.0
+ARG AGENT_BROWSER_VERSION=0.41.0
+RUN npm install -g @anthropic-ai/claude-code@$CLAUDE_CODE_VERSION @openai/codex@$CODEX_VERSION agent-browser@$AGENT_BROWSER_VERSION \
+  && npm cache clean --force
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 
 WORKDIR /app
@@ -32,7 +36,9 @@ COPY packages/tsconfig/package.json packages/tsconfig/
 COPY packages/core/package.json packages/core/
 COPY packages/contracts/package.json packages/contracts/
 COPY apps/runner/package.json apps/runner/
-RUN pnpm install --frozen-lockfile --prod --filter @corral/runner...
+# The store is a BuildKit cache: a lockfile change downloads only what changed
+RUN --mount=type=cache,id=corral-pnpm,target=/pnpm/store,sharing=locked \
+  pnpm install --store-dir /pnpm/store --frozen-lockfile --prod --filter @corral/runner...
 
 COPY packages/core packages/core
 COPY packages/contracts packages/contracts
@@ -40,8 +46,6 @@ COPY packages/contracts packages/contracts
 # codex skill directories at startup (they're on volumes, so it can't be baked in)
 COPY apps/runner apps/runner
 
-ARG CORRAL_BUILD_SHA=development
-ENV CORRAL_BUILD_SHA=$CORRAL_BUILD_SHA
 ENV NODE_ENV=production
 ENV CORRAL_RUNNER_DATA_DIR=/data/runner
 ENV CORRAL_RUNNER_NAME=home-server
@@ -58,6 +62,9 @@ RUN useradd --create-home --uid 1001 runner \
   && mkdir -p /data/runner /home/runner/.claude /home/runner/.codex /home/runner/.config/gh \
   && chown -R runner:runner /data/runner /home/runner
 VOLUME ["/data/runner", "/home/runner/.claude", "/home/runner/.codex", "/home/runner/.config/gh"]
+# Last, so a new SHA changes no layer that needs rebuilding
+ARG CORRAL_BUILD_SHA=development
+ENV CORRAL_BUILD_SHA=$CORRAL_BUILD_SHA
 USER runner
 WORKDIR /app/apps/runner
 CMD ["node", "src/index.ts"]

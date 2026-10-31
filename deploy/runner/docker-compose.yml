@@ -1,8 +1,13 @@
 # Run from the checkout root with:
-# export CORRAL_BUILD_SHA=$(git rev-parse HEAD)
-# docker compose --env-file deploy/runner/.env -f deploy/runner/docker-compose.yml up -d --build
+# scripts/deploy/compose.sh --env-file deploy/runner/.env -f deploy/runner/docker-compose.yml up -d --build
 # Separate project name keeps these volumes independent of the home-server stack.
 name: corral-remote-runner
+
+x-logging: &logging
+  driver: local
+  options:
+    max-size: 10m
+    max-file: "5"
 
 services:
   runner:
@@ -33,6 +38,7 @@ services:
       - gh-config:/home/runner/.config/gh
     mem_limit: ${CORRAL_RUNNER_MEMORY:-6g}
     shm_size: 1g
+    logging: *logging
     restart: unless-stopped
 
 volumes:
