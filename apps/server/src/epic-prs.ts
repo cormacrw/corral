@@ -8,6 +8,7 @@ import type { OrchestratorDeps } from './orchestrator.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import { getEpic } from './epics.ts'
 import { fileArtifacts, workNotes } from './inbox-changes.ts'
+import { publishInvalidatedEpics, type InvalidatedEpics } from './epic-review-state.ts'
 import { runEndValues } from './run-lifecycle.ts'
 import { listEvidence } from './runs.ts'
 import { thumbnailUrl } from './projects.ts'
@@ -157,6 +158,7 @@ export class EpicPullRequests {
   // the epic branch, so its run rebases and force-pushes that branch. When
   // the task is Merged, the head has moved and integration review starts over.
   private async handOffRebase(epicId: string, headSha: string, actor: Actor) {
+    const invalidatedEpics: InvalidatedEpics = new Map()
     const taskId = await this.d.db.transaction(async (tx) => {
       const [found] = await tx.select().from(epics).where(eq(epics.id, epicId))
       if (!found) throw notFound()
@@ -166,13 +168,13 @@ export class EpicPullRequests {
       const target = project.defaultBranch
       const files = epic.conflictFiles?.length ? epic.conflictFiles.join(', ') : 'the files git reports'
       const text = `Rebase the epic branch ${epic.branch} onto origin/${target}: git fetch origin && git rebase origin/${target}. Never merge ${target} in. Resolve the conflicts in ${files}, keeping both sides' intent and never reverting what ${target} just merged. No feature changes. Run the project's gates, then report pr_updated; Corral force-pushes the epic branch with --force-with-lease, and no separate PR is opened.`
-      const id = await createTask(tx, project, { type: 'task', title: `Rebase epic: ${epic.title}`.slice(0, 200), description: paragraph(text), epicId: epic.id, acceptanceCriteria: [`${epic.branch} is rebased onto origin/${target} with no merge commits, and the conflicts in ${files} are resolved keeping both sides' intent`] }, actor, { epicFix: true })
+      const id = await createTask(tx, project, { type: 'task', title: `Rebase epic: ${epic.title}`.slice(0, 200), description: paragraph(text), epicId: epic.id, acceptanceCriteria: [`${epic.branch} is rebased onto origin/${target} with no merge commits, and the conflicts in ${files} are resolved keeping both sides' intent`] }, actor, { epicFix: true, invalidatedEpics })
       await tx.update(tasks).set({ branch: epic.branch }).where(eq(tasks.id, id))
       await appendAudit(tx, { projectId: project.id, actor }, auditEvent('epic.pr', { epicId, event: 'rebase_handed_off', headSha }))
       return id
     })
     this.d.events.publish({ type: 'task.created', task: await loadTask(this.d.db, taskId) })
-    await this.publish(epicId)
+    await publishInvalidatedEpics(this.d.db, this.d.events, invalidatedEpics)
     return { ok: true }
   }
 
