@@ -1,16 +1,17 @@
+import { databaseFixture } from '@corral/db/testing'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { EpicReviewItem, Inbox, RunJob } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
-import { afterAll, beforeAll, expect, it } from 'vitest'
+import { afterAll, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './test-runner.ts'
 import { complete } from './epic-prs.ts'
 
 let t: TestApp
 let runner: FakeRunner
-beforeAll(async () => {
+databaseFixture('postgres', async () => {
   t = await createTestApp('postgres', { listen: true })
   await t.db.update(schema.agents).set({ concurrency: 20, wakeIntervalSeconds: null })
   await t.db.update(schema.agents).set({ paused: true }).where(eq(schema.agents.role, 'developer'))

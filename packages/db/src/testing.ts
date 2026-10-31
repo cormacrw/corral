@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import pg from 'pg'
+import { beforeAll, beforeEach, type TestContext } from 'vitest'
 import { openDatabase, type DatabaseHandle } from './client.ts'
+import { attemptAll, operationError, runAll } from './failures.ts'
 
 // A fresh, migrated, throwaway database for one test file.
 //
@@ -17,32 +19,63 @@ export async function createTestDatabase(driver: 'pglite' | 'postgres'): Promise
   if (!adminUrl) return null
 
   const name = `corral_test_${randomUUID().replaceAll('-', '')}`
-  await withAdmin(adminUrl, admin => admin.query(`create database ${name}`))
-  const url = new URL(adminUrl)
-  url.pathname = `/${name}`
+  // Wait for pool sockets to disconnect; FORCE can emit uncaught 57P01 errors.
+  const drop = () => withAdmin(
+    adminUrl,
+    `Dropping test database ${name}`,
+    admin => admin.query(`drop database if exists ${name}`)
+  )
 
-  const handle = await openDatabase({ driver: 'postgres', url: url.href })
-  return {
-    db: handle.db,
-    async close() {
-      await handle.close()
-      // pg.Pool.end resolves before every client's socket has finished closing.
-      // Let Postgres wait for those disconnects; FORCE can kill an ending client
-      // and emit an uncaught 57P01 error after all assertions have passed.
-      await withAdmin(adminUrl, admin => admin.query(`drop database if exists ${name}`))
+  // Only this run's generated database is ever dropped, and only once it exists
+  let created = false
+  try {
+    const url = new URL(adminUrl)
+    url.pathname = `/${name}`
+    await withAdmin(adminUrl, `Creating test database ${name}`, async (admin) => {
+      await admin.query(`create database ${name}`)
+      created = true
+    })
+
+    const handle = await openDatabase({ driver: 'postgres', url: url.href })
+    return {
+      db: handle.db,
+      close: () => runAll(`Closing test database ${name}`, adminUrl, [() => handle.close(), drop])
     }
+  } catch (error) {
+    throw operationError(
+      `Initialising test database ${name}`,
+      error,
+      await attemptAll(created ? [drop] : []),
+      adminUrl
+    )
   }
 }
 
-// Whether the Postgres-only tests can run here
-export const postgresAvailable = Boolean(process.env.CORRAL_DATABASE_URL)
-
-async function withAdmin(url: string, fn: (client: pg.Client) => Promise<unknown>): Promise<void> {
-  const client = new pg.Client({ connectionString: url })
-  await client.connect()
-  try {
-    await fn(client)
-  } finally {
-    await client.end()
+// Read at hook/test execution, never at import time. A configured but broken
+// database must fail, rather than silently skip (D14).
+export function requireDatabase(driver: 'pglite' | 'postgres', context: Pick<TestContext, 'skip'>): void {
+  if (driver === 'postgres' && !process.env.CORRAL_DATABASE_URL) {
+    context.skip('Postgres requires CORRAL_DATABASE_URL (D14)')
   }
+}
+
+// Suite setup stays once per suite; skipping happens in a test hook so Vitest
+// reports each unavailable test as skipped rather than passed or failed.
+export function databaseFixture(driver: 'pglite' | 'postgres', setup: () => Promise<void>): void {
+  beforeAll(async () => {
+    if (driver === 'postgres' && !process.env.CORRAL_DATABASE_URL) return
+    await setup()
+  })
+  beforeEach(({ skip }) => requireDatabase(driver, { skip }))
+}
+
+async function withAdmin(url: string, operation: string, fn: (client: pg.Client) => Promise<unknown>): Promise<void> {
+  const client = new pg.Client({ connectionString: url })
+  await runAll(operation, url, [
+    async () => {
+      await client.connect()
+      await fn(client)
+    },
+    () => client.end()
+  ])
 }

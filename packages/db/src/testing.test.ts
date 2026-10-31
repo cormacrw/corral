@@ -1,9 +1,10 @@
 import { sql } from 'drizzle-orm'
 import pg from 'pg'
 import { expect, it } from 'vitest'
-import { createTestDatabase } from './testing.ts'
+import { createTestDatabase, requireDatabase } from './testing.ts'
 
-it('waits for a disconnect instead of terminating a closing database client', async () => {
+it('waits for a disconnect instead of terminating a closing database client', async (context) => {
+  requireDatabase('postgres', context)
   const handle = await createTestDatabase('postgres')
   if (!handle) throw new Error('Postgres test setup is required')
   const result = await handle.db.execute(sql`select current_database() as name`) as { rows: { name: string }[] }
