@@ -162,7 +162,7 @@ export class PlanService {
   }
 
   // An agent may stop an empty thread, but discarding human-owned work
-  // requires the human's confirmed close flow (D11/D27).
+  // requires the human's confirmed close flow (D11/D29).
   async #assertCloseAllowed(db: Executor, sessionId: string, actor: Actor): Promise<void> {
     if (actor.kind === 'human') return
     const [proposed] = await db.select({ id: plans.id }).from(plans)
