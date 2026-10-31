@@ -25,7 +25,7 @@ const router = useRouter()
 // so quick changes (picking two options, typing) would otherwise build on a
 // stale query and drop one another.
 const filters = ref<BoardFilters>(filtersFromQuery(route.query))
-// The Tasks / Epics toggle is desktop-only (design/board.md). ?view= wins over
+// The Tasks / Epics toggle is shared across layouts. ?view= wins over
 // the view last used, and the URL's view counts as used.
 const lastView = useLocalStorage<BoardView>('corral.board.view', 'tasks')
 const view = ref(boardView(route.query.view, boardView(lastView.value, 'tasks')))
@@ -72,11 +72,9 @@ const epicOptions = computed(() => epics.value.map(id => ({ id, label: epicLabel
 // stays here after its tasks leave the Merged column.
 const liveEpics = computed(() => epicList.value.map(epic => epicWithLiveCounts(epic, all.value)))
 const onBoardEpics = computed(() => liveEpics.value.filter(epic => epicOnBoard(epic, all.value.filter(t => t.epicId === epic.id))))
-// The row above the task columns. The Epic filter applies.
-const boardEpics = computed(() => onBoardEpics.value.filter(epic => filters.value.epics.length === 0 || filters.value.epics.includes(epic.id)))
 // The Epics view: one card per epic, each in the one column its stage names
 const visibleEpics = computed(() => onBoardEpics.value.filter(epic => matchesEpicFilter(epic, filters.value)))
-const activeRuns = useQuery(computed(() => ({ ...runsQuery({ active: true }), enabled: view.value === 'epics' && !device.isMobile.value })))
+const activeRuns = useQuery(computed(() => ({ ...runsQuery({ active: true }), enabled: view.value === 'epics' })))
 const epicColumns = computed(() => {
   const staged = visibleEpics.value.map((epic) => {
     const stage = epicStage(epic, all.value.filter(t => t.epicId === epic.id && t.status !== 'draft' && t.status !== 'backlog'))
@@ -130,9 +128,11 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
       v-if="device.isMobile.value"
       v-model:search="search"
       v-model:filters="filters"
+      v-model:view="view"
+      :epic-columns="epicColumns"
+      :epic-total="visibleEpics.length"
       :columns="mobileColumns"
       :epics="epicOptions"
-      :board-epics="boardEpics"
       :agents="taskAgents"
       :total="visible.length"
       :all="all"
@@ -180,12 +180,6 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
           />
           <span class="ms-auto text-sm text-muted">{{ view === 'epics' ? `${visibleEpics.length} epics` : `${visible.length} tasks` }}</span>
         </div>
-
-        <BoardEpics
-          v-if="view === 'tasks' && boardEpics.length"
-          :epics="boardEpics"
-          class="border-b border-default px-4 py-2"
-        />
 
         <UAlert
           v-if="error"
