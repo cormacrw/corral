@@ -211,7 +211,7 @@ describe('merge orchestrator and human controls', () => {
     expect(await getTask(project, task.number)).toMatchObject({ status: 'in_progress', reviewRounds: task.reviewRounds })
     expect(await runner.call(rebase.runId, rebase.leaseEpoch, 'report_outcome', { outcome: 'pr_updated', note: 'Resolved conflicts', summary: 'Resolved', headSha: 'rebased' })).toMatchObject({ ok: false, error: expect.stringContaining('pr_rebased') })
     t.github.setBranch(project.repository, rebase.branch!, 'rebased')
-    expect(await runner.call(rebase.runId, rebase.leaseEpoch, 'report_outcome', { outcome: 'pr_rebased', note: 'Resolved conflicts', summary: 'Kept both changes in app.ts', headSha: 'rebased' })).toMatchObject({ ok: true })
+    expect(await runner.call(rebase.runId, rebase.leaseEpoch, 'report_outcome', { outcome: 'pr_rebased', review: 'needs_review', conflictedFiles: ['app.ts'], note: 'Resolved conflicts', summary: 'Kept both changes in app.ts', headSha: 'rebased' })).toMatchObject({ ok: true })
     expect(await taskRow(task.id)).toMatchObject({ status: 'agent_review', reviewRounds: task.reviewRounds, approvedHeadSha: 'abc123', headSha: 'rebased' })
     expect(await getTask(project, task.number)).toMatchObject({ status: 'agent_review', reviewRounds: task.reviewRounds })
     const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
@@ -231,7 +231,7 @@ describe('merge orchestrator and human controls', () => {
     await t.orchestrator.schedule()
     const fix = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
     expect(fix.prompt).not.toContain('rebase-only round')
-    expect(await runner.call(fix.runId, fix.leaseEpoch, 'report_outcome', { outcome: 'pr_rebased', note: 'Fixed merge failure', summary: 'Restored PR', headSha: 'fixed' }))
+    expect(await runner.call(fix.runId, fix.leaseEpoch, 'report_outcome', { outcome: 'pr_rebased', review: 'needs_review', conflictedFiles: ['app.ts'], note: 'Fixed merge failure', summary: 'Restored PR', headSha: 'fixed' }))
       .toMatchObject({ ok: false, error: expect.stringContaining('pr_opened or pr_updated') })
     t.github.setBranch(project.repository, fix.branch!, 'fixed')
     expect(await runner.call(fix.runId, fix.leaseEpoch, 'report_outcome', { outcome: 'pr_updated', note: 'Fixed merge failure', summary: 'Restored PR', headSha: 'fixed' }))

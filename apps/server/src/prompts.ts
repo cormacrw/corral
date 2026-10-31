@@ -1,4 +1,5 @@
 import { attachmentIdsInMarkdown, richTextToMarkdown } from '@corral/core'
+import type { RebaseCheckFailure } from './rebase-review.ts'
 
 // The task-specific part of each agent's prompt. Role instructions come
 // from the repo's .corral/agents/<role>.md, added by the runner (D13).
@@ -99,8 +100,11 @@ export interface ReviewTask extends PromptTask {
   previousFeedback: string | null
   // A spike's latest findings, which are what's under review
   findings?: string | null
+  rebaseReport?: { review: string | null, conflictedFiles: string[] | null } | null
   // The project's required CI checks: with none, the reviewer runs the gates
   requiredChecks: string[]
+  // The D24 conditions the server check found broken, when it ran
+  rebaseCheckFailures?: RebaseCheckFailure[]
 }
 
 // The design version under review (D20)
@@ -140,12 +144,26 @@ export function reviewerPrompt(task: ReviewTask & { underReview?: DesignUnderRev
   ].join('\n')
 }
 
+const REBASE_CHECK_CONDITIONS: Record<RebaseCheckFailure['condition'], string> = {
+  changes_outside_conflicts: 'The change in these files differs from the approved diff, or GitHub gave no patch to compare it by, but they are not in the developer\'s conflicted-file list',
+  project_docs_changed: 'These project docs changed on the base since approval'
+}
+
+function rebaseCheckSection(failures: RebaseCheckFailure[]): string {
+  if (failures.length === 0) return ''
+  return section('Server check failed', `The developer's choice didn't pass the server check, so this review decides. Look at these first:
+${failures.map(f => `- ${REBASE_CHECK_CONDITIONS[f.condition]}: ${f.files.map(file => `\`${file}\``).join(', ')}`).join('\n')}`)
+}
+
 // D24: review the resolution; the server carries the approved criteria forward.
 function rebaseReviewerPrompt(task: ReviewTask, agentName: string): string {
   return [
     `You are ${agentName}, the reviewer agent in Corral. Rebase review for ${task.ref}: ${task.title}.`,
     section('Rebase under review', `Previously approved head: ${task.approvedHeadSha}. New head: ${task.headSha}. Base branch: origin/${task.defaultBranch}.
+Developer review choice: ${task.rebaseReport?.review ?? '(not recorded)'}.
+Conflicted files: ${task.rebaseReport?.conflictedFiles?.join(', ') ?? '(not recorded)'}.
 This is a conflict check of approved work, excluded from the review-round cap.`),
+    rebaseCheckSection(task.rebaseCheckFailures ?? []),
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
     section('Acceptance criteria (previously approved)', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
     commentsSection(task),
@@ -157,7 +175,8 @@ This is a conflict check of approved work, excluded from the review-round cap.`)
 - Identify old-base and new-base, the base commits of the approved and rebased work (use git merge-base against origin/${task.defaultBranch}; inspect history to confirm them). Run \`git range-diff <old-base>..<approved> <new-base>..<new-head>\`, substituting the approved and new head SHAs above. Compare rewritten commits with the approved work; no feature changes are allowed.
 - Read the developer's conflict report. Check each conflicted hunk against the specific main/base commit that caused it, preserving both sides' intent without reverting newly merged work.
 - Inspect binding docs changed on the base since approval and check this branch against them. If a changed binding decision affects the criteria, report outcome "blocked" with the changed decision, affected criteria and reason for the human. Do not choose a side or rewrite the criteria.
-- If the resolution holds, report "approved" without criteria verdicts: the server copies the earlier approval's verdicts and notes onto the new head.
+- If the rebase changed something substantial, report outcome "blocked", explaining the substantial change and the affected criteria for the human.
+- If the resolution holds, report "approved" without criteria verdicts: the server copies the earlier approval's verdicts and notes onto the new head and the task returns to Ready to merge, because the human approved before the conflict.
 - If the resolution needs changes, report "changes_requested" with actionable feedback and a verdict for every criterion. This starts a normal counted revision.
 - Your summary becomes a short task comment: name the conflicted files and the verdict, explaining whether their resolutions hold. Do not repeat a per-criterion list in the summary or add_comment.
 - Always finish by calling \`report_outcome\`.`)
@@ -479,7 +498,7 @@ function rebaseDeveloperPrompt(task: PromptTask, agentName: string): string {
 - Check that \`git merge-tree --write-tree HEAD origin/${task.defaultBranch}\` is clean.
 - Do not push or use gh. Corral pushes with --force-with-lease.
 ${WORK_NOTE}
-- Report \`pr_rebased\` with a summary naming every conflicted file and how each was resolved, and a one-line note naming the conflicted files and their resolutions. If a human decision is needed, report stuck instead.
+- Report \`pr_rebased\` with \`conflictedFiles\`: a non-empty list of every file in which you resolved a conflict, and \`review\`: \`trivial\` only if the resolution just combines both sides with no new logic, renames or behaviour changes; otherwise choose \`needs_review\`. The server checks a \`trivial\` choice: if only the conflicted files changed and no project doc moved on the base, the approval carries over without a review. Anything else goes to Agent review. Include a summary naming every conflicted file and how each was resolved, and a one-line note naming the conflicted files and their resolutions. If a human decision is needed, report stuck instead.
 - Always finish by calling \`report_outcome\`.`),
     commentsSection(task)
   ].join('\n')

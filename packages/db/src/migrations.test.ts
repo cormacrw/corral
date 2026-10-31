@@ -53,7 +53,7 @@ describe('migrations', () => {
     const runs = (await db.execute(sql`select * from runs order by id`)).rows
     await migrate(migrationsFolder)
     expect((await db.execute(sql`select * from agents order by name`)).rows).toEqual(agents)
-    expect((await db.execute(sql`select * from runs order by id`)).rows).toEqual(runs.map(run => ({ ...run, timings: null })))
+    expect((await db.execute(sql`select * from runs order by id`)).rows).toEqual(runs.map(run => ({ ...run, timings: null, review: null, conflicted_files: null })))
     await db.execute(sql`insert into agents (name, role) values ('Iris', 'designer')`)
     expect((await db.execute(sql`select role from agents where name = 'Iris'`)).rows).toEqual([{ role: 'designer' }])
   })

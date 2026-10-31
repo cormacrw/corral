@@ -23,6 +23,21 @@ export interface CheckResult {
   url: string | null
 }
 
+// One file in a comparison. GitHub leaves `patch` out for binary and very
+// large files; `sha` is the file's blob on the head side.
+export interface ChangedFile {
+  filename: string
+  previousFilename?: string
+  status: string
+  sha: string
+  patch?: string
+}
+
+export interface Comparison {
+  mergeBase: string
+  files: ChangedFile[]
+}
+
 // The server's view of GitHub (D8: only the server decides PR, CI and merge
 // actions). The real implementation sends each call through the runner's
 // `gh` (R15); tests use FakeGitHub.
@@ -36,6 +51,9 @@ export interface GitHubClient {
   checks(repository: string, sha: string): Promise<CheckResult[]>
   // How many commits on `base` the commit `head` doesn't have
   behindBy(repository: string, base: string, head: string): Promise<number>
+  // Three-dot compare: the changes from the merge base of the two commits to
+  // `head`. Throws when GitHub can't give the complete file list.
+  compare(repository: string, base: string, head: string): Promise<Comparison>
   // Rebases the PR branch onto its base on GitHub (never merges the base
   // in); false on a conflict or when GitHub can't update it
   updateBranch(repository: string, pr: { number: number, nodeId: string }, expectedHeadSha: string): Promise<boolean>
@@ -78,6 +96,18 @@ function toPullRequest(raw: RawPull): PullRequest {
     mergeableState: raw.mergeable_state ?? null
   }
 }
+
+interface RawChangedFile {
+  filename: string
+  previous_filename?: string
+  status: string
+  sha: string
+  patch?: string
+}
+
+// GitHub lists at most this many files in a comparison, without saying it cut
+// the list short
+const MAX_COMPARE_FILES = 300
 
 interface GraphQLError {
   type?: string
@@ -165,6 +195,24 @@ export class RunnerGitHub implements GitHubClient {
   async behindBy(repository: string, base: string, head: string) {
     const result = await this.#call('GET', `/repos/${repository}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`)
     return (result.body as { behind_by: number }).behind_by
+  }
+
+  // One commit per page: only the files are needed, and they all come on page 1
+  async compare(repository: string, base: string, head: string) {
+    const result = await this.#call('GET', `/repos/${repository}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}?per_page=1`)
+    const body = result.body as { merge_base_commit: { sha: string }, files?: RawChangedFile[] }
+    const files = body.files ?? []
+    if (files.length >= MAX_COMPARE_FILES) throw new GitHubError(result.status, `Comparison ${base}...${head} has too many files to list completely`)
+    return {
+      mergeBase: body.merge_base_commit.sha,
+      files: files.map(f => ({
+        filename: f.filename,
+        ...(f.previous_filename !== undefined && { previousFilename: f.previous_filename }),
+        status: f.status,
+        sha: f.sha,
+        ...(f.patch !== undefined && { patch: f.patch })
+      }))
+    }
   }
 
   // GraphQL, because the REST endpoint can only merge the base in.

@@ -59,6 +59,10 @@ export type TaskEvent =
   // Agent review → Human review for spikes, designs or flagged tasks,
   // otherwise Ready to merge
   | { type: 'review_approved' }
+  // In progress or Agent review → Ready to merge: a rebase kept the earlier
+  // approval, so the human isn't asked again (D24). Human review instead when
+  // a criterion still needs a human check (D28).
+  | { type: 'approval_carried', humanCheckOpen?: boolean | undefined }
   // Human review → Approved for designs, Merged for spikes, Ready to merge otherwise
   | { type: 'human_approve' }
   // A human adds a new human-only check after agent approval.
@@ -97,6 +101,7 @@ export const TRANSITION_RULES: Readonly<Record<TaskEventType, Rule>> = {
   submit: { from: ['in_progress'], actors: ['server'] },
   changes_requested: { from: ['agent_review'], actors: ['server'] },
   review_approved: { from: ['agent_review'], actors: ['server'] },
+  approval_carried: { from: ['in_progress', 'agent_review'], actors: ['server'] },
   human_approve: { from: ['human_review'], actors: ['human'] },
   require_human_check: { from: ['ready_to_merge'], actors: ['server'] },
   ci_failed: { from: ['ready_to_merge'], actors: ['server'] },
@@ -208,7 +213,10 @@ export function transition(
     // an each_task epic (D23) or a human check (D27), and a design always goes
     // to one (D20). Spikes always go to a human to accept their findings (D19).
     case 'review_approved':
-      return ok({ ...task, ...(task.rebaseOnly && { rebaseOnly: false }), status: requiresHumanReview(task.type ?? 'task', task.humanReview) ? 'human_review' : 'ready_to_merge' })
+      return ok({ ...task, status: requiresHumanReview(task.type ?? 'task', task.humanReview) ? 'human_review' : 'ready_to_merge' })
+
+    case 'approval_carried':
+      return ok({ ...task, rebaseOnly: false, status: event.humanCheckOpen ? 'human_review' : 'ready_to_merge' })
 
     case 'require_human_check':
       return ok({ ...task, status: 'human_review' })
