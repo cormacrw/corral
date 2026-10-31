@@ -6,7 +6,7 @@ import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner, sleep } from './test-runner.ts'
 import { PM_WORKTREE_TTL } from './worktree-sweep.ts'
 
-const { auditLog, comments, planSessions, runs, tasks } = schema
+const { auditLog, comments, epics, planSessions, runs, tasks } = schema
 
 type SweepJob = Extract<Extract<ServerMessage, { type: 'job.request' }>['job'], { kind: 'sweep_worktrees' }>
 
@@ -77,6 +77,14 @@ describe('worktree sweep', () => {
 
     const job = await sweepJob(await connect())
     expect([...job.keepTaskIds].sort()).toEqual([...open].sort())
+  })
+
+  it('keeps every epic until its PR has merged', async () => {
+    const [open] = await t.db.insert(epics).values({ projectId: project.id, title: 'Open', createdBy: { kind: 'system', component: 'server' } }).returning()
+    await t.db.insert(epics).values({ projectId: project.id, title: 'Merged', mergeCommitSha: 'abc', createdBy: { kind: 'system', component: 'server' } })
+
+    const job = await sweepJob(await connect())
+    expect(job.keepEpicIds).toEqual([open!.id])
   })
 
   it('keeps Plan sessions that are recent or have a turn active, and no others', async () => {

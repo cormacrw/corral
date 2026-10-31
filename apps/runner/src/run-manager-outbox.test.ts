@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentExit, AgentRuntime, ParsedLine } from './agent-runtime.ts'
 import type { RunnerConfig } from './config.ts'
 import type { ServerConnection } from './connection.ts'
+import { git } from './exec.ts'
 import type { ToolHandler, ToolServer } from './mcp.ts'
 import { barePath } from './repos.ts'
 import { RunManager } from './run-manager.ts'
@@ -167,17 +168,21 @@ describe('RunManager with the server out of reach', () => {
   })
 
   it('waits on shutdown for a run that was already saving its work', async () => {
+    // Reached once the run has ended and is pushing its WIP commit
+    const pushing = join(dirname(dataDir), 'pushing')
+    const hook = join(barePath(dataDir, TEST_REPOSITORY), 'hooks', 'pre-push')
+    await writeFile(hook, `#!/bin/sh\ntouch '${pushing}'\nsleep 0.5\n`)
+    await chmod(hook, 0o755)
     const manager = await start()
-    const worktree = join(dataDir, 'worktrees', 'task-1')
-    await writeFile(join(worktree, 'feature.txt'), 'half done\n')
+    manager.handle({ type: 'run.lease', runId: 'r1', leaseEpoch: 1, validUntil: new Date(Date.now() + 240_000).toISOString() })
+    await writeFile(join(dataDir, 'worktrees', 'task-1', 'feature.txt'), 'half done\n')
     manager.handle({ type: 'run.stop', runId: 'r1', reason: 'Stopped by a human', keepWork: true })
-    await expect.poll(() => manager.activeRunCount()).toBe(1)
-    // The agent has gone and the run has ended, but git is still saving
-    await new Promise(resolve => setImmediate(resolve))
+    await expect.poll(() => stat(pushing).then(() => true, () => false), { timeout: 10_000 }).toBe(true)
+    expect(types()).not.toContain('run.ended')
 
     await manager.shutdown()
 
-    expect(sent.find(m => m.type === 'run.ended')).toMatchObject({ exit: { kind: 'stopped' } })
+    expect(sent.find(m => m.type === 'run.ended')).toMatchObject({ exit: { kind: 'stopped' }, wipSha: expect.stringMatching(/^[0-9a-f]{40}$/) })
   })
 
   it('does not let a shutdown wait for the outcome grace', async () => {
@@ -234,10 +239,11 @@ describe('RunManager with the server out of reach', () => {
     manager.stop('r1', 'timed_out', '60 s')
     await expect.poll(() => types(), { timeout: 10_000 }).toContain('run.ended')
 
-    expect(sent.find(m => m.type === 'run.ended')).toMatchObject({ wipSha: null })
+    // Nothing was committed over the push: the file is still uncommitted
+    const status = await git(['status', '--porcelain'], { cwd: join(dataDir, 'worktrees', 'task-1') })
+    expect(status.stdout).toContain('feature.txt')
     await writeFile(release, '')
     expect(await report).toEqual({ ok: false, error: 'This run is over. Stop working.' })
     expect(types()).not.toContain('tool.call')
-    await stat(join(dataDir, 'worktrees', 'task-1', 'feature.txt'))
   })
 })

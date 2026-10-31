@@ -233,16 +233,17 @@ describe('runner update status on the wire', () => {
   })
 
   it('keeps backing off while sockets open and close without a welcome', async () => {
+    // The top of the jitter range: each wait is the whole backoff
+    const jitter = vi.spyOn(Math, 'random').mockReturnValue(1)
     const delays = vi.spyOn(globalThis, 'setTimeout')
     try {
       await start(false, socket => socket.close(1011))
-      await vi.waitFor(() => expect(received.filter(m => m.type === 'hello').length).toBeGreaterThanOrEqual(2), { timeout: 4000 })
+      await vi.waitFor(() => expect(received.filter(m => m.type === 'hello').length).toBeGreaterThanOrEqual(3), { timeout: 6000 })
       connection.close()
-      // Doubled from 1 s, so the second wait can pass what the first could not
-      const retries = delays.mock.calls.flatMap(([, ms]) => (ms ?? 0) >= 500 && (ms ?? 0) <= 2000 ? [ms!] : [])
-      expect(retries.length).toBeGreaterThanOrEqual(2)
+      expect(delays.mock.calls.flatMap(([, ms]) => ms === 1000 || ms === 2000 ? [ms] : [])).toEqual([1000, 2000])
     } finally {
       delays.mockRestore()
+      jitter.mockRestore()
     }
   })
 
