@@ -6,7 +6,7 @@
 
 ## Purpose
 
-One place for everything an agent needs you to decide, from every project, with the means to resolve it right there (D11). It works like an email client: a list on the left, the selected message on the right, and an action tray at the bottom.
+One place for everything an agent needs you to decide, from every project, with the means to resolve it right there (D11). It works like an email client: a list on the left, the selected message on the right, with its actions and a composer.
 
 Items come from two places:
 
