@@ -106,7 +106,7 @@ Plan, Inbox Plan panes, session navigation, drafts and finished turn steps now r
 
 ## Inbox
 
-The page reads `useHeldInbox()`, and the selected task, evidence and reviews through queries keyed by the selection, so a revisit shows cached data and no response can land on the wrong item. `TaskDetail` shows a task already in the cache while it loads its own copy.
+`pages/inbox.vue` reads `useHeldInbox()` once and shares it through `useInboxView`, so the list and the selected item hold and release together. The item page reads the selected task, evidence and reviews through queries keyed by the selection, so a revisit shows cached data and no response can land on the wrong item. `TaskDetail` shows a task already in the cache while it loads its own copy.
 
 A mutation that resolves the selected item spreads `holdsInbox` into `useMutation`, on the page or in a child. While one runs, the list stays as it was when it started: events still update the cache, but a removed row can't move the selection. A failure lets go. On success the page takes the same position from the fresh list with `moveToNext`, then releases, so nothing shows between the two. It prefetches the next task first, for at most a second, and does nothing if the selection changed meanwhile. Changing selection also releases. The `holdsInbox` key lives on the Inbox's `useMutation` calls, not on the shared definitions, so approving from Plan holds nothing.
 
