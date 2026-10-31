@@ -21,12 +21,12 @@ export function vitalRating(metric: keyof PerfVitals, value: number): VitalRatin
   return value <= poor ? 'needs-improvement' : 'poor'
 }
 
-export function formatMs(ms: number | null): string {
+export function formatLatency(ms: number | null): string {
   if (ms === null) return '–'
   if (ms >= 1000) return `${(ms / 1000).toFixed(2)} s`
   return `${ms < 10 ? Number(ms.toFixed(1)) : Math.round(ms)} ms`
 }
 
 export function formatVital(metric: keyof PerfVitals, value: number): string {
-  return metric === 'CLS' ? value.toFixed(2) : formatMs(value)
+  return metric === 'CLS' ? value.toFixed(2) : formatLatency(value)
 }

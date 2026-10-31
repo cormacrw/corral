@@ -1,6 +1,6 @@
 # Request performance samples
 
-Compose forwards both slow-warning thresholds from `.env` to the server, defaulting to 500 ms for requests and 200 ms for queries. Migration `0040_sad_rachel_grey` adds the complete performance table after main’s 0039 without changing existing migrations. The table lives in `packages/db/src/schema/performance.ts`, exported by the shared schema index.
+Compose forwards both slow-warning thresholds from `.env` to the server, defaulting to 500 ms for requests and 200 ms for queries. An additive migration adds the complete performance table without changing existing migrations. The table lives in `packages/db/src/schema/performance.ts`, exported by the shared schema index.
 
 The API timing middleware in `apps/server/src/performance.ts` measures handler time with the monotonic clock and sets `Server-Timing: total;dur=<milliseconds>, db;dur=<milliseconds>;desc="N queries"` on all API responses, including errors, health and SSE handshakes. This measures response preparation, not body transfer or the lifetime of a stream.
 
