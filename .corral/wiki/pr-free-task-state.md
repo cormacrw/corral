@@ -131,8 +131,11 @@ build comes back as `failed`. Anything else counts, one per pass, and three fail
 the task. A push git itself refused looks the same as any other refusal and counts.
 
 Pausing the task or project stops `#prepare` and the gate before the push, leaving
-the operation where it is to carry on later. Reconcile still runs: it only reads,
-and a commit already on the branch is a fact. A task sent back during its push lands
+the operation where it is to carry on later. Unknown results still reconcile: it
+only reads, and a commit already on the branch is a fact. A running candidate at
+the paused gate skips remote fetches on subsequent ticks. On resume its push
+still compares the expected epic head; after a restart it reconciles first.
+A task sent back during its push lands
 anyway: the commit stands, the task stays open and gets a comment.
 
 The kill switch and update hold (`stopped`) are held the same way, but read again
@@ -146,3 +149,17 @@ re-enters the gate with the same candidate.
 Dependents: `claim.ts` treats a dependency on a build task in another epic as met
 only when that epic is done, and `publishEpicDependents` wakes those tasks when the
 epic PR merges. Same-epic dependents wake on Merged through `publishDependents`.
+
+## Wait reasons and activity (COR-356)
+
+`holdsAcrossEpics` in `epic-review-state.ts` shares the claim rule with task
+serialization. A Merged task/bug dependency in another unfinished epic adds that
+epic to `Task.waitingOnEpics`, including for standalone dependents. Same-epic
+dependencies, spikes, deleted tasks and finished epics do not add a wait. An
+unmerged dependency keeps its task-level wait reason. Epic names are deduplicated
+with explicit epic dependencies. Board notes, task properties and the overview
+count all read this field.
+
+Inbox CI failures refer to the commit when there is no PR; conflicts name the
+epic branch and head changes name the task branch. Tasks with PRs keep their PR
+wording.
