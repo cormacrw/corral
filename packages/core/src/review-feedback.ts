@@ -76,11 +76,13 @@ export function feedbackPoints(feedback: string): string[] {
   return points.length > 0 ? points : [feedback.trim()]
 }
 
+export const FIX_TITLE_PREFIX = 'Fix integration: '
+
 // A fix task's title: the first sentence of the feedback's first point
 export function feedbackFixTitle(feedback: string): string {
   const [sentence = ''] = feedbackPoints(feedback)[0]!.split(/(?<=[.!?])\s/)
   const title = sentence.replace(/[.!;:,]+$/, '')
-  return `Fix integration: ${title.length > FIX_TITLE_LENGTH ? `${title.slice(0, FIX_TITLE_LENGTH - 1).trimEnd()}…` : title}`
+  return `${FIX_TITLE_PREFIX}${title.length > FIX_TITLE_LENGTH ? `${title.slice(0, FIX_TITLE_LENGTH - 1).trimEnd()}…` : title}`
 }
 
 // "1 criterion met; 2 criteria need a human check", for a verdict with human checks

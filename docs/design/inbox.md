@@ -171,6 +171,7 @@ An epic PR in human review and an epic PR rebase conflict have their own layout 
 
 - **Items:** id, project, task ref, type (question / human review / blocked / failed / activity / plan thread), sender agent and role, time, subject, preview, body, unread, resolved outcome.
 - **Type-specific fields:** PR, checks, criteria with evidence, positions, suggested answers. A plan thread has the session id, title, status (needs approval / question / none with an unread reply), `activeRunId`, preview, `reply` and the time it started waiting; its question and plan come from the Plan session endpoints.
+- **What changed since the last review:** a needs-you task or epic item carries `since` and `newArtifacts`. `since` is null until the human has acted, then holds when they last requested changes or answered, what they said, the developers' one-line notes after it, and an epic's fix tasks. `newArtifacts` lists the files added after that action, plus a design's latest version with its preview link, and on an epic each file names its task. Before any action everything is new. Written (`note`) evidence is never listed. Actions and artifacts are compared by time, because review rounds reset when a task is resolved.
 - **Counts per filter.**
 - New items stream in over SSE; plan threads follow `plan.session` events.
 

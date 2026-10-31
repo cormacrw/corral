@@ -115,6 +115,7 @@ export interface AuditView {
   of?: number
   version?: number
   summary?: string
+  feedback?: string
 }
 
 // Reads a stored detail, whatever its age. `event` was written as a name by
@@ -122,7 +123,7 @@ export interface AuditView {
 // the target status only inside it. Rows are never rewritten, so both stay.
 export function readAudit(detail: unknown): AuditView {
   const stored = (detail ?? {}) as Omit<AuditView, 'event' | 'to'> & { event?: unknown, to?: string }
-  const event = typeof stored.event === 'object' ? stored.event as { type?: string, to?: string } | null : null
+  const event = typeof stored.event === 'object' ? stored.event as { type?: string, to?: string, feedback?: string } | null : null
   const name = typeof stored.event === 'string' ? stored.event : event?.type ?? null
-  return { ...stored, event: name, to: event?.to ?? stored.to ?? null }
+  return { ...stored, event: name, to: event?.to ?? stored.to ?? null, ...(event?.feedback && { feedback: event.feedback }) }
 }
