@@ -28,7 +28,3 @@ export const patchProfile = defineMutation<Profile, PatchProfileInput>({
   mutationFn: input => api.me.patch(input),
   invalidates: [keys.profile()]
 })
-export const resumeAll = defineMutation<GlobalStatus>({
-  mutationFn: () => api.resumeAll(),
-  invalidates: [keys.status()]
-})
