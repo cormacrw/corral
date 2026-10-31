@@ -9,10 +9,14 @@ import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import pg from 'pg'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { openDatabase, type DatabaseLocation } from './client.ts'
 import { requireDatabase } from './testing.ts'
 
 const migrationsFolder = join(import.meta.dirname, '..', 'migrations')
+
+// Both drivers return `rows` from execute; only this type says so
+type RowsDatabase = ReturnType<typeof drizzle>
 
 interface Journal { entries: { idx: number, tag: string }[] }
 
@@ -39,6 +43,36 @@ describe('migrations', () => {
   it.for([
     { driver: 'pglite' as const },
     { driver: 'postgres' as const }
+  ])('0043 diagnoses historical messages while preserving reads on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+    requireDatabase(driver, context)
+    const before = await migrationsBefore('0043_blushing_roughhouse')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const legacy = { rows: [] as Record<string, unknown>[] }
+    const { db, warnings } = await startServerOn(driver, before, async (db) => {
+      await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('Test app', 'test-app', 'TA', 'cormacrw/test-app', 'main')`)
+      await db.execute(sql`insert into plan_sessions (project_id, title, created_by) select id, 'History', '{"kind":"system","component":"server"}'::jsonb from projects`)
+      await db.execute(sql`insert into plan_messages (session_id, role, kind, text, recommendation)
+        select id, 'human', 'question', 'Legacy human question', null from plan_sessions
+        union all select id, 'pm', 'legacy-kind', 'Legacy PM kind', null from plan_sessions
+        union all select id, 'pm', 'message', 'Legacy recommendation', 'Keep this' from plan_sessions`)
+      legacy.rows = (await db.execute(sql`select * from plan_messages order by id`)).rows
+    })
+    expect((await db.execute(sql`select * from plan_messages order by id`)).rows).toEqual(legacy.rows)
+    // One warning: routine notices stay out of the server's output
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('Database warning: Historical plan message violations')
+    for (const row of legacy.rows) {
+      expect(warnings[0]).toContain(String(row.id))
+      expect(warnings[0]).toContain(String(row.session_id))
+    }
+    expect((await db.execute(sql`select convalidated from pg_constraint where conname in ('plan_messages_role_kind', 'plan_messages_question_fields')`)).rows)
+      .toEqual([{ convalidated: false }, { convalidated: false }])
+    await expect(db.execute(sql`update plan_messages set text = 'Changed'`)).rejects.toThrow()
+  })
+
+  it.for([
+    { driver: 'pglite' as const },
+    { driver: 'postgres' as const }
   ])('0049 reports all ownership violations without rewriting rows on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
     requireDatabase(driver, context)
     const before = await migrationsBefore('0049_odd_malcolm_colcord')
@@ -53,6 +87,7 @@ describe('migrations', () => {
     await db.execute(sql`insert into plans (project_id, session_id, version, title) select p.id, s.id, 1, 'Plan' from projects p, plan_sessions s where p.slug = 'a'`)
     await db.execute(sql`insert into acceptance_criteria (task_id, position, text) select id, 0, 'Criterion' from tasks where title = 'B'`)
     await db.execute(sql`insert into evidence (task_id, criterion_id, run_id, round, kind, note, size) select t.id, c.id, r.id, 0, 'note', 'Proof', 0 from tasks t, acceptance_criteria c, runs r where t.title = 'A'`)
+    await db.execute(sql`insert into evidence (criterion_id, run_id, round, kind, note, size) select c.id, r.id, 0, 'note', 'Null owner', 0 from acceptance_criteria c, runs r`)
     const snapshot = async () => (await db.execute(sql`select jsonb_build_object('runs', (select jsonb_agg(r) from runs r), 'plans', (select jsonb_agg(p) from plans p), 'evidence', (select jsonb_agg(e) from evidence e)) as records`)).rows
     const old = await snapshot()
     const error = await migrate(migrationsFolder).then(() => null, (e: unknown) => e)
@@ -61,7 +96,7 @@ describe('migrations', () => {
     expect(String(cause)).toContain('Ownership violations must be fixed by hand')
     for (const table of ['runs', 'plans', 'evidence']) {
       const rows = (await db.execute(sql.raw('select id from ' + table))).rows
-      expect(String(cause)).toContain(String(rows[0]!.id))
+      for (const row of rows) expect(String(cause)).toContain(String(row.id))
     }
     expect(await snapshot()).toEqual(old)
     expect((await db.execute(sql`select conname from pg_constraint where conname = 'runs_task_same_project_fk'`)).rows).toEqual([])
@@ -81,13 +116,18 @@ describe('migrations', () => {
     requireDatabase(driver, context)
     const before = await migrationsBefore('0048_plan_approval_tuples')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
-    const { db, migrate } = await open(driver)
-    await migrate(before)
-    await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('Test app', 'test-app', 'TA', 'cormacrw/test-app', 'main')`)
-    await db.execute(sql`insert into plan_sessions (project_id, title, created_by) select id, 'History', '{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb from projects`)
-    await db.execute(sql`insert into plans (session_id, project_id, version, title, status) select id, project_id, 1, 'Legacy approval without attribution', 'approved' from plan_sessions`)
-    await db.execute(sql`insert into plan_tasks (plan_id, key, change, position, revision) select id, 'removed', 'removed', 0, '{"title":"Legacy revision"}'::jsonb from plans`)
-    await migrate(migrationsFolder)
+    const { db, warnings } = await startServerOn(driver, before, async (db) => {
+      await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('Test app', 'test-app', 'TA', 'cormacrw/test-app', 'main')`)
+      await db.execute(sql`insert into plan_sessions (project_id, title, created_by) select id, 'History', '{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb from projects`)
+      await db.execute(sql`insert into plans (session_id, project_id, version, title, status) select id, project_id, 1, 'Legacy approval without attribution', 'approved' from plan_sessions`)
+      await db.execute(sql`insert into plan_tasks (plan_id, key, change, position, revision) select id, 'removed', 'removed', 0, '{"title":"Legacy revision"}'::jsonb from plans`)
+    })
+    const plan = (await db.execute(sql`select id, session_id from plans`)).rows[0]!
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('Database warning: Historical plan approval/staged task violations')
+    expect(warnings[0]).toContain(String(plan.id))
+    expect(warnings[0]).toContain(String(plan.session_id))
+    expect(warnings[0]).toContain('plan-task removed')
     expect((await db.execute(sql`select status, approved_by, approved_at from plans`)).rows).toEqual([{ status: 'approved', approved_by: null, approved_at: null }])
     expect((await db.execute(sql`select task_id, change, revision from plan_tasks`)).rows).toEqual([{ task_id: null, change: 'removed', revision: { title: 'Legacy revision' } }])
     expect((await db.execute(sql`select conname, convalidated from pg_constraint where conname in ('plans_approval_tuple', 'plan_tasks_revision_change') order by conname`)).rows).toEqual([
@@ -583,6 +623,32 @@ describe('migrations', () => {
     await db.execute(sql`update evidence set size = 0 where kind <> 'note'`)
   })
 
+  // A database at `before` holding what `seed` wrote, then opened the way the
+  // server opens it at startup. `warnings` is what that printed.
+  async function startServerOn(driver: 'pglite' | 'postgres', before: string, seed: (db: RowsDatabase) => Promise<unknown>) {
+    let location: DatabaseLocation
+    if (driver === 'pglite') {
+      const dataDir = await mkdtemp(join(tmpdir(), 'corral-pgdata-'))
+      cleanup.push(() => rm(dataDir, { recursive: true, force: true }))
+      const client = new PGlite(dataDir)
+      const db = drizzle(client, { casing: 'snake_case' })
+      await migrate(db, { migrationsFolder: before })
+      await seed(db)
+      await client.close()
+      location = { driver, dataDir }
+    } else {
+      const { db, migrate, url } = await open(driver)
+      await migrate(before)
+      await seed(db as unknown as RowsDatabase)
+      location = { driver, url: url! }
+    }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    cleanup.push(async () => warn.mockRestore())
+    const { db, close } = await openDatabase(location)
+    cleanup.unshift(close)
+    return { db: db as unknown as RowsDatabase, warnings: warn.mock.calls.map(call => String(call[0])) }
+  }
+
   // An empty database to migrate step by step: PGlite in memory, or a
   // throwaway database on the test Postgres server
   async function open(driver: 'pglite' | 'postgres') {
@@ -606,6 +672,6 @@ describe('migrations', () => {
     const pool = new pg.Pool({ connectionString: url.href })
     cleanup.unshift(() => pool.end())
     const db = drizzlePg(pool, { casing: 'snake_case' })
-    return { db, migrate: (folder: string) => migratePg(db, { migrationsFolder: folder }) }
+    return { db, url: url.href, migrate: (folder: string) => migratePg(db, { migrationsFolder: folder }) }
   }
 })

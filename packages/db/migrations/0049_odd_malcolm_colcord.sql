@@ -11,7 +11,7 @@ BEGIN
     FROM plans p JOIN plan_sessions s ON s.id = p.session_id WHERE p.project_id <> s.project_id
     UNION ALL
     SELECT format('evidence %s (task %s) references criterion %s (task %s)', e.id, e.task_id, c.id, c.task_id)
-    FROM evidence e JOIN acceptance_criteria c ON c.id = e.criterion_id WHERE e.task_id <> c.task_id
+    FROM evidence e JOIN acceptance_criteria c ON c.id = e.criterion_id WHERE e.task_id IS DISTINCT FROM c.task_id
   ) AS violations;
   IF found IS NOT NULL THEN
     RAISE EXCEPTION E'Ownership violations must be fixed by hand before migrating:\n%', found;
@@ -20,6 +20,8 @@ END $$;
 --> statement-breakpoint
 ALTER TABLE "acceptance_criteria" ADD CONSTRAINT "criteria_task_id_unique" UNIQUE("task_id","id");--> statement-breakpoint
 ALTER TABLE "plan_sessions" ADD CONSTRAINT "sessions_project_id_unique" UNIQUE("project_id","id");--> statement-breakpoint
+ALTER TABLE "evidence" ADD CONSTRAINT "evidence_criterion_requires_task" CHECK ("criterion_id" IS NULL OR "task_id" IS NOT NULL);
+--> statement-breakpoint
 ALTER TABLE "evidence" DROP CONSTRAINT "evidence_criterion_id_acceptance_criteria_id_fk";
 --> statement-breakpoint
 ALTER TABLE "plans" DROP CONSTRAINT "plans_session_id_plan_sessions_id_fk";
