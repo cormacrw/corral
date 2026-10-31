@@ -180,7 +180,7 @@ async function submit(message: string): Promise<boolean> {
   failedAction.value = null
   try {
     if (!action.value) {
-      if (task.value) await commenting.mutateAsync({ task: { slug: actedOn.project.slug, number: task.value.number, ref: task.value.ref }, body: message })
+      if (task.value) await commenting.mutateAsync({ task: { id: task.value.id, slug: actedOn.project.slug, number: task.value.number, ref: task.value.ref }, body: message })
     } else {
       const input: InboxActionInput = action.value === 'clarify'
         ? { action: 'clarify', text: message }
