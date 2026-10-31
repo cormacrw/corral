@@ -173,10 +173,10 @@ async function changeStatus(value: string) {
   if (!task.value || value === 'current') return
   try {
     const transition = (input: Parameters<typeof api.tasks.transition>[2], status: TaskStatus) => applyTask(transitionMutation.mutateAsync({ task: { slug: slug.value, number: number.value, ref: props.taskRef }, input, status }))
-    const updated = value === 'approve' ? await transition({ type: value }, 'ready')
-      : value === 'send_back' ? await transition({ type: value }, 'backlog')
-        : value === 'human_request_changes' ? await transition({ type: value }, 'in_progress')
-          : await transition({ type: 'resolve', to: value.slice(8) as 'backlog' | 'ready' | 'in_progress' }, value.slice(8) as 'backlog' | 'ready' | 'in_progress')
+    const moves = { approve: 'ready', send_back: 'backlog', human_request_changes: 'in_progress' } as const
+    const updated = value === 'approve' || value === 'send_back' || value === 'human_request_changes'
+      ? await transition({ type: value }, moves[value])
+      : await transition({ type: 'resolve', to: value.slice(8) as 'backlog' | 'ready' | 'in_progress' }, value.slice(8) as 'backlog' | 'ready' | 'in_progress')
     if (updated) flashSaved()
   } catch (e) {
     if (e instanceof ApiError && e.body?.code === 'transition_rejected' && e.body.reason.code === 'not_ready') {
