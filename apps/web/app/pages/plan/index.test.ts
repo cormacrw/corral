@@ -52,7 +52,8 @@ async function render(url: string) {
   vi.stubGlobal('useTaskFlyout', useTaskFlyout)
   vi.stubGlobal('useSeoMeta', vi.fn())
   vi.stubGlobal('useLocalStorage', (_key: string, value: unknown) => vue.ref(value))
-  vi.stubGlobal('useLive', () => ({ state: vue.ref({ loaded: true, runner: { online: false }, agents: [], projects: [], tasks: {} }) }))
+  vi.stubGlobal('useShell', () => ({ loaded: true, runner: { online: false }, agents: [], projects: [] }))
+  vi.stubGlobal('useProjectLists', () => ({ tasks: vue.ref([]) }))
   vi.stubGlobal('usePendingPlan', () => ({ restored: vue.ref(null) }))
   vi.stubGlobal('usePlanThreads', () => ({ add: vi.fn() }))
   const wrapper = mount(PlanPage, {

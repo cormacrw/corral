@@ -24,9 +24,10 @@ it('shows the error when reading fails, without retrying in a loop', async () =>
   vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(false) }))
   vi.mocked(api.deployments.read).mockRejectedValueOnce(new Error('Server unavailable'))
   const client = testQueryClient()
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/tasks/:ref', component: { template: '<div>Task</div>' } }] })
   const wrapper = mount(InboxReleaseNotes, {
     props: { item: releaseNotes[0]! },
-    global: { plugins: [[VueQueryPlugin, { queryClient: client }]], components: { MarkdownText, UAlert: vue.defineComponent({ props: ['title'], setup: props => () => vue.h('p', props.title) }) }, stubs: { UButton: true, AgentAvatar: true, ProjectThumbnail: true } }
+    global: { plugins: [router, [VueQueryPlugin, { queryClient: client }]], components: { MarkdownText, UAlert: vue.defineComponent({ props: ['title'], setup: props => () => vue.h('p', props.title) }) }, stubs: { UButton: true, AgentAvatar: true, ProjectThumbnail: true } }
   })
   await flushPromises()
   expect(wrapper.text()).toContain('Server unavailable')

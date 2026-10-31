@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { VueQueryPlugin } from '@tanstack/vue-query'
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
@@ -6,11 +7,15 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { api } from '~/composables/useApi'
 import { tasks } from '~/prototype/fixtures'
 import { useTaskFlyout } from '~/composables/useTaskFlyout'
+import { testQueryClient } from '~/queries/mount-with-query'
 import TaskDetail from './TaskDetail.vue'
 import TaskProperties from './TaskProperties.vue'
 import TaskLink from './TaskLink.vue'
 
-vi.mock('~/composables/useApi', () => ({ api: { tasks: { byRef: vi.fn() } }, ApiError: class extends Error {} }))
+vi.mock('~/composables/useApi', () => {
+  const none = () => vi.fn().mockResolvedValue([])
+  return { api: { tasks: { byRef: vi.fn(), comments: none(), history: none(), evidence: none(), reviews: none(), designs: none() }, runs: { list: none() } }, ApiError: class extends Error {} }
+})
 afterEach(() => vi.unstubAllGlobals())
 
 async function setup() {
@@ -22,7 +27,8 @@ async function setup() {
   vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(false) }))
   vi.stubGlobal('useTaskFlyout', useTaskFlyout)
   vi.stubGlobal('useToast', () => ({ add: vi.fn() }))
-  vi.stubGlobal('useLive', () => ({ state: vue.ref({ projects: [], agents: [], tasks: {}, epics: {} }), subscribe: () => () => {} }))
+  vi.stubGlobal('useShell', () => ({ projects: [], agents: [] }))
+  vi.stubGlobal('useProjectLists', () => ({ tasks: vue.ref([]), epics: vue.ref([]) }))
   return router
 }
 
@@ -31,7 +37,7 @@ it('gives a dependency a real href and navigates from a task page without a flyo
   vi.mocked(api.tasks.byRef).mockResolvedValue({ ...tasks[0]!, dependsOn: ['TA-2'] })
   const wrapper = shallowMount(TaskDetail, {
     props: { taskRef: 'TA-1', mode: 'page' },
-    global: { plugins: [router], components: { TaskLink }, stubs: { TaskLink: false, RouterLink: false } }
+    global: { plugins: [router, [VueQueryPlugin, { queryClient: testQueryClient() }]], components: { TaskLink }, stubs: { TaskLink: false, RouterLink: false } }
   })
   await flushPromises()
   const dependency = wrapper.get('a[href="/tasks/TA-2"]')
@@ -46,7 +52,7 @@ it.each([false, true])('links the design version with a real href in stacked=%s 
   const router = await setup()
   const wrapper = shallowMount(TaskProperties, {
     props: { task: { ...tasks[0]!, design: { taskRef: 'TA-3', version: 2, screens: [], newerVersion: null } }, project: null, statusOptions: [], statusEditable: false, priorityOptions: [], typeOptions: [], developer: null, reviewer: null, stacked },
-    global: { plugins: [router], components: { TaskLink }, stubs: { TaskLink: false, RouterLink: false } }
+    global: { plugins: [router, [VueQueryPlugin, { queryClient: testQueryClient() }]], components: { TaskLink }, stubs: { TaskLink: false, RouterLink: false } }
   })
   const design = wrapper.get('a[href="/tasks/TA-3"]')
   expect(design.text()).toBe('TA-3 v2')

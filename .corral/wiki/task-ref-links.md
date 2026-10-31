@@ -18,9 +18,9 @@ epic from that sheet, keeps the composer's draft. A page that provides
 `FLYOUT_SHEETS` must show both `?task` and `?epic`: epic controls in a task sheet
 swap one for the other, and `plan/index.test.ts` covers this.
 Modified clicks and middle clicks retain native browser navigation. Missing
-refs reach the existing TaskDetail error state. The Inbox follows its selection
-into the flyout once per selected item, so a live refresh leaves a task opened
-from a message link in place.
+refs reach the existing TaskDetail error state. An Inbox item opens with the
+flyout closed and a live refresh doesn't touch it, so a task opened from a
+message link stays in place.
 
 Ref labels outside rendered text use `TaskLink` as well: Home agent lines, the
 Inbox message header, "Refining" chips, live run lines, the selected run header,
