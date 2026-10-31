@@ -33,6 +33,7 @@ import { designerPrompt, designerRevisionPrompt, developerPrompt, developerRevis
 import { PmTools } from './pm-tools.ts'
 import { runExitError, withLastActivity } from './run-exit.ts'
 import { runEndValues, type RunEnd } from './run-lifecycle.ts'
+import { humanApprovalSummary } from './pm-approval-summary.ts'
 import { PmDecisions } from './pm-decisions.ts'
 import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
 import { MergeOrchestrator } from './merge.ts'
@@ -1429,7 +1430,8 @@ export class Orchestrator implements RunnerHandlers {
       const event = parsed.transition
       const destination = event?.type === 'resolve' ? event.to : event?.type === 'approve' ? 'ready' : event?.type === 'human_request_changes' ? 'in_progress' : 'backlog'
       const verb = tool === 'delete_task' ? 'Delete' : tool === 'approve_task' ? 'Approve' : 'Move'
-      const summary = `${verb} ${taskRef(project.prefix, task.number)}${tool === 'move_task' ? ` to ${destination.replaceAll('_', ' ')}` : ''}: ${task.title}${tool === 'approve_task' ? ` (${task.prNumber ? `PR #${task.prNumber} at ` : 'head: '}${task.headSha ?? 'none'})` : ''}${event?.type === 'human_request_changes' && event.feedback ? ` — Feedback: ${event.feedback}` : ''}`
+      let summary = `${verb} ${taskRef(project.prefix, task.number)}${tool === 'move_task' ? ` to ${destination.replaceAll('_', ' ')}` : ''}: ${task.title}${tool === 'approve_task' ? ` (${task.prNumber ? `PR #${task.prNumber} at ` : 'head: '}${task.headSha ?? 'none'})` : ''}${event?.type === 'human_request_changes' && event.feedback ? ` — Feedback: ${event.feedback}` : ''}`
+      if (tool === 'approve_task') summary += await humanApprovalSummary(db, task.id)
       return { input: { ...parsed, project: project.slug, taskRef: taskRef(project.prefix, task.number) }, summary: parsed.reason ? `${summary} — ${parsed.reason}` : summary, targetId: task.id, taskId: task.id, projectId: project.id }
     }
     switch (tool) {

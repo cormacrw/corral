@@ -141,7 +141,7 @@ describe('global and project Plan sessions', () => {
     expect(await call(job, 'list_projects', {})).toMatchObject({ ok: true })
     expect(await call(job, 'list_inbox', {})).toMatchObject({ ok: true })
     expect(await call(job, 'get_run', { runId: job.runId })).toMatchObject({ ok: true, result: { projectId: null } })
-    expect(await call(job, 'message_run', { runId: job.runId, text: 'Hello' })).toMatchObject({ ok: false, error: expect.stringContaining('only developer and reviewer runs') })
+    expect(await call(job, 'message_run', { runId: job.runId, text: 'Hello' })).toMatchObject({ ok: false, error: expect.stringContaining('only developer, reviewer and designer runs') })
     const proposal = await call(job, 'delete_project', { project: project.slug })
     expect(proposal).toMatchObject({ ok: true, result: { confirmationPending: true } })
     const { actionId } = (proposal as { result: { actionId: string } }).result
