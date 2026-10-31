@@ -79,6 +79,10 @@ D10 says to delete the Corral branch "when safe". The server closes the PR and d
 
 Not built in the MVP: sending a message to an agent mid-run (the agent page says so; comments reach the agent on its next run), runner pairing and auth (D1 defers them), and writing `.corral/` into a target repository during setup (agents read `.corral/agents/<role>.md` when it exists and fall back to built-in instructions). Human change requests don't count toward the review-round cap, and agents run with `--permission-mode bypassPermissions`, which is safe inside the runner container but has wide reach on a laptop.
 
+### R19 — Which PM settings edits and limits need a human click (raised reviewing the D29 epic, 2026-10-31)
+
+Open questions for Cormac. These PM tools act with no confirm card: `update_task {humanReview: false}`, `update_project` gate settings, and `update_epic` `reviewMode` before its lock. `update_task` can also clear a criterion's `checkedByHuman` or replace the criteria list, which drops a D28 human check, although D28 names only `propose_plan` and the human as setting that flag. Decide whether these should need a card. Separately, `start_thread` has no depth cap and `message_thread` no ping-pong limit.
+
 ## Phasing and metrics
 
 ### R12 — Build a walking skeleton first

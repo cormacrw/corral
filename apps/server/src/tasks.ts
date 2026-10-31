@@ -3,7 +3,6 @@ import { holdsEpicOpen, invalidateEpicReview } from './epic-review-state.ts'
 import type { AuditEntry, Comment, CreateTaskInput, HumanTransitionInput, PatchTaskInput, Task, TaskAgent, TaskDesignPin } from '@corral/contracts'
 import { createTaskInput } from '@corral/contracts'
 import {
-  canChangeTaskType,
   canChangeType,
   checkDependencies,
   createTask as createTaskState,
@@ -403,15 +402,12 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
     const { task } = await lockTask(tx, taskId)
     // Merged is final (D10): the record stays as it shipped; comments still work
     if (task.status === 'merged') throw new ApiFailure(409, { code: 'conflict', constraint: 'task_merged' })
-    if (input.type && input.type !== task.type && !canChangeTaskType(task)) {
-      throw new ApiFailure(409, { code: 'conflict', constraint: 'task_type_locked' })
-    }
+    if (input.type && !canChangeType(task, input.type)) throw new ApiFailure(409, { code: 'conflict', constraint: 'task_type_locked' })
     // D27: PM metadata edits must not remove the work that locks epic review mode.
     if (actor.kind === 'agent' && actor.role === 'pm' && input.epicId !== undefined && input.epicId !== task.epicId && task.prNumber !== null) {
       throw new ApiFailure(409, { code: 'conflict', constraint: 'task_epic_locked' })
     }
     const { acceptanceCriteria: criteriaInput, dependsOn, ...fields } = input
-    if (fields.type && !canChangeType(task.status, task.type, fields.type)) throw new ApiFailure(409, { code: 'conflict', constraint: 'task_type_locked' })
     // D20: a design task's flag can't be turned off, by the human or a plan
     if ((fields.type ?? task.type) === 'design') fields.humanReview = true
     if (fields.epicId) {

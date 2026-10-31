@@ -231,6 +231,9 @@ describe('PM task and epic tools', () => {
       expect(await call('update_task', { taskRef: task.ref, type })).toMatchObject({ ok: false, error: expect.stringContaining('left Draft or Backlog') })
     }
     expect(await call('update_task', { taskRef: task.ref, type: 'bug' })).toMatchObject({ ok: true, result: { type: 'bug' } })
+    // Work awaiting merge keeps its type, even between task and bug
+    await t.db.update(schema.tasks).set({ status: 'ready_to_merge' }).where(eq(schema.tasks.id, task.id))
+    expect(await call('update_task', { taskRef: task.ref, type: 'task' })).toMatchObject({ ok: false, error: expect.stringContaining('awaiting merge') })
     // Unstarted work can still be retyped, which is what plan revisions rely on
     const unstarted = await t.createTask(slug, { type: 'design' })
     expect(await call('update_task', { taskRef: unstarted.ref, type: 'task' })).toMatchObject({ ok: true, result: { type: 'task' } })

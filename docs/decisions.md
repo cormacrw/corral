@@ -818,8 +818,10 @@ Every agent action is attributed to the agent and session that made it, and show
 **Confirm-required** tools are the destructive or decision-making ones. They don't act directly: the tool posts a **confirm card** in the chat saying what will happen, and the action runs only when the human clicks **Confirm**. If the human doesn't click it, nothing happens. They cover:
 
 - **Deleting** a project or a task.
-- **Stop-all**, the kill switch on every run, and **setting an update hold**, which queues PM turns after work drains.
+- **Stopping** a run, **stop-all**, the kill switch on every run, and **resume-all**, which lifts it.
+- **Setting an update hold**, which queues PM turns after work drains.
 - **Approving** tasks or designs.
+- **Moving a task** through a human board transition.
 - **Inbox decisions**, such as resolving a Needs-you item.
 
 This isn't a role restriction. The PM can propose any of these at any time, whether or not the human asked. The click is the human's own action, so it goes through the same endpoint and rules as the button elsewhere in the app, and is refused the same way if the state has moved on.
@@ -841,7 +843,7 @@ Sessions can be **global** as well as tied to a project. A global session has **
 - **D9:** the PM's tools are no longer the short list there, and `propose_plan` is no longer the only way for the PM to change the board: it can create and edit tasks with its task tools. Plans stay the way to propose a body of work. Only a session tied to a project has a read-only checkout. **Unchanged:** the PM has no tool to merge or edit docs, its checkout stays read-only, and a turn runs when the human or another PM thread sends a message, or the human approves a design (COR-243). Child completion notifications are saved for the parent’s next turn; they do not start one.
 - **D10:** the PM can create tasks in Backlog of any kind, not only documentation tasks. The **Human only** transitions stay human: the PM can propose them on a confirm card, and the transition runs on the human's click with the human as its actor.
 - **D10 (COR-240, reconciled with main):** Merged work stays immutable through both PM and human edits (`409 task_merged`). Epic membership is fixed for PM edits once a task has a PR (`409 task_epic_locked`), preserving D27’s review-mode lock. The task UI stays read-only after merge; follow-up work remains a new task.
-- **D10 (COR-298):** a task can't enter or leave the `spike` or `design` type once it has left Draft or Backlog; `PATCH` and `update_task` return `409 task_type_locked`. Those types have their own end states, so a retyped task could otherwise skip them. Changing between `task` and `bug` stays open in every status the task can be edited.
+- **D10 (COR-298):** a task can't enter or leave the `spike` or `design` type once it has left Draft or Backlog; `PATCH` and `update_task` return `409 task_type_locked`. Those types have their own end states, so a retyped task could otherwise skip them. Changing between `task` and `bug` stays open until the task is approved or awaiting merge, when its type is fixed (also `409 task_type_locked`).
 - **D10 (COR-246):** the one exception is the PM's `answer` transition, Blocked → In progress, for answering a question or adding information. It keeps the review-round and failed-run counters, so it can't lift a cap, and `resolve` stays **Human only**.
 - **D11:** "the PM stays in Plan" no longer holds. The PM can read and act on the Inbox, with decisions on a confirm card, and its actions appear in Activity. **Unchanged:** it raises no Needs-you items of its own.
 - **D13:** "Plan sessions belong to one project" and "every PM session has a `projectId`" no longer hold, because global sessions have none. A project session's project is still locked once it has messages.
