@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 import { VueQueryPlugin } from '@tanstack/vue-query'
+import type { PlanSessionDetail } from '@corral/contracts'
+import { keys } from '~/queries/keys'
 import { testQueryClient } from '~/queries/mount-with-query'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -54,7 +56,8 @@ async function mountInbox() {
   const button = vue.defineComponent({ props: ['label', 'ariaLabel'], setup: props => () => vue.h('button', props.label ?? props.ariaLabel) })
   const row = vue.defineComponent({ props: ['item'], setup: props => () => vue.h('span', { 'data-row': props.item.id }, props.item.subject) })
   const avatar = vue.defineComponent({ props: ['name'], setup: props => () => vue.h('i', { 'data-avatar': props.name }) })
-  const wrapper = mount(InboxPage, { global: { plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }]], components: { InboxPlanThread, UDashboardPanel: plain, UButton: button, PlanThreadRow: row, AgentAvatar: avatar }, stubs: {
+  const client = testQueryClient()
+  const wrapper = mount(InboxPage, { global: { plugins: [[VueQueryPlugin, { queryClient: client }]], components: { InboxPlanThread, UDashboardPanel: plain, UButton: button, PlanThreadRow: row, AgentAvatar: avatar }, stubs: {
     UBadge: true, UInput: true, UTabs: true,
     MarkdownText: true, TaskFlyout: true,
     PlanConversation: true, InboxMobile: true, UAlert: true, USkeleton: true, NuxtLink: true,
@@ -69,7 +72,13 @@ async function mountInbox() {
   const setInbox = (next: typeof data) => {
     data = next
   }
-  return { wrapper, replace, remove, toasts, toastRemove, rows, rename, setInbox, emitLive: (event: Parameters<typeof listeners[number]>[0]) => listeners.forEach(l => l(event)) }
+  const emitLive = (event: Parameters<typeof listeners[number]>[0]) => {
+    if (event.session) {
+      client.setQueryData<PlanSessionDetail>(keys.plan.session(event.session.id), detail => detail && { ...detail, ...event.session })
+    }
+    listeners.forEach(l => l(event))
+  }
+  return { wrapper, replace, remove, toasts, toastRemove, rows, rename, setInbox, emitLive }
 }
 
 it('reads an unread thread in place and keeps it open, without fetching the Inbox', async () => {
