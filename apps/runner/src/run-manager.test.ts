@@ -1,5 +1,5 @@
 import type { RunnerMessage } from '@corral/contracts'
-import { chmod, mkdir, readFile, rm, stat, symlink, truncate, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, realpath, rm, stat, symlink, truncate, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ServerConnection } from './connection.ts'
@@ -154,7 +154,9 @@ describe('RunManager PM turns', () => {
     expect(messages.find(m => m.type === 'run.ended')).toMatchObject({ exit: { kind: 'exited', code: 0 } })
     const log = await calls()
     expect(log).toHaveLength(2)
-    expect(log.map(c => c.cwd)).toEqual([pmWorktreePath(dataDir, 'project-1', 's1'), pmWorktreePath(dataDir, 'project-1', 's1')])
+    // The agent sees the real path; macOS's temporary folder is behind a symlink
+    const checkout = await realpath(pmWorktreePath(dataDir, 'project-1', 's1'))
+    expect(log.map(c => c.cwd)).toEqual([checkout, checkout])
     expect(log[1]!.args).toEqual(expect.arrayContaining(['--resume', 'fresh-session']))
   })
 

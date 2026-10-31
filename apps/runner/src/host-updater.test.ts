@@ -1,5 +1,5 @@
-import { execFile } from 'node:child_process'
-import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { execFile, execFileSync } from 'node:child_process'
+import { chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -7,6 +7,24 @@ import { promisify } from 'node:util'
 import { afterEach, expect, it } from 'vitest'
 
 const exec = promisify(execFile)
+
+const hasFlock = (() => {
+  try {
+    execFileSync('sh', ['-c', 'command -v flock'], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+})()
+
+// A test that runs runner-update.sh itself, which only exists on Linux hosts
+function updaterIt(name: string, test: () => Promise<void>, timeout?: number) {
+  it(name, async ({ skip }) => {
+    if (!hasFlock) skip('runner-update.sh needs flock from util-linux, which macOS does not have')
+    await test()
+  }, timeout)
+}
+
 const dirs: string[] = []
 const controllers: AbortController[] = []
 const runs: Promise<unknown>[] = []
@@ -22,7 +40,9 @@ afterEach(async () => {
 })
 
 async function fixture(options: { current?: boolean, busy?: boolean, fail?: boolean, auto?: boolean, forged?: boolean, untrusted?: boolean } = {}) {
-  const dir = await mkdtemp(join(tmpdir(), 'host-updater-'))
+  // Resolved because the updater refuses symlinks anywhere in a path, and the
+  // temporary folder is behind one on macOS
+  const dir = await realpath(await mkdtemp(join(tmpdir(), 'host-updater-')))
   dirs.push(dir)
   await Promise.all(['scripts/deploy', 'deploy/runner', 'data', 'bin'].map(path => mkdir(join(dir, path), { recursive: true })))
   await copyFile(resolve('../../scripts/deploy/runner-update.sh'), join(dir, 'scripts/deploy/runner-update.sh'))
@@ -74,7 +94,7 @@ esac
   }
 }
 
-it('builds the exact server commit, waits for terminal run reports, then replaces only the runner', async () => {
+updaterIt('builds the exact server commit, waits for terminal run reports, then replaces only the runner', async () => {
   const f = await fixture({ busy: true })
   const running = f.run()
   await expect.poll(f.events, { timeout: 10_000 }).toContain('build runner')
@@ -86,19 +106,19 @@ it('builds the exact server commit, waits for terminal run reports, then replace
   expect(events).toContain(`up -d --no-build runner SHA=${'a'.repeat(40)}`)
 }, 20_000)
 
-it('does nothing and logs when current', async () => {
+updaterIt('does nothing and logs when current', async () => {
   const f = await fixture({ current: true })
   expect((await f.run()).stdout).toContain('up to date')
   await expect(f.events()).rejects.toThrow('ENOENT')
 })
 
-it('leaves manual-only behind runners working', async () => {
+updaterIt('leaves manual-only behind runners working', async () => {
   const f = await fixture({ auto: false })
   expect((await f.run()).stdout).toContain('automatic updates disabled')
   await expect(f.events()).rejects.toThrow('ENOENT')
 })
 
-it('reports a failed build without replacing the old container', async () => {
+updaterIt('reports a failed build without replacing the old container', async () => {
   const f = await fixture({ fail: true })
   await expect(f.run()).rejects.toThrow()
   expect(await f.events()).not.toContain('up -d')
@@ -110,20 +130,20 @@ it('reports a failed build without replacing the old container', async () => {
   expect(retry.attempt).not.toBe(first.attempt)
 }, 20_000)
 
-it('rejects a forged volume SHA before fetching or selecting deployment code', async () => {
+updaterIt('rejects a forged volume SHA before fetching or selecting deployment code', async () => {
   const f = await fixture({ forged: true })
   await expect(f.run()).rejects.toMatchObject({ stdout: expect.stringContaining('Untrusted runner target') })
   await expect(f.events()).rejects.toThrow('ENOENT')
 })
 
-it('rejects an authenticated server target outside reviewed main history', async () => {
+updaterIt('rejects an authenticated server target outside reviewed main history', async () => {
   const f = await fixture({ untrusted: true })
   await expect(f.run()).rejects.toMatchObject({ stdout: expect.stringContaining('outside trusted origin/main') })
   expect(await f.events()).not.toContain('checkout')
   expect(await f.events()).not.toContain('docker compose')
 })
 
-it('does not overwrite or chmod host files through feedback symlinks', async () => {
+updaterIt('does not overwrite or chmod host files through feedback symlinks', async () => {
   const f = await fixture()
   const sentinel = join(f.dir, 'host-file')
   await writeFile(sentinel, 'host sentinel', { mode: 0o600 })

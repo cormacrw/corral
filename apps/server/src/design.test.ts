@@ -21,7 +21,8 @@ function tarball(files: Record<string, string>): Buffer {
       mkdirSync(dirname(join(src, name)), { recursive: true })
       writeFileSync(join(src, name), text)
     }
-    execFileSync('tar', ['-cf', join(root, 'bundle.tar'), '-C', src, '.'])
+    // Plain ustar with no macOS extras, so one test can corrupt a known offset
+    execFileSync('tar', ['--format=ustar', '-cf', join(root, 'bundle.tar'), '-C', src, '.'], { env: { ...process.env, COPYFILE_DISABLE: '1' } })
     return readFileSync(join(root, 'bundle.tar'))
   } finally {
     rmSync(root, { recursive: true, force: true })
