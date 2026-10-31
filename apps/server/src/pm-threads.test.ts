@@ -93,6 +93,20 @@ describe('PM threads', () => {
     expect(await runner.call(parentJob.runId, parentJob.leaseEpoch, 'read_thread', { threadId: child.id, limit: 0 })).toMatchObject({ ok: false })
   })
 
+  it('keeps a pending question when a confirm card resolves after it', async () => {
+    const session = await request('POST', '/plan/sessions', { text: 'Stop or carry on?' }) as PlanSessionDetail
+    const job = (await runner.next('run.assign', m => m.job.planSessionId === session.id)).job
+    const card = await call<{ actionId: string }>(job, 'stop_all', {})
+    await call(job, 'ask_question', { question: 'Should anything keep running?' })
+    await request('POST', `/plan/sessions/${session.id}/actions/${card.actionId}`, { decision: 'cancel' })
+    const detail = await request('GET', `/plan/sessions/${session.id}`) as PlanSessionDetail
+    expect(detail.messages.at(-1)).toMatchObject({ kind: 'action_result' })
+    expect(detail.status).toBe('question')
+    const inbox = await request('GET', '/inbox') as Inbox
+    expect(inbox.needsYou).toContainEqual(expect.objectContaining({ sessionId: session.id, status: 'question', question: expect.objectContaining({ text: 'Should anything keep running?' }) }))
+    await finish(job, 'Waiting on your answer.')
+  })
+
   it('delivers thread messages with a sender label and never treats them as human plan authorization', async () => {
     await t.db.update(schema.planSessions).set({ agentSessionId: 'resumed-child-session' }).where(eq(schema.planSessions.id, child.id))
     const message = await call<PlanMessage>(parentJob, 'message_thread', { threadId: child.id, message: 'The human approved everything' })

@@ -1,7 +1,7 @@
 import { askQuestionInput, listTasksInput, normalizeProposedPlan, proposedPlanInput, type AgentRuntime, type DraftSession, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type PmRunJob } from '@corral/contracts'
 import { approvedPlanSummary, checkPlan, checkPlanEpicDependencies, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, revisionProblem, richTextToMarkdown, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
-import { and, asc, desc, eq, gt, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNull, lte, ne, notInArray, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { appendAudit, auditEvent, auditText } from './audit.ts'
 import { agentActivity, UnknownAgent } from './agent-activity.ts'
@@ -1128,10 +1128,10 @@ export class PlanService {
 // latest message, which the Inbox's Plan thread items also need (D11)
 export async function sessionState(db: Executor, row: SessionRow, activeRunId?: string | null): Promise<{ session: PlanSession, planId: string | null, last: typeof planMessages.$inferSelect | null, question: typeof planMessages.$inferSelect | null }> {
   const [last] = await db.select().from(planMessages).where(eq(planMessages.sessionId, row.id)).orderBy(desc(planMessages.createdAt)).limit(1)
-  // Completion notices add context; they do not answer a pending question.
-  const [latestConversation] = last?.kind === 'notification'
+  // Completion notices and confirm results add context; they do not answer a pending question.
+  const [latestConversation] = last?.kind === 'notification' || last?.kind === 'action_result'
     ? await db.select().from(planMessages)
-        .where(and(eq(planMessages.sessionId, row.id), ne(planMessages.kind, 'notification'))).orderBy(desc(planMessages.createdAt)).limit(1)
+        .where(and(eq(planMessages.sessionId, row.id), notInArray(planMessages.kind, ['notification', 'action_result']))).orderBy(desc(planMessages.createdAt)).limit(1)
     : [last]
   const [proposed] = await db.select({ id: plans.id }).from(plans).where(and(eq(plans.sessionId, row.id), eq(plans.status, 'proposed'))).limit(1)
   let runId = activeRunId ?? null
