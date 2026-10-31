@@ -677,10 +677,10 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
               :key="ref"
               class="flex items-center gap-2 text-sm"
             >
-              <NuxtLink
-                :to="mobile ? `/tasks/${ref}` : { query: { ...$route.query, task: ref } }"
+              <TaskLink
+                :task-ref="ref"
                 class="font-mono text-muted"
-              >{{ ref }}</NuxtLink>
+              />
               <span class="truncate">{{ dependencyTask(ref)?.title ?? '' }}</span>
               <StatusBadge
                 v-if="dependencyTask(ref)"

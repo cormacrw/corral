@@ -33,3 +33,10 @@ and the design link sits beside it.
 Component checks cover cross-project refs, unknown prefixes, code styling,
 explicit link targets, literal rich text, desktop host/mobile sheet navigation
 and browser handling of modified clicks.
+
+TaskDetail's Depends on refs and TaskProperties' pinned design version also use
+`TaskLink` in every layout. Dependencies keep their monospace label; design
+links use the slot for `REF vN`. Both therefore navigate to the task page when
+there is no flyout host and stay in a Plan sheet when that capability is provided.
+`TaskDetailLinks.test.ts` mounts the actual dependency list without a host and
+checks its href and navigation, plus design links in both property layouts.
