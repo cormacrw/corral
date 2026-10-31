@@ -43,9 +43,9 @@ describe('migrations', () => {
   it.for([
     { driver: 'pglite' as const },
     { driver: 'postgres' as const }
-  ])('0043 diagnoses historical messages while preserving reads on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+  ])('0044 diagnoses historical messages while preserving reads on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
     requireDatabase(driver, context)
-    const before = await migrationsBefore('0043_blushing_roughhouse')
+    const before = await migrationsBefore('0044_blushing_roughhouse')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
     const legacy = { rows: [] as Record<string, unknown>[] }
     const { db, warnings } = await startServerOn(driver, before, async (db) => {
@@ -73,7 +73,7 @@ describe('migrations', () => {
   it.for([
     { driver: 'pglite' as const },
     { driver: 'postgres' as const }
-  ])('0049 reports all ownership violations without rewriting rows on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+  ])('0050 reports all ownership violations without rewriting rows on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
     requireDatabase(driver, context)
     const before = await migrationsBefore('0050_odd_malcolm_colcord')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
@@ -112,7 +112,7 @@ describe('migrations', () => {
   it.for([
     { driver: 'pglite' as const },
     { driver: 'postgres' as const }
-  ])('0048 checks future writes without rewriting approval or staged history on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+  ])('0049 checks future writes without rewriting approval or staged history on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
     requireDatabase(driver, context)
     const before = await migrationsBefore('0049_plan_approval_tuples')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
@@ -141,7 +141,7 @@ describe('migrations', () => {
   it.for([
     { driver: 'pglite' as const },
     { driver: 'postgres' as const }
-  ])('0047 reports all inconsistent avatars and preserves them on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+  ])('0048 reports all inconsistent avatars and preserves them on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
     requireDatabase(driver, context)
     const before = await migrationsBefore('0048_chunky_peter_parker')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
@@ -245,7 +245,7 @@ describe('migrations', () => {
     expect((await db.execute(sql`select count(*)::int as count from deployments`)).rows).toEqual([{ count: 1 }])
   })
 
-  describe('0044 project-scoped edges', () => {
+  describe('0045 project-scoped edges', () => {
     const actor = sql`'{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb`
     // Two projects, each with two epics and two tasks, in the old shape
     async function seed(driver: 'pglite' | 'postgres') {
@@ -322,7 +322,7 @@ describe('migrations', () => {
   it.for([
     { driver: 'pglite' as const },
     { driver: 'postgres' as const }
-  ])('0045 refuses inconsistent historical rows without rewriting them on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+  ])('0046 refuses inconsistent historical rows without rewriting them on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
     requireDatabase(driver, context)
     const before = await migrationsBefore('0046_nostalgic_thanos')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
@@ -588,7 +588,7 @@ describe('migrations', () => {
   it.for([
     { driver: 'pglite' as const },
     { driver: 'postgres' as const }
-  ])('0046 checks old evidence before enforcing note/file shapes on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+  ])('0047 checks old evidence before enforcing note/file shapes on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
     requireDatabase(driver, context)
     const before = await migrationsBefore('0047_evidence_shapes')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
