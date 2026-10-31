@@ -38,6 +38,7 @@ import { Hono, type Context, type ValidationTargets } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { streamSSE } from 'hono/streaming'
 import type { ZodType } from 'zod'
+import { publishInvalidatedEpics } from './epic-review-state.ts'
 import { publishDependents } from './dependent-tasks.ts'
 import { ApiFailure, fromDatabaseError } from './errors.ts'
 import { checkThumbnail, readThumbnail, THUMBNAIL_MAX_BYTES } from './thumbnails.ts'
@@ -130,20 +131,21 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
 
   // design/inbox.md: what the tray does, all through D10 transitions
   const inboxAction = async (taskId: string, input: InboxActionInput) => {
+    const invalidatedEpics = new Set<string>()
     switch (input.action) {
       case 'clarify': {
         await addComment(db, taskId, { body: input.text, pinned: true }, actor)
-        await transitionTask(db, taskId, { type: 'resolve', to: 'in_progress' }, actor)
+        await transitionTask(db, taskId, { type: 'resolve', to: 'in_progress' }, actor, invalidatedEpics)
         break
       }
       case 'send_back': {
         const [row] = await db.select({ status: schema.tasks.status }).from(schema.tasks).where(eq(schema.tasks.id, taskId))
-        await transitionTask(db, taskId, row?.status === 'ready' ? { type: 'send_back' } : { type: 'resolve', to: 'backlog' }, actor)
+        await transitionTask(db, taskId, row?.status === 'ready' ? { type: 'send_back' } : { type: 'resolve', to: 'backlog' }, actor, invalidatedEpics)
         break
       }
       case 'resolve':
         if (input.text) await addComment(db, taskId, { body: input.text, pinned: true }, actor)
-        await transitionTask(db, taskId, { type: 'resolve', to: input.to }, actor)
+        await transitionTask(db, taskId, { type: 'resolve', to: input.to }, actor, invalidatedEpics)
         break
       case 'approve': {
         const [row] = await db.select({ type: schema.tasks.type }).from(schema.tasks).where(eq(schema.tasks.id, taskId))
@@ -153,12 +155,13 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
         break
       }
       case 'request_changes':
-        await transitionTask(db, taskId, { type: 'human_request_changes', feedback: input.text }, actor)
+        await transitionTask(db, taskId, { type: 'human_request_changes', feedback: input.text }, actor, invalidatedEpics)
         break
       case 'delete':
         await orchestrator.deleteTask(taskId, actor, input.text ?? null)
         return null
     }
+    await publishInvalidatedEpics(db, events, invalidatedEpics)
     const task = await publishTask(taskId)
     orchestrator.poke([taskId])
     return task
@@ -335,7 +338,9 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
 
     .post('/projects/:slug/tasks', validate('json', createTaskInput), async (c) => {
       const project = await findProjectBySlug(db, c.req.param('slug'))
-      const task = await loadTask(db, await createTask(db, project, c.req.valid('json'), actor))
+      const invalidatedEpics = new Set<string>()
+      const task = await loadTask(db, await createTask(db, project, c.req.valid('json'), actor, { invalidatedEpics }))
+      await publishInvalidatedEpics(db, events, invalidatedEpics)
       events.publish({ type: 'task.created', task })
       return c.json(task, 201)
     })
@@ -348,7 +353,9 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     .post('/projects/:slug/tasks/:number/transitions', validate('json', humanTransitionInput), async (c) => {
       const project = await findProjectBySlug(db, c.req.param('slug'))
       const taskId = await findTaskId(db, project.id, taskNumber(c.req.param('number')))
-      await transitionTask(db, taskId, c.req.valid('json'), actor)
+      const invalidatedEpics = new Set<string>()
+      await transitionTask(db, taskId, c.req.valid('json'), actor, invalidatedEpics)
+      await publishInvalidatedEpics(db, events, invalidatedEpics)
       // Published after the commit, so listeners never see a rolled-back state
       const task = await loadTask(db, taskId)
       events.publish({ type: 'task.updated', task })
@@ -360,7 +367,9 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     .patch('/projects/:slug/tasks/:number', validate('json', patchTaskInput), async (c) => {
       const project = await findProjectBySlug(db, c.req.param('slug'))
       const taskId = await findTaskId(db, project.id, taskNumber(c.req.param('number')))
-      const edit = await patchTask(db, project, taskId, c.req.valid('json'), actor)
+      const invalidatedEpics = new Set<string>()
+      const edit = await patchTask(db, project, taskId, c.req.valid('json'), actor, invalidatedEpics)
+      await publishInvalidatedEpics(db, events, invalidatedEpics)
       // The edit is saved either way; telling the run is best effort (PRD §7.3)
       if (edit) await orchestrator.noticeTaskEdit(taskId, edit, actor).catch(error => console.error(`Telling the run about the edit to task ${taskId} failed`, error))
       return c.json(await publishTask(taskId))

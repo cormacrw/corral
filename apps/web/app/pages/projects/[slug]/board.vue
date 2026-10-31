@@ -3,9 +3,9 @@ import { useMutation } from '@tanstack/vue-query'
 import { moveTask } from '~/queries/tasks'
 import type { Task } from '@corral/contracts'
 import { DEFAULT_LIMITS, type TaskStatus } from '@corral/core'
-import type { BoardFilters } from '~/utils/board'
-import { BOARD_COLUMNS, boardMove, filtersFromQuery, filtersToQuery, matchesFilter, onBoard, sortColumn, taskAgentIds } from '~/utils/board'
-import { epicInProgress, epicTitle, epicWithLiveCounts, PRIORITY, STATUS, taskNote } from '~/utils/labels'
+import type { BoardFilters, BoardView } from '~/utils/board'
+import { BOARD_COLUMNS, boardMove, boardView, EPIC_COLUMNS, epicOnBoard, epicStage, filtersFromQuery, filtersToQuery, matchesEpicFilter, matchesFilter, onBoard, sortColumn, taskAgentIds, unfinishedPrerequisites } from '~/utils/board'
+import { epicTitle, epicWithLiveCounts, PRIORITY, STATUS, taskNote } from '~/utils/labels'
 
 // The Board: approved work by status, with human moves through the same
 // actions as the Status menu. The server remains authoritative.
@@ -24,19 +24,29 @@ const router = useRouter()
 // so quick changes (picking two options, typing) would otherwise build on a
 // stale query and drop one another.
 const filters = ref<BoardFilters>(filtersFromQuery(route.query))
+// The Tasks / Epics toggle is desktop-only (design/board.md). ?view= wins over
+// the view last used, and the URL's view counts as used.
+const lastView = useLocalStorage<BoardView>('corral.board.view', 'tasks')
+const view = ref(boardView(route.query.view, boardView(lastView.value, 'tasks')))
+watch(view, (next) => {
+  lastView.value = next
+}, { immediate: true })
+const VIEW_ITEMS = [{ label: 'Tasks', value: 'tasks' }, { label: 'Epics', value: 'epics' }]
 let writing = 0
-watch(filters, async (next) => {
+watch([filters, view], async ([next, nextView]) => {
   writing++
   try {
-    await router.replace({ query: filtersToQuery(next, route.query) })
+    await router.replace({ query: { ...filtersToQuery(next, route.query), view: nextView } })
   } finally {
     writing--
   }
 })
 // Back, forward and links change the query from outside
 watch(() => route.query, (query) => {
+  if (writing) return
   const next = filtersFromQuery(query)
-  if (!writing && JSON.stringify(next) !== JSON.stringify(filters.value)) filters.value = next
+  if (JSON.stringify(next) !== JSON.stringify(filters.value)) filters.value = next
+  view.value = boardView(query.view, view.value)
 })
 const search = computed({
   get: () => filters.value.search,
@@ -58,11 +68,20 @@ const agentFor = (task: Task) => task.lease ? live.state.value.agents.find(a => 
 const epicLabel = (id: string) => epicTitle(epicList.value, id, epics.value.indexOf(id))
 const epicOptions = computed(() => epics.value.map(id => ({ id, label: epicLabel(id) })))
 // Epics with work left or tasks on the Board, so one waiting on its epic PR
-// stays here after its tasks leave the Merged column. The Epic filter applies.
-const boardEpics = computed(() => epicList.value
-  .map(epic => epicWithLiveCounts(epic, all.value))
-  .filter(epic => epicInProgress(epic) || all.value.some(t => t.epicId === epic.id && onBoard(t)))
-  .filter(epic => filters.value.epics.length === 0 || filters.value.epics.includes(epic.id)))
+// stays here after its tasks leave the Merged column.
+const liveEpics = computed(() => epicList.value.map(epic => epicWithLiveCounts(epic, all.value)))
+const onBoardEpics = computed(() => liveEpics.value.filter(epic => epicOnBoard(epic, all.value.filter(t => t.epicId === epic.id))))
+// The row above the task columns. The Epic filter applies.
+const boardEpics = computed(() => onBoardEpics.value.filter(epic => filters.value.epics.length === 0 || filters.value.epics.includes(epic.id)))
+// The Epics view: one card per epic, each in the one column its stage names
+const visibleEpics = computed(() => onBoardEpics.value.filter(epic => matchesEpicFilter(epic, filters.value)))
+const epicColumns = computed(() => {
+  const staged = visibleEpics.value.map((epic) => {
+    const stage = epicStage(epic, all.value.filter(t => t.epicId === epic.id && t.status !== 'draft' && t.status !== 'backlog'))
+    return { epic, stage, waitingOn: stage === 'done' ? [] : unfinishedPrerequisites(epic, liveEpics.value) }
+  })
+  return EPIC_COLUMNS.map(column => ({ ...column, dot: DOT[STATUS[column.status].color], cards: staged.filter(card => card.stage === column.key) }))
+})
 
 const toast = useToast()
 const move = useMutation(moveTask)
@@ -125,9 +144,16 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
     >
       <div class="flex min-w-0 flex-1 flex-col">
         <div class="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b border-default px-4 py-2">
+          <UTabs
+            v-model="view"
+            :items="VIEW_ITEMS"
+            :content="false"
+            size="xs"
+            class="w-auto shrink-0"
+          />
           <UInput
             v-model="search"
-            placeholder="Search tasks"
+            :placeholder="view === 'epics' ? 'Search epics' : 'Search tasks'"
             icon="i-lucide-search"
             size="sm"
             class="w-60"
@@ -136,6 +162,7 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
             v-model="filters"
             :epics="epicOptions"
             :agents="taskAgents"
+            :epics-only="view === 'epics'"
             size="sm"
             item-class="w-40"
           />
@@ -149,11 +176,11 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
             :aria-pressed="flyout.epic.value === single"
             @click="flyout.toggleEpic(single)"
           />
-          <span class="ms-auto text-sm text-muted">{{ visible.length }} tasks</span>
+          <span class="ms-auto text-sm text-muted">{{ view === 'epics' ? `${visibleEpics.length} epics` : `${visible.length} tasks` }}</span>
         </div>
 
         <BoardEpics
-          v-if="boardEpics.length"
+          v-if="view === 'tasks' && boardEpics.length"
           :epics="boardEpics"
           class="border-b border-default px-4 py-2"
         />
@@ -175,6 +202,10 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
             class="h-64 w-[272px]"
           />
         </div>
+        <BoardEpicColumns
+          v-else-if="view === 'epics'"
+          :columns="epicColumns"
+        />
         <div
           v-else
           role="region"
@@ -190,20 +221,12 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
             @dragover="allowDrop($event, column.statuses[0]!)"
             @drop="dropTask($event, column.statuses[0]!)"
           >
-            <header class="flex shrink-0 items-center gap-2 px-3 py-2.5 text-sm">
-              <span
-                :class="['size-2 rounded-full', DOT[STATUS[column.statuses[0]!].color]]"
-                aria-hidden="true"
-              />
-              <span class="font-medium">{{ column.label }}</span>
-              <UBadge
-                :label="String(inColumn(column).length)"
-                size="xs"
-                variant="subtle"
-                color="neutral"
-              />
-              <span class="ms-auto text-xs text-muted">{{ column.hint }}</span>
-            </header>
+            <BoardColumnHeader
+              :label="column.label"
+              :hint="column.hint"
+              :count="inColumn(column).length"
+              :dot="DOT[STATUS[column.statuses[0]!].color]"
+            />
             <!-- The padding matches the glow radius so the working glow and the
                  selected ring fit inside the list: anything past it counts as
                  overflow and makes the column scroll (and clips the glow) -->

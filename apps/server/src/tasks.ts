@@ -245,7 +245,7 @@ export async function listTasks(db: Executor, project: ProjectRow, view: TaskVie
 
 // New tasks start in Backlog, or as Drafts for the PM's plans (D10).
 // Returns the new task's ID.
-export async function createTask(db: Executor, project: ProjectRow, rawInput: CreateTaskInput, actor: Actor, options: { draft?: boolean, epicFix?: boolean } = {}): Promise<string> {
+export async function createTask(db: Executor, project: ProjectRow, rawInput: CreateTaskInput, actor: Actor, options: { draft?: boolean, epicFix?: boolean, invalidatedEpics?: Set<string> } = {}): Promise<string> {
   const input = createTaskInput.parse(rawInput)
   // D27 integration feedback creates Ready work without a separate plan approval.
   const created: ReturnType<typeof createTaskState> = options.epicFix
@@ -282,7 +282,10 @@ export async function createTask(db: Executor, project: ProjectRow, rawInput: Cr
     }
 
     const state = created.task
-    if (!['draft', 'backlog'].includes(state.status)) await invalidateEpicReview(tx, input.epicId)
+    if (!['draft', 'backlog'].includes(state.status)) {
+      const id = await invalidateEpicReview(tx, input.epicId)
+      if (id) options.invalidatedEpics?.add(id)
+    }
     const [row] = await tx.insert(tasks).values({
       projectId: project.id,
       number: allocated!.number,
@@ -312,10 +315,10 @@ export async function createTask(db: Executor, project: ProjectRow, rawInput: Cr
 
 // Applies a D10 transition the human asked for. The row is locked for the
 // whole check-and-write, and core decides whether the transition is allowed.
-export async function transitionTask(db: Executor, taskId: string, input: HumanTransitionInput, actor: Actor): Promise<void> {
+export async function transitionTask(db: Executor, taskId: string, input: HumanTransitionInput, actor: Actor, invalidatedEpics?: Set<string>): Promise<void> {
   await db.transaction(async (tx) => {
     const { task, project } = await lockTask(tx, taskId)
-    await applyTransition(tx, task, project, await humanEvent(tx, task, input), actor, { event: input })
+    await applyTransition(tx, task, project, await humanEvent(tx, task, input), actor, { event: input }, invalidatedEpics)
   })
 }
 
@@ -339,7 +342,8 @@ export async function applyTransition(
   project: ProjectRow,
   event: TaskEvent,
   actor: Actor,
-  detail: TransitionDetail
+  detail: TransitionDetail,
+  invalidatedEpics?: Set<string>
 ): Promise<TaskState> {
   const state = toTaskState(task)
   if (event.type === 'review_approved') {
@@ -358,7 +362,10 @@ export async function applyTransition(
   if (!result.ok) throw new ApiFailure(409, { code: 'transition_rejected', reason: result.error })
 
   const next = result.task
-  if (['draft', 'backlog'].includes(task.status) && !['draft', 'backlog'].includes(next.status)) await invalidateEpicReview(tx, task.epicId)
+  if (['draft', 'backlog'].includes(task.status) && !['draft', 'backlog'].includes(next.status)) {
+    const id = await invalidateEpicReview(tx, task.epicId)
+    if (id) invalidatedEpics?.add(id)
+  }
   await tx.update(tasks).set({
     status: next.status,
     rebaseOnly: next.rebaseOnly ?? false,
@@ -396,7 +403,7 @@ export interface TaskContentEdit {
 
 // design/task.md: a PATCH per field. Criteria keep their IDs (and so their
 // evidence and verdicts) when passed back with the same ID.
-export async function patchTask(db: Executor, project: ProjectRow, taskId: string, input: PatchTaskInput, actor: Actor): Promise<TaskContentEdit | null> {
+export async function patchTask(db: Executor, project: ProjectRow, taskId: string, input: PatchTaskInput, actor: Actor, invalidatedEpics?: Set<string>): Promise<TaskContentEdit | null> {
   return db.transaction(async (tx) => {
     const { task } = await lockTask(tx, taskId)
     // Merged is final (D10): the record stays as it shipped; comments still work
@@ -414,8 +421,10 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
     const descriptionChanged = fields.description !== undefined && JSON.stringify(fields.description) !== JSON.stringify(task.description)
     let criteriaChange: TaskContentEdit['criteria'] = null
     if (fields.epicId !== undefined && fields.epicId !== task.epicId && !['draft', 'backlog'].includes(task.status)) {
-      await invalidateEpicReview(tx, task.epicId)
-      await invalidateEpicReview(tx, fields.epicId)
+      for (const epicId of [task.epicId, fields.epicId]) {
+        const id = await invalidateEpicReview(tx, epicId)
+        if (id) invalidatedEpics?.add(id)
+      }
     }
     if (Object.keys(fields).length > 0) {
       await tx.update(tasks).set({ ...fields, updatedAt: new Date() }).where(eq(tasks.id, taskId))
