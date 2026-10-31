@@ -36,7 +36,7 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
    - **Cards** (`components/TaskCard.vue`, shared with the mobile layout): a `div` with a `bg-default` background, a 1px border and `rounded-md`, stacked top to bottom:
      - **Title:** medium, highlighted, wrapping as far as it needs. It's the card's keyboard control.
      - **Epic:** one line, truncated, muted. Omitted when the task has none.
-     - **Footer:** the priority on the left (Urgent in `error`, High in `warning`, others muted), and on the right the type icon and the assignee.
+     - **Footer:** the priority on the left (Urgent in `error`, High in `warning`, others muted), and on the right the blocked icon, type icon and assignee.
      - **Type icon:** muted, so colour on the card belongs to the priority. Bug `i-lucide-bug`, Design `i-lucide-paintbrush`, Spike `i-lucide-flask-conical`, and none for Task.
      - **Assignee** (`components/TaskCardAssignee.vue`): the avatar only, with the full name on hover. Agent review shows `task.reviewer` and every other status shows `task.developer`, never falling back to the other role. With no agent it's a dashed circle (hover: Unassigned). The green dot shows only when the displayed agent holds the lease.
      - **Not on the card, in any status:** notes (status reasons, review round, "Waiting for you", "Merges when checks pass", "Paused"), the ref, type badge, design-changed badge and PR link. They're in the flyout.
@@ -60,7 +60,8 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
 
 - The Merged column only shows tasks merged in the last 3 days (`MERGED_WINDOW_DAYS` in `apps/web/app/utils/board.ts`). Older merged tasks stay on the Backlog, epic and task pages.
 - The Merged column lists the most recently merged task first (`sortColumn` in `apps/web/app/utils/board.ts`), on desktop and mobile; ties fall back to ref. Other columns keep the order the task list gives them.
-- Ready tasks with unmerged dependencies stay in Ready (D10).
+- Ready tasks with unfinished dependencies stay in Ready (D10). An amber `i-lucide-ban` button sits to the left of the type icon when `dependsOn` contains a task not done by `isTaskDone`, or `waitingOnEpics` is nonempty. Approved designs count as done. Resolve dependencies against the full project task list, before filters and the merged window. Other statuses, including Blocked and Failed, never get the icon.
+- The blocked button opens a `UPopover` headed **Waiting on**, listing every blocking task’s title, ref and status, plus each waiting epic. Task rows open the flyout on desktop and the task page on phones. Epic rows link to `/epics/<id>`, like Board epics. The button and rows stop clicks from opening the parent card. Escape and outside clicks dismiss the popover. It fits within the phone viewport and updates from live task data without a reload.
 - "Working" comes from an active lease, not from the status. A task in In progress waiting for a retry doesn't glow.
 
 ## Data
@@ -87,6 +88,7 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
 
 - Each column is a `section` labelled with its name and count.
 - A card is a `div`, so it can hold other buttons. Its title is the keyboard control: a button with `aria-pressed` when open, or a link on the mobile layout. The focus ring shows round the whole card.
+- Tab reaches the blocked button after the title. Enter opens its popover; its accessible name says what the task is waiting on.
 - The type icon is labelled with the type.
 - The assignee is labelled with the agent's name and, when the dot shows, "working", or "Unassigned". Sighted users get the name by hovering, so phones don't show it.
 - The glow is decorative.

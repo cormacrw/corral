@@ -8,6 +8,7 @@ import { PRIORITY, cardTypeIcon } from '~/utils/labels'
 // the title is a link. `pressed` marks a card that toggles, as on desktop.
 const props = defineProps<{
   task: Task
+  tasks: Task[]
   epic?: string | null
   to?: string
   pressed?: boolean
@@ -64,7 +65,10 @@ function onClick(event: MouseEvent) {
       <span class="flex items-center gap-2 text-xs">
         <span :class="priorityClass">{{ PRIORITY[task.priority].label }}</span>
         <span class="ms-auto flex items-center gap-2">
-          <!-- The blocked icon goes here, to the left of the type icon -->
+          <TaskCardBlockers
+            :task="task"
+            :tasks="tasks"
+          />
           <UIcon
             v-if="typeIcon"
             :name="typeIcon.name"
