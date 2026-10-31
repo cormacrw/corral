@@ -90,8 +90,10 @@ it('integrates sensitive and human-check work on agent approval, leaving both to
   // Commits are linked with no task PR
   expect(two!.task).toMatchObject({ prUrl: null, submission: { sequence: 1, submitted: { sha: `head-${checked.id}`, url: `https://github.com/${project.repository}/commit/head-${checked.id}` }, approved: { sha: `head-${checked.id}` }, integrated: { sha: `integrated-${checked.id}`, url: `https://github.com/${project.repository}/commit/integrated-${checked.id}` } } })
   expect(two!.task.submission!.integratedAt).toEqual(expect.any(String))
-  expect((await t.github.getPullRequest(project.repository, (await epicRow(epic.id)).prNumber!)).body).toContain(`/commit/integrated-${checked.id}`)
-  expect((await t.github.getPullRequest(project.repository, (await epicRow(epic.id)).prNumber!)).body).toContain('Works on a real iPhone')
+  const { branch } = await epicRow(epic.id)
+  const pr = [...t.github.pulls.values()].find(p => p.head === branch)!
+  expect(pr.body).toContain(`/commit/integrated-${checked.id}`)
+  expect(pr.body).toContain('Works on a real iPhone')
   // No evidence or verdict is invented for the human check
   expect(two!.evidence.filter(e => e.criterionId === human.id)).toEqual([])
   expect(two!.task.acceptanceCriteria.find(c => c.id === human.id)).toMatchObject({ met: null, checkedByHuman: true })
