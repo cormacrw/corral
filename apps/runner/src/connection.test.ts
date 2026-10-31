@@ -1,9 +1,9 @@
-import { RUNNER_PROTOCOL_VERSION, TASK_INTEGRATION_PROTOCOL, type RunnerMessage, type ServerMessage } from '@corral/contracts'
+import { RUNNER_HEARTBEAT_MS, RUNNER_PROTOCOL_VERSION, TASK_INTEGRATION_PROTOCOL, type RunnerCapacity, type RunnerMessage, type ServerMessage } from '@corral/contracts'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { WebSocketServer, type WebSocket } from 'ws'
+import { WebSocketServer, type ServerOptions, type WebSocket } from 'ws'
 import { ServerConnection } from './connection.ts'
 import { UpdateStatus } from './update-status.ts'
 
@@ -14,7 +14,12 @@ describe('runner update status on the wire', () => {
   let active: { runId: string, leaseEpoch: number }[] = []
   let finishingCount: number | undefined
   const received: RunnerMessage[] = []
+  const signedIn = async (): Promise<RunnerCapacity> => ({ slots: 2, runtimes: ['codex'], roles: ['developer'] })
+  let capacity = signedIn
+  let serverOptions: ServerOptions = {}
   afterEach(async () => {
+    capacity = signedIn
+    serverOptions = {}
     connection?.close()
     server?.clients.forEach(s => s.terminate())
     if (server) await new Promise<void>(resolve => server.close(() => resolve()))
@@ -26,7 +31,7 @@ describe('runner update status on the wire', () => {
 
   async function start(autoUpdate: boolean, handler: (socket: WebSocket, hello: Extract<RunnerMessage, { type: 'hello' }>) => void) {
     dataDir = await mkdtemp(join(tmpdir(), 'corral-update-'))
-    server = new WebSocketServer({ port: 0, host: '127.0.0.1' })
+    server = new WebSocketServer({ port: 0, host: '127.0.0.1', ...serverOptions })
     await new Promise(resolve => server.once('listening', resolve))
     const address = server.address()
     if (typeof address === 'string' || !address) throw new Error('No port')
@@ -38,7 +43,7 @@ describe('runner update status on the wire', () => {
     connection = new ServerConnection(new URL(`http://127.0.0.1:${address.port}`), { runnerId: 'r1', name: 'runner' }, {
       activeRuns: () => active,
       activeRunCount: () => finishingCount ?? active.length,
-      capacity: async () => ({ slots: 2, runtimes: ['codex'], roles: ['developer'] }),
+      capacity: () => capacity(),
       onMessage: (message) => {
         if (message.type === 'run.assign') active.push({ runId: message.job.runId, leaseEpoch: message.job.leaseEpoch })
       },
@@ -146,5 +151,109 @@ describe('runner update status on the wire', () => {
     restarted.server('new')
     restarted.write(0)
     expect(await status()).toMatchObject({ behind: false, draining: false, updateRequested: false, idle: true })
+  })
+
+  const WELCOME = { type: 'welcome', runnerId: 'r1', commit: 'old', draining: false, updateRequested: false } satisfies ServerMessage
+  const EVENTS = { type: 'run.events', runId: 'run-1', leaseEpoch: 1, events: [] } satisfies RunnerMessage
+
+  it('reports nothing as sent between the socket opening and its hello', async () => {
+    const detected = Promise.withResolvers<RunnerCapacity>()
+    capacity = () => detected.promise
+    await start(false, () => {})
+    await vi.waitFor(() => expect(server.clients.size).toBe(1))
+    await vi.waitFor(() => expect([...server.clients][0]!.readyState).toBe(1))
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    expect(connection.connected).toBe(false)
+    expect(connection.send({ type: 'job.result', jobId: 'j1', ok: true, result: { kind: 'detect_clis', clis: [] } })).toBe(false)
+
+    detected.resolve({ slots: 2, runtimes: ['codex'], roles: ['developer'] })
+    await vi.waitFor(() => expect(received.map(m => m.type)).toEqual(['hello']))
+    expect(connection.connected).toBe(true)
+  })
+
+  it('survives the socket closing while the hello is being prepared', async () => {
+    const detected = Promise.withResolvers<RunnerCapacity>()
+    capacity = () => detected.promise
+    await start(false, () => {})
+    await vi.waitFor(() => expect(server.clients.size).toBe(1))
+    connection.close()
+    detected.resolve({ slots: 2, runtimes: ['codex'], roles: ['developer'] })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(received).toEqual([])
+  })
+
+  it('holds run traffic until welcome, so a replay stays in order', async () => {
+    let peer: WebSocket | undefined
+    await start(false, socket => (peer = socket))
+    await vi.waitFor(() => expect(connection.connected).toBe(true))
+    expect(connection.send(EVENTS)).toBe(false)
+
+    peer!.send(JSON.stringify(WELCOME))
+    await vi.waitFor(() => expect(connection.send(EVENTS)).toBe(true))
+    await vi.waitFor(() => expect(received.some(m => m.type === 'run.events')).toBe(true))
+  })
+
+  it.each([4000, 4001, 4003])('waits at least 15 s after a refusal with code %i, even though the socket opened', async (code) => {
+    const delays = vi.spyOn(globalThis, 'setTimeout')
+    try {
+      await start(false, socket => socket.close(code, 'Refused'))
+      await vi.waitFor(() => expect(delays.mock.calls.some(([, ms]) => (ms ?? 0) >= 15_000)).toBe(true))
+      expect(received.filter(m => m.type === 'hello')).toHaveLength(1)
+    } finally {
+      delays.mockRestore()
+    }
+  })
+
+  it('keeps backing off while sockets open and close without a welcome', async () => {
+    const delays = vi.spyOn(globalThis, 'setTimeout')
+    try {
+      await start(false, socket => socket.close(1011))
+      await vi.waitFor(() => expect(received.filter(m => m.type === 'hello').length).toBeGreaterThanOrEqual(2), { timeout: 4000 })
+      connection.close()
+      // Doubled from 1 s, so the second wait can pass what the first could not
+      const retries = delays.mock.calls.flatMap(([, ms]) => (ms ?? 0) >= 500 && (ms ?? 0) <= 2000 ? [ms!] : [])
+      expect(retries.length).toBeGreaterThanOrEqual(2)
+    } finally {
+      delays.mockRestore()
+    }
+  })
+
+  it('terminates a socket whose server stopped answering, and reconnects', async () => {
+    let closed: Promise<unknown> | undefined
+    serverOptions = { autoPong: false }
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    try {
+      await start(false, socket => socket.send(JSON.stringify(WELCOME)))
+      await vi.waitFor(() => expect(connection.connected).toBe(true))
+      const peer = [...server.clients][0]!
+      closed = new Promise(resolve => peer.once('close', resolve))
+      await vi.advanceTimersByTimeAsync(RUNNER_HEARTBEAT_MS)
+      await vi.advanceTimersByTimeAsync(RUNNER_HEARTBEAT_MS)
+      expect(connection.connected).toBe(true)
+      await vi.advanceTimersByTimeAsync(RUNNER_HEARTBEAT_MS)
+    } finally {
+      vi.useRealTimers()
+    }
+    await closed
+    await vi.waitFor(() => expect(received.filter(m => m.type === 'hello')).toHaveLength(2), { timeout: 4000 })
+  })
+
+  it('keeps a quiet socket whose server answers its pings', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    try {
+      await start(false, socket => socket.send(JSON.stringify(WELCOME)))
+      await vi.waitFor(() => expect(connection.connected).toBe(true))
+      for (let beat = 0; beat < 4; beat++) {
+        await vi.advanceTimersByTimeAsync(RUNNER_HEARTBEAT_MS)
+        await new Promise(resolve => setImmediate(resolve))
+        await vi.waitFor(() => expect(received.filter(m => m.type === 'heartbeat')).toHaveLength(beat + 1))
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(connection.connected).toBe(true)
+    expect(received.filter(m => m.type === 'hello')).toHaveLength(1)
   })
 })

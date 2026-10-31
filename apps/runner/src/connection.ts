@@ -22,7 +22,18 @@ export interface ConnectionHandlers {
   onStatus(status: 'connected' | 'disconnected', detail?: string): void
 }
 
+const MIN_BACKOFF_MS = 1000
 const MAX_BACKOFF_MS = 30_000
+// The soonest to retry after a refusal that won't change right away: the
+// protocol (4000), a newer connection with this ID (4001) or the token (4003)
+const REFUSED_DELAY_MS = 15_000
+const REFUSED_CODES = new Set([4000, 4001, 4003])
+const HANDSHAKE_TIMEOUT_MS = 15_000
+// Heartbeats in a row with nothing back before the socket counts as dead. Two,
+// so a busy server isn't mistaken for a lost one.
+const MISSED_HEARTBEATS_LIMIT = 2
+// The run manager replays these after welcome, so nothing newer may overtake them
+const RUN_TRAFFIC = new Set<RunnerMessage['type']>(['run.started', 'run.events', 'run.ended'])
 
 // The runner's outbound connection to the server. Reconnects with backoff
 // forever; heartbeats run on their own timer so agent work can't delay them
@@ -37,8 +48,11 @@ export class ServerConnection {
   #lastUpdateSent = ''
   #updatePoll: NodeJS.Timeout | null = null
   #retry: NodeJS.Timeout | null = null
-  #backoff = 1000
+  #backoff = MIN_BACKOFF_MS
   #closed = false
+  // The server drops anything that comes before this socket's hello
+  #helloSent = false
+  #welcomed = false
 
   readonly updateStatus: UpdateStatus | undefined
 
@@ -52,8 +66,9 @@ export class ServerConnection {
     this.#handlers = handlers
   }
 
+  // Open and hello'd: a message sent now reaches the server's handlers
   get connected(): boolean {
-    return this.#socket?.readyState === WebSocket.OPEN
+    return this.#helloSent && this.#socket?.readyState === WebSocket.OPEN
   }
 
   start(): void {
@@ -76,7 +91,7 @@ export class ServerConnection {
 
   send(message: RunnerMessage): boolean {
     this.refreshUpdateStatus()
-    if (!this.connected) return false
+    if (!this.connected || (!this.#welcomed && RUN_TRAFFIC.has(message.type))) return false
     this.#socket!.send(JSON.stringify(message))
     return true
   }
@@ -90,22 +105,18 @@ export class ServerConnection {
   }
 
   #open(): void {
-    const socket = new WebSocket(this.#url, { headers: this.#token ? { authorization: `Bearer ${this.#token}` } : {} })
+    const socket = new WebSocket(this.#url, { handshakeTimeout: HANDSHAKE_TIMEOUT_MS, headers: this.#token ? { authorization: `Bearer ${this.#token}` } : {} })
     this.#socket = socket
+    this.#helloSent = false
+    this.#welcomed = false
+    const liveness = { answered: true, missed: 0 }
 
-    socket.on('open', async () => {
-      this.#backoff = 1000
-      this.#lastUpdateSent = ''
-      const capacity = await this.#handlers.capacity()
-      if (this.#socket !== socket) return
-      this.send({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, taskIntegrationProtocols: [TASK_INTEGRATION_PROTOCOL], taskIntegrationExecutor: true, commit: this.updateStatus?.commit || process.env.CORRAL_BUILD_SHA || 'development', draining: this.updateStatus?.draining ?? false, updateRequested: this.updateStatus?.updateRequested ?? false, autoUpdate: this.updateStatus?.autoUpdate ?? false, updateTarget: this.updateStatus?.serverCommit ?? '', updateState: this.updateStatus?.updateState ?? '', updateError: this.updateStatus?.updateError ?? '', ...this.#identity, ...capacity, activeRuns: this.#handlers.activeRuns() })
-      this.#heartbeat = setInterval(() => {
-        this.send({ type: 'heartbeat', sentAt: Date.now(), activeRuns: this.#handlers.activeRuns() })
-        // Keeps proxies from dropping an idle socket (D12)
-        socket.ping()
-      }, RUNNER_HEARTBEAT_MS)
+    socket.on('open', () => void this.#hello(socket, liveness))
+    socket.on('pong', () => {
+      liveness.answered = true
     })
     socket.on('message', (data) => {
+      liveness.answered = true
       let decoded: unknown
       try {
         decoded = JSON.parse(String(data))
@@ -121,6 +132,10 @@ export class ServerConnection {
       const message = parsed.data
       if (message.type === 'welcome') {
         if (message.integrationCompatibilityReason) console.warn(message.integrationCompatibilityReason)
+        // Only now has the server taken this runner: a socket that opens and is
+        // refused has to keep backing off
+        this.#backoff = MIN_BACKOFF_MS
+        this.#welcomed = true
         this.updateStatus?.server(message.commit)
         if (message.draining) this.updateStatus?.drain(message.updateRequested)
         if (this.updateStatus?.draining) this.send({ type: 'runner.draining', updateRequested: this.updateStatus.updateRequested })
@@ -141,15 +156,47 @@ export class ServerConnection {
       this.refreshUpdateStatus()
       if (this.#socket === socket) this.#socket = null
       this.#handlers.onStatus('disconnected', reason.toString() || `code ${code}`)
-      this.#scheduleReconnect()
+      this.#scheduleReconnect(code)
     })
     // 'close' follows every 'error'; reconnecting happens there
     socket.on('error', () => {})
   }
 
-  #scheduleReconnect(): void {
+  async #hello(socket: WebSocket, liveness: { answered: boolean, missed: number }): Promise<void> {
+    this.#lastUpdateSent = ''
+    let capacity: RunnerCapacity
+    try {
+      capacity = await this.#handlers.capacity()
+    } catch (error) {
+      console.warn(`Could not read this runner's capacity: ${error instanceof Error ? error.message : String(error)}`)
+      socket.terminate()
+      return
+    }
+    // That took seconds, and the socket may have gone meanwhile
+    if (this.#socket !== socket || socket.readyState !== WebSocket.OPEN) return
+    socket.send(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, taskIntegrationProtocols: [TASK_INTEGRATION_PROTOCOL], taskIntegrationExecutor: true, commit: this.updateStatus?.commit || process.env.CORRAL_BUILD_SHA || 'development', draining: this.updateStatus?.draining ?? false, updateRequested: this.updateStatus?.updateRequested ?? false, autoUpdate: this.updateStatus?.autoUpdate ?? false, updateTarget: this.updateStatus?.serverCommit ?? '', updateState: this.updateStatus?.updateState ?? '', updateError: this.updateStatus?.updateError ?? '', ...this.#identity, ...capacity, activeRuns: this.#handlers.activeRuns() } satisfies RunnerMessage))
+    this.#helloSent = true
+    this.#heartbeat = setInterval(() => {
+      // A half-open connection stays OPEN until the kernel gives up, so silence
+      // is the only sign of it. Anything from the server counts as an answer.
+      liveness.missed = liveness.answered ? 0 : liveness.missed + 1
+      if (liveness.missed >= MISSED_HEARTBEATS_LIMIT) {
+        socket.terminate()
+        return
+      }
+      liveness.answered = false
+      this.send({ type: 'heartbeat', sentAt: Date.now(), activeRuns: this.#handlers.activeRuns() })
+      // Keeps proxies from dropping an idle socket (D12)
+      socket.ping()
+    }, RUNNER_HEARTBEAT_MS)
+  }
+
+  #scheduleReconnect(code: number): void {
     if (this.#closed) return
-    this.#retry = setTimeout(() => this.#open(), this.#backoff)
+    const floor = REFUSED_CODES.has(code) ? REFUSED_DELAY_MS : MIN_BACKOFF_MS / 2
+    // Jittered, so runners that lost the same server don't all return at once
+    const delay = floor + Math.random() * (Math.max(this.#backoff, floor * 2) - floor)
+    this.#retry = setTimeout(() => this.#open(), delay)
     this.#backoff = Math.min(this.#backoff * 2, MAX_BACKOFF_MS)
   }
 
