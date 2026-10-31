@@ -328,7 +328,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
             id="epic-review-mode-note"
             class="text-xs text-muted"
           >
-            Locked because a task in this epic has opened a PR.
+            Locked because a task in this epic has submitted work.
           </p>
           <p
             v-else

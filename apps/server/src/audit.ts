@@ -117,6 +117,7 @@ export interface AuditView {
   of?: number
   version?: number
   summary?: string
+  integratedCommitSha?: string
 }
 
 // Reads a stored detail, whatever its age. `event` was written as a name by
