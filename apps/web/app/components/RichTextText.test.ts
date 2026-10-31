@@ -24,7 +24,7 @@ it('links rich descriptions without interpreting literal markdown or replacing m
   expect(wrapper.find('script').exists()).toBe(false)
 })
 
-it('shows external and attachment images full width, and drops unsafe sources', () => {
+it('keeps external and attachment images at natural size capped by the column, and drops unsafe sources', () => {
   const id = '11111111-1111-4111-8111-111111111111'
   const wrapper = mount(RichTextText, { props: { doc: { type: 'doc', content: [
     { type: 'image', attrs: { src: 'https://example.com/x.png', alt: '' } },
@@ -33,7 +33,7 @@ it('shows external and attachment images full width, and drops unsafe sources', 
   ] } } })
   const images = wrapper.findAll('img')
   expect(images.map(image => image.attributes('src'))).toEqual(['https://example.com/x.png', attachmentUrl(id)])
-  for (const image of images) expect(image.classes()).toEqual(['max-w-full', 'rounded-md'])
+  for (const image of images) expect(image.classes()).toEqual(['max-w-full', 'self-start', 'rounded-md'])
   expect(wrapper.text()).toBe('Unsafe')
 })
 
@@ -43,4 +43,12 @@ it('sizes headings by level', () => {
   expect(wrapper.get('h2').classes()).toContain('text-base')
   expect(wrapper.get('h3').classes()).toContain('text-sm')
   expect(wrapper.get('h4').classes()).toEqual(['font-semibold', 'text-highlighted'])
+})
+
+it('preserves underline marks around linked task refs', () => {
+  const wrapper = mount(RichTextText, { props: { doc: { type: 'doc', content: [
+    { type: 'paragraph', content: [{ type: 'text', text: 'Follow COR-12', marks: [{ type: 'underline' }] }] }
+  ] } } })
+  expect(wrapper.get('u').text()).toBe('Follow COR-12')
+  expect(wrapper.get('u a').attributes('href')).toBe('/tasks/COR-12')
 })

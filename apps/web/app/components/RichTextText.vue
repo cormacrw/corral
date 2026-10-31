@@ -23,7 +23,7 @@ function render(node: Node): VNodeChild {
     const linked = node.marks?.some(mark => mark.type === 'link' && safeHref(mark.attrs?.href))
     let content: VNodeChild = linked ? node.text ?? '' : textNode(node.text ?? '')
     for (const mark of node.marks ?? []) {
-      const tag = { bold: 'strong', italic: 'em', strike: 's', code: 'code' }[mark.type]
+      const tag = { bold: 'strong', italic: 'em', strike: 's', underline: 'u', code: 'code' }[mark.type]
       if (tag) content = h(tag, tag === 'code' ? { class: 'rounded border border-muted bg-muted px-1 font-mono text-xs' } : {}, [content])
       else if (mark.type === 'link' && safeHref(mark.attrs?.href)) {
         const href = mark.attrs.href
@@ -53,7 +53,7 @@ function render(node: Node): VNodeChild {
     case 'image': {
       const { src, alt, title } = node.attrs ?? {}
       if (!safeImageSrc(src)) return typeof alt === 'string' ? alt : ''
-      return h('img', { src: shownImageSrc(src), alt, title, class: 'max-w-full rounded-md' })
+      return h('img', { src: shownImageSrc(src), alt, title, class: 'max-w-full self-start rounded-md' })
     }
     default: return h('span', children)
   }

@@ -5,7 +5,8 @@ code, using every project's prefix from the shell query. Existing markdown links
 retain their targets. `TaskRefText` uses the same matcher for plain transcript
 thinking, tool output, raw input and system lines. Task descriptions use
 `RichTextText` to preserve their JSON document structure and literal text while
-linking refs; it shows external and attachment images at full width. Acceptance criteria show linked markdown until selected for editing. None of these renderers uses `v-html`.
+linking refs; it preserves underline marks and shows external and attachment images at their
+natural size, capped at the column width. Acceptance criteria show linked markdown until selected for editing. None of these renderers uses `v-html`.
 
 All generated links use `TaskLink`, with a real `/tasks/<ref>` href. Plain clicks
 open the current page's mounted `TaskFlyout` on desktop. Without a host they go
