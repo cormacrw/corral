@@ -4,7 +4,8 @@ import { afterEach, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import { runs } from '~/prototype/fixtures'
 import MobileAgentRun from '~/components/MobileAgentRun.vue'
-import AgentPage from './[name]/[[runId]].vue'
+import AgentPage from './[name].vue'
+import AgentRunPage from './[name]/[[runId]].vue'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -47,14 +48,35 @@ it('gives each run its own composer and transcript on desktop', async () => {
   vi.stubGlobal('computed', vue.computed)
   const { view, selected } = runView()
   vi.stubGlobal('definePageMeta', vi.fn())
-  vi.stubGlobal('useSeoMeta', vi.fn())
-  vi.stubGlobal('useRoute', () => ({ params: { name: 'Juno' } }))
-  vi.stubGlobal('useRouter', () => ({}))
   vi.stubGlobal('useTaskFlyout', () => ({}))
   vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(false) }))
-  vi.stubGlobal('useAgentRuns', () => view)
-  mount(AgentPage, { global })
+  mount(AgentRunPage, { props: { view: view as never }, global })
   await expectNewInstances(selected)
+})
+
+function mountAgent(params: Record<string, string>, isMobile: boolean) {
+  vi.stubGlobal('computed', vue.computed)
+  vi.stubGlobal('useSeoMeta', vi.fn())
+  vi.stubGlobal('useRoute', () => ({ params }))
+  vi.stubGlobal('useRouter', () => ({}))
+  vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(isMobile) }))
+  vi.stubGlobal('useAgentRuns', () => runView().view)
+  return mount(AgentPage, { global: { ...global, stubs: { ...global.stubs, NuxtPage: { template: '<main data-testid="child" />' }, MobileAgent: { template: '<section data-testid="list" />' } } } })
+}
+
+it('shows the agent or the run on a phone, never both', () => {
+  const agent = mountAgent({ name: 'Juno' }, true)
+  expect(agent.find('[data-testid="list"]').exists()).toBe(true)
+  expect(agent.find('[data-testid="child"]').exists()).toBe(false)
+  const run = mountAgent({ name: 'Juno', runId: 'run-1' }, true)
+  expect(run.find('[data-testid="list"]').exists()).toBe(false)
+  expect(run.find('[data-testid="child"]').exists()).toBe(true)
+})
+
+it('keeps the runs list beside the transcript with no run in the URL on the web', () => {
+  const wrapper = mountAgent({ name: 'Juno' }, false)
+  expect(wrapper.find('ul').exists()).toBe(true)
+  expect(wrapper.find('[data-testid="child"]').exists()).toBe(true)
 })
 
 it('gives each run its own composer and transcript on mobile', async () => {
