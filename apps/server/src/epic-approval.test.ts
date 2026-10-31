@@ -3,9 +3,13 @@ import { join } from 'node:path'
 import { TASK_INTEGRATION_PROTOCOL, type EpicReviewItem, type Inbox, type RunJob } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
-import { afterAll, beforeAll, expect, it } from 'vitest'
+import { afterAll, beforeAll, expect, it, vi } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './test-runner.ts'
+
+// Each test drives whole developer and reviewer rounds over a real WebSocket, so
+// these need more time than the default on a busy machine
+vi.setConfig({ testTimeout: 30_000 })
 
 let t: TestApp
 let runner: FakeRunner

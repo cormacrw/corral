@@ -135,6 +135,14 @@ the operation where it is to carry on later. Reconcile still runs: it only reads
 and a commit already on the branch is a fact. A task sent back during its push lands
 anyway: the commit stands, the task stays open and gets a comment.
 
+The kill switch and update hold (`stopped`) are held the same way, but read again
+at each wait, because a tick's own check can be minutes old: at the start of
+`#prepare` and the gate, after the CI lookup (so a verdict read during a stop waits
+too), and right before `integration_push`. A stop that lands after the `reconciling`
+journal write restores `running` and the original `updatedAt`, since nothing was
+sent. An operation left `running` resumes through reconcile on the next pass, which
+re-enters the gate with the same candidate.
+
 Dependents: `claim.ts` treats a dependency on a build task in another epic as met
 only when that epic is done, and `publishEpicDependents` wakes those tasks when the
 epic PR merges. Same-epic dependents wake on Merged through `publishDependents`.

@@ -17,7 +17,11 @@ const confirmedCriteria = ref<string[]>([])
 const confirmedTasks = ref<string[]>([])
 const obligations = computed(() => props.item.tasks.reduce((n, t) => n + t.humanChecks.length + (t.humanReview ? 1 : 0), 0))
 const confirmed = computed(() => props.item.tasks.reduce((n, t) => n + t.humanChecks.filter(id => confirmedCriteria.value.includes(id)).length + (t.humanReview && confirmedTasks.value.includes(t.task.id) ? 1 : 0), 0))
-watch(() => props.item.id, () => {
+// A tick vouches for what was on screen, so a new head or changed checks need fresh ones
+const reviewed = computed(() => JSON.stringify([props.item.id, props.item.headSha, props.item.tasks.map(t => [
+  t.task.id, t.humanReview, t.humanChecks, t.task.acceptanceCriteria.filter(c => t.humanChecks.includes(c.id)).map(c => c.text)
+])]))
+watch(reviewed, () => {
   confirmedCriteria.value = []
   confirmedTasks.value = []
 })

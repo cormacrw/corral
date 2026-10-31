@@ -6,7 +6,7 @@ Developers still implement the task, but skip checking and attaching evidence fo
 
 Reviewer approval routes any task with a flagged criterion to Human review, even with `humanReview: false` (and in any epic review mode). This is computed from the current criteria without changing the task's own human-review preference. Existing rebase-only approval carryover remains unchanged. The Inbox displays these criteria with **Needs human check** and a checklist. The human ticks each one before using Approve and merge; requesting changes remains available. Checklist ticks are local to the selected item; approval follows the existing human approval and merge gates. The reviewer's verdict remains a human check rather than claiming agent verification.
 
-PR-free epic build tasks (`task` and `bug`) are the exception: their checks skip task Human review and are confirmed on the epic review (`pr-free-task-state.md`). Spike and design tasks keep task-level Human review, even in an epic-review epic; the task-page hint and PM guidance reflect that boundary.
+PR-free epic build tasks (`task` and `bug`) are the exception: their checks skip task Human review and are confirmed on the epic review (`pr-free-task-state.md`). Those ticks clear whenever the epic's head or the owed checks change, even though the Inbox item keeps the epic's ID. Spike and design tasks keep task-level Human review, even in an epic-review epic; the task-page hint and PM guidance reflect that boundary.
 
 The additive migration gives existing criteria `false`, so tasks with no flagged criteria keep their existing routing, evidence and review requirements.
 

@@ -3,7 +3,7 @@ import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { exec } from '../../runner/src/exec.ts'
 import { inspectIntegration, prepareIntegration, pushIntegration } from '../../runner/src/integration.ts'
 import { createTestDataDir, TEST_REPOSITORY } from '../../runner/src/test-repo.ts'
@@ -352,6 +352,127 @@ it('moves nothing while paused, and carries on from the same operation afterward
   await tick()
   expect(await row(task)).toMatchObject({ status: 'merged', mergeCommitSha: op!.resultHeadSha })
   expect(await ops(epic.id)).toHaveLength(1)
+})
+
+describe('while the kill switch or update hold is on', () => {
+  let jobs: string[] = []
+  const pushes = () => jobs.filter(kind => kind === 'integration_push').length
+  const stop = (on: boolean) => {
+    t.orchestrator.merges.stopped = on
+  }
+  const record = (stopAfter?: Job['kind']) => {
+    faults = async (job, real) => {
+      jobs.push(job.kind)
+      const result = await real()
+      if (job.kind === stopAfter) stop(true)
+      return result
+    }
+  }
+  // `during` runs as the checks of this commit are read
+  const onChecks = (candidate: string, during: () => void) => {
+    const read = t.github.checks.bind(t.github)
+    vi.spyOn(t.github, 'checks').mockImplementation(async (repository, sha) => {
+      if (sha === candidate) during()
+      return read(repository, sha)
+    })
+  }
+  beforeEach(() => {
+    jobs = []
+    record()
+  })
+  afterEach(() => {
+    stop(false)
+    vi.restoreAllMocks()
+  })
+
+  it('holds a candidate that finished preparing as the stop began, then pushes that same candidate', async () => {
+    const epic = await createEpic()
+    const task = await approved(epic, 'a.txt')
+    record('integration_prepare')
+    await tick()
+    await tick()
+    expect(pushes()).toBe(0)
+    expect(await git('rev-parse', epic.branch)).toBe(epic.base)
+    expect(await row(task)).toMatchObject({ status: 'ready_to_merge', mergedAt: null })
+    const [held] = await ops(epic.id)
+    expect(held).toMatchObject({ state: 'running', error: null, resultHeadSha: expect.any(String) })
+
+    stop(false)
+    await tick()
+    expect(pushes()).toBe(1)
+    expect(await ops(epic.id)).toMatchObject([{ id: held!.id, state: 'succeeded', resultHeadSha: held!.resultHeadSha }])
+    expect(await row(task)).toMatchObject({ status: 'merged', mergeCommitSha: held!.resultHeadSha })
+    expect(await git('rev-parse', epic.branch)).toBe(held!.resultHeadSha)
+    expect(await trailers(epic.branch, task.submissionId)).toHaveLength(1)
+  })
+
+  it('holds a candidate whose checks passed as the stop began, then pushes it', async () => {
+    await t.db.update(schema.projects).set({ requiredChecks: ['ci'] }).where(eq(schema.projects.id, project.id))
+    const epic = await createEpic()
+    const task = await approved(epic, 'a.txt')
+    await tick()
+    const [op] = await ops(epic.id)
+    t.github.setChecks(op!.resultHeadSha!, [{ name: 'ci', conclusion: 'pending', url: null }])
+    await tick()
+
+    t.github.setChecks(op!.resultHeadSha!, [{ name: 'ci', conclusion: 'success', url: null }])
+    onChecks(op!.resultHeadSha!, () => stop(true))
+    await tick()
+    expect(pushes()).toBe(0)
+    expect(await git('rev-parse', epic.branch)).toBe(epic.base)
+    expect(await ops(epic.id)).toMatchObject([{ id: op!.id, state: 'running' }])
+
+    vi.restoreAllMocks()
+    stop(false)
+    await tick()
+    expect(pushes()).toBe(1)
+    expect(await ops(epic.id)).toMatchObject([{ id: op!.id, state: 'succeeded' }])
+    expect(await row(task)).toMatchObject({ status: 'merged', mergeCommitSha: op!.resultHeadSha })
+  })
+
+  it('waits for the stop to end before acting on a failure read during it', async () => {
+    await t.db.update(schema.projects).set({ requiredChecks: ['ci'] }).where(eq(schema.projects.id, project.id))
+    const epic = await createEpic()
+    const task = await approved(epic, 'a.txt')
+    await tick()
+    const [op] = await ops(epic.id)
+    t.github.setChecks(op!.resultHeadSha!, [{ name: 'ci', conclusion: 'failure', url: null }])
+    onChecks(op!.resultHeadSha!, () => stop(true))
+    await tick()
+    expect(await row(task)).toMatchObject({ status: 'ready_to_merge' })
+    expect(await ops(epic.id)).toMatchObject([{ id: op!.id, state: 'running' }])
+
+    vi.restoreAllMocks()
+    stop(false)
+    await tick()
+    expect(await row(task)).toMatchObject({ status: 'in_progress' })
+  })
+
+  it('puts an operation back when the stop begins as its push is journaled', async () => {
+    await t.db.update(schema.projects).set({ requiredChecks: ['ci'] }).where(eq(schema.projects.id, project.id))
+    const epic = await createEpic()
+    const task = await approved(epic, 'a.txt')
+    await tick()
+    const [waiting] = await ops(epic.id)
+    t.github.setChecks(waiting!.resultHeadSha!, [{ name: 'ci', conclusion: 'success', url: null }])
+    // Off for the look straight after the checks, on for the last one before the push
+    let read = false
+    let looks = 0
+    onChecks(waiting!.resultHeadSha!, () => {
+      read = true
+    })
+    const integrator = new TaskIntegrator({ db: t.db, events: t.bus, github: t.github, runner: t.runner }, async () => {})
+    await integrator.tick(() => read && ++looks > 1)
+    expect(pushes()).toBe(0)
+    expect(await git('rev-parse', epic.branch)).toBe(epic.base)
+    // Back as it was: not a push of unknown result, and its checks keep their age
+    expect(await ops(epic.id)).toMatchObject([{ id: waiting!.id, state: 'running', updatedAt: waiting!.updatedAt }])
+
+    vi.restoreAllMocks()
+    await tick()
+    expect(await row(task)).toMatchObject({ status: 'merged', mergeCommitSha: waiting!.resultHeadSha })
+    expect(await ops(epic.id)).toHaveLength(1)
+  })
 })
 
 it('leaves a pending operation alone while paused', async () => {
