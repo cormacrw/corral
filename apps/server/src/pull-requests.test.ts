@@ -154,7 +154,7 @@ describe('pull request detail', () => {
   it('returns a task\'s PR with its description, branches and files', async () => {
     const number = await open('whole', [{ path: 'a.ts', status: 'renamed', additions: 1, deletions: 2, patch: '@@ -1,2 +1 @@\n-a\n-b\n+c' }])
     const task = await t.createTask(project.slug)
-    await t.db.update(tasks).set({ prNumber: number }).where(eq(tasks.id, task.id))
+    await t.db.update(tasks).set({ prNumber: number, prUrl: `https://github.com/${project.repository}/pull/${number}` }).where(eq(tasks.id, task.id))
 
     const res = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/pull-request`)
 

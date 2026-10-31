@@ -659,7 +659,7 @@ const approveFiles: PullRequestFile[] = [
 function prDetail(ref: string, body: string, fields: Partial<PullRequestDetail> = {}): PullRequestDetail {
   const t = at(ref)
   return {
-    number: t.prNumber!, url: t.prUrl!, title: t.title, body, headBranch: t.branch ?? `corral/${t.ref.toLowerCase()}`,
+    ...t.pr!, title: t.title, body, headBranch: t.branch ?? `corral/${t.ref.toLowerCase()}`,
     // In an `epic` or `each_task` epic, a task PR's base is the epic branch (D23)
     baseBranch: epics.find(e => e.id === t.epicId)?.branch ?? 'main',
     files: approveFiles, totalFiles: approveFiles.length, truncated: false, ...fields
