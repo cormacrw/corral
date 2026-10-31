@@ -1,4 +1,4 @@
-import type { Inbox, Comment, Project, RunJob, Task } from '@corral/contracts'
+import type { TaskInboxItem, Inbox, Comment, Project, RunJob, Task } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { and, eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -191,7 +191,10 @@ describe('spikes deliver findings instead of a PR', () => {
     await runner.call(second.runId, second.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Now complete.', criteria: verdicts(task, [true, true]) })
     expect(await taskRow(task.id)).toMatchObject({ status: 'human_review', reviewRounds: 1 })
     const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
-    expect(inbox.needsYou.find(i => i.id === task.id)).toMatchObject({ body: `## Findings\n\n${FINDINGS}`, preview: `## Findings\n\n${FINDINGS}`.slice(0, 200) })
+    const item = inbox.needsYou.find(i => i.id === task.id) as TaskInboxItem
+    expect(item.body).toBe(`## Findings\n\n${FINDINGS}`)
+    expect(item.message).toBeTruthy()
+    expect(item.preview).toBe(item.message!.slice(0, 200))
     const findings = (await commentsOf(project, task)).filter(c => c.body.startsWith('## Findings'))
     expect(findings).toHaveLength(2)
     expect(t.github.pulls.size).toBe(0)
@@ -208,7 +211,10 @@ describe('spikes deliver findings instead of a PR', () => {
 
     const after = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
     expect(after.count).toBe(before.count + 1)
-    expect(after.needsYou.find(i => i.id === task.id)).toMatchObject({ type: 'human_review', body: `## Findings\n\n${FINDINGS}`, preview: `## Findings\n\n${FINDINGS}`.slice(0, 200) })
+    const item = after.needsYou.find(i => i.id === task.id) as TaskInboxItem
+    expect(item).toMatchObject({ type: 'human_review', body: `## Findings\n\n${FINDINGS}` })
+    expect(item.message).toBeTruthy()
+    expect(item.preview).toBe(item.message!.slice(0, 200))
     await runner.next('run.stop', m => m.runId === reviewer.runId)
     const feedback = 'Please compare session locks too.'
     expect((await t.request('POST', `/api/inbox/${task.id}/actions`, { action: 'request_changes', text: feedback })).status).toBe(200)

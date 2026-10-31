@@ -1,3 +1,4 @@
+import { withMessage } from './inbox-message.ts'
 import type { EpicConflictItem, EpicReviewActionInput, EpicReviewItem, EpicReviewReport, InboxSince, RunJob } from '@corral/contracts'
 import { ACTIVE_RUN_STATES, feedbackFixTitle, FIX_TITLE_PREFIX, feedbackPoints, isTaskDone, LEASE_DURATION_MS, markdownToRichText, taskRef, type Actor, type CompletionState } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
@@ -208,8 +209,17 @@ async function epicChanges(db: Executor, epic: EpicRow, board: Awaited<ReturnTyp
   return { since, newArtifacts }
 }
 
-export async function epicInboxItems(db: Executor): Promise<(EpicReviewItem | EpicConflictItem)[]> {
-  const rows = await db.select({ epic: epics, project: projects }).from(epics).innerJoin(projects, eq(projects.id, epics.projectId)).where(eq(epics.reviewState, 'human_review'))
+// Editing an epic while it waits does not constitute a new arrival.
+async function epicArrival(db: Executor, epic: EpicRow): Promise<string> {
+  const events = epic.reviewState === 'conflict' ? ['conflict'] : ['approved', 'merge_refused']
+  const [entry] = await db.select({ createdAt: auditLog.createdAt }).from(auditLog)
+    .where(and(eq(auditLog.action, 'epic.pr'), sql`${auditText('epic.pr', 'epicId')} = ${epic.id}`, inArray(auditText('epic.pr', 'event'), events)))
+    .orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(1)
+  return (entry?.createdAt ?? epic.updatedAt).toISOString()
+}
+
+export async function epicInboxItems(db: Executor, epicId?: string): Promise<(EpicReviewItem | EpicConflictItem)[]> {
+  const rows = await db.select({ epic: epics, project: projects }).from(epics).innerJoin(projects, eq(projects.id, epics.projectId)).where(and(eq(epics.reviewState, 'human_review'), epicId ? eq(epics.id, epicId) : undefined))
   const items: (EpicReviewItem | EpicConflictItem)[] = []
   for (const { epic, project } of rows) {
     if (!epic.prNumber || !epic.prHeadSha || !complete(await epicBoard(db, epic.id))) continue
@@ -220,11 +230,11 @@ export async function epicInboxItems(db: Executor): Promise<(EpicReviewItem | Ep
     const { tasks: board } = await epicReviewContext(db, epic, project)
     items.push({ id: epic.id, type: 'epic_review', epicId: epic.id, taskId: null, taskRef: null, subject: epic.title,
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: thumbnailUrl(project) },
-      preview: review.run.summary ?? 'Integration approved', body: review.run.summary ?? 'Integration approved', sender: { name: review.agent.name, role: 'reviewer' }, at: epic.updatedAt.toISOString(),
+      preview: review.run.summary ?? 'Integration approved', body: review.run.summary ?? 'Integration approved', sender: { name: review.agent.name, role: 'reviewer' }, at: await epicArrival(db, epic),
       prUrl: `https://github.com/${project.repository}/pull/${epic.prNumber}`, resolution: null, headSha: epic.prHeadSha,
       tasks: board, ...await epicChanges(db, epic, board) })
   }
-  const conflicts = await db.select({ epic: epics, project: projects }).from(epics).innerJoin(projects, eq(projects.id, epics.projectId)).where(eq(epics.reviewState, 'conflict'))
+  const conflicts = await db.select({ epic: epics, project: projects }).from(epics).innerJoin(projects, eq(projects.id, epics.projectId)).where(and(eq(epics.reviewState, 'conflict'), epicId ? eq(epics.id, epicId) : undefined))
   for (const { epic, project } of conflicts) {
     if (!epic.prNumber || !epic.prHeadSha) continue
     const files = epic.conflictFiles ?? []
@@ -232,8 +242,8 @@ export async function epicInboxItems(db: Executor): Promise<(EpicReviewItem | Ep
     const body = `The epic PR can't rebase onto ${project.defaultBranch}. ${files.length ? `Conflicting files: ${files.join(', ')}.` : 'Corral couldn\'t work out which files conflict; the PR on GitHub shows them.'}`
     items.push({ id: epic.id, type: 'epic_conflict', epicId: epic.id, taskId: null, taskRef: null, subject: epic.title,
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: thumbnailUrl(project) },
-      preview: body, body, sender: { name: 'Corral', role: 'system' }, at: epic.updatedAt.toISOString(),
+      preview: body, body, sender: { name: 'Corral', role: 'system' }, at: await epicArrival(db, epic),
       prUrl: `https://github.com/${project.repository}/pull/${epic.prNumber}`, resolution: null, headSha: epic.prHeadSha, targetBranch: project.defaultBranch, files, ...await epicChanges(db, epic, board) })
   }
-  return items
+  return Promise.all(items.map(item => withMessage(db, item)))
 }

@@ -17,6 +17,7 @@ export class FakeRunner {
   onJob: (job: Extract<ServerMessage, { type: 'job.request' }>['job']) => SetupJobResult | null = (job) => {
     if (job.kind === 'cleanup_worktrees') return { kind: 'cleanup_worktrees', removed: [`worktrees/${job.taskId}`], kept: [] }
     if (job.kind === 'sweep_worktrees') return { kind: 'sweep_worktrees', removed: [], kept: [] }
+    if (job.kind === 'inbox_message') throw new Error('No message in tests')
     if (job.kind === 'session_title') throw new Error('No title in tests')
     if (job.kind === 'detect_clis') return { kind: 'detect_clis', clis: [{ id: 'claude', version: '2.0.0', signedIn: true }, { id: 'codex', version: '0.50.0', signedIn: true }] }
     return null
