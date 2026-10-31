@@ -4,7 +4,7 @@ import { patchEpic, setEpicDependencies } from '~/queries/epics'
 import type { AuditEntry, EpicDetail, PatchEpicInput } from '@corral/contracts'
 import { isTaskDone, type EpicReviewMode, type TaskStatus } from '@corral/core'
 import { api, ApiError } from '~/composables/useApi'
-import { EPIC_REVIEW_MODE, EPIC_REVIEW_STATE, EPIC_STATUS_TEXT, epicReviewStatus, epicWithLiveCounts, PRIORITY, STATUS } from '~/utils/labels'
+import { EPIC_REVIEW_MODE, EPIC_REVIEW_STATE, EPIC_STATUS_TEXT, epicHistoryText, epicReviewStatus, epicWithLiveCounts, PRIORITY, STATUS } from '~/utils/labels'
 
 // An epic: its title, description and progress, and the dependency tree of
 // its tasks. Docked in the flyout, as a page with room for a big tree, or
@@ -487,7 +487,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
             v-for="entry in history"
             :key="entry.id"
             :entry="entry"
-            :text="entry.action === 'epic.updated' ? `edited ${(entry.detail.changed as string[] | undefined)?.join(', ') ?? 'the epic'}` : entry.action"
+            :text="epicHistoryText(entry)"
           />
           <p
             v-if="!history.length"
