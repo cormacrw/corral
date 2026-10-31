@@ -381,6 +381,10 @@ export class PlanService {
   async onRunEnded(sessionId: string, runId: string, reply: string | null, error: string | null): Promise<void> {
     const { db, events } = this.#d
     if (reply?.trim()) {
+      // A run.ended replayed after reconnecting may bring what's already saved
+      const [saved] = await db.select({ id: planMessages.id }).from(planMessages)
+        .where(and(eq(planMessages.runId, runId), eq(planMessages.kind, 'message'), eq(planMessages.text, reply.trim()))).limit(1)
+      if (saved) return
       const message = await insertMessage(db, sessionId, { role: 'pm', kind: 'message', text: reply.trim() }, { runId })
       events.publish({ type: 'plan.message', message: toMessage(message) })
     } else if (error) {

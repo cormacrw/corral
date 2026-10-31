@@ -149,6 +149,31 @@ describe('agent wake interval', () => {
     }
   })
 
+  it('keeps an event about a task when no runner could take it, for the next pass', async () => {
+    await setInterval(600)
+    try {
+      minutes(11)
+      const project = await waitingTasks(1)
+      await setPaused(project, false)
+      await t.orchestrator.tick()
+      expect(await runsIn(project)).toBe(1)
+
+      const task = await t.createTask(project.slug)
+      const full = vi.spyOn(t.runner, 'available').mockReturnValue([])
+      await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'approve' })
+      await t.orchestrator.schedule()
+      full.mockRestore()
+      expect(await runsIn(project)).toBe(1)
+
+      // Still inside the interval: only the event can start it
+      await t.orchestrator.schedule()
+      expect(await runsIn(project)).toBe(2)
+      await setPaused(project, true)
+    } finally {
+      await setInterval(null)
+    }
+  })
+
   it('rejects an interval for the PM, which never starts on the tick', async () => {
     const [pm] = await t.db.select().from(agents).where(eq(agents.role, 'pm'))
     const res = await t.request('PATCH', `/api/agents/${pm!.id}`, { wakeIntervalSeconds: 600 })

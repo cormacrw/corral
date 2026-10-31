@@ -365,7 +365,8 @@ export class RunnerHub {
         const next = previous.then(() => this.#handlers?.onRunMessage(message, runnerId)).catch(error => console.error(`Runner message ${message.type} failed`, error))
         this.#queues.set(message.runId, next)
         await next
-        if (message.type === 'run.ended') this.#queues.delete(message.runId)
+        // Idle again: a run that never gets its run.ended leaves nothing behind
+        if (this.#queues.get(message.runId) === next) this.#queues.delete(message.runId)
         return
       }
       case 'tool.call': {

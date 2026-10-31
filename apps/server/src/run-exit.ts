@@ -6,8 +6,10 @@ export function runExitError(exit: Exclude<RunExit, { kind: 'rate_limited' }>, l
   return withLastActivity(exitMessage(exit), lastActivityAt)
 }
 
+export const LAST_ACTIVITY = 'Last transcript activity:'
+
 export function withLastActivity(error: string, lastActivityAt: string | null | undefined): string {
-  return lastActivityAt ? `${error}. Last transcript activity: ${lastActivityAt}` : error
+  return lastActivityAt ? `${error}. ${LAST_ACTIVITY} ${lastActivityAt}` : error
 }
 
 function exitMessage(exit: Exclude<RunExit, { kind: 'rate_limited' }>): string {

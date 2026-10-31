@@ -1,7 +1,9 @@
 import type { RunEvent } from '@corral/contracts'
-import { appendFile, mkdir, readFile, rm } from 'node:fs/promises'
+import { appendFile, mkdir, readdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { BlobStore } from './blob-store.ts'
+
+const SPOOL_SUFFIX = '.jsonl'
 
 // Run transcripts: appended to a spool file while the run is live, then
 // stored as one immutable blob when it ends. Transcripts never go in the
@@ -19,7 +21,7 @@ export class Transcripts {
   }
 
   #path(runId: string): string {
-    return join(this.#dir, `${runId}.jsonl`)
+    return join(this.#dir, `${runId}${SPOOL_SUFFIX}`)
   }
 
   // After a restart the spool is the only record of how long it is
@@ -50,6 +52,18 @@ export class Transcripts {
     const hash = await this.#blobs.put(data)
     await rm(this.#path(runId), { force: true })
     return hash
+  }
+
+  // The runs with a spool file
+  async spooled(): Promise<string[]> {
+    const files = await readdir(this.#dir).catch(() => [])
+    return files.filter(f => f.endsWith(SPOOL_SUFFIX)).map(f => f.slice(0, -SPOOL_SUFFIX.length))
+  }
+
+  // For a spool whose run no longer exists
+  async discard(runId: string): Promise<void> {
+    this.#lengths.delete(runId)
+    await rm(this.#path(runId), { force: true })
   }
 
   // The live spool, or the stored blob once the run has finished

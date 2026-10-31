@@ -26,13 +26,14 @@ import { bundleProblem, DesignNotFound, readDesign } from './designs.ts'
 import { ApiFailure } from './errors.ts'
 import type { EventBus } from './events.ts'
 import type { GitHubClient, PullRequest } from './github.ts'
+import { Backoff } from './retries.ts'
 import { EpicBranchError, isEpicRebaseTask, taskBase } from './task-base.ts'
 import { listTaskSubmissions, recordTaskSubmission, selectPrFreeProtocol } from './task-submissions.ts'
 import { slugify } from './projects.ts'
 import { designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
 import { PmTools } from './pm-tools.ts'
 import { carryOverApproval, checkTrivialRebase, latestRebaseCheckFailures } from './rebase-review.ts'
-import { runExitError, withLastActivity } from './run-exit.ts'
+import { LAST_ACTIVITY, runExitError, withLastActivity } from './run-exit.ts'
 import { runEndValues, type RunEnd } from './run-lifecycle.ts'
 import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
 import { MergeOrchestrator } from './merge.ts'
@@ -54,6 +55,14 @@ const KILL_SWITCH_STOP = 'Stopped: Corral was stopped'
 const KEEP_WORK_STOPS: ReadonlySet<string> = new Set([HUMAN_STOP, KILL_SWITCH_STOP])
 const RUNNER_WENT_OFFLINE = 'The runner went offline before the run started'
 const RUNNER_RESTARTED = 'The runner restarted during the run: it shut down before it could report'
+// A runner reconnects within its backoff and next heartbeat. Longer than both.
+const STARTUP_GRACE_MS = 3 * RUNNER_HEARTBEAT_MS
+// How often orphaned transcript spools are looked for, and how long after its
+// run ended one may still get a replayed run.ended
+const SPOOL_SWEEP_MS = 60 * 60 * 1000
+const SPOOL_GRACE_MS = 60 * 60 * 1000
+const ASSIGN_RETRY_MS = 60_000
+const ASSIGN_RETRY_MAX_MS = 5 * 60_000
 
 type RunRow = typeof runs.$inferSelect
 type AgentRow = typeof agents.$inferSelect
@@ -134,6 +143,12 @@ export class Orchestrator implements RunnerHandlers {
   // Picking a runner and recording the run on it happen one at a time, so
   // PM turns and claims never both take a runner's last slot
   #placing: Promise<unknown> = Promise.resolve()
+  // Tasks whose job couldn't be prepared because GitHub didn't answer
+  #assignRetry: Backoff
+  // After a restart, leases that ran out while the server was down are left
+  // for the runners to renew as they reconnect
+  #sweepFrom = 0
+  #spoolsSweptAt = Date.now()
   readonly epicPrs: EpicPullRequests
   readonly pmTools: PmTools
   readonly merges: MergeOrchestrator
@@ -152,8 +167,10 @@ export class Orchestrator implements RunnerHandlers {
       github: deps.github,
       runner: deps.runner,
       wake: ids => this.poke(ids),
+      epicHeadMoved: id => this.epicPrs.headMoved(id),
       ...(deps.now && { now: deps.now })
     })
+    this.#assignRetry = new Backoff(ASSIGN_RETRY_MS, ASSIGN_RETRY_MAX_MS, () => this.#now())
     this.sweep = new WorktreeSweep({ db: deps.db, runner: deps.runner, ...(deps.now && { now: deps.now }) })
   }
 
@@ -390,6 +407,7 @@ export class Orchestrator implements RunnerHandlers {
   }
 
   start(intervalMs = 15_000): void {
+    this.#sweepFrom = this.#now().getTime() + STARTUP_GRACE_MS
     this.#timer = setInterval(() => void this.tick(), intervalMs)
     this.sweep.start()
   }
@@ -415,6 +433,26 @@ export class Orchestrator implements RunnerHandlers {
     await this.sweepLeases().catch(error => console.error('Lease sweep failed', error))
     await this.merges.tick().catch(error => console.error('Merge pass failed', error))
     await this.schedule()
+    if (Date.now() - this.#spoolsSweptAt >= SPOOL_SWEEP_MS) await this.sweepSpools().catch(error => console.error('Spool sweep failed', error))
+  }
+
+  // Transcripts of runs that never got a run.ended: the runner was lost or the
+  // lease ran out. A replayed run.ended may still come, so they wait a while.
+  async sweepSpools(): Promise<void> {
+    const { db, transcripts } = this.#d
+    this.#spoolsSweptAt = Date.now()
+    const spooled = (await transcripts.spooled()).filter(id => UUID.test(id))
+    if (!spooled.length) return
+    const rows = await db.select({ id: runs.id, state: runs.state, endedAt: runs.endedAt }).from(runs).where(inArray(runs.id, spooled))
+    for (const id of spooled) {
+      const run = rows.find(r => r.id === id)
+      // Gone with its project
+      if (!run) await transcripts.discard(id)
+      else if (run.endedAt && this.#now().getTime() - run.endedAt.getTime() >= SPOOL_GRACE_MS) {
+        const blob = await transcripts.finish(id)
+        if (blob) await db.update(runs).set({ transcriptBlob: blob }).where(eq(runs.id, id))
+      }
+    }
   }
 
   // Asks for a scheduling pass soon; passes never overlap. Passing the tasks
@@ -434,14 +472,26 @@ export class Orchestrator implements RunnerHandlers {
     this.#scheduling = (async () => {
       do {
         this.#again = false
-        const urgent = [...this.#urgent]
-        this.#urgent.clear()
-        await this.#schedulePass(urgent).catch(error => console.error('Scheduling failed', error))
+        await this.#schedulePass([...this.#urgent]).catch(error => console.error('Scheduling failed', error))
+        await this.#dropSettledUrgent().catch(error => console.error('Scheduling failed', error))
       } while (this.#again)
     })().finally(() => {
       this.#scheduling = null
     })
     return this.#scheduling
+  }
+
+  // An urgent task stays urgent until it's claimed or can't be: a pass that
+  // ended early, or found no runner slot, mustn't lose the event (flows.md step 2)
+  async #dropSettledUrgent(): Promise<void> {
+    const urgent = [...this.#urgent]
+    if (!urgent.length) return
+    const open = await this.#d.db.select({ id: tasks.id }).from(tasks)
+      .innerJoin(projects, eq(projects.id, tasks.projectId))
+      .where(and(inArray(tasks.id, urgent), inArray(tasks.status, ['ready', 'in_progress', 'agent_review']), isNull(tasks.leaseRunId), isNull(tasks.deletedAt), eq(tasks.paused, false), eq(projects.paused, false)))
+    for (const id of urgent) {
+      if (!open.some(t => t.id === id)) this.#urgent.delete(id)
+    }
   }
 
   async #schedulePass(urgent: readonly string[]): Promise<void> {
@@ -456,34 +506,47 @@ export class Orchestrator implements RunnerHandlers {
     const workers = await db.select().from(agents).where(ne(agents.role, 'pm')).orderBy(asc(agents.createdAt))
     // Tasks whose run couldn't start wait for the next pass rather than
     // burning their failed-run cap in a tight loop
-    const skip: string[] = []
+    const skip = this.#assignRetry.waiting()
     for (const agent of workers) {
-      // An agent with a wake interval starts at most one task of its own
-      // choosing per interval, counted from its last run however that one
-      // started. Tasks an event is about start regardless.
-      if (agent.role === 'reviewer' && (agent.wakeIntervalSeconds === null || await this.#awake(agent))) {
-        const claimEpic = () => this.#exclusive(() => this.epicPrs.claim(agent.id, tx => this.#pickRunner(tx, 'reviewer', agent.runtime, null)))
-        for (let job = await claimEpic(); job; job = await claimEpic()) {
-          const ctx = await this.#load(job.runId)
-          if (!ctx) break
-          if (ctx.run.runnerId) await this.#d.db.update(runs).set({ runnerName: runner.name(ctx.run.runnerId) }).where(eq(runs.id, job.runId))
-          if (!await this.#dispatch(ctx, job, RUNNER_WENT_OFFLINE)) break
-          if (this.#stopped || this.#updating) return
-          if (agent.wakeIntervalSeconds !== null) break
-        }
+      // One agent's failure leaves the others their turn
+      try {
+        await this.#scheduleAgent(agent, urgent, skip)
+      } catch (error) {
+        console.error(`Scheduling ${agent.name} failed`, error)
       }
-      let only = agent.wakeIntervalSeconds === null || (await this.#awake(agent)) ? undefined : urgent
-      const place: Place = async (tx, task) => {
-        const role: RunnerRole = agent.role === 'designer' ? 'design' : agent.role
-        const previous = agent.role !== 'reviewer' ? await this.#previousAuthorRun(tx, task.id, agent.id, agent.role) : null
-        return this.#pickRunner(tx, role, agent.runtime, previous?.runnerId ?? null, task.integrationProtocol)
-      }
-      const claimNext = () => this.#exclusive(() => claimNextTask(db, agent.id, this.#now(), only, skip, place))
-      for (let claim = await claimNext(); claim; claim = await claimNext()) {
-        if (!await this.#assign(claim)) skip.push(claim.taskId)
+      if (this.#stopped || this.#updating) return
+    }
+  }
+
+  async #scheduleAgent(agent: AgentRow, urgent: readonly string[], skip: string[]): Promise<void> {
+    const { db, runner } = this.#d
+    // An agent with a wake interval starts at most one task of its own
+    // choosing per interval, counted from its last run however that one
+    // started. Tasks an event is about start regardless.
+    if (agent.role === 'reviewer' && (agent.wakeIntervalSeconds === null || await this.#awake(agent))) {
+      const claimEpic = () => this.#exclusive(() => this.epicPrs.claim(agent.id, tx => this.#pickRunner(tx, 'reviewer', agent.runtime, null)))
+      for (let job = await claimEpic(); job; job = await claimEpic()) {
+        const ctx = await this.#load(job.runId)
+        if (!ctx) break
+        if (ctx.run.runnerId) await this.#d.db.update(runs).set({ runnerName: runner.name(ctx.run.runnerId) }).where(eq(runs.id, job.runId))
+        if (!await this.#dispatch(ctx, job, RUNNER_WENT_OFFLINE)) break
         if (this.#stopped || this.#updating) return
-        if (agent.wakeIntervalSeconds !== null) only = urgent
+        if (agent.wakeIntervalSeconds !== null) break
       }
+    }
+    let only = agent.wakeIntervalSeconds === null || (await this.#awake(agent)) ? undefined : urgent
+    const role: RunnerRole = agent.role === 'designer' ? 'design' : agent.role
+    const place: Place = async (tx, task) => {
+      const previous = agent.role !== 'reviewer' ? await this.#previousAuthorRun(tx, task.id, agent.id, agent.role) : null
+      return this.#pickRunner(tx, role, agent.runtime, previous?.runnerId ?? null, task.integrationProtocol)
+    }
+    // With no slot on any runner that fits, a claim would lock and try every
+    // ready task on every pass only to place none of them
+    const claimNext = () => this.#exclusive(async () => await this.#pickRunner(db, role, agent.runtime, null) ? claimNextTask(db, agent.id, this.#now(), only, skip, place) : null)
+    for (let claim = await claimNext(); claim; claim = await claimNext()) {
+      if (!await this.#assign(claim)) skip.push(claim.taskId)
+      if (this.#stopped || this.#updating) return
+      if (agent.wakeIntervalSeconds !== null) only = urgent
     }
   }
 
@@ -501,12 +564,21 @@ export class Orchestrator implements RunnerHandlers {
     if (!ctx?.task) return false
     try {
       const job = ctx.run.role === 'reviewer' ? await this.#reviewerJob(ctx) : ctx.run.role === 'designer' ? await this.#designerJob(ctx) : await this.#developerJob(ctx)
-      return await this.#dispatch(ctx, job, RUNNER_WENT_OFFLINE)
+      const sent = await this.#dispatch(ctx, job, RUNNER_WENT_OFFLINE)
+      if (sent) this.#assignRetry.clear(claim.taskId)
+      return sent
     } catch (error) {
-      // The run fails straight away with the cause, instead of pinning its
-      // agent until the lease expires and being claimed again uncounted
       console.error(`Assigning run ${claim.runId} failed`, error)
-      await this.#failRun(ctx, errorText(error))
+      if (error instanceof EpicBranchError && error.transient) {
+        // GitHub didn't answer, which says nothing about the task: no failed
+        // run, and a while before it's tried again
+        this.#assignRetry.later(claim.taskId)
+        await this.#endRun(ctx, { state: 'interrupted', error: error.message })
+      } else {
+        // The run fails straight away with the cause, instead of pinning its
+        // agent until the lease expires and being claimed again uncounted
+        await this.#failRun(ctx, errorText(error))
+      }
       await this.#publish(ctx)
       return false
     }
@@ -754,6 +826,7 @@ export class Orchestrator implements RunnerHandlers {
   // The run is Interrupted, not Failed, and the task waits for a retry (D10).
   async sweepLeases(): Promise<void> {
     const now = this.#now()
+    if (now.getTime() < this.#sweepFrom) return
     // Epic reviews and PM turns hold their lease on the run. A turn still
     // holding its job was never sent, and a turn sent before PM leases
     // existed has none, so it's timed from when it was queued.
@@ -775,6 +848,16 @@ export class Orchestrator implements RunnerHandlers {
 
   async onConnected(activeRuns: { runId: string, leaseEpoch: number }[], runnerId: string): Promise<void> {
     const { db, runner } = this.#d
+    // Runners keep agents alive through a server outage, and their leases run
+    // out meanwhile. Fencing holds: a run that still has its lease at its
+    // epoch was never given up, because only ending a run frees a lease, so
+    // nothing else can have the task. A lost run is ended by then, and this
+    // renews nothing for it.
+    const now = this.#now()
+    for (const active of activeRuns) {
+      const ctx = await this.#fenced(active.runId, active.leaseEpoch)
+      if (ctx?.run.runnerId === runnerId) await this.#renewLease(ctx, now)
+    }
     // Runs the server thinks are live but the runner doesn't have were lost
     // when the runner restarted
     const live = await db.select().from(runs).where(and(eq(runs.runnerId, runnerId), inArray(runs.state, [...ACTIVE_RUN_STATES])))
@@ -813,14 +896,17 @@ export class Orchestrator implements RunnerHandlers {
         this.#d.runner.send({ type: 'run.stop', runId: active.runId, reason: 'This run no longer holds its lease' }, runnerId)
         continue
       }
-      if (ctx.run.epicId || ctx.run.role === 'pm') await this.#d.db.update(runs).set({ leaseExpiresAt: new Date(now.getTime() + LEASE_DURATION_MS) }).where(eq(runs.id, ctx.run.id))
-      if (ctx.task) {
-        await this.#d.db.update(tasks).set({
-          leaseHeartbeatAt: now,
-          leaseExpiresAt: new Date(now.getTime() + 15 * 60 * 1000)
-        }).where(and(eq(tasks.id, ctx.task.id), eq(tasks.leaseRunId, ctx.run.id), eq(tasks.leaseEpoch, active.leaseEpoch)))
-      }
+      await this.#renewLease(ctx, now)
       this.#confirmLease(ctx, sentAt)
+    }
+  }
+
+  async #renewLease(ctx: RunContext, now: Date): Promise<void> {
+    const leaseExpiresAt = new Date(now.getTime() + LEASE_DURATION_MS)
+    if (ctx.run.epicId || ctx.run.role === 'pm') await this.#d.db.update(runs).set({ leaseExpiresAt }).where(eq(runs.id, ctx.run.id))
+    if (ctx.task) {
+      await this.#d.db.update(tasks).set({ leaseHeartbeatAt: now, leaseExpiresAt })
+        .where(and(eq(tasks.id, ctx.task.id), eq(tasks.leaseRunId, ctx.run.id), eq(tasks.leaseEpoch, ctx.run.leaseEpoch!)))
     }
   }
 
@@ -853,9 +939,11 @@ export class Orchestrator implements RunnerHandlers {
   async onRunMessage(message: Extract<RunnerMessage, { type: 'run.started' | 'run.events' | 'run.ended' }>, runnerId: string): Promise<void> {
     const { db, events, transcripts } = this.#d
     // IDs come from the runner; a malformed one is simply unknown
-    const [owner] = UUID.test(message.runId) ? await db.select({ runnerId: runs.runnerId }).from(runs).where(eq(runs.id, message.runId)) : []
+    const [owner] = UUID.test(message.runId) ? await db.select({ runnerId: runs.runnerId, transcriptBlob: runs.transcriptBlob }).from(runs).where(eq(runs.id, message.runId)) : []
     if (!owner || owner.runnerId !== runnerId) return
     if (message.type === 'run.events') {
+      // A replay after the transcript was stored would only start a new spool
+      if (owner.transcriptBlob) return
       // Transcript lines are kept even from a stale run: they're history, not writes
       const offset = await transcripts.append(message.runId, message.events)
       events.publish({ type: 'run.events', runId: message.runId, offset, events: message.events })
@@ -868,10 +956,20 @@ export class Orchestrator implements RunnerHandlers {
 
     if (message.type === 'run.started') {
       const ctx = await this.#fenced(message.runId, message.leaseEpoch)
-      if (!ctx) return
-      // Still active: the server may have ended the run since it was fenced
+      if (!ctx) {
+        // Sent while the socket was down: the run really did start, and a
+        // retry resumes its session
+        if (reconciled(owner.run, message.leaseEpoch)) {
+          await db.update(runs).set({ startedAt: owner.run.startedAt ?? this.#now(), agentSessionId: message.agentSessionId }).where(eq(runs.id, owner.run.id))
+          if (owner.run.role === 'pm' && owner.run.planSessionId) await this.plans?.onRunStarted(owner.run.planSessionId, message.agentSessionId)
+        }
+        return
+      }
+      // Only from before it started: a replay must not move a run back or
+      // restart its clock. Still active: the server may have ended the run
+      // since it was fenced.
       await db.update(runs).set({ state: 'running', startedAt: this.#now(), agentSessionId: message.agentSessionId })
-        .where(and(eq(runs.id, ctx.run.id), inArray(runs.state, [...ACTIVE_RUN_STATES])))
+        .where(and(eq(runs.id, ctx.run.id), inArray(runs.state, ['queued', 'starting'])))
       this.#confirmLease(ctx, message.sentAt)
       if (ctx.run.role === 'pm' && ctx.run.planSessionId) await this.plans?.onRunStarted(ctx.run.planSessionId, message.agentSessionId)
       await this.#publish(ctx)
@@ -884,8 +982,9 @@ export class Orchestrator implements RunnerHandlers {
     const live = (ACTIVE_RUN_STATES as readonly RunState[]).includes(ctx.run.state) && ctx.run.leaseEpoch === message.leaseEpoch
     if (live && ctx.run.role === 'pm') await this.#pmExited(ctx, message.exit, message.lastActivityAt)
     else if (live) await this.#runExited(ctx, message.exit, message.lastActivityAt, message.wipSha ?? null)
+    else if (reconciled(ctx.run, message.leaseEpoch)) await this.#restoreExit(ctx, message.exit, message.lastActivityAt)
     // The server already ended a run it stopped; only the runner knows the agent's last activity
-    else if (ctx.run.state === 'interrupted' && ctx.run.error && ctx.run.leaseEpoch === message.leaseEpoch) {
+    else if (ctx.run.state === 'interrupted' && ctx.run.error && ctx.run.leaseEpoch === message.leaseEpoch && !ctx.run.error.includes(LAST_ACTIVITY)) {
       await db.update(runs).set({ error: withLastActivity(ctx.run.error, message.lastActivityAt) }).where(eq(runs.id, ctx.run.id))
     }
     // The commit that saved a stopped run's work, for the retry's prompt
@@ -900,6 +999,58 @@ export class Orchestrator implements RunnerHandlers {
     this.poke()
   }
 
+  // A run.ended replayed after reconnecting (the runner's outbox), for a run
+  // this server took as lost with the runner. What the agent really did stands
+  // where it's safe: facts about the agent always are, but the task only
+  // counts the failure if no newer run has claimed it since.
+  async #restoreExit(ctx: RunContext, exit: RunExit, lastActivityAt: string | null | undefined): Promise<void> {
+    const { db, transcripts } = this.#d
+    const ended = ctx.run.endedAt ?? this.#now()
+    const reconciledRun = and(eq(runs.id, ctx.run.id), eq(runs.state, 'interrupted'))
+    if (ctx.run.role === 'pm' && exit.kind !== 'rate_limited') {
+      const reply = lastPmReply(await transcripts.read(ctx.run.id, null))
+      if (reply) {
+        await db.update(runs).set({ ...runEndValues({ state: 'completed', summary: reply }, ended), error: null }).where(reconciledRun)
+        if (ctx.run.planSessionId) await this.plans?.onRunEnded(ctx.run.planSessionId, ctx.run.id, reply, null)
+      }
+      return
+    }
+    switch (exit.kind) {
+      case 'rate_limited': {
+        const resetsAt = this.#limitResetsAt(exit)
+        await db.update(runs).set({ ...runEndValues({ state: 'completed', outcome: 'rate_limited', rateLimitResetAt: resetsAt, summary: 'Hit a usage limit' }, ended), error: null }).where(reconciledRun)
+        await this.#pauseAgent(ctx, resetsAt)
+        return
+      }
+      case 'stopped':
+      case 'runner_shutdown':
+        await db.update(runs).set({ error: runExitError(exit, lastActivityAt) }).where(reconciledRun)
+        return
+      default: {
+        const error = runExitError(exit, lastActivityAt)
+        await db.transaction(async (tx) => {
+          const locked = ctx.task ? await lockTask(tx, ctx.task.id).catch(() => null) : null
+          if (locked && !locked.task.leaseRunId && locked.task.leaseEpoch === ctx.run.leaseEpoch && ['in_progress', 'agent_review'].includes(locked.task.status)) {
+            await applyTransition(tx, locked.task, locked.project, { type: 'run_failed' }, server, { event: 'run_failed', runId: ctx.run.id, error })
+          }
+          await tx.update(runs).set(runEndValues({ state: 'failed', outcome: 'failed', error }, ended)).where(reconciledRun)
+        })
+      }
+    }
+  }
+
+  #limitResetsAt(exit: Extract<RunExit, { kind: 'rate_limited' }>): Date {
+    return exit.resetsAt ? new Date(exit.resetsAt) : new Date(this.#now().getTime() + RATE_LIMIT_BACKOFF_MS)
+  }
+
+  // D3: a pause, not a failure. The agent waits until the limit resets.
+  async #pauseAgent(ctx: RunContext, resetsAt: Date): Promise<void> {
+    const { db, events } = this.#d
+    await db.update(agents).set({ pausedUntil: resetsAt }).where(and(eq(agents.id, ctx.agent.id), or(isNull(agents.pausedUntil), lt(agents.pausedUntil, resetsAt))))
+    const agent = (await listAgents(db)).find(a => a.id === ctx.agent.id)
+    if (agent) events.publish({ type: 'agent.updated', agent })
+  }
+
   // A PM turn has no outcome to report: its reply is the last thing it said
   async #pmExited(ctx: RunContext, exit: RunExit, lastActivityAt: string | null | undefined): Promise<void> {
     const events = await this.#d.transcripts.read(ctx.run.id, null)
@@ -907,9 +1058,9 @@ export class Orchestrator implements RunnerHandlers {
     let error: string | null = null
     switch (exit.kind) {
       case 'rate_limited': {
-        const resetsAt = exit.resetsAt ? new Date(exit.resetsAt) : new Date(this.#now().getTime() + RATE_LIMIT_BACKOFF_MS)
+        const resetsAt = this.#limitResetsAt(exit)
         await this.#endRun(ctx, { state: 'completed', outcome: 'rate_limited', rateLimitResetAt: resetsAt, summary: 'Hit a usage limit' })
-        await this.#d.db.update(agents).set({ pausedUntil: resetsAt }).where(eq(agents.id, ctx.agent.id))
+        await this.#pauseAgent(ctx, resetsAt)
         error = `${ctx.agent.name} hit a usage limit; try again after ${resetsAt.toISOString()}`
         break
       }
@@ -947,15 +1098,11 @@ export class Orchestrator implements RunnerHandlers {
 
   // The agent process ended without its outcome having been accepted
   async #runExited(ctx: RunContext, exit: RunExit, lastActivityAt: string | null | undefined, headSha: string | null): Promise<void> {
-    const now = this.#now()
     switch (exit.kind) {
       case 'rate_limited': {
-        // D3: a pause, not a failure. The agent waits until the limit resets.
-        const resetsAt = exit.resetsAt ? new Date(exit.resetsAt) : new Date(now.getTime() + RATE_LIMIT_BACKOFF_MS)
+        const resetsAt = this.#limitResetsAt(exit)
         await this.#endRun(ctx, { state: 'completed', outcome: 'rate_limited', rateLimitResetAt: resetsAt, summary: 'Hit a usage limit' })
-        await this.#d.db.update(agents).set({ pausedUntil: resetsAt }).where(eq(agents.id, ctx.agent.id))
-        const agent = (await listAgents(this.#d.db)).find(a => a.id === ctx.agent.id)
-        if (agent) this.#d.events.publish({ type: 'agent.updated', agent })
+        await this.#pauseAgent(ctx, resetsAt)
         return
       }
       case 'stopped':
@@ -963,12 +1110,14 @@ export class Orchestrator implements RunnerHandlers {
         await this.#endRun(ctx, { state: 'interrupted', error: runExitError(exit, lastActivityAt), headSha })
         return
       default:
-        await this.#failRun(ctx, runExitError(exit, lastActivityAt), { headSha })
+        // An epic review keeps the head it was claimed for: failures count per head
+        await this.#failRun(ctx, runExitError(exit, lastActivityAt), { headSha: headSha ?? ctx.run.headSha })
     }
   }
 
   // A failed run counts towards the failed-run cap (D10); at the cap the task fails
   async #failRun(ctx: RunContext, error: string, fields: Partial<typeof runs.$inferInsert> = {}, note?: string): Promise<void> {
+    let reviewHandedOver = false
     const comment = await this.#d.db.transaction(async (tx) => {
       const comment = note && ctx.task ? await this.#postNote(tx, ctx, note) : null
       if (ctx.task) {
@@ -977,10 +1126,12 @@ export class Orchestrator implements RunnerHandlers {
           await applyTransition(tx, task, project, { type: 'run_failed' }, server, { event: 'run_failed', runId: ctx.run.id, error })
         }
       }
+      if (ctx.run.epicId) reviewHandedOver = await this.epicPrs.reviewFailed(tx, ctx.run, error)
       await this.#endRunIn(tx, ctx, { ...fields, state: 'failed', outcome: 'failed', error })
       return comment
     })
     if (comment) this.#d.events.publish({ type: 'comment.created', comment })
+    if (reviewHandedOver) await this.epicPrs.publish(ctx.run.epicId!)
   }
 
   // The developer's work note: what this run did, as a comment by its agent,
@@ -1137,8 +1288,11 @@ export class Orchestrator implements RunnerHandlers {
     const { task, project } = row
     if (task.status === 'merged') throw new ApiFailure(409, { code: 'conflict', constraint: 'merged_tasks_are_immutable' })
 
-    if (task.leaseRunId) {
-      const ctx = await this.#load(task.leaseRunId)
+    // Nothing new is claimed while the PR closes, which can take a while, and
+    // the run's ending pokes the scheduler. The lease is read after that.
+    const [paused] = await db.update(tasks).set({ paused: true }).where(eq(tasks.id, taskId)).returning({ leaseRunId: tasks.leaseRunId })
+    if (paused?.leaseRunId) {
+      const ctx = await this.#load(paused.leaseRunId)
       if (ctx) {
         runner.send({ type: 'run.stop', runId: ctx.run.id, reason: 'The task was deleted' }, ctx.run.runnerId)
         await this.#endRun(ctx, { state: 'interrupted', error: 'The task was deleted' })
@@ -1572,6 +1726,7 @@ export class Orchestrator implements RunnerHandlers {
   async #stuck(ctx: RunContext, question: string, note: string) {
     const comment = await this.#d.db.transaction(async (tx) => {
       const { task, project } = await lockTask(tx, ctx.task!.id)
+      if (task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease. Stop working.')
       const comment = await this.#postNote(tx, ctx, note)
       await applyTransition(tx, task, project, { type: 'block', reason: question }, server, { event: 'stuck', runId: ctx.run.id })
       await this.#endRunIn(tx, ctx, { state: 'completed', outcome: 'stuck', summary: question })
@@ -1897,6 +2052,11 @@ export class Orchestrator implements RunnerHandlers {
 }
 
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
+
+// Whether this run was ended as lost when its runner reconnected
+function reconciled(run: RunRow, leaseEpoch: number): boolean {
+  return run.state === 'interrupted' && run.leaseEpoch === leaseEpoch && (run.error ?? '').startsWith(RUNNER_RESTARTED)
+}
 
 // A PM turn's reply is the last thing it said (D9)
 function lastPmReply(events: RunEvent[]): string | null {
