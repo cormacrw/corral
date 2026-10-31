@@ -1,4 +1,4 @@
-import type { QueryClient, QueryKey } from '@tanstack/vue-query'
+import type { Query, QueryClient, QueryKey } from '@tanstack/vue-query'
 import { partialMatchKey } from '@tanstack/vue-query'
 import type { Agent, Comment, Epic, EpicDetail, Inbox, PlanSession, PlanSessionDetail, Project, Run, RunEvent, ServerEvent, ServerEventType, Task } from '@corral/contracts'
 import { keys } from './keys'
@@ -74,13 +74,14 @@ function taskStale(task: Task, cache: EventCache): QueryKey[] {
 
 // What refetches once a project is gone. The list is here because a fetch in
 // flight started before the removal and would bring the project back.
-export const removedProjectStale = [keys.projects.list(), keys.inbox(), keys.tasks.lists(), keys.epics.lists(), keys.plan.all(), keys.runs.lists()]
+export const removedProjectStale = [keys.projects.list(), keys.inbox(), keys.tasks.lists(), keys.epics.lists(), keys.plan.all(), keys.runs.lists(), keys.setup.repos()]
 
 // Typed by event, so a ServerEvent without an entry here doesn't compile
 export const eventDependencies: EventDependencies = {
   'project.created': {
     write: ({ project }, cache) => cache.set<Project[]>(keys.projects.list(), upsertInto(project)),
-    invalidates: () => []
+    // Rows say which project uses them
+    invalidates: () => [keys.setup.repos()]
   },
   'project.updated': {
     write: ({ project }, cache) => {
@@ -235,7 +236,11 @@ export function clearProject(client: QueryClient, projectId: string): void {
     ...owned(keys.runs.all()),
     ...owned(keys.plan.sessions())
   ]
-  client.removeQueries({ predicate: query => removed.some(key => partialMatchKey(query.queryKey, key)) })
+  const isRemoved = (query: Query) => removed.some(key => partialMatchKey(query.queryKey, key))
+  client.removeQueries({ predicate: query => isRemoved(query) && !query.isActive() })
+  // A mounted observer keeps showing a removed query's data, so one still on
+  // screen loses it and refetches to the server's 404
+  void client.resetQueries({ predicate: isRemoved })
   // These lists span projects, so they lose its rows and stay
   const others = <T extends { projectId: string }>(list: T[] | undefined) => list?.filter(item => item.projectId !== projectId)
   client.setQueriesData<Run[]>({ queryKey: keys.runs.lists() }, others)

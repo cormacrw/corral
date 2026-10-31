@@ -433,6 +433,32 @@ describe('removing a project', () => {
     await mutation(removeProject, client)({ id: 'p-1', slug: 'corral', confirm: 'Corral' })
     expectCleared(client)
   })
+  it('marks the repository list stale, whose rows name the project', async () => {
+    vi.mocked(api.projects.remove).mockResolvedValue(null as never)
+    const client = cached()
+    client.setQueryData(keys.setup.repos(), { signedIn: true, repos: [] })
+    await mutation(removeProject, client)({ id: 'p-1', slug: 'corral', confirm: 'Corral' })
+    expect(client.getQueryState(keys.setup.repos())?.isInvalidated).toBe(true)
+    client.setQueryData(keys.setup.repos(), { signedIn: true, repos: [] })
+    expect(applyEvent(client, { type: 'project.deleted', projectId: 'p-1' })).toContainEqual(keys.setup.repos())
+    expect(applyEvent(client, { type: 'project.created', project: gone })).toContainEqual(keys.setup.repos())
+  })
+  it('takes the data off a page still showing it and refetches to the 404', async () => {
+    const client = cached()
+    let found = true
+    const queryFn = vi.fn(async () => {
+      if (!found) throw new ApiError(404, { code: 'not_found' } as never, 'Not found')
+      return session('s-1', 'p-1')
+    })
+    const { wrapper } = mountWithQuery(defineComponent({ setup() {
+      const query = useQuery({ queryKey: keys.plan.session('s-1'), queryFn, staleTime: Infinity })
+      return () => h('div', query.error.value?.message ?? (query.data.value ? 'data' : 'nothing'))
+    } }), { client })
+    expect(wrapper.text()).toBe('data')
+    found = false
+    applyEvent(client, { type: 'project.deleted', projectId: 'p-1' })
+    await vi.waitFor(() => expect(wrapper.text()).toBe('Not found'))
+  })
   it('clears the same from the event alone', () => {
     const client = cached()
     applyEvent(client, { type: 'project.deleted', projectId: 'p-1' })

@@ -121,6 +121,10 @@ onMounted(() => {
       if (!comments.value.some(c => c.id === event.comment.id)) comments.value.push(event.comment)
     }
     if (event.type === 'run.updated' && task.value && event.run.taskId === task.value.id) void loadSide()
+    if (event.type === 'project.deleted' && task.value?.projectId === event.projectId) {
+      task.value = null
+      void load()
+    }
   })
   onBeforeUnmount(stop)
 })

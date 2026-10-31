@@ -24,7 +24,7 @@ export const pullRequestsQuery = (slug: string) => queryOptions({
 
 export const createProject = defineMutation<Project, CreateProjectInput>({
   mutationFn: input => api.projects.create(input),
-  invalidates: [keys.projects.list()]
+  invalidates: [keys.projects.list(), keys.setup.repos()]
 })
 export const setProjectThumbnail = defineMutation<Project, { slug: string, image: File | null }>({
   mutationFn: ({ slug, image }) => image ? api.projects.setThumbnail(slug, image) : api.projects.clearThumbnail(slug),

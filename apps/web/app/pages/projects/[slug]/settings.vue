@@ -10,7 +10,6 @@ import { EPIC_REVIEW_MODE, THUMBNAIL_COLORS } from '~/utils/labels'
 // On mobile the sections stack under the mobile header, which holds Save (design/mobile.md).
 const route = useRoute()
 const device = useDevice()
-const live = useLive()
 const router = useRouter()
 const { data: projects } = useQuery(projectsQuery())
 const patch = useMutation(patchProject)
