@@ -231,7 +231,7 @@ export async function readDesignScreenshot(db: Executor, blobs: BlobStore, versi
 // in Ready to merge by the old Inbox path (D20): it's
 // marked approved and every earlier version superseded. Versions are
 // otherwise immutable. Returns the approved version's id.
-export async function approveDesign(db: Database, taskId: string, version: number | undefined, actor: Actor): Promise<string> {
+export async function approveDesign(db: Database, taskId: string, version: number | undefined, actor: Actor, note?: string): Promise<string> {
   return db.transaction(async (tx) => {
     const { task, project } = await lockTask(tx, taskId)
     if (actor.kind !== 'human' || task.type !== 'design' || !['human_review', 'ready_to_merge', 'approved'].includes(task.status)) {
@@ -264,6 +264,7 @@ export async function approveDesign(db: Database, taskId: string, version: numbe
       await appendAudit(tx, { projectId: project.id, taskId, actor }, auditEvent('task.transition', { event: 'human_approve', headSha: task.headSha, from: task.status, to: 'approved' }))
     }
     await appendAudit(tx, { projectId: project.id, taskId, actor }, auditEvent('design.approved', { version: target.version }))
+    if (note?.trim()) await tx.insert(schema.comments).values({ taskId, author: actor, body: note.trim(), pinned: false })
     return result.versions.find(v => v.version === target.version)!.id
   })
 }
