@@ -25,7 +25,7 @@ const render = (props: { task: ReturnType<typeof task>, epic?: string | null, to
       BorderGlow: { template: '<div><slot /></div>' },
       UTooltip: { props: ['text'], template: '<span :data-tooltip="text"><slot /></span>' },
       AgentAvatar: { props: ['name', 'working'], template: '<i :data-avatar="name" :data-working="working" />' },
-      UIcon: { template: '<i data-icon />' },
+      UIcon: { template: '<i />' },
       NuxtLink: { props: ['to'], template: '<a :href="to"><slot /></a>' }
     }
   }

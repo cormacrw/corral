@@ -23,9 +23,10 @@ const working = computed(() => Boolean(agent.value && props.task.lease?.agentId 
         :working="working"
         size="xs"
       />
-      <span
+      <UIcon
         v-else
-        class="size-6 rounded-full border border-dashed border-accented"
+        name="i-lucide-circle-dashed"
+        class="size-6 text-dimmed"
         data-testid="card-unassigned"
       />
     </span>
