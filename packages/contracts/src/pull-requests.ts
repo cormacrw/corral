@@ -39,4 +39,38 @@ export interface PullRequestStatus {
   }
 }
 
+// A PR's description and diff, read live from GitHub for the Inbox's PR
+// description and Code diff tabs. It works for any PR on the project's
+// repository (GET /projects/:slug/pull-requests/:number) and for a task's own
+// (GET /projects/:slug/tasks/:number/pull-request).
+export interface PullRequestDetail {
+  number: number
+  url: string
+  title: string
+  // The PR description, as the developer wrote it (markdown)
+  body: string
+  baseBranch: string
+  headBranch: string
+  // Capped at PULL_REQUEST_FILE_LIMIT files and PULL_REQUEST_LINE_LIMIT changed
+  // lines; the rest is on GitHub at `url`
+  files: PullRequestFile[]
+  // Files changed in the whole PR, including any left out of `files`
+  totalFiles: number
+  // Some of the diff was left out: whole files, or the end of the last file's patch
+  truncated: boolean
+}
+
+export interface PullRequestFile {
+  path: string
+  status: 'added' | 'modified' | 'removed' | 'renamed'
+  // The file's full counts, even when its patch was cut
+  additions: number
+  deletions: number
+  // Empty when GitHub has no text diff for the file, e.g. a binary or a very large file
+  patch: string
+}
+
+export const PULL_REQUEST_FILE_LIMIT = 20
+export const PULL_REQUEST_LINE_LIMIT = 1000
+
 export type CheckConclusion = 'success' | 'failure' | 'pending' | 'neutral' | 'skipped'

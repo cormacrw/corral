@@ -1,3 +1,4 @@
+import type { PullRequestFile } from '@corral/contracts'
 import type { MergeMethod } from '@corral/core'
 import type { RunnerHub } from './runner-hub.ts'
 
@@ -14,6 +15,18 @@ export interface PullRequest {
   mergeable: boolean | null
   // e.g. 'behind' when the base branch has moved on (R7)
   mergeableState: string | null
+}
+
+// A PR as a reader sees it, with up to `fileLimit` of its changed files
+export interface PullRequestDiff {
+  number: number
+  url: string
+  title: string
+  body: string
+  baseBranch: string
+  headBranch: string
+  changedFiles: number
+  files: PullRequestFile[]
 }
 
 export interface CheckResult {
@@ -48,6 +61,7 @@ export interface GitHubClient {
   openPullRequest(repository: string, input: { head: string, base: string, title: string, body: string }): Promise<PullRequest>
   updatePullRequest(repository: string, number: number, input: { title?: string, body?: string }): Promise<void>
   getPullRequest(repository: string, number: number): Promise<PullRequest>
+  getPullRequestDiff(repository: string, number: number, fileLimit: number): Promise<PullRequestDiff>
   checks(repository: string, sha: string): Promise<CheckResult[]>
   // How many commits on `base` the commit `head` doesn't have
   behindBy(repository: string, base: string, head: string): Promise<number>
@@ -81,6 +95,30 @@ interface RawPull {
   head: { sha: string }
   mergeable?: boolean | null
   mergeable_state?: string | null
+}
+
+interface RawPullDetail {
+  number: number
+  html_url: string
+  title: string
+  body: string | null
+  base: { ref: string }
+  head: { ref: string }
+  changed_files: number
+}
+
+interface RawPullFile {
+  filename: string
+  status: string
+  additions: number
+  deletions: number
+  patch?: string
+}
+
+// GitHub also says `copied`, `changed` and `unchanged`
+function toFileStatus(status: string): PullRequestFile['status'] {
+  if (status === 'added' || status === 'removed' || status === 'renamed') return status
+  return status === 'copied' ? 'added' : 'modified'
 }
 
 function toPullRequest(raw: RawPull): PullRequest {
@@ -167,6 +205,30 @@ export class RunnerGitHub implements GitHubClient {
 
   async getPullRequest(repository: string, number: number) {
     return toPullRequest((await this.#call('GET', `/repos/${repository}/pulls/${number}`)).body as RawPull)
+  }
+
+  async getPullRequestDiff(repository: string, number: number, fileLimit: number) {
+    const [pull, files] = await Promise.all([
+      this.#call('GET', `/repos/${repository}/pulls/${number}`),
+      this.#call('GET', `/repos/${repository}/pulls/${number}/files?per_page=${fileLimit}`)
+    ])
+    const raw = pull.body as RawPullDetail
+    return {
+      number: raw.number,
+      url: raw.html_url,
+      title: raw.title,
+      body: raw.body ?? '',
+      baseBranch: raw.base.ref,
+      headBranch: raw.head.ref,
+      changedFiles: raw.changed_files,
+      files: (files.body as RawPullFile[]).map(file => ({
+        path: file.filename,
+        status: toFileStatus(file.status),
+        additions: file.additions,
+        deletions: file.deletions,
+        patch: file.patch ?? ''
+      }))
+    }
   }
 
   async checks(repository: string, sha: string) {

@@ -1,7 +1,9 @@
-import type { PullRequestStatus } from '@corral/contracts'
+import { PULL_REQUEST_FILE_LIMIT, PULL_REQUEST_LINE_LIMIT, type PullRequestDetail, type PullRequestFile, type PullRequestStatus } from '@corral/contracts'
 import { failedMergeGates, requiresHumanReview, taskRef } from '@corral/core'
 import { schema, type Database } from '@corral/db'
 import { and, asc, desc, eq, isNotNull, isNull, ne } from 'drizzle-orm'
+import { ApiFailure } from './errors.ts'
+import { GitHubError, type GitHubClient } from './github.ts'
 import type { MergeOrchestrator } from './merge.ts'
 import type { ProjectRow } from './tasks.ts'
 
@@ -55,4 +57,47 @@ export async function listPullRequests(db: Database, merges: MergeOrchestrator, 
     }
   }))
   return statuses.filter((s): s is PullRequestStatus => s !== null)
+}
+
+// A patch up to `lines` changed lines, ending on a whole line
+function cutPatch(patch: string, lines: number): string {
+  let changed = 0
+  const all = patch.split('\n')
+  const end = all.findIndex((line) => {
+    if (line.startsWith('+') || line.startsWith('-')) changed++
+    return changed > lines
+  })
+  return end === -1 ? patch : all.slice(0, end).join('\n')
+}
+
+// As many files as fit the line budget, in GitHub's order. The file that goes
+// over it keeps the start of its patch, so a single huge file still shows
+// something. Files with no changed lines, such as renames, cost nothing.
+function capFiles(files: PullRequestFile[]): { files: PullRequestFile[], cut: boolean } {
+  const kept: PullRequestFile[] = []
+  let remaining = PULL_REQUEST_LINE_LIMIT
+  for (const file of files) {
+    const lines = file.additions + file.deletions
+    if (lines > 0 && remaining === 0) return { files: kept, cut: true }
+    if (lines > remaining) return { files: [...kept, { ...file, patch: cutPatch(file.patch, remaining) }], cut: true }
+    kept.push(file)
+    remaining -= lines
+  }
+  return { files: kept, cut: false }
+}
+
+// Any PR on the project's repository, not just a task's: the epic panel reads
+// epic PRs through this too. Failures come back as API errors because a PR
+// GitHub can't return is an expected answer here, not a server fault; a
+// runner that's offline stays `runner_offline`.
+export async function readPullRequest(github: GitHubClient, project: ProjectRow, number: number): Promise<PullRequestDetail> {
+  try {
+    const { changedFiles, ...pr } = await github.getPullRequestDiff(project.repository, number, PULL_REQUEST_FILE_LIMIT)
+    const { files, cut } = capFiles(pr.files)
+    return { ...pr, files, totalFiles: changedFiles, truncated: cut || files.length < changedFiles }
+  } catch (error) {
+    if (error instanceof ApiFailure) throw error
+    const message = error instanceof Error ? error.message : String(error)
+    throw new ApiFailure(error instanceof GitHubError && error.status === 404 ? 404 : 502, { code: 'pull_request_unavailable', number, message })
+  }
 }
