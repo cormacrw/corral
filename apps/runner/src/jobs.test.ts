@@ -129,6 +129,17 @@ describe('session_title', () => {
     expect(await readFile(join(root, 'stdin'), 'utf8')).toBe('Title this: plan a login page')
   })
 
+  it('writes Inbox messages with the same configured small model', async () => {
+    const claudeBin = await fakeClaude('echo "Please review the login fix."')
+    const config = { ...loadConfig({ CORRAL_TITLE_MODEL: 'tiny' }), claudeBin }
+    expect(await runSetupJob(config, { kind: 'inbox_message', prompt: 'Facts only' })).toEqual({ kind: 'inbox_message', message: 'Please review the login fix.' })
+    const args = (await readFile(join(root, 'args'), 'utf8')).split('\n')
+    expect(args.slice(0, 5)).toEqual(['-p', '--model', 'tiny', '--tools', ''])
+    expect(args).toContain('--strict-mcp-config')
+    expect(args).toContain('--no-session-persistence')
+    expect(await readFile(join(root, 'stdin'), 'utf8')).toBe('Facts only')
+  })
+
   it('defaults to haiku', () => {
     expect(loadConfig({}).titleModel).toBe('haiku')
   })

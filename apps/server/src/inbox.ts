@@ -3,6 +3,7 @@ import { auditText, readAudit, type AuditView } from './audit.ts'
 import { epicInboxItems } from './epic-prs.ts'
 import { fileArtifacts, isNew, workNotes } from './inbox-changes.ts'
 import type { Inbox, InboxItem, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
+import { withMessage } from './inbox-message.ts'
 import { designPreviewUrl, humanCheckTally, richTextToPlainText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, count, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
@@ -21,12 +22,9 @@ const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'pr_rebased', 'findings_repo
 // The Inbox (D11, design/inbox.md): what developer and reviewer runs need
 // from the human, plus what they did, and Plan sessions waiting on the human as a Plan
 // thread (D11, amended). Items are derived from tasks, Plan sessions and the
-// audit log and deployments, so there's nothing to keep in sync.
+// audit log and deployments; only their short conversational prose is stored.
 export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
-  const open = await db.select({ task: tasks, project: projects }).from(tasks)
-    .innerJoin(projects, eq(projects.id, tasks.projectId))
-    .where(and(inArray(tasks.status, ['human_review', 'blocked', 'failed']), isNull(tasks.deletedAt)))
-  const taskItems = await Promise.all(open.map(({ task, project }) => needsYouItem(db, task, project)))
+  const taskItems = await taskMessageItems(db)
   const threads = await planThreads(db)
   const epicItems = await epicInboxItems(db)
 
@@ -142,6 +140,13 @@ async function planThreads(db: Executor): Promise<PlanThreadItem[]> {
   return items.filter((item): item is NonNullable<typeof item> => item !== null)
 }
 
+export async function taskMessageItems(db: Executor, taskId?: string): Promise<TaskInboxItem[]> {
+  const open = await db.select({ task: tasks, project: projects }).from(tasks)
+    .innerJoin(projects, eq(projects.id, tasks.projectId))
+    .where(and(inArray(tasks.status, ['human_review', 'blocked', 'failed']), isNull(tasks.deletedAt), taskId ? eq(tasks.id, taskId) : undefined))
+  return Promise.all(open.map(({ task, project }) => needsYouItem(db, task, project)))
+}
+
 async function needsYouItem(db: Executor, task: typeof tasks.$inferSelect, project: typeof projects.$inferSelect): Promise<TaskInboxItem> {
   // The last run on the task is the sender
   const [last] = await db.select({ run: runs, agent: agents }).from(runs).innerJoin(agents, eq(agents.id, runs.agentId))
@@ -160,7 +165,7 @@ async function needsYouItem(db: Executor, task: typeof tasks.$inferSelect, proje
   const body = task.status === 'human_review'
     ? await humanReviewNote(db, task)
     : (task.statusReason ?? '')
-  return {
+  return withMessage(db, {
     id: task.id,
     type,
     project: projectTag(project),
@@ -174,7 +179,7 @@ async function needsYouItem(db: Executor, task: typeof tasks.$inferSelect, proje
     prUrl: task.prUrl,
     resolution: null,
     ...await taskChanges(db, task)
-  }
+  })
 }
 
 // What's new on a task since the human's last action (design/inbox.md)
