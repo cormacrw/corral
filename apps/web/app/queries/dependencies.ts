@@ -144,13 +144,18 @@ export const eventDependencies: EventDependencies = {
   },
   'plan.session': {
     write: ({ session }, cache) => {
-      cache.set<PlanSession[]>(keys.plan.sessions(), list => list && [session, ...list.filter(s => s.id !== session.id)])
+      cache.set<PlanSession[]>(keys.plan.sessions(), (list) => {
+        if (!list) return list
+        const previous = list.find(s => s.id === session.id)
+        // Read echoes keep the timestamp: preserve order for acknowledgements.
+        return previous?.updatedAt === session.updatedAt ? upsert(list, session) : [session, ...list.filter(s => s.id !== session.id)]
+      })
       cache.set<PlanSessionDetail>(keys.plan.session(session.id), merge<PlanSessionDetail>(session))
     },
     invalidates: () => [keys.inbox()]
   },
   'plan.message': {
-    write: ({ message }, cache) => cache.set<PlanSessionDetail>(keys.plan.session(message.sessionId), detail => detail && { ...detail, messages: upsert(detail.messages, message) }),
+    write: ({ message }, cache) => cache.set<PlanSessionDetail>(keys.plan.session(message.sessionId), detail => detail && { ...detail, messages: upsert(message.role === 'human' ? detail.messages.filter(m => !m.id.startsWith('pending-')) : detail.messages, message) }),
     invalidates: () => []
   },
   'plan.updated': {

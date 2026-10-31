@@ -2,6 +2,8 @@
 // close (api.plan.close) waits out a 5 second Undo toast. The state lives
 // outside any page, so leaving the Inbox doesn't cancel a delete, and one
 // still pending when the tab closes or reloads is sent as it unloads.
+import { useMutation } from '@tanstack/vue-query'
+import { closePlanThread } from '~/queries/plan'
 import { readonly, ref } from 'vue'
 import { api } from '~/composables/useApi'
 
@@ -18,6 +20,7 @@ function forget(id: string) {
 
 export function usePlanThreadDelete() {
   const toast = useToast()
+  const closing = useMutation(closePlanThread)
   const threads = usePlanThreads()
 
   if (!listening && typeof window !== 'undefined') {
@@ -49,7 +52,7 @@ export function usePlanThreadDelete() {
     async function commit(id: string) {
       timers.delete(id)
       try {
-        await api.plan.close(id)
+        await closing.mutateAsync(id)
         threads.remove(id)
         await refresh?.().catch(() => {})
       } catch (e) {

@@ -1,3 +1,5 @@
+import { useQuery } from '@tanstack/vue-query'
+import { planSessionsQuery } from '~/queries/plan'
 import type { Ref } from 'vue'
 import type { PlanSession } from '@corral/contracts'
 
@@ -26,10 +28,11 @@ export function usePlanThreads() {
 }
 
 // The open sessions in the side nav and mobile switcher.
-// Status comes from live.state.planSessions, which plan.session events keep
+// Status comes from the sessions query, which plan.session events keep
 // current. Call it from a component: it tracks the current session as a thread.
 export function useOpenPlanSessions() {
-  const live = useLive()
+  const query = useQuery(planSessionsQuery())
+  const planSessions = computed(() => query.data.value ?? [])
   const pending = usePendingPlan()
   const route = useRoute()
   const { threads, add, remove, prune } = usePlanThreads()
@@ -39,12 +42,12 @@ export function useOpenPlanSessions() {
     if (id) add(id)
   }, { immediate: true })
   // Only against a full load: a session you just started may not have arrived yet
-  watch(() => live.state.value.loaded, (loaded) => {
-    if (loaded) prune([...live.state.value.planSessions.filter(s => !s.closed || s.id === active.value).map(s => s.id), ...Object.keys(pending.entries.value)])
+  watch(() => query.isSuccess.value, (loaded) => {
+    if (loaded) prune([...planSessions.value.filter(s => !s.closed || s.id === active.value).map(s => s.id), ...Object.keys(pending.entries.value)])
   }, { immediate: true })
 
   const sessions = computed(() => {
-    const byId = new Map(live.state.value.planSessions.map(s => [s.id, s]))
+    const byId = new Map(planSessions.value.map(s => [s.id, s]))
     for (const entry of Object.values(pending.entries.value)) if (!byId.has(entry.session.id)) byId.set(entry.session.id, entry.session)
     return threads.value.map(id => byId.get(id)).filter((s): s is PlanSession => s !== undefined)
   })
@@ -55,7 +58,7 @@ export function useOpenPlanSessions() {
 
   // Compare snapshots so read acknowledgements for a reopened, still-closed
   // session don't remove it again. Only the transition to closed removes it.
-  watch(() => live.state.value.planSessions, (next, previous) => {
+  watch(() => planSessions.value, (next, previous) => {
     const before = new Map(previous.map(s => [s.id, s]))
     for (const session of next) {
       const old = before.get(session.id)

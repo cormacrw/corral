@@ -55,3 +55,11 @@ On SSE reconnect, everything is invalidated and active queries refetch. Inactive
 ## Tests
 
 `mountWithQuery` in `mount-with-query.ts` mounts a component with a `QueryClient`.
+
+## Plan conversations
+
+Plan, Inbox Plan panes, session navigation, drafts and finished turn steps now read queries. `plan.message` and `plan.updated` update the shared session detail even while its thread is unmounted. Session snapshots preserve messages, plan revisions and metadata that arrived during the request, so an older response cannot briefly hide a live reply. Conversation scrolling watches the session ID and message/transcript counts individually; read echoes and metadata updates do not move the log.
+
+`usePendingPlan` keeps its retry/restoration state and seeds the query cache before navigation. The client plugin connects it to the cache so the reconciled POST result is written even after navigation away. Only starting/failed entries override the query; accepted threads use the shared session cache. Server human messages remove the temporary bubble, including when an event beats the POST response. See [optimistic-plan-starts.md](optimistic-plan-starts.md).
+
+`markPlanRead` patches unread flags in place and sends a fire-and-forget acknowledgement, without invalidating queries. A `plan.session` echo with the same `updatedAt` keeps the session's list position. Approvals and thread closes use mutations to invalidate Plan and Inbox queries; approval also invalidates task lists. The Inbox page still owns its legacy refresh callbacks until its own migration.

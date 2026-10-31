@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useQuery } from '@tanstack/vue-query'
+import { planSessionsQuery } from '~/queries/plan'
 import type { PlanSession } from '@corral/contracts'
 import { projectColor, timeAgo } from '~/utils/labels'
 
@@ -9,10 +11,11 @@ const live = useLive()
 const router = useRouter()
 const { active, sessions, close } = useOpenPlanSessions()
 const open = ref(false)
+const allSessions = useQuery(planSessionsQuery()).data
 
 const others = computed(() => {
   const shown = new Set(sessions.value.map(s => s.id))
-  return live.state.value.planSessions.filter(s => !shown.has(s.id))
+  return (allSessions.value ?? []).filter(s => !shown.has(s.id))
 })
 const projectOf = (session: PlanSession) => live.state.value.projects.find(p => p.id === session.projectId) ?? null
 const needsYou = computed(() => sessions.value.some(s => s.unread || s.status === 'question' || s.status === 'needs_approval'))
