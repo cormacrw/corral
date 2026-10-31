@@ -192,7 +192,7 @@ watch(() => props.plan.id, () => {
           :aria-label="`Dependency graph of ${group.title}`"
           class="mt-2 h-80 overflow-hidden rounded-lg border border-default"
         >
-          <EpicGraph
+          <AsyncEpicGraph
             v-if="graphTasks[group.id]"
             :tasks="graphTasks[group.id]!"
             direction="down"

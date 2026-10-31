@@ -32,8 +32,8 @@ function deferred<T>() {
 
 const tabs = vue.defineComponent({ name: 'UTabs', props: ['modelValue'], setup: () => () => vue.h('nav') })
 const composer = vue.defineComponent({
-  name: 'PromptComposer',
-  props: ['modelValue'],
+  name: 'DraftComposer',
+  props: ['draft'],
   setup: () => () => vue.h('form')
 })
 
@@ -57,7 +57,7 @@ async function mountDetail(client = testQueryClient()) {
   const wrapper = mount(TaskDetail, {
     props: { taskRef: 'COR-1', mode: 'page' },
     shallow: true,
-    global: { plugins: [[VueQueryPlugin, { queryClient: client }]], components: { PromptComposer: composer, UTabs: tabs }, stubs: { PromptComposer: false, UTabs: false, teleport: true } }
+    global: { plugins: [[VueQueryPlugin, { queryClient: client }]], components: { DraftComposer: composer, UTabs: tabs }, stubs: { DraftComposer: false, UTabs: false, teleport: true } }
   })
   await flushPromises()
   return wrapper
@@ -108,19 +108,19 @@ it('leaves the next task\'s comments and draft alone when an older comment lands
   await wrapper.setProps({ taskRef: 'COR-2' })
   await flushPromises()
   const draft = wrapper.getComponent(composer)
-  await (draft.vm.$attrs['onUpdate:modelValue'] as (text: string) => void)('Draft for B')
+  draft.props('draft').text.value = 'Draft for B'
   await flushPromises()
 
   sent.resolve({ id: 'c-a', taskId: 'task-a', body: 'For task A', createdAt: new Date().toISOString() } as unknown as Comment)
   expect(await sending).toBe(true)
   await flushPromises()
-  expect(wrapper.getComponent(composer).props('modelValue')).toBe('Draft for B')
+  expect(wrapper.getComponent(composer).props('draft').text.value).toBe('Draft for B')
   expect(wrapper.text()).not.toContain('For task A')
 })
 
 const submitComment = (wrapper: VueWrapper, text: string) => {
   const box = wrapper.getComponent(composer)
-  ;(box.vm.$attrs['onUpdate:modelValue'] as (text: string) => void)(text)
+  box.props('draft').text.value = text
   return (box.vm.$attrs.onSubmit as (text: string) => Promise<boolean>)(text)
 }
 const comment = (over: Partial<Comment> = {}) => ({ id: 'c-1', taskId: taskA.id, author: { kind: 'human', userId: 'me' }, body: 'Hello', pinned: false, createdAt: new Date().toISOString(), ...over }) as Comment
@@ -134,7 +134,7 @@ it('reopens from cache at once and refetches nothing while the data is fresh', a
   const reopened = mount(TaskDetail, {
     props: { taskRef: 'COR-1', mode: 'page' },
     shallow: true,
-    global: { plugins: [[VueQueryPlugin, { queryClient: client }]], components: { PromptComposer: composer, UTabs: tabs }, stubs: { PromptComposer: false, UTabs: false, teleport: true } }
+    global: { plugins: [[VueQueryPlugin, { queryClient: client }]], components: { DraftComposer: composer, UTabs: tabs }, stubs: { DraftComposer: false, UTabs: false, teleport: true } }
   })
   // Before anything has had a chance to resolve
   expect(reopened.find('[aria-label="Title"]').exists()).toBe(true)
@@ -164,7 +164,7 @@ it('shows a posted comment and empties the box before the server answers', async
   const sending = submitComment(wrapper, 'Hello')
   await flushPromises()
   expect(client.getQueryData<Comment[]>(keys.tasks.comments('COR-1'))?.map(c => c.body)).toEqual(['Hello'])
-  expect(wrapper.getComponent(composer).props('modelValue')).toBe('')
+  expect(wrapper.getComponent(composer).props('draft').text.value).toBe('')
 
   // The event can beat the response; only one comment ever stays
   applyEvent(client, { type: 'comment.created', comment: comment() })
@@ -182,7 +182,7 @@ it('removes a comment whose post failed and puts its draft back', async () => {
   expect(await submitComment(wrapper, 'Keep me')).toBe(false)
   await flushPromises()
   expect(client.getQueryData(keys.tasks.comments('COR-1'))).toEqual([])
-  expect(wrapper.getComponent(composer).props('modelValue')).toBe('Keep me')
+  expect(wrapper.getComponent(composer).props('draft').text.value).toBe('Keep me')
 })
 
 it('keeps a failed comment\'s draft for when you return to its task', async () => {
@@ -198,10 +198,10 @@ it('keeps a failed comment\'s draft for when you return to its task', async () =
   sent.resolve(comment())
   expect(await sending).toBe(false)
   await flushPromises()
-  expect(wrapper.getComponent(composer).props('modelValue')).toBe('')
+  expect(wrapper.getComponent(composer).props('draft').text.value).toBe('')
   await wrapper.setProps({ taskRef: 'COR-1' })
   await flushPromises()
-  expect(wrapper.getComponent(composer).props('modelValue')).toBe('For task A')
+  expect(wrapper.getComponent(composer).props('draft').text.value).toBe('For task A')
 })
 
 it('shows a resume in the open task from its response', async () => {

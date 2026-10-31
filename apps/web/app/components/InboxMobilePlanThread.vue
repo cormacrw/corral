@@ -261,14 +261,14 @@ async function deleteThread() {
     >
       <template #content>
         <div class="flex min-h-0 flex-1 flex-col pb-[env(safe-area-inset-bottom)]">
-          <TaskDetail
+          <AsyncTaskDetail
             v-if="flyout.ref.value"
             :task-ref="flyout.ref.value"
             mode="flyout"
             class="flex-1"
             @close="detailSheet = false"
           />
-          <EpicDetail
+          <AsyncEpicDetail
             v-else-if="flyout.epic.value"
             :epic-id="flyout.epic.value"
             mode="flyout"

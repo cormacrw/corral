@@ -2,7 +2,9 @@
 // The docked flyout wrapper: resizable 360–960px, remembered width. Shows a
 // task, an epic, or what the page puts in its slot for ?plan.
 const flyout = useTaskFlyout()
-const width = useLocalStorage('corral.flyout.width', 420)
+const saved = useLocalStorage('corral.flyout.width', 420)
+// Follows the pointer while dragging; saved when it lets go
+const width = ref(saved.value)
 const dragging = ref(false)
 let startX = 0
 let startWidth = 0
@@ -19,10 +21,12 @@ function onPointerMove(event: PointerEvent) {
 }
 function onPointerUp() {
   dragging.value = false
+  saved.value = width.value
 }
 function onKey(event: KeyboardEvent) {
   if (event.key === 'ArrowLeft') width.value = Math.min(960, width.value + 16)
   if (event.key === 'ArrowRight') width.value = Math.max(360, width.value - 16)
+  saved.value = width.value
 }
 </script>
 
@@ -47,13 +51,13 @@ function onKey(event: KeyboardEvent) {
       @pointerup="onPointerUp"
       @keydown="onKey"
     />
-    <TaskDetail
+    <AsyncTaskDetail
       v-if="flyout.ref.value"
       :task-ref="flyout.ref.value"
       mode="flyout"
       @close="flyout.close()"
     />
-    <EpicDetail
+    <AsyncEpicDetail
       v-else-if="flyout.epic.value"
       :epic-id="flyout.epic.value"
       mode="flyout"

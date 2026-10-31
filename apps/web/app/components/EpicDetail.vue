@@ -494,7 +494,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
           :aria-label="`Dependency graph of ${epic.title}`"
           :class="props.mode === 'page' ? 'min-h-0 flex-1' : 'mt-2 h-[420px] overflow-hidden rounded-lg border border-default'"
         >
-          <EpicGraph
+          <AsyncEpicGraph
             :tasks="epic.tasks"
             :selected="flyout.ref.value"
             :minimap="props.mode === 'page'"

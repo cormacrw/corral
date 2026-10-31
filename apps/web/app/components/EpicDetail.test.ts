@@ -51,7 +51,7 @@ it('updates prerequisite and blocks progress and the waiting alert from task eve
       components: { UAlert: Alert, NuxtLink: Link },
       stubs: {
         UButton: true, UIcon: true, UBadge: true, UTextarea: true,
-        UBreadcrumb: true, USelect: true, UTabs: true, EpicGraph: true, MarkdownText: true,
+        UBreadcrumb: true, USelect: true, UTabs: true, AsyncEpicGraph: true, MarkdownText: true,
         TaskTypeBadge: true
       }
     }
@@ -110,7 +110,7 @@ it('keeps an open epic\'s task list live as its tasks change, join and leave', a
     global: {
       plugins: [[VueQueryPlugin, { queryClient: client }]],
       components: { StatusBadge: Badge },
-      stubs: { UButton: true, UIcon: true, UBadge: true, UAlert: true, UTextarea: true, UBreadcrumb: true, USelect: true, UTabs: true, EpicGraph: true, MarkdownText: true, NuxtLink: true }
+      stubs: { UButton: true, UIcon: true, UBadge: true, UAlert: true, UTextarea: true, UBreadcrumb: true, USelect: true, UTabs: true, AsyncEpicGraph: true, MarkdownText: true, NuxtLink: true }
     }
   })
   const statuses = () => wrapper.findAll('li [data-testid="status"]').map(s => s.text())

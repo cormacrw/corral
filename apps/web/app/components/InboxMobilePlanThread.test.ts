@@ -51,8 +51,8 @@ function screen(item = question) {
         MarkdownText: defineComponent({ props: ['text'], setup: p => () => h('p', p.text) }),
         AgentAvatar: defineComponent({ setup: () => () => h('span') }),
         PlanDetail: defineComponent({ setup: () => () => h('div') }),
-        TaskDetail: defineComponent({ setup: () => () => h('div') }),
-        EpicDetail: defineComponent({ setup: () => () => h('div') }),
+        AsyncTaskDetail: defineComponent({ setup: () => () => h('div') }),
+        AsyncEpicDetail: defineComponent({ setup: () => () => h('div') }),
         UAlert: defineComponent({ props: ['title'], setup: p => () => h('p', { role: 'alert' }, p.title) })
       }
     }
@@ -155,11 +155,11 @@ describe('a task opened from the mobile plan sheet', () => {
       global: { plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }], router],
         components: {
           UButton, UDrawer, UDropdownMenu, PlanDetail,
-          UBadge: stub(), UIcon: stub(), UTabs: stub(), USkeleton: stub(), EpicGraph: stub('div'),
+          UBadge: stub(), UIcon: stub(), UTabs: stub(), USkeleton: stub(), AsyncEpicGraph: stub('div'),
           MobilePageHeader: defineComponent({ setup: (_, { slots }) => () => h('header', slots.actions?.()) }),
           MarkdownText: defineComponent({ props: ['text'], setup: p => () => h('p', p.text) }),
-          TaskDetail: defineComponent({ props: ['taskRef'], emits: ['close'], setup: (p, { emit }) => () => h('div', [`Task detail ${p.taskRef}`, h('button', { onClick: () => emit('close') }, 'Close task')]) }),
-          EpicDetail: defineComponent({ setup: () => () => h('div') }),
+          AsyncTaskDetail: defineComponent({ props: ['taskRef'], emits: ['close'], setup: (p, { emit }) => () => h('div', [`Task detail ${p.taskRef}`, h('button', { onClick: () => emit('close') }, 'Close task')]) }),
+          AsyncEpicDetail: defineComponent({ setup: () => () => h('div') }),
           UAlert: defineComponent({ props: ['title'], setup: p => () => h('p', { role: 'alert' }, p.title) })
         }
       }
