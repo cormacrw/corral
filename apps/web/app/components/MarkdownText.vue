@@ -2,7 +2,7 @@
 import type { Token, Tokens } from 'marked'
 import { attachmentIdFromSrc, attachmentUrl } from '@corral/core'
 import { marked } from 'marked'
-import { h, ref, type VNode } from 'vue'
+import { computed, h, ref, type VNode } from 'vue'
 import { RouterLink } from 'vue-router'
 
 // Agents write markdown (PM replies, transcripts, comments, summaries).
@@ -15,7 +15,9 @@ import { RouterLink } from 'vue-router'
 // `taskRefs` lists the project prefixes whose task refs become links, so text
 // like SHA-256 or UTF-8 stays text.
 const props = defineProps<{ text: string, breaks?: boolean, taskRefs?: string[] }>()
+// A modal for every block of a long log adds up, so it exists only once opened
 const lightbox = ref<{ src: string, alt: string } | null>(null)
+const lightboxOpen = ref(false)
 
 const SAFE_HREF = /^(https?:|mailto:|\/|#)/i
 
@@ -88,7 +90,10 @@ function inline(tokens: Token[]): (VNode | string)[] {
           'type': 'button',
           'class': 'me-1 inline-block cursor-zoom-in overflow-hidden rounded-md border border-default align-top',
           'aria-label': `Open ${image.text || 'image'} full size`,
-          'onClick': () => (lightbox.value = { src, alt: image.text })
+          'onClick': () => {
+            lightbox.value = { src, alt: image.text }
+            lightboxOpen.value = true
+          }
         }, h('img', { src, alt: image.text, loading: 'lazy', class: 'block max-h-40 max-w-full object-contain sm:max-w-60' }))
       }
       case 'text': return token.tokens ? h('span', inline(token.tokens)) : textNode(unescapeHtml((token as Tokens.Text).text))
@@ -97,10 +102,11 @@ function inline(tokens: Token[]): (VNode | string)[] {
   })
 }
 
+const taskRefPattern = computed(() => props.taskRefs?.length ? new RegExp(`\\b((?:${props.taskRefs.join('|')})-\\d+)\\b`) : null)
+
 function textNode(text: string): VNode | string {
-  if (!props.taskRefs?.length) return text
-  const ref = new RegExp(`\\b((?:${props.taskRefs.join('|')})-\\d+)\\b`)
-  return h('span', text.split(ref).map((part, i) =>
+  if (!taskRefPattern.value) return text
+  return h('span', text.split(taskRefPattern.value).map((part, i) =>
     i % 2 === 1
       ? h(RouterLink, { to: `/tasks/${part}`, class: 'text-primary hover:underline' }, () => part)
       : part))
@@ -118,14 +124,14 @@ const Rendered = () => blocks(marked.lexer(props.text, { ...marked.defaults, bre
   <div class="flex min-w-0 flex-col gap-2 wrap-anywhere">
     <Rendered />
     <UModal
-      :open="lightbox !== null"
-      :title="lightbox?.alt || 'Image'"
+      v-if="lightbox"
+      v-model:open="lightboxOpen"
+      :title="lightbox.alt || 'Image'"
       :ui="{ content: 'max-w-5xl' }"
-      @update:open="lightbox = null"
+      @after:leave="lightbox = null"
     >
       <template #body>
         <img
-          v-if="lightbox"
           :src="lightbox.src"
           :alt="lightbox.alt"
           class="max-h-[80vh] w-full object-contain"

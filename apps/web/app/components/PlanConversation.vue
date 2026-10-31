@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Plan, PlanMessage } from '@corral/contracts'
+import type { Plan } from '@corral/contracts'
 import { approvedPlanSummary } from '@corral/core'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { approvePlan as approvePlanMutation, planSessionQuery, markPlanRead, sendPlanMessage } from '~/queries/plan'
@@ -7,8 +7,9 @@ import { runTranscriptQuery } from '~/queries/runs'
 import { reloadShell } from '~/queries/shell'
 import { projectColor, runtimeLabel } from '~/utils/labels'
 import { approvePlan } from '~/utils/plan-approval'
-import { answerTo, openQuestionId, STOP_ASKING } from '~/utils/plan-questions'
+import { STOP_ASKING } from '~/utils/plan-questions'
 import { withoutMessages } from '~/utils/tool-steps'
+import PlanMessages from './PlanMessages.vue'
 
 // A Plan conversation (design/plan.md)
 const props = defineProps<{ sessionId: string, inbox?: boolean }>()
@@ -73,7 +74,6 @@ watch(id, () => {
   approvalTarget.value = null
 })
 
-const planOf = (message: PlanMessage): Plan | null => session.value?.plans.find(p => p.id === message.planId) ?? null
 // The flyout always shows the newest version; the chat only links to it
 const latest = computed(() => session.value?.plans.reduce<Plan | null>((a, p) => !a || p.version > a.version ? p : a, null) ?? null)
 const planTaskCount = computed(() => latest.value?.tasks.filter(task => task.change !== 'removed').length ?? 0)
@@ -108,7 +108,6 @@ async function send(message: string): Promise<boolean> {
 // One-tap answers and Grill me send straight away. An answer leaves the
 // draft and attached task alone; Grill me sends the draft.
 const composer = ref<{ focus: () => void } | null>(null)
-const openQuestion = computed(() => session.value ? openQuestionId(session.value.messages) : null)
 const cantApprove = computed(() => Boolean(starting.value && (starting.value.state !== 'accepted' || waitingForStart.value)) || busy.value || approving.value !== null || Boolean(session.value?.activeRunId))
 const cantSend = computed(() => cantApprove.value || runnerOffline.value)
 async function submit(message: string): Promise<boolean> {
@@ -162,9 +161,6 @@ const transcript = useQuery(computed(() => ({ ...runTranscriptQuery(activeRunId.
 // What the turn has posted to the log already (a question, a plan) isn't repeated in its transcript
 const repliesOf = (runId: string) => session.value?.messages.filter(m => m.role === 'pm' && m.runId === runId).map(m => m.text) ?? []
 const liveEvents = computed(() => activeRunId.value ? withoutMessages(transcript.data.value ?? [], repliesOf(activeRunId.value)) : [])
-// A finished turn's steps sit above its first message
-const firstOfTurn = (message: PlanMessage) => message.role === 'pm' && message.runId !== null && message.runId !== activeRunId.value
-  && session.value?.messages.find(m => m.role === 'pm' && m.runId === message.runId)?.id === message.id
 
 // On phones the plan opens in a bottom sheet, and a task or epic from it
 // in a taller one over it; closing either clears ?plan, ?task and ?epic.
@@ -184,13 +180,23 @@ const detailSheet = computed({
 
 // Follows the conversation. When the PM's next question arrives it scrolls
 // to the question's top, so a long one isn't cut off above its answers.
+// A reader who has scrolled up stays there, until the conversation changes or
+// they send something.
 const log = ref<HTMLElement | null>(null)
-watch([() => session.value?.id, () => session.value?.messages.length, () => liveEvents.value.length], async () => {
+const NEAR_BOTTOM_PX = 64
+let following = true
+function onLogScroll() {
+  const el = log.value
+  if (el) following = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX
+}
+watch([() => session.value?.id, () => session.value?.messages.length, () => liveEvents.value.length], async ([sessionId, count], [lastSession, lastCount]) => {
+  const last = session.value?.messages.at(-1)
+  if (sessionId !== lastSession || (count !== lastCount && last?.role === 'human')) following = true
   await nextTick()
   if (!log.value) return
-  const last = session.value?.messages.at(-1)
   const question = last?.kind === 'question' ? log.value.querySelector<HTMLElement>(`[data-message-id="${last.id}"]`) : null
-  log.value.scrollTop = question ? question.offsetTop - 16 : log.value.scrollHeight
+  if (question) log.value.scrollTop = question.offsetTop - 16
+  else if (following) log.value.scrollTop = log.value.scrollHeight
 })
 </script>
 
@@ -289,93 +295,22 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
           role="log"
           aria-live="polite"
           class="relative min-h-0 flex-1 overflow-y-auto overscroll-contain p-4"
+          @scroll.passive="onLogScroll"
         >
           <div class="mx-auto flex w-full max-w-[768px] flex-col gap-4">
-            <div
-              v-for="message in session.messages"
-              :key="message.id"
-              :data-message-id="message.id"
-              :class="['flex', message.role === 'human' ? 'justify-end' : 'justify-start']"
-            >
-              <div
-                v-if="message.role === 'human'"
-                class="max-w-[85%] min-w-0 rounded-lg bg-elevated px-3 py-2 text-sm"
-              >
-                <MarkdownText
-                  :text="message.text"
-                  breaks
-                />
-                <UBadge
-                  v-if="starting?.taskRef && message.id === session.messages[0]?.id"
-                  variant="subtle"
-                  class="mt-2"
-                >
-                  Refining {{ starting.taskRef }}
-                </UBadge>
-                <span
-                  v-if="starting?.state === 'failed' && message.id.startsWith('pending-')"
-                  class="block text-xs text-error"
-                >Not sent</span>
-              </div>
-              <!-- Full width on phones, so a question's answers span the screen -->
-              <div
-                v-else
-                :class="['flex max-w-full min-w-0 gap-2', device.isMobile.value && 'flex-1']"
-              >
-                <AgentAvatar
-                  :name="pm?.name ?? 'PM'"
-                  size="sm"
-                />
-                <div :class="['flex min-w-0 flex-col gap-2', device.isMobile.value && 'flex-1']">
-                  <span class="text-xs text-muted">{{ pm?.name ?? 'PM' }} · PM</span>
-                  <PlanTurnSteps
-                    v-if="firstOfTurn(message)"
-                    :run-id="message.runId!"
-                    :replies="repliesOf(message.runId!)"
-                    :agent-name="pm?.name ?? 'PM'"
-                  />
-                  <UAlert
-                    v-if="message.kind === 'error'"
-                    color="error"
-                    variant="subtle"
-                    :title="message.text"
-                    :actions="[{ label: 'Retry', onClick: () => send('Please continue.') }]"
-                  />
-                  <PlanQuestion
-                    v-else-if="message.kind === 'question'"
-                    :message="message"
-                    :active="message.id === openQuestion"
-                    :answer="answerTo(session.messages, message.id)"
-                    :disabled="cantSend"
-                    :stacked="device.isMobile.value"
-                    @answer="quick"
-                    @other="composer?.focus()"
-                    @stop="quick(STOP_ASKING)"
-                  />
-                  <div
-                    v-else
-                    class="text-sm"
-                  >
-                    <MarkdownText :text="message.text" />
-                  </div>
-                  <button
-                    v-if="planOf(message)"
-                    type="button"
-                    :class="['flex max-w-full items-center gap-2 self-start rounded-md border border-default px-3 py-2 text-start text-sm hover:bg-elevated', flyout.plan.value && 'bg-elevated']"
-                    @click="flyout.plan.value ? flyout.close() : flyout.openPlan()"
-                  >
-                    <UIcon
-                      name="i-lucide-list-checks"
-                      class="size-4 shrink-0 text-muted"
-                    />
-                    <span class="min-w-0 truncate">
-                      <span class="font-medium">Plan v{{ planOf(message)!.version }}</span> · {{ planOf(message)!.title }}
-                    </span>
-                    <span class="shrink-0 text-xs text-muted">{{ planOf(message)!.id === latest?.id ? 'Open plan' : `Now v${latest?.version}` }}</span>
-                  </button>
-                </div>
-              </div>
-            </div>
+            <PlanMessages
+              :session="session"
+              :pm-name="pm?.name ?? 'PM'"
+              :active-run-id="activeRunId"
+              :latest="latest"
+              :cant-send="cantSend"
+              :refining="starting?.taskRef"
+              :failed="starting?.state === 'failed'"
+              @retry="send('Please continue.')"
+              @answer="quick"
+              @other="composer?.focus()"
+              @stop="quick(STOP_ASKING)"
+            />
             <UAlert
               v-if="starting?.state === 'failed'"
               color="error"
@@ -608,14 +543,14 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
         >
           <template #content>
             <div class="flex min-h-0 flex-1 flex-col pb-[env(safe-area-inset-bottom)]">
-              <TaskDetail
+              <AsyncTaskDetail
                 v-if="flyout.ref.value"
                 class="flex-1"
                 :task-ref="flyout.ref.value"
                 mode="flyout"
                 @close="flyout.close()"
               />
-              <EpicDetail
+              <AsyncEpicDetail
                 v-else-if="flyout.epic.value"
                 class="flex-1"
                 :epic-id="flyout.epic.value"

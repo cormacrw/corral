@@ -27,53 +27,75 @@ export type TranscriptEntry
   = | { key: number, type: 'system', text: string }
     | { key: number, type: 'message', text: string }
     | { key: number, type: 'thinking', text: string }
-    | { key: number, type: 'steps', steps: ToolStep[] }
+    | { key: number, type: 'steps', steps: ToolStep[], revision: number }
 
-export function transcriptEntries(events: RunEvent[]): TranscriptEntry[] {
-  const list: TranscriptEntry[] = []
-  const byId = new Map<string, ToolStep>()
-  events.forEach((event, i) => {
-    switch (event.type) {
-      case 'system':
-        list.push({ key: i, type: 'system', text: event.text })
-        break
-      case 'message':
-        list.push({ key: i, type: 'message', text: event.text })
-        break
-      case 'thinking': {
-        // The CLI marks an empty thinking block at the start of most turns.
-        // One between tool calls doesn't split their group, and consecutive
-        // empty ones show as one "Thinking" step. Thinking with text does
-        // split the group, as its own step.
-        const last = list.at(-1)
-        const text = event.text.trim()
-        if (!text && (last?.type === 'steps' || (last?.type === 'thinking' && !last.text))) break
-        list.push({ key: i, type: 'thinking', text })
-        break
-      }
-      case 'tool_call': {
-        if (HIDDEN_TOOLS.has(event.tool)) break
-        const step: ToolStep = { key: i, ...describe(event.tool, event.input), input: event.input, isError: false, done: false }
-        const last = list.at(-1)
-        if (last?.type === 'steps') last.steps.push(step)
-        else list.push({ key: i, type: 'steps', steps: [step] })
-        byId.set(event.id, step)
-        break
-      }
-      case 'tool_result': {
-        const step = byId.get(event.id)
-        if (step) {
-          step.output = event.output
-          step.isError = event.isError
-          step.done = true
-        }
-        break
-      }
-      default:
-        break
+type StepsEntry = Extract<TranscriptEntry, { type: 'steps' }>
+
+// Builds entries as a transcript grows, looking only at the lines it hasn't
+// seen. Entries change in place, and a group's `revision` says when. A list
+// that isn't the last one plus more lines starts over.
+export function transcriptFold(): (events: RunEvent[]) => TranscriptEntry[] {
+  let list: TranscriptEntry[] = []
+  let byId = new Map<string, { step: ToolStep, group: StepsEntry }>()
+  let seen: RunEvent[] = []
+  return (events) => {
+    const last = seen.length - 1
+    if (events.length < seen.length || events[0] !== seen[0] || events[last] !== seen[last]) {
+      list = []
+      byId = new Map()
+      seen = []
     }
-  })
-  return list
+    for (let i = seen.length; i < events.length; i++) addEvent(list, byId, events[i]!, i)
+    seen = events
+    return list
+  }
+}
+
+export const transcriptEntries = (events: RunEvent[]): TranscriptEntry[] => transcriptFold()(events)
+
+function addEvent(list: TranscriptEntry[], byId: Map<string, { step: ToolStep, group: StepsEntry }>, event: RunEvent, i: number): void {
+  switch (event.type) {
+    case 'system':
+      list.push({ key: i, type: 'system', text: event.text })
+      break
+    case 'message':
+      list.push({ key: i, type: 'message', text: event.text })
+      break
+    case 'thinking': {
+      // The CLI marks an empty thinking block at the start of most turns.
+      // One between tool calls doesn't split their group, and consecutive
+      // empty ones show as one "Thinking" step. Thinking with text does
+      // split the group, as its own step.
+      const last = list.at(-1)
+      const text = event.text.trim()
+      if (!text && (last?.type === 'steps' || (last?.type === 'thinking' && !last.text))) break
+      list.push({ key: i, type: 'thinking', text })
+      break
+    }
+    case 'tool_call': {
+      if (HIDDEN_TOOLS.has(event.tool)) break
+      const step: ToolStep = { key: i, ...describe(event.tool, event.input), input: event.input, isError: false, done: false }
+      const last = list.at(-1)
+      const group: StepsEntry = last?.type === 'steps' ? last : { key: i, type: 'steps', steps: [], revision: 0 }
+      if (group !== last) list.push(group)
+      group.steps.push(step)
+      group.revision++
+      byId.set(event.id, { step, group })
+      break
+    }
+    case 'tool_result': {
+      const found = byId.get(event.id)
+      if (found) {
+        found.step.output = event.output
+        found.step.isError = event.isError
+        found.step.done = true
+        found.group.revision++
+      }
+      break
+    }
+    default:
+      break
+  }
 }
 
 // "Read 2 files, ran a command, attached evidence"

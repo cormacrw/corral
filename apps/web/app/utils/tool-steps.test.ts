@@ -1,6 +1,6 @@
 import type { RunEvent } from '@corral/contracts'
-import { describe, expect, it } from 'vitest'
-import { transcriptEntries } from './tool-steps.ts'
+import { describe, expect, it, vi } from 'vitest'
+import { transcriptEntries, transcriptFold } from './tool-steps.ts'
 
 const call = (id: string, command: string): RunEvent => ({ type: 'tool_call', id, tool: 'Bash', input: { command } })
 const result = (id: string): RunEvent => ({ type: 'tool_result', id, output: 'ok', isError: false })
@@ -59,5 +59,57 @@ describe('transcriptEntries', () => {
     const steps = (agent?: string) => transcriptEntries([{ type: 'tool_call', id: 'a', tool: 'mcp__corral__get_agent_activity', input: agent ? { agent } : {} }])
     expect(steps()[0]).toMatchObject({ steps: [{ verb: 'Checked what the team is doing', target: '' }] })
     expect(steps('Jack')[0]).toMatchObject({ steps: [{ verb: 'Checked what the team is doing', target: 'Jack' }] })
+  })
+})
+
+describe('transcriptFold', () => {
+  const events: RunEvent[] = [
+    { type: 'system', text: 'Started' },
+    { type: 'tool_call', id: 'a', tool: 'Read', input: { file_path: 'a.ts' } },
+    { type: 'thinking', text: '' },
+    { type: 'tool_call', id: 'b', tool: 'Bash', input: { command: 'ls' } },
+    { type: 'tool_result', id: 'a', output: 'one', isError: false },
+    { type: 'message', text: 'Done with that' },
+    { type: 'tool_result', id: 'b', output: 'boom', isError: true },
+    { type: 'tool_call', id: 'c', tool: 'Read', input: { file_path: 'b.ts' } }
+  ] as RunEvent[]
+  const plain = (entries: unknown) => JSON.parse(JSON.stringify(entries, (key, value) => key === 'revision' ? undefined : value))
+
+  it('builds the same entries however the lines arrive', () => {
+    for (let split = 0; split <= events.length; split++) {
+      const fold = transcriptFold()
+      fold(events.slice(0, split))
+      expect(plain(fold(events))).toEqual(plain(transcriptEntries(events)))
+    }
+  })
+
+  it('reads each line once', () => {
+    const fold = transcriptFold()
+    fold(events.slice(0, 2))
+    const texts = vi.fn(() => 'later')
+    const later = { type: 'message', get text() {
+      return texts()
+    } } as unknown as RunEvent
+    fold([...events.slice(0, 2), later])
+    const reads = texts.mock.calls.length
+    fold([...events.slice(0, 2), later, { type: 'message', text: 'more' }])
+    expect(texts.mock.calls.length).toBe(reads)
+  })
+
+  it('starts over when the list is not the last one plus more', () => {
+    const fold = transcriptFold()
+    fold(events)
+    const refetched = events.map(event => ({ ...event }))
+    refetched[0] = { type: 'system', text: 'Reloaded' } as RunEvent
+    expect(plain(fold(refetched))).toEqual(plain(transcriptEntries(refetched)))
+    expect(plain(fold(events.slice(0, 1)))).toEqual(plain(transcriptEntries(events.slice(0, 1))))
+  })
+
+  it('marks a group changed when a result lands in it', () => {
+    const fold = transcriptFold()
+    const group = fold(events.slice(0, 2)).find(entry => entry.type === 'steps') as Extract<ReturnType<typeof transcriptEntries>[number], { type: 'steps' }>
+    const before = group.revision
+    fold(events.slice(0, 5))
+    expect(group.revision).toBeGreaterThan(before)
   })
 })

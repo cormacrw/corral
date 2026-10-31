@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { RunEvent } from '@corral/contracts'
-import { summarizeSteps, transcriptEntries, type ToolStep } from '~/utils/tool-steps'
+import { summarizeSteps, transcriptFold, type ToolStep, type TranscriptEntry } from '~/utils/tool-steps'
 
 // The transcript log (design/agent.md): system dividers, agent messages,
 // muted "Thinking" steps, collapsed groups of tool steps, and a working line
@@ -12,11 +12,22 @@ const isMine = (text: string) => props.mine?.includes(text.trim()) ?? false
 
 const OUTPUT_LINES = 12
 
-const entries = computed(() => transcriptEntries(props.events).map((entry) => {
+// A live run adds to the last group or two; the rest keep what they had
+const fold = transcriptFold()
+type StepsEntry = Extract<TranscriptEntry, { type: 'steps' }>
+const groups = new WeakMap<StepsEntry, { revision: number, summary: string, failed: number, open: boolean }>()
+function summarized(entry: StepsEntry) {
+  let group = groups.get(entry)
+  if (group?.revision !== entry.revision) {
+    group = { revision: entry.revision, summary: summarizeSteps(entry.steps), failed: entry.steps.filter(s => s.isError).length, open: entry.steps.some(s => !s.done) }
+    groups.set(entry, group)
+  }
+  return group
+}
+const entries = computed(() => fold(props.events).map((entry) => {
   if (entry.type !== 'steps') return entry
-  const failed = entry.steps.filter(s => s.isError).length
-  const running = props.live && entry.steps.some(s => !s.done)
-  return { ...entry, summary: summarizeSteps(entry.steps), failed, running }
+  const { summary, failed, open } = summarized(entry)
+  return { ...entry, summary, failed, running: props.live && open }
 }))
 
 // Groups and steps start closed unless something in them failed; a click
@@ -32,10 +43,17 @@ function shownOutput(step: ToolStep): string {
 }
 const outputLines = (step: ToolStep) => (step.output ?? '').trimEnd().split('\n').length
 
+// Follows a live run unless the reader has scrolled up, until they come back
 const log = ref<HTMLElement | null>(null)
+const NEAR_BOTTOM_PX = 64
+let following = true
+function onScroll() {
+  const el = log.value
+  if (el) following = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX
+}
 watch(() => props.events.length, async () => {
   await nextTick()
-  if (props.live && log.value && !props.inline) log.value.scrollTop = log.value.scrollHeight
+  if (following && props.live && log.value && !props.inline) log.value.scrollTop = log.value.scrollHeight
 })
 </script>
 
@@ -45,8 +63,10 @@ watch(() => props.events.length, async () => {
     :role="props.inline ? undefined : 'log'"
     :aria-live="props.inline ? undefined : 'polite'"
     :class="props.inline ? 'flex flex-col gap-3' : 'flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain p-4'"
+    @scroll.passive="onScroll"
   >
-    <div :class="['flex w-full flex-col gap-3', !props.inline && 'mx-auto max-w-[880px]']">
+    <!-- Off-screen entries skip layout and paint, so a long log stays quick -->
+    <div :class="['flex w-full flex-col gap-3 [&>*]:[contain-intrinsic-block-size:auto_2.5rem] [&>*]:[content-visibility:auto]', !props.inline && 'mx-auto max-w-[880px]']">
       <template v-for="entry in entries">
         <div
           v-if="entry.type === 'system'"
