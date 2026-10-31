@@ -60,7 +60,7 @@ export class PmDecisions {
       if (latest?.version !== version) throw new ToolError(`Version ${version} of ${ref} is no longer the latest submitted version; request changes on v${latest?.version} instead`)
     }
     // The note goes to the build's Plan session as the human's words, so they see it first
-    return { ...prepared, summary: tool === 'approve_design' ? `Approve v${version} of ${ref}: ${task.title}${note ? `. Note: ${note}` : ''}` : `Request changes on v${version} of ${ref} (${task.title}): ${feedback}` }
+    return { ...prepared, summary: tool === 'approve_design' ? `Approve v${version} of ${ref}: ${task.title}${note ? `. Note: ${note}` : ''}${await humanApprovalSummary(this.#d.db, task.id)}` : `Request changes on v${version} of ${ref} (${task.title}): ${feedback}` }
   }
 
   async execute(tool: DecisionTool, prepared: PreparedPmAction, actor: Actor): Promise<string> {
