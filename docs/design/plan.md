@@ -2,7 +2,7 @@
 
 **Canvas frames:** `App shell · Plan`, `Plan (component)` (the canvas still shows the plan as a card in the log; this spec moves it to the flyout)
 **Route:** `/plan` (new session) and `/plan/:sessionId`
-**Scope:** global. Sessions can be Global or belong to one project (D27).
+**Scope:** global. Sessions can be Global or belong to one project (D29).
 
 ## Purpose
 
@@ -58,7 +58,7 @@ Docked on the right (`?plan`), the same flyout as tasks and epics; the conversat
 
 - **Header:** a "Plan v2" badge, a status badge ("Waiting for approval" in `primary`, or "Approved" in `success`), and Close.
 - **Title:** the plan title and "2 epics · 4 tasks" (the epic count only when the plan has epics, "1 epic" for one).
-- **One section per epic**, in the order Juno gave them: the epic title (opens the epic), "N tasks · Review: {mode}" (Epic PR, Each task or Direct, D27), an "After: {epic titles}" line when it depends on other epics, and **List** / **Graph** tabs, remembered per epic.
+- **One section per epic**, in the order Juno gave them: the epic title (opens the epic), "N tasks · Review: {mode}" (Epic PR, Each task or Direct, D29), an "After: {epic titles}" line when it depends on other epics, and **List** / **Graph** tabs, remembered per epic.
   - **List:** one row per task: the ref and title, a subline with the priority (Urgent in `error`, High in `warning`, Medium and Low muted), "· Human review" with a user-check icon when the task needs human review, and "· after {dependency}", and a **New** (`success`) or **Revised** (`warning`) badge. A Revised row is an existing Backlog task or unclaimed Ready task the plan refines by its ref; it shows the plan's proposed title, priority, human review and dependencies, while the task itself (opened from the row) is unchanged until approval. A revised Ready task stays in Ready with either button. Rows open the task in the flyout, with a back arrow to the plan.
   - **Graph:** the epic's dependency tree, top to bottom, as on the epic flyout ([epic.md](epic.md)). A dependency in another epic shows as a dashed placeholder. Clicking a node opens the task.
   - Tasks with no epic, and a Draft moved to another epic by hand, are listed last, under **Other tasks** (just **Tasks** when the plan has no epics).

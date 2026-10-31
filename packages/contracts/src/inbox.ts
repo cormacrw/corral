@@ -88,7 +88,6 @@ export interface PmActivityItem extends InboxItemBase {
   resolution: null
 }
 
-
 // An open Plan session waiting on the human (D11, amended): a question, a plan
 // needing approval or an unread PM reply
 export interface PlanThreadItem extends Omit<InboxItemBase, 'project'> {

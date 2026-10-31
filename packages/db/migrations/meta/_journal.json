@@ -302,6 +302,13 @@
       "when": 1793414758744,
       "tag": "0042_short_oracle",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1793418811629,
+      "tag": "0043_known_the_watchers",
+      "breakpoints": true
     }
   ]
 }

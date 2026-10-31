@@ -88,7 +88,7 @@ describe('PM tools for projects, runs and the factory', () => {
   async function liveRun(status: 'running' | 'interrupted' = 'running') {
     const task = await t.createTask(project.slug, { title: `Work ${crypto.randomUUID()}` })
     const [pm] = await t.db.select().from(runs).where(eq(runs.id, job.runId))
-    const [run] = await t.db.insert(runs).values({ agentId: pm!.agentId, projectId: project.id, taskId: task.id, role: 'developer', state: status, leaseEpoch: 1, runnerId: pm!.runnerId, summary: 'x'.repeat(5000), outcome: status === 'running' ? null : 'pr_opened' }).returning()
+    const [run] = await t.db.insert(runs).values({ agentId: pm!.agentId, projectId: project.id, taskId: task.id, role: 'developer', state: status, leaseEpoch: 1, runnerId: pm!.runnerId, summary: 'x'.repeat(5000), startedAt: new Date(), endedAt: status === 'running' ? null : new Date(), outcome: null }).returning()
     await t.db.update(tasks).set({ leaseRunId: run!.id, leaseEpoch: 1, leaseRole: 'developer', leaseExpiresAt: new Date(Date.now() + 60_000) }).where(eq(tasks.id, task.id))
     return { task, run: run! }
   }
@@ -129,14 +129,14 @@ describe('PM tools for projects, runs and the factory', () => {
     await t.transcripts.append(run.id, [{ type: 'message', text: 'y'.repeat(500) }])
     const listed = await result<{ runs: { id: string, outcome: string, summary: string }[], note: string }>('list_runs', { taskRef: task.ref })
     expect(listed.runs).toHaveLength(1)
-    expect(listed.runs[0]).toMatchObject({ id: run.id, outcome: 'pr_opened' })
+    expect(listed.runs[0]).toMatchObject({ id: run.id, outcome: null })
     expect(listed.runs[0]!.summary.length).toBeLessThan(400)
     expect(listed.note).toContain('cut to')
     const limited = await result<{ runs: unknown[], note: string }>('list_runs', { project: project.slug, status: 'interrupted', limit: 1 })
     expect(limited.runs).toHaveLength(1)
     expect(limited.note).toContain('there are more')
     const got = await result<{ outcome: string, transcript: { excerpt: string, truncated: boolean, note: string } }>('get_run', { runId: run.id, transcriptLimit: 100 })
-    expect(got.outcome).toBe('pr_opened')
+    expect(got.outcome).toBeNull()
     expect(got.transcript.excerpt).toHaveLength(100)
     expect(got.transcript).toMatchObject({ truncated: true, note: expect.stringContaining('100') })
   })
@@ -160,7 +160,7 @@ describe('PM tools for projects, runs and the factory', () => {
   })
 
   it('requires confirmation before holding, then lets the human lift a latched hold', async () => {
-    await t.db.update(runs).set({ state: 'completed' }).where(ne(runs.role, 'pm'))
+    await t.db.update(runs).set({ state: 'interrupted', outcome: null, endedAt: new Date() }).where(ne(runs.role, 'pm'))
     const proposed = await result<{ actionId: string, confirmationPending: boolean }>('set_update_hold')
     expect(proposed.confirmationPending).toBe(true)
     expect(await (await t.request('GET', '/api/status')).json()).toMatchObject({ updating: false })
@@ -228,7 +228,7 @@ describe('PM tools for projects, runs and the factory', () => {
 
     const { run: raced } = await liveRun()
     const stale = await propose('stop_run', { runId: raced.id })
-    await t.db.update(runs).set({ state: 'failed' }).where(eq(runs.id, raced.id))
+    await t.db.update(runs).set({ state: 'failed', endedAt: new Date() }).where(eq(runs.id, raced.id))
     expect(await (await resolve(session.id, stale, 'confirm')).json()).toMatchObject({ pendingAction: { status: 'failed' } })
     expect((await inbox()).activity.some(a => a.preview.startsWith(`Could not confirm: Stop run #${raced.number}`))).toBe(true)
   })

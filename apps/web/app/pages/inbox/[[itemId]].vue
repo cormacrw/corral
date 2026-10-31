@@ -166,7 +166,7 @@ watch(selected, async (item, previous) => {
     loadedTask.value = null
     return
   }
-  await loadTask(item)
+  await loadTask(isTaskItem(item) ? item : null)
 }, { immediate: true })
 // Capture before the request: plan.session can remove the row before it resolves.
 // Hold refreshes through both the request and flyout close, as for approval.
@@ -264,7 +264,7 @@ async function submit(message: string): Promise<boolean> {
               ? { action: 'delete', ...(message && { text: message }) }
               : action.value === 'send_back' ? { action: 'send_back' } : { action: 'approve', text: message }
       const description = action.value === 'approve' && isSpike.value ? 'You accepted the findings' : submitLabel.value
-      await api.inbox.act(actedOn.taskId, input)
+      await api.inbox.act(actedOn.taskId!, input)
       toast.add({ title: 'Done', description, color: 'success' })
     }
     if (selectedId.value === actedOn.id) text.value = ''

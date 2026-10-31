@@ -26,7 +26,7 @@ interface Deps {
   approveDesign(taskId: string, version: number, note: string | undefined, actor: Actor): Promise<void>
 }
 
-// The PM's confirm-required Inbox and design tools (D27), prepared and executed
+// The PM's confirm-required Inbox and design tools (D29), prepared and executed
 // through PmActions. Each takes a task by ref from any project, as the Inbox
 // it reads spans them.
 export class PmDecisions {

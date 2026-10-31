@@ -20,12 +20,12 @@ import { projects } from './projects.ts'
 import { runs } from './runs.ts'
 import { tasks } from './tasks.ts'
 
-// A conversation with the PM (D9, design/plan.md). Belongs to one project.
+// A conversation with the PM (D9, D29, design/plan.md), global or in one project.
 // The agent CLI's session ID is only a cache: the messages here are the
 // source of truth, and a lost session is reseeded from them.
 export const planSessions = pgTable('plan_sessions', {
-  parentSessionId: uuid().references((): AnyPgColumn => planSessions.id, { onDelete: 'set null' }),
   id: uuid().primaryKey().defaultRandom(),
+  parentSessionId: uuid().references((): AnyPgColumn => planSessions.id, { onDelete: 'set null' }),
   projectId: uuid().references(() => projects.id, { onDelete: 'cascade' }),
   title: text().notNull(),
   agentSessionId: text(),

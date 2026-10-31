@@ -19,7 +19,7 @@ export type TransitionDetail =
   | { event: 'merged', pr: number, mergeCommitSha: string | null, outside?: true }
   // An epic rebase task with nothing left to merge
   | { event: 'merged', headSha: string | null }
-  | { event: 'require_human_check' }
+  | { event: 'require_human_check' | 'answer' }
   | { event: 'ci_failed', checks: string[] }
   | { event: 'base_conflict', mergeableState?: string | null }
   | { event: 'pr_closed' | 'merge_failed' }
@@ -40,6 +40,7 @@ type StatusChange = { from: TaskStatus, to: TaskStatus }
 type Changed = { changed: string[] }
 type RunComment = { runId: string, runNumber: number, commentId: string }
 type AgentChange = Changed & { agentId: string }
+type PmActionDetail = { actionId: string, sessionId: string, runId: string | null, targetId?: string | null, proposer?: Actor, tool?: string, input?: unknown, summary?: string, result?: unknown, error?: string | null }
 type PlanMessage = { sessionId: string, messageId: string }
 
 // The detail each action stores. A new action or key starts here.
@@ -62,7 +63,11 @@ export interface AuditDetails {
   'plan.message': PlanMessage
   'plan.proposed': { planId: string, version: number, tasks: number, revises: number }
   'plan.runtime': { sessionId: string, from: string, to: string }
-  'pm.tool_called': { sessionId: string, runId: string, tool: string, input: unknown, ok: boolean, summary: string, error?: string }
+  'pm.action_proposed': PmActionDetail
+  'pm.action_cancelled': PmActionDetail
+  'pm.action_confirmed': PmActionDetail
+  'pm.action_failed': PmActionDetail
+  'pm.tool_called': { targetId?: string | null, sessionId: string, runId: string, tool: string, input: unknown, ok: boolean, summary: string, error?: string }
   'project.created': Record<string, never>
   'project.deleted': { projectId: string, name: string, repository: string }
   'project.paused': Changed
@@ -76,6 +81,7 @@ export interface AuditDetails {
   'task.created': { number: number }
   'task.deleted': { mode: string, number: number, title: string, reason: string | null }
   'task.edit_pinned': RunComment
+  'task.paused': Record<string, never>
   'task.resumed': Record<string, never>
   'task.revised': { planId: string, version: number, fields: string[] }
   'task.transition': TransitionDetail & StatusChange

@@ -260,13 +260,6 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
           @change="patch({ title: ($event.target as HTMLInputElement).value })"
         >
 
-        <p
-          class="text-sm text-muted"
-          :title="EPIC_REVIEW_MODE[epic.reviewMode].description"
-        >
-          Review: {{ EPIC_REVIEW_MODE[epic.reviewMode].label }}
-        </p>
-
         <section>
           <h3 class="mb-1 text-xs font-medium text-muted">
             Description

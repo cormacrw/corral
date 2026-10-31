@@ -30,7 +30,7 @@ export const pmActionTools = {
   },
   update_task: {
     confirmRequired: false,
-    description: 'Edit task metadata in any status. Epic membership is fixed once a PR opens or the task merges. A spike or design type is fixed once the task leaves Draft or Backlog. Criteria and dependencies replace the lists; preserve criterion IDs. paused pauses unleased tasks or resumes work; use stop_run with human confirmation for a leased task.',
+    description: 'Edit task metadata before it is Merged. Epic membership is fixed once a PR opens or the task merges. A spike or design type is fixed once the task leaves Draft or Backlog. Criteria and dependencies replace the lists; preserve criterion IDs. paused pauses unleased tasks or resumes work; use stop_run with human confirmation for a leased task.',
     input: { taskRef: z.string().trim().min(1), ...patchTaskInput.shape, paused: z.boolean().optional() }
   },
   move_task: {
@@ -224,7 +224,7 @@ export function isPmDirectTool(tool: string): tool is PmDirectTool {
 // The PM role's complete tool registry, shared by MCP registration and API coverage.
 // Legacy planning/read tools have their definitions in apps/runner/src/mcp.ts.
 export const PM_TOOL_NAMES = [
-  'list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design',
+  'attach_evidence', 'add_comment', 'get_agent_activity', 'list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design',
   'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs',
   ...Object.keys(pmActionTools) as (keyof typeof pmActionTools)[],
   ...Object.keys(pmDirectTools) as (keyof typeof pmDirectTools)[]

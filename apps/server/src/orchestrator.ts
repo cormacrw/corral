@@ -38,7 +38,6 @@ import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
 import { MergeOrchestrator } from './merge.ts'
 import type { ReleaseNotes } from './deployments.ts'
 import { PmActions, type PreparedPmAction } from './pm-actions.ts'
-import { PmTools } from './pm-tools.ts'
 import type { PlanService } from './plan.ts'
 import { getRun, listAgents, listEvidence } from './runs.ts'
 import { createTask, patchTask, transitionTask, addComment, applyTransition, deleteTaskRows, findTaskByRef, loadTask, lockTask, toTaskState, type ProjectRow, type TaskContentEdit, type TaskRow } from './tasks.ts'
@@ -154,7 +153,6 @@ export class Orchestrator implements RunnerHandlers {
   readonly pmTools: PmTools
   readonly pmDecisions: PmDecisions
   readonly epicPrs: EpicPullRequests
-  readonly pmTools: PmTools
   readonly merges: MergeOrchestrator
   readonly sweep: WorktreeSweep
   // Set once the plan service exists (it needs the orchestrator to start runs)
@@ -641,7 +639,7 @@ export class Orchestrator implements RunnerHandlers {
       leaseEpoch: ctx.run.leaseEpoch!,
       role: ctx.run.role,
       runtime: ctx.agent.runtime,
-      projectId: ctx.run.projectId,
+      projectId: ctx.project!.id,
       repository: ctx.project!.repository,
       defaultBranch: ctx.project!.defaultBranch,
       baseBranch,
@@ -716,7 +714,7 @@ export class Orchestrator implements RunnerHandlers {
       leaseEpoch: ctx.run.leaseEpoch!,
       role: 'reviewer',
       runtime: ctx.agent.runtime,
-      projectId: ctx.run.projectId,
+      projectId: ctx.project!.id,
       repository: ctx.project!.repository,
       defaultBranch: ctx.project!.defaultBranch,
       baseBranch,
@@ -1312,7 +1310,7 @@ export class Orchestrator implements RunnerHandlers {
       if (role === 'pm') {
         if (!this.plans || !ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
         const { taskRef: ref } = z.object({ taskRef: z.string().optional() }).parse(input)
-        if (ref) return this.#attachEvidence({ ...ctx, task: await findTaskByRef(this.#d.db, ctx.project, ref) }, parsed.data)
+        if (ref) return this.#attachEvidence({ ...ctx, project: await this.plans.toolProject(ctx.run.planSessionId, input), task: await findTaskByRef(this.#d.db, await this.plans.toolProject(ctx.run.planSessionId, input), ref) }, parsed.data)
         if (parsed.data.criterionId) throw new ToolError('Pass taskRef to attach evidence for a criterion')
         const attached = await this.#attachEvidence(ctx, parsed.data)
         const label = (parsed.data.fileName ?? 'Evidence').replace(/[[\]\\]/g, '')
@@ -1399,7 +1397,7 @@ export class Orchestrator implements RunnerHandlers {
       const edit = await patchTask(tx, project, row.id, fields, actor)
       if (paused !== undefined) {
         await tx.update(tasks).set({ paused, updatedAt: this.#now() }).where(eq(tasks.id, row.id))
-        await tx.insert(auditLog).values({ projectId: project.id, taskId: row.id, actor, action: paused ? 'task.paused' : 'task.resumed', detail: {} })
+        await appendAudit(tx, { projectId: project.id, taskId: row.id, actor }, paused ? auditEvent('task.paused', {}) : auditEvent('task.resumed', {}))
       }
       return edit
     })
