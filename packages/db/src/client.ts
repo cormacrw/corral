@@ -46,19 +46,37 @@ function reportPgliteWarnings(client: PGlite) {
   client.execProtocolStream = (message, options) => execProtocolStream(message, { ...options, onNotice: reportWarning })
 }
 
+// Waiting for a free connection, so a stuck pool fails a pass instead of hanging it
+const CONNECTION_TIMEOUT_MS = 30_000
+// Longer than the 15 s tick, so connections are reused between ticks
+const IDLE_TIMEOUT_MS = 60_000
+// Waiting for a row lock counts, and a merge holds one across GitHub calls of
+// up to 60 s each: the merge and re-reading the PR, plus a little
+const STATEMENT_TIMEOUT_MS = 180_000
+
+// An idle connection dropping (a Postgres restart) is emitted on the pool, and
+// with no listener that's an uncaught exception. The pool replaces it.
+function postgresPool(connectionString: string, limits: pg.PoolConfig = {}): pg.Pool {
+  const pool = new pg.Pool({ connectionString, connectionTimeoutMillis: CONNECTION_TIMEOUT_MS, idleTimeoutMillis: IDLE_TIMEOUT_MS, ...limits })
+  pool.on('error', error => console.error('Idle Postgres connection failed', error))
+  pool.on('connect', client => client.on('notice', reportWarning))
+  return pool
+}
+
 // Opens the database and applies any pending migrations. Only apps/server
 // calls this (D8).
 export async function openDatabase(location: DatabaseLocation): Promise<DatabaseHandle> {
   if (location.driver === 'postgres') {
-    const pool = new pg.Pool({ connectionString: location.url })
-    pool.on('connect', client => client.on('notice', reportWarning))
-    const db = drizzleNodePg(pool, { schema, casing })
+    // Migrations may take as long as they take, so they run before the limit
+    const migrating = postgresPool(location.url)
     try {
-      await migrateNodePg(db, { migrationsFolder })
+      await migrateNodePg(drizzleNodePg(migrating, { schema, casing }), { migrationsFolder })
     } catch (error) {
-      throw operationError('Migrating the Postgres database', error, await attemptAll([() => pool.end()]), location.url)
+      throw operationError('Migrating the Postgres database', error, await attemptAll([() => migrating.end()]), location.url)
     }
-    return { db, close: () => pool.end() }
+    await migrating.end()
+    const pool = postgresPool(location.url, { statement_timeout: STATEMENT_TIMEOUT_MS })
+    return { db: drizzleNodePg(pool, { schema, casing }), close: () => pool.end() }
   }
 
   // PGlite creates its own folder but not missing parents
