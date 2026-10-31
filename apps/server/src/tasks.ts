@@ -386,6 +386,10 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
   return db.transaction(async (tx) => {
     const { task } = await lockTask(tx, taskId)
     if (task.status === 'merged' && actor.kind === 'human') throw new ApiFailure(409, { code: 'conflict', constraint: 'task_merged' })
+    // D23: PM metadata edits must not remove the work that locks epic review mode.
+    if (actor.kind === 'agent' && actor.role === 'pm' && input.epicId !== undefined && input.epicId !== task.epicId && (task.status === 'merged' || task.prNumber !== null)) {
+      throw new ApiFailure(409, { code: 'conflict', constraint: 'task_epic_locked' })
+    }
     const { acceptanceCriteria: criteriaInput, dependsOn, ...fields } = input
     if (fields.type && !canChangeType(task.status, task.type, fields.type)) throw new ApiFailure(409, { code: 'conflict', constraint: 'task_type_locked' })
     // D20: a design task's flag can't be turned off, by the human or a plan
