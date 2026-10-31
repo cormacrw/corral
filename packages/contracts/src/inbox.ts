@@ -109,7 +109,11 @@ export const epicReviewActionInput = z.object({
   // `rebase` hands an epic PR conflict to a developer run
   action: z.enum(['approve', 'request_changes', 'rebase']),
   headSha: z.string().min(1),
-  text: z.string().trim().optional()
+  text: z.string().trim().optional(),
+  // What the human confirmed on this approval (D27, D28). The server compares
+  // these with what the epic's tasks need now, not with what the client saw.
+  confirmedCriteria: z.array(z.uuid()).default([]),
+  confirmedTasks: z.array(z.uuid()).default([])
 }).refine(input => input.action !== 'request_changes' || Boolean(input.text), { message: 'Describe the changes needed', path: ['text'] })
 export type EpicReviewActionInput = z.input<typeof epicReviewActionInput>
 
@@ -123,7 +127,17 @@ export interface EpicReviewItem extends InboxItemBase, ReviewChanges {
   body: string
   resolution: null
   headSha: string
-  tasks: { task: Task, evidence: Evidence[] }[]
+  tasks: EpicReviewTask[]
+}
+
+// A task on the epic review. `humanReview` and `humanChecks` (criterion IDs)
+// are what the human must confirm to approve the epic. PR-free tasks skip
+// task-level human review, so they carry them; task-PR tasks had it already.
+export interface EpicReviewTask {
+  task: Task
+  evidence: Evidence[]
+  humanReview: boolean
+  humanChecks: string[]
 }
 
 export interface ReleaseNotesItem extends InboxItemBase {

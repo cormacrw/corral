@@ -14,7 +14,7 @@ export class FakeRunner {
   // are installed and signed in unless a test says otherwise. Throwing
   // answers with an error; session titles fail unless a test says otherwise,
   // so the fallback title stays. Release notes jobs are left to each test.
-  onJob: (job: Extract<ServerMessage, { type: 'job.request' }>['job']) => SetupJobResult | null = (job) => {
+  onJob: (job: Extract<ServerMessage, { type: 'job.request' }>['job']) => SetupJobResult | null | Promise<SetupJobResult | null> = (job) => {
     if (job.kind === 'cleanup_worktrees') return { kind: 'cleanup_worktrees', removed: [`worktrees/${job.taskId}`], kept: [] }
     if (job.kind === 'sweep_worktrees') return { kind: 'sweep_worktrees', removed: [], kept: [] }
     if (job.kind === 'inbox_message') throw new Error('No message in tests')
@@ -28,12 +28,14 @@ export class FakeRunner {
     socket.on('message', (data) => {
       const message = JSON.parse(String(data)) as ServerMessage
       if (message.type === 'job.request') {
-        try {
-          const result = this.onJob(message.job)
-          if (result) this.send({ type: 'job.result', jobId: message.jobId, ok: true, result })
-        } catch (error) {
-          this.send({ type: 'job.result', jobId: message.jobId, ok: false, error: (error as Error).message })
-        }
+        void (async () => {
+          try {
+            const result = await this.onJob(message.job)
+            if (result) this.send({ type: 'job.result', jobId: message.jobId, ok: true, result })
+          } catch (error) {
+            this.send({ type: 'job.result', jobId: message.jobId, ok: false, error: (error as Error).message })
+          }
+        })()
       }
       this.received.push(message)
       const index = this.#waiters.findIndex(w => w.match(message))
@@ -42,7 +44,7 @@ export class FakeRunner {
   }
 
   // Takes every role and runtime with plenty of slots unless a test says otherwise
-  static async connect(url: string, activeRuns: { runId: string, leaseEpoch: number }[] = [], runnerId = 'r1', capacity: Partial<RunnerCapacity> & { commit?: string, updateTarget?: string, updateState?: string, updateError?: string, autoUpdate?: boolean, draining?: boolean, updateRequested?: boolean } = {}): Promise<FakeRunner> {
+  static async connect(url: string, activeRuns: { runId: string, leaseEpoch: number }[] = [], runnerId = 'r1', capacity: Partial<RunnerCapacity> & { taskIntegrationProtocols?: number[], taskIntegrationExecutor?: boolean, commit?: string, updateTarget?: string, updateState?: string, updateError?: string, autoUpdate?: boolean, draining?: boolean, updateRequested?: boolean } = {}): Promise<FakeRunner> {
     const socket = new WebSocket(`${url.replace('http', 'ws')}/runner`)
     const runner = new FakeRunner(socket)
     await new Promise(resolve => socket.once('open', resolve))

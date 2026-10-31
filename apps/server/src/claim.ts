@@ -1,8 +1,8 @@
 import { ACTIVE_RUN_STATES, LEASE_DURATION_MS, transition, type Actor, type TaskStatus } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, asc, count, eq, gt, inArray, isNotNull, isNull, ne, notInArray, notExists, sql } from 'drizzle-orm'
+import { and, asc, count, eq, gt, inArray, isNotNull, isNull, ne, notInArray, notExists, or, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
-import { holdsEpicOpen } from './epic-review-state.ts'
+import { holdsAcrossEpics, holdsEpicOpen } from './epic-review-state.ts'
 import { appendAudit, auditEvent, auditText } from './audit.ts'
 import { toTaskState, type TaskRow } from './tasks.ts'
 import { unfinishedTask } from './completion.ts'
@@ -60,16 +60,22 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
     if (active!.n >= agent.concurrency) return null
 
     const dependency = alias(tasks, 'dependency')
+    const dependencyEpic = alias(epics, 'dependency_epic')
     const epicTask = alias(tasks, 'epic_task')
     const author = agent.role === 'developer' || agent.role === 'designer'
     const eligible = author
       ? and(
           inArray(tasks.status, ['ready', 'in_progress']),
           agent.role === 'designer' ? eq(tasks.type, 'design') : ne(tasks.type, 'design'),
-          // Every dependency finished for its type (D19/D20)
+          // Every dependency finished for its type (D19/D20). Work in another
+          // epic is only on the target branch once that epic is done (D27)
           notExists(tx.select({ one: sql`1` }).from(taskDependencies)
             .innerJoin(dependency, eq(dependency.id, taskDependencies.dependsOnId))
-            .where(and(eq(taskDependencies.taskId, tasks.id), unfinishedTask(dependency)))),
+            .leftJoin(dependencyEpic, eq(dependencyEpic.id, dependency.epicId))
+            .where(and(eq(taskDependencies.taskId, tasks.id), or(
+              unfinishedTask(dependency),
+              holdsAcrossEpics(dependency, dependencyEpic, tasks.epicId)
+            )))),
           notExists(tx.select({ one: sql`1` }).from(epicDependencies)
             .innerJoin(epics, eq(epics.id, epicDependencies.dependsOnEpicId))
             .innerJoin(epicTask, eq(epicTask.epicId, epics.id))

@@ -1,5 +1,7 @@
 import {
   RUNNER_HEARTBEAT_MS,
+  TASK_INTEGRATION_PROTOCOL,
+  integrationCompatibilityReason,
   runnerMessageSchema,
   legacyRunnerHelloSchema,
   protocolMessageType,
@@ -153,7 +155,7 @@ export class RunnerHub {
           this.#cliCache.delete(runnerId)
           const now = new Date().toISOString()
           const capacity = parseCapacity(message)
-          this.#runners.set(runnerId, { socket, status: { id: runnerId, name: message.name, online: false, slotsInUse: this.#inUse.get(runnerId) ?? 0, protocol: message.protocol, needsUpdate: false, connectedAt: now, lastHeartbeatAt: now, ...capacity, commit: message.commit || 'unknown', serverCommit: this.commit, behind: message.commit !== this.commit, draining: !!message.draining || (!!message.autoUpdate && message.commit !== this.commit && !(message.updateState === 'failed' && message.updateTarget === this.commit)), updateRequested: !!message.updateRequested, updateState: message.updateState ?? '', updateError: message.updateError ?? '', activeRunCount: message.activeRuns.length } })
+          this.#runners.set(runnerId, { socket, status: { id: runnerId, name: message.name, online: false, slotsInUse: this.#inUse.get(runnerId) ?? 0, protocol: message.protocol, needsUpdate: false, connectedAt: now, lastHeartbeatAt: now, ...capacity, taskIntegrationProtocols: message.taskIntegrationProtocols ?? [], taskIntegrationExecutor: !!message.taskIntegrationExecutor, integrationCompatibilityReason: integrationCompatibilityReason(TASK_INTEGRATION_PROTOCOL, message.taskIntegrationProtocols), commit: message.commit || 'unknown', serverCommit: this.commit, behind: message.commit !== this.commit, draining: !!message.draining || (!!message.autoUpdate && message.commit !== this.commit && !(message.updateState === 'failed' && message.updateTarget === this.commit)), updateRequested: !!message.updateRequested, updateState: message.updateState ?? '', updateError: message.updateError ?? '', activeRunCount: message.activeRuns.length } })
           // Don't dispatch into this socket until its hello snapshot has been
           // reconciled: a newly assigned run isn't in that snapshot.
           await this.#handlers?.onConnected(message.activeRuns, runnerId).catch(error => console.error('Runner reconciliation failed', error))
@@ -161,7 +163,7 @@ export class RunnerHub {
           if (runner?.socket !== socket) return
           runner.status.online = true
           this.#publishStatus()
-          this.send({ type: 'welcome', runnerId, commit: this.commit, draining: runner.status.draining, updateRequested: runner.status.updateRequested }, runnerId)
+          this.send({ type: 'welcome', ...(runner.status.integrationCompatibilityReason ? { integrationCompatibilityReason: runner.status.integrationCompatibilityReason } : {}), runnerId, commit: this.commit, draining: runner.status.draining, updateRequested: runner.status.updateRequested }, runnerId)
           void this.detectClis(true, runnerId).catch(error => console.error('Runner CLI detection failed', error))
           this.#handlers?.onReady()
           return
@@ -229,14 +231,24 @@ export class RunnerHub {
       .sort((a, b) => a.connectedAt.localeCompare(b.connectedAt))
   }
 
+  // The longest-connected runner that can run integration jobs
+  integrationRunner(): string | null {
+    return this.available().find(r => r.taskIntegrationExecutor)?.id ?? null
+  }
+
   isOnline(runnerId: string | null): boolean {
     return !!runnerId && !!this.#runners.get(runnerId)?.socket && !!this.#runners.get(runnerId)?.status.online
   }
 
   send(message: ServerMessage, runnerId: string | null): boolean {
-    const socket = runnerId ? this.#runners.get(runnerId)?.socket : null
-    if (!socket || (message.type === 'run.assign' && runnerId && this.#runners.get(runnerId)?.status.draining)) return false
-    socket.send(JSON.stringify(message))
+    const runner = runnerId ? this.#runners.get(runnerId) : undefined
+    if (!runner?.socket) return false
+    if (message.type === 'run.assign') {
+      if (runner.status.draining) return false
+      const required = 'integrationProtocol' in message.job ? message.job.integrationProtocol ?? 0 : 0
+      if (integrationCompatibilityReason(required, runner.status.taskIntegrationProtocols)) return false
+    }
+    runner.socket.send(JSON.stringify(message))
     return true
   }
 
@@ -274,6 +286,12 @@ export class RunnerHub {
     }
     const runnerId = this.pick(job.kind === 'release_notes' ? (job as Extract<SetupJob, { kind: 'release_notes' }>).runtime : undefined)
     if (!runnerId) return Promise.reject(runnerOffline())
+    return this.#request(job, timeoutMs, runnerId)
+  }
+
+  // A job for one runner: an integration's candidate only exists where it was built
+  requestOn<K extends SetupJob['kind']>(runnerId: string, job: Extract<SetupJob, { kind: K }>, timeoutMs: number): Promise<Extract<SetupJobResult, { kind: K }>> {
+    if (!this.isOnline(runnerId)) return Promise.reject(runnerOffline())
     return this.#request(job, timeoutMs, runnerId)
   }
 

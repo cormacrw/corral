@@ -22,8 +22,8 @@ import { projects } from './projects.ts'
 // other. See schema.ts.
 import { runs } from './runs.ts'
 
-// The unit of work that becomes one PR (PRD §4.3). Status, counters and
-// reason mirror core's TaskState; the lease columns are the lock (PRD §4.6).
+// A reviewed unit of work: legacy task PR or PR-free epic submission (D27).
+// Status, counters and reason mirror core's TaskState; leases are the lock.
 export const tasks = pgTable('tasks', {
   id: uuid().primaryKey().defaultRandom(),
   projectId: uuid().notNull().references(() => projects.id, { onDelete: 'cascade' }),
@@ -46,6 +46,9 @@ export const tasks = pgTable('tasks', {
   // Set when the human stops a run, so the scheduler doesn't restart it (flows.md §3)
   paused: boolean().notNull().default(false),
   branch: text(),
+  // 0: existing PR/spike/design path. Positive: negotiated PR-free protocol.
+  // Additive rollout: never infer this from a nullable PR number on old rows.
+  integrationProtocol: integer().notNull().default(0),
   prNumber: integer(),
   prUrl: text(),
   // The commit the developer last submitted; reviews and approvals are tied to it
@@ -84,6 +87,7 @@ export const tasks = pgTable('tasks', {
     then ${t.statusReason} is not null and btrim(${t.statusReason}, U&'\\0009\\000A\\000B\\000C\\000D\\0020\\00A0\\1680\\2000\\2001\\2002\\2003\\2004\\2005\\2006\\2007\\2008\\2009\\200A\\2028\\2029\\202F\\205F\\3000\\FEFF') <> ''
     else ${t.statusReason} is null end`),
   check('tasks_pr_complete', sql`(${t.prNumber} is null) = (${t.prUrl} is null)`),
+  check('tasks_integration_protocol', sql`${t.integrationProtocol} >= 0 and (${t.integrationProtocol} = 0 or (${t.prNumber} is null and ${t.epicId} is not null and ${t.type}::text in ('task', 'bug')))`),
   check('tasks_counters_non_negative', sql`${t.reviewRounds} >= 0 and ${t.failedRuns} >= 0 and ${t.leaseEpoch} >= 0`),
   // A lease is either fully held or fully released
   check('tasks_lease_complete', sql`(${t.leaseRunId} is null) = (${t.leaseExpiresAt} is null)

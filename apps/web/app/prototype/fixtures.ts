@@ -264,6 +264,7 @@ export function task(project: Project, number: number, fields: Partial<Task> & P
     latestReview: null,
     mergeCommitSha: null,
     mergedAt: null,
+    submission: null,
     gateChecks: null,
     design: null,
     createdAt: ago(60 * 24),
@@ -287,6 +288,8 @@ function criteria(...texts: string[]): Task['acceptanceCriteria'] {
 }
 
 const [corral, site] = projects as [Project, Project]
+
+const commitOf = (sha: string) => ({ sha, url: `https://github.com/cormacrw/corral/commit/${sha}` })
 
 export const tasks: Task[] = [
   task(corral, 20, { title: 'Design the agent settings experience', type: 'design', status: 'in_progress', branch: 'design/COR-20', humanReview: true, lease: { agentId: 'a-design', runId: 'r-design', role: 'designer', expiresAt: ago(-10) }, acceptanceCriteria: criteria('Agent settings work on desktop and mobile') }),
@@ -355,7 +358,16 @@ export const tasks: Task[] = [
   ...epicTasks('e-searches', 36, ['Save a board search', 'List saved searches', 'Share a saved search']),
   task(corral, 21, { title: 'Export the board as CSV', status: 'ready', epicId: 'e-exports' }),
   task(corral, 22, { title: 'Export run history as CSV', status: 'ready', epicId: 'e-exports', dependsOn: ['COR-21'] }),
-  ...epicTasks('e-alerts', 23, ['Alert when a run fails', 'Alert when a runner disconnects']),
+  ...epicTasks('e-alerts', 23, ['Alert when a run fails', 'Alert when a runner disconnects']).map((t, i) => ({
+    ...t,
+    prNumber: null,
+    prUrl: null,
+    humanReview: i === 0,
+    acceptanceCriteria: i === 0
+      ? [{ id: 'c-alert-sent', position: 0, text: 'A failed run sends one alert', checkedByHuman: false, met: true }]
+      : [{ id: 'c-alert-phone', position: 0, text: 'The alert arrives on a real phone', checkedByHuman: true, met: null }],
+    submission: { sequence: 1, targetBranch: 'corral/epic-e-alerts-failure-alerts', submitted: commitOf('8f3a1c2d9e01'), approved: commitOf('8f3a1c2d9e01'), integrated: commitOf(i === 0 ? '41bd07e6c2aa' : '7ce2951fb03d'), integratedAt: ago(90) }
+  })),
   ...epicTasks('e-webhooks', 25, ['Queue failed webhooks', 'Back off between retries']),
   ...epicTasks('e-audit', 27, ['Record every status change', 'Show the trail on a task']),
   ...epicTasks('e-themes', 29, ['Pick a project colour', 'Theme the board header']),
@@ -913,7 +925,7 @@ export function inbox(): Inbox {
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
       preview: body, body, message: body, sender: { name: 'Rita', role: 'reviewer' }, at: review.updatedAt,
       prUrl: review.prUrl!, resolution: null, headSha: review.prHeadSha!,
-      tasks: tasks.filter(t => t.epicId === review.id).map(task => ({ task, evidence: evidence[task.id] ?? [] })),
+      tasks: tasks.filter(t => t.epicId === review.id).map(task => ({ task, evidence: evidence[task.id] ?? [], humanReview: task.humanReview, humanChecks: task.submission ? task.acceptanceCriteria.filter(c => c.checkedByHuman).map(c => c.id) : [] })),
       since: null, newArtifacts: []
     })
   }

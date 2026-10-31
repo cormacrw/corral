@@ -77,7 +77,8 @@ export type CarryOver = { ok: true } | { ok: false, problem: string }
 // D24: records a review on the new head with the last approval's criteria
 // verdicts, then returns the task to Ready to merge. The human approved before
 // the conflict, so humanReview and each_task epics don't send it back to them;
-// a criterion checked by a human stays open and does (D28).
+// a criterion checked by a human stays open and does (D28), unless it's a
+// PR-free task, whose open checks wait for the epic's approval (D27).
 // Call with the task locked and `headSha` on the new head; nothing is written
 // when the approval can't carry over.
 export async function carryOverApproval(
@@ -110,6 +111,6 @@ export async function carryOverApproval(
     author: input.actor
   })
   await appendAudit(tx, { projectId: project.id, taskId: task.id, actor: input.actor }, auditEvent('review.recorded', { runId, verdict: 'approved', headSha, round: task.reviewRounds, met: kept.filter(v => v?.met).length, of: criteria.length, carriedFrom: task.approvedHeadSha }))
-  await applyTransition(tx, task, project, { type: 'approval_carried', humanCheckOpen: kept.some(v => v?.met === null) }, { kind: 'system', component: 'server' }, { event: 'approval_carried', runId, headSha })
+  await applyTransition(tx, task, project, { type: 'approval_carried', humanCheckOpen: task.integrationProtocol === 0 && kept.some(v => v?.met === null) }, { kind: 'system', component: 'server' }, { event: 'approval_carried', runId, headSha })
   return { ok: true }
 }

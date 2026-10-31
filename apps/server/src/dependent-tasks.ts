@@ -15,9 +15,13 @@ export async function publishDependents(db: Executor, events: EventBus, taskId: 
   return publish(db, events, [...ids, ...task?.epicId ? await epicDependents(db, task.epicId) : []])
 }
 
-// Called when an epic PR merges (D22): tasks in dependent epics can start
+// Called when an epic PR merges (D22, D27): tasks in dependent epics can start,
+// and so can tasks elsewhere that depend on one of its tasks
 export async function publishEpicDependents(db: Executor, events: EventBus, epicId: string): Promise<string[]> {
-  return publish(db, events, await epicDependents(db, epicId))
+  const crossEpic = await db.select({ id: taskDependencies.taskId }).from(taskDependencies)
+    .innerJoin(tasks, eq(tasks.id, taskDependencies.dependsOnId))
+    .where(eq(tasks.epicId, epicId))
+  return publish(db, events, [...await epicDependents(db, epicId), ...crossEpic.map(t => t.id)])
 }
 
 async function epicDependents(db: Executor, epicId: string): Promise<string[]> {

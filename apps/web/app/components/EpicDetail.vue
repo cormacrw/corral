@@ -295,7 +295,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
             id="epic-review-mode-note"
             class="text-xs text-muted"
           >
-            Locked because a task in this epic has opened a PR.
+            Locked because a task in this epic has submitted work.
           </p>
           <p
             v-else
@@ -326,7 +326,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
             v-else-if="epic.reviewMode !== 'direct'"
             class="text-xs text-muted"
           >
-            The epic PR opens once every task is complete.
+            The epic PR opens once every task is complete. Human checks are confirmed there.
           </p>
         </section>
 
@@ -482,6 +482,11 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
                 size="xs"
               />
             </button>
+            <TaskCommitLinks
+              v-if="task.submission"
+              :task="task"
+              class="px-2 pb-1 text-xs"
+            />
           </li>
         </ul>
         <div

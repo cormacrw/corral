@@ -6,6 +6,7 @@ import { appendAudit, auditEvent, type TransitionDetail } from './audit.ts'
 import { isEpicRebaseTask, taskBase } from './task-base.ts'
 import { ApiFailure } from './errors.ts'
 import { publishDependents } from './dependent-tasks.ts'
+import { TaskIntegrator } from './task-integration.ts'
 import type { EventBus } from './events.ts'
 import type { CheckResult, GitHubClient, PullRequest } from './github.ts'
 import type { RunnerHub } from './runner-hub.ts'
@@ -54,12 +55,18 @@ export class MergeOrchestrator {
   // Tasks being advanced right now: a tick and a human approval can overlap
   #busy = new Set<string>()
   #epics: EpicMerger
+  #integrations: TaskIntegrator
   // Set by the Orchestrator while the kill switch or the update hold is on
   stopped = false
 
   constructor(deps: MergeDeps) {
     this.#d = deps
     this.#epics = new EpicMerger(deps)
+    this.#integrations = new TaskIntegrator(deps, async (taskId) => {
+      await this.#publish(taskId)
+      const task = await loadTask(deps.db, taskId).catch(() => null)
+      if (task?.status === 'merged') await this.cleanup(taskId)
+    })
   }
 
   #now(): Date {
@@ -68,7 +75,7 @@ export class MergeOrchestrator {
 
   // Merges being advanced right now; a redeploy waits for these
   get inFlight(): number {
-    return this.#busy.size + this.#epics.inFlight
+    return this.#busy.size + this.#epics.inFlight + this.#integrations.inFlight
   }
 
   // One pass over every task in Ready to merge
@@ -85,6 +92,7 @@ export class MergeOrchestrator {
       if (await isEpicRebaseTask(this.#d.db, task)) await this.#settleEpicRebase(task)
       else if (task.prNumber && task.headSha) await this.#advanceOnce(task, project)
     }
+    await this.#integrations.tick(() => this.stopped)
     await this.#epics.tick(() => this.stopped)
   }
 

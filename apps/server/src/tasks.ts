@@ -1,6 +1,6 @@
 import { appendAudit, auditEvent, type TransitionDetail } from './audit.ts'
-import { holdsEpicOpen, invalidateEpicReview } from './epic-review-state.ts'
-import type { AuditEntry, Comment, CreateTaskInput, HumanTransitionInput, PatchTaskInput, Task, TaskAgent, TaskDesignPin } from '@corral/contracts'
+import { holdsAcrossEpics, holdsEpicOpen, invalidateEpicReview } from './epic-review-state.ts'
+import type { AuditEntry, Comment, CreateTaskInput, HumanTransitionInput, PatchTaskInput, Task, TaskAgent, TaskDesignPin, TaskSubmissionSummary } from '@corral/contracts'
 import { createTaskInput } from '@corral/contracts'
 import {
   canChangeTaskType,
@@ -22,10 +22,11 @@ import {
 } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, max, ne, sql } from 'drizzle-orm'
+import { alias } from 'drizzle-orm/pg-core'
 import { ApiFailure, notFound } from './errors.ts'
 import { toReview } from './runs.ts'
 
-const { acceptanceCriteria, agents, auditLog, comments, designVersions, epicDependencies, epics, planSessions, planTasks, plans, projects, reviews, runs, taskDependencies, taskDesignPins, tasks } = schema
+const { acceptanceCriteria, agents, auditLog, comments, designVersions, epicDependencies, epics, planSessions, planTasks, plans, projects, reviews, runs, taskDependencies, taskDesignPins, taskSubmissions, tasks } = schema
 
 type TaskRow = typeof tasks.$inferSelect
 type ProjectRow = typeof projects.$inferSelect
@@ -70,6 +71,20 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
     .innerJoin(tasks, eq(tasks.epicId, epics.id))
     .where(and(eq(epics.projectId, project.id), holdsEpicOpen(tasks, epics)))
     .orderBy(asc(epics.title), asc(epics.id))
+  // A Merged dependency still holds its dependents until its epic is done (the
+  // claim's rule). One that isn't Merged is its own, more exact, reason to wait.
+  const dependency = alias(tasks, 'dependency')
+  const dependencyEpics = await db.selectDistinct({ taskId: taskDependencies.taskId, id: epics.id, title: epics.title })
+    .from(taskDependencies)
+    .innerJoin(tasks, eq(tasks.id, taskDependencies.taskId))
+    .innerJoin(dependency, eq(dependency.id, taskDependencies.dependsOnId))
+    .innerJoin(epics, eq(epics.id, dependency.epicId))
+    .where(and(inArray(taskDependencies.taskId, ids), eq(dependency.status, 'merged'), holdsAcrossEpics(dependency, epics, tasks.epicId)))
+    .orderBy(asc(epics.title), asc(epics.id))
+  const waitingOn = (row: TaskRow) => [...new Map([
+    ...waitingEpics.filter(e => e.epicId === row.epicId),
+    ...dependencyEpics.filter(e => e.taskId === row.id)
+  ].map(({ id, title }) => [id, { id, title }])).values()].sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id))
   // Newest first, so the first row per task is its latest review
   const reviewRows = await db.select().from(reviews).where(inArray(reviews.taskId, ids)).orderBy(desc(reviews.createdAt))
   const pins = await db
@@ -78,6 +93,8 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
     .innerJoin(designVersions, eq(designVersions.id, taskDesignPins.designVersionId))
     .innerJoin(tasks, eq(tasks.id, designVersions.taskId))
     .where(inArray(taskDesignPins.taskId, ids))
+  // Newest first, so the first row per task is its latest submission
+  const submissionRows = await db.select().from(taskSubmissions).where(inArray(taskSubmissions.taskId, ids)).orderBy(desc(taskSubmissions.sequence))
   const { latestApproved, started } = await pinStaleness(db, pins.map(p => p.designTaskId), ids)
   const owners = await draftSessions(db, rows.filter(r => r.status === 'draft').map(r => r.id))
   // Newest first, so the first run per task and role names its agent.
@@ -102,8 +119,8 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
     const stale = pin && isDesignPinStale({ version: pin.version, latestApproved: newest }, { status: row.status, started: started.has(row.id) })
     const design = pin ? { taskRef: taskRef(project.prefix, pin.number), version: pin.version, screens: pin.screens, newerVersion: stale ? newest : null } : null
     return {
-      ...toTask(project, row, criteria, dependencies, latest, current, design, owners.get(row.id) ?? null, row.leaseRunId ? leaseAgents.get(row.leaseRunId) ?? null : null),
-      waitingOnEpics: waitingEpics.filter(e => e.epicId === row.epicId).map(({ id, title }) => ({ id, title })),
+      ...toTask(project, row, criteria, dependencies, latest, current, design, owners.get(row.id) ?? null, row.leaseRunId ? leaseAgents.get(row.leaseRunId) ?? null : null, submissionSummary(project, submissionRows.find(s => s.taskId === row.id))),
+      waitingOnEpics: waitingOn(row),
       developer: agentOf(row.id, row.type === 'design' ? 'designer' : 'developer'),
       reviewer: agentOf(row.id, 'reviewer')
     }
@@ -139,6 +156,21 @@ function taskStatus(row: TaskRow, session: { id: string, title: string } | null)
   return { status: state.status, statusReason: null, draftSession: null } as const
 }
 
+export const commitUrl = (project: ProjectRow, sha: string) => `https://github.com/${project.repository}/commit/${sha}`
+
+function submissionSummary(project: ProjectRow, row: typeof taskSubmissions.$inferSelect | undefined): TaskSubmissionSummary | null {
+  if (!row) return null
+  const commit = (sha: string | null) => sha ? { sha, url: commitUrl(project, sha) } : null
+  return {
+    sequence: row.sequence,
+    targetBranch: row.targetBranch,
+    submitted: commit(row.submittedHeadSha)!,
+    approved: commit(row.agentApprovedHeadSha),
+    integrated: commit(row.integratedCommitSha),
+    integratedAt: row.integratedAt?.toISOString() ?? null
+  }
+}
+
 function toTask(
   project: ProjectRow,
   row: TaskRow,
@@ -148,7 +180,8 @@ function toTask(
   current: typeof reviews.$inferSelect | null,
   design: TaskDesignPin | null,
   session: { id: string, title: string } | null,
-  leaseAgentId: string | null
+  leaseAgentId: string | null,
+  submission: TaskSubmissionSummary | null
 ): TaskWithoutAgents {
   return {
     id: row.id,
@@ -178,6 +211,7 @@ function toTask(
     latestReview: latest ? toReview(latest) : null,
     mergeCommitSha: row.mergeCommitSha,
     mergedAt: row.mergedAt?.toISOString() ?? null,
+    submission,
     gateChecks: row.gateChecks,
     design,
     createdAt: row.createdAt.toISOString(),
@@ -354,7 +388,10 @@ export async function applyTransition(
       .where(and(eq(acceptanceCriteria.taskId, task.id), eq(acceptanceCriteria.checkedByHuman, true))).limit(1)
     if (humanCriteria.length) state.humanReview = true
   }
-  if (task.epicId) {
+  // PR-free epic work integrates on agent approval. Its flag and human checks
+  // become obligations of the epic's human approval (D27), and the row keeps them.
+  if (task.integrationProtocol > 0) state.humanReview = false
+  else if (task.epicId) {
     const [epic] = await tx.select({ reviewMode: epics.reviewMode }).from(epics).where(eq(epics.id, task.epicId))
     if (epic?.reviewMode === 'each_task') state.humanReview = true
   }
@@ -418,6 +455,10 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
       const [epic] = await tx.select({ id: epics.id }).from(epics).where(and(eq(epics.id, fields.epicId), eq(epics.projectId, project.id)))
       if (!epic) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['epicId'], message: 'Unknown epic' }] })
     }
+    // A selected task's submissions target this epic's branch and it can't take another path
+    if (task.integrationProtocol > 0 && ((fields.epicId !== undefined && fields.epicId !== task.epicId) || (fields.type !== undefined && fields.type !== task.type))) {
+      throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: 'A task submitting commits to its epic branch can\'t change epic or type' }] })
+    }
     const descriptionChanged = fields.description !== undefined && JSON.stringify(fields.description) !== JSON.stringify(task.description)
     let criteriaChange: TaskContentEdit['criteria'] = null
     if (fields.epicId !== undefined && fields.epicId !== task.epicId && !['draft', 'backlog'].includes(task.status)) {
@@ -446,7 +487,8 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
         }
       }
     }
-    if (task.status === 'ready_to_merge' && newHumanCheck) {
+    // A PR-free task's new check goes to the epic review instead
+    if (task.status === 'ready_to_merge' && newHumanCheck && task.integrationProtocol === 0) {
       await applyTransition(tx, task, project, { type: 'require_human_check' }, { kind: 'system', component: 'server' }, { event: 'require_human_check' })
     }
     if (dependsOn) await setDependencies(tx, project, task, dependsOn)

@@ -15,7 +15,7 @@ export interface RebaseCheckFailure {
 // the whole input as `event`; every other producer writes the event's name.
 export type TransitionDetail =
   | { event: HumanTransitionInput }
-  | { event: 'pr_opened' | 'pr_updated' | 'pr_rebased', runId: string, headSha: string | undefined, pr: number | null, checkFailures?: RebaseCheckFailure[], checkError?: string }
+  | { event: 'pr_opened' | 'pr_updated' | 'pr_rebased' | 'commit_submitted', runId: string, headSha: string | undefined, pr: number | null, checkFailures?: RebaseCheckFailure[], checkError?: string }
   | { event: 'findings_reported', runId: string, headSha: string }
   | { event: 'design_submitted', runId: string, headSha: string | undefined, version: number }
   | { event: 'review_approved', runId?: string, headSha: string | null }
@@ -26,6 +26,8 @@ export type TransitionDetail =
   | { event: 'merged', pr: number, mergeCommitSha: string | null, outside?: true }
   // An epic rebase task with nothing left to merge
   | { event: 'merged', headSha: string | null }
+  // A PR-free task, confirmed on the epic branch (D27)
+  | { event: 'integrated', submissionId: string, integratedCommitSha: string }
   | { event: 'require_human_check' }
   | { event: 'ci_failed', checks: string[] }
   | { event: 'base_conflict', mergeableState?: string | null }
@@ -37,7 +39,7 @@ export type TransitionDetail =
 // The epic PR events that go with a review state change
 export type EpicPrDetail =
   | { event: 'opened' | 'review_started', prNumber: number }
-  | { event: 'approved' | 'changes_requested' | 'human_approved' | 'human_changes_requested', headSha: string | null, summary: string }
+  | { event: 'approved' | 'changes_requested' | 'human_approved' | 'human_changes_requested', headSha: string | null, summary: string, confirmedCriteria?: string[], confirmedTasks?: string[] }
   | { event: 'closed' }
   | { event: 'rebased', from: string | null, to: string }
   | { event: 'conflict', summary: string, files: string[] }
@@ -63,6 +65,7 @@ export interface AuditDetails {
   'design.submitted': { runId: string, version: number, headSha: string, screenshots: number }
   'epic.pr': { epicId: string } & (EpicPrDetail | { event: 'rebase_requested' | 'rebase_handed_off', headSha: string | null } | { event: 'ci_failed', summary: string } | { event: 'merged', pr: number, mergeCommitSha: string | null })
   'epic.updated': Changed & { epicId: string, dependsOn?: string[] }
+  'integration.operation': { operationId: string, submissionId: string, event: 'started' | 'succeeded' | 'failed' | 'checks_deferred', expectedTargetSha: string, leaseEpoch: number, commitSha?: string, error?: string }
   'merge.refused': { pr: number, message: string, attempt: number, epicId?: string }
   'plan.approved': { planId: string, version: number, to: string, viaPmRun?: string }
   'plan.discarded': { planId: string, version: number, deleted: number }
@@ -124,6 +127,7 @@ export interface AuditView {
   version?: number
   summary?: string
   feedback?: string
+  integratedCommitSha?: string
 }
 
 // Reads a stored detail, whatever its age. `event` was written as a name by

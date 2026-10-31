@@ -1,0 +1,3 @@
+ALTER TABLE "task_integration_operations" ADD COLUMN "epic_id" uuid NOT NULL;--> statement-breakpoint
+ALTER TABLE "task_integration_operations" ADD CONSTRAINT "task_integration_operations_epic_id_epics_id_fk" FOREIGN KEY ("epic_id") REFERENCES "public"."epics"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "task_integration_one_active_per_epic" ON "task_integration_operations" USING btree ("epic_id") WHERE "task_integration_operations"."state" in ('pending', 'running', 'reconciling');

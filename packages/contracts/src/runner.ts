@@ -44,6 +44,7 @@ const runJobCommon = {
   timeoutSeconds: z.number()
 }
 const taskJobContext = {
+  integrationProtocol: z.number().int().nonnegative().optional(),
   baseBranch: z.string().optional(), taskId: z.string().min(1), taskRef: z.string().min(1),
   // Older servers omit taskType and designPinned; preserve absence.
   epicId: z.string().optional(), taskType: z.enum(TASK_TYPES).nullish(),
@@ -127,8 +128,10 @@ export const reportOutcomeInput = z.object({
   criteria: z.array(criterionVerdict).optional().describe('Reviewer only: a verdict per acceptance criterion')
 })
 
-// Developer: the commit the runner pushed
-const reportFields = { summary: reportOutcomeInput.shape.summary, note: reportOutcomeInput.shape.note, review: reportOutcomeInput.shape.review, conflictedFiles: reportOutcomeInput.shape.conflictedFiles, headSha: z.string().optional() }
+// Set by the runner, never the agent. headSha: the commit a developer's run
+// pushed, or the one a reviewer's checkout is at. baseSha: where a submitted
+// commit forked from its epic branch.
+const reportFields = { summary: reportOutcomeInput.shape.summary, note: reportOutcomeInput.shape.note, review: reportOutcomeInput.shape.review, conflictedFiles: reportOutcomeInput.shape.conflictedFiles, headSha: z.string().optional(), baseSha: z.string().optional() }
 const taskReview = <Outcome extends z.ZodType<ReviewVerdict>>(outcome: Outcome) => z.object({ ...reportFields, outcome, criteria: z.array(criterionVerdict, { error: missingCriteria }) })
 const nonReview = z.object({ ...reportFields, outcome: NON_REVIEW_OUTCOMES })
 
@@ -182,7 +185,20 @@ export interface RunnerCapacity {
 export type RunnerRole = AgentRole | 'design'
 export const RUNNER_ROLES: readonly RunnerRole[] = ['pm', 'developer', 'reviewer', 'design']
 
+// Integration protocol is negotiated independently of the WebSocket envelope.
+// Omission means legacy only; do not advertise execution before implementing it.
+export const TASK_INTEGRATION_PROTOCOL = 1
+export function integrationCompatibilityReason(required: number, supported: readonly number[] = []): string | null {
+  return required === 0 || supported.includes(required)
+    ? null
+    : `Task requires integration protocol ${required}. Update the runner to a build supporting PR-free epic task integration; legacy PR work remains available.`
+}
+
 export interface RunnerInfo extends RunnerCapacity {
+  taskIntegrationProtocols?: number[]
+  // Runs integration jobs; a runner that only submits and reviews doesn't
+  taskIntegrationExecutor?: boolean
+  integrationCompatibilityReason?: string | null
   activeRunCount?: number
   updateState?: string
   updateError?: string
@@ -227,6 +243,15 @@ export const setupJobSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('cleanup_worktrees'), repository: z.string(), taskId: z.string() }),
   // The files that stop `branch` rebasing onto `onto`, read from a fresh fetch
   z.object({ kind: z.literal('rebase_conflicts'), repository: z.string(), branch: z.string(), onto: z.string() }),
+  // PR-free integration (D27). Prepare builds one commit from a reviewed
+  // submission on top of the expected epic head, touching no shared ref; push
+  // advances the epic branch only if it's still at that head; inspect reads the
+  // remote. submissionId is written into the commit, so the remote itself says
+  // whether a submission landed. candidateRef: where to publish the candidate
+  // for CI, when the project has required checks.
+  z.object({ kind: z.literal('integration_prepare'), repository: z.string(), targetBranch: z.string(), expectedTargetSha: z.string(), submissionId: z.string(), headSha: z.string(), baseSha: z.string(), message: z.string(), committedAt: z.string(), candidateRef: z.string().nullable() }),
+  z.object({ kind: z.literal('integration_push'), repository: z.string(), targetBranch: z.string(), expectedTargetSha: z.string(), candidateSha: z.string() }),
+  z.object({ kind: z.literal('integration_inspect'), repository: z.string(), targetBranch: z.string(), submissionId: z.string() }),
   // Remove every worktree outside this keep set, which covers all projects.
   // Developer worktrees with uncommitted work stay (PRD §7.4), and so does the
   // checkout of a PM turn running on the runner.
@@ -246,6 +271,9 @@ export const setupJobResultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('github'), status: z.number(), body: z.unknown() }),
   z.object({ kind: z.literal('cleanup_worktrees'), removed: z.array(z.string()), kept: z.array(z.string()) }),
   z.object({ kind: z.literal('rebase_conflicts'), files: z.array(z.string()) }),
+  z.object({ kind: z.literal('integration_prepare'), status: z.enum(['prepared', 'integrated', 'moved', 'conflict', 'empty', 'failed']), targetSha: z.string(), commitSha: z.string().nullable(), files: z.array(z.string()), error: z.string().nullable().optional() }),
+  z.object({ kind: z.literal('integration_push'), pushed: z.boolean(), error: z.string().nullable() }),
+  z.object({ kind: z.literal('integration_inspect'), targetSha: z.string().nullable(), integratedSha: z.string().nullable() }),
   // `kept` is only what stayed because it holds uncommitted changes
   z.object({ kind: z.literal('sweep_worktrees'), removed: z.array(z.string()), kept: z.array(z.string()) }),
   z.object({ kind: z.literal('session_title'), title: z.string() }),
@@ -285,7 +313,7 @@ export const slotSourceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('derived'), cpus: z.number(), memoryBytes: z.number(), slotCpus: z.number(), slotMemoryBytes: z.number() })
 ])
 
-export const runnerHelloSchema = z.object({ type: z.literal('hello'), protocol: z.number(), commit: z.string().default('unknown'), updateTarget: z.string().optional(), updateState: z.string().optional(), updateError: z.string().optional(), draining: z.boolean().optional(), updateRequested: z.boolean().optional(), autoUpdate: z.boolean().optional(), runnerId: z.string(), name: z.string(), activeRuns: z.array(z.object({ runId: z.string(), leaseEpoch: z.number() })), slotSource: slotSourceSchema.optional().catch(undefined), slots: z.number().optional(), runtimes: z.array(z.string()).optional(), roles: z.array(z.enum(RUNNER_ROLES)).optional() })
+export const runnerHelloSchema = z.object({ type: z.literal('hello'), protocol: z.number(), taskIntegrationProtocols: z.array(z.number().int().positive()).optional(), taskIntegrationExecutor: z.boolean().optional(), commit: z.string().default('unknown'), updateTarget: z.string().optional(), updateState: z.string().optional(), updateError: z.string().optional(), draining: z.boolean().optional(), updateRequested: z.boolean().optional(), autoUpdate: z.boolean().optional(), runnerId: z.string(), name: z.string(), activeRuns: z.array(z.object({ runId: z.string(), leaseEpoch: z.number() })), slotSource: slotSourceSchema.optional().catch(undefined), slots: z.number().optional(), runtimes: z.array(z.string()).optional(), roles: z.array(z.enum(RUNNER_ROLES)).optional() })
 
 // Pre-capacity/build hello packets must still get the protocol-version refusal.
 // This schema is used only for rejecting a different version, never admission.
@@ -311,7 +339,7 @@ export const runnerMessageSchema = z.discriminatedUnion('type', [
 ])
 
 export const serverMessageSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('welcome'), runnerId: z.string(), commit: z.string(), draining: z.boolean(), updateRequested: z.boolean() }),
+  z.object({ type: z.literal('welcome'), integrationCompatibilityReason: z.string().nullable().optional(), runnerId: z.string(), commit: z.string(), draining: z.boolean(), updateRequested: z.boolean() }),
   // A short-lived acknowledgement of a live lease; expired acknowledgements never authorise a WIP push.
   z.object({ type: z.literal('run.lease'), runId: z.string(), leaseEpoch: z.number(), validUntil: z.string() }),
   z.object({ type: z.literal('runner.drain'), updateRequested: z.boolean() }),

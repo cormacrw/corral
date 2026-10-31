@@ -83,6 +83,8 @@ The PM has **no** tools to merge, edit docs or change status. This is enforced b
 
 ## 2. A task from Ready to Merged
 
+The PR steps below describe standalone/direct tasks and the legacy task-PR path. D27's COR-286 amendment defines the PR-free epic path and its staged rollout; section 4 describes it. Existing task PRs keep these steps through completion, including revisions. Spikes and designs retain their explicit exceptions below.
+
 Remember the D10 rule: **status = whose turn it is; the lease = whether a run is active.** The scheduler starts a run for a task in Ready, In progress or Agent review that has no lease, if its group has capacity.
 
 ### Step 1 — Approve → Ready
@@ -155,7 +157,7 @@ Run: Starting → Running. A heartbeat every 2 minutes renews the lease, and eve
 
 ### Step 7c — Ready to merge: wait for CI and the base branch
 
-Adding a new human check while Ready to merge returns the task to **Human review** (`require_human_check`, D28). Otherwise the task waits in Ready to merge. Its base branch is the project's target branch, or the epic branch for a task in an `epic` or `each_task` epic (D27). Waiting is a webhook or a cheap polling check, never an agent.
+Adding a new human check while Ready to merge returns the task to **Human review** (`require_human_check`, D28), except on the PR-free epic path, where it joins the epic review (D27). Otherwise the task waits in Ready to merge. Its base branch is the project's target branch, or the epic branch for a task in an `epic` or `each_task` epic (D27). Waiting is a webhook or a cheap polling check, never an agent.
 
 - **CI fails:** → In progress with the logs attached.
 - **The base branch has moved:** the server asks GitHub to rebase the branch onto the base (GraphQL `updatePullRequestBranch` with `updateMethod: REBASE`, so no local git is needed and the base is never merged in). A clean rebase keeps the approval and CI runs again on the new head: the server recorded that it asked for the update, so the new head counts as mechanical. A conflict (`base_conflict`) → **In progress** for a **rebase-only round**, excluded from `reviewRoundCap` ([D24](decisions.md#d24--rebase-only-rounds-preserve-approved-work)). The developer only rebases onto `origin/<default>` (or `origin/<base branch>` for an epic-based task PR), resolves conflicts preserving both sides' intent without reverting newly merged work, and re-runs the gates; no feature changes. It reports `pr_rebased` with `review: trivial | needs_review` and the files it resolved conflicts in. For `trivial`, the server (not an agent) checks that every file whose change differs between the approved diff (old base → approved head) and the new diff (new base → new head) is in that conflicted-file list, and that no project doc (`CORRAL.md`, `CLAUDE.md`, `docs/**`, `.corral/wiki/**`) changed on the base between the old and new base commits. Both conditions passing carries over approval and previous criteria verdicts → **Ready to merge**. A failed check → **Agent review**, with the reviewer told which condition or conditions failed; `needs_review` goes straight to **Agent review**. The **rebase review** follows D24: compare approved and new heads with `git range-diff`, check every conflicted hunk against the base's change, and check any binding docs the base changed. The gates follow the same rule as any review: left to required CI, or run without the cache when the project has none (D26). A clean resolution carries over approval and previous criteria verdicts → **Ready to merge**, with CI and merge gates on the new head. Either carry-over path returns to **Ready to merge** even with `humanReview` set or an `each_task` epic, because the human approved before the conflict. A criterion checked by a human stays open across the rebase, so a task with one goes to **Human review** instead (D28). Changes requested start a normal round; a substantial change, including a changed binding decision that the criteria rely on, instead → **Blocked** for the human, never an agent picking a side. The developer judges the size of its resolution; the server check guards against changes outside the conflicted files or a moved binding decision. D27's epic-PR conflict-task flow is unchanged.
@@ -230,13 +232,24 @@ A design task follows steps 1–7 with these differences: the designer builds a 
 
 How an epic in `epic` or `each_task` mode gets its work onto the target branch. A `direct` epic, and a task without an epic, follow section 2 alone and merge straight into the target branch. The example project's target branch is whatever its settings name (`defaultBranch`); Corral never assumes its name.
 
-The example: epic **E7 "Saved searches"** in `epic` mode, with three board tasks: **#41** (API), **#42** (UI, depends on #41) and **#43** (docs). #42 has `humanReview` set.
+The example: epic **E7 "Saved searches"** in `epic` mode, with three board tasks: **#41** (API), **#42** (UI, depends on #41) and **#43** (docs). #42 has `humanReview` set, which on the PR-free path the human settles at the epic review (step 5), not on the task.
 
 ### Step 1 — First claim creates the epic branch
 
-The plan is approved and the scheduler claims #41 (section 2, step 2). E7 has no epic branch yet, so the server creates `corral/epic-<epicId>-saved-searches` from the tip of the target branch. The runner then creates #41's branch from `origin/corral/epic-…` instead of the target branch (section 2, step 3), and the server opens #41's PR with the epic branch as its base.
+The plan is approved and the scheduler claims #41 (section 2, step 2). E7 has no epic branch yet, so the server creates `corral/epic-<epicId>-saved-searches` from the tip of the target branch. The runner then creates #41's branch from `origin/corral/epic-…` instead of the target branch (section 2, step 3), and the task submits from that branch. The legacy path instead opens #41's task PR with the epic branch as its base.
 
-### Step 2 — Task PRs merge into the epic branch
+### Step 2 — Approved tasks integrate into the epic branch
+
+For eligible new task/bug submissions in `epic` mode, the PR-free path uses this sequence (COR-286 defines its persistence and negotiation, COR-287 implements steps 1 and 2, COR-288 steps 3 and 4):
+
+1. The developer reports `commit_submitted`. The runner pushes the task branch and Corral records a new immutable submission with its head, base and target epic branch. Do not open a task PR. Reviewers check out that exact head; a verdict from a different head, or while the branch has moved, is rejected.
+2. Record agent approval for that exact submitted head. That leads straight to Ready to merge and integration, with no task-level Human review: D5 flags and D28 human checks are kept as human obligations, which the human confirms at the final epic approval (step 5). Changes requested create a new submission on revision; old heads and verdicts remain history.
+3. In Ready to merge, journal an integration operation with the expected epic head and fenced runner. Rebase against a moved epic branch under D24, with review of changed resolutions; never silently transfer approval to arbitrary new work. Integrate one commit per task, one task at a time per epic, using a compare-and-swap push. The commit carries a `Corral-Submission` trailer, so the remote itself says whether a submission landed. Reconcile ambiguous pushes by reading the remote before retrying. Required checks are read on the exact candidate first, pushed to `corral/candidates/<operation>`: a failure returns the task to its developer, and a check that never appears on such a commit (a PR-only workflow) is left to the epic PR's merge gate, so no task PR is needed.
+4. Record the confirmed integrated commit and timestamp and only then mark Merged. #42 may now start after #41 integrates, because they share E7. A dependent outside E7 waits for the epic PR merge. A submission, approval or operation in progress does not satisfy dependencies.
+
+Only runners explicitly advertising the task's integration protocol can claim it. Missing support leaves it unleased; the runner receives an update reason and can still take legacy tasks. Existing task PRs keep their branch, PR link, evidence and approval history and finish through the following legacy flow. `each_task` also keeps that flow. `direct` epics are not converted.
+
+### Legacy step 2 — Task PRs merge into the epic branch
 
 Each task follows section 2, steps 4–10, against the epic branch:
 
@@ -248,7 +261,7 @@ Meanwhile the target branch has moved on with other work. Corral doesn't touch t
 
 ### Step 3 — Corral opens the epic PR
 
-#42 was the last board task of E7 still unmerged. With all three Merged, the server opens the **epic PR** from the epic branch into the target branch. Its description lists the epic's tasks with links to their PRs and evidence. In the Inbox it's Activity: "Epic PR opened". E7 isn't done yet, so epics that depend on it (D22) are still waiting.
+#42 was the last board task of E7 still unmerged. With all three Merged, the server opens the **epic PR** from the epic branch into the target branch. Its description lists the epic's tasks with their submitted, reviewed and integrated commits and evidence (and task PR links for legacy tasks). In the Inbox it's Activity: "Epic PR opened". E7 isn't done yet, so epics that depend on it (D22) are still waiting.
 
 ### Step 4 — Integration review
 
@@ -256,7 +269,7 @@ The scheduler claims a reviewer run for the epic PR. The reviewer checks out the
 
 ### Step 5 — Human review and a fix task
 
-The reviewer approves, and the epic PR becomes a **Needs you** item in the Inbox (D11, D27), with the reviewer's verdict and the combined diff. The human tries it and requests changes: "Deleting a saved search doesn't ask for confirmation."
+The reviewer approves, and the epic PR becomes a **Needs you** item in the Inbox (D11, D27), with the reviewer's verdict, the combined diff, and each task's criteria, evidence and recorded commits or task PR. The tasks' human checks and `humanReview` flags are checkboxes here, and approval is refused until every one is ticked (COR-289). The human tries it and requests changes: "Deleting a saved search doesn't ask for confirmation."
 
 The server creates fix task **#44** in E7, in **Ready**, titled from the feedback, with the feedback as its description and each of its points (list items, or paragraphs) as a criterion. The epic PR's review state becomes `changes_requested`, which keeps it from being approved or merged, and the Inbox item is resolved. #44 runs through section 2 like any task in E7: its branch is cut from the epic branch, it's reviewed in `epic` mode, and it squash-merges into the epic branch. (A reviewer's `changes_requested` on the epic PR in step 4 creates a fix task the same way.)
 
