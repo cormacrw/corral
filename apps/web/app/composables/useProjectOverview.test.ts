@@ -25,11 +25,10 @@ afterEach(() => {
   for (const cleanup of cleanups.splice(0)) cleanup()
 })
 
-function setup(initiallyOpen: boolean, initiallyLoading = false) {
+function setup(initiallyOpen: boolean, initiallyLoading = false, client = testQueryClient()) {
   const open = ref(initiallyOpen)
   const tasks = ref([task('a')])
   const loading = ref(initiallyLoading)
-  const client = testQueryClient()
   let overview!: ReturnType<typeof useProjectOverview>
   const { wrapper } = mountWithQuery({
     setup() {
@@ -80,6 +79,18 @@ it('holds changes while closed and catches up once on opening', async () => {
   expect(activeRunLoads()).toBe(2)
   expect(api.tasks.history).toHaveBeenLastCalledWith('corral', 1)
   expect(api.tasks.history).toHaveBeenCalledTimes(2)
+})
+
+it('holds changes on another tab when returning to a project over a warm cache', async () => {
+  const first = setup(true)
+  await flushPromises()
+  first.wrapper.unmount()
+  const { client } = setup(false, false, first.client)
+  await flushPromises()
+  expect(activeRunLoads()).toBe(1)
+  await runChanged(client)
+  await flushPromises()
+  expect(activeRunLoads()).toBe(1)
 })
 
 it('stays live while open', async () => {

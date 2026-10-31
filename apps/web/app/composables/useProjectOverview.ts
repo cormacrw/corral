@@ -50,7 +50,7 @@ export function useProjectOverview({ slug, project, tasks, epics: epicList, load
   })
   watch(() => ready.value && !activeRuns.isPending.value && [...taskHistories.value, ...taskRuns.value].every(query => !query.isPending), (settled) => {
     if (settled) preloaded.value = true
-  })
+  }, { immediate: true })
 
   const inbox = computed(() => inboxState.data.value ?? null)
   const runs = computed(() => (activeRuns.data.value ?? []).filter(run => run.projectId === project.value?.id))

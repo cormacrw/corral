@@ -13,15 +13,19 @@ export default withNuxt(
       'no-restricted-imports': ['error', {
         patterns: [
           {
-            regex: '(^|/)useApi$',
+            regex: '(^|/)useApi(\\.[cm]?[jt]s)?$',
             message: 'Only app/queries talks to the server: add a query or mutation there. ApiError is exported from ~/queries/client.'
           },
           {
-            regex: '(^|/)useLive$',
+            regex: '(^|/)useLive(\\.[cm]?[jt]s)?$',
             importNames: ['subscribeLive', 'subscribeReconnect'],
             message: 'Server events reach pages through the query cache. Add the query to the event in queries/dependencies.ts.'
           }
         ]
+      }],
+      'no-restricted-syntax': ['error', {
+        selector: 'ImportExpression[source.value=/(^|\\/)useApi(\\.[cm]?[jt]s)?$/]',
+        message: 'Only app/queries talks to the server: add a query or mutation there.'
       }]
     }
   },
