@@ -71,9 +71,14 @@ const alertStub = vue.defineComponent({
   setup: props => () => vue.h('div', { 'data-alert': true }, [props.title, ...(props.actions ?? []).map((a: { label: string, onClick: () => void }) => vue.h('button', { onClick: a.onClick }, a.label))])
 })
 
-async function mountInbox(type: 'human_review' | 'failed', taskRef?: string, dockedTask: string | null = null, selection = true, editTask = (task: (typeof tasks)[number]) => task, realComposer = false, mobile = false) {
+async function mountInbox(type: 'human_review' | 'failed' | 'question', taskRef?: string, dockedTask: string | null = null, selection = true, editTask = (task: (typeof tasks)[number]) => task, realComposer = false, mobile = false) {
   for (const name of ['ref', 'shallowRef', 'computed', 'watch', 'watchEffect', 'onMounted', 'onBeforeUnmount', 'nextTick'] as const) vi.stubGlobal(name, vue[name])
-  const item = inbox().needsYou.find(i => i.type === type && (taskRef ? i.taskRef === taskRef : tasks.find(t => t.id === i.taskId)?.type !== 'design'))!
+  const fixture = inbox()
+  if (type === 'question') {
+    const question = fixture.needsYou.find(i => i.taskRef === 'COR-8')!
+    question.type = 'question'
+  }
+  const item = fixture.needsYou.find(i => i.type === type && (taskRef ? i.taskRef === taskRef : tasks.find(t => t.id === i.taskId)?.type !== 'design'))!
   const params = vue.reactive<{ itemId?: string }>({ itemId: selection ? item.id : undefined })
   vi.stubGlobal('useRoute', () => ({ params }))
   const router = {
@@ -93,7 +98,7 @@ async function mountInbox(type: 'human_review' | 'failed', taskRef?: string, doc
   const closeFlyout = vi.fn().mockResolvedValue(undefined)
   vi.stubGlobal('useTaskFlyout', () => ({ ref: vue.ref(dockedTask), epic: vue.ref(null), open: vi.fn(), close: closeFlyout }))
   vi.stubGlobal('useLive', () => ({ state: vue.ref({ agents, projects, loaded: true, runner: { online: true } }) }))
-  vi.mocked(api.inbox.get).mockImplementation(async () => structuredClone(inbox()))
+  vi.mocked(api.inbox.get).mockImplementation(async () => structuredClone(fixture))
   vi.mocked(api.inbox.act).mockReset().mockResolvedValue({ task: null })
   const byRef = vi.mocked(api.tasks.byRef).mockReset()
   if (taskRef) byRef.mockResolvedValue(editTask(tasks.find(t => t.ref === taskRef)!))
@@ -626,7 +631,7 @@ for (const type of ['human_review', 'failed'] as const) {
 describe('on a phone', () => {
   let mounted: { unmount: () => void } | undefined
   afterEach(() => mounted?.unmount())
-  const phone = async (type: 'human_review' | 'failed' = 'human_review', ref = 'COR-5', edit = (t: (typeof tasks)[number]) => t) => {
+  const phone = async (type: 'human_review' | 'failed' | 'question' = 'human_review', ref = 'COR-5', edit = (t: (typeof tasks)[number]) => t) => {
     const view = await mountInbox(type, ref, null, true, edit, false, true)
     mounted = view.wrapper
     return view
@@ -655,6 +660,50 @@ describe('on a phone', () => {
     await flushPromises()
     expect(composerOpen(view)).toBe(true)
     expect(view.panel().action).toBeNull()
+    expect(api.inbox.act).not.toHaveBeenCalled()
+  })
+
+  it('opens a question with Answer selected and its composer visible', async () => {
+    const view = await phone('question', 'COR-8')
+    expect(view.panel().action).toBe('clarify')
+    expect(composerOpen(view)).toBe(true)
+    expect(bar(view).text()).toContain('Answer')
+    expect(api.inbox.act).not.toHaveBeenCalled()
+  })
+
+  it.each(['Cancel', 'Reply'])('keeps a draft visible after %s before approval', async (control) => {
+    const view = await phone()
+    await button(view, control === 'Cancel' ? 'Request changes' : 'Reply').trigger('click')
+    view.panel().setText('Do not merge, the migration is wrong')
+    await flushPromises()
+    await button(view, control).trigger('click')
+    await flushPromises()
+    expect(composerOpen(view)).toBe(true)
+    expect(view.composer().props('modelValue')).toBe('Do not merge, the migration is wrong')
+    expect(api.inbox.act).not.toHaveBeenCalled()
+    view.panel().setText('')
+    await flushPromises()
+    expect(composerOpen(view)).toBe(false)
+  })
+
+  it('keeps an image-only draft visible after Cancel and toggling Reply off', async () => {
+    vi.stubGlobal('URL', { createObjectURL: () => 'blob:preview', revokeObjectURL: vi.fn() })
+    const view = await mountInbox('human_review', 'COR-5', null, true, task => task, true, true)
+    mounted = view.wrapper
+    vi.mocked(api.attachments.upload).mockResolvedValue({ id: 'image' } as never)
+    await button(view, 'Request changes').trigger('click')
+    const input = view.wrapper.get('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { value: [new File(['image'], 'screen.png', { type: 'image/png' })] })
+    await input.trigger('change')
+    await flushPromises()
+    await button(view, 'Cancel').trigger('click')
+    await flushPromises()
+    const images = () => view.wrapper.get('[aria-label="Attached images"]')
+    expect(images().isVisible()).toBe(true)
+    await button(view, 'Reply').trigger('click')
+    await button(view, 'Reply').trigger('click')
+    await flushPromises()
+    expect(images().isVisible()).toBe(true)
     expect(api.inbox.act).not.toHaveBeenCalled()
   })
 

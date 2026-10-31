@@ -8,7 +8,7 @@ const props = defineProps<{
   // Sends in place of ctx.submit, for a host that follows what's sent
   onSubmit?: (text: string) => Promise<boolean>
 }>()
-const composer = ref<{ focus: () => void, send: () => Promise<boolean>, uploading: boolean } | null>(null)
+const composer = ref<{ focus: () => void, send: () => Promise<boolean>, uploading: boolean, hasImages: boolean } | null>(null)
 const chosen = computed(() => props.ctx.composerChosen ? props.ctx.actions.find(a => a.value === props.ctx.action) ?? null : null)
 watch(chosen, (value) => {
   if (value) void nextTick(() => composer.value?.focus())
@@ -36,7 +36,7 @@ async function send() {
   await nextTick()
   return await composer.value?.send() ?? false
 }
-defineExpose({ send, focus: () => composer.value?.focus() })
+defineExpose({ send, hasImages: computed(() => composer.value?.hasImages ?? false), focus: () => composer.value?.focus() })
 </script>
 
 <template>
@@ -74,8 +74,8 @@ defineExpose({ send, focus: () => composer.value?.focus() })
       :busy="ctx.busy || ctx.taskLoading"
       :rows="1"
       :project="ctx.item.project.slug"
-      @update:model-value="ctx.setText"
       :on-submit="onSubmit ?? ctx.submit"
+      @update:model-value="ctx.setText"
     />
   </div>
 </template>

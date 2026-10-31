@@ -43,7 +43,13 @@ conflict panels. It shows `message` as plain text and only `newArtifacts` in a
 New row immediately below. Files open `EvidenceViewer.vue` (also used by
 `EvidenceList.vue`); design links open the version preview. Evidence metadata
 provides MIME types where available, with kind/name fallbacks while loading.
-The existing full `body`, including spike findings, is collapsed under Full
-message. Keying by selected item resets the disclosure on navigation. Items
-without `message` retain the existing markdown body; Plan/release components
-remain separate. No New markers are added to the criteria evidence lists.
+Task Option D panels show the full `body`, including spike findings, in the
+Message tab. Items without `message` retain the existing markdown body;
+Plan/release components remain separate. No New markers are added to the criteria evidence lists.
+
+## Mobile draft visibility
+
+`InboxPanelThumbBar.vue` keeps `InboxPanelTray` visible while its text is
+non-empty or `PromptComposer` has images (including pending or failed uploads).
+Cancel and toggling Reply off change the selected action without hiding a draft
+that a subsequent one-tap Approve or Retry would send. An empty draft can close.

@@ -4,14 +4,13 @@ import { actionDisabled, type InboxPanelContext, type ResolveTo } from '~/compos
 
 // The panel's actions on a phone (design/mobile.md): each one a large target at
 // the bottom of the screen, in thumb reach. The composer opens just above them.
-// It stays mounted while closed, so a one-tap action sends through it like the
-// desktop's, with any draft and images.
+// Keep drafts visible so a one-tap action cannot send an unseen note or image.
 const props = withDefaults(defineProps<{ ctx: InboxPanelContext, approveLabel?: string, reply?: boolean }>(), { approveLabel: undefined, reply: true })
-const tray = ref<{ focus: () => void, send: () => Promise<boolean> } | null>(null)
+const tray = ref<{ focus: () => void, send: () => Promise<boolean>, hasImages: boolean } | null>(null)
 defineExpose({ send: () => tray.value?.send() ?? Promise.resolve(false) })
 
 const replying = ref(false)
-const composing = computed(() => replying.value || props.ctx.composerChosen)
+const composing = computed(() => replying.value || props.ctx.composerChosen || !!props.ctx.text.trim() || !!tray.value?.hasImages)
 const SHORT: Record<string, string> = { send_back: 'Send back', delete: 'Delete' }
 const label = (a: { value: string, label: string }) => a.value === 'approve' && props.approveLabel && !props.ctx.taskLoading && !props.ctx.taskLoadFailed ? props.approveLabel : SHORT[a.value] ?? a.label
 function tap(value: string) {
