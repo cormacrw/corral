@@ -208,7 +208,7 @@ export const acceptanceCriteria = pgTable('acceptance_criteria', {
   text: text().notNull(),
   createdAt: createdAt(),
   updatedAt: updatedAt()
-}, t => [index().on(t.taskId, t.position)])
+}, t => [index().on(t.taskId, t.position), unique('criteria_task_id_unique').on(t.taskId, t.id)])
 
 // `taskId` depends on `dependsOnId`. Cycles are rejected by core before writing.
 // Both ends are keyed through projectId, so an edge can't cross projects.
@@ -270,7 +270,7 @@ export const runs = pgTable('runs', {
   number: bigint({ mode: 'number' }).notNull().generatedAlwaysAsIdentity().unique(),
   agentId: uuid().notNull().references(() => agents.id),
   projectId: uuid().notNull().references(() => projects.id, { onDelete: 'cascade' }),
-  taskId: uuid().references(() => tasks.id, { onDelete: 'cascade' }),
+  taskId: uuid(),
   // Integration reviews belong to an epic, independently of task reviews.
   epicId: uuid().references(() => epics.id, { onDelete: 'cascade' }),
   leaseExpiresAt: timestamp({ withTimezone: true }),
@@ -301,6 +301,7 @@ export const runs = pgTable('runs', {
   startedAt: timestamp({ withTimezone: true }),
   endedAt: timestamp({ withTimezone: true })
 }, t => [
+  foreignKey({ name: 'runs_task_same_project_fk', columns: [t.projectId, t.taskId], foreignColumns: [tasks.projectId, tasks.id] }).onDelete('cascade'),
   index().on(t.taskId),
   index().on(t.epicId),
   index().on(t.agentId, t.state),
@@ -330,7 +331,7 @@ export const planSessions = pgTable('plan_sessions', {
   createdBy: actor('created_by'),
   createdAt: createdAt(),
   updatedAt: updatedAt()
-}, t => [index().on(t.projectId, t.updatedAt)])
+}, t => [index().on(t.projectId, t.updatedAt), unique('sessions_project_id_unique').on(t.projectId, t.id)])
 
 export const planMessages = pgTable('plan_messages', {
   id: uuid().primaryKey().defaultRandom(),
@@ -357,7 +358,7 @@ export const planMessages = pgTable('plan_messages', {
 // human approves the plan (D9, D10)
 export const plans = pgTable('plans', {
   id: uuid().primaryKey().defaultRandom(),
-  sessionId: uuid().notNull().references(() => planSessions.id, { onDelete: 'cascade' }),
+  sessionId: uuid().notNull(),
   projectId: uuid().notNull().references(() => projects.id, { onDelete: 'cascade' }),
   epicId: uuid().references(() => epics.id, { onDelete: 'set null' }),
   version: integer().notNull(),
@@ -368,6 +369,7 @@ export const plans = pgTable('plans', {
   approvedAt: timestamp({ withTimezone: true }),
   createdAt: createdAt()
 }, t => [
+  foreignKey({ name: 'plans_session_same_project_fk', columns: [t.projectId, t.sessionId], foreignColumns: [planSessions.projectId, planSessions.id] }).onDelete('cascade'),
   unique('plans_session_version_unique').on(t.sessionId, t.version),
   // Superseding an approved version preserves its approval history.
   check('plans_approval_tuple', sql`(${t.approvedBy} is null) = (${t.approvedAt} is null) and (${t.status} <> 'approved' or (${t.approvedBy} is not null and ${t.approvedAt} is not null))`)
@@ -470,7 +472,7 @@ export const evidence = pgTable('evidence', {
   id: uuid().primaryKey().defaultRandom(),
   taskId: uuid().notNull().references(() => tasks.id, { onDelete: 'cascade' }),
   // Null for evidence about the task as a whole (e.g. a full test run)
-  criterionId: uuid().references(() => acceptanceCriteria.id, { onDelete: 'set null' }),
+  criterionId: uuid(),
   runId: uuid().notNull().references(() => runs.id, { onDelete: 'cascade' }),
   round: integer().notNull(),
   kind: evidenceKind().notNull(),
@@ -482,6 +484,8 @@ export const evidence = pgTable('evidence', {
   size: integer().notNull(),
   createdAt: createdAt()
 }, t => [
+  // Migration uses SET NULL (criterion_id) to preserve the required task_id.
+  foreignKey({ name: 'evidence_criterion_same_task_fk', columns: [t.taskId, t.criterionId], foreignColumns: [acceptanceCriteria.taskId, acceptanceCriteria.id] }).onDelete('set null'),
   index().on(t.taskId, t.round),
   // ECMAScript trim whitespace, including NBSP and BOM, matches the API.
   check('evidence_note_or_file', sql`(

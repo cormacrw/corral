@@ -2,7 +2,7 @@ import type { Actor } from '@corral/core'
 import { eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Database, DatabaseHandle } from './client.ts'
-import { agents, attachments, epicDependencies, epics, planEpics, planMessages, planSessions, planTasks, plans, projects, runs, taskDependencies, tasks, users } from './schema.ts'
+import { acceptanceCriteria, evidence, agents, attachments, epicDependencies, epics, planEpics, planMessages, planSessions, planTasks, plans, projects, runs, taskDependencies, tasks, users } from './schema.ts'
 import { createTestDatabase, postgresAvailable } from './testing.ts'
 
 const human: Actor = { kind: 'human', userId: '00000000-0000-4000-8000-000000000001' }
@@ -275,6 +275,47 @@ describe.each([
       db.insert(taskDependencies).values({ projectId: task.projectId, taskId: task.id, dependsOnId: task.id }),
       'task_dependencies_not_self'
     )
+  })
+
+  it.skipIf(!enabled)('scopes runs, plans and evidence while preserving deletion semantics', async () => {
+    const [a, b] = [await insertProject(), await insertProject()]
+    const [ta, tb, other] = [await insertTask(a.id, 1), await insertTask(b.id, 1), await insertTask(a.id, 2)]
+    const [agent] = await db.insert(agents).values({ name: 'Ownership', role: 'developer' }).returning()
+    const run = { projectId: a.id, taskId: ta.id, agentId: agent!.id, role: 'developer' as const }
+    await expectViolation(db.insert(runs).values({ ...run, taskId: tb.id }), 'runs_task_same_project_fk')
+    const [r] = await db.insert(runs).values(run).returning()
+    await expectViolation(db.update(runs).set({ projectId: b.id }).where(eq(runs.id, r!.id)), 'runs_task_same_project_fk')
+    await expectViolation(db.update(tasks).set({ projectId: b.id, number: 9 }).where(eq(tasks.id, ta.id)), 'runs_task_same_project_fk')
+    const [session] = await db.insert(planSessions).values({ projectId: a.id, title: 'S', createdBy: human }).returning()
+    const plan = { projectId: a.id, sessionId: session!.id, title: 'P', version: 1 }
+    await expectViolation(db.insert(plans).values({ ...plan, projectId: b.id }), 'plans_session_same_project_fk')
+    const [p] = await db.insert(plans).values(plan).returning()
+    await expectViolation(db.update(plans).set({ projectId: b.id }).where(eq(plans.id, p!.id)), 'plans_session_same_project_fk')
+    await expectViolation(db.update(planSessions).set({ projectId: b.id }).where(eq(planSessions.id, session!.id)), 'plans_session_same_project_fk')
+    const criteria = await db.insert(acceptanceCriteria).values([ta, tb, other].map(t => ({ taskId: t.id, text: 'Criterion', position: 0 }))).returning()
+    const base = { taskId: ta.id, runId: r!.id, round: 0, kind: 'note' as const, note: 'Proof', size: 0 }
+    for (const c of criteria.slice(1)) {
+      await expectViolation(db.insert(evidence).values({ ...base, criterionId: c.id }), 'evidence_criterion_same_task_fk')
+    }
+    const [e] = await db.insert(evidence).values({ ...base, criterionId: criteria[0]!.id }).returning()
+    await expectViolation(db.update(evidence).set({ taskId: other.id }).where(eq(evidence.id, e!.id)), 'evidence_criterion_same_task_fk')
+    await expectViolation(db.update(acceptanceCriteria).set({ taskId: other.id }).where(eq(acceptanceCriteria.id, criteria[0]!.id)), 'evidence_criterion_same_task_fk')
+    await db.delete(acceptanceCriteria).where(eq(acceptanceCriteria.id, criteria[0]!.id))
+    expect((await db.select().from(evidence).where(eq(evidence.id, e!.id)))[0]).toMatchObject({ taskId: ta.id, criterionId: null })
+    await db.insert(evidence).values(base)
+    const [pm] = await db.insert(runs).values({ projectId: a.id, agentId: agent!.id, role: 'pm', planSessionId: session!.id }).returning()
+    await db.delete(planSessions).where(eq(planSessions.id, session!.id))
+    expect(await db.select().from(plans).where(eq(plans.id, p!.id))).toEqual([])
+    expect((await db.select().from(runs).where(eq(runs.id, pm!.id)))[0]).toMatchObject({ planSessionId: null, taskId: null })
+    await db.update(runs).set({ summary: 'Session deleted' }).where(eq(runs.id, pm!.id))
+    await db.delete(tasks).where(eq(tasks.id, ta.id))
+    expect(await db.select().from(runs).where(eq(runs.id, r!.id))).toEqual([])
+    expect(await db.select().from(evidence).where(eq(evidence.id, e!.id))).toEqual([])
+    const [fresh] = await db.insert(runs).values({ ...run, taskId: other.id }).returning()
+    await db.insert(evidence).values({ ...base, taskId: other.id, runId: fresh!.id })
+    const [next] = await db.insert(planSessions).values({ projectId: a.id, title: 'New', createdBy: human }).returning()
+    await db.insert(plans).values({ ...plan, sessionId: next!.id })
+    await db.delete(projects).where(eq(projects.id, a.id))
   })
 
   it.skipIf(!enabled)('keeps epic membership and dependency edges inside one project', async () => {
