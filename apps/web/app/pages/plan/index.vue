@@ -16,14 +16,14 @@ const router = useRouter()
 const route = useRoute()
 const pending = usePendingPlan()
 const device = useDevice()
-// The attached task opens beside the composer, or over it on phones, which
-// keeps the draft that going to the task's page would lose
+// The attached task and its epic open beside the composer, or over it on
+// phones, which keeps the draft that going to the task's page would lose
 provide(FLYOUT_SHEETS, true)
 const flyout = useTaskFlyout()
 const detailSheet = computed({
-  get: () => Boolean(flyout.ref.value),
+  get: () => Boolean(flyout.ref.value || flyout.epic.value),
   set: (open) => {
-    if (!open && flyout.ref.value) flyout.close()
+    if (!open && (flyout.ref.value || flyout.epic.value)) flyout.close()
   }
 })
 useSeoMeta({ title: 'Plan · Corral' })
@@ -249,7 +249,7 @@ async function start(message: string): Promise<boolean> {
     <UDrawer
       v-if="device.isMobile.value"
       v-model:open="detailSheet"
-      :title="`Task ${flyout.ref.value}`"
+      :title="flyout.ref.value ? `Task ${flyout.ref.value}` : 'Epic'"
       :ui="{ content: 'h-[94svh]' }"
     >
       <template #content>
@@ -258,6 +258,13 @@ async function start(message: string): Promise<boolean> {
             v-if="flyout.ref.value"
             class="flex-1"
             :task-ref="flyout.ref.value"
+            mode="flyout"
+            @close="flyout.close()"
+          />
+          <EpicDetail
+            v-else-if="flyout.epic.value"
+            class="flex-1"
+            :epic-id="flyout.epic.value"
             mode="flyout"
             @close="flyout.close()"
           />

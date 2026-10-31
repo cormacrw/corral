@@ -283,10 +283,10 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
             <span class="min-w-0">
               <span class="font-medium">{{ actorName(entry) }}</span>{{ ' ' }}
               <span class="text-muted">{{ activityText(entry) }}</span>{{ ' ' }}
-              <NuxtLink
-                :to="`/tasks/${taskRefOf(entry)}`"
-                class="font-mono text-xs text-muted"
-              >{{ taskRefOf(entry) }}</NuxtLink>
+              <TaskLink
+                :task-ref="taskRefOf(entry)"
+                class="font-mono text-xs"
+              />
               <span class="ms-2 text-xs text-dimmed">{{ timeAgo(entry.createdAt) }}</span>
             </span>
           </li>

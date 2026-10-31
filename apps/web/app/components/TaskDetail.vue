@@ -692,7 +692,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
             >
               <TaskLink
                 :task-ref="ref"
-                class="font-mono text-muted"
+                class="font-mono"
               />
               <span class="truncate">{{ dependencyTask(ref)?.title ?? '' }}</span>
               <StatusBadge

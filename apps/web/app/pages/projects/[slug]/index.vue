@@ -289,10 +289,10 @@ useSeoMeta({ title: () => `${project.value?.name ?? 'Project'} · Corral` })
                 <span class="min-w-0 truncate">
                   <span class="font-medium">{{ actorName(entry) }}</span>{{ ' ' }}
                   <span class="text-muted">{{ activityText(entry) }}</span>{{ ' ' }}
-                  <NuxtLink
-                    :to="`/tasks/${taskRefOf(entry)}`"
-                    class="font-mono text-xs text-muted hover:underline"
-                  >{{ taskRefOf(entry) }}</NuxtLink>
+                  <TaskLink
+                    :task-ref="taskRefOf(entry)"
+                    class="font-mono text-xs"
+                  />
                   <span class="ms-2 text-xs text-dimmed">{{ timeAgo(entry.createdAt) }}</span>
                 </span>
               </li>
