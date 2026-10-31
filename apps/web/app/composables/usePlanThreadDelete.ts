@@ -35,9 +35,7 @@ export function usePlanThreadDelete() {
     })
   }
 
-  // refresh reloads the list once the close is done, so the row doesn't
-  // reappear between the request and the list catching up
-  function remove(sessionId: string, refresh?: () => Promise<unknown>) {
+  function remove(sessionId: string) {
     if (timers.has(sessionId)) return
     pending.value = [...pending.value, sessionId]
     const shown = toast.add({
@@ -52,9 +50,9 @@ export function usePlanThreadDelete() {
     async function commit(id: string) {
       timers.delete(id)
       try {
+        // Settles once the list has refetched, so the row can't reappear in between
         await closing.mutateAsync(id)
         threads.remove(id)
-        await refresh?.().catch(() => {})
       } catch (e) {
         toast.add({ title: 'Could not delete the thread', description: e instanceof Error ? e.message : String(e), color: 'error' })
       } finally {

@@ -58,6 +58,8 @@ export const keys = {
     repos: () => [...keys.setup.all(), 'repos'] as const
   },
   inbox: () => ['inbox'] as const,
+  // A mutation key: what's running, not cached data
+  inboxResolving: () => ['inbox', 'resolving'] as const,
   profile: () => ['profile'] as const,
   runner: () => ['runner'] as const,
   status: () => ['status'] as const

@@ -1,18 +1,25 @@
 <script setup lang="ts">
 import type { Project } from '@corral/contracts'
-import { api } from '~/composables/useApi'
+import { useMutation, useQuery } from '@tanstack/vue-query'
+import { patchProject, projectsQuery } from '~/queries/projects'
+import { resumeAll as resumeAllMutation, runnerQuery, statusQuery } from '~/queries/system'
 
 // Shell-wide banners (design/app-shell.md), shared by the web and mobile
 // layouts: kill switch, update hold, paused project, runner offline
-const state = useLive().state
+const live = useLive().state
 const route = useRoute()
 const toast = useToast()
+const status = useQuery(statusQuery()).data
+const runner = useQuery(runnerQuery()).data
+const projects = useQuery(projectsQuery()).data
+const patching = useMutation(patchProject)
+const resuming = useMutation(resumeAllMutation)
 
 // Shown only when no runner at all is online; some offline is just the list
 const runnerBanner = computed(() => {
-  const runners = state.value.runner?.runners ?? []
+  const runners = runner.value?.runners ?? []
   if (runners.some(r => r.needsUpdate) && !runners.some(r => !r.needsUpdate)) {
-    return `The runner needs an update to protocol ${state.value.runner?.protocol}. Plan and live runs are unavailable until it reconnects.`
+    return `The runner needs an update to protocol ${runner.value?.protocol}. Plan and live runs are unavailable until it reconnects.`
   }
   return runners.length > 1
     ? 'Every runner is offline. Plan and live runs are unavailable until one reconnects.'
@@ -20,18 +27,18 @@ const runnerBanner = computed(() => {
 })
 
 const currentSlug = computed(() => typeof route.params.slug === 'string' ? route.params.slug : null)
-const currentProject = computed(() => state.value.projects.find(p => p.slug === currentSlug.value) ?? null)
+const currentProject = computed(() => projects.value?.find(p => p.slug === currentSlug.value) ?? null)
 
 async function resume(project: Project) {
   try {
-    await api.projects.patch(project.slug, { paused: false })
+    await patching.mutateAsync({ slug: project.slug, input: { paused: false } })
   } catch (error) {
     toast.add({ title: 'Could not resume', description: error instanceof Error ? error.message : String(error), color: 'error' })
   }
 }
 async function resumeAll() {
   try {
-    await api.resumeAll()
+    await resuming.mutateAsync()
   } catch (error) {
     toast.add({ title: 'Could not resume', description: error instanceof Error ? error.message : String(error), color: 'error' })
   }
@@ -40,7 +47,7 @@ async function resumeAll() {
 
 <template>
   <UAlert
-    v-if="state.status.stopped"
+    v-if="status?.stopped"
     color="error"
     variant="solid"
     icon="i-lucide-octagon-x"
@@ -50,7 +57,7 @@ async function resumeAll() {
     :actions="[{ label: 'Resume everything', color: 'neutral', variant: 'solid', onClick: resumeAll }]"
   />
   <UAlert
-    v-else-if="state.status.updating"
+    v-else-if="status?.updating"
     color="info"
     variant="subtle"
     icon="i-lucide-download"
@@ -69,7 +76,7 @@ async function resumeAll() {
     :actions="[{ label: 'Resume', color: 'neutral', variant: 'solid', onClick: () => resume(currentProject!) }]"
   />
   <UAlert
-    v-else-if="state.loaded && !state.runner?.online"
+    v-else-if="runner && !runner.online"
     color="warning"
     variant="subtle"
     icon="i-lucide-server-off"
@@ -80,7 +87,7 @@ async function resumeAll() {
     :actions="[{ label: 'Runners', color: 'neutral', variant: 'outline', to: '/settings/runner' }]"
   />
   <UAlert
-    v-else-if="state.connection === 'reconnecting'"
+    v-else-if="live.connection === 'reconnecting'"
     color="neutral"
     variant="subtle"
     icon="i-lucide-refresh-cw"

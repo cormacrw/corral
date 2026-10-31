@@ -11,8 +11,6 @@ import { moveRadioSelection } from '~/utils/radio'
 type Action = InboxActionInput['action']
 const props = defineProps<{
   planThread: PlanThreadItem | null
-  onRefresh: () => Promise<void>
-  onRead: (id: string) => void
   inbox: Inbox | null
   error: string | null
   items: InboxItem[]
@@ -77,8 +75,6 @@ const tabs = computed(() => [
     v-if="planThread"
     :key="planThread.sessionId"
     :item="planThread"
-    :on-refresh="onRefresh"
-    :on-read="onRead"
   />
   <div
     v-else-if="selected?.type === 'release_notes'"
@@ -88,8 +84,6 @@ const tabs = computed(() => [
     <InboxReleaseNotes
       :key="selected.id"
       :item="selected"
-      @read="onRead(selected.id)"
-      @refresh="onRefresh"
     />
   </div>
   <!-- Task items keep their message, context and tray. -->
@@ -363,7 +357,7 @@ const tabs = computed(() => [
         <!-- Only Plan threads swipe to delete; task items are resolved from their screen -->
         <SwipeToDelete
           v-if="item.type === 'plan_thread'"
-          @delete="deleting.remove(item.sessionId, props.onRefresh)"
+          @delete="deleting.remove(item.sessionId)"
         >
           <NuxtLink
             :to="`/inbox/${item.id}`"

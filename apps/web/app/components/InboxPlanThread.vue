@@ -2,6 +2,7 @@
 import type { PlanThreadItem } from '@corral/contracts'
 import { approvedPlanSummary } from '@corral/core'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { holdsInbox } from '~/queries/inbox'
 import { approvePlan, planSessionQuery, markPlanRead, sendPlanMessage } from '~/queries/plan'
 import { runtimeLabel } from '~/utils/labels'
 import { STOP_ASKING } from '~/utils/plan-questions'
@@ -10,7 +11,7 @@ import { STOP_ASKING } from '~/utils/plan-questions'
 // you, the question or the plan, never the conversation. The full
 // conversation is one click away with Open in Plan.
 const props = defineProps<{ item: PlanThreadItem }>()
-const emit = defineEmits<{ read: [], approved: [], approving: [value: boolean], delete: [] }>()
+const emit = defineEmits<{ approved: [], delete: [] }>()
 const live = useLive()
 const flyout = useTaskFlyout()
 const toast = useToast()
@@ -20,14 +21,11 @@ const runnerOffline = computed(() => live.state.value.loaded && !live.state.valu
 // The plan itself, for View plan and approving; the item only has its summary
 const client = useQueryClient()
 const sending = useMutation(sendPlanMessage)
-const approval = useMutation(approvePlan)
+const approval = useMutation({ ...approvePlan, ...holdsInbox })
 const detail = useQuery(computed(() => planSessionQuery(props.item.sessionId)))
 const plans = computed(() => detail.data.value?.plans ?? [])
 watch(() => detail.data.value?.unread, (unread) => {
-  if (unread) {
-    markPlanRead(client, props.item.sessionId)
-    emit('read')
-  }
+  if (unread) markPlanRead(client, props.item.sessionId)
 }, { immediate: true })
 const plan = computed(() => props.item.plan ? plans.value.find(p => p.id === props.item.plan!.id) ?? null : null)
 const previous = computed(() => plan.value ? plans.value.find(p => p.version === plan.value!.version - 1) ?? null : null)
@@ -69,7 +67,6 @@ const approving = ref<'ready' | 'backlog' | null>(null)
 async function approve(to: 'ready' | 'backlog') {
   if (!props.item.plan || approving.value || working.value) return
   approving.value = to
-  emit('approving', true)
   try {
     const approved = await approval.mutateAsync({ planId: props.item.plan.id, to })
     toast.add({ title: 'Resolved', description: approvedPlanSummary(approved.tasks), color: 'success' })
@@ -79,7 +76,6 @@ async function approve(to: 'ready' | 'backlog') {
     toast.add({ title: 'Could not approve', description: e instanceof Error ? e.message : String(e), color: 'error' })
   } finally {
     approving.value = null
-    emit('approving', false)
   }
 }
 </script>

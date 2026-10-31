@@ -1,8 +1,8 @@
 import { queryOptions } from '@tanstack/vue-query'
 import type { QueryClient } from '@tanstack/vue-query'
-import type { Plan, PlanMessage, PlanSession, PlanSessionDetail } from '@corral/contracts'
+import type { Inbox, Plan, PlanMessage, PlanSession, PlanSessionDetail } from '@corral/contracts'
 import { api } from '~/composables/useApi'
-import { defineMutation } from './dependencies'
+import { defineMutation, inboxWithRead } from './dependencies'
 import { keys } from './keys'
 
 export const planSessionsQuery = () => queryOptions({ queryKey: keys.plan.sessions(), queryFn: () => api.plan.sessions() })
@@ -48,6 +48,7 @@ export const closePlanThread = defineMutation<Awaited<ReturnType<typeof api.plan
 export function markPlanRead(client: QueryClient, id: string): void {
   client.setQueryData<PlanSessionDetail>(keys.plan.session(id), session => session && { ...session, unread: false })
   client.setQueryData<PlanSession[]>(keys.plan.sessions(), sessions => sessions?.map(session => session.id === id ? { ...session, unread: false } : session))
+  client.setQueryData<Inbox>(keys.inbox(), inbox => inbox && inboxWithRead(inbox, id))
   void api.plan.read(id).catch(() => {})
 }
 
