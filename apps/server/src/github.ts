@@ -84,6 +84,29 @@ export class GitHubError extends Error {
   }
 }
 
+// Whether a failed call says nothing about what was asked: a 5xx, a rate limit,
+// a runner that dropped off, a job timeout. Only a real answer from GitHub
+// counts against a task; anything else is worth trying again later.
+export function isTransient(error: unknown): boolean {
+  if (!(error instanceof GitHubError)) return true
+  return error.status >= 500 || error.status === 429 || (error.status === 403 && /rate limit/i.test(error.message))
+}
+
+// GitHub branch protection accepts all three for a required check
+export function checkPassed(check: CheckResult): boolean {
+  return check.conclusion === 'success' || check.conclusion === 'neutral' || check.conclusion === 'skipped'
+}
+
+// Where each required check stands on a commit
+export function requiredChecks(required: readonly string[], checks: readonly CheckResult[]) {
+  const reported = required.map(name => checks.find(c => c.name === name))
+  return {
+    failed: reported.filter((c): c is CheckResult => c?.conclusion === 'failure'),
+    passed: reported.filter((c): c is CheckResult => c !== undefined && checkPassed(c)),
+    pending: required.filter(name => !checks.some(c => c.name === name && checkPassed(c)))
+  }
+}
+
 interface RawPull {
   number: number
   node_id: string
@@ -151,6 +174,8 @@ interface GraphQLError {
   type?: string
   message: string
 }
+
+const PAGE_SIZE = 100
 
 const UPDATE_BRANCH_MUTATION = `mutation($pullRequestId: ID!, $expectedHeadOid: GitObjectID!) {
   updatePullRequestBranch(input: { pullRequestId: $pullRequestId, expectedHeadOid: $expectedHeadOid, updateMethod: REBASE }) {
@@ -231,22 +256,34 @@ export class RunnerGitHub implements GitHubClient {
     }
   }
 
+  // Every page: a required check past the first would look pending forever
+  async #allPages<T>(path: string, page: (body: unknown) => { total: number, items: T[] }): Promise<T[]> {
+    const items: T[] = []
+    for (let number = 1; ; number++) {
+      const { total, items: more } = page((await this.#call('GET', `${path}?per_page=${PAGE_SIZE}&page=${number}`)).body)
+      items.push(...more)
+      if (more.length < PAGE_SIZE || items.length >= total) return items
+    }
+  }
+
   async checks(repository: string, sha: string) {
-    const runs = (await this.#call('GET', `/repos/${repository}/commits/${sha}/check-runs?per_page=100`)).body as {
-      check_runs: { name: string, status: string, conclusion: string | null, html_url: string | null }[]
-    }
-    const statuses = (await this.#call('GET', `/repos/${repository}/commits/${sha}/status`)).body as {
-      statuses: { context: string, state: string, target_url: string | null }[]
-    }
+    const runs = await this.#allPages(`/repos/${repository}/commits/${sha}/check-runs`, (body) => {
+      const { total_count: total, check_runs: items } = body as { total_count: number, check_runs: { name: string, status: string, conclusion: string | null, html_url: string | null }[] }
+      return { total, items }
+    })
+    const statuses = await this.#allPages(`/repos/${repository}/commits/${sha}/status`, (body) => {
+      const { total_count: total, statuses: items } = body as { total_count: number, statuses: { context: string, state: string, target_url: string | null }[] }
+      return { total, items }
+    })
     return [
-      ...runs.check_runs.map((run): CheckResult => ({
+      ...runs.map((run): CheckResult => ({
         name: run.name,
         conclusion: run.status !== 'completed'
           ? 'pending'
           : run.conclusion === 'success' ? 'success' : run.conclusion === 'neutral' ? 'neutral' : run.conclusion === 'skipped' ? 'skipped' : 'failure',
         url: run.html_url
       })),
-      ...statuses.statuses.map((status): CheckResult => ({
+      ...statuses.map((status): CheckResult => ({
         name: status.context,
         conclusion: status.state === 'success' ? 'success' : status.state === 'pending' ? 'pending' : 'failure',
         url: status.target_url

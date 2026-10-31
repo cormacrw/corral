@@ -272,7 +272,7 @@ describe('design versions in the task view', () => {
     // Even a legacy design with PR metadata must be left alone.
     await t.db.update(schema.tasks).set({ status: 'ready_to_merge', prNumber: 999, prUrl: 'https://github.com/cormacrw/test-app/pull/999', headSha: 'design-head' }).where(eq(schema.tasks.id, task.id))
     const calls = t.github.calls.length
-    await t.orchestrator.merges.tick()
+    await t.mergePass()
     expect(t.github.calls.slice(calls)).toEqual([])
     const before = await t.request('GET', `/api/tasks/${task.ref}`).then(r => r.json())
     expect(before).toMatchObject({ status: 'ready_to_merge' })

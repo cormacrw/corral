@@ -1,10 +1,25 @@
 import { schema, type Executor } from '@corral/db'
-import { eq } from 'drizzle-orm'
-import type { GitHubClient } from './github.ts'
+import { and, asc, eq } from 'drizzle-orm'
+import { isTransient, type GitHubClient } from './github.ts'
 import { slugify } from './projects.ts'
 import type { ProjectRow, TaskRow } from './tasks.ts'
 
-export class EpicBranchError extends Error {}
+export class EpicBranchError extends Error {
+  // Whether trying again later may work (see isTransient in github.ts)
+  readonly transient: boolean
+  constructor(message: string, transient: boolean) {
+    super(message)
+    this.transient = transient
+  }
+}
+
+// The agent-checkable criteria with no evidence this round (D21, D28)
+export async function evidenceMissing(db: Executor, task: { id: string, reviewRounds: number }) {
+  const criteria = await db.select().from(schema.acceptanceCriteria).where(eq(schema.acceptanceCriteria.taskId, task.id)).orderBy(asc(schema.acceptanceCriteria.position))
+  const attached = await db.select({ criterionId: schema.evidence.criterionId }).from(schema.evidence)
+    .where(and(eq(schema.evidence.taskId, task.id), eq(schema.evidence.round, task.reviewRounds)))
+  return criteria.filter(c => !c.checkedByHuman && !attached.some(e => e.criterionId === c.id))
+}
 
 // A task handed an epic PR's rebase (D27): its branch is the epic branch, so
 // it opens no PR of its own
@@ -31,7 +46,7 @@ export async function taskBase(db: Executor, task: TaskRow, project: ProjectRow,
         await github.createBranch(project.repository, branch, sha)
       }
     } catch (error) {
-      throw new EpicBranchError(`Could not prepare epic branch ${branch}: ${error instanceof Error ? error.message : String(error)}`)
+      throw new EpicBranchError(`Could not prepare epic branch ${branch}: ${error instanceof Error ? error.message : String(error)}`, isTransient(error))
     }
     if (!epic.branch) await db.update(schema.epics).set({ branch }).where(eq(schema.epics.id, epic.id))
   }

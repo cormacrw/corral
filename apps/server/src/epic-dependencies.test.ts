@@ -290,7 +290,7 @@ describe('epic scheduling', () => {
     await t.orchestrator.schedule()
     expect((await t.db.select().from(tasks).where(eq(tasks.id, second.id)))[0]?.leaseRunId).toBeNull()
     t.events.length = 0
-    await t.orchestrator.merges.tick()
+    await t.mergePass()
     await vi.waitFor(async () => {
       expect((await t.db.select().from(tasks).where(eq(tasks.id, second.id)))[0]?.leaseRunId).not.toBeNull()
     })

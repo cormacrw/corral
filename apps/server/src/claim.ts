@@ -14,6 +14,21 @@ export const PLACE_BATCH = 50
 
 const scheduler: Actor = { kind: 'system', component: 'scheduler' }
 
+// A review row that is a verdict on the task's latest submission. A human
+// resolving Blocked resets the round counter (D10), so even this head and round
+// may have a verdict from an older submission. Uses existing history so
+// already-stranded tasks recover too.
+export function verdictForSubmission(db: Executor) {
+  return and(eq(reviews.taskId, tasks.id), eq(reviews.headSha, tasks.headSha), eq(reviews.round, tasks.reviewRounds),
+    notExists(db.select({ one: sql`1` }).from(auditLog).where(and(
+      eq(auditLog.taskId, tasks.id),
+      eq(auditLog.action, 'task.transition'),
+      sql`${auditText('task.transition', 'from')} = 'in_progress'`,
+      sql`${auditText('task.transition', 'to')} = 'agent_review'`,
+      gt(auditLog.createdAt, reviews.createdAt)
+    ))))
+}
+
 export interface Claim {
   taskId: string
   runId: string
@@ -84,18 +99,7 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
       : and(
           eq(tasks.status, 'agent_review'),
           isNotNull(tasks.headSha),
-          // A human resolving Blocked resets the round counter (D10), so
-          // even this head and round may have a verdict from an older submission.
-          // Use existing history so already-stranded tasks recover too.
-          notExists(tx.select({ one: sql`1` }).from(reviews)
-            .where(and(eq(reviews.taskId, tasks.id), eq(reviews.headSha, tasks.headSha), eq(reviews.round, tasks.reviewRounds),
-              notExists(tx.select({ one: sql`1` }).from(auditLog).where(and(
-                eq(auditLog.taskId, tasks.id),
-                eq(auditLog.action, 'task.transition'),
-                sql`${auditText('task.transition', 'from')} = 'in_progress'`,
-                sql`${auditText('task.transition', 'to')} = 'agent_review'`,
-                gt(auditLog.createdAt, reviews.createdAt)
-              ))))))
+          notExists(tx.select({ one: sql`1` }).from(reviews).where(verdictForSubmission(tx)))
         )
     const batch = (offset: number) => tx.select({ task: tasks })
       .from(tasks)

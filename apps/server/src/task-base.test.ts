@@ -3,6 +3,7 @@ import type { Task } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterAll, expect, it } from 'vitest'
+import { GitHubError } from './github.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './test-runner.ts'
 
@@ -42,7 +43,7 @@ it('uses the epic base throughout claim, review, merge and dependent claims on d
   const review = (await runner.next('run.assign', m => m.job.taskId === first.id && m.job.role === 'reviewer')).job
   expect(review.prompt).toContain(`against \`${dev.baseBranch}\``)
   expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Approved', criteria: first.acceptanceCriteria.map(c => ({ criterionId: c.id, met: true, note: 'Checked' })) })).toMatchObject({ ok: true })
-  await t.orchestrator.merges.tick()
+  await t.mergePass()
   expect(await t.github.branchHead(project.repository, 'develop')).toBe('target-tip')
   expect(await t.github.branchHead(project.repository, dev.baseBranch!)).toBe('merge-sha')
   expect(t.github.calls.find(c => c.method === 'merge')?.args[2]).toBe('squash')
@@ -90,16 +91,37 @@ it.each(['each_task', 'epic', 'direct', null] as const)('routes review and confl
   if (mode === 'epic') {
     pr.mergeableState = 'behind'
     t.github.updateBranchResult = false
-    await t.orchestrator.merges.tick()
+    await t.mergePass()
     t.github.updateBranchResult = true
     expect((await get()).status).toBe('in_progress')
     const notes = await t.db.select().from(schema.comments).where(eq(schema.comments.taskId, task.id))
     expect(notes.at(-1)!.body).toContain(`Rebase onto \`origin/${dev.baseBranch}\``)
   } else if (mode !== 'each_task') {
-    await t.orchestrator.merges.tick()
+    await t.mergePass()
     expect((await get()).status).toBe('merged')
     expect(await t.github.branchHead(project.repository, 'develop')).toBe('merge-sha')
   }
+  await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+})
+
+it('interrupts the run, counting nothing, when GitHub gives no real answer about the epic branch, and waits before retrying', async () => {
+  const project = await t.createProject({ defaultBranch: 'develop' })
+  t.github.setBranch(project.repository, 'develop', 'target-tip')
+  const [epic] = await t.db.insert(schema.epics).values({ projectId: project.id, createdBy: t.actor, title: 'Blip', reviewMode: 'epic' }).returning()
+  const task = await t.createTask(project.slug, { epicId: epic!.id })
+  const createBranch = t.github.createBranch
+  t.github.createBranch = () => Promise.reject(new GitHubError(502, 'Bad gateway'))
+  await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'approve' })
+  await t.orchestrator.schedule()
+  t.github.createBranch = createBranch
+  await t.orchestrator.schedule()
+  const runs = await t.db.select().from(schema.runs).where(eq(schema.runs.taskId, task.id))
+  expect(runs).toMatchObject([{ state: 'interrupted', outcome: null }])
+  expect((await t.db.select().from(schema.tasks).where(eq(schema.tasks.id, task.id)))[0]).toMatchObject({ leaseRunId: null, failedRuns: 0 })
+
+  t.clock.now = new Date(t.clock.now.getTime() + 61_000)
+  await t.orchestrator.schedule()
+  await runner.next('run.assign', m => m.job.taskId === task.id)
   await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 
@@ -110,7 +132,7 @@ it('fails the run with the cause when the epic branch cannot be created, and kee
   const epicTask = await t.createTask(project.slug, { epicId: epic!.id, priority: 'urgent' })
   const plain = await t.createTask(project.slug, {})
   const createBranch = t.github.createBranch
-  t.github.createBranch = () => Promise.reject(new Error('GitHub said no'))
+  t.github.createBranch = () => Promise.reject(new GitHubError(403, 'GitHub said no'))
   try {
     for (const task of [epicTask, plain]) await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'approve' })
     await t.orchestrator.schedule()

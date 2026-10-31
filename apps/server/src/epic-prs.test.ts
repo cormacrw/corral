@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { EpicReviewItem, Inbox, RunJob } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
-import { afterAll, expect, it } from 'vitest'
+import { afterAll, expect, it, vi } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './test-runner.ts'
 import { complete } from './epic-prs.ts'
@@ -226,6 +226,7 @@ it('fences a moved PR head and retries an expired integration lease', async () =
   t.github.setBranch(project.repository, epic.branch!, 'new-combined-head')
   expect(await report(job, 'approved')).toMatchObject({ ok: false })
   expect((await inbox()).needsYou.some(i => i.id === epic.id)).toBe(false)
+  await t.mergePass()
   await t.orchestrator.schedule()
   const next = (await runner.next('run.assign', m => m.job.epicId === epic.id && m.job.runId !== job.runId)).job
   expect(next.headSha).toBe('new-combined-head')
@@ -239,6 +240,66 @@ it('fences a moved PR head and retries an expired integration lease', async () =
   await t.orchestrator.schedule()
   const retried = (await runner.next('run.assign', m => m.job.epicId === epic.id && m.job.runId !== next.runId && m.job.runId !== job.runId)).job
   expect(await report(retried, 'approved')).toMatchObject({ ok: true })
+  await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+})
+
+it('stops retrying after three failed reviews on a head and puts the epic PR in front of the human', async () => {
+  const { project, epic, other } = await setup()
+  let job = await lastMerge(other.id, epic.id)
+  for (let attempt = 1; attempt < 3; attempt++) {
+    runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 1 }, headSha: null })
+    job = (await runner.next('run.assign', m => m.job.epicId === epic.id && m.job.runId !== job.runId)).job
+    expect(await reviewState(epic.id)).toBe('in_review')
+  }
+  // An interrupted run says nothing about the review, so it doesn't count
+  await t.db.update(schema.runs).set({ leaseExpiresAt: new Date(t.clock.now.getTime() - 1000) }).where(eq(schema.runs.id, job.runId))
+  await t.orchestrator.sweepLeases()
+  await t.orchestrator.schedule()
+  job = (await runner.next('run.assign', m => m.job.epicId === epic.id && m.job.runId !== job.runId)).job
+  runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 1 }, headSha: null })
+  await vi.waitFor(async () => expect(await reviewState(epic.id)).toBe('human_review'), { timeout: 20_000 })
+
+  await t.orchestrator.schedule()
+  const runs = await t.db.select().from(schema.runs).where(eq(schema.runs.epicId, epic.id))
+  expect(runs.filter(r => r.state === 'failed')).toHaveLength(3)
+  expect(runs.filter(r => r.state === 'queued')).toHaveLength(0)
+  const item = (await inbox()).needsYou.find(i => i.id === epic.id) as EpicReviewItem
+  expect(item.body).toContain('Integration review failed 3 times')
+  expect(item.body).toContain('exited (code 1)')
+  expect(item.sender.role).toBe('system')
+  await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+})
+
+it.each(['in_review', 'human_review', 'conflict'] as const)('sends an epic whose PR was closed in %s back to open, and reopening restarts review', async (state) => {
+  const { project, epic, other } = await setup()
+  const job = await lastMerge(other.id, epic.id)
+  await t.db.update(schema.epics).set({ reviewState: state }).where(eq(schema.epics.id, epic.id))
+  const pr = [...t.github.pulls.values()].find(p => p.head === epic.branch)!
+  pr.state = 'closed'
+  await t.mergePass()
+  expect(await reviewState(epic.id)).toBe('open')
+  expect((await t.db.select().from(schema.runs).where(eq(schema.runs.id, job.runId)))[0]).toMatchObject({ state: 'interrupted', error: 'Epic PR closed' })
+  await t.orchestrator.schedule()
+  expect(await reviewState(epic.id)).toBe('open')
+
+  pr.state = 'open'
+  t.clock.now = new Date(t.clock.now.getTime() + 121_000)
+  await t.orchestrator.schedule()
+  expect(await reviewState(epic.id)).toBe('in_review')
+  await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+})
+
+it('holds no epic lock while GitHub answers a verdict', async () => {
+  const { project, epic, other } = await setup()
+  const job = await lastMerge(other.id, epic.id)
+  const live = t.github.getPullRequest.bind(t.github)
+  const spy = vi.spyOn(t.github, 'getPullRequest').mockImplementationOnce(async (...args) => {
+    // Would wait forever if the verdict held the row
+    await t.db.update(schema.epics).set({ updatedAt: new Date() }).where(eq(schema.epics.id, epic.id))
+    return live(...args)
+  })
+  expect(await report(job, 'approved')).toMatchObject({ ok: true })
+  spy.mockRestore()
   await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 

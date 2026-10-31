@@ -1208,7 +1208,7 @@ describe('plan sessions', () => {
     const review = (await runner.next('run.assign', m => m.job.role === 'reviewer' && m.job.taskId === task.id)).job
     await runner.call(review.runId, review.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Good', criteria: [{ criterionId: task.acceptanceCriteria[0]!.id, met: true, note: '' }] })
     t.github.setChecks('abc123', [{ name: 'lint', conclusion: 'success', url: null }])
-    await t.orchestrator.merges.tick()
+    await t.mergePass()
     expect((await t.request('GET', `/api/tasks/${dev.taskRef}`).then(r => r.json()) as Task).status).toBe('merged')
 
     // Merged work isn't handed back to the PM: no turn, nothing unread

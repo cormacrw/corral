@@ -29,6 +29,8 @@ export interface TestApp extends Services {
   request(method: string, path: string, body?: unknown): Promise<Response>
   createProject(overrides?: Partial<CreateProjectInput>): Promise<Project>
   createTask(slug: string, input?: Partial<CreateTaskInput>): Promise<Task>
+  // A merge pass after long enough that nothing is left waiting to be polled
+  mergePass(): Promise<void>
   close(): Promise<void>
 }
 
@@ -75,6 +77,10 @@ export async function createTestApp(driver: 'pglite' | 'postgres', options: { li
     clock,
     server,
     request,
+    mergePass() {
+      clock.now = new Date(clock.now.getTime() + 121_000)
+      return services.orchestrator.merges.tick()
+    },
     async createProject(overrides = {}) {
       counter++
       const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'

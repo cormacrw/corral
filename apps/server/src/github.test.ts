@@ -1,6 +1,6 @@
 import type { SetupJob, SetupJobResult } from '@corral/contracts'
 import { describe, expect, it } from 'vitest'
-import { GitHubError, RunnerGitHub } from './github.ts'
+import { GitHubError, isTransient, requiredChecks, RunnerGitHub, type CheckResult } from './github.ts'
 import type { RunnerHub } from './runner-hub.ts'
 
 // RunnerGitHub against a stub runner that answers each `gh api` job
@@ -16,6 +16,48 @@ function stub(answer: (job: Extract<SetupJob, { kind: 'github' }>) => { status: 
 }
 
 const pr = { number: 7, nodeId: 'PR_kwDOAbc' }
+
+describe('RunnerGitHub.checks', () => {
+  it('reads every page, so a required check past the first 100 is not pending forever', async () => {
+    const run = (n: number) => ({ name: `job-${n}`, status: 'completed', conclusion: 'success', html_url: null })
+    const { github, jobs } = stub((job) => {
+      if (job.path.includes('/status')) return { status: 200, body: { total_count: 0, statuses: [] } }
+      const page = Number(new URL(job.path, 'https://github.test').searchParams.get('page'))
+      return { status: 200, body: { total_count: 120, check_runs: Array.from({ length: page === 1 ? 100 : 20 }, (_, i) => run((page - 1) * 100 + i)) } }
+    })
+    const checks = await github.checks('owner/repo', 'abc123')
+    expect(checks).toHaveLength(120)
+    expect(checks.at(-1)).toMatchObject({ name: 'job-119', conclusion: 'success' })
+    expect(jobs.filter(j => j.path.includes('check-runs'))).toHaveLength(2)
+  })
+})
+
+describe('requiredChecks', () => {
+  const check = (name: string, conclusion: CheckResult['conclusion']): CheckResult => ({ name, conclusion, url: null })
+
+  // GitHub branch protection accepts these for a required check, and a
+  // path-filtered job reports skipped
+  it.each(['success', 'neutral', 'skipped'] as const)('passes a required check that is %s', (conclusion) => {
+    expect(requiredChecks(['ci'], [check('ci', conclusion)])).toMatchObject({ failed: [], pending: [], passed: [{ name: 'ci' }] })
+  })
+
+  it('keeps a failed check failed and a pending or missing one pending', () => {
+    const { failed, pending } = requiredChecks(['bad', 'slow', 'absent'], [check('bad', 'failure'), check('slow', 'pending')])
+    expect(failed.map(c => c.name)).toEqual(['bad'])
+    expect(pending).toEqual(['bad', 'slow', 'absent'])
+  })
+})
+
+describe('isTransient', () => {
+  it('counts only a real answer from GitHub against a task', () => {
+    expect(isTransient(new GitHubError(502, 'Bad gateway'))).toBe(true)
+    expect(isTransient(new GitHubError(429, 'Slow down'))).toBe(true)
+    expect(isTransient(new GitHubError(403, 'API rate limit exceeded'))).toBe(true)
+    expect(isTransient(new Error('Runner job github timed out'))).toBe(true)
+    expect(isTransient(new GitHubError(422, 'Validation failed'))).toBe(false)
+    expect(isTransient(new GitHubError(403, 'Resource not accessible'))).toBe(false)
+  })
+})
 
 describe('RunnerGitHub.updateBranch', () => {
   it('rebases through the GraphQL updatePullRequestBranch mutation', async () => {

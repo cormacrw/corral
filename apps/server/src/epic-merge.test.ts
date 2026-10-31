@@ -58,7 +58,7 @@ it('rebases a moved epic branch, keeps the approval, reruns checks, then squashe
   const { project, epic, head, pr } = await approved()
   t.github.behind.set(head, 2)
   const before = t.github.calls.length
-  await t.orchestrator.merges.tick()
+  await t.mergePass()
   expect(calls('updateBranch').at(-1)!.args).toEqual([project.repository, pr.number, head])
   expect(t.github.calls.slice(before).some(c => c.method === 'merge')).toBe(false)
   expect((await reload(epic.id)).rebaseRequested).toBe(true)
@@ -67,14 +67,14 @@ it('rebases a moved epic branch, keeps the approval, reruns checks, then squashe
   t.github.setBranch(project.repository, epic.branch!, `${head}-rebased`)
   t.github.setChecks(`${head}-rebased`, [{ name: 'ci', conclusion: 'pending', url: null }])
   await t.orchestrator.schedule()
-  await t.orchestrator.merges.tick()
-  await t.orchestrator.merges.tick()
+  await t.mergePass()
+  await t.mergePass()
   expect(await reload(epic.id)).toMatchObject({ reviewState: 'ready_to_merge', prHeadSha: `${head}-rebased`, rebaseRequested: false })
   expect(t.github.calls.slice(before).some(c => c.method === 'merge')).toBe(false)
   expect(await t.db.select().from(schema.runs).where(eq(schema.runs.epicId, epic.id))).toHaveLength(1)
 
   t.github.setChecks(`${head}-rebased`, [{ name: 'ci', conclusion: 'success', url: null }])
-  await t.orchestrator.merges.tick()
+  await t.mergePass()
   const merges = t.github.calls.slice(before).filter(c => c.method === 'merge')
   expect(merges.map(c => c.args)).toEqual([[project.repository, pr.number, 'squash', `${head}-rebased`]])
   expect(await reload(epic.id)).toMatchObject({ reviewState: 'merged', mergeCommitSha: 'squash-sha' })
@@ -91,10 +91,10 @@ it('keeps the approval when a reconcile pass sees the new head before updateBran
     t.github.setBranch(project.repository, epic.branch!, rebased)
     await t.orchestrator.schedule()
   }
-  await t.orchestrator.merges.tick()
+  await t.mergePass()
   expect(await reload(epic.id)).toMatchObject({ reviewState: 'ready_to_merge', rebaseRequested: true })
-  await t.orchestrator.merges.tick()
-  await t.orchestrator.merges.tick()
+  await t.mergePass()
+  await t.mergePass()
   expect(await reload(epic.id)).toMatchObject({ reviewState: 'merged', prHeadSha: rebased })
   expect(await t.db.select().from(schema.runs).where(eq(schema.runs.epicId, epic.id))).toHaveLength(1)
 })
@@ -105,10 +105,10 @@ it('clears the rebase flag when updateBranch throws, then asks again', async () 
   t.github.onUpdateBranch = async () => {
     throw new Error('GitHub timed out')
   }
-  await t.orchestrator.merges.tick()
+  await t.mergePass()
   expect(await reload(epic.id)).toMatchObject({ reviewState: 'ready_to_merge', rebaseRequested: false })
   t.github.onUpdateBranch = null
-  await t.orchestrator.merges.tick()
+  await t.mergePass()
   expect((await reload(epic.id)).rebaseRequested).toBe(true)
 })
 
@@ -116,13 +116,13 @@ it('asks again when a requested rebase never shows on the PR', async () => {
   const { project, epic, head } = await approved()
   const rebases = () => calls('updateBranch').filter(c => c.args[0] === project.repository)
   t.github.behind.set(head, 1)
-  await t.orchestrator.merges.tick()
+  await t.mergePass()
   const asked = rebases().length
-  await t.orchestrator.merges.tick()
+  await t.mergePass()
   expect(rebases()).toHaveLength(asked)
   t.clock.now = new Date(t.clock.now.getTime() + 6 * 60_000)
-  await t.orchestrator.merges.tick()
-  await t.orchestrator.merges.tick()
+  await t.mergePass()
+  await t.mergePass()
   expect(rebases()).toHaveLength(asked + 1)
   expect(await reload(epic.id)).toMatchObject({ reviewState: 'ready_to_merge', rebaseRequested: true })
 })
@@ -131,8 +131,8 @@ it('skips an epic a slower pass is still advancing, so no false conflict is rais
   const { project, epic, head } = await approved()
   const rebases = () => calls('updateBranch').filter(c => c.args[0] === project.repository)
   t.github.behind.set(head, 1)
-  t.github.onUpdateBranch = () => t.orchestrator.merges.tick()
-  await t.orchestrator.merges.tick()
+  t.github.onUpdateBranch = () => t.mergePass()
+  await t.mergePass()
   expect(rebases()).toHaveLength(1)
   expect(await reload(epic.id)).toMatchObject({ reviewState: 'ready_to_merge', conflictFiles: null })
 })
@@ -140,7 +140,7 @@ it('skips an epic a slower pass is still advancing, so no false conflict is rais
 it('squashes even when task PRs use another merge method', async () => {
   const { project, epic } = await approved()
   await t.db.update(schema.projects).set({ mergeMethod: 'merge' }).where(eq(schema.projects.id, project.id))
-  await t.orchestrator.merges.tick()
+  await t.mergePass()
   expect(calls('merge').at(-1)!.args[2]).toBe('squash')
   expect((await reload(epic.id)).reviewState).toBe('merged')
 })
@@ -150,8 +150,8 @@ it('blocks a conflicted rebase with an Inbox item and hands it to a developer ru
   t.github.behind.set(head, 1)
   t.github.updateBranchResult = false
   const before = t.github.calls.length
-  await t.orchestrator.merges.tick()
-  await t.orchestrator.merges.tick()
+  await t.mergePass()
+  await t.mergePass()
   expect(t.github.calls.slice(before).filter(c => c.method === 'updateBranch')).toHaveLength(1)
   expect(t.github.calls.slice(before).some(c => c.method === 'merge')).toBe(false)
   const box = await inbox()
@@ -187,7 +187,7 @@ it('blocks a conflicted rebase with an Inbox item and hands it to a developer ru
   const review = (await runner.next('run.assign', m => m.job.role === 'reviewer' && m.job.taskId === rebase.id)).job
   expect(review.headSha).toBe(`${head}-resolved`)
   expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Both sides kept', criteria: [{ criterionId: criterion!.id, met: true, note: '' }] })).toMatchObject({ ok: true })
-  await t.orchestrator.merges.tick()
+  await t.mergePass()
   expect((await t.db.select().from(schema.tasks).where(eq(schema.tasks.id, rebase.id)))[0]!.status).toBe('merged')
 
   // Back to integration review, then to the human, on the new head
@@ -218,7 +218,7 @@ it('keeps the gates on an epic rebase when no required check would verify it', a
 it('sends a failed required check back as a fix task in the epic', async () => {
   const { epic, head } = await approved()
   t.github.setChecks(head, [{ name: 'ci', conclusion: 'failure', url: 'http://ci' }])
-  await t.orchestrator.merges.tick()
+  await t.mergePass()
   expect((await reload(epic.id)).reviewState).toBe('open')
   const fixes = await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epic.id))
   expect(fixes.find(row => row.title === 'Fix integration: CI failed on the epic PR')).toMatchObject({ status: 'ready' })
@@ -227,12 +227,12 @@ it('sends a failed required check back as a fix task in the epic', async () => {
 it('returns a repeatedly refused merge to the human, whose approval retries it', async () => {
   const { epic, head } = await approved()
   t.github.mergeResult = { merged: false, sha: null, message: 'Required reviews missing' }
-  for (let i = 0; i < 3; i++) await t.orchestrator.merges.tick()
+  for (let i = 0; i < 3; i++) await t.mergePass()
   expect((await reload(epic.id)).reviewState).toBe('human_review')
   expect((await inbox()).needsYou.find(i => i.id === epic.id)).toMatchObject({ type: 'epic_review' })
   t.github.mergeResult = { merged: true, sha: 'squash-sha', message: 'merged' }
   expect((await t.request('POST', `/api/epics/${epic.id}/review`, { action: 'approve', headSha: head })).status).toBe(200)
-  await t.orchestrator.merges.tick()
+  await t.mergePass()
   expect((await reload(epic.id)).reviewState).toBe('merged')
 })
 
@@ -240,11 +240,11 @@ it('counts a PR merged on GitHub, and leaves a closed one to the human', async (
   const merged = await approved()
   t.github.pulls.get(merged.pr.number)!.merged = true
   t.github.pulls.get(merged.pr.number)!.state = 'closed'
-  await t.orchestrator.merges.tick()
+  await t.mergePass()
   expect((await reload(merged.epic.id)).reviewState).toBe('merged')
   const closed = await approved()
   t.github.pulls.get(closed.pr.number)!.state = 'closed'
-  await t.orchestrator.merges.tick()
+  await t.mergePass()
   expect((await reload(closed.epic.id)).reviewState).toBe('open')
   expect((await inbox()).activity.find(a => a.epicId === closed.epic.id)!.body).toBe('Epic PR closed on GitHub')
 })
@@ -258,14 +258,14 @@ it('holds tasks in a dependent epic until the epic PR merges, though every task 
   const get = async () => (await t.request('GET', `/api/projects/${project.slug}/tasks/${waiting.number}`)).json() as Promise<Task>
 
   t.github.setChecks(head, [{ name: 'ci', conclusion: 'pending', url: null }])
-  await t.orchestrator.merges.tick()
+  await t.mergePass()
   await t.orchestrator.schedule()
   const held = await get()
   expect(held).toMatchObject({ status: 'ready', waitingOnEpics: [{ id: epic.id, title: epic.title }] })
   expect(runner.received.some(m => m.type === 'run.assign' && m.job.taskId === waiting.id)).toBe(false)
 
   t.github.setChecks(head, [{ name: 'ci', conclusion: 'success', url: null }])
-  await t.orchestrator.merges.tick()
+  await t.mergePass()
   await t.orchestrator.schedule()
   const { job } = await runner.next('run.assign', m => m.job.taskId === waiting.id)
   expect(job.role).toBe('developer')

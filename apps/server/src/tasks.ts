@@ -443,6 +443,9 @@ export async function applyTransition(
     reviewRounds: next.reviewRounds,
     failedRuns: next.failedRuns,
     statusReason: next.reason,
+    // A base update asked for in Ready to merge mustn't keep the approval
+    // over whatever is pushed once the task has left it
+    ...(next.status !== 'ready_to_merge' && { branchUpdateRequested: false }),
     // A spike finishes without a merge (D19); this is when it finished
     ...(task.type === 'spike' && next.status === 'merged' && task.status !== 'merged' && { mergedAt: new Date() }),
     updatedAt: new Date()
@@ -507,9 +510,14 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
       await tx.update(tasks).set({ ...fields, updatedAt: new Date() }).where(eq(tasks.id, taskId))
     }
     let newHumanCheck = false
+    let newAgentCheck = false
     if (criteriaInput) {
       const existing = await tx.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, taskId))
       newHumanCheck = criteriaInput.some(c => c.checkedByHuman && !existing.some(e => e.id === c.id && e.checkedByHuman))
+      newAgentCheck = criteriaInput.some((c) => {
+        const held = existing.find(e => e.id === c.id)
+        return !(c.checkedByHuman ?? held?.checkedByHuman ?? false) && (!held || held.checkedByHuman)
+      })
       const keep = new Set(criteriaInput.map(c => c.id).filter((id): id is string => Boolean(id)))
       const gone = existing.filter(c => !keep.has(c.id)).map(c => c.id)
       if (gone.length > 0) await tx.delete(acceptanceCriteria).where(inArray(acceptanceCriteria.id, gone))
@@ -525,8 +533,14 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
         }
       }
     }
+    if (task.status === 'ready_to_merge' && newAgentCheck && actor.kind === 'human') {
+      // Evidence for it can only come from a developer run (D21, flows.md step
+      // 5), so this is the human asking for more work, whatever else changed.
+      // Without it the merge gate would wait for evidence nothing will produce.
+      await applyTransition(tx, task, project, { type: 'human_request_changes' }, actor, { event: { type: 'human_request_changes' } })
+      await addComment(tx, taskId, { body: `A criterion that needs evidence was added after approval. Attach evidence for it, then report ${task.integrationProtocol > 0 ? 'commit_submitted' : 'pr_updated'}.`, pinned: true }, { kind: 'system', component: 'server' })
     // A PR-free task's new check goes to the epic review instead
-    if (task.status === 'ready_to_merge' && newHumanCheck && task.integrationProtocol === 0) {
+    } else if (task.status === 'ready_to_merge' && newHumanCheck && task.integrationProtocol === 0) {
       await applyTransition(tx, task, project, { type: 'require_human_check' }, { kind: 'system', component: 'server' }, { event: 'require_human_check' })
     }
     if (dependsOn) await setDependencies(tx, project, task, dependsOn)
@@ -618,7 +632,8 @@ export async function deleteTaskRows(db: Executor, taskId: string, actor: Actor,
     }
     await appendAudit(tx, { projectId: project.id, taskId, actor }, auditEvent('task.deleted', { mode, number: task.number, title: task.title, reason }))
     if (mode === 'hard') await tx.delete(tasks).where(eq(tasks.id, taskId))
-    else await tx.update(tasks).set({ deletedAt: new Date(), updatedAt: new Date() }).where(eq(tasks.id, taskId))
+    // No run keeps a lease on a hidden task: it would pass every fence
+    else await tx.update(tasks).set({ deletedAt: new Date(), updatedAt: new Date(), leaseRunId: null, leaseRole: null, leaseExpiresAt: null, leaseHeartbeatAt: null }).where(eq(tasks.id, taskId))
     return dependents.map(d => d.task.id)
   })
 }

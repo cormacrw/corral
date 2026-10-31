@@ -142,7 +142,7 @@ describe('two-phase update hold', () => {
       if (phase === 'finishing') await t.db.update(runs).set({ state: 'completed', endedAt: new Date() }).where(eq(runs.id, worker!.id))
       await hold()
       await t.orchestrator.schedule()
-      await t.orchestrator.merges.tick()
+      await t.mergePass()
       expect(runner.received.filter(m => m.type === 'run.assign')).toHaveLength(0)
       expect(t.github.calls).toEqual([])
     }

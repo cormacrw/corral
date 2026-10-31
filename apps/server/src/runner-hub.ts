@@ -1,4 +1,5 @@
 import {
+  RUNNER_HEARTBEAT_MS,
   TASK_INTEGRATION_PROTOCOL,
   integrationCompatibilityReason,
   runnerMessageSchema,
@@ -401,6 +402,10 @@ function parseCapacity(message: Extract<RunnerMessage, { type: 'hello' }>, fallb
     roles: Array.isArray(message.roles) ? message.roles.filter(r => (RUNNER_ROLES as readonly string[]).includes(r)) : fallback?.roles ?? []
   }
 }
+
+// How long without a heartbeat before the server treats the runner as gone,
+// even if the socket hasn't closed (e.g. a sleeping laptop)
+export const RUNNER_STALE_MS = RUNNER_HEARTBEAT_MS * 3
 
 function parseSlotSource(source: SlotSource | undefined): SlotSource | undefined {
   if (source?.kind === 'explicit') return { kind: 'explicit' }

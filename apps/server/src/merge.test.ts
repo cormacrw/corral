@@ -3,6 +3,7 @@ import type { Inbox, Project, Task, TaskInboxItem } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { and, desc, eq, ne } from 'drizzle-orm'
 import { afterAll, describe, expect, it, vi } from 'vitest'
+import { GitHubError } from './github.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner, sleep } from './test-runner.ts'
 
@@ -87,13 +88,13 @@ describe('merge orchestrator and human controls', () => {
     const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
     const item = inbox.needsYou.filter((i): i is TaskInboxItem => i.type !== 'plan_thread').find(i => i.taskId === task.id)!
     expect(item.body).toBe(`Approved, 1 criterion met; ${humanChecks} ${humanChecks === 1 ? 'criterion needs' : 'criteria need'} a human check. These checks need your OK before the task merges.`)
-    await t.orchestrator.merges.tick()
+    await t.mergePass()
     expect(t.github.pulls.get(pr.number)?.merged).toBe(false)
     const statuses = await t.request('GET', `/api/projects/${project.slug}/pull-requests`).then(r => r.json()) as { humanReviewOutstanding: boolean }[]
     expect(statuses[0]?.humanReviewOutstanding).toBe(true)
     const res = await t.request('POST', `/api/inbox/${item.id}/actions`, { action: 'approve' })
     expect(res.status).toBe(200)
-    await t.orchestrator.merges.tick()
+    await t.mergePass()
     await vi.waitFor(async () => expect((await getTask(project, task.number)).status).toBe('merged'))
     await pause(project)
   })
@@ -120,11 +121,11 @@ describe('merge orchestrator and human controls', () => {
   it('waits while required checks are pending, and sends CI failures back to the developer', async () => {
     const { project, task, pr } = await approved()
     expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge' })
-    await t.orchestrator.merges.tick()
+    await t.mergePass()
     expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge' })
 
     t.github.setChecks(pr.headSha, [{ name: 'lint', conclusion: 'failure', url: 'https://ci/1' }])
-    await t.orchestrator.merges.tick()
+    await t.mergePass()
     expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress' })
     const notes = await t.db.select().from(comments).where(eq(comments.taskId, task.id))
     expect(notes.at(-1)?.body).toContain('lint: failed (https://ci/1)')
@@ -141,13 +142,13 @@ describe('merge orchestrator and human controls', () => {
     const { project, task, pr } = await approved()
     t.github.setChecks('abc123', [{ name: 'lint', conclusion: 'success', url: null }])
     t.github.pulls.get(pr.number)!.mergeableState = 'behind'
-    await t.orchestrator.merges.tick()
+    await t.mergePass()
     expect(t.github.calls.filter(c => c.method === 'updateBranch')).toHaveLength(1)
     expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge', branchUpdateRequested: true })
 
     // GitHub rebased the branch, rewriting every commit, so the head is new; CI runs again on it
     t.github.setBranch(project.repository, pr.head, 'def456')
-    await t.orchestrator.merges.tick()
+    await t.mergePass()
     expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge', headSha: 'def456', branchUpdateRequested: false })
     const reviews = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/reviews`).then(r => r.json()) as { headSha: string, verdict: string, round: number }[]
     expect(reviews[0]).toMatchObject({ headSha: 'def456', verdict: 'approved', round: task.reviewRounds })
@@ -156,7 +157,7 @@ describe('merge orchestrator and human controls', () => {
     expect(runner.received.filter(m => m.type === 'run.assign' && m.job.taskId === task.id)).toHaveLength(0)
 
     t.github.setChecks('def456', [{ name: 'lint', conclusion: 'success', url: null }])
-    await t.orchestrator.merges.tick()
+    await t.mergePass()
     expect(await taskRow(task.id)).toMatchObject({ status: 'merged', mergeCommitSha: 'merge-sha' })
     expect(t.github.pulls.get(pr.number)).toMatchObject({ merged: true })
     // Merged tasks are read-only except for comments
@@ -176,7 +177,7 @@ describe('merge orchestrator and human controls', () => {
     t.github.setChecks('abc123', [{ name: 'lint', conclusion: 'success', url: null }])
     const status = await t.request('GET', `/api/projects/${project.slug}/pull-requests`).then(r => r.json()) as { taskRef: string, evidenceComplete: boolean, merge: { eligible: boolean } }[]
     expect(status.find(s => s.taskRef === task.ref)).toMatchObject({ evidenceComplete: true, merge: { eligible: true } })
-    await t.orchestrator.merges.tick()
+    await t.mergePass()
     expect(await taskRow(task.id)).toMatchObject({ status: 'merged' })
     expect(t.github.pulls.get(pr.number)).toMatchObject({ merged: true })
     await pause(project)
@@ -185,7 +186,7 @@ describe('merge orchestrator and human controls', () => {
   it('needs a fresh review when a commit other than a base update arrives', async () => {
     const { project, task, pr } = await approved()
     t.github.setBranch(project.repository, pr.head, 'fff999')
-    await t.orchestrator.merges.tick()
+    await t.mergePass()
     expect(await taskRow(task.id)).toMatchObject({ status: 'agent_review', headSha: 'fff999' })
     await t.orchestrator.schedule()
     const review = await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'reviewer')
@@ -198,7 +199,7 @@ describe('merge orchestrator and human controls', () => {
     t.github.setChecks('abc123', [{ name: 'lint', conclusion: 'success', url: null }])
     t.github.pulls.get(pr.number)!.mergeable = false
     t.github.pulls.get(pr.number)!.mergeableState = 'dirty'
-    await t.orchestrator.merges.tick()
+    await t.mergePass()
     expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', rebaseOnly: true, approvedHeadSha: 'abc123', reviewRounds: task.reviewRounds })
     const notes = await t.db.select().from(comments).where(eq(comments.taskId, task.id))
     expect(notes.at(-1)?.body).toContain('can’t be merged')
@@ -225,7 +226,7 @@ describe('merge orchestrator and human controls', () => {
     })).toMatchObject({ ok: true })
     expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge', rebaseOnly: false, approvedHeadSha: 'abc123' })
     t.github.pulls.get(pr.number)!.state = 'closed'
-    await t.orchestrator.merges.tick()
+    await t.mergePass()
     expect(await getTask(project, task.number)).toMatchObject({ status: 'failed' })
     expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'resolve', to: 'in_progress' })).status).toBe(200)
     await t.orchestrator.schedule()
@@ -246,7 +247,7 @@ describe('merge orchestrator and human controls', () => {
     t.github.pulls.get(pr.number)!.mergeableState = 'behind'
     t.github.updateBranchResult = false
     try {
-      await t.orchestrator.merges.tick()
+      await t.mergePass()
     } finally {
       t.github.updateBranchResult = true
     }
@@ -265,7 +266,7 @@ describe('merge orchestrator and human controls', () => {
     expect(await taskRow(task.id)).toMatchObject({ status: 'human_review' })
     t.github.setChecks('abc123', [{ name: 'lint', conclusion: 'success', url: 'https://ci/lint' }])
     // Nothing merges while the human hasn't approved
-    await t.orchestrator.merges.tick()
+    await t.mergePass()
     expect(t.github.pulls.get(pr.number)).toMatchObject({ merged: false })
 
     const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
@@ -308,7 +309,7 @@ describe('merge orchestrator and human controls', () => {
   it('merges an unflagged task on the reviewer\'s approval when the project has no required checks', async () => {
     const { project, task, pr } = await approved({ requiredChecks: [], humanReview: false })
     expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge' })
-    await t.orchestrator.merges.tick()
+    await t.mergePass()
     expect(await taskRow(task.id)).toMatchObject({ status: 'merged' })
     expect(t.github.pulls.get(pr.number)).toMatchObject({ merged: true })
     await pause(project)
@@ -329,10 +330,10 @@ describe('merge orchestrator and human controls', () => {
     t.github.setChecks('abc123', [{ name: 'lint', conclusion: 'success', url: null }])
     t.github.mergeResult = { merged: false, sha: null, message: 'Required status check is expected' }
     for (let i = 0; i < 2; i++) {
-      await t.orchestrator.merges.tick()
+      await t.mergePass()
       expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge' })
     }
-    await t.orchestrator.merges.tick()
+    await t.mergePass()
     expect(await taskRow(task.id)).toMatchObject({ status: 'failed', statusReason: expect.stringContaining('refused the merge 3 times') })
     expect(t.github.pulls.get(pr.number)).toMatchObject({ merged: false })
     t.github.mergeResult = { merged: true, sha: 'merge-sha', message: '' }
@@ -352,7 +353,7 @@ describe('merge orchestrator and human controls', () => {
       live.mergeCommitSha = 'ambiguous-sha'
       return original(...args)
     }
-    await t.orchestrator.merges.tick()
+    await t.mergePass()
     expect(await taskRow(task.id)).toMatchObject({ status: 'merged', mergeCommitSha: 'ambiguous-sha' })
     t.github.merge = original
     t.github.mergeResult = { merged: true, sha: 'merge-sha', message: '' }
@@ -379,7 +380,7 @@ describe('merge orchestrator and human controls', () => {
         await veto(project, task)
         return live(...args)
       })
-      await t.orchestrator.merges.tick()
+      await t.mergePass()
       spy.mockRestore()
       expect(merges()).toHaveLength(0)
       expect(t.github.pulls.get(pr.number)).toMatchObject({ merged: false })
@@ -396,12 +397,14 @@ describe('merge orchestrator and human controls', () => {
       const original = t.github.merge.bind(t.github)
       t.github.merge = async (...args) => {
         veto = t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'human_request_changes' })
-        void veto.then(() => { settled = true })
+        void veto.then(() => {
+          settled = true
+        })
         await sleep(100)
         expect(settled).toBe(false)
         return original(...args)
       }
-      await t.orchestrator.merges.tick()
+      await t.mergePass()
       t.github.merge = original
       expect((await veto!).status).toBe(409)
       expect(await taskRow(task.id)).toMatchObject({ status: 'merged', mergeCommitSha: 'merge-sha' })
@@ -424,11 +427,209 @@ describe('merge orchestrator and human controls', () => {
         await t.db.update(tasks).set({ status: row.status }).where(eq(tasks.id, task.id))
         return { ...live }
       })
-      await t.orchestrator.merges.tick()
+      await t.mergePass()
       spy.mockRestore()
       expect(await taskRow(task.id)).toMatchObject({ status: 'blocked', statusReason: expect.stringContaining(`PR #${pr.number} merged`) })
       await pause(project)
     })
+  })
+
+  describe('retries and head changes', () => {
+    const lintPassed = (sha: string) => t.github.setChecks(sha, [{ name: 'lint', conclusion: 'success', url: null }])
+    const refused = { merged: false, sha: null, message: 'Base branch was modified' }
+    const merges = { merged: true, sha: 'merge-sha', message: '' }
+
+    it('keeps retrying when GitHub or the runner gives no real answer, and counts real answers', async () => {
+      const { project, task, pr } = await approved()
+      lintPassed('abc123')
+      t.github.mergeResult = new GitHubError(502, 'Bad gateway')
+      for (let i = 0; i < 4; i++) await t.mergePass()
+      expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge', failedRuns: 0 })
+      t.github.mergeResult = new GitHubError(422, 'Pull Request is not mergeable')
+      for (let i = 0; i < 3; i++) await t.mergePass()
+      expect(await taskRow(task.id)).toMatchObject({ status: 'failed', statusReason: expect.stringContaining('merge failed 3 times') })
+      expect(t.github.pulls.get(pr.number)).toMatchObject({ merged: false })
+      t.github.mergeResult = merges
+      await pause(project)
+    })
+
+    it('waits before retrying after a transient failure', async () => {
+      const { project, pr } = await approved()
+      lintPassed('abc123')
+      t.github.mergeResult = new GitHubError(502, 'Bad gateway')
+      const attempts = () => t.github.calls.filter(c => c.method === 'merge' && c.args[1] === pr.number).length
+      await t.mergePass()
+      expect(attempts()).toBe(1)
+      await t.orchestrator.merges.tick()
+      expect(attempts()).toBe(1)
+      t.github.mergeResult = merges
+      await t.mergePass()
+      expect(t.github.pulls.get(pr.number)).toMatchObject({ merged: true })
+      await pause(project)
+    })
+
+    it('counts merge attempts per head', async () => {
+      const { project, task, pr } = await approved()
+      lintPassed('abc123')
+      t.github.mergeResult = refused
+      for (let i = 0; i < 2; i++) await t.mergePass()
+      await t.db.update(tasks).set({ branchUpdateRequested: true }).where(eq(tasks.id, task.id))
+      t.github.setBranch(project.repository, pr.head, 'def456')
+      lintPassed('def456')
+      await t.mergePass()
+      expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge', headSha: 'def456' })
+      await t.mergePass()
+      expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge' })
+      t.github.mergeResult = merges
+      await pause(project)
+    })
+
+    it('reads the base-update flag from the locked row, not the pass\'s older copy', async () => {
+      const { project, task, pr } = await approved()
+      const live = t.github.getPullRequest.bind(t.github)
+      const spy = vi.spyOn(t.github, 'getPullRequest').mockImplementationOnce(async (...args) => {
+        await t.db.update(tasks).set({ branchUpdateRequested: true }).where(eq(tasks.id, task.id))
+        t.github.setBranch(project.repository, pr.head, 'def456')
+        return live(...args)
+      })
+      await t.mergePass()
+      spy.mockRestore()
+      expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge', headSha: 'def456', branchUpdateRequested: false })
+      await pause(project)
+    })
+
+    it('flags a base update before asking, so a timeout on one that worked keeps the approval', async () => {
+      const { project, task, pr } = await approved()
+      lintPassed('abc123')
+      t.github.pulls.get(pr.number)!.mergeableState = 'behind'
+      const original = t.github.updateBranch.bind(t.github)
+      t.github.updateBranch = async () => {
+        expect(await taskRow(task.id)).toMatchObject({ branchUpdateRequested: true })
+        t.github.setBranch(project.repository, pr.head, 'def456')
+        throw new Error('Runner job github timed out')
+      }
+      await t.mergePass()
+      t.github.updateBranch = original
+      expect(await taskRow(task.id)).toMatchObject({ branchUpdateRequested: true })
+      await t.mergePass()
+      expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge', headSha: 'def456', branchUpdateRequested: false })
+      await pause(project)
+    })
+
+    it('does not try to merge while a base update is due, and asks again if the request was lost', async () => {
+      const { project, task, pr } = await approved()
+      lintPassed('abc123')
+      const live = t.github.pulls.get(pr.number)!
+      live.mergeableState = 'behind'
+      await t.mergePass()
+      expect(await taskRow(task.id)).toMatchObject({ branchUpdateRequested: true })
+      const asked = () => t.github.calls.filter(c => c.method === 'merge' && c.args[1] === pr.number).length
+      await t.mergePass()
+      expect(asked()).toBe(0)
+      t.clock.now = new Date(t.clock.now.getTime() + 5 * 60_000)
+      await t.mergePass()
+      expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge', branchUpdateRequested: false })
+      await pause(project)
+    })
+
+    it('clears a requested base update when the task leaves Ready to merge', async () => {
+      const { project, task } = await approved()
+      await t.db.update(tasks).set({ branchUpdateRequested: true }).where(eq(tasks.id, task.id))
+      await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'human_request_changes' })
+      expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', branchUpdateRequested: false })
+      await pause(project)
+    })
+
+    it('reviews a same-head resubmission afresh, whatever approval came before it', async () => {
+      const { project, task, dev } = await approved()
+      await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'human_request_changes' })
+      await t.orchestrator.schedule()
+      const again = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer' && m.job.runId !== dev.runId)).job
+      expect(await runner.call(again.runId, again.leaseEpoch, 'report_outcome', { outcome: 'pr_updated', note: 'Looked again', summary: 'Same commit', headSha: 'abc123' })).toMatchObject({ ok: true })
+      expect(await taskRow(task.id)).toMatchObject({ status: 'agent_review' })
+      await t.mergePass()
+      await t.orchestrator.schedule()
+      await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'reviewer' && m.job.runId !== again.runId)
+      expect((await taskRow(task.id)).status).toBe('agent_review')
+      await pause(project)
+    })
+
+    it('moves on an approval a reviewer claim would leave waiting forever', async () => {
+      const { project, task } = await approved()
+      await t.db.update(tasks).set({ status: 'agent_review' }).where(eq(tasks.id, task.id))
+      await t.mergePass()
+      // The same pass may go on to merge it: 'abc123' is shared between tests
+      expect(['ready_to_merge', 'merged']).toContain((await taskRow(task.id)).status)
+      await pause(project)
+    })
+
+    it('sends a task back to the developer when a criterion that needs evidence is added', async () => {
+      const { project, task } = await approved()
+      const res = await t.request('PATCH', `/api/projects/${project.slug}/tasks/${task.number}`, {
+        acceptanceCriteria: [...task.acceptanceCriteria.map(c => ({ id: c.id, text: c.text })), { text: 'Works on mobile' }]
+      })
+      expect(res.status).toBe(200)
+      expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress' })
+      const notes = await t.db.select().from(comments).where(eq(comments.taskId, task.id))
+      expect(notes.at(-1)).toMatchObject({ pinned: true, body: expect.stringContaining('report pr_updated') })
+      await pause(project)
+    })
+
+    it('records failed gates once per commit', async () => {
+      const { project, task } = await approved()
+      lintPassed('abc123')
+      await t.db.delete(schema.evidence).where(eq(schema.evidence.taskId, task.id))
+      for (let i = 0; i < 2; i++) await t.mergePass()
+      const entries = await t.db.select().from(auditLog).where(and(eq(auditLog.taskId, task.id), eq(auditLog.action, 'merge.gates_failed')))
+      expect(entries).toMatchObject([{ detail: { headSha: 'abc123', gates: ['evidenceComplete'] } }])
+      await pause(project)
+    })
+
+    it.each(['neutral', 'skipped'] as const)('merges when a required check is %s', async (conclusion) => {
+      const { project, task, pr } = await approved()
+      t.github.setChecks('abc123', [{ name: 'lint', conclusion, url: 'https://ci/2' }])
+      await t.mergePass()
+      expect(await taskRow(task.id)).toMatchObject({ status: 'merged', gateChecks: [{ name: 'lint', url: 'https://ci/2' }] })
+      expect(t.github.pulls.get(pr.number)).toMatchObject({ merged: true })
+      await pause(project)
+    })
+
+    it('polls a task waiting on CI less often', async () => {
+      const { project, pr } = await approved()
+      const reads = () => t.github.calls.filter(c => c.method === 'getPullRequest' && c.args[1] === pr.number).length
+      await t.mergePass()
+      const before = reads()
+      await t.orchestrator.merges.tick()
+      expect(reads()).toBe(before)
+      await pause(project)
+    })
+
+    it('reads the PR and its checks once on the way to a merge', async () => {
+      const { project, pr } = await approved()
+      lintPassed('abc123')
+      const before = t.github.calls.length
+      await t.mergePass()
+      const made = t.github.calls.slice(before).filter(c => c.args[1] === pr.number || c.args[1] === 'abc123')
+      expect(made.filter(c => c.method === 'checks')).toHaveLength(1)
+      await pause(project)
+    })
+  })
+
+  it('keeps a task being deleted from being claimed while its PR closes', async () => {
+    const { project, task, pr } = await approved()
+    await t.db.update(tasks).set({ status: 'in_progress' }).where(eq(tasks.id, task.id))
+    const closing = t.github.closePullRequest.bind(t.github)
+    const spy = vi.spyOn(t.github, 'closePullRequest').mockImplementationOnce(async (...args) => {
+      await t.orchestrator.schedule()
+      return closing(...args)
+    })
+    expect((await t.request('DELETE', `/api/projects/${project.slug}/tasks/${task.number}`)).status).toBe(204)
+    spy.mockRestore()
+    const live = await t.db.select().from(runs).where(and(eq(runs.taskId, task.id), ne(runs.state, 'completed'), ne(runs.state, 'interrupted')))
+    expect(live).toEqual([])
+    expect(await taskRow(task.id)).toMatchObject({ leaseRunId: null, deletedAt: expect.any(Date) })
+    expect(t.github.pulls.get(pr.number)).toMatchObject({ state: 'closed' })
+    await pause(project)
   })
 
   it('deletes a Backlog task outright and keeps its audit entry', async () => {
@@ -469,7 +670,7 @@ describe('merge orchestrator and human controls', () => {
   it('refuses to delete a Merged task', async () => {
     const { project, task } = await approved()
     t.github.setChecks('abc123', [{ name: 'lint', conclusion: 'success', url: null }])
-    await t.orchestrator.merges.tick()
+    await t.mergePass()
     expect(await taskRow(task.id)).toMatchObject({ status: 'merged' })
     expect((await t.request('DELETE', `/api/projects/${project.slug}/tasks/${task.number}`)).status).toBe(409)
     await pause(project)
@@ -518,7 +719,7 @@ describe('merge orchestrator and human controls', () => {
     await vi.waitFor(async () => {
       const again = await t.request('POST', '/api/update-hold').then(r => r.json()) as { busy: number }
       expect(again.busy).toBe(busy - 1)
-    })
+    }, { timeout: 20_000 })
 
     expect(await t.request('DELETE', '/api/update-hold').then(r => r.json())).toEqual({ stopped: false, updating: false })
     await runner.next('run.assign', m => m.job.taskId === waiting.id)

@@ -62,7 +62,7 @@ export async function listPullRequests(db: Database, merges: MergeOrchestrator, 
     : []
   const reviewOf = new Map(latestReviews.map(r => [r.taskId, r]))
   const statuses = await mapLimit(rows, CONCURRENT_PULL_REQUESTS, async (task): Promise<PullRequestStatus | null> => {
-    const report = await merges.gates(task, project, merges.displayReads)
+    const report = await merges.gates(task, project, undefined, merges.displayReads)
     const { pr } = report
     if (pr.state !== 'open' || pr.merged) return null
     const review = reviewOf.get(task.id)

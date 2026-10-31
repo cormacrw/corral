@@ -39,7 +39,7 @@ export type TransitionDetail =
 // The epic PR events that go with a review state change
 export type EpicPrDetail =
   | { event: 'opened' | 'review_started', prNumber: number }
-  | { event: 'approved' | 'changes_requested' | 'human_approved' | 'human_changes_requested', headSha: string | null, summary: string, confirmedCriteria?: string[], confirmedTasks?: string[] }
+  | { event: 'approved' | 'changes_requested' | 'human_approved' | 'human_changes_requested' | 'review_failed', headSha: string | null, summary: string, confirmedCriteria?: string[], confirmedTasks?: string[] }
   | { event: 'closed' }
   | { event: 'rebased', from: string | null, to: string }
   | { event: 'conflict', summary: string, files: string[] }
@@ -66,6 +66,7 @@ export interface AuditDetails {
   'epic.pr': { epicId: string } & (EpicPrDetail | { event: 'rebase_requested' | 'rebase_handed_off', headSha: string | null } | { event: 'ci_failed', summary: string } | { event: 'merged', pr: number, mergeCommitSha: string | null })
   'epic.updated': Changed & { epicId: string, dependsOn?: string[] }
   'integration.operation': { operationId: string, submissionId: string, event: 'started' | 'succeeded' | 'failed' | 'checks_deferred', expectedTargetSha: string, leaseEpoch: number, commitSha?: string, error?: string }
+  'merge.gates_failed': { pr: number, headSha: string, gates: string[] }
   'merge.refused': { pr: number, message: string, attempt: number, epicId?: string }
   'plan.approved': { planId: string, version: number, to: string, viaPmRun?: string }
   'plan.discarded': { planId: string, version: number, deleted: number }
