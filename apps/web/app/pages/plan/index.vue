@@ -65,7 +65,8 @@ async function reconnect() {
   }
 }
 
-const backlog = computed(() => project.value ? (live.state.value.tasks[project.value.id] ?? []).filter(t => t.status === 'backlog') : [])
+const { tasks: projectTasks } = useProjectLists(() => project.value?.slug ?? '')
+const backlog = computed(() => project.value ? projectTasks.value.filter(t => t.status === 'backlog') : [])
 // The project's Drafts by session, kept current by plan.drafts, which
 // follows every propose, approve and discard
 const sessions = useQuery(planSessionsQuery()).data

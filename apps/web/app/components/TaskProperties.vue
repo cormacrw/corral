@@ -21,9 +21,9 @@ const props = withDefaults(defineProps<{
   readonly?: boolean
 }>(), { stacked: false, draft: false, readonly: false })
 const DRAFT_HIDDEN = ['status', 'branch', 'pr', 'round']
-const live = useLive()
+const { epics } = useProjectLists(() => props.project?.slug ?? '')
 const flyout = useTaskFlyout()
-const epic = computed(() => props.task.epicId ? live.state.value.epics[props.task.projectId]?.find(e => e.id === props.task.epicId) ?? null : null)
+const epic = computed(() => props.task.epicId ? epics.value.find(e => e.id === props.task.epicId) ?? null : null)
 const emit = defineEmits<{ status: [value: string], patch: [input: PatchTaskInput] }>()
 
 const dotClass = (status: TaskStatus) => ({

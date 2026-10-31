@@ -5,6 +5,8 @@ import { stepsToAppStart } from '~/utils/app-history'
 
 const live = useLive()
 const state = live.state
+// Keep the same shared list queries warm as the desktop shell
+useAllProjectLists(() => state.value.projects)
 const route = useRoute()
 const router = useRouter()
 
@@ -43,13 +45,6 @@ async function selectTab(event: MouseEvent, to: string) {
     resettingHistory = false
   }
 }
-
-// Pages read tasks from live state, as they do under the web shell
-watch(() => state.value.projects, (projects) => {
-  for (const project of projects) {
-    if (!state.value.tasks[project.id]) void live.loadTasks(project)
-  }
-}, { immediate: true })
 
 const planUnread = computed(() => state.value.planSessions.some(s => s.unread))
 

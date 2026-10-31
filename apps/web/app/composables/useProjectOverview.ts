@@ -11,19 +11,19 @@ export function useProjectOverview() {
   const live = useLive()
   const slug = computed(() => String(route.params.slug))
   const project = computed(() => live.state.value.projects.find(p => p.slug === slug.value) ?? null)
-  const tasks = computed<Task[]>(() => project.value ? live.state.value.tasks[project.value.id] ?? [] : [])
+  const { tasks, epics: epicList, error: listError } = useProjectLists(slug)
   const inbox = ref<Inbox | null>(null)
   const runs = ref<Run[]>([])
   const history = ref<AuditEntry[]>([])
   // The agent of each run behind the recent activity, by run id
   const runAgents = ref<Map<string, string>>(new Map())
-  const error = ref<string | null>(null)
+  const detailError = ref<string | null>(null)
+  const error = computed(() => listError.value ?? detailError.value)
   useSeoMeta({ title: () => `${project.value?.name ?? 'Project'} · Corral` })
 
   async function load() {
-    error.value = null
+    detailError.value = null
     try {
-      if (project.value && !live.state.value.tasks[project.value.id]) await live.loadTasks(project.value)
       const [i, r] = await Promise.all([api.inbox.get(), api.runs.list({ active: true })])
       inbox.value = i
       runs.value = r.filter(run => run.projectId === project.value?.id)
@@ -36,13 +36,13 @@ export function useProjectOverview() {
       history.value = entries.flat().sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 12)
       runAgents.value = new Map([...taskRuns.flat(), ...r].map(run => [run.id, run.agentName]))
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
+      detailError.value = e instanceof Error ? e.message : String(e)
     }
   }
-  watch(project, () => void load(), { immediate: true })
+  watch([project, tasks], () => void load(), { immediate: true })
   onMounted(() => {
     const stop = live.subscribe((event) => {
-      if (event.type === 'task.updated' || event.type === 'run.updated' || event.type === 'task.deleted') void load()
+      if (event.type === 'run.updated' && event.run.projectId === project.value?.id) void load()
     })
     onBeforeUnmount(stop)
   })
@@ -69,7 +69,7 @@ export function useProjectOverview() {
   const pmName = computed(() => live.state.value.agents.find(a => a.role === 'pm')?.name ?? 'the PM')
   const epics = computed(() => {
     const groups = new Map<string, { id: string, title: string, merged: number, total: number, epic?: Epic }>()
-    const list = live.state.value.epics[project.value?.id ?? ''] ?? []
+    const list = epicList.value
     for (const task of tasks.value) {
       const id = task.epicId ?? 'none'
       const found = list.find(e => e.id === id)

@@ -51,7 +51,7 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
   - **Status** hides the columns that aren't selected (and their tabs on mobile).
   - **Agent** matches the agent holding the task's lease, or the agent it's assigned to. Tasks aren't assigned ahead of time (D15), so a task belongs to the agent of its latest run of the role whose turn it is (`task.developer` / `task.reviewer`): the developer in Ready and In progress, the reviewer in Agent review (`taskAgentIds`). A task no agent of that role has claimed matches no agent.
 - The search and filters live in the URL query, so a filtered Board reloads and can be shared: `?q=`, and comma-separated `?epics=` (epic ids), `?status=` (column keys), `?priority=` and `?agent=` (agent ids). `?epic=` is taken by the epic flyout.
-- There's **no drag and drop.** Agents and the scheduler move tasks. Human moves (unblocking, sending back to Backlog) happen in the flyout's Status menu or the Inbox, limited to what D10 allows.
+- On desktop, cards with a permitted human move to another Board column can be dragged there. Valid target columns are highlighted. The move appears immediately; a rejected request restores the card and shows an error toast. These use the same D10 actions as the flyout's Status menu: for example, resolving Blocked to Ready or requesting changes from Human review. Agent and scheduler transitions remain server-owned. Sending work to Backlog stays in the Status menu or Inbox.
 
 ## Rules
 

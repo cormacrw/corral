@@ -6,6 +6,7 @@ import { searchPages } from '~/utils/search'
 // The app shell (design/app-shell.md): global nav, projects, agents, runner
 const live = useLive()
 const state = live.state
+const lists = useAllProjectLists(() => state.value.projects)
 const route = useRoute()
 const now = ref(Date.now())
 onMounted(() => {
@@ -23,12 +24,7 @@ const isExpanded = (project: Project) => expanded.value[project.id] ?? true
 
 const currentSlug = computed(() => typeof route.params.slug === 'string' ? route.params.slug : null)
 
-const counts = (project: Project) => taskCounts(state.value.tasks[project.id] ?? [])
-watch(() => state.value.projects, (projects) => {
-  for (const project of projects) {
-    if (!state.value.tasks[project.id]) void live.loadTasks(project)
-  }
-}, { immediate: true })
+const counts = (project: Project) => taskCounts(lists.tasks.value[project.id] ?? [])
 
 const { active, sessions: threads, close: closeThread } = useOpenPlanSessions()
 const attention = (session: typeof threads.value[number]) => session.status === 'needs_approval' ? 'Needs approval' : session.status === 'question' ? 'Question' : session.unread ? 'Unread reply' : null
@@ -51,7 +47,7 @@ const searchGroups = computed(() => [{
 }, {
   id: 'tasks',
   label: 'Tasks',
-  items: Object.values(state.value.tasks).flat().map(t => ({ label: `${t.ref} ${t.title}`, icon: 'i-lucide-square-check', to: `/tasks/${t.ref}` }))
+  items: Object.values(lists.tasks.value).flatMap(tasks => tasks ?? []).map(t => ({ label: `${t.ref} ${t.title}`, icon: 'i-lucide-square-check', to: `/tasks/${t.ref}` }))
 }])
 
 const isActive = (path: string) => route.path === path || route.path.startsWith(`${path}/`)

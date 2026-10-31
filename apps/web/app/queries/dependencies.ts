@@ -85,8 +85,15 @@ export const eventDependencies: EventDependencies = {
     invalidates: () => []
   },
   'project.deleted': {
-    write: ({ projectId }, cache) => cache.set<Project[]>(keys.projects.list(), list => list?.filter(p => p.id !== projectId)),
-    invalidates: () => [keys.inbox(), keys.tasks.lists(), keys.epics.lists(), keys.plan.all()]
+    write: ({ projectId }, cache) => {
+      const slug = cache.slug(projectId)
+      if (slug) {
+        cache.set<Task[]>(keys.tasks.list(slug), list => list && [])
+        cache.set<Epic[]>(keys.epics.list(slug), list => list && [])
+      }
+      cache.set<Project[]>(keys.projects.list(), list => list?.filter(p => p.id !== projectId))
+    },
+    invalidates: () => [keys.inbox(), keys.plan.all()]
   },
   'task.created': {
     write: ({ task }, cache) => writeTask(task, cache),

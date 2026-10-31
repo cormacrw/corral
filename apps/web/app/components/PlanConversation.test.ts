@@ -24,8 +24,7 @@ const pendingEntries = vue.ref<Record<string, { session: PlanSessionDetail, stat
 const retryStart = vi.fn()
 const restored = vue.ref(null)
 const state = vue.ref({
-  loaded: true, runner: { online: true }, agents, projects,
-  tasks: {}
+  loaded: true, runner: { online: true }, agents, projects
 })
 const flyout = {
   ref: vue.ref<string | null>(null), epic: vue.ref<string | null>(null), plan: vue.ref(false),
@@ -98,6 +97,7 @@ beforeEach(() => {
   vi.stubGlobal('usePlanThreads', () => ({ add: vi.fn() }))
   vi.stubGlobal('useTaskFlyout', () => flyout)
   vi.stubGlobal('useToast', () => toast)
+  vi.stubGlobal('useProjectLists', () => ({ tasks: vue.ref([]) }))
   vi.stubGlobal('useLive', () => ({
     state,
     subscribe: (callback: typeof listener) => {

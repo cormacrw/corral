@@ -5,6 +5,7 @@ import { computed, defineComponent, ref, watch } from 'vue'
 
 const replace = vi.fn()
 const go = vi.fn()
+vi.stubGlobal('useAllProjectLists', vi.fn())
 vi.stubGlobal('computed', computed)
 vi.stubGlobal('watch', watch)
 vi.stubGlobal('useLive', () => ({

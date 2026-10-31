@@ -1,6 +1,6 @@
-import type { Task } from '@corral/contracts'
+import type { HumanTransitionInput, Task } from '@corral/contracts'
 import type { AgentRole, TaskPriority, TaskStatus } from '@corral/core'
-import { TASK_PRIORITIES } from '@corral/core'
+import { availableEvents, TASK_PRIORITIES } from '@corral/core'
 
 // How long a merged task stays in the Board's Merged column. Older ones are
 // still on the Backlog, epic and task pages.
@@ -10,7 +10,7 @@ const MERGED_WINDOW_MS = MERGED_WINDOW_DAYS * 24 * 60 * 60 * 1000
 // Whether a task belongs on the Board: everything past Backlog, except merged
 // tasks older than the window.
 export function onBoard(task: Pick<Task, 'status' | 'mergedAt'>, now = Date.now()): boolean {
-  if (task.status === 'backlog') return false
+  if (task.status === 'backlog' || task.status === 'draft') return false
   if (task.status !== 'merged') return true
   return task.mergedAt !== null && now - new Date(task.mergedAt).getTime() <= MERGED_WINDOW_MS
 }
@@ -129,4 +129,19 @@ export function filterLabel(selected: string[], label: (id: string) => string, a
   if (selected.length === 0) return all
   if (selected.length === 1) return label(selected[0]!)
   return `${selected.length} ${plural}`
+}
+
+// Dragging uses the same human actions as the task's Status menu. It cannot
+// impersonate an agent or move work through scheduler-owned transitions.
+export function boardMove(task: Task, status: TaskStatus): HumanTransitionInput | null {
+  if (task.status === status) return null
+  const events = availableEvents({
+    type: task.type, status: task.status, humanReview: task.humanReview,
+    reviewRounds: task.reviewRounds, failedRuns: task.failedRuns, reason: task.statusReason
+  }, { kind: 'human', userId: 'me' })
+  if (events.includes('resolve') && (status === 'ready' || status === 'in_progress' || status === 'backlog')) return { type: 'resolve', to: status }
+  if (events.includes('approve') && status === 'ready') return { type: 'approve' }
+  if (events.includes('send_back') && status === 'backlog') return { type: 'send_back' }
+  if (events.includes('human_request_changes') && task.status !== 'approved' && status === 'in_progress') return { type: 'human_request_changes' }
+  return null
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { BOARD_COLUMNS, filterLabel, filtersFromQuery, filtersToQuery, hasFilters, matchesFilter, MERGED_WINDOW_DAYS, NO_FILTERS, onBoard, sortColumn, swipeStep, taskAgentIds } from './board.ts'
+import type { Task } from '@corral/contracts'
+import { BOARD_COLUMNS, boardMove, filterLabel, filtersFromQuery, filtersToQuery, hasFilters, matchesFilter, MERGED_WINDOW_DAYS, NO_FILTERS, onBoard, sortColumn, swipeStep, taskAgentIds } from './board.ts'
 
 const DAY = 24 * 60 * 60 * 1000
 const now = Date.parse('2026-10-29T12:00:00Z')
@@ -29,6 +30,7 @@ describe('onBoard', () => {
     expect(onBoard({ status: 'ready', mergedAt: null }, now)).toBe(true)
     expect(onBoard({ status: 'blocked', mergedAt: null }, now)).toBe(true)
     expect(onBoard({ status: 'backlog', mergedAt: null }, now)).toBe(false)
+    expect(onBoard({ status: 'draft', mergedAt: null }, now)).toBe(false)
   })
 })
 
@@ -201,5 +203,26 @@ describe('filterLabel', () => {
     expect(filterLabel([], label, 'All epics', 'epics')).toBe('All epics')
     expect(filterLabel(['billing'], label, 'All epics', 'epics')).toBe('Billing')
     expect(filterLabel(['auth', 'billing'], label, 'All epics', 'epics')).toBe('2 epics')
+  })
+})
+
+describe('boardMove', () => {
+  const task = (status: Task['status'], type: Task['type'] = 'task') => ({ type, status, humanReview: true, reviewRounds: 0, failedRuns: 0, statusReason: null }) as Task
+
+  it('offers the existing human resolution and request-changes actions', () => {
+    expect(boardMove(task('blocked'), 'ready')).toEqual({ type: 'resolve', to: 'ready' })
+    expect(boardMove(task('failed'), 'in_progress')).toEqual({ type: 'resolve', to: 'in_progress' })
+    expect(boardMove(task('human_review'), 'in_progress')).toEqual({ type: 'human_request_changes' })
+  })
+
+  it('cannot claim, submit, merge, or repeat the current status by dragging', () => {
+    expect(boardMove(task('ready'), 'in_progress')).toBeNull()
+    expect(boardMove(task('in_progress'), 'agent_review')).toBeNull()
+    expect(boardMove(task('ready_to_merge'), 'merged')).toBeNull()
+    expect(boardMove(task('blocked'), 'blocked')).toBeNull()
+  })
+
+  it('keeps approved-design changes in the feedback action', () => {
+    expect(boardMove(task('approved', 'design'), 'in_progress')).toBeNull()
   })
 })
