@@ -1,5 +1,5 @@
 import { RUNNER_HEARTBEAT_MS, RUNNER_PROTOCOL_VERSION, TASK_INTEGRATION_PROTOCOL, type RunnerCapacity, type RunnerMessage, type ServerMessage } from '@corral/contracts'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -119,6 +119,7 @@ describe('runner update status on the wire', () => {
     // drain notification has arrived before we assert its presence or absence.
     await vi.waitFor(() => expect(received.some(m => m.type === 'run.ended')).toBe(true))
     expect(received.filter(m => m.type === 'runner.draining')).toEqual(autoUpdate ? [{ type: 'runner.draining', updateRequested: false }] : [])
+    await connection.refreshUpdateStatus()
     expect(await status()).toMatchObject({ behind: true, draining: autoUpdate, idle: true })
   })
 
@@ -129,7 +130,7 @@ describe('runner update status on the wire', () => {
     // The heartbeat snapshot has no running process, but the manager still owns the report.
     expect(active).toEqual([])
     finishingCount = 0
-    connection.refreshUpdateStatus()
+    await connection.refreshUpdateStatus()
     expect(await status()).toMatchObject({ activeRunCount: 0, idle: true })
   })
 
@@ -144,13 +145,39 @@ describe('runner update status on the wire', () => {
     await vi.waitFor(() => expect(received.filter(m => m.type === 'hello')).toHaveLength(2), { timeout: 4000 })
     expect(received.filter(m => m.type === 'hello')[1]).toMatchObject({ draining: true, updateRequested: true })
     active = []
-    connection.refreshUpdateStatus()
+    await connection.refreshUpdateStatus()
     expect(await status()).toMatchObject({ idle: true, activeRunCount: 0, updateRequested: true })
     connection.close()
     const restarted = new UpdateStatus(dataDir, 'new', true)
     restarted.server('new')
-    restarted.write(0)
+    await restarted.write(0)
     expect(await status()).toMatchObject({ behind: false, draining: false, updateRequested: false, idle: true })
+  })
+
+  it('survives a disk that refuses the status file, and writes again once it can', async () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      dataDir = await mkdtemp(join(tmpdir(), 'corral-update-'))
+      const updates = new UpdateStatus(dataDir, 'old', false)
+      // A folder in the way makes the write fail, as a full disk would
+      await mkdir(join(dataDir, 'update-status.json.tmp'))
+      await updates.write(1)
+      await updates.write(2)
+      expect(warnings).toHaveBeenCalledTimes(1)
+
+      await rm(join(dataDir, 'update-status.json.tmp'), { recursive: true })
+      await updates.write(3)
+      expect(await status()).toMatchObject({ activeRunCount: 3 })
+    } finally {
+      warnings.mockRestore()
+    }
+  })
+
+  it('lands the last state when writes come while one is under way', async () => {
+    dataDir = await mkdtemp(join(tmpdir(), 'corral-update-'))
+    const updates = new UpdateStatus(dataDir, 'old', false)
+    await Promise.all([updates.write(1), updates.write(2), updates.write(0), updates.write(5)])
+    expect(await status()).toMatchObject({ activeRunCount: 5, idle: false })
   })
 
   const WELCOME = { type: 'welcome', runnerId: 'r1', commit: 'old', draining: false, updateRequested: false } satisfies ServerMessage

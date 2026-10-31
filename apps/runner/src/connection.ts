@@ -47,6 +47,7 @@ export class ServerConnection {
   #heartbeat: NodeJS.Timeout | null = null
   #lastUpdateSent = ''
   #updatePoll: NodeJS.Timeout | null = null
+  #polling = false
   #retry: NodeJS.Timeout | null = null
   #backoff = MIN_BACKOFF_MS
   #closed = false
@@ -73,24 +74,38 @@ export class ServerConnection {
 
   start(): void {
     this.#closed = false
-    this.refreshUpdateStatus()
+    void this.#pollUpdateStatus()
     this.#open()
-    this.#updatePoll = setInterval(() => {
-      this.refreshUpdateStatus()
-      const state = this.updateStatus
-      if (!state || !this.connected) return
-      const message: RunnerMessage = { type: 'runner.update-status', draining: state.draining, updateRequested: state.updateRequested, activeRunCount: this.#handlers.activeRunCount?.() ?? this.#handlers.activeRuns().length, updateState: state.updateState, updateError: state.updateError }
-      const json = JSON.stringify(message)
-      if (json !== this.#lastUpdateSent && this.send(message)) this.#lastUpdateSent = json
-    }, 1000)
+    this.#updatePoll = setInterval(() => void this.#pollUpdateStatus(), 1000)
   }
 
-  refreshUpdateStatus(): void {
-    this.updateStatus?.write(this.#handlers.activeRunCount?.() ?? this.#handlers.activeRuns().length)
+  async #pollUpdateStatus(): Promise<void> {
+    // A stalled disk mustn't stack up polls
+    if (this.#polling) return
+    this.#polling = true
+    try {
+      await this.updateStatus?.refresh(this.#activeRunCount())
+    } finally {
+      this.#polling = false
+    }
+    const state = this.updateStatus
+    if (!state || !this.connected) return
+    const message: RunnerMessage = { type: 'runner.update-status', draining: state.draining, updateRequested: state.updateRequested, activeRunCount: this.#activeRunCount(), updateState: state.updateState, updateError: state.updateError }
+    const json = JSON.stringify(message)
+    if (json !== this.#lastUpdateSent && this.send(message)) this.#lastUpdateSent = json
+  }
+
+  #activeRunCount(): number {
+    return this.#handlers.activeRunCount?.() ?? this.#handlers.activeRuns().length
+  }
+
+  // Writes the status file if it changed; the 1 s poll reads the updater's answer
+  refreshUpdateStatus(): Promise<void> {
+    return this.updateStatus?.write(this.#activeRunCount()) ?? Promise.resolve()
   }
 
   send(message: RunnerMessage): boolean {
-    this.refreshUpdateStatus()
+    void this.refreshUpdateStatus()
     if (!this.connected || (!this.#welcomed && RUN_TRAFFIC.has(message.type))) return false
     this.#socket!.send(JSON.stringify(message))
     return true
@@ -143,7 +158,7 @@ export class ServerConnection {
       }
       if (message.type === 'runner.drain') this.updateStatus?.drain(message.updateRequested)
       this.#handlers.onMessage(message)
-      this.refreshUpdateStatus()
+      void this.refreshUpdateStatus()
     })
     socket.on('close', (code, reason) => {
       this.#stopHeartbeat()
@@ -153,7 +168,7 @@ export class ServerConnection {
           if (typeof detail.commit === 'string') this.updateStatus?.server(detail.commit)
         } catch { /* Older servers may only send a readable protocol error. */ }
       }
-      this.refreshUpdateStatus()
+      void this.refreshUpdateStatus()
       if (this.#socket === socket) this.#socket = null
       this.#handlers.onStatus('disconnected', reason.toString() || `code ${code}`)
       this.#scheduleReconnect(code)
