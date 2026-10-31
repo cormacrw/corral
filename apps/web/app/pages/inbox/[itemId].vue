@@ -1,30 +1,35 @@
 <script setup lang="ts">
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import type { InboxActionInput } from '@corral/contracts'
+import type { InboxActionInput, TaskInboxItem } from '@corral/contracts'
+import { reactive } from 'vue'
+import { actionOpensComposer, type InboxPanelContext, type InboxPanelTab, type ResolveTo } from '~/composables/useInboxPanel'
 import { isOwnPane, isTaskItem, useInboxView } from '~/composables/useInboxView'
 import { inboxActions } from '~/utils/inbox-actions'
 import { actOnInboxItem, holdsInbox } from '~/queries/inbox'
 import { keys } from '~/queries/keys'
 import { commentOnTask, taskEvidenceQuery, taskQuery, taskReviewsQuery } from '~/queries/tasks'
-import { inboxTypeBadge as typeBadge, timeAgo } from '~/utils/labels'
-import { moveRadioSelection } from '~/utils/radio'
+import { inboxTypeBadge as typeBadge } from '~/utils/labels'
 
 // The selected Inbox item (design/inbox.md): its panes, action tray and
 // composer. Nuxt keys this page by its path, so the next item is a new instance
 // with no draft, checked criteria or error left over.
 const toast = useToast()
 const device = useDevice()
-const { list, inbox, error, selected, selectedId, showTask, toggleTask, moveToNext, deleteThread } = useInboxView()
+const flyout = useTaskFlyout()
+const { list, inbox, error, selected, selectedId, toggleTask, moveToNext, deleteThread } = useInboxView()
 
 const client = useQueryClient()
 const acting = useMutation({ ...actOnInboxItem, ...holdsInbox })
 const commenting = useMutation({ ...commentOnTask, ...holdsInbox })
 const action = ref<InboxActionInput['action'] | null>(null)
-const resolveTo = ref<'backlog' | 'ready' | 'in_progress'>('in_progress')
+const resolveTo = ref<ResolveTo>('in_progress')
 const text = ref('')
 const busy = ref(false)
+const panelView = ref<{ send: () => Promise<boolean> } | null>(null)
+let quickActionPending = false
 const failedAction = ref<string | null>(null)
 const checkedHumanCriteria = ref<string[]>([])
+const tab = ref<InboxPanelTab>('overview')
 
 // The key ties the task to the selection, so nothing of the last item shows
 const taskRef = computed(() => isTaskItem(selected.value) ? selected.value.taskRef : null)
@@ -47,7 +52,11 @@ const taskLoadFailed = computed(() => taskRef.value !== null && taskResult.isErr
 const approveBlocked = computed(() => taskLoadFailed.value && action.value === 'approve')
 const alreadyResolved = computed(() => selected.value !== null && selected.value.type !== 'activity' && !inbox.value?.needsYou.some(i => i.id === selected.value!.id))
 const TASK_LOAD_ERROR = 'Couldn\'t load this task'
-const actionError = computed(() => failedAction.value ?? (taskLoadFailed.value ? TASK_LOAD_ERROR : null))
+const HUMAN_CHECK_ERROR = 'Tick each human check before approving.'
+const actionError = computed(() => failedAction.value ?? (taskLoadFailed.value && device.isMobile.value ? TASK_LOAD_ERROR : null))
+watch(checkedHumanCriteria, () => {
+  if (failedAction.value === HUMAN_CHECK_ERROR) failedAction.value = null
+})
 function retryTask() {
   failedAction.value = null
   // Back to pending, for the loading state and a fresh failure
@@ -55,9 +64,12 @@ function retryTask() {
 }
 
 const actions = computed(() => selected.value && selected.value.type !== 'plan_thread' ? inboxActions(selected.value.type, task.value, taskLoading.value ? 'loading' : taskLoadFailed.value ? 'failed' : null) : [])
-// Reset when the item or its type changes, including when its task loads.
+// Reset when the item or its type changes, including when its task loads. A
+// phone's composer always sends an action; the desktop panel's replies until
+// one is picked.
+const defaultAction = () => device.isMobile.value ? (actions.value[0]?.value as InboxActionInput['action'] | undefined) ?? null : null
 watch([() => selected.value?.id, () => selected.value?.type, () => task.value?.type], () => {
-  action.value = (actions.value[0]?.value as InboxActionInput['action'] | undefined) ?? null
+  action.value = defaultAction()
 }, { immediate: true })
 const needsText = computed(() => action.value === 'request_changes' || action.value === 'clarify')
 const placeholder = computed(() => {
@@ -76,7 +88,8 @@ async function submit(message: string): Promise<boolean> {
   if (!selected.value || isOwnPane(selected.value)) return false
   if (taskLoading.value || approveBlocked.value) return false
   if (action.value === 'approve' && task.value?.acceptanceCriteria.some(c => c.checkedByHuman && !checkedHumanCriteria.value.includes(c.id))) {
-    failedAction.value = 'Check each human criterion before approving.'
+    failedAction.value = HUMAN_CHECK_ERROR
+    tab.value = 'criteria'
     return false
   }
   const actedOn = selected.value
@@ -84,7 +97,8 @@ async function submit(message: string): Promise<boolean> {
   failedAction.value = null
   try {
     if (!action.value) {
-      if (task.value) await commenting.mutateAsync({ task: { id: task.value.id, slug: actedOn.project.slug, number: task.value.number, ref: task.value.ref }, body: message })
+      await commenting.mutateAsync({ task: { id: actedOn.taskId, slug: actedOn.project.slug, number: Number(actedOn.taskRef.split('-').at(-1)), ref: actedOn.taskRef }, body: message })
+      toast.add({ title: 'Done', description: 'Reply sent', color: 'success' })
     } else {
       const input: InboxActionInput = action.value === 'clarify'
         ? { action: 'clarify', text: message }
@@ -102,8 +116,10 @@ async function submit(message: string): Promise<boolean> {
     // A send finishing for an older selection leaves the new one alone
     if (selectedId.value !== actedOn.id) return true
     text.value = ''
-    if (list.data.value?.needsYou.some(i => i.id === actedOn.id)) list.release()
-    else await moveToNext()
+    if (list.data.value?.needsYou.some(i => i.id === actedOn.id)) {
+      action.value = defaultAction()
+      list.release()
+    } else await moveToNext()
     return true
   } catch (e) {
     if (selectedId.value === actedOn.id) failedAction.value = e instanceof Error ? e.message : String(e)
@@ -112,6 +128,48 @@ async function submit(message: string): Promise<boolean> {
     if (selectedId.value === actedOn.id) busy.value = false
   }
 }
+
+// One click: an action sent from the panel. If it wasn't, the composer goes
+// back to replying, with the draft kept.
+async function act(value: InboxActionInput['action']) {
+  if (busy.value || quickActionPending) return false
+  failedAction.value = null
+  action.value = value
+  if (actionOpensComposer(value)) return false
+  const actedOn = selectedId.value
+  quickActionPending = true
+  try {
+    const sent = await panelView.value?.send() ?? false
+    if (!sent && selectedId.value === actedOn) action.value = null
+    return sent
+  } finally {
+    quickActionPending = false
+  }
+}
+const panel = reactive({
+  item: computed(() => selected.value as TaskInboxItem),
+  task, evidence, reviews, alreadyResolved, taskLoading, taskLoadFailed,
+  evidenceLoading: computed(() => address.value !== null && evidenceResult.isPending.value),
+  actions, action, resolveTo, text, busy, actionError, placeholder, submitLabel, needsText, tab, checkedHumanCriteria,
+  taskOpen: computed(() => flyout.ref.value !== null),
+  submit, act, retryTask, toggleTask,
+  setAction: (value: InboxActionInput['action'] | null) => {
+    action.value = value
+    failedAction.value = null
+  },
+  setText: (value: string) => {
+    text.value = value
+  },
+  setResolveTo: (value: ResolveTo) => {
+    resolveTo.value = value
+  },
+  setTab: (value: InboxPanelTab) => {
+    tab.value = value
+  },
+  setCheckedHumanCriteria: (value: string[]) => {
+    checkedHumanCriteria.value = value
+  }
+}) as InboxPanelContext
 </script>
 
 <template>
@@ -163,159 +221,15 @@ async function submit(message: string): Promise<boolean> {
     @approved="moveToNext"
     @delete="deleteThread(selected)"
   />
+  <InboxPanel
+    v-else-if="selected"
+    ref="panelView"
+    :ctx="panel"
+  />
   <div
     v-else
     class="flex min-w-0 flex-1 flex-col"
   >
-    <template v-if="selected">
-      <header class="flex h-14 shrink-0 items-center gap-3 border-b border-default px-4">
-        <AgentAvatar
-          :name="selected.sender.name"
-          size="sm"
-        />
-        <div class="min-w-0 flex-1">
-          <h1 class="truncate text-sm font-medium">
-            {{ selected.subject }}
-          </h1>
-          <div class="flex items-center gap-2 overflow-hidden text-xs whitespace-nowrap text-muted">
-            <UBadge
-              :label="typeBadge(selected.type).label"
-              :color="typeBadge(selected.type).color"
-              variant="subtle"
-              size="xs"
-            />
-            <span class="flex items-center gap-1"><ProjectThumbnail
-              :project="selected.project"
-              :size="16"
-            />{{ selected.project.name }} · {{ selected.taskRef }}</span>
-            <span>{{ selected.sender.name }} · {{ selected.sender.role }} · {{ timeAgo(selected.at) }}</span>
-          </div>
-        </div>
-        <UButton
-          label="Task details"
-          variant="outline"
-          color="neutral"
-          size="sm"
-          :aria-pressed="showTask"
-          @click="toggleTask"
-        />
-      </header>
-      <div
-        class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4"
-        data-testid="inbox-detail-scroller"
-      >
-        <div class="mx-auto flex max-w-[720px] flex-col gap-4">
-          <UAlert
-            v-if="selected.resolution"
-            color="success"
-            variant="subtle"
-            icon="i-lucide-circle-check"
-            title="Resolved"
-            :description="selected.resolution"
-          />
-          <UAlert
-            v-else-if="alreadyResolved"
-            color="neutral"
-            variant="subtle"
-            title="Already resolved"
-            description="This task changed status elsewhere."
-          />
-          <InboxMessage
-            :item="selected"
-            :evidence="evidence"
-            class="text-sm"
-          />
-          <a
-            v-if="!isSpike && selected.prUrl"
-            :href="selected.prUrl"
-            target="_blank"
-            rel="noopener"
-            class="text-sm text-primary hover:underline"
-          >Open PR</a>
-          <template v-if="selected.type === 'human_review' && task">
-            <div
-              v-if="!isSpike && task.gateChecks?.length"
-              class="flex flex-wrap gap-1"
-            >
-              <UBadge
-                v-for="check in task.gateChecks"
-                :key="check.name"
-                :label="`✓ ${check.name}`"
-                color="success"
-                variant="subtle"
-                size="xs"
-              />
-            </div>
-            <EvidenceList
-              v-model:checked="checkedHumanCriteria"
-              :evidence="evidence"
-              human-checklist
-              :criteria="task.acceptanceCriteria"
-              :reviews="reviews.length > 0 ? reviews : task.latestReview ? [task.latestReview] : []"
-            />
-          </template>
-          <NuxtLink
-            v-if="selected.type === 'activity'"
-            :to="selected.epicId ? `/epics/${selected.epicId}` : `/tasks/${selected.taskRef}`"
-            class="text-sm text-primary hover:underline"
-          >{{ selected.epicId ? 'Open epic' : 'Open task' }}</NuxtLink>
-        </div>
-      </div>
-      <div
-        v-if="selected.type !== 'activity' && !selected.resolution && !alreadyResolved"
-        class="shrink-0 border-t border-default p-3"
-      >
-        <div class="mx-auto flex max-w-[720px] flex-col gap-2">
-          <div
-            role="radiogroup"
-            aria-label="Quick actions"
-            class="flex flex-wrap gap-1.5"
-            @keydown="moveRadioSelection"
-          >
-            <InboxDesignReviewLink :task="task" />
-            <UButton
-              v-for="a in actions"
-              :key="a.value"
-              :label="a.label"
-              :icon="a.icon"
-              size="xs"
-              role="radio"
-              :aria-checked="action === a.value"
-              :tabindex="action === a.value ? 0 : -1"
-              :variant="action === a.value ? 'subtle' : 'outline'"
-              :color="a.value === 'delete' ? 'error' : action === a.value ? 'primary' : 'neutral'"
-              @click="action = (a.value as InboxActionInput['action'])"
-            />
-            <USelectMenu
-              v-if="action === 'resolve'"
-              v-model="resolveTo"
-              :items="[{ label: 'In progress', value: 'in_progress' }, { label: 'Ready', value: 'ready' }, { label: 'Backlog', value: 'backlog' }]"
-              value-key="value"
-              size="xs"
-              :search-input="false"
-            />
-          </div>
-          <UAlert
-            v-if="actionError"
-            color="error"
-            variant="subtle"
-            :title="actionError"
-            :actions="taskLoadFailed ? [{ label: 'Retry', onClick: retryTask }] : []"
-          />
-          <PromptComposer
-            v-model="text"
-            :placeholder="placeholder"
-            :submit-label="submitLabel"
-            :submit-color="action === 'delete' ? 'error' : 'primary'"
-            :allow-empty="action !== null && !needsText"
-            :busy="busy || taskLoading"
-            :disabled="approveBlocked"
-            :project="selected.project.slug"
-            @submit="submit"
-          />
-        </div>
-      </div>
-    </template>
-    <InboxEmpty v-else />
+    <InboxEmpty />
   </div>
 </template>
