@@ -113,6 +113,7 @@ export const api = {
   runner: () => call<RunnerStatus>('GET', '/runner'),
   status: () => call<ServerStatus>('GET', '/status'),
   stopAll: () => call<GlobalStatus>('POST', '/stop-all'),
+  liftUpdateHold: () => call<GlobalStatus>('DELETE', '/update-hold'),
   resumeAll: () => call<GlobalStatus>('POST', '/resume-all'),
 
   setup: {

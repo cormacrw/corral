@@ -36,6 +36,13 @@ async function resume(project: Project) {
     toast.add({ title: 'Could not resume', description: error instanceof Error ? error.message : String(error), color: 'error' })
   }
 }
+async function liftUpdateHold() {
+  try {
+    await api.liftUpdateHold()
+  } catch (error) {
+    toast.add({ title: 'Could not lift update hold', description: error instanceof Error ? error.message : String(error), color: 'error' })
+  }
+}
 async function resumeAll() {
   try {
     await resuming.mutateAsync()
@@ -62,6 +69,7 @@ async function resumeAll() {
     variant="subtle"
     icon="i-lucide-download"
     title="Corral is waiting to update"
+    :actions="[{ label: 'Lift', color: 'neutral', variant: 'solid', onClick: liftUpdateHold }]"
     :ui="{ root: 'shrink-0 rounded-none py-2' }"
     orientation="horizontal"
   />

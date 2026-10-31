@@ -122,7 +122,7 @@ describe('PM tools for the Inbox, designs and agents', () => {
   it('refuses a confirmation when the PR moved on after the card was shown', async () => {
     const review = await task({ status: 'human_review', prNumber: 7, headSha: 'a'.repeat(40) })
     const { actionId } = await propose('act_on_inbox', { taskRef: review.ref, action: 'approve' })
-    await t.db.update(tasks).set({ headSha: 'b'.repeat(40) }).where(eq(tasks.id, review.id))
+    await t.db.update(tasks).set({ headSha: 'a'.repeat(7) + 'b'.repeat(33) }).where(eq(tasks.id, review.id))
     expect(await (await resolve(actionId, 'confirm')).json()).toMatchObject({ pendingAction: { status: 'failed', error: expect.stringContaining('changed') } })
     expect(await statusOf(review.id)).toMatchObject({ status: 'human_review' })
   })

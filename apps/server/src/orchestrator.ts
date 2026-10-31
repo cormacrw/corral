@@ -179,6 +179,10 @@ export class Orchestrator implements RunnerHandlers {
           case 'stop_run':
             await this.stopRun(prepared.targetId!, actor)
             return 'The run was stopped.'
+          case 'set_update_hold': {
+            const busy = await this.holdForUpdate()
+            return { ...this.status, busy }
+          }
           case 'stop_all':
             await this.stopAll(actor)
             return 'Corral is stopped.'
@@ -1452,6 +1456,8 @@ export class Orchestrator implements RunnerHandlers {
         const about = ctx.task ? ` on ${taskRef(ctx.project!.prefix, ctx.task.number)}: ${ctx.task.title}` : ctx.project ? ` in ${ctx.project.name}` : ' in a global conversation'
         return { input: parsed, summary: `Stop run #${ctx.run.number}, the ${ctx.run.role} run${about}`, targetId: ctx.run.id, taskId: ctx.task?.id ?? null, projectId: ctx.project?.id ?? null }
       }
+      case 'set_update_hold':
+        return { input: strict(pmActionTools.set_update_hold.input), summary: 'Hold Corral for an update; after running work drains, all new turns wait until you Lift the hold in the app banner', targetId: null, taskId: null, projectId: session.projectId }
       case 'stop_all':
         return { input: strict(pmActionTools.stop_all.input), summary: 'Stop every run in Corral and start no new ones', targetId: null, taskId: null, projectId: session.projectId }
       case 'resume_all':
