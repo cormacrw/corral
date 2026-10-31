@@ -55,7 +55,7 @@ describe('shell queries', () => {
     vi.mocked(api.projects.list).mockResolvedValue([{ id: 'p1', slug: 'test-app' }] as never)
     vi.mocked(api.agents.list).mockResolvedValue([{ id: 'a1', activeRuns: 0 }] as never)
     vi.mocked(api.runner).mockResolvedValue({ online: true } as never)
-    vi.mocked(api.status).mockResolvedValue({ stopped: false, updating: false })
+    vi.mocked(api.status).mockResolvedValue({ stopped: false, updating: false } as never)
     vi.mocked(api.me.get).mockResolvedValue({ name: 'Sam' } as never)
     vi.mocked(api.plan.sessions).mockResolvedValue([])
     vi.mocked(api.inbox.get).mockResolvedValue({ count: 2 } as never)
