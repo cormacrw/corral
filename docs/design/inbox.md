@@ -6,7 +6,7 @@
 
 ## Purpose
 
-One place for everything an agent needs you to decide, from every project, with the means to resolve it right there (D11). It works like an email client: a list on the left, the selected message on the right, and an action tray at the bottom.
+One place for everything an agent needs you to decide, from every project, with the means to resolve it right there (D11). It works like an email client: a list on the left, the selected message on the right, with its actions and a composer.
 
 Items come from two places:
 
@@ -68,6 +68,7 @@ Task items (human review, question, blocked, failed, Activity and Resolved) use 
 
 ### What each kind shows
 
+- **New row:** needs-you task and epic items show the short `message` from shared `InboxMessage`, then a **New** row directly below it when `newArtifacts` is nonempty. Screenshots are thumbnails; other files use icons and names. One click opens the same evidence viewer used by the criteria list. Design versions link directly to that version's preview. Epic artifacts include their task ref. Evidence is untrusted, so the viewer never frames HTML: images, video and text show in the app, a PDF in an iframe, and anything else is a download link.
 - The row uses only the server's `newArtifacts`, already filtered since the human's last review or answer. Older files remain in the evidence list without a New marker. With no new artifacts there is no row.
 - The complete `body`, including spike findings, is in the **Message** tab, and the tab resets when another item opens. Items without `message` keep their existing rendering, including Plan threads, release notes, Activity and Resolved.
 - **Spikes always stop in Human review**, whatever their human-review flag says. They appear under Needs you and add one to its count. The **Message** tab renders the latest `## Findings` comment as markdown; criteria verdicts and evidence remain below it. Desktop and mobile label approval **Accept findings**, keep **Request changes**, and hide PR links and check badges. The success toast and Resolved entry say **You accepted the findings**. The preview is the start of the short message; approval finishes the spike in Merged; requesting changes returns it to the developer with the feedback.
@@ -180,9 +181,9 @@ An epic PR in human review and an epic PR rebase conflict have their own layout 
 ## States
 
 - **Loading:** skeleton rows in the list. An item's top block shows at once from the Inbox data, with skeletons for its verdict and tab body until the task and its evidence arrive; Approve reads **Loading task…** and the actions wait.
-- **An action fails:** an inline error above the composer. The draft is kept, and an action that opens the composer stays chosen.
-- **The task fails to load:** an inline error under the actions with **Retry**, instead of a spinner (in the tray on a phone). Approval stays blocked, because its human-criteria check needs the task, and its action reads **Task not loaded**. The other actions and the reply box still work.
-- **A task changed status elsewhere:** the item shows "Already resolved" and the tray is disabled.
+- **An action fails:** an inline error above the composer, or above the action bar on a phone with the composer closed. The draft is kept, and an action that opens the composer stays chosen.
+- **The task fails to load:** an inline error at the end of the top block with **Retry**, instead of a spinner. Approval stays blocked, because its human-criteria check needs the task, and its action reads **Task not loaded**. The other actions and the reply box still work.
+- **A task changed status elsewhere:** the item shows "Already resolved. This task changed status elsewhere." in Overview, with no actions and no composer, and no action bar on a phone.
 
 ## Responsive
 
@@ -192,7 +193,7 @@ An epic PR in human review and an epic PR rebase conflict have their own layout 
 
 ## Accessibility
 
-- The tabs use `role="tablist"`; quick actions use `role="radiogroup"` with `aria-checked`.
+- The tabs use `role="tablist"`. Actions are plain buttons named with their full label, so a phone's **Send back** is announced as "Send back to Backlog". Reply on a phone uses `aria-pressed`.
 - Every icon-only control has an `aria-label`.
 - Pane dividers are `role="separator"` with `aria-valuenow` and work with the arrow keys.
 

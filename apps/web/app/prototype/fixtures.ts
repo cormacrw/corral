@@ -332,6 +332,7 @@ export const tasks: Task[] = [
   task(corral, 7, { title: 'PM drafts tasks from an approved design', status: 'ready_to_merge', epicId: 'e-design', pr: { number: 65, url: 'https://github.com/cormacrw/corral/pull/65' } }),
   task(corral, 8, { title: 'Push notifications for Needs you', status: 'blocked', epicId: 'e-mobile', statusReason: 'Which push service should the server use: Web Push with VAPID keys, or ntfy?' }),
   task(corral, 9, { title: 'Offline board', status: 'failed', type: 'bug', priority: 'urgent', epicId: 'e-mobile', failedRuns: 3, statusReason: 'The runner lost its worktree three times in a row.' }),
+  task(corral, 42, { title: 'Reuse the failed run\'s worktree on Retry', status: 'blocked', statusReason: 'Should Retry reuse the failed run\'s worktree, or start from a fresh checkout?' }),
   task(corral, 10, { title: 'Install sheet on iOS', status: 'merged', epicId: 'e-mobile', mergedAt: ago(60 * 30) }),
   task(corral, 11, { title: 'Dark mode for the epic graph', status: 'backlog', priority: 'low' }),
   task(corral, 12, { title: 'Spike: Codex reasoning effort', status: 'backlog', type: 'spike' }),
@@ -855,7 +856,7 @@ export function inbox(): Inbox {
     .filter(t => t.status === 'human_review' || t.status === 'blocked' || t.status === 'failed')
     .map((t) => {
       const project = projects.find(p => p.id === t.projectId)!
-      const type = t.status === 'human_review' ? 'human_review' as const : t.status === 'blocked' ? 'blocked' as const : 'failed' as const
+      const type = t.status === 'human_review' ? 'human_review' as const : t.ref === 'COR-42' ? 'question' as const : t.status === 'blocked' ? 'blocked' as const : 'failed' as const
       const subject = type === 'human_review' ? `Review ${t.title}` : t.title
       const body = (t.type === 'spike' ? comments[t.id]?.findLast(c => c.body.startsWith('## Findings'))?.body : null) ?? t.statusReason ?? 'The reviewer approved this change and it needs your review.'
       const message = t.ref === 'COR-5'
@@ -876,7 +877,7 @@ export function inbox(): Inbox {
           ...(evidence[t.id] ?? []).filter(e => e.kind !== 'note' && e.url && e.createdAt > (t.ref === 'COR-5' ? ago(30) : '')).map(e => ({ id: e.id, kind: e.kind as Exclude<Evidence['kind'], 'note'>, name: e.fileName!, url: e.url!, taskRef: null, at: e.createdAt }))
         ],
         body,
-        sender: type === 'failed' ? { name: 'Corral', role: 'system' as const } : { name: type === 'blocked' ? 'Victor' : 'Rita', role: type === 'blocked' ? 'developer' as const : 'reviewer' as const },
+        sender: type === 'failed' ? { name: 'Corral', role: 'system' as const } : type === 'human_review' ? { name: 'Rita', role: 'reviewer' as const } : { name: 'Victor', role: 'developer' as const },
         at: t.updatedAt,
         prUrl: t.pr?.url ?? null,
         resolution: null
@@ -941,7 +942,8 @@ export function inbox(): Inbox {
   const count = needsYou.length
   needsYou.push(...releaseNotes.filter(r => !r.resolution))
   needsYou.sort((a, b) => b.at.localeCompare(a.at))
-  return { needsYou, activity, resolved: [...resolvedInbox, ...releaseNotes.filter(r => r.resolution)], count }
+  const approved = { ...activity[0]!, id: 'activity-approved', body: 'You approved and merged it', preview: 'You approved and merged it', resolution: 'You approved and merged it', sender: { name: 'Rita', role: 'reviewer' as const } }
+  return { needsYou, activity, resolved: [...resolvedInbox, approved, ...releaseNotes.filter(r => r.resolution)], count }
 }
 
 // Different cohorts make every window visibly distinct. Marketing site has no

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { InboxActionInput } from '@corral/contracts'
-import { actionDisabled, type InboxPanelContext, type ResolveTo } from '~/composables/useInboxPanel'
+import { actionDisabled, actionOpensComposer, type InboxPanelContext, type ResolveTo } from '~/composables/useInboxPanel'
 
 // The panel's actions on a phone (design/mobile.md): each one a large target at
 // the bottom of the screen, in thumb reach. The composer opens just above them.
@@ -15,7 +15,10 @@ const SHORT: Record<string, string> = { send_back: 'Send back', delete: 'Delete'
 const label = (a: { value: string, label: string }) => a.value === 'approve' && props.approveLabel && !props.ctx.taskLoading && !props.ctx.taskLoadFailed ? props.approveLabel : SHORT[a.value] ?? a.label
 function tap(value: string) {
   replying.value = false
-  void props.ctx.act(value as InboxActionInput['action'])
+  const action = value as InboxActionInput['action']
+  void props.ctx.act(action)
+  // Already chosen on a question, so the tray has no change to focus on
+  if (actionOpensComposer(action)) void nextTick(() => tray.value?.focus())
 }
 function toggleReply() {
   props.ctx.setAction(null)
@@ -72,18 +75,19 @@ async function submit(text: string) {
         :key="a.value"
         type="button"
         :class="[
-          'flex min-h-16 min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-lg px-1 text-sm font-medium transition-colors disabled:opacity-60',
+          'flex min-h-16 min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-lg px-1 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60',
           i === 0 ? 'bg-primary text-inverted active:bg-primary/80'
           : a.value === 'delete' ? ['border text-error active:bg-error/10', ctx.action === a.value ? 'border-error bg-error/10' : 'border-default']
             : ctx.action === a.value ? 'border border-primary bg-primary/10 text-primary' : 'border border-default text-default active:bg-elevated'
         ]"
+        :aria-label="a.label"
         :disabled="actionDisabled(ctx, a.value)"
         :data-testid="i === 0 ? 'inbox-primary' : undefined"
         @click="tap(a.value)"
       >
         <UIcon
           :name="ctx.busy && ctx.action === a.value ? 'i-lucide-loader-circle' : a.icon"
-          :class="['size-5', ctx.busy && ctx.action === a.value && 'animate-spin']"
+          :class="['size-5 shrink-0', ctx.busy && ctx.action === a.value && 'animate-spin']"
         />
         <span class="line-clamp-2 text-center leading-tight">{{ label(a) }}</span>
       </button>

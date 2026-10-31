@@ -744,8 +744,8 @@ for (const type of ['human_review', 'failed'] as const) {
 describe('on a phone', () => {
   let mounted: { unmount: () => void } | undefined
   afterEach(() => mounted?.unmount())
-  const phone = async (type: 'human_review' | 'failed' | 'question' = 'human_review', ref = 'COR-5', edit = (t: (typeof tasks)[number]) => t) => {
-    const view = await mountInbox(type, ref, null, true, edit, false, true)
+  const phone = async (type: 'human_review' | 'failed' | 'question' = 'human_review', ref = 'COR-5', edit = (t: (typeof tasks)[number]) => t, editApi = () => {}) => {
+    const view = await mountInbox(type, ref, null, true, edit, false, true, editApi)
     mounted = view.wrapper
     return view
   }
@@ -852,5 +852,25 @@ describe('on a phone', () => {
     await view.primary().trigger('click')
     await flushPromises()
     expect(api.inbox.act).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: 'resolve', to: 'in_progress' }))
+  })
+
+  it('shows the PR error and Retry in its tabs', async () => {
+    const view = await phone('human_review', 'COR-5', t => t, () => {
+      vi.mocked(api.projects.pullRequest).mockRejectedValue(new Error('Runner offline'))
+    })
+    await view.openTab('diff')
+    expect(view.alert().text()).toContain('Couldn\'t load this pull request')
+    expect(view.alert().text()).toContain('Retry')
+    expect(view.wrapper.find('[data-testid="inbox-thumb-bar"]').exists()).toBe(true)
+  })
+
+  it('shows no action bar on a read-only item', async () => {
+    const view = await phone()
+    for (const read of [inbox().activity[0]!, inbox().resolved[0]!]) {
+      view.params.itemId = read.id
+      await flushPromises()
+      expect(view.wrapper.find('[data-testid="inbox-panel-option-d"]').exists()).toBe(true)
+      expect(view.wrapper.find('[data-testid="inbox-thumb-bar"]').exists()).toBe(false)
+    }
   })
 })

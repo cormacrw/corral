@@ -26,7 +26,7 @@ const planSession = computed(() => {
   return { title: session?.title ?? 'Plan', eyebrow: project?.name ?? '', back: '/plan', backLabel: 'Back to Plan', dot: project ? projectColor(project) : null }
 })
 // An Inbox item is its own screen: the task above where it sits in the
-// list, a back button to the list, and the tray at the bottom in place of
+// list, a back button to the list, and the action bar at the bottom in place of
 // the tab bar
 const mobileHeader = useMobileHeader()
 const inboxItem = computed(() => {
