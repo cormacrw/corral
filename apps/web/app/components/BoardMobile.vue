@@ -37,10 +37,12 @@ function select(i: number) {
 
 // Keep the open tab in view as it changes
 const tabs = useTemplateRef<HTMLElement[]>('tabs')
-watch(index, async (i) => {
+async function scrollTab(i: number) {
   await nextTick()
   tabs.value?.[i]?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' })
-})
+}
+watch(index, scrollTab)
+onMounted(() => void scrollTab(index.value))
 
 let start: { x: number, y: number } | null = null
 function onTouchStart(event: TouchEvent) {
