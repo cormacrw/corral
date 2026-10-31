@@ -33,7 +33,7 @@ it('updates prerequisite and blocks progress and the waiting alert from task eve
   for (const name of ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount'] as const) vi.stubGlobal(name, vue[name])
   vi.stubGlobal('useLocalStorage', (_key: string, initial: unknown) => vue.ref(initial))
   vi.stubGlobal('useProjectLists', useProjectLists)
-  vi.stubGlobal('useLive', () => ({ state: vue.ref({ projects: [project] }), subscribe: () => () => {} }))
+  vi.stubGlobal('useShell', () => ({ projects: [project] }))
   vi.stubGlobal('useTaskFlyout', () => ({ ref: vue.ref(null) }))
   vi.stubGlobal('useToast', () => ({ add: vi.fn() }))
   const Alert = vue.defineComponent({
@@ -101,7 +101,7 @@ it('keeps an open epic\'s task list live as its tasks change, join and leave', a
   for (const name of ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount'] as const) vi.stubGlobal(name, vue[name])
   vi.stubGlobal('useLocalStorage', (_key: string, initial: unknown) => vue.ref(initial))
   vi.stubGlobal('useProjectLists', useProjectLists)
-  vi.stubGlobal('useLive', () => ({ state: vue.ref({ projects: [project] }) }))
+  vi.stubGlobal('useShell', () => ({ projects: [project] }))
   vi.stubGlobal('useTaskFlyout', () => ({ ref: vue.ref(null) }))
   vi.stubGlobal('useToast', () => ({ add: vi.fn() }))
   const Badge = vue.defineComponent({ props: ['status'], setup: props => () => vue.h('i', { 'data-testid': 'status' }, props.status) })

@@ -1,11 +1,10 @@
 // Delete thread (design/inbox.md#delete-thread): the row goes at once and the
-// close (api.plan.close) waits out a 5 second Undo toast. The state lives
+// close waits out a 5 second Undo toast. The state lives
 // outside any page, so leaving the Inbox doesn't cancel a delete, and one
 // still pending when the tab closes or reloads is sent as it unloads.
 import { useMutation } from '@tanstack/vue-query'
-import { closePlanThread } from '~/queries/plan'
+import { closePlanThread, closePlanThreadOnExit } from '~/queries/plan'
 import { readonly, ref } from 'vue'
-import { api } from '~/composables/useApi'
 
 export const UNDO_MS = 5000
 
@@ -30,7 +29,7 @@ export function usePlanThreadDelete() {
         clearTimeout(timer)
         timers.delete(id)
         threads.remove(id)
-        void api.plan.close(id, { keepalive: true }).catch(() => {})
+        void closePlanThreadOnExit(id).catch(() => {})
       }
     })
   }

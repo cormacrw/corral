@@ -62,7 +62,7 @@ function mountAgent(params: Record<string, string>, isMobile: boolean) {
   vi.stubGlobal('useRouter', () => ({}))
   vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(isMobile) }))
   vi.stubGlobal('useAgentRuns', () => runView().view)
-  return mount(AgentPage, { global: { ...global, stubs: { ...global.stubs, NuxtPage: { template: '<main data-testid="child" />' }, MobileAgent: { template: '<section data-testid="list" />' } } } })
+  return mount(AgentPage, { global: { ...global, components: { ...global.components, NuxtPage: { render: () => vue.h('main', { 'data-testid': 'child' }) }, MobileAgent: { render: () => vue.h('section', { 'data-testid': 'list' }) } } } })
 }
 
 it('shows the agent or the run on a phone, never both', () => {

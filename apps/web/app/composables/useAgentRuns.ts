@@ -1,8 +1,7 @@
 import { useMutation, useQueries, useQuery } from '@tanstack/vue-query'
 import type { Run } from '@corral/contracts'
-import { api } from '~/composables/useApi'
 import { patchAgent } from '~/queries/agents'
-import { runsQuery, runTranscriptQuery, stopRun } from '~/queries/runs'
+import { messageRun, runsQuery, runTranscriptQuery, stopRun } from '~/queries/runs'
 import { shell } from '~/queries/shell'
 import { taskDesignsQuery } from '~/queries/tasks'
 import { agentFacts, designerStats } from '~/utils/agents'
@@ -141,7 +140,7 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
     const slug = project(run)?.slug
     if (!slug) return false
     try {
-      const { comment } = await api.runs.message(slug, run.id, text)
+      const { comment } = await messageRun({ slug, id: run.id, text })
       ;(sent.value[run.id] ??= []).push(comment.body.trim())
       return true
     } catch (e) {

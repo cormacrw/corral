@@ -1,13 +1,12 @@
 <script setup lang="ts">
-import type { Agent, AgentRuntime } from '@corral/contracts'
-import type { api } from '~/composables/useApi'
+import type { Agent, AgentRuntime, PatchAgentInput } from '@corral/contracts'
 import { ROLE, runtimeLabel } from '~/utils/labels'
 
 const props = defineProps<{
   agents: Agent[]
   stopped: boolean
   runtimeItems: (agent: Agent) => { label: string, value: string }[]
-  patchAgent: (agent: Agent, input: Parameters<typeof api.agents.patch>[1]) => Promise<void>
+  patchAgent: (agent: Agent, input: PatchAgentInput) => Promise<void>
   patchWakeInterval: (agent: Agent, minutes: number | null | undefined) => void
   saveAvatar: (agent: Agent, image: Blob | null) => Promise<void>
 }>()

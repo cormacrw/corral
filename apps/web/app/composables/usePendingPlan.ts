@@ -1,7 +1,7 @@
 import type { QueryClient } from '@tanstack/vue-query'
 import { keys } from '~/queries/keys'
 import type { AgentRuntime, PlanSessionDetail, ServerEvent } from '@corral/contracts'
-import { api } from './useApi'
+import { startPlanThread } from '~/queries/plan'
 
 let queryClient: QueryClient | null = null
 
@@ -64,7 +64,7 @@ export function usePendingPlan() {
     entry.state = 'starting'
     entry.error = null
     try {
-      accept(id, await api.plan.start(entry.session.projectId, entry.message, entry.taskRef, entry.session.runtime, id))
+      accept(id, await startPlanThread(entry.session, entry.message, entry.taskRef, id))
     } catch (error) {
       // A live message/session proves acceptance even if the response was lost.
       if (entries.value[id]?.state === 'accepted') return

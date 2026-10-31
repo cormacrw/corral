@@ -12,11 +12,11 @@ import { STOP_ASKING } from '~/utils/plan-questions'
 // conversation is one click away with Open in Plan.
 const props = defineProps<{ item: PlanThreadItem }>()
 const emit = defineEmits<{ approved: [], delete: [] }>()
-const live = useLive()
+const shell = useShell()
 const flyout = useTaskFlyout()
 const toast = useToast()
 const threads = usePlanThreads()
-const runnerOffline = computed(() => live.state.value.loaded && !live.state.value.runner?.online)
+const runnerOffline = computed(() => shell.loaded && !shell.runner?.online)
 
 // The plan itself, for View plan and approving; the item only has its summary
 const client = useQueryClient()

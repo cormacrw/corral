@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { useMutation, useQuery } from '@tanstack/vue-query'
-import type { Agent, AgentRuntime } from '@corral/contracts'
-import type { api } from '~/composables/useApi'
+import type { Agent, AgentRuntime, PatchAgentInput } from '@corral/contracts'
 import { agentsQuery, patchAgent as patchAgentMutation, setAgentAvatar } from '~/queries/agents'
 import { clisQuery } from '~/queries/setup'
 import { resumeAll as resumeAllMutation, statusQuery, stopAll as stopAllMutation } from '~/queries/system'
@@ -26,7 +25,7 @@ function runtimeItems(agent: Agent) {
   return [...values].map(value => ({ label: runtimeLabel(value), value }))
 }
 
-async function patchAgent(agent: Agent, input: Parameters<typeof api.agents.patch>[1]) {
+async function patchAgent(agent: Agent, input: PatchAgentInput) {
   try {
     await agentPatch.mutateAsync({ id: agent.id, input })
     toast.add({ title: 'Saved', color: 'success' })

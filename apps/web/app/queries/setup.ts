@@ -9,6 +9,8 @@ import { keys } from './keys'
 export const clisQuery = () => queryOptions({ queryKey: keys.setup.clis(), queryFn: () => api.setup.clis(), staleTime: 0 })
 export const reposQuery = () => queryOptions({ queryKey: keys.setup.repos(), queryFn: () => api.setup.repos() })
 
+export const checkRepo = (name: string) => api.setup.checkRepo(name)
+
 // The server caches the list; this asks past that and is the same list
 export const refreshRepos = defineMutation<RepoList>({
   mutationFn: () => api.setup.repos(true),

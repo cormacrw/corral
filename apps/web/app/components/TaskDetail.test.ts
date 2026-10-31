@@ -43,10 +43,7 @@ beforeEach(() => {
   vi.stubGlobal('useToast', () => ({ add: vi.fn() }))
   vi.stubGlobal('useTaskFlyout', () => ({ close: vi.fn(), open: vi.fn() }))
   vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(false) }))
-  vi.stubGlobal('useLive', () => ({
-    state: vue.ref({ projects: [{ ...projects[0]!, id: taskA.projectId }], agents: [] }),
-    subscribe: () => () => {}
-  }))
+  vi.stubGlobal('useShell', () => ({ projects: [{ ...projects[0]!, id: taskA.projectId }], agents: [] }))
   vi.stubGlobal('useProjectLists', () => ({ tasks: vue.ref([]), epics: vue.ref([]) }))
   vi.mocked(api.tasks.byRef).mockImplementation(async ref => ref === 'COR-1' ? taskA : taskB)
   for (const side of [api.tasks.comments, api.tasks.history, api.tasks.evidence, api.tasks.reviews, api.runs.list]) vi.mocked(side).mockResolvedValue([])
@@ -75,6 +72,16 @@ it('opens the next task on the default tab', async () => {
   await wrapper.setProps({ taskRef: 'COR-2' })
   await flushPromises()
   expect(activityTabs().props('modelValue')).toBe('activity')
+})
+
+it('shows a task from a loaded project list while its own entry loads', async () => {
+  const client = testQueryClient()
+  client.setQueryData(keys.tasks.list('corral'), [taskA])
+  vi.mocked(api.tasks.byRef).mockReturnValue(new Promise(() => {}))
+  const wrapper = await mountDetail(client)
+  expect(wrapper.findComponent({ name: 'USkeleton' }).exists()).toBe(false)
+  expect(wrapper.find('u-skeleton-stub').exists()).toBe(false)
+  expect(wrapper.html()).toContain(taskA.title)
 })
 
 it('drops a save that finishes after moving to another task', async () => {

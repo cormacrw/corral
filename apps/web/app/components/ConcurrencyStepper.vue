@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import type { Agent } from '@corral/contracts'
-import { ApiError } from '~/composables/useApi'
+import { ApiError } from '~/queries/client'
 import { patchAgent } from '~/queries/agents'
 import { keys } from '~/queries/keys'
 

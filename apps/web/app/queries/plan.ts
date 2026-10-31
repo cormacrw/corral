@@ -38,6 +38,15 @@ export const discardPlan = defineMutation<Plan, string>({
   invalidates: [keys.plan.all(), keys.inbox()]
 })
 
+// Not a mutation: its result reconciles usePendingPlan's entry, which outlives
+// any component
+export const startPlanThread = (session: Pick<PlanSession, 'projectId' | 'runtime'>, message: string, taskRef: string | undefined, id: string) =>
+  api.plan.start(session.projectId, message, taskRef, session.runtime, id)
+
+// For a page being closed: the request has to outlive it, and nothing is left
+// to invalidate
+export const closePlanThreadOnExit = (id: string) => api.plan.close(id, { keepalive: true })
+
 export const closePlanThread = defineMutation<Awaited<ReturnType<typeof api.plan.close>>, string>({
   mutationFn: id => api.plan.close(id),
   invalidates: [keys.plan.all(), keys.inbox()]

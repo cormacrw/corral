@@ -22,7 +22,8 @@ Three processes. In development they're all started together by `turbo dev`; whe
 - UI only. **No business logic in Nuxt server routes.**
 - `ssr: false` for now; everything shown is live data from the server.
 - Nuxt `routeRules` proxy `/api/**` to `apps/server` (no CORS).
-- Live updates arrive over SSE from the server. Task leases include the holding run’s `agentId`; working indicators, run links and agent filters use that identity. Unleased tasks use the latest run’s agent for the column’s role, or no agent until one claims the task.
+- Server data lives in TanStack Query, in `app/queries/`, the only code that may use the API client (lint enforces it). Live updates arrive over SSE from the server: `useLive` holds that one connection and its status, and `app/queries/live.ts` writes events into the cache or invalidates what they affect, so pages read queries and never listen to the stream. A page with a persistent part and a changing part uses a parent route and a child route, not a stable key on one large page. See the `query-layer` and `stable-page-keys` wiki pages in `.corral/wiki/`.
+- Task leases include the holding run’s `agentId`; working indicators, run links and agent filters use that identity. Unleased tasks use the latest run’s agent for the column’s role, or no agent until one claims the task.
 - Plan renders sessions through `PlanConversation`. The Inbox reuses its question card, composer, approval actions and plan flyout (via its `inbox` prop) for Plan threads (D11). Inbox actions hold the list and selection until the mutation completes, then advance to the item at the same position in the refetched list.
 - The one exception is `pnpm --filter web prototype` (D20): a static build of the same app on fixtures from `app/prototype/`, with no server, API or SSE. How to use it is in `.corral/agents/designer.md`.
 - Types come from the Hono typed client (`hc`) and `packages/contracts`.

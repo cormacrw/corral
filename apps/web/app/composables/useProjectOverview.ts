@@ -1,7 +1,10 @@
 import { isTaskDone } from '@corral/core'
-import type { AuditEntry, Epic, Inbox, Project, Run, Task } from '@corral/contracts'
+import type { AuditEntry, Epic, Project, Run, Task } from '@corral/contracts'
+import { useQueries, useQuery } from '@tanstack/vue-query'
 import type { ComputedRef } from 'vue'
-import { api } from '~/composables/useApi'
+import { inboxQuery } from '~/queries/inbox'
+import { runsQuery } from '~/queries/runs'
+import { taskHistoryQuery } from '~/queries/tasks'
 import { epicTitle, epicWithLiveCounts } from '~/utils/labels'
 import { completedAt } from '~/utils/completion'
 import { projectNeedsYou } from '~/utils/projects'
@@ -17,65 +20,50 @@ interface OverviewSource {
 }
 
 // Project overview data (design/project-overview.md), shared by the web page
-// and MobileProjectOverview. The project parent route holds it, so going back
-// to Overview shows it at once. It loads once for the project, stays live while
-// open, and catches up on return only if something changed in between.
+// and MobileProjectOverview. The project parent route holds its observers, so
+// going back to Overview shows it at once. They load once for the project, stay
+// live while open, and catch up on return only if something changed in between.
 export function useProjectOverview({ slug, project, tasks, epics: epicList, loading, error: listError, open }: OverviewSource) {
-  const live = useLive()
-  const inbox = ref<Inbox | null>(null)
-  const runs = ref<Run[]>([])
-  const history = ref<AuditEntry[]>([])
-  // The agent of each run behind the recent activity, by run id
-  const runAgents = ref<Map<string, string>>(new Map())
-  const detailError = ref<string | null>(null)
-  const error = computed(() => listError.value ?? detailError.value)
+  const shell = useShell()
+  // The shell keeps the Inbox current, so mounting here never asks again
+  const inboxState = useQuery({ ...inboxQuery(), refetchOnMount: false })
 
-  let loaded = false
-  let outdated = false
-  let generation = 0
-  onBeforeUnmount(() => generation++)
-  async function load() {
-    if (!project.value || loading.value) return
-    const current = ++generation
-    const projectId = project.value.id
-    const projectSlug = slug.value
-    const recent = [...tasks.value].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 5)
-    outdated = false
-    loaded = true
-    detailError.value = null
-    try {
-      const [i, r] = await Promise.all([api.inbox.get(), api.runs.list({ active: true })])
-      // Recent activity: the newest audit entries of this project's tasks
-      const [entries, taskRuns] = await Promise.all([
-        Promise.all(recent.map(t => api.tasks.history(projectSlug, t.number))),
-        Promise.all(recent.map(t => api.runs.list({ taskId: t.id })))
-      ])
-      if (current !== generation) return
-      inbox.value = i
-      runs.value = r.filter(run => run.projectId === projectId)
-      history.value = entries.flat().sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 12)
-      runAgents.value = new Map([...taskRuns.flat(), ...r].map(run => [run.id, run.agentName]))
-    } catch (e) {
-      if (current !== generation) return
-      detailError.value = e instanceof Error ? e.message : String(e)
-    }
-  }
   // Preload once to keep the first Overview visit free of requests and an
-  // empty-activity flash. Subsequent changes wait while another tab is open.
-  function changed() {
-    if (open() || !loaded) void load()
-    else outdated = true
+  // empty-activity flash. After that an event only marks these stale while
+  // another tab is open, and opening Overview fetches what it marked.
+  const ready = computed(() => Boolean(project.value) && !loading.value)
+  const preloaded = ref(false)
+  const held = computed(() => ({ staleTime: Infinity, enabled: ready.value && (open() || !preloaded.value) }))
+  // Recent activity: the newest audit entries of this project's tasks
+  const recent = shallowRef<Task[]>([])
+  watch([tasks, ready, open, preloaded], () => {
+    if (ready.value && (open() || !preloaded.value)) {
+      recent.value = [...tasks.value].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 5)
+    }
+  }, { immediate: true })
+  const activeRuns = useQuery(computed(() => ({ ...runsQuery({ active: true }), ...held.value })))
+  const taskHistories = useQueries({
+    queries: computed(() => recent.value.map(task => ({ ...taskHistoryQuery({ slug: slug.value, number: task.number, ref: task.ref }), ...held.value })))
+  })
+  const taskRuns = useQueries({
+    queries: computed(() => recent.value.map(task => ({ ...runsQuery({ taskId: task.id }), ...held.value })))
+  })
+  watch(() => ready.value && !activeRuns.isPending.value && [...taskHistories.value, ...taskRuns.value].every(query => !query.isPending), (settled) => {
+    if (settled) preloaded.value = true
+  })
+
+  const inbox = computed(() => inboxState.data.value ?? null)
+  const runs = computed(() => (activeRuns.data.value ?? []).filter(run => run.projectId === project.value?.id))
+  const history = computed(() => taskHistories.value.flatMap(query => query.data ?? []).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 12))
+  // The agent of each run behind the recent activity, by run id
+  const runAgents = computed(() => new Map([...taskRuns.value.flatMap(query => query.data ?? []), ...runs.value].map(run => [run.id, run.agentName])))
+  // A failed background refetch keeps its data and shows no error
+  const failed = computed(() => [inboxState, activeRuns].flatMap(query => query.data.value === undefined && query.error.value ? [query] : []))
+  const failedActivity = computed(() => [...taskHistories.value, ...taskRuns.value].filter(query => query.data === undefined && query.error))
+  const error = computed(() => listError.value ?? failed.value[0]?.error.value?.message ?? failedActivity.value[0]?.error?.message ?? null)
+  async function load() {
+    await Promise.all([...failed.value, ...failedActivity.value].map(query => query.refetch()))
   }
-  watch([project, tasks, loading], changed, { immediate: true })
-  watch(open, (now) => {
-    if (now && outdated) void load()
-  })
-  onMounted(() => {
-    const stop = live.subscribe((event) => {
-      if (event.type === 'run.updated' && event.run.projectId === project.value?.id) changed()
-    })
-    onBeforeUnmount(stop)
-  })
 
   const DOT = { neutral: 'bg-neutral-400', info: 'bg-info', primary: 'bg-primary', warning: 'bg-warning', error: 'bg-error', success: 'bg-success', secondary: 'bg-secondary' } as const
   const count = (status: Task['status']) => tasks.value.filter(t => t.status === status).length
@@ -99,7 +87,7 @@ export function useProjectOverview({ slug, project, tasks, epics: epicList, load
   }
   const developer = computed(() => activeAgents('developer'))
   const reviewer = computed(() => activeAgents('reviewer'))
-  const pmName = computed(() => live.state.value.agents.find(a => a.role === 'pm')?.name ?? 'the PM')
+  const pmName = computed(() => shell.agents.find(a => a.role === 'pm')?.name ?? 'the PM')
   const epics = computed(() => {
     const groups = new Map<string, { id: string, title: string, merged: number, total: number, epic?: Epic }>()
     const list = epicList.value
@@ -114,7 +102,7 @@ export function useProjectOverview({ slug, project, tasks, epics: epicList, load
     return [...groups.values()]
   })
   const taskOf = (run: Run) => tasks.value.find(t => t.id === run.taskId)
-  const actorName = (entry: AuditEntry) => entry.actor.kind === 'human' ? 'You' : entry.actor.kind === 'agent' ? (entry.actor.role === 'pm' ? live.state.value.agents.find(a => a.role === 'pm')?.name ?? 'PM' : runAgents.value.get(entry.actor.runId) ?? (entry.actor.role === 'developer' ? 'Developer' : entry.actor.role === 'designer' ? 'Designer' : 'Reviewer')) : 'Corral'
+  const actorName = (entry: AuditEntry) => entry.actor.kind === 'human' ? 'You' : entry.actor.kind === 'agent' ? (entry.actor.role === 'pm' ? shell.agents.find(a => a.role === 'pm')?.name ?? 'PM' : runAgents.value.get(entry.actor.runId) ?? (entry.actor.role === 'developer' ? 'Developer' : entry.actor.role === 'designer' ? 'Designer' : 'Reviewer')) : 'Corral'
   const taskRefOf = (entry: AuditEntry) => tasks.value.find(t => t.id === entry.taskId)?.ref ?? ''
   const activityText = (entry: AuditEntry) => {
     const d = entry.detail

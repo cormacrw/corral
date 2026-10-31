@@ -1,5 +1,7 @@
 import type { QueryClient, QueryKey } from '@tanstack/vue-query'
 import { hashKey } from '@tanstack/vue-query'
+import type { ServerEvent } from '@corral/contracts'
+import { api } from '~/composables/useApi'
 import { subscribeLive, subscribeReconnect } from '~/composables/useLive'
 import { applyEvent, invalidateKeys } from './dependencies'
 
@@ -45,10 +47,25 @@ export function createInvalidationQueue(client: QueryClient): InvalidationQueue 
   }
 }
 
+interface ConnectOptions {
+  // The Plan thread on screen, whose replies are read as they arrive
+  openSession?: () => unknown
+  // Sees every event, with or without a conversation mounted
+  onEvent?: (event: ServerEvent) => void
+}
+
 // Feeds useLive's stream, real or mock, into the query cache. Returns a stop.
-export function connectQueries(client: QueryClient): () => void {
+export function connectQueries(client: QueryClient, { openSession, onEvent }: ConnectOptions = {}): () => void {
   const queue = createInvalidationQueue(client)
-  const stopEvents = subscribeLive(event => queue.add(applyEvent(client, event)))
+  const stopEvents = subscribeLive((event) => {
+    onEvent?.(event)
+    // Before the cache, so it gets the session as read
+    if (event.type === 'plan.session' && event.session.unread && openSession?.() === event.session.id) {
+      event.session = { ...event.session, unread: false }
+      void api.plan.read(event.session.id).catch(() => {})
+    }
+    queue.add(applyEvent(client, event))
+  })
   // Anything could have been missed while disconnected. Queries with data
   // refetch behind it: isFetching changes, isPending doesn't.
   const stopReconnect = subscribeReconnect(() => {

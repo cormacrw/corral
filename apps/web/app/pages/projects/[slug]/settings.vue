@@ -2,7 +2,7 @@
 import { useMutation } from '@tanstack/vue-query'
 import type { PatchProjectInput, Project } from '@corral/contracts'
 import { DEFAULT_LIMITS } from '@corral/core'
-import { ApiError } from '~/composables/useApi'
+import { ApiError } from '~/queries/client'
 import { patchProject, removeProject, setProjectThumbnail } from '~/queries/projects'
 import { EPIC_REVIEW_MODE, THUMBNAIL_COLORS } from '~/utils/labels'
 

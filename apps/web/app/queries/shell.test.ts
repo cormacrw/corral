@@ -15,7 +15,7 @@ vi.mock('~/composables/useApi', async original => ({ ...await original<typeof im
   me: { get: vi.fn() }, plan: { sessions: vi.fn() }, inbox: { get: vi.fn() }
 } }))
 
-// useLive with Nuxt's auto-imports stubbed
+// useLive and useShell with Nuxt's auto-imports stubbed
 const pendingApply = vi.fn()
 const eventSources: FakeEventSource[] = []
 class FakeEventSource {
@@ -35,12 +35,11 @@ class FakeEventSource {
   }
 }
 vi.stubGlobal('EventSource', FakeEventSource)
-vi.stubGlobal('useRoute', () => ({ params: {} }))
-vi.stubGlobal('usePendingPlan', () => ({ apply: pendingApply }))
 const useState = vi.fn((_key: string, init: () => unknown) => ref(init()))
 vi.stubGlobal('useState', useState)
 
 const { useLive } = await import('~/composables/useLive')
+const { useShell } = await import('~/composables/useShell')
 
 const run = { id: 'r1', projectId: 'p1', taskId: 't1' }
 const task = { id: 't1', ref: 'TA-1', projectId: 'p1', status: 'ready', epicId: null }
@@ -60,7 +59,7 @@ describe('shell queries', () => {
     vi.mocked(api.plan.sessions).mockResolvedValue([])
     vi.mocked(api.inbox.get).mockResolvedValue({ count: 2 } as never)
     client = createQueryClient()
-    stops = [startShell(client), connectQueries(client)]
+    stops = [startShell(client), connectQueries(client, { onEvent: pendingApply })]
   })
   afterEach(() => {
     stops.forEach(stop => stop())
@@ -73,7 +72,7 @@ describe('shell queries', () => {
     await vi.advanceTimersByTimeAsync(0)
   }
 
-  it('reads through the useLive getters once every query has data', async () => {
+  it('reads through useShell once every query has data', async () => {
     stops.shift()!()
     client.clear()
     let answer!: (status: never) => void
@@ -81,37 +80,37 @@ describe('shell queries', () => {
       answer = resolve
     }))
     stops.unshift(startShell(client))
-    const live = useLive()
+    const shellData = useShell()
     await loaded()
-    expect(live.state.value.loaded).toBe(false)
-    expect(live.state.value.runner).toBeNull()
+    expect(shellData.loaded).toBe(false)
+    expect(shellData.runner).toBeNull()
     answer({ online: true } as never)
     await loaded()
-    expect(live.state.value.loaded).toBe(true)
-    expect(live.state.value.projects[0]!.slug).toBe('test-app')
-    expect(live.state.value.inboxCount).toBe(2)
-    expect(live.state.value.profile?.name).toBe('Sam')
+    expect(shellData.loaded).toBe(true)
+    expect(shellData.projects[0]!.slug).toBe('test-app')
+    expect(shellData.inboxCount).toBe(2)
+    expect(shellData.profile?.name).toBe('Sam')
   })
 
-  it('updates getters from entity events at once', async () => {
-    const live = useLive()
+  it('updates useShell from entity events at once', async () => {
+    const shellData = useShell()
     await loaded()
     const seen = ref<boolean[]>([])
     const scope = effectScope()
-    scope.run(() => watch(() => live.state.value.status.stopped, stopped => seen.value.push(stopped), { flush: 'sync' }))
+    scope.run(() => watch(() => shellData.status.stopped, stopped => seen.value.push(stopped), { flush: 'sync' }))
     applyEvent(client, { type: 'global.status', status: { stopped: true, updating: false } })
-    expect(live.state.value.status.stopped).toBe(true)
+    expect(shellData.status.stopped).toBe(true)
     expect(seen.value).toEqual([true])
     applyEvent(client, { type: 'runner.status', status: { online: false } } as ServerEvent)
-    expect(live.state.value.runner?.online).toBe(false)
+    expect(shellData.runner?.online).toBe(false)
     applyEvent(client, { type: 'profile.updated', profile: { name: 'Robin' } } as ServerEvent)
-    expect(live.state.value.profile?.name).toBe('Robin')
+    expect(shellData.profile?.name).toBe('Robin')
     scope.stop()
   })
 
   it('refetches agents and the inbox count once for a burst of events', async () => {
-    const live = useLive()
-    live.connect()
+    const shellData = useShell()
+    useLive().connect()
     await loaded()
     expect(api.agents.list).toHaveBeenCalledTimes(1)
     expect(api.inbox.get).toHaveBeenCalledTimes(1)
@@ -126,13 +125,13 @@ describe('shell queries', () => {
 
     expect(api.agents.list).toHaveBeenCalledTimes(2)
     expect(api.inbox.get).toHaveBeenCalledTimes(2)
-    expect(live.state.value.agents[0]!.activeRuns).toBe(1)
-    expect(live.state.value.inboxCount).toBe(3)
+    expect(shellData.agents[0]!.activeRuns).toBe(1)
+    expect(shellData.inboxCount).toBe(3)
     await vi.advanceTimersByTimeAsync(MAX_WAIT_MS)
     expect(api.agents.list).toHaveBeenCalledTimes(2)
   })
 
-  it('hands plan events to usePendingPlan with no conversation mounted', async () => {
+  it('hands events on with no conversation mounted', async () => {
     useLive().connect()
     await loaded()
     const session = { id: 's1', unread: false }
@@ -152,7 +151,7 @@ describe('shell queries', () => {
 
   it('asks for nothing while the data is fresh, however many read it', async () => {
     await loaded()
-    for (let i = 0; i < 5; i++) useLive().state.value.projects.find(p => p.id === 'p1')
+    for (let i = 0; i < 5; i++) useShell().projects.find(p => p.id === 'p1')
     await client.fetchQuery({ queryKey: keys.projects.list(), queryFn: api.projects.list })
     expect(api.projects.list).toHaveBeenCalledTimes(1)
   })

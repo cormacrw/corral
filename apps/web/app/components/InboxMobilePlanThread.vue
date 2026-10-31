@@ -12,7 +12,7 @@ import { STOP_ASKING } from '~/utils/plan-questions'
 // its messages and run transcript belong in Plan, never on this screen.
 const props = defineProps<{ item: PlanThreadItem }>()
 const router = useRouter()
-const live = useLive()
+const shell = useShell()
 const threads = usePlanThreads()
 const deleting = usePlanThreadDelete()
 const flyout = useTaskFlyout()
@@ -31,7 +31,7 @@ const error = computed(() => actionError.value ?? detail.error.value?.message ??
 const session = detail.data
 const loadingPlan = detail.isPending
 const composer = ref<{ focus: () => void } | null>(null)
-const offline = computed(() => live.state.value.loaded && !live.state.value.runner?.online)
+const offline = computed(() => shell.loaded && !shell.runner?.online)
 const working = computed(() => Boolean(props.item.activeRunId))
 const cantSend = computed(() => busy.value || offline.value || working.value)
 // A question or an unread reply is answered here; a plan is approved instead
