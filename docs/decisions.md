@@ -818,7 +818,7 @@ Every agent action is attributed to the agent and session that made it, and show
 **Confirm-required** tools are the destructive or decision-making ones. They don't act directly: the tool posts a **confirm card** in the chat saying what will happen, and the action runs only when the human clicks **Confirm**. If the human doesn't click it, nothing happens. They cover:
 
 - **Deleting** a project or a task.
-- **Stop-all**, the kill switch on every run.
+- **Stop-all**, the kill switch on every run, and **setting an update hold**, which queues PM turns after work drains.
 - **Approving** tasks or designs.
 - **Inbox decisions**, such as resolving a Needs-you item.
 
@@ -840,10 +840,11 @@ Sessions can be **global** as well as tied to a project. A global session has **
 
 - **D9:** the PM's tools are no longer the short list there, and `propose_plan` is no longer the only way for the PM to change the board: it can create and edit tasks with its task tools. Plans stay the way to propose a body of work. Only a session tied to a project has a read-only checkout. **Unchanged:** the PM has no tool to merge or edit docs, its checkout stays read-only, and a turn runs when the human or another PM thread sends a message, or the human approves a design (COR-243). Child completion notifications are saved for the parent’s next turn; they do not start one.
 - **D10:** the PM can create tasks in Backlog of any kind, not only documentation tasks. The **Human only** transitions stay human: the PM can propose them on a confirm card, and the transition runs on the human's click with the human as its actor.
-- **D10 (COR-240):** Merged remains final for workflow and shipped code, but the PM may edit its metadata through update_task. The human PATCH route still rejects Merged edits with 409 task_merged, and the task UI stays read-only. Follow-up work remains a new task.
+- **D10 (COR-240):** Merged remains final for workflow and shipped code, but the PM may edit its metadata through update_task. Epic membership is fixed for PM edits once a task has a PR or is Merged (409 task_epic_locked), preserving D23’s review-mode lock. The human PATCH route still rejects Merged edits with 409 task_merged, and the task UI stays read-only. Follow-up work remains a new task.
 - **D10 (COR-298):** a task can't enter or leave the `spike` or `design` type once it has left Draft or Backlog; `PATCH` and `update_task` return `409 task_type_locked`. Those types have their own end states, so a retyped task could otherwise skip them. Changing between `task` and `bug` stays open in every status the task can be edited.
 - **D10 (COR-246):** the one exception is the PM's `answer` transition, Blocked → In progress, for answering a question or adding information. It keeps the review-round and failed-run counters, so it can't lift a cap, and `resolve` stays **Human only**.
 - **D11:** "the PM stays in Plan" no longer holds. The PM can read and act on the Inbox, with decisions on a confirm card, and its actions appear in Activity. **Unchanged:** it raises no Needs-you items of its own.
 - **D13:** "Plan sessions belong to one project" and "every PM session has a `projectId`" no longer hold, because global sessions have none. A project session's project is still locked once it has messages.
+- **D16 (COR-241, COR-323):** set_update_hold now requires human confirmation because it can queue every PM turn. The updating banner offers Lift through DELETE /api/update-hold, including after finishing has latched. clear_update_hold remains direct but cannot execute from a queued turn.
 - **D20:** design approval stays **Human only**. The PM can propose it on a confirm card, and the rest of D20's approval flow follows from the human's click as usual.
 - **PRD §7.2:** the PM still can't merge PRs, approve its own plan or modify canonical documentation. "Cannot bypass role permissions" now means the tools and rules above.

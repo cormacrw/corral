@@ -44,7 +44,6 @@ const TOOL_GOALS: Record<PmToolName, string> = {
   get_run: 'read a run',
   message_run: 'message a run',
   get_status: 'check Corral\'s status',
-  set_update_hold: 'hold Corral for an update',
   clear_update_hold: 'lift the update hold',
   list_inbox: 'read the Inbox',
   list_agents: 'list agents',
@@ -275,13 +274,6 @@ export class PmTools {
       case 'get_status':
         strict(pmDirectTools.get_status.input)
         return { result: { ...orchestrator.status, ...runner.status() }, summary: 'Checked Corral\'s status' }
-
-      case 'set_update_hold': {
-        strict(pmDirectTools.set_update_hold.input)
-        const held = orchestrator.status.updating
-        const busy = await orchestrator.holdForUpdate()
-        return { result: { ...orchestrator.status, busy }, summary: held ? 'Checked the update hold, which was already on' : 'Held Corral for an update' }
-      }
 
       case 'clear_update_hold': {
         strict(pmDirectTools.clear_update_hold.input)

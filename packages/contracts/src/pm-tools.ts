@@ -30,7 +30,7 @@ export const pmActionTools = {
   },
   update_task: {
     confirmRequired: false,
-    description: 'Edit a task in any status, except that a spike or design type is fixed once the task leaves Draft or Backlog. Criteria and dependencies replace the lists; preserve criterion IDs. paused pauses unleased tasks or resumes work; use stop_run with human confirmation for a leased task.',
+    description: 'Edit task metadata in any status. Epic membership is fixed once a PR opens or the task merges. A spike or design type is fixed once the task leaves Draft or Backlog. Criteria and dependencies replace the lists; preserve criterion IDs. paused pauses unleased tasks or resumes work; use stop_run with human confirmation for a leased task.',
     input: { taskRef: z.string().trim().min(1), ...patchTaskInput.shape, paused: z.boolean().optional() }
   },
   move_task: {
@@ -62,6 +62,11 @@ export const pmActionTools = {
     confirmRequired: true,
     description: 'Propose stopping a live run. Nothing stops until the human clicks Confirm in the conversation. The stopped run\'s task is paused so it doesn\'t restart.',
     input: { runId }
+  },
+  set_update_hold: {
+    confirmRequired: true,
+    description: 'Propose holding Corral for an update. Nothing changes until the human clicks Confirm. Running work drains, then PM turns queue too. The human can Lift the hold from the app banner; clear_update_hold cannot run once PM turns queue.',
+    input: {}
   },
   stop_all: {
     confirmRequired: true,
@@ -173,14 +178,9 @@ export const pmDirectTools = {
     description: 'Whether Corral is stopped or held for an update, and each runner\'s connection, capacity, commit and update state.',
     input: {}
   },
-  set_update_hold: {
-    confirmRequired: false,
-    description: 'Hold Corral for an update: nothing new starts and running work finishes. Returns how much is still busy. Lasts until clear_update_hold or the next server start.',
-    input: {}
-  },
   clear_update_hold: {
     confirmRequired: false,
-    description: 'Lift the update hold so work starts again.',
+    description: 'Lift the update hold so work starts again, while this turn can still run. Once PM turns queue, ask the human to use Lift in the updating banner.',
     input: {}
   },
   list_inbox: {

@@ -1,6 +1,8 @@
 import type { Inbox, PlanMessage, PlanSessionDetail, Project, RunEvent, RunJob } from '@corral/contracts'
 import { schema } from '@corral/db'
-import { eq } from 'drizzle-orm'
+import { eq, ne } from 'drizzle-orm'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { transcriptExcerpt } from './pm-tools.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
@@ -40,6 +42,7 @@ describe('PM tools for projects, runs and the factory', () => {
   let job: RunJob
   let session: PlanSessionDetail
   let project: Project
+  const transcript: unknown[] = []
 
   async function startSession(target: Project, text: string) {
     const created = await (await t.request('POST', '/api/plan/sessions', { projectId: target.id, text })).json() as PlanSessionDetail
@@ -50,18 +53,31 @@ describe('PM tools for projects, runs and the factory', () => {
 
   beforeAll(async () => {
     t = await createTestApp('pglite', { listen: true })
+    t.request = async (method, path, body) => {
+      const response = await fetch(`${t.server!.url}${path}`, { method, ...(body !== undefined && { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }) })
+      transcript.push({ request: { method, path, body }, response: { status: response.status, body: await response.clone().text() } })
+      return response
+    }
     runner = await FakeRunner.connect(t.server!.url)
-    project = await t.createProject()
+    project = await t.createProject({ repository: 'cormacrw/test-app', defaultBranch: 'main' })
     await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
     ;({ session, job } = await startSession(project, 'Look after the factory'))
   })
 
   afterAll(async () => {
+    if (process.env.CORRAL_PM_EVIDENCE_DIR) {
+      await mkdir(process.env.CORRAL_PM_EVIDENCE_DIR, { recursive: true })
+      await writeFile(join(process.env.CORRAL_PM_EVIDENCE_DIR, 'pm-hold-requests.json'), JSON.stringify(transcript, null, 2))
+    }
     runner?.close()
     await t?.close()
   })
 
-  const call = (tool: Parameters<FakeRunner['call']>[2], input: unknown = {}, via = job) => runner.call(via.runId, via.leaseEpoch, tool, input)
+  const call = async (tool: Parameters<FakeRunner['call']>[2], input: unknown = {}, via = job) => {
+    const response = await runner.call(via.runId, via.leaseEpoch, tool, input)
+    transcript.push({ request: { transport: 'runner WebSocket', tool, input }, response })
+    return response
+  }
   const result = async <T>(tool: Parameters<FakeRunner['call']>[2], input: unknown = {}, via = job) => {
     const response = await call(tool, input, via) as { ok: boolean, result: T, error?: string }
     expect(response, response.error).toMatchObject({ ok: true })
@@ -143,21 +159,44 @@ describe('PM tools for projects, runs and the factory', () => {
     expect(await result('get_status')).toMatchObject({ stopped: status.stopped, updating: status.updating, online: hub.online, protocol: hub.protocol, runners: [expect.objectContaining({ id: (status.runners as { id: string }[])[0]!.id })] })
   })
 
-  it('sets and clears the update hold, and shows a call that changed nothing', async () => {
-    expect(await result('set_update_hold')).toMatchObject({ updating: true })
+  it('requires confirmation before holding, then lets the human lift a latched hold', async () => {
+    await t.db.update(runs).set({ state: 'completed' }).where(ne(runs.role, 'pm'))
+    const proposed = await result<{ actionId: string, confirmationPending: boolean }>('set_update_hold')
+    expect(proposed.confirmationPending).toBe(true)
+    expect(await (await t.request('GET', '/api/status')).json()).toMatchObject({ updating: false })
+    const confirmed = await t.request('POST', `/api/plan/sessions/${session.id}/actions/${proposed.actionId}`, { decision: 'confirm' })
+    expect(await confirmed.json()).toMatchObject({ pendingAction: { status: 'confirmed' } })
+    expect(t.orchestrator.status.updating).toBe(true)
+    runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
+    await vi.waitFor(async () => {
+      const [ended] = await t.db.select().from(runs).where(eq(runs.id, job.runId))
+      expect(ended!.state).toBe('completed')
+    })
+    const queued = await (await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Wait for update' })).json() as PlanSessionDetail
+    await vi.waitFor(async () => {
+      const current = await (await t.request('GET', `/api/plan/sessions/${queued.id}`)).json() as PlanSessionDetail
+      queued.activeRunId = current.activeRunId
+      expect(queued.activeRunId).not.toBeNull()
+    })
+    await t.orchestrator.schedule()
+    const [held] = await t.db.select().from(runs).where(eq(runs.id, queued.activeRunId!))
+    expect(held).toMatchObject({ state: 'queued', pmJob: expect.any(Object) })
+    expect(await (await t.request('GET', `/api/runs/${queued.activeRunId}`)).json()).toMatchObject({ state: 'queued' })
+    expect(await (await t.request('GET', '/api/status')).json()).toMatchObject({ updating: true })
+    expect(await (await t.request('DELETE', '/api/update-hold')).json()).toMatchObject({ updating: false })
+    const assignment = await runner.next('run.assign', m => m.job.runId === queued.activeRunId)
+    transcript.push({ event: assignment })
+    job = assignment.job
+    session = queued
+    runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'after-update-hold' })
     expect(await result('clear_update_hold')).toMatchObject({ updating: false })
-    await result('clear_update_hold')
-    const activity = (await inbox()).activity
-    expect(activity.filter(a => a.preview === 'Held Corral for an update')).toHaveLength(1)
-    expect(activity.filter(a => a.preview === 'Lifted the update hold')).toHaveLength(1)
-    expect(activity.filter(a => a.preview.includes('already off'))).toHaveLength(1)
   })
 
   it('audits every call with the PM session and shows reads and failures in Activity', async () => {
     await result('get_status')
     await call('get_project', { project: 'no-such-project' })
     const rows = await t.db.select().from(auditLog).where(eq(auditLog.action, 'pm.tool_called'))
-    expect(rows.find(r => (r.detail as { tool: string }).tool === 'get_status')).toMatchObject({ actor: { sessionId: session.id }, detail: { sessionId: session.id, runId: job.runId, ok: true } })
+    expect(rows.find(r => (r.detail as { tool: string, runId: string }).tool === 'get_status' && (r.detail as { runId: string }).runId === job.runId)).toMatchObject({ actor: { sessionId: session.id }, detail: { sessionId: session.id, runId: job.runId, ok: true } })
     const activity = (await inbox()).activity
     const read = activity.find(a => a.preview === 'Checked Corral\'s status')
     expect(read).toMatchObject({ taskRef: null, sender: { name: 'PM', role: 'pm' } })
