@@ -50,6 +50,16 @@ async function report(job: RunJob, outcome: 'approved' | 'changes_requested') {
   return runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome, summary: outcome === 'approved' ? 'Checked API/UI contract and combined behavior; gates rerun without cache.' : 'UI sends the wrong search field; align it with the API.' })
 }
 
+it('opens the epic PR when its board contains a merged task and an Approved design', async () => {
+  const { epic, other } = await setup()
+  await t.db.update(schema.tasks).set({ type: 'design', status: 'approved' }).where(eq(schema.tasks.id, other.id))
+  await t.orchestrator.schedule()
+  const job = (await runner.next('run.assign', m => m.job.epicId === epic.id)).job
+  expect(job).toMatchObject({ role: 'reviewer', epicId: epic.id })
+  expect([...t.github.pulls.values()].some(p => p.head === epic.branch)).toBe(true)
+  expect(await t.request('GET', `/api/epics/${epic.id}`).then(r => r.json())).toMatchObject({ taskCount: 2, mergedCount: 2 })
+})
+
 it.each(['epic', 'each_task'] as const)('opens %s PR only after the last board task merges; integration approval alone exposes all tasks and evidence', async (mode) => {
   const { project, epic, task, other } = await setup(mode)
   await t.createTask(project.slug, { epicId: epic.id, title: 'Future backlog work' })

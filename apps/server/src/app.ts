@@ -111,6 +111,14 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     return task
   }
 
+  const approveDesignBuild = async (taskId: string, version?: number, note?: string) => {
+    plans.assertTurnPossible()
+    await orchestrator.assertPmRunPossible()
+    const versionId = await approveDesign(db, taskId, version, actor)
+    orchestrator.poke(await publishDependents(db, events, taskId))
+    await plans.startDesignBuild(versionId, note, actor)
+  }
+
   // A task by its ref, e.g. COR-29 (design/task.md page route)
   const findByRef = async (ref: string) => {
     const match = /^([A-Z]{2,5})-(\d+)$/i.exec(ref)
@@ -137,9 +145,13 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
         if (input.text) await addComment(db, taskId, { body: input.text, pinned: true }, actor)
         await transitionTask(db, taskId, { type: 'resolve', to: input.to }, actor)
         break
-      case 'approve':
-        await orchestrator.merges.humanApprove(taskId, actor)
+      case 'approve': {
+        const [row] = await db.select({ type: schema.tasks.type }).from(schema.tasks).where(eq(schema.tasks.id, taskId))
+        if (row?.type === 'design') {
+          await approveDesignBuild(taskId)
+        } else await orchestrator.merges.humanApprove(taskId, actor)
         break
+      }
       case 'request_changes':
         await transitionTask(db, taskId, { type: 'human_request_changes', feedback: input.text }, actor)
         break
@@ -362,7 +374,8 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       return c.body(null, 204)
     })
 
-    // Human review → Merged, after the gates are re-checked (design/inbox.md)
+    // Approve a mergeable task for the merge pass; spikes finish here.
+    // Designs must use version approval and are rejected by core.
     .post('/projects/:slug/tasks/:number/approve', async (c) => {
       const project = await findProjectBySlug(db, c.req.param('slug'))
       const taskId = await findTaskId(db, project.id, taskNumber(c.req.param('number')))
@@ -396,10 +409,7 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       if (!parsed.success) throw new ApiFailure(400, { code: 'invalid_input', issues: parsed.error.issues.map(i => ({ path: i.path.map(String), message: i.message })) })
       const project = await findProjectBySlug(db, c.req.param('slug'))
       const taskId = await findTaskId(db, project.id, taskNumber(c.req.param('number')))
-      plans.assertTurnPossible()
-      const versionId = await approveDesign(db, taskId, taskNumber(c.req.param('version')), actor)
-      orchestrator.poke(await publishDependents(db, events, taskId))
-      await plans.startDesignBuild(versionId, parsed.data.note || undefined, actor)
+      await approveDesignBuild(taskId, taskNumber(c.req.param('version')), parsed.data.note || undefined)
       return c.json(await publishTask(taskId))
     })
 

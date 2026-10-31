@@ -231,7 +231,10 @@ async function submit(message: string): Promise<boolean> {
     if (!inbox.value?.needsYou.some(i => i.id === actedOn.id)) {
       const remaining = inbox.value?.needsYou ?? []
       const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
-      void router.replace(next ? `/inbox/${next.id}` : '/inbox')
+      // Finish removing the old task query before selecting the next row.
+      // A live update can start that close before the action returns.
+      await flyout.close()
+      await router.replace(next ? `/inbox/${next.id}` : '/inbox')
     }
     return true
   } catch (e) {

@@ -50,6 +50,7 @@ There are three columns. The list divider can be resized (280–560px, default 3
   - Type-specific context:
     - **Human review:** the PR link (`#41`), passing-check badges, and a card of acceptance criteria. Each criterion shows a met icon, the reviewer’s note, screenshot/video/request cards, then inline markdown notes. Agent artifacts are collapsed separately; see [Evidence review](task.md#evidence-review-d21).
     - **Spikes always stop in Human review**, whatever their human-review flag says. They appear under Needs you and add one to its count. The message body renders the latest `## Findings` comment as markdown above the criteria verdicts and evidence. Desktop and mobile label approval **Accept findings**, keep **Request changes**, and hide PR links and check badges. The success toast and Resolved entry say **You accepted the findings**. The preview is the start of that comment; approval finishes the spike in Merged; requesting changes returns it to the developer with the feedback.
+    - **Designs** use **Approve design** on desktop and mobile. Approval marks the latest submitted version Approved, supersedes earlier versions and moves the task to Approved, then advances to the next item. There is no PR to merge; approval opens a Plan session and starts the PM’s build-planning turn.
     - **Blocked:** the reviewer's and developer's positions side by side (2 columns, `bg-muted`).
     - **Question:** the question itself. The answers live in the tray.
     - **Activity:** one link button (Open PR, Open task…).
@@ -60,7 +61,7 @@ There are three columns. The list divider can be resized (280–560px, default 3
 
     | Item type | Actions | Needs text |
     |---|---|---|
-    | Human review | ✓ Approve and merge (Accept findings for spikes) · ✎ Request changes | Request changes only |
+    | Human review | ✓ Approve and merge (Accept findings for spikes; Approve design for designs) · ✎ Request changes | Request changes only |
     | Blocked / Question | 💬 Clarify and continue · ↩ Send back to Backlog · 🗑 Delete task (`error`) | Clarify only |
     | Failed | ↻ Retry · ↩ Send back to Backlog · 🗑 Delete task (`error`) | None |
 

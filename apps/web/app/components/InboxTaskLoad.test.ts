@@ -34,13 +34,15 @@ async function mountInbox(type: 'human_review' | 'failed', taskRef?: string) {
   const item = inbox().needsYou.find(i => i.type === type && (taskRef ? i.taskRef === taskRef : tasks.find(t => t.id === i.taskId)?.type !== 'design'))!
   const params = vue.reactive({ itemId: item.id })
   vi.stubGlobal('useRoute', () => ({ params }))
-  vi.stubGlobal('useRouter', () => ({ replace: vi.fn(), push: vi.fn() }))
+  const router = { replace: vi.fn(), push: vi.fn() }
+  vi.stubGlobal('useRouter', () => router)
   vi.stubGlobal('useSeoMeta', vi.fn())
   vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(false) }))
   vi.stubGlobal('useMobileHeader', () => vue.ref(null))
   vi.stubGlobal('useToast', () => ({ add: vi.fn() }))
   vi.stubGlobal('usePlanThreadDelete', () => ({ pending: vue.ref([]), remove: vi.fn() }))
-  vi.stubGlobal('useTaskFlyout', () => ({ ref: vue.ref(null), epic: vue.ref(null), open: vi.fn(), close: vi.fn().mockResolvedValue(undefined) }))
+  const closeFlyout = vi.fn().mockResolvedValue(undefined)
+  vi.stubGlobal('useTaskFlyout', () => ({ ref: vue.ref(null), epic: vue.ref(null), open: vi.fn(), close: closeFlyout }))
   const listeners: ((event: { type: string }) => void)[] = []
   vi.stubGlobal('useLive', () => ({
     state: vue.ref({ agents, projects, loaded: true, runner: { online: true } }),
@@ -68,7 +70,7 @@ async function mountInbox(type: 'human_review' | 'failed', taskRef?: string) {
     return sent
   }
   const alert = () => wrapper.find('[data-alert]')
-  return { wrapper, item, composer, submit, alert, refresh: () => listeners.forEach(l => l({ type: 'task.updated' })) }
+  return { wrapper, item, composer, submit, alert, router, closeFlyout, refresh: () => listeners.forEach(l => l({ type: 'task.updated' })) }
 }
 
 it('shows the error instead of loading forever and keeps approval blocked when the task fails to load', async () => {
@@ -98,12 +100,12 @@ it('leaves the actions that do not need the task available after a failed load',
   }
 })
 
-it('drops the approve choice once the loaded task is a design', async () => {
-  const { wrapper, composer, submit } = await mountInbox('human_review', 'COR-41')
+it('offers Approve design once the loaded task is a design', async () => {
+  const { wrapper, item, composer, submit } = await mountInbox('human_review', 'COR-41')
   try {
-    expect(composer().props('submitLabel')).toBe('')
+    expect(composer().props('submitLabel')).toBe('Approve design')
     await submit()
-    expect(api.inbox.act).not.toHaveBeenCalled()
+    expect(api.inbox.act).toHaveBeenCalledWith((item as { taskId: string }).taskId, expect.objectContaining({ action: 'approve' }))
   } finally {
     wrapper.unmount()
   }
@@ -131,6 +133,36 @@ it('recovers through Retry, and keeps the error while a live refresh fetches aga
     expect(composer().props('busy')).toBe(false)
     expect(composer().props('disabled')).toBe(false)
     expect(composer().props('submitLabel')).toMatch(/Approve and merge|Accept findings/)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('labels a design approval and waits for the old flyout to close before advancing', async () => {
+  const { wrapper, item, composer, submit, alert, router, closeFlyout } = await mountInbox('human_review')
+  try {
+    const original = tasks.find(t => t.id === (item as { taskId: string }).taskId)!
+    vi.mocked(api.tasks.byRef).mockResolvedValue({ ...original, type: 'design', acceptanceCriteria: [] })
+    await alert().find('button').trigger('click')
+    await flushPromises()
+    expect(composer().props('submitLabel')).toBe('Approve design')
+    let finishClose = () => {}
+    const closed = new Promise<void>((resolve) => {
+      finishClose = resolve
+    })
+    closeFlyout.mockReturnValue(closed)
+    const remaining = structuredClone(inbox())
+    remaining.needsYou = remaining.needsYou.filter(i => i.id !== item.id)
+    vi.mocked(api.inbox.get).mockResolvedValue(remaining)
+    const sent = submit()
+    await flushPromises()
+    expect(closeFlyout).toHaveBeenCalled()
+    expect(router.replace).not.toHaveBeenCalled()
+    finishClose()
+    expect(await sent).toBe(true)
+    const position = inbox().needsYou.findIndex(i => i.id === item.id)
+    const next = remaining.needsYou[Math.min(position, remaining.needsYou.length - 1)]!
+    expect(router.replace).toHaveBeenCalledWith(`/inbox/${next.id}`)
   } finally {
     wrapper.unmount()
   }

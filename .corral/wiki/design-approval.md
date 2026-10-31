@@ -14,8 +14,23 @@ Migration `0040_late_colossus.sql` only adds the enum value. It does not repair 
 - Approved version with In progress: inspect the history for an intentional reopening; never automatically mark done.
 - Approved version with any other legacy status (including Human review, Ready to merge or Merged): review individually. Version approval alone is not permission to rewrite task history.
 
-Any repair must be a separate, explicitly reviewed migration with the inventory, chosen task IDs, expected old statuses/version IDs, and the human's decision attached. No repair is included here. The deployed database must be inventoried by its operator; development data cannot establish which production rows need repair.
+Any bulk repair must be a separate, explicitly reviewed migration with the inventory, chosen task IDs, expected old statuses/version IDs, and the human's decision attached. No repair is included here. The deployed database must be inventoried by its operator; development data cannot establish which production rows need repair. A human can recover one task at a time; see below.
 
 A legacy design already in `merged` counts as unfinished under the type-aware rule; its dependents wait until it is repaired through the reviewed migration policy above.
 
-Inbox design reviews link to the task's design panel for version approval and Plan creation. Type changes are locked in Approved, Ready to merge and Merged. Epic PR readiness and live epic progress count type-aware completion; Approved designs leave open-work counts.
+Type changes are locked in Approved, Ready to merge and Merged. Epic PR readiness and live epic progress count type-aware completion; Approved designs leave open-work counts.
+
+## Approving from the Inbox (COR-320)
+
+The Inbox's **Approve design** action (desktop and mobile) approves the latest submitted version under the task lock, through the same path as the version endpoint: approve the version, supersede earlier versions, move the task to Approved, and open a Plan session with the human's message. The PM gets a turn to propose the build with pins to that version. **Review design** still links to the task's design panel. The Inbox waits for its old task panel to close before advancing to the next Needs-you item, so a live refresh cannot cancel that navigation. Approval preflights runner and PM availability (including pause and stop controls) before changing the version.
+
+`human_approve` on a design only comes from `approveDesign`; the generic approve path refuses designs, because it can't approve a version. The merge pass skips designs even if they have PR metadata.
+
+## Recovering one task by hand, including COR-190 v5
+
+These never run on their own: each is a human's explicit approval of one task, recorded in the audit log with the task transition and the version.
+
+- **Ready to merge** (left by the old Inbox path): open the task page, select the submitted version (v5 for COR-190) and click its approve button. The version endpoint accepts this status. A `human_approve` audit entry alone doesn't identify today's latest version, which may have been submitted later.
+- **Human review whose latest version is already approved** (a task-page approval from before the Approved status): if no version is submitted, the Inbox action, the version endpoint and the task page finish the task in Approved, reusing its build Plan session or starting one if absent. A newer submitted version always takes priority.
+
+Approval needs an online runner to start the PM's build session.

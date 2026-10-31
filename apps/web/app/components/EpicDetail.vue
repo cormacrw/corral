@@ -359,7 +359,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
             v-else-if="epic.reviewMode !== 'direct'"
             class="text-xs text-muted"
           >
-            The epic PR opens once every task has merged.
+            The epic PR opens once every task is complete.
           </p>
         </section>
 

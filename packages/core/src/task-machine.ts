@@ -214,6 +214,7 @@ export function transition(
       return ok({ ...task, status: 'human_review' })
 
     case 'human_approve':
+      // Only approveDesign sends this for a design, with the version it approves.
       return ok({ ...task, status: task.type === 'design' ? 'approved' : task.type === 'spike' ? 'merged' : 'ready_to_merge' })
 
     case 'head_moved':
@@ -263,6 +264,7 @@ export function availableEvents(task: TaskState, actor: Actor): TaskEventType[] 
   if (type === null) return []
   return (Object.keys(TRANSITION_RULES) as TaskEventType[]).filter((event) => {
     const rule = TRANSITION_RULES[event]
+    if (event === 'human_approve' && task.type === 'design') return false
     return rule.from.includes(task.status) && rule.actors.includes(type) && (task.status !== 'approved' || task.type === 'design')
   })
 }

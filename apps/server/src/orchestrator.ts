@@ -167,15 +167,21 @@ export class Orchestrator implements RunnerHandlers {
     this.sweep = new WorktreeSweep({ db: deps.db, runner: deps.runner, ...(deps.now && { now: deps.now }) })
   }
 
+  // Preflight design approval before it changes the version or task.
+  async assertPmRunPossible() {
+    if (this.#stopped) throw new ApiFailure(409, { code: 'conflict', constraint: 'corral_stopped' })
+    const [pm] = await this.#d.db.select().from(agents).where(eq(agents.role, 'pm')).orderBy(asc(agents.createdAt)).limit(1)
+    if (!pm) throw new ApiFailure(409, { code: 'conflict', constraint: 'no_pm_agent' })
+    if (pm.paused || (pm.pausedUntil && pm.pausedUntil > this.#now())) throw new ApiFailure(409, { code: 'conflict', constraint: 'pm_paused' })
+    return pm
+  }
+
   // A PM turn (D9): a run with no task and no lease, fenced by its own epoch.
   // It starts right away; it only waits as `queued`, holding its job, while
   // the PM is paused, the runner can't take it, or an update is finishing (D13, D16).
   async startPmRun(session: PlanSessionRow, job: Omit<PmRunJob, 'runId' | 'runNumber' | 'leaseEpoch'>): Promise<string> {
     const { db } = this.#d
-    if (this.#stopped) throw new ApiFailure(409, { code: 'conflict', constraint: 'corral_stopped' })
-    const [pm] = await db.select().from(agents).where(eq(agents.role, 'pm')).orderBy(asc(agents.createdAt)).limit(1)
-    if (!pm) throw new ApiFailure(409, { code: 'conflict', constraint: 'no_pm_agent' })
-    if (pm.paused || (pm.pausedUntil && pm.pausedUntil > this.#now())) throw new ApiFailure(409, { code: 'conflict', constraint: 'pm_paused' })
+    const pm = await this.assertPmRunPossible()
     const [run] = await db.insert(runs).values({
       agentId: pm.id, projectId: job.projectId, taskId: null, role: 'pm', leaseEpoch: 1, planSessionId: session.id, pmJob: job, queuedAt: this.#now()
     }).returning()

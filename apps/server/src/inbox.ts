@@ -178,6 +178,12 @@ async function humanReviewNote(db: Executor, task: typeof tasks.$inferSelect): P
       .orderBy(desc(comments.createdAt), desc(comments.id)).limit(1)
     return findings?.body ?? ''
   }
+  if (task.type === 'design') {
+    const [version] = await db.select({ version: schema.designVersions.version }).from(schema.designVersions)
+      .where(and(eq(schema.designVersions.taskId, task.id), eq(schema.designVersions.status, 'submitted')))
+      .orderBy(desc(schema.designVersions.version)).limit(1)
+    return `Design${version ? ` v${version.version}` : ''} is ready for your approval. Approving opens a Plan session for the build.`
+  }
   const [review] = await db.select({ criteria: reviews.criteria }).from(reviews)
     .where(and(eq(reviews.taskId, task.id), eq(reviews.verdict, 'approved')))
     .orderBy(desc(reviews.createdAt)).limit(1)

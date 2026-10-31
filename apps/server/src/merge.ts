@@ -81,6 +81,7 @@ export class MergeOrchestrator {
       .orderBy(asc(tasks.updatedAt))
     for (const { task, project } of waiting) {
       if (this.stopped) return
+      if (task.type === 'design') continue
       if (await isEpicRebaseTask(this.#d.db, task)) await this.#settleEpicRebase(task)
       else if (task.prNumber && task.headSha) await this.#advanceOnce(task, project)
     }
