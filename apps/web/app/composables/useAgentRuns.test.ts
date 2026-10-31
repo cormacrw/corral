@@ -1,10 +1,15 @@
 // @vitest-environment happy-dom
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises } from '@vue/test-utils'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
+import { mountWithQuery } from '~/queries/mount-with-query'
 import { agents, runs } from '~/prototype/fixtures'
 import { api } from './useApi'
 import { useAgentRuns } from './useAgentRuns'
+
+vi.mock('~/queries/shell', () => ({
+  shell: () => ({ agents: { data: vue.ref(agents) }, projects: { data: vue.ref([]) } })
+}))
 
 vi.mock('./useApi', () => ({ api: { runs: { list: vi.fn(), transcript: vi.fn() } } }))
 
@@ -15,21 +20,17 @@ it('keeps the runs list and ignores an old transcript after switching runs', asy
   const list = runs.filter(r => r.agentId === agent.id)
   expect(list.length).toBeGreaterThan(1)
   const route = vue.reactive({ params: { name: agent.name, runId: list[0]!.id } })
-  const watchRun = vi.fn()
   for (const [key, value] of Object.entries(vue)) vi.stubGlobal(key, value)
   vi.stubGlobal('useRoute', () => route)
-  vi.stubGlobal('useLive', () => ({
-    state: vue.ref({ agents, projects: [] }), watchRun, subscribe: () => () => {}
-  }))
   vi.stubGlobal('useToast', () => ({ add: vi.fn() }))
   vi.mocked(api.runs.list).mockResolvedValue(list)
-  let finishOld!: (value: never[]) => void
+  let finishOld!: (value: import('@corral/contracts').RunEvent[]) => void
   vi.mocked(api.runs.transcript).mockImplementationOnce(() => new Promise((resolve) => {
     finishOld = resolve
   }))
-    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([{ type: 'message', text: 'new run' }])
   let view!: ReturnType<typeof useAgentRuns>
-  const wrapper = mount(vue.defineComponent({
+  const { wrapper } = mountWithQuery(vue.defineComponent({
     setup() {
       view = useAgentRuns({ autoSelect: () => true })
       return () => null
@@ -42,10 +43,10 @@ it('keeps the runs list and ignores an old transcript after switching runs', asy
     await flushPromises()
     expect(view.runs.value).toBe(originalList)
     expect(api.runs.list).toHaveBeenCalledTimes(1)
-    expect(watchRun).toHaveBeenCalledExactlyOnceWith(list[1]!.id, [])
-    finishOld([])
+    expect(view.events.value).toEqual([{ type: 'message', text: 'new run' }])
+    finishOld([{ type: 'message', text: 'old run' }])
     await flushPromises()
-    expect(watchRun).toHaveBeenCalledTimes(1)
+    expect(view.events.value).toEqual([{ type: 'message', text: 'new run' }])
     expect(view.selected.value?.id).toBe(list[1]!.id)
   } finally {
     wrapper.unmount()
