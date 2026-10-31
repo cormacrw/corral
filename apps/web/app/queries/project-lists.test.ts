@@ -128,7 +128,8 @@ describe('shared project lists', () => {
     projects.value = client.getQueryData<Project[]>(keys.projects.list())!
     await flushPromises()
     expect(shell.wrapper.text()).toBe('')
-    expect(client.getQueryData(keys.tasks.list(project.slug))).toEqual([])
+    expect(board.wrapper.text()).toBe('')
+    expect(client.getQueryData(keys.tasks.list(project.slug))).toBeUndefined()
     board.wrapper.unmount()
     shell.wrapper.unmount()
   })
