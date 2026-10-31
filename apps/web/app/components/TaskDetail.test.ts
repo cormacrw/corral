@@ -35,6 +35,8 @@ const composer = vue.defineComponent({
   setup: () => () => vue.h('form')
 })
 
+const auditActivity = vue.defineComponent({ name: 'AuditActivity', props: ['text'], setup: () => () => vue.h('p') })
+
 beforeEach(() => {
   for (const name of ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount', 'useTemplateRef'] as const) vi.stubGlobal(name, vue[name])
   vi.stubGlobal('useRoute', () => ({ query: {} }))
@@ -58,7 +60,7 @@ async function mountDetail() {
   const wrapper = mount(TaskDetail, {
     props: { taskRef: 'COR-1', mode: 'page' },
     shallow: true,
-    global: { plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }]], components: { PromptComposer: composer, UTabs: tabs }, stubs: { PromptComposer: false, UTabs: false, teleport: true } }
+    global: { plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }]], components: { PromptComposer: composer, UTabs: tabs, AuditActivity: auditActivity }, stubs: { PromptComposer: false, UTabs: false, AuditActivity: false, teleport: true } }
   })
   await flushPromises()
   return wrapper
@@ -73,6 +75,12 @@ it('opens the next task on the default tab', async () => {
   await wrapper.setProps({ taskRef: 'COR-2' })
   await flushPromises()
   expect(activityTabs().props('modelValue')).toBe('activity')
+})
+
+it('words a PM pause in the Activity', async () => {
+  vi.mocked(api.tasks.history).mockResolvedValue([{ id: 1, action: 'task.paused', detail: {}, createdAt: new Date().toISOString(), actor: { kind: 'agent', role: 'pm', runId: 'r1' } }] as never)
+  const wrapper = await mountDetail()
+  expect(wrapper.findComponent(auditActivity).props('text')).toBe('paused the task')
 })
 
 it('drops a save that finishes after moving to another task', async () => {

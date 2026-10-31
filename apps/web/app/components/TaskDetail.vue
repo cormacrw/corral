@@ -420,6 +420,7 @@ function historyText(entry: AuditEntry): string {
     case 'design.approved': return `approved design v${String(d.version)}`
     case 'task.deleted': return 'deleted the task'
     case 'run.stopped': return 'stopped the run'
+    case 'task.paused': return 'paused the task'
     case 'task.resumed': return 'resumed the task'
     default: return entry.action
   }

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { AuditEntry } from '@corral/contracts'
+import { ROLE, timeAgo } from '~/utils/labels'
 
 const props = defineProps<{ entry: AuditEntry, text: string }>()
 const fieldLabels: Record<string, string> = { acceptanceCriteria: 'acceptance criteria', humanReview: 'human review', epicId: 'epic', dependsOn: 'dependencies', reviewMode: 'review mode' }
@@ -11,7 +12,7 @@ const sessionId = computed(() => {
 const author = computed(() => {
   const actor = props.entry.actor
   if (actor.kind === 'human') return actor.viaPm ? 'PM · confirmed by you' : 'You'
-  if (actor.kind === 'agent') return actor.role === 'pm' ? 'PM' : actor.role === 'developer' ? 'Developer' : 'Reviewer'
+  if (actor.kind === 'agent') return ROLE[actor.role]
   return 'Corral'
 })
 </script>
