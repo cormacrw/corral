@@ -6,9 +6,11 @@ Only `app/queries/` talks to the server. Lint fails on any other import of `useA
 
 ## Shell data
 
-`shell.ts` holds one long-lived observer each for projects, agents, runner, status, profile, Plan sessions and the inbox count. `app.vue` starts it after the first navigation. Because those observers never unmount, navigating refetches none of them, whatever `staleTime` says; they refetch on events, window focus and reconnect. Pages read them through `useShell()`, a reactive object (`shell.projects`, `shell.loaded`, ...) that is empty until the shell starts. It's read-only: change this data with a mutation, or `setQueryData` for an optimistic edit as `ConcurrencyStepper` does.
+`shell.ts` holds one long-lived observer each for projects, agents, runner, status, profile, Plan sessions and the inbox count. `app.vue` starts it after the first navigation. Because those observers never unmount, navigating refetches none of them, whatever `staleTime` says; they refetch on events and reconnect. Pages read them through `useShell()`, a reactive object (`shell.projects`, `shell.loaded`, ...) that is empty until the shell starts. It's read-only: change this data with a mutation, or `setQueryData` for an optimistic edit as `ConcurrencyStepper` does.
 
-The setup middleware runs before the shell starts and makes a single `api.projects.list()`, caching the list only if it is an array. It doesn't use the query's retries, so an unreachable server doesn't hold up a cold launch, and the shell then finds the list fresh and doesn't ask again.
+The setup middleware runs in the first navigation, before mount. Only `/` and `/setup` wait for it: they make a single `fetchProjectsOnce()`, caching the list only if it is an array, without the query's retries, so an unreachable server doesn't hold up a cold launch. Any other path opens at once and checks in the background with `fetchQuery(projectsQuery())`, which the shell's observer shares, then redirects from wherever the human is by then. `app/spa-loading-template.html` holds the shell's background until mount, reading `--ui-bg` so it follows colour mode and the dark neutral.
+
+Refetch on window focus is off. On return `useLive` checks the stream instead: if it isn't open, or nothing (including the server's `ping`) has arrived for two heartbeats, it reconnects, and reconnecting invalidates everything. A phone asleep can leave `readyState` open with a dead socket, which is why the heartbeat counts. Query data is shallow (`shallow: true` in the defaults, and on each `useQueries`), so replace it whole and never mutate it.
 
 `reloadShell()` refetches all of it, for a human pressing Retry or Reconnect. `connectQueries` marks a `plan.session` for the open thread read before writing it, so the cache gets the read session. `usePendingPlan` gets every event there too, with or without a conversation mounted; the client plugin passes both in.
 
@@ -18,9 +20,11 @@ The setup middleware runs before the shell starts and makes a single `api.projec
 
 Events reach the query with or without an observer, so a run you switch away from keeps growing and shows at once when you come back. `useAgentRuns` and `PlanConversation` read the same `runTranscriptQuery`.
 
+A live run's lines are buffered for a frame and merged (`createLineBuffer` in `live.ts`), or written at once in a hidden tab, which has no frames. The transcript query has no structural sharing. `RunTranscript` folds in only new lines with `transcriptFold`, which starts over if the list isn't the last one plus more.
+
 ## Polling
 
-Pull requests have no event for CI or base branch changes, so `pullRequestsQuery` sets `refetchInterval` to 30 s. TanStack skips the tick while the tab is hidden (`document.visibilityState`, through `focusManager`), and coming back refetches if the data is older than `staleTime`. Other data shouldn't poll.
+Pull requests have no event for CI or base branch changes, so `pullRequestsQuery` sets `refetchInterval` to 30 s. TanStack skips the tick while the tab is hidden (`document.visibilityState`, through `focusManager`), and coming back refetches if the data is older than `staleTime`: it sets `refetchOnWindowFocus` itself, the one query that does. Other data shouldn't poll.
 
 ## Project lists
 
@@ -28,19 +32,23 @@ Pull requests have no event for CI or base branch changes, so `pullRequestsQuery
 
 Task events update loaded lists immediately. EpicDetail derives prerequisite and blocked-epic progress from the shared tasks with `epicWithLiveCounts`, so task creation, moves and deletion update the counts and waiting alert without needing an `epic.updated` event. Drafts are excluded both on fetch and on event writes, since they live only in their plan. Deleting a project empties its cached lists and removes its observers/search entries by deriving those from the current project list.
 
-Board/Backlog and their task/epic flyouts use `defineMutation` for task creation, patching, transitions and deletion, epic patching and epic dependencies. Desktop drag moves and task Status actions (including mobile) use `moveTask` on top of the transition mutation: cancel an older list fetch, optimistically move the single card, then invalidate on success or restore just that card on rejection. A newer event for the card wins over rollback; other cards' live changes are preserved. Drag targets follow D10's existing human actions, and Board filters remain in the URL.
+Board/Backlog and their task/epic flyouts use `defineMutation` for task creation, patching, transitions and deletion, epic patching and epic dependencies. Desktop drag moves and task Status actions (including mobile) use `moveTask` on top of the transition mutation: cancel an older list fetch, optimistically move the single card, then take the response on success or restore just that card on rejection. If it cancelled a fetch, it refetches the list afterwards. A newer event for the card wins over rollback; other cards' live changes are preserved. Drag targets follow D10's existing human actions, and Board filters remain in the URL.
 
 ## Task and epic details
 
-`TaskDetail` reads the task, comments, history, evidence, reviews and runs as separate queries, and `DesignReview` reads the designs; `EpicDetail` reads `epicQuery`. Until a task's own entry loads, `listedTask` shows its copy from a project list as placeholder data, so opening a task from the Board shows no skeleton. Reopening within the 30-minute cache lifetime shows the cached entries at once. Past `staleTime` they refetch behind that, and only a cold-load failure shows the error, with Retry refetching what failed.
+A listed task is a whole task, so `seededTaskQuery` shows the row as placeholder data while its own copy loads, and side queries start straight away. `useTaskPrefetch` fetches the chunks, task and comments when a mouse rests on a row.
 
-A `comment.created` event is written into the comments and invalidates nothing, since a comment adds no audit entry. Don't add its history or evidence back: only comments on a task that isn't cached (so no ref to find) fall back to `keys.tasks.details()`. `run.updated` refreshes the run's task, because a run's end changes its history and can add evidence, reviews or a design version. `keys.tasks.detail(ref)` covers the task's side queries, so invalidate it only for something that changes them.
+`AsyncTaskDetail`, `AsyncEpicDetail`, `AsyncEpicGraph` and `AsyncTaskDescription` load Tiptap and Vue Flow when first shown, without holding up the page as a `Lazy` component would. Values from `@corral/contracts` come from its `/client` entry, because the main one runs every zod schema on load; lint enforces this.
+
+`TaskDetail` reads the task, comments, history, evidence, reviews and runs as separate queries, and `DesignReview` reads the designs; `EpicDetail` reads `epicQuery`. Reopening within the 30-minute cache lifetime shows the cached entries at once. Past `staleTime` they refetch behind that, and only a cold-load failure shows the error, with Retry refetching what failed.
+
+A `comment.created` event is written into the comments and invalidates nothing, since a comment adds no audit entry. Don't add its history or evidence back: only comments on a task that isn't cached (so no ref to find) fall back to `keys.tasks.details()`. `run.updated` refreshes the run's task, because a run's end changes its history and can add evidence, reviews or a design version. `keys.tasks.detail(ref)` covers the task's side queries, so invalidate it only for something that changes them. `run.updated` also places the run in every cached run list by its filter, so those lists don't refetch.
 
 `commentOnTask` shows a `pending-` entry straight away. `withComment` replaces it, whichever of the response and the event comes first, and a failure removes it. `TaskDetail` empties the box when sending and puts the text back on failure; a failure after moving to another task is held until you return to that task, for as long as the component stays mounted.
 
 `writeTask` also writes the task into its cached epic details, so an open epic's list and graph follow status changes at once. It finds them through `task.epicId` and `cache.epicsWith`, the second because a task that left an epic no longer names it. The epic then refetches through the queue, for the fields only the server derives, such as `reviewModeLocked`.
 
-Task patches, transitions, resume and design approval write their response into the task's detail entry before invalidating `changed`, so the open task doesn't wait for the refetch. `actOnInboxItem` does the same when it returns a task, and `reviewEpic` covers the Inbox's epic actions.
+Task patches, transitions, resume and design approval finish on their response: `writeTaskResponse` puts it wherever the event would, unless the cache already holds something newer, and only the Inbox refreshes, without being waited for. History, evidence and the rest follow from the task's event. `actOnInboxItem` does the same when it returns a task, and waits for the Inbox because `moveToNext` needs it fresh, and `reviewEpic` covers the Inbox's epic actions.
 
 `uploadAttachment` is the only way images upload, from `PromptComposer` and the description editor.
 
@@ -76,7 +84,7 @@ export const patchEpic = defineMutation<Epic, { id: string, input: PatchEpicInpu
 const patch = useMutation(patchEpic)
 ```
 
-`invalidates` is a list of keys, or a function of the result and variables. An optional `write(client, data, variables)` runs first, for what a refetch can't do, such as dropping a removed project. It runs only on success, at once rather than through the event queue, and `isPending` lasts until the refetch ends. On failure nothing is invalidated, `mutateAsync` rejects and `error` is set.
+`invalidates` is a list of keys, or a function of the result and variables, and the mutation waits for those refetches. `refreshes` takes the same form for data the screen isn't waiting on. An optional `write(client, data, variables)` runs first, for what a refetch can't do, such as dropping a removed project. It runs only on success, at once rather than through the event queue, and `isPending` lasts until the refetch ends. On failure nothing is invalidated, `mutateAsync` rejects and `error` is set.
 
 ## Add a dependency
 
