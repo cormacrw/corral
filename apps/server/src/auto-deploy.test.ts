@@ -408,6 +408,13 @@ describe('auto-deploy.sh deciding what to do', { timeout: 30_000 }, () => {
       expect(await log()).toEqual([])
     })
 
+    it('runs under the lock auto-deploy.sh passes down instead of waiting on its parent', async ({ skip }) => {
+      if (!hasFlock) skip('needs flock from util-linux, which macOS does not have')
+      const script = 'exec 9>.corral/deploy/lock; flock -n 9; CORRAL_BACKUP_LOCK_WAIT=0 CORRAL_BACKUP_MIN_FREE_MB=0 scripts/deploy/backup.sh'
+      await exec('bash', ['-c', script], { cwd: checkout, env: { ...process.env, PATH: `${dir}/bin:${process.env.PATH}`, FAKE: dir } })
+      expect(await backups()).toHaveLength(2)
+    })
+
     it('waits for the deploy lock and gives up rather than running during a deploy', async ({ skip }) => {
       if (!hasFlock) skip('needs flock from util-linux, which macOS does not have')
       const lock = join(checkout, '.corral/deploy/lock')

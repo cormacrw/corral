@@ -206,7 +206,7 @@ fi
 if [ "$(cat "$state_dir/backed-up" 2>/dev/null || true)" != "$remote_sha" ] \
   && { [ -z "$deployed_sha" ] || ! git diff --quiet "$deployed_sha" "$remote_sha" -- packages/db/migrations 2>/dev/null; }; then
   log "migrations may have changed; backing up first"
-  CORRAL_DEPLOY_LOCK_HELD=1 scripts/deploy/backup.sh "pre-${remote_sha:0:7}" || { log "backup failed; not deploying"; exit 1; }
+  scripts/deploy/backup.sh "pre-${remote_sha:0:7}" || { log "backup failed; not deploying"; exit 1; }
   echo "$remote_sha" >"$state_dir/backed-up"
 fi
 

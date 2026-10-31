@@ -20,9 +20,10 @@ mkdir -p "$backup_dir" .corral/deploy
 
 log() { echo "$(date +%Y-%m-%dT%H:%M:%S%z) $*"; }
 
-# auto-deploy.sh already holds the lock when it calls this. A deploy can wait
-# an hour on running work, so the nightly run waits it out rather than failing.
-if [ "${CORRAL_DEPLOY_LOCK_HELD:-}" != 1 ]; then
+# auto-deploy.sh holds the lock on descriptor 9 and passes it down; taking it
+# again here would wait on our own parent. A deploy can wait an hour on running
+# work, so the nightly run waits it out rather than failing.
+if ! { : >&9; } 2>/dev/null; then
   exec 9>.corral/deploy/lock
   flock -w "${CORRAL_BACKUP_LOCK_WAIT:-7200}" 9 || { log "a deploy held the lock too long; not backing up"; exit 1; }
 fi
