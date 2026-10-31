@@ -1,5 +1,5 @@
 import { isTaskDone } from '@corral/core'
-import { AGENT_RUNTIMES, type Agent, type AgentRuntime, type CliStatus, type Epic, type RunnerInfo, type RunnerRole, type RunnerStatus, type InboxItem, type PlanStatus, type Project, type Run, type Task } from '@corral/contracts'
+import { AGENT_RUNTIMES, type Agent, type AgentRuntime, type AuditEntry, type CliStatus, type Epic, type RunnerInfo, type RunnerRole, type RunnerStatus, type InboxItem, type PlanStatus, type Project, type Run, type Task } from '@corral/contracts'
 import type { AgentRole, DesignVersionStatus, EpicReviewMode, EpicReviewState, RunOutcome, RunState, TaskPriority, TaskStatus } from '@corral/core'
 
 export type Color = 'primary' | 'secondary' | 'success' | 'info' | 'warning' | 'error' | 'neutral'
@@ -74,6 +74,35 @@ export const EPIC_STATUS_TEXT: Record<Color, string> = {
 
 // The counts an epic should show, from live tasks: the server only sends an
 // epic again when the epic itself changes
+// Epic PR audit events, worded to follow the actor's name in the Activity tab.
+const EPIC_PR_HISTORY: Record<string, string> = {
+  opened: 'opened the epic PR',
+  review_started: 'started the epic integration review',
+  approved: 'approved the epic PR',
+  changes_requested: 'requested changes on the epic PR',
+  human_approved: 'approved the epic PR',
+  human_changes_requested: 'requested changes on the epic PR',
+  rebase_requested: 'asked to rebase the epic PR onto the target branch',
+  rebased: 'rebased the epic PR; CI runs again',
+  conflict: 'found a conflict on the epic PR',
+  rebase_handed_off: 'handed the epic PR rebase to a developer',
+  ci_failed: 'saw CI fail on the epic PR',
+  merge_refused: 'stopped retrying after GitHub refused the epic PR merge',
+  closed: 'saw the epic PR closed on GitHub',
+  merged: 'merged the epic PR'
+}
+
+// Everything listEpicHistory returns: the audit rows whose detail has the epicId.
+export function epicHistoryText(entry: Pick<AuditEntry, 'action' | 'detail'>): string {
+  const d = entry.detail
+  switch (entry.action) {
+    case 'epic.updated': return `edited ${(d.changed as string[] | undefined)?.join(', ') ?? 'the epic'}`
+    case 'merge.refused': return `reported GitHub refused the merge: ${String(d.message)}`
+    case 'epic.pr': return [EPIC_PR_HISTORY[String(d.event)] ?? 'updated the epic PR', d.summary].filter(Boolean).join(': ')
+    default: return 'updated the epic'
+  }
+}
+
 export function epicWithLiveCounts<E extends Epic>(epic: E, tasks: Pick<Task, 'epicId' | 'status' | 'type'>[]): E {
   const counted = tasks.filter(t => t.epicId === epic.id && t.status !== 'draft' && t.status !== 'backlog')
   return { ...epic, taskCount: counted.length, mergedCount: counted.filter(isTaskDone).length }

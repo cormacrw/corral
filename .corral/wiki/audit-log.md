@@ -15,3 +15,6 @@ action, instead of writing `detail->>'to'` by hand.
 
 Add new shapes to `readAudit` rather than migrating stored rows.
 `GET .../history` still returns details as stored.
+
+The epic Activity tab lists every row whose detail has that `epicId`, so an action
+that stores `epicId` also needs wording in `epicHistoryText` (`apps/web/app/utils/labels.ts`).
