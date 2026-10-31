@@ -2,9 +2,17 @@
 
 The `sweep_worktrees` setup job (`sweepWorktrees` in
 `apps/runner/src/workspace.ts`) removes folders under `<dataDir>/worktrees/`
-outside the job's keep list. Only `<uuid>`, `<uuid>-review` and
-`pm-<uuid>-<uuid>` names are candidates; a looser pattern can't tell a task
-folder from anything else.
+outside the job's keep list. Only `<uuid>`, `<uuid>-review`,
+`epic-<uuid>-review` and `pm-<uuid>-<uuid>` names are candidates; a looser
+pattern can't tell a task folder from anything else. `keepEpicIds` is optional
+for older servers, and without it epic checkouts are left alone.
+
+The job also clears `scratch/` and `spool/`, which it doesn't report: a Plan
+session's scratch folder goes with its session, and a `<uuid>` run's files go
+when `runIsHere` says the runner no longer has that run. Runs normally delete
+their own once `run.ended` has gone out, so these are what a crash left.
+`runIsHere` defaults to true, so a caller that can't tell removes nothing. Design
+copies are read-only, so `removeScratch` runs `chmod -R u+w` first.
 
 Clones are found with `git worktree list` in each bare clone rather than from a
 worktree's `.git` file, so the clone path matches `barePath` and `removeWorktree`

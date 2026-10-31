@@ -18,7 +18,6 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 # The agent CLIs (D2): installed here, logged in by the user, never configured by Corral.
-# Codex is installed and signed in to but not yet used by the runner.
 RUN npm install -g @anthropic-ai/claude-code @openai/codex
 
 # The agent browser (D4) agents capture evidence with. It drives the Debian

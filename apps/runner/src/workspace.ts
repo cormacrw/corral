@@ -3,7 +3,7 @@ import type { AgentRole } from '@corral/core'
 import { readdir, readFile, realpath, rm, stat } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import type { GitAuthor } from './config.ts'
-import { git } from './exec.ts'
+import { exec, git } from './exec.ts'
 import { barePath, exists, syncRepository, withRepoLock } from './repos.ts'
 import { DEFAULT_ROLE_INSTRUCTIONS } from './role-defaults.ts'
 
@@ -27,7 +27,7 @@ export interface Workspace {
 
 // Fetches the bare clone and creates or reuses the worktree for this run.
 // Returns an error message instead of throwing, so the run can fail cleanly.
-export async function prepareWorkspace(dataDir: string, job: RunJob): Promise<{ workspace: Workspace, error: null } | { workspace: null, error: string }> {
+export async function prepareWorkspace(dataDir: string, job: RunJob): Promise<Prepared> {
   const syncError = await syncRepository(dataDir, job.repository)
   if (syncError) return { workspace: null, error: `Could not fetch ${job.repository}: ${syncError}` }
   const bare = barePath(dataDir, job.repository)
@@ -35,19 +35,21 @@ export async function prepareWorkspace(dataDir: string, job: RunJob): Promise<{ 
   return withRepoLock(bare, () => checkOut(dataDir, bare, job))
 }
 
-async function checkOut(dataDir: string, bare: string, job: RunJob): Promise<{ workspace: Workspace, error: null } | { workspace: null, error: string }> {
+type Prepared = { workspace: Workspace, error: null } | { workspace: null, error: string }
+
+// A checkout of a large repository under load can take minutes
+const CHECKOUT_TIMEOUT_MS = 10 * 60_000
+
+async function checkOut(dataDir: string, bare: string, job: RunJob): Promise<Prepared> {
   // Forget worktrees whose folders were removed by hand
   await git(['worktree', 'prune'], { cwd: bare })
+  const prepared = (path: string, error: string | null): Prepared => error ? { workspace: null, error } : { workspace: { path, bare }, error: null }
 
   if (job.role === 'pm') {
     // A read-only checkout of the default branch (D9), one per Plan session
     if (!job.planSessionId) return { workspace: null, error: 'The job has no plan session' }
     const path = pmWorktreePath(dataDir, job.projectId, job.planSessionId)
-    const result = await exists(path)
-      ? await git(['checkout', '--detach', '--force', `origin/${job.defaultBranch}`], { cwd: path })
-      : await git(['worktree', 'add', '--detach', path, `origin/${job.defaultBranch}`], { cwd: bare })
-    if (result.code !== 0) return { workspace: null, error: result.stderr.trim() || 'git worktree add failed' }
-    return { workspace: { path, bare }, error: null }
+    return prepared(path, await checkoutOrAdd(bare, path, `origin/${job.defaultBranch}`))
   }
 
   const workId = job.taskId ?? (job.role === 'reviewer' && job.epicId ? `epic-${job.epicId}` : null)
@@ -58,36 +60,71 @@ async function checkOut(dataDir: string, bare: string, job: RunJob): Promise<{ w
   // reviewer get a detached checkout of the default branch. The developer's
   // is kept between revisions, like any developer worktree.
   if (!job.branch) {
-    if (job.role === 'developer' && await exists(path)) return { workspace: { path, bare }, error: null }
-    const start = `origin/${job.defaultBranch}`
-    const result = await exists(path)
-      ? await git(['checkout', '--detach', '--force', start], { cwd: path })
-      : await git(['worktree', 'add', '--detach', path, start], { cwd: bare })
-    if (result.code !== 0) return { workspace: null, error: result.stderr.trim() || 'git worktree add failed' }
-    return { workspace: { path, bare }, error: null }
+    if (job.role === 'developer' && await keptWorktree(bare, path)) return prepared(path, null)
+    return prepared(path, await checkoutOrAdd(bare, path, `origin/${job.defaultBranch}`))
   }
 
   if (job.role === 'reviewer') {
     // The reviewer looks at exactly the commit the developer submitted
     if (!job.headSha) return { workspace: null, error: 'The job has no commit to review' }
-    const result = await exists(path)
-      ? await git(['checkout', '--detach', '--force', job.headSha], { cwd: path })
-      : await git(['worktree', 'add', '--detach', path, job.headSha], { cwd: bare })
-    if (result.code !== 0) return { workspace: null, error: result.stderr.trim() || 'git worktree add failed' }
-    return { workspace: { path, bare }, error: null }
+    return prepared(path, await checkoutOrAdd(bare, path, job.headSha))
   }
 
   // Developer: reuse the worktree between revisions (D10) so uncommitted
   // work is never lost; otherwise start the branch from origin
-  if (await exists(path)) {
-    const error = job.continueFrom ? await catchUp(path, job.continueFrom) : null
-    return error ? { workspace: null, error } : { workspace: { path, bare }, error: null }
-  }
+  if (await keptWorktree(bare, path)) return prepared(path, job.continueFrom ? await catchUp(path, job.continueFrom) : null)
   const remote = await git(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${job.branch}`], { cwd: bare })
   const start = remote.code === 0 ? `origin/${job.branch}` : `origin/${job.baseBranch ?? job.defaultBranch}`
-  const result = await git(['worktree', 'add', path, '-B', job.branch, start], { cwd: bare })
-  if (result.code !== 0) return { workspace: null, error: result.stderr.trim() || 'git worktree add failed' }
-  return { workspace: { path, bare }, error: null }
+  return prepared(path, await addWorktree(bare, path, [path, '-B', job.branch, start]))
+}
+
+// A read-only checkout at `ref`, reusing the worktree that's there. Returns an
+// error message or null.
+async function checkoutOrAdd(bare: string, path: string, ref: string): Promise<string | null> {
+  if (!(await keptWorktree(bare, path))) return addWorktree(bare, path, ['--detach', path, ref])
+  const result = await git(['checkout', '--detach', '--force', ref], { cwd: path, timeoutMs: CHECKOUT_TIMEOUT_MS })
+  return result.code === 0 ? null : result.stderr.trim() || 'git worktree add failed'
+}
+
+async function addWorktree(bare: string, path: string, args: string[]): Promise<string | null> {
+  const result = await git(['worktree', 'add', ...args], { cwd: bare, timeoutMs: CHECKOUT_TIMEOUT_MS })
+  if (result.code === 0) return null
+  // Half a checkout must not pass for a kept worktree next time
+  await discardWorktree(bare, path)
+  return result.stderr.trim() || 'git worktree add failed'
+}
+
+// Whether the folder is a worktree to reuse. One `git worktree add` never
+// finished is discarded: the agent would miss files, and a WIP commit would
+// record them as deleted.
+async function keptWorktree(bare: string, path: string): Promise<boolean> {
+  if (!(await exists(path))) return false
+  if (!(await unfinishedWorktree(path))) return true
+  await discardWorktree(bare, path)
+  return false
+}
+
+// `git worktree add` locks a worktree with this reason until it has finished
+// checking out. Anything it can't vouch for counts as finished, so a working
+// tree that might hold uncommitted changes is never removed by mistake: a
+// timeout says nothing, and neither does a lock someone took on purpose.
+async function unfinishedWorktree(path: string): Promise<boolean> {
+  if (!(await exists(join(path, '.git')))) return true
+  const head = await git(['rev-parse', '--verify', '--quiet', 'HEAD'], { cwd: path })
+  if (head.code === null) return false
+  if (head.code !== 0) return true
+  const lock = await git(['rev-parse', '--git-path', 'locked'], { cwd: path })
+  if (lock.code !== 0) return false
+  const reason = await readFile(resolve(path, lock.stdout.trim()), 'utf8').catch(() => null)
+  return reason?.trim() === 'initializing'
+}
+
+// Called with the repo lock held. Two --force: the first ignores changes, the
+// second the lock an unfinished `worktree add` left.
+async function discardWorktree(bare: string, path: string): Promise<void> {
+  await git(['worktree', 'remove', '--force', '--force', path], { cwd: bare })
+  await rm(path, { recursive: true, force: true })
+  await git(['worktree', 'prune'], { cwd: bare })
 }
 
 // A worktree kept from an earlier run can be behind the WIP commit a stopped
@@ -246,14 +283,26 @@ export function removeWorktree(bare: string, path: string, force = false): Promi
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 const TASK_FOLDER = new RegExp(`^(${UUID})(-review)?$`)
 const PM_FOLDER = new RegExp(`^pm-${UUID}-(${UUID})$`)
+const EPIC_FOLDER = new RegExp(`^epic-(${UUID})-review$`)
+const RUN_FOLDER = new RegExp(`^${UUID}$`)
+const RUN_SPOOL = new RegExp(`^(${UUID})\\.jsonl$`)
+
+interface KeepLists {
+  keepTaskIds: string[]
+  keepPlanSessionIds: string[]
+  // An older server doesn't send this, and then epic checkouts are left alone
+  keepEpicIds?: string[] | undefined
+}
 
 // Removes every worktree outside the keep lists. A developer worktree or an
 // orphan with uncommitted changes stays (PRD §7.4); review and PM checkouts
-// are read-only by contract, so theirs are discarded.
+// are read-only by contract, so theirs are discarded. Scratch and spool files
+// nothing needs go too, without a place in the result: it's about worktrees.
 export async function sweepWorktrees(
   dataDir: string,
-  keep: { keepTaskIds: string[], keepPlanSessionIds: string[] },
-  pmTurnRunning: (planSessionId: string) => boolean
+  keep: KeepLists,
+  pmTurnRunning: (planSessionId: string) => boolean,
+  runIsHere: (runId: string) => boolean = () => true
 ): Promise<{ removed: string[], kept: string[] }> {
   const root = join(dataDir, 'worktrees')
   const folders = await readdir(root, { withFileTypes: true }).catch(() => [])
@@ -264,19 +313,48 @@ export async function sweepWorktrees(
     if (!folder.isDirectory()) continue
     const task = TASK_FOLDER.exec(folder.name)
     const planSessionId = PM_FOLDER.exec(folder.name)?.[1]
-    if (!task && !planSessionId) continue
-    if (task ? keep.keepTaskIds.includes(task[1]!) : keep.keepPlanSessionIds.includes(planSessionId!)) continue
+    const epicId = keep.keepEpicIds ? EPIC_FOLDER.exec(folder.name)?.[1] : undefined
+    if (!task && !planSessionId && !epicId) continue
+    if (task ? keep.keepTaskIds.includes(task[1]!) : planSessionId ? keep.keepPlanSessionIds.includes(planSessionId) : keep.keepEpicIds!.includes(epicId!)) continue
 
     const path = join(root, folder.name)
     const bare = registered.get(await realpath(path))
     // Nothing awaits between this check and removeWorktree taking its place
     // in the repo queue, so a turn starting later checks out after the removal
     if (planSessionId && pmTurnRunning(planSessionId)) continue
-    const force = planSessionId !== undefined || task?.[2] !== undefined
+    const force = planSessionId !== undefined || epicId !== undefined || task?.[2] !== undefined
     const gone = bare ? await removeWorktree(bare, path, force) : await removeOrphan(path)
     ;(gone ? removed : kept).push(path)
   }
+  await sweepRunFiles(dataDir, keep, pmTurnRunning, runIsHere).catch((error: unknown) => {
+    console.warn(`Could not sweep the scratch folders: ${error instanceof Error ? error.message : String(error)}`)
+  })
   return { removed, kept }
+}
+
+// Design copies are read-only, and rm can't empty a read-only folder
+export async function removeScratch(path: string): Promise<void> {
+  await exec('chmod', ['-R', 'u+w', path])
+  await rm(path, { recursive: true, force: true })
+}
+
+// A Plan session's scratch folder goes with its session. A run's goes when the
+// run ends; these are what a runner that died left behind. Nothing awaits
+// between each check and its removal starting, and a new run isn't on disk yet.
+async function sweepRunFiles(dataDir: string, keep: KeepLists, pmTurnRunning: (planSessionId: string) => boolean, runIsHere: (runId: string) => boolean): Promise<void> {
+  const scratch = join(dataDir, 'scratch')
+  for (const folder of await readdir(scratch).catch(() => [])) {
+    const planSessionId = PM_FOLDER.exec(folder)?.[1]
+    const unused = planSessionId
+      ? !keep.keepPlanSessionIds.includes(planSessionId) && !pmTurnRunning(planSessionId)
+      : RUN_FOLDER.test(folder) && !runIsHere(folder)
+    if (unused) await removeScratch(join(scratch, folder))
+  }
+  const spool = join(dataDir, 'spool')
+  for (const file of await readdir(spool).catch(() => [])) {
+    const runId = RUN_SPOOL.exec(file)?.[1]
+    if (runId && !runIsHere(runId)) await rm(join(spool, file), { force: true })
+  }
 }
 
 // Each worktree's real path and its bare clone, as barePath spells it so

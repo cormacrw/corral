@@ -4,7 +4,7 @@ import { and, eq, gte, inArray, isNotNull, isNull, ne, or } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
 import type { RunnerHub } from './runner-hub.ts'
 
-const { planSessions, runs, tasks } = schema
+const { epics, planSessions, runs, tasks } = schema
 
 const server: Actor = { kind: 'system', component: 'server' }
 
@@ -74,7 +74,7 @@ export class WorktreeSweep {
     await appendAudit(db, { actor: server }, auditEvent('worktrees.swept', { removed: answers.flatMap(a => a.removed), kept: answers.flatMap(a => a.kept) }))
   }
 
-  async #keepSet(): Promise<{ keepTaskIds: string[], keepPlanSessionIds: string[] }> {
+  async #keepSet(): Promise<{ keepTaskIds: string[], keepPlanSessionIds: string[], keepEpicIds: string[] }> {
     const { db } = this.#d
     const cutoff = new Date((this.#d.now?.() ?? new Date()).getTime() - PM_WORKTREE_TTL)
     // Soft-deleted tasks stay in the table, but nothing runs on them again
@@ -83,6 +83,7 @@ export class WorktreeSweep {
     const keptSessions = await db.selectDistinct({ id: planSessions.id }).from(planSessions)
       .leftJoin(runs, and(eq(runs.planSessionId, planSessions.id), eq(runs.role, 'pm'), inArray(runs.state, [...ACTIVE_RUN_STATES])))
       .where(or(gte(planSessions.updatedAt, cutoff), isNotNull(runs.id)))
-    return { keepTaskIds: keptTasks.map(t => t.id), keepPlanSessionIds: keptSessions.map(s => s.id) }
+    const keptEpics = await db.select({ id: epics.id }).from(epics).where(isNull(epics.mergeCommitSha))
+    return { keepTaskIds: keptTasks.map(t => t.id), keepPlanSessionIds: keptSessions.map(s => s.id), keepEpicIds: keptEpics.map(e => e.id) }
   }
 }

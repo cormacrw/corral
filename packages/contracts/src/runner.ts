@@ -177,8 +177,8 @@ export interface RunnerCapacity {
   slots: number
   // Runtime ids with a signed-in CLI, e.g. 'claude-code', 'codex'
   runtimes: string[]
-  // Agent roles it takes (CORRAL_RUNNER_ROLES); design runs are developer
-  // runs on design tasks, taken only with 'design'
+  // Agent roles it takes (CORRAL_RUNNER_ROLES); design runs are designer
+  // runs on design tasks (D23), taken only with 'design'
   roles: RunnerRole[]
 }
 
@@ -255,7 +255,7 @@ export const setupJobSchema = z.discriminatedUnion('kind', [
   // Remove every worktree outside this keep set, which covers all projects.
   // Developer worktrees with uncommitted work stay (PRD §7.4), and so does the
   // checkout of a PM turn running on the runner.
-  z.object({ kind: z.literal('sweep_worktrees'), keepTaskIds: z.array(z.string()), keepPlanSessionIds: z.array(z.string()) }),
+  z.object({ kind: z.literal('sweep_worktrees'), keepTaskIds: z.array(z.string()), keepPlanSessionIds: z.array(z.string()), keepEpicIds: z.array(z.string()).optional() }),
   z.object({ kind: z.literal('session_title'), prompt: z.string() }),
   z.object({ kind: z.literal('inbox_message'), prompt: z.string() }),
   z.object({ kind: z.literal('release_notes'), runtime: z.string(), prompt: z.string() })

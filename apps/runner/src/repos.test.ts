@@ -38,12 +38,29 @@ describe('syncRepository', () => {
     await rm(dataDir, { recursive: true, force: true })
   })
 
-  it('fetches into one bare repo one at a time', async () => {
+  it('shares one fetch between callers that arrive before it starts', async () => {
     const results = await Promise.all([1, 2, 3].map(() => syncRepository(dataDir, 'acme/app')))
     expect(results).toEqual([null, null, null])
+    expect(calls.filter(c => c.args[0] === 'fetch')).toHaveLength(1)
+  })
+
+  it('never joins a fetch already running: callers during it share the next one', async () => {
+    const first = syncRepository(dataDir, 'acme/app')
+    await vi.waitFor(() => expect(calls.some(c => c.args[0] === 'fetch')).toBe(true), { interval: 1 })
+    expect(calls.filter(c => c.args[0] === 'fetch')[0]!.end).toBe(0)
+
+    const later = [syncRepository(dataDir, 'acme/app'), syncRepository(dataDir, 'acme/app')]
+    await Promise.all([first, ...later])
+
     const fetches = calls.filter(c => c.args[0] === 'fetch')
-    expect(fetches).toHaveLength(3)
+    expect(fetches).toHaveLength(2)
     expect(overlaps(fetches)).toBe(false)
+  })
+
+  it('starts a new fetch once the last has finished', async () => {
+    await syncRepository(dataDir, 'acme/app')
+    await syncRepository(dataDir, 'acme/app')
+    expect(calls.filter(c => c.args[0] === 'fetch')).toHaveLength(2)
   })
 
   it('fetches different repos in parallel', async () => {

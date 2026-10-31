@@ -217,7 +217,8 @@ describe('RunManager PM turns', () => {
           screenshots: [{ fileName: 'login.png', contentType: 'image/png', dataBase64: Buffer.from('png').toString('base64') }], bundle: { dataBase64: bundle }
         } }))
       }
-      return true
+      // Undelivered, so the run's scratch folder is still there to check
+      return message.type !== 'run.ended'
     }
     const tools = { register: () => () => {}, url: () => 'http://127.0.0.1:9/mcp' } as unknown as ToolServer
     manager = new RunManager({ dataDir, claudeBin, codexBin: 'codex', name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds: 0, titleModel: 'haiku', slots: 4, roles: ['pm', 'developer', 'reviewer', 'design'] }, { send } as unknown as ServerConnection, tools)

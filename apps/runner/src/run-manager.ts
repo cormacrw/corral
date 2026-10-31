@@ -1,7 +1,7 @@
 import type { AgentTool, RunEvent, RunExit, RunJob, RunnerMessage, ServerMessage } from '@corral/contracts'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { createWriteStream, type WriteStream } from 'node:fs'
-import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { constants } from 'node:os'
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { createRuntimeRegistry, STOP_GRACE_MS, type AgentExit, type AgentProcess, type AgentRuntime, type AgentSession, type ParsedLine, type RuntimeOptions, type RuntimeRegistry } from './agent-runtime.ts'
@@ -11,13 +11,13 @@ import { packDesign, saveDesign } from './designs.ts'
 import { batchEvents, capEvent } from './event-limits.ts'
 import { convertToMp4 } from './evidence-video.ts'
 import { outcomesFor, toolRefusal, toolsFor, type ToolOutcome, type ToolServer } from './mcp.ts'
-import { headSha, mergeBase, prepareWorkspace, pushBranch, readProjectBrief, readRoleInstructions, saveStoppedWork } from './workspace.ts'
+import { headSha, mergeBase, prepareWorkspace, pushBranch, readProjectBrief, readRoleInstructions, removeScratch, saveStoppedWork } from './workspace.ts'
 import { RunTimer } from './run-timings.ts'
 
 // Runs on this runner (flows.md §2 steps 3–5, PRD §8.6). Each run gets a
 // worktree, a secret MCP path, and an agent process in its own process
 // group, started by the adapter for the job's runtime (D15). Events stream
-// to the server in batches; raw lines go to the spool.
+// to the server in batches; raw lines go to a spool file for the run's length.
 // A PM turn is still one run, but its process can outlive the run: it stays
 // warm for the session's next message until the idle timeout (D9).
 // A Claude Code developer or reviewer run streams its input too, so a human
@@ -126,6 +126,8 @@ interface ActiveRun {
   flushTimer: NodeJS.Timeout | null
   timeoutTimer: NodeJS.Timeout | null
   spool: WriteStream | null
+  // A stream still opening would recreate the file after it's deleted
+  spoolClosed: Promise<unknown>
   unregisterTools: (() => void) | null
   // The live session taking messages; null between processes and once it closes
   session: AgentSession | null
@@ -177,6 +179,10 @@ export class RunManager {
 
   activeRunCount(): number {
     return this.#runs.size
+  }
+
+  hasRun(runId: string): boolean {
+    return this.#runs.has(runId)
   }
 
   // Set from assign on, so a turn still preparing its checkout counts
@@ -255,6 +261,7 @@ export class RunManager {
       flushTimer: null,
       timeoutTimer: null,
       spool: null,
+      spoolClosed: Promise.resolve(),
       unregisterTools: null,
       session: null,
       queuedMessages: [],
@@ -386,7 +393,7 @@ export class RunManager {
     await Promise.all([...this.#runs.values()].filter(other => other !== run && other.keepWork && (other.job.role === 'developer' || other.job.role === 'designer') && other.job.taskId === job.taskId).map(other => other.closed.promise))
     await mkdir(join(this.#config.dataDir, 'spool'), { recursive: true })
     await mkdir(run.scratchDir, { recursive: true })
-    run.spool = createWriteStream(join(this.#config.dataDir, 'spool', `${job.runId}.jsonl`), { flags: 'a' })
+    this.#openSpool(run)
 
     // A PM follow-up turn reuses its session's checkout; the note is noise there
     if (!(job.role === 'pm' && job.agentSessionId)) this.#note(run, `Preparing a worktree for ${job.repository}${job.branch ? ` on ${job.branch}` : ''}`)
@@ -419,6 +426,23 @@ export class RunManager {
     else if (run.rateLimit) this.#end(run, { kind: 'rate_limited', resetsAt: run.rateLimit.resetsAt })
     else if (run.killedBy) this.#end(run, { kind: 'signalled', signal: run.killedBy })
     else this.#end(run, { kind: 'exited', code: run.exitCode })
+  }
+
+  // An 'error' with no listener would take down every run on this runner. The
+  // transcript still reaches the server; only this local copy stops.
+  #openSpool(run: ActiveRun): void {
+    const spool = createWriteStream(this.#spoolPath(run), { flags: 'a' })
+    spool.on('error', (error) => {
+      console.warn(`Run ${run.job.runId}: could not write to the spool: ${error.message}`)
+      if (run.spool !== spool) return
+      run.spool = null
+      this.#note(run, `The runner stopped keeping a local copy of this transcript: ${error.message}`)
+    })
+    run.spool = spool
+  }
+
+  #spoolPath(run: ActiveRun): string {
+    return join(this.#config.dataDir, 'spool', `${run.job.runId}.jsonl`)
   }
 
   async #coldStart(run: ActiveRun, worktree: string): Promise<void> {
@@ -741,6 +765,20 @@ export class RunManager {
   #finished(run: ActiveRun): void {
     this.#runs.delete(run.job.runId)
     this.#connection.refreshUpdateStatus?.()
+    void this.#removeRunFiles(run)
+  }
+
+  // Evidence and designs are on the server by now, and the transcript is the
+  // server's own, built from run.events; the sweep retries what fails here. A
+  // warm session's scratch folder is the session's, and its process still uses it.
+  async #removeRunFiles(run: ActiveRun): Promise<void> {
+    await run.spoolClosed
+    await Promise.all([
+      rm(this.#spoolPath(run), { force: true }),
+      this.#keepsWarm(run.job) ? null : removeScratch(run.scratchDir)
+    ]).catch((error: unknown) => {
+      console.warn(`Run ${run.job.runId}: could not remove its files: ${error instanceof Error ? error.message : String(error)}`)
+    })
   }
 
   #end(run: ActiveRun, exit: RunExit): void {
@@ -753,7 +791,8 @@ export class RunManager {
     if (run.timeoutTimer) clearTimeout(run.timeoutTimer)
     this.#flush(run)
     run.unregisterTools?.()
-    run.spool?.end()
+    run.spoolClosed = closeStream(run.spool)
+    run.spool = null
     const finish = (sha: string | null, wipSha: string | null = null) => {
       this.#post(run, { type: 'run.ended', runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, exit, headSha: sha, lastActivityAt: run.lastActivityAt, wipSha, timings: run.timer.finish() })
       // A retry waits for the saved work, not for the server to hear about it
@@ -937,6 +976,14 @@ export class RunManager {
     if (data.length > MAX_EVIDENCE_BYTES) return { ok: false, error: 'Evidence files are limited to 25 MB' }
     return evidenceFile(basename(path), contentType, data)
   }
+}
+
+function closeStream(stream: WriteStream | null): Promise<void> {
+  if (!stream) return Promise.resolve()
+  return new Promise((resolve) => {
+    stream.once('close', () => resolve())
+    stream.end()
+  })
 }
 
 function evidenceFile(fileName: string, contentType: string, data: Buffer): ToolOutcome {

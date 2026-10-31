@@ -2,8 +2,8 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { loadConfig } from './config.ts'
-import { codexSignedIn, parseIncludedResponse, runSetupJob, toRepoSummary } from './jobs.ts'
+import { loadConfig, type RunnerConfig } from './config.ts'
+import { codexSignedIn, parseIncludedResponse, runSetupJob, signedInRuntimes, toRepoSummary } from './jobs.ts'
 
 describe('detect_clis', () => {
   let root: string
@@ -22,6 +22,31 @@ describe('detect_clis', () => {
     await chmod(path, 0o755)
     return path
   }
+
+  async function countedCli(name: string, signedIn: boolean): Promise<string> {
+    return fakeCli(name, `echo run >> '${join(root, 'runs')}'; echo 'Logged in'; exit ${signedIn ? 0 : 1}`)
+  }
+  const runs = async () => (await readFile(join(root, 'runs'), 'utf8')).split('\n').filter(Boolean).length
+
+  it('runs one detection for a hello and the server\'s check right after it', async () => {
+    const config = { claudeBin: await countedCli('claude', true), codexBin: await fakeCli('codex', `echo run >> '${join(root, 'runs')}'; echo 'Logged in'`) } as RunnerConfig
+    const [first, second] = await Promise.all([signedInRuntimes(config), runSetupJob(config, { kind: 'detect_clis' })])
+    const counted = await runs()
+    await signedInRuntimes(config)
+
+    expect(first).toEqual(['claude-code', 'codex'])
+    expect(second.kind).toBe('detect_clis')
+    expect(counted).toBe(4)
+    expect(await runs()).toBe(4)
+  })
+
+  it('checks again each time while a CLI is signed out, so a new login shows up', async () => {
+    const config = { claudeBin: await countedCli('claude', false), codexBin: join(root, 'missing') } as RunnerConfig
+    await signedInRuntimes(config)
+    const counted = await runs()
+    await signedInRuntimes(config)
+    expect(await runs()).toBeGreaterThan(counted)
+  })
 
   it('reports claude and codex, and a missing codex as not found without failing', async () => {
     const claudeBin = await fakeCli('claude', 'if [ "$1" = "--version" ]; then echo "2.1.312 (Claude Code)"; fi; exit 0')

@@ -1,6 +1,7 @@
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import type { RunJob } from '@corral/contracts'
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { git } from './exec.ts'
 import { createTestDataDir, pmJob } from './test-repo.ts'
@@ -172,6 +173,77 @@ describe('readProjectBrief', () => {
 })
 
 // D19: a spike's jobs have no branch and no commit
+describe('prepareWorkspace and unfinished worktrees', () => {
+  let dataDir: string
+  const developer = (overrides: Partial<RunJob> = {}) => pmJob({ role: 'developer', planSessionId: null, taskId: 'task-1', taskRef: 'APP-1', branch: 'corral/app-1', ...overrides })
+
+  beforeEach(async () => {
+    dataDir = await createTestDataDir()
+  })
+
+  afterEach(async () => {
+    await rm(dirname(dataDir), { recursive: true, force: true })
+  })
+
+  // What a `git worktree add` that was killed part way leaves
+  async function cutOff(path: string, reason = 'initializing') {
+    const lock = await git(['rev-parse', '--git-path', 'locked'], { cwd: path })
+    await writeFile(resolve(path, lock.stdout.trim()), reason)
+    await rm(join(path, 'README.md'))
+  }
+
+  it.each([
+    ['developer', () => developer()],
+    ['PM', () => pmJob({ planSessionId: 's1' })],
+    ['spike developer', () => developer({ branch: null })],
+    ['reviewer', () => developer({ role: 'reviewer', headSha: 'origin/main' })]
+  ])('replaces a %s worktree that was cut off', async (_name, job) => {
+    const first = await prepareWorkspace(dataDir, job())
+    expect(first.error).toBeNull()
+    const path = first.workspace!.path
+    await cutOff(path)
+
+    const second = await prepareWorkspace(dataDir, job())
+
+    expect(second.error).toBeNull()
+    expect(await readFile(join(path, 'README.md'), 'utf8')).toBe('# App\n')
+  })
+
+  it('replaces a folder that never became a worktree', async () => {
+    const path = join(dataDir, 'worktrees', 'task-1')
+    await mkdir(path, { recursive: true })
+    await writeFile(join(path, 'stray'), '')
+
+    expect((await prepareWorkspace(dataDir, developer())).error).toBeNull()
+    expect(await readFile(join(path, 'README.md'), 'utf8')).toBe('# App\n')
+  })
+
+  it('keeps a finished developer worktree and its uncommitted work', async () => {
+    const path = (await prepareWorkspace(dataDir, developer())).workspace!.path
+    await writeFile(join(path, 'work.txt'), 'uncommitted')
+
+    expect((await prepareWorkspace(dataDir, developer())).error).toBeNull()
+    expect(await readFile(join(path, 'work.txt'), 'utf8')).toBe('uncommitted')
+  })
+
+  it('keeps a worktree someone locked on purpose', async () => {
+    const path = (await prepareWorkspace(dataDir, developer())).workspace!.path
+    await writeFile(join(path, 'work.txt'), 'uncommitted')
+    await cutOff(path, 'on a USB stick')
+
+    expect((await prepareWorkspace(dataDir, developer())).error).toBeNull()
+    expect(await readFile(join(path, 'work.txt'), 'utf8')).toBe('uncommitted')
+  })
+
+  it('leaves no folder behind when adding fails, so the next run starts clean', async () => {
+    const job = developer({ baseBranch: 'no-such-branch' } as Partial<RunJob>)
+
+    expect((await prepareWorkspace(dataDir, job)).error).toEqual(expect.any(String))
+    expect(await stat(join(dataDir, 'worktrees', 'task-1')).catch(() => null)).toBeNull()
+    expect((await prepareWorkspace(dataDir, developer())).error).toBeNull()
+  })
+})
+
 describe('prepareWorkspace for spikes', () => {
   let dataDir: string
 

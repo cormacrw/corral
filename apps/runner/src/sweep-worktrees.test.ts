@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { RunnerMessage, RunJob } from '@corral/contracts'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { AgentExit, AgentRuntime } from './agent-runtime.ts'
 import { loadConfig, type RunnerConfig } from './config.ts'
 import type { ServerConnection } from './connection.ts'
-import { git } from './exec.ts'
+import { exec, git } from './exec.ts'
 import { runSetupJob } from './jobs.ts'
 import type { ToolServer } from './mcp.ts'
 import { barePath } from './repos.ts'
@@ -30,6 +30,7 @@ describe('sweep_worktrees', () => {
   })
 
   afterEach(async () => {
+    await exec('chmod', ['-R', 'u+w', dirname(dataDir)])
     await rm(dirname(dataDir), { recursive: true, force: true })
   })
 
@@ -172,5 +173,85 @@ describe('sweep_worktrees', () => {
     finish({ code: 0, signal: null })
     await expect.poll(() => sent.some(m => m.type === 'run.ended')).toBe(true)
     expect(await sweep([], [], pmTurnRunning)).toEqual({ kind: 'sweep_worktrees', removed: [path], kept: [] })
+  })
+
+  describe('epic checkouts', () => {
+    const job = (keepEpicIds?: string[]) => runSetupJob(config, { kind: 'sweep_worktrees', keepTaskIds: [], keepPlanSessionIds: [], ...(keepEpicIds ? { keepEpicIds } : {}) })
+    const epicId = randomUUID()
+    async function epicWorktree() {
+      const prepared = await prepareWorkspace(dataDir, pmJob({ runId: 'e1', role: 'reviewer', planSessionId: null, taskId: null, taskRef: null, epicId, branch: 'main', headSha: 'origin/main' }))
+      expect(prepared.error).toBeNull()
+      return prepared.workspace!.path
+    }
+
+    it('removes one whose epic is off the list', async () => {
+      const path = await epicWorktree()
+      expect(path).toMatch(/epic-[0-9a-f-]+-review$/)
+      expect(await job([])).toEqual({ kind: 'sweep_worktrees', removed: [path], kept: [] })
+      expect(await exists(path)).toBe(false)
+    })
+
+    it('keeps one on the list', async () => {
+      const path = await epicWorktree()
+      await job([epicId])
+      expect(await exists(path)).toBe(true)
+    })
+
+    it('leaves them alone for a server that sends no list', async () => {
+      const path = await epicWorktree()
+      await job()
+      expect(await exists(path)).toBe(true)
+    })
+  })
+
+  describe('scratch and spool files', () => {
+    const scratch = (name: string) => join(dataDir, 'scratch', name)
+    const spool = (runId: string) => join(dataDir, 'spool', `${runId}.jsonl`)
+    async function readOnlyScratch(name: string) {
+      const dir = join(scratch(name), 'designs')
+      await mkdir(dir, { recursive: true })
+      await writeFile(join(dir, 'design.md'), '# Design')
+      await chmod(dir, 0o555)
+      return scratch(name)
+    }
+    const sweepFiles = (keepPlanSessionIds: string[], pmTurnRunning: (id: string) => boolean = () => false, runIsHere?: (id: string) => boolean) =>
+      runSetupJob(config, { kind: 'sweep_worktrees', keepTaskIds: [], keepPlanSessionIds }, pmTurnRunning, runIsHere)
+
+    it('removes the PM scratch of a session off the keep list, and keeps the rest', async () => {
+      const [kept, active, gone] = [randomUUID(), randomUUID(), randomUUID()]
+      const paths = [kept, active, gone].map(session => readOnlyScratch(`pm-${PROJECT}-${session}`))
+      const [keptPath, activePath, gonePath] = await Promise.all(paths)
+
+      expect(await sweepFiles([kept], id => id === active)).toEqual({ kind: 'sweep_worktrees', removed: [], kept: [] })
+
+      expect(await exists(keptPath!)).toBe(true)
+      expect(await exists(activePath!)).toBe(true)
+      expect(await exists(gonePath!)).toBe(false)
+    })
+
+    it('removes run files a dead runner left, but never those of a run still here', async () => {
+      const [dead, live] = [randomUUID(), randomUUID()]
+      await Promise.all([readOnlyScratch(dead), readOnlyScratch(live)])
+      await mkdir(join(dataDir, 'spool'), { recursive: true })
+      await Promise.all([writeFile(spool(dead), '{}\n'), writeFile(spool(live), '{}\n')])
+
+      await sweepFiles([], () => false, id => id === live)
+
+      expect(await exists(scratch(dead))).toBe(false)
+      expect(await exists(spool(dead))).toBe(false)
+      expect(await exists(scratch(live))).toBe(true)
+      expect(await exists(spool(live))).toBe(true)
+    })
+
+    it('touches no run files when it cannot tell which are live, nor anything not named like one', async () => {
+      const run = randomUUID()
+      await Promise.all([readOnlyScratch(run), readOnlyScratch('notes')])
+
+      await sweepFiles([])
+      expect(await exists(scratch(run))).toBe(true)
+      await sweepFiles([], () => false, () => false)
+      expect(await exists(scratch(run))).toBe(false)
+      expect(await exists(scratch('notes'))).toBe(true)
+    })
   })
 })

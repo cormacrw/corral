@@ -1,7 +1,7 @@
 import { tmpdir } from 'node:os'
 import type { RepoSummary, SetupJob, SetupJobResult } from '@corral/contracts'
 import type { RunnerConfig } from './config.ts'
-import { exec } from './exec.ts'
+import { exec, gh } from './exec.ts'
 import { inspectIntegration, prepareIntegration, pushIntegration } from './integration.ts'
 import { barePath, conflictingFiles, syncRepository } from './repos.ts'
 import { removeWorktree, sweepWorktrees, worktreePath } from './workspace.ts'
@@ -9,12 +9,13 @@ import { removeWorktree, sweepWorktrees, worktreePath } from './workspace.ts'
 // Setup jobs from the server (architecture.md, "Setup jobs, not only agent
 // runs"). Tokens stay in `gh`'s, `claude`'s and `codex`'s own config; these only report
 // whether a login exists (D2, D12). `pmTurnRunning` says whether a Plan
-// session has a turn in progress on this runner.
-export async function runSetupJob(config: RunnerConfig, job: SetupJob, pmTurnRunning: (planSessionId: string) => boolean = () => false): Promise<SetupJobResult> {
+// session has a turn in progress on this runner, and `runIsHere` whether a run
+// is still this runner's, so the sweep leaves its files alone.
+export async function runSetupJob(config: RunnerConfig, job: SetupJob, pmTurnRunning: (planSessionId: string) => boolean = () => false, runIsHere?: (runId: string) => boolean): Promise<SetupJobResult> {
   switch (job.kind) {
     case 'list_repos': {
       if (!(await ghSignedIn())) return { kind: 'list_repos', signedIn: false }
-      const result = await exec('gh', ['api', '--paginate', '--slurp',
+      const result = await gh(['api', '--paginate', '--slurp',
         '/user/repos?affiliation=owner,collaborator,organization_member&sort=updated&per_page=100'], { timeoutMs: 60_000 })
       if (result.code !== 0) throw new Error(result.stderr.trim() || 'gh api failed')
       const pages = JSON.parse(result.stdout) as GitHubRepo[][]
@@ -25,7 +26,7 @@ export async function runSetupJob(config: RunnerConfig, job: SetupJob, pmTurnRun
       if (!(await ghSignedIn())) {
         return { kind: 'check_repo', signedIn: false, found: false, canPush: false, defaultBranch: null, cloned: false, error: null }
       }
-      const result = await exec('gh', ['api', `/repos/${job.repository}`], { timeoutMs: 30_000 })
+      const result = await gh(['api', `/repos/${job.repository}`], { timeoutMs: 30_000 })
       if (result.code !== 0) {
         return { kind: 'check_repo', signedIn: true, found: false, canPush: false, defaultBranch: null, cloned: false, error: null }
       }
@@ -35,7 +36,7 @@ export async function runSetupJob(config: RunnerConfig, job: SetupJob, pmTurnRun
     }
 
     case 'detect_clis':
-      return { kind: 'detect_clis', clis: [await detectClaude(config.claudeBin), await detectCodex(config.codexBin)] }
+      return { kind: 'detect_clis', clis: await detectClis(config) }
 
     case 'github':
       return githubRequest(job.method, job.path, job.body)
@@ -69,7 +70,7 @@ export async function runSetupJob(config: RunnerConfig, job: SetupJob, pmTurnRun
       return inspectIntegration(config.dataDir, job)
 
     case 'sweep_worktrees':
-      return { kind: 'sweep_worktrees', ...await sweepWorktrees(config.dataDir, job, pmTurnRunning) }
+      return { kind: 'sweep_worktrees', ...await sweepWorktrees(config.dataDir, job, pmTurnRunning, runIsHere) }
 
     case 'inbox_message':
       return { kind: 'inbox_message', message: await sessionTitle(config, job.prompt) }
@@ -113,11 +114,33 @@ async function releaseNotes(config: RunnerConfig, runtime: string, prompt: strin
 
 // The runtime ids whose CLI is installed and signed in, for the runner's hello
 export async function signedInRuntimes(config: Pick<RunnerConfig, 'claudeBin' | 'codexBin'>): Promise<string[]> {
-  const [claude, codex] = await Promise.all([detectClaude(config.claudeBin), detectCodex(config.codexBin)])
-  return [...(claude.signedIn ? ['claude-code'] : []), ...(codex.signedIn ? ['codex'] : [])]
+  const [claude, codex] = await detectClis(config)
+  return [...(claude!.signedIn ? ['claude-code'] : []), ...(codex!.signedIn ? ['codex'] : [])]
 }
 
 type DetectedCli = Extract<SetupJobResult, { kind: 'detect_clis' }>['clis'][number]
+
+const CLI_DETECTION_TTL_MS = 30_000
+const cliDetections = new Map<string, Promise<DetectedCli[]>>()
+
+// Each hello and the server's check right after it would otherwise run the
+// same four commands. Calls share one detection, and a full result is reused
+// for a while. One with a CLI signed out isn't: someone may be signing in.
+function detectClis(config: Pick<RunnerConfig, 'claudeBin' | 'codexBin'>): Promise<DetectedCli[]> {
+  const key = `${config.claudeBin}\0${config.codexBin}`
+  const running = cliDetections.get(key)
+  if (running) return running
+  const forget = () => {
+    if (cliDetections.get(key) === detection) cliDetections.delete(key)
+  }
+  const detection = Promise.all([detectClaude(config.claudeBin), detectCodex(config.codexBin)])
+  cliDetections.set(key, detection)
+  void detection.then((clis) => {
+    if (clis.every(cli => cli.signedIn)) setTimeout(forget, CLI_DETECTION_TTL_MS).unref()
+    else forget()
+  }, forget)
+  return detection
+}
 
 async function detectClaude(bin: string): Promise<DetectedCli> {
   const version = await exec(bin, ['--version'], { timeoutMs: 15_000 })
@@ -141,7 +164,7 @@ export function codexSignedIn(output: string): boolean {
 }
 
 async function ghSignedIn(): Promise<boolean> {
-  return (await exec('gh', ['auth', 'status'], { timeoutMs: 15_000 })).code === 0
+  return (await gh(['auth', 'status'], { timeoutMs: 15_000 })).code === 0
 }
 
 // One GitHub REST call through `gh api`, returning the status and JSON body.
@@ -149,7 +172,7 @@ async function ghSignedIn(): Promise<boolean> {
 export async function githubRequest(method: string, path: string, body?: unknown): Promise<Extract<SetupJobResult, { kind: 'github' }>> {
   const args = ['api', '--include', '-X', method, path, '-H', 'Accept: application/vnd.github+json']
   if (body !== undefined) args.push('--input', '-')
-  const result = await exec('gh', args, { input: body === undefined ? '' : JSON.stringify(body), timeoutMs: 60_000 })
+  const result = await gh(args, { input: body === undefined ? '' : JSON.stringify(body), timeoutMs: 60_000 })
   const parsed = parseIncludedResponse(result.stdout)
   if (!parsed) throw new Error(result.stderr.trim() || `gh api ${method} ${path} failed`)
   return { kind: 'github', ...parsed }

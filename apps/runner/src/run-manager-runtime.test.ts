@@ -56,7 +56,7 @@ describe('RunManager runtimes', () => {
     const fixture = join(import.meta.dirname, 'fixtures', 'codex', 'usage-limit.jsonl')
     const codexBin = join(dirname(dataDir), 'codex')
     // Stands in for `codex`: logs its arguments and prints the fixture
-    await writeFile(codexBin, `#!/bin/sh\nprintf '%s\\n' "$@" > "$0.args"\ncat ${JSON.stringify(fixture)}\nexit 1\n`)
+    await writeFile(codexBin, `#!/bin/sh\nprintf '%s\\n' "$@" > "$0.args"\ncat > "$0.stdin"\ncat ${JSON.stringify(fixture)}\nexit 1\n`)
     await chmod(codexBin, 0o755)
     const manager = new RunManager({ ...config, codexBin }, connection, tools)
     manager.assign(pmJob({ runId: 'r1', runtime: 'codex', prompt: 'Plan it', model: 'gpt-5.5-codex' }))
@@ -67,7 +67,8 @@ describe('RunManager runtimes', () => {
     const args = (await readFile(`${codexBin}.args`, 'utf8')).trim().split('\n')
     expect(args.slice(0, 2)).toEqual(['exec', '--json'])
     expect(args).toContain('mcp_servers.corral.url="http://127.0.0.1:9/mcp"')
-    expect(args.slice(-2)).toEqual(['--', 'Plan it'])
+    expect(args.slice(-2)).toEqual(['--', '-'])
+    expect(await readFile(`${codexBin}.stdin`, 'utf8')).toBe('Plan it')
   })
 
   it('reports phase and tool timings on run.ended for a Codex run', async () => {
