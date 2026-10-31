@@ -4,6 +4,7 @@ import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { GitHubError } from './github.ts'
+import { SharedReads } from './pull-requests.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 
 const { agents, evidence, reviews, runs, tasks } = schema
@@ -114,6 +115,28 @@ describe('project pull requests', () => {
     spy.mockRestore()
     expect(status.merge.failingGate).toBe('approvalIsForHeadCommit')
     expect(status.merge.failedGates).toEqual(['approvalIsForHeadCommit', 'requiredChecksPassed', 'evidenceComplete'])
+  })
+
+  it('shares a read in flight, then reads GitHub afresh', async () => {
+    let finish = () => {}
+    const github = { getPullRequest: vi.fn(() => new Promise<never>(resolve => (finish = () => resolve({ number: 1 } as never)))), checks: vi.fn() }
+    const reads = new SharedReads(github)
+    const overlapping = [reads.getPullRequest('a/b', 1), reads.getPullRequest('a/b', 1)]
+    expect(github.getPullRequest).toHaveBeenCalledTimes(1)
+    finish()
+    await Promise.all(overlapping)
+    void reads.getPullRequest('a/b', 1)
+    expect(github.getPullRequest).toHaveBeenCalledTimes(2)
+  })
+
+  it('doesn\'t keep a failed read', async () => {
+    const github = { getPullRequest: vi.fn(), checks: vi.fn() }
+    github.getPullRequest.mockRejectedValueOnce(new Error('GitHub is down')).mockResolvedValue({ number: 1 })
+    const reads = new SharedReads(github)
+    await Promise.all([1, 2].map(() => expect(reads.getPullRequest('a/b', 1)).rejects.toThrow('GitHub is down')))
+    expect(github.getPullRequest).toHaveBeenCalledTimes(1)
+    expect(await reads.getPullRequest('a/b', 1)).toEqual({ number: 1 })
+    expect(github.getPullRequest).toHaveBeenCalledTimes(2)
   })
 
   it('is a 404 for an unknown project', async () => {

@@ -9,6 +9,7 @@ import { publishDependents } from './dependent-tasks.ts'
 import { TaskIntegrator } from './task-integration.ts'
 import type { EventBus } from './events.ts'
 import type { CheckResult, GitHubClient, PullRequest } from './github.ts'
+import { SharedReads } from './pull-requests.ts'
 import type { RunnerHub } from './runner-hub.ts'
 import { applyTransition, loadTask, lockTask, type ProjectRow, type TaskRow } from './tasks.ts'
 
@@ -35,6 +36,9 @@ export interface MergeDeps {
   wake?: (taskIds: string[]) => void
 }
 
+// What the gate check reads from GitHub
+export type GateReads = Pick<GitHubClient, 'getPullRequest' | 'checks'>
+
 // Whether a task may be merged right now, from live GitHub data
 export interface GateReport {
   pr: PullRequest
@@ -52,6 +56,7 @@ export interface GateReport {
 export class MergeOrchestrator {
   #d: MergeDeps
   #attempts = new Map<string, number>()
+  #display: SharedReads | null = null
   // Tasks being advanced right now: a tick and a human approval can overlap
   #busy = new Set<string>()
   #epics: EpicMerger
@@ -67,6 +72,12 @@ export class MergeOrchestrator {
       const task = await loadTask(deps.db, taskId).catch(() => null)
       if (task?.status === 'merged') await this.cleanup(taskId)
     })
+  }
+
+  // For showing gates, where page refetches overlap. A merge makes its own reads.
+  get displayReads(): GateReads {
+    this.#display ??= new SharedReads(this.#d.github)
+    return this.#display
   }
 
   #now(): Date {
@@ -142,8 +153,8 @@ export class MergeOrchestrator {
   }
 
   // Gathers the facts for core's gate check from GitHub and the database
-  async gates(task: TaskRow, project: ProjectRow): Promise<GateReport> {
-    const { db, github } = this.#d
+  async gates(task: TaskRow, project: ProjectRow, github: GateReads = this.#d.github): Promise<GateReport> {
+    const { db } = this.#d
     const pr = await github.getPullRequest(project.repository, task.prNumber!)
     const checks = await github.checks(project.repository, pr.headSha)
     const required = project.requiredChecks

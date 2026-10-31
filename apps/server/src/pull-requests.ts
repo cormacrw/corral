@@ -1,13 +1,52 @@
 import { PULL_REQUEST_FILE_LIMIT, PULL_REQUEST_LINE_LIMIT, type PullRequestDetail, type PullRequestFile, type PullRequestStatus } from '@corral/contracts'
 import { failedMergeGates, requiresHumanReview, taskRef } from '@corral/core'
 import { schema, type Database } from '@corral/db'
-import { and, asc, desc, eq, isNotNull, isNull, ne } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne } from 'drizzle-orm'
 import { ApiFailure } from './errors.ts'
 import { GitHubError, type GitHubClient } from './github.ts'
-import type { MergeOrchestrator } from './merge.ts'
+import type { GateReads, MergeOrchestrator } from './merge.ts'
 import type { ProjectRow } from './tasks.ts'
 
 const { reviews, tasks } = schema
+
+// The page refetches on every task event and on a timer, so requests overlap.
+// Overlapping reads of one PR share a call; each still reads GitHub live
+// (design/pull-requests.md).
+const CONCURRENT_PULL_REQUESTS = 5
+
+export class SharedReads implements GateReads {
+  #github: GateReads
+  #reads = new Map<string, Promise<unknown>>()
+
+  constructor(github: GateReads) {
+    this.#github = github
+  }
+
+  getPullRequest(repository: string, number: number): ReturnType<GitHubClient['getPullRequest']> {
+    return this.#read(`pr ${repository} ${number}`, () => this.#github.getPullRequest(repository, number))
+  }
+
+  checks(repository: string, sha: string): ReturnType<GitHubClient['checks']> {
+    return this.#read(`checks ${repository} ${sha}`, () => this.#github.checks(repository, sha))
+  }
+
+  #read<T>(key: string, load: () => Promise<T>): Promise<T> {
+    const shared = this.#reads.get(key)
+    if (shared) return shared as Promise<T>
+    const value = load().finally(() => this.#reads.delete(key))
+    this.#reads.set(key, value)
+    return value
+  }
+}
+
+async function mapLimit<T, R>(items: T[], limit: number, map: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  const queue = items.entries()
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (const [i, item] of queue) results[i] = await map(item)
+  }))
+  return results
+}
 
 // Every task in the project with an open PR, and where it stands against the
 // merge gates. The gate facts come from the merge orchestrator and the
@@ -17,11 +56,16 @@ export async function listPullRequests(db: Database, merges: MergeOrchestrator, 
   const rows = await db.select().from(tasks)
     .where(and(eq(tasks.projectId, project.id), isNotNull(tasks.prNumber), isNull(tasks.deletedAt), ne(tasks.status, 'merged')))
     .orderBy(asc(tasks.number))
-  const statuses = await Promise.all(rows.map(async (task): Promise<PullRequestStatus | null> => {
-    const report = await merges.gates(task, project)
+  const latestReviews = rows.length > 0
+    ? await db.selectDistinctOn([reviews.taskId], { taskId: reviews.taskId, verdict: reviews.verdict, headSha: reviews.headSha, createdAt: reviews.createdAt }).from(reviews)
+        .where(inArray(reviews.taskId, rows.map(t => t.id))).orderBy(reviews.taskId, desc(reviews.createdAt))
+    : []
+  const reviewOf = new Map(latestReviews.map(r => [r.taskId, r]))
+  const statuses = await mapLimit(rows, CONCURRENT_PULL_REQUESTS, async (task): Promise<PullRequestStatus | null> => {
+    const report = await merges.gates(task, project, merges.displayReads)
     const { pr } = report
     if (pr.state !== 'open' || pr.merged) return null
-    const [review] = await db.select().from(reviews).where(eq(reviews.taskId, task.id)).orderBy(desc(reviews.createdAt)).limit(1)
+    const review = reviewOf.get(task.id)
     const checks = project.requiredChecks.map((name) => {
       const check = report.checks.find(c => c.name === name)
       return { name, conclusion: check?.conclusion ?? 'missing' as const, url: check?.url ?? null }
@@ -55,7 +99,7 @@ export async function listPullRequests(db: Database, merges: MergeOrchestrator, 
       humanReviewOutstanding: task.status === 'human_review' || (requiresHumanReview(task.type, task.humanReview) && task.status !== 'ready_to_merge'),
       merge: { eligible: failed.length === 0, failingGate: failed[0] ?? null, failedGates: failed }
     }
-  }))
+  })
   return statuses.filter((s): s is PullRequestStatus => s !== null)
 }
 
