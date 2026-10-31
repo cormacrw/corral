@@ -1,0 +1,10 @@
+<!-- Holds the shell's background from the first paint until the app mounts.
+     The stylesheet and the head scripts for colour mode and the dark neutral
+     all run before this, so --ui-bg is already the right one. -->
+<style>
+  #__nuxt-loader {
+    position: fixed;
+    inset: 0;
+    background: var(--ui-bg, #fff);
+  }
+</style>

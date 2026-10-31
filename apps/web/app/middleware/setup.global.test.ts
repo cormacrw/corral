@@ -1,6 +1,7 @@
 import type { RouteLocationNormalized } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { keys } from '~/queries/keys'
+import { projectsQuery } from '~/queries/projects'
 import { testQueryClient } from '~/queries/mount-with-query'
 
 // The middleware with Nuxt's auto-imports stubbed: a fresh browser (nothing
@@ -14,16 +15,26 @@ vi.stubGlobal('useDevice', () => ({ mode }))
 
 vi.stubGlobal('defineNuxtRouteMiddleware', (fn: unknown) => fn)
 vi.stubGlobal('navigateTo', (to: string) => ({ redirect: to }))
+const router = { isReady: async () => {}, currentRoute: { value: { path: '/', query: {} } }, replace: vi.fn(async () => {}) }
+vi.stubGlobal('useRouter', () => router)
 
 const { default: middleware } = await import('./setup.global.ts') as unknown as {
   default: (to: Pick<RouteLocationNormalized, 'path' | 'query'>) => Promise<{ redirect: string } | undefined>
 }
 const visit = (path: string, query: Record<string, string> = {}) => middleware({ path, query })
+// A page outside / and /setup, once the first navigation has landed on it
+const visitDeep = async (path: string) => {
+  router.currentRoute.value = { path, query: {} }
+  await visit(path)
+  await vi.waitFor(() => expect(client.isFetching()).toBe(0))
+  await new Promise(resolve => setTimeout(resolve))
+}
 
 beforeEach(() => {
   client.clear()
   reachable = true
   mode.value = 'web'
+  router.replace.mockClear()
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (!reachable) throw new TypeError('Failed to fetch')
     expect(url).toBe('/api/projects')
@@ -74,6 +85,53 @@ describe('setup middleware with a project on the server', () => {
     await visit('/home')
     expect(fetch).toHaveBeenCalledTimes(1)
     expect(client.getQueryData(keys.projects.list())).toEqual([{ slug: 'test-app' }])
+  })
+
+  it('leaves a deep link where it is', async () => {
+    await visitDeep('/projects/test-app/board')
+    expect(router.replace).not.toHaveBeenCalled()
+  })
+})
+
+describe('setup middleware on a deep link', () => {
+  it('opens the page without waiting for the server', async () => {
+    projects = [{ slug: 'test-app' }]
+    let answer!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => {
+      answer = resolve
+    })))
+    router.currentRoute.value = { path: '/inbox', query: {} }
+    await expect(visit('/inbox')).resolves.toBeUndefined()
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+    answer(new Response(JSON.stringify(projects), { status: 200 }))
+    await vi.waitFor(() => expect(client.getQueryData(keys.projects.list())).toEqual(projects))
+  })
+
+  it('shares its request with the shell', async () => {
+    projects = [{ slug: 'test-app' }]
+    router.currentRoute.value = { path: '/inbox', query: {} }
+    await visit('/inbox')
+    await client.fetchQuery(projectsQuery())
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('sends a fresh install to onboarding once the server answers', async () => {
+    projects = []
+    await visitDeep('/inbox')
+    expect(router.replace).toHaveBeenCalledWith('/setup')
+  })
+
+  it('judges the page the human reached, not the one first asked for', async () => {
+    projects = [{ slug: 'test-app' }]
+    router.currentRoute.value = { path: '/setup', query: {} }
+    await visit('/inbox')
+    await vi.waitFor(() => expect(router.replace).toHaveBeenCalledWith('/projects/test-app'))
+  })
+
+  it('stays put when the server is unreachable', async () => {
+    reachable = false
+    await visitDeep('/inbox')
+    expect(router.replace).not.toHaveBeenCalled()
   })
 })
 

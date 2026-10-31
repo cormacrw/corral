@@ -74,12 +74,17 @@ export default defineNuxtConfig({
     define: { 'import.meta.prototype': JSON.stringify(prototype) }
   },
 
-  ...(prototype && {
-    plugins: ['~/prototype/storage.client.ts'],
-    nitro: { output: { publicDir: 'prototype-dist' } },
-    // No icon server and no network: bundle every icon the code names
-    icon: { provider: 'none', clientBundle: { scan: { globInclude: ['app/**/*.{vue,ts}'] }, sizeLimitKb: 0 } }
-  }),
+  // No icon server and no network, in every build: bundle each icon the code
+  // names. A name built at runtime would not be found, so write names out in full.
+  icon: { provider: 'none', clientBundle: { scan: { globInclude: ['app/**/*.{vue,ts}'] }, sizeLimitKb: 0 } },
+
+  // Hashed assets are served precompressed when the client accepts it, so
+  // direct access to the home server gets them small too (D12)
+  nitro: prototype
+    ? { output: { publicDir: 'prototype-dist' } }
+    : { compressPublicAssets: { gzip: true, brotli: true } },
+
+  ...(prototype && { plugins: ['~/prototype/storage.client.ts'] }),
 
   hooks: {
     // Lint can't see an auto-import, so what only app/queries may use isn't one
