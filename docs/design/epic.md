@@ -19,9 +19,10 @@ Epic names replace the old "Epic 1", "Epic 2" labels everywhere.
 3. **Description.** Markdown, rendered. Click anywhere on it to edit in a textarea; **Save** / **Cancel**, Esc cancels.
 4. **Review (D27).** The review mode in a select, saved on change. It can change until a task of the epic opens a PR (or merges without one, as a spike does); after that the select is disabled, with "Locked because a task in this epic has opened a PR." The epic PR link and a badge for its review state follow; before the PR exists an `epic` or `each_task` epic says it opens once every task is complete (Merged, or Approved for designs).
 5. **Progress.** "N of M done" (Drafts aren't counted; they're noted as "· 2 drafts"), a progress bar, a status badge with a count for each status present, and the review status, such as "All tasks complete, awaiting your review".
-6. **Tabs: Tasks and Graph.** The last tab used is remembered.
+6. **Tabs: Tasks, Graph and Activity.** The last tab used is remembered.
    - **Tasks:** every task in the epic as a list: ref, title, "after TES-3" for its dependencies, priority when High or Urgent, and its status. Clicking a row opens the task.
    - **Graph:** the dependency tree below.
+   - **Activity:** epic audit history, including title, summary, review-mode and dependency edits, epic PR events and merge refusals, with actor and time. It uses the same remembered tab selection as Tasks and Graph.
 7. **Dependency tree.** Every task in the epic, Drafts included (dashed border). A task sits one step after the last task it depends on; siblings are ordered to keep edges from crossing. Nodes are compact (180×64) and the view never zooms past 85% when fitting, so a small tree doesn't fill the frame with oversized cards. Each node shows the ref, status and title, plus priority when High or Urgent. Edges are green once the dependency is merged, and animated while it's being worked on. A dependency in another epic shows as a dashed placeholder with its ref. Pan and zoom with the controls (and a minimap on the page). Clicking a node opens that task in the flyout.
    - **Flyout:** the tree runs top to bottom in a 420px-tall frame, to suit the narrow column.
    - **Page:** the details sit in a 360px left column and the tree fills the rest, running left to right.

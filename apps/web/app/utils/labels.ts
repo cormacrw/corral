@@ -72,8 +72,6 @@ export const EPIC_STATUS_TEXT: Record<Color, string> = {
   primary: 'text-primary', secondary: 'text-secondary', neutral: 'text-muted', info: 'text-info', warning: 'text-warning', success: 'text-success', error: 'text-error'
 }
 
-// The counts an epic should show, from live tasks: the server only sends an
-// epic again when the epic itself changes
 // Epic PR audit events, worded to follow the actor's name in the Activity tab.
 const EPIC_PR_HISTORY: Record<string, string> = {
   opened: 'opened the epic PR',
@@ -103,6 +101,8 @@ export function epicHistoryText(entry: Pick<AuditEntry, 'action' | 'detail'>): s
   }
 }
 
+// The counts an epic should show, from live tasks: the server only sends an
+// epic again when the epic itself changes
 export function epicWithLiveCounts<E extends Epic>(epic: E, tasks: Pick<Task, 'epicId' | 'status' | 'type'>[]): E {
   const counted = tasks.filter(t => t.epicId === epic.id && t.status !== 'draft' && t.status !== 'backlog')
   return { ...epic, taskCount: counted.length, mergedCount: counted.filter(isTaskDone).length }
@@ -173,13 +173,13 @@ export function cliLoginCommand(id: CliStatus['id']): string {
   return `docker exec -it corral-runner ${id === 'codex' ? 'codex login --device-auth' : 'claude'}`
 }
 
-// design/inbox.md item type badges
 // PM activity about a project or the factory has no task to name
 export function inboxProjectLine(item: InboxItem): string {
   const project = item.project?.name ?? 'Global'
   return item.taskRef ? `${project} · ${item.taskRef}` : project
 }
 
+// design/inbox.md item type badges
 export function inboxTypeBadge(type: InboxItem['type']): { label: string, color: Color } {
   return ({
     release_notes: { label: 'Release notes', color: 'neutral' as const },
