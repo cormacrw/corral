@@ -82,7 +82,8 @@ describe('epic scheduling', () => {
     // The same exceptions as the claim: a spike and a task in the same epic don't wait
     await t.db.update(tasks).set({ type: 'spike' }).where(eq(tasks.id, first.id))
     expect((await get()).waitingOnEpics).toEqual([])
-    await t.db.update(tasks).set({ type: 'task', epicId: a.id }).where(eq(tasks.id, second.id))
+    await t.db.update(tasks).set({ type: 'task' }).where(eq(tasks.id, first.id))
+    await t.db.update(tasks).set({ epicId: a.id }).where(eq(tasks.id, second.id))
     expect((await get()).waitingOnEpics).toEqual([])
     await t.db.update(tasks).set({ epicId: null }).where(eq(tasks.id, second.id))
     expect((await get()).waitingOnEpics).toEqual([held])
