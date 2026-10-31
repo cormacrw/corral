@@ -12,7 +12,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-async function render(mobile = false, host = false, sheets = false) {
+async function render(mobile = false, host = false, sheets = false, attrs = {}) {
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:all(.*)*', component: { template: '<div />' } }] })
   await router.push('/plan/session')
   vi.stubGlobal('computed', computed)
@@ -22,6 +22,7 @@ async function render(mobile = false, host = false, sheets = false) {
   taskFlyoutHosts.value = Number(host)
   const wrapper = mount(TaskLink, {
     props: { taskRef: 'COR-12' },
+    attrs,
     global: { plugins: [router], provide: sheets ? { [FLYOUT_SHEETS as symbol]: true } : {} }
   })
   return { wrapper, router }
@@ -41,6 +42,12 @@ it.each([[false, false], [true, true]])('falls back to the task page without an 
   await wrapper.get('a').trigger('click', { button: 0 })
   await flushPromises()
   expect(router.currentRoute.value.path).toBe('/tasks/COR-12')
+  wrapper.unmount()
+})
+
+it('passes classes to the link', async () => {
+  const { wrapper } = await render(false, false, false, { class: 'relative z-10' })
+  expect(wrapper.get('a').classes()).toEqual(expect.arrayContaining(['relative', 'z-10', 'text-primary']))
   wrapper.unmount()
 })
 

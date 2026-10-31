@@ -129,7 +129,7 @@ const tabs = computed(() => [
                   <ProjectThumbnail
                     :project="selected.project"
                     :size="16"
-                  />{{ selected.project.name }}
+                  />{{ selected.project.name }} · <TaskLink :task-ref="selected.taskRef" />
                 </span>
               </span>
               <span class="text-xs text-muted">

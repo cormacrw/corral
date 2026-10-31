@@ -197,23 +197,32 @@ const { project, tasks, runs, history, error, load, DOT, count, needsYou, merged
             :key="run.id"
             :border-radius="8"
           >
-            <NuxtLink
-              :to="`/agents/${run.agentName.toLowerCase()}/${run.id}`"
-              class="flex items-center gap-3 rounded-lg border border-primary/40 p-3 active:bg-elevated"
-            >
+            <!-- The run link covers the card, so the task link can sit beside it, not inside it -->
+            <div class="relative flex items-center gap-3 rounded-lg border border-primary/40 p-3 active:bg-elevated">
               <AgentAvatar
                 :name="run.agentName"
                 working
               />
               <div class="min-w-0">
                 <p class="truncate text-sm">
-                  <span class="font-medium">{{ run.agentName }}</span> is {{ run.role === 'reviewer' ? 'reviewing' : run.role === 'pm' ? 'planning' : 'building' }} {{ run.taskRef ?? (run.epicId ? 'epic' : '') }} {{ taskOf(run)?.title ?? run.epicTitle ?? '' }}
+                  <span class="font-medium">{{ run.agentName }}</span> is {{ run.role === 'reviewer' ? 'reviewing' : run.role === 'pm' ? 'planning' : 'building' }} <TaskLink
+                    v-if="run.taskRef"
+                    :task-ref="run.taskRef"
+                    class="relative z-10"
+                  /><template v-else>
+                    {{ run.epicId ? 'epic' : '' }}
+                  </template> {{ taskOf(run)?.title ?? run.epicTitle ?? '' }}
                 </p>
                 <p class="text-xs text-muted">
                   Run #{{ run.number }} · {{ duration(run.startedAt ?? run.queuedAt, null) }} · {{ run.state.replace('_', ' ') }}
                 </p>
               </div>
-            </NuxtLink>
+              <NuxtLink
+                :to="`/agents/${run.agentName.toLowerCase()}/${run.id}`"
+                :aria-label="`${run.agentName}, run #${run.number}`"
+                class="absolute inset-0 rounded-lg"
+              />
+            </div>
           </BorderGlow>
         </div>
         <p
