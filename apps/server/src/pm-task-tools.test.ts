@@ -80,6 +80,32 @@ describe('PM task and epic tools', () => {
     await t?.close()
   })
 
+  it('binds both approval tools to the human checklist on their cards', async () => {
+    for (const tool of ['approve_task', 'act_on_inbox'] as const) {
+      const task = await t.createTask(slug, { type: 'spike' })
+      await t.db.update(schema.tasks).set({ status: 'human_review' }).where(eq(schema.tasks.id, task.id))
+      const input = { taskRef: task.ref, ...(tool === 'act_on_inbox' && { action: 'approve' }) }
+      const propose = async () => {
+        const response = await call(tool, input)
+        expect(response).toMatchObject({ ok: true, result: { confirmationPending: true } })
+        return (response as { result: { actionId: string, summary: string } }).result
+      }
+      const empty = await propose()
+      expect(empty.summary).toBe(tool === 'approve_task' ? `Approve ${task.ref}: ${task.title} (head: none)` : `Approve and merge ${task.ref}: ${task.title}`)
+      const [criterion] = await t.db.insert(schema.acceptanceCriteria).values({ taskId: task.id, position: 0, text: 'Playback works on a real iPhone', checkedByHuman: true }).returning()
+      expect((await resolve(empty.actionId)).body).toMatchObject({ pendingAction: { status: 'failed', error: expect.stringContaining('changed') } })
+      const card = await propose()
+      expect(card.summary).toBe(`${empty.summary}. Confirming says you checked: Playback works on a real iPhone`)
+      await t.db.update(schema.acceptanceCriteria).set({ text: 'Playback works on a real iPad' }).where(eq(schema.acceptanceCriteria.id, criterion!.id))
+      expect((await resolve(card.actionId)).body).toMatchObject({ pendingAction: { status: 'failed', error: expect.stringContaining('changed') } })
+      expect((await get(task)).status).toBe('human_review')
+      const fresh = await propose()
+      expect(fresh.summary).toContain('Playback works on a real iPad')
+      expect((await resolve(fresh.actionId)).body).toMatchObject({ pendingAction: { status: 'confirmed' } })
+      expect((await get(task)).status).toBe('merged')
+    }
+  })
+
   it('keeps epic review mode locked after PM attempts to detach PR or merged work', async () => {
     const [epic] = await t.db.insert(schema.epics).values({ projectId, title: 'Locked review', reviewMode: 'epic', createdBy: t.actor }).returning()
     const [other] = await t.db.insert(schema.epics).values({ projectId, title: 'Other epic', createdBy: t.actor }).returning()

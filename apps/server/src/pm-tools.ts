@@ -266,7 +266,7 @@ export class PmTools {
       case 'message_run': {
         const { runId, text } = strict(pmDirectTools.message_run.input)
         const run = await getRun(db, runId)
-        if (!run.projectId) throw new Error(`Run #${run.number} is a ${run.role} run; only developer and reviewer runs take messages`)
+        if (!run.projectId) throw new Error(`Run #${run.number} is a ${run.role} run; only developer, reviewer and designer runs take messages`)
         const sent = await orchestrator.messageRun(run.projectId, runId, { text: `From the PM: ${text}`, attachments: [] }, actor)
         return { result: { ok: true, runId: sent.runId, commentId: sent.comment.id }, projectId: run.projectId, summary: `Messaged run #${run.number}${run.taskRef ? ` on ${run.taskRef}` : ''}: ${clip(text, LIST_TEXT_MAX)}` }
       }

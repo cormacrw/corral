@@ -9,3 +9,5 @@ Reviewer approval routes any task with a flagged criterion to Human review, even
 The additive migration gives existing criteria `false`, so tasks with no flagged criteria keep their existing routing, evidence and review requirements.
 
 Task-page criterion text wraps in an expanding editor, with the human-check toggle on a separate line so mobile users can read the complete criterion. Inbox approval notes name the human checks as the reason for review, independently of the task-level flag.
+
+PM approval cards (`approve_task` and `act_on_inbox` approve) use `humanApprovalSummary` in `apps/server/src/pm-approval-summary.ts` to load and name every current human check. **Confirming says you checked: …** makes Confirm an explicit attestation to each named check. Confirm re-prepares the summary, refusing stale cards after checks are added or reworded. Tasks without human checks keep the existing summary.

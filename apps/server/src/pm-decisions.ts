@@ -3,6 +3,7 @@ import { taskRef, type Actor, type TaskStatus } from '@corral/core'
 import { schema, type Database } from '@corral/db'
 import { and, desc, eq, isNull } from 'drizzle-orm'
 import { z } from 'zod'
+import { humanApprovalSummary } from './pm-approval-summary.ts'
 import type { PreparedPmAction } from './pm-actions.ts'
 
 const { designVersions, projects, tasks } = schema
@@ -42,7 +43,7 @@ export class PmDecisions {
       if (action.action === 'clarify') throw new ToolError('clarify acts directly and has no confirmation')
       if (!INBOX_ACTION_STATUSES[action.action].includes(task.status)) throw new ToolError(`${ref} is ${task.status}, so ${action.action} doesn't apply. list_inbox shows what's waiting.`)
       if (action.action === 'approve' && task.type === 'design') throw new ToolError('Use approve_design to approve a design')
-      return { ...prepared, summary: inboxSummary(action, ref, task) }
+      return { ...prepared, summary: inboxSummary(action, ref, task) + (action.action === 'approve' ? await humanApprovalSummary(this.#d.db, task.id) : '') }
     }
     const { version, feedback, note } = parsed
     if (task.type !== 'design') throw new ToolError(`${ref} is not a design task`)

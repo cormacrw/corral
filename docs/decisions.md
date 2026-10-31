@@ -784,7 +784,7 @@ Epic PR review state is kept on the epic (open, agent review, human review, chan
 
 ## D29 — The PM is the human's point of contact, through deliberate tools
 
-**Status:** Accepted 2026-10-30 (COR-239). Amends D9, D10, D11, D13, D20 and PRD §7.2. The tools below are implemented; [flows.md](flows.md) describes the shipped flows.
+**Status:** Accepted 2026-10-30 (COR-239). Amends D9, D10, D11, D13, D16, D20 and PRD §7.2. The tools below are implemented; [flows.md](flows.md) describes the shipped flows.
 
 **Decision:** The PM chat is the human's point of contact for everything in Corral, and planning is one of its jobs. The PM can do anything the human can, through **specific, typed tools for each area**, not one general API tool.
 
@@ -825,6 +825,8 @@ Every agent action is attributed to the agent and session that made it, and show
 - **Inbox decisions**, such as resolving a Needs-you item.
 
 This isn't a role restriction. The PM can propose any of these at any time, whether or not the human asked. The click is the human's own action, so it goes through the same endpoint and rules as the button elsewhere in the app, and is refused the same way if the state has moved on.
+
+Task approval cards name every current **Checked by a human** criterion (D28). Confirm explicitly says the human checked each one; adding or rewording a check invalidates the old card. Cards without human checks keep their existing summary.
 
 Plan approval isn't a confirm-required tool: `approve_plan` keeps D9's rule, that the human must have written since the plan was proposed.
 
