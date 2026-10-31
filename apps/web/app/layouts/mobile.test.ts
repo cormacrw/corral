@@ -127,6 +127,7 @@ describe('mobile layout', () => {
     ['/inbox/item-1', '/inbox', 'Back to Inbox', 'Inbox'],
     ['/settings/profile', '/settings', 'Back to Settings', 'Profile'],
     ['/settings/agents', '/settings', 'Back to Settings', 'Agents'],
+    ['/settings/performance', '/settings', 'Back to Settings', 'Performance'],
     ['/settings/appearance', '/settings', 'Back to Settings', 'Appearance']
   ])('preserves back navigation on %s', (path, target, label, title) => {
     route.path = route.fullPath = path

@@ -39,6 +39,31 @@ describe('migrations', () => {
   it.each([
     { driver: 'pglite' as const, enabled: true },
     { driver: 'postgres' as const, enabled: postgresAvailable }
+  ])('0042 creates the complete performance table after main 0041 on $driver', async ({ driver, enabled }) => {
+    if (!enabled) return
+    const before = await migrationsBefore('0042_military_magdalene')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db, migrate } = await open(driver)
+    await migrate(before)
+    const journal = JSON.parse(await readFile(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as { entries: { when: number }[] }
+    const previous = journal.entries.at(-2)!.when
+    const added = journal.entries.at(-1)!.when
+    expect(added).toBeGreaterThan(previous)
+    expect(Number((await db.execute(sql`select max(created_at) as latest from drizzle.__drizzle_migrations`)).rows[0]!.latest)).toBe(previous)
+    expect((await db.execute(sql`select table_name from information_schema.tables where table_name = 'perf_samples'`)).rows).toEqual([])
+    await migrate(migrationsFolder)
+    await db.execute(sql`insert into perf_samples (kind, name, duration_ms, metric, session_id, query_count, db_time_ms)
+      values ('page', '/tasks/[ref]', 120, 'navigation', '00000000-0000-4000-8000-000000000001', 3, 12.5)`)
+    expect((await db.execute(sql`select metric, session_id, query_count, db_time_ms from perf_samples`)).rows)
+      .toEqual([{ metric: 'navigation', session_id: '00000000-0000-4000-8000-000000000001', query_count: 3, db_time_ms: 12.5 }])
+    expect(Number((await db.execute(sql`select max(created_at) as latest from drizzle.__drizzle_migrations`)).rows[0]!.latest)).toBe(added)
+    await migrate(migrationsFolder)
+    expect((await db.execute(sql`select count(*)::int as count from perf_samples`)).rows).toEqual([{ count: 1 }])
+  }, 60_000)
+
+  it.each([
+    { driver: 'pglite' as const, enabled: true },
+    { driver: 'postgres' as const, enabled: postgresAvailable }
   ])('0035 adds designer without changing existing agents or runs on $driver', async ({ driver, enabled }) => {
     if (!enabled) return
     const before = await migrationsBefore('0035_amused_bloodaxe')

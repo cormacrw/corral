@@ -14,6 +14,8 @@ import type {
   Inbox,
   InboxItem,
   ReleaseNotesItem,
+  PerfSummary,
+  PerfWindow,
   PlanMessage,
   Plan,
   PlanSession,
@@ -933,4 +935,60 @@ export const designVersions: Record<string, DesignVersion[]> = {
     spec: '# Navigation prototype\n\n## Screens\n- navigation: project links and board states',
     screenshots: [], previewUrl: 'about:blank', feedback: null, planSessionId: null, createdAt: ago(30)
   }]
+}
+
+// Sorted slowest p95 first, as the server does. The threshold is its default.
+export const perfSummaries: Record<PerfWindow, PerfSummary> = {
+  '1h': {
+    window: '1h',
+    slowThresholdMs: 500,
+    routes: [
+      { name: '/api/projects/:slug/pull-requests', count: 12, p50Ms: 212, p95Ms: 386, maxMs: 402, avgDbTimeMs: 41.2, avgQueries: 6 },
+      { name: '/api/tasks/:ref', count: 38, p50Ms: 31, p95Ms: 74, maxMs: 91, avgDbTimeMs: 12.5, avgQueries: 5.2 },
+      { name: '/api/inbox', count: 21, p50Ms: 18, p95Ms: 42, maxMs: 55, avgDbTimeMs: 9.1, avgQueries: 3 }
+    ],
+    pages: [
+      { name: '/projects/[slug]/board', count: 9, p50Ms: 240, p95Ms: 430 },
+      { name: '/tasks/[ref]', count: 14, p50Ms: 120, p95Ms: 260 }
+    ],
+    vitals: { LCP: 1840, INP: 120, CLS: 0.04 }
+  },
+  '24h': {
+    window: '24h',
+    slowThresholdMs: 500,
+    routes: [
+      { name: '/api/projects/:slug/pull-requests', count: 184, p50Ms: 318, p95Ms: 942, maxMs: 1610, avgDbTimeMs: 58.4, avgQueries: 6.4 },
+      { name: '/api/plan/sessions/:id', count: 96, p50Ms: 142, p95Ms: 561, maxMs: 804, avgDbTimeMs: 96.7, avgQueries: 14.2 },
+      { name: '/api/tasks/:ref', count: 612, p50Ms: 34, p95Ms: 118, maxMs: 340, avgDbTimeMs: 14.3, avgQueries: 5.4 },
+      { name: '/api/inbox', count: 430, p50Ms: 21, p95Ms: 66, maxMs: 148, avgDbTimeMs: 10.8, avgQueries: 3 },
+      { name: '/api/runner', count: 288, p50Ms: 1.4, p95Ms: 3.2, maxMs: 9.8, avgDbTimeMs: 0, avgQueries: 0 }
+    ],
+    pages: [
+      { name: '/projects/[slug]/board', count: 74, p50Ms: 310, p95Ms: 1240 },
+      { name: '/inbox/[[itemId]]', count: 121, p50Ms: 180, p95Ms: 620 },
+      { name: '/tasks/[ref]', count: 203, p50Ms: 140, p95Ms: 390 },
+      { name: '/settings/[[section]]', count: 11, p50Ms: 60, p95Ms: 120 }
+    ],
+    vitals: { LCP: 2860, INP: 180, CLS: 0.27 }
+  },
+  '7d': {
+    window: '7d',
+    slowThresholdMs: 500,
+    routes: [
+      { name: '/api/projects/:slug/pull-requests', count: 1302, p50Ms: 344, p95Ms: 1180, maxMs: 4120, avgDbTimeMs: 62.9, avgQueries: 6.3 },
+      { name: '/api/plan/sessions/:id', count: 701, p50Ms: 156, p95Ms: 720, maxMs: 2230, avgDbTimeMs: 104.1, avgQueries: 14.8 },
+      { name: '/api/designs/:versionId/files/*', count: 240, p50Ms: 88, p95Ms: 512, maxMs: 960, avgDbTimeMs: 22, avgQueries: 2 },
+      { name: '/api/tasks/:ref', count: 4388, p50Ms: 36, p95Ms: 131, maxMs: 876, avgDbTimeMs: 15, avgQueries: 5.4 },
+      { name: '/api/inbox', count: 3127, p50Ms: 23, p95Ms: 71, maxMs: 412, avgDbTimeMs: 11.2, avgQueries: 3 },
+      { name: '/api/runner', count: 2016, p50Ms: 1.5, p95Ms: 3.6, maxMs: 21, avgDbTimeMs: null, avgQueries: null }
+    ],
+    pages: [
+      { name: '/projects/[slug]/board', count: 502, p50Ms: 330, p95Ms: 1460 },
+      { name: '/inbox/[[itemId]]', count: 866, p50Ms: 190, p95Ms: 710 },
+      { name: '/tasks/[ref]', count: 1422, p50Ms: 150, p95Ms: 420 },
+      { name: '/plan/[sessionId]', count: 318, p50Ms: 130, p95Ms: 380 },
+      { name: '/settings/[[section]]', count: 57, p50Ms: 65, p95Ms: 140 }
+    ],
+    vitals: { LCP: 4310, INP: 540, CLS: 0.08 }
+  }
 }

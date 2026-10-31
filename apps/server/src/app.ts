@@ -1,5 +1,8 @@
 import {
   addCommentInput,
+  clientPerfInput,
+  CLIENT_PERF_MAX_BYTES,
+  perfSummaryQuery,
   ATTACHMENT_MAX_BYTES,
   AVATAR_MAX_BYTES,
   approveDesignInput,
@@ -39,6 +42,7 @@ import { bodyLimit } from 'hono/body-limit'
 import { streamSSE } from 'hono/streaming'
 import type { ZodType } from 'zod'
 import { publishDependents } from './dependent-tasks.ts'
+import { apiTiming, type PerformanceSamples } from './performance.ts'
 import { ApiFailure, fromDatabaseError } from './errors.ts'
 import { checkThumbnail, readThumbnail, THUMBNAIL_MAX_BYTES } from './thumbnails.ts'
 import { byteRange } from './byte-range.ts'
@@ -75,6 +79,7 @@ function rawPath(c: Context): string {
 const DESIGN_FILES = /^\/api\/designs\/([^/]*)\/files\/(.*)$/s
 
 export interface AppDeps {
+  performance: PerformanceSamples
   db: Database
   events: EventBus
   // Who web requests act as (see owner.ts)
@@ -102,7 +107,7 @@ const taskNumber = (value: string) => {
   return number
 }
 
-export function createApp({ db, events, actor, runner, orchestrator, blobs, transcripts, plans, releaseNotes }: AppDeps) {
+export function createApp({ db, events, actor, runner, orchestrator, blobs, transcripts, plans, releaseNotes, performance }: AppDeps) {
   const repos = new RepoCatalog(db, runner)
 
   const publishTask = async (taskId: string) => {
@@ -197,6 +202,7 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
 
   return new Hono()
     .basePath('/api')
+    .use('*', apiTiming(performance))
     .onError((error, c) => {
       const failure = error instanceof ApiFailure ? error : fromDatabaseError(error)
       if (failure) return c.json<ApiErrorBody>({ error: failure.body }, failure.status)
@@ -211,10 +217,29 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
     .use('*', async (c, next) => {
       const match = c.req.method === 'GET' ? DESIGN_FILES.exec(rawPath(c)) : null
       if (!match) return next()
+      c.set('performanceRoute', '/api/designs/:versionId/files/*')
       const file = await readDesignFile(db, blobs, match[1]!, match[2]!)
       if (!file) throw new ApiFailure(404, { code: 'not_found' })
       return c.body(new Uint8Array(file.data), 200, { ...DESIGN_BUNDLE_HEADERS, 'content-type': file.type })
     })
+
+    .post('/perf/client', bodyLimit({
+      maxSize: CLIENT_PERF_MAX_BYTES,
+      onError: c => c.json({ error: { code: 'invalid_input' } }, 400)
+    }), async (c) => {
+      // Parse text as well as application/json: sendBeacon can use either.
+      const input = clientPerfInput.safeParse(await c.req.json().catch(() => null))
+      if (!input.success) return c.json({ error: { code: 'invalid_input' } }, 400)
+      const createdAt = new Date()
+      for (const sample of input.data.samples) {
+        performance.record({ kind: 'page', name: sample.name, metric: sample.metric,
+          durationMs: sample.value, sessionId: input.data.sessionId, createdAt })
+      }
+      return c.body(null, 204)
+    })
+
+    .get('/perf/summary', validate('query', perfSummaryQuery), async c =>
+      c.json(await performance.summary(c.req.valid('query').window)))
 
     .get('/health', c => c.json({ ok: true }))
 
