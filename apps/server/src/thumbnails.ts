@@ -16,10 +16,15 @@ export function checkThumbnail(data: Uint8Array, contentType: string): void {
   if (!hasImageSignature(data, type)) throw invalid(`The file isn't a ${type.slice(6).toUpperCase()} image`)
 }
 
-export async function readThumbnail(db: Executor, blobs: BlobStore, slug: string, version?: string): Promise<{ data: Uint8Array, type: string } | null> {
+// The hash of the project's thumbnail, refusing a stale `v`
+export async function thumbnailHash(db: Executor, slug: string, version?: string): Promise<string | null> {
   const project = await findProjectBySlug(db, slug)
   if (!project.thumbnailBlob || (version !== undefined && version !== project.thumbnailBlob.slice(0, 12))) return null
-  const data = await blobs.get(project.thumbnailBlob)
+  return project.thumbnailBlob
+}
+
+export async function readThumbnail(blobs: BlobStore, hash: string): Promise<{ data: Uint8Array, type: string } | null> {
+  const data = await blobs.get(hash)
   if (!data) return null
   const type = ATTACHMENT_CONTENT_TYPES.find(type => hasImageSignature(data, type))
   return type ? { data, type } : null

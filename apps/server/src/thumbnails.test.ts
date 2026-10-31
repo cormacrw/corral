@@ -2,7 +2,8 @@ import { databaseFixture } from '@corral/db/testing'
 import type { Inbox, Project } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
+import { createApp } from './app.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 
 describe.each(['pglite', 'postgres'] as const)('project thumbnails on %s', (driver) => {
@@ -21,6 +22,27 @@ describe.each(['pglite', 'postgres'] as const)('project thumbnails on %s', (driv
     body.set('file', new File([new Uint8Array(data)], 'image', { type }))
     return t.request('PUT', `/api/projects/${slug}/thumbnail`, body)
   }
+
+  it('answers a revalidation from the hash, without reading the blob', async () => {
+    await upload(png, 'image/png')
+    const path = `/api/projects/${project.slug}/thumbnail`
+    const first = await t.request('GET', path)
+    const etag = first.headers.get('etag')!
+    expect(etag).toMatch(/^"[0-9a-f]{64}"$/)
+    expect(first.headers.get('cache-control')).toBe('private, no-cache')
+    const read = vi.spyOn(t.blobs, 'get')
+    const app = createApp({ ...t, events: t.bus })
+    const revalidate = (tag: string) => app.request(path, { headers: { 'if-none-match': tag } })
+    for (const tag of [etag, `W/${etag}`, `"other", ${etag}`, '*']) {
+      const res = await revalidate(tag)
+      expect(res.status).toBe(304)
+      expect(res.headers.get('etag')).toBe(etag)
+      expect(res.headers.get('cache-control')).toBe('private, no-cache')
+    }
+    expect(read).not.toHaveBeenCalled()
+    expect((await revalidate('"other"')).status).toBe(200)
+    read.mockRestore()
+  })
 
   it('stores all supported types, versions replacements and broadcasts each change', async () => {
     let previous: string | null = null

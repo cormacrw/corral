@@ -75,29 +75,49 @@ export const DESIGN_BUNDLE_HEADERS = {
   'cache-control': 'private, max-age=31536000, immutable'
 }
 
-// Unpacked bundles by blob hash. Bundles are immutable, so entries never go
-// stale; only the most recently used few are kept.
-const CACHE_SIZE = 8
-const unpacked = new Map<string, Map<string, Uint8Array>>()
+// Unpacked bundles by blob hash, oldest use first. Bundles are immutable, so
+// entries never go stale. The cache holds the load, so the assets of one page
+// share a single unpack, and is bounded by what's unpacked; the newest bundle
+// stays even over the bound, as its page is still asking for it.
+const MAX_CACHED_BYTES = 64 * 1024 * 1024
+const unpacked = new Map<string, { files: Promise<Map<string, Uint8Array> | null>, bytes: number }>()
 
-async function loadBundle(blobs: BlobStore, hash: string): Promise<Map<string, Uint8Array> | null> {
+function loadBundle(blobs: BlobStore, hash: string): Promise<Map<string, Uint8Array> | null> {
   const cached = unpacked.get(hash)
   if (cached) {
     unpacked.delete(hash)
     unpacked.set(hash, cached)
-    return cached
+    return cached.files
   }
+  const entry = { files: unpackBlob(blobs, hash), bytes: 0 }
+  unpacked.set(hash, entry)
+  void entry.files.then((files) => {
+    // Nothing to keep: the next request tries again
+    if (!files) {
+      unpacked.delete(hash)
+      return
+    }
+    entry.bytes = [...files.values()].reduce((total, data) => total + data.byteLength, 0)
+    let total = [...unpacked.values()].reduce((sum, e) => sum + e.bytes, 0)
+    for (const [key, { bytes }] of unpacked) {
+      if (total <= MAX_CACHED_BYTES || unpacked.size === 1) break
+      if (bytes > 0) {
+        unpacked.delete(key)
+        total -= bytes
+      }
+    }
+  }, () => unpacked.delete(hash))
+  return entry.files
+}
+
+async function unpackBlob(blobs: BlobStore, hash: string): Promise<Map<string, Uint8Array> | null> {
   const archive = await blobs.get(hash)
   if (!archive) return null
-  let files: Map<string, Uint8Array>
   try {
-    files = unpackBundle(archive)
+    return unpackBundle(archive)
   } catch {
     return null
   }
-  unpacked.set(hash, files)
-  if (unpacked.size > CACHE_SIZE) unpacked.delete(unpacked.keys().next().value!)
-  return files
 }
 
 // One file of a design version's bundle, for GET /designs/:versionId/files/*.

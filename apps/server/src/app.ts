@@ -40,7 +40,7 @@ import { streamSSE } from 'hono/streaming'
 import type { ZodType } from 'zod'
 import { publishDependents } from './dependent-tasks.ts'
 import { ApiFailure, fromDatabaseError } from './errors.ts'
-import { checkThumbnail, readThumbnail, THUMBNAIL_MAX_BYTES } from './thumbnails.ts'
+import { checkThumbnail, readThumbnail, thumbnailHash, THUMBNAIL_MAX_BYTES } from './thumbnails.ts'
 import { byteRange } from './byte-range.ts'
 import { createAttachment, readAttachment } from './attachments.ts'
 import { recordDeployment, updateDeploymentInbox, type ReleaseNotes } from './deployments.ts'
@@ -53,7 +53,8 @@ import { loadInbox } from './inbox.ts'
 import type { GitHubClient } from './github.ts'
 import { listPullRequests, readPullRequest } from './pull-requests.ts'
 import { createProject, findProjectBySlug, listProjects, patchProject, setProjectThumbnail, toProject } from './projects.ts'
-import type { BlobStore } from './blob-store.ts'
+import type { BlobHandle, BlobStore } from './blob-store.ts'
+import { evidenceHeaders } from './evidence-file.ts'
 import type { Orchestrator } from './orchestrator.ts'
 import type { PlanService } from './plan.ts'
 import type { RunnerHub } from './runner-hub.ts'
@@ -71,6 +72,26 @@ function rawPath(c: Context): string {
   const path = incoming ?? c.req.url.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i, '')
   const end = path.search(/[?#]/)
   return end === -1 ? path : path.slice(0, end)
+}
+
+// Bytes the response only reads, so they needn't be copied for it
+const bytes = (data: Uint8Array) => data as Uint8Array<ArrayBuffer>
+
+// A blob with Range support, reading only the requested bytes
+function serveBlob(c: Context, file: BlobHandle, headers: Record<string, string>) {
+  const { size } = file
+  const range = byteRange(c.req.header('range'), size)
+  if (range === 'unsatisfiable') return c.body(null, 416, { ...headers, 'content-range': `bytes */${size}`, 'content-length': '0' })
+  if (range) {
+    const { start, end } = range
+    return c.body(file.stream(start, end), 206, { ...headers, 'content-range': `bytes ${start}-${end}/${size}`, 'content-length': String(end - start + 1) })
+  }
+  return c.body(file.stream(), 200, { ...headers, 'content-length': String(size) })
+}
+
+// Whether If-None-Match names this entity tag
+function matchesEtag(header: string | undefined, etag: string): boolean {
+  return header?.split(',').some(tag => ['*', etag].includes(tag.trim().replace(/^W\//, ''))) ?? false
 }
 
 const DESIGN_FILES = /^\/api\/designs\/([^/]*)\/files\/(.*)$/s
@@ -179,7 +200,7 @@ export function createApp({ db, events, actor, runner, orchestrator, github, blo
   // The URL changes with the picture, so a served one never changes
   const serveAvatar = (c: Context, avatar: { data: Uint8Array, type: string } | null) => {
     if (!avatar) throw new ApiFailure(404, { code: 'not_found' })
-    return c.body(new Uint8Array(avatar.data), 200, { 'content-type': avatar.type, 'cache-control': 'private, max-age=31536000, immutable' })
+    return c.body(bytes(avatar.data), 200, { 'content-type': avatar.type, 'cache-control': 'private, max-age=31536000, immutable' })
   }
   const avatarBodyLimit = bodyLimit({
     maxSize: AVATAR_MAX_BYTES,
@@ -215,7 +236,7 @@ export function createApp({ db, events, actor, runner, orchestrator, github, blo
       if (!match) return next()
       const file = await readDesignFile(db, blobs, match[1]!, match[2]!)
       if (!file) throw new ApiFailure(404, { code: 'not_found' })
-      return c.body(new Uint8Array(file.data), 200, { ...DESIGN_BUNDLE_HEADERS, 'content-type': file.type })
+      return c.body(bytes(file.data), 200, { ...DESIGN_BUNDLE_HEADERS, 'content-type': file.type })
     })
 
     .get('/health', c => c.json({ ok: true }))
@@ -261,13 +282,14 @@ export function createApp({ db, events, actor, runner, orchestrator, github, blo
       return c.json(saved)
     })
     .get('/projects/:slug/thumbnail', async (c) => {
-      const file = await readThumbnail(db, blobs, c.req.param('slug'), c.req.query('v'))
+      const hash = await thumbnailHash(db, c.req.param('slug'), c.req.query('v'))
+      if (!hash) throw new ApiFailure(404, { code: 'not_found' })
+      // The hash is the content, so a revalidation needn't read the blob
+      const validators = { 'cache-control': 'private, no-cache', 'etag': `"${hash}"` }
+      if (matchesEtag(c.req.header('if-none-match'), validators.etag)) return c.body(null, 304, validators)
+      const file = await readThumbnail(blobs, hash)
       if (!file) throw new ApiFailure(404, { code: 'not_found' })
-      return c.body(new Uint8Array(file.data), 200, {
-        'content-type': file.type,
-        'cache-control': 'private, no-cache',
-        'x-content-type-options': 'nosniff'
-      })
+      return c.body(bytes(file.data), 200, { ...validators, 'content-type': file.type, 'x-content-type-options': 'nosniff' })
     })
     .delete('/projects/:slug/thumbnail', async (c) => {
       const project = await setProjectThumbnail(db, await findProjectBySlug(db, c.req.param('slug')), null, actor)
@@ -461,27 +483,9 @@ export function createApp({ db, events, actor, runner, orchestrator, github, blo
       c.header('accept-ranges', 'bytes')
       const [row] = await db.select().from(schema.evidence).where(eq(schema.evidence.id, c.req.param('id')))
       // A note has no file
-      const data = row?.blob ? await blobs.get(row.blob) : null
-      if (!row || !data) throw new ApiFailure(404, { code: 'not_found' })
-      const headers = {
-        'content-type': row.contentType!,
-        // Blobs are immutable, so they can be cached forever
-        'cache-control': 'private, max-age=31536000, immutable',
-        'content-disposition': `inline; filename="${row.fileName!.replace(/"/g, '')}"`
-      }
-      const range = byteRange(c.req.header('range'), data.byteLength)
-      if (range === 'unsatisfiable') {
-        return c.body(null, 416, { ...headers, 'content-range': `bytes */${data.byteLength}`, 'content-length': '0' })
-      }
-      if (range) {
-        const { start, end } = range
-        return c.body(new Uint8Array(data.subarray(start, end + 1)), 206, {
-          ...headers,
-          'content-range': `bytes ${start}-${end}/${data.byteLength}`,
-          'content-length': String(end - start + 1)
-        })
-      }
-      return c.body(new Uint8Array(data), 200, { ...headers, 'content-length': String(data.byteLength) })
+      const file = row?.blob ? await blobs.open(row.blob) : null
+      if (!row || !file) throw new ApiFailure(404, { code: 'not_found' })
+      return serveBlob(c, file, evidenceHeaders(row.contentType, row.fileName))
     })
 
     .get('/agents', async c => c.json(await listAgents(db)))
@@ -525,10 +529,11 @@ export function createApp({ db, events, actor, runner, orchestrator, github, blo
     // An attachment never changes, so it can be cached for good. nosniff
     // keeps browsers to the stored (always raster image) type.
     .get('/attachments/:id/file', async (c) => {
-      const file = await readAttachment(db, blobs, c.req.param('id'))
-      if (!file) throw new ApiFailure(404, { code: 'not_found' })
-      return c.body(new Uint8Array(file.data), 200, {
-        'content-type': file.type,
+      const attachment = await readAttachment(db, blobs, c.req.param('id'))
+      if (!attachment) throw new ApiFailure(404, { code: 'not_found' })
+      return c.body(attachment.file.stream(), 200, {
+        'content-type': attachment.type,
+        'content-length': String(attachment.file.size),
         'cache-control': 'private, max-age=31536000, immutable',
         'x-content-type-options': 'nosniff'
       })
@@ -537,7 +542,7 @@ export function createApp({ db, events, actor, runner, orchestrator, github, blo
     .get('/designs/:versionId/screenshots/:index', async (c) => {
       const file = await readDesignScreenshot(db, blobs, c.req.param('versionId'), Number(c.req.param('index')))
       if (!file) throw new ApiFailure(404, { code: 'not_found' })
-      return c.body(new Uint8Array(file.data), 200, { ...DESIGN_BUNDLE_HEADERS, 'content-type': file.type })
+      return c.body(bytes(file.data), 200, { ...DESIGN_BUNDLE_HEADERS, 'content-type': file.type })
     })
 
     // Without the trailing slash, a prototype's relative asset paths would

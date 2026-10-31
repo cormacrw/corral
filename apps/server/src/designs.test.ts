@@ -3,8 +3,8 @@ import { packBundle } from '@corral/core'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { request as httpRequest } from 'node:http'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { bundleContentType, DESIGN_BUNDLE_CSP } from './designs.ts'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { bundleContentType, DESIGN_BUNDLE_CSP, readDesignFile } from './designs.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './test-runner.ts'
 
@@ -55,6 +55,45 @@ describe('design bundle files', () => {
   }
 
   const files = () => `/api/designs/${versionId}/files`
+
+  const versionWith = async (name: string, data: Uint8Array) => {
+    const [task] = await t.db.select({ id: schema.tasks.id }).from(schema.tasks).limit(1)
+    const [version] = await t.db.insert(schema.designVersions).values({
+      taskId: task!.id, version: Math.floor(Math.random() * 1e8) + 10, branch: 'design/T-1', commitSha: 'a'.repeat(40),
+      bundleBlob: await t.blobs.put(packBundle([{ path: 'index.html', data: text(name) }, { path: 'big.bin', data }])), specBlob: await t.blobs.put(text('# Design'))
+    }).returning()
+    return version!.id
+  }
+
+  it('unpacks a cold bundle once for a page of concurrent assets', async () => {
+    const id = await versionWith('stampede', new Uint8Array(8))
+    const read = vi.spyOn(t.blobs, 'get')
+    const loaded = await Promise.all(Array.from({ length: 12 }, () => readDesignFile(t.db, t.blobs, id, 'index.html')))
+    expect(loaded.every(f => new TextDecoder().decode(f!.data) === 'stampede')).toBe(true)
+    expect(read).toHaveBeenCalledTimes(1)
+    read.mockRestore()
+  })
+
+  it('retries a bundle that failed to load', async () => {
+    const id = await versionWith('retry', new Uint8Array(8))
+    const read = vi.spyOn(t.blobs, 'get').mockResolvedValueOnce(null)
+    expect(await readDesignFile(t.db, t.blobs, id, 'index.html')).toBeNull()
+    await new Promise(resolve => setImmediate(resolve))
+    read.mockRestore()
+    expect(await readDesignFile(t.db, t.blobs, id, 'index.html')).not.toBeNull()
+  })
+
+  it('evicts by bytes, so large bundles can\'t pile up', async () => {
+    const ids = [await versionWith('first', new Uint8Array(40 * 1024 * 1024)), await versionWith('second', new Uint8Array(40 * 1024 * 1024).fill(1))]
+    for (const id of ids) await readDesignFile(t.db, t.blobs, id, 'index.html')
+    await new Promise(resolve => setImmediate(resolve))
+    const read = vi.spyOn(t.blobs, 'get')
+    await readDesignFile(t.db, t.blobs, ids[1]!, 'index.html')
+    expect(read).not.toHaveBeenCalled()
+    await readDesignFile(t.db, t.blobs, ids[0]!, 'index.html')
+    expect(read).toHaveBeenCalledTimes(1)
+    read.mockRestore()
+  })
 
   it('serves each file with its content type and the sandbox headers', async () => {
     const cases: [string, string, string][] = [

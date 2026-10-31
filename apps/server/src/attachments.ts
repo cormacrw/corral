@@ -2,7 +2,7 @@ import { ATTACHMENT_MAX_BYTES, type Attachment, type AttachmentContentType } fro
 import { attachmentIdsInMarkdown, attachmentIdsInRichText, attachmentUrl, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, eq, inArray } from 'drizzle-orm'
-import type { BlobStore } from './blob-store.ts'
+import type { BlobHandle, BlobStore } from './blob-store.ts'
 import { ApiFailure } from './errors.ts'
 import { declaredImageType, hasImageSignature } from './images.ts'
 import { findProjectBySlug } from './projects.ts'
@@ -49,12 +49,12 @@ export async function createAttachment(db: Executor, blobs: BlobStore, slug: str
 }
 
 // The stored image, for GET /attachments/:id/file
-export async function readAttachment(db: Executor, blobs: BlobStore, id: string): Promise<{ data: Uint8Array, type: string } | null> {
+export async function readAttachment(db: Executor, blobs: BlobStore, id: string): Promise<{ file: BlobHandle, type: string } | null> {
   if (!UUID.test(id)) return null
   const [row] = await db.select({ blob: attachments.blob, type: attachments.mimeType }).from(attachments).where(eq(attachments.id, id))
   if (!row || !declaredImageType(row.type)) return null
-  const data = await blobs.get(row.blob)
-  return data ? { data, type: row.type } : null
+  const file = await blobs.open(row.blob)
+  return file ? { file, type: row.type } : null
 }
 
 // An attachment with its bytes, only if it belongs to the project: for the
