@@ -43,6 +43,25 @@ describe('StreamJsonParser', () => {
     expect(next.events).toEqual([{ type: 'usage', inputTokens: 10, cacheReadTokens: 0, outputTokens: 2 }])
   })
 
+  it('reports each warm turn its own usage, not the sum of the turns so far', () => {
+    const parser = new StreamJsonParser()
+    const result = { type: 'result', subtype: 'success', is_error: false, result: 'Done', usage: { input_tokens: 10, output_tokens: 2 } }
+    expect(parser.parse(line(result)).events).toEqual([{ type: 'usage', inputTokens: 10, cacheReadTokens: 0, outputTokens: 2 }])
+    parser.startTurn()
+    expect(parser.parse(line(result)).events).toEqual([{ type: 'usage', inputTokens: 10, cacheReadTokens: 0, outputTokens: 2 }])
+    parser.startTurn()
+    expect(parser.parse(line(result)).events).toEqual([{ type: 'usage', inputTokens: 10, cacheReadTokens: 0, outputTokens: 2 }])
+  })
+
+  it.each(['null', '42', '"text"', 'true'])('shows the JSON line %s instead of throwing on it', (text) => {
+    expect(new StreamJsonParser().parse(text).events).toEqual([{ type: 'system', text }])
+  })
+
+  it('ignores a reset time no date can hold', () => {
+    const parsed = new StreamJsonParser().parse(line({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: 1e30 } }))
+    expect(parsed.rateLimit).toEqual({ resetsAt: null })
+  })
+
   it('reports a replayed user message without adding it to the transcript', () => {
     const parser = new StreamJsonParser()
     expect(parser.parse(line({ type: 'user', isReplay: true, message: { role: 'user', content: 'Use pnpm' } }))).toMatchObject({ events: [], replayed: 'Use pnpm' })
@@ -185,7 +204,26 @@ describe('parseResetTime', () => {
   const now = new Date('2026-10-28T10:00:00')
 
   it('reads a clock time later today', () => {
-    expect(parseResetTime('resets 3pm (Europe/London)', now)).toBe(new Date('2026-10-28T15:00:00').toISOString())
+    expect(parseResetTime('resets 3pm', now)).toBe(new Date('2026-10-28T15:00:00').toISOString())
+  })
+
+  it.each([
+    ['resets 3pm (America/New_York)', '2026-10-28T10:00:00Z', '2026-10-28T19:00:00.000Z'],
+    ['resets 3pm (Europe/London)', '2026-10-28T10:00:00Z', '2026-10-28T15:00:00.000Z'],
+    // Still British Summer Time, four days earlier
+    ['resets 3pm (Europe/London)', '2026-10-24T10:00:00Z', '2026-10-24T14:00:00.000Z'],
+    ['resets 9:30am (Asia/Kolkata)', '2026-10-28T10:00:00Z', '2026-10-29T04:00:00.000Z'],
+    // Already past in the zone, though not in UTC
+    ['resets 8am (Asia/Tokyo)', '2026-10-28T10:00:00Z', '2026-10-28T23:00:00.000Z'],
+    ['resets 12am (UTC)', '2026-10-28T10:00:00Z', '2026-10-29T00:00:00.000Z'],
+    // The clock change itself: 1am New York is EST by the evening before it ends
+    ['resets 6am (America/New_York)', '2026-11-01T09:00:00Z', '2026-11-01T11:00:00.000Z']
+  ])('reads %s in the zone it names, at %s', (text, at, expected) => {
+    expect(parseResetTime(text, new Date(at))).toBe(expected)
+  })
+
+  it('falls back to local time for a zone it does not know', () => {
+    expect(parseResetTime('resets 3pm (Mars/Olympus)', now)).toBe(new Date('2026-10-28T15:00:00').toISOString())
   })
 
   it('rolls a clock time already past to tomorrow', () => {

@@ -1,5 +1,5 @@
 import type { RunEvent } from '@corral/contracts'
-import { LIMIT_TEXT, parseResetTime, type ParsedLine } from './stream-json.ts'
+import { LIMIT_TEXT, parseJsonLine, parseResetTime, resultText, type ParsedLine } from './stream-json.ts'
 
 // Turns `codex exec --json` lines into Corral's runtime-neutral RunEvents
 // (agent-runtime-and-auth.md rule 7), the same shape StreamJsonParser gives
@@ -44,8 +44,6 @@ interface CodexLine {
   error?: { message?: string }
 }
 
-const empty = (): ParsedLine => ({ events: [], sessionId: null, rateLimit: null, result: null })
-
 export class CodexJsonParser {
   #inputTokens = 0
   #cacheReadTokens = 0
@@ -61,16 +59,8 @@ export class CodexJsonParser {
   }
 
   parse(line: string): ParsedLine {
-    const out = empty()
-    const trimmed = line.trim()
-    if (!trimmed) return out
-    let data: CodexLine
-    try {
-      data = JSON.parse(trimmed) as CodexLine
-    } catch {
-      out.events.push({ type: 'system', text: trimmed })
-      return out
-    }
+    const { out, data } = parseJsonLine<CodexLine>(line)
+    if (!data) return out
 
     switch (data.type) {
       case 'thread.started':
@@ -190,18 +180,13 @@ function toolResult(item: CodexItem): { output: string, isError: boolean } | nul
     case 'file_change':
       return { output: (item.changes ?? []).map(change => `${change.kind ?? 'update'} ${change.path ?? ''}`).join('\n'), isError: failed }
     case 'mcp_tool_call':
-      return { output: item.error?.message ?? contentText(item.result?.content), isError: failed || Boolean(item.error) }
+      return { output: item.error?.message ?? resultText(item.result?.content), isError: failed || Boolean(item.error) }
     case 'web_search':
     case 'todo_list':
       return { output: '', isError: failed }
     default:
       return null
   }
-}
-
-function contentText(content: unknown): string {
-  if (!Array.isArray(content)) return content === undefined || content === null ? '' : JSON.stringify(content)
-  return content.map(part => (typeof part === 'object' && part && 'text' in part ? String((part as { text: unknown }).text) : '[non-text content]')).join('\n')
 }
 
 // Codex runs commands as `/bin/sh -lc '<command>'`; show just the command

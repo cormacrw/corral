@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { createInterface } from 'node:readline'
-import type { AgentExit, AgentProcess, AgentRuntime, AgentSession, RuntimeOptions, TurnResult } from './agent-runtime.ts'
+import { StringDecoder } from 'node:string_decoder'
+import { STOP_GRACE_MS, type AgentExit, type AgentProcess, type AgentRuntime, type AgentSession, type RuntimeOptions, type TurnResult } from './agent-runtime.ts'
 import type { GitAuthor } from './config.ts'
 import { StreamJsonParser, type ParsedLine } from './stream-json.ts'
 
@@ -71,7 +71,7 @@ export function agentEnv(base: NodeJS.ProcessEnv = process.env, gitAuthor: GitAu
 
 export function spawnAgent(options: AgentOptions): AgentProcess {
   const { child, exited } = startAgent(agentArgs(options), 'ignore', options)
-  return { pid: child.pid ?? -1, exited, kill: signal => killGroup(child, signal) }
+  return agentProcess(child, exited)
 }
 
 export type AgentOptionsWithoutPrompt = Omit<AgentOptions, 'prompt'>
@@ -117,9 +117,7 @@ export function spawnAgentSession(options: AgentOptionsWithoutPrompt): AgentSess
   })
 
   return {
-    pid: child.pid ?? -1,
-    exited,
-    kill: signal => killGroup(child, signal),
+    ...agentProcess(child, exited),
     send(prompt) {
       if (ended || !stdin.writable) return
       parser.startTurn()
@@ -157,14 +155,72 @@ function startAgent(args: string[], stdin: 'ignore' | 'pipe', options: AgentOpti
   return { ...startProcess(options.claudeBin, args, stdin, options, parser), parser }
 }
 
+// Far above a real JSONL line; a longer one is skipped with a note, not held
+export const MAX_LINE_CHARS = 8 * 1024 * 1024
+// How long after the CLI exits a descendant may keep its pipes open
+const EXIT_DRAIN_MS = 2000
+
+// Splits a byte stream on \n alone. JSON leaves U+2028 and U+2029 raw inside
+// strings, and readline would cut a line at either.
+export class LineSplitter {
+  #decoder = new StringDecoder('utf8')
+  #parts: string[] = []
+  #length = 0
+  #skipping = false
+  #onLine: (line: string) => void
+  #onSkipped: () => void
+
+  constructor(onLine: (line: string) => void, onSkipped: () => void) {
+    this.#onLine = onLine
+    this.#onSkipped = onSkipped
+  }
+
+  write(chunk: Buffer): void {
+    let text = this.#decoder.write(chunk)
+    for (let end = text.indexOf('\n'); end >= 0; end = text.indexOf('\n')) {
+      this.#add(text.slice(0, end))
+      this.#finishLine()
+      text = text.slice(end + 1)
+    }
+    this.#add(text)
+  }
+
+  // A last line with no \n still counts
+  end(): void {
+    this.#add(this.#decoder.end())
+    if (this.#length > 0) this.#finishLine()
+  }
+
+  #add(text: string): void {
+    if (this.#skipping || !text) return
+    this.#length += text.length
+    if (this.#length <= MAX_LINE_CHARS) {
+      this.#parts.push(text)
+      return
+    }
+    this.#skipping = true
+    this.#parts = []
+    this.#onSkipped()
+  }
+
+  #finishLine(): void {
+    if (!this.#skipping) this.#onLine(this.#parts.join(''))
+    this.#parts = []
+    this.#length = 0
+    this.#skipping = false
+  }
+}
+
 // Starts an agent CLI in the worktree with agentEnv, in its own process
-// group, feeding each stdout line through the adapter's parser to onLine
+// group, feeding each stdout line through the adapter's parser to onLine.
+// `input` is written to its stdin, which is then closed.
 export function startProcess(
   bin: string,
   args: string[],
   stdin: 'ignore' | 'pipe',
   options: Pick<RuntimeOptions, 'cwd' | 'gitAuthor' | 'onLine'>,
-  parser: { parse(line: string): ParsedLine }
+  parser: { parse(line: string): ParsedLine },
+  input?: string
 ): { child: ChildProcess, exited: Promise<AgentExit> } {
   const child = spawn(bin, args, {
     cwd: options.cwd,
@@ -173,10 +229,25 @@ export function startProcess(
     detached: true,
     stdio: [stdin, 'pipe', 'pipe']
   })
+  if (input !== undefined) {
+    // Writing after the process died raises EPIPE; exited already reports that
+    child.stdin!.on('error', () => {})
+    child.stdin!.end(input)
+  }
 
+  const note = (text: string) => options.onLine('', { events: [{ type: 'system', text }], sessionId: null, rateLimit: null, result: null })
+  // An exception in a stream listener would take down every run on this runner
+  const handleLine = (line: string) => {
+    try {
+      options.onLine(line, parser.parse(line))
+    } catch (error) {
+      note(`Could not read a line of the agent's output: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
   // Line by line, never the whole transcript in memory (runner rule 3)
-  const stdout = createInterface({ input: child.stdout! })
-  stdout.on('line', line => options.onLine(line, parser.parse(line)))
+  const lines = new LineSplitter(handleLine, () => note(`Skipped a line of the agent's output over ${MAX_LINE_CHARS.toLocaleString('en')} characters`))
+  child.stdout!.on('data', (chunk: Buffer) => lines.write(chunk))
+  child.stdout!.on('end', () => lines.end())
   let stderr = ''
   child.stderr!.setEncoding('utf8').on('data', (chunk: string) => {
     // Keep only the tail: enough to explain a crash
@@ -184,18 +255,57 @@ export function startProcess(
   })
 
   const exited = new Promise<AgentExit>((resolve) => {
-    child.on('error', (error) => {
-      options.onLine('', { events: [{ type: 'system', text: `Could not start the agent: ${error.message}` }], sessionId: null, rateLimit: null, result: null })
-      resolve({ code: null, signal: null })
-    })
-    child.on('close', (code, signal) => {
-      if (code !== 0 && stderr.trim()) {
-        options.onLine('', { events: [{ type: 'system', text: stderr.trim() }], sessionId: null, rateLimit: null, result: null })
-      }
+    let finished = false
+    const finish = (code: number | null, signal: NodeJS.Signals | null) => {
+      if (finished) return
+      finished = true
+      lines.end()
+      if (code !== 0 && stderr.trim()) note(stderr.trim())
       resolve({ code, signal })
+    }
+    child.on('error', (error) => {
+      note(`Could not start the agent: ${error.message}`)
+      finish(null, null)
+    })
+    child.on('exit', (code, signal) => {
+      stopGroup(child)
+      // 'close' waits for the pipes, which a process that left the group can
+      // hold open forever. Without this the run would never end.
+      const stuck = setTimeout(() => {
+        child.stdout!.destroy()
+        child.stderr!.destroy()
+        finish(code, signal)
+      }, EXIT_DRAIN_MS)
+      child.once('close', () => {
+        clearTimeout(stuck)
+        finish(code, signal)
+      })
     })
   })
   return { child, exited }
+}
+
+// The CLI has exited, so nothing will stop what it left behind (runner rule 2).
+// This doesn't hold up the exit: the run's own work is the runner's git, not
+// these. An idle warm process hasn't exited, so its children are left alone.
+function stopGroup(child: ChildProcess): void {
+  killGroup(child, 'SIGTERM')
+  if (!groupAlive(child)) return
+  setTimeout(() => {
+    if (!groupAlive(child)) return
+    console.warn(`Process group ${child.pid} outlived its agent and ignored SIGTERM; sending SIGKILL`)
+    killGroup(child, 'SIGKILL')
+  }, STOP_GRACE_MS).unref()
+}
+
+function groupAlive(child: ChildProcess): boolean {
+  if (!child.pid) return false
+  try {
+    process.kill(-child.pid, 0)
+    return true
+  } catch {
+    return false
+  }
 }
 
 export function killGroup(child: ChildProcess, signal: NodeJS.Signals): void {
@@ -205,4 +315,8 @@ export function killGroup(child: ChildProcess, signal: NodeJS.Signals): void {
   } catch {
     // The group is already gone
   }
+}
+
+export function agentProcess(child: ChildProcess, exited: Promise<AgentExit>): AgentProcess {
+  return { pid: child.pid ?? -1, exited, kill: signal => killGroup(child, signal) }
 }
