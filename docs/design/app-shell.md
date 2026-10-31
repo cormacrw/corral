@@ -56,7 +56,7 @@ The active item has `bg-elevated` and `text-primary`, with its icon in `primary`
 
 **Runner offline:** a warning banner shows only when no runner is online: "The runner is offline…" with one runner, "Every runner is offline…" with several, or "The runner needs an update to protocol {n}…" when the only runners known were turned away for an old protocol. It links to **Runners** in Settings. When some runners are offline and another is online there is no banner; the runner list shows them as offline.
 
-**Updating (D16):** while either update-hold phase is active, show an info banner: "Corral is waiting to update". Plan messages and question replies remain enabled: turns start during draining and queue during finishing.
+**Updating (D16):** while either update-hold phase is active, show an info banner: "Corral is waiting to update", with a **Lift** action calling DELETE /api/update-hold. Plan messages and question replies remain enabled: turns start during draining and queue during finishing.
 
 **Project paused:** a full-width `warning` bar above the shell, shown only on that project's pages. It reads "{Project} is paused. No new runs will start; work already running will finish." and has a **Resume** button. Pausing happens in project settings.
 

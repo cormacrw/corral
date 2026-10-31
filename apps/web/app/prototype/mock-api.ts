@@ -39,6 +39,11 @@ function session(id: string): PlanSessionDetail {
 route('GET', '/health', () => ({ ok: true }))
 route('GET', '/runner', () => f.runner)
 route('GET', '/status', () => ({ ...f.status, runners: f.runner.runners }))
+route('DELETE', '/update-hold', () => {
+  Object.assign(f.status, { updating: false })
+  emit({ type: 'global.status', status: f.status })
+  return f.status
+})
 route('POST', '/stop-all', () => Object.assign(f.status, { stopped: true }))
 route('POST', '/resume-all', () => Object.assign(f.status, { stopped: false }))
 
