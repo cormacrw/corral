@@ -1,3 +1,5 @@
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { TASK_INTEGRATION_PROTOCOL, type EpicReviewItem, type Inbox, type RunJob } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
@@ -16,6 +18,10 @@ afterAll(async () => {
   runner?.close()
   await t?.close()
 })
+
+async function capture(name: string, data: unknown) {
+  if (process.env.CORRAL_EPIC_EVIDENCE_DIR) await writeFile(join(process.env.CORRAL_EPIC_EVIDENCE_DIR, name), JSON.stringify(data, null, 2))
+}
 
 type Created = Awaited<ReturnType<TestApp['createTask']>>
 const humanCheck = { text: 'Works on a real iPhone', checkedByHuman: true }
@@ -78,7 +84,9 @@ it('integrates sensitive and human-check work on agent approval, leaving both to
   // Ready to merge goes straight to the integrator: no separate human approval
   expect(await row(flagged.id)).toMatchObject({ status: 'ready_to_merge', humanReview: true, integrationProtocol: 1 })
   expect(await row(checked.id)).toMatchObject({ status: 'ready_to_merge', humanReview: false, integrationProtocol: 1 })
-  expect((await inbox()).needsYou.some(i => i.taskId === flagged.id || i.taskId === checked.id)).toBe(false)
+  const open = await inbox()
+  expect(open.needsYou.some(i => i.taskId === flagged.id || i.taskId === checked.id)).toBe(false)
+  await capture('agent-approved-routing.json', { flagged: await row(flagged.id), humanCheck: await row(checked.id), inboxItemsForThem: open.needsYou.filter(i => i.taskId === flagged.id || i.taskId === checked.id) })
 
   const human = checked.acceptanceCriteria.find(c => c.checkedByHuman)!
   await integrate(flagged)
@@ -99,15 +107,20 @@ it('integrates sensitive and human-check work on agent approval, leaving both to
   expect(two!.task.acceptanceCriteria.find(c => c.id === human.id)).toMatchObject({ met: null, checkedByHuman: true })
   expect(two!.task.latestReview!.criteria.find(c => c.criterionId === human.id)).toMatchObject({ met: null, note: 'Needs human check' })
 
+  await capture('epic-review-item.json', { request: { method: 'GET', url: '/api/inbox' }, response: item })
+  await capture('epic-pr-body.md.json', { body: pr.body })
   const approve = (body: object) => t.request('POST', `/api/epics/${epic.id}/review`, { action: 'approve', headSha: item.headSha, ...body })
   for (const partial of [{}, { confirmedCriteria: [human.id] }, { confirmedTasks: [flagged.id] }]) {
     const refused = await approve(partial)
     expect(refused.status).toBe(409)
-    expect(await refused.json()).toMatchObject({ error: { constraint: 'human_checks_unconfirmed' } })
+    const failure = await refused.json()
+    expect(failure).toMatchObject({ error: { constraint: 'human_checks_unconfirmed' } })
+    await capture('approve-refused.json', { request: { method: 'POST', url: `/api/epics/${epic.id}/review`, body: { action: 'approve', headSha: item.headSha, ...partial } }, status: 409, response: failure })
     expect((await epicRow(epic.id)).reviewState).toBe('human_review')
   }
   expect((await approve({ confirmedCriteria: [human.id], confirmedTasks: [flagged.id] })).status).toBe(200)
   expect((await epicRow(epic.id)).reviewState).toBe('ready_to_merge')
+  await capture('approve-confirmed.json', { request: { method: 'POST', url: `/api/epics/${epic.id}/review`, body: { action: 'approve', headSha: item.headSha, confirmedCriteria: [human.id], confirmedTasks: [flagged.id] } }, status: 200, epic: await epicRow(epic.id) })
   const audit = await t.db.select().from(schema.auditLog).where(eq(schema.auditLog.action, 'epic.pr'))
   expect(audit.map(a => a.detail)).toContainEqual(expect.objectContaining({ epicId: epic.id, event: 'human_approved', confirmedCriteria: [human.id], confirmedTasks: [flagged.id] }))
 })
@@ -131,10 +144,13 @@ it('keeps a prior approval for Backlog-only work, and invalidates it for board w
 
   const later = await t.createTask(project.slug, { epicId: epic.id, title: 'Someday' })
   expect(later.status).toBe('backlog')
-  expect((await epicRow(epic.id)).reviewState).toBe('ready_to_merge')
+  const held = (await epicRow(epic.id)).reviewState
+  expect(held).toBe('ready_to_merge')
 
   await ready(project, later)
-  expect((await epicRow(epic.id)).reviewState).toBe('open')
+  const invalidated = (await epicRow(epic.id)).reviewState
+  expect(invalidated).toBe('open')
+  await capture('invalidation.json', { afterApproval: 'ready_to_merge', afterBacklogOnlyTask: held, afterTaskReachesBoard: invalidated })
   await t.db.update(schema.tasks).set({ deletedAt: new Date() }).where(eq(schema.tasks.id, later.id))
 
   const again = await toHumanReview(project, epic)
@@ -143,6 +159,7 @@ it('keeps a prior approval for Backlog-only work, and invalidates it for board w
   t.github.setBranch(project.repository, branch!, 'someone-pushed')
   await t.orchestrator.epicPrs.reconcile()
   expect(await epicRow(epic.id)).toMatchObject({ reviewState: 'in_review', prHeadSha: 'someone-pushed' })
+  await capture('invalidation-new-head.json', { afterApproval: 'ready_to_merge', afterNewEpicHead: await epicRow(epic.id) })
 })
 
 it('keeps task-level human review for standalone work and each_task epics, each with its own PR', async () => {
@@ -161,7 +178,9 @@ it('keeps task-level human review for standalone work and each_task epics, each 
     const review = await assigned(task, 'reviewer')
     expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Checked', criteria: task.acceptanceCriteria.map(c => ({ criterionId: c.id, met: true, note: 'Checked' })) })).toMatchObject({ ok: true })
     expect(await row(task.id)).toMatchObject({ status: 'human_review' })
-    expect((await inbox()).needsYou.find(i => i.taskId === task.id)).toMatchObject({ type: 'human_review', prUrl: opened.prUrl })
+    const inboxItem = (await inbox()).needsYou.find(i => i.taskId === task.id)
+    expect(inboxItem).toMatchObject({ type: 'human_review', prUrl: opened.prUrl })
+    await capture(`task-level-review-${task === standalone ? 'standalone' : 'each-task'}.json`, { request: { method: 'GET', url: '/api/inbox' }, task: await row(task.id), response: inboxItem })
     expect((await t.request('GET', `/api/projects/${p.slug}/tasks/${task.number}`).then(r => r.json()) as { submission: unknown }).submission).toBeNull()
   }
 })
