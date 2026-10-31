@@ -206,11 +206,12 @@ function startEditDescription() {
   descriptionDraft.value = structuredClone(toRaw(task.value?.description ?? { type: 'doc', content: [] })) as { type: 'doc' }
   editingDescription.value = true
 }
+// Following a link or selecting text to copy shouldn't open an editor
+function wantsEdit(event: MouseEvent) {
+  return !(event.target as HTMLElement).closest('a, button') && !window.getSelection()?.toString()
+}
 function onDescriptionClick(event: MouseEvent) {
-  // Following a link or selecting text to copy shouldn't open the editor
-  if ((event.target as HTMLElement).closest('a')) return
-  if (window.getSelection()?.toString()) return
-  startEditDescription()
+  if (wantsEdit(event)) startEditDescription()
 }
 // The editor's defaults suit a full page; a task's description sits in a
 // narrow column at body text size
@@ -287,6 +288,7 @@ async function saveDescription() {
 // A Draft from a plan: the task itself, without the work around it. It's
 // placed only with the whole plan, from the plan flyout
 const isDraft = computed(() => task.value?.status === 'draft')
+const editingCriterion = ref<string | null>(null)
 // Merged is final (D10): the task reads as it shipped; only comments change
 const readonly = computed(() => task.value?.status === 'merged')
 const placing = ref(false)
@@ -776,14 +778,9 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
             @click="!readonly && onDescriptionClick($event)"
             @keydown.enter.self.prevent="!readonly && startEditDescription()"
           >
-            <UEditor
-              :model-value="(task.description ?? { type: 'doc', content: [] }) as never"
-              content-type="json"
-              :editable="false"
-              :image="false"
-              :extensions="descriptionExtensions"
-              placeholder="Add a description…"
-              :ui="{ base: `${descriptionUi.base} [&>p:last-child:not(:first-child):has(>br:only-child)]:hidden` }"
+            <RichTextText
+              :doc="task.description"
+              class="text-sm"
             />
           </div>
           <p
@@ -812,14 +809,21 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
                 :aria-label="criterion.met ? 'Met' : criterion.met === false ? 'Not met' : 'Open'"
               />
               <div class="min-w-0 flex-1">
-                <MarkdownText
-                  v-if="readonly"
-                  :text="criterion.text"
-                  class="px-1"
-                />
+                <div
+                  v-if="readonly || editingCriterion !== criterion.id"
+                  :role="readonly ? undefined : 'button'"
+                  :tabindex="readonly ? undefined : 0"
+                  :aria-label="readonly ? undefined : `Edit criterion: ${criterion.text}`"
+                  class="rounded px-1 py-0.5 hover:bg-elevated"
+                  @click="!readonly && wantsEdit($event) && (editingCriterion = criterion.id)"
+                  @keydown.enter.self.prevent="!readonly && (editingCriterion = criterion.id)"
+                >
+                  <MarkdownText :text="criterion.text" />
+                </div>
                 <UTextarea
                   v-else
                   :model-value="criterion.text"
+                  autofocus
                   autoresize
                   :rows="1"
                   variant="none"
@@ -828,6 +832,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
                   :ui="{ base: 'px-1 py-0 text-sm/6 hover:bg-elevated focus:ring-2 focus:ring-primary' }"
                   :aria-label="`Criterion: ${criterion.text}`"
                   @change="saveCriterion(criterion.id, ($event.target as HTMLTextAreaElement).value)"
+                  @blur="editingCriterion = null"
                 />
                 <label class="mt-1 flex items-center gap-1 px-1 text-xs text-muted">
                   <input
