@@ -56,6 +56,12 @@ export interface DesignSubmission {
 }
 
 export const MAX_BUNDLE_BYTES = 25 * 1024 * 1024
+// With the bundle, these keep the base64 message under the socket's 100 MiB: a
+// larger one would close the connection, and with it every run on this runner
+export const MAX_SPEC_BYTES = 5 * 1024 * 1024
+export const MAX_SCREENSHOT_BYTES = 10 * 1024 * 1024
+export const MAX_SCREENSHOTS_BYTES = 40 * 1024 * 1024
+const BUNDLE_TOO_BIG = 'Not submitted. The packed bundle is over 25 MB; leave out what the prototype doesn\'t need.'
 const SCREENSHOT_TYPES: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' }
 
 // Reads what the designer passed to submit_design and packs the bundle.
@@ -72,16 +78,30 @@ export async function packDesign(baseDir: string, input: Record<string, unknown>
   const links = entries.filter(e => e.isSymbolicLink())
   if (links.length > 0) return { ok: false, error: `Not submitted. The bundle can't contain symlinks: ${links.map(e => relative(bundleDir, join(e.parentPath, e.name))).join(', ')}. Copy the files in instead.` }
 
+  // Sizes first: a folder holding node_modules must not reach tar or memory
+  let bundleBytes = 0
+  for (const entry of entries.filter(e => e.isFile())) {
+    bundleBytes += (await stat(join(entry.parentPath, entry.name)).catch(() => null))?.size ?? 0
+    if (bundleBytes > MAX_BUNDLE_BYTES) return { ok: false, error: BUNDLE_TOO_BIG }
+  }
+
   const specPath = at(input.specPath ?? '')
+  const specSize = input.specPath ? (await stat(specPath).catch(() => null))?.size ?? 0 : 0
+  if (specSize > MAX_SPEC_BYTES) return { ok: false, error: `Not submitted. ${specPath} is over 5 MB; design.md is a spec, not a place for assets.` }
   const spec = input.specPath ? await readFile(specPath, 'utf8').catch(() => null) : null
   if (!spec?.trim()) return { ok: false, error: `Not submitted. No design.md at ${specPath}. Write the spec and pass its path.` }
 
   const paths = Array.isArray(input.screenshots) ? input.screenshots.map(at) : []
   if (paths.length === 0) return { ok: false, error: 'Not submitted. Pass at least one screenshot per screen.' }
   const screenshots = []
+  let screenshotBytes = 0
   for (const path of paths) {
     const contentType = SCREENSHOT_TYPES[extname(path).toLowerCase()]
     if (!contentType) return { ok: false, error: `Not submitted. ${path} isn't a PNG, JPEG or WebP screenshot.` }
+    const size = (await stat(path).catch(() => null))?.size ?? 0
+    screenshotBytes += size
+    if (size > MAX_SCREENSHOT_BYTES) return { ok: false, error: `Not submitted. ${path} is over 10 MB; capture a smaller screenshot.` }
+    if (screenshotBytes > MAX_SCREENSHOTS_BYTES) return { ok: false, error: 'Not submitted. The screenshots come to over 40 MB; capture smaller ones.' }
     const data = await readFile(path).catch(() => null)
     if (!data) return { ok: false, error: `Not submitted. No screenshot at ${path}.` }
     screenshots.push({ fileName: basename(path), contentType, dataBase64: data.toString('base64') })
@@ -92,8 +112,8 @@ export async function packDesign(baseDir: string, input: Record<string, unknown>
     const archive = join(scratch, 'bundle.tar')
     const tar = await exec('tar', ['-cf', archive, '-C', bundleDir, '.'])
     if (tar.code !== 0) return { ok: false, error: `Corral could not pack the bundle: ${tar.stderr.trim() || 'tar is missing'}` }
+    if ((await stat(archive)).size > MAX_BUNDLE_BYTES) return { ok: false, error: BUNDLE_TOO_BIG }
     const data = await readFile(archive)
-    if (data.length > MAX_BUNDLE_BYTES) return { ok: false, error: 'Not submitted. The packed bundle is over 25 MB; leave out what the prototype doesn\'t need.' }
     return { ok: true, result: { bundle: { dataBase64: data.toString('base64'), files: entries.filter(e => e.isFile()).length }, spec, screenshots } }
   } finally {
     await rm(scratch, { recursive: true, force: true })

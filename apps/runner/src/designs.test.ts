@@ -1,8 +1,8 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { packDesign, saveDesign } from './designs.ts'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { MAX_BUNDLE_BYTES, MAX_SCREENSHOT_BYTES, MAX_SCREENSHOTS_BYTES, MAX_SPEC_BYTES, packDesign, saveDesign } from './designs.ts'
 import { exec } from './exec.ts'
 
 describe('saveDesign', () => {
@@ -98,6 +98,50 @@ describe('packDesign', () => {
   })
 
   const input = (over: Record<string, unknown> = {}) => ({ bundleDir: join(root, 'dist'), specPath: join(root, 'design.md'), screenshots: [join(root, 'login-desktop.png')], ...over })
+
+  describe('size limits', () => {
+    const sized = (path: string, bytes: number) => truncate(path, bytes)
+
+    it('refuses an oversized bundle before running tar', async () => {
+      await writeFile(join(root, 'dist', 'huge.bin'), '')
+      await sized(join(root, 'dist', 'huge.bin'), MAX_BUNDLE_BYTES + 1)
+      // Sparse, so a tar of it would take no time: tar failing proves it never ran
+      await writeFile(join(root, 'tar'), '#!/bin/sh\ntouch "$0.ran"\nexit 1\n')
+      await chmod(join(root, 'tar'), 0o755)
+      vi.stubEnv('PATH', `${root}:${process.env.PATH}`)
+      try {
+        expect(await packDesign(root, input())).toEqual({ ok: false, error: expect.stringContaining('over 25 MB') })
+        expect(await stat(join(root, 'tar.ran')).catch(() => null)).toBeNull()
+      } finally {
+        vi.unstubAllEnvs()
+      }
+    })
+
+    it('refuses one screenshot over the limit without reading it', async () => {
+      await sized(join(root, 'login-desktop.png'), MAX_SCREENSHOT_BYTES + 1)
+      expect(await packDesign(root, input())).toEqual({ ok: false, error: expect.stringContaining('over 10 MB') })
+    })
+
+    it('refuses screenshots that come to too much together', async () => {
+      const screenshots: string[] = []
+      for (let i = 0; i < 5; i++) {
+        screenshots.push(join(root, `s${i}.png`))
+        await writeFile(screenshots[i]!, '')
+        await sized(screenshots[i]!, MAX_SCREENSHOT_BYTES)
+      }
+      expect(await packDesign(root, input({ screenshots }))).toEqual({ ok: false, error: expect.stringContaining('over 40 MB') })
+    })
+
+    it('refuses an oversized spec', async () => {
+      await sized(join(root, 'design.md'), MAX_SPEC_BYTES + 1)
+      expect(await packDesign(root, input())).toEqual({ ok: false, error: expect.stringContaining('over 5 MB') })
+    })
+
+    it('stays under the socket limit at every maximum at once', () => {
+      const base64 = (bytes: number) => bytes * 4 / 3
+      expect(base64(MAX_BUNDLE_BYTES) + base64(MAX_SCREENSHOTS_BYTES) + MAX_SPEC_BYTES).toBeLessThan(100 * 1024 * 1024)
+    })
+  })
 
   it('packs the bundle as a tar with index.html at its root, with the spec and screenshots', async () => {
     const packed = await packDesign(root, input())
