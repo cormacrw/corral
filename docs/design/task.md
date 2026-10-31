@@ -98,9 +98,9 @@ Ready tasks whose epic has unfinished prerequisites show **Waiting on epic: <tit
 - Should "Open full page" replace the current page or open a new tab?
 - Should humans be able to reorder acceptance criteria?
 
-## Merged tasks
+## Complete tasks
 
-Merged is final (D10). The task reads as it shipped: title, properties, dependencies, description and criteria are shown but not editable (a lock note says "Merged, so read-only. You can still comment."), and the server rejects edits with `409 task_merged`. Comments still work.
+A merged task reads as **Complete**. Merged is final (D10). The task reads as it shipped: title, properties, dependencies, description and criteria are shown but not editable (a lock note says "Complete, so read-only. You can still comment."), and the server rejects edits with `409 task_merged`. Comments still work.
 
 ## Evidence review (D21)
 

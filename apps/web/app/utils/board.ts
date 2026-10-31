@@ -1,18 +1,20 @@
 import type { HumanTransitionInput, Task } from '@corral/contracts'
 import type { AgentRole, TaskPriority, TaskStatus } from '@corral/core'
-import { availableEvents, TASK_PRIORITIES } from '@corral/core'
+import { availableEvents, isTaskDone, TASK_PRIORITIES } from '@corral/core'
 
-// How long a merged task stays in the Board's Merged column. Older ones are
+import { completedAt } from './completion.ts'
+
+// How long a completed task stays in the Board's Complete column. Older ones are
 // still on the Backlog, epic and task pages.
-export const MERGED_WINDOW_DAYS = 3
-const MERGED_WINDOW_MS = MERGED_WINDOW_DAYS * 24 * 60 * 60 * 1000
+export const COMPLETE_WINDOW_DAYS = 3
+const COMPLETE_WINDOW_MS = COMPLETE_WINDOW_DAYS * 24 * 60 * 60 * 1000
 
-// Whether a task belongs on the Board: everything past Backlog, except merged
-// tasks older than the window.
-export function onBoard(task: Pick<Task, 'status' | 'mergedAt'>, now = Date.now()): boolean {
+// Finished work stays on the Board for three days; older work remains elsewhere.
+export function onBoard(task: Pick<Task, 'type' | 'status' | 'mergedAt' | 'updatedAt'>, now = Date.now()): boolean {
   if (task.status === 'backlog' || task.status === 'draft') return false
-  if (task.status !== 'merged') return true
-  return task.mergedAt !== null && now - new Date(task.mergedAt).getTime() <= MERGED_WINDOW_MS
+  if (!isTaskDone(task)) return true
+  const at = completedAt(task)
+  return at !== null && now - new Date(at).getTime() <= COMPLETE_WINDOW_MS
 }
 
 // The Board's columns, in order (design/board.md). The key names a column in
@@ -24,8 +26,7 @@ export const BOARD_COLUMNS: { key: string, label: string, statuses: TaskStatus[]
   { key: 'human_review', label: 'Human review', statuses: ['human_review'], hint: 'You' },
   { key: 'ready_to_merge', label: 'Ready to merge', statuses: ['ready_to_merge'], hint: 'Corral' },
   { key: 'blocked', label: 'Blocked & failed', statuses: ['blocked', 'failed'], hint: 'You' },
-  { key: 'merged', label: 'Merged', statuses: ['merged'], hint: `Last ${MERGED_WINDOW_DAYS} days` },
-  { key: 'approved', label: 'Approved', statuses: ['approved'], hint: 'Designs' }
+  { key: 'complete', label: 'Complete', statuses: ['merged', 'approved'], hint: `Last ${COMPLETE_WINDOW_DAYS} days` }
 ]
 
 // How far a finger must travel sideways, in px, to count as a swipe
@@ -38,13 +39,19 @@ export function swipeStep(dx: number, dy: number): -1 | 0 | 1 {
   return dx < 0 ? 1 : -1
 }
 
-// Orders a column's tasks. Merged lists the newest merge first, with tasks that
-// have no merge time last and ties broken by ref so the order is stable. Other
-// columns keep the order they came in.
-export function sortColumn<T extends Pick<Task, 'ref' | 'mergedAt'>>(key: string, tasks: T[]): T[] {
-  if (key !== 'merged') return tasks
-  const time = (t: T) => t.mergedAt === null ? -Infinity : new Date(t.mergedAt).getTime()
+// Complete lists the newest finish first, missing times last, with stable ref ties.
+export function sortColumn<T extends Pick<Task, 'ref' | 'type' | 'status' | 'mergedAt' | 'updatedAt'>>(key: string, tasks: T[]): T[] {
+  if (key !== 'complete') return tasks
+  const time = (task: T) => {
+    const at = completedAt(task)
+    return at === null ? -Infinity : new Date(at).getTime()
+  }
   return [...tasks].sort((a, b) => time(b) - time(a) || a.ref.localeCompare(b.ref, undefined, { numeric: true }))
+}
+
+// Preserve saved Board links from before the combined column.
+export function boardColumnKey<T>(key: T): T | 'complete' {
+  return key === 'merged' || key === 'approved' ? 'complete' : key
 }
 
 // The Board's filters (design/board.md). Each list is a multi-select, and an
@@ -108,7 +115,7 @@ export function filtersFromQuery(query: Query): BoardFilters {
   return {
     search: first(query.q),
     epics: list(QUERY.epics),
-    statuses: list(QUERY.statuses).filter(key => BOARD_COLUMNS.some(c => c.key === key)),
+    statuses: [...new Set(list(QUERY.statuses).map(boardColumnKey))].filter(key => BOARD_COLUMNS.some(c => c.key === key)),
     priorities: list(QUERY.priorities).filter((p): p is TaskPriority => (TASK_PRIORITIES as readonly string[]).includes(p)),
     agents: list(QUERY.agents)
   }

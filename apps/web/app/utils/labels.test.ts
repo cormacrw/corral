@@ -1,9 +1,18 @@
 import type { TaskStatus } from '@corral/core'
 import { describe, expect, it } from 'vitest'
-import { agentStatus, cliLoginCommand, detectedRuntimes, formatMs, epicInProgress, epicReviewStatus, epicWithLiveCounts, runtimeLabel, runBadge, runRef, runTitle, runTokens, taskCounts, taskTypeBadge, taskNote } from './labels.ts'
+import { agentStatus, cliLoginCommand, detectedRuntimes, formatMs, epicInProgress, epicReviewStatus, epicWithLiveCounts, runtimeLabel, runBadge, runRef, runTitle, runTokens, statusCounts, taskCounts, taskTypeBadge, taskNote } from './labels.ts'
 import { projects, task } from '../prototype/fixtures'
 
 const tasks = (...statuses: TaskStatus[]) => statuses.map(status => ({ status }))
+
+describe('statusCounts', () => {
+  it('combines merged tasks and approved designs into one Complete count', () => {
+    expect(statusCounts(tasks('merged', 'approved', 'ready', 'merged', 'approved'))).toEqual([
+      { status: 'ready', label: 'Ready', count: 1 },
+      { status: 'approved', label: 'Complete', count: 4 }
+    ])
+  })
+})
 
 describe('taskCounts', () => {
   it('leaves merged tasks out of the Board count', () => {
