@@ -1,4 +1,6 @@
 <script setup lang="ts">
+definePageMeta({ key: 'task' })
+
 // The task page (design/task.md, page mode). On mobile it's the full-page
 // task screen instead (design/mobile.md)
 const route = useRoute()

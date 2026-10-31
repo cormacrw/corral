@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { agentStatus, duration, isLiveRun as isLive, ROLE, runBadge, runRef, runTitle, runTokens, runtimeLabel, timeAgo } from '~/utils/labels'
 
+definePageMeta({ key: route => `agent:${String(route.params.name)}` })
+
 // An agent's page (design/agent.md): runs list and the transcript. Mobile
 // shows the agent and its runs at /agents/:name, and a run's transcript
 // at /agents/:name/:runId (design/mobile.md).
@@ -187,7 +189,11 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
                 />
               </div>
             </header>
-            <div :class="selected.timings ? 'min-h-0 flex-1 overflow-y-auto overscroll-contain p-4' : 'flex min-h-0 flex-1 flex-col'">
+            <!-- Keyed so a run's scroll, steps and draft stay with that run -->
+            <div
+              :key="selected.id"
+              :class="selected.timings ? 'min-h-0 flex-1 overflow-y-auto overscroll-contain p-4' : 'flex min-h-0 flex-1 flex-col'"
+            >
               <div :class="selected.timings ? 'mx-auto flex max-w-[880px] flex-col gap-4' : 'flex min-h-0 flex-1 flex-col'">
                 <RunTimingBreakdown :run="selected" />
                 <RunTranscript
@@ -201,6 +207,7 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
             </div>
             <footer class="border-t border-default px-4 py-2">
               <RunComposer
+                :key="selected.id"
                 :view="view"
                 :run="selected"
               />

@@ -72,8 +72,10 @@ const live = computed(() => !!selected.value && isLiveRun(selected.value))
       </div>
     </header>
 
+    <!-- Keyed so a run's scroll, steps and draft stay with that run -->
     <div
       v-if="selected && agent"
+      :key="selected.id"
       :class="selected.timings ? 'min-h-0 flex-1 overflow-y-auto overscroll-contain p-3' : 'flex min-h-0 flex-1 flex-col'"
     >
       <RunTimingBreakdown
@@ -106,6 +108,7 @@ const live = computed(() => !!selected.value && isLiveRun(selected.value))
       class="shrink-0 border-t border-default px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]"
     >
       <RunComposer
+        :key="selected.id"
         :view="props.view"
         :run="selected"
       />

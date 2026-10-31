@@ -9,6 +9,7 @@ import { listTaskAttachments } from './attachments.ts'
 import { listEpics } from './epics.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
+import { loadInbox } from './inbox.ts'
 import { pmFallbackPrompt, pmPrompt, questionText, sessionTitlePrompt } from './prompts.ts'
 import type { RunnerHub } from './runner-hub.ts'
 import { requireRuntimeCli } from './setup.ts'
@@ -108,7 +109,8 @@ export class PlanService {
   async markRead(sessionId: string): Promise<PlanSession> {
     await this.#d.db.update(planSessions).set({ unread: false }).where(eq(planSessions.id, sessionId))
     const session = await this.#toSession(await this.#session(sessionId))
-    this.#d.events.publish({ type: 'plan.session', session })
+    const { count: inboxCount } = await loadInbox(this.#d.db)
+    this.#d.events.publish({ type: 'plan.session', session, markedRead: { inboxCount } })
     return session
   }
 

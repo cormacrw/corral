@@ -78,6 +78,24 @@ describe('query layer', () => {
     expect([...FakeEventSource.last.handlers.keys()]).toEqual(expect.arrayContaining(serverEventTypes))
   })
 
+  it('keeps read-only Inbox events out of refetches and writes the count into the cache', async () => {
+    useLive().connect()
+    const inbox = onScreen(client, keys.inbox(), () => ({ count: 2 }))
+    await vi.advanceTimersByTimeAsync(0)
+    FakeEventSource.last.emit('plan.session', {
+      type: 'plan.session', session: { id: 's-1', unread: false }, markedRead: { inboxCount: 1 }
+    })
+    FakeEventSource.last.emit('deployment.updated', { type: 'deployment.updated', markedRead: true })
+    await vi.advanceTimersByTimeAsync(MAX_WAIT_MS + QUIET_MS)
+    expect(client.getQueryData(keys.inbox())).toEqual({ count: 1 })
+    expect(inbox.queryFn).toHaveBeenCalledTimes(1)
+    // Content changes still invalidate the derived Inbox, as on main.
+    FakeEventSource.last.emit('deployment.updated', { type: 'deployment.updated' })
+    await vi.advanceTimersByTimeAsync(MAX_WAIT_MS + QUIET_MS)
+    expect(inbox.queryFn).toHaveBeenCalledTimes(2)
+    inbox.wrapper.unmount()
+  })
+
   it('coalesces a burst of task events into one refetch of each affected query', async () => {
     const live = useLive()
     live.connect()

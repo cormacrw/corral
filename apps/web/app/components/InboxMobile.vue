@@ -12,6 +12,7 @@ type Action = InboxActionInput['action']
 const props = defineProps<{
   planThread: PlanThreadItem | null
   onRefresh: () => Promise<void>
+  onRead: (id: string) => void
   inbox: Inbox | null
   error: string | null
   items: InboxItem[]
@@ -77,6 +78,7 @@ const tabs = computed(() => [
     :key="planThread.sessionId"
     :item="planThread"
     :on-refresh="onRefresh"
+    :on-read="onRead"
   />
   <div
     v-else-if="selected?.type === 'release_notes'"
@@ -84,7 +86,9 @@ const tabs = computed(() => [
   >
     <MobilePageHeader compact />
     <InboxReleaseNotes
+      :key="selected.id"
       :item="selected"
+      @read="onRead(selected.id)"
       @refresh="onRefresh"
     />
   </div>
@@ -107,7 +111,12 @@ const tabs = computed(() => [
       </template>
     </MobilePageHeader>
     <template v-if="selected">
-      <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
+      <!-- Keyed so the next item opens at its top -->
+      <div
+        :key="selected.id"
+        class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4"
+        data-testid="inbox-detail-scroller"
+      >
         <div class="flex flex-col gap-4">
           <div class="flex gap-3">
             <AgentAvatar
@@ -242,6 +251,7 @@ const tabs = computed(() => [
           :actions="taskLoadFailed ? [{ label: 'Retry', onClick: onRetryTask }] : []"
         />
         <PromptComposer
+          :key="selected.id"
           v-model="text"
           :placeholder="composerPlaceholder"
           :submit-label="composerLabel"
