@@ -56,6 +56,7 @@ it('gives each run its own composer and transcript on desktop', async () => {
 
 function mountAgent(params: Record<string, string>, isMobile: boolean) {
   vi.stubGlobal('computed', vue.computed)
+  vi.stubGlobal('definePageMeta', vi.fn())
   vi.stubGlobal('useSeoMeta', vi.fn())
   vi.stubGlobal('useRoute', () => ({ params }))
   vi.stubGlobal('useRouter', () => ({}))

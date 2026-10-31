@@ -1,14 +1,13 @@
 <script setup lang="ts">
-import { useQuery } from '@tanstack/vue-query'
-import { projectsQuery } from '~/queries/projects'
+// Wraps every /projects/:slug route: it resolves the project once for its tabs
+// (useProject) and shows the one not-found state. Until the list loads, pages
+// show their own skeletons.
+definePageMeta({ taskFlyout: true })
 
-// Wraps every /projects/:slug route, so none of them has to handle a project
-// that isn't there. Until the list loads, pages show their own skeletons.
 const route = useRoute()
-const { data: projects } = useQuery(projectsQuery())
-// The project being removed here is about to be left, not missing
-const removing = useRemovingProject()
-const missing = computed(() => removing.value !== route.params.slug && (projects.value?.every(p => p.slug !== route.params.slug) ?? false))
+const slug = computed(() => String(route.params.slug))
+const missing = useProjectMissing(slug)
+provideProject(slug, () => route.name === 'projects-slug')
 </script>
 
 <template>

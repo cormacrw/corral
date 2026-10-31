@@ -6,16 +6,16 @@ import { ciCell, evidenceCell, mergeCell, rebaseCell, reviewCell } from '~/utils
 
 // Pull requests (design/pull-requests.md): every open PR in the project and
 // where it stands against the merge gates, read live from GitHub
-const route = useRoute()
-const live = useLive()
 const flyout = useTaskFlyout()
 const device = useDevice()
-const slug = computed(() => String(route.params.slug))
-const project = computed(() => live.state.value.projects.find(p => p.slug === slug.value) ?? null)
+const { slug, project } = useProject()
 useSeoMeta({ title: () => `Pull requests · ${project.value?.name ?? ''} · Corral` })
 
-// Task and run events refetch it too (queries/dependencies.ts)
-const { data: prs, error, isFetching, refetch } = useQuery(computed(() => pullRequestsQuery(slug.value)))
+// The parent prefetches once. Mounting this tab shows that cache immediately;
+// polling and task/run event refetches run only while this page is mounted.
+const { data: prs, error, isFetching, refetch } = useQuery(computed(() => ({
+  ...pullRequestsQuery(slug.value), enabled: Boolean(project.value), refetchOnMount: false
+})))
 
 const rows = computed(() => (prs.value ?? []).map(pr => ({
   pr,
@@ -255,7 +255,6 @@ const summary = computed(() => {
           </table>
         </div>
       </div>
-      <TaskFlyout v-if="!device.isMobile.value" />
     </div>
   </UDashboardPanel>
 </template>

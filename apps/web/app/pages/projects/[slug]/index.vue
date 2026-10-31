@@ -4,8 +4,9 @@ import { duration, STATUS, timeAgo } from '~/utils/labels'
 // Project overview (design/project-overview.md). Mobile gets
 // MobileProjectOverview (design/mobile.md) over the same data.
 const device = useDevice()
-const overview = useProjectOverview()
+const { overview } = useProject()
 const { project, tasks, runs, history, error, load, DOT, count, needsYou, mergedThisWeek, firstPass, waitingOnDependency, developer, reviewer, pmName, epics, taskOf, actorName, taskRefOf, activityText } = overview
+useSeoMeta({ title: () => `${project.value?.name ?? 'Project'} · Corral` })
 </script>
 
 <template>

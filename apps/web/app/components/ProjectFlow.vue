@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { useQuery } from '@tanstack/vue-query'
 import type { FlowMetricsQuery } from '@corral/contracts'
-import { flowQuery } from '~/queries/projects'
+import { DEFAULT_FLOW_WINDOW, flowQuery } from '~/queries/projects'
 import { QUEUE_WAIT_LABEL, ROLE, STATUS, formatMs } from '~/utils/labels'
 
 const props = defineProps<{ slug: string }>()
-const window = ref<FlowMetricsQuery['window']>('30d')
-const { data: metrics, error, isPending, isPlaceholderData, refetch } = useQuery(computed(() => flowQuery(props.slug, window.value)))
+const window = ref<FlowMetricsQuery['window']>(DEFAULT_FLOW_WINDOW)
+// The project parent route keeps the default window current; events invalidate the rest
+const { data: metrics, error, isPending, isPlaceholderData, refetch } = useQuery(computed(() => ({ ...flowQuery(props.slug, window.value), refetchOnMount: false })))
 const maxStatus = computed(() => Math.max(1, ...metrics.value?.timeInStatus.map(s => s.medianMs) ?? []))
 function category(status: string) {
   if (status === 'human_review') return 'Human wait'

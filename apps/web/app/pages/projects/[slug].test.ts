@@ -3,7 +3,6 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { VueQueryPlugin } from '@tanstack/vue-query'
 import { computed, ref } from 'vue'
 import { expect, it, vi } from 'vitest'
-import Project from './[slug].vue'
 import { keys } from '~/queries/keys'
 import { testQueryClient } from '~/queries/mount-with-query'
 
@@ -11,8 +10,14 @@ const { list } = vi.hoisted(() => ({ list: vi.fn() }))
 vi.mock('~/composables/useApi', () => ({ api: { projects: { list } } }))
 vi.stubGlobal('computed', computed)
 vi.stubGlobal('useRoute', () => ({ params: { slug: 'corral' } }))
+vi.stubGlobal('definePageMeta', vi.fn())
 const removing = ref<string | null>(null)
 vi.stubGlobal('useRemovingProject', () => removing)
+const { useProjectMissing } = await import('~/composables/useProject')
+vi.stubGlobal('useProjectMissing', useProjectMissing)
+vi.stubGlobal('provideProject', vi.fn())
+
+const { default: Project } = await import('./[slug].vue')
 
 function render(client = testQueryClient()) {
   return { client, wrapper: mount(Project, { global: { plugins: [[VueQueryPlugin, { queryClient: client }]], components: { ProjectNotFound: { template: '<p>not found</p>' }, NuxtPage: { template: '<p>page</p>' } } } }) }

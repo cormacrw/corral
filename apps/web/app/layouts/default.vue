@@ -23,6 +23,11 @@ const toggle = (project: Project) => {
 const isExpanded = (project: Project) => expanded.value[project.id] ?? true
 
 const currentSlug = computed(() => typeof route.params.slug === 'string' ? route.params.slug : null)
+// The one docked flyout for pages that set the taskFlyout meta, kept here so it
+// lives through navigation. Inbox and Plan host their own: theirs fills its plan
+// slot from page state, and the Inbox swaps it with the selected item.
+const missing = useProjectMissing(currentSlug)
+const flyoutHosted = computed(() => Boolean(route.meta.taskFlyout) && !missing.value)
 
 const counts = (project: Project) => taskCounts(lists.tasks.value[project.id] ?? [])
 
@@ -371,6 +376,10 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
       </UDashboardSidebar>
 
       <slot />
+      <TaskFlyout
+        v-if="flyoutHosted"
+        class="border-s-0!"
+      />
     </UDashboardGroup>
 
     <UDashboardSearch
