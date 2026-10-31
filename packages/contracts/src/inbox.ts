@@ -2,7 +2,7 @@ import type { AgentRole } from '@corral/core'
 import { z } from 'zod'
 import type { AgentRuntime } from './agent-runtimes.ts'
 import type { Deployment } from './deployments.ts'
-import type { Plan, PlanMessage, PlanSession } from './plans.ts'
+import type { Plan, PlanQuestion } from './plans.ts'
 import type { Evidence, Task } from './tasks.ts'
 
 // ── Inbox (D11, design/inbox.md) ───────────────────────────────────────────
@@ -77,7 +77,7 @@ export interface TaskInboxItem extends InboxItemBase, Partial<ReviewChanges> {
 
 // An open Plan session waiting on the human (D11, amended): a question, a plan
 // needing approval or an unread PM reply
-export interface PlanThreadItem extends InboxItemBase {
+interface PlanThreadBase extends InboxItemBase {
   // The session ID
   id: string
   type: 'plan_thread'
@@ -88,17 +88,22 @@ export interface PlanThreadItem extends InboxItemBase {
   resolution: null
   sessionId: string
   runtime: AgentRuntime
-  status: PlanSession['status']
-  question: Pick<PlanMessage, 'text' | 'recommendation' | 'options'> | null
-  // The latest PM message, when the thread is listed only for an unread reply
-  reply: string | null
-  plan: (Pick<Plan, 'id' | 'version' | 'title' | 'summary'> & { epicCount: number, taskCount: number }) | null
   unread: boolean
-  // The plan waiting for approval, when status is needs_approval
-  planId: string | null
   // Set while a PM turn is running
   activeRunId: string | null
 }
+
+export type PlanThreadPlan = Pick<Plan, 'id' | 'version' | 'title' | 'summary'> & { epicCount: number, taskCount: number }
+
+// What the thread waits on: its status always comes with what that status
+// needs. 'none' is a thread listed only for an unread reply, the latest PM
+// message.
+export type PlanThreadAttention =
+  | { status: 'question', question: Pick<PlanQuestion, 'text' | 'recommendation' | 'options'>, plan: null, planId: null, reply: null }
+  | { status: 'needs_approval', question: null, plan: PlanThreadPlan, planId: string, reply: null }
+  | { status: 'none', question: null, plan: null, planId: null, reply: string }
+
+export type PlanThreadItem = PlanThreadBase & PlanThreadAttention
 
 export const epicReviewActionInput = z.object({
   // `rebase` hands an epic PR conflict to a developer run

@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { check, index, integer, jsonb, pgTable, text, uuid } from 'drizzle-orm/pg-core'
+import { check, foreignKey, index, integer, jsonb, pgTable, text, uuid } from 'drizzle-orm/pg-core'
 import { actor, createdAt } from './columns.ts'
 import { evidenceKind, reviewVerdict } from './enums.ts'
 import { runs } from './runs.ts'
@@ -32,7 +32,7 @@ export const evidence = pgTable('evidence', {
   // Null for a PM file shared in its Plan conversation, owned by runId.
   taskId: uuid().references(() => tasks.id, { onDelete: 'cascade' }),
   // Null for evidence about the task as a whole (e.g. a full test run)
-  criterionId: uuid().references(() => acceptanceCriteria.id, { onDelete: 'set null' }),
+  criterionId: uuid(),
   runId: uuid().notNull().references(() => runs.id, { onDelete: 'cascade' }),
   round: integer().notNull(),
   kind: evidenceKind().notNull(),
@@ -44,6 +44,13 @@ export const evidence = pgTable('evidence', {
   size: integer().notNull(),
   createdAt: createdAt()
 }, t => [
+  check('evidence_criterion_requires_task', sql`${t.criterionId} is null or ${t.taskId} is not null`),
+  // Migration uses SET NULL (criterion_id) to preserve task_id.
+  foreignKey({ name: 'evidence_criterion_same_task_fk', columns: [t.taskId, t.criterionId], foreignColumns: [acceptanceCriteria.taskId, acceptanceCriteria.id] }).onDelete('set null'),
   index().on(t.taskId, t.round),
-  check('evidence_file_unless_note', sql`${t.kind}::text = 'note' or (${t.blob} is not null and ${t.fileName} is not null and ${t.contentType} is not null)`)
+  // ECMAScript trim whitespace, including NBSP and BOM, matches the API.
+  check('evidence_note_or_file', sql`(
+    (${t.kind}::text = 'note' and ${t.note} ~ '[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]' and ${t.blob} is null and ${t.fileName} is null and ${t.contentType} is null and ${t.size} = 0)
+    or (${t.kind}::text <> 'note' and ${t.blob} is not null and ${t.blob} ~ '[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]' and ${t.fileName} is not null and ${t.fileName} ~ '[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]' and ${t.contentType} is not null and ${t.contentType} ~ '[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]' and ${t.size} >= 0)
+  )`)
 ])

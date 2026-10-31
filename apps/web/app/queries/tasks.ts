@@ -79,7 +79,8 @@ export const moveTask = {
     const key = keys.tasks.list(task.slug)
     await client.cancelQueries({ queryKey: key })
     const previous = client.getQueryData<Task[]>(key)?.find(t => t.ref === task.ref)
-    const optimistic = previous && { ...previous, status, statusReason: null }
+    // Human moves only land on statuses with no reason or Draft session
+    const optimistic = previous && { ...previous, status, statusReason: null, draftSession: null } as Task
     if (optimistic) client.setQueryData<Task[]>(key, list => list?.map(t => t.id === optimistic.id ? optimistic : t))
     return { previous, optimistic: client.getQueryData<Task[]>(key)?.find(t => t.ref === task.ref) }
   },

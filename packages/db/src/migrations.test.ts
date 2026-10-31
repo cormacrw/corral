@@ -9,10 +9,14 @@ import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import pg from 'pg'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { openDatabase, type DatabaseLocation } from './client.ts'
 import { requireDatabase } from './testing.ts'
 
 const migrationsFolder = join(import.meta.dirname, '..', 'migrations')
+
+// Both drivers return `rows` from execute; only this type says so
+type RowsDatabase = ReturnType<typeof drizzle>
 
 interface Journal { entries: { idx: number, tag: string }[] }
 
@@ -34,6 +38,134 @@ describe('migrations', () => {
   const cleanup: (() => Promise<unknown>)[] = []
   afterEach(async () => {
     for (const fn of cleanup.splice(0)) await fn()
+  })
+
+  it.for([
+    { driver: 'pglite' as const },
+    { driver: 'postgres' as const }
+  ])('0043 diagnoses historical messages while preserving reads on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+    requireDatabase(driver, context)
+    const before = await migrationsBefore('0043_blushing_roughhouse')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const legacy = { rows: [] as Record<string, unknown>[] }
+    const { db, warnings } = await startServerOn(driver, before, async (db) => {
+      await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('Test app', 'test-app', 'TA', 'cormacrw/test-app', 'main')`)
+      await db.execute(sql`insert into plan_sessions (project_id, title, created_by) select id, 'History', '{"kind":"system","component":"server"}'::jsonb from projects`)
+      await db.execute(sql`insert into plan_messages (session_id, role, kind, text, recommendation)
+        select id, 'human', 'question', 'Legacy human question', null from plan_sessions
+        union all select id, 'pm', 'legacy-kind', 'Legacy PM kind', null from plan_sessions
+        union all select id, 'pm', 'message', 'Legacy recommendation', 'Keep this' from plan_sessions`)
+      legacy.rows = (await db.execute(sql`select * from plan_messages order by id`)).rows
+    })
+    expect((await db.execute(sql`select * from plan_messages order by id`)).rows).toEqual(legacy.rows)
+    // One warning: routine notices stay out of the server's output
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('Database warning: Historical plan message violations')
+    for (const row of legacy.rows) {
+      expect(warnings[0]).toContain(String(row.id))
+      expect(warnings[0]).toContain(String(row.session_id))
+    }
+    expect((await db.execute(sql`select convalidated from pg_constraint where conname in ('plan_messages_role_kind', 'plan_messages_question_fields')`)).rows)
+      .toEqual([{ convalidated: false }, { convalidated: false }])
+    await expect(db.execute(sql`update plan_messages set text = 'Changed'`)).rejects.toThrow()
+  })
+
+  it.for([
+    { driver: 'pglite' as const },
+    { driver: 'postgres' as const }
+  ])('0049 reports all ownership violations without rewriting rows on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+    requireDatabase(driver, context)
+    const before = await migrationsBefore('0049_odd_malcolm_colcord')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db, migrate } = await open(driver)
+    await migrate(before)
+    await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('A', 'a', 'AA', 'cormacrw/test-app', 'main'), ('B', 'b', 'BB', 'fixture/second-project', 'main')`)
+    await db.execute(sql`insert into tasks (project_id, number, title, type, created_by) select id, 1, name, 'task', '{"kind":"system","component":"server"}'::jsonb from projects`)
+    await db.execute(sql`insert into agents (name, role) values ('Dev', 'developer')`)
+    await db.execute(sql`insert into runs (project_id, task_id, agent_id, role) select a.id, t.id, ag.id, 'developer' from projects a, tasks t, agents ag where a.slug = 'a' and t.title = 'B'`)
+    await db.execute(sql`insert into plan_sessions (project_id, title, created_by) select id, 'Session', '{"kind":"system","component":"server"}'::jsonb from projects where slug = 'b'`)
+    await db.execute(sql`insert into plans (project_id, session_id, version, title) select p.id, s.id, 1, 'Plan' from projects p, plan_sessions s where p.slug = 'a'`)
+    await db.execute(sql`insert into acceptance_criteria (task_id, position, text) select id, 0, 'Criterion' from tasks where title = 'B'`)
+    await db.execute(sql`insert into evidence (task_id, criterion_id, run_id, round, kind, note, size) select t.id, c.id, r.id, 0, 'note', 'Proof', 0 from tasks t, acceptance_criteria c, runs r where t.title = 'A'`)
+    await db.execute(sql`insert into evidence (criterion_id, run_id, round, kind, note, size) select c.id, r.id, 0, 'note', 'Null owner', 0 from acceptance_criteria c, runs r`)
+    const snapshot = async () => (await db.execute(sql`select jsonb_build_object('runs', (select jsonb_agg(r) from runs r), 'plans', (select jsonb_agg(p) from plans p), 'evidence', (select jsonb_agg(e) from evidence e)) as records`)).rows
+    const old = await snapshot()
+    const error = await migrate(migrationsFolder).then(() => null, (e: unknown) => e)
+    expect(error).not.toBeNull()
+    const cause = (error as { cause?: Error }).cause ?? error
+    expect(String(cause)).toContain('Ownership violations must be fixed by hand')
+    for (const table of ['runs', 'plans', 'evidence']) {
+      const rows = (await db.execute(sql.raw('select id from ' + table))).rows
+      for (const row of rows) expect(String(cause)).toContain(String(row.id))
+    }
+    expect(await snapshot()).toEqual(old)
+    expect((await db.execute(sql`select conname from pg_constraint where conname = 'runs_task_same_project_fk'`)).rows).toEqual([])
+    // A human can repair the edges and retry without losing historical records.
+    await db.execute(sql`update runs set project_id = (select project_id from tasks where tasks.id = runs.task_id)`)
+    await db.execute(sql`update plans set project_id = (select project_id from plan_sessions where plan_sessions.id = plans.session_id)`)
+    await db.execute(sql`update evidence set criterion_id = null`)
+    const repaired = await snapshot()
+    await migrate(migrationsFolder)
+    expect(await snapshot()).toEqual(repaired)
+  })
+
+  it.for([
+    { driver: 'pglite' as const },
+    { driver: 'postgres' as const }
+  ])('0048 checks future writes without rewriting approval or staged history on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+    requireDatabase(driver, context)
+    const before = await migrationsBefore('0048_plan_approval_tuples')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db, warnings } = await startServerOn(driver, before, async (db) => {
+      await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('Test app', 'test-app', 'TA', 'cormacrw/test-app', 'main')`)
+      await db.execute(sql`insert into plan_sessions (project_id, title, created_by) select id, 'History', '{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb from projects`)
+      await db.execute(sql`insert into plans (session_id, project_id, version, title, status) select id, project_id, 1, 'Legacy approval without attribution', 'approved' from plan_sessions`)
+      await db.execute(sql`insert into plan_tasks (plan_id, key, change, position, revision) select id, 'removed', 'removed', 0, '{"title":"Legacy revision"}'::jsonb from plans`)
+    })
+    const plan = (await db.execute(sql`select id, session_id from plans`)).rows[0]!
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('Database warning: Historical plan approval/staged task violations')
+    expect(warnings[0]).toContain(String(plan.id))
+    expect(warnings[0]).toContain(String(plan.session_id))
+    expect(warnings[0]).toContain('plan-task removed')
+    expect((await db.execute(sql`select status, approved_by, approved_at from plans`)).rows).toEqual([{ status: 'approved', approved_by: null, approved_at: null }])
+    expect((await db.execute(sql`select task_id, change, revision from plan_tasks`)).rows).toEqual([{ task_id: null, change: 'removed', revision: { title: 'Legacy revision' } }])
+    expect((await db.execute(sql`select conname, convalidated from pg_constraint where conname in ('plans_approval_tuple', 'plan_tasks_revision_change') order by conname`)).rows).toEqual([
+      { conname: 'plan_tasks_revision_change', convalidated: false },
+      { conname: 'plans_approval_tuple', convalidated: false }
+    ])
+    await expect(db.execute(sql`update plans set title = 'Updated'`)).rejects.toThrow()
+    await expect(db.execute(sql`update plan_tasks set position = 1`)).rejects.toThrow()
+  })
+
+  it.for([
+    { driver: 'pglite' as const },
+    { driver: 'postgres' as const }
+  ])('0047 reports all inconsistent avatars and preserves them on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+    requireDatabase(driver, context)
+    const before = await migrationsBefore('0047_chunky_peter_parker')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db, migrate } = await open(driver)
+    await migrate(before)
+    const userId = '00000000-0000-4000-8000-000000000001'
+    const agentId = '00000000-0000-4000-8000-000000000002'
+    await db.execute(sql`insert into users (id, name, avatar_blob) values (${userId}, 'Human', 'keep-image')`)
+    await db.execute(sql`insert into agents (id, name, role, avatar_content_type) values (${agentId}, 'Agent', 'developer', 'image/png')`)
+    const error = await migrate(migrationsFolder).then(() => null, (e: unknown) => e)
+    expect(error).not.toBeNull()
+    const cause = (error as { cause?: Error }).cause ?? error
+    expect(String(cause)).toContain('Inconsistent avatars:')
+    expect(String(cause)).toContain(userId)
+    expect(String(cause)).toContain(agentId)
+    expect((await db.execute(sql`select avatar_blob, avatar_content_type from users where id = ${userId}`)).rows)
+      .toEqual([{ avatar_blob: 'keep-image', avatar_content_type: null }])
+    expect((await db.execute(sql`select avatar_blob, avatar_content_type from agents where id = ${agentId}`)).rows)
+      .toEqual([{ avatar_blob: null, avatar_content_type: 'image/png' }])
+    await db.execute(sql`update users set avatar_content_type = 'image/png' where id = ${userId}`)
+    await db.execute(sql`update agents set avatar_blob = 'restored-image' where id = ${agentId}`)
+    await migrate(migrationsFolder)
+    expect((await db.execute(sql`select conname from pg_constraint where conname in ('users_avatar_paired', 'agents_avatar_paired') order by conname`)).rows)
+      .toEqual([{ conname: 'agents_avatar_paired' }, { conname: 'users_avatar_paired' }])
   })
 
   it.for([
@@ -113,7 +245,106 @@ describe('migrations', () => {
     expect((await db.execute(sql`select count(*)::int as count from deployments`)).rows).toEqual([{ count: 1 }])
   })
 
-  it('0028 preserves historical runs with null runner ownership', async () => {
+  describe('0044 project-scoped edges', () => {
+    const actor = sql`'{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb`
+    // Two projects, each with two epics and two tasks, in the old shape
+    async function seed(driver: 'pglite' | 'postgres') {
+      const before = await migrationsBefore('0044_robust_jackpot')
+      cleanup.push(() => rm(before, { recursive: true, force: true }))
+      const { db, migrate } = await open(driver)
+      await migrate(before)
+      for (const prefix of ['AA', 'BB']) {
+        await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values (${prefix}, ${prefix}, ${prefix}, ${`o/${prefix}`}, 'main')`)
+        for (const n of [1, 2]) {
+          await db.execute(sql`insert into epics (project_id, title, created_by) select id, ${`${prefix}${n}`}, ${actor} from projects where prefix = ${prefix}`)
+          await db.execute(sql`insert into tasks (project_id, number, title, type, created_by) select id, ${n}, 'T', 'task', ${actor} from projects where prefix = ${prefix}`)
+        }
+      }
+      const task = (prefix: string, n: number) => sql`(select t.id from tasks t join projects p on p.id = t.project_id where p.prefix = ${prefix} and t.number = ${n})`
+      const epic = (title: string) => sql`(select id from epics where title = ${title})`
+      return { db, migrate, task, epic }
+    }
+
+    it.for([
+      { driver: 'pglite' as const },
+      { driver: 'postgres' as const }
+    ])('fills in the project of every same-project row on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+      requireDatabase(driver, context)
+      const { db, migrate, task, epic } = await seed(driver)
+      await db.execute(sql`update tasks set epic_id = ${epic('AA1')} where id = ${task('AA', 1)}`)
+      await db.execute(sql`insert into task_dependencies (task_id, depends_on_id) values (${task('AA', 1)}, ${task('AA', 2)})`)
+      await db.execute(sql`insert into epic_dependencies (epic_id, depends_on_epic_id) values (${epic('BB1')}, ${epic('BB2')})`)
+
+      await migrate(migrationsFolder)
+
+      const prefixes = (table: string) => db.execute(sql`select p.prefix from ${sql.raw(table)} d join projects p on p.id = d.project_id`)
+      expect((await prefixes('task_dependencies')).rows).toEqual([{ prefix: 'AA' }])
+      expect((await prefixes('epic_dependencies')).rows).toEqual([{ prefix: 'BB' }])
+      expect((await db.execute(sql`select count(*)::int as count from tasks where epic_id is not null`)).rows).toEqual([{ count: 1 }])
+      await db.execute(sql`delete from epics where title = 'AA1'`)
+      expect((await db.execute(sql`select count(*)::int as count from tasks where epic_id is null`)).rows).toEqual([{ count: 4 }])
+    })
+
+    it.for([
+      { driver: 'pglite' as const },
+      { driver: 'postgres' as const }
+    ])('reports every cross-project row and stops without changing anything on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+      requireDatabase(driver, context)
+      const { db, migrate, task, epic } = await seed(driver)
+      await db.execute(sql`update tasks set epic_id = ${epic('BB1')} where id = ${task('AA', 1)}`)
+      await db.execute(sql`insert into task_dependencies (task_id, depends_on_id) values (${task('AA', 2)}, ${task('BB', 2)})`)
+      await db.execute(sql`insert into epic_dependencies (epic_id, depends_on_epic_id) values (${epic('AA2')}, ${epic('BB2')})`)
+      await db.execute(sql`insert into epic_dependencies (epic_id, depends_on_epic_id) values (${epic('AA1')}, ${epic('AA2')})`)
+
+      const error = await migrate(migrationsFolder).then(() => null, (e: unknown) => e as Error & { cause?: Error })
+      const message = error?.cause?.message ?? error?.message
+      expect(message).toContain('Cross-project rows must be fixed by hand')
+      expect(message).toMatch(/task AA-1 \(.+\) is in epic .+ \(BB1, BB\)/)
+      expect(message).toMatch(/task AA-2 \(.+\) depends on task BB-2/)
+      expect(message).toMatch(/epic .+ \(AA2, AA\) depends on epic .+ \(BB2, BB\)/)
+      expect(message).not.toContain('(AA1, AA) depends on')
+
+      // Nothing was rewritten, and the migration didn't count as applied
+      expect((await db.execute(sql`select count(*)::int as count from tasks where epic_id is not null`)).rows).toEqual([{ count: 1 }])
+      expect((await db.execute(sql`select count(*)::int as count from task_dependencies`)).rows).toEqual([{ count: 1 }])
+      expect((await db.execute(sql`select count(*)::int as count from epic_dependencies`)).rows).toEqual([{ count: 2 }])
+      expect((await db.execute(sql`select column_name from information_schema.columns where table_name = 'task_dependencies' and column_name = 'project_id'`)).rows).toEqual([])
+
+      // Once a human has fixed the rows, the same migration goes through
+      await db.execute(sql`update tasks set epic_id = null`)
+      await db.execute(sql`delete from task_dependencies`)
+      await db.execute(sql`delete from epic_dependencies where depends_on_epic_id = ${epic('BB2')}`)
+      await migrate(migrationsFolder)
+      expect((await db.execute(sql`select count(*)::int as count from epic_dependencies where project_id is not null`)).rows).toEqual([{ count: 1 }])
+    })
+  })
+
+  it.for([
+    { driver: 'pglite' as const },
+    { driver: 'postgres' as const }
+  ])('0045 refuses inconsistent historical rows without rewriting them on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+    requireDatabase(driver, context)
+    const before = await migrationsBefore('0045_nostalgic_thanos')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db, migrate } = await open(driver)
+    await migrate(before)
+    await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('Test app', 'test-app', 'TA', 'cormacrw/test-app', 'main')`)
+    await db.execute(sql`insert into tasks (project_id, number, title, type, status, created_by)
+      select id, 1, 'Needs a reason', 'task', 'blocked', '{"kind":"human","userId":"00000000-0000-4000-8000-000000000001"}'::jsonb from projects`)
+    const id = (await db.execute(sql`select id from tasks`)).rows[0]!.id
+    const failure = await migrate(migrationsFolder).catch((error: unknown) => error) as { cause?: Error }
+    expect(failure.cause?.message).toContain(`Task metadata preflight failed. Repair status reasons or PR pairs for task IDs: ${id}`)
+    expect((await db.execute(sql`select status_reason from tasks`)).rows).toEqual([{ status_reason: null }])
+    await db.execute(sql`update tasks set status_reason = 'Which provider?', pr_number = 123`)
+    await expect(migrate(migrationsFolder)).rejects.toThrow()
+    await db.execute(sql`update tasks set pr_url = 'https://github.com/cormacrw/test-app/pull/123'`)
+    await migrate(migrationsFolder)
+    expect((await db.execute(sql`select status_reason, pr_number, pr_url from tasks`)).rows).toEqual([
+      { status_reason: 'Which provider?', pr_number: 123, pr_url: 'https://github.com/cormacrw/test-app/pull/123' }
+    ])
+  })
+
+  it('0028 preserves historical runs with null runner ownership', { timeout: 60_000 }, async () => {
     const before = await migrationsBefore('0028_complex_clint_barton')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
     const client = new PGlite()
@@ -130,9 +361,9 @@ describe('migrations', () => {
     await db.execute(sql`insert into runs (project_id, agent_id, task_id, role, runner_id)
       select p.id, a.id, t.id, 'developer', 'runner-B' from projects p, agents a, tasks t`)
     expect((await db.execute(sql`select runner_id from runs order by number`)).rows).toEqual([{ runner_id: null }, { runner_id: 'runner-B' }])
-  }, 60_000)
+  })
 
-  it('0015 turns every task of the four old types into a task (D19)', async () => {
+  it('0015 turns every task of the four old types into a task (D19)', { timeout: 60_000 }, async () => {
     const before = await migrationsBefore('0015_task_bug_spike')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
     const client = new PGlite()
@@ -166,8 +397,8 @@ describe('migrations', () => {
     const values = await db.execute(sql`select unnest(enum_range(null::task_type))::text as value`)
     expect(values.rows.map(r => r.value)).toEqual(['task', 'bug', 'spike'])
     // Two full migration runs on PGlite
-  }, 60_000)
-  it('0016 adds the design type and design versions to a database with tasks (D20)', async () => {
+  })
+  it('0016 adds the design type and design versions to a database with tasks (D20)', { timeout: 60_000 }, async () => {
     const before = await migrationsBefore('0016_design_tasks')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
     const client = new PGlite()
@@ -208,9 +439,9 @@ describe('migrations', () => {
     // Versions go with their task
     await db.execute(sql`delete from tasks where number = 4`)
     expect((await db.execute(sql`select * from design_versions`)).rows).toEqual([])
-  }, 60_000)
+  })
 
-  it('0023 adds closed_at to plan sessions, leaving existing sessions open', async () => {
+  it('0023 adds closed_at to plan sessions, leaving existing sessions open', { timeout: 60_000 }, async () => {
     const before = await migrationsBefore('0023_third_mandrill')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
     const client = new PGlite()
@@ -226,7 +457,7 @@ describe('migrations', () => {
 
     const sessions = await db.execute(sql`select title, unread, closed_at from plan_sessions`)
     expect(sessions.rows).toEqual([{ title: 'S', unread: true, closed_at: null }])
-  }, 60_000)
+  })
 
   // On both drivers: Postgres can't use an enum value in the transaction
   // that adds it, so the check compares the kind as text
@@ -354,6 +585,70 @@ describe('migrations', () => {
     })
   })
 
+  it.for([
+    { driver: 'pglite' as const },
+    { driver: 'postgres' as const }
+  ])('0046 checks old evidence before enforcing note/file shapes on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+    requireDatabase(driver, context)
+    const before = await migrationsBefore('0046_evidence_shapes')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db, migrate } = await open(driver)
+    await migrate(before)
+    await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('P', 'p', 'PA', 'cormacrw/test-app', 'main')`)
+    await db.execute(sql`insert into tasks (project_id, number, title, type, created_by) select id, 1, 'T', 'task', '{"kind":"system","component":"server"}'::jsonb from projects`)
+    await db.execute(sql`insert into agents (role, name) values ('developer', 'Dev')`)
+    await db.execute(sql`insert into runs (task_id, project_id, agent_id, role) select t.id, t.project_id, a.id, 'developer' from tasks t, agents a`)
+    await db.execute(sql`insert into evidence (task_id, run_id, round, kind, note, blob, file_name, content_type, size)
+      select t.id, r.id, 0, k::evidence_kind, 'Existing evidence', 'blob', 'file', 'application/octet-stream', 42
+      from tasks t, runs r, unnest(array['screenshot', 'video']) k`)
+    await db.execute(sql`insert into evidence (task_id, run_id, round, kind, note, size)
+      select t.id, r.id, 0, 'note', 'Explanation', 0 from tasks t, runs r`)
+    const old = (await db.execute(sql`select * from evidence order by id`)).rows
+    // Legacy-invalid evidence must stop the migration without silently rewriting it.
+    await db.execute(sql`update evidence set note = E' \t\n' where kind = 'note'`)
+    await expect(migrate(migrationsFolder)).rejects.toMatchObject({ cause: { message: expect.stringContaining('Evidence violates note/file invariant; inspect rows before migrating:') } })
+    await db.execute(sql`update evidence set note = 'Explanation' where kind = 'note'`)
+    await migrate(migrationsFolder)
+    expect((await db.execute(sql`select * from evidence order by id`)).rows).toEqual(old)
+    for (const change of [
+      sql`note = E' \t\n'`, sql`note = chr(160)`, sql`note = chr(65279)`, sql`blob = 'x'`, sql`file_name = 'x'`, sql`content_type = 'x'`, sql`size = 1`, sql`size = -1`
+    ]) {
+      await expect(db.execute(sql`update evidence set ${change} where kind = 'note'`)).rejects.toThrow()
+    }
+    for (const change of [
+      sql`blob = null`, sql`file_name = null`, sql`content_type = null`, sql`blob = ''`, sql`file_name = ' '`, sql`content_type = E'\t'`, sql`file_name = chr(160)`, sql`content_type = chr(65279)`, sql`size = -1`
+    ]) {
+      await expect(db.execute(sql`update evidence set ${change} where kind <> 'note'`)).rejects.toThrow()
+    }
+    await db.execute(sql`update evidence set size = 0 where kind <> 'note'`)
+  })
+
+  // A database at `before` holding what `seed` wrote, then opened the way the
+  // server opens it at startup. `warnings` is what that printed.
+  async function startServerOn(driver: 'pglite' | 'postgres', before: string, seed: (db: RowsDatabase) => Promise<unknown>) {
+    let location: DatabaseLocation
+    if (driver === 'pglite') {
+      const dataDir = await mkdtemp(join(tmpdir(), 'corral-pgdata-'))
+      cleanup.push(() => rm(dataDir, { recursive: true, force: true }))
+      const client = new PGlite(dataDir)
+      const db = drizzle(client, { casing: 'snake_case' })
+      await migrate(db, { migrationsFolder: before })
+      await seed(db)
+      await client.close()
+      location = { driver, dataDir }
+    } else {
+      const { db, migrate, url } = await open(driver)
+      await migrate(before)
+      await seed(db as unknown as RowsDatabase)
+      location = { driver, url: url! }
+    }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    cleanup.push(async () => warn.mockRestore())
+    const { db, close } = await openDatabase(location)
+    cleanup.unshift(close)
+    return { db: db as unknown as RowsDatabase, warnings: warn.mock.calls.map(call => String(call[0])) }
+  }
+
   // An empty database to migrate step by step: PGlite in memory, or a
   // throwaway database on the test Postgres server
   async function open(driver: 'pglite' | 'postgres') {
@@ -377,6 +672,6 @@ describe('migrations', () => {
     const pool = new pg.Pool({ connectionString: url.href })
     cleanup.unshift(() => pool.end())
     const db = drizzlePg(pool, { casing: 'snake_case' })
-    return { db, migrate: (folder: string) => migratePg(db, { migrationsFolder: folder }) }
+    return { db, url: url.href, migrate: (folder: string) => migratePg(db, { migrationsFolder: folder }) }
   }
 })

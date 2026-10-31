@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { answerTo, grillMessage, openQuestionId } from './plan-questions.ts'
 
 const msg = (id: string, role: 'pm' | 'human', kind: PlanMessage['kind'] = 'message', text = id): PlanMessage =>
-  ({ id, sessionId: 's', role, kind, text, recommendation: null, options: null, planId: null, runId: null, createdAt: '' })
+  ({ id, sessionId: 's', role, kind, text, recommendation: null, options: null, planId: null, runId: null, createdAt: '' } as PlanMessage)
 
 describe('openQuestionId', () => {
   it('is the latest question until you write', () => {

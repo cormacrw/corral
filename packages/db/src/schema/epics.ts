@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { boolean, check, index, integer, jsonb, pgTable, primaryKey, text, uuid } from 'drizzle-orm/pg-core'
+import { boolean, check, foreignKey, index, integer, jsonb, pgTable, primaryKey, text, unique, uuid } from 'drizzle-orm/pg-core'
 import { actor, createdAt, updatedAt } from './columns.ts'
 import { epicReviewMode, epicReviewState, taskPriority } from './enums.ts'
 import { projects } from './projects.ts'
@@ -29,14 +29,22 @@ export const epics = pgTable('epics', {
   createdBy: actor('created_by'),
   createdAt: createdAt(),
   updatedAt: updatedAt()
-}, t => [index().on(t.projectId)])
+}, t => [
+  index().on(t.projectId),
+  // The target of the composite keys that keep tasks and edges in one project
+  unique('epics_project_id_unique').on(t.projectId, t.id)
+])
 
 // Epic prerequisites gate developer claims; core validates the combined graph.
+// Both ends are keyed through projectId, so an edge can't cross projects.
 export const epicDependencies = pgTable('epic_dependencies', {
-  epicId: uuid().notNull().references(() => epics.id, { onDelete: 'cascade' }),
-  dependsOnEpicId: uuid().notNull().references(() => epics.id, { onDelete: 'cascade' })
+  projectId: uuid().notNull(),
+  epicId: uuid().notNull(),
+  dependsOnEpicId: uuid().notNull()
 }, t => [
   primaryKey({ columns: [t.epicId, t.dependsOnEpicId] }),
   index().on(t.dependsOnEpicId),
+  foreignKey({ name: 'epic_dependencies_epic_same_project_fk', columns: [t.projectId, t.epicId], foreignColumns: [epics.projectId, epics.id] }).onDelete('cascade'),
+  foreignKey({ name: 'epic_dependencies_depends_on_same_project_fk', columns: [t.projectId, t.dependsOnEpicId], foreignColumns: [epics.projectId, epics.id] }).onDelete('cascade'),
   check('epic_dependencies_not_self', sql`${t.epicId} <> ${t.dependsOnEpicId}`)
 ])

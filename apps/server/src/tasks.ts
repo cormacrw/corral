@@ -12,6 +12,7 @@ import {
   requiresHumanReview,
   richTextToPlainText,
   taskRef,
+  normalizeTaskState,
   transition,
   upgradePlainMarkdown,
   type Actor,
@@ -33,7 +34,7 @@ export type TaskView = 'board' | 'backlog' | 'all'
 export type { ProjectRow, TaskRow }
 
 export function toTaskState(row: TaskRow): TaskState {
-  return {
+  return normalizeTaskState({
     status: row.status,
     humanReview: row.humanReview,
     rebaseOnly: row.rebaseOnly,
@@ -42,7 +43,7 @@ export function toTaskState(row: TaskRow): TaskState {
     failedRuns: row.failedRuns,
     reason: row.statusReason,
     type: row.type
-  }
+  })
 }
 
 // Builds API tasks for rows of one project, loading criteria and dependencies in bulk
@@ -128,6 +129,16 @@ export async function draftSessions(db: Executor, taskIds: string[]): Promise<Ma
   return owners
 }
 
+type OmitFromUnion<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
+type TaskWithoutAgents = OmitFromUnion<Task, 'developer' | 'reviewer' | 'waitingOnEpics'>
+
+function taskStatus(row: TaskRow, session: { id: string, title: string } | null) {
+  const state = toTaskState(row)
+  if (state.status === 'draft') return { status: state.status, statusReason: null, draftSession: session } as const
+  if (state.status === 'blocked' || state.status === 'failed') return { status: state.status, statusReason: state.reason, draftSession: null } as const
+  return { status: state.status, statusReason: null, draftSession: null } as const
+}
+
 function toTask(
   project: ProjectRow,
   row: TaskRow,
@@ -138,7 +149,7 @@ function toTask(
   design: TaskDesignPin | null,
   session: { id: string, title: string } | null,
   leaseAgentId: string | null
-): Omit<Task, 'developer' | 'reviewer' | 'waitingOnEpics'> {
+): TaskWithoutAgents {
   return {
     id: row.id,
     projectId: row.projectId,
@@ -146,18 +157,16 @@ function toTask(
     number: row.number,
     title: row.title,
     description: upgradePlainMarkdown(row.description),
-    status: row.status,
+    ...taskStatus(row, session),
     priority: row.priority,
     type: row.type,
     epicId: row.epicId,
     humanReview: row.humanReview,
     reviewRounds: row.reviewRounds,
     failedRuns: row.failedRuns,
-    statusReason: row.statusReason,
     paused: row.paused,
     branch: row.branch,
-    prNumber: row.prNumber,
-    prUrl: row.prUrl,
+    pr: row.prNumber !== null && row.prUrl !== null ? { number: row.prNumber, url: row.prUrl } : null,
     acceptanceCriteria: criteria
       .filter(c => c.taskId === row.id)
       .map(c => ({ id: c.id, position: c.position, text: c.text, checkedByHuman: c.checkedByHuman, met: c.checkedByHuman ? null : current?.criteria.find(v => v.criterionId === c.id)?.met ?? null })),
@@ -171,8 +180,6 @@ function toTask(
     mergedAt: row.mergedAt?.toISOString() ?? null,
     gateChecks: row.gateChecks,
     design,
-    planSessionId: row.status === 'draft' ? session?.id ?? null : null,
-    planSessionTitle: row.status === 'draft' ? session?.title ?? null : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString()
   }
@@ -303,7 +310,7 @@ export async function createTask(db: Executor, project: ProjectRow, rawInput: Cr
       )
     }
     if (dependencies.length > 0) {
-      await tx.insert(taskDependencies).values(dependencies.map(d => ({ taskId, dependsOnId: d.id })))
+      await tx.insert(taskDependencies).values(dependencies.map(d => ({ projectId: project.id, taskId, dependsOnId: d.id })))
     }
     await appendAudit(tx, { projectId: project.id, taskId, actor }, auditEvent('task.created', { number: row!.number }))
     return taskId
@@ -470,8 +477,8 @@ async function setDependencies(tx: Executor, project: ProjectRow, task: TaskRow,
   graph.set(task.id, found.map(d => d.id))
   const problems = checkDependencies(graph)
   if (problems.length > 0) throw new ApiFailure(400, { code: 'invalid_dependencies', problems })
-  await tx.delete(taskDependencies).where(eq(taskDependencies.taskId, task.id))
-  if (found.length > 0) await tx.insert(taskDependencies).values(found.map(d => ({ taskId: task.id, dependsOnId: d.id })))
+  await tx.delete(taskDependencies).where(and(eq(taskDependencies.projectId, project.id), eq(taskDependencies.taskId, task.id)))
+  if (found.length > 0) await tx.insert(taskDependencies).values(found.map(d => ({ projectId: project.id, taskId: task.id, dependsOnId: d.id })))
 }
 
 // Stamped with the clock, not the transaction's start, so comments posted in

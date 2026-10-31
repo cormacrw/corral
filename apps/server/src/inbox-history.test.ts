@@ -40,7 +40,7 @@ describe('inbox over stored audit rows', () => {
     const blocked = await task('Blocked', { status: 'blocked', statusReason: 'Reset' })
     const objectEvent = await task('Object event', { status: 'human_review' })
     const stringEvent = await task('String event', { status: 'failed', statusReason: 'Gave up' })
-    const moved = await task('Activity', { prNumber: 7, type: 'design' })
+    const moved = await task('Activity', { prNumber: 7, prUrl: 'https://github.com/cormacrw/test-app/pull/7', type: 'design' })
     const human = await task('Resolved')
 
     await t.db.insert(auditLog).values([

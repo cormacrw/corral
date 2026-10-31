@@ -58,7 +58,7 @@ describe('epic dependencies in plans', { timeout: 30_000 }, () => {
     const approved = await approvedResponse.json() as Plan
     const [a, b] = approved.epics
     expect(await t.db.select().from(schema.epicDependencies).where(eq(schema.epicDependencies.epicId, b!.id))).toEqual([
-      { epicId: b!.id, dependsOnEpicId: a!.id }, { epicId: b!.id, dependsOnEpicId: existing!.id }
+      { projectId: project.id, epicId: b!.id, dependsOnEpicId: a!.id }, { projectId: project.id, epicId: b!.id, dependsOnEpicId: existing!.id }
     ])
     expect(await runner.call(job.runId, job.leaseEpoch, 'list_tasks', {})).toMatchObject({ ok: true, result: { epics: expect.arrayContaining([{ id: b!.id, title: 'Offline support', reviewMode: 'epic', dependsOn: [a!.id, existing!.id] }]) } })
     const [dev] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'developer'))

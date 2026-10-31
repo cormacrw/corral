@@ -37,3 +37,8 @@ and verifies that no more than two worker processes overlap.
 
 Docker install stages copy `patches/` before pnpm install so the pinned dependency
 patches are available in production and web build images.
+
+Plan queue tests wait for persisted `running` states with `vi.waitFor` after
+sending `run.started`. Assignment delivery does not mean the server has handled
+the runner's start messages; a fixed sleep can still observe queued rows on a
+busy CI worker.
