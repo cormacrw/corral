@@ -3,11 +3,11 @@ import { useMutation } from '@tanstack/vue-query'
 import { createTask, transitionTask } from '~/queries/tasks'
 import { isTaskDone } from '@corral/core'
 import type { Task } from '@corral/contracts'
-import { ApiError } from '~/composables/useApi'
+import { ApiError } from '~/queries/client'
 import { epicTitle, PRIORITY, timeAgo } from '~/utils/labels'
 
 // Backlog (design/backlog.md): proposed tasks grouped by epic
-const live = useLive()
+const shell = useShell()
 const flyout = useTaskFlyout()
 const device = useDevice()
 const router = useRouter()
@@ -15,7 +15,7 @@ const toast = useToast()
 const transition = useMutation(transitionTask)
 const create = useMutation(createTask)
 const { slug, project, tasks: all, epics: epicList, loading, error } = useProject()
-const pmName = computed(() => live.state.value.agents.find(a => a.role === 'pm')?.name ?? 'the PM')
+const pmName = computed(() => shell.agents.find(a => a.role === 'pm')?.name ?? 'the PM')
 useSeoMeta({ title: () => `Backlog · ${project.value?.name ?? ''} · Corral` })
 
 const search = ref('')
@@ -32,7 +32,7 @@ const groups = computed(() => {
     total: all.value.filter(t => (t.epicId ?? 'none') === id).length
   })).filter(g => g.rows.length > 0)
 })
-const inPlan = computed(() => new Map(live.state.value.planSessions.filter(s => s.status === 'needs_approval').map(s => [s.projectId, s])))
+const inPlan = computed(() => new Map(shell.planSessions.filter(s => s.status === 'needs_approval').map(s => [s.projectId, s])))
 const setAll = (value: boolean) => {
   collapsed.value = Object.fromEntries(groups.value.map(g => [g.id, value]))
 }

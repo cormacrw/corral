@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { CliStatus, RepoCheck, RepoChoice } from '@corral/contracts'
 import { suggestPrefix } from '~/utils/prefix'
-import { ApiError, api } from '~/composables/useApi'
+import { ApiError } from '~/queries/client'
 import { agentsQuery, patchAgent } from '~/queries/agents'
 import { createProject, projectsQuery } from '~/queries/projects'
-import { clisQuery, refreshRepos, reposQuery } from '~/queries/setup'
+import { checkRepo, clisQuery, refreshRepos, reposQuery } from '~/queries/setup'
 import { patchProfile, profileQuery } from '~/queries/system'
 import { cliLoginCommand } from '~/utils/labels'
 
@@ -89,7 +89,7 @@ export function useSetup() {
     checking.value = true
     check.value = null
     try {
-      const [result, projects] = await Promise.all([api.setup.checkRepo(name), client.fetchQuery(projectsQuery())])
+      const [result, projects] = await Promise.all([checkRepo(name), client.fetchQuery(projectsQuery())])
       if (version !== pickVersion) return
       setPrefix(suggestPrefix(name.split('/')[1] ?? name, projects.map(p => p.prefix)))
       check.value = result

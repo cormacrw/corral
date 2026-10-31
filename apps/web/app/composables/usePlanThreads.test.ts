@@ -42,7 +42,6 @@ describe('open Plan threads', () => {
       return stored
     })
     vi.stubGlobal('usePendingPlan', () => ({ entries: ref({}) }))
-    vi.stubGlobal('useLive', () => ({ state }))
     vi.stubGlobal('useRoute', () => route)
   })
   afterEach(() => {

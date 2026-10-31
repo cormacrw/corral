@@ -81,6 +81,14 @@ export default defineNuxtConfig({
     icon: { provider: 'none', clientBundle: { scan: { globInclude: ['app/**/*.{vue,ts}'] }, sizeLimitKb: 0 } }
   }),
 
+  hooks: {
+    // Lint can't see an auto-import, so what only app/queries may use isn't one
+    'imports:extend': (imports) => {
+      const restricted = imports.filter(i => /\/composables\/useApi(\.ts)?$/.test(i.from) || ['subscribeLive', 'subscribeReconnect'].includes(i.name))
+      for (const entry of restricted) imports.splice(imports.indexOf(entry), 1)
+    }
+  },
+
   eslint: {
     config: {
       stylistic: {

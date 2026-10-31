@@ -14,10 +14,10 @@ import { withoutMessages } from '~/utils/tool-steps'
 const props = defineProps<{ sessionId: string, inbox?: boolean }>()
 const emit = defineEmits<{ read: [], approved: [], approving: [value: boolean] }>()
 const router = useRouter()
-const live = useLive()
+const shell = useShell()
 const threads = usePlanThreads()
 // The PM by its current name and picture
-const pm = computed(() => live.state.value.agents.find(a => a.role === 'pm') ?? null)
+const pm = computed(() => shell.agents.find(a => a.role === 'pm') ?? null)
 const flyout = useTaskFlyout()
 const toast = useToast()
 const device = useDevice()
@@ -51,8 +51,8 @@ const taskRef = ref<string | null>(null)
 const busy = ref(false)
 const approving = ref<string | null>(null)
 const approvalTarget = ref<'ready' | 'backlog' | null>(null)
-const project = computed(() => live.state.value.projects.find(p => p.id === session.value?.projectId) ?? null)
-const runnerOffline = computed(() => live.state.value.loaded && !live.state.value.runner?.online)
+const project = computed(() => shell.projects.find(p => p.id === session.value?.projectId) ?? null)
+const runnerOffline = computed(() => shell.loaded && !shell.runner?.online)
 const reconnecting = ref(false)
 // Re-reads the runner's status, in case its live update was missed
 async function reconnect() {

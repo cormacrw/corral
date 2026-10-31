@@ -7,7 +7,7 @@ import { projectColor, timeAgo } from '~/utils/labels'
 // The mobile session switcher (design/plan.md, design/mobile.md): a header
 // button that opens a sheet of the open sessions, with their status and a
 // close button each, then every other session to resume.
-const live = useLive()
+const shell = useShell()
 const router = useRouter()
 const { active, sessions, close } = useOpenPlanSessions()
 const open = ref(false)
@@ -17,7 +17,7 @@ const others = computed(() => {
   const shown = new Set(sessions.value.map(s => s.id))
   return (allSessions.value ?? []).filter(s => !shown.has(s.id))
 })
-const projectOf = (session: PlanSession) => live.state.value.projects.find(p => p.id === session.projectId) ?? null
+const projectOf = (session: PlanSession) => shell.projects.find(p => p.id === session.projectId) ?? null
 const needsYou = computed(() => sessions.value.some(s => s.unread || s.status === 'question' || s.status === 'needs_approval'))
 
 async function go(to: string) {

@@ -31,7 +31,6 @@ const flyout = {
   openPlan: vi.fn(), close: vi.fn()
 }
 const toast = { add: vi.fn() }
-const stop = vi.fn()
 const push = vi.fn()
 const onApproved = vi.fn()
 const onApproving = vi.fn()
@@ -98,13 +97,7 @@ beforeEach(() => {
   vi.stubGlobal('useTaskFlyout', () => flyout)
   vi.stubGlobal('useToast', () => toast)
   vi.stubGlobal('useProjectLists', () => ({ tasks: vue.ref([]) }))
-  vi.stubGlobal('useLive', () => ({
-    state,
-    subscribe: (callback: typeof listener) => {
-      listener = callback
-      return stop
-    }
-  }))
+  vi.stubGlobal('useShell', () => state.value)
   state.value.runner.online = true
   flyout.plan.value = false
   vi.mocked(api.plan.session).mockImplementation(async id => detail(id))

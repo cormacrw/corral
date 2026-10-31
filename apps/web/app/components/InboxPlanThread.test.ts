@@ -39,7 +39,7 @@ async function mountInbox() {
   vi.stubGlobal('usePlanThreads', () => ({ add: vi.fn(), remove }))
   vi.stubGlobal('usePlanThreadDelete', usePlanThreadDelete)
   vi.stubGlobal('useTaskFlyout', () => ({ ref: vue.ref(null), epic: vue.ref(null), plan: vue.ref(false), close: vi.fn().mockResolvedValue(undefined) }))
-  vi.stubGlobal('useLive', () => ({ state: vue.ref({ agents, projects, loaded: true, runner: { online: true } }) }))
+  vi.stubGlobal('useShell', () => ({ agents, projects, loaded: true, runner: { online: true } }))
   let data = inbox()
   vi.mocked(api.inbox.get).mockImplementation(async () => structuredClone(data))
   vi.mocked(api.plan.session).mockResolvedValue({ ...planSessions.find(s => s.id === 's-1')!, unread: false, messages: [], plans: plans['s-1']! })

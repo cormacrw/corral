@@ -26,7 +26,7 @@ function setup() {
   for (const [name, value] of Object.entries({ ref, reactive, computed, watch, useProject: () => {
     const { data } = useQuery(projectsQuery())
     return { slug: ref('test-app'), projects: data, project: computed(() => data.value?.find(p => p.slug === 'test-app') ?? null) }
-  }, useDevice: () => ({ isMobile: ref(false) }), useRemovingProject: () => ref(null), useLive: () => ({ forgetProject: vi.fn() }), useRouter: () => ({ push: vi.fn() }), useToast: () => ({ add }), useSeoMeta: () => {} })) vi.stubGlobal(name, value)
+  }, useDevice: () => ({ isMobile: ref(false) }), useRemovingProject: () => ref(null), useRouter: () => ({ push: vi.fn() }), useToast: () => ({ add }), useSeoMeta: () => {} })) vi.stubGlobal(name, value)
   const wrapper = mount(Settings, { global: { plugins: [[VueQueryPlugin, { queryClient: client }]], components: { ProjectThumbnail, UButton: Button, UDashboardPanel: Container, UCard: Container }, stubs: { UInput: true, UInputNumber: true, UFormField: true, USelectMenu: true, USwitch: true, UModal: true, UIcon: true } } })
   async function choose(file: File) {
     const input = wrapper.get('input[type=file]')

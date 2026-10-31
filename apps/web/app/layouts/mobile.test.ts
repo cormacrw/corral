@@ -25,11 +25,11 @@ async function tailwind(html: string): Promise<string> {
 }
 
 // Nuxt auto-imports the layout uses, standing in for a phone on Home
-const live = { state: ref({ projects: [], planSessions: [], runner: { online: true }, connection: 'open', inboxCount: 0, agents: [] }) }
+const shellData = { projects: [], planSessions: [], runner: { online: true }, inboxCount: 0, agents: [] }
 vi.stubGlobal('computed', computed)
 vi.stubGlobal('ref', ref)
 vi.stubGlobal('watch', watch)
-vi.stubGlobal('useLive', () => live)
+vi.stubGlobal('useShell', () => shellData)
 vi.stubGlobal('useAllProjectLists', vi.fn())
 vi.stubGlobal('usePendingPlan', () => ({ entries: ref({}) }))
 const route = reactive({ path: '/home', fullPath: '/home' })

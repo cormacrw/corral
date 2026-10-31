@@ -1,6 +1,9 @@
 import { QueryClient } from '@tanstack/vue-query'
 import { ApiError } from '~/composables/useApi'
 
+// Pages tell failures apart with this; the client itself stays in app/queries
+export { ApiError }
+
 // Live events keep the cache current, so a revisit shows cached data at once
 // and refetches behind it. Skeletons depend on `isPending` only, which stays
 // false for a query with data, so a background refetch never shows loading.

@@ -9,6 +9,9 @@ export const runsQuery = (filter: RunFilter = {}) => queryOptions({ queryKey: ke
 export const runQuery = (id: string) => queryOptions({ queryKey: keys.runs.detail(id), queryFn: () => api.runs.get(id) })
 export const runTranscriptQuery = (id: string) => queryOptions({ queryKey: keys.runs.transcript(id), queryFn: () => api.runs.transcript(id) })
 
+// Its comment and transcript line arrive as events
+export const messageRun = ({ slug, id, text }: { slug: string, id: string, text: string }) => api.runs.message(slug, id, text)
+
 export const stopRun = defineMutation<Run, string>({
   mutationFn: id => api.runs.stop(id),
   invalidates: (_, id) => [keys.runs.lists(), keys.runs.detail(id), keys.agents.list()]
