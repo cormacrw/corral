@@ -54,7 +54,10 @@ watch(() => props.events.length, async () => {
           class="flex items-center gap-2 text-xs text-muted"
         >
           <span class="h-px flex-1 bg-border" />
-          <span class="max-w-[80%] truncate">{{ entry.text }}</span>
+          <TaskRefText
+            :text="entry.text"
+            class="max-w-[80%] truncate"
+          />
           <span class="h-px flex-1 bg-border" />
         </div>
         <div
@@ -103,10 +106,10 @@ watch(() => props.events.length, async () => {
             />
             Thinking
           </button>
-          <div
+          <TaskRefText
             v-if="isOpen(`t${entry.key}`, false)"
             class="ms-2.5 border-s border-default ps-3.5 text-sm wrap-anywhere whitespace-pre-wrap text-muted"
-            v-text="entry.text"
+            :text="entry.text"
           />
         </div>
         <div
@@ -191,7 +194,7 @@ watch(() => props.events.length, async () => {
                 <pre
                   v-if="step.output"
                   :class="['max-h-80 overflow-auto overscroll-contain rounded-md p-2 font-mono text-xs/5 wrap-anywhere whitespace-pre-wrap', step.isError ? 'bg-error/10 text-error' : 'bg-elevated text-default']"
-                >{{ shownOutput(step) }}</pre>
+                ><TaskRefText :text="shownOutput(step)" /></pre>
                 <div class="flex gap-3 text-xs">
                   <UButton
                     v-if="outputLines(step) > OUTPUT_LINES"
@@ -214,7 +217,7 @@ watch(() => props.events.length, async () => {
                 <pre
                   v-if="isOpen(`raw${step.key}`, false)"
                   class="max-h-60 overflow-auto overscroll-contain rounded-md bg-elevated p-2 font-mono text-xs/5 wrap-anywhere whitespace-pre-wrap"
-                >{{ JSON.stringify(step.input, null, 2) }}</pre>
+                ><TaskRefText :text="JSON.stringify(step.input, null, 2)" /></pre>
               </div>
             </div>
           </div>

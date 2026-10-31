@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { provide } from 'vue'
+import { FLYOUT_SHEETS } from '~/composables/useTaskFlyout'
 import type { Plan, PlanMessage } from '@corral/contracts'
 import { approvedPlanSummary } from '@corral/core'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
@@ -18,6 +20,7 @@ const live = useLive()
 const threads = usePlanThreads()
 // The PM by its current name and picture
 const pm = computed(() => live.state.value.agents.find(a => a.role === 'pm') ?? null)
+provide(FLYOUT_SHEETS, true)
 const flyout = useTaskFlyout()
 const toast = useToast()
 const device = useDevice()

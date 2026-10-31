@@ -8,6 +8,8 @@ import { releaseNotes } from '~/prototype/fixtures'
 import InboxReleaseNotes from './InboxReleaseNotes.vue'
 import MarkdownText from './MarkdownText.vue'
 
+vi.mock('~/queries/shell', () => ({ shell: () => ({ projects: { data: { value: [{ prefix: 'COR' }] } } }) }))
+vi.mock('~/composables/useTaskFlyout', () => ({ FLYOUT_SHEETS: Symbol(), useTaskFlyout: () => ({ open: vi.fn() }) }))
 vi.mock('~/composables/useApi', () => ({ api: { deployments: { read: vi.fn().mockResolvedValue({}), dismiss: vi.fn().mockResolvedValue({}) } } }))
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -16,6 +18,7 @@ afterEach(() => {
 
 it('marks an opened item read, replaces pending notes live, links task refs and dismisses', async () => {
   for (const name of ['ref', 'watch', 'computed'] as const) vi.stubGlobal(name, vue[name])
+  vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(false) }))
   vi.stubGlobal('useLive', () => ({ state: vue.ref({ projects: [{ prefix: 'COR' }] }) }))
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/tasks/:ref', component: { template: '<div>Task</div>' } }] })
   const button = vue.defineComponent({ props: ['label'], emits: ['click'], setup: (props, { emit }) => () => vue.h('button', { onClick: () => emit('click') }, props.label) })
