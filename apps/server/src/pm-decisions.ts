@@ -100,7 +100,7 @@ function parseInboxAction(input: unknown): InboxActionInput {
 
 function inboxSummary(input: Exclude<InboxActionInput, { action: 'clarify' }>, ref: string, task: typeof tasks.$inferSelect): string {
   switch (input.action) {
-    case 'approve': return `Approve and merge ${ref}: ${task.title}${task.prNumber ? ` (PR #${task.prNumber} at ${task.headSha ?? 'its head'})` : ''}`
+    case 'approve': return `Approve and merge ${ref}: ${task.title}${task.prNumber ? ` (PR #${task.prNumber} at ${task.headSha ?? 'its head'})` : ''}${input.text ? `. Note: ${input.text}` : ''}`
     case 'request_changes': return `Request changes on ${ref} (${task.title}): ${input.text}`
     case 'resolve': return `Move ${ref} to ${input.to.replace('_', ' ')}: ${task.title}${input.text ? `. Note: ${input.text}` : ''}`
     case 'send_back': return `Send ${ref} back to the Backlog: ${task.title}`

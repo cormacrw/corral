@@ -79,7 +79,7 @@ Ready tasks whose epic has unfinished prerequisites show **Waiting on epic: <tit
 ## Data
 
 - **Task:** ref, project, title, status, priority, type (Task / Bug / Spike / Design, D19, D20), epic, developer, reviewer, human review flag, branch, PR, review round, description (rich text JSON), criteria (text, met), dependencies, activity.
-  Once a task has left Draft or Backlog, the Type menu offers only changes the server allows: a spike or design stays as it is, and a task or bug can't become one (`409 task_type_locked`, D29).
+  Once a task has left Draft or Backlog, the Type menu offers only changes the server allows: a spike or design stays as it is, and a task or bug can't become one. The menu is disabled when nothing is left to choose, and from Ready to merge the type is fixed (`409 task_type_locked`, D29).
 - **Writes:** a `PATCH` per field, saved as you go. Description saves on Save. Comments are a `POST`.
 
 ## Responsive

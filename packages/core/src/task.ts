@@ -15,12 +15,15 @@ export function requiresHumanReview(type: TaskType, humanReview: boolean): boole
   return type === 'spike' || type === 'design' || humanReview
 }
 
-// Spikes and designs have their own flow to the end (D19, D20), so a task
-// can't enter or leave those types once it has left Draft or Backlog: a
-// retyped design could otherwise be approved into Ready to merge.
-export function canChangeType(status: TaskStatus, from: TaskType, to: TaskType): boolean {
-  if (from === to || status === 'draft' || status === 'backlog') return true
-  return ![from, to].some(type => type === 'spike' || type === 'design')
+// The deliverable type is fixed once work is approved or awaiting merge. Spikes
+// and designs have their own flow to the end (D19, D20), so a task can't enter
+// or leave those types once it has left Draft or Backlog: a retyped design
+// could otherwise be approved into Ready to merge.
+export function canChangeType(task: { status: TaskStatus, type: TaskType }, to: TaskType): boolean {
+  if (to === task.type) return true
+  if (['approved', 'ready_to_merge', 'merged'].includes(task.status)) return false
+  if (task.status === 'draft' || task.status === 'backlog') return true
+  return ![task.type, to].some(type => type === 'spike' || type === 'design')
 }
 
 // Task IDs are PREFIX-NUMBER, e.g. COR-29 (D13)

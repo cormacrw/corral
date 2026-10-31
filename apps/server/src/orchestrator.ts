@@ -1400,7 +1400,7 @@ export class Orchestrator implements RunnerHandlers {
     const edit = await db.transaction(async (tx) => {
       const { task } = await lockTask(tx, row.id)
       if (paused && task.leaseRunId) throw new ToolError('Use stop_run to stop a leased task with human confirmation')
-      if (fields.type && !canChangeType(task.status, task.type, fields.type)) throw new ToolError('A task can’t enter or leave the spike or design type once it has left Draft or Backlog')
+      if (fields.type && !canChangeType(task, fields.type)) throw new ToolError('A task’s type is fixed once it is approved or awaiting merge, and it can’t enter or leave the spike or design type once it has left Draft or Backlog')
       const edit = await patchTask(tx, project, row.id, fields, actor)
       if (paused !== undefined) {
         await tx.update(tasks).set({ paused, updatedAt: this.#now() }).where(eq(tasks.id, row.id))
