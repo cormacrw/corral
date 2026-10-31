@@ -129,6 +129,9 @@ export function useInboxPanel(ctx: InboxPanelContext) {
 
   const primary = computed(() => canAct.value ? ctx.actions[0] ?? null : null)
   const secondary = computed(() => canAct.value ? ctx.actions.slice(1) : [])
+  // Approval needs the task for its human-criteria check; the rest only wait
+  // while it's still loading
+  const actionDisabled = (value: string) => ctx.busy || ctx.taskLoading || (value === 'approve' && ctx.taskLoadFailed)
   // What each action does, for items with nothing else to show
   const explanations = computed<Record<string, string>>(() => ({
     approve: isDesign.value ? 'Approves this version and starts planning the build.' : isSpike.value ? 'Accepts the findings and finishes the spike.' : 'Merges the PR once the checks pass.',
@@ -139,6 +142,6 @@ export function useInboxPanel(ctx: InboxPanelContext) {
     resolve: 'Starts the task again from the status you pick.'
   }))
 
-  return { item, task, isReview, isDesign, canAct, kind, readOnlyNote, tldr, latestReview, history, criteria, met, gates, images, others, hasVerdict, pr, hasPullRequest, prDetail, prLoading, prFailed, prError, retryPullRequest, preview, primary, secondary, explanations }
+  return { item, task, isReview, isDesign, canAct, kind, readOnlyNote, tldr, latestReview, history, criteria, met, gates, images, others, hasVerdict, pr, hasPullRequest, prDetail, prLoading, prFailed, prError, retryPullRequest, preview, primary, secondary, actionDisabled, explanations }
 }
 export type InboxPanel = ReturnType<typeof useInboxPanel>
