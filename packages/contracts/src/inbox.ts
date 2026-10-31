@@ -174,7 +174,7 @@ export const inboxActionInput = z.discriminatedUnion('action', [
   // Failed or Blocked: resolve to a status (D10)
   z.object({ action: z.literal('resolve'), to: z.enum(['backlog', 'ready', 'in_progress']), text: z.string().trim().optional() }),
   // Human review
-  z.object({ action: z.literal('approve') }),
+  z.object({ action: z.literal('approve'), text: z.string().trim().optional() }),
   z.object({ action: z.literal('request_changes'), text: z.string().trim().min(1) }),
   z.object({ action: z.literal('delete'), text: z.string().trim().optional() })
 ])

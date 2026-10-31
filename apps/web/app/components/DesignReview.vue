@@ -57,7 +57,7 @@ const reopenable = computed(() => props.task.status === 'approved')
 const requesting = ref(false)
 const feedback = ref('')
 const approving = ref(false)
-// Goes to the PM in the Plan session the approval opens for the build
+// Saved on the task and sent to the PM in the build Plan session
 const note = ref('')
 function fail(e: unknown) {
   toast.add({ title: 'Not saved', description: e instanceof ApiError ? e.message : String(e), color: 'error' })
