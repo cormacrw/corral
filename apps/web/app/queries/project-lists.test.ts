@@ -54,6 +54,54 @@ describe('shared project lists', () => {
     shell.wrapper.unmount()
   })
 
+  it.each(['tasks', 'epics'] as const)('keeps cached content after a failed %s background refetch', async (domain) => {
+    vi.spyOn(api.tasks, 'list').mockImplementation(async () => {
+      if (domain === 'tasks') throw new Error('502')
+      return [task()]
+    })
+    vi.spyOn(api.epics, 'list').mockImplementation(async () => {
+      if (domain === 'epics') throw new Error('502')
+      return []
+    })
+    let lists!: ReturnType<typeof useProjectLists>
+    const page = mountWithQuery(defineComponent({ setup() {
+      lists = useProjectLists(project.slug)
+      return () => h('div', lists.error.value ?? (lists.loading.value ? 'skeleton' : lists.tasks.value.map(t => t.ref).join(',')))
+    } }), { client })
+    await client.invalidateQueries()
+    await flushPromises()
+    // Confirm a real refetch error, including the cached empty epic list.
+    expect(client.getQueryState(keys[domain].list(project.slug))?.error?.message).toBe('502')
+    expect(lists.error.value).toBeNull()
+    expect(lists.loading.value).toBe(false)
+    expect(page.wrapper.text()).toBe('TA-1')
+    // Re-entering Board/Backlog/Overview mustn't expose the retained error.
+    page.wrapper.unmount()
+    const revisit = mountWithQuery(defineComponent({ setup() {
+      const lists = useProjectLists(project.slug)
+      return () => h('div', lists.error.value ?? (lists.loading.value ? 'skeleton' : lists.tasks.value.map(t => t.ref).join(',')))
+    } }), { client })
+    expect(revisit.wrapper.text()).toBe('TA-1')
+    await flushPromises()
+    revisit.wrapper.unmount()
+  })
+
+  it.each(['tasks', 'epics'] as const)('still exposes a %s cold-load failure without cached data', async (domain) => {
+    client.removeQueries({ queryKey: keys[domain].list(project.slug) })
+    vi.spyOn(api.tasks, 'list').mockRejectedValue(new Error('502'))
+    vi.spyOn(api.epics, 'list').mockRejectedValue(new Error('502'))
+    let lists!: ReturnType<typeof useProjectLists>
+    const page = mountWithQuery(defineComponent({ setup() {
+      lists = useProjectLists(project.slug)
+      return () => h('div', lists.error.value ?? '')
+    } }), { client })
+    await flushPromises()
+    expect(lists.error.value).toBe('502')
+    expect(lists.loading.value).toBe(false)
+    expect(page.wrapper.text()).toBe('502')
+    page.wrapper.unmount()
+  })
+
   it('writes agent moves to every observer and removes drafts and deleted projects from search', async () => {
     const projects = ref([project])
     let lists!: ReturnType<typeof useAllProjectLists>

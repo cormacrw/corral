@@ -13,7 +13,10 @@ export function useProjectLists(slug: MaybeRefOrGetter<string>) {
     tasks: computed(() => tasks.data.value ?? []),
     epics: computed(() => epics.data.value ?? []),
     loading: computed(() => Boolean(toValue(slug)) && (tasks.isPending.value || epics.isPending.value)),
-    error: computed(() => tasks.error.value?.message ?? epics.error.value?.message ?? null)
+    // A failed refresh must not replace cached content, including in Overview.
+    // Cold-load failures still surface so an unavailable list isn't shown empty.
+    error: computed(() => (tasks.isLoadingError.value ? tasks.error.value?.message : null)
+      ?? (epics.isLoadingError.value ? epics.error.value?.message : null) ?? null)
   }
 }
 
