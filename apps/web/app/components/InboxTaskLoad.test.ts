@@ -97,7 +97,7 @@ async function mountInbox(type: 'human_review' | 'failed' | 'question', taskRef?
   vi.stubGlobal('usePlanThreadDelete', () => ({ pending: vue.ref([]), remove: vi.fn() }))
   const closeFlyout = vi.fn().mockResolvedValue(undefined)
   vi.stubGlobal('useTaskFlyout', () => ({ ref: vue.ref(dockedTask), epic: vue.ref(null), open: vi.fn(), close: closeFlyout }))
-  vi.stubGlobal('useLive', () => ({ state: vue.ref({ agents, projects, loaded: true, runner: { online: true } }) }))
+  vi.stubGlobal('useShell', () => ({ agents, projects, loaded: true, runner: { online: true } }))
   vi.mocked(api.inbox.get).mockImplementation(async () => structuredClone(fixture))
   vi.mocked(api.inbox.act).mockReset().mockResolvedValue({ task: null })
   const byRef = vi.mocked(api.tasks.byRef).mockReset()

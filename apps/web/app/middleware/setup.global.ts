@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/vue-query'
 import type { Project } from '@corral/contracts'
-import { api } from '~/composables/useApi'
 import { keys } from '~/queries/keys'
+import { fetchProjectsOnce } from '~/queries/projects'
 import { onboardingRedirect } from '~/utils/onboarding'
 
 // First run: with no projects, everything leads to onboarding; once the
@@ -13,10 +13,9 @@ export default defineNuxtRouteMiddleware(async (to) => {
   const client = useQueryClient()
   let projects = client.getQueryData<Project[]>(keys.projects.list())
   if (!projects) {
-    // One attempt, not the query's: a cold launch can't wait out retries. The
-    // shell finds the list cached and doesn't ask again.
+    // The shell finds the list cached and doesn't ask again
     try {
-      const list = await api.projects.list()
+      const list = await fetchProjectsOnce()
       // Anything but a list (say, a proxy's HTML page) says nothing either way
       if (!Array.isArray(list)) return
       projects = client.setQueryData<Project[]>(keys.projects.list(), list)!

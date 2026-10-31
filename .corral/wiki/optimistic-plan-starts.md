@@ -2,7 +2,7 @@
 
 The new-session page generates a UUID and seeds `usePendingPlan` before navigating to `/plan/<id>`. The POST runs after navigation; both Send and Grill me pass through `PromptComposer.send`, including uploaded images. The pending entry supplies the conversation and the open-thread list until server data arrives.
 
-`useLive` forwards Plan events into the pending store, even if the conversation has unmounted. Server human messages replace the temporary message; response reconciliation preserves newer live messages and run metadata. Starts reuse their UUID on retry, using the server's existing idempotency contract. The store is memory-only; reloading an accepted session reads the durable server thread at the same URL.
+`connectQueries` forwards Plan events into the pending store, even if the conversation has unmounted. Server human messages replace the temporary message; response reconciliation preserves newer live messages and run metadata. Starts reuse their UUID on retry, using the server's existing idempotency contract. The store is memory-only; reloading an accepted session reads the durable server thread at the same URL.
 
 A failed start stays in its thread, labelled Not sent, with Retry and Back to prompt. Back to prompt restores the submitted text, uploaded image references as removable thumbnails, project, runtime and attached task. Images are not uploaded again. Pending/failed starts cannot send follow-up messages or close a server thread that does not yet exist.
 

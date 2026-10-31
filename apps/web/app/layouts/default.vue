@@ -4,9 +4,9 @@ import { agentStatus, isWorking, projectColor, ROLE, runnerSummary, taskCounts }
 import { searchPages } from '~/utils/search'
 
 // The app shell (design/app-shell.md): global nav, projects, agents, runner
-const live = useLive()
-const state = live.state
-const lists = useAllProjectLists(() => state.value.projects)
+const shell = useShell()
+const { connection } = useLive()
+const lists = useAllProjectLists(() => shell.projects)
 const route = useRoute()
 const now = ref(Date.now())
 onMounted(() => {
@@ -35,10 +35,10 @@ const { active, sessions: threads, close: closeThread } = useOpenPlanSessions()
 const attention = (session: typeof threads.value[number]) => session.status === 'needs_approval' ? 'Needs approval' : session.status === 'question' ? 'Question' : session.unread ? 'Unread reply' : null
 const attentionCount = computed(() => threads.value.filter(s => attention(s)).length)
 const threadColor = (projectId: string) => {
-  const project = state.value.projects.find(p => p.id === projectId)
+  const project = shell.projects.find(p => p.id === projectId)
   return project ? projectColor(project) : undefined
 }
-const runnerColor = computed(() => !state.value.runner?.online ? 'error' : state.value.connection === 'open' ? 'success' : 'warning')
+const runnerColor = computed(() => !shell.runner?.online ? 'error' : connection.value === 'open' ? 'success' : 'warning')
 
 // UDashboardSearch owns the palette's behaviour: it binds ⌘K/Ctrl+K, opens on the
 // Search… button (via the dashboard toggle hook) and closes once an item is picked.
@@ -48,7 +48,7 @@ const searchOpen = ref(false)
 const searchGroups = computed(() => [{
   id: 'pages',
   label: 'Go to',
-  items: searchPages(state.value.projects, state.value.agents)
+  items: searchPages(shell.projects, shell.agents)
 }, {
   id: 'tasks',
   label: 'Tasks',
@@ -176,8 +176,8 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
             >
               <template #trailing>
                 <UBadge
-                  v-if="state.inboxCount > 0"
-                  :label="String(state.inboxCount)"
+                  v-if="shell.inboxCount > 0"
+                  :label="String(shell.inboxCount)"
                   color="primary"
                   size="sm"
                   class="ms-auto"
@@ -202,7 +202,7 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
               />
             </div>
             <div
-              v-for="project in state.projects"
+              v-for="project in shell.projects"
               :key="project.id"
               role="group"
               :aria-label="project.name"
@@ -295,7 +295,7 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
               Agents
             </div>
             <UTooltip
-              v-for="agent in state.agents"
+              v-for="agent in shell.agents"
               :key="agent.id"
               :text="`${agent.name} · ${ROLE[agent.role]}`"
               :disabled="!collapsed"
@@ -353,10 +353,10 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
               class="min-w-0 flex-1"
             >
               <div class="font-medium">
-                Runner {{ state.runner?.online ? 'online' : 'offline' }}
+                Runner {{ shell.runner?.online ? 'online' : 'offline' }}
               </div>
               <div class="truncate text-muted">
-                {{ runnerSummary(state.runner) }}
+                {{ runnerSummary(shell.runner) }}
               </div>
             </div>
           </div>

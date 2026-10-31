@@ -10,7 +10,7 @@ import { epicInProgress, epicTitle, epicWithLiveCounts, PRIORITY, STATUS, taskNo
 // The Board: approved work by status, with human moves through the same
 // actions as the Status menu. The server remains authoritative.
 const route = useRoute()
-const live = useLive()
+const shell = useShell()
 const flyout = useTaskFlyout()
 const device = useDevice()
 const { slug, project, tasks: all, epics: epicList, loading, error } = useProject()
@@ -42,7 +42,7 @@ const search = computed({
 })
 const epics = computed(() => [...new Set(all.value.map(t => t.epicId).filter((id): id is string => Boolean(id)))])
 // Agents that work on tasks, for the Agent filter
-const taskAgents = computed(() => live.state.value.agents.filter(a => a.role !== 'pm'))
+const taskAgents = computed(() => shell.agents.filter(a => a.role !== 'pm'))
 const visible = computed(() => all.value.filter(t => onBoard(t) && matchesFilter(t, filters.value, taskAgentIds(t))))
 // Epic details opens the epic only when exactly one is selected
 const single = computed(() => filters.value.epics.length === 1 ? filters.value.epics[0]! : null)
@@ -52,7 +52,7 @@ const columns = computed(() => filters.value.statuses.length > 0 ? BOARD_COLUMNS
 const DOT = { neutral: 'bg-neutral-400', info: 'bg-info', primary: 'bg-primary', warning: 'bg-warning', error: 'bg-error', success: 'bg-success', secondary: 'bg-secondary' } as const
 const inColumn = (column: { key: string, statuses: TaskStatus[] }) => sortColumn(column.key, visible.value.filter(t => column.statuses.includes(t.status)))
 const mobileColumns = computed(() => columns.value.map(c => ({ ...c, color: DOT[STATUS[c.statuses[0]!].color], tasks: inColumn(c) })))
-const agentFor = (task: Task) => task.lease ? live.state.value.agents.find(a => a.id === task.lease!.agentId) : null
+const agentFor = (task: Task) => task.lease ? shell.agents.find(a => a.id === task.lease!.agentId) : null
 const epicLabel = (id: string) => epicTitle(epicList.value, id, epics.value.indexOf(id))
 const epicOptions = computed(() => epics.value.map(id => ({ id, label: epicLabel(id) })))
 // Epics with work left or tasks on the Board, so one waiting on its epic PR

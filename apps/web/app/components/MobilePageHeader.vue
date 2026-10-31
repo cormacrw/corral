@@ -3,7 +3,7 @@ import { projectColor } from '~/utils/labels'
 
 defineProps<{ compact?: boolean }>()
 const route = useRoute()
-const state = useLive().state
+const shell = useShell()
 const pending = usePendingPlan()
 const parts = computed(() => route.path.split('/').filter(Boolean))
 
@@ -13,7 +13,7 @@ const PROJECT_PAGES: Record<string, string> = { 'board': 'Board', 'backlog': 'Ba
 const projectPage = computed(() => {
   const [section, slug, page] = parts.value
   if (section !== 'projects' || !slug || !page || !PROJECT_PAGES[page]) return null
-  const project = state.value.projects.find(p => p.slug === slug)
+  const project = shell.projects.find(p => p.slug === slug)
   return { title: PROJECT_PAGES[page], eyebrow: project?.name ?? slug, back: `/projects/${slug}`, backLabel: 'Back to the project', dot: project ? projectColor(project) : null }
 })
 // A Plan conversation names its project and session, goes back to a new
@@ -21,8 +21,8 @@ const projectPage = computed(() => {
 const planSession = computed(() => {
   const [section, id] = parts.value
   if (section !== 'plan' || !id) return null
-  const session = state.value.planSessions.find(s => s.id === id) ?? pending.entries.value[id]?.session
-  const project = state.value.projects.find(p => p.id === session?.projectId)
+  const session = shell.planSessions.find(s => s.id === id) ?? pending.entries.value[id]?.session
+  const project = shell.projects.find(p => p.id === session?.projectId)
   return { title: session?.title ?? 'Plan', eyebrow: project?.name ?? '', back: '/plan', backLabel: 'Back to Plan', dot: project ? projectColor(project) : null }
 })
 // An Inbox item is its own screen: the task above where it sits in the
@@ -72,7 +72,7 @@ const title = computed(() => {
     case 'projects': return id ? 'Overview' : 'Projects'
     case 'agents': {
       if (!id) return 'Agents'
-      return state.value.agents.find(a => a.name.toLowerCase() === id)?.name ?? 'Agent'
+      return shell.agents.find(a => a.name.toLowerCase() === id)?.name ?? 'Agent'
     }
     default: return 'Corral'
   }

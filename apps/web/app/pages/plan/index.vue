@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import type { AgentRuntime, CliStatus } from '@corral/contracts'
+import type { AgentRuntime } from '@corral/contracts'
 import { useQuery } from '@tanstack/vue-query'
 import { planDraftsQuery, planSessionsQuery } from '~/queries/plan'
-import { api } from '~/composables/useApi'
 import { reloadShell } from '~/queries/shell'
+import { clisQuery } from '~/queries/setup'
 import { detectedRuntimes, projectColor, runtimeLabel } from '~/utils/labels'
 
 // Plan, new session (design/plan.md)
-const live = useLive()
+const shell = useShell()
 // The PM by its current name and picture
-const pm = computed(() => live.state.value.agents.find(a => a.role === 'pm') ?? null)
+const pm = computed(() => shell.agents.find(a => a.role === 'pm') ?? null)
 const router = useRouter()
 const route = useRoute()
 const pending = usePendingPlan()
@@ -18,23 +18,13 @@ useSeoMeta({ title: 'Plan · Corral' })
 
 const lastProject = useLocalStorage<string | null>('corral.plan.project', null)
 const projectId = ref<string | null>(typeof route.query.project === 'string' ? route.query.project : lastProject.value)
-const project = computed(() => live.state.value.projects.find(p => p.id === projectId.value) ?? live.state.value.projects[0] ?? null)
+const project = computed(() => shell.projects.find(p => p.id === projectId.value) ?? shell.projects[0] ?? null)
 watch(project, (p) => {
   if (p) lastProject.value = p.id
 }, { immediate: true })
 // The PM's runtime for the new session (D18): only CLIs the runner has.
 // Until the runner answers, Claude is the one on offer.
-const clis = ref<CliStatus[] | null>(null)
-async function detect() {
-  try {
-    clis.value = await api.setup.clis()
-  } catch {
-    clis.value = null
-  }
-}
-watch(() => live.state.value.runner?.online, (online) => {
-  if (online) void detect()
-}, { immediate: true })
+const { data: clis } = useQuery(computed(() => ({ ...clisQuery(), enabled: Boolean(shell.runner?.online) })))
 const runtimes = computed(() => {
   const found = detectedRuntimes(clis.value ?? [])
   return found.length > 0 ? found : ['claude-code' as const]
@@ -53,7 +43,7 @@ const text = ref((restored?.message ?? '').replace(/!\[[^\]]*\]\(attachment:[^)]
 const composer = ref<{ send: (message: string) => Promise<void> } | null>(null)
 const taskRef = ref<string | null>(restored?.taskRef ?? null)
 const busy = ref(false)
-const runnerOffline = computed(() => live.state.value.loaded && !live.state.value.runner?.online)
+const runnerOffline = computed(() => shell.loaded && !shell.runner?.online)
 const reconnecting = ref(false)
 // Re-reads the runner's status, in case its live update was missed
 async function reconnect() {
@@ -157,7 +147,7 @@ async function start(message: string): Promise<boolean> {
           <template #tools>
             <USelectMenu
               :model-value="project?.id"
-              :items="live.state.value.projects.map(p => ({ label: p.name, value: p.id, project: p }))"
+              :items="shell.projects.map(p => ({ label: p.name, value: p.id, project: p }))"
               value-key="value"
               size="xs"
               variant="ghost"

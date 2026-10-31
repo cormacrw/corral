@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The Projects tab: MobileProjects on mobile (design/mobile.md), a plain
 // project list on the web
-const state = useLive().state
+const shell = useShell()
 const device = useDevice()
 useSeoMeta({ title: 'Projects · Corral' })
 </script>
@@ -16,7 +16,7 @@ useSeoMeta({ title: 'Projects · Corral' })
   <UDashboardPanel v-else>
     <div class="flex flex-col gap-2 p-4">
       <UButton
-        v-for="project in state.projects"
+        v-for="project in shell.projects"
         :key="project.id"
         :to="`/projects/${project.slug}`"
         variant="outline"

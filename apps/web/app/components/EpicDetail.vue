@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@tanstack/vue-query'
 import { epicQuery, patchEpic, setEpicDependencies } from '~/queries/epics'
 import type { PatchEpicInput } from '@corral/contracts'
 import { isTaskDone, type EpicReviewMode } from '@corral/core'
-import { ApiError } from '~/composables/useApi'
+import { ApiError } from '~/queries/client'
 import { EPIC_REVIEW_MODE, EPIC_REVIEW_STATE, EPIC_STATUS_TEXT, epicReviewStatus, epicWithLiveCounts, PRIORITY, statusCounts } from '~/utils/labels'
 
 // An epic: its title, description and progress, and the dependency tree of
@@ -12,7 +12,7 @@ import { EPIC_REVIEW_MODE, EPIC_REVIEW_STATE, EPIC_STATUS_TEXT, epicReviewStatus
 const props = defineProps<{ epicId: string, mode: 'flyout' | 'page' | 'mobile' }>()
 const emit = defineEmits<{ close: [] }>()
 
-const live = useLive()
+const shell = useShell()
 const flyout = useTaskFlyout()
 const toast = useToast()
 const patchMutation = useMutation(patchEpic)
@@ -22,7 +22,7 @@ const epic = computed(() => epicResult.data.value ?? null)
 // A failed background refetch leaves what's cached on screen
 const error = computed(() => epicResult.isLoadingError.value ? epicResult.error.value?.message ?? null : null)
 const saved = ref(false)
-const project = computed(() => live.state.value.projects.find(p => p.id === epic.value?.projectId) ?? null)
+const project = computed(() => shell.projects.find(p => p.id === epic.value?.projectId) ?? null)
 const { tasks: projectTasks, epics: epicList } = useProjectLists(() => project.value?.slug ?? '')
 // Task events update the shared task list, not the epic's aggregate counts.
 const related = computed(() => epicList.value.map(e => epicWithLiveCounts(e, projectTasks.value)))
