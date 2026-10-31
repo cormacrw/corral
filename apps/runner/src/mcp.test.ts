@@ -55,7 +55,7 @@ describe('ToolServer', () => {
 
   it('exposes pr_rebased to developers and forwards it over MCP', async () => {
     const { client, calls } = await connect('developer')
-    const input = { outcome: 'pr_rebased', summary: 'Kept both changes in app.ts', note: 'app.ts: kept main validation and task flow' }
+    const input = { outcome: 'pr_rebased', review: 'needs_review', conflictedFiles: ['app.ts'], summary: 'Kept both changes in app.ts', note: 'app.ts: kept main validation and task flow' }
     const result = await client.callTool({ name: 'report_outcome', arguments: input })
     expect(result.isError).not.toBe(true)
     expect(calls).toEqual([{ tool: 'report_outcome', input }])

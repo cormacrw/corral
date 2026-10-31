@@ -553,14 +553,18 @@ export const comments: Record<string, Comment[]> = {
   }],
   [at('COR-3').id]: [
     { id: 'cm-1', taskId: at('COR-3').id, author: { kind: 'human', userId: 'user-1' }, body: 'Keep the fixtures out of the production bundle.', pinned: true, createdAt: ago(40) },
-    { id: 'cm-2', taskId: at('COR-3').id, author: { kind: 'agent', role: 'developer', runId: 'r-1' }, body: 'Done: the fixtures load only when the prototype flag is set.', pinned: false, createdAt: ago(10) }
+    { id: 'cm-2', taskId: at('COR-3').id, author: { kind: 'agent', role: 'developer', runId: 'r-1' }, body: 'Done: the fixtures load only when the prototype flag is set.', pinned: false, createdAt: ago(10) },
+    { id: 'cm-rebase-verified', taskId: at('COR-3').id, author: { kind: 'system', component: 'server' }, body: 'Trivial rebase verified without review: only the conflicted files changed (`apps/server/src/app.ts`) and no project doc changed on the base. The approval carried over to f6e5d4c3b2.', pinned: false, createdAt: ago(5) }
   ]
 }
 
 export const history: Record<string, AuditEntry[]> = {
   [at('COR-3').id]: [
     { id: 1, projectId: 'p-corral', taskId: at('COR-3').id, actor: { kind: 'human', userId: 'user-1' }, action: 'task.created', detail: {}, createdAt: ago(60 * 24) },
-    { id: 2, projectId: 'p-corral', taskId: at('COR-3').id, actor: { kind: 'system', component: 'scheduler' }, action: 'task.transition', detail: { from: 'ready', to: 'in_progress' }, createdAt: ago(25) }
+    { id: 2, projectId: 'p-corral', taskId: at('COR-3').id, actor: { kind: 'system', component: 'scheduler' }, action: 'task.transition', detail: { from: 'ready', to: 'in_progress' }, createdAt: ago(25) },
+    { id: 3, projectId: 'p-corral', taskId: at('COR-3').id, actor: { kind: 'system', component: 'scheduler' }, action: 'run.ended', detail: { runId: 'r-rebase-1', runNumber: 119, state: 'completed', outcome: 'pr_rebased', review: 'trivial', conflictedFiles: ['apps/web/app/components/TaskDetail.vue', 'apps/server/src/prompts.ts'] }, createdAt: ago(20) },
+    { id: 4, projectId: 'p-corral', taskId: at('COR-3').id, actor: { kind: 'system', component: 'scheduler' }, action: 'run.ended', detail: { runId: 'r-rebase-2', runNumber: 120, state: 'completed', outcome: 'pr_rebased', review: 'needs_review', conflictedFiles: ['packages/core/src/task-machine.ts', 'docs/decisions.md'] }, createdAt: ago(15) },
+    { id: 5, projectId: 'p-corral', taskId: at('COR-3').id, actor: { kind: 'system', component: 'server' }, action: 'rebase.verified', detail: { approvedHeadSha: 'a1b2c3d4e5', headSha: 'f6e5d4c3b2', conflictedFiles: ['apps/server/src/app.ts'] }, createdAt: ago(5) }
   ]
 }
 

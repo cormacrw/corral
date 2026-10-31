@@ -30,6 +30,7 @@ import { EpicBranchError, isEpicRebaseTask, taskBase } from './task-base.ts'
 import { slugify } from './projects.ts'
 import { designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
 import { PmTools } from './pm-tools.ts'
+import { carryOverApproval, checkTrivialRebase, latestRebaseCheckFailures } from './rebase-review.ts'
 import { runExitError, withLastActivity } from './run-exit.ts'
 import { runEndValues, type RunEnd } from './run-lifecycle.ts'
 import type { RunnerHandlers, RunnerHub } from './runner-hub.ts'
@@ -645,7 +646,11 @@ export class Orchestrator implements RunnerHandlers {
       ? await db.select().from(designVersions)
           .where(and(eq(designVersions.taskId, task.id), eq(designVersions.commitSha, task.headSha))).orderBy(desc(designVersions.version)).limit(1)
       : []
+    const [rebase] = task.rebaseOnly
+      ? await db.select().from(runs).where(and(eq(runs.taskId, task.id), eq(runs.outcome, 'pr_rebased'), eq(runs.headSha, task.headSha!))).orderBy(desc(runs.number)).limit(1)
+      : []
     const pin = await this.#pinnedDesign(ctx.project.prefix, task.id)
+    const rebaseCheckFailures = task.rebaseOnly ? await latestRebaseCheckFailures(db, task.id) : []
     return {
       runId: ctx.run.id,
       runNumber: ctx.run.number,
@@ -674,12 +679,14 @@ export class Orchestrator implements RunnerHandlers {
         branch: spike ? null : task.branch,
         spike,
         findings: reported?.summary ?? null,
+        rebaseReport: rebase ? { review: rebase.review, conflictedFiles: rebase.conflictedFiles } : null,
         design: design ? { version: version?.version ?? null } : null,
         pin,
         underReview: version ? { version: version.version, commitSha: version.commitSha, screenshots: version.screenshots.map(s => s.fileName) } : null,
         defaultBranch: baseBranch,
         rebaseOnly: task.rebaseOnly,
         approvedHeadSha: task.approvedHeadSha,
+        rebaseCheckFailures,
         reviewRounds: task.reviewRounds,
         reviewRoundCap: ctx.project.reviewRoundCap,
         criteria: criteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })),
@@ -947,7 +954,7 @@ export class Orchestrator implements RunnerHandlers {
       await tx.update(tasks).set({ leaseRunId: null, leaseRole: null, leaseExpiresAt: null, leaseHeartbeatAt: null, updatedAt: this.#now() })
         .where(and(eq(tasks.id, ctx.task.id), eq(tasks.leaseRunId, ctx.run.id)))
     }
-    await appendAudit(tx, { projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor: server }, auditEvent('run.ended', { runId: ctx.run.id, runNumber: ctx.run.number, state: end.state, outcome: end.outcome ?? null, error: 'error' in end ? end.error : null }))
+    await appendAudit(tx, { projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor: server }, auditEvent('run.ended', { runId: ctx.run.id, runNumber: ctx.run.number, state: end.state, outcome: end.outcome ?? null, error: 'error' in end ? end.error : null, ...(end.outcome === 'pr_rebased' ? { review: end.review, conflictedFiles: end.conflictedFiles } : {}) }))
   }
 
   // A human stops a run: the process tree is killed, the run is Interrupted
@@ -1344,6 +1351,10 @@ export class Orchestrator implements RunnerHandlers {
           if (!ctx.task!.rebaseOnly && report.outcome === 'pr_rebased') throw new ToolError('Not submitted. This round expects pr_opened or pr_updated, not pr_rebased.')
           if (spike) throw new ToolError('Not submitted. A spike opens no PR: report your findings with outcome findings_reported.')
           if (design) throw new ToolError('Not submitted. A design task opens no PR: call submit_design, then report design_submitted.')
+          if (report.outcome === 'pr_rebased') {
+            if (!report.review) throw new ToolError('Not submitted. Add review: trivial or needs_review.')
+            if (!report.conflictedFiles?.length) throw new ToolError('Not submitted. Add conflictedFiles: every file in which you resolved a conflict.')
+          }
           return this.#submit(ctx, { ...report, outcome: report.outcome })
         case 'findings_reported':
           if (!spike) throw new ToolError(`Not submitted. Only a spike reports findings; this task reports ${design ? 'design_submitted' : 'pr_opened or pr_updated'}.`)
@@ -1372,12 +1383,9 @@ export class Orchestrator implements RunnerHandlers {
   async #review(ctx: RunContext, report: Extract<OutcomeReport, { outcome: ReviewVerdict }>, verdict: ReviewVerdict) {
     const { db } = this.#d
     const task = ctx.task!
+    if (task.rebaseOnly && verdict === 'approved') return this.#approvedRebaseReview(ctx, report)
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
-    const [approval] = task.rebaseOnly && verdict === 'approved'
-      ? await db.select().from(reviews).where(and(eq(reviews.taskId, task.id), eq(reviews.verdict, 'approved'), eq(reviews.headSha, task.approvedHeadSha!))).orderBy(desc(reviews.createdAt)).limit(1)
-      : []
-    if (task.rebaseOnly && verdict === 'approved' && !approval) throw new ToolError('Not recorded. No approval found for the previously approved head.')
-    const verdicts = approval ? approval.criteria : report.criteria ?? []
+    const verdicts = report.criteria ?? []
     const missing = criteria.filter(c => !c.checkedByHuman && !verdicts.some(v => v.criterionId === c.id))
     if (missing.length > 0) {
       throw new ToolError(`Not recorded. Give a verdict for every criterion; missing: ${missing.map(c => `[${c.id}] ${c.text}`).join('; ')}.`)
@@ -1393,8 +1401,8 @@ export class Orchestrator implements RunnerHandlers {
     // An approval is a short note; the per-criterion notes are kept on the
     // review and shown next to the evidence. Changes requested spells out
     // every criterion for the developer, except the narrow rebase comment.
-    const summary = approval ? `Approval carried over a reviewed rebase from ${task.approvedHeadSha} to ${task.headSha}. ${report.summary.trim()}` : report.summary
-    const feedback = task.rebaseOnly ? `Rebase review ${verdict === 'approved' ? 'approved' : 'changes requested'}: ${report.summary.trim()}` : verdict === 'approved' ? `Approved: ${kept.some(v => v.met === null) ? humanCheckTally(kept.filter(v => v.met).length, kept.filter(v => v.met === null).length) : `all ${kept.length} criteria met`}. ${report.summary.trim()}`.trim() : feedbackComment(report.summary, kept, criteria)
+    const summary = report.summary
+    const feedback = task.rebaseOnly ? `Rebase review changes requested: ${report.summary.trim()}` : verdict === 'approved' ? `Approved: ${kept.some(v => v.met === null) ? humanCheckTally(kept.filter(v => v.met).length, kept.filter(v => v.met === null).length) : `all ${kept.length} criteria met`}. ${report.summary.trim()}`.trim() : feedbackComment(report.summary, kept, criteria)
 
     const next = await db.transaction(async (tx) => {
       const locked = await lockTask(tx, task.id)
@@ -1442,9 +1450,23 @@ export class Orchestrator implements RunnerHandlers {
     return feedbackSimilarity(reviewFeedbackText(previous.summary, previous.criteria), reviewFeedbackText(summary, criteria))
   }
 
-  // D24: a changed binding decision must be settled by the human.
+  // D24: the reviewer found the rebase clean, so the earlier approval stands
+  async #approvedRebaseReview(ctx: RunContext, report: OutcomeReport) {
+    await this.#d.db.transaction(async (tx) => {
+      const locked = await lockTask(tx, ctx.task!.id)
+      if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease. Stop working.')
+      const carried = await carryOverApproval(tx, locked, { actor: this.#actor(ctx), runId: ctx.run.id, via: 'a reviewed rebase', note: report.summary })
+      if (!carried.ok) throw new ToolError(`Not recorded. ${carried.problem}`)
+      await tx.insert(comments).values({ taskId: locked.task.id, author: this.#actor(ctx), body: `Rebase review approved: ${report.summary.trim()}` })
+      await this.#endRunIn(tx, ctx, { state: 'completed', outcome: 'approved', summary: report.summary, headSha: locked.task.headSha! })
+    })
+    this.#finished(ctx, 'Review recorded: approved', { handoff: true })
+    return { ok: true, message: 'Approval carried over. Corral handles any human check, CI and the merge from here. You can stop now.' }
+  }
+
+  // D24: a substantial change or a changed binding decision is the human's call.
   async #blockedRebaseReview(ctx: RunContext, reason: string) {
-    if (!reason.trim()) throw new ToolError('Explain the changed binding decision and affected criteria for the human.')
+    if (!reason.trim()) throw new ToolError('Explain the substantial change and the affected criteria for the human.')
     await this.#d.db.transaction(async (tx) => {
       const { task, project } = await lockTask(tx, ctx.task!.id)
       if (task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease. Stop working.')
@@ -1510,21 +1532,55 @@ export class Orchestrator implements RunnerHandlers {
       else pr = await github.openPullRequest(ctx.project.repository, { head: task.branch!, base: await taskBase(db, task, ctx.project, github), title: `${ref}: ${task.title}`, body })
     }
 
-    const comment = await db.transaction(async (tx) => {
+    // D24: a trivial rebase goes to the reviewer unless the server can confirm
+    // it. GitHub failing proves nothing, so that also means a review.
+    const rebaseCheck = report.outcome === 'pr_rebased' && report.review === 'trivial'
+      ? await checkTrivialRebase(github, ctx.project.repository, {
+          baseBranch: await taskBase(db, task, ctx.project),
+          approvedHeadSha: task.approvedHeadSha!,
+          newHeadSha: report.headSha,
+          conflictedFiles: report.conflictedFiles!
+        })
+      : null
+
+    const { posted, verified } = await db.transaction(async (tx) => {
       const locked = await lockTask(tx, task.id)
       if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease while submitting. Stop working.')
-      await applyTransition(tx, locked.task, locked.project, {
-        type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true
-      }, server, { event: report.outcome, runId: ctx.run.id, headSha: report.headSha, pr: pr?.number ?? null })
       await tx.update(tasks).set({ headSha: report.headSha, ...(pr && { prNumber: pr.number, prUrl: pr.url }) }).where(eq(tasks.id, task.id))
-      const comment = await this.#postNote(tx, ctx, report.note!)
-      await this.#endRunIn(tx, ctx, { state: 'completed', outcome: report.outcome, summary: report.summary, headSha: report.headSha })
-      return comment
+      const carried = rebaseCheck && !rebaseCheck.error && rebaseCheck.failures.length === 0
+        ? await this.#carryVerifiedRebase(tx, ctx, { task: { ...locked.task, headSha: report.headSha!, prNumber: pr?.number ?? locked.task.prNumber }, project: locked.project }, report)
+        : null
+      if (!carried?.comment) {
+        const checkError = carried?.problem ?? rebaseCheck?.error
+        const checkResult = rebaseCheck && { checkFailures: rebaseCheck.failures, ...(checkError && { checkError }) }
+        await applyTransition(tx, locked.task, locked.project, {
+          type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true
+        }, server, { event: report.outcome, runId: ctx.run.id, headSha: report.headSha, pr: pr?.number ?? null, ...checkResult })
+      }
+      const note = await this.#postNote(tx, ctx, report.note!)
+      await this.#endRunIn(tx, ctx, { state: 'completed', outcome: report.outcome, summary: report.summary, headSha: report.headSha, ...(report.outcome === 'pr_rebased' ? { review: report.review, conflictedFiles: report.conflictedFiles } : {}) })
+      return { posted: carried?.comment ? [note, carried.comment] : [note], verified: Boolean(carried?.comment) }
     })
-    this.#d.events.publish({ type: 'comment.created', comment })
+    for (const comment of posted) this.#d.events.publish({ type: 'comment.created', comment })
     this.#finished(ctx, 'Outcome accepted', { handoff: true })
     if (!pr) return { ok: true, message: 'The rebased epic branch is ready for review. You can stop now.' }
+    if (verified) return { ok: true, pr: pr.url, message: 'The server verified your trivial rebase, so the approval carried over. Corral handles any human check, CI and the merge from here. You can stop now.' }
     return { ok: true, pr: pr.url, message: `PR #${pr.number} is ready for review. You can stop now.` }
+  }
+
+  // D24: the server check passed, so no reviewer is needed. The comment is the
+  // task's Activity entry. Call with `headSha` on the new head.
+  async #carryVerifiedRebase(tx: Executor, ctx: RunContext, locked: { task: TaskRow, project: ProjectRow }, report: OutcomeReport): Promise<{ comment?: Comment, problem?: string }> {
+    const files = report.conflictedFiles!.map(file => `\`${file}\``).join(', ')
+    const carried = await carryOverApproval(tx, locked, {
+      actor: server,
+      runId: ctx.run.id,
+      via: 'a server-verified trivial rebase',
+      note: `Only the conflicted files changed (${report.conflictedFiles!.join(', ')}) and no project doc moved on the base.`
+    })
+    if (!carried.ok) return { problem: carried.problem }
+    await appendAudit(tx, { projectId: locked.project.id, taskId: locked.task.id, actor: server }, auditEvent('rebase.verified', { runId: ctx.run.id, pr: locked.task.prNumber, approvedHeadSha: locked.task.approvedHeadSha, headSha: report.headSha, conflictedFiles: report.conflictedFiles }))
+    return { comment: await addComment(tx, locked.task.id, { body: `Trivial rebase verified without review: only the conflicted files changed (${files}) and no project doc changed on the base. The approval carried over to ${report.headSha}.`, pinned: false }, server) }
   }
 
   // D19: a spike's findings are its deliverable. Like a submission they
