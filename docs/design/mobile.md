@@ -71,6 +71,12 @@ On the web, `/projects` renders in the normal shell as a plain project list.
 
 - **Epics**, below Agents: live epics with at least one non-Draft task and fewer merged tasks than total tasks, newest updated first. Rows link to the epic and show “N of M merged” with an accessible two-segment meter. All projects shows the project name and colour dot; selecting one project hides those labels. When none qualify, show “No epics in progress.”
 
+## Board
+
+The Board shares the desktop **Tasks / Epics** toggle, `?view=` and saved view preference. Both views show one column at a time with pill tabs and horizontal swipes. Epics uses the same stage order and full-width `BoardEpicCard` cards, including overlapping working-agent avatars, as desktop. There is no epic carousel in either layout.
+
+`?column=` holds the task column or epic stage key for the active view. Unknown keys, including keys carried from the other view, fall back to the first visible column. Tapping an epic opens `/epics/<id>`; Back restores its Board stage. The expanded Filters row retains the Tasks view's Epic filter and **Epic details** button; Epics hides task-only filters while preserving them for the return to Tasks. See [board.md](board.md).
+
 ## Agents
 
 Agent detail and run screens follow [agent.md](agent.md); the web and mobile pages share `useAgentRuns()`. The former Agents list is retired: `/agents` redirects to `/home` on both layouts. Home’s Agents cards and the web sidebar open individual agents.
