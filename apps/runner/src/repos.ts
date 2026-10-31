@@ -8,7 +8,7 @@ export function barePath(dataDir: string, repository: string): string {
   return join(dataDir, 'repos', `${repository.replace('/', '__')}.git`)
 }
 
-async function exists(path: string): Promise<boolean> {
+export async function exists(path: string): Promise<boolean> {
   return stat(path).then(() => true, () => false)
 }
 

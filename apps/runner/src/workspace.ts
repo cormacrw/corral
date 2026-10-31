@@ -4,7 +4,7 @@ import { readdir, readFile, realpath, rm, stat } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import type { GitAuthor } from './config.ts'
 import { git } from './exec.ts'
-import { barePath, syncRepository, withRepoLock } from './repos.ts'
+import { barePath, exists, syncRepository, withRepoLock } from './repos.ts'
 import { DEFAULT_ROLE_INSTRUCTIONS } from './role-defaults.ts'
 
 // Worktrees under <dataDir>/worktrees (architecture.md, Layout on disk):
@@ -18,10 +18,6 @@ export function worktreePath(dataDir: string, taskId: string, role: AgentRole): 
 // `claude --resume` finds a session by its working directory.
 export function pmWorktreePath(dataDir: string, projectId: string, planSessionId: string): string {
   return join(dataDir, 'worktrees', `pm-${projectId}-${planSessionId}`)
-}
-
-async function exists(path: string): Promise<boolean> {
-  return stat(path).then(() => true, () => false)
 }
 
 export interface Workspace {

@@ -4,7 +4,7 @@ import { createWriteStream, type WriteStream } from 'node:fs'
 import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import { constants } from 'node:os'
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { createRuntimeRegistry, STOP_GRACE_MS, type AgentExit, type AgentProcess, type AgentRuntime, type AgentSession, type ParsedLine, type RuntimeRegistry } from './agent-runtime.ts'
+import { createRuntimeRegistry, STOP_GRACE_MS, type AgentExit, type AgentProcess, type AgentRuntime, type AgentSession, type ParsedLine, type RuntimeOptions, type RuntimeRegistry } from './agent-runtime.ts'
 import type { RunnerConfig } from './config.ts'
 import type { ServerConnection } from './connection.ts'
 import { packDesign, saveDesign } from './designs.ts'
@@ -493,7 +493,7 @@ export class RunManager {
   }
 
   async #spawnOnce(run: ActiveRun, options: SpawnOptions): Promise<AgentExit> {
-    const process = run.runtime!.spawn({
+    const runtimeOptions: RuntimeOptions = {
       cwd: run.worktree!,
       prompt: options.prompt,
       systemPrompt: options.systemPrompt,
@@ -503,7 +503,11 @@ export class RunManager {
       quietResume: run.job.role === 'pm',
       gitAuthor: this.#config.gitAuthor,
       onLine: (raw, parsed) => this.#onLine(run, raw, parsed)
-    })
+    }
+    const prepared = await run.runtime!.prepare?.(runtimeOptions) ?? runtimeOptions
+    // A stop that came during that wait found no process to signal
+    if (run.stopping || run.ended) return { code: null, signal: null }
+    const process = run.runtime!.spawn(prepared)
     run.process = process
     const exit = await process.exited
     run.exitCode = exit.code
@@ -568,9 +572,9 @@ export class RunManager {
     // Tool calls go to whichever turn the process is answering
     const unregisterTools = await this.#registerTools(options.mcpConfigPath, job, (tool, input) =>
       warm.run ? this.#toolCall(warm.run, tool, input) : Promise.resolve({ ok: false, error: 'This run is over. Stop working.' }))
-    const warm: WarmSession = {
-      planSessionId: job.planSessionId!,
-      session: run.runtime!.spawnSession!({
+    let session: AgentSession
+    try {
+      session = run.runtime!.spawnSession!({
         cwd: run.worktree!,
         systemPrompt: options.systemPrompt,
         mcpConfigPath: options.mcpConfigPath,
@@ -581,7 +585,15 @@ export class RunManager {
         onLine: (raw, parsed) => {
           if (warm.run) this.#onLine(warm.run, raw, parsed)
         }
-      }),
+      })
+    } catch (error) {
+      // The route belongs to a process that never started
+      unregisterTools()
+      throw error
+    }
+    const warm: WarmSession = {
+      planSessionId: job.planSessionId!,
+      session,
       runtime: job.runtime,
       model: job.model,
       sessionId: null,

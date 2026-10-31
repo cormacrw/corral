@@ -63,6 +63,9 @@ export const STOP_GRACE_MS = 5_000
 
 export interface AgentRuntime {
   id: string
+  // Reads what a one-shot run needs from disk, off the event loop's main path
+  // (runner rule 1). spawn gets what this returns, so call it first when defined.
+  prepare?(options: RuntimeOptions): Promise<RuntimeOptions>
   // A one-shot run: answers the prompt and exits
   spawn(options: RuntimeOptions): AgentProcess
   // A long-lived process that takes turns. Runtimes without it never keep a
