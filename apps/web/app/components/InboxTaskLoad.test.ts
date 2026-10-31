@@ -9,6 +9,7 @@ import { agents, inbox, projects, tasks } from '~/prototype/fixtures'
 import { applyEvent, invalidateKeys } from '~/queries/dependencies'
 import { keys } from '~/queries/keys'
 import { testQueryClient } from '~/queries/mount-with-query'
+import PromptComposer from '~/components/PromptComposer.vue'
 import InboxPanel from '~/components/InboxPanel.vue'
 import InboxPanelActions from '~/components/InboxPanelActions.vue'
 import InboxPanelArtifacts from '~/components/InboxPanelArtifacts.vue'
@@ -25,7 +26,8 @@ vi.mock('~/composables/useApi', () => ({
   api: {
     inbox: { get: vi.fn(), act: vi.fn() },
     tasks: { byRef: vi.fn(), evidence: vi.fn(), reviews: vi.fn(), designs: vi.fn(), comment: vi.fn() },
-    deployments: { read: vi.fn() }
+    deployments: { read: vi.fn() },
+    attachments: { upload: vi.fn() }
   }
 }))
 
@@ -36,10 +38,10 @@ afterEach(() => {
 const plain = vue.defineComponent({ setup: (_, { slots }) => () => vue.h('div', slots.default?.()) })
 const composerStub = vue.defineComponent({
   name: 'PromptComposer',
-  props: ['busy', 'disabled', 'submitLabel', 'modelValue', 'placeholder', 'allowEmpty'],
+  props: ['busy', 'disabled', 'submitLabel', 'modelValue', 'placeholder', 'allowEmpty', 'onSubmit'],
   emits: ['update:modelValue'],
-  setup: (_, { expose }) => {
-    expose({ focus: vi.fn() })
+  setup: (props, { expose }) => {
+    expose({ focus: vi.fn(), send: () => props.onSubmit(props.modelValue) })
     return () => vue.h('form')
   }
 })
@@ -67,7 +69,7 @@ const alertStub = vue.defineComponent({
   setup: props => () => vue.h('div', { 'data-alert': true }, [props.title, ...(props.actions ?? []).map((a: { label: string, onClick: () => void }) => vue.h('button', { onClick: a.onClick }, a.label))])
 })
 
-async function mountInbox(type: 'human_review' | 'failed', taskRef?: string, dockedTask: string | null = null, selection = true, editTask = (task: (typeof tasks)[number]) => task) {
+async function mountInbox(type: 'human_review' | 'failed', taskRef?: string, dockedTask: string | null = null, selection = true, editTask = (task: (typeof tasks)[number]) => task, realComposer = false) {
   for (const name of ['ref', 'shallowRef', 'computed', 'watch', 'watchEffect', 'onMounted', 'onBeforeUnmount', 'nextTick'] as const) vi.stubGlobal(name, vue[name])
   const item = inbox().needsYou.find(i => i.type === type && (taskRef ? i.taskRef === taskRef : tasks.find(t => t.id === i.taskId)?.type !== 'design'))!
   const params = vue.reactive<{ itemId?: string }>({ itemId: selection ? item.id : undefined })
@@ -102,7 +104,7 @@ async function mountInbox(type: 'human_review' | 'failed', taskRef?: string, doc
   const NuxtPage = vue.defineComponent({ setup: () => () => params.itemId ? vue.h(InboxItemPage, { key: params.itemId }) : null })
   const wrapper = mount(InboxPage, { global: {
     plugins: [[VueQueryPlugin, { queryClient: client }]],
-    components: { NuxtPage, InboxPanel, InboxPanelActions, InboxPanelArtifacts, InboxPanelDetails, InboxPanelMeta, InboxPanelTray, InboxPanelVerdict, InboxReleaseNotes, EvidenceList: evidenceStub, PromptComposer: composerStub, UAlert: alertStub, UButton: buttonStub, UTabs: tabsStub, UDashboardPanel: plain },
+    components: { NuxtPage, InboxPanel, InboxPanelActions, InboxPanelArtifacts, InboxPanelDetails, InboxPanelMeta, InboxPanelTray, InboxPanelVerdict, InboxReleaseNotes, EvidenceList: evidenceStub, PromptComposer: realComposer ? PromptComposer : composerStub, UChatPrompt: vue.defineComponent({ setup: (_, { slots }) => () => vue.h('div', [slots.header?.(), slots.footer?.()]) }), UAlert: alertStub, UButton: buttonStub, UTabs: tabsStub, UDashboardPanel: plain },
     stubs: { UModal: true, EvidenceViewer: true, InboxMessage: true, InboxDesignReviewLink: true, UBadge: true, UInput: true, UIcon: true, USkeleton: true, USelectMenu: true, MarkdownText: true, TaskFlyout: true, AgentAvatar: true, ProjectThumbnail: true, PlanThreadRow: true, NuxtLink: true, InboxMobile: true, InboxMobileItem: true }
   } })
   await flushPromises()
@@ -423,11 +425,19 @@ it('loads evidence for a non-review item only when it has new artifacts', async 
     await flushPromises()
     vi.mocked(api.tasks.evidence).mockClear()
     vi.mocked(api.tasks.reviews).mockClear()
+    vi.mocked(api.tasks.evidence).mockResolvedValue([
+      { id: 'e1', kind: 'screenshot', fileName: 'screen.png', contentType: 'image/png', url: '/api/evidence/e1/file' },
+      { id: 'e2', kind: 'other', fileName: 'report.html', contentType: 'text/html', url: '/api/evidence/e2/file' }
+    ] as never)
     withArtifacts([{ id: 'e1', kind: 'other', name: 'report.html', url: '/api/evidence/e1/file', taskRef: null, at: item.at }])
     refresh()
     await flushPromises()
     expect(api.tasks.evidence).toHaveBeenCalled()
     expect(api.tasks.reviews).not.toHaveBeenCalled()
+    const overview = wrapper.get('[data-testid="inbox-detail-scroller"]')
+    expect(overview.find('img').exists()).toBe(false)
+    expect(overview.text()).not.toContain('report.html')
+    expect(overview.get('[data-testid="inbox-action-help"]').text()).toContain('Retry')
   } finally {
     wrapper.unmount()
   }
@@ -555,7 +565,7 @@ it('asks for a reason before deleting, and replies with no action chosen even if
     expect(composer().props('submitLabel')).toBe('Delete task')
     await wrapper.findAll('button').find(b => b.text() === 'Cancel')!.trigger('click')
     vi.mocked(api.tasks.comment).mockResolvedValue({ id: 'c1' } as never)
-    await (composer().vm.$attrs.onSubmit as (message: string) => Promise<boolean>)('Any news?')
+    await (composer().props('onSubmit') as (message: string) => Promise<boolean>)('Any news?')
     const failed = item as { project: { slug: string }, taskRef: string }
     expect(api.tasks.comment).toHaveBeenCalledWith(failed.project.slug, Number(failed.taskRef.split('-')[1]), 'Any news?')
   } finally {
@@ -580,3 +590,33 @@ it('hides criteria and review history until their tab opens, and shows no action
     wrapper.unmount()
   }
 })
+
+for (const type of ['human_review', 'failed'] as const) {
+  it(`waits for an attached image before the one-click ${type === 'human_review' ? 'approval' : 'retry'}`, async () => {
+    vi.stubGlobal('URL', { createObjectURL: () => 'blob:preview', revokeObjectURL: vi.fn() })
+    const ref = type === 'human_review' ? 'COR-5' : inbox().needsYou.find(i => i.type === 'failed')!.taskRef!
+    const { wrapper, item, primary } = await mountInbox(type, ref, null, true, task => task, true)
+    try {
+      let finish!: (value: never) => void
+      vi.mocked(api.attachments.upload).mockReturnValue(new Promise((resolve) => {
+        finish = resolve
+      }))
+      const input = wrapper.get('input[type="file"]')
+      Object.defineProperty(input.element, 'files', { value: [new File(['image'], 'screen.png', { type: 'image/png' })] })
+      await input.trigger('change')
+      await primary().trigger('click')
+      await flushPromises()
+      expect(api.inbox.act).not.toHaveBeenCalled()
+      // A second click while uploading must not queue another action.
+      await primary().trigger('click')
+      finish({ id: 'uploaded-image' } as never)
+      await flushPromises()
+      expect(api.inbox.act).toHaveBeenCalledExactlyOnceWith((item as { taskId: string }).taskId, expect.objectContaining({
+        action: type === 'human_review' ? 'approve' : 'resolve',
+        text: '![screen.png](attachment:uploaded-image)'
+      }))
+    } finally {
+      wrapper.unmount()
+    }
+  })
+}

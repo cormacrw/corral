@@ -25,6 +25,8 @@ const action = ref<InboxActionInput['action'] | null>(null)
 const resolveTo = ref<ResolveTo>('in_progress')
 const text = ref('')
 const busy = ref(false)
+const panelView = ref<{ send: () => Promise<boolean> } | null>(null)
+let quickActionPending = false
 const failedAction = ref<string | null>(null)
 const checkedHumanCriteria = ref<string[]>([])
 const tab = ref<InboxPanelTab>('overview')
@@ -130,14 +132,19 @@ async function submit(message: string): Promise<boolean> {
 // One click: an action sent from the panel. If it wasn't, the composer goes
 // back to replying, with the draft kept.
 async function act(value: InboxActionInput['action']) {
-  if (busy.value) return false
+  if (busy.value || quickActionPending) return false
   failedAction.value = null
   action.value = value
   if (actionOpensComposer(value)) return false
   const actedOn = selectedId.value
-  const sent = await submit(text.value)
-  if (!sent && selectedId.value === actedOn) action.value = null
-  return sent
+  quickActionPending = true
+  try {
+    const sent = await panelView.value?.send() ?? false
+    if (!sent && selectedId.value === actedOn) action.value = null
+    return sent
+  } finally {
+    quickActionPending = false
+  }
 }
 const panel = reactive({
   item: computed(() => selected.value as TaskInboxItem),
@@ -216,6 +223,7 @@ const panel = reactive({
   />
   <InboxPanel
     v-else-if="selected"
+    ref="panelView"
     :ctx="panel"
   />
   <div

@@ -6,6 +6,8 @@ import { useInboxPanel, type InboxPanelContext, type InboxPanelTab } from '~/com
 // up front, then tabs for everything else. Phones keep InboxMobileItem.
 const props = defineProps<{ ctx: InboxPanelContext }>()
 const p = useInboxPanel(props.ctx)
+const tray = ref<{ send: () => Promise<boolean> } | null>(null)
+defineExpose({ send: () => tray.value?.send() ?? Promise.resolve(false) })
 const viewing = ref<Evidence | null>(null)
 
 const tabs = computed(() => [
@@ -124,7 +126,7 @@ const loading = computed(() => props.ctx.taskLoading || (p.isReview.value && pro
           {{ p.readOnlyNote.value }}
         </p>
         <div
-          v-if="p.images.value.length"
+          v-if="p.isReview.value && p.images.value.length"
           class="grid grid-cols-3 gap-2"
         >
           <button
@@ -144,7 +146,7 @@ const loading = computed(() => props.ctx.taskLoading || (p.isReview.value && pro
           </button>
         </div>
         <div
-          v-if="p.others.value.length"
+          v-if="p.isReview.value && p.others.value.length"
           class="flex flex-wrap items-center gap-2"
         >
           <UButton
@@ -190,7 +192,10 @@ const loading = computed(() => props.ctx.taskLoading || (p.isReview.value && pro
       v-if="p.canAct.value"
       class="shrink-0 border-t border-default p-3"
     >
-      <InboxPanelTray :ctx="ctx" />
+      <InboxPanelTray
+        ref="tray"
+        :ctx="ctx"
+      />
     </div>
     <EvidenceViewer v-model="viewing" />
   </div>

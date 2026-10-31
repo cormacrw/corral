@@ -57,7 +57,7 @@ Task items on desktop (human review, question, blocked, failed, Activity and Res
 
   | Item | Actions | One click |
   |---|---|---|
-  | Human review | Approve and merge (Accept findings on spikes, Approve design on designs) · Request changes | Approve sends, with any text in the composer as its note, and the Inbox moves on. An unmet criterion doesn't stop it. |
+  | Human review | Approve and merge (Accept findings on spikes, Approve design on designs) · Request changes | Approve sends, with the composer’s text and attached images as its note (waiting for pending uploads), and the Inbox moves on. An unmet criterion doesn't stop it. |
   | Question, Blocked | Answer · Send back to Backlog · Delete task | Send back sends |
   | Failed | Retry, with its status picker beside it · Send back to Backlog · Delete task | Retry and Send back send |
   | Activity, Resolved | None, and no composer | |

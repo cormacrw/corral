@@ -51,12 +51,13 @@ const available = computed(() => !props.disabled && !props.busy && !sending.valu
 const canSend = computed(() => available.value && (props.allowEmpty || text.value.trim().length > 0 || ready.value.length > 0))
 
 async function send(message = text.value) {
-  if (!available.value || (!props.allowEmpty && !message.trim() && ready.value.length === 0)) return
+  if (!available.value || (!props.allowEmpty && !message.trim() && ready.value.length === 0)) return false
   const sent = ready.value
   sending.value = true
   try {
     const result = await props.onSubmit?.(withAttachments(message, sent.map(i => ({ id: i.id!, name: i.name }))))
     if (result !== false) for (const image of sent) remove(image)
+    return result !== false
   } finally {
     sending.value = false
   }
@@ -93,7 +94,7 @@ onBeforeUnmount(() => images.value.forEach(i => URL.revokeObjectURL(i.preview)))
 
 // Lets a page put the cursor in the composer (e.g. Other… on a question)
 const box = ref<HTMLElement | null>(null)
-defineExpose({ focus: () => box.value?.querySelector('textarea')?.focus(), send })
+defineExpose({ focus: () => box.value?.querySelector('textarea')?.focus(), send, uploading })
 
 function filesOf(data: DataTransfer | null): File[] {
   if (!data) return []
