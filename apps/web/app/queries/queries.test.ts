@@ -50,6 +50,73 @@ function onScreen(client: ReturnType<typeof testQueryClient>, queryKey: readonly
   return { queryFn, shown, wrapper }
 }
 
+describe('run transcripts', () => {
+  const line = (text: string) => ({ type: 'system', text }) as const
+  const lines = (...texts: string[]) => texts.map(line)
+  const key = keys.runs.transcript('r1')
+  const event = (offset: number, ...texts: string[]): ServerEvent => ({ type: 'run.events', runId: 'r1', offset, events: lines(...texts) })
+  const stale = (client: ReturnType<typeof testQueryClient>, e: ServerEvent) => applyEvent(client, e)
+
+  it('appends a line at the end, active or not', () => {
+    const client = testQueryClient()
+    client.setQueryData(key, lines('a'))
+    expect(stale(client, event(1, 'b', 'c'))).toEqual([])
+    expect(client.getQueryData(key)).toEqual(lines('a', 'b', 'c'))
+  })
+
+  it('skips lines a fetch already returned, keeping any new ones in the same event', () => {
+    const client = testQueryClient()
+    client.setQueryData(key, lines('a', 'b'))
+    expect(stale(client, event(0, 'a'))).toEqual([])
+    expect(client.getQueryData(key)).toEqual(lines('a', 'b'))
+    expect(stale(client, event(1, 'b', 'c'))).toEqual([])
+    expect(client.getQueryData(key)).toEqual(lines('a', 'b', 'c'))
+  })
+
+  it('refetches rather than leave a gap, and doesn\'t mark a stale transcript fresh', async () => {
+    const client = testQueryClient()
+    client.setQueryData(key, lines('a'))
+    await client.invalidateQueries({ queryKey: key })
+    expect(stale(client, event(3, 'd'))).toEqual([key])
+    expect(client.getQueryData(key)).toEqual(lines('a'))
+    expect(client.getQueryState(key)?.isInvalidated).toBe(true)
+  })
+
+  it('starts nothing for a transcript nobody has loaded, and retries one that failed', () => {
+    const client = testQueryClient()
+    expect(stale(client, event(0, 'a'))).toEqual([key])
+    expect(client.getQueryData(key)).toBeUndefined()
+  })
+
+  it('keeps a run going through switching away and back without a gap or duplicate', async () => {
+    const client = testQueryClient()
+    const server = lines('a', 'b')
+    const queryFn = vi.fn(async () => [...server])
+    const view = defineComponent({ setup() {
+      const query = useQuery({ queryKey: key, queryFn })
+      return () => h('p', query.data.value?.map(l => l.text).join('') ?? 'empty')
+    } })
+    const first = mountWithQuery(view, { client })
+    await vi.waitFor(() => expect(first.wrapper.text()).toBe('ab'))
+    const emitLine = async (text: string, delivered = true) => {
+      const offset = server.length
+      server.push(line(text))
+      if (delivered) stale(client, event(offset, text))
+    }
+    await emitLine('c')
+    await nextTick()
+    expect(first.wrapper.text()).toBe('abc')
+    first.wrapper.unmount()
+    await emitLine('d')
+    const back = mountWithQuery(view, { client })
+    expect(back.wrapper.text()).toBe('abcd')
+    await emitLine('e')
+    await nextTick()
+    expect(back.wrapper.text()).toBe('abcde')
+    back.wrapper.unmount()
+  })
+})
+
 describe('query layer', () => {
   let client: ReturnType<typeof testQueryClient>
   let stop: () => void

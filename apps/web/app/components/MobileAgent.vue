@@ -7,7 +7,7 @@ import { agentStatus, duration, isLiveRun, projectColor, ROLE, runBadge, runRef,
 // header and stat tiles, then the current run and previous runs. Each run
 // opens its transcript, or its linked Plan conversation for a PM turn.
 const props = defineProps<{ view: AgentRuns }>()
-const { name, agent, runs, error, now, current, today, tiles, facts, load, project, resume } = props.view
+const { name, agent, runs, pending, error, now, current, today, tiles, facts, load, project, resume } = props.view
 
 const previous = computed(() => runs.value.filter(r => !isLiveRun(r)))
 const status = computed(() => agent.value ? agentStatus(agent.value, now.value) : null)
@@ -142,6 +142,10 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
           {{ meta(current) }}
         </span>
       </NuxtLink>
+      <USkeleton
+        v-else-if="pending"
+        class="h-16 w-full"
+      />
       <p
         v-else
         class="text-sm text-muted"
@@ -204,6 +208,10 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
           </NuxtLink>
         </li>
       </ul>
+      <USkeleton
+        v-else-if="pending"
+        class="mx-4 h-16"
+      />
       <p
         v-else
         class="px-4 text-sm text-muted"

@@ -10,6 +10,16 @@ The setup middleware runs before the shell starts and makes a single `api.projec
 
 `reloadShell()` refetches all of it, for a human pressing Retry or Reconnect. `plan.session` is marked read in `useLive.apply` before listeners run, so the cache gets the read session. `usePendingPlan` gets every event there too, with or without a conversation mounted.
 
+## Run transcripts
+
+`run.events` carries `offset`, where its first line sits in the transcript (`Transcripts.append` returns it, serialized per run and counted from the spool after a restart). The server appends before it publishes, so a fetch can return lines whose event is still on its way. `addLines` in `dependencies.ts` therefore skips lines the cache holds, appends the rest, and leaves the cache alone when an offset is past the end; that case refetches, as does an event for a transcript with no data, such as one whose first fetch failed. Appending without the check would also mark a stale transcript fresh, because `setQueryData` clears `isInvalidated`.
+
+Events reach the query with or without an observer, so a run you switch away from keeps growing and shows at once when you come back. `useAgentRuns` and `PlanConversation` read the same `runTranscriptQuery`.
+
+## Polling
+
+Pull requests have no event for CI or base branch changes, so `pullRequestsQuery` sets `refetchInterval` to 30 s. TanStack skips the tick while the tab is hidden (`document.visibilityState`, through `focusManager`), and coming back refetches if the data is older than `staleTime`. Other data shouldn't poll.
+
 ## Rules
 
 - Skeletons depend on `isPending` only. It stays false for a query with data, so background refetches show no loading state. Never use `isFetching` for a skeleton.

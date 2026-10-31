@@ -9,8 +9,10 @@ export type ServerEvent =
   | { type: 'task.updated', task: Task }
   | { type: 'runner.status', status: RunnerStatus }
   | { type: 'run.updated', run: Run }
-  // Live transcript lines for the agent page
-  | { type: 'run.events', runId: string, events: RunEvent[] }
+  // Live transcript lines for the agent page. `offset` is where the first one
+  // sits in the run's transcript, so web can tell a line it already fetched
+  // from one it missed.
+  | { type: 'run.events', runId: string, offset: number, events: RunEvent[] }
   | { type: 'agent.updated', agent: Agent }
   | { type: 'task.deleted', taskId: string, projectId: string }
   | { type: 'comment.created', comment: Comment }

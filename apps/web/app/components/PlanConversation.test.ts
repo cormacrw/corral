@@ -25,7 +25,7 @@ const retryStart = vi.fn()
 const restored = vue.ref(null)
 const state = vue.ref({
   loaded: true, runner: { online: true }, agents, projects,
-  tasks: {}, runEvents: {} as Record<string, import('@corral/contracts').RunEvent[]>
+  tasks: {}
 })
 const flyout = {
   ref: vue.ref<string | null>(null), epic: vue.ref<string | null>(null), plan: vue.ref(false),
@@ -56,7 +56,8 @@ async function open(id = 's-1', mobile = false) {
   vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(mobile) }))
   const wrapper = mount(PlanConversation, {
     props: { sessionId: id, inbox: true, onApproved, onApproving },
-    global: { plugins: [[VueQueryPlugin, { queryClient: client }]],
+    global: {
+      plugins: [[VueQueryPlugin, { queryClient: client }]],
       stubs: {
         PromptComposer: true, PlanQuestion: true,
         AgentAvatar: true, PlanTurnSteps: true, PlanDetail: true,
@@ -102,11 +103,9 @@ beforeEach(() => {
     subscribe: (callback: typeof listener) => {
       listener = callback
       return stop
-    },
-    watchRun: (id: string, events: import('@corral/contracts').RunEvent[]) => { state.value.runEvents[id] = events }
+    }
   }))
   state.value.runner.online = true
-  state.value.runEvents = {}
   flyout.plan.value = false
   vi.mocked(api.plan.session).mockImplementation(async id => detail(id))
   vi.mocked(api.plan.read).mockResolvedValue({ ...planSessions[0]!, unread: false })
@@ -175,7 +174,7 @@ describe('Inbox shared Plan conversation', () => {
     expect(api.plan.message).toHaveBeenCalledWith('s-1', 'Keep this small.', undefined)
     listener({ type: 'plan.session', session: { ...planSessions.find(s => s.id === 's-1')!, activeRunId: 'live-run' } })
     await flushPromises()
-    state.value.runEvents['live-run'] = [{ type: 'message', text: 'I am checking the scope.' }]
+    applyEvent(client, { type: 'run.events', runId: 'live-run', offset: 0, events: [{ type: 'message', text: 'I am checking the scope.' }] })
     await vue.nextTick()
     expect(wrapper.get('[data-transcript]').text()).toContain('I am checking the scope.')
     expect(wrapper.findComponent({ name: 'PromptComposer' }).vm.$attrs.disabled).toBe(true)

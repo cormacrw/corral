@@ -44,11 +44,13 @@ prefix, as the rest of the API does.
 ## Project overview
 
 Desktop and mobile share `ProjectFlow.vue`, defaulting to 30d with 7d/30d/90d
-buttons. Changing project or window clears the previous figures while loading;
-stale responses cannot overwrite the latest selection. `task.updated`,
-`task.deleted` and `run.updated` events for this project refresh the cohort in
-place at most once a second, keeping the current figures (also if the refresh
-fails); other projects' events are ignored. Errors offer retry; zero merged tasks show an empty state.
+buttons, read through `flowQuery(slug, window)`. Changing window keeps the
+previous chart, still naming its own window and marked `aria-busy`, until the
+new data arrives; a window seen before shows from cache at once. Changing project
+clears the figures. `task.updated`, `task.deleted` and `run.updated` events for
+this project refresh every cached window in place through the event queue, keeping
+the current figures (also if the refresh fails); other projects' events are
+ignored. Errors offer retry; zero merged tasks show an empty state.
 
 Status bars compare median durations on a shared scale. Human review is labelled
 Human wait (warning), development and agent review Agent time (primary), and
