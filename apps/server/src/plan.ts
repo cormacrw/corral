@@ -495,9 +495,9 @@ export class PlanService {
             type: t.type,
             priority: t.priority,
             epicId: t.epicId,
-            humanReview: t.humanReview,
-            statusReason: t.statusReason,
-            pr: t.prUrl,
+            ...(t.humanReview && { humanReview: true }),
+            ...(t.statusReason && { statusReason: t.statusReason }),
+            ...(t.prUrl && { pr: t.prUrl }),
             dependsOn: deps.filter(d => d.taskId === t.id).map(d => taskRef(project!.prefix, d.number))
           }))
         }
