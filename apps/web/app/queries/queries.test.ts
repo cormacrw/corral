@@ -182,6 +182,14 @@ describe('query layer', () => {
     inbox.wrapper.unmount()
   })
 
+  it('refetches an epic\'s history when it changes, and tells it from the epic when finding a task\'s epics', () => {
+    const epic = { id: 'e1', projectId: project.id, tasks: [] } as unknown as Epic
+    client.setQueryData(keys.epics.detail('e1'), epic)
+    client.setQueryData(keys.epics.history('e1'), [])
+    expect(applyEvent(client, { type: 'epic.updated', epic })).toContainEqual(keys.epics.history('e1'))
+    expect(() => applyEvent(client, { type: 'task.updated', task: { id: 't1', ref: 'TA-1', projectId: project.id, epicId: null, status: 'ready' } as Task })).not.toThrow()
+  })
+
   it('coalesces a burst of task events into one refetch of each affected query', async () => {
     useLive().connect()
     const inbox = onScreen(client, keys.inbox(), () => ({ count: 0 }))

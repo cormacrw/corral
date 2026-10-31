@@ -99,6 +99,7 @@ it('keeps an open epic\'s task list live as its tasks change, join and leave', a
   client.setQueryData(keys.epics.list(project.slug), [own])
   client.setQueryData(keys.epics.detail('own'), own)
   const get = vi.spyOn(api.epics, 'get').mockImplementation(async () => client.getQueryData<EpicDetail>(keys.epics.detail('own'))!)
+  vi.spyOn(api.epics, 'history').mockResolvedValue([])
   for (const name of ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount'] as const) vi.stubGlobal(name, vue[name])
   vi.stubGlobal('useLocalStorage', (_key: string, initial: unknown) => vue.ref(initial))
   vi.stubGlobal('useProjectLists', useProjectLists)

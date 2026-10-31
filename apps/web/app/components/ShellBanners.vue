@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Project } from '@corral/contracts'
 import { useMutation, useQuery } from '@tanstack/vue-query'
+import { api } from '~/composables/useApi'
 import { patchProject, projectsQuery } from '~/queries/projects'
 import { resumeAll as resumeAllMutation, runnerQuery, statusQuery } from '~/queries/system'
 
