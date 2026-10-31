@@ -816,8 +816,9 @@ export class Orchestrator implements RunnerHandlers {
 
   async onRunMessage(message: Extract<RunnerMessage, { type: 'run.started' | 'run.events' | 'run.ended' }>, runnerId: string): Promise<void> {
     const { db, events, transcripts } = this.#d
-    const owner = await this.#load(message.runId)
-    if (!owner || owner.run.runnerId !== runnerId) return
+    // IDs come from the runner; a malformed one is simply unknown
+    const [owner] = UUID.test(message.runId) ? await db.select({ runnerId: runs.runnerId }).from(runs).where(eq(runs.id, message.runId)) : []
+    if (!owner || owner.runnerId !== runnerId) return
     if (message.type === 'run.events') {
       // Transcript lines are kept even from a stale run: they're history, not writes
       const offset = await transcripts.append(message.runId, message.events)

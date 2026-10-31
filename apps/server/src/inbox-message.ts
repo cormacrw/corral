@@ -1,43 +1,63 @@
 import type { EpicConflictItem, EpicReviewItem, TaskInboxItem } from '@corral/contracts'
 import { richTextToPlainText } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, desc, eq, gte, inArray, lt, sql } from 'drizzle-orm'
-import { auditText } from './audit.ts'
+import { desc, inArray } from 'drizzle-orm'
 
 export type MessageItem = TaskInboxItem | EpicReviewItem | EpicConflictItem
 
-export async function arrivalKey(db: Executor, item: MessageItem): Promise<string> {
-  const { auditLog } = schema
-  const status = item.type === 'question' ? 'blocked' : item.type
-  const events = item.type === 'epic_conflict' ? ['conflict'] : ['approved', 'merge_refused']
-  const [entry] = await db.select({ id: auditLog.id }).from(auditLog)
-    .where(and(gte(auditLog.createdAt, new Date(item.at)), lt(auditLog.createdAt, new Date(Date.parse(item.at) + 1)), item.taskId
-      ? and(eq(auditLog.taskId, item.taskId), eq(auditLog.action, 'task.transition'), sql`${auditText('task.transition', 'to')} = ${status}`, sql`${auditText('task.transition', 'from')} is distinct from ${status}`)
-      : and(eq(auditLog.action, 'epic.pr'), sql`${auditText('epic.pr', 'epicId')} = ${item.epicId}`, inArray(auditText('epic.pr', 'event'), events))))
-    .orderBy(desc(auditLog.id)).limit(1)
-  // Audit IDs distinguish even two arrivals sharing the same millisecond.
-  return `${item.id}:${item.type}:${entry ? `audit-${entry.id}` : item.at}`
+// An item with the key its message is stored under
+export interface PreparedItem<T extends MessageItem = MessageItem> {
+  item: T
+  arrival: string
 }
 
-export async function messageFacts(db: Executor, item: MessageItem) {
-  const [task] = item.taskId ? await db.select().from(schema.tasks).where(eq(schema.tasks.id, item.taskId)) : []
-  const epicId = task?.epicId ?? item.epicId
-  const [epic] = epicId ? await db.select().from(schema.epics).where(eq(schema.epics.id, epicId)) : []
-  const [review] = task
-    ? await db.select({ verdict: schema.reviews.verdict, summary: schema.reviews.summary }).from(schema.reviews)
-        .where(eq(schema.reviews.taskId, task.id)).orderBy(desc(schema.reviews.createdAt)).limit(1)
+// The audit entries an item could have arrived by, newest first. Audit IDs
+// distinguish even two arrivals sharing the same millisecond, so the key takes
+// the highest ID in the millisecond of the item's `at`.
+export function arrivalKey(item: Pick<MessageItem, 'id' | 'type' | 'at'>, entries: readonly { id: number, createdAt: Date }[]): string {
+  const at = Date.parse(item.at)
+  const ids = entries.filter(e => e.createdAt.getTime() === at).map(e => e.id)
+  return `${item.id}:${item.type}:${ids.length > 0 ? `audit-${Math.max(...ids)}` : item.at}`
+}
+
+// What the fallback message and the prompt are written from, for many items
+export async function messageFacts(db: Executor, items: MessageItem[]) {
+  const taskIds = items.flatMap(i => i.taskId ? [i.taskId] : [])
+  const [taskRows, reviewRows] = taskIds.length > 0
+    ? await Promise.all([
+        db.select({ id: schema.tasks.id, epicId: schema.tasks.epicId, title: schema.tasks.title, description: schema.tasks.description, statusReason: schema.tasks.statusReason, type: schema.tasks.type })
+          .from(schema.tasks).where(inArray(schema.tasks.id, taskIds)),
+        db.selectDistinctOn([schema.reviews.taskId], { taskId: schema.reviews.taskId, verdict: schema.reviews.verdict, summary: schema.reviews.summary }).from(schema.reviews)
+          .where(inArray(schema.reviews.taskId, taskIds)).orderBy(schema.reviews.taskId, desc(schema.reviews.createdAt))
+      ])
+    : [[], []]
+  const taskOf = new Map(taskRows.map(t => [t.id, t]))
+  const reviewOf = new Map(reviewRows.map(r => [r.taskId, r]))
+  const epicIds = [...new Set(items.flatMap((i) => {
+    const id = (i.taskId ? taskOf.get(i.taskId)?.epicId : null) ?? i.epicId
+    return id ? [id] : []
+  }))]
+  const epicRows = epicIds.length > 0
+    ? await db.select({ id: schema.epics.id, title: schema.epics.title, description: schema.epics.description }).from(schema.epics).where(inArray(schema.epics.id, epicIds))
     : []
-  return {
-    task: task ? { title: task.title, description: richTextToPlainText(task.description) } : null,
-    epic: epic ? { title: epic.title, description: epic.description } : null,
-    review: review ?? (item.type === 'epic_review' ? { verdict: 'approved', summary: item.body } : null),
-    reasonOrFindings: task ? task.statusReason || (task.type === 'spike' ? item.body : '') : item.type === 'epic_conflict' ? item.body : '',
-    since: item.since ?? null,
-    newArtifacts: item.newArtifacts ?? []
-  }
+  const epicOf = new Map(epicRows.map(e => [e.id, e]))
+  return items.map((item) => {
+    const task = item.taskId ? taskOf.get(item.taskId) : undefined
+    const epicId = task?.epicId ?? item.epicId
+    const epic = epicId ? epicOf.get(epicId) : undefined
+    const review = task ? reviewOf.get(task.id) : undefined
+    return {
+      task: task ? { title: task.title, description: richTextToPlainText(task.description) } : null,
+      epic: epic ? { title: epic.title, description: epic.description } : null,
+      review: review ? { verdict: review.verdict, summary: review.summary } : item.type === 'epic_review' ? { verdict: 'approved', summary: item.body } : null,
+      reasonOrFindings: task ? task.statusReason || (task.type === 'spike' ? item.body : '') : item.type === 'epic_conflict' ? item.body : '',
+      since: item.since ?? null,
+      newArtifacts: item.newArtifacts ?? []
+    }
+  })
 }
 
-type Facts = Awaited<ReturnType<typeof messageFacts>>
+type Facts = Awaited<ReturnType<typeof messageFacts>>[number]
 
 function short(text: string, words: number): string {
   const plain = text.replace(/[#*`>[\]]/g, '').replace(/\s+/g, ' ').trim()
@@ -85,9 +105,21 @@ export function cleanMessage(text: string): string | null {
   return value && value.split(/\s+/).length <= 80 && !/[#*`]/.test(value) ? value : null
 }
 
+// The arrivals that already have a message
+export async function storedMessages(db: Executor, arrivals: string[]): Promise<Map<string, string>> {
+  if (arrivals.length === 0) return new Map()
+  const rows = await db.select().from(schema.inboxMessages).where(inArray(schema.inboxMessages.arrival, arrivals))
+  return new Map(rows.map(m => [m.arrival, m.message]))
+}
+
 // Read-only: neither this nor an Inbox GET can dispatch model work.
-export async function withMessage<T extends MessageItem>(db: Executor, item: T): Promise<T> {
-  const [stored] = await db.select().from(schema.inboxMessages).where(eq(schema.inboxMessages.arrival, await arrivalKey(db, item)))
-  const message = stored?.message ?? fallbackMessage(item, await messageFacts(db, item))
-  return { ...item, message, preview: message.slice(0, 200) }
+export async function withMessages<T extends MessageItem>(db: Executor, prepared: PreparedItem<T>[]): Promise<T[]> {
+  const stored = await storedMessages(db, prepared.map(p => p.arrival))
+  const missing = prepared.filter(p => !stored.has(p.arrival)).map(p => p.item)
+  const facts = await messageFacts(db, missing)
+  const fallbacks = new Map(missing.map((item, i) => [item, fallbackMessage(item, facts[i]!)]))
+  return prepared.map(({ item, arrival }) => {
+    const message = stored.get(arrival) ?? fallbacks.get(item)!
+    return { ...item, message, preview: message.slice(0, 200) }
+  })
 }

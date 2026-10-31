@@ -2,6 +2,7 @@ import { AGENT_ROLES, TASK_STATUSES, type TaskStatus } from '@corral/core'
 import type { FlowMetrics, FlowMetricsQuery, FlowPercentiles } from '@corral/contracts'
 import { schema, type Executor } from '@corral/db'
 import { and, asc, eq, gte, inArray, isNull, lte } from 'drizzle-orm'
+import { auditText } from './audit.ts'
 
 // Continuous percentiles: interpolate between adjacent sorted observations.
 export function percentiles(values: number[]): FlowPercentiles {
@@ -20,16 +21,17 @@ const waiting = (status: TaskStatus) => status === 'draft' || status === 'backlo
 
 export async function flowMetrics(db: Executor, project: Pick<typeof schema.projects.$inferSelect, 'id' | 'prefix'>, window: FlowMetricsQuery['window'], now = new Date()): Promise<FlowMetrics> {
   const since = new Date(now.getTime() - Number.parseInt(window) * 86_400_000)
-  const tasks = await db.select().from(schema.tasks).where(and(
+  const tasks = await db.select({ id: schema.tasks.id, number: schema.tasks.number, createdAt: schema.tasks.createdAt, mergedAt: schema.tasks.mergedAt }).from(schema.tasks).where(and(
     eq(schema.tasks.projectId, project.id), eq(schema.tasks.status, 'merged'), isNull(schema.tasks.deletedAt),
     gte(schema.tasks.mergedAt, since), lte(schema.tasks.mergedAt, now)
   ))
   const ids = tasks.map(task => task.id)
   const [transitions, runs] = ids.length
     ? await Promise.all([
-        db.select().from(schema.auditLog).where(and(inArray(schema.auditLog.taskId, ids), eq(schema.auditLog.action, 'task.transition')))
+        db.select({ taskId: schema.auditLog.taskId, createdAt: schema.auditLog.createdAt, from: auditText('task.transition', 'from'), to: auditText('task.transition', 'to') }).from(schema.auditLog)
+          .where(and(inArray(schema.auditLog.taskId, ids), eq(schema.auditLog.action, 'task.transition')))
           .orderBy(asc(schema.auditLog.createdAt), asc(schema.auditLog.id)),
-        db.select().from(schema.runs).where(inArray(schema.runs.taskId, ids))
+        db.select({ taskId: schema.runs.taskId, role: schema.runs.role, queuedAt: schema.runs.queuedAt, startedAt: schema.runs.startedAt, endedAt: schema.runs.endedAt }).from(schema.runs).where(inArray(schema.runs.taskId, ids))
       ])
     : [[], []]
   const histories = Map.groupBy(transitions, entry => entry.taskId)
@@ -44,8 +46,8 @@ export async function flowMetrics(db: Executor, project: Pick<typeof schema.proj
     const created = task.createdAt.getTime()
     const merged = task.mergedAt!.getTime()
     const history = (histories.get(task.id) ?? []).filter(entry => entry.createdAt.getTime() >= created && entry.createdAt.getTime() <= merged)
-    const first = history[0]?.detail as { from?: unknown } | undefined
-    let status: TaskStatus = validStatus(first?.from) ? first.from : 'backlog'
+    const from = history[0]?.from
+    let status: TaskStatus = validStatus(from) ? from : 'backlog'
     let cursor = created
     let cycleStart: number | null = waiting(status) ? null : created
     const spent = new Map<TaskStatus, number>()
@@ -56,11 +58,11 @@ export async function flowMetrics(db: Executor, project: Pick<typeof schema.proj
       cursor = end
     }
     for (const entry of history) {
-      const detail = entry.detail as { to?: unknown }
-      if (!validStatus(detail.to)) continue
+      const { to } = entry
+      if (!validStatus(to)) continue
       accrue(entry.createdAt.getTime())
-      if (cycleStart === null && waiting(status) && !waiting(detail.to) && detail.to !== 'merged') cycleStart = cursor
-      status = detail.to
+      if (cycleStart === null && waiting(status) && !waiting(to) && to !== 'merged') cycleStart = cursor
+      status = to
     }
     accrue(merged)
     const leadTimeMs = Math.max(0, merged - created)

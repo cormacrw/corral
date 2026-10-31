@@ -2,11 +2,11 @@ import { schema, type Database } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import type { EventBus } from './events.ts'
 import type { RunnerHub } from './runner-hub.ts'
-import { taskMessageItems } from './inbox.ts'
+import { unclaimedTaskItems } from './inbox.ts'
 import { loadTask } from './tasks.ts'
-import { getEpic } from './epics.ts'
-import { epicInboxItems } from './epic-prs.ts'
-import { arrivalKey, cleanMessage, fallbackMessage, messageFacts, messagePrompt, type MessageItem } from './inbox-message.ts'
+import { loadEpic } from './epics.ts'
+import { unclaimedEpicItems } from './epic-prs.ts'
+import { cleanMessage, fallbackMessage, messageFacts, messagePrompt, type MessageItem, type PreparedItem } from './inbox-message.ts'
 
 // Runs on arrivals, never on reads. The durable insert is also the claim:
 // duplicate events and server restarts cannot dispatch a second job.
@@ -30,21 +30,18 @@ export class InboxMessages {
 
   refresh(id?: string, kind?: 'task' | 'epic'): void {
     this.#pending = this.#pending.then(async () => {
-      const items = [...(kind === 'epic' ? [] : await taskMessageItems(this.#db, id)), ...(kind === 'task' ? [] : await epicInboxItems(this.#db, id))]
+      const items = [...(kind === 'epic' ? [] : await unclaimedTaskItems(this.#db, id)), ...(kind === 'task' ? [] : await unclaimedEpicItems(this.#db, id))]
       for (const item of items) await this.#claim(item)
     }).catch(error => console.error('Preparing Inbox messages failed', error))
   }
 
-  async #claim(item: MessageItem): Promise<void> {
-    const arrival = await arrivalKey(this.#db, item)
-    const [existing] = await this.#db.select().from(schema.inboxMessages).where(eq(schema.inboxMessages.arrival, arrival))
-    if (existing) return
-    const facts = await messageFacts(this.#db, item)
-    const [claimed] = await this.#db.insert(schema.inboxMessages).values({ arrival, message: fallbackMessage(item, facts) })
+  async #claim({ item, arrival }: PreparedItem): Promise<void> {
+    const [facts] = await messageFacts(this.#db, [item])
+    const [claimed] = await this.#db.insert(schema.inboxMessages).values({ arrival, message: fallbackMessage(item, facts!) })
       .onConflictDoNothing().returning()
     if (!claimed) return
     // Do not await the model: neither arrivals nor subsequent items wait on it.
-    void this.#generate(item, arrival, messagePrompt(item, facts))
+    void this.#generate(item, arrival, messagePrompt(item, facts!))
   }
 
   async #generate(item: MessageItem, arrival: string, prompt: string): Promise<void> {
@@ -58,7 +55,7 @@ export class InboxMessages {
       if (item.taskId) {
         this.#events.publish({ type: 'task.updated', task: await loadTask(this.#db, item.taskId) })
       } else if (item.epicId) {
-        this.#events.publish({ type: 'epic.updated', epic: await getEpic(this.#db, item.epicId) })
+        this.#events.publish({ type: 'epic.updated', epic: await loadEpic(this.#db, item.epicId) })
       }
     } catch (error) {
       console.error(`Generating Inbox message ${arrival} failed; keeping fallback`, error instanceof Error ? error.message : error)

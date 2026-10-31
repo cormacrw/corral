@@ -9,11 +9,11 @@ import { listTaskAttachments } from './attachments.ts'
 import { listEpics, replaceEpicDependencies } from './epics.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
-import { loadInbox } from './inbox.ts'
+import { inboxCount } from './inbox.ts'
 import { pmFallbackPrompt, pmPrompt, questionText, sessionTitlePrompt } from './prompts.ts'
 import type { RunnerHub } from './runner-hub.ts'
 import { requireRuntimeCli } from './setup.ts'
-import { addComment, createTask, deleteTaskRows, draftSessions, findTaskByRef, loadTask, patchTask, pinStaleness, setDesignPin, transitionTask, type ProjectRow } from './tasks.ts'
+import { addComment, createTask, deleteTaskRows, draftSessions, findTaskByRef, loadTask, loadTasks, patchTask, pinStaleness, setDesignPin, transitionTask, type ProjectRow } from './tasks.ts'
 
 const { acceptanceCriteria, agents, auditLog, designVersions, epicDependencies, epics, planEpics, planMessages, planSessions, planTasks, plans, projects, runs, taskDependencies, taskDesignPins, tasks } = schema
 
@@ -85,7 +85,7 @@ export class PlanService {
 
   async listSessions(): Promise<PlanSession[]> {
     const rows = await this.#d.db.select().from(planSessions).orderBy(desc(planSessions.updatedAt))
-    return Promise.all(rows.map(row => this.#toSession(row)))
+    return (await sessionStates(this.#d.db, rows)).map(s => s.session)
   }
 
   async getSession(sessionId: string): Promise<PlanSessionDetail> {
@@ -95,7 +95,7 @@ export class PlanService {
     return {
       ...(await this.#toSession(row)),
       messages: messages.map(toMessage),
-      plans: await Promise.all(planRows.map(p => this.toPlan(p)))
+      plans: await this.toPlans(planRows)
     }
   }
 
@@ -132,8 +132,7 @@ export class PlanService {
   async markRead(sessionId: string): Promise<PlanSession> {
     await this.#d.db.update(planSessions).set({ unread: false }).where(eq(planSessions.id, sessionId))
     const session = await this.#toSession(await this.#session(sessionId))
-    const { count: inboxCount } = await loadInbox(this.#d.db)
-    this.#d.events.publish({ type: 'plan.session', session, markedRead: { inboxCount } })
+    this.#d.events.publish({ type: 'plan.session', session, markedRead: { inboxCount: await inboxCount(this.#d.db) } })
     return session
   }
 
@@ -166,9 +165,9 @@ export class PlanService {
     const closed = await this.#toSession(await this.#session(sessionId))
     if (deleted) {
       for (const task of deleted.owned) events.publish({ type: 'task.deleted', taskId: task.id, projectId: session.projectId })
-      for (const id of deleted.detached) events.publish({ type: 'task.updated', task: await loadTask(db, id) })
+      for (const task of await loadTasks(db, deleted.detached)) events.publish({ type: 'task.updated', task })
       const discarded = await db.select().from(plans).where(and(eq(plans.sessionId, sessionId), eq(plans.status, 'discarded')))
-      for (const plan of discarded) events.publish({ type: 'plan.updated', plan: await this.toPlan(plan) })
+      for (const plan of await this.toPlans(discarded)) events.publish({ type: 'plan.updated', plan })
       events.publish({ type: 'plan.session', session: closed })
       await this.#publishDrafts(session.projectId)
     }
@@ -814,62 +813,82 @@ export class PlanService {
 
   // The plan's tasks that still exist, e.g. after approval moves them on
   async #publishTasks(plan: Plan): Promise<void> {
-    for (const t of plan.tasks) {
-      if (!t.taskId) continue
-      const task = await loadTask(this.#d.db, t.taskId).catch(() => null)
-      if (task) this.#d.events.publish({ type: 'task.updated', task })
-    }
+    const ids = plan.tasks.flatMap(t => t.taskId ? [t.taskId] : [])
+    for (const task of await loadTasks(this.#d.db, ids)) this.#d.events.publish({ type: 'task.updated', task })
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   async toPlan(row: PlanRow): Promise<Plan> {
+    return (await this.toPlans([row]))[0]!
+  }
+
+  // Plans of one project, such as a session's versions
+  async toPlans(rows: PlanRow[]): Promise<Plan[]> {
+    if (rows.length === 0) return []
     const { db } = this.#d
-    const [project] = await db.select().from(projects).where(eq(projects.id, row.projectId))
-    const items = await db.select({ item: planTasks, task: tasks }).from(planTasks).leftJoin(tasks, eq(tasks.id, planTasks.taskId))
-      .where(eq(planTasks.planId, row.id)).orderBy(asc(planTasks.position))
-    const ids = items.map(i => i.task?.id).filter((id): id is string => Boolean(id))
-    const deps = ids.length > 0
+    const planIds = rows.map(r => r.id)
+    const projectId = rows[0]!.projectId
+    const [[project], itemRows, snapshotRows, allEpics] = await Promise.all([
+      db.select({ prefix: projects.prefix }).from(projects).where(eq(projects.id, projectId)),
+      db.select({
+        item: planTasks,
+        task: { id: tasks.id, number: tasks.number, epicId: tasks.epicId, title: tasks.title, status: tasks.status, priority: tasks.priority, humanReview: tasks.humanReview }
+      }).from(planTasks).leftJoin(tasks, eq(tasks.id, planTasks.taskId))
+        .where(inArray(planTasks.planId, planIds)).orderBy(asc(planTasks.position)),
+      db.select().from(planEpics).where(inArray(planEpics.planId, planIds)).orderBy(asc(planEpics.position)),
+      db.select({ id: epics.id, title: epics.title, reviewMode: epics.reviewMode }).from(epics).where(eq(epics.projectId, projectId))
+    ])
+    const ids = [...new Set(itemRows.flatMap(i => i.task ? [i.task.id] : []))]
+    const depRows = ids.length > 0
       ? await db.select({ taskId: taskDependencies.taskId, number: tasks.number }).from(taskDependencies)
           .innerJoin(tasks, eq(tasks.id, taskDependencies.dependsOnId)).where(inArray(taskDependencies.taskId, ids))
       : []
-    const keyed = await this.#epicsOf(row)
-    const epicRows = keyed.size > 0 ? await db.select({ id: epics.id, title: epics.title, reviewMode: epics.reviewMode }).from(epics).where(inArray(epics.id, [...keyed.values()])) : []
-    const snapshots = await db.select().from(planEpics).where(eq(planEpics.planId, row.id))
-    const allEpics = await db.select({ id: epics.id, title: epics.title }).from(epics).where(eq(epics.projectId, row.projectId))
-    const dependenciesOf = (key: string) => (snapshots.find(e => e.key === key)?.dependsOn ?? []).map((dep) => {
-      const id = keyed.get(dep) ?? dep
-      return { id, title: allEpics.find(e => e.id === id)?.title ?? dep }
+    const itemsOf = Map.groupBy(itemRows, i => i.item.planId)
+    const snapshotsOf = Map.groupBy(snapshotRows, e => e.planId)
+    const deps = Map.groupBy(depRows, d => d.taskId)
+    const epicOf = new Map(allEpics.map(e => [e.id, e]))
+    return rows.map((row) => {
+      const snapshots = snapshotsOf.get(row.id) ?? []
+      const keyed = epicKeys(row, snapshots)
+      const items = itemsOf.get(row.id) ?? []
+      const dependenciesOf = (key: string) => (snapshots.find(e => e.key === key)?.dependsOn ?? []).map((dep) => {
+        const id = keyed.get(dep) ?? dep
+        return { id, title: epicOf.get(id)?.title ?? dep }
+      })
+      return {
+        id: row.id,
+        sessionId: row.sessionId,
+        projectId: row.projectId,
+        epicId: row.epicId,
+        version: row.version,
+        title: row.title,
+        summary: row.summary,
+        status: row.status,
+        approvedAt: row.approvedAt?.toISOString() ?? null,
+        epics: [...keyed].flatMap(([key, id]) => {
+          const epic = epicOf.get(id)
+          return epic ? [{ key, id, title: epic.title, reviewMode: epic.reviewMode, dependsOn: dependenciesOf(key) }] : []
+        }),
+        // A revised task shows the plan's staged edits, not what it has now
+        tasks: items.map(({ item, task }) => ({
+          key: item.key,
+          change: item.change,
+          revises: Boolean(item.revision),
+          taskId: task?.id ?? null,
+          epicId: item.revision ? item.revision.epicId : task?.epicId ?? null,
+          ref: task && project ? taskRef(project.prefix, task.number) : null,
+          title: item.revision?.title ?? task?.title ?? item.key,
+          status: task?.status ?? null,
+          priority: item.revision?.priority ?? task?.priority ?? 'medium',
+          humanReview: item.revision?.humanReview ?? task?.humanReview ?? false,
+          dependsOn: item.revision
+            ? item.revision.dependsOn.map(n => taskRef(project!.prefix, n))
+            : (task ? deps.get(task.id) ?? [] : []).map(d => taskRef(project!.prefix, d.number))
+        })),
+        createdAt: row.createdAt.toISOString()
+      }
     })
-    return {
-      id: row.id,
-      sessionId: row.sessionId,
-      projectId: row.projectId,
-      epicId: row.epicId,
-      version: row.version,
-      title: row.title,
-      summary: row.summary,
-      status: row.status,
-      approvedAt: row.approvedAt?.toISOString() ?? null,
-      epics: [...keyed].flatMap(([key, id]) => epicRows.filter(e => e.id === id).map(e => ({ key, id, title: e.title, reviewMode: e.reviewMode, dependsOn: dependenciesOf(key) }))),
-      // A revised task shows the plan's staged edits, not what it has now
-      tasks: items.map(({ item, task }) => ({
-        key: item.key,
-        change: item.change,
-        revises: Boolean(item.revision),
-        taskId: task?.id ?? null,
-        epicId: item.revision ? item.revision.epicId : task?.epicId ?? null,
-        ref: task && project ? taskRef(project.prefix, task.number) : null,
-        title: item.revision?.title ?? task?.title ?? item.key,
-        status: task?.status ?? null,
-        priority: item.revision?.priority ?? task?.priority ?? 'medium',
-        humanReview: item.revision?.humanReview ?? task?.humanReview ?? false,
-        dependsOn: item.revision
-          ? item.revision.dependsOn.map(n => taskRef(project!.prefix, n))
-          : deps.filter(d => d.taskId === task?.id).map(d => taskRef(project!.prefix, d.number))
-      })),
-      createdAt: row.createdAt.toISOString()
-    }
   }
 
   async #proposedTasksOf(plan: PlanRow, project: ProjectRow): Promise<ProposedTask[]> {
@@ -1024,9 +1043,7 @@ export class PlanService {
   // A plan's epics by key, in order. Plans saved before plan_epics have
   // only plans.epicId, under ONLY_EPIC.
   async #epicsOf(plan: PlanRow, db: Executor = this.#d.db): Promise<Map<string, string>> {
-    const rows = await db.select().from(planEpics).where(eq(planEpics.planId, plan.id)).orderBy(asc(planEpics.position))
-    if (rows.length === 0) return new Map(plan.epicId ? [[ONLY_EPIC, plan.epicId]] : [])
-    return new Map(rows.filter(r => r.epicId).map(r => [r.key, r.epicId!]))
+    return epicKeys(plan, await db.select().from(planEpics).where(eq(planEpics.planId, plan.id)).orderBy(asc(planEpics.position)))
   }
 
   async #session(sessionId: string): Promise<SessionRow> {
@@ -1063,34 +1080,56 @@ export type SessionAttention =
   | { status: 'question', question: typeof planMessages.$inferSelect }
   | { status: 'none' }
 
+// Each epic key of a plan and the epic it made. Plans saved before plan_epics
+// existed have no rows, only plans.epicId.
+function epicKeys(plan: Pick<PlanRow, 'epicId'>, rows: (typeof planEpics.$inferSelect)[]): Map<string, string> {
+  if (rows.length === 0) return new Map(plan.epicId ? [[ONLY_EPIC, plan.epicId]] : [])
+  return new Map(rows.filter(r => r.epicId).map(r => [r.key, r.epicId!]))
+}
+
 // A session as the API shows it, with what it waits on, which the Inbox's Plan
 // thread items also need (D11)
-export async function sessionState(db: Executor, row: SessionRow, activeRunId?: string | null): Promise<{ session: PlanSession, attention: SessionAttention }> {
-  const [last] = await db.select().from(planMessages).where(eq(planMessages.sessionId, row.id)).orderBy(desc(planMessages.createdAt)).limit(1)
-  const [proposed] = await db.select().from(plans).where(and(eq(plans.sessionId, row.id), eq(plans.status, 'proposed'))).limit(1)
-  let runId = activeRunId ?? null
-  if (activeRunId === undefined) {
-    const [active] = await db.select({ id: runs.id }).from(runs)
-      .where(and(eq(runs.role, 'pm'), eq(runs.planSessionId, row.id), inArray(runs.state, ['queued', 'starting', 'running'])))
-    runId = active?.id ?? null
-  }
-  const attention: SessionAttention = proposed
-    ? { status: 'needs_approval', plan: proposed }
-    : last?.role === 'pm' && last.kind === 'question' ? { status: 'question', question: last } : { status: 'none' }
-  const session: PlanSession = {
-    id: row.id,
-    projectId: row.projectId,
-    title: row.title,
-    runtime: row.runtime as AgentRuntime,
-    preview: last?.text.slice(0, 160) ?? '',
-    unread: row.unread,
-    closed: row.closedAt !== null,
-    status: attention.status,
-    activeRunId: runId,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString()
-  }
-  return { session, attention }
+export async function sessionState(db: Executor, row: SessionRow, activeRunId?: string | null) {
+  return (await sessionStates(db, [row], activeRunId))[0]!
+}
+
+// One state per row. `activeRunId` is the caller's own knowledge of one
+// session's run; otherwise each is read.
+export async function sessionStates(db: Executor, rows: SessionRow[], activeRunId?: string | null): Promise<{ session: PlanSession, attention: SessionAttention }[]> {
+  if (rows.length === 0) return []
+  const ids = rows.map(r => r.id)
+  const [lastMessages, proposedPlans, activeRuns] = await Promise.all([
+    db.selectDistinctOn([planMessages.sessionId]).from(planMessages).where(inArray(planMessages.sessionId, ids)).orderBy(planMessages.sessionId, desc(planMessages.createdAt)),
+    db.select().from(plans).where(and(inArray(plans.sessionId, ids), eq(plans.status, 'proposed'))),
+    activeRunId === undefined
+      ? db.select({ id: runs.id, sessionId: runs.planSessionId }).from(runs)
+          .where(and(eq(runs.role, 'pm'), inArray(runs.planSessionId, ids), inArray(runs.state, ['queued', 'starting', 'running'])))
+      : []
+  ])
+  const lastOf = new Map(lastMessages.map(m => [m.sessionId, m]))
+  const proposedOf = new Map(proposedPlans.map(p => [p.sessionId, p]))
+  const activeOf = new Map(activeRuns.map(r => [r.sessionId, r.id]))
+  return rows.map((row) => {
+    const last = lastOf.get(row.id)
+    const proposed = proposedOf.get(row.id)
+    const attention: SessionAttention = proposed
+      ? { status: 'needs_approval', plan: proposed }
+      : last?.role === 'pm' && last.kind === 'question' ? { status: 'question', question: last } : { status: 'none' }
+    const session: PlanSession = {
+      id: row.id,
+      projectId: row.projectId,
+      title: row.title,
+      runtime: row.runtime as AgentRuntime,
+      preview: last?.text.slice(0, 160) ?? '',
+      unread: row.unread,
+      closed: row.closedAt !== null,
+      status: attention.status,
+      activeRunId: activeRunId === undefined ? activeOf.get(row.id) ?? null : activeRunId,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString()
+    }
+    return { session, attention }
+  })
 }
 
 // Whether an agent holds the task now or has ever run on it

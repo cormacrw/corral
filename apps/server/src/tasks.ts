@@ -52,79 +52,95 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
   if (rows.length === 0) return []
   const ids = rows.map(r => r.id)
   const leaseRunIds = rows.flatMap(r => r.leaseRunId ? [r.leaseRunId] : [])
-  const leasedRuns = leaseRunIds.length > 0
-    ? await db.select({ id: runs.id, agentId: runs.agentId }).from(runs).where(inArray(runs.id, leaseRunIds))
-    : []
-  const leaseAgents = new Map(leasedRuns.map(r => [r.id, r.agentId]))
-  const criteria = await db.select().from(acceptanceCriteria)
-    .where(inArray(acceptanceCriteria.taskId, ids))
-    .orderBy(asc(acceptanceCriteria.position))
-  const dependencies = await db
-    .select({ taskId: taskDependencies.taskId, number: tasks.number })
-    .from(taskDependencies)
-    .innerJoin(tasks, eq(tasks.id, taskDependencies.dependsOnId))
-    .where(inArray(taskDependencies.taskId, ids))
-    .orderBy(asc(tasks.number))
-  const waitingEpics = await db.selectDistinct({ epicId: epicDependencies.epicId, id: epics.id, title: epics.title })
-    .from(epicDependencies)
-    .innerJoin(epics, eq(epics.id, epicDependencies.dependsOnEpicId))
-    .innerJoin(tasks, eq(tasks.epicId, epics.id))
-    .where(and(eq(epics.projectId, project.id), holdsEpicOpen(tasks, epics)))
-    .orderBy(asc(epics.title), asc(epics.id))
+  const epicIds = [...new Set(rows.flatMap(r => r.epicId ? [r.epicId] : []))]
+  const drafts = rows.filter(r => r.status === 'draft').map(r => r.id)
   // A Merged dependency still holds its dependents until its epic is done (the
   // claim's rule). One that isn't Merged is its own, more exact, reason to wait.
   const dependency = alias(tasks, 'dependency')
-  const dependencyEpics = await db.selectDistinct({ taskId: taskDependencies.taskId, id: epics.id, title: epics.title })
-    .from(taskDependencies)
-    .innerJoin(tasks, eq(tasks.id, taskDependencies.taskId))
-    .innerJoin(dependency, eq(dependency.id, taskDependencies.dependsOnId))
-    .innerJoin(epics, eq(epics.id, dependency.epicId))
-    .where(and(inArray(taskDependencies.taskId, ids), eq(dependency.status, 'merged'), holdsAcrossEpics(dependency, epics, tasks.epicId)))
-    .orderBy(asc(epics.title), asc(epics.id))
+  const [leasedRuns, criteriaRows, dependencies, waitingEpics, dependencyEpics, latestReviews, latestSubmissions, pinned, owners, runAgents] = await Promise.all([
+    leaseRunIds.length > 0
+      ? db.select({ id: runs.id, agentId: runs.agentId }).from(runs).where(inArray(runs.id, leaseRunIds))
+      : [],
+    db.select().from(acceptanceCriteria)
+      .where(inArray(acceptanceCriteria.taskId, ids))
+      .orderBy(asc(acceptanceCriteria.position)),
+    db.select({ taskId: taskDependencies.taskId, number: tasks.number })
+      .from(taskDependencies)
+      .innerJoin(tasks, eq(tasks.id, taskDependencies.dependsOnId))
+      .where(inArray(taskDependencies.taskId, ids))
+      .orderBy(asc(tasks.number)),
+    epicIds.length > 0
+      ? db.selectDistinct({ epicId: epicDependencies.epicId, id: epics.id, title: epics.title })
+          .from(epicDependencies)
+          .innerJoin(epics, eq(epics.id, epicDependencies.dependsOnEpicId))
+          .innerJoin(tasks, eq(tasks.epicId, epics.id))
+          .where(and(inArray(epicDependencies.epicId, epicIds), eq(epics.projectId, project.id), holdsEpicOpen(tasks, epics)))
+          .orderBy(asc(epics.title), asc(epics.id))
+      : [],
+    db.selectDistinct({ taskId: taskDependencies.taskId, id: epics.id, title: epics.title })
+      .from(taskDependencies)
+      .innerJoin(tasks, eq(tasks.id, taskDependencies.taskId))
+      .innerJoin(dependency, eq(dependency.id, taskDependencies.dependsOnId))
+      .innerJoin(epics, eq(epics.id, dependency.epicId))
+      .where(and(inArray(taskDependencies.taskId, ids), eq(dependency.status, 'merged'), holdsAcrossEpics(dependency, epics, tasks.epicId)))
+      .orderBy(asc(epics.title), asc(epics.id)),
+    db.selectDistinctOn([reviews.taskId]).from(reviews).where(inArray(reviews.taskId, ids)).orderBy(reviews.taskId, desc(reviews.createdAt)),
+    db.selectDistinctOn([taskSubmissions.taskId]).from(taskSubmissions).where(inArray(taskSubmissions.taskId, ids)).orderBy(taskSubmissions.taskId, desc(taskSubmissions.sequence)),
+    designPins(db, ids),
+    draftSessions(db, drafts),
+    // The latest run per task and role names its agent. Designs use their
+    // designer in the API's Developer field (D23).
+    db.selectDistinctOn([runs.taskId, runs.role], { taskId: runs.taskId, role: runs.role, id: agents.id, name: agents.name })
+      .from(runs)
+      .innerJoin(agents, eq(agents.id, runs.agentId))
+      .where(and(inArray(runs.taskId, ids), inArray(runs.role, ['developer', 'designer', 'reviewer'])))
+      .orderBy(runs.taskId, runs.role, desc(runs.queuedAt), desc(runs.number))
+  ])
+  const leaseAgents = new Map(leasedRuns.map(r => [r.id, r.agentId]))
+  const criteria = Map.groupBy(criteriaRows, c => c.taskId)
+  const dependenciesOf = Map.groupBy(dependencies, d => d.taskId)
+  const epicWaits = Map.groupBy(waitingEpics, e => e.epicId)
+  const dependencyWaits = Map.groupBy(dependencyEpics, e => e.taskId)
   const waitingOn = (row: TaskRow) => [...new Map([
-    ...waitingEpics.filter(e => e.epicId === row.epicId),
-    ...dependencyEpics.filter(e => e.taskId === row.id)
+    ...(row.epicId ? epicWaits.get(row.epicId) ?? [] : []),
+    ...dependencyWaits.get(row.id) ?? []
   ].map(({ id, title }) => [id, { id, title }])).values()].sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id))
-  // Newest first, so the first row per task is its latest review
-  const reviewRows = await db.select().from(reviews).where(inArray(reviews.taskId, ids)).orderBy(desc(reviews.createdAt))
-  const pins = await db
-    .select({ taskId: taskDesignPins.taskId, screens: taskDesignPins.screens, version: designVersions.version, designTaskId: designVersions.taskId, number: tasks.number })
-    .from(taskDesignPins)
-    .innerJoin(designVersions, eq(designVersions.id, taskDesignPins.designVersionId))
-    .innerJoin(tasks, eq(tasks.id, designVersions.taskId))
-    .where(inArray(taskDesignPins.taskId, ids))
-  // Newest first, so the first row per task is its latest submission
-  const submissionRows = await db.select().from(taskSubmissions).where(inArray(taskSubmissions.taskId, ids)).orderBy(desc(taskSubmissions.sequence))
-  const { latestApproved, started } = await pinStaleness(db, pins.map(p => p.designTaskId), ids)
-  const owners = await draftSessions(db, rows.filter(r => r.status === 'draft').map(r => r.id))
-  // Newest first, so the first run per task and role names its agent.
-  // Designs use their designer in the API's Developer field (D23).
-  const runAgents = await db
-    .select({ taskId: runs.taskId, role: runs.role, id: agents.id, name: agents.name })
-    .from(runs)
-    .innerJoin(agents, eq(agents.id, runs.agentId))
-    .where(and(inArray(runs.taskId, ids), inArray(runs.role, ['developer', 'designer', 'reviewer'])))
-    .orderBy(desc(runs.queuedAt), desc(runs.number))
+  const reviewOf = new Map(latestReviews.map(r => [r.taskId, r]))
+  const submissionOf = new Map(latestSubmissions.map(s => [s.taskId, s]))
+  const pins = new Map(pinned.pins.map(p => [p.taskId, p]))
+  const agentByRun = new Map(runAgents.map(r => [`${r.taskId}:${r.role}`, r]))
   const agentOf = (taskId: string, role: 'developer' | 'designer' | 'reviewer'): TaskAgent | null => {
-    const found = runAgents.find(r => r.taskId === taskId && r.role === role)
+    const found = agentByRun.get(`${taskId}:${role}`)
     return found ? { id: found.id, name: found.name } : null
   }
 
   return rows.map((row) => {
-    const latest = reviewRows.find(r => r.taskId === row.id) ?? null
+    const latest = reviewOf.get(row.id) ?? null
     // A verdict only describes the commit it was given for
     const current = latest && latest.headSha === row.headSha ? latest : null
-    const pin = pins.find(p => p.taskId === row.id)
-    const newest = pin ? latestApproved.get(pin.designTaskId) ?? null : null
-    const stale = pin && isDesignPinStale({ version: pin.version, latestApproved: newest }, { status: row.status, started: started.has(row.id) })
+    const pin = pins.get(row.id)
+    const newest = pin ? pinned.latestApproved.get(pin.designTaskId) ?? null : null
+    const stale = pin && isDesignPinStale({ version: pin.version, latestApproved: newest }, { status: row.status, started: pinned.started.has(row.id) })
     const design = pin ? { taskRef: taskRef(project.prefix, pin.number), version: pin.version, screens: pin.screens, newerVersion: stale ? newest : null } : null
     return {
-      ...toTask(project, row, criteria, dependencies, latest, current, design, owners.get(row.id) ?? null, row.leaseRunId ? leaseAgents.get(row.leaseRunId) ?? null : null, submissionSummary(project, submissionRows.find(s => s.taskId === row.id))),
+      ...toTask(project, row, criteria.get(row.id) ?? [], dependenciesOf.get(row.id) ?? [], latest, current, design, owners.get(row.id) ?? null, row.leaseRunId ? leaseAgents.get(row.leaseRunId) ?? null : null, submissionSummary(project, submissionOf.get(row.id))),
       waitingOnEpics: waitingOn(row),
       developer: agentOf(row.id, row.type === 'design' ? 'designer' : 'developer'),
       reviewer: agentOf(row.id, 'reviewer')
     }
   })
+}
+
+// The tasks' design pins, with what decides whether each is stale (D20)
+async function designPins(db: Executor, taskIds: string[]) {
+  const pins = await db
+    .select({ taskId: taskDesignPins.taskId, screens: taskDesignPins.screens, version: designVersions.version, designTaskId: designVersions.taskId, number: tasks.number })
+    .from(taskDesignPins)
+    .innerJoin(designVersions, eq(designVersions.id, taskDesignPins.designVersionId))
+    .innerJoin(tasks, eq(tasks.id, designVersions.taskId))
+    .where(inArray(taskDesignPins.taskId, taskIds))
+  const { latestApproved, started } = await pinStaleness(db, pins.map(p => p.designTaskId), pins.map(p => p.taskId))
+  return { pins, latestApproved, started }
 }
 
 // The Plan session each Draft belongs to: the session of the latest proposed
@@ -201,9 +217,8 @@ function toTask(
     branch: row.branch,
     pr: row.prNumber !== null && row.prUrl !== null ? { number: row.prNumber, url: row.prUrl } : null,
     acceptanceCriteria: criteria
-      .filter(c => c.taskId === row.id)
       .map(c => ({ id: c.id, position: c.position, text: c.text, checkedByHuman: c.checkedByHuman, met: c.checkedByHuman ? null : current?.criteria.find(v => v.criterionId === c.id)?.met ?? null })),
-    dependsOn: dependencies.filter(d => d.taskId === row.id).map(d => taskRef(project.prefix, d.number)),
+    dependsOn: dependencies.map(d => taskRef(project.prefix, d.number)),
     lease: row.leaseRunId && row.leaseRole && row.leaseExpiresAt && leaseAgentId
       ? { agentId: leaseAgentId, runId: row.leaseRunId, role: row.leaseRole, expiresAt: row.leaseExpiresAt.toISOString() }
       : null,
@@ -226,6 +241,20 @@ export async function loadTask(db: Executor, taskId: string): Promise<Task> {
     .where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt)))
   if (!found) throw notFound()
   return (await toTasks(db, found.project, [found.task]))[0]!
+}
+
+// Like loadTask for many tasks at once, in the order given. A task that's gone
+// is left out, so a publish loop has nothing to skip.
+export async function loadTasks(db: Executor, taskIds: string[]): Promise<Task[]> {
+  if (taskIds.length === 0) return []
+  const found = await db.select({ task: tasks, project: projects })
+    .from(tasks)
+    .innerJoin(projects, eq(projects.id, tasks.projectId))
+    .where(and(inArray(tasks.id, taskIds), isNull(tasks.deletedAt)))
+  const groups = [...Map.groupBy(found, f => f.project.id).values()]
+  const loaded = await Promise.all(groups.map(group => toTasks(db, group[0]!.project, group.map(f => f.task))))
+  const byId = new Map(loaded.flat().map(t => [t.id, t]))
+  return taskIds.flatMap(id => byId.get(id) ?? [])
 }
 
 // What decides whether pins are stale (D20): each design's latest approved
@@ -537,6 +566,13 @@ function toComment(row: typeof comments.$inferSelect): Comment {
 export async function listComments(db: Executor, taskId: string): Promise<Comment[]> {
   const rows = await db.select().from(comments).where(eq(comments.taskId, taskId)).orderBy(asc(comments.createdAt))
   return rows.map(toComment)
+}
+
+// Each task's comments, oldest first
+export async function listCommentsFor(db: Executor, taskIds: string[]): Promise<Map<string, Comment[]>> {
+  if (taskIds.length === 0) return new Map()
+  const rows = await db.select().from(comments).where(inArray(comments.taskId, taskIds)).orderBy(asc(comments.createdAt), asc(comments.id))
+  return Map.groupBy(rows.map(toComment), c => c.taskId)
 }
 
 export function toAuditEntry(row: typeof auditLog.$inferSelect): AuditEntry {

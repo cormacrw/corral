@@ -2,7 +2,7 @@ import { schema, type Executor } from '@corral/db'
 import { and, eq, isNull } from 'drizzle-orm'
 import { holdsEpicOpen } from './epic-review-state.ts'
 import type { EventBus } from './events.ts'
-import { loadTask } from './tasks.ts'
+import { loadTasks } from './tasks.ts'
 
 const { epics, epicDependencies, taskDependencies, tasks } = schema
 
@@ -35,9 +35,6 @@ async function epicDependents(db: Executor, epicId: string): Promise<string[]> {
 
 async function publish(db: Executor, events: EventBus, taskIds: string[]): Promise<string[]> {
   const ids = [...new Set(taskIds)]
-  for (const id of ids) {
-    const dependent = await loadTask(db, id).catch(() => null)
-    if (dependent) events.publish({ type: 'task.updated', task: dependent })
-  }
+  for (const task of await loadTasks(db, ids)) events.publish({ type: 'task.updated', task })
   return ids
 }

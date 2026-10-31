@@ -190,3 +190,10 @@ export async function listEvidence(db: Executor, taskId: string): Promise<Eviden
   const rows = await db.select().from(evidence).where(eq(evidence.taskId, taskId)).orderBy(desc(evidence.createdAt))
   return rows.map(toEvidence)
 }
+
+// Each task's evidence, newest first
+export async function listEvidenceFor(db: Executor, taskIds: string[]): Promise<Map<string, Evidence[]>> {
+  if (taskIds.length === 0) return new Map()
+  const rows = await db.select().from(evidence).where(inArray(evidence.taskId, taskIds)).orderBy(desc(evidence.createdAt))
+  return Map.groupBy(rows.map(toEvidence), e => e.taskId!)
+}

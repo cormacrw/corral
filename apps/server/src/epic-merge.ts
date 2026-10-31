@@ -3,7 +3,7 @@ import { schema } from '@corral/db'
 import { and, asc, eq, inArray, isNotNull, ne } from 'drizzle-orm'
 import { appendAudit, auditEvent, type EpicPrDetail } from './audit.ts'
 import { publishEpicDependents } from './dependent-tasks.ts'
-import { getEpic } from './epics.ts'
+import { loadEpic } from './epics.ts'
 import { complete, createEpicFixTask, epicBoard } from './epic-prs.ts'
 import type { CheckResult, PullRequest } from './github.ts'
 import type { MergeDeps } from './merge.ts'
@@ -115,7 +115,7 @@ export class EpicMerger {
     }
     if (!updated) return this.#conflict(epic, project)
     await appendAudit(db, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, event: 'rebase_requested', headSha: pr.headSha }))
-    this.#d.events.publish({ type: 'epic.updated', epic: await getEpic(db, epic.id) })
+    this.#d.events.publish({ type: 'epic.updated', epic: await loadEpic(db, epic.id) })
   }
 
   async #clearRebase(epic: EpicRow): Promise<void> {
@@ -129,7 +129,7 @@ export class EpicMerger {
       .where(and(eq(epics.id, epic.id), eq(epics.reviewState, 'ready_to_merge'))).returning({ id: epics.id })
     if (!moved) return
     await appendAudit(db, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, ...detail }))
-    this.#d.events.publish({ type: 'epic.updated', epic: await getEpic(db, epic.id) })
+    this.#d.events.publish({ type: 'epic.updated', epic: await loadEpic(db, epic.id) })
   }
 
   async #conflict(epic: EpicRow, project: ProjectRow): Promise<void> {
@@ -149,7 +149,7 @@ export class EpicMerger {
     const taskId = await db.transaction(tx => createEpicFixTask(tx, project, epic, `CI failed on the epic PR. ${lines}`, server))
     await appendAudit(db, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, event: 'ci_failed', summary: lines }))
     events.publish({ type: 'task.created', task: await loadTask(db, taskId) })
-    events.publish({ type: 'epic.updated', epic: await getEpic(db, epic.id) })
+    events.publish({ type: 'epic.updated', epic: await loadEpic(db, epic.id) })
     this.#d.wake?.([taskId])
   }
 
@@ -189,7 +189,7 @@ export class EpicMerger {
       await appendAudit(tx, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, event: 'merged', pr: pr.number, mergeCommitSha: pr.mergeCommitSha }))
     })
     this.#attempts.delete(epic.id)
-    events.publish({ type: 'epic.updated', epic: await getEpic(db, epic.id) })
+    events.publish({ type: 'epic.updated', epic: await loadEpic(db, epic.id) })
     this.#d.wake?.(await publishEpicDependents(db, events, epic.id))
     await github.deleteBranch(project.repository, epic.branch!).catch(error => console.error(`Deleting ${epic.branch} failed`, error))
     await runner.request({ kind: 'cleanup_worktrees', repository: project.repository, taskId: `epic-${epic.id}` })

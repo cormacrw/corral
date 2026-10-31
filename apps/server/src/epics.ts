@@ -1,7 +1,7 @@
 import type { Epic, EpicDetail, PatchEpicInput } from '@corral/contracts'
 import { checkEpicDependencies, isTaskDone, type CompletionState, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, asc, eq, or } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNotNull, or } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import { toTasks, type ProjectRow } from './tasks.ts'
@@ -14,10 +14,27 @@ type EpicRow = typeof epics.$inferSelect
 // the board yet; the detail includes them so the canvas shows the whole plan.
 export async function listEpics(db: Executor, project: ProjectRow): Promise<Epic[]> {
   const rows = await db.select().from(epics).where(eq(epics.projectId, project.id)).orderBy(asc(epics.createdAt))
-  const taskRows = await db.select({ epicId: tasks.epicId, status: tasks.status, type: tasks.type, prNumber: tasks.prNumber, integrationProtocol: tasks.integrationProtocol, deletedAt: tasks.deletedAt }).from(tasks)
-    .where(eq(tasks.projectId, project.id))
-  const edges = await db.select().from(epicDependencies)
-  return rows.map(row => toEpic(row, project, taskRows.filter(t => t.epicId === row.id), edges))
+  if (rows.length === 0) return []
+  const ids = rows.map(r => r.id)
+  const [taskRows, edges] = await Promise.all([
+    db.select({ epicId: tasks.epicId, status: tasks.status, type: tasks.type, prNumber: tasks.prNumber, integrationProtocol: tasks.integrationProtocol, deletedAt: tasks.deletedAt }).from(tasks)
+      .where(and(eq(tasks.projectId, project.id), isNotNull(tasks.epicId))),
+    db.select().from(epicDependencies).where(or(inArray(epicDependencies.epicId, ids), inArray(epicDependencies.dependsOnEpicId, ids)))
+  ])
+  const tasksOf = Map.groupBy(taskRows, t => t.epicId!)
+  const dependsOn = Map.groupBy(edges, e => e.epicId)
+  const blocks = Map.groupBy(edges, e => e.dependsOnEpicId)
+  return rows.map(row => toEpic(row, project, tasksOf.get(row.id) ?? [], [...dependsOn.get(row.id) ?? [], ...blocks.get(row.id) ?? []]))
+}
+
+// An epic without its tasks: what `epic.updated` carries and PATCH returns
+export async function loadEpic(db: Executor, epicId: string): Promise<Epic> {
+  const { row, project } = await findEpic(db, epicId)
+  const [taskRows, edges] = await Promise.all([
+    db.select({ status: tasks.status, type: tasks.type, prNumber: tasks.prNumber, integrationProtocol: tasks.integrationProtocol, deletedAt: tasks.deletedAt }).from(tasks).where(eq(tasks.epicId, epicId)),
+    db.select().from(epicDependencies).where(or(eq(epicDependencies.epicId, epicId), eq(epicDependencies.dependsOnEpicId, epicId)))
+  ])
+  return toEpic(row, project, taskRows, edges)
 }
 
 export async function getEpic(db: Executor, epicId: string): Promise<EpicDetail> {
@@ -30,7 +47,7 @@ export async function getEpic(db: Executor, epicId: string): Promise<EpicDetail>
 
 export async function patchEpic(db: Executor, epicId: string, input: PatchEpicInput, actor: Actor): Promise<Epic> {
   return db.transaction(async (tx) => {
-    const { row, project } = await findEpic(tx, epicId)
+    const { row } = await findEpic(tx, epicId)
     const changed = (Object.keys(input) as (keyof PatchEpicInput)[]).filter(k => input[k] !== undefined && input[k] !== row[k])
     if (changed.includes('reviewMode')) {
       const [epic] = await tx.select({ prNumber: epics.prNumber }).from(epics).where(eq(epics.id, epicId)).for('update')
@@ -41,7 +58,7 @@ export async function patchEpic(db: Executor, epicId: string, input: PatchEpicIn
       await tx.update(epics).set({ ...input, updatedAt: new Date() }).where(eq(epics.id, epicId))
       await appendAudit(tx, { projectId: row.projectId, actor }, auditEvent('epic.updated', { epicId, changed }))
     }
-    return (await listEpics(tx, project)).find(e => e.id === epicId)!
+    return loadEpic(tx, epicId)
   })
 }
 
@@ -97,10 +114,12 @@ export async function setEpicDependencies(db: Executor, epicId: string, dependsO
     const all = await listEpics(tx, project)
     const graph = new Map(all.map(e => [e.id, e.dependsOn]))
     graph.set(epicId, [...new Set(dependsOn)])
-    const rows = await tx.select().from(tasks).where(eq(tasks.projectId, project.id))
-    const edges = await tx.select().from(taskDependencies)
+    const rows = await tx.select({ id: tasks.id, epicId: tasks.epicId, status: tasks.status, type: tasks.type, deletedAt: tasks.deletedAt }).from(tasks).where(eq(tasks.projectId, project.id))
+    const edges = await tx.select({ taskId: taskDependencies.taskId, dependsOnId: taskDependencies.dependsOnId }).from(taskDependencies)
+      .innerJoin(tasks, eq(tasks.id, taskDependencies.taskId)).where(eq(tasks.projectId, project.id))
+    const dependencies = Map.groupBy(edges, e => e.taskId)
     const problems = checkEpicDependencies(graph, rows.map(t => ({
-      ...t, deleted: t.deletedAt !== null, dependsOn: edges.filter(e => e.taskId === t.id).map(e => e.dependsOnId)
+      ...t, deleted: t.deletedAt !== null, dependsOn: (dependencies.get(t.id) ?? []).map(e => e.dependsOnId)
     })), new Map(all.map(e => [e.id, e.title])))
     if (problems.length) throw new ApiFailure(400, {
       code: 'invalid_input', issues: problems.map(p => ({ message: `Dependency cycle or deadlock: ${p.epics.join(' → ')}` }))
