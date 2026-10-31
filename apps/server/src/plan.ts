@@ -459,7 +459,7 @@ export class PlanService {
   async tool(sessionId: string, runId: string, tool: string, input: unknown, actor: Actor): Promise<unknown> {
     const { db } = this.#d
     const session = await this.#session(sessionId)
-    const scoped = !['ask_question', 'approve_plan'].includes(tool)
+    const scoped = !['ask_question', 'approve_plan', 'get_agent_activity'].includes(tool)
     const project = scoped ? await this.toolProject(sessionId, input) : undefined
 
     switch (tool) {
@@ -468,7 +468,7 @@ export class PlanService {
         if (!parsed.success) throw new ToolError(`The tasks were not listed: ${z.prettifyError(parsed.error)}`)
         const { status, epic, query, includeMerged } = parsed.data
         const statuses = status === undefined ? [] : [status].flat()
-        const rows = await db.select({ id: tasks.id, number: tasks.number, title: tasks.title, status: tasks.status, type: tasks.type, priority: tasks.priority, epicId: tasks.epicId }).from(tasks)
+        const rows = await db.select({ id: tasks.id, number: tasks.number, title: tasks.title, status: tasks.status, type: tasks.type, priority: tasks.priority, epicId: tasks.epicId, humanReview: tasks.humanReview, statusReason: tasks.statusReason, prUrl: tasks.prUrl }).from(tasks)
           .where(and(
             eq(tasks.projectId, project!.id),
             isNull(tasks.deletedAt),
@@ -519,7 +519,7 @@ export class PlanService {
 
       case 'add_comment': {
         const { taskRef: ref, body } = z.object({ taskRef: z.string(), body: z.string().trim().min(1) }).parse(input)
-        const comment = await addComment(db, await this.#taskIdByRef(project, ref), { body, pinned: false }, actor)
+        const comment = await addComment(db, await this.#taskIdByRef(project!, ref), { body, pinned: false }, actor)
         this.#d.events.publish({ type: 'comment.created', comment })
         return { ok: true }
       }

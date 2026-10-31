@@ -51,6 +51,7 @@ export const pmRouteTools: Record<string, readonly string[]> = {
 // Unsupported human operations are explicit here rather than attributed to a
 // nearby tool that cannot actually perform them.
 export const pmRouteExclusions: Record<string, string> = {
+  'GET /runner/version': 'Runner updater compatibility probe before reconnecting; protocol and build information is available to PM through get_status.',
   'GET /runner': 'Internal authenticated runner WebSocket transport; PM tools travel over it, rather than opening it themselves.',
   'ALL /api/*': 'Raw-path design-file middleware: serves sandboxed prototype bytes and rejects traversal before URL normalization; otherwise calls next. Not a general API endpoint.',
   'GET /api/health': 'Liveness probe for operators and container health checks.',
@@ -62,7 +63,7 @@ export const pmRouteExclusions: Record<string, string> = {
   'GET /api/projects/:slug/thumbnail': 'Browser image download; project tools return the thumbnail URL.',
   'DELETE /api/projects/:slug/thumbnail': 'Human cosmetic image removal; update_project does not change binary thumbnails.',
   'GET /api/projects/:slug/drafts': 'Human Plan-tab draft grouping by session; PM reads its proposed plan through read_thread and tasks through list_tasks.',
-  'POST /api/epics/:id/review': 'Epic PR merge/rejection remains a human decision; PM has no epic-review decision tool (D27: cannot merge PRs).',
+  'POST /api/epics/:id/review': 'Epic PR merge/rejection remains a human decision; PM has no epic-review decision tool (D29: cannot merge PRs).',
   'GET /api/epics/:id/history': 'Human Activity audit view; no PM epic audit-history reader currently exists.',
   'GET /api/epics/:id': 'Detailed human epic view; list_tasks exposes epic identity and dependencies, but no PM tool reads the full epic detail.',
   'GET /api/projects/:slug/pull-requests': 'Human GitHub PR overview; PM reads task PR links via list_tasks and cannot merge PRs.',
@@ -90,6 +91,7 @@ export const pmRouteExclusions: Record<string, string> = {
   'POST /api/deployments': 'Called by the deploy script to record a deployment, not by PM.',
   'POST /api/deployments/:id/read': 'Human release-note read receipt; PM must not clear human unread state.',
   'POST /api/deployments/:id/dismiss': 'Human release-note dismissal; no PM deployment dismissal tool.',
+  'GET /api/projects/:slug/metrics/flow': 'Human flow dashboard cohort and timing analytics; run tools report individual runs rather than aggregate flow metrics.',
   'GET /api/events': 'Browser SSE subscription; tools return snapshots and do not hold event streams open.'
 }
 

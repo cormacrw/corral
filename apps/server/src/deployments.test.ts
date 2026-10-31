@@ -113,7 +113,7 @@ describe.each(['pglite', 'postgres'] as const)('POST /api/deployments on %s', (d
     const at = Date.parse(before.needsYou.find(i => i.taskId === task.id)!.at)
     const deployment = (minutes: number, toSha: string) => ({ projectId: project.id, fromSha: null, toSha, notes: 'Notes', notesStatus: 'ready' as const, createdAt: new Date(at + minutes * 60_000) })
     const [older, newer] = await t.db.insert(schema.deployments).values([deployment(-1, sha('1')), deployment(1, sha('2'))]).returning()
-    const ids = async () => (await getInbox()).needsYou.filter(i => i.project.id === project.id).map(i => i.id)
+    const ids = async () => (await getInbox()).needsYou.filter(i => i.project?.id === project.id).map(i => i.id)
     const expected = [newer!.id, task.id, older!.id]
     expect(await ids()).toEqual(expected)
     expect((await t.request('POST', `/api/deployments/${older!.id}/read`)).status).toBe(200)

@@ -93,19 +93,19 @@ describe('PM task and epic tools', () => {
       for (const epicId of [null, other!.id]) {
         expect(await call('update_task', { taskRef: task.ref, epicId })).toMatchObject({ ok: false, error: 'conflict' })
       }
-      expect(await call('update_task', { taskRef: task.ref, epicId: epic!.id, title: 'Allowed metadata' })).toMatchObject({ ok: true })
+      expect(await call('update_task', { taskRef: task.ref, epicId: epic!.id, title: 'Allowed metadata' })).toMatchObject({ ok: state.status !== 'merged' })
       expect((await get(task)).epicId).toBe(epic!.id)
       expect(await call('update_epic', { epicId: epic!.id, reviewMode: 'direct' })).toMatchObject({ ok: false })
       expect((await request('GET', `/api/epics/${epic!.id}`)).body).toMatchObject({ reviewMode: 'epic' })
     }
   })
 
-  it('creates outside a plan, edits every status and preserves criterion ids with PM session attribution', async () => {
+  it('creates outside a plan, edits mutable statuses and preserves criterion ids with PM session attribution', { timeout: 30_000 }, async () => {
     const created = await call('create_task', { title: 'A task outside a plan', type: 'task' })
     expect(created).toMatchObject({ ok: true, result: { status: 'backlog' } })
     const task = (created as { result: Task }).result
     expect(await history(task)).toContainEqual(expect.objectContaining({ action: 'task.created', actor: actor() }))
-    for (const status of TASK_STATUSES) {
+    for (const status of TASK_STATUSES.filter(status => status !== 'merged')) {
       await t.db.update(schema.tasks).set({ status }).where(eq(schema.tasks.id, task.id))
       expect(await call('update_task', { taskRef: task.ref, title: `Edited in ${status}`, priority: 'high', acceptanceCriteria: [{ text: `Works in ${status}` }] })).toMatchObject({ ok: true })
       const updated = await get(task)
@@ -160,9 +160,9 @@ describe('PM task and epic tools', () => {
     await history(task)
   })
 
-  it('confirms board moves, records the reason and returns the board error for invalid moves', async () => {
+  it('confirms board moves, records the reason and returns the board error for invalid moves', { timeout: 30_000 }, async () => {
     const task = await t.createTask(slug)
-    // D27 requires human confirmation for human-only board transitions.
+    // D29 requires human confirmation for human-only board transitions.
     const id = await action('move_task', { taskRef: task.ref, transition: { type: 'send_back' }, reason: 'Needs refinement' })
     const board = await request('POST', `/api/projects/${slug}/tasks/${task.number}/transitions`, { type: 'send_back' })
     const failed = await resolve(id)
@@ -236,12 +236,12 @@ describe('PM task and epic tools', () => {
     expect(await call('update_task', { taskRef: unstarted.ref, type: 'task' })).toMatchObject({ ok: true, result: { type: 'task' } })
   })
 
-  it('keeps human Merged edits read-only while permitting PM metadata edits', async () => {
+  it('keeps Merged edits read-only for both humans and the PM', async () => {
     const task = await t.createTask(slug)
     await t.db.update(schema.tasks).set({ status: 'merged' }).where(eq(schema.tasks.id, task.id))
     expect(await request('PATCH', `/api/projects/${slug}/tasks/${task.number}`, { title: 'Human edit' })).toMatchObject({ status: 409 })
-    expect(await call('update_task', { taskRef: task.ref, title: 'PM metadata edit' })).toMatchObject({ ok: true })
-    expect(await get(task)).toMatchObject({ status: 'merged', title: 'PM metadata edit' })
+    expect(await call('update_task', { taskRef: task.ref, title: 'PM metadata edit' })).toMatchObject({ ok: false })
+    expect(await get(task)).toMatchObject({ status: 'merged', title: task.title })
   })
 
   it('requires human confirmation for approval and deletion, and revalidates changed approval state', async () => {

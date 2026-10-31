@@ -199,7 +199,7 @@ describe('ToolServer', () => {
     await client.callTool({ name: 'list_tasks', arguments: { project: 'another-project' } })
     await client.callTool({ name: 'get_task', arguments: { project: 'another-project', taskRef: 'OTH-1' } })
     expect(calls).toEqual([
-      { tool: 'list_tasks', input: { project: 'another-project' } },
+      { tool: 'list_tasks', input: { project: 'another-project', includeMerged: false } },
       { tool: 'get_task', input: { project: 'another-project', taskRef: 'OTH-1' } }
     ])
     await client.close()

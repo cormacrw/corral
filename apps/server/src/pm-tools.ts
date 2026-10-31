@@ -124,7 +124,7 @@ function failureReason(error: unknown): string {
   return typeof reason === 'string' ? reason : typeof constraint === 'string' ? `${code.replaceAll('_', ' ')}: ${constraint}` : code.replaceAll('_', ' ')
 }
 
-// The PM tools that act without a confirm card (D27). Each validates its typed
+// The PM tools that act without a confirm card (D29). Each validates its typed
 // input and calls the service behind the matching route, and every call is
 // audited with the PM session as actor.
 export class PmTools {
@@ -133,7 +133,7 @@ export class PmTools {
 
   async call(tool: PmToolName, input: unknown, actor: Actor, context: PmToolContext): Promise<unknown> {
     const audit = (projectId: string | null | undefined, outcome: { ok: boolean, summary: string, error?: string }, target?: ToolResult['target']) =>
-      appendAudit(this.#d.db, { projectId: projectId === undefined ? context.projectId : projectId, taskId: target?.taskId, actor }, auditEvent('pm.tool_called', { sessionId: context.sessionId, runId: context.runId, tool, input: target ? { ...input as object, taskRef: target.taskRef } : input, targetId: target?.taskId ?? null, ...outcome }))
+      appendAudit(this.#d.db, { projectId: projectId === undefined ? context.projectId : projectId, taskId: target?.taskId ?? null, actor }, auditEvent('pm.tool_called', { sessionId: context.sessionId, runId: context.runId, tool, input: target ? { ...input as object, taskRef: target.taskRef } : input, targetId: target?.taskId ?? null, ...outcome }))
     try {
       const { result, projectId, target, summary } = await this.#run(tool, input, actor, context)
       await audit(projectId, { ok: true, summary }, target)
@@ -320,7 +320,7 @@ export class PmTools {
   }
 
   // A Blocked task's question, answered for the human: the same pinned
-  // comment as Clarify, by the PM's own transition (D27)
+  // comment as Clarify, by the PM's own transition (D29)
   async #answer(input: unknown, actor: Actor): Promise<ToolResult> {
     const { taskRef: ref, action, text } = z.object(pmActionTools.act_on_inbox.input).strict().parse(input)
     if (action !== 'clarify' || !text) throw new Error('clarify needs text: your answer for the developer')
@@ -329,7 +329,7 @@ export class PmTools {
     const { comment, project, number } = await db.transaction(async (tx) => {
       const { task, project } = await lockTask(tx, taskId)
       const added = await addComment(tx, task.id, { body: text, pinned: true }, actor)
-      await applyTransition(tx, task, project, { type: 'answer' }, actor)
+      await applyTransition(tx, task, project, { type: 'answer' }, actor, { event: 'answer' })
       return { comment: added, project, number: task.number }
     })
     events.publish({ type: 'comment.created', comment })

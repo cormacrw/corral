@@ -56,9 +56,10 @@ describe('global and project Plan sessions', () => {
       { sessionId: session!.id, role: 'pm', text: 'The original reply stays in history' }
     ])
     const before = await request('GET', `/plan/sessions/${session!.id}`)
-    const migration = await readFile(new URL('../../../packages/db/migrations/0036_natural_santa_claus.sql', import.meta.url), 'utf8')
-    for (const statement of migration.split('--> statement-breakpoint')) await t.db.execute(sql.raw(statement))
-    evidence.push({ migration: '0036_natural_santa_claus.sql', sql: migration, baseline: 'Both project_id columns were NOT NULL; the session and its messages existed before applying this migration.' })
+    const migration = await readFile(new URL('../../../packages/db/migrations/0043_known_the_watchers.sql', import.meta.url), 'utf8')
+    // The other additive columns are already present in this test database.
+    for (const statement of migration.split('--> statement-breakpoint').filter(s => s.includes('ALTER COLUMN'))) await t.db.execute(sql.raw(statement))
+    evidence.push({ migration: '0043_known_the_watchers.sql', sql: migration, baseline: 'Both project_id columns were NOT NULL; the session and its messages existed before applying this migration.' })
     const after = await request('GET', `/plan/sessions/${session!.id}`)
     expect(after).toEqual(before)
     expect(after).toMatchObject({ projectId: project.id, messages: [expect.objectContaining({ text: 'Remember this project discussion' }), expect.objectContaining({ text: 'The original reply stays in history' })] })

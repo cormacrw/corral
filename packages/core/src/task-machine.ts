@@ -83,7 +83,7 @@ export type TaskEvent =
   | { type: 'fail', reason: string }
   // A run ended Failed. Keeps the status for a retry, or → Failed at the cap.
   | { type: 'run_failed' }
-  // Blocked → In progress: the PM answered for the human (D27). It keeps the
+  // Blocked → In progress: the PM answered for the human (D29). It keeps the
   // counters, so an answer can't lift the review-round cap the way resolve does.
   | { type: 'answer' }
   // Blocked or Failed → Backlog, Ready or In progress (In progress keeps the branch and PR)
@@ -214,7 +214,7 @@ export function transition(
       return ok({ ...task, ...(task.rebaseOnly && { rebaseOnly: false }), status: 'in_progress' })
 
     // D5: the task's flag sends it to a human, which the server also sets for
-    // an each_task epic (D23) or a human check (D27), and a design always goes
+    // an each_task epic (D23) or a human check (D29), and a design always goes
     // to one (D20). Spikes always go to a human to accept their findings (D19).
     case 'review_approved':
       return ok({ ...task, status: requiresHumanReview(task.type ?? 'task', task.humanReview) ? 'human_review' : 'ready_to_merge' })

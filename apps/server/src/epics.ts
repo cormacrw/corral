@@ -1,12 +1,12 @@
 import type { Epic, EpicDetail, PatchEpicInput } from '@corral/contracts'
 import { checkEpicDependencies, isTaskDone, type CompletionState, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, asc, eq, isNull, or, sql } from 'drizzle-orm'
+import { asc, eq, or, sql } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import { toAuditEntry, toTasks, type ProjectRow } from './tasks.ts'
 
-const { epics, epicDependencies, taskDependencies, projects, tasks } = schema
+const { auditLog, epics, epicDependencies, taskDependencies, projects, tasks } = schema
 
 type EpicRow = typeof epics.$inferSelect
 

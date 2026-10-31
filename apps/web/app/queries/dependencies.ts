@@ -173,7 +173,7 @@ export const eventDependencies: EventDependencies = {
     invalidates: ({ run }, cache) => [
       keys.runs.lists(), keys.agents.list(), keys.inbox(),
       ...(run.taskRef ? [keys.tasks.history(run.taskRef), keys.tasks.evidence(run.taskRef), keys.tasks.reviews(run.taskRef), keys.tasks.designs(run.taskRef)] : []),
-      ...projectStale(run.projectId, cache)
+      ...(run.projectId ? projectStale(run.projectId, cache) : [])
     ]
   },
   'run.events': {

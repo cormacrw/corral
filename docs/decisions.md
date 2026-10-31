@@ -209,7 +209,7 @@ A status says whose turn it is. Whether a run is actually active is shown by the
 | Agent review, Human review, Ready to merge | Merged | GitHub shows the PR merged outside Corral | Server |
 | Ready, In progress, Agent review, Human review, Ready to merge | Blocked | See causes below | Server |
 | In progress, Agent review, Ready to merge | Failed | See causes below | Server |
-| Blocked | In progress | The PM answers a question or adds information (D27) | PM |
+| Blocked | In progress | The PM answers a question or adds information (D29) | PM |
 | Blocked, Failed | Backlog, Ready or In progress | Human resolves it (In progress keeps the branch and PR) | **Human only** |
 
 **Amended by D28:** criteria reserved for a human require neither agent evidence nor an agent met/unmet verdict. Their recorded verdict is **Needs human check**. Reviewer approval and a newly added human check use the Human review routes above; human approval then follows the usual merge gates.
@@ -848,7 +848,7 @@ Sessions can be **global** as well as tied to a project. A global session has **
 
 - **D9:** the PM's tools are no longer the short list there, and `propose_plan` is no longer the only way for the PM to change the board: it can create and edit tasks with its task tools. Plans stay the way to propose a body of work. Only a session tied to a project has a read-only checkout. **Unchanged:** the PM has no tool to merge or edit docs, its checkout stays read-only, and a turn runs when the human or another PM thread sends a message, or the human approves a design (COR-243). Child completion notifications are saved for the parent’s next turn; they do not start one.
 - **D10:** the PM can create tasks in Backlog of any kind, not only documentation tasks. The **Human only** transitions stay human: the PM can propose them on a confirm card, and the transition runs on the human's click with the human as its actor.
-- **D10 (COR-240):** Merged remains final for workflow and shipped code, but the PM may edit its metadata through update_task. Epic membership is fixed for PM edits once a task has a PR or is Merged (409 task_epic_locked), preserving D23’s review-mode lock. The human PATCH route still rejects Merged edits with 409 task_merged, and the task UI stays read-only. Follow-up work remains a new task.
+- **D10 (COR-240, reconciled with main):** Merged work stays immutable through both PM and human edits (`409 task_merged`). Epic membership is fixed for PM edits once a task has a PR (`409 task_epic_locked`), preserving D27’s review-mode lock. The task UI stays read-only after merge; follow-up work remains a new task.
 - **D10 (COR-298):** a task can't enter or leave the `spike` or `design` type once it has left Draft or Backlog; `PATCH` and `update_task` return `409 task_type_locked`. Those types have their own end states, so a retyped task could otherwise skip them. Changing between `task` and `bug` stays open in every status the task can be edited.
 - **D10 (COR-246):** the one exception is the PM's `answer` transition, Blocked → In progress, for answering a question or adding information. It keeps the review-round and failed-run counters, so it can't lift a cap, and `resolve` stays **Human only**.
 - **D11:** "the PM stays in Plan" no longer holds. The PM can read and act on the Inbox, with decisions on a confirm card, and its actions appear in Activity. **Unchanged:** it raises no Needs-you items of its own.

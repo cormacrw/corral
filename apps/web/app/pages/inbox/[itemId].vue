@@ -81,7 +81,7 @@ const submitLabel = computed(() => action.value ? (actions.value.find(a => a.val
 
 // Resolves false when not sent, so the composer keeps its images
 async function submit(message: string): Promise<boolean> {
-  if (!selected.value || isOwnPane(selected.value)) return false
+  if (!isTaskItem(selected.value) || isOwnPane(selected.value)) return false
   if (taskLoading.value || approveBlocked.value) return false
   if (action.value === 'approve' && task.value?.acceptanceCriteria.some(c => c.checkedByHuman && !checkedHumanCriteria.value.includes(c.id))) {
     failedAction.value = HUMAN_CHECK_ERROR

@@ -29,6 +29,7 @@ it('updates prerequisite and blocks progress and the waiting alert from task eve
   client.setQueryData(keys.tasks.list(project.slug), [task(), task({ id: 't2', ref: 'TA-2', epicId: 'next', type: 'design' })])
   client.setQueryData(keys.epics.list(project.slug), [own, prerequisite, blocked])
   vi.spyOn(api.epics, 'get').mockResolvedValue(own)
+  vi.spyOn(api.epics, 'history').mockResolvedValue([])
   const list = vi.spyOn(api.epics, 'list')
   for (const name of ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount'] as const) vi.stubGlobal(name, vue[name])
   vi.stubGlobal('useLocalStorage', (_key: string, initial: unknown) => vue.ref(initial))

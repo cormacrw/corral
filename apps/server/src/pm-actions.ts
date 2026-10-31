@@ -2,11 +2,12 @@ import { requiresPmConfirmation, type PlanMessage } from '@corral/contracts'
 import type { Actor, PmAction } from '@corral/core'
 import { schema, type Database } from '@corral/db'
 import { and, eq, sql } from 'drizzle-orm'
+import { appendAudit, auditEvent } from './audit.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
 import { toMessage } from './plan.ts'
 
-const { planMessages, planSessions, auditLog, projects, tasks } = schema
+const { planMessages, planSessions, projects, tasks } = schema
 
 export interface PreparedPmAction {
   input: Record<string, unknown>
@@ -45,7 +46,7 @@ export class PmActions {
         await tx.insert(planMessages).values({ sessionId: row.sessionId, role: 'pm', kind: 'action_result', text: `${row.pendingAction!.summary}: ${error}` })
         await tx.update(planSessions).set({ unread: true, updatedAt: new Date() }).where(eq(planSessions.id, row.sessionId))
         const [session] = await tx.select().from(planSessions).where(eq(planSessions.id, row.sessionId))
-        await tx.insert(auditLog).values({ projectId: session!.projectId, actor: { kind: 'system', component: 'server' }, action: 'pm.action_failed', detail: { actionId: row.id, sessionId: row.sessionId, runId: row.runId, error } })
+        await appendAudit(tx, { projectId: session!.projectId, actor: { kind: 'system', component: 'server' } }, auditEvent('pm.action_failed', { actionId: row.id, sessionId: row.sessionId, runId: row.runId, error }))
       })
     }
   }
@@ -58,7 +59,7 @@ export class PmActions {
       const [session] = await tx.select().from(planSessions).where(eq(planSessions.id, sessionId)).for('update')
       if (!session || session.closedAt) throw new Error('This conversation is closed or no longer exists')
       const [row] = await tx.insert(planMessages).values({ sessionId, runId, role: 'pm', kind: 'confirmation', text: action.summary, pendingAction: action }).returning()
-      await tx.insert(auditLog).values({ projectId: prepared.projectId, taskId: prepared.taskId, actor, action: 'pm.action_proposed', detail: { actionId: row!.id, sessionId, runId, targetId: action.targetId, tool, input: action.input, summary: action.summary } })
+      await appendAudit(tx, { projectId: prepared.projectId, taskId: prepared.taskId, actor }, auditEvent('pm.action_proposed', { actionId: row!.id, sessionId, runId, targetId: action.targetId, tool, input: action.input, summary: action.summary }))
       await tx.update(planSessions).set({ unread: true, updatedAt: new Date() }).where(eq(planSessions.id, sessionId))
       return row!
     })
@@ -119,8 +120,8 @@ export class PmActions {
       const [alive] = await tx.select({ id: planSessions.id }).from(planSessions).where(eq(planSessions.id, sessionId))
       const [owner] = actionProjectId ? await tx.select({ id: projects.id }).from(projects).where(eq(projects.id, actionProjectId)) : []
       const projectId = target?.projectId ?? owner?.id ?? (alive ? session.projectId : null)
-      const audit = { projectId, taskId: target?.id ?? null, actor, action: decision === 'cancel' ? 'pm.action_cancelled' : action.status === 'confirmed' ? 'pm.action_confirmed' : 'pm.action_failed', detail: { actionId, sessionId, runId: row.runId, targetId: action.targetId, proposer, tool: action.tool, input: action.input, summary: action.summary, result: action.result, error: action.error } }
-      await tx.insert(auditLog).values(audit)
+      const detail = { actionId, sessionId, runId: row.runId, targetId: action.targetId, proposer, tool: action.tool, input: action.input, summary: action.summary, result: action.result, error: action.error }
+      await appendAudit(tx, { projectId, taskId: target?.id ?? null, actor }, decision === 'cancel' ? auditEvent('pm.action_cancelled', detail) : action.status === 'confirmed' ? auditEvent('pm.action_confirmed', detail) : auditEvent('pm.action_failed', detail))
       if (!alive) return null
       const [message] = await tx.update(planMessages).set({ pendingAction: action }).where(eq(planMessages.id, actionId)).returning()
       const [result] = await tx.insert(planMessages).values({ sessionId, role: 'pm', kind: 'action_result', text }).returning()

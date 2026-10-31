@@ -1,1 +1,0 @@
-ALTER TABLE "plan_messages" ADD COLUMN "pending_action" jsonb;

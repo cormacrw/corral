@@ -25,7 +25,7 @@ const retryStart = vi.fn()
 const restored = vue.ref(null)
 const state = vue.ref({
   loaded: true, runner: { online: true }, agents, projects, planSessions,
- runEvents: {} as Record<string, import('@corral/contracts').RunEvent[]>
+  runEvents: {} as Record<string, import('@corral/contracts').RunEvent[]>
 })
 const flyout = {
   ref: vue.ref<string | null>(null), epic: vue.ref<string | null>(null), plan: vue.ref(false),
