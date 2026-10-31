@@ -33,7 +33,7 @@ import type {
   PlanSessionDetail,
   Profile,
   Project,
-  PullRequestStatus,
+  PullRequestDetail, PullRequestStatus,
   RepoCheck,
   RepoList,
   Review,
@@ -102,6 +102,8 @@ export function describe(status: number, error: ApiErrorBody['error'] | null): s
     case 'transition_rejected': return `Not allowed: ${JSON.stringify(error.reason)}`
     case 'invalid_dependencies': return `Invalid dependencies: ${JSON.stringify(error.problems)}`
     case 'plan_not_approvable': return error.problems.map(p => p.message).join(' ')
+    case 'no_pull_request': return 'This task has no pull request yet'
+    case 'pull_request_unavailable': return `GitHub couldn't return PR #${error.number}: ${error.message}`
     default: return `Request failed (${status})`
   }
 }
@@ -135,7 +137,8 @@ export const api = {
     },
     clearThumbnail: (slug: string) => call<Project>('DELETE', `/projects/${slug}/thumbnail`),
     // Open PRs and their merge gates, read live from GitHub
-    pullRequests: (slug: string) => call<PullRequestStatus[]>('GET', `/projects/${slug}/pull-requests`)
+    pullRequests: (slug: string) => call<PullRequestStatus[]>('GET', `/projects/${slug}/pull-requests`),
+    pullRequest: (slug: string, number: number) => call<PullRequestDetail>('GET', `/projects/${slug}/pull-requests/${number}`)
   },
 
   tasks: {

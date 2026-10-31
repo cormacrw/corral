@@ -20,6 +20,8 @@ import type {
   PlanThreadAttention,
   Profile,
   Project,
+  PullRequestDetail,
+  PullRequestFile,
   PullRequestStatus,
   RepoList,
   Review,
@@ -330,6 +332,7 @@ export const tasks: Task[] = [
   task(corral, 7, { title: 'PM drafts tasks from an approved design', status: 'ready_to_merge', epicId: 'e-design', pr: { number: 65, url: 'https://github.com/cormacrw/corral/pull/65' } }),
   task(corral, 8, { title: 'Push notifications for Needs you', status: 'blocked', epicId: 'e-mobile', statusReason: 'Which push service should the server use: Web Push with VAPID keys, or ntfy?' }),
   task(corral, 9, { title: 'Offline board', status: 'failed', type: 'bug', priority: 'urgent', epicId: 'e-mobile', failedRuns: 3, statusReason: 'The runner lost its worktree three times in a row.' }),
+  task(corral, 42, { title: 'Reuse the failed run\'s worktree on Retry', status: 'blocked', statusReason: 'Should Retry reuse the failed run\'s worktree, or start from a fresh checkout?' }),
   task(corral, 10, { title: 'Install sheet on iOS', status: 'merged', epicId: 'e-mobile', mergedAt: ago(60 * 30) }),
   task(corral, 11, { title: 'Dark mode for the epic graph', status: 'backlog', priority: 'low' }),
   task(corral, 12, { title: 'Spike: Codex reasoning effort', status: 'backlog', type: 'spike' }),
@@ -640,6 +643,34 @@ function pullRequest(ref: string, fields: Partial<PullRequestStatus> & Pick<Pull
     ...fields
   }
 }
+// PR descriptions and diffs by task (GET /projects/:slug/tasks/:number/pull-request)
+const approvePatch = [
+  '@@ -41,5 +41,8 @@ export async function approveDesignVersion(db: Database, taskId: string, version: number) {',
+  '-  await db.update(designVersions).set({ status: \'approved\' }).where(eq(designVersions.version, version))',
+  '+  return db.transaction(async (tx) => {',
+  '+    await tx.update(designVersions).set({ status: \'superseded\' }).where(eq(designVersions.taskId, taskId))',
+  '+    return tx.update(designVersions).set({ status: \'approved\' }).where(eq(designVersions.version, version))',
+  '+  })'
+].join('\n')
+const approveFiles: PullRequestFile[] = [
+  { path: 'apps/server/src/designs.ts', status: 'modified', additions: 4, deletions: 1, patch: approvePatch },
+  { path: 'apps/server/src/designs.test.ts', status: 'added', additions: 1, deletions: 0, patch: '@@ -0,0 +1 @@\n+it(\'supersedes earlier versions in the same transaction\')' }
+]
+function prDetail(ref: string, body: string, fields: Partial<PullRequestDetail> = {}): PullRequestDetail {
+  const t = at(ref)
+  return {
+    ...t.pr!, title: t.title, body, headBranch: t.branch ?? `corral/${t.ref.toLowerCase()}`,
+    // In an `epic` or `each_task` epic, a task PR's base is the epic branch (D23)
+    baseBranch: epics.find(e => e.id === t.epicId)?.branch ?? 'main',
+    files: approveFiles, totalFiles: approveFiles.length, truncated: false, ...fields
+  }
+}
+export const pullRequestDetails: PullRequestDetail[] = [
+  prDetail('COR-5', '## What\n\nApproving a design version supersedes earlier versions in the same transaction.\n\n## How it was checked\n\n- New `designs.test.ts` covers supersede-on-approve'),
+  // Over the cap: the rest of the diff is on GitHub
+  prDetail('COR-7', '## What\n\nThe PM drafts tasks from an approved design.', { totalFiles: 34, truncated: true })
+]
+
 const eligible = { eligible: true, failingGate: null, failedGates: [] }
 
 export const pullRequests: PullRequestStatus[] = [
@@ -825,7 +856,7 @@ export function inbox(): Inbox {
     .filter(t => t.status === 'human_review' || t.status === 'blocked' || t.status === 'failed')
     .map((t) => {
       const project = projects.find(p => p.id === t.projectId)!
-      const type = t.status === 'human_review' ? 'human_review' as const : t.status === 'blocked' ? 'blocked' as const : 'failed' as const
+      const type = t.status === 'human_review' ? 'human_review' as const : t.ref === 'COR-42' ? 'question' as const : t.status === 'blocked' ? 'blocked' as const : 'failed' as const
       const subject = type === 'human_review' ? `Review ${t.title}` : t.title
       const body = (t.type === 'spike' ? comments[t.id]?.findLast(c => c.body.startsWith('## Findings'))?.body : null) ?? t.statusReason ?? 'The reviewer approved this change and it needs your review.'
       const message = t.ref === 'COR-5'
@@ -846,7 +877,7 @@ export function inbox(): Inbox {
           ...(evidence[t.id] ?? []).filter(e => e.kind !== 'note' && e.url && e.createdAt > (t.ref === 'COR-5' ? ago(30) : '')).map(e => ({ id: e.id, kind: e.kind as Exclude<Evidence['kind'], 'note'>, name: e.fileName!, url: e.url!, taskRef: null, at: e.createdAt }))
         ],
         body,
-        sender: type === 'failed' ? { name: 'Corral', role: 'system' as const } : { name: type === 'blocked' ? 'Victor' : 'Rita', role: type === 'blocked' ? 'developer' as const : 'reviewer' as const },
+        sender: type === 'failed' ? { name: 'Corral', role: 'system' as const } : type === 'human_review' ? { name: 'Rita', role: 'reviewer' as const } : { name: 'Victor', role: 'developer' as const },
         at: t.updatedAt,
         prUrl: t.pr?.url ?? null,
         resolution: null
@@ -911,7 +942,8 @@ export function inbox(): Inbox {
   const count = needsYou.length
   needsYou.push(...releaseNotes.filter(r => !r.resolution))
   needsYou.sort((a, b) => b.at.localeCompare(a.at))
-  return { needsYou, activity, resolved: [...resolvedInbox, ...releaseNotes.filter(r => r.resolution)], count }
+  const approved = { ...activity[0]!, id: 'activity-approved', body: 'You approved and merged it', preview: 'You approved and merged it', resolution: 'You approved and merged it', sender: { name: 'Rita', role: 'reviewer' as const } }
+  return { needsYou, activity, resolved: [...resolvedInbox, approved, ...releaseNotes.filter(r => r.resolution)], count }
 }
 
 // Different cohorts make every window visibly distinct. Marketing site has no

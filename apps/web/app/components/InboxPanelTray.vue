@@ -10,8 +10,9 @@ const props = defineProps<{
 }>()
 const composer = ref<{ focus: () => void, send: () => Promise<boolean>, uploading: boolean, hasImages: boolean } | null>(null)
 const chosen = computed(() => props.ctx.composerChosen ? props.ctx.actions.find(a => a.value === props.ctx.action) ?? null : null)
-watch(chosen, (value) => {
-  if (value) void nextTick(() => composer.value?.focus())
+// Choosing an action focuses it; an item that opens with one chosen doesn't
+watch(() => props.ctx.action, () => {
+  if (chosen.value) void nextTick(() => composer.value?.focus())
 })
 // One-click actions use the same attachment-aware send as the reply button.
 // Keep the action pending until any images the human picked have uploaded.

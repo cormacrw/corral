@@ -15,6 +15,13 @@ const tabs = computed(() => [
   { label: 'Overview', value: 'overview' },
   ...(p.criteria.value.length ? [{ label: `Criteria ${p.met.value}/${p.criteria.value.length}`, value: 'criteria' }] : []),
   ...(p.history.value.length ? [{ label: 'Review', value: 'review' }] : []),
+  // Before the PR arrives, or if it can't, the tabs stay to say so
+  ...(p.hasPullRequest.value
+    ? [
+        { label: 'PR description', value: 'pr' },
+        { label: p.prDetail.value ? `Code diff ${p.prDetail.value.totalFiles}` : 'Code diff', value: 'diff' }
+      ]
+    : []),
   { label: 'Message', value: 'message' }
 ])
 // A tab's content can load after the page asks for it, or go away

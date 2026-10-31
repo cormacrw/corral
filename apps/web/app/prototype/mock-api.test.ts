@@ -1,5 +1,5 @@
 import { EPIC_REVIEW_STATES } from '@corral/core'
-import type { Agent, DraftSession, Epic, EpicDetail, Inbox, PlanSessionDetail, Project, PullRequestStatus, ServerEvent, Task } from '@corral/contracts'
+import type { Agent, DraftSession, Epic, EpicDetail, Inbox, PlanSessionDetail, Project, PullRequestDetail, PullRequestStatus, ServerEvent, Task } from '@corral/contracts'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
@@ -64,6 +64,16 @@ describe('prototype mock API', () => {
     await expect(mockCall('GET', '/projects/marketing-site/pull-requests')).resolves.toEqual([])
   })
 
+  it('serves a PR\'s description and diff by task or by number, and says when there is none', async () => {
+    const pr = await mockCall<PullRequestDetail>('GET', '/projects/corral/tasks/5/pull-request')
+    expect(pr).toMatchObject({ number: 64, truncated: false, body: expect.stringContaining('## What') })
+    expect(pr.files.every(f => f.patch.startsWith('@@'))).toBe(true)
+    await expect(mockCall('GET', '/projects/corral/pull-requests/64')).resolves.toEqual(pr)
+    await expect(mockCall('GET', '/projects/corral/tasks/7/pull-request')).resolves.toMatchObject({ truncated: true, totalFiles: 34 })
+    await expect(mockCall('GET', '/projects/corral/tasks/6/pull-request')).rejects.toMatchObject({ body: { code: 'no_pull_request' } })
+    await expect(mockCall('GET', '/projects/corral/pull-requests/9999')).rejects.toMatchObject({ body: { code: 'pull_request_unavailable' } })
+  })
+
   it('serves a project, its tasks by view, a task and an epic', async () => {
     const [project] = await mockCall<Project[]>('GET', '/projects')
     const all = await mockCall<Task[]>('GET', `/projects/${project!.slug}/tasks?view=all`)
@@ -95,7 +105,7 @@ describe('prototype mock API', () => {
       question: null, plan: { id: 'plan-1', version: 1, epicCount: 1, taskCount: 3 }
     })
     expect(threads.every(i => !('body' in i))).toBe(true)
-    expect(inbox.needsYou.filter(i => i.type !== 'plan_thread' && i.type !== 'release_notes').map(i => i.type).sort()).toEqual(['blocked', 'epic_conflict', 'epic_review', 'failed', 'human_review', 'human_review', 'human_review'])
+    expect(inbox.needsYou.filter(i => i.type !== 'plan_thread' && i.type !== 'release_notes').map(i => i.type).sort()).toEqual(['blocked', 'epic_conflict', 'epic_review', 'failed', 'human_review', 'human_review', 'human_review', 'question'])
     expect(threads.some(i => i.sessionId === 's-idle')).toBe(false)
   })
 

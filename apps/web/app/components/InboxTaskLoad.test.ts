@@ -5,7 +5,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import { api } from '~/composables/useApi'
-import { agents, inbox, projects, tasks } from '~/prototype/fixtures'
+import { agents, inbox, projects, pullRequestDetails, tasks } from '~/prototype/fixtures'
 import { applyEvent, invalidateKeys } from '~/queries/dependencies'
 import { keys } from '~/queries/keys'
 import { testQueryClient } from '~/queries/mount-with-query'
@@ -15,6 +15,7 @@ import InboxPanelActions from '~/components/InboxPanelActions.vue'
 import InboxPanelArtifacts from '~/components/InboxPanelArtifacts.vue'
 import InboxPanelDetails from '~/components/InboxPanelDetails.vue'
 import InboxMobileItem from '~/components/InboxMobileItem.vue'
+import InboxPanelDiff from '~/components/InboxPanelDiff.vue'
 import InboxPanelMeta from '~/components/InboxPanelMeta.vue'
 import InboxPanelThumbBar from '~/components/InboxPanelThumbBar.vue'
 import InboxPanelTray from '~/components/InboxPanelTray.vue'
@@ -27,6 +28,7 @@ import InboxItemPage from '~/pages/inbox/[itemId].vue'
 vi.mock('~/composables/useApi', () => ({
   api: {
     inbox: { get: vi.fn(), act: vi.fn() },
+    projects: { pullRequest: vi.fn() },
     tasks: { byRef: vi.fn(), evidence: vi.fn(), reviews: vi.fn(), designs: vi.fn(), comment: vi.fn() },
     deployments: { read: vi.fn() },
     attachments: { upload: vi.fn() }
@@ -71,7 +73,7 @@ const alertStub = vue.defineComponent({
   setup: props => () => vue.h('div', { 'data-alert': true }, [props.title, ...(props.actions ?? []).map((a: { label: string, onClick: () => void }) => vue.h('button', { onClick: a.onClick }, a.label))])
 })
 
-async function mountInbox(type: 'human_review' | 'failed' | 'question', taskRef?: string, dockedTask: string | null = null, selection = true, editTask = (task: (typeof tasks)[number]) => task, realComposer = false, mobile = false) {
+async function mountInbox(type: 'human_review' | 'failed' | 'question', taskRef?: string, dockedTask: string | null = null, selection = true, editTask = (task: (typeof tasks)[number]) => task, realComposer = false, mobile = false, editApi = () => {}) {
   for (const name of ['ref', 'shallowRef', 'computed', 'watch', 'watchEffect', 'onMounted', 'onBeforeUnmount', 'nextTick'] as const) vi.stubGlobal(name, vue[name])
   const fixture = inbox()
   if (type === 'question') {
@@ -106,12 +108,14 @@ async function mountInbox(type: 'human_review' | 'failed' | 'question', taskRef?
   vi.mocked(api.tasks.evidence).mockResolvedValue([])
   vi.mocked(api.tasks.reviews).mockResolvedValue([])
   vi.mocked(api.tasks.designs).mockResolvedValue([])
+  vi.mocked(api.projects.pullRequest).mockReset().mockResolvedValue(pullRequestDetails[0]!)
+  editApi()
   const client = testQueryClient()
   // As Nuxt renders the child: keyed by its path
   const NuxtPage = vue.defineComponent({ setup: () => () => params.itemId ? vue.h(InboxItemPage, { key: params.itemId }) : null })
   const wrapper = mount(InboxPage, { global: {
     plugins: [[VueQueryPlugin, { queryClient: client }]],
-    components: { NuxtPage, InboxPanel, ...(mobile && { InboxMobileItem, MobilePageHeader: plain }), InboxPanelThumbBar, InboxPanelActions, InboxPanelArtifacts, InboxPanelDetails, InboxPanelMeta, InboxPanelTray, InboxPanelVerdict, InboxReleaseNotes, EvidenceList: evidenceStub, PromptComposer: realComposer ? PromptComposer : composerStub, UChatPrompt: vue.defineComponent({ setup: (_, { slots }) => () => vue.h('div', [slots.header?.(), slots.footer?.()]) }), UAlert: alertStub, UButton: buttonStub, UTabs: tabsStub, UDashboardPanel: plain },
+    components: { NuxtPage, InboxPanel, ...(mobile && { InboxMobileItem, MobilePageHeader: plain }), InboxPanelThumbBar, InboxPanelActions, InboxPanelArtifacts, InboxPanelDetails, InboxPanelDiff, InboxPanelMeta, InboxPanelTray, InboxPanelVerdict, InboxReleaseNotes, EvidenceList: evidenceStub, PromptComposer: realComposer ? PromptComposer : composerStub, UChatPrompt: vue.defineComponent({ setup: (_, { slots }) => () => vue.h('div', [slots.header?.(), slots.footer?.()]) }), UAlert: alertStub, UButton: buttonStub, UTabs: tabsStub, UDashboardPanel: plain },
     stubs: { UModal: true, EvidenceViewer: true, InboxMessage: true, InboxDesignReviewLink: true, UBadge: true, UInput: true, UIcon: true, USkeleton: true, USelectMenu: true, MarkdownText: true, TaskFlyout: true, AgentAvatar: true, ProjectThumbnail: true, PlanThreadRow: true, NuxtLink: true, InboxMobile: true, ...(!mobile && { InboxMobileItem: true }) }
   } })
   await flushPromises()
@@ -525,6 +529,115 @@ it('labels a design approval and advances without a live refresh closing the fly
   }
 })
 
+it('shows PR description and Code diff N on a code review, counting every changed file', async () => {
+  const { wrapper, openTab } = await mountInbox('human_review', 'COR-5')
+  try {
+    expect(api.projects.pullRequest).toHaveBeenCalledWith('corral', 64)
+    vi.mocked(api.projects.pullRequest).mockClear()
+    expect(wrapper.get('[data-tab="diff"]').text()).toBe(`Code diff ${pullRequestDetails[0]!.totalFiles}`)
+    await openTab('pr')
+    expect(wrapper.get('[data-testid="inbox-pr-description"]').text()).toContain('#64')
+    await openTab('diff')
+    expect(wrapper.findAll('[data-testid="inbox-diff-file"]')).toHaveLength(pullRequestDetails[0]!.files.length)
+    expect(api.projects.pullRequest).not.toHaveBeenCalled()
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it.each([
+  ['a design', 'design'],
+  ['a spike', 'spike']
+] as const)('shows neither PR tab on %s, even with a PR', async (_, type) => {
+  const { wrapper } = await mountInbox('human_review', 'COR-5', null, true, task => ({ ...task, type }))
+  try {
+    expect(wrapper.find('[data-tab="overview"]').exists()).toBe(true)
+    expect(wrapper.find('[data-tab="pr"]').exists()).toBe(false)
+    expect(wrapper.find('[data-tab="diff"]').exists()).toBe(false)
+    expect(api.projects.pullRequest).not.toHaveBeenCalled()
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('shows neither PR tab on an item without a PR', async () => {
+  const item = inbox().needsYou.find(i => i.type === 'failed' && !i.prUrl)!
+  const { wrapper } = await mountInbox('failed', item.taskRef!)
+  try {
+    expect(wrapper.find('[data-tab="overview"]').exists()).toBe(true)
+    expect(wrapper.find('[data-tab="pr"]').exists()).toBe(false)
+    expect(wrapper.find('[data-tab="diff"]').exists()).toBe(false)
+    expect(api.projects.pullRequest).not.toHaveBeenCalled()
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('shows the error and Retry in the PR tabs with the rest of the panel working', async () => {
+  const { wrapper, item, primary, openTab, alert } = await mountInbox('human_review', 'COR-5', null, true, task => task, false, false, () => {
+    vi.mocked(api.projects.pullRequest).mockRejectedValue(new Error('GitHub couldn\'t return PR #64'))
+  })
+  try {
+    expect(wrapper.get('[data-tab="diff"]').text()).toBe('Code diff')
+    await openTab('diff')
+    expect(alert().text()).toContain('Couldn\'t load this pull request')
+    await openTab('pr')
+    expect(alert().text()).toContain('Retry')
+    await openTab('overview')
+    expect(alert().exists()).toBe(false)
+    await primary().trigger('click')
+    await flushPromises()
+    expect(api.inbox.act).toHaveBeenCalledWith((item as { taskId: string }).taskId, expect.objectContaining({ action: 'approve' }))
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('reloads the PR through Retry, back through its loading state', async () => {
+  const { wrapper, openTab, alert } = await mountInbox('human_review', 'COR-5', null, true, task => task, false, false, () => {
+    vi.mocked(api.projects.pullRequest).mockRejectedValue(new Error('Runner offline'))
+  })
+  try {
+    await openTab('pr')
+    let finish = (_: (typeof pullRequestDetails)[number]) => {}
+    vi.mocked(api.projects.pullRequest).mockReturnValue(new Promise((resolve) => {
+      finish = resolve
+    }))
+    await alert().find('button').trigger('click')
+    expect(wrapper.find('[data-testid="inbox-pr-loading"]').exists()).toBe(true)
+    finish(pullRequestDetails[0]!)
+    await flushPromises()
+    expect(alert().exists()).toBe(false)
+    expect(wrapper.find('[data-testid="inbox-pr-description"]').exists()).toBe(true)
+    expect(wrapper.get('[data-tab="diff"]').text()).toBe(`Code diff ${pullRequestDetails[0]!.totalFiles}`)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('refetches the open PR when a run on its task ends, not while one is going', async () => {
+  const { wrapper, openTab, emitLive } = await mountInbox('human_review', 'COR-5')
+  try {
+    await openTab('diff')
+    const run = { id: 'r-1', agentId: 'a-1', projectId: 'p-corral', taskRef: 'COR-5', endedAt: null }
+    vi.mocked(api.projects.pullRequest).mockClear()
+    await emitLive({ type: 'run.updated', run })
+    await flushPromises()
+    expect(api.projects.pullRequest).not.toHaveBeenCalled()
+    await emitLive({ type: 'run.updated', run: { ...run, taskRef: 'COR-6', endedAt: inbox().activity[0]!.at } })
+    await flushPromises()
+    expect(api.projects.pullRequest).not.toHaveBeenCalled()
+    const pushed = { ...pullRequestDetails[0]!, totalFiles: 9 }
+    vi.mocked(api.projects.pullRequest).mockResolvedValue(pushed)
+    await emitLive({ type: 'run.updated', run: { ...run, endedAt: inbox().activity[0]!.at } })
+    await flushPromises()
+    expect(api.projects.pullRequest).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-tab="diff"]').text()).toBe('Code diff 9')
+  } finally {
+    wrapper.unmount()
+  }
+})
+
 it('sends nothing for unticked human checks, opens Criteria and says why, then approves once ticked', async () => {
   const check = { id: 'check', position: 0, text: 'Looks right', met: null, checkedByHuman: true }
   const { wrapper, primary, alert, composer } = await mountInbox('human_review', 'COR-5', null, true, task => ({ ...task, acceptanceCriteria: [check] }))
@@ -631,8 +744,8 @@ for (const type of ['human_review', 'failed'] as const) {
 describe('on a phone', () => {
   let mounted: { unmount: () => void } | undefined
   afterEach(() => mounted?.unmount())
-  const phone = async (type: 'human_review' | 'failed' | 'question' = 'human_review', ref = 'COR-5', edit = (t: (typeof tasks)[number]) => t) => {
-    const view = await mountInbox(type, ref, null, true, edit, false, true)
+  const phone = async (type: 'human_review' | 'failed' | 'question' = 'human_review', ref = 'COR-5', edit = (t: (typeof tasks)[number]) => t, editApi = () => {}) => {
+    const view = await mountInbox(type, ref, null, true, edit, false, true, editApi)
     mounted = view.wrapper
     return view
   }
@@ -739,5 +852,25 @@ describe('on a phone', () => {
     await view.primary().trigger('click')
     await flushPromises()
     expect(api.inbox.act).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: 'resolve', to: 'in_progress' }))
+  })
+
+  it('shows the PR error and Retry in its tabs', async () => {
+    const view = await phone('human_review', 'COR-5', t => t, () => {
+      vi.mocked(api.projects.pullRequest).mockRejectedValue(new Error('Runner offline'))
+    })
+    await view.openTab('diff')
+    expect(view.alert().text()).toContain('Couldn\'t load this pull request')
+    expect(view.alert().text()).toContain('Retry')
+    expect(view.wrapper.find('[data-testid="inbox-thumb-bar"]').exists()).toBe(true)
+  })
+
+  it('shows no action bar on a read-only item', async () => {
+    const view = await phone()
+    for (const read of [inbox().activity[0]!, inbox().resolved[0]!]) {
+      view.params.itemId = read.id
+      await flushPromises()
+      expect(view.wrapper.find('[data-testid="inbox-panel-option-d"]').exists()).toBe(true)
+      expect(view.wrapper.find('[data-testid="inbox-thumb-bar"]').exists()).toBe(false)
+    }
   })
 })

@@ -50,7 +50,8 @@ import { checkAvatar, getProfile, patchProfile, readAvatar, setAgentAvatar, setU
 import { getEpic, listEpics, patchEpic, setEpicDependencies } from './epics.ts'
 import type { EventBus } from './events.ts'
 import { loadInbox } from './inbox.ts'
-import { listPullRequests } from './pull-requests.ts'
+import type { GitHubClient } from './github.ts'
+import { listPullRequests, readPullRequest } from './pull-requests.ts'
 import { createProject, findProjectBySlug, listProjects, patchProject, setProjectThumbnail, toProject } from './projects.ts'
 import type { BlobStore } from './blob-store.ts'
 import type { Orchestrator } from './orchestrator.ts'
@@ -81,6 +82,7 @@ export interface AppDeps {
   actor: Actor
   runner: RunnerHub
   orchestrator: Orchestrator
+  github: GitHubClient
   blobs: BlobStore
   transcripts: Transcripts
   plans: PlanService
@@ -102,7 +104,7 @@ const taskNumber = (value: string) => {
   return number
 }
 
-export function createApp({ db, events, actor, runner, orchestrator, blobs, transcripts, plans, releaseNotes }: AppDeps) {
+export function createApp({ db, events, actor, runner, orchestrator, github, blobs, transcripts, plans, releaseNotes }: AppDeps) {
   const repos = new RepoCatalog(db, runner)
 
   const publishTask = async (taskId: string) => {
@@ -333,11 +335,24 @@ export function createApp({ db, events, actor, runner, orchestrator, blobs, tran
       return c.json(await listPullRequests(db, orchestrator.merges, project))
     })
 
+    // Any PR on the project's repository: its description and capped diff
+    .get('/projects/:slug/pull-requests/:number', async (c) => {
+      const project = await findProjectBySlug(db, c.req.param('slug'))
+      return c.json(await readPullRequest(github, project, taskNumber(c.req.param('number'))))
+    })
+
     .post('/projects/:slug/tasks', validate('json', createTaskInput), async (c) => {
       const project = await findProjectBySlug(db, c.req.param('slug'))
       const task = await loadTask(db, await createTask(db, project, c.req.valid('json'), actor))
       events.publish({ type: 'task.created', task })
       return c.json(task, 201)
+    })
+
+    .get('/projects/:slug/tasks/:number/pull-request', async (c) => {
+      const project = await findProjectBySlug(db, c.req.param('slug'))
+      const task = await loadTask(db, await findTaskId(db, project.id, taskNumber(c.req.param('number'))))
+      if (task.pr === null) throw new ApiFailure(404, { code: 'no_pull_request' })
+      return c.json(await readPullRequest(github, project, task.pr.number))
     })
 
     .get('/projects/:slug/tasks/:number', async (c) => {
