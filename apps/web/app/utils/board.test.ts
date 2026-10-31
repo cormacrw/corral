@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Task } from '@corral/contracts'
+import type { BoardFilters } from './board.ts'
 import { BOARD_COLUMNS, boardMove, boardView, EPIC_COLUMNS, epicOnBoard, epicStage, filterLabel, filtersFromQuery, filtersToQuery, hasEpicFilters, hasFilters, matchesEpicFilter, matchesFilter, MERGED_WINDOW_DAYS, NO_FILTERS, onBoard, sortColumn, swipeStep, taskAgentIds, unfinishedPrerequisites } from './board.ts'
 
 const DAY = 24 * 60 * 60 * 1000
@@ -353,7 +354,8 @@ describe('matchesEpicFilter', () => {
   })
 
   it('ignores the hidden filters when deciding whether anything is set', () => {
-    expect(hasEpicFilters({ ...NO_FILTERS, statuses: ['ready'] })).toBe(false)
+    const hidden: BoardFilters = { ...NO_FILTERS, statuses: ['ready'] }
+    expect(hasEpicFilters(hidden)).toBe(false)
     expect(hasEpicFilters({ ...NO_FILTERS, epics: ['e1'] })).toBe(true)
   })
 })

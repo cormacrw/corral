@@ -28,7 +28,9 @@ const filters = ref<BoardFilters>(filtersFromQuery(route.query))
 // the view last used, and the URL's view counts as used.
 const lastView = useLocalStorage<BoardView>('corral.board.view', 'tasks')
 const view = ref(boardView(route.query.view, boardView(lastView.value, 'tasks')))
-watch(view, (next) => { lastView.value = next }, { immediate: true })
+watch(view, (next) => {
+  lastView.value = next
+}, { immediate: true })
 const VIEW_ITEMS = [{ label: 'Tasks', value: 'tasks' }, { label: 'Epics', value: 'epics' }]
 let writing = 0
 watch([filters, view], async ([next, nextView]) => {
