@@ -1,6 +1,6 @@
 import { flowMetricsQuery } from '@corral/contracts'
 import { checkEpicDependencies, isTaskDone } from '@corral/core'
-import type { CreateAgentInput, CreateTaskInput, EpicReviewActionInput, InboxActionInput, PatchEpicInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
+import type { CreateAgentInput, CreateTaskInput, EpicReviewActionInput, HumanTransitionInput, InboxActionInput, PatchEpicInput, DraftSession, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
 import * as f from './fixtures'
@@ -128,6 +128,22 @@ route('GET', '/projects/:slug/tasks/:number', ([slug, number]) => taskIn(slug!, 
 route('POST', '/projects/:slug/tasks/:number/resume', ([slug, number]) => {
   const task = taskIn(slug!, number!)
   Object.assign(task, { paused: false, updatedAt: new Date().toISOString() })
+  emit({ type: 'task.updated', task })
+  return task
+})
+route('POST', '/projects/:slug/tasks/:number/transitions', ([slug, number], body) => {
+  const task = taskIn(slug!, number!)
+  const input = body as HumanTransitionInput
+  const to = { approve: 'ready', send_back: 'backlog', human_request_changes: 'in_progress' } as const
+  Object.assign(task, { status: input.type === 'resolve' ? input.to : to[input.type as keyof typeof to], statusReason: null, updatedAt: new Date().toISOString() })
+  emit({ type: 'task.updated', task })
+  return task
+})
+route('POST', '/projects/:slug/tasks/:number/designs/:version/approve', ([slug, number, version]) => {
+  const task = taskIn(slug!, number!)
+  const design = f.designVersions[task.id]?.find(v => v.version === Number(version)) ?? notFound()
+  design.status = 'approved'
+  Object.assign(task, { status: 'approved', updatedAt: new Date().toISOString() })
   emit({ type: 'task.updated', task })
   return task
 })
