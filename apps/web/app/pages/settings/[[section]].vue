@@ -46,10 +46,16 @@ async function saveName() {
   }
 }
 // The runner page shows the logins; the agents page needs them for the runtime menu
-const cliScan = useQuery(computed(() => ({ ...clisQuery(), enabled: section.value === 'runner' || section.value === 'agents' })))
+const usesClis = (s: string | null) => s === 'runner' || s === 'agents'
+const cliScan = useQuery(computed(() => ({ ...clisQuery(), enabled: usesClis(section.value) })))
 const clis = computed(() => cliScan.data.value ?? null)
 const cliError = computed(() => cliScan.error.value?.message ?? null)
 const scan = () => cliScan.refetch()
+// The page stays mounted between sections, and the query only rescans by itself
+// when it turns on, so a move straight from one of these to the other asks here
+watch(section, (s, previous) => {
+  if (usesClis(s) && usesClis(previous)) void scan()
+})
 
 const adding = ref(false)
 // Existing agents can switch to any detected runtime, keeping their current one listed
