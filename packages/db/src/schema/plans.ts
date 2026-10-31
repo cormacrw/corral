@@ -40,11 +40,11 @@ export const planSessions = pgTable('plan_sessions', {
   createdBy: actor('created_by'),
   createdAt: createdAt(),
   updatedAt: updatedAt()
-}, t => [index().on(t.projectId, t.updatedAt)])
+}, t => [index().on(t.projectId, t.updatedAt), unique('sessions_project_id_unique').on(t.projectId, t.id)])
 
 export const planMessages = pgTable('plan_messages', {
   id: uuid().primaryKey().defaultRandom(),
-  sessionId: uuid().notNull().references(() => planSessions.id, { onDelete: 'cascade' }),
+  sessionId: uuid().notNull(),
   // Questions are PM messages flagged as such
   role: text().$type<'human' | 'pm'>().notNull(),
   kind: text().$type<'message' | 'question' | 'error'>().notNull().default('message'),
@@ -78,6 +78,7 @@ export const plans = pgTable('plans', {
   approvedAt: timestamp({ withTimezone: true }),
   createdAt: createdAt()
 }, t => [
+  foreignKey({ name: 'plans_session_same_project_fk', columns: [t.projectId, t.sessionId], foreignColumns: [planSessions.projectId, planSessions.id] }).onDelete('cascade'),
   unique('plans_session_version_unique').on(t.sessionId, t.version),
   // Superseding an approved version preserves its approval history.
   check('plans_approval_tuple', sql`(${t.approvedBy} is null) = (${t.approvedAt} is null) and (${t.status} <> 'approved' or (${t.approvedBy} is not null and ${t.approvedAt} is not null))`)
