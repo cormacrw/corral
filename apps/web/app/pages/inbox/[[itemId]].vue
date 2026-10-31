@@ -122,12 +122,14 @@ async function loadTask(item: TaskInboxItem | null) {
     taskLoadFailed.value = false
     actionError.value = null
   }
-  // A human review carries its evidence in the message (design/inbox.md)
+  // A human review carries its evidence in the message (design/inbox.md), and
+  // any item's New row needs the files' real types
   const slug = live.state.value.projects.find(p => p.id === task.value?.projectId)?.slug
-  if (item?.type === 'human_review' && task.value && slug) {
+  const isReview = item?.type === 'human_review'
+  if ((isReview || item?.newArtifacts?.length) && task.value && slug) {
     const [loadedEvidence, loadedReviews] = await Promise.all([
       api.tasks.evidence(slug, task.value.number).catch(() => []),
-      api.tasks.reviews(slug, task.value.number).catch(() => [])
+      isReview ? api.tasks.reviews(slug, task.value.number).catch(() => []) : []
     ])
     if (!isCurrent()) return
     evidence.value = loadedEvidence

@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import type { InboxArtifact } from '@corral/contracts'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
@@ -184,6 +185,30 @@ it('shows the error instead of loading forever and keeps approval blocked when t
     expect(composer().props('submitLabel')).toBe('Task not loaded')
     expect(await submit()).toBe(false)
     expect(api.inbox.act).not.toHaveBeenCalled()
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('loads evidence for a non-review item only when it has new artifacts', async () => {
+  const failed = inbox().needsYou.find(i => i.type === 'failed' && i.taskRef)!
+  const { wrapper, item, refresh } = await mountInbox('failed', failed.taskRef!)
+  try {
+    const withArtifacts = (newArtifacts: InboxArtifact[]) => {
+      const data = inbox()
+      const needsYou = data.needsYou.map(i => i.id === item.id ? { ...i, newArtifacts } : i)
+      vi.mocked(api.inbox.get).mockImplementation(async () => ({ ...data, needsYou }))
+    }
+    withArtifacts([])
+    refresh()
+    await flushPromises()
+    vi.mocked(api.tasks.evidence).mockClear()
+    vi.mocked(api.tasks.reviews).mockClear()
+    withArtifacts([{ id: 'e1', kind: 'other', name: 'report.html', url: '/api/evidence/e1/file', taskRef: null, at: item.at }])
+    refresh()
+    await flushPromises()
+    expect(api.tasks.evidence).toHaveBeenCalled()
+    expect(api.tasks.reviews).not.toHaveBeenCalled()
   } finally {
     wrapper.unmount()
   }

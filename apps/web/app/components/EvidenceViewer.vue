@@ -10,6 +10,9 @@ const isVideo = (e: ViewerFile) => !!e.contentType?.startsWith('video/')
 // Logs, test output and requests: shown as text in the app's theme, not in
 // an iframe where the browser picks its own colours
 const isText = (e: ViewerFile) => !!e.contentType && (e.contentType.startsWith('text/') || /json|xml|yaml/.test(e.contentType))
+// Evidence is untrusted: an iframe would run HTML in the app's origin, so only
+// a PDF goes in one. Anything else that isn't shown above is a download.
+const isPdf = (e: ViewerFile) => !!e.contentType?.startsWith('application/pdf')
 const text = ref<string | null>(null)
 const textError = ref<string | null>(null)
 watch(open, async (item) => {
@@ -71,11 +74,22 @@ watch(open, async (item) => {
         >{{ text }}</pre>
       </template>
       <iframe
-        v-else-if="open"
+        v-else-if="open && isPdf(open)"
         :src="open.url ?? undefined"
         :title="open.fileName ?? undefined"
         class="h-[60vh] w-full rounded-md border border-default"
       />
+      <p
+        v-else-if="open"
+        class="text-sm text-muted"
+      >
+        This file can't be previewed.
+        <a
+          :href="open.url ?? undefined"
+          :download="open.fileName ?? ''"
+          class="text-primary hover:underline"
+        >Download</a>
+      </p>
     </template>
   </UModal>
 </template>

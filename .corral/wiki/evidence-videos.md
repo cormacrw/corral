@@ -24,3 +24,8 @@ it, such as a local dev runner, takes the fallback path.
 
 The viewer's Download link uses the `download` attribute. It only works
 same-origin, which holds because the web app proxies `/api`.
+
+Evidence is untrusted. The viewer shows images, video and text itself, frames
+only `application/pdf`, and offers everything else as a download, so stored HTML
+never runs in Corral's origin. A file with no known type, as in an Inbox New row
+before its evidence loads, takes that same download path.

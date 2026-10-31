@@ -9,6 +9,8 @@ const props = defineProps<{
   evidence?: Evidence[]
 }>()
 const open = ref<ViewerFile | null>(null)
+// Before evidence loads, or where there is none, the type is a guess from the
+// artifact's kind. Unknown stays null, which the viewer offers as a download.
 function file(artifact: InboxArtifact): ViewerFile {
   return props.evidence?.find(e => e.id === artifact.id) ?? {
     id: artifact.id,
@@ -83,7 +85,10 @@ function file(artifact: InboxArtifact): ViewerFile {
         </button>
       </template>
     </div>
-    <details class="min-w-0">
+    <details
+      v-if="item.body"
+      class="min-w-0"
+    >
       <summary class="min-h-11 cursor-pointer content-center rounded-md text-sm text-muted focus-visible:outline-2 focus-visible:outline-primary">
         Full message
       </summary>

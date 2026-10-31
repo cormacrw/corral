@@ -52,6 +52,33 @@ describe('InboxMessage', () => {
     expect(wrapper.find('[aria-label="New artifacts"]').exists()).toBe(false)
   })
 
+  it('offers an unknown file as a download, never in an iframe', async () => {
+    const wrapper = render('New report.', [{ ...screenshot, kind: 'other', name: 'report.html' }])
+    await wrapper.get('button').trigger('click')
+    expect(wrapper.find('iframe').exists()).toBe(false)
+    expect(wrapper.get('[data-title="report.html"] a').attributes('href')).toBe(screenshot.url)
+    expect(wrapper.get('[data-title="report.html"] a').attributes('download')).toBe('report.html')
+  })
+
+  it('shows no HTML evidence in an iframe even with its real type, and keeps PDFs viewable', async () => {
+    const evidence = (contentType: string) => [{ id: 'new', fileName: 'report', contentType, url: screenshot.url, kind: 'other', note: '', createdAt: screenshot.at } as Evidence]
+    const html = render('New report.', [{ ...screenshot, kind: 'other' }], evidence('TEXT/HTML'))
+    await html.get('button').trigger('click')
+    expect(html.find('iframe').exists()).toBe(false)
+    const pdf = render('New report.', [{ ...screenshot, kind: 'other' }], evidence('application/pdf'))
+    await pdf.get('button').trigger('click')
+    expect(pdf.get('iframe').attributes('src')).toBe(screenshot.url)
+  })
+
+  it('has no Full message control when there is no body', () => {
+    const wrapper = mount(InboxMessage, {
+      props: { item: { message: 'Blocked.', body: '' } },
+      global: { components: { MarkdownText, UModal: modal }, stubs: { UIcon: true } }
+    })
+    expect(wrapper.get('p').text()).toBe('Blocked.')
+    expect(wrapper.find('details').exists()).toBe(false)
+  })
+
   it('uses actual evidence MIME metadata for file viewing', async () => {
     const wrapper = render('New recording.', [{ ...screenshot, kind: 'other', name: 'recording.bin' }], [{
       id: 'new', fileName: 'recording.bin', contentType: 'video/webm', url: '/recording', kind: 'other', note: '', createdAt: screenshot.at
