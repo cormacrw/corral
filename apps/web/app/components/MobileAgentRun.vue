@@ -8,7 +8,7 @@ import { duration, isLiveRun, runBadge, runRef, runTitle, runTokens } from '~/ut
 // and a footer with the composer while it's live. The layout drops its
 // header and tab bar here.
 const props = defineProps<{ view: AgentRuns }>()
-const { name, agent, runs, events, now, selected, stop, sent } = props.view
+const { name, agent, pending, events, now, selected, stop, sent } = props.view
 const live = computed(() => !!selected.value && isLiveRun(selected.value))
 </script>
 
@@ -91,7 +91,7 @@ const live = computed(() => !!selected.value && isLiveRun(selected.value))
       />
     </div>
     <p
-      v-else-if="agent && runs.length > 0"
+      v-else-if="agent && !pending"
       class="flex-1 p-4 text-sm text-muted"
     >
       This run isn't in {{ agent.name }}'s recent runs.

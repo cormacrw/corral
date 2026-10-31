@@ -293,8 +293,8 @@ export class Orchestrator implements RunnerHandlers {
   // A line in the run's transcript from Corral itself
   async #note(runId: string, text: string): Promise<void> {
     const events: RunEvent[] = [{ type: 'system', text }]
-    await this.#d.transcripts.append(runId, events)
-    this.#d.events.publish({ type: 'run.events', runId, events })
+    const offset = await this.#d.transcripts.append(runId, events)
+    this.#d.events.publish({ type: 'run.events', runId, offset, events })
   }
 
   // Reads the kill switch; called once at startup
@@ -804,8 +804,8 @@ export class Orchestrator implements RunnerHandlers {
     if (!owner || owner.run.runnerId !== runnerId) return
     if (message.type === 'run.events') {
       // Transcript lines are kept even from a stale run: they're history, not writes
-      await transcripts.append(message.runId, message.events)
-      events.publish({ type: 'run.events', runId: message.runId, events: message.events })
+      const offset = await transcripts.append(message.runId, message.events)
+      events.publish({ type: 'run.events', runId: message.runId, offset, events: message.events })
       const usage = message.events.filter((e): e is Extract<RunEvent, { type: 'usage' }> => e.type === 'usage').at(-1)
       if (usage) {
         await db.update(runs).set({ inputTokens: usage.inputTokens, cacheReadTokens: usage.cacheReadTokens, outputTokens: usage.outputTokens }).where(eq(runs.id, message.runId))

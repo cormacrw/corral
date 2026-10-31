@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { shell } from '~/queries/shell'
 import { initials } from '~/utils/labels'
 
 // An agent's avatar, or the human's ("You"), with the working status dot
@@ -10,11 +11,10 @@ const props = withDefaults(defineProps<{
   size?: '2xs' | 'xs' | 'sm' | 'md' | 'lg' | 'xl' | '3xl'
   src?: string | null
 }>(), { working: false, size: 'sm', src: undefined })
-const live = useLive()
 const picture = computed(() => {
   if (props.src !== undefined) return props.src ?? undefined
-  if (props.name === 'You') return live.state.value.profile?.avatarUrl ?? undefined
-  return live.state.value.agents.find(a => a.name.toLowerCase() === props.name.toLowerCase())?.avatarUrl ?? undefined
+  if (props.name === 'You') return shell()?.profile.data.value?.avatarUrl ?? undefined
+  return shell()?.agents.data.value?.find(a => a.name.toLowerCase() === props.name.toLowerCase())?.avatarUrl ?? undefined
 })
 </script>
 

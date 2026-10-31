@@ -7,8 +7,11 @@ import type { PlanSessionDetail, ServerEvent } from '@corral/contracts'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
+import { VueQueryPlugin } from '@tanstack/vue-query'
 import { agents, planMessages, plans, planSessions, projects } from '~/prototype/fixtures'
 import { api } from '~/composables/useApi'
+import { applyEvent } from '~/queries/dependencies'
+import { testQueryClient } from '~/queries/mount-with-query'
 import PlanConversation from './PlanConversation.vue'
 
 vi.mock('~/composables/useApi', () => ({
@@ -25,13 +28,14 @@ const retryStart = vi.fn()
 const restored = vue.ref(null)
 const state = vue.ref({
   loaded: true, runner: { online: true }, agents, projects,
-  tasks: {}, runEvents: {} as Record<string, import('@corral/contracts').RunEvent[]>
+  tasks: {}
 })
 const flyout = {
   ref: vue.ref<string | null>(null), epic: vue.ref<string | null>(null), plan: vue.ref(false),
   openPlan: vi.fn(), close: vi.fn()
 }
 const toast = { add: vi.fn() }
+const client = testQueryClient()
 const stop = vi.fn()
 const push = vi.fn()
 const onApproved = vi.fn()
@@ -56,7 +60,8 @@ async function open(id = 's-1', mobile = false) {
   vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(mobile) }))
   const wrapper = mount(PlanConversation, {
     props: { sessionId: id, inbox: true, onApproved, onApproving },
-    global: { plugins: [[VueQueryPlugin, { queryClient: client }]],
+    global: {
+      plugins: [[VueQueryPlugin, { queryClient: client }]],
       stubs: {
         PromptComposer: true, PlanQuestion: true,
         AgentAvatar: true, PlanTurnSteps: true, PlanDetail: true,
@@ -102,11 +107,10 @@ beforeEach(() => {
     subscribe: (callback: typeof listener) => {
       listener = callback
       return stop
-    },
-    watchRun: (id: string, events: import('@corral/contracts').RunEvent[]) => { state.value.runEvents[id] = events }
+    }
   }))
   state.value.runner.online = true
-  state.value.runEvents = {}
+  client.clear()
   flyout.plan.value = false
   vi.mocked(api.plan.session).mockImplementation(async id => detail(id))
   vi.mocked(api.plan.read).mockResolvedValue({ ...planSessions[0]!, unread: false })
@@ -175,7 +179,7 @@ describe('Inbox shared Plan conversation', () => {
     expect(api.plan.message).toHaveBeenCalledWith('s-1', 'Keep this small.', undefined)
     listener({ type: 'plan.session', session: { ...planSessions.find(s => s.id === 's-1')!, activeRunId: 'live-run' } })
     await flushPromises()
-    state.value.runEvents['live-run'] = [{ type: 'message', text: 'I am checking the scope.' }]
+    applyEvent(client, { type: 'run.events', runId: 'live-run', offset: 0, events: [{ type: 'message', text: 'I am checking the scope.' }] })
     await vue.nextTick()
     expect(wrapper.get('[data-transcript]').text()).toContain('I am checking the scope.')
     expect(wrapper.findComponent({ name: 'PromptComposer' }).vm.$attrs.disabled).toBe(true)

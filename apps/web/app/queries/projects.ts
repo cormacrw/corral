@@ -1,13 +1,26 @@
-import { queryOptions } from '@tanstack/vue-query'
+import { partialMatchKey, queryOptions } from '@tanstack/vue-query'
 import type { CreateProjectInput, FlowMetricsQuery, PatchProjectInput, Project } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { defineMutation } from './dependencies'
 import { keys } from './keys'
 
+export const PULL_REQUESTS_POLL_MS = 30_000
+
 export const projectsQuery = () => queryOptions({ queryKey: keys.projects.list(), queryFn: () => api.projects.list() })
 export const projectQuery = (slug: string) => queryOptions({ queryKey: keys.projects.detail(slug), queryFn: () => api.projects.get(slug) })
-export const flowQuery = (slug: string, window: FlowMetricsQuery['window']) => queryOptions({ queryKey: keys.projects.flow(slug, window), queryFn: () => api.projects.flow(slug, window) })
-export const pullRequestsQuery = (slug: string) => queryOptions({ queryKey: keys.projects.pullRequests(slug), queryFn: () => api.projects.pullRequests(slug) })
+// Keeps the chart on screen while another window loads, but not another project's
+export const flowQuery = (slug: string, window: FlowMetricsQuery['window']) => queryOptions({
+  queryKey: keys.projects.flow(slug, window),
+  queryFn: () => api.projects.flow(slug, window),
+  placeholderData: (previous, query) => query && partialMatchKey(query.queryKey, keys.projects.flow(slug)) ? previous : undefined
+})
+// CI and the base branch move on GitHub without an event, so this polls, only
+// while the tab is visible (refetchIntervalInBackground defaults to false)
+export const pullRequestsQuery = (slug: string) => queryOptions({
+  queryKey: keys.projects.pullRequests(slug),
+  queryFn: () => api.projects.pullRequests(slug),
+  refetchInterval: PULL_REQUESTS_POLL_MS
+})
 
 export const createProject = defineMutation<Project, CreateProjectInput>({
   mutationFn: input => api.projects.create(input),

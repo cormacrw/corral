@@ -239,8 +239,9 @@ route('POST', '/projects/:slug/runs/:runId/messages', ([slug, runId], body) => {
   ;(f.comments[run.taskId!] ??= []).push(comment)
   emit({ type: 'comment.created', comment })
   const deliver = (events: RunEvent[]) => {
-    ;(f.runEvents[run.id] ??= []).push(...events)
-    emit({ type: 'run.events', runId: run.id, events })
+    const offset = (f.runEvents[run.id] ??= []).length
+    f.runEvents[run.id]!.push(...events)
+    emit({ type: 'run.events', runId: run.id, offset, events })
   }
   setTimeout(() => deliver([{ type: 'message', text: comment.body }]), 300)
   setTimeout(() => deliver([{ type: 'message', text: 'Got it, I\'ll do that next.' }]), 1200)
@@ -425,8 +426,9 @@ route('POST', '/plan/sessions/:id/messages', ([id], body) => {
   for (let i = 1; i <= updates.length; i++) {
     setTimeout(() => {
       const events: RunEvent[] = [updates[i - 1]!]
-      ;(f.runEvents[runId] ??= []).push(...events)
-      emit({ type: 'run.events', runId, events })
+      const offset = (f.runEvents[runId] ??= []).length
+      f.runEvents[runId]!.push(...events)
+      emit({ type: 'run.events', runId, offset, events })
     }, i * 400)
   }
   setTimeout(() => {
