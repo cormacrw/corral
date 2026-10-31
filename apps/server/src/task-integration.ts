@@ -45,6 +45,8 @@ export interface IntegrationDeps {
 
 // `settled` is told about every task whose status this changed
 type Settled = (taskId: string) => Promise<void>
+// Whether the kill switch or the update hold is on right now
+type Stopped = () => boolean
 
 // Moves approved PR-free tasks onto their epic branch (D27, flows.md section 4),
 // one at a time per epic. Every step is journaled in task_integration_operations
@@ -72,7 +74,7 @@ export class TaskIntegrator {
     return this.#busy.size
   }
 
-  async tick(stopped: () => boolean): Promise<void> {
+  async tick(stopped: Stopped): Promise<void> {
     const { db } = this.#d
     if (!this.#d.runner.integrationRunner()) return
     const active = await db.select({ epicId: operations.epicId }).from(operations).where(inArray(operations.state, [...ACTIVE]))
@@ -100,11 +102,11 @@ export class TaskIntegrator {
       .orderBy(asc(tasks.updatedAt), asc(tasks.id))
   }
 
-  async #advance(epicId: string, stopped: () => boolean): Promise<void> {
+  async #advance(epicId: string, stopped: Stopped): Promise<void> {
     for (let n = 0; n < MAX_OPERATIONS_PER_PASS && !stopped(); n++) {
       const [active] = await this.#d.db.select().from(operations).where(and(eq(operations.epicId, epicId), inArray(operations.state, [...ACTIVE])))
       const operation = active ?? await this.#begin(epicId)
-      if (!operation || !await this.#step(operation)) return
+      if (!operation || !await this.#step(operation, stopped)) return
     }
   }
 
@@ -152,16 +154,17 @@ export class TaskIntegrator {
   }
 
   // One step of the operation. True when the epic should be looked at again now.
-  async #step(operation: OperationRow): Promise<boolean> {
+  async #step(operation: OperationRow, stopped: Stopped): Promise<boolean> {
     const ctx = await this.#context(operation)
-    if (operation.state === 'pending') return this.#prepare(operation, ctx)
-    if (operation.state === 'running' && this.#awaitingChecks.has(operation.id)) return this.#gate(operation, ctx)
-    return this.#reconcile(operation, ctx)
+    if (operation.state === 'pending') return this.#prepare(operation, ctx, stopped)
+    if (operation.state === 'running' && this.#awaitingChecks.has(operation.id)) return this.#gate(operation, ctx, stopped)
+    return this.#reconcile(operation, ctx, stopped)
   }
 
-  async #prepare(pending: OperationRow, ctx: Context): Promise<boolean> {
+  async #prepare(pending: OperationRow, ctx: Context, stopped: Stopped): Promise<boolean> {
     const { db, runner } = this.#d
     const { submission, task, project, epic } = ctx
+    if (stopped()) return false
     if (task.status !== 'ready_to_merge' || task.deletedAt) return this.#fail(pending, ctx, CANCELLED)
     if (task.paused || project.paused) return false
     const runnerId = runner.integrationRunner()
@@ -202,7 +205,7 @@ export class TaskIntegrator {
       case 'prepared': {
         const [ready] = await db.update(operations).set({ resultHeadSha: prepared.commitSha, updatedAt: this.#now() }).where(eq(operations.id, operation.id)).returning()
         // Preparing can take minutes: the gate needs the task as it is now
-        return this.#gate(ready!, await this.#context(ready!))
+        return this.#gate(ready!, await this.#context(ready!), stopped)
       }
     }
   }
@@ -210,9 +213,12 @@ export class TaskIntegrator {
   // The last look before the shared branch moves: the task is still approved
   // for this submission, and the exact candidate has passed what it can be
   // checked by. Required checks that only run on the epic PR stay at its merge.
-  async #gate(operation: OperationRow, ctx: Context): Promise<boolean> {
+  // The kill switch and the update hold are read at each step here, because any
+  // wait can outlast them. A stopped operation stays running, to resume as it was.
+  async #gate(operation: OperationRow, ctx: Context, stopped: Stopped): Promise<boolean> {
     const { db, runner } = this.#d
     const { submission, task, project, epic } = ctx
+    if (stopped()) return false
     if (task.status !== 'ready_to_merge' || task.deletedAt || task.headSha !== submission.agentApprovedHeadSha) return this.#fail(operation, ctx, CANCELLED)
     // Nothing shared moves while paused; the operation carries on afterwards
     if (task.paused || project.paused) return false
@@ -221,6 +227,7 @@ export class TaskIntegrator {
       this.#awaitingChecks.add(operation.id)
       return false
     }
+    if (stopped()) return false
     this.#awaitingChecks.delete(operation.id)
     if (verdict.state === 'failed') {
       await this.#fail(operation, ctx, `Required checks failed on candidate ${operation.resultHeadSha}: ${verdict.checks.map(c => c.name).join(', ')}`)
@@ -239,6 +246,13 @@ export class TaskIntegrator {
     const [pushing] = await db.update(operations).set({ state: 'reconciling', updatedAt: this.#now() })
       .where(and(eq(operations.id, operation.id), eq(operations.state, 'running'), eq(operations.leaseEpoch, operation.leaseEpoch))).returning()
     if (!pushing) return false
+    // Nothing was sent, so this isn't an unknown result. The original time keeps
+    // the age of its checks.
+    if (stopped()) {
+      await db.update(operations).set({ state: 'running', updatedAt: operation.updatedAt })
+        .where(and(eq(operations.id, operation.id), eq(operations.state, 'reconciling'), eq(operations.leaseEpoch, operation.leaseEpoch)))
+      return false
+    }
     let error: string | null
     try {
       error = (await runner.requestOn<'integration_push'>(operation.runnerId!, {
@@ -269,7 +283,7 @@ export class TaskIntegrator {
   // Nothing is assumed about an operation found part-way, or one whose push
   // has an unknown result: the remote says what happened. A failed read leaves
   // it as it is for the next pass.
-  async #reconcile(operation: OperationRow, ctx: Context): Promise<boolean> {
+  async #reconcile(operation: OperationRow, ctx: Context, stopped: Stopped): Promise<boolean> {
     const { runner } = this.#d
     const runnerId = runner.integrationRunner()
     if (!runnerId) return false
@@ -287,7 +301,7 @@ export class TaskIntegrator {
     if (remote.targetSha !== operation.expectedTargetSha) return this.#fail(operation, ctx, TARGET_MOVED)
     if (operation.state === 'reconciling') return this.#fail(operation, ctx, operation.error ?? 'The push did not reach the epic branch')
     // Found running after a restart, with the branch where it was left
-    if (operation.resultHeadSha && operation.runnerId && runner.isOnline(operation.runnerId)) return this.#gate(operation, ctx)
+    if (operation.resultHeadSha && operation.runnerId && runner.isOnline(operation.runnerId)) return this.#gate(operation, ctx, stopped)
     return this.#fail(operation, ctx, INTERRUPTED)
   }
 

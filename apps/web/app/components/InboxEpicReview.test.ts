@@ -60,4 +60,40 @@ describe('InboxEpicReview', () => {
     await flushPromises()
     expect(review).toHaveBeenCalledWith('e', { action: 'approve', headSha: 'head', confirmedCriteria: ['c'], confirmedTasks: ['t1'] })
   })
+
+  async function ticked() {
+    const wrapper = render()
+    for (const box of wrapper.findAll('input[type="checkbox"]')) await box.setValue(true)
+    expect(wrapper.text()).toContain('2 of 2 human checks confirmed')
+    return wrapper
+  }
+
+  it('needs fresh ticks when the same epic comes back on a new head', async () => {
+    const wrapper = await ticked()
+    await wrapper.setProps({ item: { ...item, headSha: 'new-head' } })
+    expect(wrapper.text()).toContain('0 of 2 human checks confirmed')
+    const approve = wrapper.findAll('button').find(b => b.text() === 'Approve')!
+    await approve.trigger('click')
+    expect(review).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Confirm every human check first')
+
+    for (const box of wrapper.findAll('input[type="checkbox"]')) await box.setValue(true)
+    await approve.trigger('click')
+    await flushPromises()
+    expect(review).toHaveBeenCalledWith('e', { action: 'approve', headSha: 'new-head', confirmedCriteria: ['c'], confirmedTasks: ['t1'] })
+  })
+
+  it('needs fresh ticks when an owed check changes on the same head', async () => {
+    const wrapper = await ticked()
+    const [one, two, three] = item.tasks
+    const reworded = { ...two!, task: { ...two!.task, acceptanceCriteria: [{ ...two!.task.acceptanceCriteria[0]!, text: 'On a real Android' }] } }
+    await wrapper.setProps({ item: { ...item, tasks: [one!, reworded, three!] } })
+    expect(wrapper.text()).toContain('0 of 2 human checks confirmed')
+  })
+
+  it('keeps ticks through a refresh that changes nothing owed', async () => {
+    const wrapper = await ticked()
+    await wrapper.setProps({ item: { ...item, body: 'Still fine', tasks: item.tasks.map(t => ({ ...t })) } })
+    expect(wrapper.text()).toContain('2 of 2 human checks confirmed')
+  })
 })
