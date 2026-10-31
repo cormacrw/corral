@@ -1,7 +1,7 @@
 import type { AgentTool, AuditEntry, EpicDetail, PlanSessionDetail, RunJob, Task } from '@corral/contracts'
 import { TASK_STATUSES } from '@corral/core'
 import { schema } from '@corral/db'
-import { eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -184,15 +184,27 @@ describe('PM task and epic tools', () => {
     expect(await call('update_task', { taskRef: task.ref, paused: false })).toMatchObject({ ok: true, result: { paused: false } })
     await get(task)
     await history(task)
+    const idle = await t.createTask(slug)
+    const activity = async () => (await history(idle)).filter(e => e.action.startsWith('task.')).map(e => e.action)
+    expect(await call('update_task', { taskRef: idle.ref, paused: true })).toMatchObject({ ok: true })
+    expect(await call('update_task', { taskRef: idle.ref, paused: false })).toMatchObject({ ok: true })
+    expect(await activity()).toEqual(['task.created', 'task.paused', 'task.resumed'])
+    await t.db.update(schema.tasks).set({ status: 'merged' }).where(eq(schema.tasks.id, idle.id))
+    expect(await call('update_task', { taskRef: idle.ref, paused: true })).toMatchObject({ ok: false, error: 'conflict' })
+    expect(await get(idle)).toMatchObject({ paused: false })
   })
 
-  it('confirms board moves, records the reason and returns the board error for invalid moves', { timeout: 30_000 }, async () => {
+  it('confirms board moves, records the reason and words the board error for invalid moves', { timeout: 30_000 }, async () => {
     const task = await t.createTask(slug)
     // D29 requires human confirmation for human-only board transitions.
     const id = await action('move_task', { taskRef: task.ref, transition: { type: 'send_back' }, reason: 'Needs refinement' })
     const board = await request('POST', `/api/projects/${slug}/tasks/${task.number}/transitions`, { type: 'send_back' })
     const failed = await resolve(id)
-    expect(failed.body).toMatchObject({ pendingAction: { status: 'failed', error: JSON.stringify((board.body as { error: unknown }).error) } })
+    expect(board.body).toMatchObject({ error: { code: 'transition_rejected', reason: { code: 'invalid_transition', status: 'backlog', event: 'send_back' } } })
+    expect(failed.body).toMatchObject({ pendingAction: { status: 'failed', error: 'This move doesn\'t apply to a task in Backlog' } })
+    const [result] = await t.db.select().from(schema.planMessages).where(and(eq(schema.planMessages.sessionId, session.id), eq(schema.planMessages.kind, 'action_result'))).orderBy(desc(schema.planMessages.createdAt)).limit(1)
+    expect(result!.text).toContain('This move doesn\'t apply to a task in Backlog')
+    expect(result!.text).not.toContain('{')
     await t.db.update(schema.tasks).set({ status: 'ready' }).where(eq(schema.tasks.id, task.id))
     const move = await action('move_task', { taskRef: task.ref, transition: { type: 'send_back' }, reason: 'Needs refinement' })
     expect((await get(task)).status).toBe('ready')

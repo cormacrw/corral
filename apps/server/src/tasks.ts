@@ -446,7 +446,8 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
       await applyTransition(tx, task, project, { type: 'require_human_check' }, { kind: 'system', component: 'server' }, { event: 'require_human_check' })
     }
     if (dependsOn) await setDependencies(tx, project, task, dependsOn)
-    await appendAudit(tx, { projectId: project.id, taskId, actor }, auditEvent('task.updated', { changed: Object.keys(input) }))
+    // An empty input still ran the merged guard above, but it edited nothing
+    if (Object.keys(input).length > 0) await appendAudit(tx, { projectId: project.id, taskId, actor }, auditEvent('task.updated', { changed: Object.keys(input) }))
     const changedFields = Object.keys(fields).filter(k => JSON.stringify(fields[k as keyof typeof fields]) !== JSON.stringify(task[k as keyof TaskRow]))
     if (dependsOn !== undefined) changedFields.push('dependsOn')
     return descriptionChanged || criteriaChange || changedFields.length ? { description: descriptionChanged, criteria: criteriaChange, fields: changedFields.filter(k => k !== 'description') } : null

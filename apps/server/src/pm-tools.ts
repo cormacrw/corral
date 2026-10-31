@@ -4,7 +4,7 @@ import { schema, type Database } from '@corral/db'
 import { and, eq, isNull } from 'drizzle-orm'
 import { z } from 'zod'
 import { appendAudit, auditEvent } from './audit.ts'
-import { ApiFailure, fromDatabaseError } from './errors.ts'
+import { ApiFailure, failureReason, fromDatabaseError } from './errors.ts'
 import type { EventBus } from './events.ts'
 import { loadInbox } from './inbox.ts'
 import type { Orchestrator } from './orchestrator.ts'
@@ -114,14 +114,6 @@ function toolFailure(error: unknown): Error {
   const failure = error instanceof ApiFailure ? error : fromDatabaseError(error)
   if (failure) return new Error(`Corral refused this: ${JSON.stringify(failure.body)}`)
   return error instanceof Error ? error : new Error(String(error))
-}
-
-// The same failure in plain words, for the Activity line
-function failureReason(error: unknown): string {
-  const failure = error instanceof ApiFailure ? error : fromDatabaseError(error)
-  if (!failure) return error instanceof Error ? error.message : String(error)
-  const { code, reason, constraint } = failure.body as { code: string, reason?: unknown, constraint?: unknown }
-  return typeof reason === 'string' ? reason : typeof constraint === 'string' ? `${code.replaceAll('_', ' ')}: ${constraint}` : code.replaceAll('_', ' ')
 }
 
 // The PM tools that act without a confirm card (D29). Each validates its typed

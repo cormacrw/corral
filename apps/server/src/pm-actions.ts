@@ -3,7 +3,7 @@ import type { Actor, PmAction } from '@corral/core'
 import { schema, type Database } from '@corral/db'
 import { and, eq, sql } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
-import { ApiFailure, notFound } from './errors.ts'
+import { ApiFailure, failureReason, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
 import { toMessage } from './plan.ts'
 
@@ -106,7 +106,7 @@ export class PmActions {
         action.status = 'confirmed'
       } catch (error) {
         action.status = 'failed'
-        action.error = error instanceof ApiFailure ? JSON.stringify(error.body) : error instanceof Error ? error.message : String(error)
+        action.error = failureReason(error)
       }
     }
     const text = decision === 'cancel'
