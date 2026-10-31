@@ -43,10 +43,12 @@ export function useProjectOverview({ slug, project, tasks, epics: epicList, load
   }, { immediate: true })
   const activeRuns = useQuery(computed(() => ({ ...runsQuery({ active: true }), ...held.value })))
   const taskHistories = useQueries({
-    queries: computed(() => recent.value.map(task => ({ ...taskHistoryQuery({ slug: slug.value, number: task.number, ref: task.ref }), ...held.value })))
+    queries: computed(() => recent.value.map(task => ({ ...taskHistoryQuery({ slug: slug.value, number: task.number, ref: task.ref }), ...held.value }))),
+    shallow: true
   })
   const taskRuns = useQueries({
-    queries: computed(() => recent.value.map(task => ({ ...runsQuery({ taskId: task.id }), ...held.value })))
+    queries: computed(() => recent.value.map(task => ({ ...runsQuery({ taskId: task.id }), ...held.value }))),
+    shallow: true
   })
   watch(() => ready.value && !activeRuns.isPending.value && [...taskHistories.value, ...taskRuns.value].every(query => !query.isPending), (settled) => {
     if (settled) preloaded.value = true

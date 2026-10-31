@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed, ref, useTemplateRef, watchEffect } from 'vue'
+
 // The working indicator for cards: a glowing mesh-gradient edge that sweeps
 // round the wrapped element without stopping. Adapted from Vue Bits'
 // BorderGlow (https://vue-bits.dev) with the pointer tracking removed: the
@@ -74,6 +76,18 @@ function buildMeshGradients(colors: string[]): string[] {
   return gradients
 }
 
+// The sweep repaints every frame on the main thread, so it stops off-screen
+const root = useTemplateRef<HTMLElement>('root')
+const onScreen = ref(true)
+watchEffect((onCleanup) => {
+  if (!root.value || typeof IntersectionObserver === 'undefined') return
+  const observer = new IntersectionObserver(([entry]) => {
+    onScreen.value = entry!.isIntersecting
+  }, { rootMargin: `${props.glowRadius}px` })
+  observer.observe(root.value)
+  onCleanup(() => observer.disconnect())
+})
+
 const mesh = computed(() => buildMeshGradients(props.colors))
 const boxShadow = computed(() => buildBoxShadow(props.glowColor, props.glowIntensity))
 const edgeCone = computed(() => {
@@ -95,8 +109,9 @@ const glowCone = 'conic-gradient(from var(--glow-angle) at center, black 2.5%, t
 <template>
   <div
     v-if="props.active"
+    ref="root"
     class="relative isolate flex flex-col motion-safe:animate-glow-spin"
-    :style="{ borderRadius: `${props.borderRadius}px`, animationDuration: `${props.duration}s` }"
+    :style="{ borderRadius: `${props.borderRadius}px`, animationDuration: `${props.duration}s`, animationPlayState: onScreen ? undefined : 'paused' }"
   >
     <slot />
 

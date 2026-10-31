@@ -68,6 +68,12 @@ export default defineNuxtConfig({
 
   compatibilityDate: '2026-06-30',
 
+  // Hashed assets are served precompressed when the client accepts it, so
+  // direct access to the home server gets them small too (D12)
+  nitro: prototype
+    ? { output: { publicDir: 'prototype-dist' } }
+    : { compressPublicAssets: { gzip: true, brotli: true } },
+
   // Swaps the API for fixtures (app/prototype); a constant, so dev and
   // production builds drop the fixtures entirely
   vite: {
@@ -77,12 +83,6 @@ export default defineNuxtConfig({
   // No icon server and no network, in every build: bundle each icon the code
   // names. A name built at runtime would not be found, so write names out in full.
   icon: { provider: 'none', clientBundle: { scan: { globInclude: ['app/**/*.{vue,ts}'] }, sizeLimitKb: 0 } },
-
-  // Hashed assets are served precompressed when the client accepts it, so
-  // direct access to the home server gets them small too (D12)
-  nitro: prototype
-    ? { output: { publicDir: 'prototype-dist' } }
-    : { compressPublicAssets: { gzip: true, brotli: true } },
 
   ...(prototype && { plugins: ['~/prototype/storage.client.ts'] }),
 

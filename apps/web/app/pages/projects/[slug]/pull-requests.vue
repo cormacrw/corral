@@ -13,9 +13,16 @@ useSeoMeta({ title: () => `Pull requests · ${project.value?.name ?? ''} · Corr
 
 // The parent prefetches once. Mounting this tab shows that cache immediately;
 // polling and task/run event refetches run only while this page is mounted.
-const { data: prs, error, isFetching, refetch } = useQuery(computed(() => ({
+const { data: prs, error, refetch } = useQuery(computed(() => ({
   ...pullRequestsQuery(slug.value), enabled: Boolean(project.value), refetchOnMount: false
 })))
+// Spins for the button only, not for each poll behind it
+const refreshing = ref(false)
+async function refresh() {
+  refreshing.value = true
+  await refetch()
+  refreshing.value = false
+}
 
 const rows = computed(() => (prs.value ?? []).map(pr => ({
   pr,
@@ -59,8 +66,8 @@ const summary = computed(() => {
             color="neutral"
             size="sm"
             class="ms-auto"
-            :loading="isFetching"
-            @click="refetch()"
+            :loading="refreshing"
+            @click="refresh"
           />
         </div>
 

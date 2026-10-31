@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { Agent, Run } from '@corral/contracts'
 import { useQuery } from '@tanstack/vue-query'
+import type { Agent, Run } from '@corral/contracts'
 import { runsQuery } from '~/queries/runs'
 import { todayStats } from '~/utils/agents'
 import { dashboardCounts, elapsed, IN_PROGRESS_STAGES, liveRunTitle } from '~/utils/dashboard'
@@ -52,9 +52,8 @@ const today = computed(() => todayStats(
   [],
   now.value
 ))
-let timer: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
-  timer = setInterval(() => {
+  const timer = setInterval(() => {
     now.value = Date.now()
   }, 30_000)
   onBeforeUnmount(() => clearInterval(timer))

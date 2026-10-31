@@ -70,6 +70,7 @@ function file(artifact: InboxArtifact): ViewerFile {
             v-if="file(artifact).contentType?.startsWith('image/')"
             :src="artifact.url"
             :alt="artifact.name"
+            loading="lazy"
             class="size-12 shrink-0 rounded object-cover"
           >
           <UIcon

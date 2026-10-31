@@ -18,6 +18,7 @@ const emit = defineEmits<{ open: [item: Evidence] }>()
         v-if="item.contentType?.startsWith('image/')"
         :src="item.url ?? undefined"
         :alt="item.note || item.fileName || undefined"
+        loading="lazy"
         class="size-12 shrink-0 rounded object-cover"
       >
       <UIcon

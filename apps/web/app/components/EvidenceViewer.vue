@@ -42,6 +42,7 @@ watch(open, async (item) => {
         v-if="open && isImage(open)"
         :src="open.url ?? undefined"
         :alt="open.note || open.fileName || undefined"
+        loading="lazy"
         class="max-h-[70vh] w-full object-contain"
       >
       <template v-else-if="open && isVideo(open)">

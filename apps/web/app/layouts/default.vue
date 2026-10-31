@@ -8,13 +8,18 @@ const shell = useShell()
 const { connection } = useLive()
 const lists = useAllProjectLists(() => shell.projects)
 const route = useRoute()
+// An agent's status only changes with time when a usage-limit wait runs out,
+// so this wakes for that and nothing else. setTimeout can't wait past 2^31 ms.
 const now = ref(Date.now())
-onMounted(() => {
-  const timer = setInterval(() => {
-    now.value = Date.now()
-  }, 1000)
-  onBeforeUnmount(() => clearInterval(timer))
-})
+let usageWait: ReturnType<typeof setTimeout> | undefined
+function watchUsageWaits() {
+  clearTimeout(usageWait)
+  now.value = Date.now()
+  const waits = shell.agents.map(a => a.pausedUntil ? new Date(a.pausedUntil).getTime() - now.value : 0).filter(ms => ms > 0)
+  if (waits.length) usageWait = setTimeout(watchUsageWaits, Math.min(...waits, 2 ** 31 - 1))
+}
+watch(() => shell.agents, watchUsageWaits, { immediate: true })
+onBeforeUnmount(() => clearTimeout(usageWait))
 
 const expanded = useLocalStorage<Record<string, boolean>>('corral.sidebar.projects', {})
 const toggle = (project: Project) => {
@@ -29,7 +34,7 @@ const currentSlug = computed(() => typeof route.params.slug === 'string' ? route
 const missing = useProjectMissing(currentSlug)
 const flyoutHosted = computed(() => Boolean(route.meta.taskFlyout) && !missing.value)
 
-const counts = (project: Project) => taskCounts(lists.tasks.value[project.id] ?? [])
+const counts = computed(() => new Map(shell.projects.map(p => [p.id, taskCounts(lists.tasks.value[p.id] ?? [])])))
 
 const { active, sessions: threads, close: closeThread } = useOpenPlanSessions()
 const attention = (session: typeof threads.value[number]) => session.status === 'needs_approval' ? 'Needs approval' : session.status === 'question' ? 'Question' : session.unread ? 'Unread reply' : null
@@ -45,15 +50,18 @@ const runnerColor = computed(() => !shell.runner?.online ? 'error' : connection.
 // Items navigate through their `to`. Don't add handlers for any of these here, or
 // one action runs twice and the palette flashes open and shut.
 const searchOpen = ref(false)
-const searchGroups = computed(() => [{
-  id: 'pages',
-  label: 'Go to',
-  items: searchPages(shell.projects, shell.agents)
-}, {
-  id: 'tasks',
-  label: 'Tasks',
-  items: Object.values(lists.tasks.value).flatMap(tasks => tasks ?? []).map(t => ({ label: `${t.ref} ${t.title}`, icon: 'i-lucide-square-check', to: `/tasks/${t.ref}` }))
-}])
+// Built while open only: every task event would otherwise flatten every task.
+const searchGroups = computed(() => searchOpen.value
+  ? [{
+      id: 'pages',
+      label: 'Go to',
+      items: searchPages(shell.projects, shell.agents)
+    }, {
+      id: 'tasks',
+      label: 'Tasks',
+      items: Object.values(lists.tasks.value).flatMap(tasks => tasks ?? []).map(t => ({ label: `${t.ref} ${t.title}`, icon: 'i-lucide-square-check', to: `/tasks/${t.ref}` }))
+    }]
+  : [])
 
 const isActive = (path: string) => route.path === path || route.path.startsWith(`${path}/`)
 </script>
@@ -254,7 +262,7 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
                   :color="isActive(`/projects/${project.slug}/board`) ? 'primary' : 'neutral'"
                   :class="['justify-start', isActive(`/projects/${project.slug}/board`) && 'bg-elevated']"
                 >
-                  Board <span class="ms-auto text-xs text-muted">{{ counts(project).board }}</span>
+                  Board <span class="ms-auto text-xs text-muted">{{ counts.get(project.id)?.board }}</span>
                 </UButton>
                 <UButton
                   :to="`/projects/${project.slug}/backlog`"
@@ -263,7 +271,7 @@ const isActive = (path: string) => route.path === path || route.path.startsWith(
                   :color="isActive(`/projects/${project.slug}/backlog`) ? 'primary' : 'neutral'"
                   :class="['justify-start', isActive(`/projects/${project.slug}/backlog`) && 'bg-elevated']"
                 >
-                  Backlog <span class="ms-auto text-xs text-muted">{{ counts(project).backlog }}</span>
+                  Backlog <span class="ms-auto text-xs text-muted">{{ counts.get(project.id)?.backlog }}</span>
                 </UButton>
                 <UButton
                   :to="`/projects/${project.slug}/pull-requests`"

@@ -16,7 +16,7 @@ vi.mock('~/utils/pull-requests', () => {
 
 const route = reactive({ params: { slug: 'corral' } })
 for (const [name, value] of Object.entries({
-  computed, useSeoMeta: vi.fn(),
+  computed, ref, useSeoMeta: vi.fn(),
   useProject: () => ({ slug: computed(() => route.params.slug), project: ref({ slug: route.params.slug }) }),
   useTaskFlyout: () => ({ ref: ref(null) }), useDevice: () => ({ isMobile: ref(true) })
 })) vi.stubGlobal(name, value)
