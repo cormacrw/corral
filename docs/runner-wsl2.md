@@ -12,7 +12,8 @@ preserve existing database and public URL settings. Generate a shared runner
 secret with `openssl rand -hex 32`. Set `CORRAL_RUNNER_TOKEN` to that secret and
 `CORRAL_RUNNER_BIND_ADDRESS` to the home server's **Tailscale IPv4 address**
 (`tailscale ip -4`, e.g. `100.90.80.70`). Leave `CORRAL_RUNNER_PORT=4200`, or
-choose an unused host port. Then run `docker compose up -d --build`.
+choose an unused host port. Then run `scripts/deploy/compose.sh up -d --build`,
+which stamps the images with the build commit.
 
 Both the server and its local runner receive the same token. Without a token
 the listener stays off and the local runner keeps working on the private Docker
@@ -121,8 +122,7 @@ runner-only named volumes (D2).
 From `~/corral`, always use this Compose file and explicit env file:
 
 ```sh
-export CORRAL_BUILD_SHA=$(git rev-parse HEAD)
-docker compose --env-file deploy/runner/.env -f deploy/runner/docker-compose.yml up -d --build
+scripts/deploy/compose.sh --env-file deploy/runner/.env -f deploy/runner/docker-compose.yml up -d --build
 docker exec -it corral-remote-runner claude
 docker exec -it corral-remote-runner codex login --device-auth
 docker exec -it corral-remote-runner gh auth login
@@ -155,14 +155,14 @@ that deletes the runner identity, worktrees and CLI logins.
 
 ## Update the runner by hand
 
-Leave `CORRAL_RUNNER_AUTO_UPDATE=false` in `deploy/runner/.env` until the
-updater timer (COR-188) is installed. With it enabled, a behind runner drains
+Leave `CORRAL_RUNNER_AUTO_UPDATE=false` in `deploy/runner/.env` unless the
+updater timer is installed. With it enabled, a behind runner drains
 itself and takes no new work until something updates it. With it off, the runner
 shows as behind but keeps taking work.
 
-Until COR-188 lands, pause the projects this runner serves and wait for its
-active runs to finish before rebuilding. In Ubuntu, update to
-the same commit deployed on the home server (different commits count as behind):
+Without the updater timer, pause the projects this runner serves and wait for
+its active runs to finish before rebuilding. In Ubuntu, update to the same
+commit deployed on the home server (different commits count as behind):
 
 ```sh
 cd ~/corral
@@ -171,15 +171,14 @@ git switch main
 git pull --ff-only origin main
 # If the home server is not on the latest main, use its deployed commit instead:
 # git switch --detach <server-commit>
-export CORRAL_BUILD_SHA=$(git rev-parse HEAD)
-docker compose --env-file deploy/runner/.env -f deploy/runner/docker-compose.yml up -d --build
+scripts/deploy/compose.sh --env-file deploy/runner/.env -f deploy/runner/docker-compose.yml up -d --build
 ```
 
 Confirm the runner reconnects in Settings → Runner. Check `GET /api/status`
 on the control plane: its `commit` should match `serverCommit`, with `behind`
 and `draining` both `false`. Resume the paused projects. Rebuilding preserves
-the named volumes and CLI logins. The COR-188 updater must also set `CORRAL_BUILD_SHA` to the checked-out
-commit before building; otherwise the image reports `development`.
+the named volumes and CLI logins. Plain `docker compose` would leave
+`CORRAL_BUILD_SHA` unset, and the image would report `development`.
 
 ## Start automatically after reboot
 

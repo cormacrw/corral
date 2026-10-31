@@ -9,9 +9,7 @@ Requires Node 26+ and pnpm.
 ```sh
 pnpm install
 pnpm dev        # web, server and runner for this checkout
-pnpm lint
-pnpm typecheck
-pnpm test
+pnpm run check  # lint, typecheck, build and tests; run this before you finish
 ```
 
 `pnpm dev` can run in several checkouts or worktrees at once. Each instance keeps its data in its own `.corral/` folder and uses ports 3000 (web) and 4100 (server) when free, or free ports otherwise. It writes the URLs it chose to `.corral/dev.json`:
@@ -34,7 +32,7 @@ Corral runs as four containers on your own server (`docs/decisions.md` D12, D14)
 
 ```sh
 cp .env.docker.example .env        # set POSTGRES_PASSWORD, CORRAL_PUBLIC_URL and CORRAL_RUNNER_TOKEN
-docker compose up -d --build
+scripts/deploy/compose.sh up -d --build   # docker compose, with the images stamped with their commit
 docker exec -it corral-runner claude            # sign in to Claude once
 docker exec -it corral-runner codex login --device-auth   # sign in to Codex once, for agents whose runtime is codex
 docker exec -it corral-runner gh auth login     # sign in to GitHub once

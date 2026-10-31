@@ -17,6 +17,8 @@ Reference material for agents building Corral. Read this file first.
 
 [Runner-only deployment on WSL2](runner-wsl2.md) is the operator guide for a remote gaming-PC runner (D25).
 
+[`.corral/wiki/`](../.corral/wiki/README.md) holds short implementation notes written while building: why the code is the way it is. Not binding; read the page for the area you're changing.
+
 ## Precedence
 
 1. `decisions.md`
