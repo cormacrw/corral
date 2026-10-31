@@ -33,6 +33,7 @@ const showTask = ref(true)
 const planResolving = ref(false)
 let resolutionPosition = 0
 let taskRequest = 0
+let followedItem: string | null = null
 
 async function load() {
   if (planResolving.value) return
@@ -109,9 +110,11 @@ async function loadTask(item: TaskInboxItem | null) {
     reviews.value = []
   }
   // Following the selection, not a click of its own: no extra history entry.
-  // Phones open the task as its own page instead.
-  if (!isCurrent()) return
-  if (item && showTask.value && !device.isMobile.value) flyout.open(item.taskRef, { replace: true })
+  // Phones open the task as its own page instead. Only once per selection, so
+  // a live refresh doesn't replace a task opened from the message's links.
+  if (!isCurrent() || !item || followedItem === item.id) return
+  followedItem = item.id
+  if (showTask.value && !device.isMobile.value) flyout.open(item.taskRef, { replace: true })
 }
 function retryTask() {
   taskLoadFailed.value = false
@@ -121,7 +124,10 @@ function retryTask() {
 watch(selected, async (item, previous) => {
   text.value = ''
   // A live refresh keeps a failed load's error and Retry until a fetch settles it
-  if (previous?.id !== item?.id) taskLoadFailed.value = false
+  if (previous?.id !== item?.id) {
+    taskLoadFailed.value = false
+    followedItem = null
+  }
   if (!taskLoadFailed.value) actionError.value = null
   // Nothing selected (e.g. the last item was just resolved): nothing to show beside it
   if (!item) flyout.close()

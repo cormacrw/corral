@@ -42,7 +42,8 @@ async function mountInbox(type: 'human_review' | 'failed', taskRef?: string) {
   vi.stubGlobal('useToast', () => ({ add: vi.fn() }))
   vi.stubGlobal('usePlanThreadDelete', () => ({ pending: vue.ref([]), remove: vi.fn() }))
   const closeFlyout = vi.fn().mockResolvedValue(undefined)
-  vi.stubGlobal('useTaskFlyout', () => ({ ref: vue.ref(null), epic: vue.ref(null), open: vi.fn(), close: closeFlyout }))
+  const openFlyout = vi.fn()
+  vi.stubGlobal('useTaskFlyout', () => ({ ref: vue.ref(null), epic: vue.ref(null), open: openFlyout, close: closeFlyout }))
   const listeners: ((event: { type: string }) => void)[] = []
   vi.stubGlobal('useLive', () => ({
     state: vue.ref({ agents, projects, loaded: true, runner: { online: true } }),
@@ -70,7 +71,7 @@ async function mountInbox(type: 'human_review' | 'failed', taskRef?: string) {
     return sent
   }
   const alert = () => wrapper.find('[data-alert]')
-  return { wrapper, item, composer, submit, alert, router, closeFlyout, refresh: () => listeners.forEach(l => l({ type: 'task.updated' })) }
+  return { wrapper, item, composer, submit, alert, router, closeFlyout, openFlyout, refresh: () => listeners.forEach(l => l({ type: 'task.updated' })) }
 }
 
 it('shows the error instead of loading forever and keeps approval blocked when the task fails to load', async () => {
@@ -163,6 +164,20 @@ it('labels a design approval and waits for the old flyout to close before advanc
     const position = inbox().needsYou.findIndex(i => i.id === item.id)
     const next = remaining.needsYou[Math.min(position, remaining.needsYou.length - 1)]!
     expect(router.replace).toHaveBeenCalledWith(`/inbox/${next.id}`)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('follows the selection once, so a live refresh keeps a task opened from the message', async () => {
+  const { wrapper, item, openFlyout, refresh } = await mountInbox('human_review', 'COR-41')
+  try {
+    expect(openFlyout).toHaveBeenCalledTimes(1)
+    expect(openFlyout).toHaveBeenCalledWith((item as { taskRef: string }).taskRef, { replace: true })
+    refresh()
+    await flushPromises()
+    expect(api.tasks.byRef).toHaveBeenCalledTimes(2)
+    expect(openFlyout).toHaveBeenCalledTimes(1)
   } finally {
     wrapper.unmount()
   }

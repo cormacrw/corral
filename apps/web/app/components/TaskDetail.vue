@@ -206,11 +206,12 @@ function startEditDescription() {
   descriptionDraft.value = structuredClone(toRaw(task.value?.description ?? { type: 'doc', content: [] })) as { type: 'doc' }
   editingDescription.value = true
 }
+// Following a link or selecting text to copy shouldn't open an editor
+function wantsEdit(event: MouseEvent) {
+  return !(event.target as HTMLElement).closest('a, button') && !window.getSelection()?.toString()
+}
 function onDescriptionClick(event: MouseEvent) {
-  // Following a link or selecting text to copy shouldn't open the editor
-  if ((event.target as HTMLElement).closest('a, button')) return
-  if (window.getSelection()?.toString()) return
-  startEditDescription()
+  if (wantsEdit(event)) startEditDescription()
 }
 // The editor's defaults suit a full page; a task's description sits in a
 // narrow column at body text size
@@ -814,7 +815,7 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/tasks/
                   :tabindex="readonly ? undefined : 0"
                   :aria-label="readonly ? undefined : `Edit criterion: ${criterion.text}`"
                   class="rounded px-1 py-0.5 hover:bg-elevated"
-                  @click="!readonly && !($event.target as HTMLElement).closest('a, button') && (editingCriterion = criterion.id)"
+                  @click="!readonly && wantsEdit($event) && (editingCriterion = criterion.id)"
                   @keydown.enter.self.prevent="!readonly && (editingCriterion = criterion.id)"
                 >
                   <MarkdownText :text="criterion.text" />
