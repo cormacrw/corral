@@ -88,7 +88,7 @@ describe('stopping work that is being claimed', () => {
     await sleep(50)
     expect(assignments(task.id)).toEqual([])
     const taskRuns = await t.db.select().from(runs).where(eq(runs.taskId, task.id))
-    expect(taskRuns.map(r => r.state).filter(s => s !== 'interrupted')).toEqual([])
+    expect(taskRuns.map(r => r.state)).toEqual(['interrupted'])
     expect((await t.db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ leaseRunId: null })
     await pause(project)
     await t.request('POST', '/api/resume-all')

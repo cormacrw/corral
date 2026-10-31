@@ -100,7 +100,7 @@ describe('PM turns the runner lost', () => {
       }
       return live(message, id)
     })
-    const sessions = []
+    const sessions: PlanSessionDetail[] = []
     for (const project of held) sessions.push(await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan it' }).then(r => r.json()) as PlanSessionDetail)
     const assigned = await runner.next('run.assign', m => m.job.planSessionId === sessions[1]!.id || m.job.planSessionId === sessions[0]!.id)
     spy.mockRestore()
