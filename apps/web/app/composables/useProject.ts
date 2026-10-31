@@ -22,10 +22,10 @@ export function useProjectMissing(slug: MaybeRefOrGetter<string | null>): Comput
   })
 }
 
-export function provideProject(slug: ComputedRef<string>, missing: ComputedRef<boolean>, overviewOpen: () => boolean) {
+export function provideProject(slug: ComputedRef<string>, overviewOpen: () => boolean) {
   const { data: projects } = projectList()
   const project = computed(() => projects.value?.find(p => p.slug === slug.value) ?? null)
-  const known = computed(() => missing.value ? '' : slug.value)
+  const known = computed(() => project.value?.slug ?? '')
   const lists = useProjectLists(known)
   // Polls while any tab of the project is open, so Pull requests opens current
   const pullRequests = useQuery(computed(() => ({ ...pullRequestsQuery(slug.value), enabled: Boolean(known.value) })))

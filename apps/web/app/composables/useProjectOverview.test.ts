@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import type { Project, Task } from '@corral/contracts'
 
@@ -22,16 +22,24 @@ const { useProjectOverview } = await import('./useProjectOverview')
 const project = { id: 'p1', slug: 'corral' } as Project
 const task = (id: string) => ({ id, number: 1, updatedAt: '2026-10-01' }) as Task
 
-function setup(initiallyOpen: boolean) {
+const cleanups: (() => void)[] = []
+afterEach(() => {
+  for (const cleanup of cleanups.splice(0)) cleanup()
+})
+
+function setup(initiallyOpen: boolean, initiallyLoading = false) {
   const open = ref(initiallyOpen)
   const tasks = ref([task('a')])
-  mount({
+  const loading = ref(initiallyLoading)
+  let overview!: ReturnType<typeof useProjectOverview>
+  const wrapper = mount({
     setup() {
-      useProjectOverview({ slug: computed(() => 'corral'), project: computed(() => project), tasks: computed(() => tasks.value), epics: computed(() => []), loading: computed(() => false), error: computed(() => null), open: () => open.value })
+      overview = useProjectOverview({ slug: computed(() => 'corral'), project: computed(() => project), tasks: computed(() => tasks.value), epics: computed(() => []), loading: computed(() => loading.value), error: computed(() => null), open: () => open.value })
       return () => null
     }
   })
-  return { open, tasks }
+  cleanups.push(() => wrapper.unmount())
+  return { open, tasks, loading, overview, wrapper }
 }
 const loads = () => api.inbox.get.mock.calls.length
 
@@ -73,4 +81,30 @@ it('stays live while open', async () => {
   tasks.value = [task('b')]
   await flushPromises()
   expect(loads()).toBe(2)
+})
+
+it('waits for the project lists before loading activity', async () => {
+  const { loading } = setup(true, true)
+  await flushPromises()
+  expect(loads()).toBe(0)
+  loading.value = false
+  await flushPromises()
+  expect(loads()).toBe(1)
+})
+
+it('ignores an older activity response that finishes after a newer load', async () => {
+  let finish!: (entries: unknown[]) => void
+  api.tasks.history.mockReturnValueOnce(new Promise((resolve) => {
+    finish = resolve
+  }))
+  const { tasks, overview } = setup(true)
+  await flushPromises()
+  tasks.value = [task('b')]
+  const newest = { id: 'new', createdAt: '2026-10-31' }
+  api.tasks.history.mockResolvedValueOnce([newest])
+  await flushPromises()
+  expect(overview.history.value).toEqual([newest])
+  finish([{ id: 'old', createdAt: '2026-10-30' }])
+  await flushPromises()
+  expect(overview.history.value).toEqual([newest])
 })

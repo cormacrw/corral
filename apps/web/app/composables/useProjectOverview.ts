@@ -31,23 +31,31 @@ export function useProjectOverview({ slug, project, tasks, epics: epicList, load
 
   let loaded = false
   let outdated = false
+  let generation = 0
+  onBeforeUnmount(() => generation++)
   async function load() {
+    if (!project.value || loading.value) return
+    const current = ++generation
+    const projectId = project.value.id
+    const projectSlug = slug.value
+    const recent = [...tasks.value].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 5)
     outdated = false
-    loaded = Boolean(project.value) && !loading.value
+    loaded = true
     detailError.value = null
     try {
       const [i, r] = await Promise.all([api.inbox.get(), api.runs.list({ active: true })])
-      inbox.value = i
-      runs.value = r.filter(run => run.projectId === project.value?.id)
       // Recent activity: the newest audit entries of this project's tasks
-      const recent = [...tasks.value].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 5)
       const [entries, taskRuns] = await Promise.all([
-        Promise.all(recent.map(t => api.tasks.history(slug.value, t.number))),
+        Promise.all(recent.map(t => api.tasks.history(projectSlug, t.number))),
         Promise.all(recent.map(t => api.runs.list({ taskId: t.id })))
       ])
+      if (current !== generation) return
+      inbox.value = i
+      runs.value = r.filter(run => run.projectId === projectId)
       history.value = entries.flat().sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 12)
       runAgents.value = new Map([...taskRuns.flat(), ...r].map(run => [run.id, run.agentName]))
     } catch (e) {
+      if (current !== generation) return
       detailError.value = e instanceof Error ? e.message : String(e)
     }
   }
@@ -55,7 +63,7 @@ export function useProjectOverview({ slug, project, tasks, epics: epicList, load
     if (open() || !loaded) void load()
     else outdated = true
   }
-  watch([project, tasks], changed, { immediate: true })
+  watch([project, tasks, loading], changed, { immediate: true })
   watch(open, (now) => {
     if (now && outdated) void load()
   })

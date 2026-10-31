@@ -7,7 +7,7 @@ definePageMeta({ taskFlyout: true })
 const route = useRoute()
 const slug = computed(() => String(route.params.slug))
 const missing = useProjectMissing(slug)
-provideProject(slug, missing, () => route.name === 'projects-slug')
+provideProject(slug, () => route.name === 'projects-slug')
 </script>
 
 <template>
