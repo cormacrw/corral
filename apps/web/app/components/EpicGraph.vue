@@ -14,7 +14,7 @@ import { PRIORITY, STATUS } from '~/utils/labels'
 
 // An epic's tasks as a dependency tree: a task sits one step after the last
 // task it depends on. Left to right on a page, top to bottom in the narrow
-// flyout. Read-only; clicking a task opens it.
+// flyout. Read-only; clicking a task opens it, including one from another epic.
 const props = withDefaults(defineProps<{ tasks: Task[], selected?: string | null, minimap?: boolean, direction?: 'right' | 'down' }>(), { selected: null, minimap: false, direction: 'right' })
 const emit = defineEmits<{ open: [ref: string] }>()
 
@@ -170,10 +170,14 @@ const DOT = { neutral: 'bg-neutral-400', info: 'bg-info', primary: 'bg-primary',
         </div>
         <div
           v-else
-          class="flex items-center justify-center rounded-md border border-dashed border-accented px-2 py-1.5 text-[11px] text-muted"
+          class="relative flex items-center justify-center rounded-md border border-dashed border-accented px-2 py-1.5 text-[11px] text-muted"
           :style="{ width: `${NODE_WIDTH}px`, height: `${NODE_HEIGHT}px` }"
         >
-          <span><span class="font-mono">{{ data.ref }}</span> · another epic</span>
+          <!-- The link covers the node, which has no click of its own -->
+          <span><TaskLink
+            :task-ref="data.ref"
+            class="font-mono after:absolute after:inset-0"
+          /> · another epic</span>
         </div>
       </template>
       <Background

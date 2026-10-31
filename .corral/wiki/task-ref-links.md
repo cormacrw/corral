@@ -12,11 +12,23 @@ All generated links use `TaskLink`, with a real `/tasks/<ref>` href. Plain click
 open the current page's mounted `TaskFlyout` on desktop. Without a host they go
 to the task page. Mobile clicks use the thread's detail sheets when
 `FLYOUT_SHEETS` is provided, otherwise the task page. `PlanConversation` provides
-that capability for its own sheets, as does the Inbox mobile Plan thread.
+that capability for its own sheets, as does the Inbox mobile Plan thread. The new
+Plan page hosts a flyout and a sheet too, so opening an attached task keeps the
+composer's draft.
 Modified clicks and middle clicks retain native browser navigation. Missing
 refs reach the existing TaskDetail error state. The Inbox follows its selection
 into the flyout once per selected item, so a live refresh leaves a task opened
 from a message link in place.
+
+Ref labels outside rendered text use `TaskLink` as well: Home agent lines, the
+Inbox message header, "Refining" chips, live run lines, the selected run header,
+epic review rows and the other-epic graph node. Links can't nest, so a row or
+card that is one link stays one link and its ref stays a label. Home agent cards
+and live run cards also open something else, so their own link is an empty
+`absolute inset-0` sibling after the content, and the `TaskLink` sits above it with
+`relative z-10`. Run list rows and Needs-you rows keep their ref as a label.
+`DesignChangedBadge` stays plain: a tooltip isn't reachable by keyboard or touch,
+and the design link sits beside it.
 
 Component checks cover cross-project refs, unknown prefixes, code styling,
 explicit link targets, literal rich text, desktop host/mobile sheet navigation

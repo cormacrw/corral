@@ -313,7 +313,10 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
                   variant="subtle"
                   class="mt-2"
                 >
-                  Refining {{ starting.taskRef }}
+                  Refining <TaskLink
+                    :task-ref="starting.taskRef"
+                    class="underline"
+                  />
                 </UBadge>
                 <span
                   v-if="starting?.state === 'failed' && message.id.startsWith('pending-')"
@@ -526,7 +529,10 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
                     variant="subtle"
                     color="primary"
                   >
-                    Refining {{ taskRef }}
+                    Refining <TaskLink
+                      :task-ref="taskRef"
+                      class="underline"
+                    />
                   </UBadge>
                   <UButton
                     icon="i-lucide-x"
