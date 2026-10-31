@@ -18,3 +18,9 @@ obvious from it:
   In progress card whose lease is held by someone other than `task.developer`.
 - `task.statusReason` used to reach the human through the card's note. It's now
   the Reason row in `TaskProperties`, in the flyout and on the task page.
+
+- `TaskCardBlockers` uses `utils/taskBlockers.ts` with the full project list passed
+  through both Board layouts. Only Ready cards get the amber ban button; merged
+  tasks and approved designs are done. Waiting epics also appear, linking to
+  their epic pages. Task rows use `useTaskFlyout.open`, which handles phones.
+  The popover stops click propagation and follows live task updates.

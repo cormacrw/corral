@@ -18,10 +18,11 @@ const task = (overrides: Partial<Task> = {}) => fixture(projects[0]!, 99, { titl
 const lease = (agentId: string): Task['lease'] => ({ agentId, runId: 'r-1', role: 'developer', expiresAt: '' })
 
 const render = (props: { task: Task, epic?: string | null, to?: string, pressed?: boolean, onOpen?: () => void }) => mount(TaskCard, {
-  props,
+  props: { tasks: [], ...props },
   global: {
     components: {
       TaskCardAssignee,
+      TaskCardBlockers: { template: '<span />' },
       BorderGlow: { template: '<div><slot /></div>' },
       UTooltip: { props: ['text'], template: '<span :data-tooltip="text"><slot /></span>' },
       AgentAvatar: { props: ['name', 'working'], template: '<i :data-avatar="name" :data-working="working" />' },

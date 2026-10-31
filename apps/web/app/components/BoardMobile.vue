@@ -9,6 +9,7 @@ import { swipeStep } from '~/utils/board'
 // task's page. The page owns the filtering, so it matches the web Board,
 // and the Status filter hides tabs as it hides columns there.
 const props = defineProps<{
+  tasks: Task[]
   columns: { key: string, label: string, statuses: TaskStatus[], hint: string, color: string, tasks: Task[] }[]
   epics: { id: string, label: string }[]
   boardEpics: Epic[]
@@ -206,6 +207,7 @@ const epicLabel = (id: string) => props.epics.find(e => e.id === id)?.label ?? '
         >
           <TaskCard
             :task="task"
+            :tasks="tasks"
             :epic="task.epicId ? epicLabel(task.epicId) : null"
             :to="`/tasks/${task.ref}`"
           />
