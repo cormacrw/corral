@@ -35,6 +35,7 @@ Ready tasks whose epic has unfinished prerequisites show **Waiting on epic: <tit
    |---|---|---|
    | Project | text | No |
    | Status | `USelectMenu` with a colour dot | Only the moves a human may make under D10 (e.g. Blocked → Backlog / Ready / In progress). Otherwise read-only, with the tooltip "Set by agents while they work" |
+   | Reason | why a Blocked or Failed task stopped (`task.statusReason`), in `error`. Only shown when there is one | No |
    | Priority | `USelectMenu`: Urgent, High, Medium, Low | Yes |
    | Epic | `USelectMenu` | Yes |
    | Developer | avatar and name of the agent of the task's latest developer run (`task.developer`), or "Any available developer" with no avatar until one claims it | No (D15: no manual assignment yet) |

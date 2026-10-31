@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { Task } from '@corral/contracts'
-import { DEFAULT_LIMITS, type TaskStatus } from '@corral/core'
+import type { TaskStatus } from '@corral/core'
 import type { BoardFilters } from '~/utils/board'
 import { BOARD_COLUMNS, filtersFromQuery, filtersToQuery, matchesFilter, onBoard, sortColumn, taskAgentIds } from '~/utils/board'
-import { epicInProgress, epicTitle, epicWithLiveCounts, PRIORITY, STATUS, taskNote } from '~/utils/labels'
+import { epicInProgress, epicTitle, epicWithLiveCounts, STATUS } from '~/utils/labels'
 
 // The board (design/board.md): approved work by status, no drag and drop
 const route = useRoute()
@@ -63,7 +63,6 @@ const columns = computed(() => filters.value.statuses.length > 0 ? BOARD_COLUMNS
 const DOT = { neutral: 'bg-neutral-400', info: 'bg-info', primary: 'bg-primary', warning: 'bg-warning', error: 'bg-error', success: 'bg-success', secondary: 'bg-secondary' } as const
 const inColumn = (column: { key: string, statuses: TaskStatus[] }) => sortColumn(column.key, visible.value.filter(t => column.statuses.includes(t.status)))
 const mobileColumns = computed(() => columns.value.map(c => ({ ...c, color: DOT[STATUS[c.statuses[0]!].color], tasks: inColumn(c) })))
-const agentFor = (task: Task) => task.lease ? live.state.value.agents.find(a => a.id === task.lease!.agentId) : null
 const epicLabel = (id: string) => epicTitle(live.state.value.epics[project.value?.id ?? ''], id, epics.value.indexOf(id))
 const epicOptions = computed(() => epics.value.map(id => ({ id, label: epicLabel(id) })))
 // Epics with work left or tasks on the Board, so one waiting on its epic PR
@@ -86,8 +85,6 @@ const boardEpics = computed(() => (live.state.value.epics[project.value?.id ?? '
       :board-epics="boardEpics"
       :agents="taskAgents"
       :total="visible.length"
-      :all="all"
-      :review-round-cap="project?.reviewRoundCap ?? DEFAULT_LIMITS.reviewRoundCap"
       :loading="loading"
       :error="error"
     />
@@ -178,61 +175,14 @@ const boardEpics = computed(() => (live.state.value.epics[project.value?.id ?? '
                  selected ring fit inside the list: anything past it counts as
                  overflow and makes the column scroll (and clips the glow) -->
             <div class="flex min-h-0 flex-col gap-2 overflow-y-auto overscroll-contain p-2">
-              <BorderGlow
+              <TaskCard
                 v-for="task in inColumn(column)"
                 :key="task.id"
-                :active="Boolean(task.lease)"
-                :glow-radius="8"
-                class="shrink-0"
-              >
-                <button
-                  type="button"
-                  :aria-pressed="flyout.ref.value === task.ref"
-                  :class="[
-                    'flex shrink-0 flex-col gap-1.5 rounded-md border border-default bg-default px-3 py-2.5 text-start text-sm hover:border-accented',
-                    task.lease && 'border-primary/60',
-                    flyout.ref.value === task.ref && 'border-primary ring-1 ring-primary'
-                  ]"
-                  @click="flyout.toggle(task.ref)"
-                >
-                  <span class="flex items-center gap-2 text-xs">
-                    <span class="shrink-0 font-mono text-muted">{{ task.ref }}</span>
-                    <span :class="task.priority === 'urgent' ? 'text-error' : task.priority === 'high' ? 'text-warning' : 'text-muted'">{{ PRIORITY[task.priority].label }}</span>
-                    <TaskTypeBadge :type="task.type" />
-                    <DesignChangedBadge :design="task.design" />
-                    <a
-                      v-if="task.prUrl"
-                      :href="task.prUrl"
-                      target="_blank"
-                      rel="noopener"
-                      class="ms-auto flex items-center gap-0.5 text-muted hover:text-primary"
-                      @click.stop
-                    ><UIcon
-                      name="i-lucide-git-pull-request"
-                      class="size-3"
-                    />#{{ task.prNumber }}</a>
-                  </span>
-                  <span class="font-medium text-highlighted">{{ task.title }}</span>
-                  <span
-                    v-if="taskNote(task, all, project?.reviewRoundCap ?? DEFAULT_LIMITS.reviewRoundCap)"
-                    :class="['text-xs', taskNote(task, all, project?.reviewRoundCap ?? DEFAULT_LIMITS.reviewRoundCap)!.color === 'error' ? 'text-error' : taskNote(task, all, project?.reviewRoundCap ?? DEFAULT_LIMITS.reviewRoundCap)!.color === 'warning' ? 'text-warning' : 'text-muted']"
-                  >{{ taskNote(task, all, project?.reviewRoundCap ?? DEFAULT_LIMITS.reviewRoundCap)!.text }}</span>
-                  <span class="flex items-center gap-2 text-xs text-muted">
-                    <span v-if="task.epicId">{{ epicLabel(task.epicId) }}</span>
-                    <span
-                      v-if="agentFor(task)"
-                      class="ms-auto flex items-center gap-1"
-                    >
-                      <AgentAvatar
-                        :name="agentFor(task)!.name"
-                        working
-                        size="xs"
-                      />
-                      {{ task.type === 'design' && agentFor(task)!.role === 'designer' ? 'Designer · ' : '' }}{{ agentFor(task)!.name }}
-                    </span>
-                  </span>
-                </button>
-              </BorderGlow>
+                :task="task"
+                :epic="task.epicId ? epicLabel(task.epicId) : null"
+                :pressed="flyout.ref.value === task.ref"
+                @open="flyout.toggle(task.ref)"
+              />
               <p
                 v-if="inColumn(column).length === 0"
                 class="px-1 pb-2 text-xs text-dimmed"

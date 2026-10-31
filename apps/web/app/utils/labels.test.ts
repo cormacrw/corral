@@ -1,7 +1,6 @@
 import type { TaskStatus } from '@corral/core'
 import { describe, expect, it } from 'vitest'
-import { agentStatus, cliLoginCommand, detectedRuntimes, formatMs, epicInProgress, epicReviewStatus, epicWithLiveCounts, runtimeLabel, runBadge, runRef, runTitle, runTokens, taskCounts, taskTypeBadge, taskNote } from './labels.ts'
-import { projects, task } from '../prototype/fixtures'
+import { agentStatus, cliLoginCommand, detectedRuntimes, formatMs, epicInProgress, epicReviewStatus, epicWithLiveCounts, runtimeLabel, runBadge, runRef, runTitle, runTokens, taskCounts, taskTypeBadge, cardTypeIcon } from './labels.ts'
 
 const tasks = (...statuses: TaskStatus[]) => statuses.map(status => ({ status }))
 
@@ -97,24 +96,11 @@ it('excludes Approved designs from open board work', () => {
   expect(taskCounts([{ status: 'approved' }, { status: 'merged' }, { status: 'ready' }, { status: 'backlog' }])).toEqual({ board: 1, backlog: 1 })
 })
 
-describe('Ready waiting notes', () => {
-  it('marks a paused task, ahead of its other notes', () => {
-    const paused = task(projects[0]!, 99, { title: 'Stopped', status: 'in_progress', reviewRounds: 1, paused: true })
-    expect(taskNote(paused, [paused], 5)).toEqual({ text: 'Paused', color: 'warning' })
-    expect(taskNote({ ...paused, paused: false }, [paused], 5)).toEqual({ text: 'Review round 1 of 5', color: 'neutral' })
-  })
-
-  it('shows epic prerequisites and clears the note when they finish', () => {
-    const ready = task(projects[0]!, 99, { title: 'Waiting', status: 'ready', waitingOnEpics: [{ id: 'foundation', title: 'Foundation' }] })
-    expect(taskNote(ready, [ready], 5)).toEqual({ text: 'Waiting on epic: Foundation', color: 'neutral' })
-    expect(taskNote({ ...ready, waitingOnEpics: [] }, [ready], 5)).toBeNull()
-    expect(taskNote({ ...ready, status: 'in_progress' }, [ready], 5)).toBeNull()
-  })
-
-  it('preserves task dependency notes for epics without prerequisites', () => {
-    const ready = task(projects[0]!, 99, { title: 'Waiting', status: 'ready', dependsOn: ['COR-98'] })
-    expect(taskNote(ready, [ready], 5)).toEqual({ text: 'Waiting on COR-98', color: 'neutral' })
-  })
+it('gives a Board card an icon for every type but a plain task', () => {
+  expect(cardTypeIcon('task')).toBeNull()
+  expect(cardTypeIcon('bug')).toEqual({ name: 'i-lucide-bug', label: 'Bug' })
+  expect(cardTypeIcon('design')).toEqual({ name: 'i-lucide-paintbrush', label: 'Design' })
+  expect(cardTypeIcon('spike')).toEqual({ name: 'i-lucide-flask-conical', label: 'Spike' })
 })
 
 it('labels completed rebase developer runs', () => {

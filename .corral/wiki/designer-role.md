@@ -44,8 +44,8 @@ rather than a fabricated zero.
 
 The task API's existing `developer` property is the authoring slot: for design
 tasks it names the latest designer run. Task properties label it Designer,
-including the unassigned fallback and working avatar. Board cards name the
-active designer, and design revision feedback addresses the designer. The
+including the unassigned fallback and working avatar. Board cards show the
+designer's avatar, and design revision feedback addresses the designer. The
 static prototype includes Iris, an active design task (COR-20), a completed
 submission and an approved version; Add agent updates its in-memory live list.
 
