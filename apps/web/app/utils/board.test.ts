@@ -351,8 +351,19 @@ describe('epicOnBoard', () => {
     expect(epicOnBoard(epic(merged), [old], now)).toBe(false)
   })
 
-  it('does not let an approved design hold a finished epic on the Board', () => {
-    expect(epicOnBoard(epic({ reviewMode: 'direct', branch: null }), [{ status: 'approved', mergedAt: null }], now)).toBe(false)
+  it('keeps a finished epic in Done for the window after a design is approved', () => {
+    const direct = epic({ reviewMode: 'direct', branch: null })
+    const approvedAgo = (ms: number) => ({ type: 'design' as const, status: 'approved' as const, mergedAt: null, updatedAt: new Date(now - ms).toISOString() })
+    expect(epicStage(direct, [approvedAgo(DAY)])).toBe('done')
+    expect(epicOnBoard(direct, [approvedAgo(DAY)], now)).toBe(true)
+    expect(epicOnBoard(direct, [old, approvedAgo(DAY)], now)).toBe(true)
+    expect(epicOnBoard(direct, [approvedAgo(4 * DAY)], now)).toBe(false)
+  })
+
+  it('does not let an unfinished task hold a finished epic on the Board', () => {
+    const direct = epic({ reviewMode: 'direct', branch: null })
+    const reopened = { type: 'task' as const, status: 'in_progress' as const, mergedAt: null, updatedAt: new Date(now).toISOString() }
+    expect(epicOnBoard(direct, [old, reopened], now)).toBe(false)
   })
 })
 

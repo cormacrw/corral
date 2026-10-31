@@ -63,7 +63,7 @@ Each card is an epic, and no task cards are shown. Tasks with no epic don't appe
 
 The columns are shown in the order Ready, In progress, Agent review, Human review, Ready to merge, Blocked, Done. `direct` epics have no epic PR, so they go from In progress to Done.
 
-An epic is shown under `epicOnBoard`: it has work left, or it finished within `COMPLETE_WINDOW_DAYS`, counted from its latest task merge or, for an epic PR, the PR's merge. An epic waiting on its PR stays however old its tasks are. Approved designs alone don't keep a finished epic on the Board.
+An epic is shown under `epicOnBoard`: it has work left, or it finished within `COMPLETE_WINDOW_DAYS`, counted from its latest task completion (a merge or a design approval, the same rule as the Complete column) or, for an epic PR, the PR's merge. An epic waiting on its PR stays however old its tasks are.
 
 **Card** (`components/BoardEpicCard.vue`): the title and the meter with "N of M merged". Tags, review mode and the PR link stay in the epic flyout. An unfinished epic held by unfinished prerequisite epics shows the amber `i-lucide-ban` icon beside the title. It opens a "Waiting on" popover listing each prerequisite with its progress, and clicking a row opens that epic. Clicking the icon doesn't open the card's own flyout.
 

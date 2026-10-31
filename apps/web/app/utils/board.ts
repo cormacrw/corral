@@ -70,14 +70,13 @@ export function epicStage(epic: StageEpic, tasks: Pick<Task, 'status'>[]): EpicS
 }
 
 // Whether an epic belongs on the Board: it has work left or tasks on the Board.
-// A finished epic stays for the merge window from its last merge. Approved
-// designs don't hold a finished epic here, and
+// A finished epic stays while one of its done tasks is still in Complete, and
 // updatedAt covers an epic PR that merged after the tasks' window closed.
-export function epicOnBoard(epic: StageEpic & Pick<Epic, 'updatedAt'>, tasks: Pick<Task, 'status' | 'mergedAt'>[], now = Date.now()): boolean {
+export function epicOnBoard(epic: StageEpic & Pick<Epic, 'updatedAt'>, tasks: Pick<Task, 'type' | 'status' | 'mergedAt' | 'updatedAt'>[], now = Date.now()): boolean {
   if (epicInProgress(epic)) return true
   if (epic.taskCount === 0) return false
   const finished = epic.reviewMode !== 'direct' && epic.reviewState === 'merged' && now - new Date(epic.updatedAt).getTime() <= COMPLETE_WINDOW_MS
-  return finished || tasks.some(t => t.status === 'merged' && t.mergedAt !== null && now - new Date(t.mergedAt).getTime() <= COMPLETE_WINDOW_MS)
+  return finished || tasks.some(t => isTaskDone(t) && onBoard(t, now))
 }
 
 // The prerequisite epics still unfinished, for the blocked icon: the same rule
