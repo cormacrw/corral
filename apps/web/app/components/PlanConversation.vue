@@ -82,7 +82,8 @@ const previous = computed(() => latest.value ? session.value?.plans.find(p => p.
 watch(() => latest.value?.id, (planId) => {
   if (!device.isMobile.value && planId && latest.value?.status === 'proposed' && !flyout.ref.value && !flyout.epic.value && !flyout.plan.value) flyout.openPlan({ replace: true })
 }, { immediate: true })
-const backlog = computed(() => project.value ? (live.state.value.tasks[project.value.id] ?? []).filter(t => t.status === 'backlog') : [])
+const { tasks: projectTasks } = useProjectLists(() => project.value?.slug ?? '')
+const backlog = computed(() => project.value ? projectTasks.value.filter(t => t.status === 'backlog') : [])
 
 // Resolves false when not sent, so the composer keeps its images
 async function send(message: string): Promise<boolean> {

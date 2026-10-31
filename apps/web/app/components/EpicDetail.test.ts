@@ -1,0 +1,88 @@
+// @vitest-environment happy-dom
+import { VueQueryPlugin } from '@tanstack/vue-query'
+import type { EpicDetail, Task } from '@corral/contracts'
+import { flushPromises, mount } from '@vue/test-utils'
+import { afterEach, expect, it, vi } from 'vitest'
+import * as vue from 'vue'
+import { api } from '~/composables/useApi'
+import { useProjectLists } from '~/composables/useProjectLists'
+import { applyEvent } from '~/queries/dependencies'
+import { keys } from '~/queries/keys'
+import { testQueryClient } from '~/queries/mount-with-query'
+import { epics, projects } from '~/prototype/fixtures'
+import EpicDetailView from './EpicDetail.vue'
+
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
+
+it('updates prerequisite and blocks progress and the waiting alert from task events alone', async () => {
+  const client = testQueryClient()
+  client.setDefaultOptions({ queries: { staleTime: Infinity, retry: false, gcTime: Infinity } })
+  const project = projects[0]!
+  const own: EpicDetail = { ...epics[0]!, id: 'own', projectId: project.id, title: 'Current epic', reviewMode: 'direct', branch: null, prNumber: null, reviewState: null, dependsOn: ['pre'], blocks: ['next'], tasks: [] }
+  const prerequisite = { ...own, id: 'pre', title: 'Prerequisite', taskCount: 1, mergedCount: 0 }
+  const blocked = { ...own, id: 'next', title: 'Follow-up', taskCount: 1, mergedCount: 0 }
+  const task = (over: Partial<Task> = {}) => ({ id: 't1', number: 1, ref: 'TA-1', projectId: project.id, epicId: 'pre', status: 'ready', type: 'task', ...over }) as Task
+  client.setQueryData(keys.projects.list(), [project])
+  client.setQueryData(keys.tasks.list(project.slug), [task(), task({ id: 't2', ref: 'TA-2', epicId: 'next', type: 'design' })])
+  client.setQueryData(keys.epics.list(project.slug), [own, prerequisite, blocked])
+  vi.spyOn(api.epics, 'get').mockResolvedValue(own)
+  const list = vi.spyOn(api.epics, 'list')
+  for (const name of ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount'] as const) vi.stubGlobal(name, vue[name])
+  vi.stubGlobal('useLocalStorage', (_key: string, initial: unknown) => vue.ref(initial))
+  vi.stubGlobal('useProjectLists', useProjectLists)
+  vi.stubGlobal('useLive', () => ({ state: vue.ref({ projects: [project] }), subscribe: () => () => {} }))
+  vi.stubGlobal('useTaskFlyout', () => ({ ref: vue.ref(null) }))
+  vi.stubGlobal('useToast', () => ({ add: vi.fn() }))
+  const Alert = vue.defineComponent({
+    props: ['title'],
+    setup: props => () => vue.h('div', { role: 'alert' }, props.title)
+  })
+  const Link = vue.defineComponent({
+    props: ['to'],
+    setup: (props, { slots }) => () => vue.h('a', { href: props.to }, slots.default?.())
+  })
+  const wrapper = mount(EpicDetailView, {
+    props: { epicId: own.id, mode: 'page' },
+    global: {
+      plugins: [[VueQueryPlugin, { queryClient: client }]],
+      components: { UAlert: Alert, NuxtLink: Link },
+      stubs: {
+        UButton: true, UIcon: true, UBadge: true, UTextarea: true,
+        UBreadcrumb: true, USelect: true, UTabs: true, EpicGraph: true, MarkdownText: true,
+        TaskTypeBadge: true
+      }
+    }
+  })
+  try {
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toBe('Waiting on Prerequisite')
+    expect(wrapper.get('a[href="/epics/pre"]').text()).toBe('Prerequisite · 0/1 done')
+    expect(wrapper.get('a[href="/epics/next"]').text()).toBe('Follow-up · 0/1 done')
+
+    applyEvent(client, { type: 'task.updated', task: task({ status: 'merged' }) })
+    applyEvent(client, { type: 'task.updated', task: task({ id: 't2', ref: 'TA-2', epicId: 'next', type: 'design', status: 'approved' }) })
+    await flushPromises()
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.get('a[href="/epics/pre"]').text()).toBe('Prerequisite · 1/1 done')
+    expect(wrapper.get('a[href="/epics/next"]').text()).toBe('Follow-up · 1/1 done')
+
+    applyEvent(client, { type: 'task.created', task: task({ id: 't3', ref: 'TA-3' }) })
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toBe('Waiting on Prerequisite')
+    expect(wrapper.get('a[href="/epics/pre"]').text()).toBe('Prerequisite · 1/2 done')
+
+    applyEvent(client, { type: 'task.deleted', projectId: project.id, taskId: 't3' })
+    await flushPromises()
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.get('a[href="/epics/pre"]').text()).toBe('Prerequisite · 1/1 done')
+    // The cached epic aggregates deliberately remain stale; the UI reads tasks.
+    expect(client.getQueryData<typeof epics>(keys.epics.list(project.slug))?.find(e => e.id === 'pre')?.mergedCount).toBe(0)
+    expect(list).not.toHaveBeenCalled()
+  } finally {
+    wrapper.unmount()
+    client.clear()
+  }
+})

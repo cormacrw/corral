@@ -10,6 +10,7 @@ import { agentStatus, epicInProgress, epicWithLiveCounts, isLiveRun, isWorking, 
 // refetched whenever a run changes.
 const live = useLive()
 const state = live.state
+const lists = useAllProjectLists(() => state.value.projects)
 useSeoMeta({ title: 'Home · Corral' })
 
 // All projects, or one project's numbers
@@ -21,14 +22,14 @@ const projectItems = computed(() => [
 const scope = computed(() => projectId.value === 'all' ? state.value.projects : state.value.projects.filter(p => p.id === projectId.value))
 
 const epics = computed(() => scope.value
-  .flatMap(project => (state.value.epics[project.id] ?? []).map(epic => ({ epic: epicWithLiveCounts(epic, state.value.tasks[project.id] ?? []), project })))
+  .flatMap(project => (lists.epics.value[project.id] ?? []).map(epic => ({ epic: epicWithLiveCounts(epic, lists.tasks.value[project.id] ?? []), project })))
   .filter(({ epic }) => epicInProgress(epic))
   .sort((a, b) => Date.parse(b.epic.updatedAt) - Date.parse(a.epic.updatedAt)))
 
 // Re-render the "today" and elapsed numbers as time passes
 const now = ref(Date.now())
-const counts = computed(() => dashboardCounts(scope.value.flatMap(p => state.value.tasks[p.id] ?? []), new Date(now.value)))
-const loading = computed(() => !state.value.loaded || scope.value.some(p => !state.value.tasks[p.id]))
+const counts = computed(() => dashboardCounts(scope.value.flatMap(p => lists.tasks.value[p.id] ?? []), new Date(now.value)))
+const loading = computed(() => !state.value.loaded || scope.value.some(p => lists.pending.value[p.id] ?? true))
 
 const STAGE_COLOR: Record<typeof IN_PROGRESS_STAGES[number], string> = {
   in_progress: 'var(--ui-primary)',
@@ -71,7 +72,7 @@ onMounted(() => {
   })
 })
 
-const taskOf = (run: Run) => run.taskId ? state.value.tasks[run.projectId]?.find(t => t.id === run.taskId) : undefined
+const taskOf = (run: Run) => run.taskId ? lists.tasks.value[run.projectId]?.find(t => t.id === run.taskId) : undefined
 const projectOf = (id: string) => state.value.projects.find(p => p.id === id)
 // One line per active run: what it's on, where, and for how long
 const runLines = (agent: Agent) => runs.value

@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import type { Epic, EpicDetail, PatchEpicInput } from '@corral/contracts'
+import { useMutation } from '@tanstack/vue-query'
+import { patchEpic, setEpicDependencies } from '~/queries/epics'
+import type { EpicDetail, PatchEpicInput } from '@corral/contracts'
 import { isTaskDone, type EpicReviewMode, type TaskStatus } from '@corral/core'
 import { api, ApiError } from '~/composables/useApi'
 import { EPIC_REVIEW_MODE, EPIC_REVIEW_STATE, EPIC_STATUS_TEXT, epicReviewStatus, epicWithLiveCounts, PRIORITY, STATUS } from '~/utils/labels'
@@ -13,10 +15,15 @@ const emit = defineEmits<{ close: [] }>()
 const live = useLive()
 const flyout = useTaskFlyout()
 const toast = useToast()
+const patchMutation = useMutation(patchEpic)
+const dependenciesMutation = useMutation(setEpicDependencies)
 const epic = ref<EpicDetail | null>(null)
 const error = ref<string | null>(null)
 const saved = ref(false)
-const related = ref<Epic[]>([])
+const project = computed(() => live.state.value.projects.find(p => p.id === epic.value?.projectId) ?? null)
+const { tasks: projectTasks, epics: epicList } = useProjectLists(() => project.value?.slug ?? '')
+// Task events update the shared task list, not the epic's aggregate counts.
+const related = computed(() => epicList.value.map(e => epicWithLiveCounts(e, projectTasks.value)))
 const selectedDependency = ref('')
 const savingDependencies = ref(false)
 const dependencyError = ref<string | null>(null)
@@ -25,20 +32,14 @@ const blockedEpics = computed(() => related.value.filter(e => epic.value?.blocks
 const waiting = computed(() => prerequisites.value.filter(e => e.mergedCount < e.taskCount))
 const choices = computed(() => related.value.filter(e => e.id !== epic.value?.id && !epic.value?.dependsOn.includes(e.id)).map(e => ({ label: e.title, value: e.id })))
 
-async function loadRelated() {
-  const p = live.state.value.projects.find(p => p.id === epic.value?.projectId)
-  if (p) related.value = await api.epics.list(p.slug)
-}
-
 async function setDependencies(ids: string[]) {
   if (!epic.value || savingDependencies.value) return
   savingDependencies.value = true
   dependencyError.value = null
   try {
-    const updated = await api.epics.setDependencies(epic.value.id, ids)
+    const updated = await dependenciesMutation.mutateAsync({ id: epic.value.id, dependsOn: ids })
     epic.value = { ...epic.value, ...updated }
     selectedDependency.value = ''
-    await loadRelated()
   } catch (e) {
     dependencyError.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -50,25 +51,16 @@ const descriptionDraft = ref('')
 const tab = useLocalStorage<'tasks' | 'graph'>('corral.epic.tab', 'tasks')
 let savedTimer: ReturnType<typeof setTimeout> | null = null
 
-const project = computed(() => live.state.value.projects.find(p => p.id === epic.value?.projectId) ?? null)
-watch(() => project.value?.slug, () => {
-  void loadRelated().catch((e) => {
-    error.value = e instanceof Error ? e.message : String(e)
-  })
-})
-
 async function load() {
   error.value = null
   try {
     epic.value = await api.epics.get(props.epicId)
-    await loadRelated()
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   }
 }
 watch(() => props.epicId, () => {
   epic.value = null
-  related.value = []
   selectedDependency.value = ''
   dependencyError.value = null
   editingDescription.value = false
@@ -78,7 +70,6 @@ watch(() => props.epicId, () => {
 onMounted(() => {
   const stop = live.subscribe((event) => {
     if (!epic.value) return
-    if (event.type === 'epic.updated' || event.type.startsWith('task.')) void loadRelated()
     if (event.type === 'epic.updated' && event.epic.id === epic.value.id) epic.value = { ...epic.value, ...event.epic }
     if ((event.type === 'task.updated' || event.type === 'task.created') && (event.task.epicId === epic.value.id || epic.value.tasks.some(t => t.id === event.task.id))) void load()
     if (event.type === 'task.deleted' && epic.value.tasks.some(t => t.id === event.taskId)) void load()
@@ -89,7 +80,7 @@ onMounted(() => {
 async function patch(input: PatchEpicInput) {
   if (!epic.value) return
   try {
-    const updated = await api.epics.patch(epic.value.id, input)
+    const updated = await patchMutation.mutateAsync({ id: epic.value.id, input })
     epic.value = { ...epic.value, ...updated }
     saved.value = true
     if (savedTimer) clearTimeout(savedTimer)

@@ -8,6 +8,7 @@ import { projectCardSummary, projectNeedsYou } from '~/utils/projects'
 // project that opens its overview, with shortcuts to Board, Backlog and Settings
 const live = useLive()
 const state = live.state
+const lists = useAllProjectLists(() => state.value.projects)
 const inbox = ref<Inbox | null>(null)
 
 async function loadInbox() {
@@ -27,7 +28,7 @@ onMounted(() => {
 
 const cards = computed(() => state.value.projects.map((project) => {
   const needsYou = projectNeedsYou(inbox.value, project.id).length
-  return { project, loaded: Boolean(state.value.tasks[project.id]), ...projectCardSummary(project, state.value.tasks[project.id] ?? [], needsYou) }
+  return { project, loaded: !(lists.pending.value[project.id] ?? true), ...projectCardSummary(project, lists.tasks.value[project.id] ?? [], needsYou) }
 }))
 </script>
 

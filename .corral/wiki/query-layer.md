@@ -20,6 +20,14 @@ Events reach the query with or without an observer, so a run you switch away fro
 
 Pull requests have no event for CI or base branch changes, so `pullRequestsQuery` sets `refetchInterval` to 30 s. TanStack skips the tick while the tab is hidden (`document.visibilityState`, through `focusManager`), and coming back refetches if the data is older than `staleTime`. Other data shouldn't poll.
 
+## Project lists
+
+`useProjectLists(slug)` observes the shared task and epic lists in `tasks.ts` and `epics.ts`. The desktop and mobile shells use `useAllProjectLists` to load every project's lists up front for counts, Home and palette search. Board, Backlog, Overview, Plan and task/epic properties read these same entries; `useLive` no longer stores tasks or epics or loads lists. Lists have the query client's 30-minute cache lifetime, so route changes keep content visible while a stale entry refreshes. Only cold-load errors surface as list errors; failed background refetches preserve cached content, including cached empty lists, on Board, Backlog and Overview.
+
+Task events update loaded lists immediately. EpicDetail derives prerequisite and blocked-epic progress from the shared tasks with `epicWithLiveCounts`, so task creation, moves and deletion update the counts and waiting alert without needing an `epic.updated` event. Drafts are excluded both on fetch and on event writes, since they live only in their plan. Deleting a project empties its cached lists and removes its observers/search entries by deriving those from the current project list.
+
+Board/Backlog and their task/epic flyouts use `defineMutation` for task creation, patching, transitions and deletion, epic patching and epic dependencies. Desktop drag moves and task Status actions (including mobile) use `moveTask` on top of the transition mutation: cancel an older list fetch, optimistically move the single card, then invalidate on success or restore just that card on rejection. A newer event for the card wins over rollback; other cards' live changes are preserved. Drag targets follow D10's existing human actions, and Board filters remain in the URL.
+
 ## Rules
 
 - Skeletons depend on `isPending` only. It stays false for a query with data, so background refetches show no loading state. Never use `isFetching` for a skeleton.

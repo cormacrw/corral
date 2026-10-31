@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { useMutation } from '@tanstack/vue-query'
+import { createTask, transitionTask } from '~/queries/tasks'
 import { isTaskDone } from '@corral/core'
 import type { Task } from '@corral/contracts'
-import { api, ApiError } from '~/composables/useApi'
+import { ApiError } from '~/composables/useApi'
 import { epicTitle, PRIORITY, timeAgo } from '~/utils/labels'
 
 // Backlog (design/backlog.md): proposed tasks grouped by epic
@@ -11,23 +13,13 @@ const flyout = useTaskFlyout()
 const device = useDevice()
 const router = useRouter()
 const toast = useToast()
+const transition = useMutation(transitionTask)
+const create = useMutation(createTask)
 const slug = computed(() => String(route.params.slug))
 const project = computed(() => live.state.value.projects.find(p => p.slug === slug.value) ?? null)
-const all = computed<Task[]>(() => project.value ? live.state.value.tasks[project.value.id] ?? [] : [])
-const loading = computed(() => Boolean(project.value) && !live.state.value.tasks[project.value!.id])
-const error = ref<string | null>(null)
+const { tasks: all, epics: epicList, loading, error } = useProjectLists(slug)
 const pmName = computed(() => live.state.value.agents.find(a => a.role === 'pm')?.name ?? 'the PM')
 useSeoMeta({ title: () => `Backlog · ${project.value?.name ?? ''} · Corral` })
-
-watch(project, async (p) => {
-  if (p && !live.state.value.tasks[p.id]) {
-    try {
-      await live.loadTasks(p)
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
-    }
-  }
-}, { immediate: true })
 
 const search = ref('')
 const collapsed = useLocalStorage<Record<string, boolean>>('corral.backlog.collapsed', {})
@@ -36,7 +28,7 @@ const groups = computed(() => {
   const ids = [...new Set(all.value.map(t => t.epicId ?? 'none'))]
   return ids.map((id, i) => ({
     id,
-    title: id === 'none' ? 'No epic' : epicTitle(live.state.value.epics[project.value?.id ?? ''], id, i),
+    title: id === 'none' ? 'No epic' : epicTitle(epicList.value, id, i),
     rows: backlog.value.filter(t => (t.epicId ?? 'none') === id),
     merged: all.value.filter(t => (t.epicId ?? 'none') === id && isTaskDone(t)).length,
     total: all.value.filter(t => (t.epicId ?? 'none') === id).length
@@ -56,7 +48,7 @@ async function moveToBoard(tasks: Task[]) {
   for (const task of tasks) moving.value.add(task.id)
   for (const task of tasks) {
     try {
-      await api.tasks.transition(slug.value, task.number, { type: 'approve' })
+      await transition.mutateAsync({ task: { ...task, slug: slug.value }, input: { type: 'approve' } })
       moved.push(task.ref)
     } catch (e) {
       if (e instanceof ApiError && e.body?.code === 'transition_rejected' && e.body.reason.code === 'not_ready') {
@@ -81,7 +73,7 @@ function moveEpic(group: { id: string, title: string }) {
 async function newTask() {
   if (!project.value) return
   try {
-    const task = await api.tasks.create(slug.value, { title: 'New task', type: 'task', description: null })
+    const task = await create.mutateAsync({ slug: slug.value, input: { title: 'New task', type: 'task', description: null } })
     // A phone has no room for the flyout, so the task opens on its own page
     if (device.isMobile.value) void router.push(`/tasks/${task.ref}`)
     else flyout.open(task.ref)
