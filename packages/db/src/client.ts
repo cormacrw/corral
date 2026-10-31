@@ -30,11 +30,27 @@ export interface DatabaseHandle {
 const migrationsFolder = join(import.meta.dirname, '..', 'migrations')
 const casing = 'snake_case'
 
+// Neither driver surfaces a notice nobody listens for, and migrations report
+// preserved history with RAISE WARNING, so warnings go to the server's output.
+// Lower severities are routine ("schema already exists, skipping").
+function reportWarning(notice: { severity?: string | undefined, message?: string | undefined }) {
+  if (notice.severity === 'WARNING') console.warn(`Database warning: ${notice.message}`)
+}
+
+// PGlite takes its notice listener per call, not per client
+function reportPgliteWarnings(client: PGlite) {
+  const execProtocol = client.execProtocol.bind(client)
+  client.execProtocol = (message, options) => execProtocol(message, { ...options, onNotice: reportWarning })
+  const execProtocolStream = client.execProtocolStream.bind(client)
+  client.execProtocolStream = (message, options) => execProtocolStream(message, { ...options, onNotice: reportWarning })
+}
+
 // Opens the database and applies any pending migrations. Only apps/server
 // calls this (D8).
 export async function openDatabase(location: DatabaseLocation): Promise<DatabaseHandle> {
   if (location.driver === 'postgres') {
     const pool = new pg.Pool({ connectionString: location.url })
+    pool.on('connect', client => client.on('notice', reportWarning))
     const db = drizzleNodePg(pool, { schema, casing })
     try {
       await migrateNodePg(db, { migrationsFolder })
@@ -47,6 +63,7 @@ export async function openDatabase(location: DatabaseLocation): Promise<Database
   // PGlite creates its own folder but not missing parents
   if (location.dataDir !== null) await mkdir(location.dataDir, { recursive: true })
   const client = location.dataDir === null ? new PGlite() : new PGlite(location.dataDir)
+  reportPgliteWarnings(client)
   const db = drizzlePglite(client, { schema, casing })
   try {
     await migratePglite(db, { migrationsFolder })
