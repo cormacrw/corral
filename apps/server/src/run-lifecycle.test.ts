@@ -33,6 +33,43 @@ describe('run lifecycle', () => {
     expect(run).toMatchObject({ role: 'developer', state: 'interrupted', outcome: null, error: 'Stopped by a human', endedAt: expect.any(String) })
   })
 
+  it('returns the complete active snapshot while keeping history and explicit limits bounded', async () => {
+    const project = await t.createProject()
+    const [agent] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'reviewer')).limit(1)
+    const [epic] = await t.db.insert(schema.epics).values({ projectId: project.id, title: 'Integration review', createdBy: t.actor }).returning()
+    await t.db.insert(schema.runs).values(Array.from({ length: 51 }, () => ({
+      agentId: agent!.id, projectId: project.id, epicId: epic!.id, role: 'reviewer' as const, state: 'running' as const
+    })))
+    const active = await listRuns(t.db, { projectId: project.id, active: true })
+    expect(active).toHaveLength(51)
+    expect(active.every(run => run.epicId === epic!.id && run.taskId === null)).toBe(true)
+    expect(await listRuns(t.db, { projectId: project.id })).toHaveLength(50)
+    expect(await listRuns(t.db, { projectId: project.id, active: true }, 3)).toHaveLength(3)
+  })
+
+  it('publishes an interrupted epic run when its lease expires without a runner response', async () => {
+    const project = await t.createProject()
+    const [agent] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'reviewer')).limit(1)
+    const [epic] = await t.db.insert(schema.epics).values({ projectId: project.id, title: 'Expired review', createdBy: t.actor }).returning()
+    const [run] = await t.db.insert(schema.runs).values({
+      agentId: agent!.id, projectId: project.id, epicId: epic!.id, role: 'reviewer', state: 'running',
+      leaseExpiresAt: new Date(t.clock.now.getTime() - 1)
+    }).returning()
+    const before = t.events.length
+
+    // No runner is connected, so there will be no run.ended acknowledgement.
+    await t.orchestrator.sweepLeases()
+
+    expect(t.events.slice(before)).toContainEqual({
+      type: 'run.updated',
+      run: expect.objectContaining({
+        id: run!.id, epicId: epic!.id, taskId: null, state: 'interrupted',
+        endedAt: t.clock.now.toISOString(), outcome: null, error: 'Epic review lease expired'
+      })
+    })
+    expect(await listRuns(t.db, { projectId: project.id, active: true })).toEqual([])
+  })
+
   it('clears a waiting PM job when a turn ends', () => {
     expect(runEndValues({ state: 'failed', outcome: 'failed', error: 'x' }, new Date(0))).toMatchObject({ pmJob: null, endedAt: new Date(0), outcome: 'failed', error: 'x' })
   })
