@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { PlanSession } from '@corral/contracts'
-import { api } from '~/composables/useApi'
+import { useMutation } from '@tanstack/vue-query'
+import { closePlanThread } from '~/queries/plan'
 
 const props = defineProps<{ session: PlanSession, menu?: boolean }>()
 const device = useDevice()
@@ -9,6 +10,7 @@ const router = useRouter()
 const threads = usePlanThreads()
 const toast = useToast()
 const open = ref(false)
+const closing = useMutation(closePlanThread)
 const busy = ref(false)
 const UDrawer = resolveComponent('UDrawer')
 const UModal = resolveComponent('UModal')
@@ -17,7 +19,7 @@ async function close() {
   if (busy.value) return
   busy.value = true
   try {
-    await api.plan.close(props.session.id)
+    await closing.mutateAsync(props.session.id)
     threads.remove(props.session.id)
     open.value = false
     if (route.params.sessionId === props.session.id) await router.push('/plan')

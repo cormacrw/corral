@@ -3,10 +3,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import type { PlanSessionDetail } from '@corral/contracts'
 import { api } from './useApi'
-import { usePendingPlan } from './usePendingPlan'
+import { testQueryClient } from '~/queries/mount-with-query'
+import { keys } from '~/queries/keys'
+import { connectPendingPlanCache, usePendingPlan } from './usePendingPlan'
 
 vi.mock('./useApi', () => ({ api: { plan: { start: vi.fn() } } }))
+let client = testQueryClient()
 beforeEach(() => {
+  client = testQueryClient()
+  connectPendingPlanCache(client)
   vi.resetAllMocks()
   const state = new Map()
   vi.stubGlobal('useState', (key: string, init: () => unknown) => {
@@ -22,6 +27,7 @@ describe('optimistic Plan starts', () => {
     const id = pending.seed('project', 'Build this\n\n![design](attachment:image)', 'codex', 'TA-1')
     const second = usePendingPlan()
     expect(second.entries.value[id]?.session.messages[0]?.text).toContain('![design]')
+    expect(client.getQueryData<PlanSessionDetail>(keys.plan.session(id))?.messages[0]?.text).toContain('![design]')
     expect(second.entries.value[id]?.taskRef).toBe('TA-1')
     let resolve!: (value: PlanSessionDetail) => void
     vi.mocked(api.plan.start).mockImplementation(() => new Promise((r) => {
@@ -32,6 +38,7 @@ describe('optimistic Plan starts', () => {
     resolve(real(second.entries.value[id]!.session))
     await request
     expect(second.entries.value[id]?.session.messages.map(m => m.id)).toEqual(['server-human'])
+    expect(client.getQueryData<PlanSessionDetail>(keys.plan.session(id))?.messages.map(m => m.id)).toEqual(['server-human'])
     expect(api.plan.start).toHaveBeenCalledWith('project', expect.any(String), 'TA-1', 'codex', id)
   })
 

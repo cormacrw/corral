@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import type { Plan, PlanSessionDetail, PlanThreadItem } from '@corral/contracts'
-import { api } from '~/composables/useApi'
+import type { Plan, PlanThreadItem } from '@corral/contracts'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { approvePlan as approvePlanMutation, planSessionQuery, markPlanRead, sendPlanMessage } from '~/queries/plan'
 import { FLYOUT_SHEETS } from '~/composables/useTaskFlyout'
 import { approvePlan } from '~/utils/plan-approval'
 import { timeAgo } from '~/utils/labels'
@@ -20,9 +21,14 @@ provide(FLYOUT_SHEETS, true)
 const toast = useToast()
 const text = ref('')
 const busy = ref(false)
-const error = ref<string | null>(null)
-const session = ref<PlanSessionDetail | null>(null)
-const loadingPlan = ref(false)
+const actionError = ref<string | null>(null)
+const client = useQueryClient()
+const sending = useMutation(sendPlanMessage)
+const approval = useMutation(approvePlanMutation)
+const detail = useQuery(computed(() => planSessionQuery(props.item.sessionId)))
+const error = computed(() => actionError.value ?? detail.error.value?.message ?? null)
+const session = detail.data
+const loadingPlan = detail.isPending
 const composer = ref<{ focus: () => void } | null>(null)
 const offline = computed(() => live.state.value.loaded && !live.state.value.runner?.online)
 const working = computed(() => Boolean(props.item.activeRunId))
@@ -51,41 +57,26 @@ const planSheet = computed({
 })
 const messageOf = (e: unknown) => e instanceof Error ? e.message : String(e)
 
-async function loadPlan() {
-  loadingPlan.value = true
-  error.value = null
-  try {
-    session.value = await api.plan.session(props.item.sessionId)
-  } catch (e) {
-    error.value = messageOf(e)
-  } finally {
-    loadingPlan.value = false
-  }
+const loadPlan = () => {
+  actionError.value = null
+  return detail.refetch()
 }
-watch(() => props.item.planId, (id) => {
-  if (id) void loadPlan()
+watch([() => props.item.sessionId, () => props.item.unread || detail.data.value?.unread], ([id, unread]) => {
+  if (unread) markPlanRead(client, id)
 }, { immediate: true })
-onMounted(() => {
-  // A read acknowledgement removes an unread-reply-only item from the Inbox.
-  if (props.item.unread) {
-    void api.plan.read(props.item.sessionId).then(props.onRefresh).catch((e) => {
-      error.value = messageOf(e)
-    })
-  }
-})
 async function send(message: string): Promise<boolean> {
   if (cantSend.value) return false
   busy.value = true
-  error.value = null
+  actionError.value = null
   try {
-    await api.plan.message(props.item.sessionId, message)
+    await sending.mutateAsync({ id: props.item.sessionId, text: message })
     threads.add(props.item.sessionId)
     text.value = ''
     await props.onRefresh()
     await router.replace('/inbox')
     return true
   } catch (e) {
-    error.value = messageOf(e)
+    actionError.value = messageOf(e)
     return false
   } finally {
     busy.value = false
@@ -96,7 +87,7 @@ async function approve(plan: Plan, to: 'ready' | 'backlog') {
   busy.value = true
   try {
     await approvePlan(plan, to, {
-      approve: api.plan.approve,
+      approve: (planId, to) => approval.mutateAsync({ planId, to }),
       toast,
       mobile: true,
       closeSheet: flyout.close,
