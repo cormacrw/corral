@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { check, index, integer, jsonb, pgTable, text, uuid } from 'drizzle-orm/pg-core'
+import { check, foreignKey, index, integer, jsonb, pgTable, text, uuid } from 'drizzle-orm/pg-core'
 import { actor, createdAt } from './columns.ts'
 import { evidenceKind, reviewVerdict } from './enums.ts'
 import { runs } from './runs.ts'
@@ -32,7 +32,7 @@ export const evidence = pgTable('evidence', {
   // Null for a PM file shared in its Plan conversation, owned by runId.
   taskId: uuid().references(() => tasks.id, { onDelete: 'cascade' }),
   // Null for evidence about the task as a whole (e.g. a full test run)
-  criterionId: uuid().references(() => acceptanceCriteria.id, { onDelete: 'set null' }),
+  criterionId: uuid(),
   runId: uuid().notNull().references(() => runs.id, { onDelete: 'cascade' }),
   round: integer().notNull(),
   kind: evidenceKind().notNull(),
@@ -44,6 +44,8 @@ export const evidence = pgTable('evidence', {
   size: integer().notNull(),
   createdAt: createdAt()
 }, t => [
+  // Migration uses SET NULL (criterion_id) to preserve task_id.
+  foreignKey({ name: 'evidence_criterion_same_task_fk', columns: [t.taskId, t.criterionId], foreignColumns: [acceptanceCriteria.taskId, acceptanceCriteria.id] }).onDelete('set null'),
   index().on(t.taskId, t.round),
   // ECMAScript trim whitespace, including NBSP and BOM, matches the API.
   check('evidence_note_or_file', sql`(

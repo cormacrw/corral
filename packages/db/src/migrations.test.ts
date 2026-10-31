@@ -39,6 +39,44 @@ describe('migrations', () => {
   it.for([
     { driver: 'pglite' as const },
     { driver: 'postgres' as const }
+  ])('0041 reports all ownership violations without rewriting rows on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+    requireDatabase(driver, context)
+    const before = await migrationsBefore('0041_odd_malcolm_colcord')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db, migrate } = await open(driver)
+    await migrate(before)
+    await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('A', 'a', 'AA', 'cormacrw/test-app', 'main'), ('B', 'b', 'BB', 'fixture/second-project', 'main')`)
+    await db.execute(sql`insert into tasks (project_id, number, title, type, created_by) select id, 1, name, 'task', '{"kind":"system","component":"server"}'::jsonb from projects`)
+    await db.execute(sql`insert into agents (name, role) values ('Dev', 'developer')`)
+    await db.execute(sql`insert into runs (project_id, task_id, agent_id, role) select a.id, t.id, ag.id, 'developer' from projects a, tasks t, agents ag where a.slug = 'a' and t.title = 'B'`)
+    await db.execute(sql`insert into plan_sessions (project_id, title, created_by) select id, 'Session', '{"kind":"system","component":"server"}'::jsonb from projects where slug = 'b'`)
+    await db.execute(sql`insert into plans (project_id, session_id, version, title) select p.id, s.id, 1, 'Plan' from projects p, plan_sessions s where p.slug = 'a'`)
+    await db.execute(sql`insert into acceptance_criteria (task_id, position, text) select id, 0, 'Criterion' from tasks where title = 'B'`)
+    await db.execute(sql`insert into evidence (task_id, criterion_id, run_id, round, kind, note, size) select t.id, c.id, r.id, 0, 'note', 'Proof', 0 from tasks t, acceptance_criteria c, runs r where t.title = 'A'`)
+    const snapshot = async () => (await db.execute(sql`select jsonb_build_object('runs', (select jsonb_agg(r) from runs r), 'plans', (select jsonb_agg(p) from plans p), 'evidence', (select jsonb_agg(e) from evidence e)) as records`)).rows
+    const old = await snapshot()
+    const error = await migrate(migrationsFolder).then(() => null, (e: unknown) => e)
+    expect(error).not.toBeNull()
+    const cause = (error as { cause?: Error }).cause ?? error
+    expect(String(cause)).toContain('Ownership violations must be fixed by hand')
+    for (const table of ['runs', 'plans', 'evidence']) {
+      const rows = (await db.execute(sql.raw('select id from ' + table))).rows
+      expect(String(cause)).toContain(String(rows[0]!.id))
+    }
+    expect(await snapshot()).toEqual(old)
+    expect((await db.execute(sql`select conname from pg_constraint where conname = 'runs_task_same_project_fk'`)).rows).toEqual([])
+    // A human can repair the edges and retry without losing historical records.
+    await db.execute(sql`update runs set project_id = (select project_id from tasks where tasks.id = runs.task_id)`)
+    await db.execute(sql`update plans set project_id = (select project_id from plan_sessions where plan_sessions.id = plans.session_id)`)
+    await db.execute(sql`update evidence set criterion_id = null`)
+    const repaired = await snapshot()
+    await migrate(migrationsFolder)
+    expect(await snapshot()).toEqual(repaired)
+  })
+
+  it.for([
+    { driver: 'pglite' as const },
+    { driver: 'postgres' as const }
   ])('0040 checks future writes without rewriting approval or staged history on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
     requireDatabase(driver, context)
     const before = await migrationsBefore('0040_plan_approval_tuples')

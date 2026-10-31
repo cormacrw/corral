@@ -100,7 +100,7 @@ export const acceptanceCriteria = pgTable('acceptance_criteria', {
   text: text().notNull(),
   createdAt: createdAt(),
   updatedAt: updatedAt()
-}, t => [index().on(t.taskId, t.position)])
+}, t => [index().on(t.taskId, t.position), unique('criteria_task_id_unique').on(t.taskId, t.id)])
 
 // `taskId` depends on `dependsOnId`. Cycles are rejected by core before writing.
 // Both ends are keyed through projectId, so an edge can't cross projects.
