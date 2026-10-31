@@ -1,16 +1,23 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { useQuery, VueQueryPlugin } from '@tanstack/vue-query'
 import { computed, defineComponent, h, onBeforeUnmount, ref, watch } from 'vue'
+import { keys } from '~/queries/keys'
+import { testQueryClient } from '~/queries/mount-with-query'
+
+interface TestAgent { id: string, name: string, concurrency: number, activeRuns: number }
+
+const client = testQueryClient()
+const agent = () => client.getQueryData<TestAgent[]>(keys.agents.list())![0]!
+const seed = (patch: Partial<TestAgent> = {}) => client.setQueryData<TestAgent[]>(keys.agents.list(), [{ id: 'a1', name: 'Victor', concurrency: 2, activeRuns: 0, ...patch }])
 
 // Nuxt auto-imports the stepper uses
-const live = { state: ref({ agents: [{ id: 'a1', name: 'Victor', concurrency: 2, activeRuns: 0 }] }) }
 const toast = { add: vi.fn() }
 vi.stubGlobal('computed', computed)
 vi.stubGlobal('ref', ref)
 vi.stubGlobal('watch', watch)
 vi.stubGlobal('onBeforeUnmount', onBeforeUnmount)
-vi.stubGlobal('useLive', () => live)
 vi.stubGlobal('useToast', () => toast)
 
 const { default: ConcurrencyStepper } = await import('./ConcurrencyStepper.vue')
@@ -23,15 +30,18 @@ const UButton = defineComponent({
 
 // The parent passes the live agent, so optimistic updates reach the prop
 function mountStepper() {
-  const Parent = defineComponent({ setup: () => () => h(ConcurrencyStepper, { agent: live.state.value.agents[0]! }) })
-  return mount(Parent, { global: { components: { UButton } } })
+  const Parent = defineComponent({ setup() {
+    const agents = useQuery<TestAgent[]>({ queryKey: keys.agents.list(), enabled: false })
+    return () => h(ConcurrencyStepper, { agent: agents.data.value![0]! })
+  } })
+  return mount(Parent, { global: { components: { UButton }, plugins: [[VueQueryPlugin, { queryClient: client }]] } })
 }
 
 const fetchMock = vi.fn()
 beforeEach(() => {
   vi.useFakeTimers()
   vi.stubGlobal('fetch', fetchMock)
-  live.state.value.agents[0] = { id: 'a1', name: 'Victor', concurrency: 2, activeRuns: 0 }
+  seed()
 })
 afterEach(() => {
   vi.useRealTimers()
@@ -46,7 +56,7 @@ const minus = (wrapper: ReturnType<typeof mountStepper>) => wrapper.get('[aria-l
 
 describe('ConcurrencyStepper', () => {
   it('shows each tap at once and sends quick taps as one PATCH', async () => {
-    fetchMock.mockResolvedValue(ok({ ...live.state.value.agents[0], concurrency: 5 }))
+    fetchMock.mockResolvedValue(ok({ ...agent(), concurrency: 5 }))
     const wrapper = mountStepper()
     const seen: string[] = []
     for (let i = 0; i < 3; i++) {
@@ -55,7 +65,7 @@ describe('ConcurrencyStepper', () => {
       vi.advanceTimersByTime(200)
     }
     expect(seen).toEqual(['3', '4', '5'])
-    expect(live.state.value.agents[0]!.concurrency).toBe(5)
+    expect(agent().concurrency).toBe(5)
     expect(fetchMock).not.toHaveBeenCalled()
     vi.advanceTimersByTime(600)
     await flushPromises()
@@ -67,7 +77,7 @@ describe('ConcurrencyStepper', () => {
   })
 
   it('disables − at 1 and sends nothing', async () => {
-    live.state.value.agents[0]!.concurrency = 1
+    seed({ concurrency: 1 })
     const wrapper = mountStepper()
     expect(minus(wrapper).attributes('disabled')).toBeDefined()
     await minus(wrapper).trigger('click')
@@ -86,7 +96,7 @@ describe('ConcurrencyStepper', () => {
     vi.advanceTimersByTime(600)
     await flushPromises()
     expect(number(wrapper)).toBe('2')
-    expect(live.state.value.agents[0]!.concurrency).toBe(2)
+    expect(agent().concurrency).toBe(2)
     expect(toast.add).toHaveBeenCalledWith({ title: 'Not saved', description: 'Not found', color: 'error' })
     expect(wrapper.text()).not.toContain('Saved')
   })
@@ -111,14 +121,14 @@ describe('ConcurrencyStepper', () => {
     finishFirst(succeeds ? ok({ concurrency: 3 }) : new Response('{}', { status: 404 }))
     await flushPromises()
     expect(number(wrapper)).toBe('4')
-    expect(live.state.value.agents[0]!.concurrency).toBe(4)
+    expect(agent().concurrency).toBe(4)
     expect(wrapper.text()).not.toContain('Saved')
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(fetchMock.mock.calls[1]![1].body).toBe(JSON.stringify({ concurrency: 4 }))
     finishSecond(ok({ concurrency: 4 }))
     await flushPromises()
     expect(number(wrapper)).toBe('4')
-    expect(live.state.value.agents[0]!.concurrency).toBe(4)
+    expect(agent().concurrency).toBe(4)
     expect(wrapper.text()).toContain('Saved')
     expect(toast.add).toHaveBeenCalledTimes(succeeds ? 0 : 1)
     wrapper.unmount()
@@ -142,7 +152,7 @@ describe('ConcurrencyStepper', () => {
     vi.advanceTimersByTime(1)
     await flushPromises()
     expect(number(wrapper)).toBe('3')
-    expect(live.state.value.agents[0]!.concurrency).toBe(3)
+    expect(agent().concurrency).toBe(3)
     expect(wrapper.text()).not.toContain('Saved')
     expect(toast.add).toHaveBeenCalledWith({ title: 'Not saved', description: 'Request failed (404)', color: 'error' })
     wrapper.unmount()
@@ -163,14 +173,14 @@ describe('ConcurrencyStepper', () => {
     await flushPromises()
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(fetchMock.mock.calls[1]![1].body).toBe(JSON.stringify({ concurrency: 4 }))
-    expect(live.state.value.agents[0]!.concurrency).toBe(4)
+    expect(agent().concurrency).toBe(4)
     expect(toast.add).not.toHaveBeenCalled()
   })
 
   it('shows how many runs are going under the number', () => {
-    live.state.value.agents[0]!.activeRuns = 2
+    seed({ activeRuns: 2 })
     expect(mountStepper().text()).toContain('2 running now')
-    live.state.value.agents[0]!.activeRuns = 0
+    seed({ activeRuns: 0 })
     expect(mountStepper().text()).not.toContain('running now')
   })
 

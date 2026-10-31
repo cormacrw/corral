@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { AgentRuntime, CliStatus, DraftSession } from '@corral/contracts'
 import { api } from '~/composables/useApi'
+import { reloadShell } from '~/queries/shell'
 import { detectedRuntimes, projectColor, runtimeLabel } from '~/utils/labels'
 
 // Plan, new session (design/plan.md)
@@ -56,7 +57,7 @@ const reconnecting = ref(false)
 async function reconnect() {
   reconnecting.value = true
   try {
-    await live.load()
+    await reloadShell()
   } finally {
     reconnecting.value = false
   }

@@ -1,7 +1,9 @@
-import { computed, reactive, ref, watch } from 'vue'
+// @vitest-environment happy-dom
+import { computed, defineComponent, h, reactive, ref, watch } from 'vue'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { ApiError, api } from './useApi'
 import { useSetup } from './useSetup'
+import { mountWithQuery } from '../queries/mount-with-query'
 import { suggestPrefix } from '../utils/prefix'
 
 vi.mock('./useApi', async original => ({ ...await original<typeof import('./useApi')>(), api: {
@@ -17,12 +19,20 @@ beforeEach(() => {
   for (const [name, value] of Object.entries({ ref, computed, reactive, watch, onMounted: () => {},
     useRoute: () => ({ query: adding ? { add: '1' } : {} }),
     useRouter: () => ({ replace: vi.fn(), push }),
-    useLive: () => ({ state: ref({ agents: [] }), load: vi.fn() }),
     useToast: () => ({ add: toast })
   })) vi.stubGlobal(name, value)
   vi.mocked(api.projects.list).mockResolvedValue([{ prefix: 'COR' }] as never)
   vi.mocked(api.setup.checkRepo).mockResolvedValue({ ready: true } as never)
 })
+
+function mountSetup() {
+  let setup!: ReturnType<typeof useSetup>
+  mountWithQuery(defineComponent({ setup() {
+    setup = useSetup()
+    return () => h('div')
+  } }))
+  return setup
+}
 
 it('suggests a free valid prefix for collisions, short and non-letter names', () => {
   expect(suggestPrefix('corral', ['COR'])).toBe('CORR')
@@ -33,7 +43,7 @@ it('suggests a free valid prefix for collisions, short and non-letter names', ()
   }
 })
 it('normalizes edits, blocks invalid submissions and creates with the edited prefix', async () => {
-  const setup = useSetup()
+  const setup = mountSetup()
   await setup.pick('cormacrw/test-app')
   expect(setup.prefix.value).toBe('TES')
   for (const value of ['a1-', 'abcdef']) {
@@ -52,7 +62,7 @@ it('normalizes edits, blocks invalid submissions and creates with the edited pre
 })
 it.each([true, false])('keeps conflicts editable on the repository step (adding=%s)', async (add) => {
   adding = add
-  const setup = useSetup()
+  const setup = mountSetup()
   await setup.pick('cormacrw/test-app')
   setup.setPrefix('COR')
   setup.step.value = add ? 'repo' : 'names'
@@ -71,7 +81,7 @@ it('ignores an earlier repository check that completes after another selection',
   vi.mocked(api.setup.checkRepo).mockImplementationOnce(() => new Promise((resolve) => {
     resolveFirst = resolve
   }))
-  const setup = useSetup()
+  const setup = mountSetup()
   const first = setup.pick('owner/corral')
   await setup.pick('cormacrw/test-app')
   resolveFirst({ ready: true } as never)

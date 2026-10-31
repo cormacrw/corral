@@ -1,28 +1,30 @@
 import type { Agent, Epic, GlobalStatus, PlanSession, Profile, Project, RunEvent, RunnerStatus, ServerEvent, Task } from '@corral/contracts'
 import { serverEventTypes } from '~/queries/dependencies'
+import { shell } from '~/queries/shell'
 import { api } from './useApi'
 
-// Everything the shell and pages show live. Loaded once, then kept current
-// by the server's SSE stream (design/app-shell.md: "Everything stays live
-// over the existing SSE connection"). Reconnects after drops (D12).
+// What pages show live, kept current by the server's SSE stream
+// (design/app-shell.md: "Everything stays live over the existing SSE
+// connection"). Reconnects after drops (D12).
 export interface LiveState {
-  loaded: boolean
-  error: string | null
   connection: 'connecting' | 'open' | 'reconnecting'
-  projects: Project[]
   // Tasks by project ID, every status, filled in as pages ask for them
   tasks: Record<string, Task[]>
   // Epics by project ID, loaded with the project's tasks
   epics: Record<string, Epic[]>
-  agents: Agent[]
-  // The human's profile (their picture)
-  profile: Profile | null
-  runner: RunnerStatus | null
-  status: GlobalStatus
-  inboxCount: number
-  planSessions: PlanSession[]
   // Live transcript lines by run, for the agent page
   runEvents: Record<string, RunEvent[]>
+  // Compatibility getters over queries/shell.ts, until pages read queries
+  readonly loaded: boolean
+  readonly error: string | null
+  readonly projects: Project[]
+  readonly agents: Agent[]
+  // The human's profile (their picture)
+  readonly profile: Profile | null
+  readonly runner: RunnerStatus | null
+  readonly status: GlobalStatus
+  readonly inboxCount: number
+  readonly planSessions: PlanSession[]
 }
 
 type Listener = (event: ServerEvent) => void
@@ -50,39 +52,20 @@ export function useLive() {
   const route = useRoute()
   const pending = usePendingPlan()
   const state = useState<LiveState>('live', () => ({
-    loaded: false,
-    error: null,
     connection: 'connecting',
-    projects: [],
     tasks: {},
     epics: {},
-    agents: [],
-    profile: null,
-    runner: null,
-    status: { stopped: false, updating: false },
-    inboxCount: 0,
-    planSessions: [],
-    runEvents: {}
+    runEvents: {},
+    get loaded() { return shell()?.loaded.value ?? false },
+    get error() { return shell()?.error.value ?? null },
+    get projects() { return shell()?.projects.data.value ?? [] },
+    get agents() { return shell()?.agents.data.value ?? [] },
+    get profile() { return shell()?.profile.data.value ?? null },
+    get runner() { return shell()?.runner.data.value ?? null },
+    get status() { return shell()?.status.data.value ?? { stopped: false, updating: false } },
+    get inboxCount() { return shell()?.inboxCount.data.value ?? 0 },
+    get planSessions() { return shell()?.planSessions.data.value ?? [] }
   }))
-
-  async function load(): Promise<void> {
-    try {
-      const [projects, agents, runner, status, inbox, planSessions, profile] = await Promise.all([
-        api.projects.list(), api.agents.list(), api.runner(), api.status(), api.inbox.get(), api.plan.sessions(), api.me.get()
-      ])
-      state.value.profile = profile
-      state.value.projects = projects
-      state.value.agents = agents
-      state.value.runner = runner
-      state.value.status = status
-      state.value.inboxCount = inbox.count
-      state.value.planSessions = planSessions
-      state.value.error = null
-      state.value.loaded = true
-    } catch (error) {
-      state.value.error = error instanceof Error ? error.message : String(error)
-    }
-  }
 
   async function loadTasks(project: Project): Promise<Task[]> {
     const [tasks, epics] = await Promise.all([api.tasks.list(project.slug, 'all'), api.epics.list(project.slug)])
@@ -106,24 +89,13 @@ export function useLive() {
     const s = state.value
     pending.apply(event)
     switch (event.type) {
-      case 'project.created':
-        s.projects.push(event.project)
-        break
-      case 'project.updated':
-        s.projects = s.projects.map(p => p.id === event.project.id ? event.project : p)
-        break
       case 'project.deleted':
-        s.projects = s.projects.filter(p => p.id !== event.projectId)
         s.tasks = Object.fromEntries(Object.entries(s.tasks).filter(([id]) => id !== event.projectId))
         s.epics = Object.fromEntries(Object.entries(s.epics).filter(([id]) => id !== event.projectId))
-        s.planSessions = s.planSessions.filter(x => x.projectId !== event.projectId)
         break
       case 'task.created':
       case 'task.updated':
         upsertTask(event.task)
-        break
-      case 'profile.updated':
-        s.profile = event.profile
         break
       case 'epic.updated': {
         const list = s.epics[event.epic.projectId]
@@ -138,45 +110,20 @@ export function useLive() {
         if (list) s.tasks[event.projectId] = list.filter(t => t.id !== event.taskId)
         break
       }
-      case 'runner.status':
-        s.runner = event.status
-        break
-      case 'agent.updated':
-        // A new agent (Add agent in Settings) is appended
-        s.agents = s.agents.some(a => a.id === event.agent.id)
-          ? s.agents.map(a => a.id === event.agent.id ? event.agent : a)
-          : [...s.agents, event.agent]
-        break
-      case 'run.updated':
-        // Lease changes show on agents; refresh their counts cheaply
-        void api.agents.list().then((agents) => {
-          s.agents = agents
-        })
-        break
       case 'run.events': {
         const lines = s.runEvents[event.runId]
         if (lines) lines.push(...event.events)
         break
       }
-      case 'global.status':
-        s.status = event.status
-        break
       case 'plan.session':
+        // Before the listeners, so the query cache gets the session as read
         if (event.session.unread && route.params.sessionId === event.session.id) {
           event.session = { ...event.session, unread: false }
           void api.plan.read(event.session.id).catch(() => {})
         }
-        s.planSessions = [event.session, ...s.planSessions.filter(x => x.id !== event.session.id)]
         break
       default:
         break
-    }
-    // Inbox counts depend on task status and Plan session state (D11);
-    // ask the server, which owns the count
-    if (event.type === 'task.updated' || event.type === 'task.deleted' || event.type === 'task.created' || event.type === 'project.deleted' || event.type === 'plan.session') {
-      void api.inbox.get().then((inbox) => {
-        s.inboxCount = inbox.count
-      })
     }
     for (const listener of listeners) listener(event)
   }
@@ -203,7 +150,6 @@ export function useLive() {
       retryMs = 1000
       // Anything missed while disconnected
       if (wasReconnecting) {
-        void load()
         for (const listener of reconnectListeners) listener()
       }
     })
@@ -222,5 +168,5 @@ export function useLive() {
     state.value.runEvents[runId] = initial
   }
 
-  return { state, load, loadTasks, connect, subscribe: subscribeLive, watchRun }
+  return { state, loadTasks, connect, subscribe: subscribeLive, watchRun }
 }

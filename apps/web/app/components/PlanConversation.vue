@@ -2,6 +2,7 @@
 import type { Plan, PlanMessage, PlanSessionDetail } from '@corral/contracts'
 import { approvedPlanSummary } from '@corral/core'
 import { api } from '~/composables/useApi'
+import { reloadShell } from '~/queries/shell'
 import { projectColor, runtimeLabel } from '~/utils/labels'
 import { approvePlan } from '~/utils/plan-approval'
 import { answerTo, openQuestionId, STOP_ASKING } from '~/utils/plan-questions'
@@ -45,7 +46,7 @@ const reconnecting = ref(false)
 async function reconnect() {
   reconnecting.value = true
   try {
-    await live.load()
+    await reloadShell()
   } finally {
     reconnecting.value = false
   }

@@ -2,6 +2,14 @@
 
 Server data in `apps/web` is moving to TanStack Query, in `app/queries/`. `app/plugins/query.client.ts` installs the client (`client.ts`) and connects it to `useLive`'s stream, real or mock, so the prototype works the same way. Pages not yet migrated still use `useLive` state; the two run side by side.
 
+## Shell data
+
+`shell.ts` holds one long-lived observer each for projects, agents, runner, status, profile, Plan sessions and the inbox count. `app.vue` starts it after the first navigation. Because those observers never unmount, navigating refetches none of them, whatever `staleTime` says; they refetch on events, window focus and reconnect. Pages read them through temporary getters on `useLive().state` (`projects`, `agents`, `loaded`, ...), which the final migration task removes. The getters are read-only: change this data with a mutation, or `setQueryData` for an optimistic edit as `ConcurrencyStepper` does.
+
+The setup middleware runs before the shell starts and makes a single `api.projects.list()`, caching the list only if it is an array. It doesn't use the query's retries, so an unreachable server doesn't hold up a cold launch, and the shell then finds the list fresh and doesn't ask again.
+
+`reloadShell()` refetches all of it, for a human pressing Retry or Reconnect. `plan.session` is marked read in `useLive.apply` before listeners run, so the cache gets the read session. `usePendingPlan` gets every event there too, with or without a conversation mounted.
+
 ## Rules
 
 - Skeletons depend on `isPending` only. It stays false for a query with data, so background refetches show no loading state. Never use `isFetching` for a skeleton.

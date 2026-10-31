@@ -1,16 +1,18 @@
 <script setup lang="ts">
+import { useQueryClient } from '@tanstack/vue-query'
 import type { Agent } from '@corral/contracts'
 import { api, ApiError } from '~/composables/useApi'
+import { keys } from '~/queries/keys'
 
 // A big − n + control for a developer or reviewer agent's concurrency (the
 // PM has none, see utils/agents.ts agentLimit). Each tap shows at once in the
-// live state; quick taps go to the server as one PATCH after the last one.
+// agent list; quick taps go to the server as one PATCH after the last one.
 const props = defineProps<{ agent: Pick<Agent, 'id' | 'name' | 'concurrency' | 'activeRuns'>, fullWidth?: boolean, compact?: boolean }>()
 
 const SAVE_DELAY_MS = 600
 const SAVED_NOTE_MS = 2000
 
-const { state } = useLive()
+const client = useQueryClient()
 const toast = useToast()
 
 // What the server last confirmed, to go back to when a save fails
@@ -31,8 +33,7 @@ watch(() => props.agent.concurrency, (next) => {
 })
 
 function show(concurrency: number): void {
-  const live = state.value.agents.find(a => a.id === props.agent.id)
-  if (live) live.concurrency = concurrency
+  client.setQueryData<Agent[]>(keys.agents.list(), agents => agents?.map(a => a.id === props.agent.id ? { ...a, concurrency } : a))
 }
 
 function step(by: number): void {

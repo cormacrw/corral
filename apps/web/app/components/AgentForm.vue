@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import type { Agent, AgentRuntime, CliStatus, CreateAgentInput } from '@corral/contracts'
-import { api } from '~/composables/useApi'
+import { useMutation } from '@tanstack/vue-query'
+import type { AgentRuntime, CliStatus, CreateAgentInput } from '@corral/contracts'
+import { createAgent } from '~/queries/agents'
 import { detectedRuntimes, RUNTIME } from '~/utils/labels'
 
 // Add agent (design/settings.md): name, role, runtime and concurrency. The
 // runtime menu offers only the CLIs the runner detected (D18).
 const props = defineProps<{ clis: CliStatus[] | null, cliError: string | null }>()
 const open = defineModel<boolean>('open', { required: true })
-const emit = defineEmits<{ created: [agent: Agent] }>()
+const create = useMutation(createAgent)
 const toast = useToast()
 const device = useDevice()
 const UDrawer = resolveComponent('UDrawer')
@@ -29,8 +30,7 @@ async function save() {
   if (!canSave.value || !form.runtime) return
   saving.value = true
   try {
-    const agent = await api.agents.create({ name: form.name.trim(), role: form.role, runtime: form.runtime, concurrency: form.concurrency })
-    emit('created', agent)
+    const agent = await create.mutateAsync({ name: form.name.trim(), role: form.role, runtime: form.runtime, concurrency: form.concurrency })
     toast.add({ title: `Added ${agent.name}`, color: 'success' })
     open.value = false
   } catch (e) {

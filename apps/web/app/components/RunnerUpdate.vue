@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { RunnerInfo } from '@corral/contracts'
 import { api } from '~/composables/useApi'
+import { reloadShell } from '~/queries/shell'
 
 const props = defineProps<{ runner: RunnerInfo }>()
 const pending = ref(false)
@@ -20,7 +21,7 @@ async function update() {
   error.value = ''
   try {
     await api.updateRunner(props.runner.id)
-    await useLive().load()
+    await reloadShell()
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Update request failed'
   } finally {

@@ -8,6 +8,10 @@ export const profileQuery = () => queryOptions({ queryKey: keys.profile(), query
 export const runnerQuery = () => queryOptions({ queryKey: keys.runner(), queryFn: () => api.runner() })
 export const statusQuery = () => queryOptions({ queryKey: keys.status(), queryFn: () => api.status() })
 
+export const setProfileAvatar = defineMutation<Profile, Blob | null>({
+  mutationFn: image => image ? api.me.setAvatar(image) : api.me.clearAvatar(),
+  invalidates: [keys.profile()]
+})
 export const patchProfile = defineMutation<Profile, PatchProfileInput>({
   mutationFn: input => api.me.patch(input),
   invalidates: [keys.profile()]

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Inbox } from '@corral/contracts'
 import { api } from '~/composables/useApi'
+import { reloadShell } from '~/queries/shell'
 import { projectCardSummary, projectNeedsYou } from '~/utils/projects'
 
 // The mobile Projects tab (design/mobile.md, frame "Projects"): a card per
@@ -44,7 +45,7 @@ const cards = computed(() => state.value.projects.map((project) => {
       color="error"
       variant="subtle"
       :title="state.error"
-      :actions="[{ label: 'Retry', onClick: () => live.load() }]"
+      :actions="[{ label: 'Retry', onClick: reloadShell }]"
     />
     <article
       v-for="card in cards"
