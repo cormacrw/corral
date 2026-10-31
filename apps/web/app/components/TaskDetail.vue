@@ -204,7 +204,7 @@ async function resume() {
 
 const priorityOptions = (Object.keys(PRIORITY) as TaskPriority[]).map(p => ({ label: PRIORITY[p].label, value: p }))
 const typeOptions = computed(() => (Object.keys(TASK_TYPE) as Task['type'][])
-  .filter(t => !task.value || canChangeType(task.value.status, task.value.type, t))
+  .filter(t => !task.value || canChangeType(task.value, t))
   .map(t => ({ label: TASK_TYPE[t], value: t })))
 // Tasks aren't assigned ahead of time: these are the agents of the task's
 // latest runs, or null until one claims it (D15)

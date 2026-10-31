@@ -23,8 +23,3 @@ export function isUnfinishedBoardTask(task: CompletionState & { deleted?: boolea
 export function isTaskImmutable(task: CompletionState): boolean {
   return task.type !== 'design' && isTaskDone(task)
 }
-
-// Keep the deliverable type fixed once work is approved or awaiting merge.
-export function canChangeTaskType(task: CompletionState): boolean {
-  return !['approved', 'ready_to_merge', 'merged'].includes(task.status)
-}
