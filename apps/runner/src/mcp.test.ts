@@ -100,6 +100,7 @@ describe('ToolServer', () => {
     await client.callTool({ name: 'list_tasks', arguments: { status: 'merged' } })
     expect(calls.at(-1)?.input).toEqual({ status: 'merged', includeMerged: false })
     expect((await client.callTool({ name: 'list_tasks', arguments: { status: 'done' } })).isError).toBe(true)
+    await client.close()
   })
 
   it('exposes typed PM mutations and forwards their inputs', async () => {
@@ -178,6 +179,7 @@ describe('ToolServer', () => {
       expect((await client.callTool({ name: 'attach_evidence', arguments: input })).isError).not.toBe(true)
       expect(calls.at(-1)).toEqual({ tool: 'attach_evidence', input })
     }
+    await client.close()
   })
 
   it('passes project slugs through every project-scoped PM tool', async () => {
