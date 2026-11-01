@@ -20,6 +20,9 @@ export interface PromptTask {
   // D27: submits commits on its own branch for integration, with no task PR
   prFree?: boolean
   rebaseOnly?: boolean
+  // An epic PR's rebase on a project whose required CI verifies it after the
+  // push, so the developer squashes, resolves and reports
+  squashRebase?: boolean
   approvedHeadSha?: string | null
   reviewRounds: number
   reviewRoundCap: number
@@ -355,6 +358,7 @@ const WORK_NOTE = '- Every `report_outcome` needs a `note` as well: one line of 
 
 export function developerPrompt(task: PromptTask, agentName: string): string {
   if (task.rebaseOnly) return rebaseDeveloperPrompt(task, agentName)
+  if (task.squashRebase) return epicRebaseDeveloperPrompt(task, agentName)
   if (task.spike) return spikeDeveloperPrompt(task, agentName)
   const revision = task.reviewRounds > 0
   return [
@@ -455,7 +459,7 @@ export function designerPrompt(task: PromptTask, agentName: string): string {
 export function developerRevisionPrompt(task: PromptTask, feedback: PromptTask['comments']): string {
   if (task.rebaseOnly) return rebaseDeveloperPrompt({ ...task, comments: feedback }, 'the assigned developer')
   const format = (c: PromptTask['comments'][number]) => `- ${c.author} (${c.createdAt.toISOString()}): ${c.body}`
-  const outcome = task.spike ? 'findings_reported' : task.prFree ? 'commit_submitted' : task.reviewRounds > 0 ? 'pr_updated' : 'pr_opened'
+  const outcome = task.spike ? 'findings_reported' : task.prFree ? 'commit_submitted' : task.reviewRounds > 0 || task.squashRebase ? 'pr_updated' : 'pr_opened'
   return [
     task.reviewRounds > 0
       ? `Review round ${task.reviewRounds} of ${task.reviewRoundCap} on ${task.ref} requested changes. This is the same session${task.branch ? ` and the same branch, \`${task.branch}\`` : ''}: continue from your earlier work.`
@@ -464,7 +468,7 @@ export function developerRevisionPrompt(task: PromptTask, feedback: PromptTask['
     stoppedRunSection(task),
     section('New comments', feedback.length > 0 ? feedback.map(format).join('\n') : '(none: re-read the task with `get_task`)'),
     section('What to do', `
-- Address every point of the feedback, and finish whatever the task still needs.
+- Address every point of the feedback, and finish whatever the task still needs.${task.squashRebase ? `\n- ${EPIC_REBASE_NO_GATES}` : ''}
 - Re-read the task with \`get_task\` if anything may have changed, and attach evidence for every acceptance criterion again if the review round has moved on.
 - Then call \`report_outcome\` with outcome "${outcome}" and a summary${task.spike ? ' of your findings' : ' of the change as a whole'}.`)
   ].join('\n')
@@ -535,6 +539,46 @@ ${WORK_NOTE}
   : 'Report `pr_rebased` with `conflictedFiles`: a non-empty list of every file in which you resolved a conflict, and `review`: `trivial` only if the resolution just combines both sides with no new logic, renames or behaviour changes; otherwise choose `needs_review`. The server checks a `trivial` choice: if only the conflicted files changed and no project doc moved on the base, the approval carries over without a review. Anything else goes to Agent review. Include a summary naming every conflicted file and how each was resolved, and a one-line note naming the conflicted files and their resolutions. If a human decision is needed, report stuck instead.'}
 - Always finish by calling \`report_outcome\`.`),
     commentsSection(task)
+  ].join('\n')
+}
+
+// Said in the epic rebase task's text and in its prompt. The runner adds role
+// instructions that say to run the gates, so this has to overrule them.
+export const EPIC_REBASE_NO_GATES = 'Required CI runs on the epic PR and enforces the gates before merge, so run no lint, typecheck, tests, build, `pnpm run check` or Postgres suites, whatever your general instructions say. Report straight away, and don\'t fetch or rebase again once the conflicts are resolved, even if the target moved: Corral\'s epic merge pass handles a moved target, and anything CI finds comes back as an epic CI failure.'
+export const EPIC_SQUASH_KEEPS_TRAILERS = 'Keep every `Corral-Submission:` trailer in the squashed commit\'s message: Corral finds them on the epic branch to integrate each submission exactly once.'
+export const EPIC_SQUASH_KEEPS_MIGRATIONS = 'This squash doesn\'t conflict with the rule against squashing migrations: it squashes commits, not migration files. Migration files stay exactly as they are, with new ones renumbered only as a rebase already requires.'
+
+// The squash happens first so each conflict is resolved once. The epic PR
+// squashes on merge, so the individual commits aren't kept anyway.
+function epicRebaseDeveloperPrompt(task: PromptTask, agentName: string): string {
+  const target = `origin/${task.defaultBranch}`
+  return [
+    `You are ${agentName}, the developer agent in Corral, working on ${task.ref}: ${task.title}.`,
+    task.reviewRounds > 0
+      ? `This is a revision: review round ${task.reviewRounds} of ${task.reviewRoundCap} requested changes to this rebase. Address every piece of feedback below; the squash and rebase below are only for what isn't done yet.`
+      : 'Your only job is to squash the epic branch, rebase it, resolve the conflicts and report.',
+    '',
+    stoppedRunSection(task),
+    section('Task', richTextToMarkdown(task.description) || '(no description)'),
+    section('Acceptance criteria', criteriaList(task)),
+    commentsSection(task),
+    attachmentsSection(task),
+    section('How to work', `
+- You are in a git worktree on the epic branch \`${task.branch}\`. Do not push and do not use \`gh\`. Corral force-pushes it with --force-with-lease when you report, and no separate PR is opened.
+- Squash the branch into one commit on its merge base with \`${target}\`, carrying every commit's message over:
+  \`\`\`
+  git fetch origin && base=$(git merge-base HEAD ${target}) && git reset --soft "$base" && git log --format=%B "$base..ORIG_HEAD" | git commit -F -
+  \`\`\`
+- ${EPIC_SQUASH_KEEPS_TRAILERS} Don't reword them out, here or when the rebase continues.
+- ${EPIC_SQUASH_KEEPS_MIGRATIONS}
+- Rebase that commit: \`git rebase ${target}\`. Never merge the target in.
+- Resolve the conflicts keeping both sides' intent, never reverting what the target merged. Make no feature changes. Continue with \`git add\` and \`GIT_EDITOR=true git rebase --continue\`.
+- ${EPIC_REBASE_NO_GATES}
+- Attach a \`note\` with \`attach_evidence\` for each acceptance criterion, naming the conflicted files and how each was resolved. There's nothing else to prove.
+- Then call \`report_outcome\` with outcome "pr_updated" and a summary naming every conflicted file and how it was resolved.
+${WORK_NOTE}
+- If you cannot continue without a human decision, call \`report_outcome\` with outcome "stuck" and put the question in the summary.
+- Always finish by calling \`report_outcome\`.`)
   ].join('\n')
 }
 

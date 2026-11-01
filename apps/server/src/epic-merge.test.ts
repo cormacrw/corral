@@ -170,6 +170,9 @@ it('blocks a conflicted rebase with an Inbox item and hands it to a developer ru
   expect(dev).toMatchObject({ baseBranch: 'develop' })
   expect(dev.prompt).toContain('src/routes/search.ts')
   expect(dev.prompt).toContain('git rebase origin/develop')
+  expect(dev.prompt).toContain('Squash the epic branch')
+  expect(dev.prompt).toContain('Keep every `Corral-Submission:` trailer')
+  expect(dev.prompt).not.toContain('Run `pnpm run check`')
 
   const rebase = (await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epic.id))).find(row => row.id !== task.id)!
   const [criterion] = await t.db.select().from(schema.acceptanceCriteria).where(eq(schema.acceptanceCriteria.taskId, rebase.id))
@@ -194,6 +197,22 @@ it('blocks a conflicted rebase with an Inbox item and hands it to a developer ru
   expect(await reload(epic.id)).toMatchObject({ reviewState: 'in_review', conflictFiles: null, prHeadSha: `${head}-resolved` })
   expect(await runner.call(integration.runId, integration.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Still fits' })).toMatchObject({ ok: true })
   expect((await inbox()).needsYou.find(i => i.id === epic.id)).toMatchObject({ type: 'epic_review' })
+})
+
+it('keeps the gates on an epic rebase when no required check would verify it', async () => {
+  const { project, epic, head } = await approved()
+  await t.db.update(schema.projects).set({ requiredChecks: [] }).where(eq(schema.projects.id, project.id))
+  t.github.behind.set(head, 1)
+  t.github.updateBranchResult = false
+  await t.orchestrator.merges.tick()
+  await t.orchestrator.merges.tick()
+  const item = (await inbox()).needsYou.find(i => i.id === epic.id) as EpicConflictItem
+  expect((await t.request('POST', `/api/epics/${epic.id}/review`, { action: 'rebase', headSha: item.headSha })).status).toBe(200)
+  await t.orchestrator.schedule()
+  const dev = (await runner.next('run.assign', m => m.job.role === 'developer' && m.job.branch === epic.branch)).job as RunJob
+  expect(dev.prompt).toContain('Run the project\'s gates, then report pr_updated')
+  expect(dev.prompt).toContain('Run `pnpm run check` when available')
+  expect(dev.prompt).not.toContain('Corral-Submission')
 })
 
 it('sends a failed required check back as a fix task in the epic', async () => {

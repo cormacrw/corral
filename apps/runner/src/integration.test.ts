@@ -92,6 +92,35 @@ it('finds a submission already on the remote, so a retry adds no second commit',
   expect(await run('rev-list', '--count', `${tip}..epic`)).toBe('1')
 })
 
+// The steps an epic rebase task's prompt gives the developer (COR-387)
+it('still finds every submission after the epic branch is squashed and rebased through a conflict', async () => {
+  const a = await commit('task-a', 'epic', 'same.txt', 'a\n')
+  const b = await commit('task-b', 'epic', 'b.txt', 'b\n')
+  const first = await integrate('sub-a', a, tip, tip)
+  const second = await integrate('sub-b', b, tip, first)
+  await commit('moved', 'main', 'same.txt', 'target\n')
+  await run('merge', '--quiet', '--ff-only', 'moved')
+
+  await run('checkout', '--quiet', 'epic')
+  const script = 'base=$(git merge-base HEAD main) && git reset --soft "$base" && git log --format=%B "$base..ORIG_HEAD" | git -c user.name=Dev -c user.email=dev@example.com commit -F -'
+  const squashed = await exec('sh', ['-c', script], { cwd: origin })
+  expect(squashed.stderr).toBe('')
+  expect(await run('rev-list', '--count', 'main..HEAD')).toBe('1')
+  expect((await exec('git', ['rebase', 'main'], { cwd: origin })).code).toBe(1)
+  await writeFile(join(origin, 'same.txt'), 'target\na\n')
+  await run('add', '.')
+  const resolved = await exec('git', ['-c', 'user.name=Dev', '-c', 'user.email=dev@example.com', 'rebase', '--continue'], { cwd: origin, env: { GIT_EDITOR: 'true' } })
+  expect(resolved.code).toBe(0)
+  expect(await run('rev-list', '--count', 'main..HEAD')).toBe('1')
+  const head = await run('rev-parse', 'HEAD')
+  await run('checkout', '--quiet', 'main')
+
+  for (const [id, headSha] of [['sub-a', a], ['sub-b', b]] as const) {
+    expect(await prepareIntegration(dataDir, null, job(id, headSha, tip, second))).toMatchObject({ status: 'integrated', commitSha: head, targetSha: head })
+  }
+  expect(await run('rev-parse', 'epic')).toBe(head)
+})
+
 it('refuses a stale runner\'s push even when its own clone still shows the old head', async () => {
   const a = await commit('task-a', 'epic', 'a.txt', 'a\n')
   const stale = await prepareIntegration(dataDir, null, job('sub-a', a, tip, tip))

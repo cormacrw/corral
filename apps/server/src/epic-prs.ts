@@ -11,6 +11,7 @@ import { fileArtifacts, workNotes } from './inbox-changes.ts'
 import { runEndValues } from './run-lifecycle.ts'
 import { listEvidence } from './runs.ts'
 import { thumbnailUrl } from './projects.ts'
+import { EPIC_REBASE_NO_GATES, EPIC_SQUASH_KEEPS_MIGRATIONS, EPIC_SQUASH_KEEPS_TRAILERS } from './prompts.ts'
 import { commitUrl, createTask, listComments, loadTask, toTasks, type ProjectRow } from './tasks.ts'
 
 const { acceptanceCriteria, agents, auditLog, epics, projects, runs, tasks } = schema
@@ -179,8 +180,15 @@ export class EpicPullRequests {
       if (!project || !epic || epic.reviewState !== 'conflict' || epic.prHeadSha !== headSha) throw new ApiFailure(409, { code: 'conflict', constraint: 'epic_review_changed' })
       const target = project.defaultBranch
       const files = epic.conflictFiles?.length ? epic.conflictFiles.join(', ') : 'the files git reports'
-      const text = `Rebase the epic branch ${epic.branch} onto origin/${target}: git fetch origin && git rebase origin/${target}. Never merge ${target} in. Resolve the conflicts in ${files}, keeping both sides' intent and never reverting what ${target} just merged. No feature changes. Run the project's gates, then report pr_updated; Corral force-pushes the epic branch with --force-with-lease, and no separate PR is opened.`
-      const id = await createTask(tx, project, { type: 'task', title: `Rebase epic: ${epic.title}`.slice(0, 200), description: paragraph(text), epicId: epic.id, acceptanceCriteria: [`${epic.branch} is rebased onto origin/${target} with no merge commits, and the conflicts in ${files} are resolved keeping both sides' intent`] }, actor, { epicFix: true })
+      const resolve = `Resolve the conflicts in ${files}, keeping both sides' intent and never reverting what ${target} just merged. No feature changes.`
+      const pushed = 'Corral force-pushes the epic branch with --force-with-lease, and no separate PR is opened.'
+      // Without required CI nothing else would verify the gates
+      const squash = project.requiredChecks.length > 0
+      const text = squash
+        ? `Squash the epic branch ${epic.branch} into one commit on its merge base with origin/${target}, then rebase that commit onto origin/${target}, so each conflict is resolved once. Epic PRs always squash on merge, so the individual commits aren't kept anyway. ${EPIC_SQUASH_KEEPS_TRAILERS} ${EPIC_SQUASH_KEEPS_MIGRATIONS} Never merge ${target} in. ${resolve} ${EPIC_REBASE_NO_GATES} Report pr_updated; ${pushed}`
+        : `Rebase the epic branch ${epic.branch} onto origin/${target}: git fetch origin && git rebase origin/${target}. Never merge ${target} in. ${resolve} Run the project's gates, then report pr_updated; ${pushed}`
+      const criterion = `${epic.branch} is ${squash ? 'squashed to one commit keeping every Corral-Submission trailer and ' : ''}rebased onto origin/${target} with no merge commits, and the conflicts in ${files} are resolved keeping both sides' intent`
+      const id = await createTask(tx, project, { type: 'task', title: `Rebase epic: ${epic.title}`.slice(0, 200), description: paragraph(text), epicId: epic.id, acceptanceCriteria: [criterion] }, actor, { epicFix: true })
       await tx.update(tasks).set({ branch: epic.branch }).where(eq(tasks.id, id))
       await appendAudit(tx, { projectId: project.id, actor }, auditEvent('epic.pr', { epicId, event: 'rebase_handed_off', headSha }))
       return id

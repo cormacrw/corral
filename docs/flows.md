@@ -284,9 +284,9 @@ Before anything else, the server compares the epic branch with the target branch
 
 #45's job carries the epic branch itself as its branch, not a new task branch. The developer:
 
-1. Checks out the epic branch and rebases it onto `origin/<target branch>`.
-2. Resolves the conflict in the route file, keeping both changes, and runs lint, typecheck, tests and build.
-3. Reports `pr_updated` with what it resolved and how it checked it. The runner force-pushes the epic branch with `--force-with-lease`; no task PR is opened.
+1. Checks out the epic branch, squashes it to one commit that keeps every `Corral-Submission:` trailer, and rebases that onto `origin/<target branch>`.
+2. Resolves the conflict in the route file, keeping both changes. Required CI verifies the push, so it runs no gates and doesn't chase a target that moved again. A project with no required CI checks skips the squash and runs lint, typecheck, tests and build here.
+3. Reports `pr_updated` with what it resolved. The runner force-pushes the epic branch with `--force-with-lease`; no task PR is opened.
 
 #45 goes to Agent review like any task in E7; the reviewer checks the rebased epic branch against the target branch and approves. #45 is Merged, since its work is already on the epic branch. Because a resolved conflict isn't a mechanical update, the epic PR goes back to **integration review** and then to the **human**, who approves it again. On this second pass the epic branch is already on top of the target branch, so nothing needs rebasing; if the target branch had moved again, step 6 would repeat.
 
