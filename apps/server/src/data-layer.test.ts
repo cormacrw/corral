@@ -53,6 +53,19 @@ describe.each(['pglite', 'postgres'] as const)('the data layer on %s', (driver) 
     expect(item.since?.text).toBe('Use Postgres')
   })
 
+  it('pins an answer to a resolve only when it has text', async () => {
+    const pinned = async (text?: string) => {
+      const task = await t.createTask(project.slug)
+      await setStatus(task.id, 'blocked', 'in_progress')
+      expect((await t.request('POST', `/api/inbox/${task.id}/actions`, { action: 'resolve', to: 'ready', ...(text !== undefined && { text }) })).status).toBe(200)
+      expect((await t.db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, task.id)))[0]!.status).toBe('ready')
+      return (await t.db.select().from(comments).where(eq(comments.taskId, task.id))).map(c => [c.body, c.pinned])
+    }
+    expect(await pinned()).toEqual([])
+    expect(await pinned('   ')).toEqual([])
+    expect(await pinned('Use Postgres')).toEqual([['Use Postgres', true]])
+  })
+
   it('names the latest review and agents per task and role when loading many', async () => {
     const [one, two] = [await t.createTask(project.slug), await t.createTask(project.slug)] as [Task, Task]
     const developer = await agent('developer')
