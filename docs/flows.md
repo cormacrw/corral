@@ -4,6 +4,12 @@ Step-by-step walkthroughs of Corral's main flows. Uses the statuses and transiti
 
 ---
 
+## Default human decision loop (D11)
+
+Agree requirements → approve the feature plan → agents implement, review, revise and integrate its ordinary tasks → review the completed epic once: approve or request changes. Requested changes return through internal fix tasks and integration review. Internal reviews, handoffs, unread conversational replies and deploy notes are informational. Required standalone, design and spike approvals, existing epic modes, sensitive flags and human checks keep their D20/D27/D28 routing; this policy does not convert or approve existing work.
+
+Agents resolve implementation details using code, docs, board state and review. A human question is for an unresolved requirement, authority or recovery decision, and must state what is blocked, the decision needed and a recommendation when available. PM questions use `ask_question`; task agents report `stuck` with that explanation in the summary.
+
 ## 1. Talking to the PM
 
 The PM is a runner job with role `pm` (D9). It never runs on the server.
@@ -213,6 +219,8 @@ A design task follows steps 1–7 with these differences: the designer builds a 
 ---
 
 ## 3. When things go wrong
+
+Recovery still in progress is informational: reconciliation, retry and developer fixes continue within existing caps without human approval. A failed run alone does not mean a Failed task. Once recovery is exhausted or unsafe, or only a human can supply requirements or authority, its decision remains visible in Needs you until resolved; reading or acknowledging it does not clear it. Explain what was tried, what blocks progress, the choice needed and a recommendation when available. Keep the caps below and D27's three-attempt epic merge cap; never extend them silently.
 
 | Event | Result |
 |---|---|
