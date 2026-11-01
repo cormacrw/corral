@@ -52,7 +52,7 @@ it('sends a link to a read Plan reply to its conversation, with no decision to m
 })
 
 it('sends a link to a resolved task to the task', async () => {
-  const task = inbox().activity[0]!
+  const task = inbox().activity.find(i => i.type === 'activity')!
   const { wrapper } = await show(task.taskId)
   expect(wrapper.get(`a[href="/tasks/${task.taskRef}"]`).text()).toBe('Open task')
 })

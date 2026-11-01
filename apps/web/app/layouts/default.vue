@@ -38,7 +38,7 @@ const flyoutHosted = computed(() => Boolean(route.meta.taskFlyout) && !missing.v
 const counts = computed(() => new Map(shell.projects.map(p => [p.id, taskCounts(lists.tasks.value[p.id] ?? [])])))
 
 const { active, sessions: threads, close: closeThread } = useOpenPlanSessions()
-const attention = (session: typeof threads.value[number]) => session.status === 'needs_approval' ? 'Needs approval' : session.status === 'question' ? 'Question' : session.unread ? 'Unread reply' : null
+const attention = (session: typeof threads.value[number]) => session.status === 'needs_approval' ? 'Needs approval' : session.status === 'question' ? 'Question' : session.status === 'failed' ? 'Failed turn' : session.unread ? 'Unread reply' : null
 const attentionCount = computed(() => threads.value.filter(s => attention(s)).length)
 const threadColor = (projectId: string) => {
   const project = shell.projects.find(p => p.id === projectId)
@@ -163,7 +163,7 @@ const title = computed(() => shellTitle(route.path, shell.projects, shell.agents
                   >
                     <span
                       :aria-label="attention(thread)!"
-                      :class="['size-2 shrink-0 rounded-full', thread.status === 'needs_approval' ? 'bg-primary' : thread.status === 'question' ? 'bg-info' : 'bg-inverted']"
+                      :class="['size-2 shrink-0 rounded-full', thread.status === 'needs_approval' ? 'bg-primary' : thread.status === 'question' ? 'bg-info' : thread.status === 'failed' ? 'bg-error' : 'bg-inverted']"
                     />
                   </UTooltip>
                 </NuxtLink>

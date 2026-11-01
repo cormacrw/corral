@@ -40,14 +40,14 @@ it('marks an opened item read, replaces pending notes live, links task refs and 
   const button = vue.defineComponent({ props: ['label'], emits: ['click'], setup: (props, { emit }) => () => vue.h('button', { onClick: () => emit('click') }, props.label) })
   const note = releaseNotes[0]!
   const client = testQueryClient()
-  client.setQueryData(keys.inbox(), { count: 0, needsYou: [note], activity: [], resolved: [] })
+  client.setQueryData(keys.inbox(), { count: 0, needsYou: [], activity: [note], resolved: [] })
   const wrapper = mount(InboxReleaseNotes, {
     props: { item: { ...releaseNotes[0]!, notesStatus: 'pending', notes: null } },
     global: { plugins: [router, [VueQueryPlugin, { queryClient: client }]], components: { MarkdownText, UButton: button }, stubs: { UAlert: true, AgentAvatar: true, ProjectThumbnail: true, UModal: true } }
   })
   await flushPromises()
   expect(api.deployments.read).toHaveBeenCalledWith('release-demo')
-  expect(client.getQueryData<{ needsYou: { unread: boolean }[] }>(keys.inbox())?.needsYou[0]?.unread).toBe(false)
+  expect(client.getQueryData<{ activity: { unread: boolean }[] }>(keys.inbox())?.activity[0]?.unread).toBe(false)
   expect(wrapper.text()).toContain('Writing release notes…')
   await wrapper.setProps({ item: { ...releaseNotes[0]!, unread: false } })
   expect(wrapper.text()).not.toContain('Writing release notes…')

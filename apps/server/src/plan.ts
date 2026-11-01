@@ -1,7 +1,7 @@
 import { askQuestionInput, planMessageFields, type NewPlanMessageFields, listTasksInput, normalizeProposedPlan, proposedPlanInput, type AgentRuntime, type DraftSession, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type PmRunJob } from '@corral/contracts'
 import { approvedPlanSummary, checkPlan, checkPlanEpicDependencies, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, revisionProblem, richTextToMarkdown, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
-import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { appendAudit, auditEvent, auditText } from './audit.ts'
 import { agentActivity, UnknownAgent } from './agent-activity.ts'
@@ -10,7 +10,6 @@ import { publishInvalidatedEpics, type InvalidatedEpics } from './epic-review-st
 import { listEpics, replaceEpicDependencies } from './epics.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
-import { inboxCount } from './inbox.ts'
 import { pmFallbackPrompt, pmPrompt, questionText, sessionTitlePrompt } from './prompts.ts'
 import type { RunnerHub } from './runner-hub.ts'
 import { requireRuntimeCli } from './setup.ts'
@@ -133,7 +132,7 @@ export class PlanService {
   async markRead(sessionId: string): Promise<PlanSession> {
     await this.#d.db.update(planSessions).set({ unread: false }).where(eq(planSessions.id, sessionId))
     const session = await this.#toSession(await this.#session(sessionId))
-    this.#d.events.publish({ type: 'plan.session', session, markedRead: { inboxCount: await inboxCount(this.#d.db) } })
+    this.#d.events.publish({ type: 'plan.session', session, markedRead: true })
     return session
   }
 
@@ -1085,6 +1084,9 @@ export class PlanService {
 export type SessionAttention =
   | { status: 'needs_approval', plan: typeof plans.$inferSelect }
   | { status: 'question', question: typeof planMessages.$inferSelect }
+  // The PM's last turn ended in an error. Nothing retries a turn, so the
+  // session waits on the human's message or closing it, read or not (D11).
+  | { status: 'failed', failure: typeof planMessages.$inferSelect }
   | { status: 'none' }
 
 // Each epic key of a plan and the epic it made. Plans saved before plan_epics
@@ -1105,8 +1107,13 @@ export async function sessionState(db: Executor, row: SessionRow, activeRunId?: 
 export async function sessionStates(db: Executor, rows: SessionRow[], activeRunId?: string | null): Promise<{ session: PlanSession, attention: SessionAttention }[]> {
   if (rows.length === 0) return []
   const ids = rows.map(r => r.id)
-  const [lastMessages, proposedPlans, activeRuns] = await Promise.all([
+  const [lastMessages, lastTurns, proposedPlans, activeRuns] = await Promise.all([
     db.selectDistinctOn([planMessages.sessionId]).from(planMessages).where(inArray(planMessages.sessionId, ids)).orderBy(planMessages.sessionId, desc(planMessages.createdAt)),
+    // What waits on the human stands until they write: the PM's closing words
+    // after ask_question are a plain message and don't answer it (D11)
+    db.selectDistinctOn([planMessages.sessionId]).from(planMessages)
+      .where(and(inArray(planMessages.sessionId, ids), or(eq(planMessages.role, 'human'), inArray(planMessages.kind, ['question', 'error']))))
+      .orderBy(planMessages.sessionId, desc(planMessages.createdAt)),
     db.select().from(plans).where(and(inArray(plans.sessionId, ids), eq(plans.status, 'proposed'))),
     activeRunId === undefined
       ? db.select({ id: runs.id, sessionId: runs.planSessionId }).from(runs)
@@ -1114,14 +1121,18 @@ export async function sessionStates(db: Executor, rows: SessionRow[], activeRunI
       : []
   ])
   const lastOf = new Map(lastMessages.map(m => [m.sessionId, m]))
+  const turnOf = new Map(lastTurns.map(m => [m.sessionId, m]))
   const proposedOf = new Map(proposedPlans.map(p => [p.sessionId, p]))
   const activeOf = new Map(activeRuns.map(r => [r.sessionId, r.id]))
   return rows.map((row) => {
     const last = lastOf.get(row.id)
+    const turn = turnOf.get(row.id)
     const proposed = proposedOf.get(row.id)
     const attention: SessionAttention = proposed
       ? { status: 'needs_approval', plan: proposed }
-      : last?.role === 'pm' && last.kind === 'question' ? { status: 'question', question: last } : { status: 'none' }
+      : turn?.role === 'pm' && turn.kind === 'question'
+        ? { status: 'question', question: turn }
+        : turn?.role === 'pm' && turn.kind === 'error' ? { status: 'failed', failure: turn } : { status: 'none' }
     const session: PlanSession = {
       id: row.id,
       projectId: row.projectId,

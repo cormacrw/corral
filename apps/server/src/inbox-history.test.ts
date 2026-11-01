@@ -90,7 +90,7 @@ describe('inbox over stored audit rows', () => {
       ['Blocked', 'blocked', at(30).toISOString()],
       ['Stuck', 'question', at(50).toISOString()]
     ])
-    expect(mine(activity).map(i => [i.body, i.at])).toEqual([
+    expect(mine(activity).map(i => [i.preview, i.at])).toEqual([
       ['New commits on PR #8; back to the reviewer', at(2.3).toISOString()],
       ['PR #8 conflicts with the base branch; back to the developer', at(2.4).toISOString()],
       ['CI failed on PR #8; back to the developer', at(2.5).toISOString()],

@@ -35,7 +35,7 @@ export function usePlanThread(item: () => PlanThreadItem) {
   const activeRunId = computed(() => detail.data.value?.activeRunId === undefined ? item().activeRunId : detail.data.value.activeRunId)
   const sent = ref(false)
   let sentAt = 0
-  watch(() => [item().question?.text, item().plan?.id, item().reply], () => {
+  watch(() => [item().question?.text, item().plan?.id, item().failure], () => {
     sent.value = false
   })
   // A turn can fail without a new message, and no run left means nothing to wait for

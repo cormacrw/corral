@@ -19,7 +19,7 @@ const others = computed(() => {
   return (allSessions.value ?? []).filter(s => !shown.has(s.id))
 })
 const projectOf = (session: PlanSession) => shell.projects.find(p => p.id === session.projectId) ?? null
-const needsYou = computed(() => sessions.value.some(s => s.unread || s.status === 'question' || s.status === 'needs_approval'))
+const needsYou = computed(() => sessions.value.some(s => s.unread || s.status !== 'none'))
 
 async function go(to: string) {
   open.value = false

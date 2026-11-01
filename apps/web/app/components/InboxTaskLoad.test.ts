@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-import { needsAttention } from '@corral/contracts/client'
 import type { InboxActionInput, InboxArtifact, ServerEvent } from '@corral/contracts'
 import { VueQueryPlugin } from '@tanstack/vue-query'
 import { flushPromises, mount } from '@vue/test-utils'
@@ -189,9 +188,9 @@ it('keeps the selected decision, list and count when an informational update arr
   try {
     const rows = () => wrapper.findAll('li').map(row => row.text())
     const before = rows()
-    const note = { ...inbox().needsYou.find(i => i.type === 'release_notes')!, id: 'new-note', subject: 'Fresh release', at: new Date(Date.now() + 60_000).toISOString() }
+    const note = { ...inbox().activity.find(i => i.type === 'release_notes')!, id: 'new-note', subject: 'Fresh release', at: new Date(Date.now() + 60_000).toISOString() }
     const count = inbox().count
-    vi.mocked(api.inbox.get).mockImplementation(async () => ({ ...inbox(), needsYou: [note, ...inbox().needsYou] }))
+    vi.mocked(api.inbox.get).mockImplementation(async () => ({ ...inbox(), activity: [note, ...inbox().activity] }))
     replace.mockClear()
     await refresh()
     await flushPromises()
@@ -207,9 +206,9 @@ it('keeps the selected decision, list and count when an informational update arr
 it('moves on to the next decision, past release notes', async () => {
   const { wrapper, item, replace, submit } = await mountInbox('failed', undefined, 'COR-1')
   try {
-    const note = inbox().needsYou.find(i => i.type === 'release_notes')!
+    const note = inbox().activity.find(i => i.type === 'release_notes')!
     const next = inbox().needsYou.find(i => i.taskRef && i.id !== item.id)!
-    vi.mocked(api.inbox.get).mockImplementation(async () => ({ ...inbox(), needsYou: [note, next], resolved: [], activity: [] }))
+    vi.mocked(api.inbox.get).mockImplementation(async () => ({ ...inbox(), needsYou: [next], resolved: [], activity: [note] }))
     await submit()
     expect(replace).toHaveBeenCalledWith({ path: `/inbox/${next.id}`, query: {} })
   } finally {
@@ -350,7 +349,7 @@ it('opens the next item at the top of a new detail scroller', async () => {
 it('clears a release note\'s dot before the request, without fetching the Inbox', async () => {
   const { wrapper, params, emitLive } = await mountInbox('human_review')
   try {
-    const note = inbox().needsYou.find(i => i.type === 'release_notes')!
+    const note = inbox().activity.find(i => i.type === 'release_notes')!
     vi.mocked(api.inbox.get).mockClear()
     let finish = () => {}
     vi.mocked(api.deployments.read).mockReturnValue(new Promise((resolve) => {
@@ -376,8 +375,8 @@ it('clears a release note\'s dot before the request, without fetching the Inbox'
 it('fills in a pending release note when its deployment updates', async () => {
   const { wrapper, params, emitLive } = await mountInbox('human_review')
   try {
-    const note = inbox().needsYou.find(i => i.type === 'release_notes')!
-    const withNote = (notesStatus: string, notes: string | null) => ({ ...inbox(), needsYou: inbox().needsYou.map(i => i.id === note.id ? { ...i, notesStatus, notes } : i) })
+    const note = inbox().activity.find(i => i.type === 'release_notes')!
+    const withNote = (notesStatus: string, notes: string | null) => ({ ...inbox(), activity: inbox().activity.map(i => i.id === note.id ? { ...i, notesStatus, notes } : i) })
     vi.mocked(api.inbox.get).mockImplementation(async () => withNote('pending', null) as never)
     await emitLive({ type: 'deployment.updated', deployment: { id: note.id } })
     params.itemId = note.id
@@ -395,7 +394,7 @@ it('fills in a pending release note when its deployment updates', async () => {
 it('holds the list while an action runs, then moves to the item at the same position', async () => {
   const { wrapper, item, params, replace, submit, refresh } = await mountInbox('failed')
   try {
-    const before = inbox().needsYou.filter(needsAttention)
+    const before = inbox().needsYou
     const position = before.findIndex(i => i.id === item.id)
     let finish = (_: { task: null }) => {}
     vi.mocked(api.inbox.act).mockReturnValue(new Promise((resolve) => {
@@ -676,12 +675,12 @@ it('refetches the open PR when a run on its task ends, not while one is going', 
     await emitLive({ type: 'run.updated', run })
     await flushPromises()
     expect(api.projects.pullRequest).not.toHaveBeenCalled()
-    await emitLive({ type: 'run.updated', run: { ...run, taskRef: 'COR-6', endedAt: inbox().activity[0]!.at } })
+    await emitLive({ type: 'run.updated', run: { ...run, taskRef: 'COR-6', endedAt: inbox().activity.find(i => i.type === 'activity')!.at } })
     await flushPromises()
     expect(api.projects.pullRequest).not.toHaveBeenCalled()
     const pushed = { ...pullRequestDetails[0]!, totalFiles: 9 }
     vi.mocked(api.projects.pullRequest).mockResolvedValue(pushed)
-    await emitLive({ type: 'run.updated', run: { ...run, endedAt: inbox().activity[0]!.at } })
+    await emitLive({ type: 'run.updated', run: { ...run, endedAt: inbox().activity.find(i => i.type === 'activity')!.at } })
     await flushPromises()
     expect(api.projects.pullRequest).toHaveBeenCalledTimes(1)
     expect(wrapper.get('[data-tab="diff"]').text()).toBe('Code diff 9')
@@ -746,14 +745,14 @@ it('asks for a reason before deleting, and replies with no action chosen even if
 })
 
 it('hides criteria and review history until their tab opens, and shows no actions on Activity', async () => {
-  const latestReview = { id: 'r1', round: 0, verdict: 'approved', headSha: 'abc1234', summary: 'Fine', criteria: [], createdAt: inbox().activity[0]!.at } as never
+  const latestReview = { id: 'r1', round: 0, verdict: 'approved', headSha: 'abc1234', summary: 'Fine', criteria: [], createdAt: inbox().activity.find(i => i.type === 'activity')!.at } as never
   const { wrapper, params, openTab } = await mountInbox('human_review', 'COR-5', null, true, task => ({ ...task, latestReview }))
   try {
     expect(wrapper.findComponent(evidenceStub).exists()).toBe(false)
     expect(wrapper.find('[data-tab="review"]').exists()).toBe(true)
     await openTab('criteria')
     expect(wrapper.findComponent(evidenceStub).exists()).toBe(true)
-    params.itemId = inbox().activity[0]!.id
+    params.itemId = inbox().activity.find(i => i.type === 'activity')!.id
     await flushPromises()
     expect(wrapper.find('[data-testid="inbox-actions"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="inbox-read-only"]').text()).toBe('For your information. Nothing to do.')
@@ -918,7 +917,7 @@ describe('on a phone', () => {
 
   it('shows no action bar on a read-only item', async () => {
     const view = await phone()
-    for (const read of [inbox().activity[0]!, inbox().resolved[0]!]) {
+    for (const read of [inbox().activity.find(i => i.type === 'activity')!, inbox().resolved[0]!]) {
       view.params.itemId = read.id
       await flushPromises()
       expect(view.wrapper.find('[data-testid="inbox-panel-option-d"]').exists()).toBe(true)

@@ -1,5 +1,5 @@
 import { databaseFixture } from '@corral/db/testing'
-import { needsAttention, type Inbox, type Deployment } from '@corral/contracts'
+import type { Inbox, Deployment } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -36,9 +36,9 @@ describe.each(['pglite', 'postgres'] as const)('POST /api/deployments on %s', (d
     const created = await t.request('POST', '/api/deployments', { repository: project.repository, fromSha: sha('1'), toSha: sha('2'), commits: [] })
     const deployment = await created.json() as Deployment
     const pending = await getInbox()
-    const item = pending.needsYou.find(i => i.id === deployment.id)!
+    const item = pending.activity.find(i => i.id === deployment.id)!
+    expect(pending.needsYou.some(i => (i.id as string) === deployment.id)).toBe(false)
     expect(item).toMatchObject({ type: 'release_notes', fromSha: '1111111', toSha: '2222222', notesStatus: 'pending', unread: true, sender: { role: 'pm' }, project: { id: project.id } })
-    expect(needsAttention(item)).toBe(false)
     expect(pending.count).toBe(before.count)
     expect(t.events).toContainEqual(expect.objectContaining({ type: 'deployment.updated', deployment: expect.objectContaining({ id: deployment.id }) }))
     const read = await t.request('POST', `/api/deployments/${deployment.id}/read`)
@@ -46,12 +46,12 @@ describe.each(['pglite', 'postgres'] as const)('POST /api/deployments on %s', (d
     expect(read.status).toBe(200)
     const readAt = (await read.json() as Deployment).readAt
     expect(readAt).toBeTruthy()
-    expect((await getInbox()).needsYou.find(i => i.id === deployment.id)).toMatchObject({ unread: false })
+    expect((await getInbox()).activity.find(i => i.id === deployment.id)).toMatchObject({ unread: false })
     const again = await t.request('POST', `/api/deployments/${deployment.id}/read`)
     expect((await again.json() as Deployment).readAt).toBe(readAt)
     expect((await t.request('POST', `/api/deployments/${deployment.id}/dismiss`)).status).toBe(200)
     const dismissed = await getInbox()
-    expect(dismissed.needsYou.some(i => i.id === deployment.id)).toBe(false)
+    expect(dismissed.activity.some(i => i.id === deployment.id)).toBe(false)
     expect(dismissed.resolved.find(i => i.id === deployment.id)).toMatchObject({ type: 'release_notes', unread: false, resolution: 'You dismissed these release notes' })
     expect(dismissed.count).toBe(before.count)
     expect((await t.request('POST', '/api/deployments/00000000-0000-0000-0000-000000000000/read')).status).toBe(404)
@@ -96,24 +96,27 @@ describe.each(['pglite', 'postgres'] as const)('POST /api/deployments on %s', (d
       notes: 'Fallback notes', notesStatus: 'failed' as const, createdAt: new Date(Date.now() + (i + 1) * 1000)
     }))).returning()
     const inbox = await (await t.request('GET', '/api/inbox')).json() as Inbox
-    const notes = inbox.needsYou.filter(i => i.type === 'release_notes')
+    const notes = inbox.activity.filter(i => i.type === 'release_notes')
     expect(notes.map(i => i.deploymentId)).toEqual(rows.slice(-20).reverse().map(r => r.id))
     expect(notes[0]).toMatchObject({ fromSha: null, notesStatus: 'failed', notes: 'Fallback notes' })
-    expect(inbox.count).toBe(inbox.needsYou.length - 20)
+    expect(inbox.count).toBe(inbox.needsYou.length)
+    expect(inbox.needsYou.some(i => i.taskId === task.id)).toBe(true)
   })
 
-  it('places release notes among attention items by deployment time, read or unread', async () => {
+  it('keeps release notes in Activity by deployment time, read or unread, away from Needs you', async () => {
     // The suite shares a database, and only the latest 20 deployments are listed
     await t.db.delete(schema.deployments)
     const project = await t.createProject()
     const task = await t.createTask(project.slug)
     await t.db.update(schema.tasks).set({ status: 'failed', statusReason: 'Deployment failed' }).where(eq(schema.tasks.id, task.id))
+    const activityAt = new Date()
+    await t.db.insert(schema.auditLog).values({ projectId: project.id, taskId: task.id, actor: t.actor, action: 'task.transition', detail: { event: 'ci_failed', from: 'agent_review', to: 'in_progress' }, createdAt: activityAt })
     const getInbox = async () => (await (await t.request('GET', '/api/inbox')).json()) as Inbox
     const before = await getInbox()
-    const at = Date.parse(before.needsYou.find(i => i.taskId === task.id)!.at)
+    const at = activityAt.getTime()
     const deployment = (minutes: number, toSha: string) => ({ projectId: project.id, fromSha: null, toSha, notes: 'Notes', notesStatus: 'ready' as const, createdAt: new Date(at + minutes * 60_000) })
     const [older, newer] = await t.db.insert(schema.deployments).values([deployment(-1, sha('1')), deployment(1, sha('2'))]).returning()
-    const ids = async () => (await getInbox()).needsYou.filter(i => i.project.id === project.id).map(i => i.id)
+    const ids = async () => (await getInbox()).activity.filter(i => i.project.id === project.id).map(i => i.taskId ?? i.id)
     const expected = [newer!.id, task.id, older!.id]
     expect(await ids()).toEqual(expected)
     expect((await t.request('POST', `/api/deployments/${older!.id}/read`)).status).toBe(200)
