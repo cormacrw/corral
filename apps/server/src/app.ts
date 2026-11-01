@@ -306,6 +306,8 @@ export function createApp({ db, events, actor, runner, orchestrator, github, blo
 
     .post('/epics/:id/review', validate('json', epicReviewActionInput), async c => c.json(await orchestrator.epicPrs.humanAction(c.req.param('id'), c.req.valid('json'), actor)))
 
+    .post('/epics/:id/sync/retry', async c => c.json(await orchestrator.epicPrs.retrySync(c.req.param('id'), actor)))
+
     .get('/epics/:id', async c => c.json(await getEpic(db, c.req.param('id'))))
 
     .put('/epics/:id/dependencies', validate('json', setEpicDependenciesInput), async (c) => {

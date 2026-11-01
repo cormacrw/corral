@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { boolean, check, foreignKey, index, integer, jsonb, pgTable, primaryKey, text, unique, uuid } from 'drizzle-orm/pg-core'
+import { boolean, check, foreignKey, index, integer, jsonb, pgTable, primaryKey, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core'
 import { actor, createdAt, updatedAt } from './columns.ts'
 import { epicReviewMode, epicReviewState, taskPriority } from './enums.ts'
 import { projects } from './projects.ts'
@@ -19,11 +19,15 @@ export const epics = pgTable('epics', {
   prNumber: integer(),
   prHeadSha: text(),
   reviewState: epicReviewState(),
-  // Set after asking GitHub to rebase the epic PR, so the next head keeps the
-  // human's approval (D27: a clean rebase is a mechanical update)
+  // Unused since rebases became journaled operations; kept because dropping a
+  // column needs a human's sign-off
   rebaseRequested: boolean().notNull().default(false),
   // The files a failed rebase conflicts on, while reviewState is `conflict`
   conflictFiles: jsonb().$type<string[]>(),
+  // Why synchronizing with the target branch stopped, until a human retries.
+  // A retry counts failures afresh from syncRetriedAt.
+  syncError: text(),
+  syncRetriedAt: timestamp({ withTimezone: true }),
   // Recorded when GitHub confirmed the epic PR merged
   mergeCommitSha: text(),
   createdBy: actor('created_by'),

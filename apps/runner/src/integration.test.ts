@@ -125,3 +125,16 @@ it('calls a change the epic already has empty', async () => {
   const first = await integrate('sub-a', a, tip, tip)
   expect(await prepareIntegration(dataDir, null, job('sub-b', copy, tip, first))).toMatchObject({ status: 'empty' })
 })
+
+it('merges only the task\'s change when a rebase took its base out of the epic\'s history', async () => {
+  await commit('old-epic', 'epic', 'shared.txt', 'epic\n')
+  const base = await run('rev-parse', 'old-epic')
+  const head = await commit('task-a', 'old-epic', 'a.txt', 'a\n')
+  // The target moved and a developer resolved the file differently on the rebase
+  const moved = await commit('moved', 'main', 'shared.txt', 'target and epic\n')
+  await run('branch', '--force', 'epic', moved)
+  const sha = await integrate('sub-a', head, base, moved)
+  expect((await run('ls-tree', '--name-only', sha)).split('\n')).toContain('a.txt')
+  expect(await run('show', `${sha}:shared.txt`)).toBe('target and epic')
+  expect(await run('rev-parse', `${sha}^`)).toBe(moved)
+})

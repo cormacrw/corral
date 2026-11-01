@@ -2,6 +2,7 @@ import { taskRef, type Actor } from '@corral/core'
 import { schema, type Database, type Executor } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNotNull, isNull, gt, notInArray, notLike } from 'drizzle-orm'
 import { appendAudit, auditEvent, type TransitionDetail } from './audit.ts'
+import { EpicSynchronizer } from './epic-sync.ts'
 import type { EventBus } from './events.ts'
 import type { CheckResult, GitHubClient } from './github.ts'
 import type { RunnerHub } from './runner-hub.ts'
@@ -41,6 +42,7 @@ export interface IntegrationDeps {
   github: GitHubClient
   runner: RunnerHub
   now?: () => Date
+  wake?: (taskIds: string[]) => void
 }
 
 // `settled` is told about every task whose status this changed
@@ -57,6 +59,7 @@ type Stopped = () => boolean
 export class TaskIntegrator {
   #d: IntegrationDeps
   #settled: Settled
+  #sync: EpicSynchronizer
   #busy = new Set<string>()
   // Operations whose candidate is waiting on CI or a pause, neither of which
   // needs a remote read. The push's compare-and-swap catches a branch that moved.
@@ -65,6 +68,7 @@ export class TaskIntegrator {
   constructor(deps: IntegrationDeps, settled: Settled) {
     this.#d = deps
     this.#settled = settled
+    this.#sync = new EpicSynchronizer(deps, settled)
   }
 
   #now(): Date {
@@ -77,10 +81,11 @@ export class TaskIntegrator {
 
   async tick(stopped: Stopped): Promise<void> {
     const { db } = this.#d
-    if (!this.#d.runner.integrationRunner()) return
+    if (!this.#d.runner.integrationRunner() && !this.#d.runner.epicRebaseRunner()) return
     const active = await db.select({ epicId: operations.epicId }).from(operations).where(inArray(operations.state, [...ACTIVE]))
     const waiting = await this.#waiting().then(rows => rows.map(r => ({ epicId: r.task.epicId! })))
-    for (const epicId of new Set([...active, ...waiting].map(r => r.epicId))) {
+    const due = await this.#sync.due().then(ids => ids.map(epicId => ({ epicId })))
+    for (const epicId of new Set([...active, ...waiting, ...due].map(r => r.epicId))) {
       if (stopped()) return
       if (this.#busy.has(epicId)) continue
       this.#busy.add(epicId)
@@ -106,6 +111,12 @@ export class TaskIntegrator {
   async #advance(epicId: string, stopped: Stopped): Promise<void> {
     for (let n = 0; n < MAX_OPERATIONS_PER_PASS && !stopped(); n++) {
       const [active] = await this.#d.db.select().from(operations).where(and(eq(operations.epicId, epicId), inArray(operations.state, [...ACTIVE])))
+      // Between integrations is the epic's checkpoint: nothing else is writing
+      const rebase = active?.kind === 'rebase' ? active : active ? null : await this.#sync.begin(epicId, stopped)
+      if (rebase) {
+        if (!await this.#sync.step(rebase, stopped)) return
+        continue
+      }
       const operation = active ?? await this.#begin(epicId)
       if (!operation || !await this.#step(operation, stopped)) return
     }
@@ -141,7 +152,7 @@ export class TaskIntegrator {
 
   async #audit(tx: Executor, operation: OperationRow, taskId: string, projectId: string, event: 'started' | 'succeeded' | 'failed' | 'checks_deferred', extra: { commitSha?: string, error?: string } = {}): Promise<void> {
     await appendAudit(tx, { projectId, taskId, actor: server }, auditEvent('integration.operation', {
-      operationId: operation.id, submissionId: operation.submissionId, event, expectedTargetSha: operation.expectedTargetSha, leaseEpoch: operation.leaseEpoch, ...extra
+      operationId: operation.id, submissionId: operation.submissionId!, event, expectedTargetSha: operation.expectedTargetSha, leaseEpoch: operation.leaseEpoch, ...extra
     }))
   }
 
@@ -150,7 +161,7 @@ export class TaskIntegrator {
       .innerJoin(tasks, eq(tasks.id, submissions.taskId))
       .innerJoin(projects, eq(projects.id, tasks.projectId))
       .innerJoin(epics, eq(epics.id, operation.epicId))
-      .where(eq(submissions.id, operation.submissionId))
+      .where(eq(submissions.id, operation.submissionId!))
     return row!
   }
 

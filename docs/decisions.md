@@ -721,6 +721,8 @@ This decision was first numbered D23. Migration `0027_epic_review_modes.sql` sti
 
 **Amended by COR-166:** a rebase conflict blocks the epic PR with a Needs-you item naming the conflicting files, and the conflict task exists only once the human hands the rebase over from that item. Epic PRs always squash, whatever the project's merge method.
 
+**Amended by COR-290 (below):** Corral keeps the epic branch on top of the target branch through automatic rebase operations. COR-166's Needs-you item and hand-off are gone: a conflict goes straight to a developer and a reviewer.
+
 **Principle:** the project's **target branch**, `defaultBranch` in project settings, only receives approved work. Corral assumes nothing about the target branch's name or how the project releases from it. Docs, prompts and code say "target branch" and read it from the project, never a hard-coded name.
 
 **Decision:**
@@ -739,6 +741,19 @@ This amendment takes precedence over the task-PR descriptions below for eligible
 - **Staged implementation:** COR-286 supplies the durable schema, submission recorder and negotiation gate. COR-287 activates PR-free submission and review: runners advertise protocol 1, and a developer run placed on one selects it for an eligible task with no PR on its branch. A developer run on a legacy runner keeps the task on the PR path. The outcome is `commit_submitted`. Agents push nothing, and Corral pushes only the task branch. COR-288 adds the integration executor, which uses this rollout boundary: `TaskIntegrator` serializes one operation per epic, and only runners declaring `taskIntegrationExecutor` run it. A runner without it can still submit and review, and approved tasks wait in Ready to merge until an executor is online. No background conversion is authorized.
 - **Explicit paths:** `direct` epics and standalone build tasks keep task PRs into the target branch. `each_task` is retained as a legacy compatibility mode: task PRs into the epic branch with human approval per task. Spikes submit findings and complete on human approval; designs submit versioned prototypes and complete as Approved. Epic conflict tasks continue to repair the epic branch itself through the existing handoff. Existing `direct` epics stay direct: never create a feature branch or change their mode silently.
 
+### Automatic epic synchronization (COR-290)
+
+This takes precedence over the epic branch and epic PR rebase text below.
+
+- **Checkpoints:** a rebase starts when the target branch has moved and the epic reaches a checkpoint: between task integrations (a task is waiting and no operation is active), before integration review, while the epic waits for the human, and before merge. Nothing rebases while an integration review run is live. An epic with no waiting task and unfinished work isn't touched until a checkpoint. Corral never merges the target in.
+- **Operation:** a rebase is a `rebase` row in `task_integration_operations` with the expected epic head and the target commit (`ontoSha`). The one-active-per-epic index is the epic's **writer lock**, shared with task integration, and it deduplicates: polls, reconnects and repeated conflict reports find the active row. Epic review, approval, task PR merges and the epic merge all wait while it's active. The push is a compare-and-swap on the expected head, and an unknown result is settled by reading the branch. GitHub's `updatePullRequestBranch` is no longer used for epics, because it can't take the lock.
+- **Clean rebase:** runs on a throwaway candidate on the runner, then publishes. It's mechanical, so it keeps approval, in Human review as well as Ready to merge.
+- **Conflict:** the operation keeps the lock and creates a **resolution task**, in Ready, on the board, on its own candidate branch `corral/epic-rebase/<operation>` cut from the epic head. It has no PR and uses the task-PR outcomes (`pr_updated`), never the PR-free protocol. The epic shows progress, not a Needs-you item. The developer rebases on the candidate, keeping both sides' intent, with no feature changes; a reviewer approves it as any task (`each_task` epics add Human review). Only then does Corral publish the candidate, and the task is Merged. Because a resolved conflict isn't mechanical, the epic goes back to integration review and the human.
+- **Publish check:** the runner refuses a candidate that isn't on `ontoSha` or later, has merge commits, or differs from the target in a file only the target changed since the fork. That sends the task back to its developer with the epic branch untouched. Files both sides changed are the reviewer's to judge.
+- **Pause and kill switch:** nothing starts or pushes while the project is paused, the kill switch is on or an update is held; an active operation resumes afterwards. Settling an unknown push result is a read, so it may finish.
+- **Bounded retries:** failures on the same commits wait 1, then 2 minutes, and three stop synchronizing (`syncError`). That's an operational failure on the epic, with Retry, and never a product question in the Inbox. A reviewed resolution survives: its operation keeps the lock and Retry pushes the same commit. A moved epic branch or a restart mid-candidate isn't a failure and retries at once.
+- **Rollout:** runners opt in with `epicRebaseExecutor`. An epic behind its target waits at a checkpoint until one is online. An epic left in `conflict` goes round the automatic path, and a conflict task already handed off finishes on the old path, on the epic branch, first.
+
 ### Review modes
 
 Each epic has a **review mode**. The PM can set it per epic in `propose_plan`; when the plan doesn't, the epic takes the project's **default review mode** (a project setting). The setting starts at `direct` for every project, so nothing changes until the human picks another mode.
@@ -756,7 +771,7 @@ Tasks without an epic are unchanged: they merge straight into the target branch,
 - In `epic` and `each_task` modes, Corral creates the epic branch in its own branch namespace, `corral/epic-<epicId>-<slug>`, from the tip of the target branch when the epic's first task is claimed.
 - The epic's task branches are created from the epic branch, and their PRs use it as their base. Task PRs merge into it with the project's merge method (squash), so each task is one commit on the epic branch.
 - When the epic branch moves under an open task PR, Corral rebases the task PR onto it, exactly as it does for the target branch (D10, `flows.md` step 7c).
-- The target branch is **never merged into** the epic branch. Corral doesn't keep the epic branch up to date while the epic is in progress; the epic branch only meets newer target-branch work when it's rebased just before the epic PR merges (below).
+- The target branch is **never merged into** the epic branch. Corral rebases the epic branch onto it at checkpoints (COR-290, above).
 
 ### The epic PR
 

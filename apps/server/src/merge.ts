@@ -3,7 +3,8 @@ import { schema, type Database } from '@corral/db'
 import { and, asc, desc, eq, isNull } from 'drizzle-orm'
 import { EpicMerger } from './epic-merge.ts'
 import { appendAudit, auditEvent, type TransitionDetail } from './audit.ts'
-import { isEpicRebaseTask, taskBase } from './task-base.ts'
+import { activeRebase } from './epic-sync.ts'
+import { isEpicRebaseTask, isEpicResolution, taskBase } from './task-base.ts'
 import { ApiFailure } from './errors.ts'
 import { publishDependents } from './dependent-tasks.ts'
 import { TaskIntegrator } from './task-integration.ts'
@@ -89,14 +90,16 @@ export class MergeOrchestrator {
     for (const { task, project } of waiting) {
       if (this.stopped) return
       if (task.type === 'design') continue
+      // The synchronizer publishes a resolution and settles its task
+      if (isEpicResolution(task)) continue
       if (await isEpicRebaseTask(this.#d.db, task)) await this.#settleEpicRebase(task)
-      else if (task.prNumber && task.headSha) await this.#advanceOnce(task, project)
+      else if (task.prNumber && task.headSha && !(task.epicId && await activeRebase(this.#d.db, task.epicId))) await this.#advanceOnce(task, project)
     }
     await this.#integrations.tick(() => this.stopped)
     await this.#epics.tick(() => this.stopped)
   }
 
-  // A rebase task's work reached the epic branch when the runner pushed it;
+  // A handed-off rebase task's work reached the epic branch when the runner pushed it;
   // nothing is left to merge, and the epic PR goes back to integration review
   async #settleEpicRebase(task: TaskRow): Promise<void> {
     await this.#d.db.transaction(async (tx) => {

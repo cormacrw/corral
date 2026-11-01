@@ -198,6 +198,8 @@ export interface RunnerInfo extends RunnerCapacity {
   taskIntegrationProtocols?: number[]
   // Runs integration jobs; a runner that only submits and reviews doesn't
   taskIntegrationExecutor?: boolean
+  // Runs epic_rebase jobs
+  epicRebaseExecutor?: boolean
   integrationCompatibilityReason?: string | null
   activeRunCount?: number
   updateState?: string
@@ -242,7 +244,6 @@ export const setupJobSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('github'), method: z.union([z.literal('GET'), z.literal('POST'), z.literal('PUT'), z.literal('PATCH'), z.literal('DELETE')]), path: z.string(), body: z.unknown().optional() }),
   z.object({ kind: z.literal('cleanup_worktrees'), repository: z.string(), taskId: z.string() }),
   // The files that stop `branch` rebasing onto `onto`, read from a fresh fetch
-  z.object({ kind: z.literal('rebase_conflicts'), repository: z.string(), branch: z.string(), onto: z.string() }),
   // PR-free integration (D27). Prepare builds one commit from a reviewed
   // submission on top of the expected epic head, touching no shared ref; push
   // advances the epic branch only if it's still at that head; inspect reads the
@@ -252,6 +253,12 @@ export const setupJobSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('integration_prepare'), repository: z.string(), targetBranch: z.string(), expectedTargetSha: z.string(), submissionId: z.string(), headSha: z.string(), baseSha: z.string(), message: z.string(), committedAt: z.string(), candidateRef: z.string().nullable() }),
   z.object({ kind: z.literal('integration_push'), repository: z.string(), targetBranch: z.string(), expectedTargetSha: z.string(), candidateSha: z.string() }),
   z.object({ kind: z.literal('integration_inspect'), repository: z.string(), targetBranch: z.string(), submissionId: z.string() }),
+  // Epic synchronization (D27). Prepare rebases the expected epic head onto a
+  // target commit without touching a shared ref. Push checks the candidate
+  // keeps the target's work, then advances the epic branch only if it's still
+  // at the expected head.
+  z.object({ kind: z.literal('epic_rebase_prepare'), repository: z.string(), epicBranch: z.string(), expectedHeadSha: z.string(), ontoSha: z.string() }),
+  z.object({ kind: z.literal('epic_rebase_push'), repository: z.string(), epicBranch: z.string(), targetBranch: z.string(), expectedHeadSha: z.string(), ontoSha: z.string(), candidateSha: z.string() }),
   // Remove every worktree outside this keep set, which covers all projects.
   // Developer worktrees with uncommitted work stay (PRD §7.4), and so does the
   // checkout of a PM turn running on the runner.
@@ -270,10 +277,12 @@ export const setupJobResultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('detect_clis'), clis: z.array(z.object({ id: z.enum(['claude', 'codex']), version: z.string().nullable(), signedIn: z.boolean() })) }),
   z.object({ kind: z.literal('github'), status: z.number(), body: z.unknown() }),
   z.object({ kind: z.literal('cleanup_worktrees'), removed: z.array(z.string()), kept: z.array(z.string()) }),
-  z.object({ kind: z.literal('rebase_conflicts'), files: z.array(z.string()) }),
   z.object({ kind: z.literal('integration_prepare'), status: z.enum(['prepared', 'integrated', 'moved', 'conflict', 'empty', 'failed']), targetSha: z.string(), commitSha: z.string().nullable(), files: z.array(z.string()), error: z.string().nullable().optional() }),
   z.object({ kind: z.literal('integration_push'), pushed: z.boolean(), error: z.string().nullable() }),
   z.object({ kind: z.literal('integration_inspect'), targetSha: z.string().nullable(), integratedSha: z.string().nullable() }),
+  z.object({ kind: z.literal('epic_rebase_prepare'), status: z.enum(['rebased', 'up_to_date', 'moved', 'conflict', 'failed']), commitSha: z.string().nullable(), files: z.array(z.string()), error: z.string().optional() }),
+  // `rejected`: the candidate itself is wrong, and nothing was pushed
+  z.object({ kind: z.literal('epic_rebase_push'), pushed: z.boolean(), rejected: z.string().nullable(), error: z.string().nullable() }),
   // `kept` is only what stayed because it holds uncommitted changes
   z.object({ kind: z.literal('sweep_worktrees'), removed: z.array(z.string()), kept: z.array(z.string()) }),
   z.object({ kind: z.literal('session_title'), title: z.string() }),
@@ -313,7 +322,7 @@ export const slotSourceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('derived'), cpus: z.number(), memoryBytes: z.number(), slotCpus: z.number(), slotMemoryBytes: z.number() })
 ])
 
-export const runnerHelloSchema = z.object({ type: z.literal('hello'), protocol: z.number(), taskIntegrationProtocols: z.array(z.number().int().positive()).optional(), taskIntegrationExecutor: z.boolean().optional(), commit: z.string().default('unknown'), updateTarget: z.string().optional(), updateState: z.string().optional(), updateError: z.string().optional(), draining: z.boolean().optional(), updateRequested: z.boolean().optional(), autoUpdate: z.boolean().optional(), runnerId: z.string(), name: z.string(), activeRuns: z.array(z.object({ runId: z.string(), leaseEpoch: z.number() })), slotSource: slotSourceSchema.optional().catch(undefined), slots: z.number().optional(), runtimes: z.array(z.string()).optional(), roles: z.array(z.enum(RUNNER_ROLES)).optional() })
+export const runnerHelloSchema = z.object({ type: z.literal('hello'), protocol: z.number(), taskIntegrationProtocols: z.array(z.number().int().positive()).optional(), taskIntegrationExecutor: z.boolean().optional(), epicRebaseExecutor: z.boolean().optional(), commit: z.string().default('unknown'), updateTarget: z.string().optional(), updateState: z.string().optional(), updateError: z.string().optional(), draining: z.boolean().optional(), updateRequested: z.boolean().optional(), autoUpdate: z.boolean().optional(), runnerId: z.string(), name: z.string(), activeRuns: z.array(z.object({ runId: z.string(), leaseEpoch: z.number() })), slotSource: slotSourceSchema.optional().catch(undefined), slots: z.number().optional(), runtimes: z.array(z.string()).optional(), roles: z.array(z.enum(RUNNER_ROLES)).optional() })
 
 // Pre-capacity/build hello packets must still get the protocol-version refusal.
 // This schema is used only for rejecting a different version, never admission.

@@ -159,7 +159,7 @@ An epic PR in human review lists every task on the epic branch with **Open task*
 An epic PR in human review and an epic PR rebase conflict have their own layout on desktop and mobile, `InboxEpicReview` and `InboxEpicConflict`, with the action bar pinned at the bottom. Both share `InboxEpicHeader`: the badge, the epic's name linking to it, and a button to the epic PR, which goes full width under the title on a phone.
 
 - **Review:** the integration review's verdict, then one collapsible row per task with its evidence, open on desktop and closed on a phone. Request changes needs the feedback box filled in. Approve and Request changes sit side by side on a phone.
-- **Conflict:** a bordered list of the conflicting files, wrapped rather than scrolled, or a note that Corral couldn't work them out. **Hand the rebase to a developer** is full width on a phone.
+- **Conflict:** a bordered list of the conflicting files, wrapped rather than scrolled, or a note that Corral couldn't work them out. Only an epic left in `conflict` from before automatic rebasing shows this (D27, COR-290), and a conflict now goes to a developer without an Inbox item. **Hand the rebase to a developer**, which sends it round the automatic rebase, is full width on a phone.
 
 ## What each action does (D10)
 

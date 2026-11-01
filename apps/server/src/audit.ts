@@ -44,6 +44,9 @@ export type EpicPrDetail =
   | { event: 'rebased', from: string | null, to: string }
   | { event: 'conflict', summary: string, files: string[] }
   | { event: 'merge_refused', summary: string }
+  | { event: 'rebase_resolving', summary: string, files: string[] }
+  | { event: 'rebase_failed' | 'sync_failed', summary: string }
+  | { event: 'sync_retried' }
 
 type StatusChange = { from: TaskStatus, to: TaskStatus }
 type Changed = { changed: string[] }

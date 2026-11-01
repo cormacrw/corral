@@ -75,18 +75,11 @@ every open epic PR, so a PR merged by hand still counts, and advances only
 API first: `mergeable_state` says `behind` only under branch protection that
 requires it, and CI doesn't run on a conflicting PR, so this can't wait for CI.
 
-A moved target gets `updatePullRequestBranch` with `REBASE`. `rebaseRequested`
-marks the next head as Corral's, so the reconcile pass leaves it alone and the
-approval stays; any other new head restarts integration review. The flag is
-written before the call, because GitHub moves the head before the call returns
-and a scheduling pass can run in between. It's cleared if the call throws, and
-after five minutes with no new head. A failed rebase
-sets `conflict` with `conflictFiles` from the runner's `rebase_conflicts` job,
-which uses `git merge-tree` (git 2.38 or later). If that job fails, the Inbox item
-says the files are unknown; an older runner answers it that way too.
+A moved target waits for the synchronizer, which runs earlier in the same pass
+([epic-rebases.md](epic-rebases.md)); `EpicMerger` never rebases.
 
-The Inbox's **Hand the rebase to a developer** posts `action: 'rebase'`. That
-creates a Ready task whose `branch` is the epic branch, and `isEpicRebaseTask`
+A conflict task handed off before rebases were automatic has the epic branch
+as its `branch`, and `isEpicRebaseTask`
 is how the rest of the code recognises it: `taskBase` answers the target branch,
 `#submit` opens no PR, and once approved the merge pass marks it Merged, since
 the push already put the work on the epic branch. The moved head then restarts

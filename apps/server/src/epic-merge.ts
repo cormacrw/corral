@@ -5,6 +5,7 @@ import { appendAudit, auditEvent, type EpicPrDetail } from './audit.ts'
 import { publishEpicDependents } from './dependent-tasks.ts'
 import { getEpic } from './epics.ts'
 import { complete, createEpicFixTask, epicBoard } from './epic-prs.ts'
+import { activeRebase, recordSyncFailure } from './epic-sync.ts'
 import type { CheckResult, PullRequest } from './github.ts'
 import type { MergeDeps } from './merge.ts'
 import { loadTask, type ProjectRow } from './tasks.ts'
@@ -15,14 +16,11 @@ type EpicRow = typeof epics.$inferSelect
 
 // After this many failed merges the epic PR goes back to the human
 const MAX_MERGE_ATTEMPTS = 3
-// How long a requested rebase may take to show on the PR. Past this the
-// request is taken as lost (a crash before it reached GitHub) and made again.
-const REBASE_WAIT_MS = 5 * 60_000
 
-// flows.md §4 steps 6–7. An approved epic PR rebases onto the target branch
-// when that has moved, waits for its gates, then squash-merges: one commit on
-// the target branch, whatever the project's method for task PRs. Unlike a
-// task, it isn't told about a moved target by `mergeable_state`, which only
+// flows.md §4 steps 6–7. An approved epic PR must sit on top of the target
+// branch, which the synchronizer sees to in the integration pass before this
+// one, then waits for its gates and squash-merges: one commit on the target
+// branch, whatever the project's method for task PRs. `mergeable_state` only
 // says `behind` when branch protection requires it, so this compares commits.
 export class EpicMerger {
   #d: MergeDeps
@@ -63,29 +61,25 @@ export class EpicMerger {
   }
 
   async #advance(epic: EpicRow, project: ProjectRow): Promise<void> {
-    const { github } = this.#d
+    const { db, github } = this.#d
     const pr = await github.getPullRequest(project.repository, epic.prNumber!)
     if (pr.merged) return this.#recordMerged(epic, project, pr)
     if (epic.reviewState !== 'ready_to_merge') return
     if (pr.state === 'closed') return this.#leave(epic, project, 'open', {}, { event: 'closed' })
 
-    if (pr.headSha !== epic.prHeadSha) {
-      // Any other new head is the reconcile pass's: it starts a fresh review
-      if (epic.rebaseRequested) await this.#leave(epic, project, 'ready_to_merge', { prHeadSha: pr.headSha, rebaseRequested: false }, { event: 'rebased', from: epic.prHeadSha, to: pr.headSha })
-      return
-    }
-    if (epic.rebaseRequested) {
-      // GitHub hasn't shown the new head yet
-      if (this.#now().getTime() - epic.updatedAt.getTime() >= REBASE_WAIT_MS) await this.#clearRebase(epic)
-      return
-    }
+    // A new head is the reconcile pass's: it starts a fresh review
+    if (pr.headSha !== epic.prHeadSha || await activeRebase(db, epic.id)) return
 
     // Before CI: its result would be for a stale base, and GitHub doesn't
     // run pull_request workflows while a PR conflicts
-    if (await github.behindBy(project.repository, project.defaultBranch, pr.headSha) > 0) {
-      return this.#rebase(epic, project, pr)
+    if (await github.behindBy(project.repository, project.defaultBranch, pr.headSha) > 0) return
+    if (pr.mergeable === false) {
+      // Up to date and still unmergeable: no rebase can fix that
+      if (epic.syncError) return
+      await recordSyncFailure(db, project, epic.id, 'GitHub reports the epic PR can\'t merge, though it is up to date with the target branch', this.#now())
+      this.#d.events.publish({ type: 'epic.updated', epic: await getEpic(db, epic.id) })
+      return
     }
-    if (pr.mergeable === false) return this.#conflict(epic, project)
 
     const checks = await github.checks(project.repository, pr.headSha)
     const failed = project.requiredChecks
@@ -98,30 +92,6 @@ export class EpicMerger {
     await this.#merge(epic, project, pr)
   }
 
-  // The flag goes first: GitHub moves the head before updateBranch returns,
-  // and a reconcile pass that saw the new head unflagged would restart review
-  async #rebase(epic: EpicRow, project: ProjectRow, pr: PullRequest): Promise<void> {
-    const { db, github } = this.#d
-    const [flagged] = await db.update(epics).set({ rebaseRequested: true, updatedAt: this.#now() })
-      .where(and(eq(epics.id, epic.id), eq(epics.reviewState, 'ready_to_merge'), eq(epics.prHeadSha, pr.headSha), eq(epics.rebaseRequested, false)))
-      .returning({ id: epics.id })
-    if (!flagged) return
-    let updated: boolean
-    try {
-      updated = await github.updateBranch(project.repository, pr, pr.headSha)
-    } catch (error) {
-      await this.#clearRebase(epic)
-      throw error
-    }
-    if (!updated) return this.#conflict(epic, project)
-    await appendAudit(db, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, event: 'rebase_requested', headSha: pr.headSha }))
-    this.#d.events.publish({ type: 'epic.updated', epic: await getEpic(db, epic.id) })
-  }
-
-  async #clearRebase(epic: EpicRow): Promise<void> {
-    await this.#d.db.update(epics).set({ rebaseRequested: false, updatedAt: this.#now() }).where(eq(epics.id, epic.id))
-  }
-
   // Writes the epic's next state unless a task or human action changed it
   async #leave(epic: EpicRow, project: ProjectRow, reviewState: EpicRow['reviewState'], values: Partial<EpicRow>, detail: EpicPrDetail): Promise<void> {
     const { db } = this.#d
@@ -130,16 +100,6 @@ export class EpicMerger {
     if (!moved) return
     await appendAudit(db, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, ...detail }))
     this.#d.events.publish({ type: 'epic.updated', epic: await getEpic(db, epic.id) })
-  }
-
-  async #conflict(epic: EpicRow, project: ProjectRow): Promise<void> {
-    const files = await this.#d.runner.request({ kind: 'rebase_conflicts', repository: project.repository, branch: epic.branch!, onto: project.defaultBranch })
-      .then(result => result.files)
-      .catch((error: unknown) => {
-        console.error(`Finding the conflicts of epic ${epic.id} failed`, error)
-        return []
-      })
-    await this.#leave(epic, project, 'conflict', { conflictFiles: files, rebaseRequested: false }, { event: 'conflict', summary: files.join(', '), files })
   }
 
   // Like a task's CI failure, but the work to fix it is a task in the epic
@@ -163,7 +123,7 @@ export class EpicMerger {
     try {
       failure = await db.transaction(async (tx) => {
         const [locked] = await tx.select().from(epics).where(eq(epics.id, epic.id)).for('update')
-        if (locked?.reviewState !== 'ready_to_merge' || locked.prHeadSha !== pr.headSha || !complete(await epicBoard(tx, epic.id))) return null
+        if (locked?.reviewState !== 'ready_to_merge' || locked.prHeadSha !== pr.headSha || await activeRebase(tx, epic.id) || !complete(await epicBoard(tx, epic.id))) return null
         const result = await github.merge(project.repository, pr.number, 'squash', pr.headSha)
         return result.merged ? null : result.message
       })
@@ -183,7 +143,7 @@ export class EpicMerger {
   async #recordMerged(epic: EpicRow, project: ProjectRow, pr: PullRequest): Promise<void> {
     const { db, events, github, runner } = this.#d
     await db.transaction(async (tx) => {
-      await tx.update(epics).set({ reviewState: 'merged', mergeCommitSha: pr.mergeCommitSha, prHeadSha: pr.headSha, rebaseRequested: false, conflictFiles: null, updatedAt: this.#now() }).where(eq(epics.id, epic.id))
+      await tx.update(epics).set({ reviewState: 'merged', mergeCommitSha: pr.mergeCommitSha, prHeadSha: pr.headSha, conflictFiles: null, updatedAt: this.#now() }).where(eq(epics.id, epic.id))
       await tx.update(runs).set({ state: 'interrupted', endedAt: this.#now(), error: 'Epic PR merged' })
         .where(and(eq(runs.epicId, epic.id), inArray(runs.state, [...ACTIVE_RUN_STATES])))
       await appendAudit(tx, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, event: 'merged', pr: pr.number, mergeCommitSha: pr.mergeCommitSha }))
