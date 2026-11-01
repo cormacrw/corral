@@ -87,6 +87,12 @@ beforeEach(async () => {
   await git('checkout', '--quiet', '--force', 'main')
 })
 
+async function capture(name: string, data: unknown) {
+  if (process.env.CORRAL_EPIC_EVIDENCE_DIR) await writeFile(join(process.env.CORRAL_EPIC_EVIDENCE_DIR, name), JSON.stringify(data, null, 2))
+}
+
+const journal = async (epicId: string) => (await ops(epicId)).map(o => ({ kind: o.kind, state: o.state, expectedEpicHead: o.expectedTargetSha, ontoSha: o.ontoSha, result: o.resultHeadSha, resolutionTaskId: o.resolutionTaskId, conflictFiles: o.conflictFiles, error: o.error }))
+
 async function commitOn(branch: string, file: string, text: string): Promise<string> {
   await git('checkout', '--quiet', branch)
   await writeFile(join(origin, file), text)
@@ -183,6 +189,7 @@ it('rebases an active epic at the next task integration, with no hand-off and no
   expect((await ops(epic.id)).map(o => [o.kind, o.state])).toEqual([['rebase', 'succeeded'], ['integrate', 'succeeded']])
   expect([...t.github.pulls.values()].filter(pr => pr.head.startsWith('task-'))).toEqual([])
   expect(await needsYou(epic.id)).toEqual([])
+  await capture('sync-at-integration.json', { scenario: 'Target advanced, then a task integrated. No API call was made to start the rebase.', targetCommitThatLanded: landed, epicLog: (await git('log', '--oneline', '--format=%h %s', `${landed}~1..${epic.branch}`)).split('\n'), operations: await journal(epic.id), taskStatus: (await taskRow(task.id)).status, taskPrs: 0, inboxNeedsYou: await needsYou(epic.id) })
 })
 
 it('rebases before review, and keeps approval over a clean rebase before merge', async () => {
@@ -233,6 +240,7 @@ it('sends a conflict to a developer and a reviewer on a candidate, then publishe
   expect(await git('rev-parse', epic.branch)).toBe(epic.head)
   expect((await epicApi(epic.id)).sync).toMatchObject({ state: 'resolving', files: [epic.file], taskId: fix.id })
   expect(await needsYou(epic.id)).toEqual([])
+  await capture('conflict-in-progress.json', { epicApi: { status: 200, sync: (await epicApi(epic.id)).sync, reviewState: (await epicApi(epic.id)).reviewState }, inboxNeedsYou: await needsYou(epic.id), epicBranchHeadUnchanged: await git('rev-parse', epic.branch) === epic.head, resolutionTask: { title: fix.title, status: fix.status, branch: fix.branch, description: fix.description }, operations: await journal(epic.id) })
 
   const prs = t.github.pulls.size
   const resolved = await resolve(fix.branch!, epic.onto, epic.file, 'target version\nepic version\n')
@@ -251,6 +259,7 @@ it('sends a conflict to a developer and a reviewer on a candidate, then publishe
   expect((await ops(epic.id)).map(o => [o.kind, o.state])).toEqual([['rebase', 'succeeded'], ['integrate', 'succeeded']])
   await expect(git('rev-parse', '--verify', fix.branch!)).rejects.toThrow()
   expect((await epicApi(epic.id)).sync).toBeNull()
+  await capture('conflict-resolved.json', { developerPromptExcerpt: dev.prompt.split('\n').filter(l => /never remove|git rebase/.test(l)), resolvedFile: await git('show', `${epic.branch}:${epic.file}`), resolutionTask: { status: 'merged', mergeCommitSha: resolved }, candidateBranchDeleted: true, operations: await journal(epic.id) })
 })
 
 it('keeps task integration off the epic branch while a resolution holds the lock', async () => {
@@ -264,7 +273,9 @@ it('keeps task integration off the epic branch while a resolution holds the lock
   expect((await ops(epic.id)).map(o => o.kind)).toEqual(['rebase'])
   // The database refuses a second writer whichever kind it is
   const [submission] = await t.db.select().from(schema.taskSubmissions).where(eq(schema.taskSubmissions.taskId, task.id))
-  await expect(t.db.insert(schema.taskIntegrationOperations).values({ submissionId: submission!.id, epicId: epic.id, kind: 'integrate', expectedTargetSha: epic.head, leaseEpoch: 9 })).rejects.toThrow()
+  const refused = await t.db.insert(schema.taskIntegrationOperations).values({ submissionId: submission!.id, epicId: epic.id, kind: 'integrate', expectedTargetSha: epic.head, leaseEpoch: 9 }).then(() => null, (error: Error) => error.cause instanceof Error ? error.cause.message : error.message)
+  expect(refused).not.toBeNull()
+  await capture('writer-lock.json', { scenario: 'A resolution holds the lock; a task reaches Ready to merge; two passes run; then a second operation is inserted directly.', taskStatusAfterTwoPasses: (await taskRow(task.id)).status, epicBranchHeadUnchanged: await git('rev-parse', epic.branch) === epic.head, operations: await journal(epic.id), directInsertRefusedBy: refused })
 })
 
 it('never pushes over a write that beat the rebase to the branch', async () => {
@@ -282,6 +293,7 @@ it('never pushes over a write that beat the rebase to the branch', async () => {
   await tick()
   expect((await git('ls-tree', '--name-only', epic.branch)).split('\n')).toContain('sneaked.txt')
   expect((await ops(epic.id))[0]).toMatchObject({ kind: 'rebase', state: 'failed', error: 'The epic branch moved' })
+  await capture('compare-and-swap.json', { scenario: 'A commit reached the epic branch just before the rebase push.', racedCommitKept: (await git('ls-tree', '--name-only', epic.branch)).includes('sneaked.txt'), operations: await journal(epic.id) })
   expect(await isAncestor('main', await git('rev-parse', epic.branch))).toBe(true)
 })
 
@@ -294,6 +306,7 @@ it('starts one resolution for the same commits, however often it is polled or re
   expect(await ops(epic.id)).toHaveLength(1)
   const board = await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epic.id))
   expect(board.filter(row => row.id !== epic.done.id)).toHaveLength(1)
+  await capture('one-resolution.json', { scenario: 'Three concurrent passes, then a further pass, a schedule and another pass on the same conflicting commits.', operations: await journal(epic.id), resolutionTasks: board.filter(row => row.id !== epic.done.id).map(row => ({ title: row.title, branch: row.branch })) })
 })
 
 it('writes nothing while paused or stopped, and resumes afterwards', async () => {
@@ -326,6 +339,7 @@ it('writes nothing while paused or stopped, and resumes afterwards', async () =>
   t.orchestrator.merges.stopped = false
   await tick()
   expect(sent).toContain('epic_rebase_push')
+  await capture('pause-and-stop.json', { paused: { operationsStarted: 0, epicBranchMoved: false }, killSwitchBetweenPrepareAndPush: { operationState: 'running', epicBranchMoved: false }, afterResume: { jobsSent: sent, epicBranchMoved: true } })
   expect(await isAncestor('main', await git('rev-parse', epic.branch))).toBe(true)
 })
 
@@ -345,9 +359,12 @@ it('bounds infrastructure failures, then shows a recoverable failure and asks th
   expect(failed).toHaveLength(3)
   expect((await epicApi(epic.id)).sync).toMatchObject({ state: 'failed', error: expect.stringContaining('network down') })
   expect(await needsYou(epic.id)).toEqual([])
+  const stopped = { epicSync: (await epicApi(epic.id)).sync, inboxNeedsYou: await needsYou(epic.id), operationsAfterEightPasses: await journal(epic.id) }
 
   faults = null
-  expect((await t.request('POST', `/api/epics/${epic.id}/sync/retry`)).status).toBe(200)
+  const retried = await t.request('POST', `/api/epics/${epic.id}/sync/retry`)
+  expect(retried.status).toBe(200)
+  await capture('exhausted-retries.json', { stopped, retryResponse: { status: retried.status, body: await retried.json() } })
   await tick()
   expect(await isAncestor('main', await git('rev-parse', epic.branch))).toBe(true)
   expect((await epicApi(epic.id)).sync).toBeNull()
@@ -401,5 +418,6 @@ it('sends back a resolution that undoes target work, and leaves the epic branch 
   expect(notes.map(n => n.body).join('\n')).toContain('landed.txt')
   expect((await ops(epic.id))[0]).toMatchObject({ state: 'running', resultHeadSha: null })
   expect((await epicApi(epic.id)).sync).toMatchObject({ state: 'resolving' })
-  await readFile(join(origin, 'landed.txt'))
+  expect(await readFile(join(origin, 'landed.txt'), 'utf8')).toBe('landed\n')
+  await capture('target-work-protected.json', { scenario: 'A reviewed candidate deleted landed.txt, which only the target changed.', epicBranchHeadUnchanged: await git('rev-parse', epic.branch) === epic.head, taskStatus: (await taskRow(fix.id)).status, commentToDeveloper: notes.map(n => n.body).filter(b => b.includes('landed.txt')) })
 })
