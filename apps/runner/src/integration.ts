@@ -41,7 +41,10 @@ async function findIntegrated(bare: string, targetBranch: string, submissionId: 
 // One commit on top of the expected epic head holding the submission's own
 // change, three-way merged when the epic moved. A squash of the task, parented
 // on its base, is what's merged: `merge-tree --merge-base` needs git 2.40, and
-// the task's commits stay out of the shared history either way.
+// the task's commits stay out of the shared history either way. A rebase of the
+// epic takes the base out of its history, so the epic's tree goes in on a commit
+// parented on the same base: that keeps the base the merge's, and the merge
+// about this task's change alone, not the epic's old commits against its new ones.
 async function buildCandidate(bare: string, author: GitAuthor | null, job: Job<'integration_prepare'>): Promise<Result<'integration_prepare'>> {
   const prepared = (status: Result<'integration_prepare'>['status'], commitSha: string | null = null, files: string[] = []) =>
     ({ kind: 'integration_prepare' as const, status, targetSha: job.expectedTargetSha, commitSha, files })
@@ -52,7 +55,8 @@ async function buildCandidate(bare: string, author: GitAuthor | null, job: Job<'
     GIT_COMMITTER_NAME: committer.name, GIT_COMMITTER_EMAIL: committer.email, GIT_COMMITTER_DATE: job.committedAt
   }
   const squash = await required(['commit-tree', `${job.headSha}^{tree}`, '-p', job.baseSha, '-F', '-'], bare, job.message, env)
-  const merged = await git(['-c', 'core.quotePath=false', 'merge-tree', '--write-tree', '--name-only', '--no-messages', job.expectedTargetSha, squash], { cwd: bare })
+  const ours = await required(['commit-tree', `${job.expectedTargetSha}^{tree}`, '-p', job.baseSha, '-m', 'Epic head'], bare, undefined, env)
+  const merged = await git(['-c', 'core.quotePath=false', 'merge-tree', '--write-tree', '--name-only', '--no-messages', ours, squash], { cwd: bare })
   if (merged.code !== 0 && merged.code !== 1) throw new Error(merged.stderr.trim() || 'git merge-tree failed')
   const [tree, ...conflicted] = merged.stdout.split('\n').filter(Boolean)
   if (merged.code === 1) return prepared('conflict', null, conflicted)

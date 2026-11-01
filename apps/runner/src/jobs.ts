@@ -2,8 +2,9 @@ import { tmpdir } from 'node:os'
 import type { RepoSummary, SetupJob, SetupJobResult } from '@corral/contracts'
 import type { RunnerConfig } from './config.ts'
 import { exec, gh } from './exec.ts'
+import { prepareEpicRebase, pushEpicRebase } from './epic-rebase.ts'
 import { inspectIntegration, prepareIntegration, pushIntegration } from './integration.ts'
-import { barePath, conflictingFiles, syncRepository } from './repos.ts'
+import { barePath, syncRepository } from './repos.ts'
 import { removeWorktree, sweepWorktrees, worktreePath } from './workspace.ts'
 
 // Setup jobs from the server (architecture.md, "Setup jobs, not only agent
@@ -54,12 +55,6 @@ export async function runSetupJob(config: RunnerConfig, job: SetupJob, pmTurnRun
       return { kind: 'cleanup_worktrees', removed, kept }
     }
 
-    case 'rebase_conflicts': {
-      const error = await syncRepository(config.dataDir, job.repository)
-      if (error) throw new Error(error)
-      return { kind: 'rebase_conflicts', files: await conflictingFiles(barePath(config.dataDir, job.repository), job.branch, job.onto) }
-    }
-
     case 'integration_prepare':
       return prepareIntegration(config.dataDir, config.gitAuthor, job)
 
@@ -68,6 +63,12 @@ export async function runSetupJob(config: RunnerConfig, job: SetupJob, pmTurnRun
 
     case 'integration_inspect':
       return inspectIntegration(config.dataDir, job)
+
+    case 'epic_rebase_prepare':
+      return prepareEpicRebase(config.dataDir, config.gitAuthor, job)
+
+    case 'epic_rebase_push':
+      return pushEpicRebase(config.dataDir, job)
 
     case 'sweep_worktrees':
       return { kind: 'sweep_worktrees', ...await sweepWorktrees(config.dataDir, job, pmTurnRunning, runIsHere) }

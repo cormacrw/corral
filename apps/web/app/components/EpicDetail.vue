@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useMutation, useQuery } from '@tanstack/vue-query'
-import { epicQuery, patchEpic, setEpicDependencies } from '~/queries/epics'
+import { epicHistoryQuery, epicQuery, patchEpic, retryEpicSync, setEpicDependencies } from '~/queries/epics'
 import type { PatchEpicInput } from '@corral/contracts'
 import { isTaskDone, type EpicReviewMode } from '@corral/core'
 import { ApiError } from '~/queries/client'
@@ -18,6 +18,7 @@ const flyout = useTaskFlyout()
 const toast = useToast()
 const patchMutation = useMutation(patchEpic)
 const dependenciesMutation = useMutation(setEpicDependencies)
+const retryMutation = useMutation(retryEpicSync)
 const epicResult = useQuery(computed(() => epicQuery(props.epicId)))
 const epic = computed(() => epicResult.data.value ?? null)
 // A failed background refetch leaves what's cached on screen
@@ -94,6 +95,15 @@ const byStatus = computed(() => statusCounts(epic.value?.tasks ?? []))
 
 const reviewModes = Object.entries(EPIC_REVIEW_MODE).map(([value, mode]) => ({ value, label: mode.label }))
 const reviewStatus = computed(() => epic.value && epicReviewStatus(epicWithLiveCounts(epic.value, epic.value.tasks)))
+const sync = computed(() => epic.value?.sync ?? null)
+const history = useQuery(computed(() => epicHistoryQuery(props.epicId)))
+async function retrySync() {
+  try {
+    await retryMutation.mutateAsync({ id: props.epicId })
+  } catch (e) {
+    toast.add({ title: 'Could not retry', description: e instanceof Error ? e.message : undefined, color: 'error' })
+  }
+}
 
 // Mobile has no flyout, so a task opens as its own page
 const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/${ref}`) : flyout.open(ref)
@@ -168,12 +178,55 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
           variant="subtle"
           :title="`Waiting on ${waiting.map(e => e.title).join(', ')}`"
         />
+        <UAlert
+          v-if="sync?.state === 'resolving'"
+          color="info"
+          variant="subtle"
+          title="Resolving a rebase conflict"
+          :description="`${sync.taskRef ?? 'A developer'} is rebasing this epic in private${sync.files.length ? `: ${sync.files.join(', ')}` : ''}. The epic branch moves once a reviewer approves.`"
+        />
+        <UAlert
+          v-else-if="sync?.state === 'deciding'"
+          color="warning"
+          variant="subtle"
+          title="This rebase needs your decision"
+          :description="`${sync.question} It's in your Inbox on ${sync.taskRef ?? 'the rebase task'}. The rebase resumes when you answer.`"
+        />
+        <UAlert
+          v-else-if="sync?.state === 'failed'"
+          color="error"
+          variant="subtle"
+          title="Rebase stopped"
+          :description="sync.error"
+          :actions="[{ label: 'Retry', loading: retryMutation.isPending.value, onClick: retrySync }]"
+        />
         <input
           :value="epic.title"
           class="w-full rounded-md bg-transparent px-1 py-0.5 text-lg font-semibold text-highlighted hover:bg-elevated focus:ring-2 focus:ring-primary focus:outline-none"
           aria-label="Epic title"
           @change="patch({ title: ($event.target as HTMLInputElement).value })"
         >
+
+        <section v-if="history.data.value?.length">
+          <h3 class="mb-1 text-xs font-medium text-muted">
+            History
+          </h3>
+          <ol
+            class="flex max-h-64 flex-col gap-1.5 overflow-y-auto text-xs"
+            data-testid="epic-history"
+          >
+            <li
+              v-for="entry in history.data.value"
+              :key="entry.id"
+            >
+              <span
+                v-if="!entry.text.startsWith('You ')"
+                class="me-1 font-medium"
+              >{{ entry.actor }}</span>
+              <span class="text-muted">{{ entry.text }}</span>
+            </li>
+          </ol>
+        </section>
 
         <section>
           <h3 class="mb-1 text-xs font-medium text-muted">

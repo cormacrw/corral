@@ -4,7 +4,8 @@ import { and, asc, desc, eq, exists, isNull, sql } from 'drizzle-orm'
 import { EpicMerger } from './epic-merge.ts'
 import { appendAudit, auditEvent, type TransitionDetail } from './audit.ts'
 import { verdictForSubmission } from './claim.ts'
-import { evidenceState, taskBase } from './task-base.ts'
+import { activeRebase } from './epic-sync.ts'
+import { evidenceState, isEpicResolution, taskBase } from './task-base.ts'
 import { ApiFailure } from './errors.ts'
 import { publishDependents } from './dependent-tasks.ts'
 import { TaskIntegrator } from './task-integration.ts'
@@ -120,6 +121,8 @@ export class MergeOrchestrator {
     for (const { task, project, epicBranch } of waiting) {
       if (this.stopped) return
       if (task.type === 'design') continue
+      // The synchronizer publishes a resolution and settles its task
+      if (isEpicResolution(task)) continue
       // A rebase task (D27): its branch is the epic branch
       if (task.branch && task.branch === epicBranch) await this.#once(task.id, () => this.#settleEpicRebase(task))
       else if (task.prNumber && task.headSha && this.#retry.due(task.id) && this.#ciPoll.due(task.id)) await this.#advanceOnce(task, project)
@@ -128,7 +131,7 @@ export class MergeOrchestrator {
     await this.#epics.tick(() => this.stopped)
   }
 
-  // A rebase task's work reached the epic branch when the runner pushed it;
+  // A handed-off rebase task's work reached the epic branch when the runner pushed it;
   // nothing is left to merge, and the epic PR goes back to integration review
   async #settleEpicRebase(task: TaskRow): Promise<void> {
     await this.#d.db.transaction(async (tx) => {
@@ -345,6 +348,13 @@ export class MergeOrchestrator {
     const merged = await db.transaction(async (tx) => {
       const locked = await lockTask(tx, taskId).catch(() => null)
       if (!locked || !this.#mayMerge(locked.task, locked.project, pr)) return false
+      // A task PR can be based on an epic branch, so it takes that epic's writer
+      // lock like any other write there: a rebase can't start during the merge.
+      // A later pass merges it, once the rebase is done.
+      if (locked.task.epicId) {
+        await tx.select({ id: schema.epics.id }).from(schema.epics).where(eq(schema.epics.id, locked.task.epicId)).for('update')
+        if (await activeRebase(tx, locked.task.epicId)) return false
+      }
       let result: { merged: boolean, sha: string | null, message: string }
       try {
         result = await github.merge(project.repository, pr.number, project.mergeMethod, pr.headSha)

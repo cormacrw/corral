@@ -1,4 +1,4 @@
-import type { AgentRole } from '@corral/core'
+import type { AgentRole, EpicRebaseDecision } from '@corral/core'
 import { z } from 'zod'
 import type { AgentRuntime } from './agent-runtimes.ts'
 import type { Deployment } from './deployments.ts'
@@ -73,6 +73,8 @@ export interface TaskInboxItem extends InboxItemBase, Partial<ReviewChanges> {
   prUrl: string | null
   // Set on Resolved items: what the human did
   resolution: string | null
+  // An epic rebase's question, with its alternatives and affected changes
+  decision?: EpicRebaseDecision
 }
 
 // An open Plan session waiting on the human (D11, amended): a question, a plan
@@ -106,7 +108,7 @@ export type PlanThreadAttention =
 export type PlanThreadItem = PlanThreadBase & PlanThreadAttention
 
 export const epicReviewActionInput = z.object({
-  // `rebase` hands an epic PR conflict to a developer run
+  // `rebase` sends an epic PR conflict round the automatic rebase again
   action: z.enum(['approve', 'request_changes', 'rebase']),
   headSha: z.string().min(1),
   text: z.string().trim().optional(),
@@ -189,6 +191,8 @@ export interface Inbox {
 export const inboxActionInput = z.discriminatedUnion('action', [
   // Blocked: answer the question or clarify, and continue In progress
   z.object({ action: z.literal('clarify'), text: z.string().trim().min(1) }),
+  // Blocked on an epic rebase's question: one of its alternatives, or free text
+  z.object({ action: z.literal('decide'), alternative: z.number().int().min(0).optional(), text: z.string().trim().min(1).optional() }).refine(d => d.alternative !== undefined || d.text, 'Pick an alternative or write an answer'),
   z.object({ action: z.literal('send_back') }),
   // Failed or Blocked: resolve to a status (D10)
   z.object({ action: z.literal('resolve'), to: z.enum(['backlog', 'ready', 'in_progress']), text: z.string().trim().optional() }),

@@ -257,7 +257,7 @@ Each task follows section 2, steps 4–10, against the epic branch:
 - **#43** was opened before #41 merged. The epic branch moved under it, so Corral rebases #43's PR onto the epic branch (section 2, step 7c, with the epic branch as the base). It's clean; the approval stands, CI reruns, and #43 squash-merges.
 - **#42** is flagged, so after the reviewer approves it waits in **Human review**. The human approves and it squash-merges. (In `each_task` mode, #41 and #43 would have gone to Human review too.)
 
-Meanwhile the target branch has moved on with other work. Corral doesn't touch the epic branch for that: the target branch is never merged into it. A task in another epic, or without one, that depends on #41 is still waiting, because #41 isn't on the target branch yet.
+Meanwhile the target branch has moved on with other work. Corral rebases the epic branch onto it at the next checkpoint (step 6), and never merges it in. A task in another epic, or without one, that depends on #41 is still waiting, because #41 isn't on the target branch yet.
 
 ### Step 3 — Corral opens the epic PR
 
@@ -277,22 +277,28 @@ With #44 merged, every board task is Merged again, and the same epic PR goes bac
 
 ### Step 6 — Rebase before merge, and a conflict
 
-Before anything else, the server compares the epic branch with the target branch through GitHub's compare API, because `mergeable_state` only says `behind` when branch protection requires it. The target branch has moved since E7's branch was created, so the server asks GitHub to rebase the epic PR onto it (`updatePullRequestBranch` with `updateMethod: REBASE`).
+Before merging, the server compares the epic branch with the target branch through GitHub's compare API, because `mergeable_state` only says `behind` when branch protection requires it. This is the last of the checkpoints from D27's COR-290 amendment: the same check runs between task integrations, before integration review and while the epic waits for the human. The target branch has moved, so the server journals a rebase operation. It holds the epic's writer lock, the same one task integration uses, until it finishes.
 
-- **Clean rebase:** the approval stands, as for task PRs. CI runs again on the new head, and when it passes the epic PR goes to step 7.
-- **Conflict (this example):** another task changed the same route file on the target branch, so GitHub reports a conflict. The epic PR leaves ready to merge for `conflict`, the target branch is unchanged, and "Epic PR conflict" is posted to Activity. The Inbox shows a **Needs you** item naming E7 and the conflicting files, which a runner works out with `git merge-tree`. The human picks **Hand the rebase to a developer**, and the server creates conflict task **#45** in E7, in Ready, naming the files.
+The runner rebases the epic's commits onto the target commit on a throwaway candidate, touching no shared ref.
 
-#45's job carries the epic branch itself as its branch, not a new task branch. The developer:
+- **Clean rebase:** the runner publishes with a compare-and-swap on the expected head. The approval stands. CI runs again on the new head, and when it passes the epic PR goes to step 7.
+- **Conflict (this example):** another task changed the same route file on the target branch. The epic branch and the target branch stay as they were. The server creates conflict task **#45** in E7, in Ready, and "Epic rebase conflict sent to a developer" is posted to Activity. There's no Needs-you item: E7 shows "Resolving a rebase conflict" with the files and #45.
 
-1. Checks out the epic branch, squashes it to one commit that keeps every `Corral-Submission:` trailer, and rebases that onto `origin/<target branch>`.
-2. Resolves the conflict in the route file, keeping both changes. Required CI verifies the push, so it runs no gates and doesn't chase a target that moved again. A project with no required CI checks skips the squash and runs lint, typecheck, tests and build here.
-3. Reports `pr_updated` with what it resolved. The runner force-pushes the epic branch with `--force-with-lease`; no task PR is opened.
+#45's branch is a candidate, `corral/epic-rebase/<operation>`, cut from the epic head, with no PR. The developer:
 
-#45 goes to Agent review like any task in E7; the reviewer checks the rebased epic branch against the target branch and approves. #45 is Merged, since its work is already on the epic branch. Because a resolved conflict isn't a mechanical update, the epic PR goes back to **integration review** and then to the **human**, who approves it again. On this second pass the epic branch is already on top of the target branch, so nothing needs rebasing; if the target branch had moved again, step 6 would repeat.
+1. Rebases it onto the target commit named in the brief.
+2. Resolves the conflict in the route file, keeping both changes and reverting nothing that landed on the target branch, and runs lint, typecheck, tests and build.
+3. Reports `pr_updated` with what it resolved and how it checked it. The runner pushes only the candidate.
+
+#45 goes to Agent review like any task in E7; the reviewer compares the rebased commits with the old ones and approves. The server then has the runner check the candidate is on the target commit, linear, and leaves files only the target changed alone, and publishes it with a compare-and-swap. A candidate that fails goes back to the developer with the reason, and the epic branch doesn't move. Once it's published, #45 is Merged.
+
+What happens to approval depends on the review. If the reviewer confirms the approved behaviour is unchanged and the server's compare agrees, approval carries to the new head, recorded on the epic's history, and the epic PR waits for CI there (D27, COR-291). If behaviour changed, the epic PR goes back to **integration review** and then to the **human**, who approves it again. If the two sides can't both hold, or the target changed a binding decision, the developer or reviewer asks one question with alternatives in Needs you, and the human's answer resumes #45 on the same operation; an answer that changes behaviour ends in integration review and the human too. On a second pass the epic branch is already on top of the target branch, so nothing needs rebasing; if the target branch had moved again, step 6 would repeat.
+
+If the rebase can't run, Corral tries again a minute, then two, later. After three failures on the same commits it stops and the epic shows **Rebase stopped** with a **Retry**: an operational failure, with no approval asked for. A reviewed candidate that can't be pushed keeps its operation and is pushed again on Retry.
 
 ### Step 7 — The epic PR merges
 
-The final gate check (section 2, step 8) runs against live GitHub data for the epic PR: approved by the human at the current commit, or carried over a clean rebase, required CI checks passed, mergeable. A failed required check creates a fix task in E7, as in step 5. The server squash-merges the epic PR into the target branch, whatever the project's merge method, so E7 lands as one commit, and records the merge commit. Never marked merged without seeing a merged state (section 2, step 9). After three failed attempts the epic PR goes back to **Human review**, where approving retries the merge. A PR merged by hand on GitHub counts as merged; one closed without merging goes back to `open`, and reopening it restarts integration review.
+The final gate check (section 2, step 8) runs against live GitHub data for the epic PR: approved by the human at the current commit, or carried over a clean rebase or a reviewed resolution, required CI checks passed, mergeable. A failed required check creates a fix task in E7, as in step 5. The server squash-merges the epic PR into the target branch, whatever the project's merge method, so E7 lands as one commit, and records the merge commit. Never marked merged without seeing a merged state (section 2, step 9). After three failed attempts the epic PR goes back to **Human review**, where approving retries the merge. A PR merged by hand on GitHub counts as merged; one closed without merging goes back to `open`, and reopening it restarts integration review.
 
 Then:
 

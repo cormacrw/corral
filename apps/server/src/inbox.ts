@@ -1,6 +1,7 @@
 import { needsAttention, type InboxArtifact, type InboxSince, type ReleaseNotesItem } from '@corral/contracts'
 import { auditText, readAudit, type AuditView } from './audit.ts'
-import { countEpicItems, epicInboxItems } from './epic-prs.ts'
+import { countEpicItems, epicEventText, epicInboxItems } from './epic-prs.ts'
+import { waitingDecisions } from './epic-rebase-approval.ts'
 import { fileArtifacts, isNew, workNotes } from './inbox-changes.ts'
 import type { Comment, Evidence, Inbox, InboxItem, PlanThreadAttention, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
 import { arrivalKey, storedMessages, withMessages, type PreparedItem } from './inbox-message.ts'
@@ -90,8 +91,7 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     const detail = readAudit(entry.detail)
     const task = firstTask.get(epic.id)
     if (!task) continue
-    const labels: Record<string, string> = { opened: 'Epic PR opened', review_started: 'Epic integration review started', approved: 'Epic PR approved by reviewer', changes_requested: 'Epic integration changes requested', human_approved: 'You approved the epic PR', human_changes_requested: 'You requested changes on the epic PR', rebase_requested: 'Rebasing the epic PR onto the target branch', rebased: 'Epic PR rebased; CI runs again', conflict: 'Epic PR conflict', rebase_handed_off: 'You handed the epic PR rebase to a developer', ci_failed: 'CI failed on the epic PR', merge_refused: 'GitHub refused the epic PR merge', review_failed: 'Epic integration review stopped retrying', closed: 'Epic PR closed on GitHub', merged: 'Epic PR merged' }
-    const body = [labels[detail.event ?? ''] ?? detail.event, detail.summary].filter(Boolean).join(': ')
+    const body = epicEventText(detail)
     const item: TaskInboxItem = { id: `epic-${entry.id}`, type: 'activity', epicId: epic.id, project: projectTag(project), taskId: task.id, taskRef: taskRef(project.prefix, task.number), subject: epic.title, preview: body, body, sender: senderOf(entry.actor), at: entry.createdAt.toISOString(), prUrl: epic.prNumber ? `https://github.com/${project.repository}/pull/${epic.prNumber}` : null, resolution: entry.actor.kind === 'human' ? body : null }
     if (entry.actor.kind === 'human') resolved.push(item)
     else activity.push(item)
@@ -219,6 +219,7 @@ async function openTasks(db: Executor, taskId?: string) {
     .innerJoin(projects, eq(projects.id, tasks.projectId))
     .where(openTaskFilter(taskId))
   const histories = await taskTransitions(db, open.map(o => o.task.id))
+  const decisions = await waitingDecisions(db, open.filter(o => o.task.status === 'blocked').map(o => o.task.id))
   return open.map(({ task, project }) => {
     const history = histories.get(task.id) ?? []
     const arrivals = history.filter((e) => {
@@ -228,9 +229,11 @@ async function openTasks(db: Executor, taskId?: string) {
     const entered = arrivals[0]
     // A Blocked task whose reason came from the agent's own report is a question
     const stuck = task.status === 'blocked' && readAudit(entered?.detail).event === 'stuck'
-    const type: TaskInboxItemType = task.status === 'human_review' ? 'human_review' : task.status === 'failed' ? 'failed' : stuck ? 'question' : 'blocked'
+    // An epic rebase's decision is a question too, whoever raised it
+    const decision = decisions.get(task.id) ?? null
+    const type: TaskInboxItemType = task.status === 'human_review' ? 'human_review' : task.status === 'failed' ? 'failed' : stuck || decision ? 'question' : 'blocked'
     const at = (entered?.createdAt ?? task.updatedAt).toISOString()
-    return { task, project, history, type, at, arrival: arrivalKey({ id: task.id, type, at }, arrivals) }
+    return { task, project, history, type, decision, at, arrival: arrivalKey({ id: task.id, type, at }, arrivals) }
   })
 }
 
@@ -278,7 +281,7 @@ async function prepareTaskItems(db: Executor, open: Open[]): Promise<PreparedIte
   const versionsOf = Map.groupBy(versions, v => v.taskId)
   const approvalOf = new Map(approvals.map(r => [r.taskId, r]))
   const humanCriteriaOf = Map.groupBy(humanCriteria, c => c.taskId)
-  return open.map(({ task, project, type, at, arrival }) => {
+  return open.map(({ task, project, type, decision, at, arrival }) => {
     const notes = comments.get(task.id) ?? []
     const taskVersions = versionsOf.get(task.id) ?? []
     // PR reviews get a short note; spikes show their findings. The
@@ -299,6 +302,7 @@ async function prepareTaskItems(db: Executor, open: Open[]): Promise<PreparedIte
       at,
       prUrl: task.prUrl,
       resolution: null,
+      ...decision && { decision },
       ...taskChanges(task, actions.get(task.id) ?? null, evidence.get(task.id) ?? [], notes, taskVersions)
     }
     return { item, arrival }

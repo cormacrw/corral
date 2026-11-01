@@ -156,10 +156,12 @@ On the mobile layout ([mobile.md](mobile.md#inbox)), a Plan thread opens as its 
 
 An epic PR in human review lists every task on the epic branch with **Open task**, its integrated and approved commits (or legacy task PR), criteria and evidence. A PR-free task's **Needs human check** criteria have checkboxes, a task marked for human review has **I reviewed this task**, and those tasks stay expanded on a phone. The footer counts them; **Approve** needs them all (D27, COR-289), and the server checks too. Ticks are local to the item. Requesting changes doesn't need them.
 
+An epic rebase's question (D27, COR-291) is a task question whose Overview leads with the question, any binding decision, each alternative with its effect and a **Choose** button, and the affected changes. Choosing resumes the rebase; **Answer** writes a free-form answer, which counts as a behaviour change.
+
 An epic PR in human review and an epic PR rebase conflict have their own layout on desktop and mobile, `InboxEpicReview` and `InboxEpicConflict`, with the action bar pinned at the bottom. Both share `InboxEpicHeader`: the badge, the epic's name linking to it, and a button to the epic PR, which goes full width under the title on a phone.
 
 - **Review:** the integration review's verdict, then one collapsible row per task with its evidence, open on desktop and closed on a phone. Request changes needs the feedback box filled in. Approve and Request changes sit side by side on a phone.
-- **Conflict:** a bordered list of the conflicting files, wrapped rather than scrolled, or a note that Corral couldn't work them out. **Hand the rebase to a developer** is full width on a phone.
+- **Conflict:** a bordered list of the conflicting files, wrapped rather than scrolled, or a note that Corral couldn't work them out. Only an epic left in `conflict` from before automatic rebasing shows this (D27, COR-290), and a conflict now goes to a developer without an Inbox item. **Hand the rebase to a developer**, which sends it round the automatic rebase, is full width on a phone.
 
 ## What each action does (D10)
 

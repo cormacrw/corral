@@ -315,7 +315,7 @@ export async function listTasks(db: Executor, project: ProjectRow, view: TaskVie
 
 // New tasks start in Backlog, or as Drafts for the PM's plans (D10).
 // Returns the new task's ID.
-export async function createTask(db: Executor, project: ProjectRow, rawInput: CreateTaskInput, actor: Actor, options: { draft?: boolean, epicFix?: boolean, invalidatedEpics?: InvalidatedEpics } = {}): Promise<string> {
+export async function createTask(db: Executor, project: ProjectRow, rawInput: CreateTaskInput, actor: Actor, options: { draft?: boolean, epicFix?: boolean, keepEpicReview?: boolean, invalidatedEpics?: InvalidatedEpics } = {}): Promise<string> {
   const input = createTaskInput.parse(rawInput)
   // D27 integration feedback creates Ready work without a separate plan approval.
   const created: ReturnType<typeof createTaskState> = options.epicFix
@@ -352,7 +352,7 @@ export async function createTask(db: Executor, project: ProjectRow, rawInput: Cr
     }
 
     const state = created.task
-    if (!['draft', 'backlog'].includes(state.status)) {
+    if (!['draft', 'backlog'].includes(state.status) && !options.keepEpicReview) {
       await invalidateEpicReview(tx, input.epicId, options.invalidatedEpics)
     }
     const [row] = await tx.insert(tasks).values({

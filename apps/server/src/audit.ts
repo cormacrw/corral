@@ -36,6 +36,21 @@ export type TransitionDetail =
   | { event: 'blocked' | 'stuck', runId: string }
   | { event: 'dependency_deleted', dependency: string }
 
+// Why an epic's approval did or didn't survive a rebase, with every commit
+// involved: the epic's history has to answer that on its own (COR-291)
+export interface ApprovalChange {
+  event: 'approval_retained' | 'approval_invalidated'
+  approvedHeadSha: string | null
+  from: string
+  to: string
+  ontoSha: string | null
+  operationId: string | null
+  resolutionTaskId: string | null
+  resolutionReview: { runId: string, preserved: boolean, summary: string } | null
+  reason: string
+  summary: string
+}
+
 // The epic PR events that go with a review state change
 export type EpicPrDetail =
   | { event: 'opened' | 'review_started', prNumber: number }
@@ -44,6 +59,12 @@ export type EpicPrDetail =
   | { event: 'rebased', from: string | null, to: string }
   | { event: 'conflict', summary: string, files: string[] }
   | { event: 'merge_refused', summary: string }
+  | { event: 'rebase_resolving', summary: string, files: string[] }
+  | { event: 'rebase_failed' | 'sync_failed', summary: string }
+  | { event: 'sync_retried' }
+  | ApprovalChange
+  | { event: 'decision_requested', operationId: string, decisionId: string, summary: string, bindingDecision: string | null, alternatives: string[], affectedChanges: string[] }
+  | { event: 'decision_answered', operationId: string, decisionId: string, summary: string, changesBehaviour: boolean }
 
 type StatusChange = { from: TaskStatus, to: TaskStatus }
 type Changed = { changed: string[] }

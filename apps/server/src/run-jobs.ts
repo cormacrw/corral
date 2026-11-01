@@ -3,12 +3,13 @@ import { taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, asc, desc, eq, gt, inArray, isNotNull, ne } from 'drizzle-orm'
 import { listTaskAttachments } from './attachments.ts'
+import { resolutionContext } from './epic-rebase-approval.ts'
 import { slugify } from './projects.ts'
 import { designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
 import { latestRebaseCheckFailures } from './rebase-review.ts'
 import { RUN_TIMEOUT_SECONDS } from './run-lifecycle.ts'
 import { listEvidence } from './runs.ts'
-import { isEpicRebaseTask, taskBase } from './task-base.ts'
+import { isEpicRebaseTask, isEpicResolution, taskBase } from './task-base.ts'
 import { listTaskSubmissions, selectPrFreeProtocol } from './task-submissions.ts'
 import type { TaskRow } from './tasks.ts'
 import { type AgentRow, type RunContext, type RunCore } from './run-context.ts'
@@ -99,7 +100,8 @@ export class RunJobs {
       prFree: task.integrationProtocol > 0,
       reviewRounds: task.reviewRounds,
       rebaseOnly: task.rebaseOnly,
-      squashRebase: ctx.project.requiredChecks.length > 0 && await isEpicRebaseTask(db, task),
+      // A resolution has a brief of its own, on a candidate branch
+      squashRebase: ctx.project.requiredChecks.length > 0 && !isEpicResolution(task) && await isEpicRebaseTask(db, task),
       approvedHeadSha: task.approvedHeadSha,
       reviewRoundCap: ctx.project.reviewRoundCap,
       criteria: criteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })),
@@ -212,6 +214,7 @@ export class RunJobs {
       : []
     const pin = await this.#pinnedDesign(ctx.project.prefix, task.id)
     const rebaseCheckFailures = task.rebaseOnly ? await latestRebaseCheckFailures(db, task.id) : []
+    const epicResolution = isEpicResolution(task) && task.epicId ? await resolutionContext(db, task.id, task.epicId) : null
     const prFree = task.integrationProtocol > 0
     const submissions = prFree ? await listTaskSubmissions(db, task.id) : []
     return {
@@ -253,6 +256,7 @@ export class RunJobs {
         rebaseOnly: task.rebaseOnly,
         approvedHeadSha: task.approvedHeadSha,
         rebaseCheckFailures,
+        epicResolution,
         reviewRounds: task.reviewRounds,
         reviewRoundCap: ctx.project.reviewRoundCap,
         criteria: criteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })),
