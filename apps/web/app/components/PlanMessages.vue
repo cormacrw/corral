@@ -60,7 +60,10 @@ const rows = computed(() => {
         variant="subtle"
         class="mt-2"
       >
-        Refining {{ props.refining }}
+        Refining <TaskLink
+          :task-ref="props.refining"
+          class="underline"
+        />
       </UBadge>
       <span
         v-if="props.failed && message.id.startsWith('pending-')"

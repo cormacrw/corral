@@ -103,7 +103,8 @@ async function mountInbox(type: 'human_review' | 'failed' | 'question', taskRef?
   vi.stubGlobal('useToast', () => ({ add: vi.fn() }))
   vi.stubGlobal('usePlanThreadDelete', () => ({ pending: vue.ref([]), remove: vi.fn() }))
   const closeFlyout = vi.fn().mockResolvedValue(undefined)
-  vi.stubGlobal('useTaskFlyout', () => ({ ref: vue.ref(dockedTask), epic: vue.ref(null), open: vi.fn(), close: closeFlyout }))
+  const openFlyout = vi.fn()
+  vi.stubGlobal('useTaskFlyout', () => ({ ref: vue.ref(dockedTask), epic: vue.ref(null), open: openFlyout, close: closeFlyout }))
   vi.stubGlobal('useShell', () => ({ agents, projects, loaded: true, runner: { online: true } }))
   vi.mocked(api.inbox.get).mockImplementation(async () => structuredClone(fixture))
   vi.mocked(api.inbox.act).mockReset().mockResolvedValue({ task: null })
@@ -135,7 +136,7 @@ async function mountInbox(type: 'human_review' | 'failed' | 'question', taskRef?
   }
   const openTab = (value: string) => wrapper.get(`[data-tab="${value}"]`).trigger('click')
   const alert = () => wrapper.find('[data-alert]')
-  return { wrapper, item, params, panel, primary, openTab, replace: router.replace, close: closeFlyout, composer, submit, alert, router, closeFlyout, emitLive: (event: unknown) => invalidateKeys(client, applyEvent(client, event as ServerEvent)), refresh: () => invalidateKeys(client, [keys.inbox()]) }
+  return { wrapper, item, params, panel, primary, openTab, replace: router.replace, close: closeFlyout, composer, submit, alert, router, closeFlyout, openFlyout, emitLive: (event: unknown) => invalidateKeys(client, applyEvent(client, event as ServerEvent)), refresh: () => invalidateKeys(client, [keys.inbox()]) }
 }
 
 it('moves on to the next task with the flyout closed, even if the item left the list first', async () => {
@@ -891,4 +892,15 @@ describe('on a phone', () => {
       expect(view.wrapper.find('[data-testid="inbox-thumb-bar"]').exists()).toBe(false)
     }
   })
+})
+
+it('leaves the flyout alone on a live refresh, so a task opened from the message stays', async () => {
+  const { wrapper, openFlyout, refresh } = await mountInbox('human_review', 'COR-41')
+  try {
+    await refresh()
+    await flushPromises()
+    expect(openFlyout).not.toHaveBeenCalled()
+  } finally {
+    wrapper.unmount()
+  }
 })

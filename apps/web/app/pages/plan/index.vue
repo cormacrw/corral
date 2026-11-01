@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { AgentRuntime } from '@corral/contracts'
 import { useQuery } from '@tanstack/vue-query'
+import { provide } from 'vue'
+import { FLYOUT_SHEETS } from '~/composables/useTaskFlyout'
 import { planDraftsQuery, planSessionsQuery } from '~/queries/plan'
 import { useDraft } from '~/composables/useDraft'
 import { reloadShell } from '~/queries/shell'
@@ -15,6 +17,9 @@ const router = useRouter()
 const route = useRoute()
 const pending = usePendingPlan()
 const device = useDevice()
+// The attached task and its epic open beside the composer, or over it on
+// phones, which keeps the draft that going to the task's page would lose
+provide(FLYOUT_SHEETS, true)
 useSeoMeta({ title: 'Plan · Corral' })
 
 const lastProject = useLocalStorage<string | null>('corral.plan.project', null)
@@ -139,10 +144,10 @@ async function start(message: string): Promise<boolean> {
                   variant="subtle"
                   color="primary"
                 >
-                  Refining <NuxtLink
-                    :to="{ query: { ...route.query, task: taskRef } }"
-                    class="ms-1 underline"
-                  >{{ taskRef }}</NuxtLink>
+                  Refining <TaskLink
+                    :task-ref="taskRef"
+                    class="underline"
+                  />
                 </UBadge>
                 <UButton
                   icon="i-lucide-x"

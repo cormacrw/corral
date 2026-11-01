@@ -97,19 +97,9 @@ const hasReason = computed(() => (props.task.status === 'blocked' || props.task.
         v-else-if="row.key === 'design' && props.task.design"
         class="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1"
       >
-        <NuxtLink
-          v-if="props.stacked"
-          :to="`/tasks/${props.task.design.taskRef}`"
-          class="text-primary hover:underline"
-        >{{ props.task.design.taskRef }} v{{ props.task.design.version }}</NuxtLink>
-        <button
-          v-else
-          type="button"
-          class="text-primary hover:underline"
-          @click="flyout.open(props.task.design.taskRef)"
-        >
+        <TaskLink :task-ref="props.task.design.taskRef">
           {{ props.task.design.taskRef }} v{{ props.task.design.version }}
-        </button>
+        </TaskLink>
         <UBadge
           v-for="screen in props.task.design.screens"
           :key="screen"

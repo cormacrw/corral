@@ -2,8 +2,8 @@
 import type { Token, Tokens } from 'marked'
 import { attachmentIdFromSrc, attachmentUrl } from '@corral/core'
 import { marked } from 'marked'
-import { computed, h, ref, type VNode } from 'vue'
-import { RouterLink } from 'vue-router'
+import { h, ref, type VNode } from 'vue'
+import { useTaskRefText } from '~/composables/useTaskRefText'
 
 // Agents write markdown (PM replies, transcripts, comments, summaries).
 // Rendered from marked's tokens into Vue nodes rather than v-html, so agent
@@ -12,9 +12,8 @@ import { RouterLink } from 'vue-router'
 // `breaks` keeps single newlines, for text a person typed into a composer.
 // Long paths, URLs and inline code wrap anywhere, so they never widen the
 // thread on a phone; code blocks and tables scroll in their own box instead.
-// `taskRefs` lists the project prefixes whose task refs become links, so text
-// like SHA-256 or UTF-8 stays text.
-const props = defineProps<{ text: string, breaks?: boolean, taskRefs?: string[] }>()
+const props = defineProps<{ text: string, breaks?: boolean }>()
+const textNode = useTaskRefText()
 // A modal for every block of a long log adds up, so it exists only once opened
 const lightbox = ref<{ src: string, alt: string } | null>(null)
 const lightboxOpen = ref(false)
@@ -35,9 +34,9 @@ function blocks(tokens: Token[]): VNode[] {
       case 'paragraph':
         return [h('p', inline(token.tokens ?? []))]
       case 'text':
-        return [h('p', token.tokens ? inline(token.tokens) : (token as Tokens.Text).text)]
+        return [h('p', token.tokens ? inline(token.tokens) : textNode((token as Tokens.Text).text))]
       case 'code':
-        return [h('pre', { class: 'overflow-x-auto overscroll-x-contain rounded-md border border-muted bg-muted px-3 py-2 font-mono text-xs/5 wrap-normal whitespace-pre' }, h('code', (token as Tokens.Code).text))]
+        return [h('pre', { class: 'overflow-x-auto overscroll-x-contain rounded-md border border-muted bg-muted px-3 py-2 font-mono text-xs/5 wrap-normal whitespace-pre' }, h('code', textNode((token as Tokens.Code).text)))]
       case 'blockquote':
         return [h('blockquote', { class: 'flex flex-col gap-2 border-s-4 border-accented ps-3 text-muted' }, blocks(token.tokens ?? []))]
       case 'list': {
@@ -56,7 +55,7 @@ function blocks(tokens: Token[]): VNode[] {
         ]))]
       }
       default:
-        return token.raw.trim() ? [h('p', token.raw.trim())] : []
+        return token.raw.trim() ? [h('p', textNode(token.raw.trim()))] : []
     }
   })
 }
@@ -64,22 +63,22 @@ function blocks(tokens: Token[]): VNode[] {
 // Tight list items are bare inline text; loose ones are paragraphs
 function listItem(item: Tokens.ListItem): VNode[] | (VNode | string)[] {
   const loose = item.tokens.some(t => t.type !== 'text')
-  if (!loose) return item.tokens.flatMap(t => t.type === 'text' && t.tokens ? inline(t.tokens) : [(t as Tokens.Text).text])
+  if (!loose) return item.tokens.flatMap(t => t.type === 'text' && t.tokens ? inline(t.tokens) : [textNode((t as Tokens.Text).text)])
   return [h('div', { class: 'flex flex-col gap-1' }, blocks(item.tokens))]
 }
 
-function inline(tokens: Token[]): (VNode | string)[] {
+function inline(tokens: Token[], linkRefs = true): (VNode | string)[] {
   return tokens.map((token): VNode | string => {
     switch (token.type) {
-      case 'strong': return h('strong', { class: 'font-semibold text-highlighted' }, inline(token.tokens ?? []))
-      case 'em': return h('em', inline(token.tokens ?? []))
-      case 'del': return h('s', inline(token.tokens ?? []))
-      case 'codespan': return h('code', { class: 'rounded border border-muted bg-muted px-1 py-px font-mono text-xs wrap-anywhere' }, unescapeHtml((token as Tokens.Codespan).text))
+      case 'strong': return h('strong', { class: 'font-semibold text-highlighted' }, inline(token.tokens ?? [], linkRefs))
+      case 'em': return h('em', inline(token.tokens ?? [], linkRefs))
+      case 'del': return h('s', inline(token.tokens ?? [], linkRefs))
+      case 'codespan': return h('code', { class: 'rounded border border-muted bg-muted px-1 py-px font-mono text-xs wrap-anywhere' }, linkRefs ? textNode(unescapeHtml((token as Tokens.Codespan).text)) : unescapeHtml((token as Tokens.Codespan).text))
       case 'br': return h('br')
       case 'link': {
         const href = (token as Tokens.Link).href
-        if (!SAFE_HREF.test(href)) return h('span', inline(token.tokens ?? []))
-        return h('a', { href, target: href.startsWith('/') || href.startsWith('#') ? undefined : '_blank', rel: 'noopener', class: 'text-primary hover:underline' }, inline(token.tokens ?? []))
+        if (!SAFE_HREF.test(href)) return h('span', inline(token.tokens ?? [], linkRefs))
+        return h('a', { href, target: href.startsWith('/') || href.startsWith('#') ? undefined : '_blank', rel: 'noopener', class: 'text-primary hover:underline' }, inline(token.tokens ?? [], false))
       }
       case 'image': {
         const image = token as Tokens.Image
@@ -96,20 +95,10 @@ function inline(tokens: Token[]): (VNode | string)[] {
           }
         }, h('img', { src, alt: image.text, loading: 'lazy', class: 'block max-h-40 max-w-full object-contain sm:max-w-60' }))
       }
-      case 'text': return token.tokens ? h('span', inline(token.tokens)) : textNode(unescapeHtml((token as Tokens.Text).text))
+      case 'text': return token.tokens ? h('span', inline(token.tokens, linkRefs)) : linkRefs ? textNode(unescapeHtml((token as Tokens.Text).text)) : unescapeHtml((token as Tokens.Text).text)
       default: return unescapeHtml('text' in token && typeof token.text === 'string' ? token.text : token.raw)
     }
   })
-}
-
-const taskRefPattern = computed(() => props.taskRefs?.length ? new RegExp(`\\b((?:${props.taskRefs.join('|')})-\\d+)\\b`) : null)
-
-function textNode(text: string): VNode | string {
-  if (!taskRefPattern.value) return text
-  return h('span', text.split(taskRefPattern.value).map((part, i) =>
-    i % 2 === 1
-      ? h(RouterLink, { to: `/tasks/${part}`, class: 'text-primary hover:underline' }, () => part)
-      : part))
 }
 
 function unescapeHtml(text: string): string {

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { provide } from 'vue'
+import { FLYOUT_SHEETS } from '~/composables/useTaskFlyout'
 import type { Plan } from '@corral/contracts'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { approvePlan as approvePlanMutation, planSessionQuery, markPlanRead, sendPlanMessage } from '~/queries/plan'
@@ -19,6 +21,7 @@ const shell = useShell()
 const threads = usePlanThreads()
 // The PM by its current name and picture
 const pm = computed(() => shell.agents.find(a => a.role === 'pm') ?? null)
+provide(FLYOUT_SHEETS, true)
 const flyout = useTaskFlyout()
 const toast = useToast()
 const device = useDevice()
@@ -355,7 +358,10 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
                     variant="subtle"
                     color="primary"
                   >
-                    Refining {{ taskRef }}
+                    Refining <TaskLink
+                      :task-ref="taskRef"
+                      class="underline"
+                    />
                   </UBadge>
                   <UButton
                     icon="i-lucide-x"
