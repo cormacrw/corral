@@ -243,10 +243,11 @@ describe('a save that fails', () => {
   })
 })
 
-it('links a dependency to its own page where there is no flyout', async () => {
+// TaskDetailLinks.test.ts mounts the real link and proves its href and navigation.
+it('links a dependency through the shared task link', async () => {
   vi.mocked(api.tasks.byRef).mockImplementation(async ref => ref === 'COR-1' ? { ...taskA, dependsOn: ['COR-2'] } : taskB)
   const wrapper = await mountDetail()
-  expect(wrapper.find('[to="/tasks/COR-2"]').exists()).toBe(true)
+  expect(wrapper.find('[task-ref="COR-2"]').exists()).toBe(true)
 })
 
 it('asks once however often Delete is pressed', async () => {
