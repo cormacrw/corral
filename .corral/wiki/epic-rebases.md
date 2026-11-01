@@ -26,6 +26,22 @@ The clock for pause is the moment of the write, not the start of the step:
 preparing can take minutes, so `#publish` and the conflict path read the project
 again. A conflict found while stopped goes back to `pending` and prepares again.
 
+A closed PR sits at `reviewState` `open`, the same as an open one that lost its
+approval, so only GitHub can tell them apart. `begin` reads the PR, after the
+behind check so an up-to-date epic pays nothing, and `#publish` reads it again
+because a resolution can take hours. Nothing is recorded: `closedPoll` keeps
+watching for a reopen in `EpicPullRequests.reconcile`, and the next look finds
+the PR open and carries on. A plain integration is still allowed, since a
+fast-forward doesn't stop a reopen.
+A resolution run already going when the PR closes is left to finish: its result
+just can't be pushed until the PR reopens.
+
+`begin` reads GitHub three times, so the `due()` list goes through a `Backoff`
+per epic, doubling from 30 seconds to 2 minutes. Only `due()` obeys it: a task
+waiting to integrate still gets a checkpoint on every pass, and the wait starts
+over after each rebase. It's kept in memory like the merge pass's, so a restart
+just looks sooner.
+
 `candidateProblem` compares with `--no-renames` but reads the target's renames
 separately with `-M`. Without that, a rebase that correctly followed a rename
 looks like an edit of a target-only file, and it fails the same way on every

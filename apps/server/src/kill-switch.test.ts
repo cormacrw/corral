@@ -2,7 +2,8 @@ import { databaseFixture } from '@corral/db/testing'
 import type { Project, Task } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { and, eq, ne } from 'drizzle-orm'
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
+import { RunJobs } from './run-jobs.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner, sleep } from './test-runner.ts'
 
@@ -24,6 +25,12 @@ describe('stopping work that is being claimed', () => {
   afterAll(async () => {
     runner?.close()
     await t?.close()
+  })
+
+  // A test that fails halfway must not leave the switch on for the next one
+  afterEach(async () => {
+    vi.restoreAllMocks()
+    if (t?.orchestrator.stopped) await t.orchestrator.resumeAll(t.actor)
   })
 
   const assignments = (taskId: string) => runner.received.filter(m => m.type === 'run.assign' && m.job.taskId === taskId)
@@ -75,15 +82,16 @@ describe('stopping work that is being claimed', () => {
     const { project, task } = await approvedInEpic()
     let stopped: Promise<void> | undefined
     // The claim is still open when the switch is thrown, so its run isn't
-    // in stopAll's first read
-    const live = t.runner.available.bind(t.runner)
-    // The first read is the check for a free slot, before the claim opens
-    const spy = vi.spyOn(t.runner, 'available').mockImplementationOnce(live).mockImplementationOnce(() => {
-      stopped = t.orchestrator.stopAll(t.actor)
-      return live()
+    // in stopAll's first read. Placing the task is the one step sure to be
+    // inside it: agents can come in any order, and each checks for a free slot.
+    const live = RunJobs.prototype.previousAuthorRun
+    const spy = vi.spyOn(RunJobs.prototype, 'previousAuthorRun').mockImplementation(function (this: RunJobs, ...args) {
+      if (args[1] === task.id) stopped ??= t.orchestrator.stopAll(t.actor)
+      return live.apply(this, args)
     })
     await approve(project, task)
     await t.orchestrator.schedule()
+    expect(stopped).toBeDefined()
     await stopped
     spy.mockRestore()
     await sleep(50)

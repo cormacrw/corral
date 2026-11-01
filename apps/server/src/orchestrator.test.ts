@@ -2,7 +2,7 @@ import { databaseFixture } from '@corral/db/testing'
 import type { Inbox, Project, Run, RunJob, RunTimings, Task } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { and, asc, eq, ne } from 'drizzle-orm'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner, sleep } from './test-runner.ts'
 
@@ -50,6 +50,10 @@ describe('orchestrator', () => {
     const assign = await runner.next('run.assign', m => m.job.taskId === task.id)
     return { project, task, job: assign.job }
   }
+
+  // Messages from the runner land when the server gets to them, which on a busy
+  // machine can be a while
+  const eventually = (check: () => Promise<void>) => vi.waitFor(check, { timeout: 4000, interval: 25 })
 
   async function pause(project: Project) {
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
@@ -130,8 +134,9 @@ describe('orchestrator', () => {
     runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'sess-1' })
     t.clock.now = new Date(t.clock.now.getTime() + 60_000)
     runner.send({ type: 'heartbeat', activeRuns: [{ runId: job.runId, leaseEpoch: job.leaseEpoch }] })
-    await sleep(200)
-    expect((await taskRow(task.id)).leaseExpiresAt!.getTime()).toBeGreaterThan(before.getTime())
+    await eventually(async () => {
+      expect((await taskRow(task.id)).leaseExpiresAt!.getTime()).toBeGreaterThan(before.getTime())
+    })
     expect(await runRow(job.runId)).toMatchObject({ state: 'running', agentSessionId: 'sess-1' })
     await pause(project)
   })
@@ -145,8 +150,9 @@ describe('orchestrator', () => {
         { type: 'usage', inputTokens: 120, cacheReadTokens: 9000, outputTokens: 30 }
       ]
     })
-    await sleep(200)
-    expect(await runRow(job.runId)).toMatchObject({ inputTokens: 120, cacheReadTokens: 9000, outputTokens: 30 })
+    await eventually(async () => {
+      expect(await runRow(job.runId)).toMatchObject({ inputTokens: 120, cacheReadTokens: 9000, outputTokens: 30 })
+    })
     await pause(project)
   })
 
@@ -234,10 +240,10 @@ describe('orchestrator', () => {
       tools: [{ tool: 'Bash', count: 2, totalMs: 300, maxMs: 200 }]
     }
     runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'stopped' }, headSha: 'abc123', timings })
-    await sleep(200)
-    expect(await runRow(job.runId)).toMatchObject({ state: 'completed', outcome: 'pr_opened' })
     // The exit is ignored, but its timings are the run's record
-    expect(await t.request('GET', `/api/runs/${job.runId}`).then(r => r.json())).toMatchObject({ timings })
+    await eventually(async () => {
+      expect(await t.request('GET', `/api/runs/${job.runId}`).then(r => r.json())).toMatchObject({ state: 'completed', outcome: 'pr_opened', timings })
+    })
     const evidence = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/evidence`).then(r => r.json()) as { id: string, url: string }[]
     expect(evidence).toHaveLength(1)
     const file = await t.request('GET', evidence[0]!.url)
@@ -248,11 +254,13 @@ describe('orchestrator', () => {
   it('pauses the developer until the reset time on a usage limit, without counting a failure (D3)', async () => {
     const { project, task, job } = await assigned()
     runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'rate_limited', resetsAt: '2030-01-01T15:00:00Z' }, headSha: null })
-    await sleep(200)
-    expect(await runRow(job.runId)).toMatchObject({ state: 'completed', outcome: 'rate_limited', rateLimitResetAt: new Date('2030-01-01T15:00:00Z') })
-    expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', leaseRunId: null, failedRuns: 0 })
     const [atlas] = await t.db.select().from(agents).where(eq(agents.role, 'developer'))
-    expect(atlas!.pausedUntil).toEqual(new Date('2030-01-01T15:00:00Z'))
+    await eventually(async () => {
+      expect(await runRow(job.runId)).toMatchObject({ state: 'completed', outcome: 'rate_limited', rateLimitResetAt: new Date('2030-01-01T15:00:00Z') })
+      expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', leaseRunId: null, failedRuns: 0 })
+      const [paused] = await t.db.select().from(agents).where(eq(agents.id, atlas!.id))
+      expect(paused!.pausedUntil).toEqual(new Date('2030-01-01T15:00:00Z'))
+    })
     // Nothing is claimed while paused
     await t.orchestrator.schedule()
     expect(runner.received.filter(m => m.type === 'run.assign' && m.job.taskId === task.id)).toHaveLength(0)
@@ -271,13 +279,14 @@ describe('orchestrator', () => {
     for (const { exit, state, error } of cases) {
       const { project, task, job } = await assigned()
       runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit, headSha: null, lastActivityAt })
-      await sleep(200)
-      const run = await runRow(job.runId)
-      expect(run.state).toBe(state)
-      expect(run.error).toContain(error)
-      expect(run.error).toContain(lastActivityAt)
-      const history = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/history`).then(r => r.json()) as { action: string, detail: { error?: string } }[]
-      expect(history.find(e => e.action === 'run.ended')?.detail.error).toBe(run.error)
+      await eventually(async () => {
+        const run = await runRow(job.runId)
+        expect(run.state).toBe(state)
+        expect(run.error).toContain(error)
+        expect(run.error).toContain(lastActivityAt)
+        const history = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/history`).then(r => r.json()) as { action: string, detail: { error?: string } }[]
+        expect(history.find(e => e.action === 'run.ended')?.detail.error).toBe(run.error)
+      })
       await pause(project)
     }
   })
@@ -405,8 +414,9 @@ describe('orchestrator', () => {
     const { project, job } = await assigned()
     await t.orchestrator.stopRun(job.runId, { kind: 'human', userId: 'cormac' })
     runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'stopped', reason: 'Stopped by a human' }, headSha: null, lastActivityAt: '2026-10-30T11:02:55.000Z' })
-    await sleep(200)
-    expect(await runRow(job.runId)).toMatchObject({ state: 'interrupted', error: 'Stopped by a human. Last transcript activity: 2026-10-30T11:02:55.000Z' })
+    await eventually(async () => {
+      expect(await runRow(job.runId)).toMatchObject({ state: 'interrupted', error: 'Stopped by a human. Last transcript activity: 2026-10-30T11:02:55.000Z' })
+    })
     await pause(project)
   })
 
@@ -415,8 +425,9 @@ describe('orchestrator', () => {
     let job = first
     for (let attempt = 1; attempt <= 3; attempt++) {
       runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 1 }, headSha: null })
-      await sleep(200)
-      expect(await runRow(job.runId)).toMatchObject({ state: 'failed', outcome: 'failed' })
+      await eventually(async () => {
+        expect(await runRow(job.runId)).toMatchObject({ state: 'failed', outcome: 'failed' })
+      })
       const row = await taskRow(task.id)
       expect(row.failedRuns).toBe(attempt)
       if (attempt < 3) {

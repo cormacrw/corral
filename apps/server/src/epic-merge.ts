@@ -189,7 +189,7 @@ export class EpicMerger {
   async #recordMerged(epic: EpicRow, project: ProjectRow, pr: PullRequest): Promise<void> {
     const { db, events, github, runner } = this.#d
     await db.transaction(async (tx) => {
-      await tx.update(epics).set({ reviewState: 'merged', mergeCommitSha: pr.mergeCommitSha, prHeadSha: pr.headSha, conflictFiles: null, updatedAt: this.#now() }).where(eq(epics.id, epic.id))
+      await tx.update(epics).set({ reviewState: 'merged', mergeCommitSha: pr.mergeCommitSha, prHeadSha: pr.headSha, conflictFiles: null, syncError: null, updatedAt: this.#now() }).where(eq(epics.id, epic.id))
       await tx.update(runs).set({ state: 'interrupted', endedAt: this.#now(), error: 'Epic PR merged' })
         .where(and(eq(runs.epicId, epic.id), inArray(runs.state, [...ACTIVE_RUN_STATES])))
       await appendAudit(tx, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, event: 'merged', pr: pr.number, mergeCommitSha: pr.mergeCommitSha }))

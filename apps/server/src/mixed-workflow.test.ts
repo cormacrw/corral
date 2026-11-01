@@ -157,6 +157,11 @@ const tick = () => t.orchestrator.merges.tick()
 async function passes(count = 4) {
   for (let n = 0; n < count; n++) await tick()
 }
+// A pass the epic's backoffs let through: anything that merges goes this way,
+// and a test that expects nothing to happen would otherwise prove nothing
+async function mergePasses(count: number) {
+  for (let n = 0; n < count; n++) await t.mergePass()
+}
 
 const taskRow = async (id: string) => (await t.db.select().from(schema.tasks).where(eq(schema.tasks.id, id)))[0]!
 const epicRow = async (id: string) => (await t.db.select().from(schema.epics).where(eq(schema.epics.id, id)))[0]!
@@ -244,7 +249,7 @@ const passCi = (sha: string) => t.github.setChecks(sha, [{ name: 'ci', conclusio
 // The process dies with `kind` under way: if `land`, the job's work reached the
 // remote, but either way no answer ever arrives. A new process then starts on
 // the same database and the same runner connects to it.
-async function crashDuring(kind: Job['kind'], land: boolean, pass: () => Promise<unknown> = tick) {
+async function crashDuring(kind: Job['kind'], land: boolean, pass: () => Promise<unknown> = t.mergePass) {
   const { promise: died, resolve } = Promise.withResolvers<void>()
   faults = async (job, real) => {
     if (job.kind !== kind) return real()
@@ -291,11 +296,11 @@ it('lands a feature of several PR-free tasks through one epic PR and one human a
   expect(await taskPrs(branch)).toEqual([])
   expect(t.github.pulls.size).toBe(1)
   expect([...t.github.pulls.values()][0]).toMatchObject({ head: branch, base: 'main', state: 'open' })
-  await passes(2)
+  await mergePasses(2)
   expect(await git('rev-parse', 'main')).toBe(before)
 
   await integrationReview(epic.id)
-  await passes(2)
+  await mergePasses(2)
   expect(await git('rev-parse', 'main')).toBe(before)
   const needsYou = (await inbox()).needsYou
   expect(needsYou.map(i => [i.type, i.id])).toEqual([['epic_review', epic.id]])
@@ -310,7 +315,7 @@ it('lands a feature of several PR-free tasks through one epic PR and one human a
   const check = c.acceptanceCriteria.find(x => x.checkedByHuman)!
   expect((await approveEpic(epic.id, item.headSha, { confirmedTasks: [b.id], confirmedCriteria: [check.id] })).status).toBe(200)
   expect((await approveEpic(epic.id, item.headSha, { confirmedTasks: [b.id], confirmedCriteria: [check.id] })).status).toBe(409)
-  await tick()
+  await t.mergePass()
 
   expect(await epicRow(epic.id)).toMatchObject({ reviewState: 'merged', mergeCommitSha: await git('rev-parse', 'main') })
   expect(await git('rev-list', '--count', `${before}..main`)).toBe('1')
@@ -381,7 +386,7 @@ it('completes an epic mixing a grandfathered task PR with a PR-free task, keepin
 
   const before = await git('rev-parse', 'main')
   expect((await approveEpic(epic.id, item.headSha)).status).toBe(200)
-  await tick()
+  await t.mergePass()
   expect((await epicRow(epic.id)).reviewState).toBe('merged')
   expect(await git('rev-list', '--count', `${before}..main`)).toBe('1')
   expect(await git('show', 'main:legacy.txt')).toBe('legacy, revised')
@@ -486,10 +491,10 @@ describe('restarting during an epic rebase', () => {
 
     // Approval never stands in for the gates on the new head
     passCi(epic.head)
-    await passes(2)
+    await mergePasses(2)
     expect(merged).toEqual([])
     passCi(head)
-    await tick()
+    await t.mergePass()
     expect((await epicRow(epic.id)).reviewState).toBe('merged')
     expect(await git('show', 'main:feature.txt')).toBe('feature')
     expect(await git('show', 'main:target.txt')).toBe('target')
@@ -510,7 +515,7 @@ describe('restarting during an epic rebase', () => {
     expect((await ops(epic.id)).at(-1)).toMatchObject({ kind: 'rebase', state: 'failed', error: 'The epic branch moved', resultHeadSha: rebased })
     const after = await epicRow(epic.id)
     expect(after).toMatchObject({ reviewState: 'in_review', approvedHeadSha: null, approvedBaseSha: null, prHeadSha: outsider })
-    await passes(2)
+    await mergePasses(2)
     expect(merged).toEqual([])
     expect((await approveEpic(epic.id, outsider)).status).toBe(409)
     expect(await events(epic.id)).toContain('approval_invalidated')
@@ -518,7 +523,7 @@ describe('restarting during an epic rebase', () => {
     await integrationReview(epic.id)
     expect((await approveEpic(epic.id, epic.head)).status).toBe(409)
     expect((await approveEpic(epic.id, outsider)).status).toBe(200)
-    await tick()
+    await t.mergePass()
     expect((await epicRow(epic.id)).reviewState).toBe('merged')
     expect(await isAncestor(onto, 'main')).toBe(true)
     expect(await git('show', 'main:outsider.txt')).toBe('not reviewed')
@@ -548,7 +553,7 @@ describe('restarting during an epic rebase', () => {
 // The epic and target changed the same file. A developer rebases the candidate
 // the conflict task names, as `git rebase` and an edit would.
 async function conflictedResolution(epic: { id: string }, onto: string, file: string, text: string) {
-  await passes(1)
+  await mergePasses(1)
   const [operation] = (await ops(epic.id)).filter(o => o.kind === 'rebase')
   const fix = await taskRow(operation!.resolutionTaskId!)
   await git('checkout', '--quiet', fix.branch!)
@@ -603,7 +608,7 @@ describe('a target update that conflicts', () => {
     expect(await epicRow(epic.id)).toMatchObject({ reviewState: 'ready_to_merge', prHeadSha: resolved, approvedHeadSha: epic.head, approvedBaseSha: onto })
     expect((await inbox()).needsYou).toEqual([])
     passCi(resolved)
-    await tick()
+    await t.mergePass()
     expect((await epicRow(epic.id)).reviewState).toBe('merged')
     expect(await git('show', 'main:shared.txt')).toBe('target\nepic')
     expect((await events(epic.id)).filter(e => e === 'human_approved')).toHaveLength(1)
@@ -620,7 +625,7 @@ describe('a target update that conflicts', () => {
     expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'stuck', note: 'Needs a decision', summary: 'The two sides disagree', decision })).toMatchObject({ ok: true })
 
     // It waits, with the lock held and nothing moved, however long it's left
-    await passes(3)
+    await mergePasses(3)
     await t.orchestrator.schedule()
     const needsYou = (await inbox()).needsYou
     expect(needsYou).toMatchObject([{ id: fix.id, type: 'question', body: decision.question, decision: { question: decision.question, bindingDecision: decision.bindingDecision, alternatives: decision.alternatives, affectedChanges: decision.affectedChanges } }])
@@ -648,7 +653,7 @@ describe('a target update that conflicts', () => {
     expect((await inbox()).needsYou.map(i => i.id)).toEqual([epic.id])
     expect((await approveEpic(epic.id, resolved)).status).toBe(200)
     passCi(resolved)
-    await tick()
+    await t.mergePass()
     expect((await epicRow(epic.id)).reviewState).toBe('merged')
     expect(await git('show', 'main:shared.txt')).toBe('everything\nwith a total')
     expect((await events(epic.id)).filter(e => e === 'human_approved')).toHaveLength(2)
@@ -744,7 +749,7 @@ it('keeps simultaneous integrations on two epics whole while the target advances
     await tick()
     const { prHeadSha } = await epicRow(epic.id)
     expect((await approveEpic(epic.id, prHeadSha!)).status).toBe(200)
-    await passes(2)
+    await mergePasses(2)
     expect((await epicRow(epic.id)).reviewState).toBe('merged')
   }
   for (const sha of landed) expect(await isAncestor(sha, 'main')).toBe(true)
