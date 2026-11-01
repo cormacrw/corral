@@ -9,7 +9,7 @@ import PlanThreadRow from './PlanThreadRow.vue'
 const base = inbox().needsYou.find((i): i is PlanThreadItem => i.type === 'plan_thread')!
 const thread = (changes: Partial<Pick<PlanThreadItem, 'sender' | 'subject'>> = {}): PlanThreadItem => ({
   ...base,
-  status: 'question', question: { text: 'Which one?', recommendation: null, options: null }, plan: null, planId: null, reply: null,
+  status: 'question', question: { text: 'Which one?', recommendation: null, options: null }, plan: null, planId: null, failure: null,
   unread: false, activeRunId: null, ...changes
 })
 
@@ -43,10 +43,10 @@ it('uses the larger avatar on mobile', () => {
 
 it('keeps the unread dot and working spinner', () => {
   const idle = mountRow(thread())
-  expect(idle.find('[aria-label="Unread reply"]').exists()).toBe(false)
+  expect(idle.find('[aria-label="Unread"]').exists()).toBe(false)
   expect(idle.find('[data-spinner]').exists()).toBe(false)
-  const active = mountRow({ ...thread(), status: 'none', question: null, plan: null, planId: null, reply: 'Done.', unread: true, activeRunId: 'r-1' })
-  expect(active.find('[aria-label="Unread reply"]').exists()).toBe(true)
+  const active = mountRow({ ...thread(), status: 'failed', question: null, plan: null, planId: null, failure: 'The PM exited with code 1', unread: true, activeRunId: 'r-1' })
+  expect(active.find('[aria-label="Unread"]').exists()).toBe(true)
   expect(active.find('[data-spinner]').exists()).toBe(true)
-  expect(active.text()).toContain('Unread reply')
+  expect(active.text()).toContain('Failed')
 })

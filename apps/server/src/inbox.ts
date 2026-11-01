@@ -1,8 +1,8 @@
-import { needsAttention, type InboxArtifact, type InboxSince, type ReleaseNotesItem } from '@corral/contracts'
+import type { InboxArtifact, InboxSince, ReleaseNotesItem } from '@corral/contracts'
 import { auditText, readAudit, type AuditView } from './audit.ts'
-import { countEpicItems, epicInboxItems } from './epic-prs.ts'
+import { epicInboxItems } from './epic-prs.ts'
 import { fileArtifacts, isNew, workNotes } from './inbox-changes.ts'
-import type { Comment, Evidence, Inbox, InboxItem, PlanThreadAttention, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
+import type { ActionableInboxItem, Comment, Evidence, Inbox, PlanThreadAttention, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
 import { arrivalKey, storedMessages, withMessages, type PreparedItem } from './inbox-message.ts'
 import { designPreviewUrl, humanCheckTally, richTextToPlainText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
@@ -13,16 +13,17 @@ import { sessionStates, type SessionAttention } from './plan.ts'
 import { listEvidenceFor } from './runs.ts'
 import { listCommentsFor } from './tasks.ts'
 
-const { deployments, agents, auditLog, planMessages, planSessions, planEpics, planTasks, projects, reviews, runs, tasks, epics } = schema
+const { deployments, agents, auditLog, planSessions, planEpics, planTasks, projects, reviews, runs, tasks, epics } = schema
 
 // A request for changes, or an answer: a clarify is a resolve with a pinned comment
 const HUMAN_ACTIONS = ['human_request_changes', 'resolve']
 const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'pr_rebased', 'commit_submitted', 'integrated', 'findings_reported', 'design_submitted', 'changes_requested', 'merged', 'ci_failed', 'base_conflict', 'head_moved']
 
-// The Inbox (D11, design/inbox.md): what developer and reviewer runs need
-// from the human, plus what they did, and Plan sessions waiting on the human as a Plan
-// thread (D11, amended). Items are derived from tasks, Plan sessions and the
-// audit log and deployments; only their short conversational prose is stored.
+// The Inbox (D11, design/inbox.md): Needs you holds only decisions the human
+// owes (a task, an epic or a Plan session waiting on them), and Activity and
+// Resolved hold what's informational. Items are derived from tasks, Plan
+// sessions, the audit log and deployments; only their short conversational
+// prose is stored.
 export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
   const [taskItems, threads, epicItems, [pm], recent] = await Promise.all([
     taskMessageItems(db),
@@ -41,8 +42,8 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     notesStatus: d.notesStatus, unread: !d.readAt, taskId: null, taskRef: null, prUrl: null,
     resolution: d.dismissedAt ? 'You dismissed these release notes' : null
   }))
-  // One list, newest first by when each item arrived (design/inbox.md)
-  const needsYou: InboxItem[] = [...taskItems, ...threads, ...epicItems, ...releases.filter(d => !d.resolution)].sort((a: InboxItem, b: InboxItem) => b.at.localeCompare(a.at))
+  // One list, newest first by when each item began waiting (D11)
+  const needsYou = ([...taskItems, ...threads, ...epicItems] as ActionableInboxItem[]).sort((a, b) => b.at.localeCompare(a.at))
 
   const entries = await db.select({
     entry: { id: auditLog.id, actor: auditLog.actor, action: auditLog.action, detail: auditLog.detail, createdAt: auditLog.createdAt },
@@ -55,7 +56,8 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     .orderBy(desc(auditLog.createdAt), desc(auditLog.id))
     .limit(limit * 3)
 
-  const activity: TaskInboxItem[] = []
+  // Undismissed release notes are informational: Activity, until dismissed
+  const activity: (TaskInboxItem | ReleaseNotesItem)[] = releases.filter(d => !d.resolution)
   const resolved: (TaskInboxItem | ReleaseNotesItem)[] = []
   for (const { entry, task, project } of entries) {
     const detail = readAudit(entry.detail)
@@ -69,7 +71,7 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
       const text = activityText(entry.action, event, detail, task.prNumber, task.type)
       activity.push({ ...base, type: 'activity', preview: text, body: text, sender: senderOf(entry.actor), resolution: null })
     }
-    if (activity.length >= limit && resolved.length >= limit) break
+    if (activity.length >= limit + releases.length && resolved.length >= limit) break
   }
   const epicEvents = await db.select({
     entry: { id: auditLog.id, actor: auditLog.actor, detail: auditLog.detail, createdAt: auditLog.createdAt },
@@ -99,26 +101,20 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
   resolved.push(...releases.filter(d => d.resolution))
   activity.sort((a, b) => b.at.localeCompare(a.at))
   resolved.sort((a, b) => b.at.localeCompare(a.at))
-  return { needsYou, activity: activity.slice(0, limit), resolved: resolved.slice(0, limit), count: needsYou.filter(needsAttention).length }
+  return { needsYou, activity: activity.slice(0, limit), resolved: resolved.slice(0, limit), count: needsYou.length }
 }
 
-// Only open sessions waiting on the human belong in the Inbox: a question, a
-// plan needing approval or an unread PM reply.
+// Only open sessions waiting on a human decision belong in the Inbox: a
+// question, a plan needing approval or a PM turn that failed with nothing
+// left to retry it. Unread replies are conversation (D11) and stay in Plan.
 async function waitingSessions(db: Executor) {
   const rows = await db.select({ session: planSessions, project: projects }).from(planSessions)
     .innerJoin(projects, eq(projects.id, planSessions.projectId))
     .where(isNull(planSessions.closedAt))
   const states = await sessionStates(db, rows.map(r => r.session))
-  const unreadReplies = states.filter(s => s.attention.status === 'none' && s.session.unread).map(s => s.session.id)
-  const replies = unreadReplies.length > 0
-    ? await db.selectDistinctOn([planMessages.sessionId], { sessionId: planMessages.sessionId, text: planMessages.text, createdAt: planMessages.createdAt }).from(planMessages)
-        .where(and(inArray(planMessages.sessionId, unreadReplies), eq(planMessages.role, 'pm'))).orderBy(planMessages.sessionId, desc(planMessages.createdAt))
-    : []
-  const replyOf = new Map(replies.map(r => [r.sessionId, r]))
   return rows.flatMap(({ project }, i) => {
     const { session, attention } = states[i]!
-    const reply = attention.status === 'none' && session.unread ? replyOf.get(session.id) : undefined
-    return attention.status !== 'none' || reply ? [{ session, attention, project, reply }] : []
+    return attention.status === 'none' ? [] : [{ session, attention, project }]
   })
 }
 
@@ -140,8 +136,8 @@ async function planThreads(db: Executor): Promise<PlanThreadItem[]> {
   const sender = { name: pm?.name ?? 'PM', role: 'pm' as const }
   const epicsOf = new Map(epicCounts.map(e => [e.planId, e.count]))
   const tasksOf = new Map(taskCounts.map(t => [t.planId, t.count]))
-  return waiting.map(({ session, attention, project, reply }) => {
-    const { since, ...state } = threadAttention(attention, reply, epicsOf, tasksOf)
+  return waiting.map(({ session, attention, project }) => {
+    const { since, ...state } = threadAttention(attention, epicsOf, tasksOf)
     return {
       ...state,
       id: session.id,
@@ -163,35 +159,23 @@ async function planThreads(db: Executor): Promise<PlanThreadItem[]> {
   })
 }
 
-// What a session waits on, with the data its status needs. A session with
-// nothing waiting never gets here, so 'none' always has its reply.
-function threadAttention(attention: SessionAttention, reply: { text: string, createdAt: Date } | undefined, epicsOf: Map<string, number>, tasksOf: Map<string, number>): PlanThreadAttention & { since: Date } {
+// What a session waits on, with the data its status needs
+function threadAttention(attention: Exclude<SessionAttention, { status: 'none' }>, epicsOf: Map<string, number>, tasksOf: Map<string, number>): PlanThreadAttention & { since: Date } {
   switch (attention.status) {
     case 'question': {
       const { text, recommendation, options, createdAt } = attention.question
-      return { status: 'question', question: { text, recommendation, options }, plan: null, planId: null, reply: null, since: createdAt }
+      return { status: 'question', question: { text, recommendation, options }, plan: null, planId: null, failure: null, since: createdAt }
     }
     case 'needs_approval': {
       const { plan } = attention
       // Plans saved before plan_epics existed have no epic rows, only
       // plans.epicId, so count that as one epic.
       const summary = { id: plan.id, version: plan.version, title: plan.title, summary: plan.summary, epicCount: epicsOf.get(plan.id) ?? (plan.epicId ? 1 : 0), taskCount: tasksOf.get(plan.id) ?? 0 }
-      return { status: 'needs_approval', question: null, plan: summary, planId: plan.id, reply: null, since: plan.createdAt }
+      return { status: 'needs_approval', question: null, plan: summary, planId: plan.id, failure: null, since: plan.createdAt }
     }
-    case 'none':
-      return { status: 'none', question: null, plan: null, planId: null, reply: reply!.text, since: reply!.createdAt }
+    case 'failed':
+      return { status: 'failed', question: null, plan: null, planId: null, failure: attention.failure.text, since: attention.failure.createdAt }
   }
-}
-
-// Needs you's count for one number, without building the items. It shares
-// what decides membership with `loadInbox`, so the two can't drift.
-export async function inboxCount(db: Executor): Promise<number> {
-  const [[open], threads, epicCount] = await Promise.all([
-    db.select({ n: count() }).from(tasks).where(openTaskFilter()),
-    waitingSessions(db),
-    countEpicItems(db)
-  ])
-  return open!.n + threads.filter(t => t.attention.status !== 'none').length + epicCount
 }
 
 function openTaskFilter(taskId?: string) {

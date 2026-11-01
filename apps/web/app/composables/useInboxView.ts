@@ -2,7 +2,6 @@
 // pages/inbox.vue provides it, so it lasts across selections, and
 // pages/inbox/[itemId].vue, which remounts per item, reads it.
 import { useQueryClient } from '@tanstack/vue-query'
-import { needsAttention } from '@corral/contracts/client'
 import type { Inbox, InboxItem, PlanThreadItem, TaskInboxItem } from '@corral/contracts'
 import { inject, provide, type InjectionKey } from 'vue'
 import { useHeldInbox } from '~/queries/inbox'
@@ -14,15 +13,10 @@ export const isTaskItem = (item: InboxItem | null): item is TaskInboxItem => ite
 const PREFETCH_LIMIT_MS = 1000
 export const AGENTS_MAY_BE_WORKING = 'Agents may still be working; their updates are in Activity.'
 
-// What each tab lists (D11). The default tab is decisions only; informational
-// items from the server's Needs you are read on demand under Activity.
+// What each tab lists (D11): the server's lists, decisions first and
+// informational items read on demand under Activity.
 export function inboxTabs(inbox: Inbox | null): Record<'needsYou' | 'activity' | 'resolved', InboxItem[]> {
-  const listed = inbox?.needsYou ?? []
-  return {
-    needsYou: listed.filter(needsAttention),
-    activity: [...listed.filter(i => !needsAttention(i)), ...inbox?.activity ?? []].sort((a, b) => b.at.localeCompare(a.at)),
-    resolved: inbox?.resolved ?? []
-  }
+  return { needsYou: inbox?.needsYou ?? [], activity: inbox?.activity ?? [], resolved: inbox?.resolved ?? [] }
 }
 
 function createInboxView() {
@@ -53,7 +47,7 @@ function createInboxView() {
   const selectedId = computed(() => typeof route.params.itemId === 'string' ? route.params.itemId : null)
   // Leaving during an action hands the list to the new selection
   watch(selectedId, list.release)
-  // A thread leaves Needs you once it's answered or replied to (D11), while
+  // A thread leaves Needs you once it's answered (D11), while
   // the PM's turn is still running. Keep its conversation open so the turn
   // streams in, until another item is picked.
   const openThread = shallowRef<PlanThreadItem | null>(null)

@@ -20,8 +20,8 @@ export type ServerEvent =
   | { type: 'project.deleted', projectId: string }
   | { type: 'global.status', status: GlobalStatus }
   // markedRead: only the unread flag changed, so clients needn't refetch the
-  // Inbox. It carries the server's new count.
-  | { type: 'plan.session', session: PlanSession, markedRead?: { inboxCount: number } }
+  // Inbox: reading never changes what's listed or its count.
+  | { type: 'plan.session', session: PlanSession, markedRead?: true }
   | { type: 'plan.message', message: PlanMessage }
   | { type: 'plan.updated', plan: Plan }
   // A project's Drafts changed by plan: proposed, approved or discarded

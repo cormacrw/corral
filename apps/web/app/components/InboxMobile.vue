@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { needsAttention } from '@corral/contracts/client'
 import type { InboxItem } from '@corral/contracts'
 import { useInboxView } from '~/composables/useInboxView'
 import InboxItemRow from '~/components/InboxItemRow.vue'
@@ -20,7 +19,7 @@ const isHidden = (item: InboxItem) => item.type === 'plan_thread' && deleting.pe
 const listed = computed(() => items.value.filter(i => !isHidden(i)))
 // Server order: newest first, task items and threads together (D11)
 const tabs = computed(() => [
-  { label: 'Inbox', value: 'needsYou', icon: 'i-lucide-inbox', count: (inbox.value?.needsYou ?? []).filter(i => !isHidden(i) && needsAttention(i)).length },
+  { label: 'Inbox', value: 'needsYou', icon: 'i-lucide-inbox', count: (inbox.value?.needsYou ?? []).filter(i => !isHidden(i)).length },
   { label: 'Activity', value: 'activity', icon: 'i-lucide-activity', count: null },
   { label: 'Resolved', value: 'resolved', icon: 'i-lucide-circle-check', count: inbox.value?.resolved.length ?? 0 }
 ])

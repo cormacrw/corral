@@ -366,10 +366,6 @@ async function waitingEpics(db: Executor, epicId?: string) {
   })
 }
 
-export async function countEpicItems(db: Executor): Promise<number> {
-  return (await waitingEpics(db)).length
-}
-
 async function prepareEpicItems(db: Executor, epicId?: string): Promise<PreparedItem<EpicReviewItem | EpicConflictItem>[]> {
   const waiting = await waitingEpics(db, epicId)
   const entries = await epicEntries(db, waiting.map(w => w.epic.id))
