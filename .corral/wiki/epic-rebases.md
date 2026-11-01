@@ -33,6 +33,8 @@ because a resolution can take hours. Nothing is recorded: `closedPoll` keeps
 watching for a reopen in `EpicPullRequests.reconcile`, and the next look finds
 the PR open and carries on. A plain integration is still allowed, since a
 fast-forward doesn't stop a reopen.
+A resolution run already going when the PR closes is left to finish: its result
+just can't be pushed until the PR reopens.
 
 `begin` reads GitHub three times, so the `due()` list goes through a `Backoff`
 per epic, doubling from 30 seconds to 2 minutes. Only `due()` obeys it: a task
