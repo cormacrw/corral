@@ -1,6 +1,7 @@
-import type { HumanTransitionInput, Task } from '@corral/contracts'
+import type { Agent, Epic, HumanTransitionInput, Run, Task } from '@corral/contracts'
 import type { AgentRole, TaskPriority, TaskStatus } from '@corral/core'
 import { availableEvents, isTaskDone, TASK_PRIORITIES } from '@corral/core'
+import { epicInProgress, isLiveRun } from './labels.ts'
 
 import { completedAt } from './completion.ts'
 
@@ -28,6 +29,62 @@ export const BOARD_COLUMNS: { key: string, label: string, statuses: TaskStatus[]
   { key: 'blocked', label: 'Blocked & failed', statuses: ['blocked', 'failed'], hint: 'You' },
   { key: 'complete', label: 'Complete', statuses: ['merged', 'approved'], hint: `Last ${COMPLETE_WINDOW_DAYS} days` }
 ]
+
+// The Board's two views. Tasks is the default until one is chosen.
+export type BoardView = 'tasks' | 'epics'
+
+// The view from ?view=, falling back to the one last used
+export function boardView(value: unknown, fallback: BoardView): BoardView {
+  const first = Array.isArray(value) ? value[0] : value
+  return first === 'tasks' || first === 'epics' ? first : fallback
+}
+
+// The Epics view's columns, in order (design/board.md). `status` picks the
+// colour of the column's dot.
+export const EPIC_COLUMNS = [
+  { key: 'ready', label: 'Ready', status: 'ready', hint: 'Scheduled next' },
+  { key: 'in_progress', label: 'In progress', status: 'in_progress', hint: 'Developer' },
+  { key: 'agent_review', label: 'Agent review', status: 'agent_review', hint: 'Reviewer' },
+  { key: 'human_review', label: 'Human review', status: 'human_review', hint: 'You' },
+  { key: 'ready_to_merge', label: 'Ready to merge', status: 'ready_to_merge', hint: 'Corral' },
+  { key: 'blocked', label: 'Blocked', status: 'blocked', hint: 'You' },
+  { key: 'done', label: 'Done', status: 'merged', hint: `Last ${COMPLETE_WINDOW_DAYS} days` }
+] as const satisfies { key: string, label: string, status: TaskStatus, hint: string }[]
+
+export type EpicStage = typeof EPIC_COLUMNS[number]['key']
+
+type StageEpic = Pick<Epic, 'reviewMode' | 'branch' | 'reviewState' | 'taskCount' | 'mergedCount'>
+
+// The one column an epic belongs in, from the epic with its live counts and
+// its tasks. The checks are ordered. `direct` epics have no epic PR, so their
+// review state never counts and they go from In progress to Done.
+export function epicStage(epic: StageEpic, tasks: Pick<Task, 'status'>[]): EpicStage {
+  const review = epic.reviewMode === 'direct' ? null : epic.reviewState
+  if (review === 'conflict' || tasks.some(t => t.status === 'blocked' || t.status === 'failed')) return 'blocked'
+  if (epic.taskCount > 0 && !epicInProgress(epic)) return 'done'
+  if (review === 'ready_to_merge') return 'ready_to_merge'
+  if (review === 'human_review') return 'human_review'
+  if (epic.taskCount > 0 && epic.mergedCount === epic.taskCount && (review === null || review === 'open' || review === 'in_review')) return 'agent_review'
+  if (tasks.every(t => t.status === 'draft' || t.status === 'backlog' || t.status === 'ready')) return 'ready'
+  return 'in_progress'
+}
+
+// Whether an epic belongs on the Board: it has work left or tasks on the Board.
+// A finished epic stays while one of its done tasks is still in Complete, and
+// updatedAt covers an epic PR that merged after the tasks' window closed.
+export function epicOnBoard(epic: StageEpic & Pick<Epic, 'updatedAt'>, tasks: Pick<Task, 'type' | 'status' | 'mergedAt' | 'updatedAt'>[], now = Date.now()): boolean {
+  if (epicInProgress(epic)) return true
+  if (epic.taskCount === 0) return false
+  const finished = epic.reviewMode !== 'direct' && epic.reviewState === 'merged' && now - new Date(epic.updatedAt).getTime() <= COMPLETE_WINDOW_MS
+  return finished || tasks.some(t => isTaskDone(t) && onBoard(t, now))
+}
+
+// The prerequisite epics still unfinished, for the blocked icon: the same rule
+// that holds back their dependents' tasks (holdsEpicOpen on the server). Pass
+// epics with live counts.
+export function unfinishedPrerequisites<E extends Pick<Epic, 'id' | 'title'> & StageEpic>(epic: Pick<Epic, 'dependsOn'>, epics: E[]): E[] {
+  return epics.filter(e => epic.dependsOn.includes(e.id) && epicInProgress(e))
+}
 
 // How far a finger must travel sideways, in px, to count as a swipe
 export const SWIPE_DISTANCE = 50
@@ -98,13 +155,24 @@ export function matchesFilter(task: Pick<Task, 'ref' | 'title' | 'epicId' | 'sta
   return !search || `${task.ref} ${task.title}`.toLowerCase().includes(search.toLowerCase())
 }
 
+// Whether an epic passes the Epics view's filters: only the search, on its
+// title, and the Epic filter apply there.
+export function matchesEpicFilter(epic: Pick<Epic, 'id' | 'title'>, filters: Pick<BoardFilters, 'search' | 'epics'>): boolean {
+  if (filters.epics.length > 0 && !filters.epics.includes(epic.id)) return false
+  return !filters.search || epic.title.toLowerCase().includes(filters.search.toLowerCase())
+}
+
 export function hasFilters(filters: BoardFilters): boolean {
   return Boolean(filters.search) || filters.epics.length + filters.statuses.length + filters.priorities.length + filters.agents.length > 0
 }
 
+export function hasEpicFilters(filters: Pick<BoardFilters, 'search' | 'epics'>): boolean {
+  return Boolean(filters.search) || filters.epics.length > 0
+}
+
 // The filters live in the URL query so a filtered Board can be reloaded and
 // shared: ?q=, and comma-separated ?epics=, ?status=, ?priority= and ?agent=.
-// (?epic= is the epic flyout's.)
+// (?epic= is the epic flyout's, and ?view= the Tasks / Epics toggle's.)
 const QUERY = { epics: 'epics', statuses: 'status', priorities: 'priority', agents: 'agent' } as const
 
 type Query = Record<string, string | null | (string | null)[] | undefined>
@@ -148,4 +216,14 @@ export function boardMove(task: Task, status: TaskStatus): HumanTransitionInput 
   if (events.includes('send_back') && status === 'backlog') return { type: 'send_back' }
   if (events.includes('human_request_changes') && task.status !== 'approved' && status === 'in_progress') return { type: 'human_request_changes' }
   return null
+}
+
+// Task leases and taskless epic runs are independent sources of working agents.
+// Keep shell order stable as leases/runs arrive, and deduplicate by identity.
+export function epicWorkingAgents(epicId: string, tasks: Pick<Task, 'epicId' | 'lease'>[], runs: Pick<Run, 'epicId' | 'agentId' | 'state'>[], agents: Agent[]): Agent[] {
+  const ids = new Set(tasks.filter(task => task.epicId === epicId && task.lease).map(task => task.lease!.agentId))
+  for (const run of runs) {
+    if (run.epicId === epicId && isLiveRun(run)) ids.add(run.agentId)
+  }
+  return agents.filter(agent => ids.has(agent.id))
 }

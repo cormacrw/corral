@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { appendAudit, auditEvent, auditText } from './audit.ts'
 import { agentActivity, UnknownAgent } from './agent-activity.ts'
 import { listTaskAttachments } from './attachments.ts'
+import { publishInvalidatedEpics, type InvalidatedEpics } from './epic-review-state.ts'
 import { listEpics, replaceEpicDependencies } from './epics.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
@@ -734,6 +735,7 @@ export class PlanService {
     if (!project) throw notFound()
     const items = await db.select().from(planTasks).where(and(eq(planTasks.planId, planId), ne(planTasks.change, 'removed')))
     const proposed = await this.#planProposal(plan, project)
+    const invalidatedEpics: InvalidatedEpics = new Map()
     await db.transaction(async (tx) => {
       await tx.select().from(planSessions).where(eq(planSessions.id, plan.sessionId)).for('update')
       const [current] = await tx.select().from(plans).where(eq(plans.id, planId)).for('update')
@@ -756,11 +758,11 @@ export class PlanService {
 
       for (const item of items) {
         if (!item.taskId) continue
-        if (item.revision) await reviseTask(tx, project, item.taskId, item.revision, { planId, version: plan.version }, actor)
+        if (item.revision) await reviseTask(tx, project, item.taskId, item.revision, { planId, version: plan.version }, actor, invalidatedEpics)
         const [row] = await tx.select({ status: tasks.status }).from(tasks).where(and(eq(tasks.id, item.taskId), isNull(tasks.deletedAt)))
-        if (row?.status === 'draft') await transitionTask(tx, item.taskId, { type: to === 'ready' ? 'approve' : 'accept' }, actor)
+        if (row?.status === 'draft') await transitionTask(tx, item.taskId, { type: to === 'ready' ? 'approve' : 'accept' }, actor, { invalidatedEpics })
         // Revised Backlog tasks, and plans proposed before Drafts existed
-        else if (row?.status === 'backlog' && to === 'ready') await transitionTask(tx, item.taskId, { type: 'approve' }, actor)
+        else if (row?.status === 'backlog' && to === 'ready') await transitionTask(tx, item.taskId, { type: 'approve' }, actor, { invalidatedEpics })
       }
       const epicIds = await this.#epicsOf(plan, tx)
       for (const epic of proposed.epics) {
@@ -772,6 +774,7 @@ export class PlanService {
       await recordApproval(tx, planId, { approvedBy: actor, approvedAt: now })
       await tx.update(planSessions).set({ closedAt: now }).where(eq(planSessions.id, plan.sessionId))
     })
+    await publishInvalidatedEpics(db, this.#d.events, invalidatedEpics)
     await appendAudit(db, { projectId: plan.projectId, actor }, auditEvent('plan.approved', { planId, version: plan.version, to, ...(via && { viaPmRun: via.runId }) }))
     const full = await this.toPlan((await db.select().from(plans).where(eq(plans.id, planId)))[0]!)
     this.#d.events.publish({ type: 'plan.updated', plan: full })
@@ -1145,7 +1148,7 @@ async function pickedUp(db: Executor, taskId: string, leaseRunId: string | null)
 
 // Writes a plan's staged edits to the task it revises, keeping criterion IDs
 // where the text is unchanged
-async function reviseTask(tx: Executor, project: ProjectRow, taskId: string, revision: PlanRevision, plan: { planId: string, version: number }, actor: Actor): Promise<void> {
+async function reviseTask(tx: Executor, project: ProjectRow, taskId: string, revision: PlanRevision, plan: { planId: string, version: number }, actor: Actor, invalidatedEpics: InvalidatedEpics): Promise<void> {
   await patchTask(tx, project, taskId, {
     title: revision.title,
     description: markdownToRichText(revision.description),
@@ -1155,7 +1158,7 @@ async function reviseTask(tx: Executor, project: ProjectRow, taskId: string, rev
     epicId: revision.epicId,
     dependsOn: revision.dependsOn,
     acceptanceCriteria: await keepCriterionIds(tx, taskId, revision.acceptanceCriteria)
-  }, actor)
+  }, actor, invalidatedEpics)
   // Revisions saved before pins existed leave the task's pin alone
   if (revision.design !== undefined) await setDesignPin(tx, taskId, revision.design)
   await appendAudit(tx, { projectId: project.id, taskId, actor }, auditEvent('task.revised', { ...plan, fields: ['title', 'description', 'type', 'priority', 'humanReview', 'acceptanceCriteria', 'epicId', 'dependsOn', ...(revision.design !== undefined ? ['design'] : [])] }))

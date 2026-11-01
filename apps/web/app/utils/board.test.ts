@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Task } from '@corral/contracts'
-import { BOARD_COLUMNS, boardMove, filterLabel, filtersFromQuery, filtersToQuery, hasFilters, matchesFilter, COMPLETE_WINDOW_DAYS, NO_FILTERS, onBoard, sortColumn, boardColumnKey, swipeStep, taskAgentIds } from './board.ts'
+import type { BoardFilters } from './board.ts'
+import { BOARD_COLUMNS, boardMove, boardColumnKey, boardView, EPIC_COLUMNS, epicOnBoard, epicStage, epicWorkingAgents, filterLabel, filtersFromQuery, filtersToQuery, hasEpicFilters, hasFilters, matchesEpicFilter, matchesFilter, COMPLETE_WINDOW_DAYS, NO_FILTERS, onBoard, sortColumn, swipeStep, taskAgentIds, unfinishedPrerequisites } from './board.ts'
 
 const DAY = 24 * 60 * 60 * 1000
 const now = Date.parse('2026-10-29T12:00:00Z')
@@ -254,5 +255,165 @@ describe('completed designs', () => {
     expect(boardColumnKey('merged')).toBe('complete')
     expect(boardColumnKey('approved')).toBe('complete')
     expect(boardColumnKey('ready')).toBe('ready')
+  })
+})
+
+describe('boardView', () => {
+  it('lets the URL win over the view last used', () => {
+    expect(boardView('epics', 'tasks')).toBe('epics')
+    expect(boardView('tasks', 'epics')).toBe('tasks')
+    expect(boardView(['epics', 'tasks'], 'tasks')).toBe('epics')
+  })
+
+  it('falls back when the URL has no valid view', () => {
+    expect(boardView(undefined, 'epics')).toBe('epics')
+    expect(boardView('nonsense', 'tasks')).toBe('tasks')
+  })
+})
+
+describe('epicStage', () => {
+  const epic = (over: Partial<Parameters<typeof epicStage>[0]> = {}) => ({
+    reviewMode: 'epic' as const, branch: 'corral/epic', reviewState: null, taskCount: 2, mergedCount: 1, ...over
+  })
+  const merged = [{ status: 'merged' as const }, { status: 'merged' as const }]
+  const allMerged = { mergedCount: 2 }
+
+  it('has a column for every stage, in the Board order', () => {
+    expect(EPIC_COLUMNS.map(c => c.label)).toEqual(['Ready', 'In progress', 'Agent review', 'Human review', 'Ready to merge', 'Blocked', 'Done'])
+  })
+
+  it('blocks on a conflict or a Blocked or Failed task, ahead of everything else', () => {
+    expect(epicStage(epic({ ...allMerged, reviewState: 'conflict' }), merged)).toBe('blocked')
+    expect(epicStage(epic(), [{ status: 'merged' }, { status: 'blocked' }])).toBe('blocked')
+    expect(epicStage(epic({ reviewState: 'human_review' }), [{ status: 'failed' }, { status: 'merged' }])).toBe('blocked')
+  })
+
+  it('is done once nothing is left, epic PR included', () => {
+    expect(epicStage(epic({ ...allMerged, reviewState: 'merged' }), merged)).toBe('done')
+    expect(epicStage(epic({ ...allMerged, branch: null }), merged)).toBe('done')
+  })
+
+  it('follows the epic PR', () => {
+    expect(epicStage(epic({ ...allMerged, reviewState: 'ready_to_merge' }), merged)).toBe('ready_to_merge')
+    expect(epicStage(epic({ ...allMerged, reviewState: 'human_review' }), merged)).toBe('human_review')
+  })
+
+  it('is in Agent review once all tasks merged and the PR awaits the reviewer', () => {
+    for (const reviewState of [null, 'open', 'in_review'] as const) {
+      expect(epicStage(epic({ ...allMerged, reviewState }), merged)).toBe('agent_review')
+    }
+  })
+
+  it('is Ready until a task starts', () => {
+    expect(epicStage(epic({ mergedCount: 0 }), [{ status: 'ready' }, { status: 'backlog' }])).toBe('ready')
+  })
+
+  it('is In progress for everything else, including changes requested', () => {
+    expect(epicStage(epic(), [{ status: 'merged' }, { status: 'ready' }])).toBe('in_progress')
+    expect(epicStage(epic({ mergedCount: 0 }), [{ status: 'human_review' }, { status: 'ready' }])).toBe('in_progress')
+    expect(epicStage(epic({ ...allMerged, reviewState: 'changes_requested' }), merged)).toBe('in_progress')
+    expect(epicStage(epic({ reviewState: 'open' }), [{ status: 'merged' }, { status: 'in_progress' }])).toBe('in_progress')
+  })
+
+  it('takes a direct epic from In progress to Done with no review column', () => {
+    const direct = { reviewMode: 'direct' as const, branch: null }
+    expect(epicStage(epic(direct), [{ status: 'merged' }, { status: 'in_progress' }])).toBe('in_progress')
+    expect(epicStage(epic({ ...direct, ...allMerged }), merged)).toBe('done')
+    for (const reviewState of ['open', 'in_review', 'human_review', 'ready_to_merge'] as const) {
+      expect(epicStage(epic({ ...direct, ...allMerged, reviewState }), merged)).toBe('done')
+    }
+  })
+})
+
+describe('epicOnBoard', () => {
+  const epic = (over: Partial<Parameters<typeof epicOnBoard>[0]> = {}) => ({
+    reviewMode: 'epic' as const, branch: 'corral/epic', reviewState: null, taskCount: 1, mergedCount: 1, updatedAt: new Date(now - 10 * DAY).toISOString(), ...over
+  })
+  const old = mergedAgo(10 * DAY)
+
+  it('keeps an epic with its PR awaiting the human after its tasks leave the window', () => {
+    expect(epicOnBoard(epic({ reviewState: 'human_review' }), [old], now)).toBe(true)
+  })
+
+  it('hides an epic with no tasks past Backlog', () => {
+    expect(epicOnBoard(epic({ taskCount: 0, mergedCount: 0, branch: null }), [], now)).toBe(false)
+  })
+
+  it('shows a finished epic for the merge window', () => {
+    const direct = epic({ reviewMode: 'direct', branch: null })
+    expect(epicOnBoard(direct, [mergedAgo(DAY)], now)).toBe(true)
+    expect(epicOnBoard(direct, [old], now)).toBe(false)
+  })
+
+  it('counts the window from the epic PR merge when that came later', () => {
+    const merged = { reviewState: 'merged' as const }
+    expect(epicOnBoard(epic({ ...merged, updatedAt: new Date(now - DAY).toISOString() }), [old], now)).toBe(true)
+    expect(epicOnBoard(epic(merged), [old], now)).toBe(false)
+  })
+
+  it('keeps a finished epic in Done for the window after a design is approved', () => {
+    const direct = epic({ reviewMode: 'direct', branch: null })
+    const approvedAgo = (ms: number) => ({ type: 'design' as const, status: 'approved' as const, mergedAt: null, updatedAt: new Date(now - ms).toISOString() })
+    expect(epicStage(direct, [approvedAgo(DAY)])).toBe('done')
+    expect(epicOnBoard(direct, [approvedAgo(DAY)], now)).toBe(true)
+    expect(epicOnBoard(direct, [old, approvedAgo(DAY)], now)).toBe(true)
+    expect(epicOnBoard(direct, [approvedAgo(4 * DAY)], now)).toBe(false)
+  })
+
+  it('does not let an unfinished task hold a finished epic on the Board', () => {
+    const direct = epic({ reviewMode: 'direct', branch: null })
+    const reopened = { type: 'task' as const, status: 'in_progress' as const, mergedAt: null, updatedAt: new Date(now).toISOString() }
+    expect(epicOnBoard(direct, [old, reopened], now)).toBe(false)
+  })
+})
+
+describe('unfinishedPrerequisites', () => {
+  const epic = (id: string, over = {}) => ({ id, title: id, reviewMode: 'direct' as const, branch: null, reviewState: null, taskCount: 2, mergedCount: 1, ...over })
+
+  it('lists only the prerequisites with work left', () => {
+    const list = [epic('a'), epic('b', { mergedCount: 2 }), epic('c')]
+    expect(unfinishedPrerequisites({ dependsOn: ['a', 'b'] }, list).map(e => e.id)).toEqual(['a'])
+  })
+
+  it('counts a prerequisite with an unmerged epic PR', () => {
+    const list = [epic('a', { reviewMode: 'epic', branch: 'b', mergedCount: 2, reviewState: 'human_review' })]
+    expect(unfinishedPrerequisites({ dependsOn: ['a'] }, list).map(e => e.id)).toEqual(['a'])
+  })
+})
+
+describe('matchesEpicFilter', () => {
+  const epic = { id: 'e1', title: 'Billing export' }
+
+  it('searches the title, ignoring case', () => {
+    expect(matchesEpicFilter(epic, { search: 'BILLING', epics: [] })).toBe(true)
+    expect(matchesEpicFilter(epic, { search: 'auth', epics: [] })).toBe(false)
+  })
+
+  it('applies the Epic filter', () => {
+    expect(matchesEpicFilter(epic, { search: '', epics: ['e1'] })).toBe(true)
+    expect(matchesEpicFilter(epic, { search: '', epics: ['e2'] })).toBe(false)
+  })
+
+  it('ignores the hidden filters when deciding whether anything is set', () => {
+    const hidden: BoardFilters = { ...NO_FILTERS, statuses: ['ready'] }
+    expect(hasEpicFilters(hidden)).toBe(false)
+    expect(hasEpicFilters({ ...NO_FILTERS, epics: ['e1'] })).toBe(true)
+  })
+})
+
+describe('epicWorkingAgents', () => {
+  const agents = [{ id: 'a', name: 'Atlas' }, { id: 'b', name: 'Vera' }, { id: 'c', name: 'Tam' }] as import('@corral/contracts').Agent[]
+  const task = (epicId: string, agentId: string | null) => ({ epicId, lease: agentId ? { agentId } : null }) as Pick<Task, 'epicId' | 'lease'>
+  const run = (epicId: string, agentId: string, state = 'running') => ({ epicId, agentId, state }) as Pick<import('@corral/contracts').Run, 'epicId' | 'agentId' | 'state'>
+
+  it('unions leases with taskless epic runs once per agent in stable order', () => {
+    expect(epicWorkingAgents('epic', [task('epic', 'a'), task('epic', 'a'), task('other', 'c')], [run('epic', 'b'), run('epic', 'a'), run('other', 'c')], agents)).toEqual(agents.slice(0, 2))
+  })
+
+  it('includes every active state and excludes finished runs and unleased tasks', () => {
+    for (const state of ['queued', 'starting', 'running', 'waiting_for_input', 'stopping']) {
+      expect(epicWorkingAgents('epic', [], [run('epic', 'b', state)], agents)).toEqual([agents[1]])
+    }
+    expect(epicWorkingAgents('epic', [task('epic', null)], [run('epic', 'b', 'completed')], agents)).toEqual([])
   })
 })

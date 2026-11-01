@@ -10,6 +10,7 @@ import { loadEpic } from './epics.ts'
 import type { PullRequest } from './github.ts'
 import { Backoff } from './retries.ts'
 import { fileArtifacts, workNotes } from './inbox-changes.ts'
+import { publishInvalidatedEpics, type InvalidatedEpics } from './epic-review-state.ts'
 import { runEndValues, RUN_TIMEOUT_SECONDS } from './run-lifecycle.ts'
 import { listEvidenceFor } from './runs.ts'
 import { thumbnailUrl } from './projects.ts'
@@ -227,6 +228,7 @@ export class EpicPullRequests {
   // the epic branch, so its run rebases and force-pushes that branch. When
   // the task is Merged, the head has moved and integration review starts over.
   private async handOffRebase(epicId: string, headSha: string, actor: Actor) {
+    const invalidatedEpics: InvalidatedEpics = new Map()
     const taskId = await this.d.db.transaction(async (tx) => {
       const [found] = await tx.select().from(epics).where(eq(epics.id, epicId))
       if (!found) throw notFound()
@@ -243,13 +245,13 @@ export class EpicPullRequests {
         ? `Squash the epic branch ${epic.branch} into one commit on its merge base with origin/${target}, then rebase that commit onto origin/${target}, so each conflict is resolved once. Epic PRs always squash on merge, so the individual commits aren't kept anyway. ${EPIC_SQUASH_KEEPS_TRAILERS} ${EPIC_SQUASH_KEEPS_MIGRATIONS} Never merge ${target} in. ${resolve} ${EPIC_REBASE_NO_GATES} Report pr_updated; ${pushed}`
         : `Rebase the epic branch ${epic.branch} onto origin/${target}: git fetch origin && git rebase origin/${target}. Never merge ${target} in. ${resolve} Run the project's gates, then report pr_updated; ${pushed}`
       const criterion = `${epic.branch} is ${squash ? 'squashed to one commit keeping every Corral-Submission trailer and ' : ''}rebased onto origin/${target} with no merge commits, and the conflicts in ${files} are resolved keeping both sides' intent`
-      const id = await createTask(tx, project, { type: 'task', title: `Rebase epic: ${epic.title}`.slice(0, 200), description: paragraph(text), epicId: epic.id, acceptanceCriteria: [criterion] }, actor, { epicFix: true })
+      const id = await createTask(tx, project, { type: 'task', title: `Rebase epic: ${epic.title}`.slice(0, 200), description: paragraph(text), epicId: epic.id, acceptanceCriteria: [criterion] }, actor, { epicFix: true, invalidatedEpics })
       await tx.update(tasks).set({ branch: epic.branch }).where(eq(tasks.id, id))
       await appendAudit(tx, { projectId: project.id, actor }, auditEvent('epic.pr', { epicId, event: 'rebase_handed_off', headSha }))
       return id
     })
     this.d.events.publish({ type: 'task.created', task: await loadTask(this.d.db, taskId) })
-    await this.publish(epicId)
+    await publishInvalidatedEpics(this.d.db, this.d.events, invalidatedEpics)
     return { ok: true }
   }
 

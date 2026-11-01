@@ -1,18 +1,19 @@
 <script setup lang="ts">
-import type { Epic, Task } from '@corral/contracts'
+import type { Agent, Epic, Task } from '@corral/contracts'
 import type { TaskStatus } from '@corral/core'
-import type { BoardFilters } from '~/utils/board'
+import type { BoardFilters, BoardView } from '~/utils/board'
 import { boardColumnKey, swipeStep } from '~/utils/board'
 import { doneRefs, plural, taskNote } from '~/utils/labels'
 
 // The Board on a phone (design/board.md, design/mobile.md): one column at a
 // time, picked from a row of tabs or by swiping sideways. Cards open the
-// task's page. The page owns the filtering, so it matches the web Board,
+// task or epic page. The page owns the filtering, so it matches the web Board,
 // and the Status filter hides tabs as it hides columns there.
 const props = defineProps<{
   columns: { key: string, label: string, statuses: TaskStatus[], hint: string, color: string, tasks: Task[] }[]
   epics: { id: string, label: string }[]
-  boardEpics: Epic[]
+  epicColumns: { key: string, label: string, hint: string, dot: string, cards: { epic: Epic, waitingOn: Epic[], workingAgents: Agent[] }[] }[]
+  epicTotal: number
   agents: { id: string, name: string }[]
   total: number
   all: Task[]
@@ -24,16 +25,27 @@ const emit = defineEmits<{ retry: [] }>()
 const search = defineModel<string>('search', { required: true })
 const filters = defineModel<BoardFilters>('filters', { required: true })
 
+const view = defineModel<BoardView>('view', { required: true })
+const viewItems = [{ label: 'Tasks', value: 'tasks' }, { label: 'Epics', value: 'epics' }]
+const flyout = useTaskFlyout()
+const single = computed(() => filters.value.epics.length === 1 ? filters.value.epics[0]! : null)
 const shell = useShell()
 const route = useRoute()
 const router = useRouter()
 
-// The open column lives in ?column= so Back from a task returns to it
-const index = computed(() => Math.max(0, props.columns.findIndex(c => c.key === boardColumnKey(route.query.column))))
-const column = computed(() => props.columns[index.value]!)
+// Resolve against the current view's columns, so a task-only or epic-only
+// key (or an unknown key) always falls back to its first visible column.
+// ?column= survives navigation to task and epic pages and Back.
+const displayColumns = computed(() => view.value === 'epics'
+  ? props.epicColumns.map(c => ({ ...c, color: c.dot, count: c.cards.length }))
+  : props.columns.map(c => ({ ...c, count: c.tasks.length })))
+const index = computed(() => Math.max(0, displayColumns.value.findIndex(c => c.key === (view.value === 'tasks' ? boardColumnKey(route.query.column) : route.query.column))))
+const column = computed(() => displayColumns.value[index.value])
+const tasks = computed(() => props.columns[index.value]?.tasks ?? [])
+const cards = computed(() => props.epicColumns[index.value]?.cards ?? [])
 function select(i: number) {
-  const next = props.columns[Math.min(props.columns.length - 1, Math.max(0, i))]!
-  if (next.key !== column.value.key) void router.replace({ query: { ...route.query, column: next.key } })
+  const next = displayColumns.value[Math.min(displayColumns.value.length - 1, Math.max(0, i))]
+  if (next && next.key !== column.value?.key) void router.replace({ query: { ...route.query, column: next.key } })
 }
 
 // Keep the open tab in view as it changes
@@ -42,7 +54,7 @@ async function scrollTab(i: number) {
   await nextTick()
   tabs.value?.[i]?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' })
 }
-watch(index, scrollTab)
+watch([index, view], ([i]) => void scrollTab(i))
 onMounted(() => void scrollTab(index.value))
 
 let start: { x: number, y: number } | null = null
@@ -68,9 +80,7 @@ function onTabKey(event: KeyboardEvent) {
 const filtersOpen = ref(false)
 const activeFilterCount = computed(() => [
   filters.value.epics,
-  filters.value.statuses,
-  filters.value.priorities,
-  filters.value.agents
+  ...(view.value === 'epics' ? [] : [filters.value.statuses, filters.value.priorities, filters.value.agents])
 ].filter(values => values.length > 0).length)
 
 const searching = ref(Boolean(search.value))
@@ -92,7 +102,7 @@ const note = (task: Task) => taskNote(task, done.value, props.reviewRoundCap)
           icon="i-lucide-search"
           variant="ghost"
           color="neutral"
-          aria-label="Search tasks"
+          :aria-label="view === 'epics' ? 'Search epics' : 'Search tasks'"
           :aria-pressed="searching"
           @click="toggleSearch"
         />
@@ -119,10 +129,17 @@ const note = (task: Task) => taskNote(task, done.value, props.reviewRoundCap)
     </MobilePageHeader>
 
     <div class="flex shrink-0 flex-col gap-3 border-b border-default pt-3">
+      <UTabs
+        v-model="view"
+        :items="viewItems"
+        :content="false"
+        size="xs"
+        class="mx-4 w-auto self-start"
+      />
       <UInput
         v-if="searching"
         v-model="search"
-        placeholder="Search tasks"
+        :placeholder="view === 'epics' ? 'Search epics' : 'Search tasks'"
         icon="i-lucide-search"
         autofocus
         class="mx-4"
@@ -137,15 +154,20 @@ const note = (task: Task) => taskNote(task, done.value, props.reviewRoundCap)
           v-model="filters"
           :epics="epics"
           :agents="agents"
+          :epics-only="view === 'epics'"
           item-class="w-[calc(50%-0.25rem)]"
         />
-        <span class="ms-auto text-sm text-muted">{{ plural(total, 'task') }}</span>
+        <UButton
+          v-if="single"
+          label="Epic details"
+          icon="i-lucide-network"
+          size="sm"
+          variant="ghost"
+          color="neutral"
+          @click="flyout.openEpic(single)"
+        />
+        <span class="ms-auto text-sm text-muted">{{ view === 'epics' ? plural(epicTotal, 'epic') : plural(total, 'task') }}</span>
       </div>
-      <BoardEpics
-        v-if="boardEpics.length"
-        :epics="boardEpics"
-        class="px-4"
-      />
       <div
         role="tablist"
         aria-label="Board columns"
@@ -153,7 +175,7 @@ const note = (task: Task) => taskNote(task, done.value, props.reviewRoundCap)
         @keydown="onTabKey"
       >
         <button
-          v-for="(c, i) in columns"
+          v-for="(c, i) in displayColumns"
           :id="`board-tab-${c.key}`"
           ref="tabs"
           :key="c.key"
@@ -173,7 +195,7 @@ const note = (task: Task) => taskNote(task, done.value, props.reviewRoundCap)
             aria-hidden="true"
           />
           {{ c.label }}
-          <span :class="i === index ? 'text-primary' : 'text-muted'">{{ c.tasks.length }}</span>
+          <span :class="i === index ? 'text-primary' : 'text-muted'">{{ c.count }}</span>
         </button>
       </div>
     </div>
@@ -197,10 +219,10 @@ const note = (task: Task) => taskNote(task, done.value, props.reviewRoundCap)
       />
     </div>
     <section
-      v-else
+      v-else-if="column"
       id="board-column"
       role="tabpanel"
-      :aria-label="`${column.label}, ${column.tasks.length}`"
+      :aria-label="`${column.label}, ${column.count}`"
       class="flex flex-1 flex-col bg-muted/40 p-4"
       data-testid="board-column"
       @touchstart.passive="onTouchStart"
@@ -210,9 +232,24 @@ const note = (task: Task) => taskNote(task, done.value, props.reviewRoundCap)
         <span class="font-semibold text-highlighted">{{ column.label }}</span>
         <span class="ms-auto text-xs text-muted">Whose turn: {{ column.hint }}</span>
       </header>
-      <ul class="flex flex-col gap-2">
+      <div
+        v-if="view === 'epics'"
+        class="flex flex-col gap-2"
+      >
+        <BoardEpicCard
+          v-for="card in cards"
+          :key="card.epic.id"
+          :epic="card.epic"
+          :waiting-on="card.waitingOn"
+          :working-agents="card.workingAgents"
+        />
+      </div>
+      <ul
+        v-else
+        class="flex flex-col gap-2"
+      >
         <li
-          v-for="task in column.tasks"
+          v-for="task in tasks"
           :key="task.id"
         >
           <BoardCard
@@ -225,7 +262,7 @@ const note = (task: Task) => taskNote(task, done.value, props.reviewRoundCap)
         </li>
       </ul>
       <p
-        v-if="column.tasks.length === 0"
+        v-if="column.count === 0"
         class="py-8 text-center text-sm text-dimmed"
       >
         Nothing here
