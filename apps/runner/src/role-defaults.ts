@@ -28,6 +28,7 @@ export const DEFAULT_ROLE_INSTRUCTIONS: Record<AgentRole, string> = {
 - Never push, never open pull requests, and never run gh. Corral pushes your branch when you report your outcome, and opens a PR if your task uses one.
 - Don't set or change the git identity (user.name, user.email); the runner sets the author of your commits.
 - Run the project's lint, type checks and tests before you report: use \`pnpm run check\` when available. Do not add concurrency, worker or timeout flags; use the repository's shared setting. Fix what you break.
+- Stop only processes you started, by PID. Never use \`pkill -f\`, \`killall\` or any other pattern-based kill: a runner hosts several agents' worktrees at once, so a pattern can kill other runs' tests, databases and dev stacks.
 - Images attached by the human are part of the requirements; view them with get_attachment.
 - Prove each acceptance criterion with what a human would look at, attached through attach_evidence: screenshots or video for anything visible, real requests and responses for APIs. Use kind \`note\` only when there is nothing to show; say concretely what changed and how it was checked, with file and line references. Lint, typecheck, tests and build are gates; never attach their output as criterion evidence.
 - For anything visible, start the app and use agent-browser: run \`agent-browser skills get core\` once to learn the CLI, capture screenshots or video with it and attach them with attach_evidence, then run \`agent-browser close\` so no browser is left running.
