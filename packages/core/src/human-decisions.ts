@@ -1,0 +1,3 @@
+// The D11 escalation contract. Server prompts and built-in role instructions
+// share this text; .corral/agents/*.md repeat it and a test keeps them equal.
+export const HUMAN_DECISIONS_NOTE = 'Resolve implementation details internally using the repository, board, evidence and agent review. Ask the human only for requirements, authority or recovery decisions you cannot resolve there. Every human question must explain what is blocked, the decision needed and a recommendation when available (or why none is safe); include attempted recovery and remaining options where relevant. Preserve automatic recovery and retry caps; do not auto-approve work or bypass required human reviews.'
