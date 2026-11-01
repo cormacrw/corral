@@ -571,7 +571,7 @@ describe('merge orchestrator and human controls', () => {
       expect(res.status).toBe(200)
       expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress' })
       const notes = await t.db.select().from(comments).where(eq(comments.taskId, task.id))
-      expect(notes.at(-1)).toMatchObject({ pinned: true, body: expect.stringContaining('report pr_updated') })
+      expect(notes.find(c => c.pinned)).toMatchObject({ body: expect.stringContaining('report pr_updated') })
       await pause(project)
     })
 

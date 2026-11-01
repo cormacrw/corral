@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { PULL_REQUEST_LINE_LIMIT, type PullRequestDetail } from '@corral/contracts'
+import type { PullRequestDetail } from '@corral/contracts'
+import { PULL_REQUEST_LINE_LIMIT } from '@corral/contracts/client'
 
 // A PR's diff in the Inbox (design/inbox.md, the Code diff tab): the changed
 // files with their line counts, each opening to its unified diff. The first

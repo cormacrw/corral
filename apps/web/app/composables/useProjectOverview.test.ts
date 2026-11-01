@@ -41,7 +41,7 @@ function setup(initiallyOpen: boolean, initiallyLoading = false, client = testQu
 }
 // What a run's change marks stale
 const runChanged = (client: ReturnType<typeof testQueryClient>) =>
-  invalidateKeys(client, applyEvent(client, { type: 'run.updated', run: { id: 'r1', projectId: 'p1', agentId: 'a1', taskRef: 'COR-a' } } as never))
+  invalidateKeys(client, applyEvent(client, { type: 'run.updated', run: { id: 'r1', projectId: 'p1', agentId: 'a1', taskRef: 'COR-a', state: 'running' } } as never))
 const activeRunLoads = () => api.runs.list.mock.calls.filter(([filter]) => filter.active).length
 
 beforeEach(() => {
@@ -76,7 +76,8 @@ it('holds changes while closed and catches up once on opening', async () => {
   expect(api.tasks.history).toHaveBeenCalledTimes(1)
   open.value = true
   await flushPromises()
-  expect(activeRunLoads()).toBe(2)
+  // run.updated writes the run into the list, so only the history is refetched
+  expect(activeRunLoads()).toBe(1)
   expect(api.tasks.history).toHaveBeenLastCalledWith('corral', 1)
   expect(api.tasks.history).toHaveBeenCalledTimes(2)
 })
@@ -94,14 +95,15 @@ it('holds changes on another tab when returning to a project over a warm cache',
 })
 
 it('stays live while open', async () => {
-  const { tasks, client } = setup(true)
+  const { tasks, client, overview } = setup(true)
   await flushPromises()
   tasks.value = [task('b')]
   await flushPromises()
   expect(api.tasks.history).toHaveBeenCalledTimes(2)
   await runChanged(client)
   await flushPromises()
-  expect(activeRunLoads()).toBe(2)
+  expect(overview.runs.value.map(run => run.id)).toEqual(['r1'])
+  expect(activeRunLoads()).toBe(1)
 })
 
 it('waits for the project lists before loading activity', async () => {

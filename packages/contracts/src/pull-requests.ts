@@ -71,6 +71,6 @@ export interface PullRequestFile {
 }
 
 export const PULL_REQUEST_FILE_LIMIT = 20
-export const PULL_REQUEST_LINE_LIMIT = 1000
+export { PULL_REQUEST_LINE_LIMIT } from './client.ts'
 
 export type CheckConclusion = 'success' | 'failure' | 'pending' | 'neutral' | 'skipped'

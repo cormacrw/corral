@@ -29,7 +29,7 @@ describe.each(['pglite', 'postgres'] as const)('the data layer on %s', (driver) 
   const agent = async (role: 'developer' | 'reviewer') => (await t.db.select().from(agents).where(eq(agents.role, role)))[0]!
   const inbox = async () => t.request('GET', '/api/inbox').then(r => r.json()) as Promise<Inbox>
   const setStatus = async (taskId: string, status: typeof tasks.$inferInsert['status'], from: string | null = null) => {
-    await t.db.update(tasks).set({ status }).where(eq(tasks.id, taskId))
+    await t.db.update(tasks).set({ status, statusReason: status === 'blocked' || status === 'failed' ? 'Waiting' : null }).where(eq(tasks.id, taskId))
     if (from) await appendAudit(t.db, { projectId: project.id, taskId, actor: system }, auditEvent('task.transition', { event: 'stuck', from, to: status! } as never))
   }
 
@@ -74,7 +74,7 @@ describe.each(['pglite', 'postgres'] as const)('the data layer on %s', (driver) 
 
   it('keys an arrival by the highest audit ID in its millisecond, and stops at a stored message', async () => {
     const task = await t.createTask(project.slug)
-    await t.db.update(tasks).set({ status: 'failed' }).where(eq(tasks.id, task.id))
+    await t.db.update(tasks).set({ status: 'failed', statusReason: 'Waiting' }).where(eq(tasks.id, task.id))
     const at = new Date('2026-10-30T09:00:00.123Z')
     const entry = { projectId: project.id, taskId: task.id, actor: system, action: 'task.transition', createdAt: at }
     const [low, high] = await t.db.insert(auditLog).values([
@@ -88,7 +88,7 @@ describe.each(['pglite', 'postgres'] as const)('the data layer on %s', (driver) 
     await t.db.insert(inboxMessages).values({ arrival, message: 'Stored before the bulk read' })
     expect((await inbox()).needsYou.find(i => i.taskId === task.id)).toMatchObject({ message: 'Stored before the bulk read', at: at.toISOString() })
     expect(await unclaimedTaskItems(t.db, task.id)).toEqual([])
-    await t.db.update(tasks).set({ status: 'merged' }).where(eq(tasks.id, task.id))
+    await t.db.update(tasks).set({ status: 'merged', statusReason: null }).where(eq(tasks.id, task.id))
   })
 
   it('keeps the epic arrival key, and counts Needs you as the Inbox lists it', async () => {
@@ -113,7 +113,7 @@ describe.each(['pglite', 'postgres'] as const)('the data layer on %s', (driver) 
     expect(listed.needsYou.some(i => i.type === 'epic_conflict')).toBe(true)
     expect(await inboxCount(t.db)).toBe(listed.count)
     await t.db.update(epics).set({ reviewState: 'merged' }).where(eq(epics.id, conflict!.id))
-    await t.db.update(tasks).set({ status: 'merged' }).where(eq(tasks.id, task.id))
+    await t.db.update(tasks).set({ status: 'merged', statusReason: null }).where(eq(tasks.id, task.id))
   })
 
   it('links an epic\'s activity to its first task', async () => {

@@ -26,6 +26,8 @@ import InboxPage from '~/pages/inbox.vue'
 import InboxItemPage from '~/pages/inbox/[itemId].vue'
 import InboxIndexPage from '~/pages/inbox/index.vue'
 
+// PromptComposer imports this directly; each test stubs the global
+vi.mock('~/composables/useDevice', () => ({ useDevice: () => (globalThis as unknown as { useDevice: () => unknown }).useDevice() }))
 vi.mock('~/composables/useApi', () => ({
   api: {
     inbox: { get: vi.fn(), act: vi.fn() },
@@ -38,6 +40,7 @@ vi.mock('~/composables/useApi', () => ({
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  sessionStorage.clear()
 })
 
 const plain = vue.defineComponent({ setup: (_, { slots }) => () => vue.h('div', slots.default?.()) })

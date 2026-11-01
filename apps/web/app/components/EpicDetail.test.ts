@@ -150,8 +150,8 @@ async function mountEpic(mode: 'flyout' | 'page' | 'mobile') {
   client.setQueryData(keys.epics.detail('own'), own)
   for (const name of ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount'] as const) vi.stubGlobal(name, vue[name])
   vi.stubGlobal('useLocalStorage', (_key: string, initial: unknown) => vue.ref(initial))
+  vi.stubGlobal('useShell', () => ({ projects: [project] }))
   vi.stubGlobal('useProjectLists', useProjectLists)
-  vi.stubGlobal('useLive', () => ({ state: vue.ref({ projects: [project] }) }))
   vi.stubGlobal('useTaskFlyout', () => ({ ref: vue.ref(null), canGoBack: vue.ref(false) }))
   vi.stubGlobal('useToast', () => ({ add: vi.fn() }))
   const wrapper = mount(EpicDetailView, {

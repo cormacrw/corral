@@ -161,7 +161,7 @@ it('keeps a prior approval for Backlog-only work, and invalidates it for board w
   expect((await t.request('POST', `/api/epics/${epic.id}/review`, { action: 'approve', headSha: again.headSha })).status).toBe(200)
   const { branch } = await epicRow(epic.id)
   t.github.setBranch(project.repository, branch!, 'someone-pushed')
-  await t.orchestrator.epicPrs.reconcile()
+  await t.orchestrator.merges.tick()
   expect(await epicRow(epic.id)).toMatchObject({ reviewState: 'in_review', prHeadSha: 'someone-pushed' })
   await capture('invalidation-new-head.json', { afterApproval: 'ready_to_merge', afterNewEpicHead: await epicRow(epic.id) })
 })

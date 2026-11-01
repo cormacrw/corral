@@ -5,7 +5,7 @@ import { computed, defineComponent, h, resolveComponent } from 'vue'
 import { projects, task } from '~/prototype/fixtures'
 import BoardCard from './BoardCard.vue'
 
-const card = task(projects[0]!, 7, { title: 'A card', status: 'in_progress', prNumber: 41, prUrl: 'https://github.com/o/r/pull/41' })
+const card = task(projects[0]!, 7, { title: 'A card', status: 'in_progress', pr: { number: 41, url: 'https://github.com/o/r/pull/41' } })
 const NuxtLink = defineComponent({ props: ['to'], setup: (p, { slots }) => () => h('a', { 'href': p.to, 'data-link': '' }, slots.default?.()) })
 const plain = defineComponent({ setup: (_, { slots }) => () => h('div', slots.default?.()) })
 
@@ -28,7 +28,7 @@ function render(props: Record<string, unknown> = {}) {
 describe('BoardCard', () => {
   it('keeps the PR link out of the card button, where browsers ignore it', () => {
     const wrapper = render()
-    expect(wrapper.get('a').attributes('href')).toBe(card.prUrl)
+    expect(wrapper.get('a').attributes('href')).toBe(card.pr!.url)
     expect(wrapper.get('button').find('a').exists()).toBe(false)
   })
 

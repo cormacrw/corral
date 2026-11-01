@@ -114,7 +114,7 @@ export function useProjectOverview({ slug, project, tasks, epics: epicList, load
     return entry.action.replace('task.', '').replaceAll('.', ' ')
   }
 
-  return { project, tasks, loading, inboxLoading: inboxResult.isPending, inbox, runs, history, error, load, count, needsYou, mergedThisWeek, firstPass, waitingOnDependency, developer, reviewer, pmName, epics, taskOf, actorName, taskRefOf, activityText }
+  return { project, tasks, loading, inboxLoading: inboxState.isPending, inbox, runs, history, error, load, count, needsYou, mergedThisWeek, firstPass, waitingOnDependency, developer, reviewer, pmName, epics, taskOf, actorName, taskRefOf, activityText }
 }
 
 export type ProjectOverview = ReturnType<typeof useProjectOverview>

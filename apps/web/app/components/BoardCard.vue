@@ -102,7 +102,7 @@ const prLink = computed(() => !props.mobile && Boolean(props.task.pr?.url))
       </component>
       <a
         v-if="prLink"
-        :href="task.pr?.url!"
+        :href="task.pr!.url"
         target="_blank"
         rel="noopener"
         class="absolute end-3 top-2.5 flex items-center gap-0.5 text-xs text-muted hover:text-primary"

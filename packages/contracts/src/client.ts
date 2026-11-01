@@ -19,6 +19,8 @@ export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
 // Sent well inside Cloudflare's ~100 s idle timeout (D12)
 export const SSE_HEARTBEAT_MS = 25_000
 
+export const PULL_REQUEST_LINE_LIMIT = 1000
+
 export function needsAttention(item: InboxItem): boolean {
   return item.type !== 'release_notes'
 }
