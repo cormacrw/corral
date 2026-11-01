@@ -9,7 +9,8 @@ import type { EventBus } from './events.ts'
 import type { GitHubClient } from './github.ts'
 import type { RunnerHub } from './runner-hub.ts'
 import { epicResolutionBranch } from './task-base.ts'
-import { applyTransition, createTask, loadTask, lockTask, type ProjectRow } from './tasks.ts'
+import { runEndValues } from './run-lifecycle.ts'
+import { applyTransition, createTask, deleteTaskRows, loadTask, lockTask, type ProjectRow } from './tasks.ts'
 
 const { comments, epics, projects, runs, taskIntegrationOperations: operations, tasks } = schema
 type OperationRow = typeof operations.$inferSelect
@@ -180,6 +181,11 @@ export class EpicSynchronizer {
       case 'failed':
         return this.#fail(operation, ctx, `The rebase failed: ${prepared.error ?? 'unknown error'}`)
       case 'conflict':
+        // Preparing can take minutes. Nothing was written, so it starts over.
+        if (stopped() || await this.#paused(ctx.project)) {
+          await db.update(operations).set({ state: 'pending', updatedAt: this.#now() }).where(and(eq(operations.id, operation.id), eq(operations.state, 'running')))
+          return false
+        }
         try {
           await this.#startResolution(operation, ctx, prepared.files)
         } catch (error) {
@@ -231,7 +237,9 @@ export class EpicSynchronizer {
   async #publish(operation: OperationRow, ctx: Context, candidate: string, runnerId: string, stopped: Stopped): Promise<boolean> {
     const { db, runner } = this.#d
     const { project, epic } = ctx
-    if (stopped() || project.paused) return false
+    // Read now: a candidate can take minutes to prepare. A stopped operation
+    // stays running, to resume as it was.
+    if (stopped() || await this.#paused(project)) return false
     // From here the result is unknown until the branch has been read
     const [pushing] = await db.update(operations).set({ state: 'reconciling', resultHeadSha: candidate, error: null, pushAttempts: operation.pushAttempts + 1, updatedAt: this.#now() })
       .where(and(eq(operations.id, operation.id), eq(operations.state, 'running'), eq(operations.leaseEpoch, operation.leaseEpoch))).returning()
@@ -256,6 +264,11 @@ export class EpicSynchronizer {
     }
     if (error) await db.update(operations).set({ error }).where(eq(operations.id, operation.id))
     return true
+  }
+
+  async #paused(project: ProjectRow): Promise<boolean> {
+    const [row] = await this.#d.db.select({ paused: projects.paused }).from(projects).where(eq(projects.id, project.id))
+    return row?.paused ?? true
   }
 
   // The push checks found the candidate wrong, and nothing left the runner. The
@@ -290,10 +303,7 @@ export class EpicSynchronizer {
       await this.#complete(operation, ctx, operation.resultHeadSha!)
       return true
     }
-    if (head !== operation.expectedTargetSha) {
-      if (operation.resolutionTaskId) await this.#abandonResolution(operation)
-      return this.#fail(operation, ctx, EPIC_MOVED)
-    }
+    if (head !== operation.expectedTargetSha) return this.#fail(operation, ctx, EPIC_MOVED)
     const error = operation.error ?? 'The push did not reach the epic branch'
     if (!operation.resolutionTaskId) return this.#fail(operation, ctx, error)
     // A reviewed resolution is worth keeping: push it again, within a bound
@@ -304,16 +314,23 @@ export class EpicSynchronizer {
     return false
   }
 
-  // Something outside Corral moved the epic branch, so this candidate is built
-  // on the wrong head. The next checkpoint starts again from the new one.
-  async #abandonResolution(operation: OperationRow): Promise<void> {
+  // A resolution only means anything to its operation: nothing else could
+  // publish it, so a task left behind would hold the epic's board forever. The
+  // next checkpoint starts again from the branch as it is. Any run on it is
+  // fenced by losing its lease.
+  async #retireResolution(operation: OperationRow, { epic, project }: Context, reason: string): Promise<void> {
+    const { db, events, github } = this.#d
     const taskId = operation.resolutionTaskId!
-    await this.#d.db.transaction(async (tx) => {
-      const { task, project } = await lockTask(tx, taskId)
-      if (task.status !== 'ready_to_merge') return
-      await applyTransition(tx, task, project, { type: 'fail', reason: 'The epic branch moved outside Corral before this rebase could be published' }, server, { event: 'merge_failed' })
+    const retired = await db.transaction(async (tx) => {
+      const [task] = await tx.select().from(tasks).where(eq(tasks.id, taskId)).for('update')
+      if (!task || task.deletedAt || task.status === 'merged') return false
+      await tx.update(runs).set(runEndValues({ state: 'interrupted', error: reason }, this.#now())).where(and(eq(runs.taskId, taskId), inArray(runs.state, [...ACTIVE_RUN_STATES])))
+      await tx.update(tasks).set({ leaseRunId: null, leaseRole: null, leaseExpiresAt: null, leaseHeartbeatAt: null }).where(eq(tasks.id, taskId))
+      await deleteTaskRows(tx, taskId, server, reason)
+      return true
     })
-    await this.#settled(taskId)
+    if (retired) events.publish({ type: 'task.deleted', taskId, projectId: project.id })
+    await github.deleteBranch(project.repository, epicResolutionBranch(operation.id)).catch(error => console.error(`Could not delete the rebase candidate of ${epic.id}`, error))
   }
 
   async #complete(operation: OperationRow, { epic, project }: Context, commitSha: string): Promise<void> {
@@ -349,6 +366,7 @@ export class EpicSynchronizer {
     await db.update(operations).set({ state: 'failed', error, updatedAt: this.#now() })
       .where(and(eq(operations.id, operation.id), inArray(operations.state, [...ACTIVE]), eq(operations.leaseEpoch, operation.leaseEpoch)))
     await appendAudit(db, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, event: 'rebase_failed', summary: error }))
+    if (operation.resolutionTaskId) await this.#retireResolution(operation, { epic, project }, error)
     const failures = RETRY_AT_ONCE.includes(error) ? [] : await this.#failures(db, epic, operation.expectedTargetSha, operation.ontoSha!)
     if (failures.length >= MAX_FAILED_ATTEMPTS) await recordSyncFailure(db, project, epic.id, `Rebasing onto ${project.defaultBranch} failed ${failures.length} times: ${error}`, this.#now())
     await this.#publishEpic(epic.id)

@@ -1,6 +1,6 @@
 import { TASK_INTEGRATION_PROTOCOL } from '@corral/contracts'
 import { schema } from '@corral/db'
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest'
@@ -84,6 +84,11 @@ beforeEach(async () => {
   faults = null
   t.orchestrator.merges.stopped = false
   await t.db.update(schema.projects).set({ paused: false }).where(eq(schema.projects.id, project.id))
+  // Earlier tests' work must not fill the runner's slots
+  await t.orchestrator.stopAll(t.actor).catch(() => null)
+  await t.orchestrator.resumeAll(t.actor).catch(() => null)
+  t.orchestrator.merges.stopped = false
+  await t.db.update(schema.tasks).set({ status: 'blocked', statusReason: 'Done with', leaseRunId: null, leaseRole: null, leaseExpiresAt: null, leaseHeartbeatAt: null }).where(inArray(schema.tasks.status, ['ready_to_merge', 'ready', 'in_progress', 'agent_review']))
   await git('checkout', '--quiet', '--force', 'main')
 })
 
@@ -341,6 +346,128 @@ it('writes nothing while paused or stopped, and resumes afterwards', async () =>
   expect(sent).toContain('epic_rebase_push')
   await capture('pause-and-stop.json', { paused: { operationsStarted: 0, epicBranchMoved: false }, killSwitchBetweenPrepareAndPush: { operationState: 'running', epicBranchMoved: false }, afterResume: { jobsSent: sent, epicBranchMoved: true } })
   expect(await isAncestor('main', await git('rev-parse', epic.branch))).toBe(true)
+})
+
+it('holds a candidate when the project is paused while it was being prepared', async () => {
+  const epic = await createEpic()
+  await commitOn('main', `x-${++branches}.txt`, 'x\n')
+  await approved(epic, 'a.txt')
+  faults = async (job, real) => {
+    if (job.kind === 'epic_rebase_prepare') await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+    return real()
+  }
+  const sent: string[] = []
+  await tick()
+  faults = async (job, real) => {
+    sent.push(job.kind)
+    return real()
+  }
+  await tick()
+  expect(await git('rev-parse', epic.branch)).toBe(epic.head)
+  expect(sent).toEqual([])
+  const held = await journal(epic.id)
+  expect(held[0]).toMatchObject({ state: 'running', result: expect.any(String) })
+
+  await t.db.update(schema.projects).set({ paused: false }).where(eq(schema.projects.id, project.id))
+  await tick()
+  expect(sent).toContain('epic_rebase_push')
+  expect(await isAncestor('main', await git('rev-parse', epic.branch))).toBe(true)
+  await capture('pause-during-prepare.json', { scenario: 'The project is paused while the runner prepares a clean candidate.', whilePaused: { operation: held[0], jobsSent: [], epicBranchMoved: false }, afterUnpause: { jobsSent: sent, epicBranchMoved: true } })
+})
+
+it('starts no resolution when paused or stopped during the prepare that found the conflict', async () => {
+  const epic = await conflicted()
+  for (const stop of [
+    () => t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id)),
+    async () => {
+      t.orchestrator.merges.stopped = true
+    }
+  ]) {
+    faults = async (job, real) => {
+      if (job.kind === 'epic_rebase_prepare') await stop()
+      return real()
+    }
+    await tick()
+    expect((await ops(epic.id)).map(o => [o.state, o.resolutionTaskId])).toEqual([['pending', null]])
+    expect(await git('branch', '--list', 'corral/epic-rebase/*')).not.toContain((await ops(epic.id))[0]!.id)
+    faults = null
+    await t.db.update(schema.projects).set({ paused: false }).where(eq(schema.projects.id, project.id))
+    t.orchestrator.merges.stopped = false
+  }
+  await tick()
+  expect((await ops(epic.id))).toHaveLength(1)
+  expect((await ops(epic.id))[0]!.resolutionTaskId).toEqual(expect.any(String))
+})
+
+it('holds a human-approved task PR while a rebase has the lock, then merges it', async () => {
+  t.github.mergeResult = { merged: true, sha: 'merge-sha', message: 'merged' }
+  const epic = await conflicted()
+  await tick()
+  const branch = `task-pr-${++branches}`
+  await git('branch', branch, epic.branch)
+  const head = await commitOn(branch, `${branch}.txt`, 'x\n')
+  const pr = await t.github.openPullRequest(TEST_REPOSITORY, { head: branch, base: epic.branch, title: 'Task PR', body: '' })
+  const task = await t.createTask(project.slug, { epicId: epic.id, humanReview: true })
+  await t.db.delete(schema.acceptanceCriteria).where(eq(schema.acceptanceCriteria.taskId, task.id))
+  await t.db.update(schema.tasks).set({ status: 'human_review', branch, headSha: head, prNumber: pr.number, prUrl: pr.url }).where(eq(schema.tasks.id, task.id))
+  const [agent] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'reviewer')).limit(1)
+  const [run] = await t.db.insert(schema.runs).values({ projectId: project.id, taskId: task.id, agentId: agent!.id, role: 'reviewer', state: 'completed', outcome: 'approved', endedAt: new Date() }).returning()
+  await t.db.insert(schema.reviews).values({ taskId: task.id, runId: run!.id, round: 0, headSha: head, verdict: 'approved', summary: 'Good', criteria: [], author: t.actor })
+  const merges = () => t.github.calls.filter(c => c.method === 'merge' && c.args[1] === pr.number)
+
+  await t.orchestrator.merges.humanApprove(task.id, t.actor)
+  await vi.waitFor(async () => expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge' }))
+  await new Promise(resolve => setTimeout(resolve, 300))
+  await tick()
+  expect(merges()).toEqual([])
+  expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge' })
+  await capture('task-pr-held.json', { scenario: 'A human approves a task PR into the epic branch while a resolution holds the lock.', githubMergeCalls: merges().length, taskStatus: 'ready_to_merge', operations: await journal(epic.id) })
+
+  // GitHub refuses it: recording a merge isn't what this is about, and it reads
+  // outside its transaction, which PGlite's one connection can't do
+  t.github.mergeResult = { merged: false, sha: null, message: 'Not now' }
+  await t.db.update(schema.taskIntegrationOperations).set({ state: 'failed', error: 'Done with' }).where(eq(schema.taskIntegrationOperations.epicId, epic.id))
+  await tick()
+  expect(merges()).toHaveLength(1)
+})
+
+it('retires a resolution whose epic branch moved, and starts again without a human', async () => {
+  const epic = await conflicted()
+  await tick()
+  const [operation] = await ops(epic.id)
+  const fix = await taskRow(operation!.resolutionTaskId!)
+  const resolved = await resolve(fix.branch!, epic.onto, epic.file, 'target version\nepic version\n')
+  const { criteria } = await developerSubmits(fix.id, resolved)
+  await reviewerApproves(fix.id, resolved, criteria)
+  faults = async (job, real) => {
+    if (job.kind === 'epic_rebase_push') {
+      faults = null
+      await commitOn(epic.branch, `outside-${++branches}.txt`, 'x\n')
+    }
+    return real()
+  }
+  await tick()
+
+  expect(await taskRow(fix.id)).toMatchObject({ status: 'ready_to_merge', deletedAt: expect.any(Date), leaseRunId: null })
+  await expect(git('rev-parse', '--verify', fix.branch!)).rejects.toThrow()
+  const [first, second] = await ops(epic.id)
+  expect(first).toMatchObject({ state: 'failed', error: 'The epic branch moved' })
+  expect(second).toMatchObject({ kind: 'rebase', state: 'running', expectedTargetSha: await git('rev-parse', epic.branch), conflictFiles: [epic.file] })
+  const next = await taskRow(second!.resolutionTaskId!)
+  expect(next.id).not.toBe(fix.id)
+  expect((await epicApi(epic.id)).sync).toMatchObject({ state: 'resolving', taskId: next.id })
+  expect(await needsYou(epic.id)).toEqual([])
+  await capture('moved-branch-recovery.json', { scenario: 'The epic branch moved outside Corral while an approved resolution was being pushed. One pass later:', retiredTask: { deleted: true, candidateBranchDeleted: true }, newTask: { branch: next.branch }, operations: await journal(epic.id), inboxNeedsYou: await needsYou(epic.id) })
+})
+
+it('retires a live resolution when the epic PR merges first', async () => {
+  const epic = await conflicted()
+  await tick()
+  const [operation] = await ops(epic.id)
+  await t.db.update(schema.epics).set({ reviewState: 'merged' }).where(eq(schema.epics.id, epic.id))
+  await tick()
+  expect((await ops(epic.id))[0]).toMatchObject({ state: 'failed', error: 'The epic PR merged' })
+  expect(await taskRow(operation!.resolutionTaskId!)).toMatchObject({ deletedAt: expect.any(Date), leaseRunId: null })
 })
 
 it('bounds infrastructure failures, then shows a recoverable failure and asks the human for no approval', async () => {

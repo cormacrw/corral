@@ -20,7 +20,8 @@ async function required(args: string[], cwd: string): Promise<string> {
 
 const isAncestor = async (bare: string, ancestor: string, commit: string) => (await git(['merge-base', '--is-ancestor', ancestor, commit], { cwd: bare })).code === 0
 const lines = (text: string) => text.split('\n').filter(Boolean)
-const changed = async (bare: string, from: string, to: string) => lines(await required(['-c', 'core.quotePath=false', 'diff', '--name-only', from, to], bare))
+// Both sides of a rename count: only its new path would show otherwise
+const changed = async (bare: string, from: string, to: string) => lines(await required(['-c', 'core.quotePath=false', 'diff', '--name-only', '--no-renames', from, to], bare))
 
 // Rebases in a throwaway detached worktree: no shared ref moves, and a conflict
 // is aborted and thrown away, so the epic branch stays as it was (D27).

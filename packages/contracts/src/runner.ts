@@ -243,7 +243,6 @@ export const setupJobSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('detect_clis') }),
   z.object({ kind: z.literal('github'), method: z.union([z.literal('GET'), z.literal('POST'), z.literal('PUT'), z.literal('PATCH'), z.literal('DELETE')]), path: z.string(), body: z.unknown().optional() }),
   z.object({ kind: z.literal('cleanup_worktrees'), repository: z.string(), taskId: z.string() }),
-  // The files that stop `branch` rebasing onto `onto`, read from a fresh fetch
   // PR-free integration (D27). Prepare builds one commit from a reviewed
   // submission on top of the expected epic head, touching no shared ref; push
   // advances the epic branch only if it's still at that head; inspect reads the

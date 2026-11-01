@@ -97,6 +97,25 @@ it('rejects a candidate that drops target work, skips the target or merges it in
   expect(await run('rev-parse', 'epic')).toBe(head)
 })
 
+it('rejects a candidate that undoes a rename only the target made', async () => {
+  await commit('main', 'a.txt', 'a\n')
+  await run('branch', '--force', 'epic', 'main')
+  const head = await commit('epic', 'c.txt', 'epic\n')
+  await run('mv', 'a.txt', 'b.txt')
+  await run('add', '.')
+  await run('commit', '--quiet', '-m', 'Rename a to b')
+  const onto = await run('rev-parse', 'HEAD')
+  await run('checkout', '--quiet', '-b', 'candidate', onto)
+  await run('cherry-pick', head)
+  await run('mv', 'b.txt', 'a.txt')
+  await run('add', '.')
+  await run('commit', '--quiet', '-m', 'Put it back')
+  const undone = await run('rev-parse', 'HEAD')
+  await run('checkout', '--quiet', 'main')
+  expect((await push(head, onto, undone)).rejected).toContain('b.txt')
+  expect(await run('rev-parse', 'epic')).toBe(head)
+})
+
 it('accepts a candidate rebased onto a later target commit than asked', async () => {
   const head = await commit('epic', 'epic.txt', 'epic\n')
   const onto = await commit('main', 'target.txt', 'one\n')

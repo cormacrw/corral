@@ -18,6 +18,14 @@ the rest of the server recognises it: `isEpicResolution`, which keeps it off the
 PR-free path and out of the merge pass. `MergeOrchestrator` must not settle it,
 because only the synchronizer's publish makes it Merged.
 
+A resolution task never outlives its operation. `#fail` deletes it and its
+candidate branch, ending any run on it, because a Ready to merge resolution with
+no operation would hold the board with nothing to publish it.
+
+The clock for pause is the moment of the write, not the start of the step:
+preparing can take minutes, so `#publish` and the conflict path read the project
+again. A conflict found while stopped goes back to `pending` and prepares again.
+
 `step` works from the journal alone after a restart. `running` with a result and
 its runner online pushes again; `running` with neither was cut off, and that
 retries at once; `reconciling` reads the branch.
