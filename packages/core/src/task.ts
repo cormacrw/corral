@@ -8,6 +8,10 @@ export type TaskPriority = typeof TASK_PRIORITIES[number]
 export const TASK_TYPES = ['task', 'bug', 'spike', 'design'] as const
 export type TaskType = typeof TASK_TYPES[number]
 
+// Why the task was created, separate from its work type.
+export const TASK_KINDS = ['normal', 'fix', 'conflict'] as const
+export type TaskKind = typeof TASK_KINDS[number]
+
 // D19/D20: spikes and designs always go to Human review, whatever their flag says
 export function requiresHumanReview(type: TaskType, humanReview: boolean): boolean {
   return type === 'spike' || type === 'design' || humanReview

@@ -15,7 +15,7 @@ import {
   type AnyPgColumn
 } from 'drizzle-orm/pg-core'
 import { actor, createdAt, updatedAt } from './columns.ts'
-import { agentRole, taskPriority, taskStatus, taskType } from './enums.ts'
+import { agentRole, taskKind, taskPriority, taskStatus, taskType } from './enums.ts'
 import { epics } from './epics.ts'
 import { projects } from './projects.ts'
 // Import cycle with runs.ts: tasks.leaseRunId and runs.taskId point at each
@@ -36,6 +36,7 @@ export const tasks = pgTable('tasks', {
   status: taskStatus().notNull().default('backlog'),
   priority: taskPriority().notNull().default('medium'),
   type: taskType().notNull(),
+  kind: taskKind().notNull().default('normal'),
   humanReview: boolean().notNull().default(false),
   rebaseOnly: boolean().notNull().default(false),
   approvedHeadSha: text(),

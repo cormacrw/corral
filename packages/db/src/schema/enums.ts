@@ -10,6 +10,7 @@ import {
   REVIEW_VERDICTS,
   RUN_OUTCOMES,
   RUN_STATES,
+  TASK_KINDS,
   TASK_PRIORITIES,
   TASK_STATUSES,
   TASK_TYPES
@@ -21,6 +22,7 @@ import { pgEnum } from 'drizzle-orm/pg-core'
 export const taskStatus = pgEnum('task_status', TASK_STATUSES)
 export const taskPriority = pgEnum('task_priority', TASK_PRIORITIES)
 export const taskType = pgEnum('task_type', TASK_TYPES)
+export const taskKind = pgEnum('task_kind', TASK_KINDS)
 export const agentRole = pgEnum('agent_role', AGENT_ROLES)
 export const runState = pgEnum('run_state', RUN_STATES)
 export const runOutcome = pgEnum('run_outcome', RUN_OUTCOMES)

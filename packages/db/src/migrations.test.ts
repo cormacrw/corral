@@ -43,6 +43,25 @@ describe('migrations', () => {
   it.for([
     { driver: 'pglite' as const },
     { driver: 'postgres' as const }
+  ])('0055 preserves existing tasks and defaults their kind on $driver', async ({ driver }, context) => {
+    requireDatabase(driver, context)
+    const before = await migrationsBefore('0055_wakeful_alice')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db, migrate } = await open(driver)
+    await migrate(before)
+    await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('Test app', 'test-app', 'TA', 'cormacrw/test-app', 'main')`)
+    await db.execute(sql`insert into tasks (project_id, number, title, type, created_by) select id, 1, 'Existing task', 'task', '{"kind":"system","component":"server"}'::jsonb from projects`)
+    const old = (await db.execute(sql`select to_jsonb(t) as task from tasks t`)).rows[0]!.task as Record<string, unknown>
+    await migrate(migrationsFolder)
+    expect((await db.execute(sql`select to_jsonb(t) as task from tasks t`)).rows[0]!.task).toEqual({ ...old, kind: 'normal' })
+    await db.execute(sql`update tasks set title = 'Still editable'`)
+    expect((await db.execute(sql`select kind, title from tasks`)).rows).toEqual([{ kind: 'normal', title: 'Still editable' }])
+    await expect(db.execute(sql`update tasks set kind = 'unknown'`)).rejects.toThrow()
+  })
+
+  it.for([
+    { driver: 'pglite' as const },
+    { driver: 'postgres' as const }
   ])('0044 diagnoses historical messages while preserving reads on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
     requireDatabase(driver, context)
     const before = await migrationsBefore('0044_blushing_roughhouse')

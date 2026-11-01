@@ -246,6 +246,7 @@ export function task(project: Project, number: number, fields: Partial<Task> & P
     description: doc(`${fields.title}.`),
     priority: 'medium',
     type: 'task',
+    kind: 'normal',
     epicId: null,
     humanReview: project.humanReviewDefault,
     reviewRounds: 0,

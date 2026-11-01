@@ -1,4 +1,4 @@
-import { EVIDENCE_KINDS, REVIEW_VERDICTS, richTextIssue, TASK_PRIORITIES, TASK_TYPES, type Actor, type AgentRole, type EvidenceKind, type ReviewVerdict, type TaskPriority, type TaskStatus, type TaskType } from '@corral/core'
+import { EVIDENCE_KINDS, REVIEW_VERDICTS, richTextIssue, TASK_PRIORITIES, TASK_TYPES, type Actor, type AgentRole, type EvidenceKind, type ReviewVerdict, type TaskKind, type TaskPriority, type TaskStatus, type TaskType } from '@corral/core'
 import { z } from 'zod'
 
 // ── Tasks ───────────────────────────────────────────────────────────────────
@@ -115,6 +115,7 @@ interface TaskFields {
   description: unknown
   priority: TaskPriority
   type: TaskType
+  kind: TaskKind
   epicId: string | null
   humanReview: boolean
   reviewRounds: number
