@@ -56,7 +56,11 @@ export class RunEnding {
   }
 
   async endRun(ctx: RunContext, end: RunEnd): Promise<boolean> {
-    return this.#c.d.db.transaction(tx => this.endRunIn(tx, ctx, end))
+    const ended = await this.#c.d.db.transaction(tx => this.endRunIn(tx, ctx, end))
+    if (ended && ctx.run.role === 'pm' && ctx.run.planSessionId && end.state === 'interrupted') {
+      await this.#c.plans?.notifyParent(ctx.run.planSessionId, ctx.run.id, true)
+    }
+    return ended
   }
 
   // Ends the run and releases its lease, if it still holds one. Whether this
@@ -69,7 +73,7 @@ export class RunEnding {
       await tx.update(tasks).set({ leaseRunId: null, leaseRole: null, leaseExpiresAt: null, leaseHeartbeatAt: null, updatedAt: this.#c.now() })
         .where(and(eq(tasks.id, ctx.task.id), eq(tasks.leaseRunId, ctx.run.id)))
     }
-    if (ended) await appendAudit(tx, { projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor: server }, auditEvent('run.ended', { runId: ctx.run.id, runNumber: ctx.run.number, state: end.state, outcome: end.outcome ?? null, error: 'error' in end ? end.error : null, ...(end.outcome === 'pr_rebased' ? { review: end.review, conflictedFiles: end.conflictedFiles } : {}) }))
+    if (ended) await appendAudit(tx, { projectId: ctx.run.projectId, taskId: ctx.task?.id ?? null, actor: server }, auditEvent('run.ended', { runId: ctx.run.id, runNumber: ctx.run.number, state: end.state, outcome: end.outcome ?? null, error: 'error' in end ? end.error : null, ...(end.outcome === 'pr_rebased' ? { review: end.review, conflictedFiles: end.conflictedFiles } : {}) }))
     return ended !== undefined
   }
 

@@ -5,8 +5,9 @@ import { agentRuntime, type AgentRuntime } from './agent-runtimes.ts'
 // ── Plan (D9, design/plan.md) ─────────────────────────────────────────────
 
 export interface PlanSession {
+  parentSessionId?: string | null
   id: string
-  projectId: string
+  projectId: string | null
   title: string
   // The PM's runtime (D18), e.g. 'claude-code' or 'codex'. Locked once the
   // session has messages.
@@ -29,8 +30,14 @@ const plainPlanMessage = { text: z.string(), recommendation: z.null().default(nu
 export const planMessageFields = z.discriminatedUnion('role', [
   z.strictObject({ role: z.literal('human'), kind: z.literal('message'), ...plainPlanMessage }),
   z.discriminatedUnion('kind', [
+    z.strictObject({ role: z.literal('thread'), kind: z.literal('message'), ...plainPlanMessage }),
+    z.strictObject({ role: z.literal('thread'), kind: z.literal('notification'), ...plainPlanMessage })
+  ]),
+  z.discriminatedUnion('kind', [
     z.strictObject({ role: z.literal('pm'), kind: z.literal('message'), ...plainPlanMessage }),
     z.strictObject({ role: z.literal('pm'), kind: z.literal('error'), ...plainPlanMessage }),
+    z.strictObject({ role: z.literal('pm'), kind: z.literal('confirmation'), ...plainPlanMessage }),
+    z.strictObject({ role: z.literal('pm'), kind: z.literal('action_result'), ...plainPlanMessage }),
     z.strictObject({
       role: z.literal('pm'),
       kind: z.literal('question'),
@@ -46,6 +53,9 @@ export type NewPlanMessageFields = z.input<typeof planMessageFields>
 export type PlanMessage = PlanMessageFields & {
   id: string
   sessionId: string
+  senderSessionId?: string | null
+  senderTitle?: string | null
+  pendingAction?: import('@corral/core').PmAction | null
   planId: string | null
   runId: string | null
   createdAt: string
@@ -111,7 +121,7 @@ export interface PlanSessionDetail extends PlanSession {
 // A client UUID makes a start safe to retry within the same project.
 export const startPlanSessionInput = z.strictObject({
   id: z.uuid().optional(),
-  projectId: z.uuid(),
+  projectId: z.uuid().nullable().default(null),
   // The PM's runtime for this session (D18); only a CLI the runner has
   runtime: agentRuntime.default('claude-code'),
   text: z.string().trim().default(''),

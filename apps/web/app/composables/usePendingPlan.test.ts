@@ -67,7 +67,7 @@ describe('optimistic Plan starts', () => {
     pending.apply({ type: 'plan.message', message: response.messages[0]! })
     pending.apply({ type: 'plan.message', message: response.messages[0]! })
     pending.apply({ type: 'plan.session', session: { ...response, activeRunId: 'run' } })
-    pending.apply({ type: 'plan.message', message: { ...response.messages[0]!, id: 'reply', role: 'pm', text: 'Working on it' } })
+    pending.apply({ type: 'plan.message', message: { ...response.messages[0]!, id: 'reply', role: 'pm', kind: 'message', text: 'Working on it', recommendation: null, options: null } })
     resolve(response)
     await request
     expect(pending.entries.value[id]?.session.messages.map(m => m.id)).toEqual(['server-human', 'reply'])

@@ -2,7 +2,7 @@
 import type { Project } from '@corral/contracts'
 import { useMutation, useQuery } from '@tanstack/vue-query'
 import { patchProject, projectsQuery } from '~/queries/projects'
-import { resumeAll as resumeAllMutation, runnerQuery, statusQuery } from '~/queries/system'
+import { liftUpdateHold as liftUpdateHoldMutation, resumeAll as resumeAllMutation, runnerQuery, statusQuery } from '~/queries/system'
 
 // Shell-wide banners (design/app-shell.md), shared by the web and mobile
 // layouts: kill switch, update hold, paused project, runner offline
@@ -14,6 +14,7 @@ const runner = useQuery(runnerQuery()).data
 const projects = useQuery(projectsQuery()).data
 const patching = useMutation(patchProject)
 const resuming = useMutation(resumeAllMutation)
+const lifting = useMutation(liftUpdateHoldMutation)
 
 // Shown only when no runner at all is online; some offline is just the list
 const runnerBanner = computed(() => {
@@ -34,6 +35,13 @@ async function resume(project: Project) {
     await patching.mutateAsync({ slug: project.slug, input: { paused: false } })
   } catch (error) {
     toast.add({ title: 'Could not resume', description: error instanceof Error ? error.message : String(error), color: 'error' })
+  }
+}
+async function liftUpdateHold() {
+  try {
+    await lifting.mutateAsync()
+  } catch (error) {
+    toast.add({ title: 'Could not lift update hold', description: error instanceof Error ? error.message : String(error), color: 'error' })
   }
 }
 async function resumeAll() {
@@ -62,6 +70,7 @@ async function resumeAll() {
     variant="subtle"
     icon="i-lucide-download"
     title="Corral is waiting to update"
+    :actions="[{ label: 'Lift', color: 'neutral', variant: 'solid', onClick: liftUpdateHold }]"
     :ui="{ root: 'shrink-0 rounded-none py-2' }"
     orientation="horizontal"
   />

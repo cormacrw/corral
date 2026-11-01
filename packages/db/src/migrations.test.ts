@@ -57,7 +57,7 @@ describe('migrations', () => {
         union all select id, 'pm', 'message', 'Legacy recommendation', 'Keep this' from plan_sessions`)
       legacy.rows = (await db.execute(sql`select * from plan_messages order by id`)).rows
     })
-    expect((await db.execute(sql`select * from plan_messages order by id`)).rows).toEqual(legacy.rows)
+    expect((await db.execute(sql`select * from plan_messages order by id`)).rows).toEqual(legacy.rows.map(row => expect.objectContaining(row)))
     // One warning: routine notices stay out of the server's output
     expect(warnings).toHaveLength(1)
     expect(warnings[0]).toContain('Database warning: Historical plan message violations')

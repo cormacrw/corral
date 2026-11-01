@@ -1,10 +1,13 @@
-import { RUNTIMES_TAKING_MESSAGES, type Comment } from '@corral/contracts'
+import { RUNTIMES_TAKING_MESSAGES, type Comment, type InboxActionInput, type Task } from '@corral/contracts'
 import { ACTIVE_RUN_STATES, isActiveRun, taskRef, richTextToMarkdown, type Actor } from '@corral/core'
 import { schema } from '@corral/db'
 import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
+import { publishDependents } from './dependent-tasks.ts'
+import { approveDesign } from './designs.ts'
+import { publishInvalidatedEpics, type InvalidatedEpics } from './epic-review-state.ts'
 import { ApiFailure } from './errors.ts'
-import { addComment, deleteTaskRows, loadTask, type TaskContentEdit } from './tasks.ts'
+import { addComment, deleteTaskRows, loadTask, transitionTask, type TaskContentEdit } from './tasks.ts'
 import { HUMAN_STOP, type RunCore } from './run-context.ts'
 
 const { acceptanceCriteria, attachments, projects, runs, tasks } = schema
@@ -24,9 +27,10 @@ export class HumanActions {
     await this.#c.d.db.transaction(async (tx) => {
       await this.#c.ending.endRunIn(tx, ctx, { state: 'interrupted', error: HUMAN_STOP })
       if (ctx.task) await tx.update(tasks).set({ paused: true }).where(eq(tasks.id, ctx.task.id))
-      await appendAudit(tx, { projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor }, auditEvent('run.stopped', { runId }))
+      await appendAudit(tx, { projectId: ctx.run.projectId, taskId: ctx.task?.id ?? null, actor }, auditEvent('run.stopped', { runId }))
     })
     this.#c.d.runner.send({ type: 'run.stop', runId, reason: 'Stopped by a human', keepWork: true }, ctx.run.runnerId)
+    if (ctx.run.role === 'pm' && ctx.run.planSessionId) await this.#c.plans?.notifyParent(ctx.run.planSessionId, runId, true)
     await this.#c.ending.publish(ctx)
   }
 
@@ -58,7 +62,7 @@ export class HumanActions {
     if (!task || (run.role !== 'developer' && run.role !== 'designer' && run.role !== 'reviewer')) throw notLive(`Run #${run.number} is a ${run.role} run; only developer, designer and reviewer runs take messages`)
     if (run.state === 'queued') throw notLive(`Run #${run.number} hasn't started yet`)
     if (!isActiveRun(run.state) || run.state === 'stopping') throw notLive(`Run #${run.number} has ended`)
-    if (task.leaseRunId !== run.id || task.leaseEpoch !== run.leaseEpoch) throw notLive(`Run #${run.number} no longer holds ${taskRef(ctx.project.prefix, task.number)}`)
+    if (task.leaseRunId !== run.id || task.leaseEpoch !== run.leaseEpoch) throw notLive(`Run #${run.number} no longer holds ${taskRef(ctx.project!.prefix, task.number)}`)
     if (!runner.isOnline(run.runnerId)) throw notLive('No runner is connected to deliver the message')
 
     const found = input.attachments.length === 0
@@ -96,17 +100,19 @@ export class HumanActions {
     const ctx = await this.#c.runs.load(task.leaseRunId)
     if (!ctx || ctx.run.leaseEpoch !== task.leaseEpoch) return
     const { run, project } = ctx
-    if (run.role !== 'developer' && run.role !== 'designer' && run.role !== 'reviewer') return
+    if (!project || (run.role !== 'developer' && run.role !== 'designer' && run.role !== 'reviewer')) return
     if (!isActiveRun(run.state) || run.state === 'stopping') return
 
+    const current = await loadTask(db, taskId)
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, taskId)).orderBy(asc(acceptanceCriteria.position))
     const ref = taskRef(project.prefix, task.number)
-    const what = [edit.description && 'description', edit.criteria && 'acceptance criteria'].filter(Boolean).join(' and ')
+    const what = [...(edit.fields ?? []), edit.description && 'description', edit.criteria && 'acceptance criteria'].filter(Boolean).join(' and ')
     const counts = edit.criteria
       ? [edit.criteria.added && `${edit.criteria.added} added`, edit.criteria.removed && `${edit.criteria.removed} removed`, edit.criteria.reworded && `${edit.criteria.reworded} reworded`].filter(Boolean).join(', ') || 'reordered'
       : null
     const body = (lead: string) => [
       lead,
+      edit.fields?.length ? `**Updated fields**\n\n${edit.fields.map(k => `${k}: ${JSON.stringify(current[k as keyof typeof current])}`).join('\n')}` : null,
       edit.description ? `**Description**\n\n${richTextToMarkdown(task.description) || '(no description)'}` : null,
       edit.criteria ? `**Acceptance criteria** (${counts})\n\n${criteria.map(c => `- [${c.id}] ${c.text}${c.checkedByHuman ? ' — checked by a human: skip evidence and verdict; do not request changes over it' : ''}`).join('\n') || '(none)'}` : null
     ].filter(Boolean).join('\n\n')
@@ -125,6 +131,67 @@ export class HumanActions {
       return comment
     })
     events.publish({ type: 'comment.created', comment })
+  }
+
+  async taskChanged(taskId: string): Promise<void> {
+    await this.#publishTask(taskId)
+    this.#c.scheduler.poke([taskId])
+  }
+
+  async #publishTask(taskId: string) {
+    const task = await loadTask(this.#c.d.db, taskId)
+    this.#c.d.events.publish({ type: 'task.updated', task })
+    return task
+  }
+
+  // design/inbox.md: what the tray does, all through D10 transitions. A PM
+  // answer has its own transition (PmTools); everything here is the human's.
+  async inboxAction(taskId: string, input: InboxActionInput, actor: Actor): Promise<Task | null> {
+    const { db, events } = this.#c.d
+    const invalidatedEpics: InvalidatedEpics = new Map()
+    switch (input.action) {
+      case 'clarify': {
+        await transitionTask(db, taskId, { type: 'resolve', to: 'in_progress' }, actor, { comment: input.text, invalidatedEpics })
+        break
+      }
+      case 'send_back': {
+        const [row] = await db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, taskId))
+        await transitionTask(db, taskId, row?.status === 'ready' ? { type: 'send_back' } : { type: 'resolve', to: 'backlog' }, actor, { invalidatedEpics })
+        break
+      }
+      case 'resolve':
+        await transitionTask(db, taskId, { type: 'resolve', to: input.to }, actor, { comment: input.text, invalidatedEpics })
+        break
+      case 'approve': {
+        const [row] = await db.select({ type: tasks.type }).from(tasks).where(eq(tasks.id, taskId))
+        if (row?.type === 'design') await this.approveDesign(taskId, undefined, input.text, actor)
+        else await this.#c.merges.humanApprove(taskId, actor, input.text)
+        break
+      }
+      case 'request_changes':
+        await transitionTask(db, taskId, { type: 'human_request_changes', feedback: input.text }, actor, { invalidatedEpics })
+        break
+      case 'delete':
+        await this.deleteTask(taskId, actor, input.text ?? null)
+        return null
+    }
+    await publishInvalidatedEpics(db, events, invalidatedEpics)
+    const task = await this.#publishTask(taskId)
+    this.#c.scheduler.poke([taskId])
+    return task
+  }
+
+  // Approve a design version (D20): it's approved, earlier ones superseded,
+  // and a Plan session opens for its build with the human's note. The
+  // approval is a PM message, so it needs the runner like any other.
+  async approveDesign(taskId: string, version: number | undefined, note: string | undefined, actor: Actor): Promise<void> {
+    if (!this.#c.plans) throw new ApiFailure(503, { code: 'runner_offline' })
+    this.#c.plans.assertTurnPossible()
+    await this.#c.pm.assertPmRunPossible()
+    const versionId = await approveDesign(this.#c.d.db, taskId, version, actor, note)
+    this.#c.scheduler.poke(await publishDependents(this.#c.d.db, this.#c.d.events, taskId))
+    await this.#c.plans.startDesignBuild(versionId, note, actor)
+    await this.#publishTask(taskId)
   }
 
   // D10 "Deleting": stop the run, close the PR, delete the branch when safe,

@@ -125,7 +125,8 @@ export const eventDependencies: EventDependencies = {
       cache.set<Project[]>(keys.projects.list(), upsertInto(project))
       cache.set<Project>(keys.projects.detail(project.slug), current => current && project)
     },
-    invalidates: () => []
+    // Inbox rows carry the project's name
+    invalidates: () => [keys.inbox()]
   },
   'project.deleted': {
     write: ({ projectId }, cache) => cache.clearProject(projectId),
@@ -169,7 +170,7 @@ export const eventDependencies: EventDependencies = {
       const slug = cache.slug(epic.projectId)
       if (slug) cache.set<Epic[]>(keys.epics.list(slug), upsertInto(epic))
     },
-    invalidates: ({ epic }, cache) => [keys.inbox(), ...(cache.slug(epic.projectId) ? [] : [keys.epics.lists()])]
+    invalidates: ({ epic }, cache) => [keys.inbox(), keys.epics.history(epic.id), ...(cache.slug(epic.projectId) ? [] : [keys.epics.lists()])]
   },
   'agent.updated': {
     write: ({ agent }, cache) => cache.set<Agent[]>(keys.agents.list(), upsertInto(agent)),
@@ -187,7 +188,7 @@ export const eventDependencies: EventDependencies = {
     invalidates: ({ run }, cache) => [
       keys.agents.list(), keys.inbox(),
       ...(run.taskRef ? [keys.tasks.history(run.taskRef), keys.tasks.evidence(run.taskRef), keys.tasks.reviews(run.taskRef), keys.tasks.designs(run.taskRef), ...(run.endedAt ? [keys.tasks.pullRequests(run.taskRef)] : [])] : []),
-      ...projectStale(run.projectId, cache)
+      ...(run.projectId ? projectStale(run.projectId, cache) : [])
     ]
   },
   'run.events': {
@@ -267,7 +268,7 @@ function cachedTasks(client: QueryClient): Task[] {
 // finds nothing left.
 export function clearProject(client: QueryClient, projectId: string): void {
   const slug = client.getQueryData<Project[]>(keys.projects.list())?.find(p => p.id === projectId)?.slug
-  const owned = (queryKey: QueryKey) => client.getQueriesData<{ projectId?: string }>({ queryKey })
+  const owned = (queryKey: QueryKey) => client.getQueriesData<{ projectId?: string | null }>({ queryKey })
     .filter(([, data]) => data?.projectId === projectId)
     .map(([key]) => key)
   const removed = [
@@ -283,7 +284,7 @@ export function clearProject(client: QueryClient, projectId: string): void {
   // screen loses it and refetches to the server's 404
   void client.resetQueries({ predicate: isRemoved })
   // These lists span projects, so they lose its rows and stay
-  const others = <T extends { projectId: string }>(list: T[] | undefined) => list?.filter(item => item.projectId !== projectId)
+  const others = <T extends { projectId: string | null }>(list: T[] | undefined) => list?.filter(item => item.projectId !== projectId)
   client.setQueriesData<Run[]>({ queryKey: keys.runs.lists() }, others)
   client.setQueryData<PlanSession[]>(keys.plan.sessions(), others)
   client.setQueryData<Project[]>(keys.projects.list(), list => list?.filter(p => p.id !== projectId))
@@ -300,7 +301,7 @@ function eventCache(client: QueryClient, raced: QueryKey[]): EventCache {
     get: key => client.getQueryData(key),
     slug: projectId => client.getQueryData<Project[]>(keys.projects.list())?.find(p => p.id === projectId)?.slug,
     taskRef: taskId => cachedTasks(client).find(t => t.id === taskId)?.ref,
-    epicsWith: taskId => client.getQueriesData<EpicDetail>({ queryKey: keys.epics.details() })
+    epicsWith: taskId => client.getQueriesData<EpicDetail>({ queryKey: keys.epics.details(), predicate: query => query.queryKey.length === keys.epics.detail('').length })
       .filter(([, epic]) => epic?.tasks.some(t => t.id === taskId))
       .map(([, epic]) => epic!.id),
     runLists: () => client.getQueriesData({ queryKey: keys.runs.lists() }).map(([key]) => key),

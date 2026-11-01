@@ -16,6 +16,10 @@ export const resumeAll = defineMutation<GlobalStatus>({
   mutationFn: () => api.resumeAll(),
   invalidates: [keys.status()]
 })
+export const liftUpdateHold = defineMutation<unknown>({
+  mutationFn: () => api.liftUpdateHold(),
+  invalidates: [keys.status()]
+})
 export const updateRunner = defineMutation<unknown, string>({
   mutationFn: id => api.updateRunner(id),
   invalidates: [keys.runner()]

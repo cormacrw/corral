@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import type { EpicConflictItem, EpicReviewItem, InboxActionInput, InboxItem, ReleaseNotesItem, TaskInboxItem } from '@corral/contracts'
+import type { EpicConflictItem, EpicReviewItem, InboxActionInput, InboxItem, PmActivityItem, ReleaseNotesItem, TaskInboxItem } from '@corral/contracts'
 import { reactive } from 'vue'
 import { clearDraftsExcept, useDraft } from '~/composables/useDraft'
 import { actionOpensComposer, type InboxPanelContext, type InboxPanelTab, type ResolveTo } from '~/composables/useInboxPanel'
@@ -89,7 +89,7 @@ const mobileItem = computed(() => selected.value?.type === 'plan_thread' || isEp
 
 // Resolves false when not sent, so the composer keeps its images
 async function submit(message: string): Promise<boolean> {
-  if (!selected.value || isOwnPane(selected.value)) return false
+  if (!isTaskItem(selected.value) || isOwnPane(selected.value)) return false
   if (taskLoading.value || approveBlocked.value) return false
   if (action.value === 'approve' && task.value?.acceptanceCriteria.some(c => c.checkedByHuman && !checkedHumanCriteria.value.includes(c.id))) {
     failedAction.value = HUMAN_CHECK_ERROR
@@ -151,7 +151,7 @@ async function act(value: InboxActionInput['action']) {
   }
 }
 const panel = reactive({
-  item: computed(() => selected.value as TaskInboxItem),
+  item: computed(() => selected.value as TaskInboxItem | PmActivityItem),
   task, evidence, reviews, alreadyResolved, taskLoading, taskLoadFailed,
   evidenceLoading: computed(() => address.value !== null && evidenceResult.isPending.value),
   actions, action, resolveTo, text, draftKey, busy, actionError: failedAction, placeholder, submitLabel, needsText, tab, checkedHumanCriteria,

@@ -6,6 +6,7 @@ import { keys } from './keys'
 
 export const epicsQuery = (slug: string) => queryOptions({ queryKey: keys.epics.list(slug), queryFn: () => api.epics.list(slug) })
 export const epicQuery = (id: string) => queryOptions({ queryKey: keys.epics.detail(id), queryFn: () => api.epics.get(id) })
+export const epicHistoryQuery = (id: string) => queryOptions({ queryKey: keys.epics.history(id), queryFn: () => api.epics.history(id) })
 
 export const patchEpic = defineMutation<Epic, { id: string, input: PatchEpicInput }>({
   mutationFn: ({ id, input }) => api.epics.patch(id, input),

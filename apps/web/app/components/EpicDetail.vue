@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { useMutation, useQuery } from '@tanstack/vue-query'
-import { epicQuery, patchEpic, setEpicDependencies } from '~/queries/epics'
+import { epicHistoryQuery, epicQuery, patchEpic, setEpicDependencies } from '~/queries/epics'
 import type { PatchEpicInput } from '@corral/contracts'
 import { isTaskDone, type EpicReviewMode } from '@corral/core'
 import { ApiError } from '~/queries/client'
 import DetailHeader from './DetailHeader.vue'
-import { EPIC_REVIEW_MODE, EPIC_REVIEW_STATE, EPIC_STATUS_TEXT, epicReviewStatus, epicWithLiveCounts, PRIORITY, statusCounts } from '~/utils/labels'
+import { EPIC_REVIEW_MODE, EPIC_REVIEW_STATE, EPIC_STATUS_TEXT, epicHistoryText, epicReviewStatus, epicWithLiveCounts, PRIORITY, statusCounts } from '~/utils/labels'
 
 // An epic: its title, description and progress, and the dependency tree of
 // its tasks. Docked in the flyout, as a page with room for a big tree, or
@@ -19,9 +19,11 @@ const toast = useToast()
 const patchMutation = useMutation(patchEpic)
 const dependenciesMutation = useMutation(setEpicDependencies)
 const epicResult = useQuery(computed(() => epicQuery(props.epicId)))
+const historyResult = useQuery(computed(() => epicHistoryQuery(props.epicId)))
 const epic = computed(() => epicResult.data.value ?? null)
+const history = computed(() => historyResult.data.value ?? [])
 // A failed background refetch leaves what's cached on screen
-const error = computed(() => epicResult.isLoadingError.value ? epicResult.error.value?.message ?? null : null)
+const error = computed(() => [epicResult, historyResult].find(r => r.isLoadingError.value)?.error.value?.message ?? null)
 const saved = ref(false)
 const project = computed(() => shell.projects.find(p => p.id === epic.value?.projectId) ?? null)
 const { tasks: projectTasks, epics: epicList } = useProjectLists(() => project.value?.slug ?? '')
@@ -50,7 +52,7 @@ async function setDependencies(ids: string[]) {
 }
 const editingDescription = ref(false)
 const descriptionDraft = ref('')
-const tab = useLocalStorage<'tasks' | 'graph'>('corral.epic.tab', 'tasks')
+const tab = useLocalStorage<'tasks' | 'graph' | 'activity'>('corral.epic.tab', 'tasks')
 let savedTimer: ReturnType<typeof setTimeout> | null = null
 
 watch(() => props.epicId, () => {
@@ -388,15 +390,32 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
       <section :class="['flex min-w-0 flex-col', props.mode === 'page' ? 'min-h-0 flex-1 max-[900px]:h-[560px]' : 'shrink-0 px-4 pb-4']">
         <UTabs
           v-model="tab"
-          :items="[{ label: `Tasks (${epic.tasks.length})`, value: 'tasks', icon: 'i-lucide-list' }, { label: 'Graph', value: 'graph', icon: 'i-lucide-network' }]"
+          :items="[{ label: `Tasks (${epic.tasks.length})`, value: 'tasks', icon: 'i-lucide-list' }, { label: 'Graph', value: 'graph', icon: 'i-lucide-network' }, { label: 'Activity', value: 'activity', icon: 'i-lucide-activity' }]"
           :variant="props.mode === 'mobile' ? 'pill' : 'link'"
           :size="props.mode === 'mobile' ? 'md' : 'sm'"
           :content="false"
           :ui="props.mode === 'mobile' ? { indicator: 'bg-default shadow-xs', trigger: 'data-[state=active]:text-highlighted' } : undefined"
           :class="props.mode === 'page' && 'px-4 pt-2'"
         />
+        <div
+          v-if="tab === 'activity'"
+          class="flex min-h-0 flex-col gap-3 overflow-y-auto p-4"
+        >
+          <AuditActivity
+            v-for="entry in history"
+            :key="entry.id"
+            :entry="entry"
+            :text="epicHistoryText(entry)"
+          />
+          <p
+            v-if="!history.length"
+            class="text-sm text-muted"
+          >
+            No activity yet.
+          </p>
+        </div>
         <p
-          v-if="epic.tasks.length === 0"
+          v-else-if="epic.tasks.length === 0"
           class="p-6 text-center text-sm text-muted"
         >
           No tasks in this epic yet.

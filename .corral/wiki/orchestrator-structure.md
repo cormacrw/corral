@@ -13,8 +13,9 @@ call each other through it: `this.#c.ending.endRun(...)`.
 | `run-jobs.ts` | Job and prompt building; reads only |
 | `run-outcomes.ts` | Reviews, submissions, findings, designs, stuck |
 | `agent-tools.ts` | Tool dispatch, evidence, attachments |
-| `human-actions.ts` | Stop, resume, message, edit notice, delete |
+| `human-actions.ts` | Stop, resume, message, edit notice, delete, Inbox actions, design approval |
 | `pm-dispatch.ts` | The PM queue and the update hold's final phase |
+| `pm-calls.ts` | What confirm cards propose and do, and the PM's direct task and epic edits |
 | `lease-reconcile.ts` | Lease sweep, connect, heartbeat, spool sweep |
 | `scheduler.ts` | Passes, placement, `dispatch` |
 

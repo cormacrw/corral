@@ -1,6 +1,6 @@
 import type { TaskStatus } from '@corral/core'
 import { describe, expect, it } from 'vitest'
-import { agentStatus, cliLoginCommand, detectedRuntimes, doneRefs, formatMs, epicInProgress, epicReviewStatus, epicWithLiveCounts, inboxItemLink, plural, prNumberLabel, runtimeLabel, runBadge, runRef, runTitle, runTokens, statusCounts, taskCounts, taskTypeBadge, taskNote } from './labels.ts'
+import { agentStatus, cliLoginCommand, detectedRuntimes, doneRefs, formatMs, epicHistoryText, epicInProgress, epicReviewStatus, epicWithLiveCounts, inboxItemLink, plural, prNumberLabel, runtimeLabel, runBadge, runRef, runTitle, runTokens, statusCounts, taskCounts, taskTypeBadge, taskNote } from './labels.ts'
 import { projects, task } from '../prototype/fixtures'
 
 const tasks = (...statuses: TaskStatus[]) => statuses.map(status => ({ status }))
@@ -11,6 +11,20 @@ describe('statusCounts', () => {
       { status: 'ready', label: 'Ready', count: 1 },
       { status: 'approved', label: 'Complete', count: 4 }
     ])
+  })
+})
+
+describe('epicHistoryText', () => {
+  it('words every kind of entry the epic history returns', () => {
+    expect(epicHistoryText({ action: 'epic.updated', detail: { epicId: 'e', changed: ['title', 'reviewMode'] } })).toBe('edited title, reviewMode')
+    expect(epicHistoryText({ action: 'epic.pr', detail: { epicId: 'e', event: 'opened', prNumber: 7 } })).toBe('opened the epic PR')
+    expect(epicHistoryText({ action: 'epic.pr', detail: { epicId: 'e', event: 'human_changes_requested', headSha: 'abc', summary: 'Fix the title' } })).toBe('requested changes on the epic PR: Fix the title')
+    expect(epicHistoryText({ action: 'merge.refused', detail: { epicId: 'e', pr: 7, message: 'Required check failed', attempt: 1 } })).toBe('reported GitHub refused the merge: Required check failed')
+  })
+
+  it('never shows a raw code for an event or action it has no words for', () => {
+    expect(epicHistoryText({ action: 'epic.pr', detail: { epicId: 'e', event: 'something_new' } })).toBe('updated the epic PR')
+    expect(epicHistoryText({ action: 'epic.other', detail: { epicId: 'e' } })).toBe('updated the epic')
   })
 })
 

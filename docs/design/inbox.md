@@ -2,7 +2,7 @@
 
 **Canvas frames:** `App shell · Inbox`, `Inbox (component)`
 **Route:** `/inbox` and `/inbox/:itemId`
-**Scope:** global. Every item is tagged with its project.
+**Scope:** global. Items are tagged with their project, or **Global** for global Plan threads and PM activity about the factory.
 
 ## Purpose
 
@@ -73,6 +73,8 @@ Task items (human review, question, blocked, failed, Activity and Resolved) use 
 - The complete `body`, including spike findings, is in the **Message** tab, and the tab resets when another item opens. Items without `message` keep their existing rendering, including Plan threads, release notes, Activity and Resolved.
 - **Spikes always stop in Human review**, whatever their human-review flag says. They appear under Needs you and add one to its count. The **Message** tab renders the latest `## Findings` comment as markdown; criteria verdicts and evidence remain below it. Desktop and mobile label approval **Accept findings**, keep **Request changes**, and hide PR links and check badges. The success toast and Resolved entry say **You accepted the findings**. The preview is the start of the short message; approval finishes the spike in Merged; requesting changes returns it to the developer with the feedback.
 - **Designs** use **Approve design** on desktop and mobile. Approval marks the latest submitted version Approved, supersedes earlier versions and moves the task to Approved, then advances to the next item. There is no PR to merge; approval opens a Plan session and starts the PM’s build-planning turn.
+
+PM activity can have no task, including activity for a deleted task. It keeps its project tag (or **Global**) and PM conversation link in the **Message** tab, with no **Open task** or **Task details** controls and no task-loading error. This applies on desktop and mobile.
 
 ### 3. Task flyout
 

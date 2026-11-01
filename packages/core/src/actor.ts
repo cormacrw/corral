@@ -1,8 +1,9 @@
 // Who did something. Recorded on every transition and audit entry (D1), so
 // nothing here assumes there is only one user.
 export type Actor =
-  | { kind: 'human', userId: string }
-  | { kind: 'agent', role: AgentRole, runId: string }
+  | { kind: 'human', userId: string, viaPm?: { sessionId: string, runId: string } }
+  // A PM turn also carries its Plan session
+  | { kind: 'agent', role: AgentRole, runId: string, sessionId?: string }
   | { kind: 'system', component: SystemComponent }
 
 export const AGENT_ROLES = ['pm', 'developer', 'designer', 'reviewer'] as const

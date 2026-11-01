@@ -50,6 +50,7 @@ const validEvents: Record<TaskEventType, TaskEvent> = {
   block: { type: 'block', reason: 'Requirements contradict each other' },
   fail: { type: 'fail', reason: 'Repository not accessible' },
   run_failed: { type: 'run_failed' },
+  answer: { type: 'answer' },
   resolve: { type: 'resolve', to: 'ready' }
 }
 
@@ -76,6 +77,7 @@ const d10: Record<TaskEventType, [TaskStatus[], Actor]> = {
   block: [['ready', 'in_progress', 'agent_review', 'human_review', 'ready_to_merge'], server],
   fail: [['in_progress', 'agent_review', 'ready_to_merge'], server],
   run_failed: [['in_progress', 'agent_review'], server],
+  answer: [['blocked'], pm],
   resolve: [['blocked', 'failed'], human]
 }
 
@@ -321,6 +323,18 @@ describe('blocking and failing', () => {
   it('requires a reason', () => {
     expect(transition(task('in_progress'), { type: 'fail', reason: '  ' }, server))
       .toEqual({ ok: false, error: { code: 'reason_required' } })
+  })
+})
+
+describe('answer', () => {
+  it('lets the PM continue a Blocked task, keeping the counters that resolve resets', () => {
+    const blocked = task('blocked', { reviewRounds: 5, failedRuns: 1, reason: 'Which provider?' })
+    expect(expectOk(transition(blocked, { type: 'answer' }, pm))).toMatchObject({ status: 'in_progress', reason: null, reviewRounds: 5, failedRuns: 1 })
+  })
+
+  it('leaves resolve to the human', () => {
+    expect(transition(task('blocked'), { type: 'resolve', to: 'in_progress' }, pm)).toMatchObject({ ok: false, error: { code: 'actor_not_allowed' } })
+    expect(transition(task('blocked'), { type: 'answer' }, human)).toMatchObject({ ok: false, error: { code: 'actor_not_allowed' } })
   })
 })
 

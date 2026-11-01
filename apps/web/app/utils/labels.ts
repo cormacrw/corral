@@ -1,6 +1,6 @@
 import { isTaskDone } from '@corral/core'
 import { AGENT_RUNTIMES } from '@corral/contracts/client'
-import type { Agent, AgentRuntime, CliStatus, Epic, RunnerInfo, RunnerRole, RunnerStatus, InboxItem, PlanStatus, Project, Run, Task } from '@corral/contracts'
+import type { Agent, AgentRuntime, AuditEntry, CliStatus, Epic, RunnerInfo, RunnerRole, RunnerStatus, InboxItem, PlanStatus, Project, Run, Task } from '@corral/contracts'
 import type { AgentRole, DesignVersionStatus, EpicReviewMode, EpicReviewState, RunOutcome, RunState, TaskPriority, TaskStatus } from '@corral/core'
 
 export type Color = 'primary' | 'secondary' | 'success' | 'info' | 'warning' | 'error' | 'neutral'
@@ -73,6 +73,35 @@ export const EPIC_STATUS_TEXT: Record<Color, string> = {
   primary: 'text-primary', secondary: 'text-secondary', neutral: 'text-muted', info: 'text-info', warning: 'text-warning', success: 'text-success', error: 'text-error'
 }
 
+// Epic PR audit events, worded to follow the actor's name in the Activity tab.
+const EPIC_PR_HISTORY: Record<string, string> = {
+  opened: 'opened the epic PR',
+  review_started: 'started the epic integration review',
+  approved: 'approved the epic PR',
+  changes_requested: 'requested changes on the epic PR',
+  human_approved: 'approved the epic PR',
+  human_changes_requested: 'requested changes on the epic PR',
+  rebase_requested: 'asked to rebase the epic PR onto the target branch',
+  rebased: 'rebased the epic PR; CI runs again',
+  conflict: 'found a conflict on the epic PR',
+  rebase_handed_off: 'handed the epic PR rebase to a developer',
+  ci_failed: 'saw CI fail on the epic PR',
+  merge_refused: 'stopped retrying after GitHub refused the epic PR merge',
+  closed: 'saw the epic PR closed on GitHub',
+  merged: 'merged the epic PR'
+}
+
+// Everything listEpicHistory returns: the audit rows whose detail has the epicId.
+export function epicHistoryText(entry: Pick<AuditEntry, 'action' | 'detail'>): string {
+  const d = entry.detail
+  switch (entry.action) {
+    case 'epic.updated': return `edited ${(d.changed as string[] | undefined)?.join(', ') ?? 'the epic'}`
+    case 'merge.refused': return `reported GitHub refused the merge: ${String(d.message)}`
+    case 'epic.pr': return [EPIC_PR_HISTORY[String(d.event)] ?? 'updated the epic PR', d.summary].filter(Boolean).join(': ')
+    default: return 'updated the epic'
+  }
+}
+
 // The counts an epic should show, from live tasks: the server only sends an
 // epic again when the epic itself changes
 export function epicWithLiveCounts<E extends Epic>(epic: E, tasks: Pick<Task, 'epicId' | 'status' | 'type'>[]): E {
@@ -143,6 +172,12 @@ export function detectedRuntimes(clis: Pick<CliStatus, 'id' | 'version'>[]): Age
 // How to sign a CLI in inside the runner container (D12, D18)
 export function cliLoginCommand(id: CliStatus['id']): string {
   return `docker exec -it corral-runner ${id === 'codex' ? 'codex login --device-auth' : 'claude'}`
+}
+
+// PM activity about a project or the factory has no task to name
+export function inboxProjectLine(item: InboxItem): string {
+  const project = item.project?.name ?? 'Global'
+  return item.taskRef ? `${project} · ${item.taskRef}` : project
 }
 
 // design/inbox.md item type badges
