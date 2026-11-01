@@ -1,16 +1,7 @@
 import { z } from 'zod'
+import { PAGE_PATTERNS, PERF_WINDOWS, type PerfWindow } from './client.ts'
 
-// Explicit patterns keep identifiers and query strings out of diagnostics.
-export const PAGE_PATTERNS = [
-  '/', '/home', '/projects', '/setup', '/plan', '/plan/[sessionId]',
-  '/projects/[slug]', '/projects/[slug]/board', '/projects/[slug]/backlog',
-  '/projects/[slug]/settings', '/projects/[slug]/pull-requests',
-  '/tasks/[ref]', '/epics/[id]', '/designs/[versionId]',
-  '/inbox', '/inbox/[itemId]',
-  '/settings', '/settings/[section]', '/settings/profile', '/settings/agents',
-  '/settings/runner', '/settings/performance', '/settings/appearance',
-  '/agents/[name]/[[runId]]'
-] as const
+export { PAGE_PATTERNS, PERF_WINDOWS, type PerfWindow } from './client.ts'
 
 export const CLIENT_PERF_MAX_BYTES = 32 * 1024
 export const clientPerfInput = z.strictObject({
@@ -23,8 +14,6 @@ export const clientPerfInput = z.strictObject({
 })
 export type ClientPerfSample = z.infer<typeof clientPerfInput>['samples'][number]
 
-export const PERF_WINDOWS = ['1h', '24h', '7d'] as const
-export type PerfWindow = (typeof PERF_WINDOWS)[number]
 export const perfSummaryQuery = z.object({ window: z.enum(PERF_WINDOWS).default('24h') })
 
 export interface PerfRouteSummary {
