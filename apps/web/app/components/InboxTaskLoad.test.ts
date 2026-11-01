@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { needsAttention } from '@corral/contracts/client'
 import type { InboxActionInput, InboxArtifact, ServerEvent } from '@corral/contracts'
 import { VueQueryPlugin } from '@tanstack/vue-query'
 import { flushPromises, mount } from '@vue/test-utils'
@@ -183,6 +184,39 @@ it('closes the dock when the item left the list and its action failed', async ()
   }
 })
 
+it('keeps the selected decision, list and count when an informational update arrives', async () => {
+  const { wrapper, item, replace, refresh } = await mountInbox('failed', undefined, 'COR-1')
+  try {
+    const rows = () => wrapper.findAll('li').map(row => row.text())
+    const before = rows()
+    const note = { ...inbox().needsYou.find(i => i.type === 'release_notes')!, id: 'new-note', subject: 'Fresh release', at: new Date(Date.now() + 60_000).toISOString() }
+    const count = inbox().count
+    vi.mocked(api.inbox.get).mockImplementation(async () => ({ ...inbox(), needsYou: [note, ...inbox().needsYou] }))
+    replace.mockClear()
+    await refresh()
+    await flushPromises()
+    expect(rows()).toEqual(before)
+    expect(wrapper.text()).toContain(`Inbox (${count})`)
+    expect(wrapper.text()).toContain(item.subject)
+    expect(replace).not.toHaveBeenCalled()
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('moves on to the next decision, past release notes', async () => {
+  const { wrapper, item, replace, submit } = await mountInbox('failed', undefined, 'COR-1')
+  try {
+    const note = inbox().needsYou.find(i => i.type === 'release_notes')!
+    const next = inbox().needsYou.find(i => i.taskRef && i.id !== item.id)!
+    vi.mocked(api.inbox.get).mockImplementation(async () => ({ ...inbox(), needsYou: [note, next], resolved: [], activity: [] }))
+    await submit()
+    expect(replace).toHaveBeenCalledWith({ path: `/inbox/${next.id}`, query: {} })
+  } finally {
+    wrapper.unmount()
+  }
+})
+
 it('opens the empty state without a task once the last item is resolved', async () => {
   const { wrapper, replace, submit } = await mountInbox('failed', undefined, 'COR-1')
   try {
@@ -361,7 +395,7 @@ it('fills in a pending release note when its deployment updates', async () => {
 it('holds the list while an action runs, then moves to the item at the same position', async () => {
   const { wrapper, item, params, replace, submit, refresh } = await mountInbox('failed')
   try {
-    const before = inbox().needsYou
+    const before = inbox().needsYou.filter(needsAttention)
     const position = before.findIndex(i => i.id === item.id)
     let finish = (_: { task: null }) => {}
     vi.mocked(api.inbox.act).mockReturnValue(new Promise((resolve) => {

@@ -11,7 +11,7 @@ One place for everything an agent needs you to decide, from every project, with 
 Items come from two places:
 
 - **Developer and reviewer runs:** human reviews, blocked and failed tasks, questions, and Activity.
-- **Plan sessions that need you** (D11, amended 2026-10-29): each open session with a question from Juno, a plan needing approval or an unread reply from Juno is a **Plan thread** item. They can be handled from the Inbox or from Plan; both act on the same session. See [Plan threads](#plan-threads).
+- **Plan sessions that need you** (D11): each open session with a question from Juno or a plan needing approval is a **Plan thread** item. They can be handled from the Inbox or from Plan; both act on the same session. A session with only an unread reply is informational and is listed under Activity. See [Plan threads](#plan-threads).
 
 There's no separate notifications feed.
 
@@ -24,7 +24,7 @@ There are three columns. The list divider can be resized (280–560px, default 3
 ### 1. Message list
 
 - **Search** input.
-- **Filter tabs** (`UTabs`, pill): **Inbox** (with count; the Needs you list), **Activity**, **Resolved** (with count).
+- **Filter tabs** (`UTabs`, pill): **Inbox** (with count; the Needs you list, decisions only), **Activity** (agent progress, release notes and unread Plan replies, read on demand, with no count), **Resolved** (with count).
   - Each tab has an icon: inbox tray, pulse, check circle.
   - Below 360px of list width the labels hide. Only icons and counts remain; the names move to tooltips and `aria-label`, e.g. "Inbox, 4".
 - **Rows**, each a button:
@@ -36,7 +36,9 @@ There are three columns. The list divider can be resized (280–560px, default 3
   - a type badge and the project tag (a colour dot and project name)
 - **Plan thread rows** have the same layout with a status badge for the type badge; see [Plan threads](#plan-threads).
 - The selected row uses `bg-elevated`.
-- **Empty state:** "All clear. Nothing here right now."
+- **Empty state:** the Inbox tab says "No decisions are waiting on you. Agents may still be working; their updates are in Activity." It never implies that background work has finished. The detail pane says the same with **Open Activity**. Activity, Resolved and a search with no matches each have their own line.
+- **Live updates:** an informational item arriving adds no Inbox row, doesn't change the count or badge, and doesn't move the selection. It appears under Activity.
+- **A link to an item:** an informational item opens with the list on Activity, and a resolved one on Resolved. A link to something no longer listed shows "This isn't waiting on you any more", with **Open Activity** and, when known, its source: **Open in Plan**, **Open task** or **Open epic**. It's never presented as a new request.
 
 ### 2. Selected message
 
@@ -84,14 +86,14 @@ An open Plan session (D9) that's waiting on you, shown as an Inbox item (D11). A
 
 ### Where they're listed
 
-- Open sessions waiting on you are listed, under **Needs you**, never Activity or Resolved. There are three kinds:
+- Open sessions with a decision are listed under **Needs you**:
   - a pending **question** from Juno (`question` holds it)
   - a plan **needing approval** (`plan` holds its summary)
-  - an **unread reply**: Juno finished a turn you haven't seen, with no question or plan pending (`reply` holds that message's text). Reading the thread, here or in Plan, takes it out of the list.
-- Idle sessions, with none of the three, aren't Inbox items. They stay in Plan and its side nav threads ([plan.md](plan.md#side-nav-threads)). There's no "Open in Plan" divider or group.
-- **Order:** Needs you is one list of task items, threads, epic items and release notes, **newest first** by when each arrived (`at`), with no grouping or divider. The page shows it in the server's order. A task arrives when it enters Human review, Blocked or Failed (its latest transition into that status), so an update that keeps its status, such as its PR head moving, doesn't move it. A thread arrives when it started waiting: when the question was asked, the plan was proposed or the unread reply came in. A release note arrives at its deployment time.
-- The **Needs you** count includes task items, threads and epic items, and excludes release notes.
-- `plan.session` events add, re-sort and remove threads live: a question, a new plan version or a finished Juno turn adds or moves a thread up; answering its question (until Juno asks again), approving its plan, reading its reply or closing it, here or in Plan, removes it at once.
+- An **unread reply** (Juno finished a turn you haven't seen, with no question or plan pending; `reply` holds that message's text) is informational: it's listed under **Activity** and doesn't count. Reading the thread, here or in Plan, takes it out of the list; the conversation stays in Plan.
+- Idle sessions, with none of these, aren't Inbox items. They stay in Plan and its side nav threads ([plan.md](plan.md#side-nav-threads)). There's no "Open in Plan" divider or group.
+- **Order:** Needs you is one list of task items, threads and epic items, **newest first** by when each arrived (`at`), with no grouping or divider. The page shows it in the server's order. A task arrives when it enters Human review, Blocked or Failed (its latest transition into that status), so an update that keeps its status, such as its PR head moving, doesn't move it. A thread arrives when it started waiting: when the question was asked, the plan was proposed or the unread reply came in.
+- The **Needs you** count is exactly that list (`needsAttention`), so it excludes release notes and threads with only an unread reply.
+- `plan.session` events add, re-sort and remove threads live: a question or a new plan version adds or moves a thread up; answering its question (until Juno asks again), approving its plan, reading its reply or closing it, here or in Plan, removes it at once.
 
 ### Row
 
@@ -207,6 +209,6 @@ Mobile Plan threads reuse Plan's `PlanQuestion`, composer and `PlanDetail` botto
 
 ## Release notes (COR-129)
 
-The latest 20 deployments appear as Release notes from the configured PM, with its avatar, project, time and short commit range. Undismissed notes are placed by deployment time in the one newest-first list, among the attention items, read or unread. They do not add to the Needs you badge or tab count. An unread dot stays until the item is opened, on desktop or mobile. Reading keeps the item in the Inbox; Dismiss moves it to Resolved.
+The latest 20 deployments appear as Release notes from the configured PM, with its avatar, project, time and short commit range. Undismissed notes are listed under **Activity** by deployment time, read or unread (D11). They never appear in the default Inbox tab or add to its badge or count, so they need no dismissing. An unread dot stays until the item is opened, on desktop or mobile. Reading keeps the item in Activity; the optional Dismiss moves it to Resolved.
 
 The shared detail pane renders markdown with task references linking to `/tasks/:ref`, and shows the commit range (or the first-deploy commit). Pending notes show “Writing release notes…” and refresh on `deployment.updated`, without a reload. Mobile uses its regular back header and the same detail pane, without a task-details button or reply composer.

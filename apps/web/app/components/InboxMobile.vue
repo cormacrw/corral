@@ -6,7 +6,7 @@ import InboxItemRow from '~/components/InboxItemRow.vue'
 
 // The Inbox list on a phone (design/inbox.md, design/mobile.md), a screen of
 // its own at /inbox. The item is InboxMobileItem.
-const { list, inbox, error, tab, search, items } = useInboxView()
+const { list, inbox, error, tab, search, items, emptyText } = useInboxView()
 
 const searching = ref(Boolean(search.value))
 function toggleSearch() {
@@ -122,16 +122,16 @@ const tabs = computed(() => [
         class="flex flex-col items-center gap-2 p-8 text-center text-sm text-muted"
       >
         <UIcon
-          name="i-lucide-circle-check"
-          class="size-8 text-success"
+          name="i-lucide-inbox"
+          class="size-8"
         />
-        All clear. Nothing here right now.
+        {{ emptyText }}
       </li>
       <li
         v-else-if="tab === 'needsYou'"
         class="p-6 text-center text-sm text-muted"
       >
-        That's everything in your Inbox.
+        That's every decision waiting on you.
       </li>
     </ul>
   </div>
