@@ -156,7 +156,8 @@ export const eventDependencies: EventDependencies = {
       const slug = cache.slug(epic.projectId)
       if (slug) cache.set<Epic[]>(keys.epics.list(slug), upsertInto(epic))
     },
-    invalidates: ({ epic }, cache) => [keys.inbox(), ...(cache.slug(epic.projectId) ? [] : [keys.epics.lists()])]
+    // Epic events reach its history through the audit log, not this payload
+    invalidates: ({ epic }, cache) => [keys.inbox(), keys.epics.history(epic.id), ...(cache.slug(epic.projectId) ? [] : [keys.epics.lists()])]
   },
   'agent.updated': {
     write: ({ agent }, cache) => cache.set<Agent[]>(keys.agents.list(), upsertInto(agent)),

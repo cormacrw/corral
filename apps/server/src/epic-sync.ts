@@ -243,7 +243,9 @@ export class EpicSynchronizer {
   // the reviewer's. Before the push: afterwards the old head is unreachable.
   async #checkResolution(operation: OperationRow, { epic, project }: Context, candidate: string): Promise<void> {
     const { db, github } = this.#d
-    const review = operation.resolutionReview
+    // Read now: the caller's copy can predate the review that freed the task
+    const [current] = await db.select().from(operations).where(eq(operations.id, operation.id))
+    const review = current?.resolutionReview
     if (review?.headSha !== candidate || !APPROVED_STATES.includes(epic.reviewState)) return
     const check = await checkTrivialRebase(github, project.repository, { baseBranch: project.defaultBranch, approvedHeadSha: operation.expectedTargetSha, newHeadSha: candidate, conflictedFiles: operation.conflictFiles ?? [] })
     const outsideConflicts = check.failures.find(f => f.condition === 'changes_outside_conflicts')?.files ?? []

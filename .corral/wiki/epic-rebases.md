@@ -65,7 +65,12 @@ The server's compare runs in `#checkResolution`, before the push, because the
 old head may not be reachable afterwards. It goes onto `resolutionReview`, which
 is bound to the reviewed commit, so a later revision can't reuse it.
 
-Decisions live on `operations.decisions`. A resolution's `stuck` or `blocked`
+`approvalFate` fails closed: a review with no compare on record doesn't carry.
+`#checkResolution` reads the operation itself, because the pass's copy can
+predate the review that made the task Ready to merge.
+
+Decisions live on `operations.decisions`. `waitingOn` is the only reading of
+"open": the newest, unanswered, and what the task is Blocked on now. A resolution's `stuck` or `blocked`
 is refused without one. `waitingDecision` makes it a `question` in the Inbox,
 and `clarify` on one becomes a written decision. An answer that isn't an
 alternative keeping behaviour, or a question closed from the board, never

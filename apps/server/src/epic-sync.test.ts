@@ -3,11 +3,13 @@ import { schema } from '@corral/db'
 import { eq, inArray, isNotNull } from 'drizzle-orm'
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, expect, it, onTestFinished, vi } from 'vitest'
 import { prepareEpicRebase, pushEpicRebase } from '../../runner/src/epic-rebase.ts'
 import { exec } from '../../runner/src/exec.ts'
 import { inspectIntegration, prepareIntegration, pushIntegration } from '../../runner/src/integration.ts'
 import { createTestDataDir, TEST_REPOSITORY } from '../../runner/src/test-repo.ts'
+import { approvalFate } from './epic-rebase-approval.ts'
+import { EpicSynchronizer } from './epic-sync.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './test-runner.ts'
 import { recordTaskSubmission } from './task-submissions.ts'
@@ -638,6 +640,9 @@ it('keeps the human approval over a clean rebase and waits for checks on the new
 })
 
 it('carries approval over a reviewed resolution that preserves behaviour, with no new human approval', async () => {
+  // Required checks that haven't reported hold the epic where the test reads it
+  await t.db.update(schema.projects).set({ requiredChecks: ['ci'] }).where(eq(schema.projects.id, project.id))
+  onTestFinished(async () => void await t.db.update(schema.projects).set({ requiredChecks: [] }).where(eq(schema.projects.id, project.id)))
   const epic = await humanApproved(await conflicted())
   const { fix, resolved, operation } = await resolutionOf(epic)
   const { criteria } = await developerSubmits(fix.id, resolved)
@@ -681,6 +686,71 @@ it('refuses to carry approval when the resolution changed files outside its conf
   await tick()
 
   expect((await approvalEvents(epic.id))[0]).toMatchObject({ event: 'approval_invalidated', detail: { reason: `The resolution changed files outside the conflicts: ${epic.branch}.txt.` } })
+})
+
+it('compares a resolution whose review landed after the pass read the operation', async () => {
+  const epic = await humanApproved(await conflicted())
+  const { fix, resolved } = await resolutionOf(epic)
+  const { criteria } = await developerSubmits(fix.id, resolved)
+  await reviewerApproves(fix.id, resolved, criteria, { preservesApproval: true })
+  const step = EpicSynchronizer.prototype.step
+  const stale = vi.spyOn(EpicSynchronizer.prototype, 'step').mockImplementation(function (this: EpicSynchronizer, operation, stopped) {
+    return step.call(this, { ...operation, resolutionReview: null }, stopped)
+  })
+  onTestFinished(() => stale.mockRestore())
+  await tick()
+
+  expect((await ops(epic.id))[0]!.resolutionReview).toMatchObject({ outsideConflicts: [] })
+  expect((await approvalEvents(epic.id))[0]).toMatchObject({ event: 'approval_retained' })
+})
+
+it('refuses to carry approval with no compare on record, and when the compare fails', async () => {
+  const epic = await humanApproved(await conflicted())
+  const { fix, resolved } = await resolutionOf(epic)
+  const { criteria } = await developerSubmits(fix.id, resolved)
+  await reviewerApproves(fix.id, resolved, criteria, { preservesApproval: true })
+  const compare = vi.spyOn(t.github, 'compare').mockRejectedValue(new Error('GitHub is down'))
+  onTestFinished(() => compare.mockRestore())
+  await tick()
+  expect((await approvalEvents(epic.id))[0]).toMatchObject({ event: 'approval_invalidated', detail: { reason: 'The server could not compare the approved and rebased changes: GitHub is down' } })
+
+  const [operation] = await ops(epic.id)
+  const { runId, headSha, preserved, summary } = operation!.resolutionReview!
+  const uncompared = { runId, headSha, preserved, summary }
+  const [row] = await t.db.select().from(schema.epics).where(eq(schema.epics.id, epic.id))
+  const approvedEpic = { ...row!, reviewState: 'ready_to_merge' as const, prHeadSha: operation!.expectedTargetSha, approvedHeadSha: operation!.expectedTargetSha }
+  expect(approvalFate({ ...operation!, resolutionReview: uncompared }, approvedEpic, headSha)).toMatchObject({ kept: false, reason: expect.stringContaining('never compared') })
+})
+
+it('asks the newest question after an earlier one was closed from the board', async () => {
+  const epic = await humanApproved(await conflicted())
+  const { fix, resolved } = await resolutionOf(epic)
+  await t.orchestrator.schedule()
+  const dev = (await runner.next('run.assign', m => m.job.role === 'developer' && m.job.taskId === fix.id)).job
+  await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'stuck', note: 'Needs a decision', summary: 'Which side?', decision })
+
+  // Closed without an answer: nothing waits on the human any more
+  expect((await t.request('POST', `/api/inbox/${fix.id}/actions`, { action: 'resolve', to: 'in_progress' })).status).toBe(200)
+  expect((await epicApi(epic.id)).sync).toMatchObject({ state: 'resolving' })
+  expect((await inbox()).needsYou.filter(i => i.id === fix.id)).toEqual([])
+  expect((await t.request('POST', `/api/inbox/${fix.id}/actions`, { action: 'decide', alternative: 0 })).status).toBe(409)
+
+  const second = { ...decision, question: 'Which default sort?' }
+  await t.orchestrator.schedule()
+  const again = (await runner.next('run.assign', m => m.job.role === 'developer' && m.job.taskId === fix.id)).job
+  await runner.call(again.runId, again.leaseEpoch, 'report_outcome', { outcome: 'stuck', note: 'Another decision', summary: 'Which sort?', decision: second })
+  expect((await inbox()).needsYou.filter(i => i.id === fix.id)).toMatchObject([{ decision: { question: second.question } }])
+  expect((await epicApi(epic.id)).sync).toMatchObject({ state: 'deciding', question: second.question })
+
+  expect((await t.request('POST', `/api/inbox/${fix.id}/actions`, { action: 'decide', alternative: 0 })).status).toBe(200)
+  const [operation] = await ops(epic.id)
+  expect(operation!.decisions.map(d => [d.question, d.answer?.label ?? null])).toEqual([[decision.question, null], [second.question, 'Keep filtering']])
+
+  // The first stays closed without an answer, so approval can't carry past it
+  const { criteria } = await developerSubmits(fix.id, resolved)
+  await reviewerApproves(fix.id, resolved, criteria, { preservesApproval: true })
+  await tick()
+  expect((await approvalEvents(epic.id))[0]).toMatchObject({ event: 'approval_invalidated', detail: { reason: `The question "${decision.question}" was closed without an answer.` } })
 })
 
 it('asks one focused question for a changed binding decision, and resumes the same operation on a behaviour-keeping answer', async () => {

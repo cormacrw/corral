@@ -7,7 +7,7 @@ import { appendAudit, auditEvent, type ApprovalChange } from './audit.ts'
 import { ApiFailure } from './errors.ts'
 import { addComment, applyTransition, lockTask, type ProjectRow, type TaskRow } from './tasks.ts'
 
-const { epics, taskIntegrationOperations: operations } = schema
+const { epics, taskIntegrationOperations: operations, tasks } = schema
 type OperationRow = typeof operations.$inferSelect
 type EpicRow = typeof epics.$inferSelect
 
@@ -21,8 +21,13 @@ export const shortSha = (sha: string | null) => sha?.slice(0, 10) ?? 'unknown'
 
 export type ApprovalFate = { kept: boolean, reason: string }
 
-export const openDecision = (operation: Pick<OperationRow, 'decisions'>): EpicRebaseDecision | null =>
-  operation.decisions.find(d => !d.answer) ?? null
+// The question a resolution task is Blocked on, if it is. Only the newest can
+// be: an older one without an answer was closed from the board, and one still
+// unanswered no longer describes the task once it's moved on or blocked anew.
+export function waitingOn(operation: Pick<OperationRow, 'decisions'>, task: { status: string, statusReason: string | null }): EpicRebaseDecision | null {
+  const newest = operation.decisions.at(-1)
+  return newest && !newest.answer && task.status === 'blocked' && task.statusReason === newest.question ? newest : null
+}
 
 // Whether approval survives a rebase being published as `commitSha`, or null
 // when there's no approval to speak of. Every path to `kept` starts from the
@@ -36,13 +41,15 @@ export function approvalFate(operation: OperationRow, epic: EpicRow, commitSha: 
   if (!operation.resolutionTaskId) return { kept: true, reason: 'A clean rebase changes nothing that was approved; checks run again on the new head.' }
   const review = operation.resolutionReview
   if (review?.headSha !== commitSha) return { kept: false, reason: `No review of the resolution covers ${shortSha(commitSha)}.` }
-  const unanswered = openDecision(operation)
+  const unanswered = operation.decisions.find(d => !d.answer)
   if (unanswered) return { kept: false, reason: `The question "${unanswered.question}" was closed without an answer.` }
   const changed = operation.decisions.find(d => d.answer?.changesBehaviour)
   if (changed) return { kept: false, reason: `The human's decision changes approved behaviour: ${changed.answer!.label}.` }
   if (!review.preserved) return { kept: false, reason: `The reviewer found a behaviour change: ${review.summary}` }
   if (review.checkError) return { kept: false, reason: `The server could not compare the approved and rebased changes: ${review.checkError}` }
-  if (review.outsideConflicts?.length) return { kept: false, reason: `The resolution changed files outside the conflicts: ${review.outsideConflicts.join(', ')}.` }
+  // Fails closed: no compare on record is no validation
+  if (!review.outsideConflicts) return { kept: false, reason: `The server never compared the approved and rebased changes of ${shortSha(commitSha)}.` }
+  if (review.outsideConflicts.length) return { kept: false, reason: `The resolution changed files outside the conflicts: ${review.outsideConflicts.join(', ')}.` }
   return { kept: true, reason: `The reviewer confirmed the resolution keeps the approved behaviour: ${review.summary}` }
 }
 
@@ -89,7 +96,7 @@ export async function answerDecision(db: Executor, taskId: string, input: Extrac
   return db.transaction(async (tx) => {
     const { task, project } = await lockTask(tx, taskId)
     const operation = await activeResolution(tx, taskId)
-    const decision = operation && task.status === 'blocked' ? openDecision(operation) : null
+    const decision = operation && waitingOn(operation, task)
     if (!operation || !decision) throw new ApiFailure(409, { code: 'conflict', constraint: 'epic_decision_changed' })
     const choice = input.alternative === undefined ? null : decision.alternatives[input.alternative]
     if (choice === undefined) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ message: 'That alternative isn\'t on this question' }] })
@@ -106,8 +113,10 @@ export async function answerDecision(db: Executor, taskId: string, input: Extrac
 
 // The question a Blocked resolution task is waiting on, for the Inbox
 export async function waitingDecision(db: Executor, taskId: string): Promise<EpicRebaseDecision | null> {
-  const [operation] = await db.select({ decisions: operations.decisions }).from(operations).where(and(eq(operations.resolutionTaskId, taskId), inArray(operations.state, [...ACTIVE_OPERATION])))
-  return operation ? openDecision(operation) : null
+  const [row] = await db.select({ decisions: operations.decisions, status: tasks.status, statusReason: tasks.statusReason }).from(operations)
+    .innerJoin(tasks, eq(tasks.id, operations.resolutionTaskId))
+    .where(and(eq(operations.resolutionTaskId, taskId), inArray(operations.state, [...ACTIVE_OPERATION])))
+  return row ? waitingOn(row, row) : null
 }
 
 // What the reviewer of a resolution is told, from the journal

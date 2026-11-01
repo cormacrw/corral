@@ -108,7 +108,7 @@ it('counts a PR merged on GitHub, and leaves a closed one to the human', async (
   const closed = await approved()
   t.github.pulls.get(closed.pr.number)!.state = 'closed'
   await t.orchestrator.merges.tick()
-  expect((await reload(closed.epic.id)).reviewState).toBe('open')
+  expect(await reload(closed.epic.id)).toMatchObject({ reviewState: 'open', approvedHeadSha: null, approvedBaseSha: null })
   expect((await inbox()).activity.find(a => a.epicId === closed.epic.id)!.body).toBe('Epic PR closed on GitHub')
 })
 
