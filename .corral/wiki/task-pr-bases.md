@@ -133,3 +133,15 @@ The task branches created were `corral/ta-1-live-epic-smoke-document-1`,
 `corral/ev-1-live-epic-smoke-document-1` and
 `corral/ev-2-live-epic-smoke-document-2`. None of these smoke runs merged into
 the repository's target branch.
+
+## Task review context in the Inbox
+
+`InboxPanelEpicContext` loads the task's epic through the shared epic detail
+query. Human-review items in `epic` and `each_task` modes show **Part of
+[epic title]. You'll review it all together at the epic PR.** in the top block,
+including when actions and evidence are present. The title opens the epic using
+the shared flyout navigation (the epic page on a phone). Active task PR reviews
+also say **Approve and merge PR #N into the epic branch, or request changes.**
+Spikes and designs show only the context line, retaining their own approval
+labels. Direct epics and standalone tasks have no additional context. The PR
+description tab continues to show GitHub's actual base and head branches.
