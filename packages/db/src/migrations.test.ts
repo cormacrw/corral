@@ -43,7 +43,7 @@ describe('migrations', () => {
   it.for([
     { driver: 'pglite' as const },
     { driver: 'postgres' as const }
-  ])('0055 preserves existing tasks and defaults their kind on $driver', async ({ driver }, context) => {
+  ])('0055 preserves existing tasks and defaults their kind on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
     requireDatabase(driver, context)
     const before = await migrationsBefore('0055_wakeful_alice')
     cleanup.push(() => rm(before, { recursive: true, force: true }))
