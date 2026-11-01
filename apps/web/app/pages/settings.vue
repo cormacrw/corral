@@ -9,6 +9,7 @@ const items = [
   { label: 'Profile', to: '/settings/profile', icon: 'i-lucide-user' },
   { label: 'Agents', to: '/settings/agents', icon: 'i-lucide-bot' },
   { label: 'Runners', to: '/settings/runner', icon: 'i-lucide-server' },
+  { label: 'Performance', to: '/settings/performance', icon: 'i-lucide-gauge' },
   { label: 'Appearance', to: '/settings/appearance', icon: 'i-lucide-palette' }
 ]
 </script>

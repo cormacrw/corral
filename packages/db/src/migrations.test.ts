@@ -171,6 +171,31 @@ describe('migrations', () => {
   it.for([
     { driver: 'pglite' as const },
     { driver: 'postgres' as const }
+  ])('0055 creates the complete performance table after main 0054 on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+    requireDatabase(driver, context)
+    const before = await migrationsBefore('0055_good_agent_brand')
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db, migrate } = await open(driver)
+    await migrate(before)
+    const journal = JSON.parse(await readFile(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as { entries: { when: number }[] }
+    const previous = journal.entries.at(-2)!.when
+    const added = journal.entries.at(-1)!.when
+    expect(added).toBeGreaterThan(previous)
+    expect(Number((await db.execute(sql`select max(created_at) as latest from drizzle.__drizzle_migrations`)).rows[0]!.latest)).toBe(previous)
+    expect((await db.execute(sql`select table_name from information_schema.tables where table_name = 'perf_samples'`)).rows).toEqual([])
+    await migrate(migrationsFolder)
+    await db.execute(sql`insert into perf_samples (kind, name, duration_ms, metric, session_id, query_count, db_time_ms)
+      values ('page', '/tasks/[ref]', 120, 'navigation', '00000000-0000-4000-8000-000000000001', 3, 12.5)`)
+    expect((await db.execute(sql`select metric, session_id, query_count, db_time_ms from perf_samples`)).rows)
+      .toEqual([{ metric: 'navigation', session_id: '00000000-0000-4000-8000-000000000001', query_count: 3, db_time_ms: 12.5 }])
+    expect(Number((await db.execute(sql`select max(created_at) as latest from drizzle.__drizzle_migrations`)).rows[0]!.latest)).toBe(added)
+    await migrate(migrationsFolder)
+    expect((await db.execute(sql`select count(*)::int as count from perf_samples`)).rows).toEqual([{ count: 1 }])
+  })
+
+  it.for([
+    { driver: 'pglite' as const },
+    { driver: 'postgres' as const }
   ])('0035 adds designer without changing existing agents or runs on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
     requireDatabase(driver, context)
     const before = await migrationsBefore('0035_amused_bloodaxe')
@@ -659,7 +684,7 @@ describe('migrations', () => {
   })
 
   // A database at `before` holding what `seed` wrote, then opened the way the
-  // server opens it at startup. `warnings` is what that printed.
+  // server opens it at startup. Capture database notices separately from slow-query warnings.
   async function startServerOn(driver: 'pglite' | 'postgres', before: string, seed: (db: RowsDatabase) => Promise<unknown>) {
     let location: DatabaseLocation
     if (driver === 'pglite') {
@@ -681,7 +706,7 @@ describe('migrations', () => {
     cleanup.push(async () => warn.mockRestore())
     const { db, close } = await openDatabase(location)
     cleanup.unshift(close)
-    return { db: db as unknown as RowsDatabase, warnings: warn.mock.calls.map(call => String(call[0])) }
+    return { db: db as unknown as RowsDatabase, warnings: warn.mock.calls.map(call => String(call[0])).filter(message => message.startsWith('Database warning:')) }
   }
 
   // An empty database to migrate step by step: PGlite in memory, or a

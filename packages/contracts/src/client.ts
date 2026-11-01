@@ -21,6 +21,21 @@ export const SSE_HEARTBEAT_MS = 25_000
 
 export const PULL_REQUEST_LINE_LIMIT = 1000
 
+// Explicit patterns keep identifiers and query strings out of diagnostics.
+export const PAGE_PATTERNS = [
+  '/', '/home', '/projects', '/setup', '/plan', '/plan/[sessionId]',
+  '/projects/[slug]', '/projects/[slug]/board', '/projects/[slug]/backlog',
+  '/projects/[slug]/settings', '/projects/[slug]/pull-requests',
+  '/tasks/[ref]', '/epics/[id]', '/designs/[versionId]',
+  '/inbox', '/inbox/[itemId]',
+  '/settings', '/settings/[section]', '/settings/profile', '/settings/agents',
+  '/settings/runner', '/settings/performance', '/settings/appearance',
+  '/agents/[name]/[[runId]]'
+] as const
+
+export const PERF_WINDOWS = ['1h', '24h', '7d'] as const
+export type PerfWindow = (typeof PERF_WINDOWS)[number]
+
 export function needsAttention(item: InboxItem): boolean {
   return item.type !== 'release_notes'
 }

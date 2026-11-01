@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import pg from 'pg'
 import { attemptAll, operationError } from './failures.ts'
 import * as schema from './schema.ts'
+import { timedDriver } from './query-timing.ts'
 
 // Postgres when deployed and in CI; PGlite in development and tests (D14)
 export type DatabaseLocation =
@@ -76,7 +77,7 @@ export async function openDatabase(location: DatabaseLocation): Promise<Database
     }
     await migrating.end()
     const pool = postgresPool(location.url, { statement_timeout: STATEMENT_TIMEOUT_MS })
-    return { db: drizzleNodePg(pool, { schema, casing }), close: () => pool.end() }
+    return { db: drizzleNodePg(timedDriver(pool), { schema, casing }), close: () => pool.end() }
   }
 
   // PGlite creates its own folder but not missing parents
@@ -85,7 +86,7 @@ export async function openDatabase(location: DatabaseLocation): Promise<Database
     ? new PGlite({ loadDataDir: location.loadDataDir })
     : location.dataDir === null ? new PGlite() : new PGlite(location.dataDir)
   reportPgliteWarnings(client)
-  const db = drizzlePglite(client, { schema, casing })
+  const db = drizzlePglite(timedDriver(client), { schema, casing })
   try {
     await migratePglite(db, { migrationsFolder })
   } catch (error) {
