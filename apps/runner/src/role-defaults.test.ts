@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_ROLE_INSTRUCTIONS } from './role-defaults.ts'
 
 const corralReviewer = readFileSync(new URL('../../../.corral/agents/reviewer.md', import.meta.url), 'utf8')
+const corralDeveloper = readFileSync(new URL('../../../.corral/agents/developer.md', import.meta.url), 'utf8')
 
 describe('pm role defaults', () => {
   const pm = DEFAULT_ROLE_INSTRUCTIONS.pm
@@ -37,6 +38,15 @@ describe('developer role defaults', () => {
 
   it('leaves the git identity to the runner', () => {
     expect(DEFAULT_ROLE_INSTRUCTIONS.developer).toContain('Don\'t set or change the git identity')
+  })
+
+  it.each([
+    ['the role default', DEFAULT_ROLE_INSTRUCTIONS.developer],
+    ['the Corral instructions', corralDeveloper]
+  ])('stops processes by PID, never by pattern, in %s', (_, developer) => {
+    expect(developer).toContain('Stop only processes you started, by PID')
+    expect(developer).toContain('Never use `pkill -f`, `killall` or any other pattern-based kill')
+    expect(developer).toContain('a runner hosts several agents\' worktrees at once')
   })
 
   it('captures visible evidence with agent-browser', () => {
