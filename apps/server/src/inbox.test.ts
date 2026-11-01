@@ -94,6 +94,22 @@ describe('plan threads in the inbox', () => {
     await t.db.delete(planSessions).where(eq(planSessions.id, idleOld.id))
   })
 
+  it('keeps a question listed after the PM closes its turn, read or not, until the human answers', async () => {
+    const project = await t.createProject()
+    const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan it' }).then(r => r.json()) as PlanSessionDetail
+    const job = (await runner.next('run.assign', m => m.job.planSessionId === created.id)).job
+    runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'sess-q' })
+    await sleep(50)
+    await runner.call(job.runId, job.leaseEpoch, 'ask_question', { question: 'Fuzzy matching?' })
+    await endTurn(job, 'Over to you.')
+    const item = async () => (await inbox()).needsYou.find(i => i.id === created.id)
+    expect(await item()).toMatchObject({ status: 'question', question: { text: 'Fuzzy matching?' } })
+    await t.request('POST', `/api/plan/sessions/${created.id}/read`)
+    expect(await item()).toMatchObject({ status: 'question', unread: false })
+    expect((await t.request('POST', `/api/plan/sessions/${created.id}/messages`, { text: 'Yes' })).status).toBe(201)
+    expect(await item()).toBeUndefined()
+  })
+
   it('keeps a failed PM turn actionable, read or not, until the human messages the session', async () => {
     const project = await t.createProject()
     const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan it' }).then(r => r.json()) as PlanSessionDetail
