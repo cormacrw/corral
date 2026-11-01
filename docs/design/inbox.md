@@ -24,7 +24,7 @@ There are three columns. The list divider can be resized (280–560px, default 3
 ### 1. Message list
 
 - **Search** input.
-- **Filter tabs** (`UTabs`, pill): **Inbox** (with count; the Needs you list, decisions only), **Activity** (agent progress, release notes and unread Plan replies, read on demand, with no count), **Resolved** (with count).
+- **Filter tabs** (`UTabs`, pill): **Inbox** (with count; the Needs you list, decisions only), **Activity** (agent progress and release notes, read on demand, with no count), **Resolved** (with count).
   - Each tab has an icon: inbox tray, pulse, check circle.
   - Below 360px of list width the labels hide. Only icons and counts remain; the names move to tooltips and `aria-label`, e.g. "Inbox, 4".
 - **Rows**, each a button:
@@ -102,7 +102,7 @@ One button, in the same list as the other items, with a **Delete thread** button
 
 - the **sender's avatar** and **name** (Juno, under the PM's current name), with the **time** it started waiting. While Juno is working (`activeRunId`), a spinner sits next to the time.
 - the **session title** (bold)
-- a two-line **preview**: Juno's question, the plan summary ("Plan v2 · 2 epics · 4 tasks"), or Juno's reply
+- a two-line **preview**: Juno's question, the plan summary ("Plan v2 · 2 epics · 4 tasks"), or the failed turn's error
 - a **status badge** beside the **project tag** (a thumbnail and the project name): "Needs approval" in `primary`, "Question" in `info` or "Failed" in `error`, with the unread dot before the avatar while the turn is unseen.
 
 ### Detail pane

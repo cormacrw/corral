@@ -427,9 +427,9 @@ describe('orchestrator', () => {
       runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 1 }, headSha: null })
       await eventually(async () => {
         expect(await runRow(job.runId)).toMatchObject({ state: 'failed', outcome: 'failed' })
+        expect((await taskRow(task.id)).failedRuns).toBe(attempt)
       })
       const row = await taskRow(task.id)
-      expect(row.failedRuns).toBe(attempt)
       if (attempt < 3) {
         expect(row.status).toBe('in_progress')
         await t.orchestrator.schedule()
