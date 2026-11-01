@@ -2,7 +2,7 @@
 
 For whoever runs a Corral deployment. It covers switching on PR-free epic tasks and automatic epic rebases, what to do with runners, how to tell what an epic is waiting on, and how to get a stopped one moving. The rules behind it are in [D27](../decisions.md); the walkthrough is [flows.md section 4](../flows.md).
 
-`apps/server/src/mixed-workflow.test.ts` runs each behaviour described here against real git.
+`apps/server/src/mixed-workflow.test.ts` runs mixed epics, legacy runners, restarts, conflicts and simultaneous integrations against real git. Retry and pausing are covered by `epic-sync.test.ts`, `epic-merge.test.ts` and `task-integration.test.ts`.
 
 ## Activating it
 
@@ -44,7 +44,7 @@ While you have a mix of runners:
 | Merged means | The PR squash-merged into the epic branch | The commit carrying its `Corral-Submission` trailer was read back from the epic branch |
 | Human review | On the task | On the epic's final approval (`humanReview` and human checks are ticked there) |
 
-A task with neither `pr` nor `submission` hasn't submitted yet, so it can still go either way. A rebase resolution task (branch `corral/epic-rebase/<operation>`) has no PR and no submission, and uses `pr_updated`; that's expected.
+A task with neither `pr` nor `submission` hasn't submitted yet. At `integration_protocol` 0 it can still go either way, depending on the runner its developer run lands on. At `1` it's already PR-free, because selection happens when the developer run starts. A rebase resolution task (branch `corral/epic-rebase/<operation>`) has no PR and no submission, and uses `pr_updated`; that's expected.
 
 An epic's PR description and its review in the Inbox list both kinds together, with each task's PR or commits and its evidence.
 
@@ -87,7 +87,7 @@ Pausing the project, the kill switch and an update hold all stop new writes, lea
 |---|---|
 | Epic shows **Rebase stopped** | Fix the cause, then press **Retry**, or `POST /api/epics/<id>/sync/retry`. This restarts the failure count, and a reviewed resolution pushes its same commit |
 | Task **Failed** after three integration failures | Read `error` on its operations, then choose **Retry** on its Inbox item. It goes back to its developer |
-| Task **Blocked** because the epic branch is missing, or checks never finished | Restore the cause, then resolve its Inbox item the same way |
+| Task **Blocked** because the epic branch is missing, or checks never finished | Restore the cause, then choose **Answer** on its Inbox item and say what you fixed. It goes back to in progress |
 | Resolution task deleted, or the epic branch moved outside Corral | Nothing. The operation ends, its task and candidate go, and the next checkpoint starts again |
 | Epic PR merge refused three times | It's back in Human review. Approving retries the merge |
 
