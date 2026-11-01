@@ -2,9 +2,13 @@
 import type { Evidence, InboxArtifact } from '@corral/contracts'
 import { mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import InboxMessage from './InboxMessage.vue'
 import MarkdownText from './MarkdownText.vue'
+import TaskRefText from './TaskRefText.vue'
+
+vi.mock('~/queries/shell', () => ({ shell: () => ({ projects: { data: { value: [{ prefix: 'COR' }] } } }) }))
+vi.mock('./TaskLink.vue', () => ({ default: { props: ['taskRef'], template: '<a :href="`/tasks/${taskRef}`"><slot /></a>' } }))
 
 const screenshot: InboxArtifact = { id: 'new', kind: 'screenshot', name: 'fixed.png', url: '/api/evidence/new/file', taskRef: 'TA-1', at: '2026-10-30T12:00:00Z' }
 const modal = defineComponent({
@@ -13,7 +17,7 @@ const modal = defineComponent({
 })
 const render = (message: string | undefined = 'Ready for your review.', newArtifacts: InboxArtifact[] = [screenshot], evidence: Evidence[] = []) => mount(InboxMessage, {
   props: { item: { message, body: '## Findings\n\nThe complete investigation.', newArtifacts }, evidence },
-  global: { components: { MarkdownText, UModal: modal }, stubs: { UIcon: true, UAlert: true, USkeleton: true } }
+  global: { components: { MarkdownText, TaskRefText, UModal: modal }, stubs: { UIcon: true, UAlert: true, USkeleton: true } }
 })
 
 describe('InboxMessage', () => {
@@ -30,6 +34,18 @@ describe('InboxMessage', () => {
     await wrapper.get('button').trigger('click')
     expect(wrapper.get('[data-title="fixed.png"]').attributes('data-open')).toBe('true')
     expect(wrapper.get('[data-title="fixed.png"] img').attributes('src')).toBe(screenshot.url)
+  })
+
+  it('links known refs in the message and leaves the rest of it literal', () => {
+    for (const summary of [false, true]) {
+      const wrapper = mount(InboxMessage, {
+        props: { item: { message: 'Blocked on COR-12, not **XX-3**.', body: '' }, summary },
+        global: { components: { MarkdownText, TaskRefText, UModal: modal }, stubs: { UIcon: true } }
+      })
+      expect(wrapper.get('p').text()).toBe('Blocked on COR-12, not **XX-3**.')
+      expect(wrapper.get('p a[href="/tasks/COR-12"]').text()).toBe('COR-12')
+      expect(wrapper.findAll('p a')).toHaveLength(1)
+    }
   })
 
   it('does not recreate a New row from older evidence or render one when the list is empty', () => {
@@ -73,7 +89,7 @@ describe('InboxMessage', () => {
   it('has no Full message control when there is no body', () => {
     const wrapper = mount(InboxMessage, {
       props: { item: { message: 'Blocked.', body: '' } },
-      global: { components: { MarkdownText, UModal: modal }, stubs: { UIcon: true } }
+      global: { components: { MarkdownText, TaskRefText, UModal: modal }, stubs: { UIcon: true } }
     })
     expect(wrapper.get('p').text()).toBe('Blocked.')
     expect(wrapper.find('details').exists()).toBe(false)

@@ -21,6 +21,6 @@ defineProps<{ p: InboxPanel }>()
       :project="p.item.value.project"
       :size="14"
     />
-    <span class="truncate">{{ p.item.value.project.name }} · {{ p.item.value.taskRef }} · {{ p.item.value.sender.name }} · {{ timeAgo(p.item.value.at) }}</span>
+    <span class="truncate">{{ p.item.value.project.name }} · <TaskLink :task-ref="p.item.value.taskRef" /> · {{ p.item.value.sender.name }} · {{ timeAgo(p.item.value.at) }}</span>
   </p>
 </template>

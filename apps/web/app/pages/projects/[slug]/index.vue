@@ -160,23 +160,32 @@ useSeoMeta({ title: () => `${project.value?.name ?? 'Project'} · Corral` })
                 :key="run.id"
                 :border-radius="8"
               >
-                <NuxtLink
-                  :to="`/agents/${run.agentName.toLowerCase()}/${run.id}`"
-                  class="flex items-center gap-3 rounded-lg border border-primary/40 p-3 outline-primary hover:bg-elevated"
-                >
+                <!-- The run link covers the card, so the task link can sit beside it, not inside it -->
+                <div class="relative flex items-center gap-3 rounded-lg border border-primary/40 p-3 hover:bg-elevated">
                   <AgentAvatar
                     :name="run.agentName"
                     working
                   />
                   <div class="min-w-0">
                     <p class="truncate text-sm">
-                      {{ run.agentName }} is {{ run.role === 'reviewer' ? 'reviewing' : run.role === 'pm' ? 'planning' : 'building' }} {{ run.taskRef ?? (run.epicId ? 'epic' : '') }} {{ taskOf(run)?.title ?? run.epicTitle ?? '' }}
+                      {{ run.agentName }} is {{ run.role === 'reviewer' ? 'reviewing' : run.role === 'pm' ? 'planning' : 'building' }} <TaskLink
+                        v-if="run.taskRef"
+                        :task-ref="run.taskRef"
+                        class="relative z-10"
+                      /><template v-else>
+                        {{ run.epicId ? 'epic' : '' }}
+                      </template> {{ taskOf(run)?.title ?? run.epicTitle ?? '' }}
                     </p>
                     <p class="text-xs text-muted">
                       Run #{{ run.number }} · <ElapsedTime :from="run.startedAt ?? run.queuedAt" /> · {{ run.state.replace('_', ' ') }}
                     </p>
                   </div>
-                </NuxtLink>
+                  <NuxtLink
+                    :to="`/agents/${run.agentName.toLowerCase()}/${run.id}`"
+                    :aria-label="`${run.agentName}, run #${run.number}`"
+                    class="absolute inset-0 rounded-lg outline-primary"
+                  />
+                </div>
               </BorderGlow>
             </div>
             <p
@@ -244,10 +253,10 @@ useSeoMeta({ title: () => `${project.value?.name ?? 'Project'} · Corral` })
                 <span class="min-w-0 truncate">
                   <span class="font-medium">{{ actorName(entry) }}</span>{{ ' ' }}
                   <span class="text-muted">{{ activityText(entry) }}</span>{{ ' ' }}
-                  <NuxtLink
-                    :to="`/tasks/${taskRefOf(entry)}`"
-                    class="font-mono text-xs text-muted hover:underline"
-                  >{{ taskRefOf(entry) }}</NuxtLink>
+                  <TaskLink
+                    :task-ref="taskRefOf(entry)"
+                    class="font-mono text-xs"
+                  />
                   <span class="ms-2 text-xs text-dimmed"><TimeAgo :at="entry.createdAt" /></span>
                 </span>
               </li>

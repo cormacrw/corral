@@ -35,7 +35,7 @@ function file(artifact: InboxArtifact): ViewerFile {
     class="min-w-0 space-y-3"
   >
     <p :class="['[overflow-wrap:anywhere]', summary ? 'line-clamp-3 text-sm' : 'text-base whitespace-pre-wrap']">
-      {{ item.message }}
+      <TaskRefText :text="item.message" />
     </p>
     <div
       v-if="item.newArtifacts?.length"

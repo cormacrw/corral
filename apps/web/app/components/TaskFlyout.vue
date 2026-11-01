@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { taskFlyoutHosts } from '~/composables/taskLinkHost'
+
+onMounted(() => taskFlyoutHosts.value++)
+onUnmounted(() => taskFlyoutHosts.value--)
 // The docked flyout wrapper: resizable 360–960px, remembered width. Shows a
 // task, an epic, or what the page puts in its slot for ?plan.
 const flyout = useTaskFlyout()
