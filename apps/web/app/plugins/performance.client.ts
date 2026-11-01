@@ -1,4 +1,5 @@
-import { PAGE_PATTERNS, type ClientPerfSample } from '@corral/contracts'
+import type { ClientPerfSample } from '@corral/contracts'
+import { PAGE_PATTERNS } from '@corral/contracts/client'
 import { onCLS, onINP, onLCP } from 'web-vitals'
 
 export default defineNuxtPlugin((app) => {

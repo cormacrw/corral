@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { PERF_WINDOWS, type PerfVitals, type PerfWindow } from '@corral/contracts'
+import type { PerfVitals } from '@corral/contracts'
+import { PERF_WINDOWS, type PerfWindow } from '@corral/contracts/client'
 import { useQuery } from '@tanstack/vue-query'
 import { performanceQuery } from '~/queries/performance'
 import { formatLatency, formatVital, VITAL_RATING, vitalRating } from '~/utils/performance'
