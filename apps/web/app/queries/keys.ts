@@ -1,4 +1,4 @@
-import type { FlowMetricsQuery } from '@corral/contracts'
+import type { FlowMetricsQuery, PerfWindow } from '@corral/contracts'
 
 export interface RunFilter {
   agentId?: string
@@ -62,6 +62,7 @@ export const keys = {
   inbox: () => ['inbox'] as const,
   // A mutation key: what's running, not cached data
   inboxResolving: () => ['inbox', 'resolving'] as const,
+  performance: (window: PerfWindow) => ['performance', window] as const,
   profile: () => ['profile'] as const,
   runner: () => ['runner'] as const,
   status: () => ['status'] as const

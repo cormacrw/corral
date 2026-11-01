@@ -271,7 +271,7 @@ describe('orchestrator', () => {
     for (const { exit, state, error } of cases) {
       const { project, task, job } = await assigned()
       runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit, headSha: null, lastActivityAt })
-      await sleep(200)
+      await expect.poll(async () => (await runRow(job.runId)).state).toBe(state)
       const run = await runRow(job.runId)
       expect(run.state).toBe(state)
       expect(run.error).toContain(error)
