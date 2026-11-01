@@ -3,11 +3,19 @@ import { failedMergeGates, requiresHumanReview, taskRef } from '@corral/core'
 import { schema, type Database } from '@corral/db'
 import { and, asc, desc, eq, isNotNull, isNull, ne } from 'drizzle-orm'
 import { ApiFailure } from './errors.ts'
-import { GitHubError, type GitHubClient } from './github.ts'
+import { GitHubError, type CheckResult, type GitHubClient } from './github.ts'
 import type { MergeOrchestrator } from './merge.ts'
 import type { ProjectRow } from './tasks.ts'
 
 const { reviews, tasks } = schema
+
+// The project's required checks as `results` has them, for any commit
+export function requiredChecks(project: ProjectRow, results: CheckResult[]): PullRequestStatus['ci']['checks'] {
+  return project.requiredChecks.map((name) => {
+    const check = results.find(c => c.name === name)
+    return { name, conclusion: check?.conclusion ?? 'missing' as const, url: check?.url ?? null }
+  })
+}
 
 // Every task in the project with an open PR, and where it stands against the
 // merge gates. The gate facts come from the merge orchestrator and the
@@ -22,10 +30,7 @@ export async function listPullRequests(db: Database, merges: MergeOrchestrator, 
     const { pr } = report
     if (pr.state !== 'open' || pr.merged) return null
     const [review] = await db.select().from(reviews).where(eq(reviews.taskId, task.id)).orderBy(desc(reviews.createdAt)).limit(1)
-    const checks = project.requiredChecks.map((name) => {
-      const check = report.checks.find(c => c.name === name)
-      return { name, conclusion: check?.conclusion ?? 'missing' as const, url: check?.url ?? null }
-    })
+    const checks = requiredChecks(project, report.checks)
     const failed = failedMergeGates(report.facts)
     return {
       taskRef: taskRef(project.prefix, task.number),
@@ -84,6 +89,12 @@ function capFiles(files: PullRequestFile[]): { files: PullRequestFile[], cut: bo
     remaining -= lines
   }
   return { files: kept, cut: false }
+}
+
+// Any diff under the PR cap, in GitHub's order
+export function capDiff(all: PullRequestFile[]): { files: PullRequestFile[], totalFiles: number, truncated: boolean } {
+  const { files, cut } = capFiles(all.slice(0, PULL_REQUEST_FILE_LIMIT))
+  return { files, totalFiles: all.length, truncated: cut || files.length < all.length }
 }
 
 // Any PR on the project's repository, not just a task's: the epic panel reads

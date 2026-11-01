@@ -191,7 +191,7 @@ it('blocks for a changed binding decision without consuming a round', async () =
   await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
 })
 
-const file = (filename: string, patch: string): ChangedFile => ({ filename, status: 'modified', sha: `blob-${filename}-${patch}`, patch })
+const file = (filename: string, patch: string): ChangedFile => ({ filename, status: 'modified', sha: `blob-${filename}-${patch}`, additions: 1, deletions: 0, patch })
 const approvedDiff = [file('app.ts', '@@ -1,2 +1,3 @@\n a\n+feature'), file('billing.ts', '@@ -9,2 +9,2 @@ tax\n-old\n+new')]
 // The same billing.ts change further down, under a new base
 const rebasedDiff = [file('app.ts', '@@ -1,3 +1,4 @@\n a\n+main\n+feature'), file('billing.ts', '@@ -40,2 +40,2 @@ invoice\n-old\n+new')]
@@ -267,7 +267,7 @@ it('sends a trivial rebase that changed an undeclared file to the reviewer, nami
 
 // GitHub leaves the patch out, and the head blob is the same either side: this
 // was A → C before the rebase and B → C after it, which overwrites the base's B
-const binary = (filename: string, status: string): ChangedFile => ({ filename, status, sha: 'blob-c' })
+const binary = (filename: string, status: string): ChangedFile => ({ filename, status, sha: 'blob-c', additions: 0, deletions: 0 })
 
 it.each([
   ['a modified binary', 'modified'],

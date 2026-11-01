@@ -1,10 +1,11 @@
-import type { AgentRole } from '@corral/core'
+import type { AgentRole, EpicReviewMode, EpicReviewState, TaskKind } from '@corral/core'
 import { z } from 'zod'
 import type { EpicReviewFinding } from './runner.ts'
 import type { AgentRuntime } from './agent-runtimes.ts'
 import type { Deployment } from './deployments.ts'
 import type { Plan, PlanQuestion } from './plans.ts'
-import type { Evidence, Task } from './tasks.ts'
+import type { PullRequestDetail, PullRequestFile, PullRequestStatus } from './pull-requests.ts'
+import type { Evidence, Task, TaskCommit } from './tasks.ts'
 
 // ── Inbox (D11, design/inbox.md) ───────────────────────────────────────────
 
@@ -163,6 +164,67 @@ export interface EpicReviewTask {
   evidence: Evidence[]
   humanReview: boolean
   humanChecks: string[]
+}
+
+// One board task on an epic's review. Exactly one of its PR and integrated
+// commit is set once its work reached the epic branch. `humanChecks` are
+// criterion IDs, with their text in `criteria`.
+export interface EpicReviewTaskRow extends Omit<EpicReviewTask, 'task'> {
+  id: string
+  ref: string
+  title: string
+  kind: TaskKind
+  merged: boolean
+  prNumber: number | null
+  prUrl: string | null
+  integratedCommit: TaskCommit | null
+  // Who passed it: `human` when it had its own human review, which is what
+  // the review's You saw counts. Null until someone has.
+  reviewedBy: 'human' | 'reviewer' | null
+  criteria: Task['acceptanceCriteria']
+  criteriaMet: number
+  criteriaTotal: number
+}
+
+// The human's last request for changes, and what moved since that head.
+// `files` is capped as `PullRequestDetail.files` is; the rest is at `diffUrl`.
+// A diff GitHub can't give leaves `files` empty and `truncated` true. After a
+// rebase a file's patch is its whole change on the epic, not the change since.
+export interface EpicReviewFeedback {
+  text: string
+  at: string
+  headSha: string | null
+  // A snapshot from the request, so renaming or removing a task keeps the link
+  fixTasks: InboxSince['fixTasks']
+  files: PullRequestFile[]
+  totalFiles: number
+  truncated: boolean
+  diffUrl: string | null
+}
+
+// GET /epics/:id/review. Actions go to POST on the same path, with `headSha`.
+export interface EpicReview {
+  epicId: string
+  title: string
+  goal: string
+  reviewMode: EpicReviewMode
+  state: EpicReviewState | null
+  targetBranch: string
+  headSha: string | null
+  // Null until the epic has a PR
+  pr: PullRequestDetail | null
+  gateChecks: PullRequestStatus['ci']['checks']
+  // Commits on the target branch that the epic branch doesn't have
+  targetMovedBy: number
+  // Newest first
+  rounds: EpicReviewRound[]
+  tasks: EpicReviewTaskRow[]
+  // How many of `tasks` had their own human review
+  seenByHuman: number
+  lastFeedback: EpicReviewFeedback | null
+  // The unfinished task resolving a rebase conflict
+  conflictTaskRef: string | null
+  mergeCommitSha: string | null
 }
 
 export interface ReleaseNotesItem extends InboxItemBase {

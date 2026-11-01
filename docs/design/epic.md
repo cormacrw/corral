@@ -32,6 +32,7 @@ The tree is read-only: dependencies are edited on the tasks themselves. It follo
 
 - `GET /api/projects/:slug/epics`: the project's epics with task and merged counts (Drafts excluded), `prUrl` and `reviewModeLocked`.
 - `GET /api/epics/:id`: the epic and all its tasks, Drafts included.
+- `GET /api/epics/:id/review`: the `EpicReview` the human approves from, read live from GitHub: goal, state, PR, required checks, commits the target has moved, integration rounds, one row per board task and the last feedback. Unknown is 404; a `direct` epic is 409, because it has no epic review. Actions stay on `POST /api/epics/:id/review`.
 - `PATCH /api/epics/:id`: title, description and/or review mode. Changing the mode once `reviewModeLocked` is true answers 409. Publishes `epic.updated`.
 
 ## Epic prerequisites (D22)
