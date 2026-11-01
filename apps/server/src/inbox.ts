@@ -191,7 +191,7 @@ export async function inboxCount(db: Executor): Promise<number> {
     waitingSessions(db),
     countEpicItems(db)
   ])
-  return open!.n + threads.length + epicCount
+  return open!.n + threads.filter(t => t.attention.status !== 'none').length + epicCount
 }
 
 function openTaskFilter(taskId?: string) {

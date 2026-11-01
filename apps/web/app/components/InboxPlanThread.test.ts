@@ -86,7 +86,9 @@ it('reads an unread thread in place and keeps it open, without fetching the Inbo
     emitLive({ type: 'agent.updated' })
     await flushPromises()
     vi.mocked(api.inbox.get).mockClear()
-    expect(rows()).toContain('s-1')
+    // Only an unread reply: not a decision, so the row goes, the open thread stays
+    expect(rows()).not.toContain('s-1')
+    expect(wrapper.findComponent(InboxPlanThread).exists()).toBe(true)
 
     emitLive({ type: 'plan.session', session: { id: 's-1', unread: true } })
     await flushPromises()
@@ -97,7 +99,6 @@ it('reads an unread thread in place and keeps it open, without fetching the Inbo
     emitLive({ type: 'plan.session', session: { id: 's-1', unread: false }, markedRead: { inboxCount: 1 } })
     await flushPromises()
     expect(api.inbox.get).not.toHaveBeenCalled()
-    expect(rows()).not.toContain('s-1')
     expect(wrapper.findComponent(InboxPlanThread).exists()).toBe(true)
   } finally {
     wrapper.unmount()

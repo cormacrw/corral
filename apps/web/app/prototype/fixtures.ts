@@ -1,5 +1,6 @@
 import { RUNNER_PROTOCOL_VERSION } from '@corral/contracts'
 import type { EpicRebaseDecision } from '@corral/core'
+import { needsAttention } from '@corral/contracts/client'
 import corralThumbnail from '~/assets/images/corral-thumbnail.svg'
 import type {
   Agent,
@@ -981,8 +982,8 @@ export function inbox(): Inbox {
     sender: { name: 'Corral', role: 'system' }, at: completed.updatedAt,
     prUrl: completed.pr?.url ?? null, resolution: null
   }]
-  const count = needsYou.length
   needsYou.push(...releaseNotes.filter(r => !r.resolution))
+  const count = needsYou.filter(needsAttention).length
   needsYou.sort((a, b) => b.at.localeCompare(a.at))
   const approved = { ...activity[0]!, id: 'activity-approved', body: 'You approved and merged it', preview: 'You approved and merged it', resolution: 'You approved and merged it', sender: { name: 'Rita', role: 'reviewer' as const } }
   return { needsYou, activity, resolved: [...resolvedInbox, approved, ...releaseNotes.filter(r => r.resolution)], count }
