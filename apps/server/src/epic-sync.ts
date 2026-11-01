@@ -3,11 +3,13 @@ import { schema, type Database, type Executor } from '@corral/db'
 import { and, desc, eq, gte, inArray, isNotNull, isNull, ne, notInArray, or } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
 import { complete, epicBoard } from './epic-prs.ts'
+import { ACTIVE_OPERATION as ACTIVE, APPROVED_STATES, approvalChange, approvalFate } from './epic-rebase-approval.ts'
 import { getEpic } from './epics.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
 import type { GitHubClient } from './github.ts'
 import type { RunnerHub } from './runner-hub.ts'
+import { checkTrivialRebase } from './rebase-review.ts'
 import { epicResolutionBranch } from './task-base.ts'
 import { runEndValues } from './run-lifecycle.ts'
 import { applyTransition, createTask, deleteTaskRows, loadTask, lockTask, type ProjectRow } from './tasks.ts'
@@ -19,7 +21,6 @@ type Context = { epic: EpicRow, project: ProjectRow }
 type Stopped = () => boolean
 
 const server: Actor = { kind: 'system', component: 'server' }
-const ACTIVE = ['pending', 'running', 'reconciling'] as const
 
 // Endings that say nothing against these commits: they retry at once
 const EPIC_MOVED = 'The epic branch moved'
@@ -77,7 +78,9 @@ export async function retrySync(db: Database, epicId: string, actor: Actor, now:
 // A clean rebase is mechanical and keeps approval. A conflict stays on an
 // isolated candidate branch: the operation holds the lock while a developer
 // and a reviewer work on it as a task on the board, and only the approved
-// candidate is pushed to the epic branch.
+// candidate is pushed to the epic branch. Approval crosses it only when
+// approvalFate says the review validated it; a question goes to the human on
+// the same operation.
 export class EpicSynchronizer {
   #d: EpicSyncDeps
   #settled: (taskId: string) => Promise<void>
@@ -211,7 +214,8 @@ export class EpicSynchronizer {
       const id = await createTask(tx, project, {
         type: 'task', title: `Rebase epic: ${epic.title}`.slice(0, 200), description: resolutionBrief(branch, target, operation.ontoSha!, files), epicId: epic.id,
         acceptanceCriteria: [`${branch} is rebased onto ${operation.ontoSha} of ${target} with no merge commits, and the conflicts in ${files.join(', ') || 'the rebase'} are resolved keeping both sides' intent`, `Nothing newly landed on ${target} is removed or reverted, and the rebase adds no feature changes`]
-      }, server, { epicFix: true })
+        // The epic's approval stands until the publish step has judged the result
+      }, server, { epicFix: true, keepEpicReview: true })
       await tx.update(tasks).set({ branch }).where(eq(tasks.id, id))
       await tx.update(operations).set({ resolutionTaskId: id, conflictFiles: files, updatedAt: this.#now() }).where(eq(operations.id, operation.id))
       await appendAudit(tx, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, event: 'rebase_resolving', summary: files.join(', '), files }))
@@ -231,7 +235,19 @@ export class EpicSynchronizer {
     if (task.status !== 'ready_to_merge' || task.leaseRunId || task.paused || !task.headSha || ctx.epic.syncError) return false
     const runnerId = runner.epicRebaseRunner()
     if (!runnerId) return false
+    await this.#checkResolution(operation, ctx, task.headSha)
     return this.#publish(operation, ctx, task.headSha, runnerId, stopped)
+  }
+
+  // Compares the approved and rebased changes on the server's own account, not
+  // the reviewer's. Before the push: afterwards the old head is unreachable.
+  async #checkResolution(operation: OperationRow, { epic, project }: Context, candidate: string): Promise<void> {
+    const { db, github } = this.#d
+    const review = operation.resolutionReview
+    if (review?.headSha !== candidate || !APPROVED_STATES.includes(epic.reviewState)) return
+    const check = await checkTrivialRebase(github, project.repository, { baseBranch: project.defaultBranch, approvedHeadSha: operation.expectedTargetSha, newHeadSha: candidate, conflictedFiles: operation.conflictFiles ?? [] })
+    const outsideConflicts = check.failures.find(f => f.condition === 'changes_outside_conflicts')?.files ?? []
+    await db.update(operations).set({ resolutionReview: { ...review, outsideConflicts, checkError: check.error ?? null } }).where(eq(operations.id, operation.id))
   }
 
   async #publish(operation: OperationRow, ctx: Context, candidate: string, runnerId: string, stopped: Stopped): Promise<boolean> {
@@ -341,12 +357,15 @@ export class EpicSynchronizer {
       const [done] = await tx.update(operations).set({ state: 'succeeded', resultHeadSha: commitSha, error: null, updatedAt: this.#now() })
         .where(and(eq(operations.id, operation.id), inArray(operations.state, [...ACTIVE]), eq(operations.leaseEpoch, operation.leaseEpoch))).returning()
       if (!done) return
-      const approved = locked!.reviewState === 'human_review' || locked!.reviewState === 'ready_to_merge' || locked!.reviewState === 'conflict'
-      // A clean rebase is mechanical and keeps approval (D27). A resolved
-      // conflict isn't: the head moves unrecorded, so review starts over.
-      const kept = !taskId && approved && locked!.prHeadSha === operation.expectedTargetSha
-      await tx.update(epics).set({ syncError: null, conflictFiles: null, ...kept && { prHeadSha: commitSha, reviewState: locked!.reviewState === 'conflict' ? 'ready_to_merge' : locked!.reviewState }, updatedAt: this.#now() }).where(eq(epics.id, epic.id))
+      // Checks and the merge gate read the new head, so keeping approval never
+      // skips them. Losing it sends the epic back through the reconcile pass.
+      const fate = approvalFate(done, locked!, commitSha)
+      const approval = fate?.kept
+        ? { prHeadSha: commitSha, approvedBaseSha: operation.ontoSha, reviewState: locked!.reviewState === 'conflict' ? 'ready_to_merge' as const : locked!.reviewState }
+        : fate ? { reviewState: 'open' as const, approvedHeadSha: null, approvedBaseSha: null } : {}
+      await tx.update(epics).set({ syncError: null, conflictFiles: null, ...approval, updatedAt: this.#now() }).where(eq(epics.id, epic.id))
       await appendAudit(tx, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, event: 'rebased', from: operation.expectedTargetSha, to: commitSha }))
+      if (fate) await appendAudit(tx, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, ...approvalChange(done, locked!, commitSha, fate) }))
       if (!taskId) return
       const { task } = await lockTask(tx, taskId)
       if (task.status !== 'ready_to_merge') return
@@ -384,8 +403,8 @@ function resolutionBrief(branch: string, target: string, ontoSha: string, files:
   return { type: 'doc' as const, content: [
     paragraph(`Corral could not rebase this epic onto ${target} cleanly. ${branch} is a private candidate holding the epic's commits; the epic branch itself stays untouched until this task is approved, and Corral then publishes your commit with a compare-and-swap. No PR is opened.`),
     paragraph(`Run git fetch origin && git rebase ${ontoSha}. Never merge ${target} in. Resolve the conflicts in ${conflicts}, then run the project's gates and report pr_updated.`),
-    paragraph(`Keep both sides' intent. What landed on ${target} stands: never remove or revert it to make the old epic work, and adapt the epic's change around it instead. Make no feature changes. If the two sides can't both be kept, report stuck and say why.`),
-    paragraph(`Reviewer: use git range-diff against the old epic commits and check each resolved hunk against the ${target} commit that caused it. Request changes if ${target}'s work was dropped or the rebase adds anything new.`)
+    paragraph(`Keep both sides' intent. What landed on ${target} stands: never remove or revert it to make the old epic work, and adapt the epic's change around it instead. Make no feature changes. If the two sides can't both be kept, or the target changed a binding decision this work relies on, report stuck with \`decision\`: one focused question, its alternatives, and the changes affected. The human's answer brings this same task back to you.`),
+    paragraph(`Reviewer: use git range-diff against the old epic commits and check each resolved hunk against the ${target} commit that caused it. Request changes if ${target}'s work was dropped or the rebase adds anything new that nobody decided.`)
   ] }
 }
 

@@ -47,6 +47,8 @@ import { recordDeployment, updateDeploymentInbox, type ReleaseNotes } from './de
 import { flowMetrics } from './flow-metrics.ts'
 import { approveDesign, DESIGN_BUNDLE_HEADERS, listDesignVersions, readDesignFile, readDesignScreenshot } from './designs.ts'
 import { checkAvatar, getProfile, patchProfile, readAvatar, setAgentAvatar, setUserAvatar } from './avatars.ts'
+import { epicHistory } from './epic-prs.ts'
+import { answerDecision, waitingDecision } from './epic-rebase-approval.ts'
 import { getEpic, listEpics, patchEpic, setEpicDependencies } from './epics.ts'
 import type { EventBus } from './events.ts'
 import { loadInbox } from './inbox.ts'
@@ -131,9 +133,20 @@ export function createApp({ db, events, actor, runner, orchestrator, github, blo
   }
 
   // design/inbox.md: what the tray does, all through D10 transitions
+  const decide = async (taskId: string, input: Extract<InboxActionInput, { action: 'decide' }>) => {
+    events.publish({ type: 'epic.updated', epic: await getEpic(db, await answerDecision(db, taskId, input, actor)) })
+  }
   const inboxAction = async (taskId: string, input: InboxActionInput) => {
     switch (input.action) {
+      case 'decide':
+        await decide(taskId, input)
+        break
       case 'clarify': {
+        // A written answer to an epic rebase's question is still its decision
+        if (await waitingDecision(db, taskId)) {
+          await decide(taskId, { action: 'decide', text: input.text })
+          break
+        }
         await addComment(db, taskId, { body: input.text, pinned: true }, actor)
         await transitionTask(db, taskId, { type: 'resolve', to: 'in_progress' }, actor)
         break
@@ -309,6 +322,12 @@ export function createApp({ db, events, actor, runner, orchestrator, github, blo
     .post('/epics/:id/sync/retry', async c => c.json(await orchestrator.epicPrs.retrySync(c.req.param('id'), actor)))
 
     .get('/epics/:id', async c => c.json(await getEpic(db, c.req.param('id'))))
+
+    // PRD §14: every approval decision can be understood afterwards
+    .get('/epics/:id/history', async (c) => {
+      const epic = await getEpic(db, c.req.param('id'))
+      return c.json(await epicHistory(db, epic.id))
+    })
 
     .put('/epics/:id/dependencies', validate('json', setEpicDependenciesInput), async (c) => {
       const id = c.req.param('id')

@@ -30,6 +30,10 @@ const details = computed(() => openTab.value as Exclude<InboxPanelTab, 'overview
 const hasEvidence = computed(() => p.images.value.length > 0 || p.others.value.length > 0)
 // Approval can't be taken without its task, so there's nothing to explain
 const actionHelp = computed(() => props.ctx.actions.filter(a => !(a.value === 'approve' && props.ctx.taskLoadFailed)))
+const decisionItem = computed(() => {
+  const { item } = props.ctx
+  return item.decision ? { ...item, decision: item.decision } : null
+})
 const loading = computed(() => props.ctx.taskLoading || (p.isReview.value && props.ctx.evidenceLoading))
 </script>
 
@@ -128,6 +132,10 @@ const loading = computed(() => props.ctx.taskLoading || (p.isReview.value && pro
         v-else-if="openTab === 'overview'"
         class="flex flex-col gap-4"
       >
+        <InboxEpicDecision
+          v-if="decisionItem && p.canAct.value"
+          :item="decisionItem"
+        />
         <p
           v-if="!p.canAct.value"
           class="text-sm text-muted"

@@ -41,7 +41,7 @@ export async function invalidateEpicReview(db: Executor, epicId: string | null):
   const [epic] = await db.select().from(epics).where(eq(epics.id, epicId)).for('update')
   // Changes requested stands until the epic's fix work has merged
   if (!epic?.prNumber || epic.reviewState === 'merged' || epic.reviewState === 'changes_requested') return
-  await db.update(epics).set({ reviewState: 'open', conflictFiles: null, updatedAt: new Date() }).where(eq(epics.id, epicId))
+  await db.update(epics).set({ reviewState: 'open', approvedHeadSha: null, approvedBaseSha: null, conflictFiles: null, updatedAt: new Date() }).where(eq(epics.id, epicId))
   await db.update(runs).set(runEndValues({ state: 'interrupted', error: 'Epic board changed; integration review must run again' }, new Date()))
     .where(and(eq(runs.epicId, epicId), inArray(runs.state, [...ACTIVE_RUN_STATES])))
 }

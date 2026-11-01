@@ -1,3 +1,4 @@
+import type { EpicRebaseDecision, ResolutionReview } from '@corral/core'
 import { sql } from 'drizzle-orm'
 import { check, index, integer, jsonb, pgTable, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 import { createdAt, updatedAt } from './columns.ts'
@@ -46,6 +47,10 @@ export const taskIntegrationOperations = pgTable('task_integration_operations', 
   // The task resolving a rebase's conflicts on its own candidate branch
   resolutionTaskId: uuid().references(() => tasks.id, { onDelete: 'set null' }),
   conflictFiles: jsonb().$type<string[]>(),
+  // The reviewer's judgment of the resolution, bound to the commit it read
+  resolutionReview: jsonb().$type<ResolutionReview>(),
+  // Questions the resolution put to the human, oldest first, with their answers
+  decisions: jsonb().$type<EpicRebaseDecision[]>().notNull().default([]),
   // Pushes of a reviewed resolution, which stays active between them
   pushAttempts: integer().notNull().default(0),
   runnerId: text(),

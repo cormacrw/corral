@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useMutation, useQuery } from '@tanstack/vue-query'
-import { epicQuery, patchEpic, retryEpicSync, setEpicDependencies } from '~/queries/epics'
+import { epicHistoryQuery, epicQuery, patchEpic, retryEpicSync, setEpicDependencies } from '~/queries/epics'
 import type { PatchEpicInput } from '@corral/contracts'
 import { isTaskDone, type EpicReviewMode } from '@corral/core'
 import { ApiError } from '~/queries/client'
@@ -93,6 +93,7 @@ const byStatus = computed(() => statusCounts(epic.value?.tasks ?? []))
 const reviewModes = Object.entries(EPIC_REVIEW_MODE).map(([value, mode]) => ({ value, label: mode.label }))
 const reviewStatus = computed(() => epic.value && epicReviewStatus(epicWithLiveCounts(epic.value, epic.value.tasks)))
 const sync = computed(() => epic.value?.sync ?? null)
+const history = useQuery(computed(() => epicHistoryQuery(props.epicId)))
 async function retrySync() {
   try {
     await retryMutation.mutateAsync({ id: props.epicId })
@@ -238,6 +239,13 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
           :description="`${sync.taskRef ?? 'A developer'} is rebasing this epic in private${sync.files.length ? `: ${sync.files.join(', ')}` : ''}. The epic branch moves once a reviewer approves.`"
         />
         <UAlert
+          v-else-if="sync?.state === 'deciding'"
+          color="warning"
+          variant="subtle"
+          title="This rebase needs your decision"
+          :description="`${sync.question} It's in your Inbox on ${sync.taskRef ?? 'the rebase task'}. The rebase resumes when you answer.`"
+        />
+        <UAlert
           v-else-if="sync?.state === 'failed'"
           color="error"
           variant="subtle"
@@ -251,6 +259,24 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
           aria-label="Epic title"
           @change="patch({ title: ($event.target as HTMLInputElement).value })"
         >
+
+        <section v-if="history.data.value?.length">
+          <h3 class="mb-1 text-xs font-medium text-muted">
+            History
+          </h3>
+          <ol
+            class="flex max-h-64 flex-col gap-1.5 overflow-y-auto text-xs"
+            data-testid="epic-history"
+          >
+            <li
+              v-for="entry in history.data.value"
+              :key="entry.id"
+            >
+              <span class="font-medium">{{ entry.actor }}</span>
+              <span class="text-muted"> {{ entry.text }}</span>
+            </li>
+          </ol>
+        </section>
 
         <section>
           <h3 class="mb-1 text-xs font-medium text-muted">

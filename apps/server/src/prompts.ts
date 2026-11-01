@@ -109,6 +109,8 @@ export interface ReviewTask extends PromptTask {
   requiredChecks: string[]
   // The D24 conditions the server check found broken, when it ran
   rebaseCheckFailures?: RebaseCheckFailure[]
+  // The epic rebase this task resolves a conflict for, from its journal
+  epicResolution?: { oldHead: string, ontoSha: string, conflictFiles: string[], approvedHeadSha: string | null, decisions: { question: string, answer: string }[] } | null
 }
 
 export interface TaskSubmission {
@@ -146,6 +148,7 @@ export function reviewerPrompt(task: ReviewTask & { underReview?: DesignUnderRev
     commentsSection(task),
     attachmentsSection(task),
     pinSection(task, 'reviewer'),
+    epicResolutionSection(task),
     gatesSection(task),
     section('How to review', `
 - You are in a read-only checkout of the commit under review. Do not edit, commit or push. ${submission
@@ -181,6 +184,22 @@ function submissionHistory(task: ReviewTask): string {
 }
 
 // D24: review the resolution; the server carries the approved criteria forward.
+// COR-291: what lets approval cross a resolved conflict is this judgment, on
+// exactly this commit, so it spells out what to compare
+function epicResolutionSection(task: ReviewTask): string {
+  const r = task.epicResolution
+  if (!r) return ''
+  return section('Epic rebase under review', `This resolves a conflict in the epic's rebase onto \`${r.ontoSha}\` of \`${task.defaultBranch}\`. The epic head before it is \`${r.oldHead}\`. ${r.approvedHeadSha ? `Approval stands on that head (first given on \`${r.approvedHeadSha}\`), so your verdict decides whether it carries forward.` : 'The epic has no approval to carry yet.'}
+Conflicted files: ${r.conflictFiles.join(', ') || '(not recorded)'}.
+${r.decisions.length ? `The human already decided:\n${r.decisions.map(d => `- ${d.question} ${d.answer}`).join('\n')}\nA change that follows these decisions isn't scope creep.\n` : ''}
+- Compare approved and candidate with \`git range-diff $(git merge-base ${r.oldHead} ${r.ontoSha})..${r.oldHead} ${r.ontoSha}..HEAD\`.
+- Check each conflict hunk against the \`${task.defaultBranch}\` commit that caused it, and read \`git log -p ${r.oldHead}...${r.ontoSha} --right-only\` for the target's changes.
+- Read any change to \`CORRAL.md\`, \`CLAUDE.md\`, \`docs/\` or \`.corral/wiki/\` in that range: a binding decision may have moved under the epic.
+- If the two sides' intended behaviours can't both hold, or a changed binding decision affects the epic, don't pick a side: report outcome "blocked" with \`decision\`: one focused question, its alternatives and the changes affected.
+- Otherwise approve with \`preservesApproval: true\` only if every behaviour that was approved is unchanged. Approve with \`preservesApproval: false\` if the resolution is sound but behaviour changed: the epic then returns to integration review and the human.
+- Request changes if the resolution is wrong.`)
+}
+
 function rebaseReviewerPrompt(task: ReviewTask, agentName: string): string {
   return [
     `You are ${agentName}, the reviewer agent in Corral. Rebase review for ${task.ref}: ${task.title}.`,

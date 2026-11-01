@@ -1,9 +1,11 @@
 import { RUNNER_PROTOCOL_VERSION } from '@corral/contracts'
+import type { EpicRebaseDecision } from '@corral/core'
 import corralThumbnail from '~/assets/images/corral-thumbnail.svg'
 import type {
   Agent,
   AuditEntry,
   CliStatus,
+  EpicHistoryEntry,
   Comment,
   DesignVersion,
   Epic,
@@ -141,6 +143,8 @@ export const epics: Epic[] = [
     prNumber: 212,
     prUrl: 'https://github.com/cormacrw/corral/pull/212',
     prHeadSha: '6f1c2ab94d',
+    approvedHeadSha: null,
+    approvedBaseSha: null,
     reviewState: 'conflict',
     sync: null,
     reviewModeLocked: true,
@@ -161,6 +165,8 @@ export const epics: Epic[] = [
     prNumber: null,
     prUrl: null,
     prHeadSha: null,
+    approvedHeadSha: null,
+    approvedBaseSha: null,
     reviewState: null,
     sync: null,
     reviewModeLocked: true,
@@ -181,6 +187,8 @@ export const epics: Epic[] = [
     prNumber: null,
     prUrl: null,
     prHeadSha: null,
+    approvedHeadSha: null,
+    approvedBaseSha: null,
     reviewState: null,
     sync: null,
     reviewModeLocked: true,
@@ -192,26 +200,26 @@ export const epics: Epic[] = [
   {
     id: 'e-site', projectId: 'p-site', title: 'Website refresh',
     description: 'Refresh the landing page and navigation.', dependsOn: [], blocks: [],
-    reviewMode: 'direct', branch: null, prNumber: null, prUrl: null, prHeadSha: null, reviewState: null, sync: null, reviewModeLocked: false,
+    reviewMode: 'direct', branch: null, prNumber: null, prUrl: null, prHeadSha: null, approvedHeadSha: null, approvedBaseSha: null, reviewState: null, sync: null, reviewModeLocked: false,
     taskCount: 2, mergedCount: 0, createdAt: ago(60 * 24), updatedAt: ago(30)
   },
   {
     id: 'e-shipped', projectId: 'p-site', title: 'Pricing fixes',
     description: 'Completed fixes.', dependsOn: [], blocks: [],
-    reviewMode: 'direct', branch: null, prNumber: null, prUrl: null, prHeadSha: null, reviewState: null, sync: null, reviewModeLocked: false,
+    reviewMode: 'direct', branch: null, prNumber: null, prUrl: null, prHeadSha: null, approvedHeadSha: null, approvedBaseSha: null, reviewState: null, sync: null, reviewModeLocked: false,
     taskCount: 1, mergedCount: 1, createdAt: ago(60 * 24), updatedAt: ago(10)
   },
   {
     id: 'e-empty', projectId: 'p-site', title: 'Future campaigns',
     description: 'Planning only.', dependsOn: [], blocks: [],
-    reviewMode: 'direct', branch: null, prNumber: null, prUrl: null, prHeadSha: null, reviewState: null, sync: null, reviewModeLocked: false,
+    reviewMode: 'direct', branch: null, prNumber: null, prUrl: null, prHeadSha: null, approvedHeadSha: null, approvedBaseSha: null, reviewState: null, sync: null, reviewModeLocked: false,
     taskCount: 0, mergedCount: 0, createdAt: ago(60), updatedAt: ago(5)
   },
   // Nothing has opened a PR, so its review mode can still change
   {
     id: 'e-exports', projectId: 'p-corral', title: 'CSV exports',
     description: 'Export the board and run history as CSV.', dependsOn: [], blocks: [],
-    reviewMode: 'epic', branch: 'corral/epic-e-exports-csv-exports', prNumber: null, prUrl: null, prHeadSha: null, reviewState: null, sync: null, reviewModeLocked: false,
+    reviewMode: 'epic', branch: 'corral/epic-e-exports-csv-exports', prNumber: null, prUrl: null, prHeadSha: null, approvedHeadSha: null, approvedBaseSha: null, reviewState: null, sync: null, reviewModeLocked: false,
     taskCount: 2, mergedCount: 0, createdAt: ago(60 * 5), updatedAt: ago(40)
   },
   // One epic in each other epic PR review state (D27), its tasks all merged
@@ -229,7 +237,7 @@ function epicInReview(id: string, title: string, reviewState: Epic['reviewState'
   return {
     id, projectId: 'p-corral', title, description: `${title}, reviewed as one epic PR.`, dependsOn: [], blocks: [],
     reviewMode: 'epic', branch: `corral/epic-${id}`, prNumber, prUrl: `https://github.com/cormacrw/corral/pull/${prNumber}`,
-    prHeadSha: `${prNumber}c2ab94d`, reviewState, sync: null, reviewModeLocked: true,
+    prHeadSha: `${prNumber}c2ab94d`, approvedHeadSha: null, approvedBaseSha: null, reviewState, sync: null, reviewModeLocked: true,
     taskCount: fixing ? 3 : 2, mergedCount: 2, createdAt: ago(60 * 24 * 2), updatedAt: ago(prNumber - 200)
   }
 }
@@ -866,6 +874,24 @@ function threadAttention(status: PlanSession['status'], last?: PlanMessage, plan
   return reply ? { status, question: null, plan: null, planId: null, reply: reply.text } : null
 }
 
+// An epic rebase's question, with what became of an earlier one's approval
+const epicDecision: EpicRebaseDecision = {
+  id: 'decision-1', runId: 'run-1', raisedAt: ago(40), answer: null,
+  question: 'Should a CSV export keep filtered rows only, now that main exports everything?',
+  bindingDecision: 'D31 in docs/decisions.md',
+  alternatives: [
+    { label: 'Keep filtered exports', effect: 'Exports match the table the user is looking at, as you approved.', changesBehaviour: false },
+    { label: 'Follow main', effect: 'Exports always include every row, and the filter is ignored.', changesBehaviour: true }
+  ],
+  affectedChanges: ['abc1234 on main: export every row', 'COR-41: filtered exports', 'apps/web/app/utils/export.ts']
+}
+
+export const epicHistory: EpicHistoryEntry[] = [
+  { id: '1', at: ago(120), actor: 'You', event: 'human_approved', text: 'You approved the epic PR', detail: {} },
+  { id: '2', at: ago(90), actor: 'Corral', event: 'rebased', text: 'Epic PR rebased; CI runs again', detail: {} },
+  { id: '3', at: ago(90), actor: 'Corral', event: 'approval_retained', text: 'Approval kept across the rebase: Approved 6f1c2ab94d, rebased 6f1c2ab94d to 2be07c11a3. The reviewer confirmed the resolution keeps the approved behaviour: both sides kept in export.ts.', detail: {} }
+]
+
 export function inbox(): Inbox {
   const needsYou: InboxItem[] = tasks
     .filter(t => t.status === 'human_review' || t.status === 'blocked' || t.status === 'failed')
@@ -895,7 +921,8 @@ export function inbox(): Inbox {
         sender: type === 'failed' ? { name: 'Corral', role: 'system' as const } : type === 'human_review' ? { name: 'Rita', role: 'reviewer' as const } : { name: 'Victor', role: 'developer' as const },
         at: t.updatedAt,
         prUrl: t.pr?.url ?? null,
-        resolution: null
+        resolution: null,
+        ...(t.ref === 'COR-42' && { decision: epicDecision })
       }
     })
   // Threads waiting on the human: a question, a plan needing approval or an unread reply

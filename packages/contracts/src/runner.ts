@@ -116,6 +116,19 @@ const unknownOutcome = `must be one of ${REPORTED_OUTCOMES.options.join(', ')}`
 const criterionVerdict = z.object({ criterionId: z.string(), met: z.boolean(), note: z.string().default('') })
 const missingCriteria = 'Give a verdict for every acceptance criterion'
 
+// What an epic rebase's developer or reviewer asks the human when keeping both
+// sides would mean choosing product behaviour (COR-291)
+export const epicDecisionInput = z.object({
+  question: z.string().trim().min(1).describe('One focused question for the human'),
+  bindingDecision: z.string().trim().min(1).optional().describe('The binding decision that changed, if that is the cause, e.g. "D31 in docs/decisions.md"'),
+  alternatives: z.array(z.object({
+    label: z.string().trim().min(1).describe('A short name for this choice'),
+    effect: z.string().trim().min(1).describe('What the product does if this is chosen'),
+    changesBehaviour: z.boolean().describe('True when this changes the behaviour the human approved, so the epic goes back through review')
+  })).min(2, 'Give at least two alternatives').max(5),
+  affectedChanges: z.array(z.string().trim().min(1)).min(1, 'Name the changes affected').describe('The commits, files or tasks on each side this decision affects')
+})
+
 // The report_outcome tool's arguments. MCP clients need a plain object as a
 // tool's input, so this stays flat; the schemas below decide which fields each
 // outcome needs.
@@ -125,13 +138,15 @@ export const reportOutcomeInput = z.object({
   review: z.enum(REBASE_REVIEWS).optional().describe('Required for pr_rebased: trivial only for combining both sides with no new logic, renames or behaviour changes; otherwise needs_review'),
   conflictedFiles: z.array(z.string().trim().min(1)).min(1, 'conflictedFiles must contain at least one file').optional().describe('Required for pr_rebased: every file in which you resolved a conflict'),
   note: z.string().trim().optional().describe('Developer only, required: one line of at most 200 characters saying what this run did, posted as a comment on the task, e.g. "Addressed review: dropped idle-thread fixture"'),
-  criteria: z.array(criterionVerdict).optional().describe('Reviewer only: a verdict per acceptance criterion')
+  criteria: z.array(criterionVerdict).optional().describe('Reviewer only: a verdict per acceptance criterion'),
+  preservesApproval: z.boolean().optional().describe('Reviewer of an epic rebase resolution only, when approving: true only if the approved behaviour is unchanged; false restarts the epic\'s normal review'),
+  decision: epicDecisionInput.optional().describe('Epic rebase resolutions only, required with stuck or blocked: the question for the human, with alternatives and the changes affected')
 })
 
 // Set by the runner, never the agent. headSha: the commit a developer's run
 // pushed, or the one a reviewer's checkout is at. baseSha: where a submitted
 // commit forked from its epic branch.
-const reportFields = { summary: reportOutcomeInput.shape.summary, note: reportOutcomeInput.shape.note, review: reportOutcomeInput.shape.review, conflictedFiles: reportOutcomeInput.shape.conflictedFiles, headSha: z.string().optional(), baseSha: z.string().optional() }
+const reportFields = { summary: reportOutcomeInput.shape.summary, note: reportOutcomeInput.shape.note, review: reportOutcomeInput.shape.review, conflictedFiles: reportOutcomeInput.shape.conflictedFiles, preservesApproval: reportOutcomeInput.shape.preservesApproval, decision: reportOutcomeInput.shape.decision, headSha: z.string().optional(), baseSha: z.string().optional() }
 const taskReview = <Outcome extends z.ZodType<ReviewVerdict>>(outcome: Outcome) => z.object({ ...reportFields, outcome, criteria: z.array(criterionVerdict, { error: missingCriteria }) })
 const nonReview = z.object({ ...reportFields, outcome: NON_REVIEW_OUTCOMES })
 
