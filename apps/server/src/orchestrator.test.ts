@@ -415,10 +415,9 @@ describe('orchestrator', () => {
     let job = first
     for (let attempt = 1; attempt <= 3; attempt++) {
       runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 1 }, headSha: null })
-      await sleep(200)
+      await expect.poll(async () => (await taskRow(task.id)).failedRuns, { timeout: 1500 }).toBe(attempt)
       expect(await runRow(job.runId)).toMatchObject({ state: 'failed', outcome: 'failed' })
       const row = await taskRow(task.id)
-      expect(row.failedRuns).toBe(attempt)
       if (attempt < 3) {
         expect(row.status).toBe('in_progress')
         await t.orchestrator.schedule()
