@@ -1,13 +1,13 @@
 import { askQuestionInput, planMessageFields, type NewPlanMessageFields, listTasksInput, normalizeProposedPlan, proposedPlanInput, type AgentRuntime, type DraftSession, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type PmRunJob } from '@corral/contracts'
-import { approvedPlanSummary, checkPlan, checkPlanEpicDependencies, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, revisionProblem, richTextToMarkdown, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
+import { approvedPlanSummary, checkPlan, checkPlanEpicDependencies, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, revisionProblem, richTextToMarkdown, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PmAction, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
-import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNull, lte, ne, notInArray, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { appendAudit, auditEvent, auditText } from './audit.ts'
 import { agentActivity, UnknownAgent } from './agent-activity.ts'
 import { listTaskAttachments } from './attachments.ts'
 import { publishInvalidatedEpics, type InvalidatedEpics } from './epic-review-state.ts'
-import { listEpics, replaceEpicDependencies } from './epics.ts'
+import { listEpics, replaceEpicDependencies, reviewModeLocked } from './epics.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
 import { inboxCount } from './inbox.ts'
@@ -143,14 +143,20 @@ export class PlanService {
     const { db, events } = this.#d
     const session = await this.#session(sessionId)
     if (session.closedAt) return this.#toSession(session)
-    const active = await db.select({ id: runs.id }).from(runs)
-      .where(and(eq(runs.planSessionId, sessionId), eq(runs.role, 'pm'), inArray(runs.state, ['queued', 'starting', 'running', 'stopping'])))
-    for (const run of active) await this.#d.stopRun(run.id, actor)
+    await this.#assertCloseAllowed(db, sessionId, actor)
+    const stopTurns = async () => {
+      const active = await db.select({ id: runs.id }).from(runs)
+        .where(and(eq(runs.planSessionId, sessionId), eq(runs.role, 'pm'), inArray(runs.state, ['queued', 'starting', 'running', 'stopping'])))
+      for (const run of active) await this.#d.stopRun(run.id, actor)
+    }
+    await stopTurns()
     const deleted = await db.transaction(async (tx) => {
       const [locked] = await tx.select().from(planSessions).where(eq(planSessions.id, sessionId)).for('update')
       if (locked!.closedAt) return null
-      const drafts = await tx.select({ id: tasks.id }).from(tasks)
-        .where(and(eq(tasks.projectId, session.projectId), eq(tasks.status, 'draft'), isNull(tasks.deletedAt))).for('update')
+      await this.#assertCloseAllowed(tx, sessionId, actor)
+      const drafts = await tx.select({ id: tasks.id, projectId: tasks.projectId }).from(tasks)
+        .where(and(eq(tasks.status, 'draft'), isNull(tasks.deletedAt), inArray(tasks.id, tx.select({ id: planTasks.taskId }).from(planTasks)
+          .innerJoin(plans, eq(plans.id, planTasks.planId)).where(eq(plans.sessionId, sessionId))))).for('update')
       const owners = await draftSessions(tx, drafts.map(t => t.id))
       const owned = drafts.filter(t => owners.get(t.id)?.id === sessionId)
       const detached = new Set<string>()
@@ -163,20 +169,38 @@ export class PlanService {
       await tx.update(planSessions).set({ closedAt: now, updatedAt: now, unread: false }).where(eq(planSessions.id, sessionId))
       return { owned, detached: [...detached].filter(id => !owned.some(t => t.id === id)) }
     })
+    // Catch a turn inserted between the first stop and the session lock.
+    // startPmRun's same lock now refuses every insertion after close.
+    await stopTurns()
     const closed = await this.#toSession(await this.#session(sessionId))
     if (deleted) {
-      for (const task of deleted.owned) events.publish({ type: 'task.deleted', taskId: task.id, projectId: session.projectId })
+      for (const task of deleted.owned) events.publish({ type: 'task.deleted', taskId: task.id, projectId: task.projectId })
       for (const task of await loadTasks(db, deleted.detached)) events.publish({ type: 'task.updated', task })
       const discarded = await db.select().from(plans).where(and(eq(plans.sessionId, sessionId), eq(plans.status, 'discarded')))
       for (const plan of await this.toPlans(discarded)) events.publish({ type: 'plan.updated', plan })
       events.publish({ type: 'plan.session', session: closed })
-      await this.#publishDrafts(session.projectId)
+      for (const projectId of new Set(deleted.owned.map(t => t.projectId))) await this.#publishDrafts(projectId)
     }
     return closed
   }
 
+  // An agent may stop an empty thread, but discarding human-owned work
+  // requires the human's confirmed close flow (D11/D29).
+  async #assertCloseAllowed(db: Executor, sessionId: string, actor: Actor): Promise<void> {
+    if (actor.kind === 'human') return
+    const [proposed] = await db.select({ id: plans.id }).from(plans)
+      .where(and(eq(plans.sessionId, sessionId), eq(plans.status, 'proposed'))).limit(1)
+    const drafts = await db.select({ id: tasks.id }).from(tasks)
+      .where(and(eq(tasks.status, 'draft'), isNull(tasks.deletedAt), inArray(tasks.id, db.select({ id: planTasks.taskId }).from(planTasks)
+        .innerJoin(plans, eq(plans.id, planTasks.planId)).where(eq(plans.sessionId, sessionId)))))
+    const owners = await draftSessions(db, drafts.map(t => t.id))
+    if (proposed || drafts.some(t => owners.get(t.id)?.id === sessionId)) {
+      throw new ToolError('This thread has a proposed plan or owned Drafts. Ask the human to close it using Close thread and confirm the discard; agents cannot discard this work.')
+    }
+  }
+
   // design/plan.md: the project and runtime are locked once the session has messages
-  async start(projectId: string, input: { id?: string | undefined, text: string, taskRef?: string | undefined, runtime?: AgentRuntime }, actor: Actor): Promise<PlanSessionDetail> {
+  async start(projectId: string | null, input: { id?: string | undefined, text: string, taskRef?: string | undefined, runtime?: AgentRuntime, title?: string, parentSessionId?: string }, actor: Actor): Promise<PlanSessionDetail> {
     this.assertTurnPossible()
     const { db, events } = this.#d
     // A retry returns the original thread without interpreting a new message.
@@ -184,23 +208,25 @@ export class PlanService {
       const [existing] = await db.select().from(planSessions).where(eq(planSessions.id, input.id))
       if (existing) return this.#retryStart(existing, projectId)
     }
-    const [project] = await db.select().from(projects).where(eq(projects.id, projectId))
-    if (!project) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['projectId'], message: 'Unknown project' }] })
+    const [project] = projectId ? await db.select().from(projects).where(eq(projects.id, projectId)) : []
+    if (projectId && !project) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['projectId'], message: 'Unknown project' }] })
     let attached: string | null = null
     await requireRuntimeCli(this.#d.runner, input.runtime ?? 'claude-code')
     this.assertTurnPossible()
     if (input.taskRef) {
+      if (!project) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['taskRef'], message: 'Choose a project to attach a task' }] })
       const task = await loadTask(db, await this.#taskIdByRef(project, input.taskRef))
       attached = `${task.ref} ${task.title}`
     }
     const text = input.text || `Refine ${attached}`
-    const fallback = titleFrom(input.text || `Refine ${input.taskRef}`)
+    const sender = input.parentSessionId ? await this.#session(input.parentSessionId) : null
+    const fallback = input.title ?? titleFrom(input.text || `Refine ${input.taskRef}`)
     const created = await db.transaction(async (tx) => {
       this.assertTurnPossible()
-      const [session] = await tx.insert(planSessions).values({ ...(input.id ? { id: input.id } : {}), projectId, title: fallback, runtime: input.runtime ?? 'claude-code', createdBy: actor })
+      const [session] = await tx.insert(planSessions).values({ ...(input.id ? { id: input.id } : {}), projectId, title: fallback, parentSessionId: sender?.id ?? null, runtime: input.runtime ?? 'claude-code', createdBy: actor })
         .onConflictDoNothing({ target: planSessions.id }).returning()
       if (!session) return null
-      const message = await insertMessage(tx, session.id, { role: 'human', kind: 'message', text })
+      const message = await insertMessage(tx, session.id, { role: sender ? 'thread' : 'human', kind: 'message', text }, { senderSessionId: sender?.id ?? null, senderTitle: sender?.title ?? null })
       await appendAudit(tx, { projectId, actor }, auditEvent('plan.message', { sessionId: session.id, messageId: message!.id }))
       return { session, message: message! }
     })
@@ -213,24 +239,25 @@ export class PlanService {
     // Leave the response independent of runner/orchestrator work, including
     // synchronous failures. The durable message remains the turn's record.
     setImmediate(() => {
-      void this.#queueInitialTurn(session, project, text, attached).catch(error => console.error(`Recording failed PM turn for ${session.id} failed`, error)).finally(() => this.#pendingTurns.delete(session.id))
-      void this.#generateTitle(session.id, fallback, { text, attachedTask: attached })
+      void this.#queueInitialTurn(session, project, sender ? threadText(sender, text) : text, attached).catch(error => console.error(`Recording failed PM turn for ${session.id} failed`, error)).finally(() => this.#pendingTurns.delete(session.id))
+      if (!input.title) void this.#generateTitle(session.id, fallback, { text, attachedTask: attached })
     })
     return detail
   }
 
-  async #retryStart(session: SessionRow, projectId: string): Promise<PlanSessionDetail> {
+  async #retryStart(session: SessionRow, projectId: string | null): Promise<PlanSessionDetail> {
     if (session.projectId !== projectId) throw new ApiFailure(409, { code: 'conflict', constraint: 'plan_session_project' })
     return this.getSession(session.id)
   }
 
-  async #queueInitialTurn(session: SessionRow, project: ProjectRow, text: string, attached: string | null): Promise<void> {
+  async #queueInitialTurn(session: SessionRow, project: ProjectRow | undefined, text: string, attached: string | null): Promise<void> {
     try {
       await this.#turn(session, project, {
-        prompt: pmPrompt({ text, attachedTask: attached, projectName: project.name, prefix: project.prefix, fresh: true }),
-        fallbackPrompt: pmFallbackPrompt({ text, attachedTask: attached, projectName: project.name, prefix: project.prefix, history: await this.#history(session.id) })
+        prompt: pmPrompt({ text, attachedTask: attached, projectName: project?.name ?? null, prefix: project?.prefix ?? null, fresh: true }),
+        fallbackPrompt: pmFallbackPrompt({ text, attachedTask: attached, projectName: project?.name ?? null, prefix: project?.prefix ?? null, history: await this.#history(session.id) })
       })
     } catch (error) {
+      if ((await this.#session(session.id)).closedAt) return
       const { db, events } = this.#d
       const message = await insertMessage(db, session.id, { role: 'pm', kind: 'error', text: `Could not queue the PM turn: ${error instanceof Error ? error.message : String(error)}` })
       await db.update(planSessions).set({ updatedAt: new Date(), unread: true }).where(eq(planSessions.id, session.id))
@@ -319,12 +346,16 @@ export class PlanService {
       .map(p => ({ ref: taskRef(prefix, p.number), title: p.title, status: p.status, version: p.version }))
   }
 
+  async actionSessionChanged(sessionId: string): Promise<void> {
+    this.#d.events.publish({ type: 'plan.session', session: await this.#toSession(await this.#session(sessionId)) })
+  }
+
   // A human message starts one PM turn (D9)
-  async message(sessionId: string, input: { text: string, taskRef?: string | undefined }, actor: Actor): Promise<PlanMessage> {
+  async message(sessionId: string, input: { text: string, taskRef?: string | undefined, senderSessionId?: string }, actor: Actor): Promise<PlanMessage> {
     const { db } = this.#d
     const session = await this.#session(sessionId)
-    const [project] = await db.select().from(projects).where(eq(projects.id, session.projectId))
-    if (!project) throw notFound()
+    const [project] = session.projectId ? await db.select().from(projects).where(eq(projects.id, session.projectId)) : []
+    if (session.projectId && !project) throw notFound()
     this.assertTurnPossible()
     // One turn at a time per session; other sessions, in this project or
     // another, aren't held back, since the PM has no concurrency (D9, D13)
@@ -334,29 +365,46 @@ export class PlanService {
 
     let attached: string | null = null
     if (input.taskRef) {
+      if (!project) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['taskRef'], message: 'Choose a project to attach a task' }] })
       const task = await loadTask(db, await this.#taskIdByRef(project, input.taskRef))
       attached = `${task.ref} ${task.title}`
     }
+    const [previousInput] = await db.select({ createdAt: planMessages.createdAt }).from(planMessages)
+      .where(and(eq(planMessages.sessionId, sessionId), inArray(planMessages.role, ['human', 'thread']), eq(planMessages.kind, 'message')))
+      .orderBy(desc(planMessages.createdAt)).limit(1)
     const text = input.text || `Refine ${attached}`
-    const message = await insertMessage(db, sessionId, { role: 'human', kind: 'message', text })
+    const sender = input.senderSessionId ? await this.#session(input.senderSessionId) : null
+    const message = await insertMessage(db, sessionId, { role: sender ? 'thread' : 'human', kind: 'message', text }, { senderSessionId: sender?.id ?? null, senderTitle: sender?.title ?? null })
     // A new message reopens a session closed by approving its plan
     await db.update(planSessions).set({ updatedAt: new Date(), unread: false, closedAt: null }).where(eq(planSessions.id, sessionId))
-    await appendAudit(db, { projectId: project.id, actor }, auditEvent('plan.message', { sessionId, messageId: message!.id }))
+    await appendAudit(db, { projectId: session.projectId, actor }, auditEvent('plan.message', { sessionId, messageId: message!.id }))
     this.#d.events.publish({ type: 'plan.message', message: toMessage(message!) })
 
+    // Warm agent sessions do not replay database history. Include the saved
+    // confirmation ledger in full, plus notices since the preceding input.
+    // The current input is already saved, so notices racing this query remain
+    // after its timestamp and are delivered with the next turn.
+    const results = await db.select().from(planMessages)
+      .where(and(eq(planMessages.sessionId, sessionId), or(
+        eq(planMessages.kind, 'action_result'),
+        and(eq(planMessages.kind, 'notification'), lte(planMessages.createdAt, message!.createdAt), previousInput ? gt(planMessages.createdAt, previousInput.createdAt) : undefined)
+      )))
+      .orderBy(asc(planMessages.createdAt))
+    const attributedText = sender ? threadText(sender, text) : text
+    const turnText = results.length ? `${attributedText}\n\nRecorded tool results and thread notifications:\n${results.map(r => r.role === 'thread' ? threadText({ id: r.senderSessionId ?? 'removed', title: r.senderTitle ?? 'Removed thread' }, r.text) : r.text).join('\n')}` : attributedText
     await this.#turn(session, project, {
-      prompt: pmPrompt({ text, attachedTask: attached, projectName: project.name, prefix: project.prefix, fresh: session.agentSessionId === null }),
-      fallbackPrompt: pmFallbackPrompt({ text, attachedTask: attached, projectName: project.name, prefix: project.prefix, history: await this.#history(sessionId) })
+      prompt: pmPrompt({ text: turnText, attachedTask: attached, projectName: project?.name ?? null, prefix: project?.prefix ?? null, fresh: session.agentSessionId === null }),
+      fallbackPrompt: pmFallbackPrompt({ text: attributedText, attachedTask: attached, projectName: project?.name ?? null, prefix: project?.prefix ?? null, history: await this.#history(sessionId) })
     })
     return toMessage(message)
   }
 
-  async #turn(session: SessionRow, project: ProjectRow, prompts: { prompt: string, fallbackPrompt: string }): Promise<void> {
+  async #turn(session: SessionRow, project: ProjectRow | undefined, prompts: { prompt: string, fallbackPrompt: string }): Promise<void> {
     const runId = await this.#d.startRun(session, {
       role: 'pm',
-      projectId: project.id,
-      repository: project.repository,
-      defaultBranch: project.defaultBranch,
+      projectId: project?.id ?? null,
+      repository: project?.repository ?? '',
+      defaultBranch: project?.defaultBranch ?? '',
       taskId: null,
       taskRef: null,
       branch: null,
@@ -395,15 +443,50 @@ export class PlanService {
     // Every finished turn (reply, question or plan) waits for the human to read it
     await db.update(planSessions).set({ updatedAt: new Date(), unread: true }).where(eq(planSessions.id, sessionId))
     events.publish({ type: 'plan.session', session: await this.#toSession(await this.#session(sessionId), null) })
+    await this.notifyParent(sessionId, runId, false, Boolean(error))
+  }
+
+  // Stop paths fence the run before its eventual runner exit, so they must
+  // notify here rather than waiting for onRunEnded. One notice per child run.
+  async notifyParent(sessionId: string, runId: string, stopped = false, error = false): Promise<void> {
+    const { db, events } = this.#d
+    const child = await this.#session(sessionId)
+    if (!child.parentSessionId) return
+    const notification = await db.transaction(async (tx) => {
+      await tx.select({ id: runs.id }).from(runs).where(eq(runs.id, runId)).for('update')
+      const [existing] = await tx.select({ id: planMessages.id }).from(planMessages)
+        .where(and(eq(planMessages.sessionId, child.parentSessionId!), eq(planMessages.runId, runId), eq(planMessages.kind, 'notification'))).limit(1)
+      if (existing) return null
+      const message = await insertMessage(tx, child.parentSessionId!, {
+        role: 'thread', kind: 'notification',
+        text: `Thread “${child.title}” ${stopped ? 'was stopped' : `finished its turn${error ? ' with an error' : ''}`}.`
+      }, { runId, senderSessionId: child.id, senderTitle: child.title })
+      // Child activity isn't a new PM reply waiting for the human (D11).
+      await tx.update(planSessions).set({ updatedAt: new Date() }).where(eq(planSessions.id, child.parentSessionId!))
+      return message
+    })
+    if (notification) {
+      events.publish({ type: 'plan.message', message: toMessage(notification) })
+      events.publish({ type: 'plan.session', session: await this.#toSession(await this.#session(child.parentSessionId)) })
+    }
   }
 
   // ── PM tools (flows.md §1) ─────────────────────────────────────────────────
 
+  async toolProject(sessionId: string, input: unknown): Promise<ProjectRow> {
+    const session = await this.#session(sessionId)
+    const { project: slug } = z.object({ project: z.string().trim().min(1).optional() }).parse(input ?? {})
+    if (!slug && !session.projectId) throw new ToolError('Provide a project slug in the project argument for this global session.')
+    const [project] = await this.#d.db.select().from(projects).where(slug ? eq(projects.slug, slug) : eq(projects.id, session.projectId!))
+    if (!project) throw new ToolError(slug ? `Unknown project: ${slug}` : 'The project no longer exists')
+    return project
+  }
+
   async tool(sessionId: string, runId: string, tool: string, input: unknown, actor: Actor): Promise<unknown> {
     const { db } = this.#d
     const session = await this.#session(sessionId)
-    const [project] = await db.select().from(projects).where(eq(projects.id, session.projectId))
-    if (!project) throw new ToolError('The project no longer exists')
+    const scoped = !['ask_question', 'approve_plan', 'get_agent_activity'].includes(tool)
+    const project = scoped ? await this.toolProject(sessionId, input) : undefined
 
     switch (tool) {
       case 'list_tasks': {
@@ -411,25 +494,25 @@ export class PlanService {
         if (!parsed.success) throw new ToolError(`The tasks were not listed: ${z.prettifyError(parsed.error)}`)
         const { status, epic, query, includeMerged } = parsed.data
         const statuses = status === undefined ? [] : [status].flat()
-        const rows = await db.select({ id: tasks.id, number: tasks.number, title: tasks.title, status: tasks.status, type: tasks.type, priority: tasks.priority, epicId: tasks.epicId }).from(tasks)
+        const rows = await db.select({ id: tasks.id, number: tasks.number, title: tasks.title, status: tasks.status, type: tasks.type, priority: tasks.priority, epicId: tasks.epicId, humanReview: tasks.humanReview, statusReason: tasks.statusReason, prUrl: tasks.prUrl }).from(tasks)
           .where(and(
-            eq(tasks.projectId, project.id),
+            eq(tasks.projectId, project!.id),
             isNull(tasks.deletedAt),
             statuses.length > 0 ? inArray(tasks.status, statuses) : includeMerged ? undefined : ne(tasks.status, 'merged')
           ))
           .orderBy(asc(tasks.number))
         const deps = await db.select({ taskId: taskDependencies.taskId, number: tasks.number }).from(taskDependencies)
           .innerJoin(tasks, eq(tasks.id, taskDependencies.dependsOnId))
-          .where(eq(tasks.projectId, project.id))
-        const epicRows = await db.select().from(epics).where(eq(epics.projectId, project.id))
-        const epicDeps = await db.select().from(epicDependencies).innerJoin(epics, eq(epics.id, epicDependencies.epicId)).where(eq(epics.projectId, project.id))
+          .where(eq(tasks.projectId, project!.id))
+        const epicRows = await db.select().from(epics).where(eq(epics.projectId, project!.id))
+        const epicDeps = await db.select().from(epicDependencies).innerJoin(epics, eq(epics.id, epicDependencies.epicId)).where(eq(epics.projectId, project!.id))
         const needle = query?.toLowerCase()
         const matches = rows
-          .map(t => ({ ...t, ref: taskRef(project.prefix, t.number) }))
+          .map(t => ({ ...t, ref: taskRef(project!.prefix, t.number) }))
           // In memory: an epic id that isn't a UUID finds nothing here, where Postgres would reject it
           .filter(t => (!epic || t.epicId === epic) && (!needle || t.ref.toLowerCase().includes(needle) || t.title.toLowerCase().includes(needle)))
         return {
-          project: { name: project.name, prefix: project.prefix, defaultBranch: project.defaultBranch, epicReviewModeDefault: project.epicReviewModeDefault },
+          project: { name: project!.name, prefix: project!.prefix, defaultBranch: project!.defaultBranch, epicReviewModeDefault: project!.epicReviewModeDefault },
           epics: epicRows.map(e => ({ id: e.id, title: e.title, reviewMode: e.reviewMode, dependsOn: epicDeps.filter(d => d.epic_dependencies.epicId === e.id).map(d => d.epic_dependencies.dependsOnEpicId) })),
           tasks: matches.map(t => ({
             ref: t.ref,
@@ -438,14 +521,17 @@ export class PlanService {
             type: t.type,
             priority: t.priority,
             epicId: t.epicId,
-            dependsOn: deps.filter(d => d.taskId === t.id).map(d => taskRef(project.prefix, d.number))
+            ...(t.humanReview && { humanReview: true }),
+            ...(t.statusReason && { statusReason: t.statusReason }),
+            ...(t.prUrl && { pr: t.prUrl }),
+            dependsOn: deps.filter(d => d.taskId === t.id).map(d => taskRef(project!.prefix, d.number))
           }))
         }
       }
 
       case 'get_task': {
         const { taskRef: ref } = z.object({ taskRef: z.string() }).parse(input)
-        const task = await loadTask(db, await this.#taskIdByRef(project, ref))
+        const task = await loadTask(db, await this.#taskIdByRef(project!, ref))
         const notes = await db.select().from(schema.comments).where(eq(schema.comments.taskId, task.id)).orderBy(asc(schema.comments.createdAt))
         const [epic] = task.epicId ? await db.select({ id: epics.id, title: epics.title }).from(epics).where(eq(epics.id, task.epicId)) : []
         return {
@@ -453,20 +539,20 @@ export class PlanService {
           description: richTextToMarkdown(task.description),
           epic: epic ?? null,
           comments: notes.map(c => ({ author: c.author.kind, body: c.body, pinned: c.pinned, at: c.createdAt.toISOString() })),
-          attachments: await listTaskAttachments(db, project.id, task.description, notes.map(c => ({ author: c.author.kind, body: c.body, createdAt: c.createdAt })))
+          attachments: await listTaskAttachments(db, project!.id, task.description, notes.map(c => ({ author: c.author.kind, body: c.body, createdAt: c.createdAt })))
         }
       }
 
       case 'add_comment': {
         const { taskRef: ref, body } = z.object({ taskRef: z.string(), body: z.string().trim().min(1) }).parse(input)
-        const comment = await addComment(db, await this.#taskIdByRef(project, ref), { body, pinned: false }, actor)
+        const comment = await addComment(db, await this.#taskIdByRef(project!, ref), { body, pinned: false }, actor)
         this.#d.events.publish({ type: 'comment.created', comment })
         return { ok: true }
       }
 
       case 'get_run_outcomes': {
         const { taskRef: ref } = z.object({ taskRef: z.string() }).parse(input)
-        const taskId = await this.#taskIdByRef(project, ref)
+        const taskId = await this.#taskIdByRef(project!, ref)
         const rows = await db.select({ run: runs, agent: agents.name }).from(runs).innerJoin(agents, eq(agents.id, runs.agentId))
           .where(eq(runs.taskId, taskId)).orderBy(desc(runs.number)).limit(20)
         return rows.map(({ run, agent }) => ({
@@ -496,7 +582,7 @@ export class PlanService {
       case 'propose_plan': {
         const parsed = proposedPlanInput.safeParse(input)
         if (!parsed.success) throw new ToolError(`The plan was not saved: ${z.prettifyError(parsed.error)}`)
-        return this.#propose(session, project, runId, normalizeProposedPlan(parsed.data), actor)
+        return this.#propose(session, project!, runId, normalizeProposedPlan(parsed.data), actor)
       }
 
       // The human's approval, given in chat and carried out by the PM. It's
@@ -523,7 +609,7 @@ export class PlanService {
 
       case 'flag_stale_docs': {
         const { title, description } = z.object({ title: z.string().trim().min(1), description: z.string().trim().min(1) }).parse(input)
-        const taskId = await createTask(db, project, {
+        const taskId = await createTask(db, project!, {
           title,
           type: 'task',
           description: markdownToRichText(description),
@@ -548,8 +634,9 @@ export class PlanService {
     const { found: designs, versionIds } = await this.#lookupDesigns(project, proposed)
 
     const [latest] = await db.select().from(plans).where(eq(plans.sessionId, session.id)).orderBy(desc(plans.version)).limit(1)
+    if (latest?.status === 'proposed' && latest.projectId !== project.id) throw new ToolError('Approve or discard the current plan before proposing a plan for another project.')
     // A discarded plan's Drafts are gone, so the next version starts afresh
-    const previous = latest?.status === 'discarded' ? undefined : latest
+    const previous = latest?.status === 'discarded' || latest?.projectId !== project.id ? undefined : latest
     const previousEpics = previous ? await this.#epicsOf(previous) : new Map<string, string>()
     // A lone epic that was renamed is the same epic, so its tasks aren't changed
     const renamed = proposed.epics.length === 1 && previousEpics.size === 1
@@ -578,6 +665,11 @@ export class PlanService {
         // A revision that leaves the mode out keeps the epic's; a new epic
         // without one takes the project's default (D27)
         if (current) {
+          const [row] = await tx.select().from(epics).where(eq(epics.id, current)).for('update')
+          if (epic.reviewMode && epic.reviewMode !== row!.reviewMode) {
+            const taskRows = await tx.select({ status: tasks.status, prNumber: tasks.prNumber, integrationProtocol: tasks.integrationProtocol }).from(tasks).where(eq(tasks.epicId, current))
+            if (reviewModeLocked(row!, taskRows)) throw new ToolError('The plan was not saved: the review mode can\'t change once a task in the epic has submitted work or opened a PR.')
+          }
           await tx.update(epics).set({ title: epic.title, description: epic.summary, ...(epic.reviewMode && { reviewMode: epic.reviewMode }), updatedAt: new Date() }).where(eq(epics.id, current))
           epicIds.set(epic.key, current)
         } else {
@@ -1060,7 +1152,7 @@ export class PlanService {
   }
 
   async attachEvidence(sessionId: string, runId: string, text: string): Promise<void> {
-    const [message] = await this.#d.db.insert(planMessages).values({ sessionId, role: 'pm', kind: 'message', text, runId }).returning()
+    const message = await insertMessage(this.#d.db, sessionId, { role: 'pm', kind: 'message', text }, { runId })
     this.#d.events.publish({ type: 'plan.message', message: toMessage(message!) })
     this.#d.events.publish({ type: 'plan.session', session: await this.#toSession(await this.#session(sessionId), runId) })
   }
@@ -1072,7 +1164,7 @@ export class PlanService {
   // The conversation so far, for reseeding a lost session (D9)
   async #history(sessionId: string): Promise<{ role: string, text: string }[]> {
     const rows = await this.#d.db.select().from(planMessages).where(eq(planMessages.sessionId, sessionId)).orderBy(asc(planMessages.createdAt))
-    return rows.map(m => ({ role: m.role === 'human' ? 'Human' : m.kind === 'question' ? 'PM (question)' : 'PM', text: m.kind === 'question' ? questionText(m) : m.text }))
+    return rows.map(m => ({ role: m.role === 'thread' ? `Thread ${m.senderTitle ?? 'Removed thread'} (${m.senderSessionId ?? 'removed'})` : m.role === 'human' ? 'Human' : m.kind === 'question' ? 'PM (question)' : 'PM', text: m.kind === 'question' ? questionText(m) : m.text }))
   }
 
   async #toSession(row: SessionRow, activeRunId?: string | null): Promise<PlanSession> {
@@ -1105,8 +1197,11 @@ export async function sessionState(db: Executor, row: SessionRow, activeRunId?: 
 export async function sessionStates(db: Executor, rows: SessionRow[], activeRunId?: string | null): Promise<{ session: PlanSession, attention: SessionAttention }[]> {
   if (rows.length === 0) return []
   const ids = rows.map(r => r.id)
-  const [lastMessages, proposedPlans, activeRuns] = await Promise.all([
+  const [lastMessages, lastConversations, proposedPlans, activeRuns] = await Promise.all([
     db.selectDistinctOn([planMessages.sessionId]).from(planMessages).where(inArray(planMessages.sessionId, ids)).orderBy(planMessages.sessionId, desc(planMessages.createdAt)),
+    // Completion notices and confirm results add context; they do not answer a pending question.
+    db.selectDistinctOn([planMessages.sessionId]).from(planMessages)
+      .where(and(inArray(planMessages.sessionId, ids), notInArray(planMessages.kind, ['notification', 'action_result']))).orderBy(planMessages.sessionId, desc(planMessages.createdAt)),
     db.select().from(plans).where(and(inArray(plans.sessionId, ids), eq(plans.status, 'proposed'))),
     activeRunId === undefined
       ? db.select({ id: runs.id, sessionId: runs.planSessionId }).from(runs)
@@ -1114,16 +1209,19 @@ export async function sessionStates(db: Executor, rows: SessionRow[], activeRunI
       : []
   ])
   const lastOf = new Map(lastMessages.map(m => [m.sessionId, m]))
+  const conversationOf = new Map(lastConversations.map(m => [m.sessionId, m]))
   const proposedOf = new Map(proposedPlans.map(p => [p.sessionId, p]))
   const activeOf = new Map(activeRuns.map(r => [r.sessionId, r.id]))
   return rows.map((row) => {
     const last = lastOf.get(row.id)
+    const latestConversation = conversationOf.get(row.id)
     const proposed = proposedOf.get(row.id)
     const attention: SessionAttention = proposed
       ? { status: 'needs_approval', plan: proposed }
-      : last?.role === 'pm' && last.kind === 'question' ? { status: 'question', question: last } : { status: 'none' }
+      : latestConversation?.role === 'pm' && latestConversation.kind === 'question' ? { status: 'question', question: latestConversation } : { status: 'none' }
     const session: PlanSession = {
       id: row.id,
+      parentSessionId: row.parentSessionId,
       projectId: row.projectId,
       title: row.title,
       runtime: row.runtime as AgentRuntime,
@@ -1177,8 +1275,16 @@ async function keepCriterionIds(tx: Executor, taskId: string, texts: (string | {
   })
 }
 
+interface MessageLinks {
+  planId?: string
+  runId?: string | null
+  senderSessionId?: string | null
+  senderTitle?: string | null
+  pendingAction?: PmAction
+}
+
 // Every message is written here, so its fields match its role and kind
-async function insertMessage(db: Executor, sessionId: string, fields: NewPlanMessageFields, links: { planId?: string, runId?: string | null } = {}): Promise<typeof planMessages.$inferSelect> {
+export async function insertMessage(db: Executor, sessionId: string, fields: NewPlanMessageFields, links: MessageLinks = {}): Promise<typeof planMessages.$inferSelect> {
   const [row] = await db.insert(planMessages).values({ ...planMessageFields.parse(fields), sessionId, ...links }).returning()
   return row!
 }
@@ -1186,18 +1292,22 @@ async function insertMessage(db: Executor, sessionId: string, fields: NewPlanMes
 // Rows older than the constraints aren't checked, so the role and kind are
 // read defensively: anything unknown shows as a plain PM message, and only a
 // PM question keeps its question fields.
-function toMessage(row: typeof planMessages.$inferSelect): PlanMessage {
+export function toMessage(row: typeof planMessages.$inferSelect): PlanMessage {
   const message = {
     id: row.id,
     sessionId: row.sessionId,
+    senderSessionId: row.senderSessionId,
+    senderTitle: row.senderTitle,
     text: row.text,
+    pendingAction: row.pendingAction,
     planId: row.planId,
     runId: row.runId,
     createdAt: row.createdAt.toISOString()
   }
   if (row.role === 'human') return { ...message, role: 'human', kind: 'message', recommendation: null, options: null }
+  if (row.role === 'thread') return { ...message, role: 'thread', kind: row.kind === 'notification' ? 'notification' : 'message', recommendation: null, options: null }
   if (row.kind === 'question') return { ...message, role: 'pm', kind: 'question', recommendation: row.recommendation, options: row.options }
-  return { ...message, role: 'pm', kind: row.kind === 'error' ? 'error' : 'message', recommendation: null, options: null }
+  return { ...message, role: 'pm', kind: row.kind === 'error' || row.kind === 'confirmation' || row.kind === 'action_result' ? row.kind : 'message', recommendation: null, options: null }
 }
 
 // The model's answer as a title: its first line without quotes, a "Title:"
@@ -1233,3 +1343,7 @@ function designBuildMessage(ref: string, title: string, version: number, note: s
 }
 
 const STATUS_NAMES: Record<string, string> = { draft: 'Draft', backlog: 'Backlog', ready: 'Ready' }
+
+function threadText(sender: { id: string, title: string }, text: string): string {
+  return `Message from PM thread “${sender.title}” (${sender.id}), not from the human:\n${text}`
+}

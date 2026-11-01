@@ -1,6 +1,7 @@
 import type { RunJob } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
+import { writeFile } from 'node:fs/promises'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { agentActivity } from './agent-activity.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
@@ -138,4 +139,39 @@ describe('get_agent_activity', () => {
       expect(await runner.call(job.runId, job.leaseEpoch, 'get_agent_activity', {})).toMatchObject({ ok: false, error: `The ${role} can’t use get_agent_activity` })
     }
   })
+})
+
+it('lists its own active global PM turn without a project as Global', { timeout: 30_000 }, async () => {
+  const t = await createTestApp('pglite', { listen: true })
+  let runner: FakeRunner | undefined
+  try {
+    runner = await FakeRunner.connect(t.server!.url)
+    const request = { projectId: null, text: 'What am I working on globally?' }
+    const response = await fetch(`${t.server!.url}/api/plan/sessions`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request)
+    })
+    expect(response.status).toBe(201)
+    const session = await response.json() as { id: string }
+    const { job } = await runner.next('run.assign', m => m.job.planSessionId === session.id)
+    expect(job).toMatchObject({ role: 'pm', projectId: null })
+    runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'global-pm' })
+    await vi.waitFor(async () => expect((await t.db.select().from(runs).where(eq(runs.id, job.runId)))[0]?.state).toBe('running'))
+    const reply = await runner.call(job.runId, job.leaseEpoch, 'get_agent_activity', {})
+    expect(reply.ok).toBe(true)
+    if (!reply.ok) throw new Error(reply.error)
+    const activity = reply.result as Awaited<ReturnType<typeof agentActivity>>
+    expect(activity.agents.find(a => a.role === 'pm')).toMatchObject({
+      status: 'busy', activeRunCount: 1,
+      activeRuns: [{ number: job.runNumber, role: 'pm', state: 'running', project: 'Global', task: null, epic: null }]
+    })
+    if (process.env.CORRAL_GLOBAL_ACTIVITY_EVIDENCE) {
+      await writeFile(process.env.CORRAL_GLOBAL_ACTIVITY_EVIDENCE, JSON.stringify({
+        session: { request, response: { status: response.status, body: session } },
+        tool: { transport: 'runner WebSocket', runId: job.runId, leaseEpoch: job.leaseEpoch, name: 'get_agent_activity', input: {}, response: reply }
+      }, null, 2))
+    }
+  } finally {
+    runner?.close()
+    await t.close()
+  }
 })

@@ -359,6 +359,11 @@ describe.each([
     const [p] = await db.insert(plans).values(plan).returning()
     await expectViolation(db.update(plans).set({ projectId: b.id }).where(eq(plans.id, p!.id)), 'plans_session_same_project_fk')
     await expectViolation(db.update(planSessions).set({ projectId: b.id }).where(eq(planSessions.id, session!.id)), 'plans_session_same_project_fk')
+    // A global session plans for any project, and PM runs need no project
+    const [global] = await db.insert(planSessions).values({ title: 'Global', createdBy: human }).returning()
+    await db.insert(plans).values([{ ...plan, sessionId: global!.id }, { ...plan, sessionId: global!.id, projectId: b.id, version: 2 }])
+    await expectViolation(db.update(planSessions).set({ projectId: a.id }).where(eq(planSessions.id, global!.id)), 'plans_session_same_project_fk')
+    await db.insert(runs).values({ projectId: null, agentId: agent!.id, role: 'pm', planSessionId: global!.id })
     const criteria = await db.insert(acceptanceCriteria).values([ta, tb, other].map(t => ({ taskId: t.id, text: 'Criterion', position: 0 }))).returning()
     const base = { taskId: ta.id, runId: r!.id, round: 0, kind: 'note' as const, note: 'Proof', size: 0 }
     for (const c of criteria.slice(1)) {

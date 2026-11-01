@@ -72,7 +72,7 @@ describe('plan threads in the inbox', () => {
 
     const order = ['Needs approval', 'Review task', 'Blocked task', 'Question', 'Unread reply']
     const before = await inbox()
-    const mine = before.needsYou.filter(i => i.project.id === project.id)
+    const mine = before.needsYou.filter(i => i.project?.id === project.id)
     expect(mine.map(i => i.subject)).toEqual(order)
     expect(before.needsYou.map(i => i.at)).toEqual([...before.needsYou.map(i => i.at)].sort().reverse())
     expect(mine.map(i => i.at)).toEqual([at(10), at(15), at(20), at(30), at(40)].map(d => d.toISOString()))
@@ -91,7 +91,7 @@ describe('plan threads in the inbox', () => {
     const after = await inbox()
     expect(after.count).toBe(before.count - 1)
     expect(after.count).toBe(after.needsYou.length)
-    expect(after.needsYou.filter(i => i.project.id === project.id).map(i => i.subject)).toEqual(order.slice(0, -1))
+    expect(after.needsYou.filter(i => i.project?.id === project.id).map(i => i.subject)).toEqual(order.slice(0, -1))
     await t.db.delete(planSessions).where(eq(planSessions.id, idleOld.id))
   })
 
@@ -127,7 +127,7 @@ describe('plan threads in the inbox', () => {
       { sessionId: answered.id, role: 'human', kind: 'message', text: 'This one', createdAt: at(1) }
     ])
 
-    const threads = (await inbox()).needsYou.filter((item): item is PlanThreadItem => item.type === 'plan_thread' && item.project.id === project.id)
+    const threads = (await inbox()).needsYou.filter((item): item is PlanThreadItem => item.type === 'plan_thread' && item.project?.id === project.id)
     expect(threads.find(i => i.sessionId === question.id)).toMatchObject({ status: 'question', question: { text: 'Which one?', recommendation: null, options: null }, plan: null, planId: null, reply: null })
     expect(threads.find(i => i.sessionId === approval.id)).toMatchObject({ status: 'needs_approval', question: null, plan: { id: plan!.id, title: 'The plan' }, planId: plan!.id, reply: null })
     expect(threads.find(i => i.sessionId === unread.id)).toMatchObject({ status: 'none', question: null, plan: null, planId: null, reply: 'Done.', unread: true })

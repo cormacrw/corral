@@ -1,6 +1,6 @@
 import type { RunJob } from '@corral/contracts'
 import type { AgentRole } from '@corral/core'
-import { readdir, readFile, realpath, rm, stat } from 'node:fs/promises'
+import { mkdir, readdir, readFile, realpath, rm, stat } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import type { GitAuthor } from './config.ts'
 import { exec, git } from './exec.ts'
@@ -22,12 +22,18 @@ export function pmWorktreePath(dataDir: string, projectId: string, planSessionId
 
 export interface Workspace {
   path: string
-  bare: string
+  bare: string | null
 }
 
 // Fetches the bare clone and creates or reuses the worktree for this run.
 // Returns an error message instead of throwing, so the run can fail cleanly.
 export async function prepareWorkspace(dataDir: string, job: RunJob): Promise<Prepared> {
+  if (job.role === 'pm' && job.projectId === null) {
+    if (!job.planSessionId) return { workspace: null, error: 'The job has no plan session' }
+    const path = join(dataDir, 'sessions', job.planSessionId)
+    await mkdir(path, { recursive: true })
+    return { workspace: { path, bare: null }, error: null }
+  }
   const syncError = await syncRepository(dataDir, job.repository)
   if (syncError) return { workspace: null, error: `Could not fetch ${job.repository}: ${syncError}` }
   const bare = barePath(dataDir, job.repository)
@@ -48,7 +54,7 @@ async function checkOut(dataDir: string, bare: string, job: RunJob): Promise<Pre
   if (job.role === 'pm') {
     // A read-only checkout of the default branch (D9), one per Plan session
     if (!job.planSessionId) return { workspace: null, error: 'The job has no plan session' }
-    const path = pmWorktreePath(dataDir, job.projectId, job.planSessionId)
+    const path = pmWorktreePath(dataDir, job.projectId!, job.planSessionId)
     return prepared(path, await checkoutOrAdd(bare, path, `origin/${job.defaultBranch}`))
   }
 

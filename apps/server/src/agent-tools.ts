@@ -1,4 +1,4 @@
-import { epicReviewReportSchema, isPmDirectTool, pmDirectTools, evidenceInputSchema, outcomeReportSchema, rebaseReviewReportSchema, type RunnerMessage } from '@corral/contracts'
+import { epicReviewReportSchema, isPmDirectTool, pmActionTools, pmDirectTools, requiresPmConfirmation, evidenceInputSchema, outcomeReportSchema, rebaseReviewReportSchema, type RunnerMessage } from '@corral/contracts'
 import { taskRef, richTextToMarkdown } from '@corral/core'
 import { schema } from '@corral/db'
 import { and, asc, eq, isNull } from 'drizzle-orm'
@@ -59,28 +59,40 @@ export class AgentTools {
       developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'report_outcome'],
       designer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'submit_design', 'report_outcome'],
       reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'get_design', 'report_outcome'],
-      pm: ['attach_evidence', 'list_tasks', 'get_task', 'add_comment', 'get_run_outcomes', 'get_agent_activity', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs', ...Object.keys(pmDirectTools)]
+      pm: ['attach_evidence', 'list_tasks', 'get_task', 'add_comment', 'get_run_outcomes', 'get_agent_activity', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs', ...Object.keys(pmActionTools), ...Object.keys(pmDirectTools)]
     }
     if (!allowed[role]?.includes(tool)) throw new ToolError(`The ${role} can’t use ${tool}`)
-    if (role === 'pm' && isPmDirectTool(tool)) {
-      if (!ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
-      return this.#c.pmTools.call(tool, input, this.#c.runs.actor(ctx), { sessionId: ctx.run.planSessionId, runId: ctx.run.id, projectId: ctx.project.id })
+    if (role === 'pm' && requiresPmConfirmation(tool, input)) {
+      if (!this.#c.plans || !ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
+      return this.#c.pmActions.propose(ctx.run.planSessionId, ctx.run.id, tool, input, this.#c.runs.actor(ctx))
     }
-    if (tool === 'get_attachment') return this.#getAttachment(ctx, z.object({ attachmentId: z.string() }).parse(input))
-    if (tool === 'get_design') {
+    if (role === 'pm' && (isPmDirectTool(tool) || tool === 'act_on_inbox')) {
+      if (!ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
+      return this.#c.pmTools.call(tool, input, this.#c.runs.actor(ctx), { sessionId: ctx.run.planSessionId, runId: ctx.run.id, projectId: ctx.project?.id ?? null })
+    }
+    if (tool === 'get_attachment' || tool === 'get_design') {
+      const project = role === 'pm' && ctx.run.planSessionId && this.#c.plans
+        ? await this.#c.plans.toolProject(ctx.run.planSessionId, input)
+        : ctx.project
+      if (!project) throw new ToolError('Provide a project slug in the project argument.')
+      if (tool === 'get_attachment') return this.#getAttachment({ ...ctx, project }, z.object({ attachmentId: z.string() }).parse(input))
       const { taskRef: ref, version } = z.object({ taskRef: z.string(), version: z.number().int().positive().optional() }).parse(input)
-      return readDesign(this.#c.d.db, this.#c.d.blobs, ctx.project, ref, version).catch((error: unknown) => {
+      return readDesign(this.#c.d.db, this.#c.d.blobs, project, ref, version).catch((error: unknown) => {
         throw error instanceof DesignNotFound ? new ToolError(error.message) : error
       })
     }
     if (tool === 'attach_evidence') {
-      const pmInput = role === 'pm' ? z.looseObject({ taskRef: z.string().optional() }).parse(input) : null
+      const pmInput = role === 'pm' ? z.looseObject({ taskRef: z.string().optional(), project: z.string().optional() }).parse(input) : null
       const { taskRef: ref, ...fields } = pmInput ?? {}
+      delete fields.project
       const parsed = evidenceSchema.safeParse(pmInput ? fields : input)
       if (!parsed.success) throw new ToolError(`Not attached. ${parsed.error.issues.map(i => i.message).join('. ')}.`)
       if (role === 'pm') {
         if (!this.#c.plans || !ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
-        if (ref) return this.#attachEvidence({ ...ctx, task: await findTaskByRef(this.#c.d.db, ctx.project, ref) }, parsed.data)
+        if (ref) {
+          const project = await this.#c.plans.toolProject(ctx.run.planSessionId, input)
+          return this.#attachEvidence({ ...ctx, project, task: await findTaskByRef(this.#c.d.db, project, ref) }, parsed.data)
+        }
         if (parsed.data.criterionId) throw new ToolError('Pass taskRef to attach evidence for a criterion')
         const attached = await this.#attachEvidence(ctx, parsed.data)
         const label = (parsed.data.kind === 'note' ? 'Evidence' : parsed.data.fileName).replace(/[[\]\\]/g, '')
@@ -91,6 +103,7 @@ export class AgentTools {
     }
     if (role === 'pm') {
       if (!this.#c.plans || !ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
+      if (tool === 'create_task' || tool === 'update_task' || tool === 'update_epic') return this.#c.pmCalls.editEntity(ctx, tool, input)
       return this.#c.plans.tool(ctx.run.planSessionId, ctx.run.id, tool, input, this.#c.runs.actor(ctx))
     }
 
@@ -98,7 +111,7 @@ export class AgentTools {
       if (tool === 'get_task') {
         const [epic] = await this.#c.d.db.select().from(schema.epics).where(eq(schema.epics.id, ctx.run.epicId))
         if (!epic) throw new ToolError('Epic no longer exists')
-        return epicReviewContext(this.#c.d.db, epic, ctx.project)
+        return epicReviewContext(this.#c.d.db, epic, ctx.project!)
       }
       if (tool === 'get_evidence') return this.#getEvidence(ctx, z.object({ evidenceId: z.string().optional() }).parse(input))
       if (tool === 'report_outcome') {
@@ -134,7 +147,7 @@ export class AgentTools {
     const items = await listEvidence(this.#c.d.db, task.id)
     const notes = await this.#c.jobs.comments(task.id)
     return {
-      ref: taskRef(ctx.project.prefix, task.number),
+      ref: taskRef(ctx.project!.prefix, task.number),
       title: task.title,
       status: task.status,
       description: richTextToMarkdown(task.description),
@@ -143,7 +156,7 @@ export class AgentTools {
       reviewRound: task.reviewRounds,
       criteria: criteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })),
       comments: notes.map(c => ({ ...c, createdAt: c.createdAt.toISOString() })),
-      attachments: await listTaskAttachments(this.#c.d.db, ctx.project.id, task.description, notes),
+      attachments: await listTaskAttachments(this.#c.d.db, ctx.project!.id, task.description, notes),
       evidence: items.map(e => ({ id: e.id, criterionId: e.criterionId, kind: e.kind, note: e.note, fileName: e.fileName, round: e.round }))
     }
   }
@@ -205,10 +218,10 @@ export class AgentTools {
     return { ...meta, note: `${item.note} (binary ${item.contentType}; view it in Corral at ${this.#c.d.publicUrl}${item.url})`.trim() }
   }
 
-  // An image from the task text, for any role, as MCP image content. Only
-  // the run's own project: another project's id reads as unknown.
+  // An image as MCP content, scoped to the run's project for task agents
+  // or to the explicitly resolved project for PM calls.
   async #getAttachment(ctx: RunContext, input: { attachmentId: string }) {
-    const file = await readProjectAttachment(this.#c.d.db, this.#c.d.blobs, ctx.project.id, input.attachmentId)
+    const file = await readProjectAttachment(this.#c.d.db, this.#c.d.blobs, ctx.project!.id, input.attachmentId)
     if (!file) throw new ToolError(`${input.attachmentId} isn't an attachment in this project`)
     const { data, ...meta } = file
     return { ...meta, images: [{ mimeType: meta.mimeType, dataBase64: Buffer.from(data).toString('base64') }] }

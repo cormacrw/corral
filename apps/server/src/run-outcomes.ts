@@ -147,7 +147,7 @@ export class RunOutcomes {
     const feedback = task.rebaseOnly ? `Rebase review changes requested: ${report.summary.trim()}` : verdict === 'approved' ? `Approved: ${kept.some(v => v.met === null) ? humanCheckTally(kept.filter(v => v.met).length, kept.filter(v => v.met === null).length) : `all ${kept.length} criteria met`}. ${report.summary.trim()}`.trim() : feedbackComment(report.summary, kept, criteria)
 
     const prFree = task.integrationProtocol > 0
-    const branchHead = prFree ? await this.#c.d.github.branchHead(ctx.project.repository, task.branch!) : null
+    const branchHead = prFree ? await this.#c.d.github.branchHead(ctx.project!.repository, task.branch!) : null
     const next = await db.transaction(async (tx) => {
       const locked = await this.#c.runs.lockHeld(tx, ctx)
       const headSha = locked.task.headSha!
@@ -159,7 +159,7 @@ export class RunOutcomes {
         taskId: task.id, runId: ctx.run.id, round: locked.task.reviewRounds, headSha, verdict, summary, criteria: kept, author: this.#c.runs.actor(ctx)
       })
       await tx.insert(comments).values({ taskId: task.id, author: this.#c.runs.actor(ctx), body: feedback })
-      await appendAudit(tx, { projectId: ctx.project.id, taskId: task.id, actor: this.#c.runs.actor(ctx) }, auditEvent('review.recorded', { runId: ctx.run.id, verdict, headSha, round: locked.task.reviewRounds, met: kept.filter(v => v.met).length, of: kept.length, ...(similarity !== undefined && { similarity }) }))
+      await appendAudit(tx, { projectId: ctx.run.projectId, taskId: task.id, actor: this.#c.runs.actor(ctx) }, auditEvent('review.recorded', { runId: ctx.run.id, verdict, headSha, round: locked.task.reviewRounds, met: kept.filter(v => v.met).length, of: kept.length, ...(similarity !== undefined && { similarity }) }))
       // Changes requested → the developer; approved → Human review when
       // flagged, otherwise Ready to merge (D10). PR-free work always takes
       // Ready to merge: the human sees it at the epic review (D27)
@@ -214,7 +214,7 @@ export class RunOutcomes {
   // D24: the reviewer found the rebase clean, so the earlier approval stands
   async #approvedRebaseReview(ctx: RunContext, report: OutcomeReport) {
     const task = ctx.task!
-    const branchHead = task.integrationProtocol > 0 ? await this.#c.d.github.branchHead(ctx.project.repository, task.branch!) : null
+    const branchHead = task.integrationProtocol > 0 ? await this.#c.d.github.branchHead(ctx.project!.repository, task.branch!) : null
     await this.#c.d.db.transaction(async (tx) => {
       const locked = await this.#c.runs.lockHeld(tx, ctx)
       await this.#bindVerdict(tx, locked.task, report, 'approved', branchHead)
@@ -259,7 +259,7 @@ export class RunOutcomes {
   async #checkSubmission(ctx: RunContext, headSha: string) {
     const { db, github } = this.#c.d
     const task = ctx.task!
-    const head = await github.branchHead(ctx.project.repository, task.branch!)
+    const head = await github.branchHead(ctx.project!.repository, task.branch!)
     const { criteria, attached, missing } = await evidenceState(db, task)
 
     // Check with core before touching GitHub, so a rejected outcome leaves no trace
@@ -312,24 +312,24 @@ export class RunOutcomes {
     if (!report.headSha) throw new ToolError('There is no commit to submit. Commit your work, then report again.')
     const { criteria, attached } = await this.#checkSubmission(ctx, report.headSha)
 
-    const ref = taskRef(ctx.project.prefix, task.number)
+    const ref = taskRef(ctx.project!.prefix, task.number)
     const body = this.#prBody(ref, task.title, report.summary, criteria, attached)
     // A rebase task's commits are already on the epic PR; it has no PR of its own
     let pr: PullRequest | null = null
     if (!await isEpicRebaseTask(db, task)) {
       const existing = task.prNumber
-        ? await github.getPullRequest(ctx.project.repository, task.prNumber)
-        : await github.findOpenPullRequest(ctx.project.repository, task.branch!)
+        ? await github.getPullRequest(ctx.project!.repository, task.prNumber)
+        : await github.findOpenPullRequest(ctx.project!.repository, task.branch!)
       pr = existing && existing.state === 'open' ? existing : null
-      if (pr) await github.updatePullRequest(ctx.project.repository, pr.number, { body })
-      else pr = await github.openPullRequest(ctx.project.repository, { head: task.branch!, base: await taskBase(db, task, ctx.project, github), title: `${ref}: ${task.title}`, body })
+      if (pr) await github.updatePullRequest(ctx.project!.repository, pr.number, { body })
+      else pr = await github.openPullRequest(ctx.project!.repository, { head: task.branch!, base: await taskBase(db, task, ctx.project!, github), title: `${ref}: ${task.title}`, body })
     }
 
     // D24: a trivial rebase goes to the reviewer unless the server can confirm
     // it. GitHub failing proves nothing, so that also means a review.
     const rebaseCheck = report.outcome === 'pr_rebased' && report.review === 'trivial'
-      ? await checkTrivialRebase(github, ctx.project.repository, {
-          baseBranch: await taskBase(db, task, ctx.project, github),
+      ? await checkTrivialRebase(github, ctx.project!.repository, {
+          baseBranch: await taskBase(db, task, ctx.project!, github),
           approvedHeadSha: task.approvedHeadSha!,
           newHeadSha: report.headSha,
           conflictedFiles: report.conflictedFiles!
@@ -419,7 +419,7 @@ export class RunOutcomes {
     if (bundle.length + shots.reduce((n, s) => n + s.data.length, 0) > MAX_DESIGN_BYTES) throw new ToolError('Not submitted. A design version is limited to 25 MB.')
     const problem = bundleProblem(bundle)
     if (problem) throw new ToolError(`Not submitted. ${problem}`)
-    const head = await github.branchHead(ctx.project.repository, task.branch!)
+    const head = await github.branchHead(ctx.project!.repository, task.branch!)
     if (head !== submission.headSha) throw new ToolError(`Not submitted. The branch on GitHub is at ${head ?? 'nothing'}, not your commit ${submission.headSha}. Try again.`)
 
     const bundleBlob = await blobs.put(bundle)
@@ -432,7 +432,7 @@ export class RunOutcomes {
       const [row] = await tx.insert(designVersions).values({
         taskId: task.id, version: nextDesignVersion(existing), bundleBlob, specBlob, screenshots, branch: task.branch!, commitSha: submission.headSha
       }).returning()
-      await appendAudit(tx, { projectId: ctx.project.id, taskId: task.id, actor: this.#c.runs.actor(ctx) }, auditEvent('design.submitted', { runId: ctx.run.id, version: row!.version, headSha: submission.headSha, screenshots: screenshots.length }))
+      await appendAudit(tx, { projectId: ctx.run.projectId, taskId: task.id, actor: this.#c.runs.actor(ctx) }, auditEvent('design.submitted', { runId: ctx.run.id, version: row!.version, headSha: submission.headSha, screenshots: screenshots.length }))
       return row!
     })
     return {
@@ -450,7 +450,7 @@ export class RunOutcomes {
     const { db, github } = this.#c.d
     const task = ctx.task!
     if (!report.headSha) throw new ToolError('There is no commit to submit. Commit your work, call submit_design, then report again.')
-    const head = await github.branchHead(ctx.project.repository, task.branch!)
+    const head = await github.branchHead(ctx.project!.repository, task.branch!)
     const [version] = await db.select().from(designVersions)
       .where(and(eq(designVersions.taskId, task.id), eq(designVersions.commitSha, report.headSha))).orderBy(desc(designVersions.version)).limit(1)
     const { missing } = await evidenceState(db, task)

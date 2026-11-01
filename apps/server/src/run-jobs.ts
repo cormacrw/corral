@@ -63,10 +63,10 @@ export class RunJobs {
   }): Promise<RunJob> {
     const { db } = this.#c.d
     let task = ctx.task!
-    const ref = taskRef(ctx.project.prefix, task.number)
+    const ref = taskRef(ctx.project!.prefix, task.number)
     // A spike delivers findings, not a PR (D19), so it never gets a branch.
     // A design is built on design/<ref>, pushed but never merged (D20).
-    const baseBranch = await taskBase(db, task, ctx.project, this.#c.d.github)
+    const baseBranch = await taskBase(db, task, ctx.project!, this.#c.d.github)
     const spike = task.type === 'spike'
     const resumingBranch = task.branch !== null
     if (!task.branch && !spike) {
@@ -78,8 +78,8 @@ export class RunJobs {
     }
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
     const notes = await this.comments(task.id)
-    const attached = await listTaskAttachments(db, ctx.project.id, task.description, notes)
-    const pin = await this.#pinnedDesign(ctx.project.prefix, task.id)
+    const attached = await listTaskAttachments(db, ctx.project!.id, task.description, notes)
+    const pin = await this.#pinnedDesign(ctx.project!.prefix, task.id)
     const previous = await this.previousAuthorRun(db, task.id, ctx.agent.id, ctx.run.role, ctx.run.id)
     const [lastRun] = await db.select().from(runs)
       .where(and(eq(runs.taskId, task.id), inArray(runs.role, ['developer', 'designer']), ne(runs.id, ctx.run.id)))
@@ -99,9 +99,9 @@ export class RunJobs {
       prFree: task.integrationProtocol > 0,
       reviewRounds: task.reviewRounds,
       rebaseOnly: task.rebaseOnly,
-      squashRebase: ctx.project.requiredChecks.length > 0 && await isEpicRebaseTask(db, task),
+      squashRebase: ctx.project!.requiredChecks.length > 0 && await isEpicRebaseTask(db, task),
       approvedHeadSha: task.approvedHeadSha,
-      reviewRoundCap: ctx.project.reviewRoundCap,
+      reviewRoundCap: ctx.project!.reviewRoundCap,
       criteria: criteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })),
       comments: notes,
       attachments: attached,
@@ -127,9 +127,9 @@ export class RunJobs {
       leaseEpoch: ctx.run.leaseEpoch!,
       role: ctx.run.role,
       runtime: ctx.agent.runtime,
-      projectId: ctx.project.id,
-      repository: ctx.project.repository,
-      defaultBranch: ctx.project.defaultBranch,
+      projectId: ctx.project!.id,
+      repository: ctx.project!.repository,
+      defaultBranch: ctx.project!.defaultBranch,
       baseBranch,
       taskId: task.id,
       taskRef: ref,
@@ -155,7 +155,7 @@ export class RunJobs {
     const runner = this.#c.d.runner.status().runners.find(r => r.id === ctx.run.runnerId)
     if (!runner?.taskIntegrationProtocols?.includes(TASK_INTEGRATION_PROTOCOL)) return false
     if (!resumingBranch || !task.branch) return true
-    const pr = await this.#c.d.github.findOpenPullRequest(ctx.project.repository, task.branch).catch(() => undefined)
+    const pr = await this.#c.d.github.findOpenPullRequest(ctx.project!.repository, task.branch).catch(() => undefined)
     return pr === null
   }
 
@@ -187,15 +187,15 @@ export class RunJobs {
   async reviewerJob(ctx: RunContext): Promise<RunJob> {
     const { db } = this.#c.d
     const task = ctx.task!
-    const ref = taskRef(ctx.project.prefix, task.number)
+    const ref = taskRef(ctx.project!.prefix, task.number)
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
     const items = (await listEvidence(db, task.id)).filter(e => e.round === task.reviewRounds)
     const [previous] = await db.select().from(reviews).where(eq(reviews.taskId, task.id)).orderBy(desc(reviews.createdAt)).limit(1)
     const notes = await this.comments(task.id)
-    const attached = await listTaskAttachments(db, ctx.project.id, task.description, notes)
+    const attached = await listTaskAttachments(db, ctx.project!.id, task.description, notes)
     // A spike has no commit: the reviewer gets a checkout of the default
     // branch and judges the findings the developer last reported (D19)
-    const baseBranch = await taskBase(db, task, ctx.project)
+    const baseBranch = await taskBase(db, task, ctx.project!)
     const spike = task.type === 'spike'
     const [reported] = spike
       ? await db.select({ summary: runs.summary }).from(runs)
@@ -210,7 +210,7 @@ export class RunJobs {
     const [rebase] = task.rebaseOnly
       ? await db.select().from(runs).where(and(eq(runs.taskId, task.id), eq(runs.outcome, 'pr_rebased'), eq(runs.headSha, task.headSha!))).orderBy(desc(runs.number)).limit(1)
       : []
-    const pin = await this.#pinnedDesign(ctx.project.prefix, task.id)
+    const pin = await this.#pinnedDesign(ctx.project!.prefix, task.id)
     const rebaseCheckFailures = task.rebaseOnly ? await latestRebaseCheckFailures(db, task.id) : []
     const prFree = task.integrationProtocol > 0
     const submissions = prFree ? await listTaskSubmissions(db, task.id) : []
@@ -220,9 +220,9 @@ export class RunJobs {
       leaseEpoch: ctx.run.leaseEpoch!,
       role: 'reviewer',
       runtime: ctx.agent.runtime,
-      projectId: ctx.project.id,
-      repository: ctx.project.repository,
-      defaultBranch: ctx.project.defaultBranch,
+      projectId: ctx.project!.id,
+      repository: ctx.project!.repository,
+      defaultBranch: ctx.project!.defaultBranch,
       baseBranch,
       taskId: task.id,
       taskRef: ref,
@@ -254,14 +254,14 @@ export class RunJobs {
         approvedHeadSha: task.approvedHeadSha,
         rebaseCheckFailures,
         reviewRounds: task.reviewRounds,
-        reviewRoundCap: ctx.project.reviewRoundCap,
+        reviewRoundCap: ctx.project!.reviewRoundCap,
         criteria: criteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })),
         comments: notes,
         attachments: attached,
         headSha: task.headSha!,
         prUrl: task.prUrl,
         evidence: items.map(e => ({ id: e.id, criterionId: e.criterionId, kind: e.kind, note: e.note, fileName: e.fileName })),
-        requiredChecks: ctx.project.requiredChecks,
+        requiredChecks: ctx.project!.requiredChecks,
         previousFeedback: previous ? feedbackComment(previous.summary, previous.criteria, criteria) : null
       }, ctx.agent.name)
     }

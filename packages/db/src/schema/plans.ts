@@ -1,9 +1,8 @@
 import { sql } from 'drizzle-orm'
-import type { Actor, PlanTaskContent } from '@corral/core'
+import type { Actor, PmAction, PlanTaskContent } from '@corral/core'
 import {
   boolean,
   check,
-  foreignKey,
   index,
   integer,
   jsonb,
@@ -23,12 +22,13 @@ import { projects } from './projects.ts'
 import { runs } from './runs.ts'
 import { tasks } from './tasks.ts'
 
-// A conversation with the PM (D9, design/plan.md). Belongs to one project.
+// A conversation with the PM (D9, D29, design/plan.md), global or in one project.
 // The agent CLI's session ID is only a cache: the messages here are the
 // source of truth, and a lost session is reseeded from them.
 export const planSessions = pgTable('plan_sessions', {
   id: uuid().primaryKey().defaultRandom(),
-  projectId: uuid().notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  parentSessionId: uuid().references((): AnyPgColumn => planSessions.id, { onDelete: 'set null' }),
+  projectId: uuid().references(() => projects.id, { onDelete: 'cascade' }),
   title: text().notNull(),
   agentSessionId: text(),
   // The PM's runtime for this session (D18), picked in the composer and
@@ -46,12 +46,15 @@ export const planSessions = pgTable('plan_sessions', {
 }, t => [index().on(t.projectId, t.updatedAt), unique('sessions_project_id_unique').on(t.projectId, t.id)])
 
 export const planMessages = pgTable('plan_messages', {
+  senderSessionId: uuid().references(() => planSessions.id, { onDelete: 'set null' }),
+  senderTitle: text(),
   id: uuid().primaryKey().defaultRandom(),
   sessionId: uuid().notNull().references(() => planSessions.id, { onDelete: 'cascade' }),
   // Questions are PM messages flagged as such
-  role: text().$type<'human' | 'pm'>().notNull(),
-  kind: text().$type<'message' | 'question' | 'error'>().notNull().default('message'),
+  role: text().$type<'human' | 'pm' | 'thread'>().notNull(),
+  kind: text().$type<'message' | 'question' | 'error' | 'confirmation' | 'action_result' | 'notification'>().notNull().default('message'),
   text: text().notNull(),
+  pendingAction: jsonb().$type<PmAction>(),
   // A question's suggested answer and answer choices (ask_question)
   recommendation: text(),
   options: jsonb().$type<string[]>(),
@@ -63,15 +66,17 @@ export const planMessages = pgTable('plan_messages', {
   index().on(t.runId),
   // The migration diagnoses history, then adds these NOT VALID for future writes.
   // History stays as written and toMessage reads it
-  check('plan_messages_role_kind', sql`(${t.role} = 'human' and ${t.kind} = 'message') or (${t.role} = 'pm' and ${t.kind} in ('message', 'question', 'error'))`),
+  check('plan_messages_role_kind', sql`(${t.role} = 'human' and ${t.kind} = 'message') or (${t.role} = 'thread' and ${t.kind} in ('message', 'notification')) or (${t.role} = 'pm' and ${t.kind} in ('message', 'question', 'error', 'confirmation', 'action_result'))`),
   check('plan_messages_question_fields', sql`${t.kind} = 'question' or (${t.recommendation} is null and ${t.options} is null)`)
 ])
 
 // A versioned plan from propose_plan; its tasks live in Backlog until a
-// human approves the plan (D9, D10)
+// human approves the plan (D9, D10). A global session can plan for any project,
+// a project's session only for that project. A foreign key can't say that, so
+// migration 0055 enforces it with triggers on plans and plan_sessions.
 export const plans = pgTable('plans', {
   id: uuid().primaryKey().defaultRandom(),
-  sessionId: uuid().notNull(),
+  sessionId: uuid().notNull().references(() => planSessions.id, { onDelete: 'cascade' }),
   projectId: uuid().notNull().references(() => projects.id, { onDelete: 'cascade' }),
   epicId: uuid().references(() => epics.id, { onDelete: 'set null' }),
   version: integer().notNull(),
@@ -82,7 +87,6 @@ export const plans = pgTable('plans', {
   approvedAt: timestamp({ withTimezone: true }),
   createdAt: createdAt()
 }, t => [
-  foreignKey({ name: 'plans_session_same_project_fk', columns: [t.projectId, t.sessionId], foreignColumns: [planSessions.projectId, planSessions.id] }).onDelete('cascade'),
   unique('plans_session_version_unique').on(t.sessionId, t.version),
   // Superseding an approved version preserves its approval history.
   check('plans_approval_tuple', sql`(${t.approvedBy} is null) = (${t.approvedAt} is null) and (${t.status} <> 'approved' or (${t.approvedBy} is not null and ${t.approvedAt} is not null))`)

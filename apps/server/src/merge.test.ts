@@ -160,7 +160,7 @@ describe('merge orchestrator and human controls', () => {
     await t.mergePass()
     expect(await taskRow(task.id)).toMatchObject({ status: 'merged', mergeCommitSha: 'merge-sha' })
     expect(t.github.pulls.get(pr.number)).toMatchObject({ merged: true })
-    // Merged tasks are read-only except for comments
+    // D10 keeps merged task metadata immutable; comments remain available.
     expect((await t.request('PATCH', `/api/projects/${project.slug}/tasks/${task.number}`, { title: 'Changed' })).status).toBe(409)
     expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/comments`, { body: 'Shipped, thanks' })).status).toBe(201)
     await sleep(100)

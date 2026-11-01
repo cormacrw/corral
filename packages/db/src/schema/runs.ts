@@ -61,7 +61,7 @@ export const runs = pgTable('runs', {
   // Shown as #128 in the UI (D13)
   number: bigint({ mode: 'number' }).notNull().generatedAlwaysAsIdentity().unique(),
   agentId: uuid().notNull().references(() => agents.id),
-  projectId: uuid().notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  projectId: uuid().references(() => projects.id, { onDelete: 'cascade' }),
   taskId: uuid(),
   // Integration reviews belong to an epic, independently of task reviews.
   epicId: uuid().references(() => epics.id, { onDelete: 'cascade' }),

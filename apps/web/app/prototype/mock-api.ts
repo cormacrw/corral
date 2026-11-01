@@ -47,6 +47,11 @@ route('POST', '/runners/:id/update', ([id]) => {
 })
 route('GET', '/runner', () => f.runner)
 route('GET', '/status', () => ({ ...f.status, runners: f.runner.runners }))
+route('DELETE', '/update-hold', () => {
+  Object.assign(f.status, { updating: false })
+  emit({ type: 'global.status', status: f.status })
+  return f.status
+})
 route('POST', '/stop-all', () => Object.assign(f.status, { stopped: true }))
 route('POST', '/resume-all', () => Object.assign(f.status, { stopped: false }))
 
@@ -235,6 +240,7 @@ route('PUT', '/epics/:id/dependencies', ([id], body) => {
   }
   return epic
 })
+route('GET', '/epics/:id/history', () => [])
 route('GET', '/epics/:id', ([id]) => {
   const epic = f.epics.find(e => e.id === id) ?? notFound()
   return { ...epic, tasks: f.tasks.filter(t => t.epicId === epic.id) }
@@ -300,7 +306,7 @@ route('POST', '/inbox/:taskId/actions', ([taskId], body) => {
     return { task: input.action === 'delete' ? null : task }
   }
   const item = f.inbox().needsYou.find(i => i.taskId === taskId)
-  if (!item || item.type === 'plan_thread' || item.type === 'epic_review' || item.type === 'epic_conflict' || item.type === 'release_notes' || task.status !== 'human_review') {
+  if (!item?.taskId || task.status !== 'human_review') {
     throw new ApiError(409, { code: 'conflict', constraint: null }, 'This review is no longer actionable')
   }
   const accepted = input.action === 'approve'
@@ -318,7 +324,7 @@ route('POST', '/inbox/:taskId/actions', ([taskId], body) => {
 })
 
 route('POST', '/plan/sessions', (_, body) => {
-  const { id = crypto.randomUUID(), projectId, text, runtime = 'claude-code', taskRef } = body as StartPlanSessionInput
+  const { id = crypto.randomUUID(), projectId = null, text, runtime = 'claude-code', taskRef } = body as StartPlanSessionInput
   const existing = f.planSessions.find(s => s.id === id)
   if (existing) {
     if (existing.projectId !== projectId) throw new ApiError(409, { code: 'conflict', constraint: 'plan_session_project' }, 'Session belongs to another project')
@@ -384,8 +390,21 @@ route('POST', '/plan/sessions/:id/close', ([id]) => {
   }
   Object.assign(s, { closed: true, unread: false, status: 'none', activeRunId: null })
   emit({ type: 'plan.session', session: s })
-  emit({ type: 'plan.drafts', projectId: s.projectId, sessions: drafts(s.projectId) })
+  if (s.projectId) emit({ type: 'plan.drafts', projectId: s.projectId, sessions: drafts(s.projectId) })
   return s
+})
+// Decides a confirm card as the real endpoint does, without running the tool
+route('POST', '/plan/sessions/:id/actions/:actionId', ([id, actionId], body) => {
+  const s = f.planSessions.find(x => x.id === id) ?? notFound()
+  const message = f.planMessages[s.id]?.find(m => m.id === actionId && m.pendingAction) ?? notFound()
+  const action = message.pendingAction!
+  if (action.status !== 'pending') return message
+  const { decision } = body as { decision: 'confirm' | 'cancel' }
+  Object.assign(action, decision === 'confirm' ? { status: 'confirmed', result: 'Done.' } : { status: 'cancelled' })
+  emit({ type: 'plan.message', message })
+  postMessage(s.id, { role: 'pm', kind: 'action_result', text: decision === 'confirm' ? `Confirmed: ${action.summary}. Done.` : `Cancelled: ${action.summary}. Nothing was changed.` })
+  emit({ type: 'plan.session', session: Object.assign(s, { unread: true, updatedAt: new Date().toISOString() }) })
+  return message
 })
 route('POST', '/plan/sessions/:id/read', ([id]) => {
   const s = Object.assign(f.planSessions.find(s => s.id === id) ?? notFound(), { unread: false })
@@ -416,7 +435,7 @@ function postMessage(sessionId: string, message: NewPlanMessageFields, links: { 
 export function pmReply(sessionId: string, text: string): void {
   const s = f.planSessions.find(x => x.id === sessionId)
   const script = f.grilling[sessionId]
-  if (!s || !script) return
+  if (!s || !script || !s.projectId) return
   const question = text === STOP_ASKING ? undefined : script.questions.shift()
   if (question) {
     postMessage(sessionId, { role: 'pm', kind: 'question', ...question })

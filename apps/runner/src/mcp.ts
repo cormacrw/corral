@@ -1,4 +1,4 @@
-import { askQuestionInput, listTasksInput, pmDirectTools, proposedPlanInput, EVIDENCE_KINDS, reportOutcomeInput, type AgentTool, type PmDirectTool, type RunJob } from '@corral/contracts'
+import { PM_TOOL_NAMES, pmActionTools, askQuestionInput, listTasksInput, pmDirectTools, proposedPlanInput, EVIDENCE_KINDS, reportOutcomeInput, type AgentTool, type RunJob } from '@corral/contracts'
 import { DESIGNER_RUN_OUTCOMES, DEVELOPER_RUN_OUTCOMES, REVIEWER_RUN_OUTCOMES, type AgentRole } from '@corral/core'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -31,11 +31,14 @@ const outcomes: Record<AgentRole, readonly string[]> = {
 }
 
 interface ToolDefinition {
+  confirmRequired?: boolean | ((input: unknown) => boolean)
   description: string
   input: z.ZodRawShape
 }
 
 const toolDefinitions = {
+  // The confirm-required flag is shared with the server dispatcher.
+  ...pmActionTools,
   ...pmDirectTools,
   get_task: {
     description: 'The task you are working on: title, description, acceptance criteria with their IDs, comments and evidence attached so far.',
@@ -140,8 +143,14 @@ export const ROLE_TOOLS: Record<AgentRole, AgentTool[]> = {
   designer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'submit_design', 'report_outcome'],
   developer: ['get_task', 'add_comment', 'attach_evidence', 'get_attachment', 'get_design', 'report_outcome'],
   reviewer: ['get_task', 'add_comment', 'get_evidence', 'get_attachment', 'get_design', 'report_outcome'],
-  pm: ['attach_evidence', 'list_tasks', 'get_task', 'add_comment', 'get_run_outcomes', 'get_agent_activity', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs', ...Object.keys(pmDirectTools) as PmDirectTool[]]
+  pm: PM_TOOL_NAMES
 }
+
+// PM tools that get the optional `project` input. Every other PM tool acts on
+// the conversation or on Corral as a whole, or names its project in its own
+// input like delete_project and list_runs. Their inputs are strict on the
+// server, so a tool is only listed here if the server accepts `project` for it.
+const PM_PROJECT_TOOLS: readonly AgentTool[] = ['attach_evidence', 'add_comment', 'list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'propose_plan', 'flag_stale_docs', 'create_task', 'update_task', 'move_task', 'approve_task', 'delete_task', 'update_epic']
 
 // The tools a run gets: its role's alone. Only a designer submits designs (D23)
 export function toolsFor(job: Pick<RunJob, 'role'>): AgentTool[] {
@@ -223,7 +232,7 @@ export class ToolServer {
     const server = new McpServer({ name: 'corral', version: '1' })
     for (const name of route.tools) {
       const definition = roleToolDefinitions[route.role][name] ?? toolDefinitions[name]
-      server.registerTool(name, { description: definition.description, inputSchema: definition.input }, async (input: Record<string, unknown>) => {
+      server.registerTool(name, { description: definition.description, inputSchema: route.role === 'pm' && PM_PROJECT_TOOLS.includes(name) ? { ...definition.input, project: z.string().min(1).optional().describe('Project slug. Required in global sessions; defaults to the session project in project sessions. Name another project to act there.') } : definition.input }, async (input: Record<string, unknown>) => {
         const outcome = await route.handler(name, input).catch((error: unknown): ToolOutcome => ({ ok: false, error: error instanceof Error ? error.message : String(error) }))
         return toContent(outcome, name === 'list_tasks' ? undefined : 2)
       })

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { EpicConflictItem, EpicReviewItem, Inbox, PlanThreadItem, TaskInboxItem, ReleaseNotesItem } from '@corral/contracts'
+import type { EpicConflictItem, EpicReviewItem, Inbox, PlanThreadItem, PmActivityItem, TaskInboxItem, ReleaseNotesItem } from '@corral/contracts'
 import type { InboxPanelContext } from '~/composables/useInboxPanel'
 import { inboxItemLink } from '~/utils/labels'
 
@@ -11,14 +11,18 @@ const props = defineProps<{
   epicItem: EpicReviewItem | EpicConflictItem | null
   inbox: Inbox | null
   error: string | null
-  selected: TaskInboxItem | ReleaseNotesItem | null
+  selected: TaskInboxItem | PmActivityItem | ReleaseNotesItem | null
   ctx: InboxPanelContext
   onRetry: () => unknown
   onResolved: () => unknown
 }>()
 const panel = ref<{ send: () => Promise<boolean> } | null>(null)
 defineExpose({ send: () => panel.value?.send() ?? Promise.resolve(false) })
-const taskLink = computed(() => props.selected ? inboxItemLink(props.selected) : null)
+const taskLink = computed(() => {
+  const link = props.selected ? inboxItemLink(props.selected) : null
+  // An item can outlive its task, and then there's no task page to open
+  return link?.label === 'Task' && !props.ctx.task ? null : link
+})
 </script>
 
 <template>

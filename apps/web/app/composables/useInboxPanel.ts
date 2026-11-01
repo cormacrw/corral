@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import type { Evidence, InboxActionInput, Review, Task, TaskInboxItem } from '@corral/contracts'
+import type { Evidence, InboxActionInput, PmActivityItem, Review, Task, TaskInboxItem } from '@corral/contracts'
 import { keys } from '~/queries/keys'
 import { taskDesignsQuery, taskPullRequestQuery } from '~/queries/tasks'
 import { markdownToPlainText } from '~/utils/markdown'
@@ -11,7 +11,7 @@ type Action = InboxActionInput['action']
 export type ResolveTo = 'backlog' | 'ready' | 'in_progress'
 export type InboxPanelTab = 'overview' | 'criteria' | 'review' | 'pr' | 'diff' | 'message'
 export interface InboxPanelContext {
-  item: TaskInboxItem
+  item: TaskInboxItem | PmActivityItem
   task: Task | null
   evidence: Evidence[]
   reviews: Review[]
@@ -121,7 +121,7 @@ export function useInboxPanel(ctx: InboxPanelContext) {
   // Set up once per item, like the designs above.
   const taskRef = ctx.item.taskRef
   const prNumber = computed(() => task.value && !isDesign.value ? Number(pr.value?.number) || null : null)
-  const pullRequest = useQuery(computed(() => ({ ...taskPullRequestQuery({ slug, ref: taskRef }, prNumber.value ?? 0), enabled: prNumber.value !== null })))
+  const pullRequest = useQuery(computed(() => ({ ...taskPullRequestQuery({ slug, ref: taskRef ?? '' }, prNumber.value ?? 0), enabled: prNumber.value !== null })))
   const hasPullRequest = computed(() => prNumber.value !== null)
   const prDetail = computed(() => pullRequest.data.value ?? null)
   const prLoading = computed(() => hasPullRequest.value && pullRequest.isPending.value)
@@ -130,7 +130,7 @@ export function useInboxPanel(ctx: InboxPanelContext) {
   const prError = computed(() => prFailed.value ? pullRequest.error.value?.message ?? null : null)
   const retryPullRequest = () => {
     // Back to pending, for the loading state and a fresh failure
-    if (prNumber.value !== null) void client.resetQueries({ queryKey: keys.tasks.pullRequest(taskRef, prNumber.value), exact: true })
+    if (taskRef && prNumber.value !== null) void client.resetQueries({ queryKey: keys.tasks.pullRequest(taskRef, prNumber.value), exact: true })
   }
 
   const primary = computed(() => canAct.value ? ctx.actions[0] ?? null : null)

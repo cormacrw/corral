@@ -14,7 +14,7 @@ const props = defineProps<{
   refining?: string | null
   failed?: boolean
 }>()
-const emit = defineEmits<{ retry: [], answer: [text: string], other: [], stop: [] }>()
+const emit = defineEmits<{ retry: [], answer: [text: string], other: [], stop: [], resolved: [] }>()
 const flyout = useTaskFlyout()
 const device = useDevice()
 
@@ -77,7 +77,15 @@ const rows = computed(() => {
         size="sm"
       />
       <div :class="['flex min-w-0 flex-col gap-2', device.isMobile.value && 'flex-1']">
-        <span class="text-xs text-muted">{{ props.pmName }} · PM</span>
+        <NuxtLink
+          v-if="message.role === 'thread' && message.senderSessionId"
+          :to="`/plan/${message.senderSessionId}`"
+          class="text-xs text-primary hover:underline"
+        >{{ message.senderTitle ?? 'Removed thread' }} · Thread{{ message.kind === 'notification' ? ' notification' : '' }}</NuxtLink>
+        <span
+          v-else
+          class="text-xs text-muted"
+        >{{ message.role === 'thread' ? `${message.senderTitle ?? 'Removed thread'} · Thread` : `${props.pmName} · PM` }}</span>
         <PlanTurnSteps
           v-if="firstOfTurn"
           :run-id="message.runId!"
@@ -90,6 +98,11 @@ const rows = computed(() => {
           variant="subtle"
           :title="message.text"
           :actions="[{ label: 'Retry', onClick: () => emit('retry') }]"
+        />
+        <PlanConfirmAction
+          v-else-if="message.pendingAction"
+          :message="message"
+          @resolved="emit('resolved')"
         />
         <PlanQuestion
           v-else-if="message.kind === 'question'"

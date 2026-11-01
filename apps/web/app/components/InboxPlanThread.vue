@@ -57,9 +57,10 @@ async function approve(to: 'ready' | 'backlog') {
           <div class="flex min-w-0 items-center gap-2 text-xs whitespace-nowrap text-muted">
             <span class="shrink-0"><span class="font-medium text-default">{{ item.sender.name }}</span> · PM</span>
             <span class="flex min-w-0 items-center gap-1"><ProjectThumbnail
+              v-if="item.project"
               :project="item.project"
               :size="16"
-            /><span class="truncate">{{ item.project.name }}</span></span>
+            /><span class="truncate">{{ item.project?.name ?? 'Global' }}</span></span>
             <UBadge
               v-if="item.status !== 'none'"
               :label="item.status === 'needs_approval' ? 'Needs approval' : 'Question'"
@@ -219,7 +220,7 @@ async function approve(to: 'ready' | 'backlog') {
             :placeholder="`Reply to ${item.sender.name}…`"
             :disabled="runnerOffline || working"
             :busy="busy"
-            :project="item.project.slug"
+            :project="item.project?.slug"
             :draft-key="`inbox:${item.id}`"
             @submit="send"
           />

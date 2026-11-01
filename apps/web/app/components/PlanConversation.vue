@@ -52,6 +52,8 @@ const taskRef = ref<string | null>(null)
 const busy = ref(false)
 const approving = ref<string | null>(null)
 const project = computed(() => shell.projects.find(p => p.id === session.value?.projectId) ?? null)
+const parent = computed(() => shell.planSessions.find(s => s.id === session.value?.parentSessionId))
+const children = computed(() => shell.planSessions.filter(s => s.parentSessionId === id.value))
 const runnerOffline = computed(() => shell.loaded && !shell.runner?.online)
 const reconnecting = ref(false)
 // Re-reads the runner's status, in case its live update was missed
@@ -201,7 +203,7 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
             class="size-2.5 shrink-0 rounded-full"
             :style="{ background: projectColor(project) }"
           />
-          <span class="max-w-48 shrink-0 truncate text-muted">{{ project?.name }}</span>
+          <span class="max-w-48 shrink-0 truncate text-muted">{{ project?.name ?? 'Global' }}</span>
           <span class="truncate font-medium">{{ session?.title }}</span>
           <UBadge
             v-if="session"
@@ -226,6 +228,27 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
           </div>
         </header>
 
+        <nav
+          v-if="parent || children.length"
+          aria-label="Related threads"
+          class="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-default px-4 py-2 text-sm"
+        >
+          <NuxtLink
+            v-if="parent"
+            :to="`/plan/${parent.id}`"
+            class="text-primary hover:underline"
+          >Parent: {{ parent.title }}</NuxtLink>
+          <span
+            v-if="children.length"
+            class="text-muted"
+          >Child threads:</span>
+          <NuxtLink
+            v-for="child in children"
+            :key="child.id"
+            :to="`/plan/${child.id}`"
+            class="text-primary hover:underline"
+          >{{ child.title }}{{ child.closed ? ' (closed)' : '' }}</NuxtLink>
+        </nav>
         <UAlert
           v-if="error && !session"
           color="error"
@@ -259,6 +282,7 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
               :refining="starting?.taskRef"
               :failed="starting?.state === 'failed'"
               @retry="send('Please continue.')"
+              @resolved="load"
               @answer="quick"
               @other="composer?.focus()"
               @stop="quick(STOP_ASKING)"
@@ -284,7 +308,7 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
                   :events="liveEvents"
                   live
                   :agent-name="pm?.name ?? 'PM'"
-                  working="Reading the code, wiki and board…"
+                  :working="project ? 'Reading the code, wiki and board…' : 'Checking the board…'"
                   inline
                 />
               </div>
@@ -385,6 +409,7 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
                   />
                 </UTooltip>
                 <USelectMenu
+                  v-if="project"
                   :model-value="taskRef ?? undefined"
                   :items="backlog.map(t => ({ label: `${t.ref} ${t.title}`, value: t.ref }))"
                   value-key="value"

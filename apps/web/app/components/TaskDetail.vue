@@ -4,7 +4,7 @@ import { commentOnTask, moveTask, patchTask, removeTask, resumeTask, seededTaskQ
 import { runsQuery } from '~/queries/runs'
 import type { AuditEntry, Comment, HumanTransitionInput, PatchTaskInput, Task } from '@corral/contracts'
 import type { TaskPriority, TaskStatus } from '@corral/core'
-import { availableEvents } from '@corral/core'
+import { availableEvents, canChangeType } from '@corral/core'
 import { ApiError } from '~/queries/client'
 import { clearDraftsExcept, useDraft } from '~/composables/useDraft'
 import { PRIORITY, runBadge, STATUS, TASK_TYPE } from '~/utils/labels'
@@ -170,7 +170,9 @@ async function resume() {
 }
 
 const priorityOptions = (Object.keys(PRIORITY) as TaskPriority[]).map(p => ({ label: PRIORITY[p].label, value: p }))
-const typeOptions = (Object.keys(TASK_TYPE) as Task['type'][]).map(t => ({ label: TASK_TYPE[t], value: t }))
+const typeOptions = computed(() => (Object.keys(TASK_TYPE) as Task['type'][])
+  .filter(t => !task.value || canChangeType(task.value, t))
+  .map(t => ({ label: TASK_TYPE[t], value: t })))
 // Tasks aren't assigned ahead of time: these are the agents of the task's
 // latest runs, or null until one claims it (D15)
 const developer = computed(() => task.value?.developer ?? null)
@@ -289,14 +291,15 @@ async function remove() {
   }
 }
 
-// Comments and the runs that ended with an error, oldest first
+// Task mutations, comments and runs that ended with an error, oldest first
 const activity = computed(() => [
-  ...comments.value.map(comment => ({ id: comment.id, at: comment.createdAt, comment, run: null })),
-  ...runs.value.filter(run => run.error && run.endedAt).map(run => ({ id: run.id, at: run.endedAt!, comment: null, run }))
+  ...comments.value.map(comment => ({ id: comment.id, at: comment.createdAt, comment, run: null, audit: null })),
+  ...runs.value.filter(run => run.error && run.endedAt).map(run => ({ id: run.id, at: run.endedAt!, comment: null, run, audit: null })),
+  ...history.value.filter(entry => ['task.created', 'task.updated', 'task.transition', 'task.paused', 'task.resumed', 'task.deleted'].includes(entry.action)).map(audit => ({ id: audit.id, at: audit.createdAt, comment: null, run: null, audit }))
 ].sort((a, b) => a.at.localeCompare(b.at)))
 
 function authorLabel(actor: Comment['author']): string {
-  if (actor.kind === 'human') return 'You'
+  if (actor.kind === 'human') return actor.viaPm ? 'PM · confirmed by you' : 'You'
   if (actor.kind === 'agent') {
     const run = runs.value.find(r => r.id === actor.runId)
     if (run) return run.agentName
@@ -323,6 +326,7 @@ function historyText(entry: AuditEntry): string {
     case 'design.approved': return `approved design v${String(d.version)}`
     case 'task.deleted': return 'deleted the task'
     case 'run.stopped': return 'stopped the run'
+    case 'task.paused': return 'paused the task'
     case 'task.resumed': return 'resumed the task'
     default: return entry.action
   }
@@ -776,8 +780,13 @@ const workingAgent = computed(() => task.value?.lease ? shell.agents.find(a => a
               v-for="item in activity"
               :key="item.id"
             >
+              <AuditActivity
+                v-if="item.audit"
+                :entry="item.audit"
+                :text="historyText(item.audit)"
+              />
               <div
-                v-if="item.comment"
+                v-else-if="item.comment"
                 class="flex gap-2"
               >
                 <AgentAvatar

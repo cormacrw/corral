@@ -19,7 +19,7 @@ function clip(text: string | null, limit: number): string | null {
 
 async function agentRuns(db: Executor, where: SQL | undefined, order: SQL[], limit: number, textLimit: number) {
   const rows = await db.select({ run: runs, projectName: projects.name, prefix: projects.prefix, taskNumber: tasks.number, taskTitle: tasks.title, epicTitle: epics.title }).from(runs)
-    .innerJoin(projects, eq(projects.id, runs.projectId))
+    .leftJoin(projects, eq(projects.id, runs.projectId))
     .leftJoin(tasks, eq(tasks.id, runs.taskId))
     .leftJoin(epics, eq(epics.id, runs.epicId))
     .where(where)
@@ -29,8 +29,8 @@ async function agentRuns(db: Executor, where: SQL | undefined, order: SQL[], lim
     number: run.number,
     state: run.state,
     outcome: run.outcome,
-    project: projectName,
-    task: taskNumber === null ? null : { ref: taskRef(prefix, taskNumber), title: taskTitle },
+    project: projectName ?? 'Global',
+    task: taskNumber === null || prefix === null ? null : { ref: taskRef(prefix, taskNumber), title: taskTitle },
     epic: run.epicId === null ? null : { id: run.epicId, title: epicTitle },
     role: run.role,
     runner: run.runnerName,

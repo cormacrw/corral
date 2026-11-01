@@ -25,7 +25,7 @@ export function usePendingPlan() {
   const entries = useState<Record<string, PendingPlan>>('pending-plan', () => ({}))
   const restored = useState<PendingPlan | null>('restored-plan', () => null)
 
-  function seed(projectId: string, message: string, runtime: AgentRuntime, taskRef?: string) {
+  function seed(projectId: string | null, message: string, runtime: AgentRuntime, taskRef?: string) {
     const id = crypto.randomUUID()
     const now = new Date().toISOString()
     entries.value[id] = {
