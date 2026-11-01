@@ -653,7 +653,7 @@ describe('migrations', () => {
     })
     const original = await snapshot()
     await migrate(migrationsFolder)
-    expect(await snapshot()).toEqual(original)
+    expect(await snapshot()).toEqual({ ...original, epics: original.epics.map(epic => ({ ...epic, sync_error: null, sync_retried_at: null })) })
     expect((await db.execute(sql`select integration_protocol from tasks`)).rows).toEqual([{ integration_protocol: 0 }])
     expect((await db.execute(sql`select * from task_submissions`)).rows).toEqual([])
   })
