@@ -120,6 +120,7 @@ export function auditText<A extends AuditAction>(_action: A, key: keyof AuditDet
 
 export interface AuditView {
   event: string | null
+  headSha?: string | null
   to: string | null
   verdict?: string
   met?: number

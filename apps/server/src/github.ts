@@ -43,6 +43,8 @@ export interface ChangedFile {
   previousFilename?: string
   status: string
   sha: string
+  additions: number
+  deletions: number
   patch?: string
 }
 
@@ -116,7 +118,7 @@ interface RawPullFile {
 }
 
 // GitHub also says `copied`, `changed` and `unchanged`
-function toFileStatus(status: string): PullRequestFile['status'] {
+export function toFileStatus(status: string): PullRequestFile['status'] {
   if (status === 'added' || status === 'removed' || status === 'renamed') return status
   return status === 'copied' ? 'added' : 'modified'
 }
@@ -140,6 +142,8 @@ interface RawChangedFile {
   previous_filename?: string
   status: string
   sha: string
+  additions: number
+  deletions: number
   patch?: string
 }
 
@@ -272,6 +276,8 @@ export class RunnerGitHub implements GitHubClient {
         ...(f.previous_filename !== undefined && { previousFilename: f.previous_filename }),
         status: f.status,
         sha: f.sha,
+        additions: f.additions,
+        deletions: f.deletions,
         ...(f.patch !== undefined && { patch: f.patch })
       }))
     }

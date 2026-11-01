@@ -1,5 +1,5 @@
 import { withMessage } from './inbox-message.ts'
-import type { EpicConflictItem, EpicReviewActionInput, EpicReviewItem, EpicReviewReport, EpicReviewTask, InboxSince, RunJob } from '@corral/contracts'
+import type { EpicConflictItem, EpicReviewActionInput, EpicReviewItem, EpicReviewReport, EpicReviewRound, EpicReviewTask, InboxSince, RunJob } from '@corral/contracts'
 import { ACTIVE_RUN_STATES, feedbackFixTitle, feedbackPoints, isTaskDone, LEASE_DURATION_MS, markdownToRichText, taskRef, type Actor, type CompletionState } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm'
@@ -233,12 +233,29 @@ export async function epicReviewContext(db: Executor, epic: EpicRow, project: Pr
     })) }
 }
 
+// The human's latest request for changes on the epic PR, if any. Its detail
+// is a snapshot; older records have no fix task links.
+export async function lastChangesRequest(db: Executor, epicId: string) {
+  const [action] = await db.select({ detail: auditLog.detail, createdAt: auditLog.createdAt }).from(auditLog)
+    .where(and(eq(auditLog.action, 'epic.pr'), sql`${auditText('epic.pr', 'epicId')} = ${epicId}`, sql`${auditText('epic.pr', 'event')} = 'human_changes_requested'`))
+    .orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(1)
+  return action
+}
+
+export async function listEpicRounds(db: Executor, epicId: string): Promise<EpicReviewRound[]> {
+  const rounds = await db.select({ review: epicReviewRounds, reviewer: { id: agents.id, name: agents.name } })
+    .from(epicReviewRounds).innerJoin(agents, eq(agents.id, epicReviewRounds.reviewerId))
+    .where(eq(epicReviewRounds.epicId, epicId)).orderBy(asc(epicReviewRounds.round))
+  return rounds.map(({ review: r, reviewer }) => ({
+    round: r.round, verdict: r.verdict, reviewer, headSha: r.headSha,
+    summary: r.summary, findings: r.findings, at: r.createdAt.toISOString()
+  }))
+}
+
 // What's new on an epic since the human last requested changes on its PR
 // (design/inbox.md). Each task's files and notes are labelled with the task.
 async function epicChanges(db: Executor, epic: EpicRow, board: Awaited<ReturnType<typeof epicReviewContext>>['tasks']) {
-  const [action] = await db.select({ detail: auditLog.detail, createdAt: auditLog.createdAt }).from(auditLog)
-    .where(and(eq(auditLog.action, 'epic.pr'), sql`${auditText('epic.pr', 'epicId')} = ${epic.id}`, sql`${auditText('epic.pr', 'event')} = 'human_changes_requested'`))
-    .orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(1)
+  const action = await lastChangesRequest(db, epic.id)
   const at = action?.createdAt.toISOString() ?? null
   const newArtifacts = board.flatMap(({ task, evidence }) => fileArtifacts(evidence, at, task.ref))
   if (!action || !at) return { since: null, newArtifacts }
@@ -268,13 +285,7 @@ export async function epicInboxItems(db: Executor, epicId?: string): Promise<(Ep
     const [review] = await db.select({ run: runs, agent: agents }).from(runs).innerJoin(agents, eq(agents.id, runs.agentId))
       .where(and(eq(runs.epicId, epic.id), eq(runs.outcome, 'approved'))).orderBy(desc(runs.number)).limit(1)
     if (!review) continue
-    const rounds = await db.select({ review: epicReviewRounds, reviewer: { id: agents.id, name: agents.name } })
-      .from(epicReviewRounds).innerJoin(agents, eq(agents.id, epicReviewRounds.reviewerId))
-      .where(eq(epicReviewRounds.epicId, epic.id)).orderBy(asc(epicReviewRounds.round))
-    const reviewRounds = rounds.map(({ review: r, reviewer }) => ({
-      round: r.round, verdict: r.verdict, reviewer, headSha: r.headSha,
-      summary: r.summary, findings: r.findings, at: r.createdAt.toISOString()
-    }))
+    const reviewRounds = await listEpicRounds(db, epic.id)
     const { tasks: board } = await epicReviewContext(db, epic, project)
     items.push({ id: epic.id, type: 'epic_review', epicId: epic.id, taskId: null, taskRef: null, subject: epic.title,
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: thumbnailUrl(project) },

@@ -7,6 +7,8 @@ import type {
   Comment,
   DesignVersion,
   Epic,
+  EpicReview,
+  EpicReviewTaskRow,
   Evidence,
   GlobalStatus,
   FlowMetrics,
@@ -361,8 +363,7 @@ export const tasks: Task[] = [
   task(corral, 22, { title: 'Export run history as CSV', status: 'ready', epicId: 'e-exports', dependsOn: ['COR-21'] }),
   ...epicTasks('e-alerts', 23, ['Alert when a run fails', 'Alert when a runner disconnects']).map((t, i) => ({
     ...t,
-    prNumber: null,
-    prUrl: null,
+    pr: null,
     humanReview: i === 0,
     acceptanceCriteria: i === 0
       ? [{ id: 'c-alert-sent', position: 0, text: 'A failed run sends one alert', checkedByHuman: false, met: true }]
@@ -683,6 +684,56 @@ export const pullRequestDetails: PullRequestDetail[] = [
   // Over the cap: the rest of the diff is on GitHub
   prDetail('COR-7', '## What\n\nThe PM drafts tasks from an approved design.', { totalFiles: 34, truncated: true })
 ]
+
+// What the real epic review reads live from GitHub and the audit log
+const epicReviewExtras: Record<string, Partial<EpicReview>> = {
+  'e-alerts': {
+    targetMovedBy: 3,
+    rounds: [{
+      round: 1, verdict: 'approved', reviewer: { id: 'a-rita', name: 'Rita' }, headSha: '214c2ab94d',
+      summary: 'Failed runs and runner disconnects share one alert path.',
+      findings: [{ level: 'non_blocking', text: 'Both alerts could share one title format', taskRefs: ['COR-23', 'COR-24'] }], at: ago(45)
+    }]
+  },
+  'e-webhooks': {
+    lastFeedback: {
+      text: 'Back off for longer after the third failure.', at: ago(120), headSha: 'a1b2c3d4e5',
+      fixTasks: [{ id: 't-cor-25', ref: 'COR-25', title: 'Queue failed webhooks' }],
+      files: approveFiles, totalFiles: approveFiles.length, truncated: false,
+      diffUrl: 'https://github.com/cormacrw/corral/compare/a1b2c3d4e5...215c2ab94d'
+    }
+  }
+}
+
+// Same shape as the server's: one row per board task. Null for an unknown epic.
+export function epicReview(id: string): EpicReview | null {
+  const epic = epics.find(e => e.id === id)
+  if (!epic) return null
+  const board = tasks.filter(t => t.epicId === id && t.status !== 'draft' && t.status !== 'backlog')
+  const rows = board.map((t): EpicReviewTaskRow => {
+    const human = t.humanReview && t.submission === null && t.status === 'merged'
+    return {
+      id: t.id, ref: t.ref, title: t.title, kind: t.kind, merged: t.status === 'merged',
+      prNumber: t.pr?.number ?? null, prUrl: t.pr?.url ?? null, integratedCommit: t.submission?.integrated ?? null,
+      reviewedBy: human ? 'human' : t.status === 'merged' || t.status === 'ready_to_merge' ? 'reviewer' : null,
+      criteria: t.acceptanceCriteria,
+      criteriaMet: t.acceptanceCriteria.filter(c => c.met === true || (human && c.checkedByHuman)).length,
+      criteriaTotal: t.acceptanceCriteria.length,
+      evidence: evidence[t.id] ?? [],
+      humanReview: t.submission !== null && t.humanReview,
+      humanChecks: t.submission ? t.acceptanceCriteria.filter(c => c.checkedByHuman).map(c => c.id) : []
+    }
+  })
+  return {
+    epicId: id, title: epic.title, goal: epic.description, reviewMode: epic.reviewMode, state: epic.reviewState,
+    targetBranch: 'main', headSha: epic.prHeadSha,
+    pr: epic.prNumber === null ? null : { number: epic.prNumber, url: epic.prUrl!, title: epic.title, body: `## What\n\n${epic.description}`, baseBranch: 'main', headBranch: epic.branch!, files: approveFiles, totalFiles: approveFiles.length, truncated: false },
+    gateChecks: [{ name: 'lint', conclusion: 'success', url: null }, { name: 'test', conclusion: 'success', url: null }],
+    targetMovedBy: 0, rounds: [], tasks: rows, seenByHuman: rows.filter(r => r.reviewedBy === 'human').length,
+    lastFeedback: null, conflictTaskRef: board.find(t => t.kind === 'conflict' && t.status !== 'merged')?.ref ?? null,
+    mergeCommitSha: null, ...epicReviewExtras[id]
+  }
+}
 
 const eligible = { eligible: true, failingGate: null, failedGates: [] }
 

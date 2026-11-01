@@ -57,15 +57,15 @@ describe('RunnerGitHub.compare', () => {
     const { github, jobs } = stub(() => ({ status: 200, body: {
       merge_base_commit: { sha: 'base' },
       files: [
-        { filename: 'a.ts', status: 'modified', sha: 'blob-a', patch: '+a' },
-        { filename: 'b.png', previous_filename: 'old.png', status: 'renamed', sha: 'blob-b' }
+        { filename: 'a.ts', status: 'modified', sha: 'blob-a', additions: 1, deletions: 0, patch: '+a' },
+        { filename: 'b.png', previous_filename: 'old.png', status: 'renamed', sha: 'blob-b', additions: 0, deletions: 0 }
       ]
     } }))
     expect(await github.compare('owner/repo', 'one', 'two')).toEqual({
       mergeBase: 'base',
       files: [
-        { filename: 'a.ts', status: 'modified', sha: 'blob-a', patch: '+a' },
-        { filename: 'b.png', previousFilename: 'old.png', status: 'renamed', sha: 'blob-b' }
+        { filename: 'a.ts', status: 'modified', sha: 'blob-a', additions: 1, deletions: 0, patch: '+a' },
+        { filename: 'b.png', previousFilename: 'old.png', status: 'renamed', sha: 'blob-b', additions: 0, deletions: 0 }
       ]
     })
     expect(jobs[0]).toMatchObject({ method: 'GET', path: '/repos/owner/repo/compare/one...two?per_page=1' })

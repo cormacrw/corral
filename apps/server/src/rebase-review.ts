@@ -18,7 +18,7 @@ function isProjectDoc(path: string): boolean {
 // don't count. Binary and very large files have no patch, and the blob on the
 // head side says nothing about what it replaced: A → C and B → C share it. Only
 // an added file replaced nothing, so only there does the blob identify the change.
-function changeOf(file: ChangedFile): string | null {
+export function changeOf(file: ChangedFile): string | null {
   const change = file.patch?.replace(/^@@ .*$/gm, '@@') ?? (file.status === 'added' ? file.sha : null)
   return change === null ? null : JSON.stringify([file.status, file.previousFilename ?? null, change])
 }
