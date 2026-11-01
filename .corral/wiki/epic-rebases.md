@@ -77,3 +77,19 @@ alternative keeping behaviour, or a question closed from the board, never
 carries approval.
 
 `rebaseRequested` is dead: it stays only because dropping a column needs a human.
+
+## Testing the whole workflow
+
+`apps/server/src/mixed-workflow.test.ts` drives agents over the WebSocket against
+real git, with GitHub's merges and branch updates as real git operations. Each test
+gets its own app and repository. The operator guide
+(`docs/operations/epic-rollout.md`) describes what it proves, and the suite runs
+its journal query, so change them together.
+
+`TestApp.restart()` is a crash, not a shutdown. The old process's database view
+is dead from that moment, so the `#fail` a dropped job would trigger can't write,
+and a test sees the journal as a real crash leaves it. Kill the process before
+closing the runner's socket: the disconnect is what wakes the old pass.
+
+Code in a transaction must read through `tx`. On Postgres a stray `db` read just
+takes a second connection; on PGlite it hangs for good, because there's only one.

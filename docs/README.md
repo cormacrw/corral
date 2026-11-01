@@ -15,7 +15,7 @@ Reference material for agents building Corral. Read this file first.
 | [stale-runners-and-fencing.md](stale-runners-and-fencing.md) | Plain explanation of the stale-runner problem and how leases, fencing tokens and scoped GitHub tokens solve it. | Background. Its POC suggestions are advisory, like `open-recommendations.md` (R10) |
 | [open-recommendations.md](open-recommendations.md) | Review feedback on the PRD that hasn't been accepted or rejected yet, including known inconsistencies. | **No.** Raise these with Cormac before acting on them |
 
-[Runner-only deployment on WSL2](runner-wsl2.md) is the operator guide for a remote gaming-PC runner (D25).
+[Runner-only deployment on WSL2](runner-wsl2.md) is the operator guide for a remote gaming-PC runner (D25). [Operating PR-free epics](operations/epic-rollout.md) covers activation, runner compatibility, waiting and failed operations, and telling task PRs from integrated tasks (D27).
 
 ## Precedence
 

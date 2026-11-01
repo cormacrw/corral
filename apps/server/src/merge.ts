@@ -1,5 +1,5 @@
 import { failedMergeGates, type Actor, type MergeGateFacts } from '@corral/core'
-import { schema, type Database } from '@corral/db'
+import { schema, type Database, type Executor } from '@corral/db'
 import { and, asc, desc, eq, isNull } from 'drizzle-orm'
 import { EpicMerger } from './epic-merge.ts'
 import { appendAudit, auditEvent, type TransitionDetail } from './audit.ts'
@@ -137,16 +137,17 @@ export class MergeOrchestrator {
     }
   }
 
-  async #approvalFor(task: { id: string, headSha: string | null }) {
-    const [row] = await this.#d.db.select().from(reviews)
+  async #approvalFor(task: { id: string, headSha: string | null }, db: Executor = this.#d.db) {
+    const [row] = await db.select().from(reviews)
       .where(and(eq(reviews.taskId, task.id), eq(reviews.headSha, task.headSha!), eq(reviews.verdict, 'approved')))
       .orderBy(desc(reviews.createdAt)).limit(1)
     return row ?? null
   }
 
-  // Gathers the facts for core's gate check from GitHub and the database
-  async gates(task: TaskRow, project: ProjectRow): Promise<GateReport> {
-    const { db, github } = this.#d
+  // Gathers the facts for core's gate check from GitHub and the database. A
+  // caller inside a transaction passes it, so this doesn't wait on a second connection.
+  async gates(task: TaskRow, project: ProjectRow, db: Executor = this.#d.db): Promise<GateReport> {
+    const { github } = this.#d
     const pr = await github.getPullRequest(project.repository, task.prNumber!)
     const checks = await github.checks(project.repository, pr.headSha)
     const required = project.requiredChecks
@@ -154,7 +155,7 @@ export class MergeOrchestrator {
       .map(name => checks.find(c => c.name === name && c.conclusion === 'success'))
       .filter((c): c is CheckResult => Boolean(c))
       .map(c => ({ name: c.name, url: c.url }))
-    const approval = await this.#approvalFor(task)
+    const approval = await this.#approvalFor(task, db)
     const criteria = await db.select({ id: acceptanceCriteria.id, checkedByHuman: acceptanceCriteria.checkedByHuman }).from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id))
     const attached = await db.select({ criterionId: evidence.criterionId }).from(evidence)
       .where(and(eq(evidence.taskId, task.id), eq(evidence.round, task.reviewRounds)))
@@ -319,7 +320,7 @@ export class MergeOrchestrator {
       } else {
         // Core re-checks the gates; GitHub has already confirmed the merge,
         // so the facts describe the merged commit
-        const report = await this.gates(task, project)
+        const report = await this.gates(task, project, tx)
         const facts: MergeGateFacts = { ...report.facts, mergeable: true }
         await applyTransition(tx, task, project, { type: 'merged', gates: facts }, server, { event: 'merged', ...detail })
       }

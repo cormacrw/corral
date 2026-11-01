@@ -29,10 +29,28 @@ export interface TestApp extends Services {
   request(method: string, path: string, body?: unknown): Promise<Response>
   createProject(overrides?: Partial<CreateProjectInput>): Promise<Project>
   createTask(slug: string, input?: Partial<CreateTaskInput>): Promise<Task>
+  // A crash and a fresh start on the same database: the old process gets nothing
+  // more into it, whatever it was doing, and all its in-memory state is gone.
+  // Runners must connect again, to the new `server`.
+  restart(): Promise<void>
   close(): Promise<void>
 }
 
 let counter = 0
+
+// One process's use of the database, which ends when that process does.
+// Anything it still has running fails at its next query.
+function processDatabase(db: Database) {
+  let dead = false
+  const view = new Proxy(db, {
+    get(target, key) {
+      if (dead) throw new Error('This process has died')
+      const value = Reflect.get(target, key) as unknown
+      return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value
+    }
+  })
+  return { db: view, kill: () => void (dead = true) }
+}
 
 export async function createTestApp(driver: 'pglite' | 'postgres', options: { listen?: boolean, runnerToken?: string | undefined, runnerOnly?: boolean | undefined } = {}): Promise<TestApp> {
   const handle: DatabaseHandle | null = driver === 'pglite'
@@ -49,13 +67,17 @@ export async function createTestApp(driver: 'pglite' | 'postgres', options: { li
   const github = new FakeGitHub()
   const blobs = new MemoryBlobStore()
   const clock = { now: new Date() }
-  const services = createServices({ db: handle.db, events: bus, spoolDir, blobs, github, publicUrl: 'http://corral.test', now: () => clock.now })
-  await services.orchestrator.init()
-  const deps = { db: handle.db, events: bus, actor, ...services }
-  const app = createApp(deps)
-  const server = options.listen ? await startServer(deps, { host: '127.0.0.1', port: 0, runnerToken: options.runnerToken, runnerOnly: options.runnerOnly }) : null
+  const boot = async () => {
+    const process = processDatabase(handle.db)
+    const services = createServices({ db: process.db, events: bus, spoolDir, blobs, github, publicUrl: 'http://corral.test', now: () => clock.now })
+    await services.orchestrator.init()
+    const deps = { db: process.db, events: bus, actor, ...services }
+    const server = options.listen ? await startServer(deps, { host: '127.0.0.1', port: 0, runnerToken: options.runnerToken, runnerOnly: options.runnerOnly }) : null
+    return { process, services, server, app: createApp(deps) }
+  }
+  let current = await boot()
 
-  const request = async (method: string, path: string, body?: unknown) => app.request(path, {
+  const request = async (method: string, path: string, body?: unknown) => current.app.request(path, {
     method,
     ...(body instanceof FormData
       ? { body }
@@ -64,8 +86,8 @@ export async function createTestApp(driver: 'pglite' | 'postgres', options: { li
         : body !== undefined && { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } })
   })
 
-  return {
-    ...services,
+  const testApp: TestApp = {
+    ...current.services,
     db: handle.db,
     actor,
     events,
@@ -73,7 +95,7 @@ export async function createTestApp(driver: 'pglite' | 'postgres', options: { li
     github,
     blobs,
     clock,
-    server,
+    server: current.server,
     request,
     async createProject(overrides = {}) {
       counter++
@@ -101,11 +123,19 @@ export async function createTestApp(driver: 'pglite' | 'postgres', options: { li
       if (res.status !== 201) throw new Error(`createTask: ${res.status} ${await res.text()}`)
       return res.json() as Promise<Task>
     },
+    async restart() {
+      current.process.kill()
+      current.services.orchestrator.stop()
+      await current.server?.close()
+      current = await boot()
+      Object.assign(testApp, current.services, { server: current.server })
+    },
     async close() {
-      services.orchestrator.stop()
-      await server?.close()
+      current.services.orchestrator.stop()
+      await current.server?.close()
       await handle.close()
       await rm(spoolDir, { recursive: true, force: true })
     }
   }
+  return testApp
 }
