@@ -4,6 +4,7 @@ import { schema } from '@corral/db'
 import { and, eq, isNull } from 'drizzle-orm'
 import { z } from 'zod'
 import { appendAudit, auditEvent } from './audit.ts'
+import { publishInvalidatedEpics, type InvalidatedEpics } from './epic-review-state.ts'
 import { getEpic, patchEpic, setEpicDependencies } from './epics.ts'
 import type { Orchestrator } from './orchestrator.ts'
 import { humanApprovalSummary } from './pm-approval-summary.ts'
@@ -53,7 +54,9 @@ export class PmCalls {
       if (tool === 'approve_task') await this.#c.merges.humanApprove(prepared.taskId, actor)
       else {
         const event = humanTransitionInput.parse(prepared.input.transition)
-        await transitionTask(db, prepared.taskId, event, actor)
+        const invalidatedEpics: InvalidatedEpics = new Map()
+        await transitionTask(db, prepared.taskId, event, actor, { invalidatedEpics })
+        await publishInvalidatedEpics(db, events, invalidatedEpics)
         if (prepared.input.reason) await addComment(db, prepared.taskId, { body: String(prepared.input.reason), pinned: false }, actor)
       }
       const task = await loadTask(db, prepared.taskId)
@@ -95,17 +98,19 @@ export class PmCalls {
     if (!match || match[1]!.toUpperCase() !== project.prefix.toUpperCase()) throw new ToolError('Use a task ref from this conversation’s project')
     const [row] = await db.select().from(tasks).where(and(eq(tasks.projectId, project.id), eq(tasks.number, Number(match[2])), isNull(tasks.deletedAt)))
     if (!row) throw new ToolError('Task no longer exists')
+    const invalidatedEpics: InvalidatedEpics = new Map()
     const edit = await db.transaction(async (tx) => {
       const { task } = await lockTask(tx, row.id)
       if (paused && task.leaseRunId) throw new ToolError('Use stop_run to stop a leased task with human confirmation')
       if (fields.type && !canChangeType(task, fields.type)) throw new ToolError('A task’s type is fixed once it is approved or awaiting merge, and it can’t enter or leave the spike or design type once it has left Draft or Backlog')
-      const edit = await patchTask(tx, project, row.id, fields, actor)
+      const edit = await patchTask(tx, project, row.id, fields, actor, invalidatedEpics)
       if (paused !== undefined) {
         await tx.update(tasks).set({ paused, updatedAt: this.#c.now() }).where(eq(tasks.id, row.id))
         await appendAudit(tx, { projectId: project.id, taskId: row.id, actor }, paused ? auditEvent('task.paused', {}) : auditEvent('task.resumed', {}))
       }
       return edit
     })
+    await publishInvalidatedEpics(db, events, invalidatedEpics)
     if (edit) await this.#c.human.noticeTaskEdit(row.id, edit, actor).catch(error => console.error('Telling the run about the PM edit failed', error))
     const task = await loadTask(db, row.id)
     events.publish({ type: 'task.updated', task })
