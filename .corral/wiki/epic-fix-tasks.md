@@ -15,3 +15,17 @@ the epic can't get stuck.
 Human approval requires `human_review`, so it returns 409 while changes are
 outstanding. Corral has no epic PR merge path yet; when one is added it must
 only accept `ready_to_merge`.
+
+Tasks expose a persisted `kind` (`normal`, `fix`, `conflict`), independent of
+`type`. Migration 0055 defaults both existing rows and ordinary new tasks to
+`normal`; it does not infer kinds from historical titles. `createEpicFixTask`
+sets `fix` for reviewer, human and CI feedback; the rebase hand-off sets
+`conflict`. These are server-owned classifications, not editable task inputs.
+
+The human's `epic.pr` / `human_changes_requested` audit record stores their
+feedback in `summary`, the reviewed `headSha`, its `createdAt`, and a `fixTasks`
+snapshot of the created tasks' IDs, refs and titles, in the same transaction as
+the tasks and review-state change. Each request keeps its own record. Inbox
+round-two context reads the latest record's links rather than matching titles
+or creation times. Renaming or removing a task does not erase that link; older
+audit records without links read as an empty list.

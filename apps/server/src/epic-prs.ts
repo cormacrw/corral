@@ -1,6 +1,6 @@
 import { withMessage } from './inbox-message.ts'
 import type { EpicConflictItem, EpicReviewActionInput, EpicReviewItem, EpicReviewReport, EpicReviewTask, InboxSince, RunJob } from '@corral/contracts'
-import { ACTIVE_RUN_STATES, feedbackFixTitle, FIX_TITLE_PREFIX, feedbackPoints, isTaskDone, LEASE_DURATION_MS, markdownToRichText, taskRef, type Actor, type CompletionState } from '@corral/core'
+import { ACTIVE_RUN_STATES, feedbackFixTitle, feedbackPoints, isTaskDone, LEASE_DURATION_MS, markdownToRichText, taskRef, type Actor, type CompletionState } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm'
 import { appendAudit, auditEvent, auditText, readAudit } from './audit.ts'
@@ -167,7 +167,8 @@ export class EpicPullRequests {
       }
       await tx.update(epics).set({ reviewState: input.action === 'approve' ? 'ready_to_merge' : 'changes_requested', updatedAt: this.now() }).where(eq(epics.id, epic.id))
       if (input.action === 'request_changes') fixId = await createEpicFixTask(tx, project, epic, input.text!.trim(), actor)
-      await appendAudit(tx, { projectId: project.id, actor }, auditEvent('epic.pr', { epicId, event: input.action === 'approve' ? 'human_approved' : 'human_changes_requested', headSha: input.headSha, summary: input.text ?? '', ...(input.action === 'approve' && { confirmedCriteria: required.flatMap(r => r.humanChecks), confirmedTasks: required.filter(r => r.humanReview).map(r => r.taskId) }) }))
+      const [fix] = fixId ? await tx.select().from(tasks).where(eq(tasks.id, fixId)) : []
+      await appendAudit(tx, { projectId: project.id, actor }, auditEvent('epic.pr', { epicId, ...(fix && { fixTasks: [{ id: fix.id, ref: taskRef(project.prefix, fix.number), title: fix.title }] }), event: input.action === 'approve' ? 'human_approved' : 'human_changes_requested', headSha: input.headSha, summary: input.text ?? '', ...(input.action === 'approve' && { confirmedCriteria: required.flatMap(r => r.humanChecks), confirmedTasks: required.filter(r => r.humanReview).map(r => r.taskId) }) }))
     })
     if (fixId) this.d.events.publish({ type: 'task.created', task: await loadTask(this.d.db, fixId) })
     await this.publish(epicId)
@@ -188,7 +189,7 @@ export class EpicPullRequests {
       const files = epic.conflictFiles?.length ? epic.conflictFiles.join(', ') : 'the files git reports'
       const text = `Rebase the epic branch ${epic.branch} onto origin/${target}: git fetch origin && git rebase origin/${target}. Never merge ${target} in. Resolve the conflicts in ${files}, keeping both sides' intent and never reverting what ${target} just merged. No feature changes. Run the project's gates, then report pr_updated; Corral force-pushes the epic branch with --force-with-lease, and no separate PR is opened.`
       const id = await createTask(tx, project, { type: 'task', title: `Rebase epic: ${epic.title}`.slice(0, 200), description: paragraph(text), epicId: epic.id, acceptanceCriteria: [`${epic.branch} is rebased onto origin/${target} with no merge commits, and the conflicts in ${files} are resolved keeping both sides' intent`] }, actor, { epicFix: true })
-      await tx.update(tasks).set({ branch: epic.branch }).where(eq(tasks.id, id))
+      await tx.update(tasks).set({ branch: epic.branch, kind: 'conflict' }).where(eq(tasks.id, id))
       await appendAudit(tx, { projectId: project.id, actor }, auditEvent('epic.pr', { epicId, event: 'rebase_handed_off', headSha }))
       return id
     })
@@ -205,7 +206,7 @@ export class EpicPullRequests {
 const paragraph = (text: string) => ({ type: 'doc' as const, content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
 
 export async function createEpicFixTask(tx: Executor, project: ProjectRow, epic: EpicRow, feedback: string, actor: Actor) {
-  return createTask(tx, project, { type: 'task', title: feedbackFixTitle(feedback), description: markdownToRichText(feedback), epicId: epic.id, acceptanceCriteria: feedbackPoints(feedback) }, actor, { epicFix: true })
+  return createTask(tx, project, { type: 'task', title: feedbackFixTitle(feedback), description: markdownToRichText(feedback), epicId: epic.id, acceptanceCriteria: feedbackPoints(feedback) }, actor, { epicFix: true, kind: 'fix' })
 }
 
 function humanCriteria(db: Executor, board: Awaited<ReturnType<typeof epicBoard>>) {
@@ -242,8 +243,9 @@ async function epicChanges(db: Executor, epic: EpicRow, board: Awaited<ReturnTyp
   const newArtifacts = board.flatMap(({ task, evidence }) => fileArtifacts(evidence, at, task.ref))
   if (!action || !at) return { since: null, newArtifacts }
   const notes = await Promise.all(board.map(async ({ task }) => workNotes(await listComments(db, task.id), at, task.ref)))
-  // The fix task the request created shares its transaction, and so its time
-  const fixTasks = board.filter(({ task }) => task.title.startsWith(FIX_TITLE_PREFIX) && task.createdAt >= at).map(({ task }) => ({ id: task.id, ref: task.ref, title: task.title }))
+  // Snapshot the request's tasks, even if later renamed or removed. Older
+  // audit records have no links; never guess them from a title or timestamp.
+  const fixTasks = readAudit(action.detail).fixTasks ?? []
   const since: InboxSince = { at, text: readAudit(action.detail).summary || null, notes: notes.flat().sort((a, b) => a.at.localeCompare(b.at)), fixTasks }
   return { since, newArtifacts }
 }

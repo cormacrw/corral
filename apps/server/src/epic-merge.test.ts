@@ -172,6 +172,7 @@ it('blocks a conflicted rebase with an Inbox item and hands it to a developer ru
   expect(dev.prompt).toContain('git rebase origin/develop')
 
   const rebase = (await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epic.id))).find(row => row.id !== task.id)!
+  expect(rebase.kind).toBe('conflict')
   const [criterion] = await t.db.select().from(schema.acceptanceCriteria).where(eq(schema.acceptanceCriteria.taskId, rebase.id))
   t.github.setBranch(project.repository, epic.branch!, `${head}-resolved`)
   await runner.call(dev.runId, dev.leaseEpoch, 'attach_evidence', { criterionId: criterion!.id, kind: 'note', note: 'Kept both route changes' })

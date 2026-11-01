@@ -1248,6 +1248,7 @@ export class Orchestrator implements RunnerHandlers {
     const notes = await this.#comments(task.id)
     return {
       ref: taskRef(ctx.project.prefix, task.number),
+      kind: task.kind,
       title: task.title,
       status: task.status,
       description: richTextToMarkdown(task.description),
