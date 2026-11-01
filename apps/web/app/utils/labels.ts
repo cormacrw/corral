@@ -148,6 +148,7 @@ export function cliLoginCommand(id: CliStatus['id']): string {
 export function inboxTypeBadge(type: InboxItem['type']): { label: string, color: Color } {
   return ({
     release_notes: { label: 'Release notes', color: 'neutral' as const },
+    epic_activity: { label: 'Epic PR', color: 'neutral' as const },
     epic_review: { label: 'Epic PR', color: 'warning' as const },
     epic_conflict: { label: 'Epic conflict', color: 'error' as const },
     human_review: { label: 'Human review', color: 'warning' as const },

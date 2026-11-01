@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { InboxActionInput, TaskInboxItem } from '@corral/contracts'
 import { reactive } from 'vue'
 import { actionOpensComposer, type InboxPanelContext, type InboxPanelTab, type ResolveTo } from '~/composables/useInboxPanel'
-import { isOwnPane, isTaskItem, useInboxView } from '~/composables/useInboxView'
+import { isTaskItem, useInboxView } from '~/composables/useInboxView'
 import { inboxActions } from '~/utils/inbox-actions'
 import { actOnInboxItem, holdsInbox } from '~/queries/inbox'
 import { keys } from '~/queries/keys'
@@ -81,7 +81,7 @@ const submitLabel = computed(() => action.value ? (actions.value.find(a => a.val
 
 // Resolves false when not sent, so the composer keeps its images
 async function submit(message: string): Promise<boolean> {
-  if (!selected.value || isOwnPane(selected.value)) return false
+  if (!isTaskItem(selected.value)) return false
   if (taskLoading.value || approveBlocked.value) return false
   if (action.value === 'approve' && task.value?.acceptanceCriteria.some(c => c.checkedByHuman && !checkedHumanCriteria.value.includes(c.id))) {
     failedAction.value = HUMAN_CHECK_ERROR
@@ -170,8 +170,12 @@ const panel = reactive({
 </script>
 
 <template>
+  <InboxEpicActivity
+    v-if="selected?.type === 'epic_activity'"
+    :item="selected"
+  />
   <InboxEpicReview
-    v-if="selected?.type === 'epic_review'"
+    v-else-if="selected?.type === 'epic_review'"
     :item="selected"
     @resolved="moveToNext"
   />

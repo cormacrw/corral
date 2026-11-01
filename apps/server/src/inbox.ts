@@ -1,4 +1,4 @@
-import { needsAttention, type InboxArtifact, type InboxSince, type ReleaseNotesItem } from '@corral/contracts'
+import { needsAttention, type EpicActivityItem, type InboxArtifact, type InboxSince, type ReleaseNotesItem } from '@corral/contracts'
 import { auditText, readAudit, type AuditView } from './audit.ts'
 import { epicInboxItems } from './epic-prs.ts'
 import { fileArtifacts, isNew, workNotes } from './inbox-changes.ts'
@@ -50,8 +50,8 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     .orderBy(desc(auditLog.createdAt), desc(auditLog.id))
     .limit(limit * 3)
 
-  const activity: TaskInboxItem[] = []
-  const resolved: (TaskInboxItem | ReleaseNotesItem)[] = []
+  const activity: Inbox['activity'] = []
+  const resolved: Inbox['resolved'] = []
   for (const { entry, task, project } of entries) {
     const detail = readAudit(entry.detail)
     const { event } = detail
@@ -72,11 +72,9 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     .where(eq(auditLog.action, 'epic.pr')).orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(limit)
   for (const { entry, epic, project } of epicEvents) {
     const detail = readAudit(entry.detail)
-    const [task] = await db.select().from(tasks).where(and(eq(tasks.epicId, epic.id), isNull(tasks.deletedAt))).limit(1)
-    if (!task) continue
     const labels: Record<string, string> = { opened: 'Epic PR opened', review_started: 'Epic integration review started', approved: 'Epic PR approved by reviewer', changes_requested: 'Epic integration changes requested', human_approved: 'You approved the epic PR', human_changes_requested: 'You requested changes on the epic PR', rebase_requested: 'Rebasing the epic PR onto the target branch', rebased: 'Epic PR rebased; CI runs again', conflict: 'Epic PR conflict', rebase_handed_off: 'You handed the epic PR rebase to a developer', ci_failed: 'CI failed on the epic PR', merge_refused: 'GitHub refused the epic PR merge', closed: 'Epic PR closed on GitHub', merged: 'Epic PR merged' }
     const body = [labels[detail.event ?? ''] ?? detail.event, detail.summary].filter(Boolean).join(': ')
-    const item: TaskInboxItem = { id: `epic-${entry.id}`, type: 'activity', epicId: epic.id, project: projectTag(project), taskId: task.id, taskRef: taskRef(project.prefix, task.number), subject: epic.title, preview: body, body, sender: senderOf(entry.actor), at: entry.createdAt.toISOString(), prUrl: epic.prNumber ? `https://github.com/${project.repository}/pull/${epic.prNumber}` : null, resolution: entry.actor.kind === 'human' ? body : null }
+    const item: EpicActivityItem = { id: `epic-${entry.id}`, type: 'epic_activity', event: detail.event ?? '', epicId: epic.id, project: projectTag(project), taskId: null, taskRef: null, subject: epic.title, preview: body, body, sender: senderOf(entry.actor), at: entry.createdAt.toISOString(), prUrl: epic.prNumber ? `https://github.com/${project.repository}/pull/${epic.prNumber}` : null, resolution: entry.actor.kind === 'human' ? body : null }
     if (entry.actor.kind === 'human') resolved.push(item)
     else activity.push(item)
   }
