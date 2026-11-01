@@ -334,6 +334,47 @@ describe('reviewer gates (D26)', () => {
   })
 })
 
+describe('epic rebase prompts', () => {
+  const task: PromptTask = {
+    ref: 'TA-9', title: 'Rebase epic: Search', description: null, branch: 'corral/epic-1-search',
+    defaultBranch: 'develop', reviewRounds: 0, reviewRoundCap: 3,
+    criteria: [{ id: 'c1', text: 'Rebased' }], comments: [], attachments: []
+  }
+
+  it('squashes, rebases, resolves and reports when required CI verifies the push', () => {
+    const prompt = developerPrompt({ ...task, squashRebase: true }, 'Tam')
+    expect(prompt).toContain('squash the epic branch, rebase it, resolve the conflicts and report')
+    expect(prompt).toContain('git merge-base HEAD origin/develop')
+    expect(prompt).toContain('git rebase origin/develop')
+    expect(prompt).toContain('Report straight away')
+    expect(prompt).toContain('outcome "pr_updated"')
+    expect(prompt).toContain('Keep every `Corral-Submission:` trailer')
+    expect(prompt).toContain('Migration files stay exactly as they are')
+  })
+
+  it('rules out the gates and a second fetch, and never asks for them', () => {
+    const prompt = developerPrompt({ ...task, squashRebase: true }, 'Tam')
+    expect(prompt).toContain('run no lint, typecheck, tests, build, `pnpm run check` or Postgres suites')
+    expect(prompt).toContain('don\'t fetch or rebase again once the conflicts are resolved')
+    expect(prompt.match(/pnpm run check/g)).toHaveLength(1)
+    expect(prompt).not.toContain('Run `pnpm run check`')
+    expect(prompt).not.toContain('pr_opened')
+  })
+
+  it('keeps the rule when a session resumes', () => {
+    const prompt = developerRevisionPrompt({ ...task, squashRebase: true, reviewRounds: 1 }, [])
+    expect(prompt).toContain('run no lint, typecheck, tests, build')
+    expect(prompt).toContain('outcome "pr_updated"')
+  })
+
+  it('leaves every other developer task with the same gate instruction', () => {
+    const line = '- Run `pnpm run check` when available for lint, typecheck and tests before reporting. Do not add concurrency, worker or timeout flags; use the repository\'s shared CPU setting.'
+    expect(developerPrompt(task, 'Tam')).toContain(line)
+    expect(developerPrompt(task, 'Tam')).not.toContain('Corral-Submission')
+    expect(developerRevisionPrompt({ ...task, reviewRounds: 1 }, [])).not.toContain('Postgres')
+  })
+})
+
 describe('D21 evidence guidance', () => {
   const task: PromptTask = {
     ref: 'TA-1', title: 'Refactor', description: null, branch: 'corral/ta-1',

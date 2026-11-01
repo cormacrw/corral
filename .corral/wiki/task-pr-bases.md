@@ -92,6 +92,22 @@ is how the rest of the code recognises it: `taskBase` answers the target branch,
 the push already put the work on the epic branch. The moved head then restarts
 integration review.
 
+With required CI checks, the task text and `epicRebaseDeveloperPrompt` have the
+developer squash the epic branch into one commit on its merge base with the
+target, rebase that, resolve the conflicts and report. The squash means each
+conflict is resolved once, and epic PRs squash on merge anyway. The squashed
+message carries every commit's message, because `findIntegrated` greps the epic
+branch for `Corral-Submission:` trailers to keep integration exactly-once. It
+squashes commits, not migration files, so the rule against squashing migrations
+still holds.
+
+That prompt forbids the gates and any second fetch, overruling the role
+instructions. CI failures after the push come back through the epic CI failure
+path, and a moved target is the epic merge pass's job. With no required checks
+the task gets the ordinary developer prompt and text, which run the gates. The
+two are chosen separately, from `requiredChecks` when the task is created and
+when each run is assigned.
+
 Epic PRs always squash, so `project.mergeMethod` applies only to task PRs. An
 epic is done for D22 once its PR merges (`holdsEpicOpen`); an `epic`-mode epic
 with no branch, such as one holding only spikes, is done when its tasks are.

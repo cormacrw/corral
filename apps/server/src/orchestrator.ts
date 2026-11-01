@@ -542,6 +542,7 @@ export class Orchestrator implements RunnerHandlers {
       prFree: task.integrationProtocol > 0,
       reviewRounds: task.reviewRounds,
       rebaseOnly: task.rebaseOnly,
+      squashRebase: ctx.project.requiredChecks.length > 0 && await isEpicRebaseTask(db, task),
       approvedHeadSha: task.approvedHeadSha,
       reviewRoundCap: ctx.project.reviewRoundCap,
       criteria: criteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })),
