@@ -236,6 +236,57 @@ describe('PM task and epic tools', () => {
     }
   })
 
+  describe('epic review resets', () => {
+    async function reviewedEpic() {
+      const [epic] = await t.db.insert(schema.epics).values({ projectId, title: 'Under review', createdBy: t.actor, reviewState: 'human_review', branch: `epic-${crypto.randomUUID()}`, prNumber: 7 }).returning()
+      const [agent] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'reviewer'))
+      const [run] = await t.db.insert(schema.runs).values({ agentId: agent!.id, projectId, epicId: epic!.id, role: 'reviewer', state: 'running' }).returning()
+      return { epic: epic!, run: run! }
+    }
+    const published = (from: number) => t.events.slice(from).flatMap((e): { type: string, id: string, state: string | null }[] => {
+      if (e.type === 'epic.updated') return [{ type: e.type, id: e.epic.id, state: e.epic.reviewState }]
+      return e.type === 'run.updated' ? [{ type: e.type, id: e.run.id, state: e.run.state }] : []
+    })
+
+    it('publishes the reset and interrupted run when a confirmed move_task puts epic work on the board', async () => {
+      const { epic, run } = await reviewedEpic()
+      const task = await t.createTask(slug, { epicId: epic.id })
+      const id = await action('move_task', { taskRef: task.ref, transition: { type: 'approve' } })
+      const from = t.events.length
+      expect((await resolve(id)).status).toBe(200)
+      expect(await t.db.select({ state: schema.epics.reviewState }).from(schema.epics).where(eq(schema.epics.id, epic.id))).toEqual([{ state: 'open' }])
+      expect(published(from)).toEqual(expect.arrayContaining([
+        { type: 'epic.updated', id: epic.id, state: 'open' },
+        { type: 'run.updated', id: run.id, state: 'interrupted' }
+      ]))
+    })
+
+    it('publishes both resets and interrupted runs when update_task moves a board task between epics', async () => {
+      const [first, second] = [await reviewedEpic(), await reviewedEpic()]
+      const task = await t.createTask(slug, { epicId: first.epic.id })
+      await t.db.update(schema.tasks).set({ status: 'ready' }).where(eq(schema.tasks.id, task.id))
+      const from = t.events.length
+      expect(await call('update_task', { taskRef: task.ref, epicId: second.epic.id })).toMatchObject({ ok: true })
+      expect(published(from)).toEqual([
+        { type: 'epic.updated', id: first.epic.id, state: 'open' },
+        { type: 'run.updated', id: first.run.id, state: 'interrupted' },
+        { type: 'epic.updated', id: second.epic.id, state: 'open' },
+        { type: 'run.updated', id: second.run.id, state: 'interrupted' }
+      ])
+    })
+
+    it('publishes nothing and keeps the review running when update_task rolls back', async () => {
+      const [first, second] = [await reviewedEpic(), await reviewedEpic()]
+      const task = await t.createTask(slug, { epicId: first.epic.id })
+      await t.db.update(schema.tasks).set({ status: 'ready' }).where(eq(schema.tasks.id, task.id))
+      const from = t.events.length
+      expect(await call('update_task', { taskRef: task.ref, epicId: second.epic.id, dependsOn: [99_999] })).toMatchObject({ ok: false })
+      expect(published(from)).toEqual([])
+      const [row] = await t.db.select({ state: schema.runs.state }).from(schema.runs).where(eq(schema.runs.id, first.run.id))
+      expect(row!.state).toBe('running')
+    })
+  })
+
   it('refuses generic design approval and binds approval to the full reviewed head', async () => {
     const design = await t.createTask(slug, { title: 'Design prototype', type: 'design' })
     await t.db.update(schema.tasks).set({ status: 'human_review' }).where(eq(schema.tasks.id, design.id))
