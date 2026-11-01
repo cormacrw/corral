@@ -15,17 +15,18 @@ const task = (ref: string, status: Status, lease: 'developer' | 'reviewer' | nul
 describe('projectNeedsYou', () => {
   const notes = releaseNotes[0]!
   const blocked = { ...notes, id: 'task', type: 'blocked' } as unknown as Inbox['needsYou'][number]
+  const other = { ...blocked, id: 'other', project: { ...notes.project, id: 'another-project' } }
   const inbox = (needsYou: Inbox['needsYou']): Inbox => ({ needsYou, activity: [], resolved: [], count: 0 })
 
-  it('leaves release notes out of the count, however many there are', () => {
-    const many = Array.from({ length: 20 }, (_, i) => ({ ...notes, id: `release-${i}` }))
-    expect(projectNeedsYou(inbox(many), notes.project.id)).toEqual([])
-    expect(projectNeedsYou(inbox([...many, blocked]), notes.project.id)).toEqual([blocked])
-    expect(projectCardSummary({ paused: false }, [], projectNeedsYou(inbox(many), notes.project.id).length, now).line).toBe('Nothing running.')
+  it('counts the project\'s share of Needs you, so project counts add up to the global one', () => {
+    const listed = inbox([blocked, other])
+    expect(projectNeedsYou(listed, notes.project.id)).toEqual([blocked])
+    expect(projectNeedsYou(listed, 'another-project')).toEqual([other])
+    expect(projectCardSummary({ paused: false }, [], 0, now).line).toBe('Nothing running.')
   })
 
-  it('counts only the given project', () => {
-    expect(projectNeedsYou(inbox([blocked]), 'another-project')).toEqual([])
+  it('counts nothing for a project with nothing waiting', () => {
+    expect(projectNeedsYou(inbox([blocked]), 'empty-project')).toEqual([])
     expect(projectNeedsYou(null, notes.project.id)).toEqual([])
   })
 })

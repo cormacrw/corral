@@ -6,7 +6,7 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { appendAudit, auditEvent } from './audit.ts'
 import { epicInboxItems, unclaimedEpicItems } from './epic-prs.ts'
 import { loadEpic } from './epics.ts'
-import { inboxCount, loadInbox, unclaimedTaskItems } from './inbox.ts'
+import { loadInbox, unclaimedTaskItems } from './inbox.ts'
 import { createAgent } from './runs.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { deleteTaskRows, loadTask, loadTasks } from './tasks.ts'
@@ -122,9 +122,9 @@ describe.each(['pglite', 'postgres'] as const)('the data layer on %s', (driver) 
 
     const listed = await loadInbox(t.db)
     expect(listed.needsYou.some(i => i.type === 'plan_thread' && i.subject === 'Quiet')).toBe(false)
-    expect(listed.needsYou.some(i => i.type === 'plan_thread' && i.subject === 'Reply')).toBe(true)
+    expect(listed.needsYou.some(i => i.type === 'plan_thread' && i.subject === 'Reply')).toBe(false)
     expect(listed.needsYou.some(i => i.type === 'epic_conflict')).toBe(true)
-    expect(await inboxCount(t.db)).toBe(listed.count)
+    expect(listed.count).toBe(listed.needsYou.length)
     await t.db.update(epics).set({ reviewState: 'merged' }).where(eq(epics.id, conflict!.id))
     await t.db.update(tasks).set({ status: 'merged', statusReason: null }).where(eq(tasks.id, task.id))
   })

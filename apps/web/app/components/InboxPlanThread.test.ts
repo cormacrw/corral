@@ -64,7 +64,7 @@ async function mountInbox(sessionPlans = plans['s-1']!) {
   } } })
   await flushPromises()
   // An event as the real stream delivers it, less the coalescing delay
-  const emitLive = (event: { type: string, session?: { id: string, unread: boolean, activeRunId?: string | null }, markedRead?: { inboxCount: number } }) => void invalidateKeys(client, applyEvent(client, event as ServerEvent))
+  const emitLive = (event: { type: string, session?: { id: string, unread: boolean, activeRunId?: string | null }, markedRead?: true }) => void invalidateKeys(client, applyEvent(client, event as ServerEvent))
   const rows = () => wrapper.findAll('[data-row]').map(r => r.attributes('data-row'))
   const rename = (name: string) => {
     data = { ...data, needsYou: data.needsYou.map(i => i.type === 'plan_thread' ? { ...i, sender: { ...i.sender, name } } : i) }
@@ -76,13 +76,13 @@ async function mountInbox(sessionPlans = plans['s-1']!) {
   return { wrapper, params, replace, remove, toasts, toastRemove, rows, rename, setInbox, emitLive }
 }
 
-it('reads an unread thread in place and keeps it open, without fetching the Inbox', async () => {
+it('reads an unread thread in place, keeping it listed, without fetching the Inbox', async () => {
   const { wrapper, rows, emitLive, setInbox } = await mountInbox()
   try {
     const opened = inbox().needsYou.find(i => i.id === 's-1')
     if (opened?.type !== 'plan_thread') throw new Error('fixture')
     vi.mocked(api.plan.read).mockResolvedValue({ ...planSessions.find(s => s.id === 's-1')!, unread: false })
-    setInbox({ ...inbox(), needsYou: inbox().needsYou.map(i => i.id === 's-1' ? { ...opened, status: 'none', question: null, plan: null, planId: null, unread: true, reply: 'Done' } : i) })
+    setInbox({ ...inbox(), needsYou: inbox().needsYou.map(i => i.id === 's-1' ? { ...opened, unread: true } : i) })
     emitLive({ type: 'agent.updated' })
     await flushPromises()
     vi.mocked(api.inbox.get).mockClear()
@@ -96,9 +96,10 @@ it('reads an unread thread in place and keeps it open, without fetching the Inbo
     expect(api.inbox.get).toHaveBeenCalledOnce()
 
     vi.mocked(api.inbox.get).mockClear()
-    emitLive({ type: 'plan.session', session: { id: 's-1', unread: false }, markedRead: { inboxCount: 1 } })
+    emitLive({ type: 'plan.session', session: { id: 's-1', unread: false }, markedRead: true })
     await flushPromises()
     expect(api.inbox.get).not.toHaveBeenCalled()
+    expect(rows()).toContain('s-1')
     expect(wrapper.findComponent(InboxPlanThread).exists()).toBe(true)
   } finally {
     wrapper.unmount()

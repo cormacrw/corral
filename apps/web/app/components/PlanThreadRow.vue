@@ -11,7 +11,7 @@ defineProps<{ item: PlanThreadItem, mobile?: boolean }>()
   <span
     v-if="item.unread"
     class="mt-2 size-2 shrink-0 rounded-full bg-primary"
-    aria-label="Unread reply"
+    aria-label="Unread"
   />
   <AgentAvatar
     :name="item.sender.name"
@@ -34,9 +34,8 @@ defineProps<{ item: PlanThreadItem, mobile?: boolean }>()
     <span :class="['line-clamp-2 text-muted', mobile ? 'text-sm' : 'text-xs']">{{ markdownToPlainText(item.preview) }}</span>
     <span :class="['flex items-center gap-2', mobile ? 'mt-0.5' : 'mt-1']">
       <UBadge
-        v-if="item.status !== 'none' || item.unread"
-        :label="item.status === 'needs_approval' ? 'Needs approval' : item.status === 'question' ? 'Question' : 'Unread reply'"
-        :color="item.status === 'needs_approval' ? 'primary' : item.status === 'question' ? 'info' : 'neutral'"
+        :label="item.status === 'needs_approval' ? 'Needs approval' : item.status === 'question' ? 'Question' : 'Failed'"
+        :color="item.status === 'needs_approval' ? 'primary' : item.status === 'question' ? 'info' : 'error'"
         variant="subtle"
         :size="mobile ? 'sm' : 'xs'"
       />

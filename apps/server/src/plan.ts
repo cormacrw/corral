@@ -10,7 +10,6 @@ import { publishInvalidatedEpics, type InvalidatedEpics } from './epic-review-st
 import { listEpics, replaceEpicDependencies } from './epics.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
-import { inboxCount } from './inbox.ts'
 import { pmFallbackPrompt, pmPrompt, questionText, sessionTitlePrompt } from './prompts.ts'
 import type { RunnerHub } from './runner-hub.ts'
 import { requireRuntimeCli } from './setup.ts'
@@ -133,7 +132,7 @@ export class PlanService {
   async markRead(sessionId: string): Promise<PlanSession> {
     await this.#d.db.update(planSessions).set({ unread: false }).where(eq(planSessions.id, sessionId))
     const session = await this.#toSession(await this.#session(sessionId))
-    this.#d.events.publish({ type: 'plan.session', session, markedRead: { inboxCount: await inboxCount(this.#d.db) } })
+    this.#d.events.publish({ type: 'plan.session', session, markedRead: true })
     return session
   }
 
@@ -1085,6 +1084,9 @@ export class PlanService {
 export type SessionAttention =
   | { status: 'needs_approval', plan: typeof plans.$inferSelect }
   | { status: 'question', question: typeof planMessages.$inferSelect }
+  // The PM's last turn ended in an error. Nothing retries a turn, so the
+  // session waits on the human's message or closing it, read or not (D11).
+  | { status: 'failed', failure: typeof planMessages.$inferSelect }
   | { status: 'none' }
 
 // Each epic key of a plan and the epic it made. Plans saved before plan_epics
@@ -1121,7 +1123,9 @@ export async function sessionStates(db: Executor, rows: SessionRow[], activeRunI
     const proposed = proposedOf.get(row.id)
     const attention: SessionAttention = proposed
       ? { status: 'needs_approval', plan: proposed }
-      : last?.role === 'pm' && last.kind === 'question' ? { status: 'question', question: last } : { status: 'none' }
+      : last?.role === 'pm' && last.kind === 'question'
+        ? { status: 'question', question: last }
+        : last?.role === 'pm' && last.kind === 'error' ? { status: 'failed', failure: last } : { status: 'none' }
     const session: PlanSession = {
       id: row.id,
       projectId: row.projectId,

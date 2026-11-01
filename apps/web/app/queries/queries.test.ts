@@ -165,16 +165,16 @@ describe('query layer', () => {
     expect(seen).toHaveBeenCalledTimes(2)
   })
 
-  it('keeps read-only Inbox events out of refetches and writes the count into the cache', async () => {
+  it('keeps read-only Inbox events out of refetches and leaves the count alone', async () => {
     useLive().connect()
-    const inbox = onScreen(client, keys.inbox(), () => ({ count: 2, needsYou: [] }))
+    const inbox = onScreen(client, keys.inbox(), () => ({ count: 2, needsYou: [], activity: [] }))
     await vi.advanceTimersByTimeAsync(0)
     FakeEventSource.last.emit('plan.session', {
-      type: 'plan.session', session: { id: 's-1', unread: false }, markedRead: { inboxCount: 1 }
+      type: 'plan.session', session: { id: 's-1', unread: false }, markedRead: true
     })
     FakeEventSource.last.emit('deployment.updated', { type: 'deployment.updated', deployment: { id: 'd-1' }, markedRead: true })
     await vi.advanceTimersByTimeAsync(MAX_WAIT_MS + QUIET_MS)
-    expect(client.getQueryData(keys.inbox())).toEqual({ count: 1, needsYou: [] })
+    expect(client.getQueryData(keys.inbox())).toEqual({ count: 2, needsYou: [], activity: [] })
     expect(inbox.queryFn).toHaveBeenCalledTimes(1)
     // Content changes still invalidate the derived Inbox, as on main.
     FakeEventSource.last.emit('deployment.updated', { type: 'deployment.updated' })

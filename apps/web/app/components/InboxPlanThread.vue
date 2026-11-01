@@ -61,9 +61,8 @@ async function approve(to: 'ready' | 'backlog') {
               :size="16"
             /><span class="truncate">{{ item.project.name }}</span></span>
             <UBadge
-              v-if="item.status !== 'none'"
-              :label="item.status === 'needs_approval' ? 'Needs approval' : 'Question'"
-              :color="item.status === 'needs_approval' ? 'primary' : 'info'"
+              :label="item.status === 'needs_approval' ? 'Needs approval' : item.status === 'question' ? 'Question' : 'Failed'"
+              :color="item.status === 'needs_approval' ? 'primary' : item.status === 'question' ? 'info' : 'error'"
               variant="subtle"
               size="xs"
               class="shrink-0"
@@ -167,12 +166,15 @@ async function approve(to: 'ready' | 'backlog') {
           </section>
 
           <section
-            v-else-if="item.reply"
+            v-else-if="item.failure"
             class="flex flex-col gap-3"
-            data-testid="inbox-plan-reply"
+            data-testid="inbox-plan-failure"
           >
+            <p class="text-sm text-highlighted">
+              {{ item.sender.name }}'s turn failed and nothing will retry it. Send a message to try again, or delete the thread.
+            </p>
             <MarkdownText
-              :text="item.reply"
+              :text="item.failure"
               class="text-sm"
             />
             <UButton
