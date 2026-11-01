@@ -3,7 +3,7 @@ import type { Agent, Epic, Task } from '@corral/contracts'
 import type { TaskStatus } from '@corral/core'
 import type { BoardFilters, BoardView } from '~/utils/board'
 import { boardColumnKey, swipeStep } from '~/utils/board'
-import { doneRefs, plural, taskNote } from '~/utils/labels'
+import { plural } from '~/utils/labels'
 
 // The Board on a phone (design/board.md, design/mobile.md): one column at a
 // time, picked from a row of tabs or by swiping sideways. Cards open the
@@ -17,7 +17,6 @@ const props = defineProps<{
   agents: { id: string, name: string }[]
   total: number
   all: Task[]
-  reviewRoundCap: number
   loading: boolean
   error: string | null
 }>()
@@ -29,7 +28,6 @@ const view = defineModel<BoardView>('view', { required: true })
 const viewItems = [{ label: 'Tasks', value: 'tasks' }, { label: 'Epics', value: 'epics' }]
 const flyout = useTaskFlyout()
 const single = computed(() => filters.value.epics.length === 1 ? filters.value.epics[0]! : null)
-const shell = useShell()
 const route = useRoute()
 const router = useRouter()
 
@@ -89,9 +87,6 @@ function toggleSearch() {
   if (!searching.value) search.value = ''
 }
 const epicLabel = (id: string) => props.epics.find(e => e.id === id)?.label ?? ''
-const agentFor = (task: Task) => task.lease ? shell.agents.find(a => a.id === task.lease!.agentId) ?? null : null
-const done = computed(() => doneRefs(props.all))
-const note = (task: Task) => taskNote(task, done.value, props.reviewRoundCap)
 </script>
 
 <template>
@@ -252,12 +247,11 @@ const note = (task: Task) => taskNote(task, done.value, props.reviewRoundCap)
           v-for="task in tasks"
           :key="task.id"
         >
-          <BoardCard
+          <TaskCard
             :task="task"
-            :note="note(task)"
+            :tasks="all"
             :epic="task.epicId ? epicLabel(task.epicId) : null"
-            :agent="agentFor(task)"
-            mobile
+            :to="`/tasks/${task.ref}`"
           />
         </li>
       </ul>

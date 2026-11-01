@@ -29,6 +29,8 @@ const emit = defineEmits<{ status: [value: string], patch: [input: PatchTaskInpu
 const dotClass = (status: TaskStatus) => ({
   neutral: 'bg-neutral-400', info: 'bg-info', primary: 'bg-primary', warning: 'bg-warning', error: 'bg-error', success: 'bg-success', secondary: 'bg-secondary'
 })[STATUS[status].color]
+// Why a task stopped: the card no longer says, so this is where it's read
+const hasReason = computed(() => (props.task.status === 'blocked' || props.task.status === 'failed') && Boolean(props.task.statusReason))
 </script>
 
 <template>
@@ -39,6 +41,7 @@ const dotClass = (status: TaskStatus) => ({
       { key: 'waitingEpics', label: 'Waiting on epic:' },
       { key: 'design', label: 'Design' },
       { key: 'status', label: 'Status' },
+      { key: 'reason', label: 'Reason' },
       { key: 'priority', label: 'Priority' },
       { key: 'type', label: 'Type' },
       { key: 'developer', label: props.task.type === 'design' ? 'Designer' : 'Developer' },
@@ -47,7 +50,7 @@ const dotClass = (status: TaskStatus) => ({
       { key: 'branch', label: 'Branch' },
       { key: 'pr', label: 'Pull request' },
       { key: 'round', label: 'Review round' }
-    ].filter(r => (!props.draft || !DRAFT_HIDDEN.includes(r.key)) && (r.key !== 'design' || props.task.design) && (r.key !== 'waitingEpics' || (props.task.status === 'ready' && props.task.waitingOnEpics.length > 0)))"
+    ].filter(r => (!props.draft || !DRAFT_HIDDEN.includes(r.key)) && (r.key !== 'design' || props.task.design) && (r.key !== 'waitingEpics' || (props.task.status === 'ready' && props.task.waitingOnEpics.length > 0)) && (r.key !== 'reason' || hasReason))"
     :key="row.key"
   >
     <dt :class="['text-muted', props.stacked ? 'mt-2 text-xs' : 'flex min-h-8 items-center']">
@@ -150,6 +153,11 @@ const dotClass = (status: TaskStatus) => ({
           </template>
         </USelectMenu>
       </UTooltip>
+
+      <span
+        v-else-if="row.key === 'reason'"
+        class="py-1.5 wrap-anywhere text-error"
+      >{{ props.task.statusReason }}</span>
 
       <span v-else-if="props.readonly && row.key === 'priority'">{{ props.priorityOptions.find(o => o.value === props.task.priority)?.label }}</span>
       <span v-else-if="props.readonly && row.key === 'type'">{{ props.typeOptions.find(o => o.value === props.task.type)?.label }}</span>

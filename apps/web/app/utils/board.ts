@@ -138,6 +138,12 @@ export function taskAgentIds(task: Pick<Task, 'status' | 'lease' | 'developer' |
   return agent ? [agent.id] : []
 }
 
+// The agent a Board card shows: the reviewer in Agent review, otherwise the
+// developer. It never falls back to the other role.
+export function cardAssignee(task: Pick<Task, 'status' | 'developer' | 'reviewer'>): Task['developer'] {
+  return task.status === 'agent_review' ? task.reviewer : task.developer
+}
+
 // The column a task's status puts it in
 export function columnKey(status: TaskStatus): string | undefined {
   return BOARD_COLUMNS.find(c => c.statuses.includes(status))?.key
