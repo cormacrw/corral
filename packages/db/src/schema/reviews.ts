@@ -1,8 +1,9 @@
 import { sql } from 'drizzle-orm'
-import { check, foreignKey, index, integer, jsonb, pgTable, text, uuid } from 'drizzle-orm/pg-core'
+import { check, foreignKey, index, integer, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 import { actor, createdAt } from './columns.ts'
 import { evidenceKind, reviewVerdict } from './enums.ts'
-import { runs } from './runs.ts'
+import { epics } from './epics.ts'
+import { agents, runs } from './runs.ts'
 import { acceptanceCriteria, tasks } from './tasks.ts'
 
 // One reviewer verdict per round and commit (flows.md step 6). The per
@@ -53,4 +54,22 @@ export const evidence = pgTable('evidence', {
     (${t.kind}::text = 'note' and ${t.note} ~ '[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]' and ${t.blob} is null and ${t.fileName} is null and ${t.contentType} is null and ${t.size} = 0)
     or (${t.kind}::text <> 'note' and ${t.blob} is not null and ${t.blob} ~ '[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]' and ${t.fileName} is not null and ${t.fileName} ~ '[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]' and ${t.contentType} is not null and ${t.contentType} ~ '[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]' and ${t.size} >= 0)
   )`)
+])
+
+// Integration reports are immutable; the epic lock serializes round allocation.
+export const epicReviewRounds = pgTable('epic_review_rounds', {
+  id: uuid().primaryKey().defaultRandom(),
+  epicId: uuid().notNull().references(() => epics.id, { onDelete: 'cascade' }),
+  runId: uuid().notNull().references(() => runs.id, { onDelete: 'cascade' }),
+  reviewerId: uuid().notNull().references(() => agents.id),
+  round: integer().notNull(),
+  headSha: text().notNull(),
+  verdict: reviewVerdict().notNull(),
+  summary: text().notNull(),
+  findings: jsonb().$type<{ level: 'blocking' | 'non_blocking', text: string, taskRefs: string[] }[]>().notNull().default([]),
+  createdAt: createdAt()
+}, t => [
+  uniqueIndex().on(t.epicId, t.round),
+  uniqueIndex().on(t.runId),
+  check('epic_review_round_positive', sql`${t.round} > 0`)
 ])

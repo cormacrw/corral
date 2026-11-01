@@ -13,7 +13,7 @@ import { listEvidence } from './runs.ts'
 import { thumbnailUrl } from './projects.ts'
 import { commitUrl, createTask, listComments, loadTask, toTasks, type ProjectRow } from './tasks.ts'
 
-const { acceptanceCriteria, agents, auditLog, epics, projects, runs, tasks } = schema
+const { acceptanceCriteria, agents, auditLog, epicReviewRounds, epics, projects, runs, tasks } = schema
 const system: Actor = { kind: 'system', component: 'server' }
 type EpicRow = typeof epics.$inferSelect
 type RunRow = typeof runs.$inferSelect
@@ -109,7 +109,7 @@ export class EpicPullRequests {
           projectId: project.id, repository: project.repository, defaultBranch: project.defaultBranch, baseBranch: project.defaultBranch,
           taskId: null, taskRef: null, epicId: epic.id, branch: epic.branch, headSha: epic.prHeadSha,
           planSessionId: null, agentSessionId: null, fallbackPrompt: null, model: null, timeoutSeconds: 3600,
-          prompt: `You are ${agent.name}, reviewing the integration of epic "${epic.title}".\n\n${JSON.stringify(context, null, 2)}\n\nReview the whole combined diff with git diff origin/${project.defaultBranch}...HEAD at commit ${epic.prHeadSha}. This is a read-only checkout: do not edit, commit or push. Check the epic goal and every task's criteria, looking for integration problems between tasks (API/UI mismatches, inconsistent docs, duplicate helpers). The evidence is context; do not re-judge individual task evidence. Criteria checked by a human and tasks flagged humanReview wait for the human at this epic's approval: do not attempt them, produce evidence or verdicts for them, or request changes over them. Use get_task for the whole epic and get_evidence to fetch any listed evidence ID. Rerun the project's lint, typecheck, tests and build as gates WITHOUT THE CACHE (for Turbo use --force). Always finish with report_outcome, outcome approved or changes_requested, and specific reasoning in summary. No per-task criteria verdicts are required. Changes requested create a fix task in the epic; approval sends the epic PR to human review.`
+          prompt: `You are ${agent.name}, reviewing the integration of epic "${epic.title}".\n\n${JSON.stringify(context, null, 2)}\n\nReview the whole combined diff with git diff origin/${project.defaultBranch}...HEAD at commit ${epic.prHeadSha}. This is a read-only checkout: do not edit, commit or push. Check the epic goal and every task's criteria, looking for integration problems between tasks (API/UI mismatches, inconsistent docs, duplicate helpers). The evidence is context; do not re-judge individual task evidence. Criteria checked by a human and tasks flagged humanReview wait for the human at this epic's approval: do not attempt them, produce evidence or verdicts for them, or request changes over them. Use get_task for the whole epic and get_evidence to fetch any listed evidence ID. Rerun the project's lint, typecheck, tests and build as gates WITHOUT THE CACHE (for Turbo use --force). Always finish with report_outcome, outcome approved or changes_requested, and specific reasoning in summary. Report integration problems between tasks in findings: each has level (blocking or non_blocking), text explaining the problem, and taskRefs naming the concerned tasks. Mark suggestions that do not prevent approval non_blocking; use changes_requested for blocking problems. Report an empty findings array when there are none. No per-task criteria verdicts are required. Changes requested create a fix task in the epic; approval sends the epic PR to human review.`
         }
       }
       return null
@@ -127,6 +127,13 @@ export class EpicPullRequests {
       const pr = await this.d.github.getPullRequest(project.repository, epic.prNumber!)
       if (pr.state !== 'open' || pr.merged || pr.headSha !== run.headSha) throw new Error('Epic PR head changed; this verdict is stale')
       const actor: Actor = { kind: 'agent', role: 'reviewer', runId: run.id }
+      const [previous] = await tx.select({ round: epicReviewRounds.round }).from(epicReviewRounds)
+        .where(eq(epicReviewRounds.epicId, epic.id)).orderBy(desc(epicReviewRounds.round)).limit(1)
+      await tx.insert(epicReviewRounds).values({
+        epicId: epic.id, runId: run.id, reviewerId: run.agentId,
+        round: (previous?.round ?? 0) + 1, headSha: run.headSha!,
+        verdict: outcome, summary: report.summary, findings: report.findings, createdAt: this.now()
+      })
       await tx.update(runs).set(runEndValues({ state: 'completed', outcome, summary: report.summary }, this.now())).where(eq(runs.id, run.id))
       await tx.update(epics).set({ reviewState: report.outcome === 'approved' ? 'human_review' : 'changes_requested', updatedAt: this.now() }).where(eq(epics.id, epic.id))
       if (report.outcome === 'changes_requested') fixId = await createEpicFixTask(tx, project, epic, report.summary, actor)
@@ -259,11 +266,19 @@ export async function epicInboxItems(db: Executor, epicId?: string): Promise<(Ep
     const [review] = await db.select({ run: runs, agent: agents }).from(runs).innerJoin(agents, eq(agents.id, runs.agentId))
       .where(and(eq(runs.epicId, epic.id), eq(runs.outcome, 'approved'))).orderBy(desc(runs.number)).limit(1)
     if (!review) continue
+    const rounds = await db.select({ review: epicReviewRounds, reviewer: { id: agents.id, name: agents.name } })
+      .from(epicReviewRounds).innerJoin(agents, eq(agents.id, epicReviewRounds.reviewerId))
+      .where(eq(epicReviewRounds.epicId, epic.id)).orderBy(asc(epicReviewRounds.round))
+    const reviewRounds = rounds.map(({ review: r, reviewer }) => ({
+      round: r.round, verdict: r.verdict, reviewer, headSha: r.headSha,
+      summary: r.summary, findings: r.findings, at: r.createdAt.toISOString()
+    }))
     const { tasks: board } = await epicReviewContext(db, epic, project)
     items.push({ id: epic.id, type: 'epic_review', epicId: epic.id, taskId: null, taskRef: null, subject: epic.title,
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: thumbnailUrl(project) },
       preview: review.run.summary ?? 'Integration approved', body: review.run.summary ?? 'Integration approved', sender: { name: review.agent.name, role: 'reviewer' }, at: await epicArrival(db, epic),
       prUrl: `https://github.com/${project.repository}/pull/${epic.prNumber}`, resolution: null, headSha: epic.prHeadSha,
+      reviewRounds, findings: reviewRounds.at(-1)?.findings ?? [],
       tasks: board, ...await epicChanges(db, epic, board) })
   }
   const conflicts = await db.select({ epic: epics, project: projects }).from(epics).innerJoin(projects, eq(projects.id, epics.projectId)).where(and(eq(epics.reviewState, 'conflict'), epicId ? eq(epics.id, epicId) : undefined))

@@ -1,5 +1,6 @@
 import type { AgentRole } from '@corral/core'
 import { z } from 'zod'
+import type { EpicReviewFinding } from './runner.ts'
 import type { AgentRuntime } from './agent-runtimes.ts'
 import type { Deployment } from './deployments.ts'
 import type { Plan, PlanQuestion } from './plans.ts'
@@ -117,6 +118,16 @@ export const epicReviewActionInput = z.object({
 }).refine(input => input.action !== 'request_changes' || Boolean(input.text), { message: 'Describe the changes needed', path: ['text'] })
 export type EpicReviewActionInput = z.input<typeof epicReviewActionInput>
 
+export interface EpicReviewRound {
+  round: number
+  verdict: 'approved' | 'changes_requested'
+  reviewer: { id: string, name: string }
+  headSha: string
+  summary: string
+  findings: EpicReviewFinding[]
+  at: string
+}
+
 export interface EpicReviewItem extends InboxItemBase, ReviewChanges {
   id: string
   type: 'epic_review'
@@ -127,6 +138,8 @@ export interface EpicReviewItem extends InboxItemBase, ReviewChanges {
   body: string
   resolution: null
   headSha: string
+  reviewRounds: EpicReviewRound[]
+  findings: EpicReviewFinding[]
   tasks: EpicReviewTask[]
 }
 

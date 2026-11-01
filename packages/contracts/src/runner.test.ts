@@ -150,3 +150,13 @@ describe('role outcomes', () => {
     expect(DEVELOPER_RUN_OUTCOMES.filter(o => (REVIEWER_RUN_OUTCOMES as readonly string[]).includes(o))).toEqual(PM_RUN_OUTCOMES)
   })
 })
+
+it('accepts optional structured epic findings and rejects malformed findings', () => {
+  expect(epicReviewReportSchema.parse({ outcome: 'approved', summary: 'Clean' }).findings).toEqual([])
+  const finding = { level: 'non_blocking', text: 'Align the docs', taskRefs: ['TA-1', 'TA-2'] }
+  expect(reportOutcomeInput.parse({ outcome: 'approved', summary: 'Fits', findings: [finding] }).findings).toEqual([finding])
+  expect(epicReviewReportSchema.parse({ outcome: 'approved', summary: 'Fits', findings: [finding] }).findings).toEqual([finding])
+  for (const invalid of [{ ...finding, level: 'unknown' }, { ...finding, text: ' ' }, { ...finding, taskRefs: [''] }]) {
+    expect(epicReviewReportSchema.safeParse({ outcome: 'approved', summary: 'Fits', findings: [invalid] }).success).toBe(false)
+  }
+})

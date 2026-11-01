@@ -921,7 +921,7 @@ export function inbox(): Inbox {
     const project = projects.find(p => p.id === review.projectId)!
     const body = 'The combined diff matches the epic\'s goal. Failed runs and runner disconnects share one alert path, and the tasks agree on its payload.'
     needsYou.push({
-      id: review.id, type: 'epic_review', epicId: review.id, taskId: null, taskRef: null, subject: review.title,
+      id: review.id, type: 'epic_review', findings: [], reviewRounds: [], epicId: review.id, taskId: null, taskRef: null, subject: review.title,
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
       preview: body, body, message: body, sender: { name: 'Rita', role: 'reviewer' }, at: review.updatedAt,
       prUrl: review.prUrl!, resolution: null, headSha: review.prHeadSha!,
