@@ -70,6 +70,12 @@ const loading = computed(() => props.ctx.taskLoading || (p.isReview.value && pro
       >
         <span class="font-medium">TL;DR</span> <span class="text-muted">{{ p.tldr.value }}</span>
       </p>
+      <InboxPanelEpicContext
+        v-if="p.isReview.value"
+        :task="ctx.task"
+        :pr-number="p.pr.value?.number ?? null"
+        :can-act="p.canAct.value"
+      />
       <USkeleton
         v-if="ctx.taskLoading && p.isReview.value"
         class="h-5 w-72"
