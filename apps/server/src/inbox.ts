@@ -1,6 +1,7 @@
 import { needsAttention, type InboxArtifact, type InboxSince, type ReleaseNotesItem } from '@corral/contracts'
 import { auditText, readAudit, type AuditView } from './audit.ts'
-import { epicInboxItems } from './epic-prs.ts'
+import { epicEventText, epicInboxItems } from './epic-prs.ts'
+import { waitingDecision } from './epic-rebase-approval.ts'
 import { fileArtifacts, isNew, workNotes } from './inbox-changes.ts'
 import type { Inbox, InboxItem, PlanSession, PlanThreadAttention, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
 import { withMessage } from './inbox-message.ts'
@@ -74,8 +75,7 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     const detail = readAudit(entry.detail)
     const [task] = await db.select().from(tasks).where(and(eq(tasks.epicId, epic.id), isNull(tasks.deletedAt))).limit(1)
     if (!task) continue
-    const labels: Record<string, string> = { opened: 'Epic PR opened', review_started: 'Epic integration review started', approved: 'Epic PR approved by reviewer', changes_requested: 'Epic integration changes requested', human_approved: 'You approved the epic PR', human_changes_requested: 'You requested changes on the epic PR', rebase_requested: 'Rebasing the epic PR onto the target branch', rebased: 'Epic PR rebased; CI runs again', conflict: 'Epic PR conflict', rebase_handed_off: 'You handed the epic PR rebase to a developer', rebase_resolving: 'Epic rebase conflict sent to a developer', rebase_failed: 'Epic rebase attempt failed', sync_failed: 'Epic rebase stopped', sync_retried: 'You retried the epic rebase', ci_failed: 'CI failed on the epic PR', merge_refused: 'GitHub refused the epic PR merge', closed: 'Epic PR closed on GitHub', merged: 'Epic PR merged' }
-    const body = [labels[detail.event ?? ''] ?? detail.event, detail.summary].filter(Boolean).join(': ')
+    const body = epicEventText(detail)
     const item: TaskInboxItem = { id: `epic-${entry.id}`, type: 'activity', epicId: epic.id, project: projectTag(project), taskId: task.id, taskRef: taskRef(project.prefix, task.number), subject: epic.title, preview: body, body, sender: senderOf(entry.actor), at: entry.createdAt.toISOString(), prUrl: epic.prNumber ? `https://github.com/${project.repository}/pull/${epic.prNumber}` : null, resolution: entry.actor.kind === 'human' ? body : null }
     if (entry.actor.kind === 'human') resolved.push(item)
     else activity.push(item)
@@ -170,7 +170,9 @@ async function needsYouItem(db: Executor, task: typeof tasks.$inferSelect, proje
     .orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(1)
   // A Blocked task whose reason came from the agent's own report is a question
   const stuck = task.status === 'blocked' && readAudit(entered?.detail).event === 'stuck'
-  const type: TaskInboxItemType = task.status === 'human_review' ? 'human_review' : task.status === 'failed' ? 'failed' : stuck ? 'question' : 'blocked'
+  // An epic rebase's decision is a question too, whoever raised it
+  const decision = task.status === 'blocked' ? await waitingDecision(db, task.id) : null
+  const type: TaskInboxItemType = task.status === 'human_review' ? 'human_review' : task.status === 'failed' ? 'failed' : stuck || decision ? 'question' : 'blocked'
   // PR reviews get a short note; spikes show their findings. The
   // criteria and evidence sit right under it (design/inbox.md)
   const body = task.status === 'human_review'
@@ -189,6 +191,7 @@ async function needsYouItem(db: Executor, task: typeof tasks.$inferSelect, proje
     at: (entered?.createdAt ?? task.updatedAt).toISOString(),
     prUrl: task.prUrl,
     resolution: null,
+    ...decision && { decision },
     ...await taskChanges(db, task)
   })
 }

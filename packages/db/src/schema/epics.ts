@@ -18,6 +18,11 @@ export const epics = pgTable('epics', {
   branch: text(),
   prNumber: integer(),
   prHeadSha: text(),
+  // The commit the current approval was given on, agent's or human's, and the
+  // target commit its head now sits on. A validated rebase moves prHeadSha and
+  // the base and leaves the commit; anything else clears both (COR-291).
+  approvedHeadSha: text(),
+  approvedBaseSha: text(),
   reviewState: epicReviewState(),
   // Unused since rebases became journaled operations; kept because dropping a
   // column needs a human's sign-off

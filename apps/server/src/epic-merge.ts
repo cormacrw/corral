@@ -65,7 +65,7 @@ export class EpicMerger {
     const pr = await github.getPullRequest(project.repository, epic.prNumber!)
     if (pr.merged) return this.#recordMerged(epic, project, pr)
     if (epic.reviewState !== 'ready_to_merge') return
-    if (pr.state === 'closed') return this.#leave(epic, project, 'open', {}, { event: 'closed' })
+    if (pr.state === 'closed') return this.#leave(epic, project, 'open', { approvedHeadSha: null, approvedBaseSha: null }, { event: 'closed' })
 
     // A new head is the reconcile pass's: it starts a fresh review
     if (pr.headSha !== epic.prHeadSha || await activeRebase(db, epic.id)) return

@@ -13,6 +13,7 @@ import {
   taskRef,
   richTextToMarkdown,
   type Actor,
+  type EpicDecisionRequest,
   type RunState
 } from '@corral/core'
 import { schema, type Database, type Executor } from '@corral/db'
@@ -26,7 +27,8 @@ import { bundleProblem, DesignNotFound, readDesign } from './designs.ts'
 import { ApiFailure } from './errors.ts'
 import type { EventBus } from './events.ts'
 import type { GitHubClient, PullRequest } from './github.ts'
-import { EpicBranchError, isEpicRebaseTask, taskBase } from './task-base.ts'
+import { EpicBranchError, isEpicRebaseTask, isEpicResolution, taskBase } from './task-base.ts'
+import { raiseDecision, recordResolutionReview, resolutionContext } from './epic-rebase-approval.ts'
 import { listTaskSubmissions, recordTaskSubmission, selectPrFreeProtocol } from './task-submissions.ts'
 import { slugify } from './projects.ts'
 import { designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
@@ -654,6 +656,7 @@ export class Orchestrator implements RunnerHandlers {
       : []
     const pin = await this.#pinnedDesign(ctx.project.prefix, task.id)
     const rebaseCheckFailures = task.rebaseOnly ? await latestRebaseCheckFailures(db, task.id) : []
+    const epicResolution = isEpicResolution(task) && task.epicId ? await resolutionContext(db, task.id, task.epicId) : null
     const prFree = task.integrationProtocol > 0
     const submissions = prFree ? await listTaskSubmissions(db, task.id) : []
     return {
@@ -695,6 +698,7 @@ export class Orchestrator implements RunnerHandlers {
         rebaseOnly: task.rebaseOnly,
         approvedHeadSha: task.approvedHeadSha,
         rebaseCheckFailures,
+        epicResolution,
         reviewRounds: task.reviewRounds,
         reviewRoundCap: ctx.project.reviewRoundCap,
         criteria: criteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })),
@@ -1339,8 +1343,8 @@ export class Orchestrator implements RunnerHandlers {
         case 'changes_requested':
           return this.#review(ctx, report, report.outcome)
         case 'blocked':
-          if (!ctx.task?.rebaseOnly) throw new ToolError('Only a rebase review can report blocked.')
-          return this.#blockedRebaseReview(ctx, report.summary)
+          if (!ctx.task?.rebaseOnly && !(ctx.task && isEpicResolution(ctx.task))) throw new ToolError('Only a rebase review can report blocked.')
+          return this.#blockedRebaseReview(ctx, report.summary, report.decision)
         case 'failed':
           await this.#failRun(ctx, report.summary, { summary: report.summary })
           this.#finished(ctx, 'Reported failed')
@@ -1379,7 +1383,7 @@ export class Orchestrator implements RunnerHandlers {
           if (!design) throw new ToolError(`Not submitted. Only a design task reports design_submitted; this task reports ${expected}.`)
           return this.#reportDesign(ctx, report)
         case 'stuck':
-          return this.#stuck(ctx, report.summary, report.note!)
+          return this.#stuck(ctx, report.summary, report.note!, report.decision)
         case 'failed':
           await this.#failRun(ctx, report.summary, { summary: report.summary }, report.note)
           this.#finished(ctx, 'Reported failed')
@@ -1427,6 +1431,7 @@ export class Orchestrator implements RunnerHandlers {
       if (locked.task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease. Stop working.')
       const headSha = locked.task.headSha!
       await this.#bindVerdict(tx, locked.task, report, verdict, branchHead)
+      if (verdict === 'approved' && isEpicResolution(locked.task)) await recordResolutionReview(tx, task.id, { runId: ctx.run.id, headSha, preserved: report.preservesApproval === true, summary: report.summary })
       // A change request is compared with the previous round's, if that
       // one requested changes too; near-identical feedback blocks the task
       const similarity = verdict === 'changes_requested' ? await this.#feedbackSimilarity(tx, task.id, locked.task.reviewRounds, report.summary, kept) : undefined
@@ -1504,25 +1509,34 @@ export class Orchestrator implements RunnerHandlers {
   }
 
   // D24: a substantial change or a changed binding decision is the human's call.
-  async #blockedRebaseReview(ctx: RunContext, reason: string) {
+  async #blockedRebaseReview(ctx: RunContext, reason: string, decision?: EpicDecisionRequest) {
     if (!reason.trim()) throw new ToolError('Explain the substantial change and the affected criteria for the human.')
+    this.#requireDecision(ctx, decision)
     await this.#d.db.transaction(async (tx) => {
       const { task, project } = await lockTask(tx, ctx.task!.id)
       if (task.leaseRunId !== ctx.run.id) throw new ToolError('This run lost its lease. Stop working.')
       await tx.insert(comments).values({ taskId: task.id, author: this.#actor(ctx), body: `Rebase review blocked: ${reason.trim()}` })
-      await applyTransition(tx, task, project, { type: 'block', reason }, server, { event: 'blocked', runId: ctx.run.id })
+      if (decision) await raiseDecision(tx, task, project, decision, ctx.run.id, this.#actor(ctx))
+      await applyTransition(tx, task, project, { type: 'block', reason: decision?.question ?? reason }, server, { event: 'blocked', runId: ctx.run.id })
       await this.#endRunIn(tx, ctx, { state: 'completed', outcome: 'blocked', summary: reason })
     })
     this.#finished(ctx, 'Rebase review blocked: waiting on a human')
     return { ok: true, message: 'The task is Blocked for a human decision. You can stop now.' }
   }
 
+  // An epic rebase's question has to be one a human can answer in a click
+  #requireDecision(ctx: RunContext, decision?: EpicDecisionRequest) {
+    if (ctx.task && isEpicResolution(ctx.task) && !decision) throw new ToolError('Not reported. An epic rebase asks the human through `decision`: one focused question, at least two alternatives and the changes affected. Add it and report again.')
+  }
+
   // Asks a human: the task becomes Blocked with the question as its reason (D11)
-  async #stuck(ctx: RunContext, question: string, note: string) {
+  async #stuck(ctx: RunContext, question: string, note: string, decision?: EpicDecisionRequest) {
+    this.#requireDecision(ctx, decision)
     const comment = await this.#d.db.transaction(async (tx) => {
       const { task, project } = await lockTask(tx, ctx.task!.id)
       const comment = await this.#postNote(tx, ctx, note)
-      await applyTransition(tx, task, project, { type: 'block', reason: question }, server, { event: 'stuck', runId: ctx.run.id })
+      if (decision) await raiseDecision(tx, task, project, decision, ctx.run.id, this.#actor(ctx))
+      await applyTransition(tx, task, project, { type: 'block', reason: decision?.question ?? question }, server, { event: 'stuck', runId: ctx.run.id })
       await this.#endRunIn(tx, ctx, { state: 'completed', outcome: 'stuck', summary: question })
       return comment
     })

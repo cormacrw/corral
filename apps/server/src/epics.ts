@@ -3,6 +3,7 @@ import { checkEpicDependencies, isTaskDone, taskRef, type CompletionState, type 
 import { schema, type Executor } from '@corral/db'
 import { and, asc, eq, inArray, or } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
+import { waitingOn } from './epic-rebase-approval.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import { toTasks, type ProjectRow } from './tasks.ts'
 
@@ -52,12 +53,15 @@ async function epicSyncs(db: Executor, project: ProjectRow, rows: EpicRow[]): Pr
   const syncs = new Map<string, EpicSync>()
   const ids = rows.filter(r => r.branch).map(r => r.id)
   if (ids.length === 0) return syncs
-  const active = await db.select({ operation: taskIntegrationOperations, number: tasks.number }).from(taskIntegrationOperations)
+  const active = await db.select({ operation: taskIntegrationOperations, number: tasks.number, status: tasks.status, statusReason: tasks.statusReason }).from(taskIntegrationOperations)
     .leftJoin(tasks, eq(tasks.id, taskIntegrationOperations.resolutionTaskId))
     .where(and(inArray(taskIntegrationOperations.epicId, ids), eq(taskIntegrationOperations.kind, 'rebase'), inArray(taskIntegrationOperations.state, ['pending', 'running', 'reconciling'])))
-  for (const { operation, number } of active) {
+  for (const { operation, number, status, statusReason } of active) {
+    const deciding = status ? waitingOn(operation, { status, statusReason }) : null
     syncs.set(operation.epicId, operation.resolutionTaskId
-      ? { state: 'resolving', files: operation.conflictFiles ?? [], taskId: operation.resolutionTaskId, taskRef: number === null ? null : taskRef(project.prefix, number) }
+      ? deciding
+        ? { state: 'deciding', question: deciding.question, taskId: operation.resolutionTaskId, taskRef: number === null ? null : taskRef(project.prefix, number) }
+        : { state: 'resolving', files: operation.conflictFiles ?? [], taskId: operation.resolutionTaskId, taskRef: number === null ? null : taskRef(project.prefix, number) }
       : { state: 'rebasing' })
   }
   for (const row of rows) if (row.syncError) syncs.set(row.id, { state: 'failed', error: row.syncError })
@@ -92,6 +96,8 @@ function toEpic(row: EpicRow, project: ProjectRow, taskRows: (CompletionState & 
     prNumber: row.prNumber,
     prUrl: row.prNumber ? `https://github.com/${project.repository}/pull/${row.prNumber}` : null,
     prHeadSha: row.prHeadSha,
+    approvedHeadSha: row.approvedHeadSha,
+    approvedBaseSha: row.approvedBaseSha,
     reviewState: row.reviewState,
     sync,
     reviewModeLocked: reviewModeLocked(row, taskRows),
