@@ -3,10 +3,10 @@ import { useMutation, useQuery } from '@tanstack/vue-query'
 import { runsQuery } from '~/queries/runs'
 import { moveTask } from '~/queries/tasks'
 import type { Task } from '@corral/contracts'
-import { DEFAULT_LIMITS, type TaskStatus } from '@corral/core'
+import type { TaskStatus } from '@corral/core'
 import type { BoardFilters, BoardView } from '~/utils/board'
 import { BOARD_COLUMNS, boardMove, boardView, EPIC_COLUMNS, epicOnBoard, epicStage, epicWorkingAgents, filtersFromQuery, filtersToQuery, matchesEpicFilter, matchesFilter, onBoard, sortColumn, taskAgentIds, unfinishedPrerequisites } from '~/utils/board'
-import { doneRefs, epicTitle, epicWithLiveCounts, plural, STATUS, STATUS_DOT, taskNote } from '~/utils/labels'
+import { epicTitle, epicWithLiveCounts, plural, STATUS, STATUS_DOT } from '~/utils/labels'
 
 // The Board: approved work by status, with human moves through the same
 // actions as the Status menu. The server remains authoritative.
@@ -14,6 +14,7 @@ const route = useRoute()
 const shell = useShell()
 const flyout = useTaskFlyout()
 const device = useDevice()
+const prefetch = useTaskPrefetch()
 const { slug, project, tasks: all, epics: epicList, loading, error, refetch } = useProject()
 useSeoMeta({ title: () => `Board · ${project.value?.name ?? ''} · Corral` })
 
@@ -72,12 +73,6 @@ const single = computed(() => filters.value.epics.length === 1 ? filters.value.e
 // The Status filter hides the columns it doesn't select
 const columns = computed(() => filters.value.statuses.length > 0 ? BOARD_COLUMNS.filter(c => filters.value.statuses.includes(c.key)) : BOARD_COLUMNS)
 const boardColumns = computed(() => columns.value.map(c => ({ ...c, color: STATUS_DOT[STATUS[c.statuses[0]!].color], tasks: sortColumn(c.key, visible.value.filter(t => c.statuses.includes(t.status))) })))
-const notes = computed(() => {
-  const done = doneRefs(all.value)
-  const cap = project.value?.reviewRoundCap ?? DEFAULT_LIMITS.reviewRoundCap
-  return new Map(visible.value.map(task => [task.id, taskNote(task, done, cap)]))
-})
-const agentFor = (task: Task) => task.lease ? shell.agents.find(a => a.id === task.lease!.agentId) ?? null : null
 const epicLabel = (id: string) => epicTitle(epicList.value, id, epics.value.indexOf(id))
 const epicOptions = computed(() => epics.value.map(id => ({ id, label: epicLabel(id) })))
 // Epics with work left or tasks on the Board, so one waiting on its epic PR
@@ -144,11 +139,10 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
       :epic-columns="epicColumns"
       :epic-total="visibleEpics.length"
       :columns="boardColumns"
+      :all="all"
       :epics="epicOptions"
       :agents="taskAgents"
       :total="visible.length"
-      :all="all"
-      :review-round-cap="project?.reviewRoundCap ?? DEFAULT_LIMITS.reviewRoundCap"
       :loading="loading"
       :error="error"
       @retry="refetch"
@@ -241,20 +235,23 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
                  selected ring fit inside the list: anything past it counts as
                  overflow and makes the column scroll (and clips the glow) -->
             <div class="flex min-h-0 flex-col gap-2 overflow-y-auto overscroll-contain p-2">
-              <BoardCard
+              <div
                 v-for="task in column.tasks"
                 :key="task.id"
-                :task="task"
-                :selected="flyout.ref.value === task.ref"
                 :draggable="!moving.has(task.id) && canDrag(task)"
-                :note="notes.get(task.id) ?? null"
-                :epic="task.epicId ? epicLabel(task.epicId) : null"
-                :agent="agentFor(task)"
-                :slug="slug"
+                class="shrink-0"
+                v-bind="prefetch(task, slug)"
                 @dragstart="startDrag($event, task)"
                 @dragend="dragged = null"
-                @open="flyout.toggle(task.ref)"
-              />
+              >
+                <TaskCard
+                  :task="task"
+                  :tasks="all"
+                  :epic="task.epicId ? epicLabel(task.epicId) : null"
+                  :pressed="flyout.ref.value === task.ref"
+                  @open="flyout.toggle(task.ref)"
+                />
+              </div>
               <p
                 v-if="column.tasks.length === 0"
                 class="px-1 pb-2 text-xs text-dimmed"

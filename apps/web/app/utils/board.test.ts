@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Task } from '@corral/contracts'
 import type { BoardFilters } from './board.ts'
-import { BOARD_COLUMNS, boardMove, boardColumnKey, boardView, EPIC_COLUMNS, epicOnBoard, epicStage, epicWorkingAgents, filterLabel, filtersFromQuery, filtersToQuery, hasEpicFilters, hasFilters, matchesEpicFilter, matchesFilter, COMPLETE_WINDOW_DAYS, NO_FILTERS, onBoard, sortColumn, swipeStep, taskAgentIds, unfinishedPrerequisites } from './board.ts'
+import { BOARD_COLUMNS, cardAssignee, boardMove, boardColumnKey, boardView, EPIC_COLUMNS, epicOnBoard, epicStage, epicWorkingAgents, filterLabel, filtersFromQuery, filtersToQuery, hasEpicFilters, hasFilters, matchesEpicFilter, matchesFilter, COMPLETE_WINDOW_DAYS, NO_FILTERS, onBoard, sortColumn, swipeStep, taskAgentIds, unfinishedPrerequisites } from './board.ts'
 
 const DAY = 24 * 60 * 60 * 1000
 const now = Date.parse('2026-10-29T12:00:00Z')
@@ -151,6 +151,23 @@ describe('matchesFilter', () => {
     expect(match({ priorities: ['high'], statuses: ['blocked'] })).toEqual(['TA-4'])
     expect(match({ priorities: ['high'], epics: ['auth'], search: 'login' })).toEqual(['TA-1'])
     expect(match({ priorities: ['high'], epics: ['billing'] })).toEqual([])
+  })
+})
+
+describe('cardAssignee', () => {
+  const developer = { id: 'd', name: 'Dana' }
+  const reviewer = { id: 'r', name: 'Rita' }
+
+  it('shows the reviewer in Agent review and the developer otherwise', () => {
+    expect(cardAssignee({ status: 'agent_review', developer, reviewer })).toBe(reviewer)
+    for (const status of ['ready', 'in_progress', 'human_review', 'blocked', 'merged'] as const) {
+      expect(cardAssignee({ status, developer, reviewer })).toBe(developer)
+    }
+  })
+
+  it('never falls back to the other role', () => {
+    expect(cardAssignee({ status: 'agent_review', developer, reviewer: null })).toBeNull()
+    expect(cardAssignee({ status: 'in_progress', developer: null, reviewer })).toBeNull()
   })
 })
 

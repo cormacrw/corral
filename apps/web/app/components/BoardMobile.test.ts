@@ -28,7 +28,7 @@ function board(view: 'tasks' | 'epics', key: string) {
         { key: 'ready', label: 'Ready', hint: 'Scheduled next', dot: 'bg-info', cards: [] },
         { key: 'done', label: 'Done', hint: 'Last 3 days', dot: 'bg-success', cards: [] }
       ],
-      total: 0, epicTotal: 0, all: [], reviewRoundCap: 5, loading: false, error: null
+      total: 0, epicTotal: 0, all: [], loading: false, error: null
     },
     global: { stubs: {
       MobilePageHeader: true, UButton: true, UInput: true, UTabs: true,
