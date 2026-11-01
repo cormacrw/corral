@@ -57,7 +57,7 @@ export class InboxMessages {
       // is keyed to its arrival, so an old completion cannot affect a new one.
       if (item.taskId) {
         this.#events.publish({ type: 'task.updated', task: await loadTask(this.#db, item.taskId) })
-      } else if (item.epicId) {
+      } else if ('epicId' in item) {
         this.#events.publish({ type: 'epic.updated', epic: await getEpic(this.#db, item.epicId) })
       }
     } catch (error) {

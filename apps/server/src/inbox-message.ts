@@ -11,7 +11,7 @@ export async function arrivalKey(db: Executor, item: MessageItem): Promise<strin
   const status = item.type === 'question' ? 'blocked' : item.type
   const events = item.type === 'epic_conflict' ? ['conflict'] : ['approved', 'merge_refused']
   const [entry] = await db.select({ id: auditLog.id }).from(auditLog)
-    .where(and(gte(auditLog.createdAt, new Date(item.at)), lt(auditLog.createdAt, new Date(Date.parse(item.at) + 1)), item.taskId
+    .where(and(gte(auditLog.createdAt, new Date(item.at)), lt(auditLog.createdAt, new Date(Date.parse(item.at) + 1)), item.taskId !== null
       ? and(eq(auditLog.taskId, item.taskId), eq(auditLog.action, 'task.transition'), sql`${auditText('task.transition', 'to')} = ${status}`, sql`${auditText('task.transition', 'from')} is distinct from ${status}`)
       : and(eq(auditLog.action, 'epic.pr'), sql`${auditText('epic.pr', 'epicId')} = ${item.epicId}`, inArray(auditText('epic.pr', 'event'), events))))
     .orderBy(desc(auditLog.id)).limit(1)
@@ -21,7 +21,7 @@ export async function arrivalKey(db: Executor, item: MessageItem): Promise<strin
 
 export async function messageFacts(db: Executor, item: MessageItem) {
   const [task] = item.taskId ? await db.select().from(schema.tasks).where(eq(schema.tasks.id, item.taskId)) : []
-  const epicId = task?.epicId ?? item.epicId
+  const epicId = task?.epicId ?? ('epicId' in item ? item.epicId : null)
   const [epic] = epicId ? await db.select().from(schema.epics).where(eq(schema.epics.id, epicId)) : []
   const [review] = task
     ? await db.select({ verdict: schema.reviews.verdict, summary: schema.reviews.summary }).from(schema.reviews)

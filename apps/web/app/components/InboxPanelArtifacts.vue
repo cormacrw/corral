@@ -2,7 +2,7 @@
 import type { InboxPanel, InboxPanelContext } from '~/composables/useInboxPanel'
 
 // The links out of the panel: the PR or a design's preview in a new tab, the
-// way to review a design, and an Activity item's task or epic
+// way to review a design, and an Activity item's task
 defineProps<{ ctx: InboxPanelContext, p: InboxPanel }>()
 </script>
 
@@ -39,8 +39,8 @@ defineProps<{ ctx: InboxPanelContext, p: InboxPanel }>()
     />
     <UButton
       v-if="ctx.item.type === 'activity'"
-      :to="ctx.item.epicId ? `/epics/${ctx.item.epicId}` : `/tasks/${ctx.item.taskRef}`"
-      :label="ctx.item.epicId ? 'Open epic' : 'Open task'"
+      :to="`/tasks/${ctx.item.taskRef}`"
+      label="Open task"
       color="neutral"
       variant="outline"
       size="sm"

@@ -9,7 +9,7 @@ import type { Evidence, Task } from './tasks.ts'
 // ── Inbox (D11, design/inbox.md) ───────────────────────────────────────────
 
 export type TaskInboxItemType = 'human_review' | 'question' | 'blocked' | 'failed' | 'activity'
-export type InboxItemType = TaskInboxItemType | 'plan_thread' | 'epic_review' | 'release_notes' | 'epic_conflict'
+export type InboxItemType = TaskInboxItemType | 'plan_thread' | 'epic_review' | 'release_notes' | 'epic_conflict' | 'epic_activity'
 
 interface InboxItemBase {
   project: { id: string, slug: string, name: string, thumbnailColor: string | null, thumbnailUrl: string | null }
@@ -63,8 +63,6 @@ interface ReviewChanges {
 // An item raised by a developer or reviewer run, about a task. Needs-you
 // items carry the review changes; Activity and Resolved ones don't.
 export interface TaskInboxItem extends InboxItemBase, Partial<ReviewChanges> {
-  // Epic PR activity links to the epic while retaining task context.
-  epicId?: string
   body: string
   // The task ID for Needs-you items; the audit entry for Activity and Resolved
   id: string
@@ -73,6 +71,20 @@ export interface TaskInboxItem extends InboxItemBase, Partial<ReviewChanges> {
   taskRef: string
   prUrl: string | null
   // Set on Resolved items: what the human did
+  resolution: string | null
+}
+
+// Read-only history of an epic PR, independent of the epic's tasks.
+export interface EpicActivityItem extends InboxItemBase {
+  id: string
+  type: 'epic_activity'
+  epicId: string
+  // Keep the stored event name, including events added by newer servers.
+  event: string
+  taskId: null
+  taskRef: null
+  prUrl: string | null
+  body: string
   resolution: string | null
 }
 
@@ -188,14 +200,14 @@ export interface EpicConflictItem extends InboxItemBase, ReviewChanges {
   files: string[]
 }
 
-export type InboxItem = TaskInboxItem | PlanThreadItem | EpicReviewItem | ReleaseNotesItem | EpicConflictItem
+export type InboxItem = TaskInboxItem | PlanThreadItem | EpicReviewItem | ReleaseNotesItem | EpicConflictItem | EpicActivityItem
 
 export interface Inbox {
   // Attention items newest first, followed by undismissed release notes
   // newest first. Release notes remain here after reading.
   needsYou: InboxItem[]
-  activity: TaskInboxItem[]
-  resolved: (TaskInboxItem | ReleaseNotesItem)[]
+  activity: (TaskInboxItem | EpicActivityItem)[]
+  resolved: (TaskInboxItem | EpicActivityItem | ReleaseNotesItem)[]
   // The Needs you count excludes informational release notes
   count: number
 }

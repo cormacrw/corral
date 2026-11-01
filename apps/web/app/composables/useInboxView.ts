@@ -7,7 +7,7 @@ import { inject, provide, type InjectionKey } from 'vue'
 import { useHeldInbox } from '~/queries/inbox'
 import { taskQuery } from '~/queries/tasks'
 
-export const isOwnPane = (item: InboxItem | null) => item?.type === 'plan_thread' || item?.type === 'epic_review' || item?.type === 'release_notes' || item?.type === 'epic_conflict'
+export const isOwnPane = (item: InboxItem | null) => item?.type === 'plan_thread' || item?.type === 'epic_review' || item?.type === 'release_notes' || item?.type === 'epic_conflict' || item?.type === 'epic_activity'
 export const isTaskItem = (item: InboxItem | null): item is TaskInboxItem => item?.taskId != null
 
 const PREFETCH_LIMIT_MS = 1000

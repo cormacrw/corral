@@ -158,7 +158,7 @@ it('blocks a conflicted rebase with an Inbox item and hands it to a developer ru
   const item = box.needsYou.find(i => i.id === epic.id) as EpicConflictItem
   expect(item).toMatchObject({ type: 'epic_conflict', subject: epic.title, targetBranch: 'develop', files: ['src/routes/search.ts', 'docs/search.md'] })
   expect(item.body).toContain('src/routes/search.ts')
-  expect(box.activity.find(a => a.epicId === epic.id)!.body).toContain('Epic PR conflict: src/routes/search.ts')
+  expect(box.activity.find(a => a.type === 'epic_activity' && a.epicId === epic.id)!.body).toContain('Epic PR conflict: src/routes/search.ts')
   await capture('conflict-inbox.json', { request: { method: 'GET', url: '/api/inbox' }, status: 200, needsYouItem: item, targetBranchHead: t.github.branches.get(`${project.repository}#develop`), mergeCalls: t.github.calls.slice(before).filter(c => c.method === 'merge') })
 
   // A stale head can't start the hand-off
@@ -227,7 +227,7 @@ it('counts a PR merged on GitHub, and leaves a closed one to the human', async (
   t.github.pulls.get(closed.pr.number)!.state = 'closed'
   await t.orchestrator.merges.tick()
   expect((await reload(closed.epic.id)).reviewState).toBe('open')
-  expect((await inbox()).activity.find(a => a.epicId === closed.epic.id)!.body).toBe('Epic PR closed on GitHub')
+  expect((await inbox()).activity.find(a => a.type === 'epic_activity' && a.epicId === closed.epic.id)!.body).toBe('Epic PR closed on GitHub')
 })
 
 it('holds tasks in a dependent epic until the epic PR merges, though every task is Merged', async () => {
