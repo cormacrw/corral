@@ -245,7 +245,7 @@ it('rebases before review, and keeps approval over a clean rebase before merge',
 
   // Target moves while the human reads: the head follows and approval stands
   await commitOn('main', 'before-merge.txt', 'x\n')
-  await tick()
+  await t.mergePass()
   const head = await git('rev-parse', epic.branch)
   expect(head).not.toBe(review.headSha)
   expect(await reload(epic.id)).toMatchObject({ reviewState: 'human_review', prHeadSha: head })
@@ -256,8 +256,8 @@ it('rebases before review, and keeps approval over a clean rebase before merge',
 
   expect((await t.request('POST', `/api/epics/${epic.id}/review`, { action: 'approve', headSha: head })).status).toBe(200)
   await commitOn('main', 'just-before-merge.txt', 'x\n')
-  await tick()
-  await tick()
+  await t.mergePass()
+  await t.mergePass()
   const final = await reload(epic.id)
   expect(final.reviewState).toBe('merged')
   expect(t.github.calls.filter(c => c.method === 'updateBranch')).toEqual([])
@@ -624,12 +624,12 @@ it('keeps the human approval over a clean rebase and waits for checks on the new
     const head = await git('rev-parse', epic.branch)
     expect(head).not.toBe(epic.head)
     expect(await reload(epic.id)).toMatchObject({ reviewState: 'ready_to_merge', prHeadSha: head, approvedHeadSha: epic.head, approvedBaseSha: onto })
-    await tick()
+    await t.mergePass()
     await t.orchestrator.schedule()
     expect((await reload(epic.id)).reviewState).toBe('ready_to_merge') // No checks on the new head yet, and no new review
     expect(t.github.calls.filter(c => c.method === 'merge' && c.args[3] === head)).toEqual([])
     t.github.setChecks(head, [{ name: 'ci', conclusion: 'success', url: null }])
-    await tick()
+    await t.mergePass()
     expect(t.github.calls.filter(c => c.method === 'merge' && c.args[3] === head)).not.toEqual([])
     const [retained] = await approvalEvents(epic.id)
     expect(retained).toMatchObject({ event: 'approval_retained', detail: { approvedHeadSha: epic.head, from: epic.head, to: head, ontoSha: onto, resolutionTaskId: null } })
@@ -830,7 +830,7 @@ it('never lets an external head inherit approval', async () => {
   const task = await t.createTask(project.slug, { epicId: epic.id })
   await t.db.update(schema.tasks).set({ status: 'merged' }).where(eq(schema.tasks.id, task.id))
   const outside = await commitOn(epic.branch, `outside-${++branches}.txt`, 'x\n')
-  await t.orchestrator.schedule()
+  await t.mergePass()
   expect(await reload(epic.id)).toMatchObject({ reviewState: 'in_review', prHeadSha: outside, approvedHeadSha: null })
   expect((await approvalEvents(epic.id))[0]).toMatchObject({ event: 'approval_invalidated', detail: { approvedHeadSha: epic.head, from: epic.head, to: outside, operationId: null } })
   await capture('external-head.json', { scenario: 'A commit pushed straight to the approved epic branch.', approvedCommit: epic.head, externalCommit: outside, epic: { reviewState: 'in_review', approvedHeadSha: null }, history: await approvalEvents(epic.id) })
@@ -846,4 +846,119 @@ it('never lets an external head inherit approval', async () => {
   expect((await ops(second.id))[0]).toMatchObject({ state: 'succeeded', resultHeadSha: rebased })
   expect(await reload(second.id)).toMatchObject({ reviewState: 'open', prHeadSha: second.head, approvedHeadSha: null })
   expect((await approvalEvents(second.id))[0]).toMatchObject({ event: 'approval_invalidated', detail: { to: rebased } })
+})
+
+// ── Closed epic PRs and idle checkpoints ────────────────────────────────────
+
+async function closePr(epic: { id: string }, state: 'open' | 'closed') {
+  const { prNumber } = await reload(epic.id)
+  t.github.pulls.get(prNumber!)!.state = state
+}
+
+async function finished<E extends { id: string }>(epic: E) {
+  const task = await t.createTask(project.slug, { epicId: epic.id })
+  await t.db.update(schema.tasks).set({ status: 'merged' }).where(eq(schema.tasks.id, task.id))
+  return epic
+}
+
+it('leaves the branch of a closed epic PR alone, and rebases once it is reopened', async () => {
+  const epic = await finished(await humanApproved(await createEpic()))
+  await closePr(epic, 'closed')
+  await t.mergePass()
+  expect(await reload(epic.id)).toMatchObject({ reviewState: 'open', approvedHeadSha: null })
+
+  const onto = await commitOn('main', `moved-${++branches}.txt`, 'x\n')
+  for (let n = 0; n < 3; n++) {
+    await t.mergePass()
+    await t.orchestrator.schedule()
+  }
+  expect(await git('rev-parse', epic.branch)).toBe(epic.head)
+  expect(await ops(epic.id)).toEqual([])
+  expect((await reload(epic.id)).reviewState).toBe('open')
+  await capture('closed-pr.json', { scenario: 'A human closes the epic PR without merging, then the target moves. Three merge passes later:', pr: 'closed', epicBranchMoved: false, operations: await journal(epic.id) })
+
+  // Reconcile's closedPoll sees the reopen and the synchronizer brings it up to date
+  await closePr(epic, 'open')
+  await t.mergePass()
+  const head = await git('rev-parse', epic.branch)
+  expect(await isAncestor(onto, head)).toBe(true)
+  expect((await ops(epic.id)).map(o => [o.kind, o.state])).toEqual([['rebase', 'succeeded']])
+  t.clock.now = new Date(t.clock.now.getTime() + 121_000)
+  await t.orchestrator.schedule()
+  expect(await reload(epic.id)).toMatchObject({ reviewState: 'in_review', prHeadSha: head })
+  await capture('closed-pr-reopened.json', { scenario: 'The same PR is reopened.', epicHeadBefore: epic.head, epicHeadAfter: head, operations: await journal(epic.id), reviewState: 'in_review' })
+})
+
+it('starts no rebase when the merge pass has not seen the close yet', async () => {
+  const epic = await finished(await humanApproved(await createEpic()))
+  await closePr(epic, 'closed')
+  await commitOn('main', `moved-${++branches}.txt`, 'x\n')
+  await tick()
+  expect(await git('rev-parse', epic.branch)).toBe(epic.head)
+  expect(await ops(epic.id)).toEqual([])
+})
+
+it('holds a reviewed resolution while the epic PR is closed, then publishes it on reopening', async () => {
+  const epic = await humanApproved(await conflicted())
+  const { fix, resolved } = await resolutionOf(epic)
+  const { criteria } = await developerSubmits(fix.id, resolved)
+  await reviewerApproves(fix.id, resolved, criteria, { preservesApproval: true })
+  await closePr(epic, 'closed')
+  const compare = vi.spyOn(t.github, 'compare')
+  onTestFinished(() => compare.mockRestore())
+
+  await tick()
+  await tick()
+  await t.mergePass()
+  expect(await git('rev-parse', epic.branch)).toBe(epic.head)
+  expect(await taskRow(fix.id)).toMatchObject({ status: 'ready_to_merge' })
+  expect((await ops(epic.id))[0]).toMatchObject({ state: 'running', pushAttempts: 0 })
+  expect(compare).not.toHaveBeenCalled()
+
+  await closePr(epic, 'open')
+  await t.mergePass()
+  expect(await git('rev-parse', epic.branch)).toBe(resolved)
+  expect(await taskRow(fix.id)).toMatchObject({ status: 'merged' })
+})
+
+it('reads GitHub on a backoff for an epic idling at a checkpoint, however often the pass runs', async () => {
+  const epic = await finished(await createEpic())
+  await t.db.update(schema.epics).set({ reviewState: 'human_review', prHeadSha: epic.head }).where(eq(schema.epics.id, epic.id))
+  const heads = vi.spyOn(t.github, 'branchHead')
+  const behind = vi.spyOn(t.github, 'behindBy')
+  onTestFinished(() => {
+    heads.mockRestore()
+    behind.mockRestore()
+  })
+  // Ten minutes of 15 second ticks: looks at 0, 30, 90, 210, 330, 450 and 570s
+  for (let n = 0; n < 40; n++) {
+    await tick()
+    t.clock.now = new Date(t.clock.now.getTime() + 15_000)
+  }
+  expect(heads).toHaveBeenCalledTimes(14)
+  expect(behind).toHaveBeenCalledTimes(7)
+  await capture('idle-reads.json', { scenario: 'One epic parked in Human review, up to date, for 40 ticks 15 seconds apart.', githubReads: heads.mock.calls.length + behind.mock.calls.length, withoutBackoff: 120 })
+})
+
+it('does not make a task wait for the backoff: its checkpoint reads at once', async () => {
+  const epic = await finished(await createEpic())
+  await tick()
+  const landed = await commitOn('main', `moved-${++branches}.txt`, 'x\n')
+  await tick()
+  expect(await ops(epic.id)).toEqual([])
+
+  const task = await approved(epic, 'late.txt')
+  await tick()
+  expect(await taskRow(task.id)).toMatchObject({ status: 'merged' })
+  expect(await isAncestor(landed, await git('rev-parse', epic.branch))).toBe(true)
+  expect((await ops(epic.id)).map(o => o.kind)).toEqual(['rebase', 'integrate'])
+})
+
+it('looks again soon after a target move once the wait is over', async () => {
+  const epic = await finished(await createEpic())
+  await tick()
+  const landed = await commitOn('main', `moved-${++branches}.txt`, 'x\n')
+  t.clock.now = new Date(t.clock.now.getTime() + 31_000)
+  await tick()
+  expect(await isAncestor(landed, await git('rev-parse', epic.branch))).toBe(true)
 })

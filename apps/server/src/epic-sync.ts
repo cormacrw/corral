@@ -10,6 +10,7 @@ import type { EventBus } from './events.ts'
 import type { GitHubClient } from './github.ts'
 import type { RunnerHub } from './runner-hub.ts'
 import { checkTrivialRebase } from './rebase-review.ts'
+import { Backoff } from './retries.ts'
 import { epicResolutionBranch } from './task-base.ts'
 import { runEndValues } from './run-lifecycle.ts'
 import { applyTransition, createTask, deleteTaskRows, loadTask, lockTask, type ProjectRow } from './tasks.ts'
@@ -31,6 +32,11 @@ const RETRY_AT_ONCE = [EPIC_MOVED, INTERRUPTED, EPIC_MERGED]
 // little longer, so one bad minute doesn't use them all.
 const MAX_FAILED_ATTEMPTS = 3
 const RETRY_DELAY_MS = 60_000
+
+// How often an epic at a checkpoint of its own reads GitHub, at first and at
+// most: nothing is waiting on it, and the target rarely moves between two looks
+const CHECKPOINT_POLL_MS = 30_000
+const CHECKPOINT_IDLE_MS = 120_000
 
 const PREPARE_TIMEOUT_MS = 12 * 60_000
 const PUSH_TIMEOUT_MS = 13 * 60_000
@@ -90,10 +96,12 @@ export async function retrySync(db: Database, epicId: string, actor: Actor, now:
 export class EpicSynchronizer {
   #d: EpicSyncDeps
   #settled: (taskId: string) => Promise<void>
+  #poll: Backoff
 
   constructor(deps: EpicSyncDeps, settled: (taskId: string) => Promise<void>) {
     this.#d = deps
     this.#settled = settled
+    this.#poll = new Backoff(CHECKPOINT_POLL_MS, CHECKPOINT_IDLE_MS, () => this.#now())
   }
 
   #now(): Date {
@@ -101,12 +109,13 @@ export class EpicSynchronizer {
   }
 
   // Epics at a checkpoint of their own: every task is in, so they're heading
-  // for review or merge. Those with tasks to come sync when one integrates.
+  // for review or merge. Those with tasks to come sync when one integrates,
+  // and those it looked at lately wait their turn.
   async due(): Promise<string[]> {
     const { db } = this.#d
     const rows = await db.select({ id: epics.id }).from(epics).innerJoin(projects, eq(projects.id, epics.projectId))
       .where(and(ne(epics.reviewMode, 'direct'), isNotNull(epics.branch), isNull(epics.syncError), eq(projects.paused, false), or(isNull(epics.reviewState), ne(epics.reviewState, 'merged'))))
-    const due = await Promise.all(rows.map(async ({ id }) => complete(await epicBoard(db, id)) ? id : null))
+    const due = await Promise.all(rows.filter(({ id }) => this.#poll.due(id)).map(async ({ id }) => complete(await epicBoard(db, id)) ? id : null))
     return due.filter(id => id !== null)
   }
 
@@ -123,13 +132,16 @@ export class EpicSynchronizer {
     const [reviewing] = await db.select({ id: runs.id }).from(runs).where(and(eq(runs.epicId, epicId), inArray(runs.state, [...ACTIVE_RUN_STATES]))).limit(1)
     const [handedOff] = await db.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.epicId, epicId), eq(tasks.branch, epic.branch!), isNull(tasks.deletedAt), notInArray(tasks.status, ['merged']))).limit(1)
     if (reviewing || handedOff) return null
+    // Before the reads, so a failed one waits too. A rebase starts the count again.
+    this.#poll.later(epicId)
     const head = await github.branchHead(project.repository, epic.branch!)
     const onto = await github.branchHead(project.repository, project.defaultBranch)
     if (!head || !onto || await github.behindBy(project.repository, project.defaultBranch, head) === 0) return null
+    if (await this.#prShut(epic, project)) return null
     const failures = await this.#failures(db, epic, head, onto)
     const last = failures[0]
     if (last && this.#now().getTime() - last.updatedAt.getTime() < RETRY_DELAY_MS * failures.length) return null
-    return db.transaction(async (tx) => {
+    const created = await db.transaction(async (tx) => {
       const [locked] = await tx.select().from(epics).where(eq(epics.id, epicId)).for('update')
       if (!locked || !this.#eligible(locked, project)) return null
       const [newest] = await tx.select({ leaseEpoch: operations.leaseEpoch }).from(operations).where(eq(operations.epicId, epicId)).orderBy(desc(operations.leaseEpoch)).limit(1)
@@ -137,10 +149,22 @@ export class EpicSynchronizer {
       if (created) await appendAudit(tx, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId, event: 'rebase_requested', headSha: head }))
       return created ?? null
     })
+    if (created) this.#poll.clear(epicId)
+    return created
   }
 
   #eligible(epic: EpicRow, project: ProjectRow): boolean {
     return !project.paused && !epic.syncError && !!epic.branch && epic.reviewMode !== 'direct' && epic.reviewState !== 'merged'
+  }
+
+  // A PR closed without merging can be reopened, unless its branch was
+  // force-pushed: GitHub refuses that. Its epic may also be work the human
+  // dropped, so nothing is rebased until the PR is open again. A PR that merged
+  // is on its way to the merge pass, which records it.
+  async #prShut(epic: EpicRow, project: ProjectRow): Promise<boolean> {
+    if (!epic.prNumber) return false
+    const pr = await this.#d.github.getPullRequest(project.repository, epic.prNumber)
+    return pr.state !== 'open' || pr.merged
   }
 
   // Newest first. A retry starts the count again, and a moved commit is new work.
@@ -241,8 +265,18 @@ export class EpicSynchronizer {
     if (task.status !== 'ready_to_merge' || task.leaseRunId || task.paused || !task.headSha || ctx.epic.syncError) return false
     const runnerId = runner.epicRebaseRunner()
     if (!runnerId) return false
+    if (await this.#held(ctx)) return false
     await this.#checkResolution(operation, ctx, task.headSha)
-    return this.#publish(operation, ctx, task.headSha, runnerId, stopped)
+    return this.#push(operation, ctx, task.headSha, runnerId, stopped)
+  }
+
+  // A rebase can outlast the PR it's for. It keeps its candidate, and its
+  // review, to publish if the PR is reopened.
+  async #held({ epic, project }: Context): Promise<boolean> {
+    if (!this.#poll.due(epic.id)) return true
+    const shut = await this.#prShut(epic, project)
+    if (shut) this.#poll.later(epic.id)
+    return shut
   }
 
   // Compares the approved and rebased changes on the server's own account, not
@@ -259,6 +293,10 @@ export class EpicSynchronizer {
   }
 
   async #publish(operation: OperationRow, ctx: Context, candidate: string, runnerId: string, stopped: Stopped): Promise<boolean> {
+    return !await this.#held(ctx) && this.#push(operation, ctx, candidate, runnerId, stopped)
+  }
+
+  async #push(operation: OperationRow, ctx: Context, candidate: string, runnerId: string, stopped: Stopped): Promise<boolean> {
     const { db, runner } = this.#d
     const { project, epic } = ctx
     // Read now: a candidate can take minutes to prepare. A stopped operation

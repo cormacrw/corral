@@ -5,6 +5,7 @@ import type { EpicReviewItem, Inbox, Task } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeEach, expect, it } from 'vitest'
+import { recordSyncFailure } from './epic-sync.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './test-runner.ts'
 
@@ -135,4 +136,15 @@ it('holds tasks in a dependent epic until the epic PR merges, though every task 
   const claimed = await get()
   expect(claimed).toMatchObject({ status: 'in_progress', waitingOnEpics: [] })
   await capture('dependent-epic.json', { beforeEpicPrMerged: { epicTasks: 'all Merged', dependentTask: held }, afterEpicPrMerged: { epic: await reload(epic.id), dependentTask: claimed, assignedRun: { runId: job.runId, role: job.role, taskId: job.taskId } } })
+})
+
+it('shows no failed rebase on an epic merged by hand after one', async () => {
+  const { project, epic, head, pr } = await approved()
+  await recordSyncFailure(t.db, (await t.db.select().from(schema.projects).where(eq(schema.projects.id, project.id)))[0]!, epic.id, 'Rebasing failed 3 times', new Date())
+  expect((await t.request('GET', `/api/epics/${epic.id}`).then(r => r.json()) as { sync: unknown }).sync).toMatchObject({ state: 'failed' })
+  t.github.pulls.get(pr.number)!.merged = true
+  t.github.pulls.get(pr.number)!.state = 'closed'
+  await t.mergePass()
+  expect(await reload(epic.id)).toMatchObject({ reviewState: 'merged', syncError: null, prHeadSha: head })
+  expect((await t.request('GET', `/api/epics/${epic.id}`).then(r => r.json()) as { sync: unknown }).sync).toBeNull()
 })
