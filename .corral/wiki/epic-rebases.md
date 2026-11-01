@@ -44,4 +44,31 @@ copes by merging against a synthetic commit parented on that base
 the old fork point as its base, so its diff includes the epic's old commits, and
 it may come back with `base_conflict` when a resolved file differs.
 
+## Approval
+
+`approvalFate` (`epic-rebase-approval.ts`) is the one place that decides what a
+published head inherits. It runs in `#complete`, on the journal row returned by
+the state change, so a stale copy can't decide. Everything starts from
+`prHeadSha === expectedTargetSha`: a head that reached the branch any other way
+fails there, and `EpicPullRequests.reconcile` drops approval when it sees a head
+it didn't record. That comes after the behind check, because a PR read just after
+Corral's push can show the old head, and that must not cost the approval.
+
+`approvedHeadSha` stays on the commit approval was given on, so the history can
+name it after several rebases; `prHeadSha` is what approval is on now. Every
+path out of an approved state must clear the snapshot.
+
+A resolution task doesn't invalidate review (`keepEpicReview`). Any other new
+board task does, and it would otherwise wipe the approval the rebase protects.
+
+The server's compare runs in `#checkResolution`, before the push, because the
+old head may not be reachable afterwards. It goes onto `resolutionReview`, which
+is bound to the reviewed commit, so a later revision can't reuse it.
+
+Decisions live on `operations.decisions`. A resolution's `stuck` or `blocked`
+is refused without one. `waitingDecision` makes it a `question` in the Inbox,
+and `clarify` on one becomes a written decision. An answer that isn't an
+alternative keeping behaviour, or a question closed from the board, never
+carries approval.
+
 `rebaseRequested` is dead: it stays only because dropping a column needs a human.

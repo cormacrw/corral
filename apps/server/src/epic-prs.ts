@@ -56,18 +56,19 @@ export class EpicPullRequests {
                 body: await this.body(tx, epic, board, project)
               })
           if (pr.state !== 'open' || pr.merged) return
-          // Only the synchronizer moves an approved head and keeps approval.
-          // Any other new head loses it here, before anything else can run.
+          if (epic.prNumber && epic.prHeadSha === pr.headSha && epic.reviewState !== 'open' && epic.reviewState !== 'changes_requested') return
+          // Review starts from a head on top of the target branch: the
+          // synchronizer's pass rebases it, and this one comes back
+          if (await this.d.github.behindBy(project.repository, project.defaultBranch, pr.headSha) > 0) return
+          // Only the synchronizer moves an approved head and keeps approval, so
+          // any other new head loses it. After the behind check: a PR read just
+          // after Corral's own push can still show the old head, which is behind.
           if (epic.prNumber && epic.prHeadSha !== pr.headSha && APPROVED_STATES.includes(epic.reviewState)) {
             const reason = 'The epic head moved without a reviewed rebase.'
             await tx.update(epics).set({ reviewState: 'open', approvedHeadSha: null, approvedBaseSha: null, updatedAt: this.now() }).where(eq(epics.id, epic.id))
             await appendAudit(tx, { projectId: project.id, actor: system }, auditEvent('epic.pr', { epicId: epic.id, event: 'approval_invalidated', approvedHeadSha: epic.approvedHeadSha, from: epic.prHeadSha!, to: pr.headSha, ontoSha: null, operationId: null, resolutionTaskId: null, resolutionReview: null, reason, summary: `Approved ${shortSha(epic.approvedHeadSha)}, head moved ${shortSha(epic.prHeadSha)} to ${shortSha(pr.headSha)}. ${reason}` }))
             changed = true
           }
-          if (epic.prNumber && epic.prHeadSha === pr.headSha && epic.reviewState !== 'open' && epic.reviewState !== 'changes_requested') return
-          // Review starts from a head on top of the target branch: the
-          // synchronizer's pass rebases it, and this one comes back
-          if (await this.d.github.behindBy(project.repository, project.defaultBranch, pr.headSha) > 0) return
           await this.d.github.updatePullRequest(project.repository, pr.number, { body: await this.body(tx, epic, board, project) })
           // A moved epic head invalidates approval, even if board membership
           // didn't change. Active runs on the old head are fenced by state.

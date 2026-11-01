@@ -90,6 +90,7 @@ export function epicInProgress(epic: Pick<Epic, 'reviewMode' | 'branch' | 'revie
 export function epicReviewStatus(epic: Pick<Epic, 'reviewMode' | 'branch' | 'reviewState' | 'taskCount' | 'mergedCount'> & Partial<Pick<Epic, 'sync'>>): { label: string, color: Color } | null {
   if (epic.reviewMode === 'direct') return null
   if (epic.sync?.state === 'rebasing') return { label: 'Rebasing onto the target branch', color: 'info' }
+  if (epic.sync?.state === 'deciding') return { label: 'Rebase needs your decision', color: 'warning' }
   if (epic.sync?.state === 'resolving') return { label: 'Resolving a rebase conflict', color: 'info' }
   if (epic.sync?.state === 'failed') return { label: 'Rebase stopped, retry to carry on', color: 'error' }
   const allMerged = epic.taskCount > 0 && epic.mergedCount === epic.taskCount
