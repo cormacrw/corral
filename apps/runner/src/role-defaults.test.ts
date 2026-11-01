@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { HUMAN_DECISIONS_NOTE } from '@corral/core'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_ROLE_INSTRUCTIONS } from './role-defaults.ts'
 
@@ -145,5 +146,15 @@ describe('D21 role guidance', () => {
   it('asks the PM for observable behaviour instead of passing gates', () => {
     expect(DEFAULT_ROLE_INSTRUCTIONS.pm).toContain('Write acceptance criteria as observable behaviour')
     expect(DEFAULT_ROLE_INSTRUCTIONS.pm).toContain('Do not write criteria that only restate lint, typecheck, tests or build passing')
+  })
+})
+
+describe('human decisions contract (D11)', () => {
+  it.each(['designer', 'developer', 'reviewer', 'pm'] as const)('is in the built-in %s instructions', (role) => {
+    expect(DEFAULT_ROLE_INSTRUCTIONS[role]).toContain(HUMAN_DECISIONS_NOTE)
+  })
+
+  it.each(['designer', 'developer', 'reviewer'])('matches the Corral %s instructions', (role) => {
+    expect(readFileSync(new URL(`../../../.corral/agents/${role}.md`, import.meta.url), 'utf8')).toContain(HUMAN_DECISIONS_NOTE)
   })
 })

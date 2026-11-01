@@ -78,15 +78,14 @@ function writeTask(task: Task, cache: EventCache): void {
   cache.set<Task[]>(keys.tasks.list(slug), list => list && (task.status === 'draft' ? list.filter(t => t.id !== task.id) : upsert(list, task)))
 }
 
-// Reading changes one row, so it needs no refetch. As on the server, a thread
-// listed only for its unread reply leaves Needs you; a read release note stays.
+// Reading changes one row, so it needs no refetch. It never changes what's
+// listed or the count: a thread in Needs you still waits on a decision (D11).
 export function inboxWithRead(current: Inbox, id: string): Inbox {
-  const item = current.needsYou.find(i => i.id === id)
-  if (item?.type === 'plan_thread' && item.status === 'none') {
-    return { ...current, needsYou: current.needsYou.filter(i => i.id !== id), count: current.count - 1 }
+  return {
+    ...current,
+    needsYou: current.needsYou.map(i => i.id === id && i.type === 'plan_thread' ? { ...i, unread: false } : i),
+    activity: current.activity.map(i => i.id === id && i.type === 'release_notes' ? { ...i, unread: false } : i)
   }
-  if (item?.type !== 'plan_thread' && item?.type !== 'release_notes') return current
-  return { ...current, needsYou: current.needsYou.map(i => i === item ? { ...item, unread: false } : i) }
 }
 
 // What a change to a project's tasks or runs leaves stale. A project not
@@ -208,7 +207,7 @@ export const eventDependencies: EventDependencies = {
   },
   'plan.session': {
     write: ({ session, markedRead }, cache) => {
-      if (markedRead) cache.set<Inbox>(keys.inbox(), inbox => inbox && { ...inboxWithRead(inbox, session.id), count: markedRead.inboxCount })
+      if (markedRead) cache.set<Inbox>(keys.inbox(), inbox => inbox && inboxWithRead(inbox, session.id))
       cache.set<PlanSession[]>(keys.plan.sessions(), (list) => {
         if (!list) return list
         const previous = list.find(s => s.id === session.id)

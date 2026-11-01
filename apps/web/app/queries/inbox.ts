@@ -6,7 +6,7 @@ import { defineMutation, inboxWithRead, invalidateKeys, writeTaskResponse } from
 import { keys } from './keys'
 
 // Reads land in the cache as they happen, and a response can predate them
-const unreadIds = (inbox: Inbox | undefined) => (inbox?.needsYou ?? []).filter(i => 'unread' in i && i.unread).map(i => i.id)
+const unreadIds = (inbox: Inbox | undefined) => [...inbox?.needsYou ?? [], ...inbox?.activity ?? []].filter(i => 'unread' in i && i.unread).map(i => i.id)
 
 export const inboxQuery = () => queryOptions({
   queryKey: keys.inbox(),

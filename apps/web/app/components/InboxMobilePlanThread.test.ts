@@ -22,7 +22,7 @@ const question: PlanThreadItem = {
   project: { id: 'p', name: 'Test app', slug: 'test-app', thumbnailColor: null, thumbnailUrl: null },
   sender: { name: 'Juno', role: 'pm' }, at: '', subject: 'Push notifications', preview: '', runtime: 'claude-code',
   status: 'question', question: { text: 'Which service?', recommendation: 'Web Push', options: ['ntfy'] },
-  plan: null, planId: null, unread: false, activeRunId: null, reply: null
+  plan: null, planId: null, unread: false, activeRunId: null, failure: null
 }
 const plan = { id: 'plan-1', version: 1, title: 'Push plan', summary: 'Deliver notifications', tasks: [], epics: [], status: 'proposed' } as unknown as Plan
 const planItem: PlanThreadItem = { ...question, question: null, status: 'needs_approval', planId: plan.id, plan: { ...plan, epicCount: 1, taskCount: 2 } }
@@ -102,13 +102,13 @@ describe('focused mobile Plan thread', () => {
     expect(mocks.replace).toHaveBeenCalledWith('/inbox')
   })
 
-  it('shows an unread reply with a reply box that messages its session', async () => {
+  it('shows a failed turn with a reply box that retries in its session', async () => {
     mocks.session.mockResolvedValue({ unread: true, plans: [], messages: [] })
-    const reply: PlanThreadItem = { ...question, question: null, status: 'none', unread: true, reply: 'The flaky test is the SSE reconnect one.' }
+    const failed: PlanThreadItem = { ...question, question: null, status: 'failed', unread: true, failure: 'The PM exited with code 1' }
     mocks.read.mockResolvedValue(undefined)
-    const w = screen(reply)
+    const w = screen(failed)
     await flushPromises()
-    expect(w.text()).toContain('The flaky test is the SSE reconnect one.')
+    expect(w.text()).toContain('The PM exited with code 1')
     expect(w.text()).toContain('Open in Plan')
     expect(w.find('textarea').exists()).toBe(true)
     expect(mocks.read).toHaveBeenCalledWith('s-2')
@@ -171,7 +171,7 @@ describe('a task opened from the mobile plan sheet', () => {
     mocks.session.mockResolvedValue({ plans: [planned], messages: [] })
     const stub = (tag = 'span') => defineComponent({ props: ['label'], setup: p => () => h(tag, p.label) })
     const w = mount(InboxMobilePlanThread, {
-      props: { item: { ...planItem, status: 'needs_approval', question: null, plan: { id: planned.id, version: planned.version, title: planned.title, summary: planned.summary, epicCount: 0, taskCount: 0 }, planId: planned.id, reply: null } },
+      props: { item: { ...planItem, status: 'needs_approval', question: null, plan: { id: planned.id, version: planned.version, title: planned.title, summary: planned.summary, epicCount: 0, taskCount: 0 }, planId: planned.id, failure: null } },
       global: { plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }], router],
         components: {
           UButton, UDrawer, UDropdownMenu, PlanDetail, PlanSheets,

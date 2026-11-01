@@ -153,6 +153,20 @@ describe('server reliability', () => {
       expect(await t.transcripts.spooled()).not.toContain(job.runId)
     })
 
+    it('clears the failure of a PM turn taken as lost once its real reply is replayed', async () => {
+      const project = await t.createProject()
+      const session = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan it' }).then(r => r.json()) as PlanSessionDetail
+      const { job } = await runner.next('run.assign', m => m.job.planSessionId === session.id)
+      const status = async () => (await t.request('GET', `/api/plan/sessions/${session.id}`).then(r => r.json()) as PlanSessionDetail).status
+      await t.orchestrator.onConnected([], 'r1')
+      await lost(job)
+      await expect.poll(status).toBe('failed')
+      runner.send({ type: 'run.events', runId: job.runId, leaseEpoch: job.leaseEpoch, events: [{ type: 'message', text: 'Here is the plan' }] })
+      ended(job, { kind: 'exited', code: 0 })
+      await expect.poll(async () => (await run(job.runId)).state).toBe('completed')
+      await expect.poll(status).toBe('none')
+    })
+
     it('does not restart the clock of a run on a replayed run.started', async () => {
       const { project, job } = await assigned()
       const started = () => runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'session' })

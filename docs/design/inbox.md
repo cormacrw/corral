@@ -11,7 +11,7 @@ One place for everything an agent needs you to decide, from every project, with 
 Items come from two places:
 
 - **Developer and reviewer runs:** human reviews, blocked and failed tasks, questions, and Activity.
-- **Plan sessions that need you** (D11, amended 2026-10-29): each open session with a question from Juno, a plan needing approval or an unread reply from Juno is a **Plan thread** item. They can be handled from the Inbox or from Plan; both act on the same session. See [Plan threads](#plan-threads).
+- **Plan sessions that need you** (D11): each open session with a question from Juno, a plan needing approval or a failed Juno turn is a **Plan thread** item. They can be handled from the Inbox or from Plan; both act on the same session. A session with only an unread reply is informational and stays in Plan. See [Plan threads](#plan-threads).
 
 There's no separate notifications feed.
 
@@ -24,7 +24,7 @@ There are three columns. The list divider can be resized (280–560px, default 3
 ### 1. Message list
 
 - **Search** input.
-- **Filter tabs** (`UTabs`, pill): **Inbox** (with count; the Needs you list), **Activity**, **Resolved** (with count).
+- **Filter tabs** (`UTabs`, pill): **Inbox** (with count; the Needs you list, decisions only), **Activity** (agent progress and release notes, read on demand, with no count), **Resolved** (with count).
   - Each tab has an icon: inbox tray, pulse, check circle.
   - Below 360px of list width the labels hide. Only icons and counts remain; the names move to tooltips and `aria-label`, e.g. "Inbox, 4".
 - **Rows**, each a button:
@@ -36,7 +36,9 @@ There are three columns. The list divider can be resized (280–560px, default 3
   - a type badge and the project tag (a colour dot and project name)
 - **Plan thread rows** have the same layout with a status badge for the type badge; see [Plan threads](#plan-threads).
 - The selected row uses `bg-elevated`.
-- **Empty state:** "All clear. Nothing here right now."
+- **Empty state:** the Inbox tab says "No decisions are waiting on you. Agents may still be working; their updates are in Activity." It never implies that background work has finished. The detail pane says the same with **Open Activity**. Activity, Resolved and a search with no matches each have their own line.
+- **Live updates:** an informational item arriving adds no Inbox row, doesn't change the count or badge, and doesn't move the selection. It appears under Activity.
+- **A link to an item:** an informational item opens with the list on Activity, and a resolved one on Resolved. A link to something no longer listed shows "This isn't waiting on you any more", with **Open Activity** and, when known, its source: **Open in Plan**, **Open task** or **Open epic**. It's never presented as a new request.
 
 ### 2. Selected message
 
@@ -84,14 +86,15 @@ An open Plan session (D9) that's waiting on you, shown as an Inbox item (D11). A
 
 ### Where they're listed
 
-- Open sessions waiting on you are listed, under **Needs you**, never Activity or Resolved. There are three kinds:
+- Open sessions with a decision are listed under **Needs you**:
   - a pending **question** from Juno (`question` holds it)
   - a plan **needing approval** (`plan` holds its summary)
-  - an **unread reply**: Juno finished a turn you haven't seen, with no question or plan pending (`reply` holds that message's text). Reading the thread, here or in Plan, takes it out of the list.
+  - a **failed turn**: Juno's last turn ended in an error and nothing will retry it (`failure` holds the error). Reading doesn't clear it; messaging the session or deleting the thread does.
+- A session with only an **unread reply** is informational: it isn't listed and doesn't count, and the conversation stays in Plan.
 - Idle sessions, with none of the three, aren't Inbox items. They stay in Plan and its side nav threads ([plan.md](plan.md#side-nav-threads)). There's no "Open in Plan" divider or group.
-- **Order:** Needs you is one list of task items, threads, epic items and release notes, **newest first** by when each arrived (`at`), with no grouping or divider. The page shows it in the server's order. A task arrives when it enters Human review, Blocked or Failed (its latest transition into that status), so an update that keeps its status, such as its PR head moving, doesn't move it. A thread arrives when it started waiting: when the question was asked, the plan was proposed or the unread reply came in. A release note arrives at its deployment time.
-- The **Needs you** count includes task items, threads and epic items, and excludes release notes.
-- `plan.session` events add, re-sort and remove threads live: a question, a new plan version or a finished Juno turn adds or moves a thread up; answering its question (until Juno asks again), approving its plan, reading its reply or closing it, here or in Plan, removes it at once.
+- **Order:** Needs you is one list of task items, threads and epic items, **newest first** by when each arrived (`at`), with no grouping or divider. The page shows it in the server's order. A task arrives when it enters Human review, Blocked or Failed (its latest transition into that status), so an update that keeps its status, such as its PR head moving, doesn't move it. A thread arrives when it started waiting: when the question was asked, the plan was proposed or the turn failed.
+- The **Needs you** count is every listed item. Global, project and mobile counts all come from this list.
+- `plan.session` events add, re-sort and remove threads live: a question, a new plan version or a failed turn adds or moves a thread up; answering its question (until Juno asks again), approving its plan, messaging it after a failed turn or closing it, here or in Plan, removes it at once.
 
 ### Row
 
@@ -99,8 +102,8 @@ One button, in the same list as the other items, with a **Delete thread** button
 
 - the **sender's avatar** and **name** (Juno, under the PM's current name), with the **time** it started waiting. While Juno is working (`activeRunId`), a spinner sits next to the time.
 - the **session title** (bold)
-- a two-line **preview**: Juno's question, the plan summary ("Plan v2 · 2 epics · 4 tasks"), or Juno's reply
-- a **status badge** beside the **project tag** (a thumbnail and the project name): "Needs approval" in `primary` or "Question" in `info`; an unread reply has the unread dot before the avatar and an "Unread reply" badge in `neutral`.
+- a two-line **preview**: Juno's question, the plan summary ("Plan v2 · 2 epics · 4 tasks"), or the failed turn's error
+- a **status badge** beside the **project tag** (a thumbnail and the project name): "Needs approval" in `primary`, "Question" in `info` or "Failed" in `error`, with the unread dot before the avatar while the turn is unseen.
 
 ### Detail pane
 
@@ -109,7 +112,7 @@ The selected message column shows only what needs you, **not the conversation**.
 - **Header:** the sender's avatar, the session title, and below it the sender's name and role, the project tag, the status badge, the runtime badge ("Claude" or "Codex"), **Open in Plan** and **Delete thread**. There's no Task details toggle; a plan's tasks open in the flyout instead.
 - **Question:** Juno's question in its `info` card, with "Recommended: …" when Juno gave one, and the one-tap answers: **Accept recommendation**, one button per option, **Other…** (focuses the reply box) and **Stop and propose the plan**. Below it, a reply box ("Reply to Juno…") for a free-text answer. A tap or a sent reply sends the answer to the session and starts a PM turn, exactly as in Plan; the thread then leaves the list unless Juno asks again or proposes a plan.
 - **Plan:** the plan's title, its summary and counts ("Plan v2 · 2 epics · 4 tasks"), with **View plan**, **Approve to board**, **Approve to Backlog** and **Open in Plan**. **View plan** opens the plan flyout docked on the right ([plan.md](plan.md#plan-flyout)), and a task from it opens in the task flyout.
-- **Unread reply:** Juno's latest reply (`reply`), with **Open in Plan** under it and the reply box ("Reply to Juno…") below. Sending starts a PM turn, as for a question.
+- **Failed turn:** what happened and the turn's error (`failure`), with **Open in Plan** under it and the reply box ("Reply to Juno…") below. Sending starts a PM turn, as for a question.
 - Earlier messages, Steps and the live turn's transcript aren't shown. While Juno is working, the pane shows a working line in place of the answers, and they're disabled.
 
 ### Actions
@@ -146,7 +149,7 @@ The selected message column shows only what needs you, **not the conversation**.
 On the mobile layout ([mobile.md](mobile.md#inbox)), a Plan thread opens as its own screen at `/inbox/:itemId`:
 
 - **Header:** "Inbox · n of m" above the session title, a back button to the list, **Open in Plan** in place of the Task button, and a **⋯** menu with **Delete thread**. The tab bar is hidden, as on any item.
-- **Body:** only the question or the plan, full width, not the conversation. A question's answers are stacked, full-width buttons at least 44px tall, as in Plan on mobile, with the reply box ("Reply to Juno…") pinned below. An unread reply shows Juno's latest reply with the same reply box. A plan shows its title, summary and counts, with **View plan** (opens the plan in a bottom sheet; a task from it opens in a taller sheet over it) and **Approve to board** and **Approve to Backlog** side by side, full width.
+- **Body:** only the question or the plan, full width, not the conversation. A question's answers are stacked, full-width buttons at least 44px tall, as in Plan on mobile, with the reply box ("Reply to Juno…") pinned below. A failed turn shows its error with the same reply box. A plan shows its title, summary and counts, with **View plan** (opens the plan in a bottom sheet; a task from it opens in a taller sheet over it) and **Approve to board** and **Approve to Backlog** side by side, full width.
 - **Delete thread** doesn't ask first. It returns to `/inbox` without the thread and offers **Undo**, as a swipe does (below).
 - Approving returns to `/inbox`; a failed approval keeps the screen and sheet open with the error.
 - **Row:** the sender's avatar, name and time, the session title, the preview, and the status badge beside the project tag, in the same list as the other items. The first tab is named **Inbox** (the web's Needs you), newest first, with no group for threads.
@@ -175,7 +178,7 @@ An epic PR in human review and an epic PR rebase conflict have their own layout 
 ## Data
 
 - **Items:** id, project, task ref, type (question / human review / blocked / failed / activity / plan thread), sender agent and role, time, subject, preview, body, unread, resolved outcome.
-- **Type-specific fields:** PR, checks, criteria with evidence, positions, suggested answers. A plan thread has the session id, title, status (needs approval / question / none with an unread reply), `activeRunId`, preview, `reply` and the time it started waiting; its question and plan come from the Plan session endpoints.
+- **Type-specific fields:** PR, checks, criteria with evidence, positions, suggested answers. A plan thread has the session id, title, status (needs approval / question / failed), `activeRunId`, preview, `failure` and the time it started waiting; its question and plan come from the Plan session endpoints.
 - **What changed since the last review:** a needs-you task or epic item carries `since` and `newArtifacts`. `since` is null until the human has acted, then holds when they last requested changes or answered, what they said, the developers' one-line notes after it, and an epic's fix tasks. `newArtifacts` lists the files added after that action, plus a design's latest version with its preview link, and on an epic each file names its task. Before any action everything is new. Written (`note`) evidence is never listed. Actions and artifacts are compared by time, because review rounds reset when a task is resolved.
 - **Counts per filter.**
 - New items stream in over SSE; plan threads follow `plan.session` events.
@@ -207,6 +210,6 @@ Mobile Plan threads reuse Plan's `PlanQuestion`, composer and `PlanDetail` botto
 
 ## Release notes (COR-129)
 
-The latest 20 deployments appear as Release notes from the configured PM, with its avatar, project, time and short commit range. Undismissed notes are placed by deployment time in the one newest-first list, among the attention items, read or unread. They do not add to the Needs you badge or tab count. An unread dot stays until the item is opened, on desktop or mobile. Reading keeps the item in the Inbox; Dismiss moves it to Resolved.
+The latest 20 deployments appear as Release notes from the configured PM, with its avatar, project, time and short commit range. Undismissed notes are listed under **Activity** by deployment time, read or unread (D11). They never appear in the default Inbox tab or add to its badge or count, so they need no dismissing. An unread dot stays until the item is opened, on desktop or mobile. Reading keeps the item in Activity; the optional Dismiss moves it to Resolved.
 
 The shared detail pane renders markdown with task references linking to `/tasks/:ref`, and shows the commit range (or the first-deploy commit). Pending notes show “Writing release notes…” and refresh on `deployment.updated`, without a reload. Mobile uses its regular back header and the same detail pane, without a task-details button or reply composer.

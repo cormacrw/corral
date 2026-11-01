@@ -75,8 +75,8 @@ export interface TaskInboxItem extends InboxItemBase, Partial<ReviewChanges> {
   resolution: string | null
 }
 
-// An open Plan session waiting on the human (D11, amended): a question, a plan
-// needing approval or an unread PM reply
+// An open Plan session waiting on a human decision (D11): a question, a plan
+// needing approval or a failed PM turn. Unread replies stay in Plan.
 interface PlanThreadBase extends InboxItemBase {
   // The session ID
   id: string
@@ -96,12 +96,11 @@ interface PlanThreadBase extends InboxItemBase {
 export type PlanThreadPlan = Pick<Plan, 'id' | 'version' | 'title' | 'summary'> & { epicCount: number, taskCount: number }
 
 // What the thread waits on: its status always comes with what that status
-// needs. 'none' is a thread listed only for an unread reply, the latest PM
-// message.
+// needs. 'failed' carries the error the PM's last turn ended with.
 export type PlanThreadAttention =
-  | { status: 'question', question: Pick<PlanQuestion, 'text' | 'recommendation' | 'options'>, plan: null, planId: null, reply: null }
-  | { status: 'needs_approval', question: null, plan: PlanThreadPlan, planId: string, reply: null }
-  | { status: 'none', question: null, plan: null, planId: null, reply: string }
+  | { status: 'question', question: Pick<PlanQuestion, 'text' | 'recommendation' | 'options'>, plan: null, planId: null, failure: null }
+  | { status: 'needs_approval', question: null, plan: PlanThreadPlan, planId: string, failure: null }
+  | { status: 'failed', question: null, plan: null, planId: null, failure: string }
 
 export type PlanThreadItem = PlanThreadBase & PlanThreadAttention
 
@@ -143,6 +142,7 @@ export interface EpicReviewTask {
 export interface ReleaseNotesItem extends InboxItemBase {
   id: string
   type: 'release_notes'
+  epicId?: never
   deploymentId: string
   fromSha: string | null
   toSha: string
@@ -154,8 +154,6 @@ export interface ReleaseNotesItem extends InboxItemBase {
   prUrl: null
   resolution: string | null
 }
-
-export { needsAttention } from './client.ts'
 
 // An epic PR that couldn't rebase onto the target branch (D27)
 export interface EpicConflictItem extends InboxItemBase, ReviewChanges {
@@ -175,13 +173,17 @@ export interface EpicConflictItem extends InboxItemBase, ReviewChanges {
 
 export type InboxItem = TaskInboxItem | PlanThreadItem | EpicReviewItem | ReleaseNotesItem | EpicConflictItem
 
+// What the human owes a decision on (D11). Everything here counts.
+export type ActionableInboxItem = Exclude<InboxItem, ReleaseNotesItem>
+
 export interface Inbox {
-  // Attention items newest first, followed by undismissed release notes
-  // newest first. Release notes remain here after reading.
-  needsYou: InboxItem[]
-  activity: TaskInboxItem[]
+  // Newest first by when each began waiting
+  needsYou: ActionableInboxItem[]
+  // Informational, newest first: what agents did, and release notes until
+  // they're dismissed
+  activity: (TaskInboxItem | ReleaseNotesItem)[]
   resolved: (TaskInboxItem | ReleaseNotesItem)[]
-  // The Needs you count excludes informational release notes
+  // needsYou's length; every Inbox badge is this or its per-project share
   count: number
 }
 

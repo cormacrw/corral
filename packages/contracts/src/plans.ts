@@ -16,7 +16,7 @@ export interface PlanSession {
   // True once its plan is approved, until the human sends another message
   closed: boolean
   // What the human has to do here, if anything
-  status: 'needs_approval' | 'question' | 'none'
+  status: 'needs_approval' | 'question' | 'failed' | 'none'
   // Set while a PM turn is running
   activeRunId: string | null
   createdAt: string

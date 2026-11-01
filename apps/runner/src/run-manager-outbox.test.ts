@@ -50,6 +50,13 @@ describe('RunManager with the server out of reach', () => {
     manager.handle(WELCOME)
   }
   const types = () => sent.map(m => m.type)
+  // The worktree note can go first: its batch timer doesn't wait for a slow setup
+  const startsBeforeAgent = () => {
+    const spoke = sent.findIndex(m => m.type === 'run.events' && m.events.some(e => e.type === 'message'))
+    const started = types().indexOf('run.started')
+    expect(started).toBeGreaterThanOrEqual(0)
+    expect(started).toBeLessThan(spoke)
+  }
   const developer = () => pmJob({ runId: 'r1', role: 'developer', runtime: 'fake', planSessionId: null, taskId: 'task-1', taskRef: 'APP-1', branch: 'corral/app-1' })
 
   async function start(): Promise<RunManager> {
@@ -90,7 +97,7 @@ describe('RunManager with the server out of reach', () => {
 
     reconnect(manager)
 
-    expect(types()[0]).toBe('run.started')
+    startsBeforeAgent()
     expect(types().at(-1)).toBe('run.ended')
     expect(sent.find(m => m.type === 'run.started')).toMatchObject({ agentSessionId: 'fake-session' })
     expect(sent.at(-1)).toMatchObject({ exit: { kind: 'timed_out', limitSeconds: 60 } })
@@ -136,7 +143,7 @@ describe('RunManager with the server out of reach', () => {
     expect(messages.length).toBeLessThan(101)
     expect(messages.length).toBeGreaterThanOrEqual(101 - dropped)
     expect(messages.at(-1)).toEqual({ type: 'message', text: 'The last word' })
-    expect(types()[0]).toBe('run.started')
+    startsBeforeAgent()
     expect(types().at(-1)).toBe('run.ended')
     expect(JSON.stringify(sent).length).toBeLessThan(18 * 1024 * 1024)
   })

@@ -12,7 +12,6 @@ import type {
   FlowMetrics,
   FlowMetricsQuery,
   Inbox,
-  InboxItem,
   ReleaseNotesItem,
   PlanMessage,
   Plan,
@@ -20,6 +19,7 @@ import type {
   PlanThreadAttention,
   Profile,
   Project,
+  TaskInboxItem,
   PullRequestDetail,
   PullRequestFile,
   PullRequestStatus,
@@ -850,21 +850,21 @@ export const resolvedInbox: Inbox['resolved'] = []
 
 // The inbox is derived from the tasks above that need the human
 // What a thread waits on, or nothing when it's missing the data its status needs
-function threadAttention(status: PlanSession['status'], last?: PlanMessage, plan?: Plan, reply?: PlanMessage): PlanThreadAttention | null {
+function threadAttention(status: PlanSession['status'], last?: PlanMessage, plan?: Plan): PlanThreadAttention | null {
   if (status === 'question') {
     if (last?.kind !== 'question') return null
-    return { status, question: { text: last.text, recommendation: last.recommendation, options: last.options }, plan: null, planId: null, reply: null }
+    return { status, question: { text: last.text, recommendation: last.recommendation, options: last.options }, plan: null, planId: null, failure: null }
   }
   if (status === 'needs_approval') {
     if (!plan) return null
     const summary = { id: plan.id, version: plan.version, title: plan.title, summary: plan.summary, epicCount: plan.epics.length, taskCount: plan.tasks.filter(t => t.change !== 'removed').length }
-    return { status, question: null, plan: summary, planId: plan.id, reply: null }
+    return { status, question: null, plan: summary, planId: plan.id, failure: null }
   }
-  return reply ? { status, question: null, plan: null, planId: null, reply: reply.text } : null
+  return status === 'failed' && last?.kind === 'error' ? { status, question: null, plan: null, planId: null, failure: last.text } : null
 }
 
 export function inbox(): Inbox {
-  const needsYou: InboxItem[] = tasks
+  const needsYou: Inbox['needsYou'] = tasks
     .filter(t => t.status === 'human_review' || t.status === 'blocked' || t.status === 'failed')
     .map((t) => {
       const project = projects.find(p => p.id === t.projectId)!
@@ -895,22 +895,21 @@ export function inbox(): Inbox {
         resolution: null
       }
     })
-  // Threads waiting on the human: a question, a plan needing approval or an unread reply
-  for (const session of planSessions.filter(s => !s.closed && (s.status !== 'none' || s.unread))) {
+  // Threads waiting on a decision: a question, a plan needing approval or a failed turn
+  for (const session of planSessions.filter(s => !s.closed && s.status !== 'none')) {
     const project = projects.find(p => p.id === session.projectId)!
     const messages = planMessages[session.id] ?? []
     const last = messages.at(-1)
     const plan = plans[session.id]?.find(p => p.status === 'proposed')
-    const reply = messages.findLast(m => m.role === 'pm')
-    const waiting = threadAttention(session.status, last, plan, reply)
+    const waiting = threadAttention(session.status, last, plan)
     if (!waiting) continue
     needsYou.push({
       ...waiting,
       id: session.id, type: 'plan_thread', sessionId: session.id,
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
       subject: session.title, preview: session.preview ?? '',
-      // When it started waiting: the question, the plan or the reply
-      sender: { name: agents.find(a => a.role === 'pm')?.name ?? 'PM', role: 'pm' }, at: (session.status === 'needs_approval' ? plan?.createdAt : session.status === 'question' ? last?.createdAt : reply?.createdAt) ?? session.updatedAt,
+      // When it started waiting: the question or failure, or the plan
+      sender: { name: agents.find(a => a.role === 'pm')?.name ?? 'PM', role: 'pm' }, at: (session.status === 'needs_approval' ? plan?.createdAt : last?.createdAt) ?? session.updatedAt,
       taskId: null, taskRef: null, prUrl: null, resolution: null,
       runtime: session.runtime, unread: session.unread,
       activeRunId: session.activeRunId
@@ -943,19 +942,20 @@ export function inbox(): Inbox {
   }
   const completed = tasks.find(t => t.status === 'merged')!
   const project = projects.find(p => p.id === completed.projectId)!
-  const activity: Inbox['activity'] = [{
+  const merged: TaskInboxItem = {
     id: 'activity-merged', type: 'activity',
     project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
     taskId: completed.id, taskRef: completed.ref, subject: completed.title,
     preview: 'The task was merged.', body: 'The task was merged.',
     sender: { name: 'Corral', role: 'system' }, at: completed.updatedAt,
     prUrl: completed.pr?.url ?? null, resolution: null
-  }]
-  const count = needsYou.length
-  needsYou.push(...releaseNotes.filter(r => !r.resolution))
+  }
+  const activity: Inbox['activity'] = [merged]
   needsYou.sort((a, b) => b.at.localeCompare(a.at))
-  const approved = { ...activity[0]!, id: 'activity-approved', body: 'You approved and merged it', preview: 'You approved and merged it', resolution: 'You approved and merged it', sender: { name: 'Rita', role: 'reviewer' as const } }
-  return { needsYou, activity, resolved: [...resolvedInbox, approved, ...releaseNotes.filter(r => r.resolution)], count }
+  activity.push(...releaseNotes.filter(r => !r.resolution))
+  activity.sort((a, b) => b.at.localeCompare(a.at))
+  const approved = { ...merged, id: 'activity-approved', body: 'You approved and merged it', preview: 'You approved and merged it', resolution: 'You approved and merged it', sender: { name: 'Rita', role: 'reviewer' as const } }
+  return { needsYou, activity, resolved: [...resolvedInbox, approved, ...releaseNotes.filter(r => r.resolution)], count: needsYou.length }
 }
 
 // Different cohorts make every window visibly distinct. Marketing site has no

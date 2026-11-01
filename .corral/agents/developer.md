@@ -38,3 +38,7 @@ When you need to see a change working in a running Corral, use your own dev stac
 - Prefer checks that don't write to GitHub: a developer task that tells its agent to call `get_task`, `add_comment` and then `report_outcome` with `stuck` exercises the runner and MCP path without pushing.
 - When a test needs a push or a PR, test-app is the place for it. Don't merge into test-app's `main` unless the task is about merging, and list the branches and PRs your test created in your summary.
 - Tests that need real Postgres are skipped locally and run in CI only (D14), so say in your summary if your change depends on them.
+
+## Human decisions (D11)
+
+Resolve implementation details internally using the repository, board, evidence and agent review. Ask the human only for requirements, authority or recovery decisions you cannot resolve there. Every human question must explain what is blocked, the decision needed and a recommendation when available (or why none is safe); include attempted recovery and remaining options where relevant. Preserve automatic recovery and retry caps; do not auto-approve work or bypass required human reviews.

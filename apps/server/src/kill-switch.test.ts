@@ -77,9 +77,10 @@ describe('stopping work that is being claimed', () => {
     // The claim is still open when the switch is thrown, so its run isn't
     // in stopAll's first read
     const live = t.runner.available.bind(t.runner)
-    // The first read is the check for a free slot, before the claim opens
-    const spy = vi.spyOn(t.runner, 'available').mockImplementationOnce(live).mockImplementationOnce(() => {
-      stopped = t.orchestrator.stopAll(t.actor)
+    // Only the read that places the claim: other roles, and the check for a
+    // free slot, read the runners too, in an order that depends on timing
+    const spy = vi.spyOn(t.runner, 'available').mockImplementation(() => {
+      if (!stopped && new Error().stack?.includes('at place ')) stopped = t.orchestrator.stopAll(t.actor)
       return live()
     })
     await approve(project, task)

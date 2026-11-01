@@ -1,3 +1,4 @@
+import { HUMAN_DECISIONS_NOTE } from '@corral/core'
 import { describe, expect, it } from 'vitest'
 import { designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, isGrillRequest, pmFallbackPrompt, pmPrompt, questionText, reviewerPrompt, type PromptTask } from './prompts.ts'
 
@@ -511,5 +512,39 @@ describe('continuing a stopped run', () => {
     expect(prompt).toContain('Stop reason: The run hit its time limit')
     expect(prompt).toContain('No WIP commit is recorded yet')
     expect(prompt).toContain('Check the branch log')
+  })
+})
+
+describe('human decisions contract (D11)', () => {
+  const task: PromptTask = {
+    ref: 'TA-2', title: 'Queue', description: null, branch: 'corral/ta-2', defaultBranch: 'main', approvedHeadSha: 'approved-head',
+    reviewRounds: 0, reviewRoundCap: 5, criteria: [], comments: [], attachments: []
+  }
+  const review = { ...task, headSha: 'new-head', prUrl: null, evidence: [], previousFeedback: null, requiredChecks: ['ci'] }
+
+  it.each([
+    ['PM', pmPrompt({ ...turn, fresh: true })],
+    ['developer', developerPrompt(task, 'Tam')],
+    ['spike developer', developerPrompt({ ...task, spike: true, branch: null }, 'Tam')],
+    ['designer', designerPrompt({ ...task, design: { version: null } }, 'Dee')],
+    ['epic rebase developer', developerPrompt({ ...task, squashRebase: true }, 'Tam')],
+    ['rebase developer', developerRevisionPrompt({ ...task, rebaseOnly: true }, [])],
+    ['PR-free rebase developer', developerRevisionPrompt({ ...task, rebaseOnly: true, prFree: true }, [])],
+    ['rebase reviewer', reviewerPrompt({ ...review, rebaseOnly: true }, 'Rae')]
+  ])('is in the %s prompt', (_name, prompt) => {
+    expect(prompt).toContain(HUMAN_DECISIONS_NOTE)
+  })
+
+  it('asks a blocked rebase review for the decision and a recommendation without resolving it', () => {
+    const prompt = reviewerPrompt({ ...review, rebaseOnly: true }, 'Rae')
+    expect(prompt.match(/the decision the human needs to make and your recommendation \(or why none is safe\)/g)).toHaveLength(2)
+    expect(prompt).toContain('Do not choose a side or rewrite the criteria: a recommendation is advice to the human, not a resolution.')
+  })
+
+  it.each([
+    ['PR', false],
+    ['PR-free', true]
+  ])('sends the question to the summary from a %s rebase', (_name, prFree) => {
+    expect(developerRevisionPrompt({ ...task, rebaseOnly: true, prFree }, [])).toContain('report stuck instead, with the question in the summary')
   })
 })

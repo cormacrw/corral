@@ -2,6 +2,7 @@
 
 Short implementation notes written while building. Not binding: `docs/README.md` sets what is.
 
+- [Actionable Inbox policy](actionable-inbox-policy.md)
 - [Agent activity](agent-activity.md)
 - [Audit log](audit-log.md)
 - [Bounded checks](bounded-checks.md)
