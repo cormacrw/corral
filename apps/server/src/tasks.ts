@@ -387,7 +387,7 @@ export async function createTask(db: Executor, project: ProjectRow, rawInput: Cr
 // A pinned `comment` is the human's answer: it stands or falls with the
 // transition, stamped with the transaction's time like the audit entry, which
 // is how the Inbox finds it again.
-export async function transitionTask(db: Executor, taskId: string, input: HumanTransitionInput, actor: Actor, options: { comment?: string, invalidatedEpics?: InvalidatedEpics } = {}): Promise<void> {
+export async function transitionTask(db: Executor, taskId: string, input: HumanTransitionInput, actor: Actor, options: { comment?: string | undefined, invalidatedEpics?: InvalidatedEpics } = {}): Promise<void> {
   await db.transaction(async (tx) => {
     const { task, project } = await lockTask(tx, taskId)
     await applyTransition(tx, task, project, await humanEvent(tx, task, input), actor, { event: input }, options.invalidatedEpics)
