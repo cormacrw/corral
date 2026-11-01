@@ -14,7 +14,7 @@ beforeEach(() => navigate.mockClear())
 
 const dana = { id: 'dana', name: 'Dana' }
 const rita = { id: 'rita', name: 'Rita' }
-const task = (overrides: Partial<Task> = {}) => fixture(projects[0]!, 99, { title: 'Fix the login', status: 'ready', ...overrides })
+const task = (overrides: Partial<Task> & Pick<Task, 'status'> = { status: 'ready' }) => fixture(projects[0]!, 99, { title: 'Fix the login', ...overrides })
 const lease = (agentId: string): Task['lease'] => ({ agentId, runId: 'r-1', role: 'developer', expiresAt: '' })
 
 const render = (props: { task: Task, epic?: string | null, to?: string, pressed?: boolean, onOpen?: () => void }) => mount(TaskCard, {
@@ -34,12 +34,12 @@ const render = (props: { task: Task, epic?: string | null, to?: string, pressed?
 
 describe('TaskCard', () => {
   it('shows the title, epic and priority and no line for a missing epic', () => {
-    expect(render({ task: task({ priority: 'urgent' }), epic: 'Login' }).text()).toBe('Fix the loginLoginUrgent')
-    expect(render({ task: task({ priority: 'low' }), epic: null }).text()).toBe('Fix the loginLow')
+    expect(render({ task: task({ status: 'ready', priority: 'urgent' }), epic: 'Login' }).text()).toBe('Fix the loginLoginUrgent')
+    expect(render({ task: task({ status: 'ready', priority: 'low' }), epic: null }).text()).toBe('Fix the loginLow')
   })
 
   it('leaves the status detail to the flyout', () => {
-    const text = render({ task: task({ status: 'blocked', statusReason: 'Review-round limit reached', reviewRounds: 5, prNumber: 66, prUrl: 'https://example.test/pull/66', paused: true }) })
+    const text = render({ task: task({ status: 'blocked', statusReason: 'Review-round limit reached', reviewRounds: 5, pr: { number: 66, url: 'https://example.test/pull/66' }, paused: true }) })
     expect(text.text()).toBe('Fix the loginMedium')
     expect(text.find('a').exists()).toBe(false)
   })

@@ -5,7 +5,7 @@ import { STATUS } from '~/utils/labels'
 
 const props = defineProps<{ task: Task, tasks: Task[] }>()
 const blockers = computed(() => taskBlockers(props.task, props.tasks))
-const hasBlockers = computed(() => blockers.value.tasks.length > 0 || blockers.value.epics.length > 0)
+const hasBlockers = computed(() => blockers.value.tasks.length > 0 || blockers.value.unlisted.length > 0 || blockers.value.epics.length > 0)
 const open = ref(false)
 watch(hasBlockers, (value) => {
   if (!value) open.value = false
@@ -54,6 +54,18 @@ function openTask(ref: string) {
             >
               <span class="wrap-anywhere font-medium text-highlighted">{{ blocker.title }}</span>
               <span class="text-xs text-muted">{{ blocker.ref }} · {{ STATUS[blocker.status].label }}</span>
+            </button>
+          </li>
+          <li
+            v-for="blockerRef in blockers.unlisted"
+            :key="blockerRef"
+          >
+            <button
+              type="button"
+              class="flex w-full cursor-pointer rounded px-2 py-1.5 text-start text-sm font-medium text-highlighted hover:bg-elevated focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
+              @click="openTask(blockerRef)"
+            >
+              {{ blockerRef }}
             </button>
           </li>
           <li

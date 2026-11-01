@@ -24,3 +24,8 @@ obvious from it:
   tasks and approved designs are done. Waiting epics also appear, linking to
   their epic pages. Task rows use `useTaskFlyout.open`, which handles phones.
   The popover stops click propagation and follows live task updates.
+- Task lists leave out Drafts, and `plan.ts` lets a task depend on one, so a Ready
+  task can be held by a dependency the client can't see. `taskBlockers` returns
+  those refs in `unlisted`, and the popover shows them as ref-only rows. The
+  list also leaves out soft-deleted tasks, but deleting a task moves its
+  dependents to Blocked, so those don't reach this rule.
