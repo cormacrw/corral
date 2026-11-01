@@ -272,8 +272,11 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
               v-for="entry in history.data.value"
               :key="entry.id"
             >
-              <span class="font-medium">{{ entry.actor }}</span>
-              <span class="text-muted"> {{ entry.text }}</span>
+              <span
+                v-if="!entry.text.startsWith('You ')"
+                class="me-1 font-medium"
+              >{{ entry.actor }}</span>
+              <span class="text-muted">{{ entry.text }}</span>
             </li>
           </ol>
         </section>
