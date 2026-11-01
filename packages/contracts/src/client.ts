@@ -21,6 +21,9 @@ export const SSE_HEARTBEAT_MS = 25_000
 
 export const PULL_REQUEST_LINE_LIMIT = 1000
 
+// D11: only an unresolved human decision counts. Release notes and a Plan
+// thread with nothing but an unread reply are informational.
 export function needsAttention(item: InboxItem): boolean {
+  if (item.type === 'plan_thread') return item.status !== 'none'
   return item.type !== 'release_notes'
 }

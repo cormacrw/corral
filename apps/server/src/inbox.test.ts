@@ -1,4 +1,4 @@
-import type { Inbox, PlanSessionDetail, PlanThreadItem, RunJob } from '@corral/contracts'
+import { needsAttention, type Inbox, type PlanSessionDetail, type PlanThreadItem, type RunJob } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -34,7 +34,7 @@ describe('plan threads in the inbox', () => {
     await expect.poll(async () => (await t.request('GET', `/api/plan/sessions/${job.planSessionId}`).then(r => r.json()) as PlanSessionDetail).activeRunId).toBeNull()
   }
 
-  it('lists questions, waiting plans and unread replies in one list with tasks, newest first by when each arrived, and counts every listed item', async () => {
+  it('lists questions, waiting plans and unread replies in one list with tasks, newest first by when each arrived, and counts only the decisions', async () => {
     const project = await t.createProject()
     const session = async (title: string, minutes: number, values: Partial<typeof planSessions.$inferInsert> = {}) => {
       const [row] = await t.db.insert(planSessions).values({ projectId: project.id, title, createdBy: t.actor, updatedAt: at(minutes), ...values }).returning()
@@ -81,16 +81,15 @@ describe('plan threads in the inbox', () => {
     expect(mine.find(i => i.id === approval.id)).toMatchObject({ question: null, plan: { id: plan!.id, version: 2, title: 'Search', summary: 'Find tasks quickly', epicCount: 1, taskCount: 2 } })
     expect(mine.find(i => i.id === unread.id)).toMatchObject({ type: 'plan_thread', status: 'none', unread: true, question: null, plan: null, reply: 'Finished investigating.' })
     expect(mine.filter(i => i.type === 'plan_thread').every(i => !('body' in i))).toBe(true)
-    expect(before.count).toBe(before.needsYou.length)
+    expect(before.count).toBe(before.needsYou.filter(needsAttention).length)
     expect([...before.activity, ...before.resolved].some(i => (i as { type: string }).type === 'plan_thread')).toBe(false)
 
-    // Reading the unread-only thread takes it out of the list and the count
+    // Reading the unread-only thread takes it out of the list; it never counted
     const { count } = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
     await t.request('POST', `/api/plan/sessions/${unread.id}/read`)
-    expect(t.events.at(-1)).toMatchObject({ type: 'plan.session', session: { id: unread.id, unread: false }, markedRead: { inboxCount: count - 1 } })
+    expect(t.events.at(-1)).toMatchObject({ type: 'plan.session', session: { id: unread.id, unread: false }, markedRead: { inboxCount: count } })
     const after = await inbox()
-    expect(after.count).toBe(before.count - 1)
-    expect(after.count).toBe(after.needsYou.length)
+    expect(after.count).toBe(before.count)
     expect(after.needsYou.filter(i => i.project.id === project.id).map(i => i.subject)).toEqual(order.slice(0, -1))
     await t.db.delete(planSessions).where(eq(planSessions.id, idleOld.id))
   })

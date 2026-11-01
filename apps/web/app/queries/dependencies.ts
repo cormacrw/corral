@@ -83,7 +83,7 @@ function writeTask(task: Task, cache: EventCache): void {
 export function inboxWithRead(current: Inbox, id: string): Inbox {
   const item = current.needsYou.find(i => i.id === id)
   if (item?.type === 'plan_thread' && item.status === 'none') {
-    return { ...current, needsYou: current.needsYou.filter(i => i.id !== id), count: current.count - 1 }
+    return { ...current, needsYou: current.needsYou.filter(i => i.id !== id) }
   }
   if (item?.type !== 'plan_thread' && item?.type !== 'release_notes') return current
   return { ...current, needsYou: current.needsYou.map(i => i === item ? { ...item, unread: false } : i) }

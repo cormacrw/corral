@@ -176,12 +176,13 @@ export interface EpicConflictItem extends InboxItemBase, ReviewChanges {
 export type InboxItem = TaskInboxItem | PlanThreadItem | EpicReviewItem | ReleaseNotesItem | EpicConflictItem
 
 export interface Inbox {
-  // Attention items newest first, followed by undismissed release notes
-  // newest first. Release notes remain here after reading.
+  // Newest first. Besides the decisions, this still carries informational
+  // items: undismissed release notes and threads with only an unread reply.
+  // `needsAttention` tells them apart; the web lists those under Activity.
   needsYou: InboxItem[]
   activity: TaskInboxItem[]
   resolved: (TaskInboxItem | ReleaseNotesItem)[]
-  // The Needs you count excludes informational release notes
+  // How many items in needsYou are decisions (`needsAttention`)
   count: number
 }
 

@@ -1,3 +1,4 @@
+import { needsAttention } from '@corral/contracts/client'
 import { EPIC_REVIEW_STATES } from '@corral/core'
 import type { Agent, DraftSession, Epic, EpicDetail, Inbox, PlanSessionDetail, Project, PullRequestDetail, PullRequestStatus, ServerEvent, Task } from '@corral/contracts'
 import { describe, expect, it, vi } from 'vitest'
@@ -92,7 +93,7 @@ describe('prototype mock API', () => {
 
   it('derives the inbox from tasks that need the human', async () => {
     const inbox = await mockCall<Inbox>('GET', '/inbox')
-    expect(inbox.count).toBe(inbox.needsYou.filter(i => i.type !== 'release_notes').length)
+    expect(inbox.count).toBe(inbox.needsYou.filter(needsAttention).length)
     const threads = inbox.needsYou.filter(i => i.type === 'plan_thread')
     expect(threads.map(i => i.sessionId).sort()).toEqual(['s-1', 's-2', 's-3', 's-5'])
     expect(inbox.needsYou.map(i => i.at)).toEqual(inbox.needsYou.map(i => i.at).sort().reverse())
@@ -159,7 +160,7 @@ describe('prototype mock API', () => {
     await mockCall('POST', '/plan/sessions/s-5/read')
     const inbox = await mockCall<Inbox>('GET', '/inbox')
     expect(inbox.needsYou.some(i => i.id === 's-5')).toBe(false)
-    expect(inbox.count).toBe(inbox.needsYou.filter(i => i.type !== 'release_notes').length)
+    expect(inbox.count).toBe(inbox.needsYou.filter(needsAttention).length)
   })
 
   it('opens a plan session with its messages and plans', async () => {
