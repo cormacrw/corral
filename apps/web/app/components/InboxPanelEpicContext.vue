@@ -16,13 +16,18 @@ const { openEpic } = useTaskFlyout()
     class="flex flex-col gap-1 text-sm text-muted"
     data-testid="inbox-epic-context"
   >
-    <p>
-      Part of
-      <ULink
-        :to="`/epics/${grouped.id}`"
-        class="font-semibold text-primary"
-        @click.prevent="openEpic(grouped.id)"
-      >{{ grouped.title }}</ULink>. You'll review it all together at the epic PR.
+    <p class="flex items-center gap-1.5">
+      <UIcon
+        name="i-lucide-git-branch"
+        class="size-4 shrink-0"
+      />
+      <span>Part of
+        <button
+          type="button"
+          class="font-medium text-default hover:underline"
+          @click="openEpic(grouped.id)"
+        >{{ grouped.title }}</button>.
+        You'll review it all together at the epic PR.</span>
     </p>
     <p v-if="canAct && hasPr">
       Approve and merge PR #{{ prNumber }} into the epic branch, or request changes.

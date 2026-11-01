@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { VueQueryPlugin } from '@tanstack/vue-query'
 import { flushPromises, mount } from '@vue/test-utils'
-import { computed, defineComponent, h } from 'vue'
+import { computed } from 'vue'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { Task } from '@corral/contracts'
 import { api } from '~/composables/useApi'
@@ -22,7 +22,7 @@ it('shows epic context and a working epic link for both grouped modes, with PR w
         props: { task: { epicId: 'epic-1', type } as Task, prNumber: '64', canAct: true },
         global: {
           plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }]],
-          components: { ULink: defineComponent({ props: ['to'], setup: (props, { slots }) => () => h('a', { href: props.to }, slots.default?.()) }) }
+          stubs: { UIcon: true }
         }
       })
       await flushPromises()
@@ -30,7 +30,7 @@ it('shows epic context and a working epic link for both grouped modes, with PR w
         expect(wrapper.text()).toBe('')
       } else {
         expect(wrapper.text()).toContain('Part of Saved searches. You\'ll review it all together at the epic PR.')
-        await wrapper.get('a').trigger('click')
+        await wrapper.get('button').trigger('click')
         expect(openEpic).toHaveBeenCalledWith('epic-1')
         expect(wrapper.text().includes('Approve and merge PR #64 into the epic branch, or request changes.')).toBe(type === 'task')
         await wrapper.setProps({ canAct: false })
