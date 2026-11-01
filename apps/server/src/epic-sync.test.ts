@@ -197,6 +197,25 @@ it('rebases an active epic at the next task integration, with no hand-off and no
   await capture('sync-at-integration.json', { scenario: 'Target advanced, then a task integrated. No API call was made to start the rebase.', targetCommitThatLanded: landed, epicLog: (await git('log', '--oneline', '--format=%h %s', `${landed}~1..${epic.branch}`)).split('\n'), operations: await journal(epic.id), taskStatus: (await taskRow(task.id)).status, taskPrs: 0, inboxNeedsYou: await needsYou(epic.id) })
 })
 
+it('synchronizes when the target renamed a file the epic edited', async () => {
+  const epic = await createEpic()
+  const lines = 'one\ntwo\nthree\nfour\nfive\nsix\n'
+  const file = `renamed-${++branches}`
+  await commitOn('main', `${file}.txt`, lines)
+  await git('branch', '--force', epic.branch, 'main')
+  const head = await commitOn(epic.branch, `${file}.txt`, `${lines}epic\n`)
+  await git('mv', `${file}.txt`, `${file}-moved.txt`)
+  await git('commit', '--quiet', '-m', 'Rename it')
+  const task = await approved(epic, `${file}-task.txt`)
+  await tick()
+
+  const rebased = await git('rev-parse', epic.branch)
+  expect(await taskRow(task.id)).toMatchObject({ status: 'merged' })
+  expect(await git('show', `${rebased}:${file}-moved.txt`)).toContain('epic')
+  expect((await epicApi(epic.id)).sync).toBeNull()
+  await capture('target-renamed-epic-file.json', { scenario: 'The epic edited a file and the target renamed it. One merge pass later:', epicHeadBefore: head, epicHeadAfter: rebased, renamedFileOnEpic: await git('show', `${rebased}:${file}-moved.txt`), taskStatus: 'merged', operations: await journal(epic.id), inboxNeedsYou: await needsYou(epic.id) })
+})
+
 it('rebases before review, and keeps approval over a clean rebase before merge', async () => {
   const epic = await createEpic({ prNumber: null })
   const task = await t.createTask(project.slug, { epicId: epic.id })

@@ -116,6 +116,62 @@ it('rejects a candidate that undoes a rename only the target made', async () => 
   expect(await run('rev-parse', 'epic')).toBe(head)
 })
 
+// The epic edits a.txt, then the target renames it to b.txt
+async function renamedUnderEpic() {
+  await commit('main', 'a.txt', 'one\ntwo\nthree\nfour\nfive\nsix\n')
+  await run('branch', '--force', 'epic', 'main')
+  const head = await commit('epic', 'a.txt', 'one\ntwo\nthree\nfour\nfive\nsix\nepic\n')
+  await run('mv', 'a.txt', 'b.txt')
+  await run('add', '.')
+  await run('commit', '--quiet', '-m', 'Rename a to b')
+  return { head, onto: await run('rev-parse', 'HEAD') }
+}
+
+it('publishes a clean rebase that follows the target renaming a file the epic edited', async () => {
+  const { head, onto } = await renamedUnderEpic()
+  const prepared = await prepare(head, onto)
+  expect(prepared.status).toBe('rebased')
+  expect(await push(head, onto, prepared.commitSha!)).toMatchObject({ pushed: true, rejected: null })
+  expect(await run('show', 'epic:b.txt')).toContain('epic')
+})
+
+// Decided: both sides changed this file, but the rename is still target work,
+// and moving the edit back to a.txt would drop it
+it('rejects a candidate that reverts the target renaming a file the epic edited', async () => {
+  const { head, onto } = await renamedUnderEpic()
+  await run('checkout', '--quiet', '-b', 'candidate', onto)
+  await run('mv', 'b.txt', 'a.txt')
+  await writeFile(join(origin, 'a.txt'), 'one\ntwo\nthree\nfour\nfive\nsix\nepic\n')
+  await run('add', '.')
+  await run('commit', '--quiet', '-m', 'Back to a')
+  const reverted = await run('rev-parse', 'HEAD')
+  await run('checkout', '--quiet', 'main')
+  expect((await push(head, onto, reverted)).rejected).toContain('rename of a.txt to b.txt')
+  expect(await run('rev-parse', 'epic')).toBe(head)
+})
+
+it('leaves a rename both sides made to the reviewer', async () => {
+  await commit('main', 'a.txt', 'one\ntwo\nthree\nfour\nfive\nsix\n')
+  await run('branch', '--force', 'epic', 'main')
+  await run('checkout', '--quiet', 'epic')
+  await run('mv', 'a.txt', 'c.txt')
+  await run('add', '.')
+  await run('commit', '--quiet', '-m', 'Rename a to c')
+  const head = await run('rev-parse', 'HEAD')
+  await run('checkout', '--quiet', 'main')
+  await run('mv', 'a.txt', 'b.txt')
+  await run('add', '.')
+  await run('commit', '--quiet', '-m', 'Rename a to b')
+  const onto = await run('rev-parse', 'HEAD')
+  await run('checkout', '--quiet', '-b', 'candidate', onto)
+  await run('mv', 'b.txt', 'c.txt')
+  await run('add', '.')
+  await run('commit', '--quiet', '-m', 'Keep c')
+  const candidate = await run('rev-parse', 'HEAD')
+  await run('checkout', '--quiet', 'main')
+  expect(await push(head, onto, candidate)).toMatchObject({ pushed: true, rejected: null })
+})
+
 it('accepts a candidate rebased onto a later target commit than asked', async () => {
   const head = await commit('epic', 'epic.txt', 'epic\n')
   const onto = await commit('main', 'target.txt', 'one\n')

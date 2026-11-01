@@ -60,11 +60,22 @@ export async function prepareEpicRebase(dataDir: string, author: GitAuthor | nul
   })
 }
 
+// What the target renamed, as [from, to]: rebasing follows these, so an edit of
+// `from` lands in `to`
+async function renames(bare: string, from: string, to: string): Promise<[string, string][]> {
+  const entries = lines(await required(['-c', 'core.quotePath=false', 'diff', '--name-status', '-M', from, to], bare)).map(line => line.split('\t'))
+  return entries.filter(([status]) => status!.startsWith('R')).map(([, source, destination]) => [source!, destination!])
+}
+
+const exists = async (bare: string, commit: string, file: string) => (await git(['cat-file', '-e', `${commit}:${file}`], { cwd: bare })).code === 0
+
 // What's wrong with a candidate, if anything. The candidate must sit on the
 // commit it was asked to reach or a later one, stay linear, and leave files only
 // the target changed exactly as the target has them: an agent resolving a
 // conflict has no reason to touch those, so a difference is target work undone.
-// The epic's own files are the reviewer's to judge.
+// A file the target renamed under the epic's edit carries that edit, so it's
+// both sides' and only has to survive at its new path, unless the epic moved or
+// deleted it too. The epic's own files are the reviewer's to judge.
 async function candidateProblem(bare: string, job: Job<'epic_rebase_push'>): Promise<string | null> {
   const target = remoteRef(job.targetBranch)
   if (!await isAncestor(bare, job.ontoSha, job.candidateSha)) return `It isn't rebased onto ${job.ontoSha}.`
@@ -73,7 +84,12 @@ async function candidateProblem(bare: string, job: Job<'epic_rebase_push'>): Pro
   if (merges.length > 0) return `It has merge commits (${merges.join(', ')}). Rebase, never merge.`
   const fork = await required(['merge-base', job.expectedHeadSha, base], bare)
   const epicFiles = new Set(await changed(bare, fork, job.expectedHeadSha))
-  const targetOnly = (await changed(bare, fork, base)).filter(file => !epicFiles.has(file))
+  const carried = (await renames(bare, fork, base)).filter(([from]) => epicFiles.has(from))
+  for (const [from, to] of carried) {
+    if (await exists(bare, job.expectedHeadSha, from) && !await exists(bare, job.candidateSha, to)) return `It undoes the target's rename of ${from} to ${to}. Keep the file at ${to}, with the epic's change in it.`
+  }
+  const shared = new Set([...epicFiles, ...carried.map(([, to]) => to)])
+  const targetOnly = (await changed(bare, fork, base)).filter(file => !shared.has(file))
   const altered = new Set(await changed(bare, base, job.candidateSha))
   const undone = targetOnly.filter(file => altered.has(file))
   return undone.length > 0 ? `It changes target branch work the epic never touched: ${undone.join(', ')}. Keep the target's version of these files.` : null

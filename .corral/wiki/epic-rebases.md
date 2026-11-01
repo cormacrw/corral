@@ -26,6 +26,11 @@ The clock for pause is the moment of the write, not the start of the step:
 preparing can take minutes, so `#publish` and the conflict path read the project
 again. A conflict found while stopped goes back to `pending` and prepares again.
 
+`candidateProblem` compares with `--no-renames` but reads the target's renames
+separately with `-M`. Without that, a rebase that correctly followed a rename
+looks like an edit of a target-only file, and it fails the same way on every
+retry.
+
 `step` works from the journal alone after a restart. `running` with a result and
 its runner online pushes again; `running` with neither was cut off, and that
 retries at once; `reconciling` reads the branch.
