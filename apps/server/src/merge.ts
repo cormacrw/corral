@@ -3,7 +3,8 @@ import { schema, type Database } from '@corral/db'
 import { and, asc, desc, eq, isNull } from 'drizzle-orm'
 import { EpicMerger } from './epic-merge.ts'
 import { appendAudit, auditEvent, type TransitionDetail } from './audit.ts'
-import { isEpicRebaseTask, taskBase } from './task-base.ts'
+import { activeRebase } from './epic-sync.ts'
+import { isEpicRebaseTask, isEpicResolution, taskBase } from './task-base.ts'
 import { ApiFailure } from './errors.ts'
 import { publishDependents } from './dependent-tasks.ts'
 import { TaskIntegrator } from './task-integration.ts'
@@ -89,6 +90,8 @@ export class MergeOrchestrator {
     for (const { task, project } of waiting) {
       if (this.stopped) return
       if (task.type === 'design') continue
+      // The synchronizer publishes a resolution and settles its task
+      if (isEpicResolution(task)) continue
       if (await isEpicRebaseTask(this.#d.db, task)) await this.#settleEpicRebase(task)
       else if (task.prNumber && task.headSha) await this.#advanceOnce(task, project)
     }
@@ -96,7 +99,7 @@ export class MergeOrchestrator {
     await this.#epics.tick(() => this.stopped)
   }
 
-  // A rebase task's work reached the epic branch when the runner pushed it;
+  // A handed-off rebase task's work reached the epic branch when the runner pushed it;
   // nothing is left to merge, and the epic PR goes back to integration review
   async #settleEpicRebase(task: TaskRow): Promise<void> {
     await this.#d.db.transaction(async (tx) => {
@@ -259,12 +262,21 @@ export class MergeOrchestrator {
   // flows.md step 9. Re-reads the PR when GitHub's answer is ambiguous, and
   // never marks Merged without seeing it merged.
   async merge(taskId: string, project: ProjectRow, report: GateReport): Promise<void> {
-    const { github } = this.#d
+    const { db, github } = this.#d
     const attempt = (this.#attempts.get(taskId) ?? 0) + 1
-    this.#attempts.set(taskId, attempt)
-    let result: { merged: boolean, sha: string | null, message: string }
+    let result: { merged: boolean, sha: string | null, message: string } | null
     try {
-      result = await github.merge(project.repository, report.pr.number, project.mergeMethod, report.pr.headSha)
+      // A task PR can be based on an epic branch, so it takes that epic's writer
+      // lock like any other write there: a rebase can't start during the merge
+      result = await db.transaction(async (tx) => {
+        const [{ epicId } = { epicId: null }] = await tx.select({ epicId: tasks.epicId }).from(tasks).where(eq(tasks.id, taskId))
+        if (epicId) {
+          await tx.select({ id: schema.epics.id }).from(schema.epics).where(eq(schema.epics.id, epicId)).for('update')
+          if (await activeRebase(tx, epicId)) return null
+        }
+        this.#attempts.set(taskId, attempt)
+        return github.merge(project.repository, report.pr.number, project.mergeMethod, report.pr.headSha)
+      })
     } catch (error) {
       // Ambiguous (timeout, 5xx): look before deciding anything
       const again = await github.getPullRequest(project.repository, report.pr.number).catch(() => null)
@@ -278,6 +290,7 @@ export class MergeOrchestrator {
       }
       return
     }
+    if (!result) return // A later pass merges it, once the rebase is done
     if (result.merged) {
       const merged = await github.getPullRequest(project.repository, report.pr.number)
       if (!merged.merged) return // GitHub said merged but doesn't show it yet; next tick re-reads

@@ -4,6 +4,13 @@ import type { Task } from './tasks.ts'
 
 // ── Epics ───────────────────────────────────────────────────────────────────
 
+// Corral keeping the epic branch on top of its target branch (D27). Only
+// `failed` needs anyone: it's an operational stop that a retry clears.
+export type EpicSync =
+  | { state: 'rebasing' }
+  | { state: 'resolving', files: string[], taskId: string | null, taskRef: string | null }
+  | { state: 'failed', error: string }
+
 // A group of tasks, usually one approved plan. The description is markdown.
 export interface Epic {
   id: string
@@ -20,6 +27,7 @@ export interface Epic {
   prUrl: string | null
   prHeadSha: string | null
   reviewState: EpicReviewState | null
+  sync: EpicSync | null
   // True once a task has opened a PR or merged: its work already went to the
   // mode's branch, so the review mode can't change any more
   reviewModeLocked: boolean

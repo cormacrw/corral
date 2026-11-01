@@ -1,12 +1,12 @@
-import type { Epic, EpicDetail, PatchEpicInput } from '@corral/contracts'
-import { checkEpicDependencies, isTaskDone, type CompletionState, type Actor } from '@corral/core'
+import type { Epic, EpicDetail, EpicSync, PatchEpicInput } from '@corral/contracts'
+import { checkEpicDependencies, isTaskDone, taskRef, type CompletionState, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, asc, eq, or } from 'drizzle-orm'
+import { and, asc, eq, inArray, or } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import { toTasks, type ProjectRow } from './tasks.ts'
 
-const { epics, epicDependencies, taskDependencies, projects, tasks } = schema
+const { epics, epicDependencies, taskDependencies, taskIntegrationOperations, projects, tasks } = schema
 
 type EpicRow = typeof epics.$inferSelect
 
@@ -17,7 +17,8 @@ export async function listEpics(db: Executor, project: ProjectRow): Promise<Epic
   const taskRows = await db.select({ epicId: tasks.epicId, status: tasks.status, type: tasks.type, prNumber: tasks.prNumber, integrationProtocol: tasks.integrationProtocol, deletedAt: tasks.deletedAt }).from(tasks)
     .where(eq(tasks.projectId, project.id))
   const edges = await db.select().from(epicDependencies)
-  return rows.map(row => toEpic(row, project, taskRows.filter(t => t.epicId === row.id), edges))
+  const syncs = await epicSyncs(db, project, rows)
+  return rows.map(row => toEpic(row, project, taskRows.filter(t => t.epicId === row.id), edges, syncs.get(row.id) ?? null))
 }
 
 export async function getEpic(db: Executor, epicId: string): Promise<EpicDetail> {
@@ -25,7 +26,8 @@ export async function getEpic(db: Executor, epicId: string): Promise<EpicDetail>
   const taskRows = await db.select().from(tasks).where(eq(tasks.epicId, epicId)).orderBy(asc(tasks.number))
   const edges = await db.select().from(epicDependencies)
     .where(or(eq(epicDependencies.epicId, epicId), eq(epicDependencies.dependsOnEpicId, epicId)))
-  return { ...toEpic(row, project, taskRows, edges), tasks: await toTasks(db, project, taskRows.filter(t => !t.deletedAt)) }
+  const syncs = await epicSyncs(db, project, [row])
+  return { ...toEpic(row, project, taskRows, edges, syncs.get(row.id) ?? null), tasks: await toTasks(db, project, taskRows.filter(t => !t.deletedAt)) }
 }
 
 export async function patchEpic(db: Executor, epicId: string, input: PatchEpicInput, actor: Actor): Promise<Epic> {
@@ -45,6 +47,23 @@ export async function patchEpic(db: Executor, epicId: string, input: PatchEpicIn
   })
 }
 
+// What the writer lock says about each epic, or the stop a human has to clear
+async function epicSyncs(db: Executor, project: ProjectRow, rows: EpicRow[]): Promise<Map<string, EpicSync>> {
+  const syncs = new Map<string, EpicSync>()
+  const ids = rows.filter(r => r.branch).map(r => r.id)
+  if (ids.length === 0) return syncs
+  const active = await db.select({ operation: taskIntegrationOperations, number: tasks.number }).from(taskIntegrationOperations)
+    .leftJoin(tasks, eq(tasks.id, taskIntegrationOperations.resolutionTaskId))
+    .where(and(inArray(taskIntegrationOperations.epicId, ids), eq(taskIntegrationOperations.kind, 'rebase'), inArray(taskIntegrationOperations.state, ['pending', 'running', 'reconciling'])))
+  for (const { operation, number } of active) {
+    syncs.set(operation.epicId, operation.resolutionTaskId
+      ? { state: 'resolving', files: operation.conflictFiles ?? [], taskId: operation.resolutionTaskId, taskRef: number === null ? null : taskRef(project.prefix, number) }
+      : { state: 'rebasing' })
+  }
+  for (const row of rows) if (row.syncError) syncs.set(row.id, { state: 'failed', error: row.syncError })
+  return syncs
+}
+
 async function findEpic(db: Executor, epicId: string): Promise<{ row: EpicRow, project: ProjectRow }> {
   // IDs come from URLs; a malformed one is simply unknown
   if (!/^[0-9a-f-]{36}$/i.test(epicId)) throw notFound()
@@ -59,7 +78,7 @@ function reviewModeLocked(epic: { prNumber: number | null }, taskRows: { status:
   return epic.prNumber !== null || taskRows.some(t => t.prNumber !== null || t.integrationProtocol > 0 || t.status === 'merged')
 }
 
-function toEpic(row: EpicRow, project: ProjectRow, taskRows: (CompletionState & { prNumber: number | null, integrationProtocol: number, deletedAt: Date | null })[], edges: { epicId: string, dependsOnEpicId: string }[]): Epic {
+function toEpic(row: EpicRow, project: ProjectRow, taskRows: (CompletionState & { prNumber: number | null, integrationProtocol: number, deletedAt: Date | null })[], edges: { epicId: string, dependsOnEpicId: string }[], sync: EpicSync | null): Epic {
   const counted = taskRows.filter(t => !t.deletedAt && t.status !== 'draft' && t.status !== 'backlog')
   return {
     id: row.id,
@@ -74,6 +93,7 @@ function toEpic(row: EpicRow, project: ProjectRow, taskRows: (CompletionState & 
     prUrl: row.prNumber ? `https://github.com/${project.repository}/pull/${row.prNumber}` : null,
     prHeadSha: row.prHeadSha,
     reviewState: row.reviewState,
+    sync,
     reviewModeLocked: reviewModeLocked(row, taskRows),
     taskCount: counted.length,
     mergedCount: counted.filter(isTaskDone).length,

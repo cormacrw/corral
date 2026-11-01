@@ -21,3 +21,8 @@ export const reviewEpic = defineMutation<{ ok: boolean }, { id: string, input: E
   mutationFn: ({ id, input }) => api.epics.review(id, input),
   invalidates: (_, { id }) => [keys.inbox(), keys.epics.lists(), keys.epics.detail(id)]
 })
+
+export const retryEpicSync = defineMutation<{ ok: boolean }, { id: string }>({
+  mutationFn: ({ id }) => api.epics.retrySync(id),
+  invalidates: (_, { id }) => [keys.inbox(), keys.epics.lists(), keys.epics.detail(id)]
+})

@@ -142,6 +142,7 @@ export const epics: Epic[] = [
     prUrl: 'https://github.com/cormacrw/corral/pull/212',
     prHeadSha: '6f1c2ab94d',
     reviewState: 'conflict',
+    sync: null,
     reviewModeLocked: true,
     taskCount: 3,
     mergedCount: 3,
@@ -161,6 +162,7 @@ export const epics: Epic[] = [
     prUrl: null,
     prHeadSha: null,
     reviewState: null,
+    sync: null,
     reviewModeLocked: true,
     taskCount: 9,
     mergedCount: 3,
@@ -180,6 +182,7 @@ export const epics: Epic[] = [
     prUrl: null,
     prHeadSha: null,
     reviewState: null,
+    sync: null,
     reviewModeLocked: true,
     taskCount: 3,
     mergedCount: 1,
@@ -189,26 +192,26 @@ export const epics: Epic[] = [
   {
     id: 'e-site', projectId: 'p-site', title: 'Website refresh',
     description: 'Refresh the landing page and navigation.', dependsOn: [], blocks: [],
-    reviewMode: 'direct', branch: null, prNumber: null, prUrl: null, prHeadSha: null, reviewState: null, reviewModeLocked: false,
+    reviewMode: 'direct', branch: null, prNumber: null, prUrl: null, prHeadSha: null, reviewState: null, sync: null, reviewModeLocked: false,
     taskCount: 2, mergedCount: 0, createdAt: ago(60 * 24), updatedAt: ago(30)
   },
   {
     id: 'e-shipped', projectId: 'p-site', title: 'Pricing fixes',
     description: 'Completed fixes.', dependsOn: [], blocks: [],
-    reviewMode: 'direct', branch: null, prNumber: null, prUrl: null, prHeadSha: null, reviewState: null, reviewModeLocked: false,
+    reviewMode: 'direct', branch: null, prNumber: null, prUrl: null, prHeadSha: null, reviewState: null, sync: null, reviewModeLocked: false,
     taskCount: 1, mergedCount: 1, createdAt: ago(60 * 24), updatedAt: ago(10)
   },
   {
     id: 'e-empty', projectId: 'p-site', title: 'Future campaigns',
     description: 'Planning only.', dependsOn: [], blocks: [],
-    reviewMode: 'direct', branch: null, prNumber: null, prUrl: null, prHeadSha: null, reviewState: null, reviewModeLocked: false,
+    reviewMode: 'direct', branch: null, prNumber: null, prUrl: null, prHeadSha: null, reviewState: null, sync: null, reviewModeLocked: false,
     taskCount: 0, mergedCount: 0, createdAt: ago(60), updatedAt: ago(5)
   },
   // Nothing has opened a PR, so its review mode can still change
   {
     id: 'e-exports', projectId: 'p-corral', title: 'CSV exports',
     description: 'Export the board and run history as CSV.', dependsOn: [], blocks: [],
-    reviewMode: 'epic', branch: 'corral/epic-e-exports-csv-exports', prNumber: null, prUrl: null, prHeadSha: null, reviewState: null, reviewModeLocked: false,
+    reviewMode: 'epic', branch: 'corral/epic-e-exports-csv-exports', prNumber: null, prUrl: null, prHeadSha: null, reviewState: null, sync: null, reviewModeLocked: false,
     taskCount: 2, mergedCount: 0, createdAt: ago(60 * 5), updatedAt: ago(40)
   },
   // One epic in each other epic PR review state (D27), its tasks all merged
@@ -226,7 +229,7 @@ function epicInReview(id: string, title: string, reviewState: Epic['reviewState'
   return {
     id, projectId: 'p-corral', title, description: `${title}, reviewed as one epic PR.`, dependsOn: [], blocks: [],
     reviewMode: 'epic', branch: `corral/epic-${id}`, prNumber, prUrl: `https://github.com/cormacrw/corral/pull/${prNumber}`,
-    prHeadSha: `${prNumber}c2ab94d`, reviewState, reviewModeLocked: true,
+    prHeadSha: `${prNumber}c2ab94d`, reviewState, sync: null, reviewModeLocked: true,
     taskCount: fixing ? 3 : 2, mergedCount: 2, createdAt: ago(60 * 24 * 2), updatedAt: ago(prNumber - 200)
   }
 }

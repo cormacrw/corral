@@ -106,7 +106,7 @@ export type PlanThreadAttention =
 export type PlanThreadItem = PlanThreadBase & PlanThreadAttention
 
 export const epicReviewActionInput = z.object({
-  // `rebase` hands an epic PR conflict to a developer run
+  // `rebase` sends an epic PR conflict round the automatic rebase again
   action: z.enum(['approve', 'request_changes', 'rebase']),
   headSha: z.string().min(1),
   text: z.string().trim().optional(),

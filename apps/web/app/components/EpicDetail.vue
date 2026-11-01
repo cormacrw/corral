@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useMutation, useQuery } from '@tanstack/vue-query'
-import { epicQuery, patchEpic, setEpicDependencies } from '~/queries/epics'
+import { epicQuery, patchEpic, retryEpicSync, setEpicDependencies } from '~/queries/epics'
 import type { PatchEpicInput } from '@corral/contracts'
 import { isTaskDone, type EpicReviewMode } from '@corral/core'
 import { ApiError } from '~/queries/client'
@@ -17,6 +17,7 @@ const flyout = useTaskFlyout()
 const toast = useToast()
 const patchMutation = useMutation(patchEpic)
 const dependenciesMutation = useMutation(setEpicDependencies)
+const retryMutation = useMutation(retryEpicSync)
 const epicResult = useQuery(computed(() => epicQuery(props.epicId)))
 const epic = computed(() => epicResult.data.value ?? null)
 // A failed background refetch leaves what's cached on screen
@@ -91,6 +92,14 @@ const byStatus = computed(() => statusCounts(epic.value?.tasks ?? []))
 
 const reviewModes = Object.entries(EPIC_REVIEW_MODE).map(([value, mode]) => ({ value, label: mode.label }))
 const reviewStatus = computed(() => epic.value && epicReviewStatus(epicWithLiveCounts(epic.value, epic.value.tasks)))
+const sync = computed(() => epic.value?.sync ?? null)
+async function retrySync() {
+  try {
+    await retryMutation.mutateAsync({ id: props.epicId })
+  } catch (e) {
+    toast.add({ title: 'Could not retry', description: e instanceof Error ? e.message : undefined, color: 'error' })
+  }
+}
 
 // Mobile has no flyout, so a task opens as its own page
 const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/${ref}`) : flyout.open(ref)
@@ -220,6 +229,21 @@ const copyLink = () => navigator.clipboard?.writeText(`${location.origin}/epics/
           color="warning"
           variant="subtle"
           :title="`Waiting on ${waiting.map(e => e.title).join(', ')}`"
+        />
+        <UAlert
+          v-if="sync?.state === 'resolving'"
+          color="info"
+          variant="subtle"
+          title="Resolving a rebase conflict"
+          :description="`${sync.taskRef ?? 'A developer'} is rebasing this epic in private${sync.files.length ? `: ${sync.files.join(', ')}` : ''}. The epic branch moves once a reviewer approves.`"
+        />
+        <UAlert
+          v-else-if="sync?.state === 'failed'"
+          color="error"
+          variant="subtle"
+          title="Rebase stopped"
+          :description="sync.error"
+          :actions="[{ label: 'Retry', loading: retryMutation.isPending.value, onClick: retrySync }]"
         />
         <input
           :value="epic.title"
