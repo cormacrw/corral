@@ -20,7 +20,8 @@ export function shownImageSrc(src: string | null): string | null {
 }
 
 // The editor's image node, reading and writing attachment references. Used
-// in place of Nuxt UI's own, by the editor and the read-only description.
+// in place of Nuxt UI's own in the description editor. Read-only descriptions
+// resolve attachment sources with shownImageSrc directly.
 export const AttachmentImage = Image.extend({
   addAttributes() {
     return {

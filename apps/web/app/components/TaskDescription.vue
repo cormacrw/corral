@@ -6,10 +6,9 @@ import { uploadAttachment } from '~/queries/attachments'
 import { attachmentProblem } from '~/utils/attachments'
 import { AttachmentImage, imageFiles, insertImages } from '~/utils/editor-image'
 
-// A task's description, read or edited. Its own chunk, since the editor is the
-// largest thing on the page. The read-only view is the editor too: documents
-// keep extension fields a hand-written renderer wouldn't draw the same way.
-const props = defineProps<{ doc: unknown, editing?: boolean, slug?: string }>()
+// A task's description being edited. Its own chunk, since the editor is the
+// largest thing on the page. RichTextText renders the read-only view.
+const props = defineProps<{ doc: unknown, slug?: string }>()
 const emit = defineEmits<{ 'update:doc': [doc: { type: 'doc', content?: never[] }], 'cancel': [] }>()
 const uploading = defineModel<number>('uploading', { default: 0 })
 
@@ -81,45 +80,33 @@ const toolbarItems: EditorToolbarItem[][] = [
 </script>
 
 <template>
-  <template v-if="props.editing">
-    <UEditor
-      ref="descriptionEditor"
-      v-slot="{ editor }"
-      :model-value="props.doc as never"
-      content-type="json"
-      :image="false"
-      :extensions="descriptionExtensions"
-      :editor-props="descriptionEditorProps"
-      autofocus="end"
-      class="rounded-md ring-2 ring-primary"
-      :ui="{ ...descriptionUi, base: `${descriptionUi.base} min-h-24 px-3 py-2 sm:px-3` }"
-      placeholder="Describe the task…"
-      @update:model-value="emit('update:doc', $event as never)"
-      @keydown.esc="emit('cancel')"
-    >
-      <UEditorToolbar
-        :editor="editor"
-        :items="toolbarItems"
-        class="border-b border-default px-1 py-1"
-      />
-    </UEditor>
-    <input
-      ref="imageInput"
-      type="file"
-      accept="image/png,image/jpeg,image/webp,image/gif"
-      multiple
-      class="hidden"
-      @change="onImagePicked"
-    >
-  </template>
   <UEditor
-    v-else
-    :model-value="(props.doc ?? { type: 'doc', content: [] }) as never"
+    ref="descriptionEditor"
+    v-slot="{ editor }"
+    :model-value="props.doc as never"
     content-type="json"
-    :editable="false"
     :image="false"
     :extensions="descriptionExtensions"
-    placeholder="Add a description…"
-    :ui="{ base: `${descriptionUi.base} [&>p:last-child:not(:first-child):has(>br:only-child)]:hidden` }"
-  />
+    :editor-props="descriptionEditorProps"
+    autofocus="end"
+    class="rounded-md ring-2 ring-primary"
+    :ui="{ ...descriptionUi, base: `${descriptionUi.base} min-h-24 px-3 py-2 sm:px-3` }"
+    placeholder="Describe the task…"
+    @update:model-value="emit('update:doc', $event as never)"
+    @keydown.esc="emit('cancel')"
+  >
+    <UEditorToolbar
+      :editor="editor"
+      :items="toolbarItems"
+      class="border-b border-default px-1 py-1"
+    />
+  </UEditor>
+  <input
+    ref="imageInput"
+    type="file"
+    accept="image/png,image/jpeg,image/webp,image/gif"
+    multiple
+    class="hidden"
+    @change="onImagePicked"
+  >
 </template>
