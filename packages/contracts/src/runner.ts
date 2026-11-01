@@ -116,6 +116,13 @@ const unknownOutcome = `must be one of ${REPORTED_OUTCOMES.options.join(', ')}`
 const criterionVerdict = z.object({ criterionId: z.string(), met: z.boolean(), note: z.string().default('') })
 const missingCriteria = 'Give a verdict for every acceptance criterion'
 
+export const epicReviewFindingSchema = z.object({
+  level: z.enum(['blocking', 'non_blocking']),
+  text: z.string().trim().min(1),
+  taskRefs: z.array(z.string().trim().min(1))
+})
+export type EpicReviewFinding = z.infer<typeof epicReviewFindingSchema>
+
 // The report_outcome tool's arguments. MCP clients need a plain object as a
 // tool's input, so this stays flat; the schemas below decide which fields each
 // outcome needs.
@@ -125,6 +132,7 @@ export const reportOutcomeInput = z.object({
   review: z.enum(REBASE_REVIEWS).optional().describe('Required for pr_rebased: trivial only for combining both sides with no new logic, renames or behaviour changes; otherwise needs_review'),
   conflictedFiles: z.array(z.string().trim().min(1)).min(1, 'conflictedFiles must contain at least one file').optional().describe('Required for pr_rebased: every file in which you resolved a conflict'),
   note: z.string().trim().optional().describe('Developer only, required: one line of at most 200 characters saying what this run did, posted as a comment on the task, e.g. "Addressed review: dropped idle-thread fixture"'),
+  findings: z.array(epicReviewFindingSchema).optional().describe('Epic reviewer only: integration problems, marked blocking or non_blocking, with the task refs they concern'),
   criteria: z.array(criterionVerdict).optional().describe('Reviewer only: a verdict per acceptance criterion')
 })
 
@@ -148,7 +156,7 @@ export const rebaseReviewReportSchema = z.discriminatedUnion('outcome', [
 
 // D23: an integration review judges the whole epic, not one task's criteria
 export const epicReviewReportSchema = z.object({
-  ...reportFields, outcome: z.enum(REVIEW_VERDICTS, { error: `must be one of ${REVIEW_VERDICTS.join(', ')}` })
+  ...reportFields, findings: z.array(epicReviewFindingSchema).default([]), outcome: z.enum(REVIEW_VERDICTS, { error: `must be one of ${REVIEW_VERDICTS.join(', ')}` })
 })
 
 export type OutcomeReport = z.infer<typeof outcomeReportSchema> | z.infer<typeof rebaseReviewReportSchema>

@@ -379,6 +379,13 @@
       "when": 1793467887371,
       "tag": "0053_sloppy_whistler",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1793491200296,
+      "tag": "0054_elite_the_hand",
+      "breakpoints": true
     }
   ]
 }

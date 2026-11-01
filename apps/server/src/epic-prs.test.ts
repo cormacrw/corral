@@ -80,6 +80,8 @@ it.each(['epic', 'each_task'] as const)('opens %s PR only after the last board t
   expect((await t.db.select().from(schema.runs).where(eq(schema.runs.id, job.runId)))[0]?.runnerName).toBeTruthy()
   expect(job.prompt).toContain('git diff origin/develop...HEAD')
   expect(job.prompt).toContain('WITHOUT THE CACHE')
+  expect(job.prompt).toContain('blocking or non_blocking')
+  expect(job.prompt).toContain('taskRefs')
   expect(job.prompt).toContain('Search API returns saved searches')
   expect(job.prompt).toContain(task.acceptanceCriteria[0]!.text)
   expect((await inbox()).needsYou.some(i => i.id === epic.id)).toBe(false)
@@ -262,4 +264,59 @@ it('completes epic boards with Approved designs and Merged implementation tasks'
   expect(complete([{ type: 'design', status: 'approved' }, { type: 'task', status: 'merged' }])).toBe(true)
   expect(complete([{ type: 'design', status: 'merged' }])).toBe(false)
   expect(complete([{ type: 'task', status: 'approved' }])).toBe(false)
+})
+
+it('keeps structured findings and separate rounds at their reviewed heads, including an empty report', async () => {
+  const { project, epic, task, other } = await setup()
+  const first = await lastMerge(other.id, epic.id)
+  const findings = [
+    { level: 'blocking', text: 'UI sends query but the API expects search.', taskRefs: [task.ref, other.ref] },
+    { level: 'non_blocking', text: 'Use the same example in both docs.', taskRefs: [other.ref] }
+  ]
+  const input = { outcome: 'changes_requested', summary: 'Align the API and UI search fields.', findings }
+  const response = await runner.call(first.runId, first.leaseEpoch, 'report_outcome', input)
+  expect(response).toMatchObject({ ok: true })
+  const [stored] = await t.db.select().from(schema.epicReviewRounds).where(eq(schema.epicReviewRounds.epicId, epic.id))
+  expect(stored).toMatchObject({ round: 1, verdict: 'changes_requested', headSha: first.headSha, runId: first.runId, findings })
+  // A duplicate report cannot append a second round.
+  expect(await runner.call(first.runId, first.leaseEpoch, 'report_outcome', input)).toMatchObject({ ok: false })
+  const fix = await fixOf(epic.id)
+  await t.db.update(schema.tasks).set({ status: 'merged' }).where(eq(schema.tasks.id, fix.id))
+  const pr = [...t.github.pulls.values()].find(p => p.head === epic.branch)!
+  pr.headSha = 'fixed-integration-head'
+  await t.orchestrator.schedule()
+  const second = (await runner.next('run.assign', m => m.job.epicId === epic.id && m.job.runId !== first.runId)).job
+  expect(second.headSha).toBe('fixed-integration-head')
+  const emptyInput = { outcome: 'approved', summary: 'The search fields now agree.' }
+  const emptyResponse = await runner.call(second.runId, second.leaseEpoch, 'report_outcome', emptyInput)
+  expect(emptyResponse).toMatchObject({ ok: true })
+  const result = await inbox()
+  const item = result.needsYou.find(i => i.id === epic.id) as EpicReviewItem
+  expect(item.reviewRounds).toEqual([
+    { round: 1, verdict: 'changes_requested', reviewer: { id: stored!.reviewerId, name: expect.any(String) }, headSha: first.headSha, summary: input.summary, findings, at: expect.any(String) },
+    { round: 2, verdict: 'approved', reviewer: { id: expect.any(String), name: expect.any(String) }, headSha: second.headSha, summary: emptyInput.summary, findings: [], at: expect.any(String) }
+  ])
+  expect(item.findings).toEqual([])
+  await capture('structured-rounds.json', {
+    scope: 'Isolated HTTP server and runner WebSocket with simulated GitHub; no remote writes',
+    reports: [{ runId: first.runId, input, response }, { runId: second.runId, input: emptyInput, response: emptyResponse }],
+    inbox: { request: { method: 'GET', url: `${t.server!.url}/api/inbox` }, status: 200, response: item }
+  })
+  await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
+})
+
+it('keeps a pre-round integration review in Inbox with its summary and empty findings', async () => {
+  const { project, epic, other } = await setup()
+  const job = await lastMerge(other.id, epic.id)
+  // Historical persisted shape: completed run and epic state, no round row.
+  const summary = 'Legacy review: API and UI integrate correctly.'
+  await t.db.update(schema.runs).set({ state: 'completed', outcome: 'approved', summary, endedAt: new Date() }).where(eq(schema.runs.id, job.runId))
+  await t.db.update(schema.epics).set({ reviewState: 'human_review' }).where(eq(schema.epics.id, epic.id))
+  const item = (await inbox()).needsYou.find(i => i.id === epic.id) as EpicReviewItem
+  expect(item).toMatchObject({ type: 'epic_review', body: summary, findings: [], reviewRounds: [] })
+  await capture('legacy-review.json', {
+    scope: 'Pre-change database shape: approved run with summary and no epic_review_rounds row',
+    request: { method: 'GET', url: `${t.server!.url}/api/inbox` }, status: 200, response: item
+  })
+  await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })

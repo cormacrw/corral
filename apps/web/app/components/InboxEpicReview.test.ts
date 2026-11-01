@@ -24,7 +24,7 @@ const task = (id: string, fields: object) => ({
   submission: { sequence: 1, targetBranch: 'epic', submitted: commit('aaaaaaaaaaaa'), approved: commit('bbbbbbbbbbbb'), integrated: commit('cccccccccccc'), integratedAt: 'now' }, ...fields
 })
 const item = {
-  id: 'e', type: 'epic_review', epicId: 'e', subject: 'Feature', body: 'Fine', headSha: 'head', prUrl: 'https://github.com/o/r/pull/1',
+  id: 'e', type: 'epic_review', findings: [], reviewRounds: [], epicId: 'e', subject: 'Feature', body: 'Fine', headSha: 'head', prUrl: 'https://github.com/o/r/pull/1',
   project: { name: 'P' }, sender: { name: 'Rita' },
   tasks: [
     { task: task('t1', {}), evidence: [], humanReview: true, humanChecks: [] },
