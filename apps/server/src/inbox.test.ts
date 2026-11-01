@@ -171,6 +171,27 @@ describe('plan threads in the inbox', () => {
     expect(threads.find(i => i.sessionId === answered.id)).toBeUndefined()
   })
 
+  it('reads a failure from the last message alone, and a question until the human writes', async () => {
+    const project = await t.createProject()
+    const thread = async (...messages: Pick<typeof planMessages.$inferInsert, 'role' | 'kind'>[]) => {
+      const [row] = await t.db.insert(planSessions).values({ projectId: project.id, title: 'Thread', createdBy: t.actor }).returning()
+      await t.db.insert(planMessages).values(messages.map((m, i) => ({ ...m, sessionId: row!.id, text: 'Text', createdAt: at(messages.length - i) })))
+      const { status } = await t.request('GET', `/api/plan/sessions/${row!.id}`).then(r => r.json()) as PlanSessionDetail
+      return { status, listed: (await inbox()).needsYou.some(i => i.id === row!.id) }
+    }
+    const human = { role: 'human', kind: 'message' } as const
+    const reply = { role: 'pm', kind: 'message' } as const
+    const failure = { role: 'pm', kind: 'error' } as const
+    const question = { role: 'pm', kind: 'question' } as const
+
+    expect(await thread(human, failure)).toEqual({ status: 'failed', listed: true })
+    expect(await thread(human, failure, reply)).toEqual({ status: 'none', listed: false })
+    expect(await thread(human, question, reply)).toEqual({ status: 'question', listed: true })
+    expect(await thread(human, question, failure)).toEqual({ status: 'failed', listed: true })
+    expect(await thread(human, question, failure, reply)).toEqual({ status: 'question', listed: true })
+    expect(await thread(failure, human)).toEqual({ status: 'none', listed: false })
+  })
+
   it('reads historical rows from before the constraints, showing a human row as a plain message', async () => {
     const project = await t.createProject()
     const [row] = await t.db.insert(planSessions).values({ projectId: project.id, title: 'Old thread', createdBy: t.actor }).returning()

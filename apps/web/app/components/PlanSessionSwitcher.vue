@@ -111,6 +111,14 @@ async function go(to: string) {
                     size="xs"
                     class="shrink-0"
                   />
+                  <UBadge
+                    v-else-if="session.status === 'failed'"
+                    label="Failed"
+                    color="error"
+                    variant="subtle"
+                    size="xs"
+                    class="shrink-0"
+                  />
                   <span
                     v-if="session.unread"
                     class="size-1.5 shrink-0 rounded-full bg-inverted"

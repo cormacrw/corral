@@ -1109,10 +1109,11 @@ export async function sessionStates(db: Executor, rows: SessionRow[], activeRunI
   const ids = rows.map(r => r.id)
   const [lastMessages, lastTurns, proposedPlans, activeRuns] = await Promise.all([
     db.selectDistinctOn([planMessages.sessionId]).from(planMessages).where(inArray(planMessages.sessionId, ids)).orderBy(planMessages.sessionId, desc(planMessages.createdAt)),
-    // What waits on the human stands until they write: the PM's closing words
-    // after ask_question are a plain message and don't answer it (D11)
+    // A question stands until the human writes: the PM's closing words after
+    // ask_question are a plain message and don't answer it (D11). A failure is
+    // only the last message: a reply restored after it means the turn didn't fail.
     db.selectDistinctOn([planMessages.sessionId]).from(planMessages)
-      .where(and(inArray(planMessages.sessionId, ids), or(eq(planMessages.role, 'human'), inArray(planMessages.kind, ['question', 'error']))))
+      .where(and(inArray(planMessages.sessionId, ids), or(eq(planMessages.role, 'human'), eq(planMessages.kind, 'question'))))
       .orderBy(planMessages.sessionId, desc(planMessages.createdAt)),
     db.select().from(plans).where(and(inArray(plans.sessionId, ids), eq(plans.status, 'proposed'))),
     activeRunId === undefined
@@ -1130,9 +1131,9 @@ export async function sessionStates(db: Executor, rows: SessionRow[], activeRunI
     const proposed = proposedOf.get(row.id)
     const attention: SessionAttention = proposed
       ? { status: 'needs_approval', plan: proposed }
-      : turn?.role === 'pm' && turn.kind === 'question'
-        ? { status: 'question', question: turn }
-        : turn?.role === 'pm' && turn.kind === 'error' ? { status: 'failed', failure: turn } : { status: 'none' }
+      : last?.role === 'pm' && last.kind === 'error'
+        ? { status: 'failed', failure: last }
+        : turn?.role === 'pm' && turn.kind === 'question' ? { status: 'question', question: turn } : { status: 'none' }
     const session: PlanSession = {
       id: row.id,
       projectId: row.projectId,
