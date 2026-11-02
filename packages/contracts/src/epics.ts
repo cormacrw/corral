@@ -55,6 +55,8 @@ export interface Epic {
   // Its parent task (D31); null for a collapsed one-task epic
   taskId: string | null
   taskRef: string | null
+  // When its PR merged, or for a direct parent when its last sub-task landed
+  mergedAt: string | null
   projectId: string
   title: string
   description: string

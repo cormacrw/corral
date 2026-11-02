@@ -60,7 +60,7 @@ describe('migrations', () => {
       await seeded.execute(sql.raw(`insert into epics (project_id, title, description, priority, created_by, created_at, review_state, branch, pr_number, merge_commit_sha)
       select p.id, t, d, pr::task_priority, '${human}', c::timestamptz, rs::epic_review_state, b, n, m from projects p, (values
         ('Two', E'First line\n\n- second', 'urgent', '2026-01-02T00:00:00Z', null, 'corral/two', 7, null),
-        ('Merged', '', 'low', '2026-01-01T00:00:00Z', 'merged', 'corral/merged', 8, 'abc'),
+        ('Merged', E'\\n\\n', 'low', '2026-01-01T00:00:00Z', 'merged', 'corral/merged', 8, 'abc'),
         ('One', '', 'medium', '2026-01-03T00:00:00Z', null, null, null, null),
         ('Deleted down to one', '', 'medium', '2026-01-04T00:00:00Z', null, null, null, null),
         ('Empty', '', 'medium', '2026-01-05T00:00:00Z', null, null, null, null),
@@ -91,6 +91,7 @@ describe('migrations', () => {
     expect(parents[0]!.description).toBeNull()
     expect(parents[1]!.description).toEqual({ type: 'doc', content: [
       { type: 'paragraph', content: [{ type: 'text', text: 'First line' }] },
+      { type: 'paragraph' },
       { type: 'paragraph', content: [{ type: 'text', text: '- second' }] }
     ] })
     expect(new Date(parents[1]!.created_at as string).toISOString()).toBe('2026-01-02T00:00:00.000Z')

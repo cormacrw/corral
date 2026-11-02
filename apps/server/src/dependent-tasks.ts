@@ -2,7 +2,7 @@ import { schema, type Executor } from '@corral/db'
 import { and, eq, isNull } from 'drizzle-orm'
 import { holdsEpicOpen } from './epic-review-state.ts'
 import type { EventBus } from './events.ts'
-import { parentDependents } from './parents.ts'
+import { markDelivered, parentDependents } from './parents.ts'
 import { loadTasks } from './tasks.ts'
 
 const { epics, epicDependencies, taskDependencies, tasks } = schema
@@ -13,6 +13,7 @@ export async function publishDependents(db: Executor, events: EventBus, taskId: 
   const ids = (await db.select({ id: taskDependencies.taskId }).from(taskDependencies)
     .where(eq(taskDependencies.dependsOnId, taskId))).map(t => t.id)
   const [task] = await db.select().from(tasks).where(eq(tasks.id, taskId))
+  if (task?.epicId) await markDelivered(db, task.epicId)
   return publish(db, events, [...ids, ...task?.epicId ? await epicDependents(db, task.epicId) : []])
 }
 

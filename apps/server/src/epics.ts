@@ -6,7 +6,7 @@ import { appendAudit, auditEvent } from './audit.ts'
 import { epicFixRuns } from './epic-fixes.ts'
 import { deferredConflicts, openDecision, waitingOn } from './epic-rebase-approval.ts'
 import { ApiFailure, notFound } from './errors.ts'
-import { syncParentContent } from './parents.ts'
+import { deliveredAt, syncParentContent } from './parents.ts'
 import { toAuditEntry, toTasks, type ProjectRow } from './tasks.ts'
 
 const { agents, auditLog, epics, epicDependencies, runs, taskDependencies, taskIntegrationOperations, projects, tasks } = schema
@@ -144,6 +144,7 @@ function toEpic(row: EpicRow, project: ProjectRow, taskRows: (CompletionState & 
     approvedHeadSha: row.approvedHeadSha,
     approvedBaseSha: row.approvedBaseSha,
     reviewState: row.reviewState,
+    mergedAt: deliveredAt(row)?.toISOString() ?? null,
     sync,
     reviewModeLocked: reviewModeLocked(row, taskRows),
     taskCount: counted.length,

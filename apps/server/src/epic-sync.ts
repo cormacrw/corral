@@ -27,8 +27,9 @@ const server: Actor = { kind: 'system', component: 'server' }
 const EPIC_MOVED = 'The parent branch moved'
 const INTERRUPTED = 'Interrupted before a candidate was ready'
 const EPIC_MERGED = 'The parent PR merged'
-const RETRY_AT_ONCE = [EPIC_MOVED, INTERRUPTED, EPIC_MERGED]
-const NOT_FAILURES = [...RETRY_AT_ONCE, CONFLICT_DEFERRED, CONFLICT_GONE]
+// Operations are read back by their stored error: rows from before D31 say epic
+const RETRY_AT_ONCE = [EPIC_MOVED, INTERRUPTED, EPIC_MERGED, 'The epic branch moved', 'The epic PR merged']
+const NOT_FAILURES = [...RETRY_AT_ONCE, CONFLICT_DEFERRED, CONFLICT_GONE, 'The epic branch no longer conflicts']
 const RESOLUTION_FAILED = 'The conflict resolution failed and the target has moved on'
 // Failures on the same commits before it takes a human to retry. Each waits a
 // little longer, so one bad minute doesn't use them all.

@@ -6,8 +6,7 @@ export interface EpicDependencyTask extends CompletionState {
   epicId: string | null
   deleted?: boolean
   dependsOn: readonly string[]
-  // A parent's delivery record (D31): the parent finishes with that epic, and
-  // its sub-tasks wait on what it depends on
+  // A parent's delivery record (D31): the parent finishes with that epic
   parentOf?: string | null
 }
 
@@ -42,15 +41,14 @@ export function checkEpicDependencies(
   for (const id of epicGraph.keys()) graph.set(`epic:${id}`, [])
   const unfinished = tasks.filter(t => !t.deleted && !isTaskDone(t))
   const ids = new Set(unfinished.map(t => t.id))
-  const parents = new Map(tasks.flatMap(t => t.parentOf ? [[t.parentOf, t] as const] : []))
   for (const task of unfinished) {
+    // A parent waits on every sub-task, started or not, and its delivery
     if (task.parentOf) {
-      graph.set(`task:${task.id}`, [`epic:${task.parentOf}`])
+      graph.set(`task:${task.id}`, [`epic:${task.parentOf}`, ...unfinished.filter(t => t.epicId === task.parentOf).map(t => `task:${t.id}`)])
       continue
     }
-    const parent = task.epicId ? parents.get(task.epicId) : undefined
     graph.set(`task:${task.id}`, [
-      ...[...task.dependsOn, ...parent?.dependsOn ?? []].filter(id => ids.has(id)).map(id => `task:${id}`),
+      ...task.dependsOn.filter(id => ids.has(id)).map(id => `task:${id}`),
       ...(task.epicId ? epicGraph.get(task.epicId) ?? [] : []).map(id => `epic:${id}`)
     ])
     if (task.epicId && isUnfinishedBoardTask(task)) {

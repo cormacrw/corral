@@ -1,5 +1,5 @@
 import { askQuestionInput, planMessageFields, type NewPlanMessageFields, listTasksInput, normalizeProposedPlan, proposedPlanInput, type AgentRuntime, type DraftSession, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type PmRunJob } from '@corral/contracts'
-import { approvedPlanSummary, checkPlan, checkPlanEpicDependencies, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, requiresHumanReview, revisionProblem, richTextToMarkdown, richTextToPlainText, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PmAction, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
+import { approvedPlanSummary, checkPlan, checkPlanEpicDependencies, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, requiresHumanReview, revisionProblem, richTextToMarkdown, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PmAction, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
 import { and, asc, desc, eq, gt, inArray, isNull, lte, ne, notInArray, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
@@ -663,7 +663,7 @@ export class PlanService {
     // A discarded plan's Drafts are gone, so the next version starts afresh
     const previous = latest?.status === 'discarded' || latest?.projectId !== project.id ? undefined : latest
     const previousEpics = previous ? await this.#epicsOf(previous) : new Map<string, string>()
-    const { existing: parentEpics, promoted } = await this.#resolveParents(project, proposed)
+    const { existing: parentEpics, promoted } = await this.#resolveParents(project, proposed, previousEpics)
     // A lone epic that was renamed is the same epic, so its tasks aren't changed
     const renamed = proposed.epics.length === 1 && previousEpics.size === 1 && parentEpics.size === 0
     const previousTasks = previous ? (await this.#proposedTasksOf(previous, project)).map(t => renamed && t.epic ? { ...t, epic: proposed.epics[0]!.key } : t) : []
@@ -893,7 +893,7 @@ export class PlanService {
         else if (row?.status === 'backlog' && to === 'ready') await transitionTask(tx, item.taskId, { type: 'approve' }, actor, { invalidatedEpics })
       }
       const epicIds = await this.#epicsOf(plan, tx)
-      for (const epicId of epicIds.values()) await this.#promote(tx, epicId, actor)
+      for (const epicId of epicIds.values()) await this.#promote(tx, project, epicId, actor)
       for (const epic of proposed.epics) {
         const epicId = epicIds.get(epic.key)!
         await replaceEpicDependencies(tx, project.id, epicId, (epic.dependsOn ?? []).map(dep => epicIds.get(dep) ?? dep))
@@ -1148,7 +1148,7 @@ export class PlanService {
   // Resolves refs on a plan's parents (D31): existing parents by their
   // delivery record, and the tasks to promote once the plan is approved. Fills
   // in what the PM may leave out, and checks the shape a parent must have.
-  async #resolveParents(project: ProjectRow, proposed: ProposedPlan): Promise<{ existing: Map<string, string>, promoted: Map<string, string> }> {
+  async #resolveParents(project: ProjectRow, proposed: ProposedPlan, previousEpics: ReadonlyMap<string, string>): Promise<{ existing: Map<string, string>, promoted: Map<string, string> }> {
     const { db } = this.#d
     const existing = new Map<string, string>()
     const promoted = new Map<string, string>()
@@ -1162,21 +1162,27 @@ export class PlanService {
           existing.set(parent.key, delivery!.id)
           parent.title ||= delivery!.title
           parent.summary ||= delivery!.description
+          // Left out, a parent keeps what it waits on
+          parent.dependsOn ??= (await db.select({ id: epicDependencies.dependsOnEpicId }).from(epicDependencies).where(eq(epicDependencies.epicId, delivery!.id))).map(d => d.id)
           continue
         }
         const refusal = await promotionRefusal(db, target)
         if (refusal) throw new ToolError(`The plan was not saved: ${parent.ref}: ${refusal}`)
+        const [claimed] = await db.select({ id: epics.id }).from(epics).where(eq(epics.taskId, target.id))
+        if (claimed && ![...previousEpics.values()].includes(claimed.id)) throw new ToolError(`The plan was not saved: another plan already turns ${parent.ref} into a parent. Wait for that plan, or use it.`)
         promoted.set(parent.key, target.id)
         parent.title ||= target.title
-        parent.summary ||= richTextToPlainText(target.description)
+        parent.summary ||= richTextToMarkdown(target.description)
       }
       if (parent.asParent && subTasks(parent.key) < 2) throw new ToolError(`The plan was not saved: ${parent.title || parent.key} needs at least two sub-tasks. A single unit of work is one task, not a parent with one sub-task.`)
     }
-    // Refs of existing parents, for the delivery records dependencies are stored on
+    // Refs of existing parents, for the delivery records dependencies are stored
+    // on. A key in this plan may look like a ref.
+    const keys = new Set(proposed.epics.map(e => e.key))
     for (const parent of proposed.epics) {
       if (!parent.dependsOn) continue
       parent.dependsOn = await Promise.all(parent.dependsOn.map(async (dep) => {
-        if (!/^[A-Za-z]+-\d+$/.test(dep)) return dep
+        if (keys.has(dep) || !/^[A-Za-z]+-\d+$/.test(dep)) return dep
         const target = await findTaskByRef(db, project, dep.toUpperCase()).catch(() => null)
         const [delivery] = target ? await db.select({ id: epics.id }).from(epics).where(eq(epics.taskId, target.id)) : []
         if (!delivery) throw new ToolError(`The plan was not saved: ${dep} isn't a parent task.`)
@@ -1187,11 +1193,11 @@ export class PlanService {
   }
 
   // The approved plan makes a parent of a task it named
-  async #promote(tx: Executor, epicId: string, actor: Actor) {
+  async #promote(tx: Executor, project: ProjectRow, epicId: string, actor: Actor) {
     const [row] = await tx.select({ task: tasks }).from(epics).innerJoin(tasks, eq(tasks.id, epics.taskId)).where(eq(epics.id, epicId))
     if (!row || row.task.status === 'parent') return
     const [first] = await tx.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.epicId, epicId), isNull(tasks.deletedAt))).orderBy(asc(tasks.number)).limit(1)
-    if (first) await promoteToParent(tx, row.task, first.id, actor)
+    if (first) await promoteToParent(tx, project, row.task, first.id, actor)
   }
 
   async #planProposal(plan: PlanRow, project: ProjectRow): Promise<ProposedPlan> {

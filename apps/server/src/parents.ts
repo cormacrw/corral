@@ -1,13 +1,14 @@
 import type { ParentRollup, Task } from '@corral/contracts'
-import { isTaskDone, markdownToRichText, parentStage, richTextToPlainText, taskRef, type Actor } from '@corral/core'
+import { isTaskDone, markdownToRichText, parentStage, richTextToMarkdown, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, eq, exists, inArray, isNull, not, or, sql, type SQL } from 'drizzle-orm'
+import { and, eq, exists, inArray, isNull, or, sql, type SQL } from 'drizzle-orm'
 import { alias, type AnyPgColumn } from 'drizzle-orm/pg-core'
 import { appendAudit, auditEvent } from './audit.ts'
+import { unfinishedTask } from './completion.ts'
 import { ApiFailure } from './errors.ts'
 import { holdsEpicOpen } from './epic-review-state.ts'
 
-const { epics, projects, taskDependencies, tasks } = schema
+const { comments, epics, projects, taskDependencies, tasks } = schema
 
 type TaskRow = typeof tasks.$inferSelect
 type EpicRow = typeof epics.$inferSelect
@@ -47,9 +48,18 @@ export async function ensureParent(tx: Executor, epicId: string, actor: Actor): 
   if (live.length >= 2) await createParent(tx, epic, actor)
 }
 
+// What people wrote on a parent outlives the plan that made it, which is left
+// empty for them to delete
+async function hasComments(tx: Executor, taskId: string): Promise<boolean> {
+  const [comment] = await tx.select({ id: comments.id }).from(comments).where(eq(comments.taskId, taskId)).limit(1)
+  return Boolean(comment)
+}
+
 // An epic the plan dropped takes its parent with it
 export async function deleteEpicWithParent(tx: Executor, epicId: string): Promise<void> {
   const [epic] = await tx.select({ taskId: epics.taskId }).from(epics).where(eq(epics.id, epicId))
+  const [parent] = epic?.taskId ? await tx.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, epic.taskId)) : []
+  if (epic?.taskId && parent?.status === 'parent' && await hasComments(tx, epic.taskId)) return
   await tx.delete(epics).where(eq(epics.id, epicId))
   // A task the plan would have promoted stays as it was
   if (epic?.taskId) await tx.delete(tasks).where(and(eq(tasks.id, epic.taskId), eq(tasks.status, 'parent')))
@@ -60,52 +70,60 @@ export async function collapseUnstartedParent(tx: Executor, epicId: string): Pro
   const [epic] = await tx.select().from(epics).where(eq(epics.id, epicId)).for('update')
   if (!epic?.taskId || epic.branch) return
   const live = await tx.select({ status: tasks.status }).from(tasks).where(and(eq(tasks.epicId, epicId), isNull(tasks.deletedAt))).limit(2)
-  if (live.length !== 1 || live[0]!.status !== 'draft') return
+  if (live.length !== 1 || live[0]!.status !== 'draft' || await hasComments(tx, epic.taskId)) return
   await tx.update(epics).set({ taskId: null }).where(eq(epics.id, epicId))
   await tx.delete(tasks).where(and(eq(tasks.id, epic.taskId), eq(tasks.status, 'parent')))
 }
 
-// The parent shows what the delivery record says, whichever one was edited
+// The parent shows what the delivery record says, whichever one was edited.
+// Its rich text changes only if the Markdown really does, so a plan repeating
+// it doesn't flatten it, and a task a plan will promote stays as it is.
 export async function syncParentContent(tx: Executor, epicId: string, content: { title?: string | undefined, description?: string | undefined, priority?: TaskRow['priority'] | undefined }): Promise<void> {
-  const [epic] = await tx.select({ taskId: epics.taskId }).from(epics).where(eq(epics.id, epicId))
-  if (!epic?.taskId) return
+  const [row] = await tx.select({ task: tasks }).from(epics).innerJoin(tasks, eq(tasks.id, epics.taskId)).where(eq(epics.id, epicId))
+  if (row?.task.status !== 'parent') return
+  const text = content.description
   await tx.update(tasks).set({
     ...(content.title !== undefined && { title: content.title }),
-    ...(content.description !== undefined && { description: content.description.trim() ? markdownToRichText(content.description) : null }),
+    ...(text !== undefined && text !== richTextToMarkdown(row.task.description) && { description: text.trim() ? markdownToRichText(text) : null }),
     ...(content.priority !== undefined && { priority: content.priority }),
     updatedAt: new Date()
-  }).where(eq(tasks.id, epic.taskId))
+  }).where(eq(tasks.id, row.task.id))
 }
 
 // A parent's edits reach its delivery record too
 export async function syncDeliveryContent(tx: Executor, parentId: string, content: { title?: string | undefined, description?: unknown, priority?: TaskRow['priority'] | undefined }): Promise<void> {
   await tx.update(epics).set({
     ...(content.title !== undefined && { title: content.title }),
-    ...(content.description !== undefined && { description: richTextToPlainText(content.description) }),
+    ...(content.description !== undefined && { description: richTextToMarkdown(content.description) }),
     ...(content.priority !== undefined && { priority: content.priority }),
     updatedAt: new Date()
   }).where(eq(epics.taskId, parentId))
 }
 
 // True while a dependency that's a parent still holds its dependents: until
-// its work is on the target branch. holdsEpicOpen ignores unstarted sub-tasks,
-// so a parent with nothing finished yet holds them too. One with no live
-// sub-tasks has nothing to wait for.
+// every live sub-task is done, Backlog and Draft ones too, and its work is on
+// the target branch. One with no live sub-tasks has nothing to wait for.
 export function parentHolds(db: Executor, dependency: { id: AnyPgColumn, status: AnyPgColumn }): SQL {
   const delivery = alias(epics, 'parent_delivery')
   const sub = alias(tasks, 'parent_sub')
-  const done = alias(tasks, 'parent_done')
-  const live = db.select({ one: sql`1` }).from(sub).where(and(eq(sub.epicId, delivery.id), isNull(sub.deletedAt)))
-  const finished = db.select({ one: sql`1` }).from(done).where(and(eq(done.epicId, delivery.id), isNull(done.deletedAt), or(
-    and(eq(done.type, 'design'), eq(done.status, 'approved')),
-    and(inArray(done.type, ['task', 'bug', 'spike']), eq(done.status, 'merged'))
-  )))
+  const unfinished = db.select({ one: sql`1` }).from(sub).where(and(eq(sub.epicId, delivery.id), isNull(sub.deletedAt), unfinishedTask(sub)))
   const open = db.select({ one: sql`1` }).from(sub).where(and(eq(sub.epicId, delivery.id), holdsEpicOpen(sub, delivery)))
   return and(eq(dependency.status, 'parent'), exists(db.select({ one: sql`1` }).from(delivery).where(and(
     eq(delivery.taskId, dependency.id),
-    or(exists(open), and(exists(live), not(exists(finished))))
+    or(exists(open), exists(unfinished))
   ))))!
 }
+
+// A direct parent has no PR to merge, so its last sub-task landing delivers it
+export async function markDelivered(db: Executor, epicId: string): Promise<void> {
+  const [epic] = await db.select().from(epics).where(eq(epics.id, epicId))
+  if (!epic || epic.mergedAt || (epic.reviewMode !== 'direct' && epic.branch)) return
+  const live = await db.select({ status: tasks.status, type: tasks.type }).from(tasks).where(and(eq(tasks.epicId, epicId), isNull(tasks.deletedAt)))
+  if (live.length > 0 && live.every(isTaskDone)) await db.update(epics).set({ mergedAt: new Date(), updatedAt: new Date() }).where(eq(epics.id, epicId))
+}
+
+// When a parent landed. Older merged rows have only updatedAt.
+export const deliveredAt = (delivery: Pick<EpicRow, 'mergedAt' | 'reviewState' | 'updatedAt'>): Date | null => delivery.mergedAt ?? (delivery.reviewState === 'merged' ? delivery.updatedAt : null)
 
 type SubRow = Pick<TaskRow, 'epicId' | 'status' | 'type' | 'deletedAt'>
 
@@ -150,7 +168,7 @@ export async function parentFacts(db: Executor, project: { prefix: string, repos
     facts.delivery.set(delivery.taskId!, {
       pr: delivery.prNumber ? { number: delivery.prNumber, url: `https://github.com/${project.repository}/pull/${delivery.prNumber}` } : null,
       mergeCommitSha: delivery.mergeCommitSha,
-      mergedAt: (delivery.mergedAt ?? (delivery.reviewState === 'merged' ? delivery.updatedAt : null))?.toISOString() ?? null,
+      mergedAt: deliveredAt(delivery)?.toISOString() ?? null,
       branch: delivery.branch
     })
   }

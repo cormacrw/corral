@@ -23,6 +23,15 @@ FROM (
   GROUP BY "detail"->>'epicId'
 ) AS merged
 WHERE "epics"."id"::text = merged.epic_id AND "epics"."review_state" = 'merged';--> statement-breakpoint
+-- A direct epic has no PR: it landed with its last task
+UPDATE "epics" SET "merged_at" = landed."at"
+FROM (
+  SELECT "epic_id", max("merged_at") AS at FROM "tasks"
+  WHERE "epic_id" IS NOT NULL AND "deleted_at" IS NULL
+  GROUP BY "epic_id"
+  HAVING bool_and("status" = 'merged' OR ("type" = 'design' AND "status" = 'approved')) AND count(*) > 0
+) AS landed
+WHERE "epics"."id" = landed.epic_id AND "epics"."merged_at" IS NULL AND ("epics"."review_mode" = 'direct' OR "epics"."branch" IS NULL);--> statement-breakpoint
 -- Adds parents only: no branch, PR, review, evidence or existing task's status
 -- changes. A one-task epic stays as it is, because tasks_integration_protocol
 -- needs its task's epic_id. Deleted tasks don't count.
@@ -31,6 +40,7 @@ DECLARE
   epic record;
   parent_id uuid;
   parent_number integer;
+  body text;
   created integer := 0;
   collapsed integer := 0;
   skipped integer := 0;
@@ -47,14 +57,16 @@ BEGIN
       SELECT greatest(p."next_task_number", coalesce((SELECT max(t."number") + 1 FROM "tasks" t WHERE t."project_id" = p."id"), 1))
         INTO parent_number FROM "projects" p WHERE p."id" = epic.project_id;
       UPDATE "projects" SET "next_task_number" = parent_number + 1 WHERE "id" = epic.project_id;
-      -- One plain paragraph per line, which is how reads recognise Markdown
+      -- One plain paragraph per line, blank ones included, which is how reads
+      -- recognise Markdown
+      body := regexp_replace(regexp_replace(epic.description, E'\r\n?', E'\n', 'g'), E'^\\s+|\\s+$', '', 'g');
       INSERT INTO "tasks" ("project_id", "number", "title", "description", "status", "priority", "type", "created_by", "created_at", "updated_at")
       VALUES (
         epic.project_id, parent_number, epic.title,
-        CASE WHEN btrim(epic.description) = '' THEN NULL ELSE jsonb_build_object('type', 'doc', 'content', (
-          SELECT jsonb_agg(jsonb_build_object('type', 'paragraph', 'content', jsonb_build_array(jsonb_build_object('type', 'text', 'text', line.text))) ORDER BY line.position)
-          FROM unnest(string_to_array(epic.description, E'\n')) WITH ORDINALITY AS line(text, position)
-          WHERE btrim(line.text) <> ''
+        CASE WHEN body = '' THEN NULL ELSE jsonb_build_object('type', 'doc', 'content', (
+          SELECT jsonb_agg(CASE WHEN line.text ~ E'^\\s*$' THEN jsonb_build_object('type', 'paragraph')
+            ELSE jsonb_build_object('type', 'paragraph', 'content', jsonb_build_array(jsonb_build_object('type', 'text', 'text', line.text))) END ORDER BY line.position)
+          FROM unnest(string_to_array(body, E'\n')) WITH ORDINALITY AS line(text, position)
         )) END,
         'parent', epic.priority, 'task', epic.created_by, epic.created_at, epic.updated_at
       ) RETURNING "id" INTO parent_id;

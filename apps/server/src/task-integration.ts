@@ -23,6 +23,8 @@ const ACTIVE = ['pending', 'running', 'reconciling'] as const
 // retry at once, and anything else counts towards MAX_FAILED_OPERATIONS
 const TARGET_MOVED = 'The parent branch moved'
 const INTERRUPTED = 'Interrupted before a candidate was ready'
+// Rows from before D31 say epic
+const RETRIES = [TARGET_MOVED, 'The epic branch moved', INTERRUPTED]
 const CANCELLED = 'The task left Ready to merge'
 // Starts the error of a job the runner couldn't answer: a network blip or a lost
 // runner says nothing against the submission, so it's retried on a later pass
@@ -365,11 +367,11 @@ export class TaskIntegrator {
     })
     await this.#finish(operation, ctx)
     const counted = await db.select({ id: operations.id }).from(operations)
-      .where(and(eq(operations.submissionId, submission.id), eq(operations.state, 'failed'), notInArray(operations.error, [TARGET_MOVED, INTERRUPTED, CANCELLED]), notLike(operations.error, `${UNAVAILABLE}%`)))
+      .where(and(eq(operations.submissionId, submission.id), eq(operations.state, 'failed'), notInArray(operations.error, [...RETRIES, CANCELLED]), notLike(operations.error, `${UNAVAILABLE}%`)))
     if (counted.length >= MAX_FAILED_OPERATIONS) {
       await this.#transition(task.id, { type: 'fail', reason: `Integration failed ${counted.length} times: ${error}` }, { event: 'merge_failed' })
     }
-    return [TARGET_MOVED, INTERRUPTED, CANCELLED].includes(error)
+    return [...RETRIES, CANCELLED].includes(error)
   }
 
   async #finish(operation: OperationRow, ctx: Context): Promise<void> {
