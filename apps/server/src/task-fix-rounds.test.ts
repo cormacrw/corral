@@ -1,7 +1,9 @@
 import type { Project, RunJob } from '@corral/contracts'
 import { schema } from '@corral/db'
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { eq } from 'drizzle-orm'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { ciExcerpt, MAX_EXCERPT_CHARS } from './ci-output.ts'
 import { flowMetrics } from './flow-metrics.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
@@ -11,6 +13,7 @@ import { FakeRunner } from './test-runner.ts'
 let t: TestApp
 let runner: FakeRunner
 let project: Project
+let priorTaskIds = new Set<string>()
 
 beforeAll(async () => {
   t = await createTestApp('pglite', { listen: true })
@@ -22,6 +25,22 @@ beforeAll(async () => {
 afterAll(async () => {
   runner?.close()
   await t?.close()
+})
+
+beforeEach(async () => {
+  priorTaskIds = new Set((await t.db.select({ id: schema.tasks.id }).from(schema.tasks)).map(t => t.id))
+})
+afterEach(async () => {
+  if (!process.env.CORRAL_EPIC_EVIDENCE_DIR) return
+  const fresh = (await t.db.select().from(schema.tasks)).filter(t => !priorTaskIds.has(t.id) && t.projectId === project.id)
+  const responses = []
+  for (const task of fresh) {
+    for (const path of [`/api/projects/${project.slug}/tasks/${task.number}`, `/api/projects/${project.slug}/tasks/${task.number}/history`, `/api/projects/${project.slug}/tasks/${task.number}/comments`, `/api/runs?taskId=${task.id}`]) {
+      const response = await fetch(`${t.server!.url}${path}`)
+      responses.push({ method: 'GET', path, status: response.status, body: await response.json() })
+    }
+  }
+  if (responses.length) await writeFile(join(process.env.CORRAL_EPIC_EVIDENCE_DIR, `task-${expect.getState().currentTestName!.replace(/[^a-z0-9]+/gi, '-').slice(-140)}.json`), JSON.stringify({ scenario: expect.getState().currentTestName, transport: 'HTTP on isolated server; fixture GitHub PRs and checks', responses }, null, 2))
 })
 
 const taskRow = async (id: string) => (await t.db.select().from(schema.tasks).where(eq(schema.tasks.id, id)))[0]!
@@ -84,6 +103,11 @@ describe('a round started by a CI failure', () => {
 
     await t.mergePass()
     expect((await taskRow(task.id)).status).toBe('ready_to_merge')
+    if (process.env.CORRAL_EPIC_EVIDENCE_DIR) {
+      const path = `/api/projects/${project.slug}/tasks/${task.number}`
+      const response = await fetch(`${t.server!.url}${path}`)
+      await writeFile(join(process.env.CORRAL_EPIC_EVIDENCE_DIR, 'task-ci-awaits-new-head.json'), JSON.stringify({ method: 'GET', path, status: response.status, body: await response.json() }, null, 2))
+    }
     t.github.setChecks(fixed, [{ name: 'lint', conclusion: 'success', url: null }])
     await t.mergePass()
     expect((await taskRow(task.id)).status).toBe('merged')
