@@ -88,7 +88,7 @@ useSeoMeta({ title: () => `${project.value?.name ?? 'Project'} · Corral` })
                     :task-ref="run.taskRef"
                     class="relative z-10"
                   /><template v-else>
-                    {{ run.epicId ? 'epic' : '' }}
+                    {{ run.epicId ? 'parent' : '' }}
                   </template> {{ taskOf(run)?.title ?? run.epicTitle ?? '' }}
                 </p>
                 <p class="text-xs text-muted">

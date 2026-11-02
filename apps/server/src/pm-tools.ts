@@ -259,7 +259,7 @@ export class PmTools {
             ...(capped && { note: `The summary and error are cut to ${RUN_TEXT_MAX} characters.` })
           },
           ...(found.projectId && { projectId: found.projectId }),
-          summary: `Read run #${found.number}${found.taskRef ? ` on ${found.taskRef}` : found.epicTitle ? ` on epic ${found.epicTitle}` : ''}`
+          summary: `Read run #${found.number}${found.taskRef ? ` on ${found.taskRef}` : found.epicTitle ? ` on ${found.epicTitle}` : ''}`
         }
       }
       case 'message_run': {
