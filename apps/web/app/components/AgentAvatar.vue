@@ -5,10 +5,12 @@ import { initials } from '~/utils/labels'
 // An agent's avatar, or the human's ("You"), with the working status dot
 // (shared working indicator). Shows their profile picture when they have
 // one and initials otherwise; `src` overrides the lookup (e.g. a preview).
+// UAvatar stops at 3xl, so 4xl overrides its box and initials, keeping the
+// half-height type of its other sizes.
 const props = withDefaults(defineProps<{
   name: string
   working?: boolean
-  size?: '2xs' | 'xs' | 'sm' | 'md' | 'lg' | 'xl' | '3xl'
+  size?: '2xs' | 'xs' | 'sm' | 'md' | 'lg' | 'xl' | '3xl' | '4xl'
   src?: string | null
 }>(), { working: false, size: 'sm', src: undefined })
 const picture = computed(() => {
@@ -23,7 +25,8 @@ const picture = computed(() => {
     <UAvatar
       :src="picture"
       :text="initials(props.name)"
-      :size="props.size"
+      :size="props.size === '4xl' ? '3xl' : props.size"
+      :class="props.size === '4xl' && 'size-24 text-5xl'"
       :alt="props.name"
     />
     <span

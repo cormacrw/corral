@@ -1,6 +1,6 @@
 # Starting a Plan thread
 
-The new-session page generates a UUID and seeds `usePendingPlan` before navigating to `/plan/<id>`. The POST runs after navigation; both Send and Grill me pass through `PromptComposer.send`, including uploaded images. The pending entry supplies the conversation and the open-thread list until server data arrives.
+The new-session page generates a UUID and seeds `usePendingPlan` before navigating to `/plan/<id>`. The POST runs after navigation; Send passes through `PromptComposer.send`, including uploaded images. The pending entry supplies the conversation and the open-thread list until server data arrives.
 
 `connectQueries` forwards Plan events into the pending store, even if the conversation has unmounted. Server human messages replace the temporary message; response reconciliation preserves newer live messages and run metadata. Starts reuse their UUID on retry, using the server's existing idempotency contract. The store is memory-only; reloading an accepted session reads the durable server thread at the same URL.
 

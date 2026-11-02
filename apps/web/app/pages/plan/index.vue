@@ -6,6 +6,7 @@ import { useDraft } from '~/composables/useDraft'
 import { reloadShell } from '~/queries/shell'
 import { clisQuery } from '~/queries/setup'
 import { detectedRuntimes, projectColor, runtimeLabel } from '~/utils/labels'
+import { pickPlanTagline } from '~/utils/plan-taglines'
 
 // Plan, new session (design/plan.md)
 const shell = useShell()
@@ -16,6 +17,14 @@ const route = useRoute()
 const pending = usePendingPlan()
 const device = useDevice()
 useSeoMeta({ title: 'Plan · Corral' })
+// One tagline per visit. Crossing the phone breakpoint swaps the layout and
+// remounts this page, so the pick lives in state until the route is left. A
+// plain string, so clearing it on the way out can't change the heading.
+const nextTagline = useState<string | null>('plan.tagline', () => null)
+const tagline = nextTagline.value ??= pickPlanTagline()
+onBeforeRouteLeave(() => {
+  nextTagline.value = null
+})
 
 const lastProject = useLocalStorage<string | null>('corral.plan.project', null)
 const projectId = ref<string | null>(typeof route.query.project === 'string' ? route.query.project : lastProject.value)
@@ -42,7 +51,6 @@ if (restored) {
 const restoredImages = [...(restored?.message ?? '').matchAll(/!\[([^\]]*)\]\(attachment:([^)]*)\)/g)].map(m => ({ name: m[1]!, id: m[2]! }))
 const text = useDraft('plan:new')
 if (restored) text.value = restored.message.replace(/!\[[^\]]*\]\(attachment:[^)]*\)/g, '').trim()
-const composer = ref<{ send: (message: string) => Promise<void> } | null>(null)
 const taskRef = ref<string | null>(restored?.taskRef ?? null)
 const busy = ref(false)
 const runnerOffline = computed(() => shell.loaded && !shell.runner?.online)
@@ -91,10 +99,10 @@ async function start(message: string): Promise<boolean> {
           <div class="flex flex-col items-center gap-2 text-center">
             <AgentAvatar
               :name="pm?.name ?? 'PM'"
-              size="3xl"
+              size="4xl"
             />
             <h1 class="text-2xl font-semibold">
-              What should we plan?
+              {{ tagline }}
             </h1>
           </div>
 
@@ -118,7 +126,6 @@ async function start(message: string): Promise<boolean> {
           />
 
           <PromptComposer
-            ref="composer"
             v-model="text"
             :initial-images="restoredImages"
             :placeholder="placeholder"
@@ -204,13 +211,6 @@ async function start(message: string): Promise<boolean> {
                 aria-label="Refine a task"
                 :ui="{ content: 'w-80 max-w-[calc(100vw-2rem)]', base: 'max-w-56' }"
                 @update:model-value="taskRef = ($event as string | null)"
-              />
-              <!-- First on phones, so it's in reach without scrolling the toolbar -->
-              <PlanGrillButton
-                :draft="text"
-                :disabled="busy || runnerOffline || !project"
-                :class="device.isMobile.value && 'order-first'"
-                @send="composer?.send($event)"
               />
               <USelectMenu
                 v-if="!device.isMobile.value"
