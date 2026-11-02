@@ -165,6 +165,22 @@ describe('PM tools for the Inbox, designs and agents', () => {
       expect(await statusOf(paused.id)).toMatchObject({ paused: false })
     })
 
+    it('confirms a card saved before D31, with its old tool, fields and wording', async () => {
+      const { id: projectId } = await (await t.request('GET', `/api/projects/${slug}`)).json() as { id: string }
+      const [epic] = await t.db.insert(schema.epics).values({ projectId, title: 'Saved', reviewMode: 'epic', createdBy: t.actor }).returning()
+      const card = await lowered('update_parent', { parentId: epic!.id, reviewMode: 'direct' }, 'from parent to direct')
+      const [row] = await t.db.select().from(schema.planMessages).where(eq(schema.planMessages.id, card.actionId))
+      const action = row!.pendingAction!
+      await t.db.update(schema.planMessages).set({ pendingAction: {
+        ...action,
+        tool: 'update_epic',
+        input: { epicId: epic!.id, reviewMode: 'direct' },
+        summary: action.summary.replaceAll('from parent to direct', 'from epic to direct')
+      } }).where(eq(schema.planMessages.id, card.actionId))
+      expect((await resolve(card.actionId, 'confirm')).status).toBe(200)
+      expect((await t.db.select().from(schema.epics).where(eq(schema.epics.id, epic!.id)))[0]).toMatchObject({ reviewMode: 'direct' })
+    })
+
     it('takes a card for less review on an epic, not more', async () => {
       const { id: projectId } = await (await t.request('GET', `/api/projects/${slug}`)).json() as { id: string }
       const [epic] = await t.db.insert(schema.epics).values({ projectId, title: 'Gated', reviewMode: 'epic', createdBy: t.actor }).returning()
