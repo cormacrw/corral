@@ -12,8 +12,11 @@ writes the epic branch or relies on its head checks `activeRebase` or takes a
 row in that table. That covers review claims, human actions, task PR merges and
 the epic merge.
 
-While a conflict is being resolved the operation stays `running` with
-`resolutionTaskId` set. The task's branch prefix (`corral/epic-rebase/`) is how
+While a conflict is being resolved the operation stays `running` with `fix` set
+to `conflict` and a developer run on the epic (D29, [epic fixes](epic-fix-tasks.md)).
+
+A resolution task from before D29 keeps its old path: `resolutionTaskId` is set,
+and nothing creates one any more. The task's branch prefix (`corral/epic-rebase/`) is how
 the rest of the server recognises it: `isEpicResolution`, which keeps it off the
 PR-free path and out of the merge pass. `MergeOrchestrator` must not settle it,
 because only the synchronizer's publish makes it Merged.
@@ -74,6 +77,10 @@ Corral's push can show the old head, and that must not cost the approval.
 name it after several rebases; `prHeadSha` is what approval is on now. Every
 path out of an approved state must clear the snapshot.
 
+A fix's verdict is `behaviourChanged` on the operation's report, bound to the
+reported commit like `resolutionReview`. `approvalFate` reads it for an operation
+with `fix` set; the review path below is for old resolution tasks.
+
 A resolution task doesn't invalidate review (`keepEpicReview`). Any other new
 board task does, and it would otherwise wipe the approval the rebase protects.
 
@@ -85,8 +92,9 @@ is bound to the reviewed commit, so a later revision can't reuse it.
 `#checkResolution` reads the operation itself, because the pass's copy can
 predate the review that made the task Ready to merge.
 
-Decisions live on `operations.decisions`. `waitingOn` is the only reading of
-"open": the newest, unanswered, and what the task is Blocked on now. A resolution's `stuck` or `blocked`
+Decisions live on `operations.decisions`. An epic fix has no task to block, so its
+question is an `epic_conflict` Inbox item. For a resolution task `waitingOn` is the
+only reading of "open": the newest, unanswered, and what the task is Blocked on now. A resolution's `stuck` or `blocked`
 is refused without one. `waitingDecision` makes it a `question` in the Inbox,
 and `clarify` on one becomes a written decision. An answer that isn't an
 alternative keeping behaviour, or a question closed from the board, never

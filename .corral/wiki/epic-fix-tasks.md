@@ -1,17 +1,46 @@
-# Epic fix tasks
+# Epic fixes and fix tasks
 
-Requesting changes on an epic PR, by the reviewer agent or the human, creates a
-Ready task in the epic and sets the epic's `reviewState` to `changes_requested`
-in one transaction. `feedbackPoints` and `feedbackFixTitle` in
-`packages/core/src/review-feedback.ts` derive the criteria and title: list items
+D29 splits epic fixes in two. A human's Request changes is new work, so it's a
+task. Conflicts, CI failures and integration review changes are developer runs on
+the epic, with no task.
+
+## Developer runs on the epic
+
+Each fix is a `rebase` row in `task_integration_operations` with `fix` set to
+`conflict`, `ci` or `review`, so it's on the same writer lock, and everything that
+checks `activeRebase` waits for it. `EpicSynchronizer` drives it like a rebase. A
+new kind of operation would have meant teaching every lock check about it.
+
+The run has `epicId` and `operationId` and no task. Code that sees `ctx.run.epicId`
+must also look at the role: a developer run isn't an integration review. The
+candidate is `corral/epic-rebase/<operation>`. For `ci` and `review`, `ontoSha` is
+the epic head, so the publish check holds the fix to the head it's fixing.
+
+A CI fix with `behaviourChanged: false` keeps approval while the PR's head can read
+stale just after the push. The merge pass must not take that as an unknown head,
+so `startReview` compares with the branch before it drops approval.
+
+`fixAttempts` counts refused publishes and failed developer runs; interrupted runs
+don't count. Three set `syncError`. Completed CI fixes (three) and review fixes
+(`reviewRoundCap`) since the last Retry are bounded too, and the next one's
+operation opens stopped. Retry resets all of them.
+
+A review fix ends with the epic back in integration review, like any behaviour
+change. An integration review can't report while an operation is active: its
+verdict is stale, and the review runs again.
+
+## Fix tasks
+
+A human's Request changes creates a Ready task in the epic and sets `reviewState`
+to `changes_requested` in one transaction. `feedbackPoints` and `feedbackFixTitle`
+in `packages/core/src/review-feedback.ts` derive the criteria and title: list items
 are the points, or paragraphs when the feedback has no list.
 
-`changes_requested` is sticky. `invalidateEpicReview` leaves it alone, so the
-fix task's own creation and other board changes can't downgrade it to `open`.
-Only `EpicPullRequests.reconcile` leaves it, moving to `in_review` once every
-board task has merged. That also covers a deleted fix task, at the same head, so
-the epic can't get stuck.
+`changes_requested` is sticky. `invalidateEpicReview` leaves it alone, so the fix
+task's own creation and other board changes can't downgrade it to `open`. Only
+`EpicPullRequests.reconcile` leaves it, moving to `in_review` once every board task
+has merged. That also covers a deleted fix task, at the same head, so the epic
+can't get stuck.
 
 Human approval requires `human_review`, so it returns 409 while changes are
-outstanding. Corral has no epic PR merge path yet; when one is added it must
-only accept `ready_to_merge`.
+outstanding.
