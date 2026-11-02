@@ -412,7 +412,7 @@ export async function createTask(db: Executor, project: ProjectRow, rawInput: Cr
 export async function promotionRefusal(db: Executor, task: TaskRow): Promise<string | null> {
   if (task.status === 'parent') return null
   if (task.epicId) return 'A sub-task can\'t have sub-tasks; they go one level deep. Add a separate follow-up task instead.'
-  if (!['draft', 'backlog', 'ready'].includes(task.status) || task.leaseRunId) return `${task.status === 'merged' ? 'Merged' : 'Started'} work can\'t gain sub-tasks. Add a separate follow-up task instead.`
+  if (!['draft', 'backlog', 'ready'].includes(task.status) || task.leaseRunId) return `${task.status === 'merged' ? 'Merged' : 'Started'} work can't gain sub-tasks. Add a separate follow-up task instead.`
   if (task.type !== 'task' && task.type !== 'bug') return 'Only a task or a bug can gain sub-tasks.'
   const [run] = await db.select({ id: runs.id }).from(runs).where(eq(runs.taskId, task.id)).limit(1)
   const [submission] = await db.select({ id: taskSubmissions.id }).from(taskSubmissions).where(eq(taskSubmissions.taskId, task.id)).limit(1)

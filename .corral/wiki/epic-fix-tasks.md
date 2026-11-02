@@ -1,5 +1,7 @@
 # Epic fixes and fix tasks
 
+Epics are parent tasks' delivery records now ([D31](parent-tasks.md)). This page uses the code's word.
+
 D29 splits epic fixes in two. A human's Request changes is new work, so it's a
 task. Conflicts, CI failures and integration review changes are developer runs on
 the epic, with no task.

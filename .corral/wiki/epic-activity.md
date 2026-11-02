@@ -1,5 +1,7 @@
 # Epic PR history in the Inbox
 
+Epics are parent tasks' delivery records now ([D31](parent-tasks.md)). This page uses the code's word.
+
 `loadInbox` reads existing `epic.pr` audit rows as `EpicActivityItem`
 (`type: epic_activity`), with the stored `event`, `epicId`, and null `taskId`
 and `taskRef`. It never looks up a representative task: history remains visible

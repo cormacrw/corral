@@ -1,5 +1,7 @@
 # Corral — MVP Product Requirements Document
 
+> **D31:** where this document says epic, read parent task. A task is the only work item a human sees, and `epics` is a parent's delivery record.
+
 > **For agents:** This is the PRD as written. Decisions made afterwards are in [decisions.md](decisions.md) and **override this document** where they conflict. Most importantly, the POC is local-only (D1) and uses the user's own locally authenticated agent CLI (D2). Known inconsistencies in this document are listed in [open-recommendations.md](open-recommendations.md#inconsistencies-in-the-prd).
 
 | | |

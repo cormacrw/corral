@@ -1,5 +1,7 @@
 # Epic rebases
 
+Epics are parent tasks' delivery records now ([D31](parent-tasks.md)). This page uses the code's word.
+
 `EpicSynchronizer` (`apps/server/src/epic-sync.ts`) keeps an epic branch on its
 target (D27, COR-290). It runs inside `TaskIntegrator`'s per-epic pass, so a
 checkpoint is the moment between two integrations. Don't start a rebase from

@@ -85,7 +85,7 @@ export class RunOutcomes {
       const expected = design ? 'design_submitted' : spike ? 'findings_reported' : prFree ? 'commit_submitted' : 'pr_opened or pr_updated'
       switch (report.outcome) {
         case 'commit_submitted':
-          if (!prFree) throw new ToolError(`Not submitted. Only an sub-task without a PR submits a commit; this task reports ${ctx.task!.rebaseOnly ? 'pr_rebased' : expected}.`)
+          if (!prFree) throw new ToolError(`Not submitted. Only a sub-task without a PR submits a commit; this task reports ${ctx.task!.rebaseOnly ? 'pr_rebased' : expected}.`)
           this.#requireBehaviour(ctx, report)
           return this.#submitCommit(ctx, { ...report, outcome: report.outcome })
         case 'pr_opened':

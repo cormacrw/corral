@@ -26,6 +26,7 @@ Short implementation notes written while building. Not binding: `docs/README.md`
 - [Starting a Plan thread](optimistic-plan-starts.md)
 - [No-progress stops and PM recovery](retry-recovery.md)
 - [Outcome retries](outcome-retries.md)
+- [Parent tasks (D31)](parent-tasks.md)
 - [Plan thread scrolling](plan-thread-scroll.md)
 - [Plan validation and revision equality](plan-validation.md)
 - [PM evidence attachments](pm-evidence.md)

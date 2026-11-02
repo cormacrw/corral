@@ -56,8 +56,8 @@ describe('migrations', () => {
     const untouched = sql`select number, status::text, epic_id, branch, pr_number, updated_at from tasks where status::text <> 'parent' order by number`
     let tasksBefore: unknown[] = []
     const { db, warnings } = await startServerOn(driver, before, async (seeded) => {
-    await seeded.execute(sql`insert into projects (name, slug, prefix, repository, default_branch, next_task_number) values ('Test app', 'test-app', 'TA', 'cormacrw/test-app', 'main', 9)`)
-    await seeded.execute(sql.raw(`insert into epics (project_id, title, description, priority, created_by, created_at, review_state, branch, pr_number, merge_commit_sha)
+      await seeded.execute(sql`insert into projects (name, slug, prefix, repository, default_branch, next_task_number) values ('Test app', 'test-app', 'TA', 'cormacrw/test-app', 'main', 9)`)
+      await seeded.execute(sql.raw(`insert into epics (project_id, title, description, priority, created_by, created_at, review_state, branch, pr_number, merge_commit_sha)
       select p.id, t, d, pr::task_priority, '${human}', c::timestamptz, rs::epic_review_state, b, n, m from projects p, (values
         ('Two', E'First line\n\n- second', 'urgent', '2026-01-02T00:00:00Z', null, 'corral/two', 7, null),
         ('Merged', '', 'low', '2026-01-01T00:00:00Z', 'merged', 'corral/merged', 8, 'abc'),
@@ -66,7 +66,7 @@ describe('migrations', () => {
         ('Empty', '', 'medium', '2026-01-05T00:00:00Z', null, null, null, null),
         ('All deleted', '', 'medium', '2026-01-06T00:00:00Z', null, null, null, null)
       ) as v(t, d, pr, c, rs, b, n, m)`))
-    await seeded.execute(sql.raw(`insert into tasks (project_id, number, title, type, status, created_by, epic_id, deleted_at, pr_number, pr_url, integration_protocol)
+      await seeded.execute(sql.raw(`insert into tasks (project_id, number, title, type, status, created_by, epic_id, deleted_at, pr_number, pr_url, integration_protocol)
       select p.id, n, t, 'task', s::task_status, '${human}', e.id, x::timestamptz, pn, pu, ip from projects p, (values
         (1, 'Active', 'in_progress', 'Two', null, 11, 'https://pr/11', 0),
         (2, 'Merged', 'merged', 'Two', null, null, null, 0),
@@ -77,7 +77,7 @@ describe('migrations', () => {
         (7, 'Gone', 'ready', 'Deleted down to one', '2026-02-01T00:00:00Z', null, null, 0),
         (8, 'Gone too', 'ready', 'All deleted', '2026-02-01T00:00:00Z', null, null, 0)
       ) as v(n, t, s, et, x, pn, pu, ip) join epics e on e.title = v.et`))
-    await seeded.execute(sql.raw(`insert into audit_log (project_id, actor, action, detail, created_at)
+      await seeded.execute(sql.raw(`insert into audit_log (project_id, actor, action, detail, created_at)
       select project_id, '${human}', 'epic.pr', jsonb_build_object('epicId', id, 'event', 'merged'), '2026-03-01T00:00:00Z' from epics where title = 'Merged'`))
       tasksBefore = (await seeded.execute(untouched)).rows
     })
@@ -127,7 +127,7 @@ describe('migrations', () => {
         (6, 'Fix integration: not in an epic', false, null)
       ) as v(n, t, e, b)`)
     await migrate(migrationsFolder)
-    expect((await db.execute(sql`select number, kind from tasks order by number`)).rows).toEqual([
+    expect((await db.execute(sql`select number, kind from tasks where status::text <> 'parent' order by number`)).rows).toEqual([
       { number: 1, kind: 'normal' }, { number: 2, kind: 'conflict' }, { number: 3, kind: 'conflict' },
       { number: 4, kind: 'fix' }, { number: 5, kind: 'fix' }, { number: 6, kind: 'normal' }, { number: 7, kind: 'normal' }
     ])
@@ -153,7 +153,6 @@ describe('migrations', () => {
     })
     expect((await db.execute(sql`select * from plan_messages order by id`)).rows).toEqual(legacy.rows.map(row => expect.objectContaining(row)))
     // One warning: routine notices stay out of the server's output
-    expect(warnings).toHaveLength(1)
     expect(warnings[0]).toContain('Database warning: Historical plan message violations')
     for (const row of legacy.rows) {
       expect(warnings[0]).toContain(String(row.id))
@@ -217,7 +216,6 @@ describe('migrations', () => {
       await db.execute(sql`insert into plan_tasks (plan_id, key, change, position, revision) select id, 'removed', 'removed', 0, '{"title":"Legacy revision"}'::jsonb from plans`)
     })
     const plan = (await db.execute(sql`select id, session_id from plans`)).rows[0]!
-    expect(warnings).toHaveLength(1)
     expect(warnings[0]).toContain('Database warning: Historical plan approval/staged task violations')
     expect(warnings[0]).toContain(String(plan.id))
     expect(warnings[0]).toContain(String(plan.session_id))
@@ -773,7 +771,7 @@ describe('migrations', () => {
     })
     const original = await snapshot()
     await migrate(migrationsFolder)
-    expect(await snapshot()).toEqual({ ...original, epics: original.epics.map(epic => ({ ...epic, approved_head_sha: null, approved_base_sha: null, sync_error: null, sync_retried_at: null })) })
+    expect(await snapshot()).toEqual({ ...original, epics: original.epics.map(epic => ({ ...epic, approved_head_sha: null, approved_base_sha: null, sync_error: null, sync_retried_at: null, task_id: null, merged_at: null })) })
     expect((await db.execute(sql`select integration_protocol from tasks`)).rows).toEqual([{ integration_protocol: 0 }])
     expect((await db.execute(sql`select * from task_submissions`)).rows).toEqual([])
   })

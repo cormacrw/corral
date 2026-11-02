@@ -476,7 +476,6 @@ for (const epic of epics) {
   tasks.push(parentRow(projects.find(p => p.id === epic.projectId)!, epic))
 }
 
-
 function epicTasks(epicId: string, first: number, titles: string[], mergedMinutesAgo = 60 * 24 * 5): Task[] {
   return titles.map((title, i) => task(corral, first + i, {
     title, status: 'merged', epicId, pr: { number: first + 100 + i, url: `https://github.com/cormacrw/corral/pull/${first + 100 + i}` },

@@ -51,7 +51,7 @@ async function report(job: RunJob, outcome: 'approved' | 'changes_requested') {
   return runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome, summary: outcome === 'approved' ? 'Checked API/UI contract and combined behavior; gates rerun without cache.' : 'UI sends the wrong search field; align it with the API.' })
 }
 
-it('opens the epic PR when its board contains a merged task and an Approved design', async () => {
+it('opens the parent PR when its board contains a merged task and an Approved design', async () => {
   const { epic, other } = await setup()
   await t.db.update(schema.tasks).set({ type: 'design', status: 'approved' }).where(eq(schema.tasks.id, other.id))
   await t.orchestrator.schedule()
@@ -104,7 +104,7 @@ it.each(['epic', 'each_task'] as const)('opens %s PR only after the last board t
   await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 
-it('keeps changes requested out of Inbox and hands them to a developer run on the epic, with no task', async () => {
+it('keeps changes requested out of Inbox and hands them to a developer run on the parent, with no task', async () => {
   const { project, epic, other } = await setup()
   const job = await lastMerge(other.id, epic.id)
   const before = (await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epic.id))).length
@@ -192,7 +192,7 @@ it('human changes requested create a fix, hold the PR, and bring the same PR bac
   await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 
-it('sends the epic PR back to review if its fix task is dropped from the board', async () => {
+it('sends the parent PR back to review if its fix task is dropped from the board', async () => {
   const { project, epic, other } = await setup()
   const job = await lastMerge(other.id, epic.id)
   expect(await report(job, 'approved')).toMatchObject({ ok: true })
@@ -206,7 +206,7 @@ it('sends the epic PR back to review if its fix task is dropped from the board',
   await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 
-it('never opens epic PRs in direct mode', async () => {
+it('never opens parent PRs in direct mode', async () => {
   const { project, epic, other } = await setup('direct')
   await t.db.update(schema.tasks).set({ status: 'merged' }).where(eq(schema.tasks.id, other.id))
   await t.orchestrator.schedule()
@@ -237,7 +237,7 @@ it('fences a moved PR head and retries an expired integration lease', async () =
   await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 
-it('stops retrying after three failed reviews on a head and puts the epic PR in front of the human', async () => {
+it('stops retrying after three failed reviews on a head and puts the parent PR in front of the human', async () => {
   const { project, epic, other } = await setup()
   let job = await lastMerge(other.id, epic.id)
   for (let attempt = 1; attempt < 3; attempt++) {
@@ -264,7 +264,7 @@ it('stops retrying after three failed reviews on a head and puts the epic PR in 
   await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 
-it.each(['in_review', 'human_review', 'conflict'] as const)('sends an epic whose PR was closed in %s back to open, and reopening restarts review', async (state) => {
+it.each(['in_review', 'human_review', 'conflict'] as const)('sends a parent task whose PR was closed in %s back to open, and reopening restarts review', async (state) => {
   const { project, epic, other } = await setup()
   const job = await lastMerge(other.id, epic.id)
   await t.db.update(schema.epics).set({ reviewState: state }).where(eq(schema.epics.id, epic.id))
@@ -272,7 +272,7 @@ it.each(['in_review', 'human_review', 'conflict'] as const)('sends an epic whose
   pr.state = 'closed'
   await t.mergePass()
   expect(await reviewState(epic.id)).toBe('open')
-  expect((await t.db.select().from(schema.runs).where(eq(schema.runs.id, job.runId)))[0]).toMatchObject({ state: 'interrupted', error: 'Epic PR closed' })
+  expect((await t.db.select().from(schema.runs).where(eq(schema.runs.id, job.runId)))[0]).toMatchObject({ state: 'interrupted', error: 'Parent PR closed' })
   await t.orchestrator.schedule()
   expect(await reviewState(epic.id)).toBe('open')
 
@@ -283,7 +283,7 @@ it.each(['in_review', 'human_review', 'conflict'] as const)('sends an epic whose
   await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 
-it('holds no epic lock while GitHub answers a verdict', async () => {
+it('holds no parent lock while GitHub answers a verdict', async () => {
   const { project, epic, other } = await setup()
   const job = await lastMerge(other.id, epic.id)
   const live = t.github.getPullRequest.bind(t.github)
@@ -312,18 +312,18 @@ it('starts no integration review until a reviewer runner has a free slot, then r
   expect(run!.runnerId).toBe('r1')
 })
 
-it('completes epic boards with Approved designs and Merged implementation tasks', () => {
+it('completes parent boards with Approved designs and Merged implementation tasks', () => {
   expect(complete([])).toBe(false)
   expect(complete([{ type: 'design', status: 'approved' }, { type: 'task', status: 'merged' }])).toBe(true)
   expect(complete([{ type: 'design', status: 'merged' }])).toBe(false)
   expect(complete([{ type: 'task', status: 'approved' }])).toBe(false)
 })
 
-it('keeps reading history from before epic fixes ran with no task (D29)', () => {
-  expect(epicEventText({ event: 'rebase_handed_off' } as Parameters<typeof epicEventText>[0])).toContain('You handed the epic PR rebase to a developer')
-  expect(epicEventText({ event: 'conflict', summary: 'a.ts' } as Parameters<typeof epicEventText>[0])).toContain('Epic PR conflict')
-  expect(epicEventText({ event: 'sync_failed' } as Parameters<typeof epicEventText>[0])).toContain('Epic rebase stopped')
-  expect(epicEventText({ event: 'sync_failed', fix: 'ci' } as Parameters<typeof epicEventText>[0])).toContain('Epic fix stopped')
+it('keeps reading history from before parent fixes ran with no task (D29)', () => {
+  expect(epicEventText({ event: 'rebase_handed_off' } as Parameters<typeof epicEventText>[0])).toContain('You handed the parent PR rebase to a developer')
+  expect(epicEventText({ event: 'conflict', summary: 'a.ts' } as Parameters<typeof epicEventText>[0])).toContain('Parent PR conflict')
+  expect(epicEventText({ event: 'sync_failed' } as Parameters<typeof epicEventText>[0])).toContain('Parent rebase stopped')
+  expect(epicEventText({ event: 'sync_failed', fix: 'ci' } as Parameters<typeof epicEventText>[0])).toContain('Parent fix stopped')
 })
 
 it('keeps structured findings and separate rounds at their reviewed heads, including an empty report', async () => {

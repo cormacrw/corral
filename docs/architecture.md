@@ -307,3 +307,8 @@ At the PRD defaults (1 developer + 1 reviewer): **~2–5 GB peak**. Comfortable 
 - **Uncommitted developer work is always kept.** A developer worktree with uncommitted changes survives every cleanup and sweep until someone removes it by hand. Review and PM checkouts are read-only by contract, so they're force-removed.
 
 **Possible later addition:** the runner checks free memory before claiming work. Not needed for the POC.
+
+## Parent tasks (D31)
+
+A parent is a `tasks` row with status `parent`, linked from its delivery record by `epics.task_id`. Sub-tasks point at that record through `tasks.epicId`. Engine queries filter on working statuses and `tasks.epicId`, so a parent matches none of them. `apps/server/src/parents.ts` holds its rollup, dependency rule and sync between the two rows, and `packages/core/src/parent.ts` its stage.
+

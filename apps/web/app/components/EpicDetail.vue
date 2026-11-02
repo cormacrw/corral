@@ -53,6 +53,8 @@ async function setDependencies(ids: string[]) {
 }
 const editingDescription = ref(false)
 const descriptionDraft = ref('')
+// A phone has room for all four labels only without their icons
+const TAB_ICONS: Record<string, string> = { tasks: 'i-lucide-list', graph: 'i-lucide-network', activity: 'i-lucide-activity', comments: 'i-lucide-message-square' }
 const tab = useLocalStorage<'tasks' | 'graph' | 'activity' | 'comments'>('corral.epic.tab', 'tasks')
 let savedTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -399,7 +401,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
             v-if="!blockedEpics.length"
             class="text-sm text-muted"
           >
-            No blocked epics.
+            Nothing waits on this.
           </p>
           <NuxtLink
             v-for="item in blockedEpics"
@@ -450,9 +452,20 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
       <!-- In a stacked column the tasks follow the details in the one scroll,
            so the list never shrinks into a scroll of its own -->
       <section :class="['flex min-w-0 flex-col', props.mode === 'page' ? 'min-h-0 flex-1 max-[900px]:h-[560px]' : 'shrink-0 px-4 pb-4']">
+        <div
+          v-if="epic.taskRef && project"
+          :class="['flex items-center gap-3', props.mode === 'page' && 'px-4 pt-3']"
+        >
+          <span class="shrink-0 font-mono text-xs text-muted">{{ epic.taskRef }}</span>
+          <AddSubtask
+            :slug="project.slug"
+            :number="Number(epic.taskRef.split('-').at(-1))"
+            class="min-w-0 flex-1 justify-end"
+          />
+        </div>
         <UTabs
           v-model="tab"
-          :items="[{ label: `Sub-tasks (${epic.tasks.length})`, value: 'tasks', icon: 'i-lucide-list' }, { label: 'Graph', value: 'graph', icon: 'i-lucide-network' }, { label: 'Activity', value: 'activity', icon: 'i-lucide-activity' }, ...$slots.comments ? [{ label: 'Comments', value: 'comments', icon: 'i-lucide-message-square' }] : []]"
+          :items="[{ label: `Sub-tasks (${epic.tasks.length})`, value: 'tasks' }, { label: 'Graph', value: 'graph' }, { label: 'Activity', value: 'activity' }, ...$slots.comments ? [{ label: 'Comments', value: 'comments' }] : []].map(item => ({ ...item, icon: props.mode === 'mobile' ? undefined : TAB_ICONS[item.value] }))"
           :variant="props.mode === 'mobile' ? 'pill' : 'link'"
           :size="props.mode === 'mobile' ? 'md' : 'sm'"
           :content="false"
