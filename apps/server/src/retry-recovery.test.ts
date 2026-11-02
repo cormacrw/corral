@@ -163,8 +163,8 @@ describe.each(['pglite', 'postgres'] as const)('no-progress recovery on %s', (dr
       const mine = (await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.filter(i => i.project.id === task.projectId)
       expect(mine).toMatchObject([{ id: task.id, taskId: task.id, type: kind === 'capped' ? 'failed' : 'question', body: expect.stringContaining(findings) }])
       expect(mine).toHaveLength(1)
-      expect(mine[0]!.body).toContain('Decision needed:')
-      expect(mine[0]!.body).toContain('Recommendation:')
+      expect(mine[0]).toMatchObject({ body: expect.stringContaining('Decision needed:') })
+      expect(mine[0]).toMatchObject({ body: expect.stringContaining('Recommendation:') })
     }
     expect((await t.db.select().from(runs).where(eq(runs.taskId, task.id))).filter(r => r.role === 'pm')).toHaveLength(1)
   })
