@@ -309,7 +309,7 @@ describe('PM tools for the Inbox, designs and agents', () => {
       const live = { key: 'live', title: 'Live task', epic: 'e' }
       expect(await call('propose_plan', plan(live, [{ key: 'e', title: 'Live', summary: 's', reviewMode: 'epic' }]))).toMatchObject({ ok: true })
       await t.db.update(tasks).set({ status: 'backlog' }).where(and(eq(tasks.title, 'Live task'), eq(tasks.status, 'draft')))
-      await refused(plan(live, [{ key: 'e', title: 'Live', summary: 's', reviewMode: 'direct' }]), 'update_epic')
+      await refused(plan(live, [{ key: 'e', title: 'Live', summary: 's', reviewMode: 'direct' }]), 'update_parent')
     })
   })
 

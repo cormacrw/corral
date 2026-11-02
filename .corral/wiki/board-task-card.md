@@ -21,8 +21,8 @@ obvious from it:
 
 - `TaskCardBlockers` uses `utils/taskBlockers.ts` with the full project list passed
   through both Board layouts. Only Ready cards get the amber ban button; merged
-  tasks and approved designs are done. Waiting epics also appear, linking to
-  their epic pages. Task rows use `useTaskFlyout.open`, which handles phones.
+  tasks and approved designs are done. Waiting parents also appear, linking to
+  their parent pages. Task rows use `useTaskFlyout.open`, which handles phones.
   The popover stops click propagation and follows live task updates.
 - Task lists leave out Drafts, and `plan.ts` lets a task depend on one, so a Ready
   task can be held by a dependency the client can't see. `taskBlockers` returns

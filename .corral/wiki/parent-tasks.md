@@ -18,3 +18,8 @@ only people see the word parent. `apps/server/src/parents.ts` has the rollup,
 - The migration rebuilds the `task_status` type, because a value added with
   `ALTER TYPE` can't be used in the transaction that adds it.
 - `COMPATIBLE_TOOL_CONTRACTS` keeps runners on the previous build taking runs.
+- The PM's names are `update_parent`, `parentId`, `parents` and
+  `defaultReviewMode`. `neutralPmCall` turns an older runner's call, and a saved
+  confirm card, into them.
+- Stored operation errors are compared by text, and rows from before D31 say
+  epic, so `epic-sync.ts` and `task-integration.ts` list both wordings.

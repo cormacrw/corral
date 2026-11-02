@@ -110,7 +110,7 @@ describe('plans with parent tasks', () => {
     runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
     const parent = (await listed(project.slug)).find(task => task.status === 'parent')!
     const next = await turn(project.id)
-    expect(JSON.stringify(await next.propose({ parents: [{ key: 'p', ref: parent.ref, reviewMode: 'direct' }], tasks: [item('c', { parent: 'p' })] }))).toContain('update_epic')
+    expect(JSON.stringify(await next.propose({ parents: [{ key: 'p', ref: parent.ref, reviewMode: 'direct' }], tasks: [item('c', { parent: 'p' })] }))).toContain('update_parent')
   })
 
   it('collapses an old runner\'s one-task epic, and gives its two-task epic a parent, on a previous tool contract', async () => {

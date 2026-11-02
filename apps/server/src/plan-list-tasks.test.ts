@@ -52,7 +52,7 @@ describe('list_tasks', { timeout: 30_000 }, () => {
     const { list, ref, first, second } = await setup()
     const board = await list()
     expect(board.tasks).toEqual([
-      { ref: ref(1), title: 'Login form', status: 'backlog', type: 'task', priority: 'high', epicId: first.id, dependsOn: [] },
+      { ref: ref(1), title: 'Login form', status: 'backlog', type: 'task', priority: 'high', epicId: first.id, parentId: first.id, dependsOn: [] },
       { ref: ref(2), title: 'Logout button', status: 'ready', type: 'bug', priority: 'medium', epicId: null, dependsOn: [ref(1)] }
     ])
     expect(board.epics).toEqual(expect.arrayContaining([expect.objectContaining({ id: second.id, dependsOn: [first.id] })]))

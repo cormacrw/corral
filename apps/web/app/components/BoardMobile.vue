@@ -10,7 +10,7 @@ import { plural } from '~/utils/labels'
 // task or epic page. The page owns the filtering, so it matches the web Board,
 // and the Status filter hides tabs as it hides columns there.
 const props = defineProps<{
-  columns: { key: string, label: string, statuses: TaskStatus[], hint: string, color: string, tasks: Task[], cards: { epic: Epic, waitingOn: Epic[], workingAgents: Agent[] }[] }[]
+  columns: { key: string, label: string, statuses: TaskStatus[], hint: string, color: string, tasks: Task[], cards: { epic: Epic, waitingOn: Epic[], workingAgents: Agent[] }[], entries?: { card?: { epic: Epic, waitingOn: Epic[], workingAgents: Agent[] }, task?: Task }[] }[]
   epics: { id: string, label: string }[]
   agents: { id: string, name: string }[]
   total: number
@@ -36,7 +36,11 @@ const displayColumns = computed(() => props.columns.map(c => ({ ...c, count: c.t
 const index = computed(() => Math.max(0, displayColumns.value.findIndex(c => c.key === boardColumnKey(route.query.column))))
 const column = computed(() => displayColumns.value[index.value])
 const tasks = computed(() => props.columns[index.value]?.tasks ?? [])
-const cards = computed(() => props.columns[index.value]?.cards ?? [])
+type Card = { epic: Epic, waitingOn: Epic[], workingAgents: Agent[] }
+const entries = computed((): { card?: Card, task?: Task }[] => {
+  const current = props.columns[index.value]
+  return current?.entries ?? [...(current?.cards ?? []).map(card => ({ card })), ...tasks.value.map(task => ({ task }))]
+})
 function select(i: number) {
   const next = displayColumns.value[Math.min(displayColumns.value.length - 1, Math.max(0, i))]
   if (next && next.key !== column.value?.key) void router.replace({ query: { ...route.query, column: next.key } })
@@ -221,33 +225,26 @@ const epicLabel = (id: string) => props.epics.find(e => e.id === id)?.label ?? '
         <span class="font-semibold text-highlighted">{{ column.label }}</span>
         <span class="ms-auto text-xs text-muted">Whose turn: {{ column.hint }}</span>
       </header>
-      <div
-        v-if="cards.length"
-        class="mb-2 flex flex-col gap-2"
-      >
-        <BoardEpicCard
-          v-for="card in cards"
-          :key="card.epic.id"
-          :epic="card.epic"
-          :waiting-on="card.waitingOn"
-          :working-agents="card.workingAgents"
-        />
-      </div>
-      <ul
-        class="flex flex-col gap-2"
-      >
-        <li
-          v-for="task in tasks"
-          :key="task.id"
+      <div class="flex flex-col gap-2">
+        <template
+          v-for="entry in entries"
+          :key="entry.card?.epic.id ?? entry.task!.id"
         >
-          <TaskCard
-            :task="task"
-            :tasks="all"
-            :epic="task.epicId ? epicLabel(task.epicId) : null"
-            :to="`/tasks/${task.ref}`"
+          <BoardEpicCard
+            v-if="entry.card"
+            :epic="entry.card.epic"
+            :waiting-on="entry.card.waitingOn"
+            :working-agents="entry.card.workingAgents"
           />
-        </li>
-      </ul>
+          <TaskCard
+            v-else-if="entry.task"
+            :task="entry.task"
+            :tasks="all"
+            :epic="entry.task.parentTask ? epicLabel(entry.task.epicId!) : null"
+            :to="`/tasks/${entry.task.ref}`"
+          />
+        </template>
+      </div>
       <p
         v-if="column.count === 0"
         class="py-8 text-center text-sm text-dimmed"

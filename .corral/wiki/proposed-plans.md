@@ -7,12 +7,12 @@ Add wire fields there so both boundaries accept and validate them together.
 
 `normalizeProposedPlan` converts validated input to core's `ProposedPlan`:
 trimmed/defaulted content, uppercase refs (while preserving dependency keys),
-mandatory human review for design tasks, and empty epic membership removed.
+mandatory human review for design tasks, and empty parent membership removed.
 The legacy single `epic: { title, summary }` maps to the key `main`; omitted
-`epics` otherwise means no epics. Nonempty epic arrays take precedence.
+`epics` otherwise means no parents. Nonempty parent arrays take precedence.
 
 Core remains independent of contracts. Its `PlanTaskContent` is shared by
-`ProposedTask` and db's `PlanRevision`; revisions retain their database epic
+`ProposedTask` and db's `PlanRevision`; revisions retain their database parent
 and design-version IDs and numeric task dependencies. Semantic checks such
 as nonempty criteria, design approval and dependency validity still run in
 core/server before storage; the wire schema checks structure.
@@ -21,7 +21,7 @@ core/server before storage; the wire schema checks structure.
 
 The PM splits a feature into tasks only for parallel work on different code.
 Sequential work or work changing the same files stays in one task. A big
-feature always gets one epic, even with one task, so it appears in epic views;
+feature always gets one parent, even with one task, so it appears in parent views;
 independent fixes stay standalone. There is no task-size target.
 
 This guidance lives in the runner's PM defaults (`apps/runner/src/role-defaults.ts`),

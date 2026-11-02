@@ -24,7 +24,7 @@ const scope = computed(() => projectId.value === 'all' ? shell.projects : shell.
 
 const epics = computed(() => scope.value
   .flatMap(project => (lists.epics.value[project.id] ?? []).map(epic => ({ epic: epicWithLiveCounts(epic, lists.tasks.value[project.id] ?? []), project })))
-  .filter(({ epic }) => epic.taskId && epicInProgress(epic))
+  .filter(({ epic }) => (epic.taskId || epic.branch) && epicInProgress(epic))
   .sort((a, b) => Date.parse(b.epic.updatedAt) - Date.parse(a.epic.updatedAt)))
 
 // Re-render the "today" and elapsed numbers as time passes

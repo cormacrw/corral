@@ -45,6 +45,17 @@ export function boardView(value: unknown, fallback: BoardView): BoardView {
 // The Board column a parent's stage puts it in
 export const parentColumn = (stage: ParentStage): string => stage === 'done' ? 'complete' : stage
 
+// A column's tasks and parent cards. Complete lists both by when they finished;
+// elsewhere a column's parents lead.
+export function columnEntries<C extends { epic: Pick<Epic, 'mergedAt' | 'updatedAt'> }, T extends Pick<Task, 'ref' | 'type' | 'status' | 'mergedAt' | 'updatedAt'>>(key: string, tasks: T[], cards: C[]) {
+  const sorted = sortColumn(key, tasks)
+  const entries: { card?: C, task?: T, at: number }[] = [
+    ...cards.map(card => ({ card, at: new Date(card.epic.mergedAt ?? card.epic.updatedAt).getTime() })),
+    ...sorted.map(task => ({ task, at: new Date(completedAt(task) ?? 0).getTime() }))
+  ]
+  return { tasks: sorted, cards, entries: key === 'complete' ? entries.sort((a, b) => b.at - a.at) : entries }
+}
+
 // A task on its own or a parent, not a sub-task
 export const isTopLevel = (task: Pick<Task, 'parentTask'>): boolean => task.parentTask === null
 
@@ -84,10 +95,10 @@ export function matchesOverviewEpicFilter(epic: StageEpic, tasks: Pick<Task, 'st
 // Whether an epic belongs on the Board: it has work left or tasks on the Board.
 // A finished epic stays while one of its done tasks is still in Complete, and
 // updatedAt covers an epic PR that merged after the tasks' window closed.
-export function epicOnBoard(epic: StageEpic & Pick<Epic, 'updatedAt'>, tasks: Pick<Task, 'type' | 'status' | 'mergedAt' | 'updatedAt'>[], now = Date.now()): boolean {
+export function epicOnBoard(epic: StageEpic & Pick<Epic, 'updatedAt' | 'mergedAt'>, tasks: Pick<Task, 'type' | 'status' | 'mergedAt' | 'updatedAt'>[], now = Date.now()): boolean {
   if (epicInProgress(epic)) return true
   if (epic.taskCount === 0) return false
-  const finished = epic.reviewMode !== 'direct' && epic.reviewState === 'merged' && now - new Date(epic.updatedAt).getTime() <= COMPLETE_WINDOW_MS
+  const finished = (epic.mergedAt !== null || (epic.reviewMode !== 'direct' && epic.reviewState === 'merged')) && now - new Date(epic.mergedAt ?? epic.updatedAt).getTime() <= COMPLETE_WINDOW_MS
   return finished || tasks.some(t => isTaskDone(t) && onBoard(t, now))
 }
 
@@ -178,6 +189,12 @@ export function matchesFilter(task: Pick<Task, 'ref' | 'title' | 'epicId' | 'sta
 export function matchesEpicFilter(epic: Pick<Epic, 'id' | 'title'>, filters: Pick<BoardFilters, 'search' | 'epics'>): boolean {
   if (filters.epics.length > 0 && !filters.epics.includes(epic.id)) return false
   return !filters.search || epic.title.toLowerCase().includes(filters.search.toLowerCase())
+}
+
+// The filters a card has no answer for of its own use its parent row and agents
+export function matchesParentFilter(card: { workingAgents: Pick<Agent, 'id'>[] }, parent: Pick<Task, 'priority'> | undefined, filters: Pick<BoardFilters, 'priorities' | 'agents'>): boolean {
+  if (filters.priorities.length > 0 && !(parent && filters.priorities.includes(parent.priority))) return false
+  return filters.agents.length === 0 || card.workingAgents.some(agent => filters.agents.includes(agent.id))
 }
 
 export function hasFilters(filters: BoardFilters): boolean {

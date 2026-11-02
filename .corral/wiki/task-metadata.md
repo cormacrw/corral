@@ -22,7 +22,7 @@ migration is changed.
 
 There is no status-to-lease constraint: an In progress task can wait for a
 retry without a lease (D10). Merged tasks need no PR: spikes, designs and
-epic conflict work can finish without one. Board links and task properties
+parent conflict work can finish without one. Board links and task properties
 read the grouped PR object. Task detail displays the current Blocked/Failed
 reason, and the board uses its existing error note.
 

@@ -123,9 +123,9 @@ Fields:
 - Pause state
 - Created and updated timestamps
 
-### 4.2 Epic
+### 4.2 Parent
 
-An epic groups related tasks around a feature or product outcome.
+A parent groups related tasks around a feature or product outcome.
 
 Fields:
 
@@ -150,7 +150,7 @@ Fields:
 - Acceptance criteria
 - Status
 - Priority
-- Epic ID
+- Parent ID
 - Dependencies
 - Task type: Task, Bug, Spike or Design (D19, D20)
 - Human review flag
@@ -350,7 +350,7 @@ Requirements:
 - Persistent PM conversation per project.
 - PM reads project metadata, task state, relevant wiki pages, repository instructions, and recent execution outcomes.
 - PM asks questions when requirements are ambiguous.
-- PM creates structured draft epics and tasks.
+- PM creates structured draft parents and tasks.
 - PM identifies dependencies and oversized tasks.
 - PM proposes priorities and implementation order.
 - Users can edit individual tasks and acceptance criteria.
@@ -382,7 +382,7 @@ Requirements:
 
 - Kanban board grouped by status.
   > **D10:** Backlog tasks are not on the board; they have their own Backlog view in the main navigation.
-- Filtering by epic, status, priority, and agent.
+- Filtering by parent, status, priority, and agent.
 - Task cards display priority, dependency state, lock status, active agent identity, and PR status.
 - Task detail shows description, acceptance criteria, comments, dependencies, evidence, PR, reviews, and run history.
 - Humans can edit a locked task.
@@ -637,7 +637,7 @@ Required views:
 
 **Board**
 - Tasks grouped by status.
-- Filters and epic grouping.
+- Filters and parent grouping.
 - Agent identity, lock, dependency, and PR indicators.
 
 **Task detail**
@@ -945,7 +945,7 @@ The PM conversation is the home screen. The board and operational views are seco
 **Board**
 - Kanban by status.
   > **D10:** approved work only. Backlog tasks live in a separate Backlog view.
-- Epic and priority filters.
+- Parent and priority filters.
 - Lock and agent indicators.
 - Dependency and PR status.
 

@@ -22,7 +22,9 @@ const proposedTask = z.object({
   }).optional().describe('For a task that builds part of an approved design: the version and the screens it covers')
 })
 
-const reviewMode = z.enum(EPIC_REVIEW_MODES, { error: `reviewMode must be one of ${EPIC_REVIEW_MODES.join(', ')}` }).optional()
+// `parent` is the stored mode `epic`, which older runners still send
+const reviewMode = z.enum([...EPIC_REVIEW_MODES, 'parent'], { error: 'reviewMode must be one of parent, each_task, direct' }).optional()
+  .transform(mode => mode === 'parent' ? 'epic' as const : mode)
 
 export const proposedPlanInput = z.object({
   title: z.string().trim().min(1),
@@ -33,13 +35,13 @@ export const proposedPlanInput = z.object({
     title: z.string().trim().default('').describe('Required for a new parent'),
     summary: z.string().trim().default(''),
     dependsOn: z.array(z.string().trim()).optional().describe('Parent keys in this plan or refs of existing parents. Omit to keep dependencies in a revision; [] clears them. Sub-tasks wait until these parents are done.'),
-    reviewMode: reviewMode.describe('How its sub-tasks reach the target branch: epic = human reviews the parent\'s PR; each_task = human also reviews every sub-task; direct = sub-tasks merge straight into the target branch. Leave it out for the project\'s default.')
+    reviewMode: reviewMode.describe('How its sub-tasks reach the target branch: parent = human reviews the parent\'s PR; each_task = human also reviews every sub-task; direct = sub-tasks merge straight into the target branch. Leave it out for the project\'s default.')
   })).default([]),
   epics: z.array(z.object({
-    key: z.string().trim().min(1).describe('A short handle used by a task\'s epic, e.g. e1'),
+    key: z.string().trim().min(1).describe('A short handle, e.g. e1'),
     title: z.string().trim(),
     summary: z.string().trim().default(''),
-    dependsOn: z.array(z.string().trim()).optional().describe('Epic keys in this plan or existing epic ids from list_tasks. Omit to keep dependencies in a revision; [] clears them. Tasks wait until prerequisite epics are done.'),
+    dependsOn: z.array(z.string().trim()).optional().describe('Keys in this list, or ids from list_tasks. Omit to keep dependencies in a revision; [] clears them.'),
     // The project's default when left out (D27)
     reviewMode: reviewMode.describe('See parents')
   })).default([]).describe('Older name for parents'),
@@ -47,6 +49,11 @@ export const proposedPlanInput = z.object({
   // Older PMs proposed a single epic without keys.
   epic: z.object({ title: z.string().trim(), summary: z.string().trim().default('') }).optional()
 })
+
+// What the PM is offered: the same plan without the names older runners send
+const { epic: _epic, ...advertisedTask } = proposedTask.shape
+const { epics: _epics, epic: _legacyEpic, ...advertisedPlan } = proposedPlanInput.shape
+export const advertisedPlanInput = { ...advertisedPlan, tasks: z.array(z.object(advertisedTask)) }
 
 const REF = /^([A-Za-z]+)-(\d+)$/
 

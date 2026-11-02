@@ -1,12 +1,12 @@
-# Epic review in the Inbox
+# Parent review in the Inbox
 
-Epics are parent tasks' delivery records now ([D31](parent-tasks.md)). This page uses the code's word.
+Code and branch names still say epic: see [Parent tasks](parent-tasks.md). The `epics` row is a parent's delivery record.
 
-`InboxEpicPanel` renders every epic item: `epic_review`, `epic_conflict` and `epic_activity`. It reads `GET /api/epics/:id/review` (`apps/server/src/epic-review.ts`), which is live from GitHub, so it answers 503 with the runner offline. The item alone still carries the tasks and human checks owed, so approval works when the review can't load; the Tasks tab falls back to the item's tasks.
+`InboxEpicPanel` renders every parent item: `epic_review`, `epic_conflict` and `epic_activity`. It reads `GET /api/epics/:id/review` (`apps/server/src/epic-review.ts`), which is live from GitHub, so it answers 503 with the runner offline. The item alone still carries the tasks and human checks owed, so approval works when the review can't load; the Tasks tab falls back to the item's tasks.
 
 The panel builds its own `InboxPanelContext` so `InboxPanelTray` and `InboxPanelThumbBar` work unchanged. Only the fields those two read are real.
 
-Epic history has its own `epic_activity` type with no task, so an epic with no tasks left still has a history. `ActionableInboxItem` excludes it, so it never counts in Needs you.
+Parent history has its own `epic_activity` type with no task, so a parent with no tasks left still has a history. `ActionableInboxItem` excludes it, so it never counts in Needs you.
 
 `getEpicReview` reports `conflictPending` from the deferred rebase row (D27); it isn't a Needs you item. `conflictTaskRef` is only ever set by a task from before D29, since conflicts now run with no task.
 

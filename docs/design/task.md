@@ -23,7 +23,7 @@ Read and edit any task from wherever you are, without losing your place. It's th
 - **Page:** a breadcrumb (`Board › {parent} › COR-29`, the parent linking to its page) with no close or open-full-page buttons.
 - **No status badge in the header.** Status lives in the properties.
 
-Ready tasks whose parent has unfinished prerequisites, or with a Merged dependency in another parent that isn't done, show **Waiting on parent: <title>** in their properties, linking to each of those epics. The API supplies `waitingOnEpics` (IDs and titles); live task updates remove the row when those parents finish.
+Ready tasks whose parent has unfinished prerequisites, or with a Merged dependency in another parent that isn't done, show **Waiting on parent: <title>** in their properties, linking to each of those parents. The API supplies `waitingOnEpics` (IDs and titles); live task updates remove the row when those parents finish.
 
 ### Body, in order (stacked; split mode moves the properties to the rail)
 

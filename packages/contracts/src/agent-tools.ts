@@ -2,7 +2,7 @@ import { DESIGNER_RUN_OUTCOMES, DEVELOPER_RUN_OUTCOMES, REVIEWER_RUN_OUTCOMES, t
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { PM_TOOL_NAMES, pmActionTools, pmDirectTools } from './pm-tools.ts'
-import { askQuestionInput, listTasksInput, proposedPlanInput, EVIDENCE_KINDS, reportOutcomeInput, type AgentTool } from './index.ts'
+import { advertisedPlanInput, askQuestionInput, listTasksInput, EVIDENCE_KINDS, reportOutcomeInput, type AgentTool } from './index.ts'
 
 // What agents are told they can call, by role. The runner serves these and the
 // server checks reports against the same schemas, so a runner built from other
@@ -74,8 +74,8 @@ export const toolDefinitions = {
     input: reportOutcomeInput.shape
   },
   list_tasks: {
-    description: 'The live board: one compact row per task (ref, title, status, type, priority, parent ref, dependsOn refs). A parent shows status parent, its stage and how many sub-tasks are done. Parents are also listed with their delivery id (epicId), review mode and dependencies. Merged tasks are left out unless you set includeMerged or ask for that status. Filters combine. Read a task’s description and acceptance criteria with get_task.',
-    input: listTasksInput.shape
+    description: 'The live board: one compact row per task (ref, title, status, type, priority, parent ref, parentId, dependsOn refs). A parent shows status parent, its stage and how many sub-tasks are done. `parents` lists each with its parentId, ref, review mode and dependencies. Merged tasks are left out unless you set includeMerged or ask for that status. Filters combine. Read a task’s description and acceptance criteria with get_task.',
+    input: listTasksInput.omit({ epic: true }).shape
   },
   get_run_outcomes: {
     description: 'Recent run outcomes for a task.',
@@ -91,7 +91,7 @@ export const toolDefinitions = {
   },
   propose_plan: {
     description: 'Propose a plan: tasks with acceptance criteria and dependencies. Corral validates it and shows it to the human for approval. A feature with parts that can run in parallel on different code is a parent with sub-tasks: list it in `parents` and put each sub-task in it with `parent`. A parent needs at least two sub-tasks. A single unit of work is one task with no parent, and work that would run in sequence or change the same files is one task. To add to an existing parent, give its ref; to turn a Draft, Backlog or unclaimed Ready task with no runs into a parent, give that task\'s ref in `parents`: it keeps its ref and comments, and its criteria and dependencies move to its first sub-task when the human approves. A revision keeps the parent and task keys it reuses. To refine an existing Backlog task or an unclaimed Ready task (one no developer has picked up), read it with get_task and include it in the plan with its `ref`: the plan then revises that task instead of creating a new one, and the edits are applied when the human approves; a revised Ready task stays in Ready. Set each parent\'s dependsOn to parent keys in this plan or refs of existing parents; omit it on revision to preserve dependencies, or use [] to clear them. Pin a task that builds part of an approved design with `design`; only an approved version can be pinned.',
-    input: proposedPlanInput.shape
+    input: advertisedPlanInput
   },
   approve_plan: {
     description: 'Approve the current plan on the human\'s behalf, only when their latest message explicitly asks you to (e.g. "looks good, add it to the board"). Never approve on your own initiative. "ready" adds the tasks to the board; "backlog" keeps them for later. A revised Ready task stays in Ready either way.',
@@ -101,7 +101,7 @@ export const toolDefinitions = {
     description: 'Create a documentation task when the wiki or CORRAL.md no longer matches the code.',
     input: { title: z.string().min(1), description: z.string().min(1) }
   }
-} satisfies Record<AgentTool, ToolDefinition>
+} satisfies Record<Exclude<AgentTool, 'update_epic'>, ToolDefinition>
 
 // Where a role's tool differs: the PM reads and comments on any task in the
 // project by ref, while developers and reviewers only ever touch their own
@@ -146,7 +146,7 @@ export function outcomesFor(role: AgentRole): readonly string[] {
 const PM_PROJECT_TOOLS: readonly AgentTool[] = ['attach_evidence', 'add_comment', 'list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'propose_plan', 'flag_stale_docs', 'create_task', 'update_task', 'move_task', 'approve_task', 'delete_task', 'update_epic']
 
 export function toolDefinition(role: AgentRole, tool: AgentTool): ToolDefinition {
-  const definition = roleToolDefinitions[role][tool] ?? toolDefinitions[tool]
+  const definition = roleToolDefinitions[role][tool] ?? toolDefinitions[tool as keyof typeof toolDefinitions]
   if (role !== 'pm' || !PM_PROJECT_TOOLS.includes(tool)) return definition
   const project = tool === 'propose_plan'
     ? 'Project slug. Required in global sessions. A project session plans only for its own project.'

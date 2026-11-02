@@ -4,6 +4,7 @@ import { epicActivityQuery, epicHistoryQuery, epicQuery, patchEpic, retryEpicSyn
 import type { PatchEpicInput } from '@corral/contracts'
 import { isTaskDone, type EpicReviewMode } from '@corral/core'
 import { ApiError } from '~/queries/client'
+import { removeTask, taskHistoryQuery } from '~/queries/tasks'
 import DetailHeader from './DetailHeader.vue'
 import { EPIC_CONFLICT_PENDING, EPIC_REVIEW_MODE, EPIC_STATUS_TEXT, epicHistoryText, epicReviewStatus, epicStoppedLabel, epicWithLiveCounts, PRIORITY, statusCounts } from '~/utils/labels'
 
@@ -22,11 +23,16 @@ const retryMutation = useMutation(retryEpicSync)
 const epicResult = useQuery(computed(() => epicQuery(props.epicId)))
 const activityResult = useQuery(computed(() => epicActivityQuery(props.epicId)))
 const epic = computed(() => epicResult.data.value ?? null)
-const activity = computed(() => activityResult.data.value ?? [])
 // A failed background refetch leaves what's cached on screen
 const error = computed(() => epicResult.isLoadingError.value ? epicResult.error.value?.message ?? null : null)
 const saved = ref(false)
 const project = computed(() => shell.projects.find(p => p.id === epic.value?.projectId) ?? null)
+// The delivery record's history with the parent task's own
+const parentHistory = useQuery(computed(() => ({
+  ...taskHistoryQuery({ slug: project.value?.slug ?? '', number: Number(epic.value?.taskRef?.split('-').at(-1)), ref: epic.value?.taskRef ?? '' }),
+  enabled: Boolean(epic.value?.taskRef && project.value)
+})))
+const activity = computed(() => [...activityResult.data.value ?? [], ...parentHistory.data.value ?? []].sort((a, b) => a.createdAt.localeCompare(b.createdAt)))
 const { tasks: projectTasks, epics: epicList } = useProjectLists(() => project.value?.slug ?? '')
 // Task events update the shared task list, not the epic's aggregate counts.
 const related = computed(() => epicList.value.map(e => epicWithLiveCounts(e, projectTasks.value)))
@@ -37,6 +43,13 @@ const prerequisites = computed(() => related.value.filter(e => epic.value?.depen
 const blockedEpics = computed(() => related.value.filter(e => epic.value?.blocks.includes(e.id)))
 const waiting = computed(() => prerequisites.value.filter(e => e.mergedCount < e.taskCount))
 const choices = computed(() => related.value.filter(e => e.id !== epic.value?.id && !epic.value?.dependsOn.includes(e.id)).map(e => ({ label: e.title, value: e.id })))
+
+const removing = useMutation(removeTask)
+async function removeParent() {
+  if (!epic.value?.taskRef || !project.value) return
+  await removing.mutateAsync({ task: { slug: project.value.slug, number: Number(epic.value.taskRef.split('-').at(-1)), ref: epic.value.taskRef } })
+  emit('close')
+}
 
 async function setDependencies(ids: string[]) {
   if (!epic.value || savingDependencies.value) return
@@ -457,7 +470,18 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
           :class="['flex items-center gap-3', props.mode === 'page' && 'px-4 pt-3']"
         >
           <span class="shrink-0 font-mono text-xs text-muted">{{ epic.taskRef }}</span>
+          <UButton
+            v-if="epic.tasks.length === 0 && !epic.prNumber"
+            label="Delete"
+            icon="i-lucide-trash-2"
+            size="sm"
+            variant="ghost"
+            color="error"
+            :loading="removing.isPending.value"
+            @click="removeParent"
+          />
           <AddSubtask
+            v-if="!epic.mergedAt"
             :slug="project.slug"
             :number="Number(epic.taskRef.split('-').at(-1))"
             class="min-w-0 flex-1 justify-end"
@@ -465,7 +489,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
         </div>
         <UTabs
           v-model="tab"
-          :items="[{ label: `Sub-tasks (${epic.tasks.length})`, value: 'tasks' }, { label: 'Graph', value: 'graph' }, { label: 'Activity', value: 'activity' }, ...$slots.comments ? [{ label: 'Comments', value: 'comments' }] : []].map(item => ({ ...item, icon: props.mode === 'mobile' ? undefined : TAB_ICONS[item.value] }))"
+          :items="[{ label: `Sub-tasks (${epic.tasks.length})`, value: 'tasks' }, { label: 'Graph', value: 'graph' }, { label: 'Activity', value: 'activity' }, ...epic.taskId && epic.taskRef ? [{ label: 'Comments', value: 'comments' }] : []].map(item => ({ ...item, icon: props.mode === 'mobile' ? undefined : TAB_ICONS[item.value] }))"
           :variant="props.mode === 'mobile' ? 'pill' : 'link'"
           :size="props.mode === 'mobile' ? 'md' : 'sm'"
           :content="false"
@@ -476,7 +500,12 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
           v-if="tab === 'comments'"
           class="min-h-0 overflow-y-auto"
         >
-          <slot name="comments" />
+          <ParentComments
+            v-if="epic.taskId && epic.taskRef && project"
+            :slug="project.slug"
+            :task-id="epic.taskId"
+            :task-ref="epic.taskRef"
+          />
         </div>
         <div
           v-else-if="tab === 'activity'"

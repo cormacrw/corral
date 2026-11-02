@@ -505,6 +505,16 @@ it('reads the remote once at most while paused, and still finds a moved branch o
   expect(await trailers(epic.branch, task.submissionId)).toHaveLength(0)
 })
 
+it('reads operations from before D31 as what they were, by their old wording', async () => {
+  const epic = await createEpic()
+  const task = await approved(epic, 'a.txt')
+  for (const sha of ['a', 'b', 'c']) {
+    await t.db.insert(schema.taskIntegrationOperations).values({ submissionId: task.submissionId, epicId: epic.id, kind: 'integrate', state: 'failed', error: 'The epic branch moved', expectedTargetSha: sha, leaseEpoch: 1 })
+  }
+  await tick()
+  expect(await row(task)).toMatchObject({ status: 'merged' })
+})
+
 it('leaves a pending operation alone while paused', async () => {
   const epic = await createEpic()
   const task = await approved(epic, 'a.txt')

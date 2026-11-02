@@ -136,7 +136,7 @@ export const agents: Agent[] = [
   { id: 'a-rev', name: 'Rita', role: 'reviewer', runtime: 'claude-code', concurrency: 1, paused: false, wakeIntervalSeconds: null, pausedUntil: null, activeRuns: 2, avatarUrl: null }
 ]
 
-const epicRows: Omit<Epic, 'taskId' | 'taskRef'>[] = [
+const epicRows: Omit<Epic, 'taskId' | 'taskRef' | 'mergedAt'>[] = [
   {
     id: 'e-searches',
     dependsOn: [],
@@ -246,7 +246,7 @@ const epicRows: Omit<Epic, 'taskId' | 'taskRef'>[] = [
   { ...epicInReview('e-feeds', 'Activity feeds', 'ready_to_merge', 221), sync: { state: 'fixing', fix: 'ci', reason: 'CI failed on the parent PR. ci: failed', files: [], developer: null, attempts: 1 } },
   { ...epicInReview('e-exportpdf', 'PDF exports', 'ready_to_merge', 222), sync: { state: 'failed', fix: 'ci', error: '3 fixes for CI failure have been published and it\'s still failing. The last: CI failed on the parent PR. ci: failed' } }
 ]
-export const epics: Epic[] = epicRows.map(epic => ({ ...epic, taskId: null, taskRef: null }))
+export const epics: Epic[] = epicRows.map(epic => ({ ...epic, taskId: null, taskRef: null, mergedAt: epic.reviewState === 'merged' ? epic.updatedAt : null }))
 
 export const epicFixes: Record<string, EpicFixRun[]> = {
   'e-search': [
@@ -258,7 +258,7 @@ export const epicFixes: Record<string, EpicFixRun[]> = {
   ]
 }
 
-function epicInReview(id: string, title: string, reviewState: Epic['reviewState'], prNumber: number): Omit<Epic, 'taskId' | 'taskRef'> {
+function epicInReview(id: string, title: string, reviewState: Epic['reviewState'], prNumber: number): Omit<Epic, 'taskId' | 'taskRef' | 'mergedAt'> {
   const fixing = reviewState === 'changes_requested'
   return {
     id, projectId: 'p-corral', title, description: `${title}, reviewed as one parent PR.`, dependsOn: [], blocks: [],
@@ -465,7 +465,7 @@ function parentRow(project: Project, epic: Epic, from?: Task): Task {
 
 // Makes a parent of a task, as adding its first sub-task does
 export function addParent(project: Project, from: Task): Epic {
-  const epic: Epic = { ...epicRows[0]!, id: `e-${from.ref.toLowerCase()}`, projectId: project.id, title: from.title, description: '', reviewMode: project.epicReviewModeDefault, branch: null, prNumber: null, prUrl: null, prHeadSha: null, reviewState: null, sync: null, reviewModeLocked: false, taskCount: 0, mergedCount: 0, dependsOn: [], blocks: [], taskId: null, taskRef: null }
+  const epic: Epic = { ...epicRows[0]!, id: `e-${from.ref.toLowerCase()}`, projectId: project.id, title: from.title, description: '', reviewMode: project.epicReviewModeDefault, branch: null, prNumber: null, prUrl: null, prHeadSha: null, reviewState: null, sync: null, reviewModeLocked: false, taskCount: 0, mergedCount: 0, dependsOn: [], blocks: [], taskId: null, taskRef: null, mergedAt: null }
   epics.push(epic)
   parentRow(project, epic, from)
   return epic

@@ -57,7 +57,7 @@ function transitionReason(reason: TransitionError): string {
     case 'dependencies_not_merged': return 'The tasks this one depends on haven\'t merged yet'
     case 'invalid_outcome': return `This outcome can't be accepted: ${reason.problems.map(words).join(', ')}`
     case 'gates_failed': return `Merging needs ${reason.gates.map(g => MERGE_GATE_NAMES[g]).join(', ')}`
-    case 'integration_unconfirmed': return 'This task\'s commit isn\'t confirmed on the epic branch yet'
+    case 'integration_unconfirmed': return 'This task\'s commit isn\'t confirmed on the parent branch yet'
     case 'reason_required': return 'This move needs a reason'
   }
 }

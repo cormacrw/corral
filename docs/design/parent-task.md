@@ -1,8 +1,8 @@
 # Parent task page
 
-A parent's page (`/tasks/:ref`) combines its delivery page and task page (D31): sub-tasks, its PR, review, sync state, history and comments, with Add sub-task. Old `/epics/:id` links open the parent, or the task itself for a collapsed one-task epic. A sub-task's page links its parent.
+A parent's page (`/tasks/:ref`) combines its delivery page and task page (D31): sub-tasks, its PR, review, sync state, history and comments, with Add sub-task. Old `/epics/:id` links open the parent, or the task itself for a collapsed one-task parent. A sub-task's page links its parent.
 
-A parent groups related tasks of a plan (D9); one plan can propose several epics. It has a title, a markdown description and a canvas showing its tasks as a dependency tree. Like a task, it opens in two modes: docked in the flyout (`?parent=<id>` on the current page) or as a page (`/epics/<id>`). The flyout shows one thing at a time, so opening a parent replaces an open task and the other way round. On mobile it's always the page, and its tasks open as pages ([mobile.md](mobile.md#task-and-epic)).
+A parent groups related tasks of a plan (D9); one plan can propose several parents. It has a title, a markdown description and a canvas showing its tasks as a dependency tree. Like a task, it opens in two modes: docked in the flyout (`?parent=<id>` on the current page) or as a page (`/epics/<id>`). The flyout shows one thing at a time, so opening a parent replaces an open task and the other way round. On mobile it's always the page, and its tasks open as pages ([mobile.md](mobile.md#task-and-epic)).
 
 ## Where it opens
 

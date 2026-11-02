@@ -34,7 +34,7 @@ const hasReason = computed(() => (props.task.status === 'blocked' || props.task.
   <template
     v-for="row in [
       { key: 'project', label: 'Project' },
-      { key: 'epic', label: 'Parent' },
+      { key: 'parent', label: 'Parent' },
       { key: 'waitingEpics', label: 'Waiting on:' },
       { key: 'design', label: 'Design' },
       { key: 'status', label: 'Status' },

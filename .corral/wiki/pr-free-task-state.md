@@ -1,15 +1,15 @@
-# PR-free epic task state (COR-286)
+# PR-free sub-task state (COR-286)
 
 Binding rules: D5, D24, D27, D28 in `docs/decisions.md`; section 4 of
 `docs/flows.md`. COR-286 added persistence and negotiation; COR-287 added commit
-submission and review; COR-288 added integration into the epic branch.
+submission and review; COR-288 added integration into the parent's branch.
 
 `tasks.integrationProtocol = 0` preserves all existing paths. The additive
-0051 migration changes no branches, PR links, review/evidence rows or epic
+0051 migration changes no branches, PR links, review/evidence rows or parent
 modes. `recordTaskSubmission` in `apps/server/src/task-submissions.ts` selects
 protocol 1 only for ordinary epic-mode build tasks without PRs, recording a
 versioned submission and its base/target atomically. It rejects direct,
-standalone, each_task, spike, design and epic conflict submissions.
+standalone, each_task, spike, design and parent conflict submissions.
 
 `task_submissions` records submitted, agent-approved and integrated commits
 without a PR FK. Approval must match the submitted head. Integration needs
@@ -30,15 +30,15 @@ work stays available.
 `#authorJob` calls `selectPrFreeProtocol` for a developer run placed on a runner
 advertising protocol 1, so the prompt, job and report agree from the first run.
 Selection is skipped when GitHub shows, or can't rule out, an open PR on a branch
-that already existed (a PR whose number was lost in a crash), or when the epic PR
+that already existed (a PR whose number was lost in a crash), or when the parent PR
 has merged. A legacy runner's run stays on the PR path. Once selected the task
-can't change epic or type (409), because the database check and its submissions
+can't change parent or type (409), because the database check and its submissions
 depend on them.
 
 The outcome is `commit_submitted`, for first submissions, revisions and
 rebase-only rounds alike. The server rejects it on PR-path tasks and rejects
-`pr_*` on selected ones. The runner pushes the task branch (never the epic
-branch), then sends `headSha` and `baseSha`, the merge base with the epic branch.
+`pr_*` on selected ones. The runner pushes the task branch (never the parent
+branch), then sends `headSha` and `baseSha`, the merge base with the parent's branch.
 `#submitCommit` applies the usual branch and evidence checks, refuses a head equal
 to its base, and records the transition, submission, note and run end in one
 transaction. No GitHub PR call is made.
@@ -52,29 +52,29 @@ and records `agentApprovedHeadSha` with the approval. A rejected verdict leaves 
 task in Agent review with the lease held; the reviewer reports failed if the head
 won't come back. D26 applies unchanged: the gates section follows the project's
 `requiredChecks`. With checks set, its wording says CI runs on the push and the
-epic PR's CI is the merge gate, since no merge gate covers the task commit itself.
+parent PR's CI is the merge gate, since no merge gate covers the task commit itself.
 
 Revisions add a submission on the same branch. Comments, reviews and evidence
 rows are never rewritten; `get_task` returns all of them with `submissions`, and
 the reviewer prompt lists earlier submissions. Stopped-run recovery is unchanged.
 
-Merged on the PR-free path means confirmed integration into the epic branch;
-same-epic dependents can then start. Other dependents wait for the epic PR to
+Merged on the PR-free path means confirmed integration into the parent's branch;
+same-epic dependents can then start. Other dependents wait for the parent PR to
 merge. Approval or pending integration never means done.
 
-## Human review at the epic (COR-289)
+## Human review at the parent (COR-289)
 
 `applyTransition` clears the in-memory flag for `integrationProtocol > 0`, so
 `review_approved` always lands in Ready to merge; the row keeps `humanReview`
 and the criteria keep `checkedByHuman`. `humanObligations` in `epic-prs.ts` turns
-those into the epic approval's obligations, for PR-free tasks only. The Inbox gets
+those into the parent approval's obligations, for PR-free tasks only. The Inbox gets
 them as `humanReview` and `humanChecks` on each `EpicReviewTask`. Approve must send
-`confirmedCriteria` and `confirmedTasks` covering the board read under the epic
+`confirmedCriteria` and `confirmedTasks` covering the board read under the parent
 lock, or it's a 409 `human_checks_unconfirmed`, and the audit entry records them.
 `met` stays null: confirming is the human's approval, not a verdict.
 
 `Task.submission` carries the latest submission's commits with GitHub URLs, shown by
-`TaskCommitLinks`. An integrated SHA is as recorded; a later epic rebase rewrites the
+`TaskCommitLinks`. An integrated SHA is as recorded; a later parent rebase rewrites the
 branch but GitHub still serves the commit.
 
 ## Integrating (COR-288)
@@ -85,11 +85,11 @@ The server decides and the runner does the git, in the bare clone
 never touched. Only a runner saying `taskIntegrationExecutor` in its hello gets
 these jobs, so a build that only submits and reviews is never asked.
 
-Each epic has at most one active operation, enforced by the partial unique index
+Each parent has at most one active operation, enforced by the partial unique index
 `task_integration_one_active_per_epic`, and tasks go oldest first. Each tick
 rebuilds the position from the journal and the remote, so a restart loses nothing:
 
-1. `pending`: the operation is written with the epic head it expects and a new
+1. `pending`: the operation is written with the parent head it expects and a new
    `leaseEpoch`, before any git.
 2. `running`: `integration_prepare` builds one commit on the expected head, a
    three-way merge of the task's own change, carrying the trailer
@@ -101,7 +101,7 @@ rebuilds the position from the journal and the remote, so a restart loses nothin
    sees it. A failure goes to the developer (`ci_failed`). Pending waits, for up to
    an hour, then blocks. A check that hasn't appeared after three minutes doesn't run
    on such a commit (a PR-only workflow), so it's recorded as `checks_deferred` and
-   left to the epic PR's merge gate. That's how task-only CI needs no task PR.
+   left to the parent PR's merge gate. That's how task-only CI needs no task PR.
 4. `reconciling` is written **before** `integration_push`: the result is unknown
    until read. The push is `--force-with-lease=<ref>:<expected>`, which GitHub
    evaluates, so a stale runner or stale clone can't overwrite anything.
@@ -114,13 +114,13 @@ rebuilds the position from the journal and the remote, so a restart loses nothin
 The trailer is what makes this exactly once. Prepare and inspect both look for it
 first, so a retry after a lost answer, or a stale push landing behind a newer
 operation, records the commit that's there instead of adding another. It survives
-the epic branch being rebased, which a SHA wouldn't.
+the parent's branch being rebased, which a SHA wouldn't.
 
 A moved branch ends the operation (`The epic branch moved`) and the next takes a
 fresh head, up to five per pass. A conflict ends it and starts a D24 rebase-only
 round: the developer reports `commit_submitted`, which is a new submission, and the
-rebase review carries approval over. A clean three-way onto a moved epic is a
-mechanical update and keeps its approval; the epic's integration review and CI
+rebase review carries approval over. A clean three-way onto a moved parent is a
+mechanical update and keeps its approval; the parent's integration review and CI
 still see the result.
 
 Failures are sorted by whose they are. A moved branch, an interrupted or cancelled
@@ -134,7 +134,7 @@ Pausing the task or project stops `#prepare` and the gate before the push, leavi
 the operation where it is to carry on later. Unknown results still reconcile: it
 only reads, and a commit already on the branch is a fact. A running candidate at
 the paused gate skips remote fetches on subsequent ticks. On resume its push
-still compares the expected epic head; after a restart it reconciles first.
+still compares the expected parent head; after a restart it reconciles first.
 A task sent back during its push lands
 anyway: the commit stands, the task stays open and gets a comment.
 
@@ -146,20 +146,20 @@ journal write restores `running` and the original `updatedAt`, since nothing was
 sent. An operation left `running` resumes through reconcile on the next pass, which
 re-enters the gate with the same candidate.
 
-Dependents: `claim.ts` treats a dependency on a build task in another epic as met
-only when that epic is done, and `publishEpicDependents` wakes those tasks when the
-epic PR merges. Same-epic dependents wake on Merged through `publishDependents`.
+Dependents: `claim.ts` treats a dependency on a build task in another parent as met
+only when that parent is done, and `publishEpicDependents` wakes those tasks when the
+parent PR merges. Same-epic dependents wake on Merged through `publishDependents`.
 
 ## Wait reasons and activity (COR-356)
 
 `holdsAcrossEpics` in `epic-review-state.ts` shares the claim rule with task
-serialization. A Merged task/bug dependency in another unfinished epic adds that
-epic to `Task.waitingOnEpics`, including for standalone dependents. Same-epic
-dependencies, spikes, deleted tasks and finished epics do not add a wait. An
-unmerged dependency keeps its task-level wait reason. Epic names are deduplicated
-with explicit epic dependencies. Board notes, task properties and the overview
+serialization. A Merged task/bug dependency in another unfinished parent adds that
+parent to `Task.waitingOnEpics`, including for standalone dependents. Same-epic
+dependencies, spikes, deleted tasks and finished parents do not add a wait. An
+unmerged dependency keeps its task-level wait reason. Parent names are deduplicated
+with explicit parent dependencies. Board notes, task properties and the overview
 count all read this field.
 
 Inbox CI failures refer to the commit when there is no PR; conflicts name the
-epic branch and head changes name the task branch. Tasks with PRs keep their PR
+parent branch and head changes name the task branch. Tasks with PRs keep their PR
 wording.

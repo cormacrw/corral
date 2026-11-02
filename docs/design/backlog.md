@@ -5,7 +5,7 @@
 
 ## Purpose
 
-All of a project's tasks in **Backlog** status, grouped by epic. Backlog tasks are proposed or sent back, never scheduled, and not on the board (D10). This is where you browse what's coming and pick something to refine with Juno.
+All of a project's tasks in **Backlog** status, grouped by parent. Backlog tasks are proposed or sent back, never scheduled, and not on the board (D10). This is where you browse what's coming and pick something to refine with Juno.
 
 ## Layout
 
@@ -15,7 +15,7 @@ The page spans the full content width.
    - a search input ("Search Backlog")
    - "N tasks · never scheduled until approved" and **Show completed**, off by default, which includes completed work of any age in the parent groups. Rows show status badges; only Backlog tasks offer Move to board.
    - on the right: **Collapse all / Expand all** (outline) and **New task** (solid primary, plus icon)
-2. **Parent groups:** one bordered card per epic.
+2. **Parent groups:** one bordered card per parent.
    - **Header** (`bg-muted`):
      - a chevron toggle with the parent name (`aria-expanded`), which rotates 90° when open
      - a count pill

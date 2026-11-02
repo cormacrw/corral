@@ -52,6 +52,12 @@ const project = computed(() => shell.projects.find(p => p.id === task.value?.pro
 const number = computed(() => task.value?.number ?? 0)
 // A task in a collapsed one-task epic is top-level, so it shows no parent
 const epic = computed(() => task.value?.parentTask ? epicList.value.find(e => e.id === task.value!.epicId) ?? null : null)
+const delivery = computed(() => !task.value?.parentTask && task.value?.epicId ? epicList.value.find(e => e.id === task.value!.epicId) ?? null : null)
+// Unstarted work can gain sub-tasks; the server has the last word (D31)
+const canAddSubtask = computed(() => {
+  const t = task.value
+  return Boolean(t && !t.epicId && !t.lease && !t.pr && !t.design && ['draft', 'backlog', 'ready'].includes(t.status) && ['task', 'bug'].includes(t.type) && runs.value.length === 0)
+})
 const slug = computed(() => project.value?.slug ?? '')
 const { tasks: projectTasks, epics: epicList } = useProjectLists(slug)
 const address = computed((): TaskAddress => ({ slug: slug.value, number: number.value, ref: props.taskRef }))
@@ -342,39 +348,9 @@ const workingAgent = computed(() => task.value?.lease ? shell.agents.find(a => a
   <EpicDetail
     v-if="task?.rollup"
     :epic-id="task.rollup.epicId"
-    :mode="props.mode === 'flyout' ? 'flyout' : props.mode"
+    :mode="props.mode"
     @close="emit('close')"
-  >
-    <template #comments>
-      <div class="flex flex-col gap-3 p-4">
-        <div
-          v-for="comment in comments"
-          :key="comment.id"
-          class="text-sm"
-        >
-          <p class="text-xs text-muted">
-            {{ authorLabel(comment.author) }}
-          </p>
-          <MarkdownText :text="comment.body" />
-        </div>
-        <p
-          v-if="comments.length === 0"
-          class="text-sm text-muted"
-        >
-          No comments yet.
-        </p>
-        <DraftComposer
-          :key="props.taskRef"
-          :draft="composerDraft"
-          placeholder="Comment…"
-          :hint="composerHint"
-          :project="slug || null"
-          :draft-key="`task:${props.taskRef}`"
-          @submit="sendComment"
-        />
-      </div>
-    </template>
-  </EpicDetail>
+  />
   <div
     v-else
     class="flex h-full min-h-0 flex-col"
@@ -576,12 +552,6 @@ const workingAgent = computed(() => task.value?.lease ? shell.agents.find(a => a
           class="flex flex-wrap items-center gap-2 rounded-lg border border-default bg-muted px-3 py-2 text-sm"
         >
           <span class="me-auto text-muted">In the Backlog, so never scheduled until you move it.</span>
-          <AddSubtask
-            v-if="!task.parentTask && task.epicId === null && (task.type === 'task' || task.type === 'bug') && !task.design"
-            :slug="slug"
-            :number="task.number"
-            promotes
-          />
           <UButton
             label="Move to board"
             icon="i-lucide-kanban"
@@ -590,6 +560,17 @@ const workingAgent = computed(() => task.value?.lease ? shell.agents.find(a => a
             @click="place()"
           />
         </div>
+
+        <AddSubtask
+          v-if="canAddSubtask && shows('details')"
+          :slug="slug"
+          :number="task.number"
+          promotes
+        />
+        <TaskDelivery
+          v-if="delivery && shows('details')"
+          :epic="delivery"
+        />
 
         <dl
           v-if="props.mode === 'flyout' || (mobile && shows('details'))"

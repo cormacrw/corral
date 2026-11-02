@@ -523,6 +523,8 @@ export class PlanService {
         return {
           project: { name: project!.name, prefix: project!.prefix, defaultBranch: project!.defaultBranch, epicReviewModeDefault: project!.epicReviewModeDefault },
           epics: epicRows.map(e => ({ id: e.id, title: e.title, reviewMode: e.reviewMode, dependsOn: epicDeps.filter(d => d.epic_dependencies.epicId === e.id).map(d => d.epic_dependencies.dependsOnEpicId) })),
+          // `epics` and `epicId` are for runners from before D31
+          parents: epicRows.filter(e => e.taskId).map(e => ({ parentId: e.id, ref: rows.find(t => t.id === e.taskId) && taskRef(project!.prefix, rows.find(t => t.id === e.taskId)!.number), title: e.title, reviewMode: e.reviewMode === 'epic' ? 'parent' : e.reviewMode, dependsOn: epicDeps.filter(d => d.epic_dependencies.epicId === e.id).map(d => d.epic_dependencies.dependsOnEpicId) })),
           tasks: matches.map(t => ({
             ref: t.ref,
             title: t.title,
@@ -530,6 +532,7 @@ export class PlanService {
             type: t.type,
             priority: t.priority,
             epicId: t.epicId,
+            ...(t.epicId && { parentId: t.epicId }),
             ...(t.humanReview && { humanReview: true }),
             ...(t.statusReason && { statusReason: t.statusReason }),
             ...(t.prUrl && { pr: t.prUrl }),
@@ -697,7 +700,7 @@ export class PlanService {
             if (reviewModeLocked(row!, taskRows)) throw new ToolError('The plan was not saved: the review mode can\'t change once a task in the parent has submitted work or opened a PR.')
             // Only an epic still being planned is the plan's to set: its tasks are all Drafts
             const live = previous?.status === 'approved' || taskRows.some(t => t.status !== 'draft')
-            if (live && lowersMode(row!.reviewMode, epic.reviewMode)) throw new ToolError(`The plan was not saved: it would lower ${row!.title} from ${row!.reviewMode} to ${epic.reviewMode} review. Use update_epic, which asks the human.`)
+            if (live && lowersMode(row!.reviewMode, epic.reviewMode)) throw new ToolError(`The plan was not saved: it would lower ${row!.title} from ${row!.reviewMode} to ${epic.reviewMode} review. Use update_parent, which asks the human.`)
           }
           await tx.update(epics).set({ title: epic.title, description: epic.summary, ...(epic.reviewMode && { reviewMode: epic.reviewMode }), updatedAt: new Date() }).where(eq(epics.id, current))
           await syncParentContent(tx, current, { title: epic.title, description: epic.summary })

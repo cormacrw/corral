@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Task } from '@corral/contracts'
 import type { BoardFilters } from './board.ts'
-import { matchesOverviewEpicFilter, BOARD_COLUMNS, cardAssignee, boardMove, boardColumnKey, boardView, EPIC_COLUMNS, epicOnBoard, epicStage, epicWorkingAgents, filterLabel, filtersFromQuery, filtersToQuery, hasEpicFilters, hasFilters, matchesEpicFilter, matchesFilter, COMPLETE_WINDOW_DAYS, NO_FILTERS, onBoard, sortColumn, swipeStep, taskAgentIds, unfinishedPrerequisites } from './board.ts'
+import { matchesOverviewEpicFilter, BOARD_COLUMNS, cardAssignee, boardMove, boardColumnKey, boardView, EPIC_COLUMNS, epicOnBoard, epicStage, epicWorkingAgents, filterLabel, filtersFromQuery, filtersToQuery, hasEpicFilters, hasFilters, matchesEpicFilter, matchesFilter, COMPLETE_WINDOW_DAYS, NO_FILTERS, onBoard, sortColumn, swipeStep, taskAgentIds, unfinishedPrerequisites, columnEntries, matchesParentFilter } from './board.ts'
 
 const DAY = 24 * 60 * 60 * 1000
 const now = Date.parse('2026-10-29T12:00:00Z')
@@ -275,6 +275,30 @@ describe('completed designs', () => {
   })
 })
 
+describe('columnEntries', () => {
+  const finished = (ref: string, mergedAt: string) => ({ ref, type: 'task', status: 'merged', mergedAt, updatedAt: mergedAt }) as Task
+  const card = (mergedAt: string) => ({ epic: { mergedAt, updatedAt: '2020-01-01T00:00:00Z' } })
+
+  it('lists Complete by when each finished, parents and tasks together', () => {
+    const { entries } = columnEntries('complete', [finished('T-1', '2026-01-03T00:00:00Z'), finished('T-2', '2026-01-01T00:00:00Z')], [card('2026-01-02T00:00:00Z')])
+    expect(entries.map(e => e.task?.ref ?? 'parent')).toEqual(['T-1', 'parent', 'T-2'])
+  })
+
+  it('leads other columns with their parents', () => {
+    expect(columnEntries('ready', [finished('T-1', '2026-01-03T00:00:00Z')], [card('2026-01-02T00:00:00Z')]).entries.map(e => e.task?.ref ?? 'parent')).toEqual(['parent', 'T-1'])
+  })
+})
+
+describe('matchesParentFilter', () => {
+  it('applies priority and agent filters to a card', () => {
+    const none = { priorities: [], agents: [] }
+    expect(matchesParentFilter({ workingAgents: [] }, undefined, none)).toBe(true)
+    expect(matchesParentFilter({ workingAgents: [] }, { priority: 'low' }, { ...none, priorities: ['high'] })).toBe(false)
+    expect(matchesParentFilter({ workingAgents: [{ id: 'a' }] }, { priority: 'high' }, { priorities: ['high'], agents: ['a'] })).toBe(true)
+    expect(matchesParentFilter({ workingAgents: [] }, { priority: 'high' }, { ...none, agents: ['a'] })).toBe(false)
+  })
+})
+
 describe('boardView', () => {
   it('lets the URL win over the view last used', () => {
     expect(boardView('top', 'all')).toBe('top')
@@ -349,7 +373,7 @@ describe('epicStage', () => {
 
 describe('epicOnBoard', () => {
   const epic = (over: Partial<Parameters<typeof epicOnBoard>[0]> = {}) => ({
-    reviewMode: 'epic' as const, branch: 'corral/epic', reviewState: null, taskCount: 1, mergedCount: 1, updatedAt: new Date(now - 10 * DAY).toISOString(), ...over
+    reviewMode: 'epic' as const, branch: 'corral/epic', reviewState: null, taskCount: 1, mergedCount: 1, mergedAt: null, updatedAt: new Date(now - 10 * DAY).toISOString(), ...over
   })
   const old = mergedAgo(10 * DAY)
 

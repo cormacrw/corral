@@ -1,4 +1,4 @@
-import { epicReviewReportSchema, isPmDirectTool, pmActionTools, pmDirectTools, requiresPmConfirmation, evidenceInputSchema, outcomeReportSchema, rebaseReviewReportSchema, type RunnerMessage } from '@corral/contracts'
+import { epicReviewReportSchema, isPmDirectTool, neutralPmCall, pmActionTools, pmDirectTools, requiresPmConfirmation, evidenceInputSchema, outcomeReportSchema, rebaseReviewReportSchema, type RunnerMessage } from '@corral/contracts'
 import { taskRef, richTextToMarkdown } from '@corral/core'
 import { schema } from '@corral/db'
 import { and, asc, eq, isNull } from 'drizzle-orm'
@@ -44,7 +44,8 @@ export class AgentTools {
     const ctx = await this.#c.runs.fenced(message.runId, message.leaseEpoch)
     if (!ctx || ctx.run.runnerId !== runnerId) throw new ToolError('This run no longer holds its task: its lease expired or was given to another run. Stop working.')
     try {
-      return await this.#tool(ctx, message.tool, message.input)
+      const { tool, input } = neutralPmCall(message.tool, message.input)
+      return await this.#tool(ctx, tool, input)
     } catch (error) {
       if (error instanceof ApiFailure && error.body.code === 'transition_rejected') {
         throw new ToolError(`Corral rejected this: ${JSON.stringify(error.body.reason)}`)
@@ -66,7 +67,7 @@ export class AgentTools {
       if (!this.#c.plans || !ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
       return this.#c.pmActions.propose(ctx.run.planSessionId, ctx.run.id, tool, input, this.#c.runs.actor(ctx))
     }
-    if (role === 'pm' && (isPmDirectTool(tool) || tool === 'act_on_inbox' || tool === 'create_task' || tool === 'update_task' || tool === 'update_epic')) {
+    if (role === 'pm' && (isPmDirectTool(tool) || tool === 'act_on_inbox' || tool === 'create_task' || tool === 'update_task' || tool === 'update_parent')) {
       if (!ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
       return this.#c.pmTools.call(tool, input, this.#c.runs.actor(ctx), { sessionId: ctx.run.planSessionId, runId: ctx.run.id, projectId: ctx.project?.id ?? null })
     }
