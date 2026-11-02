@@ -117,6 +117,8 @@ export class RunExits {
         await db.update(runs).set({ error: runExitError(exit, lastActivityAt) }).where(reconciledRun)
         return
       default: {
+        // An epic fix spent its attempt when the reconnect interrupted it.
+        // Restore the exit facts without charging the replay a second time.
         const error = runExitError(exit, lastActivityAt)
         await db.transaction(async (tx) => {
           const locked = ctx.task ? await lockTask(tx, ctx.task.id).catch(() => null) : null

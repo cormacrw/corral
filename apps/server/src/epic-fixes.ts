@@ -20,7 +20,7 @@ type OperationRow = typeof operations.$inferSelect
 type EpicRow = typeof epics.$inferSelect
 
 // Developer runs on one operation that come to nothing before a human has to
-// retry: failed, or refused at the publish check
+// retry: failed, interrupted unexpectedly, or refused at the publish check
 export const MAX_FIX_ATTEMPTS = 3
 // Published CI fixes since the last retry before CI's verdict needs a human.
 // Review fixes stop at the project's review round cap.

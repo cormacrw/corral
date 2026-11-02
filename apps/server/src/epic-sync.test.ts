@@ -3,7 +3,7 @@ import { schema } from '@corral/db'
 import { eq, inArray, isNotNull } from 'drizzle-orm'
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { afterAll, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { prepareEpicRebase, pushEpicRebase } from '../../runner/src/epic-rebase.ts'
 import { exec } from '../../runner/src/exec.ts'
 import { inspectIntegration, prepareIntegration, pushIntegration } from '../../runner/src/integration.ts'
@@ -28,6 +28,7 @@ let dataDir: string
 let origin: string
 let project: Awaited<ReturnType<TestApp['createProject']>>
 let branches = 0
+let priorEpicIds = new Set<string>()
 
 async function git(...args: string[]): Promise<string> {
   const result = await exec('git', ['-c', 'user.name=Dev', '-c', 'user.email=dev@example.com', ...args], { cwd: origin })
@@ -88,6 +89,7 @@ afterAll(async () => {
   await t?.close()
 })
 beforeEach(async () => {
+  priorEpicIds = new Set((await t.db.select({ id: schema.epics.id }).from(schema.epics)).map(e => e.id))
   // An agent running these tests has a push URL that always fails
   vi.stubEnv('GIT_CONFIG_COUNT', '0')
   faults = null
@@ -104,8 +106,36 @@ beforeEach(async () => {
   await git('checkout', '--quiet', '--force', 'main')
 })
 
+// Optional evidence records the API's responses, not assertion or gate output.
+afterEach(async () => {
+  if (!process.env.CORRAL_EPIC_EVIDENCE_DIR) return
+  const fresh = (await t.db.select().from(schema.epics)).filter(e => !priorEpicIds.has(e.id))
+  const responses = []
+  for (const epic of fresh) {
+    for (const path of [`/api/epics/${epic.id}`, `/api/epics/${epic.id}/history`]) {
+      const response = await fetch(`${t.server!.url}${path}`)
+      responses.push({ method: 'GET', path, status: response.status, body: await response.json() })
+    }
+  }
+  const response = await fetch(`${t.server!.url}/api/runs`)
+  const allRuns = await response.json() as { epicId: string | null }[]
+  responses.push({ method: 'GET', path: '/api/runs', status: response.status, body: allRuns.filter(r => fresh.some(e => e.id === r.epicId)) })
+  await capture(`${expect.getState().currentTestName!.replace(/[^a-z0-9]+/gi, '-').slice(-150)}.json`, { scenario: expect.getState().currentTestName, transport: 'HTTP on isolated server; real git; fixture GitHub PRs and checks', responses })
+})
+
 async function capture(name: string, data: unknown) {
   if (process.env.CORRAL_EPIC_EVIDENCE_DIR) await writeFile(join(process.env.CORRAL_EPIC_EVIDENCE_DIR, name), JSON.stringify(data, null, 2))
+}
+
+async function captureEpic(name: string, epicId: string, extra: Record<string, unknown> = {}) {
+  if (!process.env.CORRAL_EPIC_EVIDENCE_DIR) return
+  const responses = []
+  for (const path of [`/api/epics/${epicId}`, `/api/epics/${epicId}/history`, '/api/runs']) {
+    const response = await fetch(`${t.server!.url}${path}`)
+    const body = await response.json() as unknown
+    responses.push({ method: 'GET', path, status: response.status, body: path === '/api/runs' ? (body as { epicId: string | null }[]).filter(r => r.epicId === epicId) : body })
+  }
+  await capture(name, { ...extra, responses })
 }
 
 const journal = async (epicId: string) => (await ops(epicId)).map(o => ({ kind: o.kind, state: o.state, expectedEpicHead: o.expectedTargetSha, ontoSha: o.ontoSha, result: o.resultHeadSha, resolutionTaskId: o.resolutionTaskId, conflictFiles: o.conflictFiles, error: o.error }))
@@ -1005,6 +1035,17 @@ describe('developer runs on the epic', () => {
     const during = await fixEpic(epic.id)
     expect(during.sync).toMatchObject({ state: 'fixing', fix: 'conflict', files: [epic.file], developer: { runId: job.runId, name: expect.any(String) } })
     await capture('fix-in-progress.json', { sync: during.sync })
+    {
+      const response = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Which developer is fixing the epic?' })
+      expect(response.status).toBe(201)
+      const pm = (await runner.next('run.assign', m => m.job.role === 'pm')).job
+      const activity = await runner.call(pm.runId, pm.leaseEpoch, 'get_agent_activity', {})
+      expect(activity.ok).toBe(true)
+      await capture('epic-fix-agent-activity.json', { request: { tool: 'get_agent_activity', input: {} }, response: activity })
+      const path = `/api/runs?agentId=${(await t.db.select().from(schema.runs).where(eq(schema.runs.id, job.runId)))[0]!.agentId}`
+      const listed = await fetch(`${t.server!.url}${path}`)
+      await capture('epic-fix-agent-history.json', { method: 'GET', path, status: listed.status, body: await listed.json() })
+    }
     const [row] = await t.db.select().from(schema.runs).where(eq(schema.runs.id, job.runId))
     expect(row).toMatchObject({ role: 'developer', epicId: epic.id, taskId: null, operationId: operation.id, fixKind: 'conflict' })
 
@@ -1077,16 +1118,101 @@ describe('developer runs on the epic', () => {
     expect((await ops(epic.id)).filter(o => o.fix)).toHaveLength(1)
   })
 
+  it('holds a human-stopped epic fix until Retry and preserves saving work through heartbeats and reconnects', async () => {
+    const epic = await conflicted()
+    await pass()
+    const job = await fixJob(epic.id)
+    await t.orchestrator.onRunMessage({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'epic-saving' }, 'r1')
+    expect((await t.request('POST', `/api/runs/${job.runId}/stop`)).status).toBe(200)
+    expect(await runner.next('run.stop', m => m.runId === job.runId)).toMatchObject({ keepWork: true })
+    for (let n = 0; n < 5; n++) {
+      await pass()
+      await t.orchestrator.schedule()
+      expect((await t.request('POST', `/api/runs/${job.runId}/stop`)).status).toBe(409)
+    }
+    expect((await fixEpic(epic.id)).sync).toMatchObject({ state: 'failed', error: expect.stringContaining('stopped by a human') })
+    expect((await ops(epic.id))[0]!.fixAttempts).toBe(0)
+    expect(await t.db.select().from(schema.runs).where(eq(schema.runs.epicId, epic.id))).toHaveLength(1)
+    const active = [{ runId: job.runId, leaseEpoch: job.leaseEpoch }]
+    await t.orchestrator.onHeartbeat(active, 'r1')
+    await t.orchestrator.onConnected(active, 'r1')
+    // A round-trip tool response follows any earlier stop on this socket.
+    await runner.call(job.runId, job.leaseEpoch, 'get_task', {})
+    expect(runner.received.filter(m => m.type === 'run.stop' && m.runId === job.runId)).toEqual([])
+    await captureEpic('human-stop-held.json', epic.id, { operation: (await ops(epic.id))[0] })
+    expect((await t.request('POST', `/api/epics/${epic.id}/sync/retry`)).status).toBe(200)
+    expect((await fixJob(epic.id)).runId).not.toBe(job.runId)
+    await t.orchestrator.onHeartbeat(active, 'r1')
+    expect((await runner.next('run.stop', m => m.runId === job.runId)).keepWork).toBeUndefined()
+  })
+
+  it('preserves saving work during the kill switch without spending an attempt', async () => {
+    const epic = await conflicted()
+    await pass()
+    const job = await fixJob(epic.id)
+    await t.orchestrator.onRunMessage({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'epic-kill-saving' }, 'r1')
+    await t.orchestrator.stopAll(t.actor)
+    expect(await runner.next('run.stop', m => m.runId === job.runId)).toMatchObject({ keepWork: true })
+    const active = [{ runId: job.runId, leaseEpoch: job.leaseEpoch }]
+    await t.orchestrator.onHeartbeat(active, 'r1')
+    await t.orchestrator.onConnected(active, 'r1')
+    await runner.call(job.runId, job.leaseEpoch, 'get_task', {})
+    expect(runner.received.filter(m => m.type === 'run.stop' && m.runId === job.runId)).toEqual([])
+    expect((await ops(epic.id))[0]!.fixAttempts).toBe(0)
+    await t.orchestrator.resumeAll(t.actor)
+    expect((await fixJob(epic.id)).runId).not.toBe(job.runId)
+  })
+
+  it.each(['lease expiry', 'runner shutdown', 'reconciled failure'] as const)('bounds epic fixes lost to %s, counting each run once', async (cause) => {
+    const epic = await conflicted()
+    await pass()
+    for (let n = 0; n < 3; n++) {
+      const job = await fixJob(epic.id)
+      if (cause === 'lease expiry') {
+        t.clock.now = new Date(t.clock.now.getTime() + 16 * 60_000)
+        await t.orchestrator.sweepLeases()
+        await t.orchestrator.sweepLeases()
+      } else if (cause === 'runner shutdown') {
+        await t.orchestrator.onRunMessage({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, headSha: null, exit: { kind: 'runner_shutdown' } }, 'r1')
+      } else {
+        await t.orchestrator.onConnected([], 'r1')
+        const ended = { type: 'run.ended' as const, runId: job.runId, leaseEpoch: job.leaseEpoch, headSha: null, exit: { kind: 'exited' as const, code: 1 } }
+        await t.orchestrator.onRunMessage(ended, 'r1')
+        await t.orchestrator.onRunMessage(ended, 'r1')
+      }
+      expect((await ops(epic.id))[0]!.fixAttempts).toBe(n + 1)
+    }
+    await t.orchestrator.schedule()
+    expect((await fixEpic(epic.id)).sync).toMatchObject({ state: 'failed', error: expect.stringContaining('3 times') })
+    expect(await t.db.select().from(schema.runs).where(eq(schema.runs.epicId, epic.id))).toHaveLength(3)
+    await captureEpic(`bounded-${cause.replaceAll(' ', '-')}.json`, epic.id, { operation: (await ops(epic.id))[0] })
+    expect((await t.request('POST', `/api/epics/${epic.id}/sync/retry`)).status).toBe(200)
+    expect((await fixJob(epic.id)).taskId).toBeNull()
+  })
+
   it('sends a refused candidate back to a developer, then stops with Retry, leaving the epic branch alone', async () => {
     const epic = await humanApproved(await conflicted())
     const seen: string[] = []
+    const publishResults: unknown[] = []
+    faults = async (job, real) => {
+      const result = await real()
+      if (job.kind === 'epic_rebase_push') publishResults.push({ request: job, response: result })
+      return result
+    }
     await pass()
-    faults = async (job, real) => job.kind === 'epic_rebase_push' ? { kind: 'epic_rebase_push', pushed: false, rejected: 'It has merge commits (abc). Rebase, never merge.', error: null } : real()
     let job = await fixJob(epic.id)
     const resolved = await resolve(job.branch!, epic.onto, epic.file, 'target version\nepic version\n')
+    // A real merge commit passes branch existence checks but the runner refuses it.
+    const side = `side-${++branches}`
+    await git('branch', side, epic.onto)
+    await commitOn(side, `${side}.txt`, 'side work\n')
+    await git('checkout', '--quiet', job.branch!)
+    await git('merge', '--quiet', '--no-ff', side, '-m', 'Invalid merge candidate')
+    const refused = await git('rev-parse', 'HEAD')
+    await git('checkout', '--quiet', 'main')
     for (let n = 0; n < 3; n++) {
       seen.push(job.runId)
-      expect(await fixReport(job, { behaviourChanged: false, headSha: resolved, conflictedFiles: [epic.file] })).toMatchObject({ ok: true })
+      expect(await fixReport(job, { behaviourChanged: false, headSha: refused, conflictedFiles: [epic.file] })).toMatchObject({ ok: true })
       await pass()
       expect(await git('rev-parse', epic.branch)).toBe(epic.head)
       if (n < 2) {
@@ -1098,14 +1224,17 @@ describe('developer runs on the epic', () => {
     await t.orchestrator.schedule()
     expect((await t.db.select().from(schema.runs).where(eq(schema.runs.epicId, epic.id)))).toHaveLength(3)
     expect(await needsYou(epic.id)).toEqual([])
+    await captureEpic('publish-refused-stopped.json', epic.id, { publishResults, expectedEpicHead: epic.head, actualEpicHead: await git('rev-parse', epic.branch) })
 
     faults = null
     expect((await t.request('POST', `/api/epics/${epic.id}/sync/retry`)).status).toBe(200)
     const again = await fixJob(epic.id)
     expect(seen).not.toContain(again.runId)
+    await git('branch', '-f', again.branch!, resolved)
     expect(await fixReport(again, { behaviourChanged: false, headSha: resolved, conflictedFiles: [epic.file] })).toMatchObject({ ok: true })
     await pass()
     expect(await git('rev-parse', epic.branch)).toBe(resolved)
+    await captureEpic('publish-retry-completed.json', epic.id, { resolved, actualEpicHead: await git('rev-parse', epic.branch) })
   })
 
   it('stops an epic after three failed developer runs, with the failure shown and a Retry that starts another', async () => {
@@ -1178,6 +1307,7 @@ describe('developer runs on the epic', () => {
       expect(await git('rev-parse', epic.branch)).toBe(head)
       await t.mergePass()
       expect((await reload(epic.id)).reviewState).toBe('ready_to_merge')
+      await capture('epic-ci-awaits-new-head.json', { epic: await fixEpic(epic.id), history: await history(epic.id), branchHead: await git('rev-parse', epic.branch) })
       t.github.setChecks(head, [{ name: 'ci', conclusion: 'success', url: null }])
       t.github.pulls.get((await reload(epic.id)).prNumber!)!.mergeable = true
       await t.mergePass()
@@ -1222,6 +1352,18 @@ describe('developer runs on the epic', () => {
       expect((await t.request('POST', `/api/epics/${epic.id}/sync/retry`)).status).toBe(200)
       expect((await fixJob(epic.id)).taskId).toBeNull()
     })
+  })
+
+  it('still creates a task for a human Request changes', async () => {
+    const epic = await humanApproved(await finished(await createEpic()))
+    await t.db.update(schema.epics).set({ reviewState: 'human_review' }).where(eq(schema.epics.id, epic.id))
+    const response = await fetch(`${t.server!.url}/api/epics/${epic.id}/review`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'request_changes', headSha: epic.head, text: 'Show export progress on small screens.' }) })
+    const body = await response.json()
+    expect(response.status).toBe(200)
+    const tasks = await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epic.id))
+    expect(tasks).toHaveLength(2)
+    expect(tasks.find(t => t.status === 'ready')).toMatchObject({ title: expect.any(String) })
+    await capture('human-request-changes.json', { method: 'POST', path: `/api/epics/${epic.id}/review`, status: response.status, body, epic: await fixEpic(epic.id) })
   })
 
   it('sends integration review changes to a developer run with no task, and reviews again with the last commit and summary', async () => {

@@ -7,7 +7,7 @@ import { publishDependents } from './dependent-tasks.ts'
 import { runEndValues, type RunEnd } from './run-lifecycle.ts'
 import { getRun } from './runs.ts'
 import { addComment, applyTransition, loadTask, lockTask } from './tasks.ts'
-import { server, type RunContext, type RunCore } from './run-context.ts'
+import { KEEP_WORK_STOPS, server, type RunContext, type RunCore } from './run-context.ts'
 
 const { runs, tasks } = schema
 
@@ -41,7 +41,7 @@ export class RunEnding {
           await applyTransition(tx, task, project, { type: 'run_failed' }, server, { event: 'run_failed', runId: ctx.run.id, error })
         }
       }
-      if (ctx.run.epicId) reviewHandedOver = ctx.run.role === 'developer' ? await this.#c.fixes.runFailed(tx, ctx.run, error) : await this.#c.epicPrs.reviewFailed(tx, ctx.run, error)
+      if (ctx.run.epicId && ctx.run.role === 'reviewer') reviewHandedOver = await this.#c.epicPrs.reviewFailed(tx, ctx.run, error)
       await this.endRunIn(tx, ctx, { ...fields, state: 'failed', outcome: 'failed', error })
       return comment
     })
@@ -63,8 +63,16 @@ export class RunEnding {
   // ended it: an outcome accepted since `ctx` was read stands, and isn't
   // overwritten or audited twice.
   async endRunIn(tx: Executor, ctx: RunContext, end: RunEnd): Promise<boolean> {
+    // Reports and claims take the operation before the run; keep the same lock
+    // order when an interrupted fix also updates its attempt count.
+    if (ctx.run.epicId && ctx.run.role === 'developer' && ctx.run.operationId) {
+      await tx.select({ id: schema.taskIntegrationOperations.id }).from(schema.taskIntegrationOperations).where(eq(schema.taskIntegrationOperations.id, ctx.run.operationId)).for('update')
+    }
     const [ended] = await tx.update(runs).set(runEndValues(end, this.#c.now()))
       .where(and(eq(runs.id, ctx.run.id), inArray(runs.state, [...ACTIVE_RUN_STATES]))).returning({ id: runs.id })
+    if (ended && ctx.run.epicId && ctx.run.role === 'developer' && (end.state === 'failed' || (end.state === 'interrupted' && !KEEP_WORK_STOPS.has(end.error ?? '')))) {
+      await this.#c.fixes.runFailed(tx, ctx.run, end.error ?? 'The developer run ended without a result')
+    }
     if (ctx.task) {
       await tx.update(tasks).set({ leaseRunId: null, leaseRole: null, leaseExpiresAt: null, leaseHeartbeatAt: null, updatedAt: this.#c.now() })
         .where(and(eq(tasks.id, ctx.task.id), eq(tasks.leaseRunId, ctx.run.id)))
@@ -110,6 +118,7 @@ export class RunEnding {
     const { db, events } = this.#c.d
     events.publish({ type: 'run.updated', run: await getRun(db, ctx.run.id) })
     await this.refreshLoad()
+    if (ctx.run.epicId && ctx.run.role === 'developer') await this.#c.fixes.publish(ctx.run.epicId)
     // A soft-deleted task has nothing left to show
     const task = ctx.task ? await loadTask(db, ctx.task.id).catch(() => null) : null
     if (task) events.publish({ type: 'task.updated', task })

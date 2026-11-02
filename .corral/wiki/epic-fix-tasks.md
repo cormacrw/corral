@@ -20,8 +20,12 @@ A CI fix with `behaviourChanged: false` keeps approval while the PR's head can r
 stale just after the push. The merge pass must not take that as an unknown head,
 so `startReview` compares with the branch before it drops approval.
 
-`fixAttempts` counts refused publishes and failed developer runs; interrupted runs
-don't count. Three set `syncError`. Completed CI fixes (three) and review fixes
+`fixAttempts` counts refused publishes, failed developer runs and non-human
+interruptions (including lease expiry, runner shutdown and reconnect loss). The
+run's conditional terminal write counts each interruption once, so a replayed
+exit cannot count it twice. A human Stop instead sets `syncError` immediately,
+holding the operation until Retry; its saving-work heartbeats keep push permission
+until a newer run starts or the operation ends. Three set `syncError`. Completed CI fixes (three) and review fixes
 (`reviewRoundCap`) since the last Retry are bounded too, and the next one's
 operation opens stopped. Retry resets all of them.
 
