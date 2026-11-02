@@ -2,6 +2,7 @@ import { schema, type Executor } from '@corral/db'
 import { and, eq, isNull } from 'drizzle-orm'
 import { holdsEpicOpen } from './epic-review-state.ts'
 import type { EventBus } from './events.ts'
+import { markDelivered, parentDependents } from './parents.ts'
 import { loadTasks } from './tasks.ts'
 
 const { epics, epicDependencies, taskDependencies, tasks } = schema
@@ -12,6 +13,7 @@ export async function publishDependents(db: Executor, events: EventBus, taskId: 
   const ids = (await db.select({ id: taskDependencies.taskId }).from(taskDependencies)
     .where(eq(taskDependencies.dependsOnId, taskId))).map(t => t.id)
   const [task] = await db.select().from(tasks).where(eq(tasks.id, taskId))
+  if (task?.epicId) await markDelivered(db, task.epicId)
   return publish(db, events, [...ids, ...task?.epicId ? await epicDependents(db, task.epicId) : []])
 }
 
@@ -28,9 +30,10 @@ async function epicDependents(db: Executor, epicId: string): Promise<string[]> {
   const [open] = await db.select({ id: tasks.id }).from(tasks).innerJoin(epics, eq(epics.id, tasks.epicId))
     .where(and(eq(epics.id, epicId), holdsEpicOpen(tasks, epics))).limit(1)
   if (open) return []
-  return (await db.select({ id: tasks.id }).from(epicDependencies)
+  const waiting = await db.select({ id: tasks.id }).from(epicDependencies)
     .innerJoin(tasks, eq(tasks.epicId, epicDependencies.epicId))
-    .where(and(eq(epicDependencies.dependsOnEpicId, epicId), isNull(tasks.deletedAt)))).map(t => t.id)
+    .where(and(eq(epicDependencies.dependsOnEpicId, epicId), isNull(tasks.deletedAt)))
+  return [...waiting.map(t => t.id), ...await parentDependents(db, epicId)]
 }
 
 async function publish(db: Executor, events: EventBus, taskIds: string[]): Promise<string[]> {

@@ -272,7 +272,7 @@ async function restart() {
   runner = await connectRunner()
 }
 
-it('lands a feature of several PR-free tasks through one epic PR and one human approval', async () => {
+it('lands a feature of several PR-free tasks through one parent PR and one human approval', async () => {
   runner = await connectRunner()
   const epic = await createEpic()
   const human = { text: 'Works on a real phone', checkedByHuman: true }
@@ -338,7 +338,7 @@ it('lands a feature of several PR-free tasks through one epic PR and one human a
   })
 })
 
-it('completes an epic mixing a grandfathered task PR with a PR-free task, keeping both contributions and their evidence', async () => {
+it('completes a parent task mixing a grandfathered task PR with a PR-free task, keeping both contributions and their evidence', async () => {
   // Before the upgrade: a runner that only knows task PRs opens one on the epic
   runner = await connectRunner('r1', {})
   const epic = await createEpic()
@@ -395,7 +395,7 @@ it('completes an epic mixing a grandfathered task PR with a PR-free task, keepin
   expect(await git('show', 'main:fresh.txt')).toBe('fresh')
   expect(await git('show', 'main:elsewhere.txt')).toBe('other team')
   await capture('mixed-epic.json', {
-    scenario: 'A task PR opened by a legacy runner stays open through a runner upgrade, a revision and an epic rebase; a new task in the same epic goes PR-free.',
+    scenario: 'A task PR opened by a legacy runner stays open through a runner upgrade, a revision and a parent task rebase; a new task in the same parent goes PR-free.',
     legacyTask: { protocol: 0, status: finished.status, pr: { number: prNumber, url: prUrl, state: t.github.pulls.get(prNumber!)!.state, merged: t.github.pulls.get(prNumber!)!.merged }, closedByRollout: 0, submissions: 0, evidence: one!.evidence.map(e => e.note) },
     prFreeTask: { protocol: 1, status: 'merged', pr: null, submission: two!.task.submission, evidence: two!.evidence.map(e => e.note) },
     commitsOnTargetAfterMerge: await log(`${landed}~1..main`),
@@ -500,7 +500,7 @@ describe('restarting during an epic rebase', () => {
     expect((await epicRow(epic.id)).reviewState).toBe('merged')
     expect(await git('show', 'main:feature.txt')).toBe('feature')
     expect(await git('show', 'main:target.txt')).toBe('target')
-    await capture(`restart-rebase-${kind}-${land ? 'landed' : 'unsent'}.json`, { scenario: `The server dies ${title}. The epic was human-approved before the target moved.`, journalAtCrash: atCrash, humanApprovingOldHeadDuringRecovery: 409, journalAfterRecovery: await journal(epic.id), approval: { approvedHeadSha: epic.head.slice(0, 8), carriedTo: head.slice(0, 8) }, mergedOnlyAfterCiOnNewHead: true, commitsOnTarget: await log('main') })
+    await capture(`restart-rebase-${kind}-${land ? 'landed' : 'unsent'}.json`, { scenario: `The server dies ${title}. The parent was human-approved before the target moved.`, journalAtCrash: atCrash, humanApprovingOldHeadDuringRecovery: 409, journalAfterRecovery: await journal(epic.id), approval: { approvedHeadSha: epic.head.slice(0, 8), carriedTo: head.slice(0, 8) }, mergedOnlyAfterCiOnNewHead: true, commitsOnTarget: await log('main') })
   })
 
   it('grants no approval to a head that moved while the server was down', async () => {
@@ -514,7 +514,7 @@ describe('restarting during an epic rebase', () => {
 
     await passes(1)
     await t.orchestrator.schedule()
-    expect((await ops(epic.id)).at(-1)).toMatchObject({ kind: 'rebase', state: 'failed', error: 'The epic branch moved', resultHeadSha: rebased })
+    expect((await ops(epic.id)).at(-1)).toMatchObject({ kind: 'rebase', state: 'failed', error: 'The parent branch moved', resultHeadSha: rebased })
     const after = await epicRow(epic.id)
     expect(after).toMatchObject({ reviewState: 'in_review', approvedHeadSha: null, approvedBaseSha: null, prHeadSha: outsider })
     await mergePasses(2)
@@ -529,7 +529,7 @@ describe('restarting during an epic rebase', () => {
     expect((await epicRow(epic.id)).reviewState).toBe('merged')
     expect(await isAncestor(onto, 'main')).toBe(true)
     expect(await git('show', 'main:outsider.txt')).toBe('not reviewed')
-    await capture('restart-stale-approval.json', { scenario: 'A rebase push landed, the server died, and someone pushed to the epic branch before it came back.', journal: await journal(epic.id), approvalAfterRestart: { reviewState: after.reviewState, approvedHeadSha: after.approvedHeadSha, prHeadSha: outsider.slice(0, 8) }, mergesBeforeNewReview: 0, staleHumanApproval: 409, history: (await history(epic.id)).map(e => `${e.actor}: ${e.text}`) })
+    await capture('restart-stale-approval.json', { scenario: 'A rebase push landed, the server died, and someone pushed to the parent branch before it came back.', journal: await journal(epic.id), approvalAfterRestart: { reviewState: after.reviewState, approvedHeadSha: after.approvedHeadSha, prHeadSha: outsider.slice(0, 8) }, mergesBeforeNewReview: 0, staleHumanApproval: 409, history: (await history(epic.id)).map(e => `${e.actor}: ${e.text}`) })
   })
 
   it('refuses the verdict of an integration review cut off by a restart', async () => {
@@ -592,7 +592,7 @@ const decision = {
     { label: 'Keep filtering', effect: 'Stays as approved', changesBehaviour: false },
     { label: 'Follow the target', effect: 'Exports every row', changesBehaviour: true }
   ],
-  affectedChanges: ['target: export everything', 'epic: filtered exports']
+  affectedChanges: ['target: export everything', 'parent: filtered exports']
 }
 
 describe('a conflict before approval (COR-445)', () => {
@@ -764,7 +764,7 @@ describe('a conflict before approval (COR-445)', () => {
     expect(await fixRuns(epic.id)).toHaveLength(2)
   })
 
-  it('returns the epic through review and the human when approval cannot carry', async () => {
+  it('returns the parent through review and the human when approval cannot carry', async () => {
     runner = await connectRunner('r1', FIXES)
     const epic = await heldEpic('shared.txt', 'epic\n')
     await commitOn('main', 'shared.txt', 'target\n')
@@ -811,7 +811,7 @@ describe('a target update that conflicts', () => {
     expect((await epicRow(epic.id)).reviewState).toBe('merged')
     expect(await git('show', 'main:shared.txt')).toBe('target\nepic')
     expect((await events(epic.id)).filter(e => e === 'human_approved')).toHaveLength(1)
-    await capture('routine-conflict.json', { scenario: 'The target changed a file a human-approved epic also changed.', humanStepsAfterTheTargetMoved: 0, needsYouThroughout: [], operation: { id: operation.id, state: 'succeeded', conflictFiles: operation.conflictFiles }, resolutionTask: { title: fix.title, branch: fix.branch, status: 'merged' }, fileOnTarget: await git('show', 'main:shared.txt'), history: (await history(epic.id)).map(e => `${e.actor}: ${e.text}`) })
+    await capture('routine-conflict.json', { scenario: 'The target changed a file a human-approved parent also changed.', humanStepsAfterTheTargetMoved: 0, needsYouThroughout: [], operation: { id: operation.id, state: 'succeeded', conflictFiles: operation.conflictFiles }, resolutionTask: { title: fix.title, branch: fix.branch, status: 'merged' }, fileOnTarget: await git('show', 'main:shared.txt'), history: (await history(epic.id)).map(e => `${e.actor}: ${e.text}`) })
   })
 
   it('waits for the human on a behaviour decision, with its context, then goes back through review', async () => {
@@ -846,7 +846,7 @@ describe('a target update that conflicts', () => {
     expect(operatorView).toMatchObject([{ kind: 'rebase', state: 'running', epic: epic.title, conflict_files: ['shared.txt'], task: `${project.prefix}-${fix.number}` }])
     expect(await git('rev-parse', epic.branch)).toBe(epic.head)
     expect(merged).toEqual([])
-    await capture('behaviour-decision.json', { scenario: 'The target changed behaviour the epic relies on, so both can\'t stand.', request: { method: 'GET', url: '/api/inbox' }, needsYouItem: needsYou[0], epicSync: waiting, operatorJournalQuery: operatorView, epicBranchMoved: false, targetLanded: false })
+    await capture('behaviour-decision.json', { scenario: 'The target changed behaviour the parent relies on, so both can\'t stand.', request: { method: 'GET', url: '/api/inbox' }, needsYouItem: needsYou[0], epicSync: waiting, operatorJournalQuery: operatorView, epicBranchMoved: false, targetLanded: false })
 
     expect((await t.request('POST', `/api/plan/sessions/${recovery.sessionId}/messages`, { text: 'Follow the target' })).status).toBe(201)
     const recorded = (await ops(epic.id)).find(o => o.id === operation.id)!.decisions[0]!.answer
@@ -1026,7 +1026,7 @@ describe('a target update that conflicts', () => {
   })
 })
 
-it('keeps simultaneous integrations on two epics whole while the target advances under them', async () => {
+it('keeps simultaneous integrations on two parent tasks whole while the target advances under them', async () => {
   runner = await connectRunner()
   const first = await createEpic('First')
   const second = await createEpic('Second')
@@ -1081,5 +1081,5 @@ it('keeps simultaneous integrations on two epics whole while the target advances
   for (const sha of landed) expect(await isAncestor(sha, 'main')).toBe(true)
   expect((await git('ls-tree', '--name-only', 'main')).split('\n')).toEqual(expect.arrayContaining(['first-a.txt', 'first-b.txt', 'second-a.txt', 'second-b.txt', 'target-1.txt', 'target-2.txt']))
   expect(merged).toHaveLength(2)
-  await capture('simultaneous-epics.json', { scenario: 'Three concurrent passes over two epics with four approved tasks, with the target moving under the jobs.', mostConcurrentWritersOnOneEpicBranch: most, journals: { first: await journal(first.id), second: await journal(second.id) }, commitsOnTarget: await log('main') })
+  await capture('simultaneous-epics.json', { scenario: 'Three concurrent passes over two parent tasks with four approved tasks, with the target moving under the jobs.', mostConcurrentWritersOnOneEpicBranch: most, journals: { first: await journal(first.id), second: await journal(second.id) }, commitsOnTarget: await log('main') })
 })

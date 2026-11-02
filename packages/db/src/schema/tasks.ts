@@ -94,6 +94,8 @@ export const tasks = pgTable('tasks', {
     else ${t.statusReason} is null end`),
   check('tasks_pr_complete', sql`(${t.prNumber} is null) = (${t.prUrl} is null)`),
   check('tasks_integration_protocol', sql`${t.integrationProtocol} >= 0 and (${t.integrationProtocol} = 0 or (${t.prNumber} is null and ${t.epicId} is not null and ${t.type}::text in ('task', 'bug')))`),
+  // A parent has sub-tasks, not work of its own (D31)
+  check('tasks_parent_shape', sql`${t.status} <> 'parent' or (${t.epicId} is null and ${t.prNumber} is null and ${t.leaseRunId} is null)`),
   index().on(t.epicId),
   index().on(t.leaseRunId),
   check('tasks_counters_non_negative', sql`${t.reviewRounds} >= 0 and ${t.failedRuns} >= 0 and ${t.leaseEpoch} >= 0`),

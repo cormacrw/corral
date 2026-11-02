@@ -36,8 +36,8 @@ function set<K extends keyof BoardFilters>(key: K, value: BoardFilters[K]) {
   <BoardFilter
     :model-value="filters.epics"
     :items="epicItems"
-    name="Epic"
-    plural="epics"
+    name="Parent"
+    plural="parents"
     icon="i-lucide-network"
     :size="props.size"
     :class="props.itemClass"

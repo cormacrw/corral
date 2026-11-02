@@ -1,26 +1,28 @@
-# Epic rebases
+# Parent rebases
 
-`EpicSynchronizer` (`apps/server/src/epic-sync.ts`) keeps an epic branch on its
+Code and branch names still say epic: see [Parent tasks](parent-tasks.md). The `epics` row is a parent's delivery record.
+
+`EpicSynchronizer` (`apps/server/src/epic-sync.ts`) keeps a parent branch on its
 target (D27, COR-290). It runs inside `TaskIntegrator`'s per-epic pass, so a
 checkpoint is the moment between two integrations. Don't start a rebase from
 anywhere else: `EpicMerger` and `EpicPullRequests.reconcile` only wait, and the
-integrator's `due()` list brings a finished epic to the checkpoint.
+integrator's `due()` list brings a finished parent to the checkpoint.
 
 A rebase is a `task_integration_operations` row of kind `rebase`, with no
 submission. The one-active-per-epic index is the writer lock, so anything that
-writes the epic branch or relies on its head checks `activeRebase` or takes a
+writes the parent's branch or relies on its head checks `activeRebase` or takes a
 row in that table. That covers review claims, human actions, task PR merges and
-the epic merge.
+the parent merge.
 
 A conflict before the final checkpoint isn't resolved at all (COR-445). `#defer`
 ends the operation as `failed` with `CONFLICT_DEFERRED`, so the lock goes and
 nothing runs. Resolving one earlier costs a run each time the target moves, and
-the target usually moves again before the epic lands.
+the target usually moves again before the parent lands.
 
-Pending has no column: `deferredConflicts` reads the epic's newest `rebase` row, so
+Pending has no column: `deferredConflicts` reads the parent's newest `rebase` row, so
 any later rebase or fix ends it by being newer. A deferred row isn't a failure
 (`NOT_FAILURES`). `begin` skips a retry on the same head and target unless the
-epic has reached `finalCheckpoint`, since those commits would conflict the same
+parent has reached `finalCheckpoint`, since those commits would conflict the same
 way. Approval is refused during an active rebase, so the state `#prepare` reads
 can't go stale in the unsafe direction: an approval just after `#defer` is seen by
 the next `begin`.
@@ -34,14 +36,14 @@ needs the approved head, because any other head is about to lose approval.
 A hand rebase or GitHub's update branch leaves no row of ours, so `begin` marks
 the deferred row `CONFLICT_GONE` when the head is no longer behind.
 
-`EpicMerger` is what stops a conflicted epic merging: it checks the head isn't
+`EpicMerger` is what stops a conflicted parent merging: it checks the head isn't
 behind in `#advance`, and again in `#merge` just before asking GitHub, because the
 target can move in between. Being behind there isn't a refused merge, so it costs
-no attempt. A checkpoint needs a waiting task or a complete epic, and
+no attempt. A checkpoint needs a waiting task or a complete parent, and
 `due()` goes through the `Backoff`, so a test expecting one uses `t.mergePass()`.
 
 While a conflict is being resolved the operation stays `running` with `fix` set
-to `conflict` and a developer run on the epic (D29, [epic fixes](epic-fix-tasks.md)).
+to `conflict` and a developer run on the parent (D29, [parent fixes](epic-fix-tasks.md)).
 
 A resolution task from before D29 keeps its old path: `resolutionTaskId` is set,
 and nothing creates one any more. The task's branch prefix (`corral/epic-rebase/`) is how
@@ -67,7 +69,7 @@ again. A conflict found while stopped goes back to `pending` and prepares again.
 
 A closed PR sits at `reviewState` `open`, the same as an open one that lost its
 approval, so only GitHub can tell them apart. `begin` reads the PR, after the
-behind check so an up-to-date epic pays nothing, and `#publish` reads it again
+behind check so an up-to-date parent pays nothing, and `#publish` reads it again
 because a resolution can take hours. Nothing is recorded: `closedPoll` keeps
 watching for a reopen in `EpicPullRequests.reconcile`, and the next look finds
 the PR open and carries on. A plain integration is still allowed, since a
@@ -76,7 +78,7 @@ A resolution run already going when the PR closes is left to finish: its result
 just can't be pushed until the PR reopens.
 
 `begin` reads GitHub three times, so the `due()` list goes through a `Backoff`
-per epic, doubling from 30 seconds to 2 minutes. Only `due()` obeys it: a task
+per parent, doubling from 30 seconds to 2 minutes. Only `due()` obeys it: a task
 waiting to integrate still gets a checkpoint on every pass, and the wait starts
 over after each rebase. It's kept in memory like the merge pass's, so a restart
 just looks sooner.
@@ -86,8 +88,8 @@ separately with `-M`. Without that, a rebase that correctly followed a rename
 looks like an edit of a target-only file, and it fails the same way on every
 retry.
 
-An epic can force an edit to a file only the target changed: main adds a test
-reading `i.project.id`, the epic makes `project` nullable, and no candidate can
+A parent can force an edit to a file only the target changed: main adds a test
+reading `i.project.id`, the parent makes `project` nullable, and no candidate can
 pass the gates without `i.project?.id` (COR-431). So `candidateProblem` refuses
 such a change outright only when `reviewed` isn't set on the push. `#awaitResolution`
 sets it when `resolutionReview` is on this exact commit, so clean candidates
@@ -117,10 +119,10 @@ retries at once; `reconciling` reads the branch.
 A clean candidate exists only in the runner's bare clone, so its push goes to
 `operation.runnerId`. A resolution's is on the remote, so any runner will do.
 
-Rebasing takes a task's recorded `baseSha` out of the epic's history. Integration
+Rebasing takes a task's recorded `baseSha` out of the parent's history. Integration
 copes by merging against a synthetic commit parented on that base
 (`buildCandidate`). A task branch cut before a rebase but submitted after gets
-the old fork point as its base, so its diff includes the epic's old commits, and
+the old fork point as its base, so its diff includes the parent's old commits, and
 it may come back with `base_conflict` when a resolved file differs.
 
 ## Approval
@@ -152,7 +154,7 @@ is bound to the reviewed commit, so a later revision can't reuse it.
 `#checkResolution` reads the operation itself, because the pass's copy can
 predate the review that made the task Ready to merge.
 
-Decisions live on `operations.decisions`. An epic fix has no task to block, so its
+Decisions live on `operations.decisions`. A parent fix has no task to block, so its
 question is an `epic_conflict` Inbox item. For a resolution task `waitingOn` is the
 only reading of "open": the newest, unanswered, and what the task is Blocked on now. A resolution's `stuck` or `blocked`
 is refused without one. `waitingDecision` makes it a `question` in the Inbox,

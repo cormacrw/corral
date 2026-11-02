@@ -104,7 +104,7 @@ export class EpicMerger {
     if (pr.mergeable === false) {
       // Up to date and still unmergeable: no rebase can fix that
       if (epic.syncError) return this.#poll.later(epic.id)
-      await recordSyncFailure(db, project, epic.id, 'GitHub reports the epic PR can\'t merge, though it is up to date with the target branch', this.#now())
+      await recordSyncFailure(db, project, epic.id, 'GitHub reports the parent PR can\'t merge, though it is up to date with the target branch', this.#now())
       this.#d.events.publish({ type: 'epic.updated', epic: await loadEpic(db, epic.id) })
       return this.#poll.later(epic.id)
     }
@@ -134,7 +134,7 @@ export class EpicMerger {
   async #closed(epic: EpicRow, project: ProjectRow): Promise<void> {
     const left = await this.#leave(epic, project, 'open', { approvedHeadSha: null, approvedBaseSha: null, conflictFiles: null }, { event: 'closed' }, epic.reviewState!)
     if (!left) return
-    await this.#d.db.update(runs).set(runEndValues({ state: 'interrupted', error: 'Epic PR closed' }, this.#now()))
+    await this.#d.db.update(runs).set(runEndValues({ state: 'interrupted', error: 'Parent PR closed' }, this.#now()))
       .where(and(eq(runs.epicId, epic.id), inArray(runs.state, [...ACTIVE_RUN_STATES])))
   }
 
@@ -147,7 +147,7 @@ export class EpicMerger {
       // The pass's copy may be old: one failure makes one fix
       const [locked] = await tx.select().from(epics).where(eq(epics.id, epic.id)).for('update')
       if (locked?.reviewState !== 'ready_to_merge' || locked.prHeadSha !== epic.prHeadSha || locked.syncError) return null
-      return openEpicFix(tx, project, locked, { fix: 'ci', brief: `CI failed on the epic PR. ${lines}`, headSha: epic.prHeadSha!, checks: failed.map(c => ({ name: c.name, url: c.url })) }, server, this.#now())
+      return openEpicFix(tx, project, locked, { fix: 'ci', brief: `CI failed on the parent PR. ${lines}`, headSha: epic.prHeadSha!, checks: failed.map(c => ({ name: c.name, url: c.url })) }, server, this.#now())
     })
     if (!fix) return
     await appendAudit(db, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, event: 'ci_failed', summary: lines }))
@@ -192,8 +192,8 @@ export class EpicMerger {
   async #recordMerged(epic: EpicRow, project: ProjectRow, pr: PullRequest): Promise<void> {
     const { db, events, github, runner } = this.#d
     await db.transaction(async (tx) => {
-      await tx.update(epics).set({ reviewState: 'merged', mergeCommitSha: pr.mergeCommitSha, prHeadSha: pr.headSha, conflictFiles: null, syncError: null, updatedAt: this.#now() }).where(eq(epics.id, epic.id))
-      await tx.update(runs).set({ state: 'interrupted', endedAt: this.#now(), error: 'Epic PR merged' })
+      await tx.update(epics).set({ reviewState: 'merged', mergeCommitSha: pr.mergeCommitSha, mergedAt: this.#now(), prHeadSha: pr.headSha, conflictFiles: null, syncError: null, updatedAt: this.#now() }).where(eq(epics.id, epic.id))
+      await tx.update(runs).set({ state: 'interrupted', endedAt: this.#now(), error: 'Parent PR merged' })
         .where(and(eq(runs.epicId, epic.id), inArray(runs.state, [...ACTIVE_RUN_STATES])))
       await appendAudit(tx, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, event: 'merged', pr: pr.number, mergeCommitSha: pr.mergeCommitSha }))
     })

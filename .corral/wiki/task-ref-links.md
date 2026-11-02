@@ -17,8 +17,8 @@ to the task page. Mobile clicks use the thread's detail sheets when
 `FLYOUT_SHEETS` is provided, otherwise the task page. `PlanConversation` provides
 that capability for its own sheets, as does the Inbox mobile Plan thread. The new
 Plan page hosts a flyout and a sheet too, so opening an attached task, or its
-epic from that sheet, keeps the composer's draft. A page that provides
-`FLYOUT_SHEETS` must show both `?task` and `?epic`: epic controls in a task sheet
+parent from that sheet, keeps the composer's draft. A page that provides
+`FLYOUT_SHEETS` must show both `?task` and `?epic`: parent controls in a task sheet
 swap one for the other, and `plan/index.test.ts` covers this.
 Modified clicks and middle clicks retain native browser navigation. Missing
 refs reach the existing TaskDetail error state. An Inbox item opens with the
@@ -27,7 +27,7 @@ message link stays in place.
 
 Ref labels outside rendered text use `TaskLink` as well: Home agent lines, the
 Inbox message header, "Refining" chips, live run lines, the selected run header,
-epic review rows, the other-epic graph node and the project activity feed. Links can't nest, so a row or
+parent review rows, the other-epic graph node and the project activity feed. Links can't nest, so a row or
 card that is one link stays one link and its ref stays a label. Home agent cards
 and live run cards also open something else, so their own link is an empty
 `absolute inset-0` sibling after the content, and the `TaskLink` sits above it with

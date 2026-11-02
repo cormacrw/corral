@@ -5,7 +5,7 @@ import { moveTask } from '~/queries/tasks'
 import type { Task } from '@corral/contracts'
 import type { TaskStatus } from '@corral/core'
 import type { BoardFilters, BoardView } from '~/utils/board'
-import { BOARD_COLUMNS, boardMove, boardView, EPIC_COLUMNS, epicOnBoard, epicStage, epicWorkingAgents, filtersFromQuery, filtersToQuery, matchesEpicFilter, matchesFilter, onBoard, sortColumn, taskAgentIds, unfinishedPrerequisites } from '~/utils/board'
+import { BOARD_COLUMNS, boardMove, boardView, epicOnBoard, epicStage, epicWorkingAgents, filtersFromQuery, filtersToQuery, isTopLevel, columnEntries, matchesEpicFilter, matchesFilter, matchesParentFilter, onBoard, parentColumn, taskAgentIds, unfinishedPrerequisites } from '~/utils/board'
 import { epicTitle, epicWithLiveCounts, plural, STATUS, STATUS_DOT } from '~/utils/labels'
 
 // The Board: approved work by status, with human moves through the same
@@ -15,7 +15,7 @@ const shell = useShell()
 const flyout = useTaskFlyout()
 const device = useDevice()
 const prefetch = useTaskPrefetch()
-const { slug, project, tasks: all, epics: epicList, loading, error, refetch } = useProject()
+const { slug, project, tasks: all, parents, epics: epicList, loading, error, refetch } = useProject()
 useSeoMeta({ title: () => `Board · ${project.value?.name ?? ''} · Corral` })
 
 // The filters live in the URL query, so a filtered Board reloads and shares
@@ -24,14 +24,15 @@ const router = useRouter()
 // so quick changes (picking two options, typing) would otherwise build on a
 // stale query and drop one another.
 const filters = ref<BoardFilters>(filtersFromQuery(route.query))
-// The Tasks / Epics toggle is shared across layouts. ?view= wins over
-// the view last used, and the URL's view counts as used.
-const lastView = useLocalStorage<BoardView>('corral.board.view', 'tasks')
-const view = ref(boardView(route.query.view, boardView(lastView.value, 'tasks')))
+// The view toggle is shared across layouts. ?view= wins over the view last
+// used, and the URL's view counts as used.
+// A new key, so a stored view from before parent tasks doesn't choose for anyone.
+const lastView = useLocalStorage<BoardView>('corral.board.scope', 'top')
+const view = ref(boardView(route.query.view, boardView(lastView.value, 'top')))
 watch(view, (next) => {
   lastView.value = next
 }, { immediate: true })
-const VIEW_ITEMS = [{ label: 'Tasks', value: 'tasks' }, { label: 'Epics', value: 'epics' }]
+const VIEW_ITEMS = [{ label: 'Top-level', value: 'top' }, { label: 'All sub-tasks', value: 'all' }]
 // The Board filters at once; the URL catches up after a pause in typing, since
 // each write is a navigation.
 const URL_WRITE_MS = 200
@@ -66,29 +67,28 @@ const search = computed({
 const epics = computed(() => [...new Set(all.value.map(t => t.epicId).filter((id): id is string => Boolean(id)))])
 // Agents that work on tasks, for the Agent filter
 const taskAgents = computed(() => shell.agents.filter(a => a.role !== 'pm'))
-const visible = computed(() => all.value.filter(t => onBoard(t) && matchesFilter(t, filters.value, taskAgentIds(t))))
+const visible = computed(() => all.value.filter(t => onBoard(t) && matchesFilter(t, filters.value, taskAgentIds(t)) && (view.value === 'all' || isTopLevel(t))))
 // Epic details opens the epic only when exactly one is selected
 const single = computed(() => filters.value.epics.length === 1 ? filters.value.epics[0]! : null)
 
 // The Status filter hides the columns it doesn't select
 const columns = computed(() => filters.value.statuses.length > 0 ? BOARD_COLUMNS.filter(c => filters.value.statuses.includes(c.key)) : BOARD_COLUMNS)
-const boardColumns = computed(() => columns.value.map(c => ({ ...c, color: STATUS_DOT[STATUS[c.statuses[0]!].color], tasks: sortColumn(c.key, visible.value.filter(t => c.statuses.includes(t.status))) })))
+const boardColumns = computed(() => columns.value.map(c => ({ ...c, color: STATUS_DOT[STATUS[c.statuses[0]!].color], ...columnEntries(c.key, visible.value.filter(t => c.statuses.includes(t.status)), parentCards.value.filter(card => parentColumn(card.stage) === c.key)) })))
 const epicLabel = (id: string) => epicTitle(epicList.value, id, epics.value.indexOf(id))
 const epicOptions = computed(() => epics.value.map(id => ({ id, label: epicLabel(id) })))
-// Epics with work left or tasks on the Board, so one waiting on its epic PR
-// stays here after its tasks leave the Complete column.
+// Parents with work left or sub-tasks on the Board, so one waiting on its PR
+// stays here after its sub-tasks leave the Complete column. A collapsed
+// one-task epic has no parent: its task is on the Board itself.
 const liveEpics = computed(() => epicList.value.map(epic => epicWithLiveCounts(epic, all.value)))
-const onBoardEpics = computed(() => liveEpics.value.filter(epic => epicOnBoard(epic, all.value.filter(t => t.epicId === epic.id))))
-// The Epics view: one card per epic, each in the one column its stage names
-const visibleEpics = computed(() => onBoardEpics.value.filter(epic => matchesEpicFilter(epic, filters.value)))
-const activeRuns = useQuery(computed(() => ({ ...runsQuery({ active: true }), enabled: view.value === 'epics' })))
-const epicColumns = computed(() => {
-  const staged = visibleEpics.value.map((epic) => {
-    const stage = epicStage(epic, all.value.filter(t => t.epicId === epic.id && t.status !== 'backlog'))
-    return { epic, stage, workingAgents: epicWorkingAgents(epic.id, all.value, activeRuns.data.value ?? [], shell.agents), waitingOn: stage === 'done' ? [] : unfinishedPrerequisites(epic, liveEpics.value) }
-  })
-  return EPIC_COLUMNS.map(column => ({ ...column, dot: STATUS_DOT[STATUS[column.status].color], cards: staged.filter(card => card.stage === column.key) }))
-})
+const onBoardEpics = computed(() => liveEpics.value.filter(epic => (epic.taskId || epic.branch) && epicOnBoard(epic, all.value.filter(t => t.epicId === epic.id))))
+// One card per parent, in the column its stage names, in the top-level view
+const emptyParents = computed(() => liveEpics.value.filter(epic => parents.value.some(p => p.id === epic.taskId && p.rollup?.total === 0)))
+const visibleEpics = computed(() => view.value === 'top' ? [...onBoardEpics.value, ...emptyParents.value.filter(e => !onBoardEpics.value.includes(e))].filter(epic => matchesEpicFilter(epic, filters.value)) : [])
+const activeRuns = useQuery(computed(() => ({ ...runsQuery({ active: true }), enabled: view.value === 'top' })))
+const parentCards = computed(() => visibleEpics.value.map((epic) => {
+  const stage = epicStage(epic, all.value.filter(t => t.epicId === epic.id && t.status !== 'backlog'))
+  return { epic, stage, workingAgents: epicWorkingAgents(epic.id, all.value, activeRuns.data.value ?? [], shell.agents), waitingOn: stage === 'done' ? [] : unfinishedPrerequisites(epic, liveEpics.value) }
+}).filter(card => matchesParentFilter(card, parents.value.find(p => p.id === card.epic.taskId), filters.value)))
 
 const toast = useToast()
 const move = useMutation(moveTask)
@@ -136,13 +136,11 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
       v-model:search="search"
       v-model:filters="filters"
       v-model:view="view"
-      :epic-columns="epicColumns"
-      :epic-total="visibleEpics.length"
       :columns="boardColumns"
       :all="all"
       :epics="epicOptions"
       :agents="taskAgents"
-      :total="visible.length"
+      :total="visible.length + visibleEpics.length"
       :loading="loading"
       :error="error"
       @retry="refetch"
@@ -162,7 +160,7 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
           />
           <UInput
             v-model="search"
-            :placeholder="view === 'epics' ? 'Search epics' : 'Search tasks'"
+            placeholder="Search tasks"
             icon="i-lucide-search"
             size="sm"
             class="w-60"
@@ -171,13 +169,12 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
             v-model="filters"
             :epics="epicOptions"
             :agents="taskAgents"
-            :epics-only="view === 'epics'"
             size="sm"
             item-class="w-40"
           />
           <UButton
             v-if="single"
-            label="Epic details"
+            label="Parent details"
             icon="i-lucide-network"
             size="xs"
             variant="outline"
@@ -185,7 +182,7 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
             :aria-pressed="flyout.epic.value === single"
             @click="flyout.toggleEpic(single)"
           />
-          <span class="ms-auto text-sm text-muted">{{ view === 'epics' ? plural(visibleEpics.length, 'epic') : plural(visible.length, 'task') }}</span>
+          <span class="ms-auto text-sm text-muted">{{ plural(visible.length + visibleEpics.length, 'task') }}</span>
         </div>
 
         <UAlert
@@ -206,10 +203,6 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
             class="h-64 w-[272px]"
           />
         </div>
-        <BoardEpicColumns
-          v-else-if="view === 'epics'"
-          :columns="epicColumns"
-        />
         <div
           v-else
           role="region"
@@ -220,7 +213,7 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
           <section
             v-for="column in boardColumns"
             :key="column.label"
-            :aria-label="`${column.label}, ${column.tasks.length}`"
+            :aria-label="`${column.label}, ${column.tasks.length + column.cards.length}`"
             :class="['flex max-h-full w-[272px] shrink-0 flex-col rounded-lg border bg-muted', dragged && boardMove(dragged, column.statuses[0]!) ? 'border-primary' : 'border-default']"
             @dragover="allowDrop($event, column.statuses[0]!)"
             @drop="dropTask($event, column.statuses[0]!)"
@@ -228,32 +221,42 @@ async function dropTask(event: DragEvent, status: TaskStatus) {
             <BoardColumnHeader
               :label="column.label"
               :hint="column.hint"
-              :count="column.tasks.length"
+              :count="column.tasks.length + column.cards.length"
               :dot="column.color"
             />
             <!-- The padding matches the glow radius so the working glow and the
                  selected ring fit inside the list: anything past it counts as
                  overflow and makes the column scroll (and clips the glow) -->
             <div class="flex min-h-0 flex-col gap-2 overflow-y-auto overscroll-contain p-2">
-              <div
-                v-for="task in column.tasks"
-                :key="task.id"
-                :draggable="!moving.has(task.id) && canDrag(task)"
-                class="shrink-0"
-                v-bind="prefetch(task, slug)"
-                @dragstart="startDrag($event, task)"
-                @dragend="dragged = null"
+              <template
+                v-for="entry in column.entries"
+                :key="entry.card?.epic.id ?? entry.task!.id"
               >
-                <TaskCard
-                  :task="task"
-                  :tasks="all"
-                  :epic="task.epicId ? epicLabel(task.epicId) : null"
-                  :pressed="flyout.ref.value === task.ref"
-                  @open="flyout.toggle(task.ref)"
+                <BoardEpicCard
+                  v-if="entry.card"
+                  :epic="entry.card.epic"
+                  :waiting-on="entry.card.waitingOn"
+                  :working-agents="entry.card.workingAgents"
                 />
-              </div>
+                <div
+                  v-else-if="entry.task"
+                  :draggable="!moving.has(entry.task.id) && canDrag(entry.task)"
+                  class="shrink-0"
+                  v-bind="prefetch(entry.task, slug)"
+                  @dragstart="startDrag($event, entry.task!)"
+                  @dragend="dragged = null"
+                >
+                  <TaskCard
+                    :task="entry.task"
+                    :tasks="all"
+                    :epic="entry.task.parentTask ? epicLabel(entry.task.epicId!) : null"
+                    :pressed="flyout.ref.value === entry.task.ref"
+                    @open="flyout.toggle(entry.task!.ref)"
+                  />
+                </div>
+              </template>
               <p
-                v-if="column.tasks.length === 0"
+                v-if="column.tasks.length + column.cards.length === 0"
                 class="px-1 pb-2 text-xs text-dimmed"
               >
                 Nothing here

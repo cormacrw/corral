@@ -1,6 +1,6 @@
 # PM run diagnostics
 
-`list_runs` and `get_run` (`apps/server/src/pm-tools.ts`, definitions in `packages/contracts/src/pm-tools.ts`) and `get_agent_activity` let the PM look into any run. The number shown in the app is `runs.number`, unique across projects, so `get_run` takes it with no task or project. Epic reviews have an `epicId` and no `taskId`, so `get_run_outcomes` never finds them; `list_runs` with role `reviewer` and status `failed` does.
+`list_runs` and `get_run` (`apps/server/src/pm-tools.ts`, definitions in `packages/contracts/src/pm-tools.ts`) and `get_agent_activity` let the PM look into any run. The number shown in the app is `runs.number`, unique across projects, so `get_run` takes it with no task or project. Parent reviews have an `epicId` and no `taskId`, so `get_run_outcomes` never finds them; `list_runs` with role `reviewer` and status `failed` does.
 
 `get_agent_activity` includes projectless PM turns in both active and recent runs. It labels their project `Global` and leaves task/epic null, so the PM can see its own global turn.
 
@@ -10,7 +10,7 @@ Runs are global, like agents (D13): these reads span every project, whichever pr
 
 ## Getting a new tool to a PM session
 
-A tool reaches the PM only once it's on `main`, because `main` is what deploys. A task merged into an epic branch shows as Merged but stays off `main` until the epic PR merges (D27). That is why these tools were missing though COR-241 and COR-269 were done.
+A tool reaches the PM only once it's on `main`, because `main` is what deploys. A task merged into a parent branch shows as Merged but stays off `main` until the parent PR merges (D27). That is why these tools were missing though COR-241 and COR-269 were done.
 
 The server and the runner both have to run the new commit: the server's list decides what may be called and the runner's decides what's advertised. Check each runner's commit in Settings or `/runner/version`.
 

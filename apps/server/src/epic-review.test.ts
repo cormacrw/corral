@@ -196,12 +196,12 @@ it('caps the files since the reviewed head as a PR is capped', async () => {
 
 it('names the open conflict task', async () => {
   const s = await setup('head-conflict')
-  const conflict = await t.createTask(s.project.slug, { title: 'Rebase epic', epicId: s.epic.id })
+  const conflict = await t.createTask(s.project.slug, { title: 'Rebase parent', epicId: s.epic.id })
   await t.db.update(tasks).set({ kind: 'conflict', status: 'ready' }).where(eq(tasks.id, conflict.id))
   expect((await read(s.epic.id)).body.conflictTaskRef).toBe(conflict.ref)
 })
 
-it('answers for an epic with no PR yet and for a merged one', async () => {
+it('answers for a parent task with no PR yet and for a merged one', async () => {
   const s = await setup('head-merged')
   t.github.behind.set(s.sha, 4)
   await t.db.update(epics).set({ reviewState: 'merged', mergeCommitSha: 'squashed' }).where(eq(epics.id, s.epic.id))
@@ -210,7 +210,7 @@ it('answers for an epic with no PR yet and for a merged one', async () => {
   expect((await read(s.epic.id)).body).toMatchObject({ pr: null, headSha: null, gateChecks: [{ name: 'lint', conclusion: 'missing' }, { name: 'test', conclusion: 'missing' }] })
 })
 
-it('answers 404 for an unknown epic and a clear error for a direct one', async () => {
+it('answers 404 for an unknown parent and a clear error for a direct one', async () => {
   const unknown = await read('6eddb30e-f553-4714-8e27-d09c4689a9ef', 'epic-review-unknown.json')
   expect(unknown.status).toBe(404)
   expect(unknown.body.error).toEqual({ code: 'not_found' })
@@ -220,5 +220,5 @@ it('answers 404 for an unknown epic and a clear error for a direct one', async (
   await t.db.update(epics).set({ reviewMode: 'direct' }).where(eq(epics.id, epic.id))
   const direct = await read(epic.id, 'epic-review-direct.json')
   expect(direct.status).toBe(409)
-  expect(direct.body.error).toEqual({ code: 'invalid_input', issues: [{ message: 'This epic merges its tasks straight to the target branch, so it has no epic review' }] })
+  expect(direct.body.error).toEqual({ code: 'invalid_input', issues: [{ message: 'This parent merges its tasks straight to the target branch, so it has no parent review' }] })
 })

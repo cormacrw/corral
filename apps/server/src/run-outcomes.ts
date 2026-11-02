@@ -85,13 +85,13 @@ export class RunOutcomes {
       const expected = design ? 'design_submitted' : spike ? 'findings_reported' : prFree ? 'commit_submitted' : 'pr_opened or pr_updated'
       switch (report.outcome) {
         case 'commit_submitted':
-          if (!prFree) throw new ToolError(`Not submitted. Only an epic task without a PR submits a commit; this task reports ${ctx.task!.rebaseOnly ? 'pr_rebased' : expected}.`)
+          if (!prFree) throw new ToolError(`Not submitted. Only a sub-task without a PR submits a commit; this task reports ${ctx.task!.rebaseOnly ? 'pr_rebased' : expected}.`)
           this.#requireBehaviour(ctx, report)
           return this.#submitCommit(ctx, { ...report, outcome: report.outcome })
         case 'pr_opened':
         case 'pr_updated':
         case 'pr_rebased':
-          if (prFree) throw new ToolError('Not submitted. This epic task opens no PR: report commit_submitted.')
+          if (prFree) throw new ToolError('Not submitted. This sub-task opens no PR: report commit_submitted.')
           if (ctx.task!.rebaseOnly && report.outcome !== 'pr_rebased') throw new ToolError('Not submitted. A rebase-only round expects pr_rebased.')
           if (!ctx.task!.rebaseOnly && report.outcome === 'pr_rebased') throw new ToolError('Not submitted. This round expects pr_opened or pr_updated, not pr_rebased.')
           if (spike) throw new ToolError('Not submitted. A spike opens no PR: report your findings with outcome findings_reported.')
@@ -201,7 +201,7 @@ export class RunOutcomes {
           : spike
             ? 'Approval recorded. A human reviews the findings next. You can stop now.'
             : prFree
-              ? 'Approval recorded for this commit. Corral integrates it into the epic branch, and any human checks go to the human at the epic review. You can stop now.'
+              ? 'Approval recorded for this commit. Corral integrates it into the parent branch, and any human checks go to the human at the parent review. You can stop now.'
               : 'Approval recorded. Corral handles human review, CI and the merge from here. You can stop now.'
     }
   }
@@ -411,7 +411,7 @@ export class RunOutcomes {
     })
     for (const comment of posted) this.#c.d.events.publish({ type: 'comment.created', comment })
     this.#c.ending.finished(ctx, 'Outcome accepted', { handoff: true })
-    if (!pr) return { ok: true, message: 'The rebased epic branch is ready for review. You can stop now.' }
+    if (!pr) return { ok: true, message: 'The rebased parent branch is ready for review. You can stop now.' }
     if (ciCarried) return { ok: true, pr: pr.url, message: 'The approval carried over. CI runs on your new head, and Corral merges once it passes. You can stop now.' }
     if (verified) return { ok: true, pr: pr.url, message: 'The server verified your trivial rebase, so the approval carried over. Corral handles any human check, CI and the merge from here. You can stop now.' }
     return { ok: true, pr: pr.url, message: `PR #${pr.number} is ready for review. You can stop now.` }

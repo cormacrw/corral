@@ -50,7 +50,14 @@ let savedTimer: ReturnType<typeof setTimeout> | null = null
 
 const project = computed(() => shell.projects.find(p => p.id === task.value?.projectId) ?? null)
 const number = computed(() => task.value?.number ?? 0)
-const epic = computed(() => task.value?.epicId ? epicList.value.find(e => e.id === task.value!.epicId) ?? null : null)
+// A task in a collapsed one-task epic is top-level, so it shows no parent
+const epic = computed(() => task.value?.parentTask ? epicList.value.find(e => e.id === task.value!.epicId) ?? null : null)
+const delivery = computed(() => !task.value?.parentTask && task.value?.epicId ? epicList.value.find(e => e.id === task.value!.epicId) ?? null : null)
+// Unstarted work can gain sub-tasks; the server has the last word (D31)
+const canAddSubtask = computed(() => {
+  const t = task.value
+  return Boolean(t && !t.epicId && !t.lease && !t.pr && !t.design && ['draft', 'backlog', 'ready'].includes(t.status) && ['task', 'bug'].includes(t.type) && runs.value.length === 0)
+})
 const slug = computed(() => project.value?.slug ?? '')
 const { tasks: projectTasks, epics: epicList } = useProjectLists(slug)
 const address = computed((): TaskAddress => ({ slug: slug.value, number: number.value, ref: props.taskRef }))
@@ -337,7 +344,17 @@ const workingAgent = computed(() => task.value?.lease ? shell.agents.find(a => a
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col">
+  <!-- A parent's page is its delivery page with its comments (D31) -->
+  <EpicDetail
+    v-if="task?.rollup"
+    :epic-id="task.rollup.epicId"
+    :mode="props.mode"
+    @close="emit('close')"
+  />
+  <div
+    v-else
+    class="flex h-full min-h-0 flex-col"
+  >
     <DetailHeader
       :mode="props.mode"
       :path="`/tasks/${props.taskRef}`"
@@ -392,7 +409,7 @@ const workingAgent = computed(() => task.value?.lease ? shell.agents.find(a => a
       </template>
       <UBreadcrumb
         v-else
-        :items="[{ label: 'Board', to: project ? `/projects/${project.slug}/board` : '/' }, ...(epic ? [{ label: epic.title, to: `/epics/${epic.id}` }] : []), { label: props.taskRef }]"
+        :items="[{ label: 'Board', to: project ? `/projects/${project.slug}/board` : '/' }, ...(task?.parentTask ? [{ label: task.parentTask.title, to: `/tasks/${task.parentTask.ref}` }] : []), { label: props.taskRef }]"
       />
       <UBadge
         v-if="isDraft && props.mode === 'flyout'"
@@ -543,6 +560,17 @@ const workingAgent = computed(() => task.value?.lease ? shell.agents.find(a => a
             @click="place()"
           />
         </div>
+
+        <AddSubtask
+          v-if="canAddSubtask && shows('details')"
+          :slug="slug"
+          :number="task.number"
+          promotes
+        />
+        <TaskDelivery
+          v-if="delivery && shows('details')"
+          :epic="delivery"
+        />
 
         <dl
           v-if="props.mode === 'flyout' || (mobile && shows('details'))"
@@ -767,7 +795,7 @@ const workingAgent = computed(() => task.value?.lease ? shell.agents.find(a => a
           <p class="mt-1 text-xs text-muted">
             {{ task.acceptanceCriteria.some(c => c.checkedByHuman)
               ? epic?.reviewMode === 'epic' && !task.pr && ['task', 'bug'].includes(task.type)
-                ? 'The reviewer checks other criteria from evidence. Human checks are completed on the epic review, once the epic is ready.'
+                ? 'The reviewer checks other criteria from evidence. Human checks are completed on the parent review, once the parent is ready.'
                 : 'The reviewer checks other criteria from evidence. Human checks are completed in the Inbox.'
               : 'The reviewer marks criteria met from evidence.' }}
           </p>

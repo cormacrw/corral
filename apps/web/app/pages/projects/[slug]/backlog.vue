@@ -25,13 +25,14 @@ const showCompleted = ref(false)
 const collapsed = useLocalStorage<Record<string, boolean>>('corral.backlog.collapsed', {})
 const backlog = computed(() => all.value.filter(t => (t.status === 'backlog' || (showCompleted.value && isTaskDone(t))) && (!search.value || `${t.ref} ${t.title}`.toLowerCase().includes(search.value.toLowerCase()))))
 const groups = computed(() => {
-  const ids = [...new Set(all.value.map(t => t.epicId ?? 'none'))]
+  const groupOf = (t: Task) => t.parentTask ? t.epicId! : 'none'
+  const ids = [...new Set(all.value.map(groupOf))]
   return ids.map((id, i) => ({
     id,
-    title: id === 'none' ? 'No epic' : epicTitle(epicList.value, id, i),
-    rows: backlog.value.filter(t => (t.epicId ?? 'none') === id),
-    merged: all.value.filter(t => (t.epicId ?? 'none') === id && isTaskDone(t)).length,
-    total: all.value.filter(t => (t.epicId ?? 'none') === id).length
+    title: id === 'none' ? 'On their own' : epicTitle(epicList.value, id, i),
+    rows: backlog.value.filter(t => groupOf(t) === id),
+    merged: all.value.filter(t => groupOf(t) === id && isTaskDone(t)).length,
+    total: all.value.filter(t => groupOf(t) === id).length
   })).filter(g => g.rows.length > 0)
 })
 const inPlan = computed(() => new Map(shell.planSessions.filter(s => s.status === 'needs_approval').map(s => [s.projectId, s])))
@@ -198,7 +199,7 @@ async function newTask() {
               <span class="text-xs text-muted">{{ group.merged }} of {{ group.total }} done</span>
               <UButton
                 v-if="group.id !== 'none'"
-                label="Epic details"
+                label="Parent details"
                 icon="i-lucide-network"
                 variant="link"
                 color="neutral"

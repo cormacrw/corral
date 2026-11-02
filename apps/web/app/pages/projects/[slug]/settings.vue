@@ -331,9 +331,9 @@ async function remove() {
               <label
                 for="epic-review-mode"
                 class="font-medium"
-              >Epic review mode</label>
+              >Parent review mode</label>
               <p class="text-xs text-muted">
-                For new epics a plan doesn't set a mode for. {{ EPIC_REVIEW_MODE[form.epicReviewModeDefault].description }}.
+                For new parents a plan doesn't set a mode for. {{ EPIC_REVIEW_MODE[form.epicReviewModeDefault].description }}.
               </p>
             </div>
             <USelectMenu
@@ -467,7 +467,7 @@ async function remove() {
       <UModal
         v-model:open="removeOpen"
         :title="`Remove ${project.name}?`"
-        description="Stops every run and removes the project with its tasks, epics and plans from Corral. Your repository, branches and PRs on GitHub are left alone."
+        description="Stops every run and removes the project with its tasks, parent tasks and plans from Corral. Your repository, branches and PRs on GitHub are left alone."
       >
         <template #body>
           <form

@@ -19,13 +19,13 @@ agent's environment, the only `CORRAL_*` variable an agent sees:
 | Run | Required checks | `CORRAL_CHECK_SCOPE` | Prompt asks for |
 |---|---|---|---|
 | First attempt, review round, CI fix, task rebase | Yes | `targeted` | Fast, relevant checks; a CI fix starts from what failed |
-| Epic conflict fix, epic rebase or resolution task | Yes | `none` | No checks at all |
+| Parent conflict fix, parent rebase or resolution task | Yes | `none` | No checks at all |
 | Any | No | unset | The full local check |
 
 Any project's check script can honour the variable. `scripts/check.ts` returns
 at once on `none`, and runs lint and typecheck without the test suites on
 `targeted`. `--review` and an unset variable run everything. A published head
-still needs required CI to merge, and a failure returns as an epic CI failure.
+still needs required CI to merge, and a failure returns as a parent CI failure.
 Spikes change no code, so their prompt asks for no checks and the variable stays
 unset.
 
@@ -81,7 +81,7 @@ still inherited: deployment tests push directly to their temporary bare repo's
 path, never by clearing the guard or changing the real origin's configuration.
 `agent.test.ts` proves named-origin pushes fail while a local fixture push works.
 
-The epic review-state retry case waits for the Inbox fallback to persist before
+The parent review-state retry case waits for the Inbox fallback to persist before
 closing its database. Retry publishes an `epic.updated` arrival whose Inbox
 preparation runs asynchronously; closing PGlite during that query can hang
 inside its WASM protocol handler. Wait for the durable result, not a fixed sleep.

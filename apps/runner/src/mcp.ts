@@ -24,7 +24,7 @@ interface ImageResult {
 
 // The tools a run gets: its role's alone. Only a designer submits designs (D23)
 export function toolsFor(job: Pick<RunJob, 'role'> & Partial<Pick<RunJob, 'taskId'>>): AgentTool[] {
-  // A developer on an epic has no task to comment on, attach evidence to or
+  // A developer on a parent's delivery run has no task to comment on, attach evidence to or
   // read attachments from (D29)
   if (job.role === 'developer' && job.taskId === null) return ['get_task', 'report_outcome']
   return ROLE_TOOLS[job.role] ?? []

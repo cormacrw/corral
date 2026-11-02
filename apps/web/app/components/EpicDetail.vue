@@ -4,6 +4,7 @@ import { epicActivityQuery, epicHistoryQuery, epicQuery, patchEpic, retryEpicSyn
 import type { PatchEpicInput } from '@corral/contracts'
 import { isTaskDone, type EpicReviewMode } from '@corral/core'
 import { ApiError } from '~/queries/client'
+import { removeTask, taskHistoryQuery } from '~/queries/tasks'
 import DetailHeader from './DetailHeader.vue'
 import { EPIC_CONFLICT_PENDING, EPIC_REVIEW_MODE, EPIC_STATUS_TEXT, epicHistoryText, epicReviewStatus, epicStoppedLabel, epicWithLiveCounts, PRIORITY, statusCounts } from '~/utils/labels'
 
@@ -22,11 +23,16 @@ const retryMutation = useMutation(retryEpicSync)
 const epicResult = useQuery(computed(() => epicQuery(props.epicId)))
 const activityResult = useQuery(computed(() => epicActivityQuery(props.epicId)))
 const epic = computed(() => epicResult.data.value ?? null)
-const activity = computed(() => activityResult.data.value ?? [])
 // A failed background refetch leaves what's cached on screen
 const error = computed(() => epicResult.isLoadingError.value ? epicResult.error.value?.message ?? null : null)
 const saved = ref(false)
 const project = computed(() => shell.projects.find(p => p.id === epic.value?.projectId) ?? null)
+// The delivery record's history with the parent task's own
+const parentHistory = useQuery(computed(() => ({
+  ...taskHistoryQuery({ slug: project.value?.slug ?? '', number: Number(epic.value?.taskRef?.split('-').at(-1)), ref: epic.value?.taskRef ?? '' }),
+  enabled: Boolean(epic.value?.taskRef && project.value)
+})))
+const activity = computed(() => [...activityResult.data.value ?? [], ...parentHistory.data.value ?? []].sort((a, b) => a.createdAt.localeCompare(b.createdAt)))
 const { tasks: projectTasks, epics: epicList } = useProjectLists(() => project.value?.slug ?? '')
 // Task events update the shared task list, not the epic's aggregate counts.
 const related = computed(() => epicList.value.map(e => epicWithLiveCounts(e, projectTasks.value)))
@@ -37,6 +43,21 @@ const prerequisites = computed(() => related.value.filter(e => epic.value?.depen
 const blockedEpics = computed(() => related.value.filter(e => epic.value?.blocks.includes(e.id)))
 const waiting = computed(() => prerequisites.value.filter(e => e.mergedCount < e.taskCount))
 const choices = computed(() => related.value.filter(e => e.id !== epic.value?.id && !epic.value?.dependsOn.includes(e.id)).map(e => ({ label: e.title, value: e.id })))
+
+const removing = useMutation(removeTask)
+const confirmDelete = ref(false)
+const deleteError = ref<string | null>(null)
+async function removeParent() {
+  if (!epic.value?.taskRef || !project.value) return
+  deleteError.value = null
+  try {
+    await removing.mutateAsync({ task: { slug: project.value.slug, number: Number(epic.value.taskRef.split('-').at(-1)), ref: epic.value.taskRef } })
+    confirmDelete.value = false
+    emit('close')
+  } catch (e) {
+    deleteError.value = e instanceof Error ? e.message : String(e)
+  }
+}
 
 async function setDependencies(ids: string[]) {
   if (!epic.value || savingDependencies.value) return
@@ -53,7 +74,9 @@ async function setDependencies(ids: string[]) {
 }
 const editingDescription = ref(false)
 const descriptionDraft = ref('')
-const tab = useLocalStorage<'tasks' | 'graph' | 'activity'>('corral.epic.tab', 'tasks')
+// A phone has room for all four labels only without their icons
+const TAB_ICONS: Record<string, string> = { tasks: 'i-lucide-list', graph: 'i-lucide-network', activity: 'i-lucide-activity', comments: 'i-lucide-message-square' }
+const tab = useLocalStorage<'tasks' | 'graph' | 'activity' | 'comments'>('corral.epic.tab', 'tasks')
 let savedTimer: ReturnType<typeof setTimeout> | null = null
 
 watch(() => props.epicId, () => {
@@ -115,13 +138,13 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
   <div class="flex h-full min-h-0 flex-col">
     <DetailHeader
       :mode="props.mode"
-      :path="`/epics/${props.epicId}`"
+      :path="epic?.taskRef ? `/tasks/${epic.taskRef}` : `/epics/${props.epicId}`"
       :saved="saved"
       @close="emit('close')"
     >
       <template v-if="props.mode === 'flyout'">
         <UBadge
-          label="Epic"
+          label="Parent"
           color="neutral"
           variant="subtle"
           size="sm"
@@ -131,7 +154,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
       <template v-else-if="props.mode === 'mobile'">
         <div class="flex items-center gap-1.5 text-xs text-muted">
           <UBadge
-            label="Epic"
+            label="Parent"
             color="neutral"
             variant="subtle"
             size="sm"
@@ -139,7 +162,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
           <span class="truncate">{{ project?.name }}</span>
         </div>
         <h1 class="flex items-center gap-2 text-base font-semibold text-highlighted">
-          <span class="min-w-0 truncate">{{ epic?.title ?? 'Epic' }}</span>
+          <span class="min-w-0 truncate">{{ epic?.title ?? 'Parent' }}</span>
           <span
             v-if="saved"
             class="shrink-0 text-xs font-normal text-success"
@@ -148,7 +171,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
       </template>
       <UBreadcrumb
         v-else
-        :items="[{ label: project?.name ?? 'Project', to: project ? `/projects/${project.slug}` : '/' }, { label: epic?.title ?? 'Epic' }]"
+        :items="[{ label: project?.name ?? 'Project', to: project ? `/projects/${project.slug}` : '/' }, { label: epic?.title ?? 'Parent' }]"
       />
     </DetailHeader>
 
@@ -187,7 +210,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
           color="info"
           variant="subtle"
           title="Resolving a rebase conflict"
-          :description="`${sync.taskRef ?? 'A developer'} is rebasing this epic in private${sync.files.length ? `: ${sync.files.join(', ')}` : ''}. The epic branch moves once a reviewer approves.`"
+          :description="`${sync.taskRef ?? 'A developer'} is rebasing this parent in private${sync.files.length ? `: ${sync.files.join(', ')}` : ''}. The parent branch moves once a reviewer approves.`"
         />
         <UAlert
           v-else-if="sync?.state === 'conflict_pending'"
@@ -195,7 +218,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
           color="neutral"
           variant="subtle"
           :title="EPIC_CONFLICT_PENDING"
-          :description="`Review carries on. A developer resolves it once, when the epic is approved${sync.files.length ? `: ${sync.files.join(', ')}` : ''}.`"
+          :description="`Review carries on. A developer resolves it once, when the parent is approved${sync.files.length ? `: ${sync.files.join(', ')}` : ''}.`"
         />
         <EpicFixAlert
           v-else-if="sync?.state === 'fixing'"
@@ -222,7 +245,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
         <input
           :value="epic.title"
           class="w-full rounded-md bg-transparent px-1 py-0.5 text-lg font-semibold text-highlighted hover:bg-elevated focus:ring-2 focus:ring-primary focus:outline-none"
-          aria-label="Epic title"
+          aria-label="Parent title"
           @change="patch({ title: ($event.target as HTMLInputElement).value })"
         >
 
@@ -262,7 +285,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
               autoresize
               autofocus
               :rows="5"
-              placeholder="What this epic is for, in markdown"
+              placeholder="What this parent is for, in markdown"
               class="w-full"
               @keydown.esc="editingDescription = false"
             />
@@ -315,7 +338,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
               :model-value="epic.reviewMode"
               :items="reviewModes"
               :disabled="epic.reviewModeLocked"
-              aria-label="Epic review mode"
+              aria-label="Parent review mode"
               :aria-describedby="epic.reviewModeLocked ? 'epic-review-mode-note' : undefined"
               class="w-full"
               @update:model-value="patch({ reviewMode: $event as EpicReviewMode })"
@@ -325,7 +348,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
               id="epic-review-mode-note"
               class="text-xs text-muted"
             >
-              Locked because a task in this epic has submitted work.
+              Locked because a task in this parent has submitted work.
             </p>
             <p
               v-else
@@ -337,7 +360,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
               v-if="epic.reviewMode !== 'direct'"
               class="text-xs text-muted"
             >
-              The epic PR opens once every task is complete. Human checks are confirmed there.
+              The parent PR opens once every task is complete. Human checks are confirmed there.
             </p>
           </template>
         </section>
@@ -376,8 +399,8 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
             <USelect
               v-model="selectedDependency"
               :items="choices"
-              placeholder="Choose an epic"
-              aria-label="Dependency epic"
+              placeholder="Choose a parent task"
+              aria-label="Dependency parent"
               class="min-w-0 flex-1"
               :disabled="savingDependencies"
             />
@@ -399,7 +422,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
             v-if="!blockedEpics.length"
             class="text-sm text-muted"
           >
-            No blocked epics.
+            Nothing waits on this.
           </p>
           <NuxtLink
             v-for="item in blockedEpics"
@@ -450,9 +473,59 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
       <!-- In a stacked column the tasks follow the details in the one scroll,
            so the list never shrinks into a scroll of its own -->
       <section :class="['flex min-w-0 flex-col', props.mode === 'page' ? 'min-h-0 flex-1 max-[900px]:h-[560px]' : 'shrink-0 px-4 pb-4']">
+        <div
+          v-if="epic.taskRef && project"
+          :class="['flex items-center gap-3', props.mode === 'page' && 'px-4 pt-3']"
+        >
+          <span class="shrink-0 font-mono text-xs text-muted">{{ epic.taskRef }}</span>
+          <UButton
+            v-if="epic.tasks.length === 0"
+            label="Delete"
+            icon="i-lucide-trash-2"
+            size="sm"
+            variant="ghost"
+            color="error"
+            @click="confirmDelete = true"
+          />
+          <UModal
+            v-model:open="confirmDelete"
+            :title="`Delete ${epic.taskRef}?`"
+            description="It has no sub-tasks left. Any comments and history are kept with the record."
+          >
+            <template #body>
+              <p
+                v-if="deleteError"
+                class="text-sm text-error"
+                role="alert"
+              >
+                {{ deleteError }}
+              </p>
+            </template>
+            <template #footer>
+              <UButton
+                label="Cancel"
+                variant="outline"
+                color="neutral"
+                @click="confirmDelete = false"
+              />
+              <UButton
+                label="Delete"
+                color="error"
+                :loading="removing.isPending.value"
+                @click="removeParent"
+              />
+            </template>
+          </UModal>
+          <AddSubtask
+            v-if="!epic.mergedAt"
+            :slug="project.slug"
+            :number="Number(epic.taskRef.split('-').at(-1))"
+            class="min-w-0 flex-1 justify-end"
+          />
+        </div>
         <UTabs
           v-model="tab"
-          :items="[{ label: `Tasks (${epic.tasks.length})`, value: 'tasks', icon: 'i-lucide-list' }, { label: 'Graph', value: 'graph', icon: 'i-lucide-network' }, { label: 'Activity', value: 'activity', icon: 'i-lucide-activity' }]"
+          :items="[{ label: `Sub-tasks (${epic.tasks.length})`, value: 'tasks' }, { label: 'Graph', value: 'graph' }, { label: 'Activity', value: 'activity' }, ...epic.taskId && epic.taskRef ? [{ label: 'Comments', value: 'comments' }] : []].map(item => ({ ...item, icon: props.mode === 'mobile' ? undefined : TAB_ICONS[item.value] }))"
           :variant="props.mode === 'mobile' ? 'pill' : 'link'"
           :size="props.mode === 'mobile' ? 'md' : 'sm'"
           :content="false"
@@ -460,7 +533,18 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
           :class="props.mode === 'page' && 'px-4 pt-2'"
         />
         <div
-          v-if="tab === 'activity'"
+          v-if="tab === 'comments'"
+          class="min-h-0 overflow-y-auto"
+        >
+          <ParentComments
+            v-if="epic.taskId && epic.taskRef && project"
+            :slug="project.slug"
+            :task-id="epic.taskId"
+            :task-ref="epic.taskRef"
+          />
+        </div>
+        <div
+          v-else-if="tab === 'activity'"
           class="flex min-h-0 flex-col gap-3 overflow-y-auto p-4"
         >
           <AuditActivity
@@ -492,7 +576,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
           v-else-if="epic.tasks.length === 0"
           class="p-6 text-center text-sm text-muted"
         >
-          No tasks in this epic yet.
+          No tasks in this parent yet.
         </p>
         <ul
           v-else-if="tab === 'tasks'"

@@ -11,7 +11,8 @@ export function deletionFor(task: CompletionState): Deletion {
   if (isTaskImmutable(task)) return 'not_allowed'
   switch (task.status) {
     case 'draft':
-    case 'backlog': return 'hard'
+    case 'backlog':
+    case 'parent': return 'hard' // Only an empty one gets here; the server keeps one with a history
     default: return 'soft'
   }
 }

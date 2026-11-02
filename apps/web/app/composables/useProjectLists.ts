@@ -10,7 +10,9 @@ export function useProjectLists(slug: MaybeRefOrGetter<string>) {
   const tasks = useQuery(computed(() => ({ ...tasksQuery(toValue(slug)), enabled: Boolean(toValue(slug)) })))
   const epics = useQuery(computed(() => ({ ...epicsQuery(toValue(slug)), enabled: Boolean(toValue(slug)) })))
   return {
-    tasks: computed(() => tasks.data.value ?? []),
+    // A parent has no work of its own, so the lists of work leave it out (D31)
+    tasks: computed(() => (tasks.data.value ?? []).filter(t => t.status !== 'parent')),
+    parents: computed(() => (tasks.data.value ?? []).filter(t => t.status === 'parent')),
     epics: computed(() => epics.data.value ?? []),
     loading: computed(() => Boolean(toValue(slug)) && (tasks.isPending.value || epics.isPending.value)),
     // A failed refresh must not replace cached content, including in Overview.
@@ -32,10 +34,16 @@ export function useAllProjectLists(projects: MaybeRefOrGetter<Project[]>) {
     ...epicsQuery(p.slug), select: (list: Epic[]) => ({ projectId: p.id, list })
   }))), shallow: true })
   return {
-    tasks: computed(() => projectMap(toValue(projects), tasks.value)),
+    tasks: computed(() => withoutParents(projectMap(toValue(projects), tasks.value))),
+    // Parents too, for finding one by ref or title
+    searchable: computed(() => projectMap(toValue(projects), tasks.value)),
     epics: computed(() => projectMap(toValue(projects), epics.value)),
     pending: computed(() => Object.fromEntries(toValue(projects).map((p, i) => [p.id, tasks.value[i]?.isPending ?? true])))
   }
+}
+
+function withoutParents(lists: Record<string, Task[] | undefined>): Record<string, Task[] | undefined> {
+  return Object.fromEntries(Object.entries(lists).map(([id, list]) => [id, list?.filter(t => t.status !== 'parent')]))
 }
 
 // Match by identity rather than array position: projects and query observers

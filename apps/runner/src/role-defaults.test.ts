@@ -11,7 +11,7 @@ describe('pm role defaults', () => {
 
   it('covers the point-of-contact role, area tools, confirmation and untrusted content', () => {
     expect(pm).toContain('human\'s point of contact for everything in Corral')
-    for (const area of ['Tasks and epics', 'Projects', 'Runs', 'Factory', 'Inbox', 'Designs', 'Agents', 'Threads']) {
+    for (const area of ['Tasks', 'Projects', 'Runs', 'Factory', 'Inbox', 'Designs', 'Agents', 'Threads']) {
       expect(pm).toContain(`- ${area}:`)
     }
     expect(pm).toContain('create_task for a single Backlog task outside a plan')

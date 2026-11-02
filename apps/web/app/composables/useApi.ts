@@ -153,6 +153,7 @@ export const api = {
     get: (slug: string, number: number) => call<Task>('GET', `/projects/${slug}/tasks/${number}`),
     byRef: (ref: string) => call<Task>('GET', `/tasks/${ref}`),
     create: (slug: string, input: CreateTaskInput) => call<Task>('POST', `/projects/${slug}/tasks`, input),
+    addSubtask: (slug: string, number: number, input: CreateTaskInput) => call<Task>('POST', `/projects/${slug}/tasks/${number}/subtasks`, input),
     patch: (slug: string, number: number, input: PatchTaskInput) => call<Task>('PATCH', `/projects/${slug}/tasks/${number}`, input),
     remove: (slug: string, number: number, reason?: string) => call<null>('DELETE', `/projects/${slug}/tasks/${number}`, reason ? { reason } : undefined),
     transition: (slug: string, number: number, input: HumanTransitionInput) => call<Task>('POST', `/projects/${slug}/tasks/${number}/transitions`, input),

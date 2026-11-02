@@ -1,6 +1,8 @@
 <script setup lang="ts">
-// An epic with room for its dependency tree; tasks open in the flyout. On
-// mobile it's the epic screen, and tasks open as pages (design/mobile.md)
+import { useQuery } from '@tanstack/vue-query'
+import { epicQuery } from '~/queries/epics'
+
+// An empty delivery record with no parent task; anything else moves to its task
 definePageMeta({ taskFlyout: true })
 
 const route = useRoute()
@@ -9,7 +11,14 @@ const device = useDevice()
 // A shared link has nothing to go back to
 const router = useRouter()
 const back = () => window.history.state?.back ? router.back() : navigateTo('/projects')
-useSeoMeta({ title: 'Epic · Corral' })
+useSeoMeta({ title: 'Parent · Corral' })
+
+// Old links open the parent task, or the task itself for a collapsed epic (D31)
+const { data: epic } = useQuery(computed(() => epicQuery(id.value)))
+const target = computed(() => epic.value ? epic.value.taskRef ?? epic.value.tasks[0]?.ref ?? null : null)
+watch(target, (ref) => {
+  if (ref) void navigateTo(`/tasks/${ref}`, { replace: true })
+}, { immediate: true })
 </script>
 
 <template>

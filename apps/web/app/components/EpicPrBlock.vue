@@ -4,10 +4,10 @@ import { useQuery } from '@tanstack/vue-query'
 import { inboxQuery } from '~/queries/inbox'
 import { EPIC_REVIEW_MODE, EPIC_REVIEW_STATE } from '~/utils/labels'
 
-// An epic's PR on its flyout and page (design/epic.md): the link, its state and
+// A parent's PR on its flyout and page (design/parent-task.md): the link, its state and
 // the review mode. The human's next step is one click, in the Inbox.
 const props = defineProps<{ epic: Epic }>()
-// Only an item that exists: a review, a stopped epic or a rebase's question
+// Only an item that exists: a review, a stopped parent or a rebase's question
 const inbox = useQuery(inboxQuery())
 const item = computed(() => inbox.data.value?.needsYou.find(i => i.id === props.epic.id) ?? null)
 </script>
@@ -24,7 +24,7 @@ const item = computed(() => inbox.data.value?.needsYou.find(i => i.id === props.
         target="_blank"
         rel="noopener"
         class="font-medium text-primary hover:underline"
-      >Epic PR #{{ epic.prNumber }}</a>
+      >Parent PR #{{ epic.prNumber }}</a>
       <UBadge
         v-if="epic.reviewState"
         :label="EPIC_REVIEW_STATE[epic.reviewState].label"

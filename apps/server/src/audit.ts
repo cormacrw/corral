@@ -120,6 +120,7 @@ export interface AuditDetails {
   'run.stopped': { runId: string }
   'task.claimed': StatusChange & { runId: string, agentId: string, leaseEpoch: number }
   'task.created': { number: number }
+  'task.promoted': { firstSub: string, from: string }
   'task.deleted': { mode: string, number: number, title: string, reason: string | null }
   'task.edit_pinned': RunComment
   'task.paused': Record<string, never>

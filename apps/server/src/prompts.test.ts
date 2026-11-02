@@ -19,7 +19,7 @@ describe('pmPrompt', () => {
     ['lost session', pmFallbackPrompt({ ...turn, history: [{ role: 'Human', text: 'hi' }] })]
   ])('gives %s the point-of-contact role and safety rules', (_name, prompt) => {
     expect(prompt).toContain('human\'s point of contact for everything in Corral')
-    for (const area of ['Tasks and epics', 'Projects', 'Runs', 'Factory', 'Inbox', 'Designs', 'Agents', 'Threads']) {
+    for (const area of ['Tasks', 'Projects', 'Runs', 'Factory', 'Inbox', 'Designs', 'Agents', 'Threads']) {
       expect(prompt).toContain(`- ${area}:`)
     }
     expect(prompt).toContain('update_task for quick edits')
@@ -53,12 +53,12 @@ describe('pmPrompt', () => {
     expect(intro).toContain('Task IDs look like TA-12')
     expect(intro).toContain('list_tasks shows it live')
     expect(intro).toContain('`bug` for a fix to wrong behaviour, `spike` for an investigation whose deliverable is written findings, and `task` for everything else')
-    expect(intro).toContain('a big feature is always one epic, even with a single task')
-    expect(intro).toContain('Plan each independent fix, such as a Bug Bash item, as a standalone task with no epic and its own PR')
+    expect(intro).toContain('never a parent with one sub-task')
+    expect(intro).toContain('Plan each independent fix, such as a Bug Bash item, as a standalone task with no parent and its own PR')
     expect(intro).toContain('Descriptions in markdown, verifiable acceptance criteria, explicit dependencies')
     expect(intro).toContain('To refine an existing Backlog task or an unclaimed Ready task, read it with get_task and include it in the plan with its `ref`')
     expect(intro).toContain('humanReview true for auth, data migrations, payments, deletions and security-sensitive code')
-    expect(intro).toContain('at the epic\'s approval')
+    expect(intro).toContain('at the parent\'s approval')
     expect(intro).toContain('Ask with ask_question when requirements are ambiguous')
     expect(intro).toContain('only then may you call approve_plan ("ready" for the board, "backlog" for later)')
     expect(intro).toContain('Never approve on your own initiative')
@@ -72,8 +72,8 @@ describe('pmPrompt', () => {
     const intro = pmPrompt({ ...turn, ...project, fresh: true })
     expect(intro).toContain('Split a feature into tasks only when the parts can run in parallel on different code')
     expect(intro).toContain('Work that would run in sequence or change the same files is one task')
-    expect(intro).toContain('a big feature is always one epic, even with a single task, so it appears in the epic views')
-    expect(intro).toContain('Plan each independent fix, such as a Bug Bash item, as a standalone task with no epic')
+    expect(intro).toContain('never a parent with one sub-task')
+    expect(intro).toContain('Plan each independent fix, such as a Bug Bash item, as a standalone task with no parent')
     expect(intro).not.toMatch(/small tasks|split the build across several epics/i)
   })
 
@@ -91,12 +91,12 @@ describe('pmPrompt', () => {
     expect(pmPrompt({ ...turn, fresh: false })).toContain('Use propose_plan for work that spans tasks')
   })
 
-  it('plans a design\'s build from the spec and the codebase, keeping features in epics and pinning screens (D20)', () => {
+  it('plans a design\'s build from the spec and the codebase, keeping features in parent tasks and pinning screens (D20)', () => {
     const intro = pmPrompt({ ...turn, fresh: true })
     expect(intro).toContain('read it with get_design')
     expect(intro).toContain('Plan from the spec and the real codebase')
     expect(intro).toContain('a reference for the look, not code to copy')
-    expect(intro).toContain('keep each big feature in one epic and split tasks only for parallel work on different code')
+    expect(intro).toContain('make a parent with sub-tasks only for parallel work on different code')
     expect(intro).toContain('pin every task that builds UI to the approved version and the screen ids')
     expect(intro).toContain('write its acceptance criteria from the spec')
   })
@@ -408,14 +408,14 @@ describe('reviewer gates (D26)', () => {
 
 describe('epic rebase prompts', () => {
   const task: PromptTask = {
-    ref: 'TA-9', title: 'Rebase epic: Search', description: null, branch: 'corral/epic-1-search',
+    ref: 'TA-9', title: 'Rebase parent: Search', description: null, branch: 'corral/epic-1-search',
     defaultBranch: 'develop', reviewRounds: 0, reviewRoundCap: 3,
     criteria: [{ id: 'c1', text: 'Rebased' }], comments: [], attachments: []
   }
 
   it('squashes, rebases, resolves and reports when required CI verifies the push', () => {
     const prompt = developerPrompt({ ...task, squashRebase: true }, 'Tam')
-    expect(prompt).toContain('squash the epic branch, rebase it, resolve the conflicts and report')
+    expect(prompt).toContain('squash the parent branch, rebase it, resolve the conflicts and report')
     expect(prompt).toContain('git merge-base HEAD origin/develop')
     expect(prompt).toContain('git rebase origin/develop')
     expect(prompt).toContain('Report straight away')
@@ -490,7 +490,7 @@ describe('how much a developer checks locally', () => {
     expect(developerRevisionPrompt({ ...spike, reviewRounds: 1 }, [])).not.toMatch(/full suite|type checks/)
   })
 
-  it('keeps the build on an epic fix with no required CI', () => {
+  it('keeps the build on a parent task fix with no required CI', () => {
     const input = { agentName: 'Tam', epicTitle: 'E', goal: '', brief: '', branch: 'c', epicBranch: 'e', target: 'main', ontoSha: 'abc', files: [], failures: [], decisions: [] }
     expect(epicFixPrompt({ ...input, fix: 'conflict', requiredChecks: [] })).toContain('Then run the project\'s build')
     expect(epicFixPrompt({ ...input, fix: 'ci', requiredChecks: [] })).toContain('Then run the project\'s build')
@@ -674,7 +674,7 @@ describe('human decisions contract (D11)', () => {
     ['developer', developerPrompt(task, 'Tam')],
     ['spike developer', developerPrompt({ ...task, spike: true, branch: null }, 'Tam')],
     ['designer', designerPrompt({ ...task, design: { version: null } }, 'Dee')],
-    ['epic rebase developer', developerPrompt({ ...task, squashRebase: true }, 'Tam')],
+    ['parent rebase developer', developerPrompt({ ...task, squashRebase: true }, 'Tam')],
     ['rebase developer', developerRevisionPrompt({ ...task, rebaseOnly: true }, [])],
     ['PR-free rebase developer', developerRevisionPrompt({ ...task, rebaseOnly: true, prFree: true }, [])],
     ['rebase reviewer', reviewerPrompt({ ...review, rebaseOnly: true }, 'Rae')]
@@ -706,7 +706,7 @@ describe('integration review prompts', () => {
     expect(none).not.toContain('don\'t rerun')
   })
 
-  it('covers the whole epic the first time, and what changed since on a repeat', () => {
+  it('covers the whole parent the first time, and what changed since on a repeat', () => {
     expect(epicReviewPrompt(input)).toContain('Review the whole combined diff with git diff origin/main...HEAD')
     const adapted = epicReviewPrompt({ ...input, lastReview: { headSha: 'old999', summary: 'Fine', outcome: 'changes_requested', fixes: [] }, targetFiles: [{ path: 'src/main-only.ts', diff: '+adapted', truncated: true }] })
     expect(adapted).toContain('## Files only the target changed')
@@ -742,5 +742,17 @@ describe('cappedBranchDiff', () => {
     expect(diff).toContain('+after')
     expect(diff).toContain('Left out for size, so read these on the branch:\n- huge.ts')
     expect(diff).not.toContain('\n- after.ts')
+  })
+})
+
+describe('the word people see', () => {
+  it.each([
+    { fresh: true, projectName: 'Test app', prefix: 'TA' },
+    { fresh: true, projectName: null, prefix: null },
+    { fresh: false, projectName: 'Test app', prefix: 'TA' }
+  ])('keeps it out of the PM prompt: %o', (turn) => {
+    const prompt = pmPrompt({ text: 'Hello', attachedTask: null, ...turn })
+    expect(prompt.replaceAll('corral/epic-', '')).not.toMatch(/\bepics?\b|update_epic/i)
+    if (turn.fresh && turn.projectName) expect(prompt).toContain('never a parent with one sub-task')
   })
 })

@@ -53,7 +53,8 @@ export function mobileSearch(query: string, data: SearchData, limit = SEARCH_LIM
   if (!q) return { pages: pages.slice(0, limit), epics: [], tasks: [], sessions: [] }
   return {
     pages: pages.filter(p => matches(q, p.label)).slice(0, limit),
-    epics: data.epics.filter(e => matches(q, e.title)).slice(0, limit),
+    // Parents are tasks; only a collapsed epic has nothing else to find it by
+    epics: [],
     tasks: data.tasks.filter(t => matches(q, t.title, t.ref)).slice(0, limit),
     sessions: data.planSessions.filter(s => matches(q, s.title)).slice(0, limit)
   }

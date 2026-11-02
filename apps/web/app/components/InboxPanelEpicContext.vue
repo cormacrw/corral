@@ -27,10 +27,10 @@ const { openEpic } = useTaskFlyout()
           class="font-medium text-default hover:underline"
           @click="openEpic(grouped.id)"
         >{{ grouped.title }}</button>.
-        You'll review it all together at the epic PR.</span>
+        You'll review it all together at the parent PR.</span>
     </p>
     <p v-if="canAct && hasPr">
-      Approve and merge PR #{{ prNumber }} into the epic branch, or request changes.
+      Approve and merge PR #{{ prNumber }} into the parent branch, or request changes.
     </p>
   </div>
 </template>

@@ -39,6 +39,10 @@ export const createTask = defineMutation<Task, { slug: string, input: CreateTask
   mutationFn: ({ slug, input }) => api.tasks.create(slug, input),
   invalidates: (_, { slug }) => [keys.tasks.list(slug), keys.inbox()]
 })
+export const addSubtask = defineMutation<Task, { slug: string, number: number, input: CreateTaskInput }>({
+  mutationFn: ({ slug, number, input }) => api.tasks.addSubtask(slug, number, input),
+  invalidates: (_, { slug }) => [keys.tasks.list(slug), keys.epics.list(slug), keys.inbox()]
+})
 export const patchTask = defineMutation<Task, { task: TaskAddress, input: PatchTaskInput }>({
   mutationFn: ({ task, input }) => api.tasks.patch(task.slug, task.number, input),
   ...edit

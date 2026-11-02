@@ -141,7 +141,7 @@ export const epicDecisionInput = z.object({
   alternatives: z.array(z.object({
     label: z.string().trim().min(1).describe('A short name for this choice'),
     effect: z.string().trim().min(1).describe('What the product does if this is chosen'),
-    changesBehaviour: z.boolean().describe('True when this changes the behaviour the human approved, so the epic goes back through review')
+    changesBehaviour: z.boolean().describe('True when this changes the behaviour the human approved, so the parent goes back through review')
   })).min(2, 'Give at least two alternatives').max(5),
   affectedChanges: z.array(z.string().trim().min(1)).min(1, 'Name the changes affected').describe('The commits, files or tasks on each side this decision affects')
 })
@@ -160,12 +160,12 @@ export const reportOutcomeInput = z.object({
   summary: z.string().trim().min(1, 'Add a summary').describe('Plain-English summary of what you did, or your question when stuck'),
   review: z.enum(REBASE_REVIEWS).optional().describe('Required for pr_rebased: trivial only for combining both sides with no new logic, renames or behaviour changes; otherwise needs_review'),
   conflictedFiles: z.array(z.string().trim().min(1)).min(1, 'conflictedFiles must contain at least one file').optional().describe('Required for pr_rebased: every file in which you resolved a conflict'),
-  behaviourChanged: z.boolean().optional().describe('Required for pr_rebased, for a round started by a CI failure, and on an epic fix: true if this changes what the code does; false only if approved behaviour is unchanged, so no reviewer looks at it again'),
+  behaviourChanged: z.boolean().optional().describe('Required for pr_rebased, for a round started by a CI failure, and on a parent fix: true if this changes what the code does; false only if approved behaviour is unchanged, so no reviewer looks at it again'),
   note: z.string().trim().optional().describe('Developer only, required: one line of at most 200 characters saying what this run did, posted as a comment on the task, e.g. "Addressed review: dropped idle-thread fixture"'),
   criteria: z.array(criterionVerdict).optional().describe('Reviewer only: a verdict per acceptance criterion'),
-  preservesApproval: z.boolean().optional().describe('Reviewer of an epic rebase resolution only, when approving: true only if the approved behaviour is unchanged; false restarts the epic\'s normal review'),
-  decision: epicDecisionInput.optional().describe('Epic rebase resolutions only, with stuck or blocked: the question for the human, with alternatives and the changes affected. Without it the summary is asked as the question and the human can only answer in words'),
-  findings: z.array(epicReviewFindingSchema).optional().describe('Epic reviewer only: integration problems, marked blocking or non_blocking, with the task refs they concern')
+  preservesApproval: z.boolean().optional().describe('Reviewer of a parent rebase resolution only, when approving: true only if the approved behaviour is unchanged; false restarts the parent\'s normal review'),
+  decision: epicDecisionInput.optional().describe('Parent rebase resolutions only, with stuck or blocked: the question for the human, with alternatives and the changes affected. Without it the summary is asked as the question and the human can only answer in words'),
+  findings: z.array(epicReviewFindingSchema).optional().describe('Parent reviewer only: integration problems, marked blocking or non_blocking, with the task refs they concern')
 })
 
 // Set by the runner, never the agent. headSha: the commit a developer's run
@@ -231,14 +231,20 @@ export const TASK_INTEGRATION_PROTOCOL = 1
 export function integrationCompatibilityReason(required: number, supported: readonly number[] = []): string | null {
   return required === 0 || supported.includes(required)
     ? null
-    : `Task requires integration protocol ${required}. Update the runner to a build supporting PR-free epic task integration; legacy PR work remains available.`
+    : `Task requires integration protocol ${required}. Update the runner to a build supporting PR-free sub-task integration; legacy PR work remains available.`
 }
 
 // Why a runner gets no new runs because its agent tools aren't the server's, or
 // null when they match. Missing means a runner older than the check, which is
 // a difference too: nothing says its tools match (COR-435).
+// Contracts of older builds that still work with this server. A change that
+// keeps every old tool call valid lists the old hash here, so runners keep
+// taking runs while they update. Remove it once they have.
+// cc3d950e1d8050a1: before parent tasks (D31), whose PM tools only add to it
+export const COMPATIBLE_TOOL_CONTRACTS: readonly string[] = ['cc3d950e1d8050a1']
+
 export function toolContractReason(runner: string | undefined, server: string): string | null {
-  if (runner === server) return null
+  if (runner === server || (runner && COMPATIBLE_TOOL_CONTRACTS.includes(runner))) return null
   return `Its agent tools ${runner ? `(${runner})` : '(from before tool contracts)'} differ from the server's (${server}), so it takes no new runs until it has updated.`
 }
 
@@ -368,7 +374,9 @@ export const agentToolSchema = z.enum([
   'list_inbox', 'act_on_inbox', 'approve_design', 'request_design_changes', 'list_agents', 'update_agent', 'create_agent',
   'start_thread', 'list_threads', 'read_thread', 'message_thread', 'close_thread',
   'delete_project', 'stop_run', 'stop_all', 'resume_all', 'list_projects', 'get_project', 'update_project', 'create_project', 'message_run', 'get_status', 'set_update_hold', 'clear_update_hold',
-  'delete_task', 'create_task', 'update_task', 'move_task', 'approve_task', 'update_epic',
+  'delete_task', 'create_task', 'update_task', 'move_task', 'approve_task', 'update_parent',
+  // Sent by runners from before parent tasks (D31), and not offered to the PM
+  'update_epic',
   'get_task', 'add_comment', 'attach_evidence', 'get_evidence', 'get_attachment',
   'get_design', 'submit_design', 'report_outcome', 'list_tasks', 'get_run_outcomes', 'get_agent_activity', 'list_runs', 'get_run',
   'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs'

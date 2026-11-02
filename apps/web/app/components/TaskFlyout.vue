@@ -39,7 +39,7 @@ function onKey(event: KeyboardEvent) {
   <aside
     v-if="flyout.ref.value || flyout.epic.value || (flyout.plan.value && $slots.plan)"
     role="complementary"
-    :aria-label="flyout.ref.value ? `Task ${flyout.ref.value}` : flyout.epic.value ? 'Epic' : 'Plan'"
+    :aria-label="flyout.ref.value ? `Task ${flyout.ref.value}` : flyout.epic.value ? 'Parent' : 'Plan'"
     class="relative flex h-full max-w-[calc(100%-20rem)] shrink-0 flex-col border-s border-default bg-default max-[1100px]:h-1/2 max-[1100px]:w-full max-[1100px]:max-w-full max-[1100px]:border-s-0 max-[1100px]:border-t min-[1101px]:w-(--flyout-width)"
     :style="{ '--flyout-width': `${width}px` }"
   >

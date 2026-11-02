@@ -6,6 +6,7 @@ import { holdsAcrossEpics, holdsEpicOpen } from './epic-review-state.ts'
 import { appendAudit, auditEvent, auditText } from './audit.ts'
 import { toTaskState, type TaskRow } from './tasks.ts'
 import { unfinishedTask } from './completion.ts'
+import { parentHolds } from './parents.ts'
 
 const { agents, auditLog, projects, reviews, runs, epics, epicDependencies, taskDependencies, tasks } = schema
 
@@ -89,6 +90,7 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
             .leftJoin(dependencyEpic, eq(dependencyEpic.id, dependency.epicId))
             .where(and(eq(taskDependencies.taskId, tasks.id), or(
               unfinishedTask(dependency),
+              parentHolds(tx, dependency),
               holdsAcrossEpics(dependency, dependencyEpic, tasks.epicId)
             )))),
           notExists(tx.select({ one: sql`1` }).from(epicDependencies)

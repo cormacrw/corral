@@ -76,14 +76,14 @@ const reviewing = useMutation({ ...reviewEpic, ...holdsInbox })
 const busy = computed(() => reviewing.isPending.value || !!props.gone)
 const action = ref<InboxActionInput['action'] | null>(null)
 const refused = ref<string | null>(null)
-const moved = 'This epic changed while you had it open. Check the refreshed review, then try again.'
+const moved = 'This parent changed while you had it open. Check the refreshed review, then try again.'
 const failure = computed(() => props.gone ? moved : refused.value)
 // A draft, so what was typed outlives the panel
 const draftKey = computed(() => `inbox:${props.item.id}`)
 const text = useDraft(draftKey)
 const REFUSED: Record<string, string> = {
   epic_review_changed: moved,
-  epic_pr_changed: 'The epic PR changed on GitHub or was closed. Check the refreshed review, then try again.',
+  epic_pr_changed: 'The parent PR changed on GitHub or was closed. Check the refreshed review, then try again.',
   human_checks_unconfirmed: 'The human checks changed. Tick them on the Tasks tab, then approve.',
   epic_decision_changed: 'This decision has already been answered, or it changed. Check the refreshed item.'
 }
@@ -123,7 +123,7 @@ const decision = computed(() => props.item.type === 'epic_conflict' ? props.item
 const actions = computed(() => {
   if (props.item.type === 'epic_review') {
     return [
-      { value: 'approve', label: 'Approve epic', icon: 'i-lucide-check' },
+      { value: 'approve', label: 'Approve parent', icon: 'i-lucide-check' },
       { value: 'request_changes', label: 'Request changes', icon: 'i-lucide-message-square-warning' }
     ]
   }
@@ -155,7 +155,7 @@ const ctx = reactive({
   item: computed(() => props.item), task: null, evidence: [], reviews: [], alreadyResolved: false,
   taskLoading: false, taskLoadFailed: false, evidenceLoading: false, actions, action, resolveTo: 'in_progress', text,
   draftKey, busy, actionError: failure,
-  placeholder: computed(() => action.value === 'clarify' ? 'Your answer' : 'What should change? It becomes a fix task in the epic'),
+  placeholder: computed(() => action.value === 'clarify' ? 'Your answer' : 'What should change? It becomes a fix task in the parent'),
   submitLabel: computed(() => action.value === 'clarify' ? 'Send answer' : 'Request changes'),
   needsText: true, tab: 'overview', checkedHumanCriteria: [], taskOpen: false,
   composerChosen: computed(() => opensComposer(action.value)),
@@ -179,14 +179,14 @@ const ctx = reactive({
 const kind = computed(() => {
   const { item } = props
   if (item.resolution) return { label: 'Resolved', icon: 'i-lucide-circle-check', color: 'text-success' }
-  if (item.type === 'epic_review') return { label: 'Epic review', icon: 'i-lucide-git-pull-request', color: 'text-primary' }
+  if (item.type === 'epic_review') return { label: 'Parent review', icon: 'i-lucide-git-pull-request', color: 'text-primary' }
   if (item.type === 'epic_conflict') {
     if (item.stopped) return { label: item.stopped.fix === 'ci' || item.stopped.fix === 'review' ? 'Fix stopped' : 'Rebase stopped', icon: 'i-lucide-octagon-pause', color: 'text-error' }
     return item.decision
       ? { label: 'Rebase decision', icon: 'i-lucide-circle-help', color: 'text-info' }
-      : { label: 'Epic conflict', icon: 'i-lucide-git-merge', color: 'text-error' }
+      : { label: 'Parent conflict', icon: 'i-lucide-git-merge', color: 'text-error' }
   }
-  return { label: 'Epic PR', icon: 'i-lucide-activity', color: 'text-muted' }
+  return { label: 'Parent PR', icon: 'i-lucide-activity', color: 'text-muted' }
 })
 const tldr = computed(() => {
   const first = props.item.body.split(/\n\s*\n/).find(p => p.trim() && !p.trim().startsWith('#')) ?? props.item.body
@@ -201,7 +201,7 @@ const verdict = computed(() => {
   const round = rounds.value.find(r => r.headSha === viewedHead.value)
   if (round?.verdict === 'changes_requested') return { text: 'requested changes', name: round.reviewer.name, ok: false }
   if (props.item.sender.role !== 'reviewer') return { text: 'No reviewer approval on this head', name: null, ok: false }
-  return { text: 'approved the epic', name: round?.reviewer.name ?? props.item.sender.name, ok: true }
+  return { text: 'approved the parent', name: round?.reviewer.name ?? props.item.sender.name, ok: true }
 })
 const gates = computed(() => review.value?.gateChecks ?? [])
 const gatesPassed = computed(() => gates.value.length > 0 && gates.value.every(g => g.conclusion === 'success'))
@@ -214,7 +214,7 @@ const target = computed(() => review.value?.targetBranch ?? (props.item.type ===
 const approving = computed(() => {
   const name = target.value ?? 'the target branch'
   const moved = review.value?.targetMovedBy ?? 0
-  if (review.value?.conflictPending) return `This epic conflicts with ${name}. Approving sends the conflict to a developer, then runs CI and squash-merges.`
+  if (review.value?.conflictPending) return `This parent conflicts with ${name}. Approving sends the conflict to a developer, then runs CI and squash-merges.`
   return moved > 0
     ? `${name} has moved ${plural(moved, 'commit')}. Approving rebases onto it, runs CI and squash-merges.`
     : `Approving runs CI and squash-merges into ${name}.`
@@ -225,7 +225,7 @@ const readOnlyNote = computed(() => {
 })
 
 const conflictTask = computed(() => props.item.type === 'epic_activity' && props.item.event === 'conflict' ? review.value?.conflictTaskRef ?? null : null)
-const prLabel = computed(() => review.value?.pr ? `Epic PR #${review.value.pr.number}` : 'Epic PR')
+const prLabel = computed(() => review.value?.pr ? `Parent PR #${review.value.pr.number}` : 'Parent PR')
 const prUrl = computed(() => props.item.prUrl)
 
 const tabs = computed(() => {
@@ -260,7 +260,7 @@ const diff = computed<PullRequestDetail | null>(() => {
 <template>
   <section
     class="flex min-h-0 min-w-0 flex-1 flex-col"
-    aria-label="Epic review"
+    aria-label="Parent review"
     data-testid="inbox-epic-panel"
   >
     <div :class="['flex max-h-[60%] shrink-0 flex-col gap-2 overflow-y-auto border-b border-default', mobile ? 'p-3' : 'px-5 pt-4 pb-3']">
@@ -423,7 +423,7 @@ const diff = computed<PullRequestDetail | null>(() => {
           v-if="result.isError.value && !review"
           color="error"
           variant="subtle"
-          title="Couldn't load this epic's review"
+          title="Couldn't load this parent's review"
           :description="result.error.value?.message"
           :actions="[{ label: 'Retry', onClick: refreshReview }]"
           data-testid="inbox-epic-error"
@@ -498,7 +498,7 @@ const diff = computed<PullRequestDetail | null>(() => {
             @click="diffView = 'since'"
           />
           <UButton
-            label="Whole epic"
+            label="Whole parent"
             size="xs"
             :color="showing === 'whole' ? 'primary' : 'neutral'"
             :variant="showing === 'whole' ? 'subtle' : 'ghost'"
@@ -536,7 +536,7 @@ const diff = computed<PullRequestDetail | null>(() => {
     <InboxPanelThumbBar
       v-if="canAct && mobile"
       :ctx="ctx"
-      approve-label="Approve epic"
+      approve-label="Approve parent"
       :reply="false"
     />
     <div

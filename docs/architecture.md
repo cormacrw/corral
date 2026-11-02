@@ -47,7 +47,7 @@ A run's `run.started`, `run.events` and `run.ended` go through a per-run ordered
 
 A `sweep_worktrees` setup job removes every folder under `worktrees/` whose task or Plan session isn't in the job's keep list, through its bare clone (or `rm -rf` for a folder no clone knows). Developer worktrees and orphans with uncommitted changes stay and are returned in `kept`, review and PM worktrees are force-removed, the checkout of a PM turn running on that runner is never touched, and names that aren't `<uuid>`, `<uuid>-review`, `epic-<uuid>-review` or `pm-<uuid>-<uuid>` are left alone. The same job removes a Plan session's `scratch/pm-<projectId>-<planSessionId>/` once the session is off the keep list and no turn is running, and any `scratch/<runId>/` or `spool/<runId>.jsonl` of a run this runner no longer has, which is what a crash leaves. These aren't listed in `removed`.
 
-The server broadcasts that job to every online runner each time a runner connects and then hourly, and skips it with none online (`apps/server/src/worktree-sweep.ts`). The keep list is every task that isn't merged or deleted, every epic whose PR hasn't merged, plus every Plan session with a PM turn active or `updatedAt` within `PM_WORKTREE_TTL` (24 hours). Each sweep is one `worktrees.swept` audit entry with `removed` and `kept`, and it posts no task comments. This also retries a `cleanup_worktrees` from a merge or deletion that found no runner online.
+The server broadcasts that job to every online runner each time a runner connects and then hourly, and skips it with none online (`apps/server/src/worktree-sweep.ts`). The keep list is every task that isn't merged or deleted, every parent whose PR hasn't merged, plus every Plan session with a PM turn active or `updatedAt` within `PM_WORKTREE_TTL` (24 hours). Each sweep is one `worktrees.swept` audit entry with `removed` and `kept`, and it posts no task comments. This also retries a `cleanup_worktrees` from a merge or deletion that found no runner online.
 
 Setup jobs use the online runner connected longest. Worktree cleanup is broadcast to every online runner. With any runner online, dispatch and setup remain available; with none online, setup returns `503 runner_offline` and PM turns wait. `GET /api/status` includes `runners`, and `/api/runner` and `runner.status` SSE include the same list (`id`, `name`, `online`, `connectedAt`, `lastHeartbeatAt`) alongside aggregate compatibility fields. Disconnected runners remain listed as offline until server restart. Settings shows each known runner.
 
@@ -145,11 +145,11 @@ Each kind of data has exactly one source of truth.
 
 | Store | What lives there | web | server | runner | agent (`claude` / `codex`) |
 |---|---|---|---|---|---|
-| **Database** (Postgres deployed, PGlite in dev; D14) | Projects, epics, tasks, criteria, dependencies, status, leases (with fencing epoch), runs, comments, reviews, evidence *records*, PM conversation, plans, settings, audit log | — | **R/W** (sole opener) | — | — |
+| **Database** (Postgres deployed, PGlite in dev; D14) | Projects, parents, tasks, criteria, dependencies, status, leases (with fencing epoch), runs, comments, reviews, evidence *records*, PM conversation, plans, settings, audit log | — | **R/W** (sole opener) | — | — |
 | **Blob store** (local folder → S3) | Screenshots, videos, test/CI logs, run transcripts. Immutable, content-addressed (sha256). | — | **R/W** (stores uploads, serves files) | — | — |
 | **Target repo: default branch** (GitHub) | Merged code, `CORRAL.md`, wiki, agent role instructions. Canonical docs = default branch. | — | — | **R** (`git fetch`) | **R**, PM only, through a read-only checkout (D9) |
 | **Target repo: task branches** (GitHub) | Work in progress per task | — | **R** (diffs for PR/gate checks) | **R/W** (`git push`, only to the branch it holds a lease for) | — |
-| **Target repo: epic branches and candidate refs** (GitHub) | Integrated epic work; `corral/candidates/<operation>` for CI on a candidate | — | **R** (heads, checks; deletes candidate refs) | **R/W** (`git push` with no task lease, D8's exception: only under an integration operation journal, with a compare-and-swap on the expected SHA for the epic branch) | — |
+| **Target repo: parent branches and candidate refs** (GitHub) | Integrated parent work; `corral/candidates/<operation>` for CI on a candidate | — | **R** (heads, checks; deletes candidate refs) | **R/W** (`git push` with no task lease, D8's exception: only under an integration operation journal, with a compare-and-swap on the expected SHA for the parent's branch) | — |
 | **GitHub PRs / CI** | PR state, CI results, mergeability, merges | — | **R/W** (open/update PR, read CI, merge) | — | — |
 | **Runner disk** | Bare clone, worktrees, dependency store, transcript spool. **Not** a source of truth; losing it costs at most uncommitted work. | — | — | **R/W** | **R/W**, own worktree + scratch only |
 
@@ -307,3 +307,8 @@ At the PRD defaults (1 developer + 1 reviewer): **~2–5 GB peak**. Comfortable 
 - **Uncommitted developer work is always kept.** A developer worktree with uncommitted changes survives every cleanup and sweep until someone removes it by hand. Review and PM checkouts are read-only by contract, so they're force-removed.
 
 **Possible later addition:** the runner checks free memory before claiming work. Not needed for the POC.
+
+## Parent tasks (D31)
+
+A parent is a `tasks` row with status `parent`, linked from its delivery record by `epics.task_id`. Sub-tasks point at that record through `tasks.epicId`. Engine queries filter on working statuses and `tasks.epicId`, so a parent matches none of them. `apps/server/src/parents.ts` holds its rollup, dependency rule and sync between the two rows, and `packages/core/src/parent.ts` its stage.
+

@@ -93,15 +93,16 @@ export function useProjectOverview({ slug, project, tasks, epics: epicList, load
     const groups = new Map<string, { id: string, title: string, merged: number, total: number, epic?: Epic }>()
     const list = epicList.value
     for (const task of tasks.value) {
-      const id = task.epicId ?? 'none'
+      const delivering = list.find(e => e.id === task.epicId && e.branch)
+      const id = task.parentTask || delivering ? task.epicId! : 'none'
       const found = list.find(e => e.id === id)
-      const group = groups.get(id) ?? { id, title: id === 'none' ? 'No epic' : epicTitle(list, id, groups.size), merged: 0, total: 0, epic: found && epicWithLiveCounts(found, tasks.value) }
+      const group = groups.get(id) ?? { id, title: id === 'none' ? 'On their own' : epicTitle(list, id, groups.size), merged: 0, total: 0, epic: found && epicWithLiveCounts(found, tasks.value) }
       group.total++
       if (isTaskDone(task)) group.merged++
       groups.set(id, group)
     }
     for (const epic of list) {
-      if (!groups.has(epic.id)) groups.set(epic.id, { id: epic.id, title: epic.title, merged: 0, total: 0, epic: epicWithLiveCounts(epic, tasks.value) })
+      if ((epic.taskId || epic.branch) && !groups.has(epic.id)) groups.set(epic.id, { id: epic.id, title: epic.title, merged: 0, total: 0, epic: epicWithLiveCounts(epic, tasks.value) })
     }
     return [...groups.values()]
   })

@@ -6,7 +6,7 @@ On a phone the same actions sit in `InboxPanelThumbBar`, with Reply beside them.
 
 The page owns default selection. Activity and Plan threads retain their existing reply flows. Live refreshes of the same item must preserve a user's chosen action.
 
-Approval's optional note, on desktop whatever is in the composer when Approve is clicked, is sent as trimmed `text` in the shared desktop/mobile Inbox action. Nonblank notes become unpinned human comments inside the task, bug, spike or design approval transaction; blank notes add nothing. Design notes also reach the PM build session. Request changes keeps the existing single pinned feedback comment. Epic PR reviews use their separate action contract.
+Approval's optional note, on desktop whatever is in the composer when Approve is clicked, is sent as trimmed `text` in the shared desktop/mobile Inbox action. Nonblank notes become unpinned human comments inside the task, bug, spike or design approval transaction; blank notes add nothing. Design notes also reach the PM build session. Request changes keeps the existing single pinned feedback comment. Parent PR reviews use their separate action contract.
 
 One-click approval and Retry go through `InboxPanelTray` and the shared `PromptComposer.send()`, so attached images are included in the text just as when pressing Send. A quick action waits for pending image uploads; repeated clicks during that wait send only once. Overview screenshot grids and files appear only on reviews; other kinds keep their New artifacts in the message and show action help in Overview.
 

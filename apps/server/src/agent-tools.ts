@@ -1,4 +1,4 @@
-import { epicReviewReportSchema, isPmDirectTool, pmActionTools, pmDirectTools, requiresPmConfirmation, evidenceInputSchema, outcomeReportSchema, rebaseReviewReportSchema, type RunnerMessage } from '@corral/contracts'
+import { epicReviewReportSchema, isPmDirectTool, neutralPmCall, pmActionTools, pmDirectTools, requiresPmConfirmation, evidenceInputSchema, outcomeReportSchema, rebaseReviewReportSchema, type RunnerMessage } from '@corral/contracts'
 import { taskRef, richTextToMarkdown } from '@corral/core'
 import { schema } from '@corral/db'
 import { and, asc, eq, isNull } from 'drizzle-orm'
@@ -44,7 +44,8 @@ export class AgentTools {
     const ctx = await this.#c.runs.fenced(message.runId, message.leaseEpoch)
     if (!ctx || ctx.run.runnerId !== runnerId) throw new ToolError('This run no longer holds its task: its lease expired or was given to another run. Stop working.')
     try {
-      return await this.#tool(ctx, message.tool, message.input)
+      const { tool, input } = neutralPmCall(message.tool, message.input)
+      return await this.#tool(ctx, tool, input)
     } catch (error) {
       if (error instanceof ApiFailure && error.body.code === 'transition_rejected') {
         throw new ToolError(`Corral rejected this: ${JSON.stringify(error.body.reason)}`)
@@ -66,7 +67,7 @@ export class AgentTools {
       if (!this.#c.plans || !ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
       return this.#c.pmActions.propose(ctx.run.planSessionId, ctx.run.id, tool, input, this.#c.runs.actor(ctx))
     }
-    if (role === 'pm' && (isPmDirectTool(tool) || tool === 'act_on_inbox' || tool === 'create_task' || tool === 'update_task' || tool === 'update_epic')) {
+    if (role === 'pm' && (isPmDirectTool(tool) || tool === 'act_on_inbox' || tool === 'create_task' || tool === 'update_task' || tool === 'update_parent')) {
       if (!ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
       return this.#c.pmTools.call(tool, input, this.#c.runs.actor(ctx), { sessionId: ctx.run.planSessionId, runId: ctx.run.id, projectId: ctx.project?.id ?? null })
     }
@@ -109,7 +110,7 @@ export class AgentTools {
     if (ctx.run.epicId) {
       if (tool === 'get_task') {
         const [epic] = await this.#c.d.db.select().from(schema.epics).where(eq(schema.epics.id, ctx.run.epicId))
-        if (!epic) throw new ToolError('Epic no longer exists')
+        if (!epic) throw new ToolError('Parent no longer exists')
         const context = await epicReviewContext(this.#c.d.db, epic, ctx.project!)
         return ctx.run.role === 'developer' ? { ...context, fix: ctx.run.fixKind, branch: `corral/epic-rebase/${ctx.run.operationId}` } : context
       }
@@ -117,10 +118,10 @@ export class AgentTools {
       if (tool === 'report_outcome' && ctx.run.role === 'developer') return this.#c.fixes.report(ctx, parseReport(outcomeReportSchema, { criteria: [], ...(input as object) }))
       if (tool === 'report_outcome') {
         await this.#c.epicPrs.report(ctx.run, parseReport(epicReviewReportSchema, input))
-        this.#c.ending.finished(ctx, 'Epic integration review recorded')
+        this.#c.ending.finished(ctx, 'Parent integration review recorded')
         return { ok: true }
       }
-      throw new ToolError('Runs on an epic use get_task and report_outcome, and an integration review get_evidence too')
+      throw new ToolError('Runs on a parent task use get_task and report_outcome, and an integration review get_evidence too')
     }
     switch (tool) {
       case 'get_task':

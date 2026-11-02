@@ -17,7 +17,8 @@ export const STATUS: Record<TaskStatus, { label: string, color: Color }> = {
   approved: { label: 'Complete', color: 'success' },
   merged: { label: 'Complete', color: 'success' },
   blocked: { label: 'Blocked', color: 'error' },
-  failed: { label: 'Failed', color: 'error' }
+  failed: { label: 'Failed', color: 'error' },
+  parent: { label: 'Parent', color: 'neutral' }
 }
 
 // Tasks counted by status label, in STATUS order, so merged tasks and approved
@@ -53,8 +54,8 @@ export const PLAN_STATUS: Record<PlanStatus, { label: string, color: Color }> = 
 
 // An epic's review mode (D27)
 export const EPIC_REVIEW_MODE: Record<EpicReviewMode, { label: string, description: string }> = {
-  epic: { label: 'Epic PR', description: 'Tasks integrate into an epic branch on agent approval; you review them all, with any human checks, on the epic PR' },
-  each_task: { label: 'Each task', description: 'You review every task, then the epic PR' },
+  epic: { label: 'Parent PR', description: 'Tasks integrate into a parent branch on agent approval; you review them all, with any human checks, on the parent PR' },
+  each_task: { label: 'Each task', description: 'You review every task, then the parent PR' },
   direct: { label: 'Direct', description: 'Each task merges straight into the target branch' }
 }
 
@@ -75,30 +76,32 @@ export const EPIC_STATUS_TEXT: Record<Color, string> = {
 
 // Epic PR audit events, worded to follow the actor's name in the Activity tab.
 const EPIC_PR_HISTORY: Record<string, string> = {
-  opened: 'opened the epic PR',
-  review_started: 'started the epic integration review',
-  approved: 'approved the epic PR',
-  changes_requested: 'requested changes on the epic PR',
-  human_approved: 'approved the epic PR',
-  human_changes_requested: 'requested changes on the epic PR',
-  rebase_requested: 'asked to rebase the epic PR onto the target branch',
-  rebased: 'rebased the epic PR; CI runs again',
-  conflict: 'found a conflict on the epic PR',
-  rebase_handed_off: 'handed the epic PR rebase to a developer',
-  ci_failed: 'saw CI fail on the epic PR',
-  merge_refused: 'stopped retrying after GitHub refused the epic PR merge',
-  closed: 'saw the epic PR closed on GitHub',
-  merged: 'merged the epic PR'
+  opened: 'opened the parent PR',
+  review_started: 'started the parent integration review',
+  approved: 'approved the parent PR',
+  changes_requested: 'requested changes on the parent PR',
+  human_approved: 'approved the parent PR',
+  human_changes_requested: 'requested changes on the parent PR',
+  rebase_requested: 'asked to rebase the parent PR onto the target branch',
+  rebased: 'rebased the parent PR; CI runs again',
+  conflict: 'found a conflict on the parent PR',
+  rebase_handed_off: 'handed the parent PR rebase to a developer',
+  ci_failed: 'saw CI fail on the parent PR',
+  merge_refused: 'stopped retrying after GitHub refused the parent PR merge',
+  closed: 'saw the parent PR closed on GitHub',
+  merged: 'merged the parent PR'
 }
 
 // Everything listEpicHistory returns: the audit rows whose detail has the epicId.
 export function epicHistoryText(entry: Pick<AuditEntry, 'action' | 'detail'>): string {
   const d = entry.detail
   switch (entry.action) {
-    case 'epic.updated': return `edited ${(d.changed as string[] | undefined)?.join(', ') ?? 'the epic'}`
+    case 'task.created': return 'created the task'
+    case 'task.promoted': return 'made this task a parent'
+    case 'epic.updated': return `edited ${(d.changed as string[] | undefined)?.join(', ') ?? 'the parent'}`
     case 'merge.refused': return `reported GitHub refused the merge: ${String(d.message)}`
-    case 'epic.pr': return [EPIC_PR_HISTORY[String(d.event)] ?? 'updated the epic PR', d.summary].filter(Boolean).join(': ')
-    default: return 'updated the epic'
+    case 'epic.pr': return [EPIC_PR_HISTORY[String(d.event)] ?? 'updated the parent PR', d.summary].filter(Boolean).join(': ')
+    default: return 'updated the parent'
   }
 }
 
@@ -116,7 +119,7 @@ export function epicInProgress(epic: Pick<Epic, 'reviewMode' | 'branch' | 'revie
 }
 
 // A developer run on an epic, with no task (D29)
-export const EPIC_CONFLICT_PENDING = 'Rebase conflict waits until the epic is about to land'
+export const EPIC_CONFLICT_PENDING = 'Rebase conflict waits until the parent is about to land'
 
 export const EPIC_FIX: Record<EpicFixKind, { active: string, past: string }> = {
   conflict: { active: 'Resolving a rebase conflict', past: 'Rebase conflict' },
@@ -148,14 +151,14 @@ export function epicReviewStatus(epic: Pick<Epic, 'reviewMode' | 'branch' | 'rev
   if (epic.sync?.state === 'failed') return { label: `${epicStoppedLabel(epic.sync.fix)}, retry to carry on`, color: 'error' }
   const allMerged = epic.taskCount > 0 && epic.mergedCount === epic.taskCount
   switch (epic.reviewState) {
-    case null: return allMerged && epic.branch ? { label: 'All tasks complete, epic PR opening', color: 'neutral' } : null
-    case 'open': return allMerged ? { label: 'All tasks complete, waiting for agent review', color: 'neutral' } : { label: 'Epic PR open, tasks still to merge', color: 'neutral' }
+    case null: return allMerged && epic.branch ? { label: 'All tasks complete, parent PR opening', color: 'neutral' } : null
+    case 'open': return allMerged ? { label: 'All tasks complete, waiting for agent review', color: 'neutral' } : { label: 'Parent PR open, tasks still to merge', color: 'neutral' }
     case 'in_review': return { label: 'All tasks complete, agent reviewing', color: 'info' }
     case 'human_review': return { label: 'All tasks complete, awaiting your review', color: 'warning' }
     case 'changes_requested': return { label: 'Changes requested, fixes in progress', color: 'warning' }
     case 'ready_to_merge': return { label: 'Approved, waiting to merge', color: 'success' }
     case 'conflict': return { label: 'Rebase conflict, rebasing again', color: 'info' }
-    case 'merged': return { label: 'Epic PR merged', color: 'success' }
+    case 'merged': return { label: 'Parent PR merged', color: 'success' }
   }
 }
 
@@ -205,9 +208,9 @@ export function cliLoginCommand(id: CliStatus['id']): string {
 export function inboxTypeBadge(type: InboxItem['type']): { label: string, color: Color } {
   return ({
     release_notes: { label: 'Release notes', color: 'neutral' as const },
-    epic_activity: { label: 'Epic PR', color: 'neutral' as const },
-    epic_review: { label: 'Epic PR', color: 'warning' as const },
-    epic_conflict: { label: 'Epic conflict', color: 'error' as const },
+    epic_activity: { label: 'Parent PR', color: 'neutral' as const },
+    epic_review: { label: 'Parent PR', color: 'warning' as const },
+    epic_conflict: { label: 'Parent conflict', color: 'error' as const },
     runner_update: { label: 'Runner', color: 'error' as const },
     human_review: { label: 'Human review', color: 'warning' as const },
     question: { label: 'Question', color: 'info' as const },
@@ -221,7 +224,7 @@ export function inboxTypeBadge(type: InboxItem['type']): { label: string, color:
 
 // An item's badge: a stopped epic shares the conflict's type, not its meaning
 export function inboxItemBadge(item: Pick<InboxItem, 'type'> & { stopped?: unknown }): { label: string, color: Color } {
-  return item.stopped ? { label: 'Epic stopped', color: 'error' } : inboxTypeBadge(item.type)
+  return item.stopped ? { label: 'Parent stopped', color: 'error' } : inboxTypeBadge(item.type)
 }
 
 export const TASK_TYPE: Record<Task['type'], string> = {
@@ -255,7 +258,7 @@ export function isLiveRun(run: Pick<Run, 'state'>): boolean {
 // design/agent.md: what a run was for. Only a task or an epic's integration
 // review has a title of its own, and only a PM run is a turn.
 export function runRef(run: Pick<Run, 'taskRef' | 'epicId'>): string {
-  return run.taskRef ?? (run.epicId ? 'Epic' : 'Plan')
+  return run.taskRef ?? (run.epicId ? 'Parent' : 'Plan')
 }
 
 export function runTitle(run: Pick<Run, 'taskTitle' | 'epicTitle' | 'summary' | 'role'>): string {
@@ -293,7 +296,7 @@ export const STATUS_DOT: Record<Color, string> = { neutral: 'bg-neutral-400', in
 // Where an Inbox item's task lives: an epic's activity is about the epic, and
 // its taskRef is only one of the epic's tasks
 export function inboxItemLink(item: { taskRef: string | null, epicId?: string | null }) {
-  if (item.epicId) return { to: `/epics/${item.epicId}`, label: 'Epic' }
+  if (item.epicId) return { to: `/epics/${item.epicId}`, label: 'Parent' }
   return item.taskRef ? { to: `/tasks/${item.taskRef}`, label: 'Task' } : null
 }
 export const prNumberLabel = (prUrl: string | null | undefined) => {
@@ -394,7 +397,7 @@ export function agentStatus(agent: Pick<Agent, 'paused' | 'pausedUntil' | 'activ
 
 // An epic's name for display; numbered when it isn't loaded yet
 export function epicTitle(epics: { id: string, title: string }[] | undefined, id: string, fallbackIndex: number): string {
-  return epics?.find(e => e.id === id)?.title ?? `Epic ${fallbackIndex + 1}`
+  return epics?.find(e => e.id === id)?.title ?? `Parent ${fallbackIndex + 1}`
 }
 
 // Sidebar counts: the Board counts open work only, so merged tasks drop out

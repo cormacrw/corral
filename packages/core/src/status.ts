@@ -11,7 +11,10 @@ export const TASK_STATUSES = [
   'merged',
   'approved',
   'blocked',
-  'failed'
+  'failed',
+  // A task with sub-tasks. It has no run or transitions of its own: its stage
+  // is computed from its sub-tasks and delivery state (D31)
+  'parent'
 ] as const
 
 export type TaskStatus = typeof TASK_STATUSES[number]

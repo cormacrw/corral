@@ -98,7 +98,7 @@ const next = computed(() => event.value === 'human_approved' && props.review?.st
         v-else-if="!conflict.decision"
         class="text-sm break-words"
       >
-        The epic PR can't rebase onto {{ conflict.targetBranch }}. Retry goes round the automatic rebase again, and a developer resolves a conflict that remains.
+        The parent PR can't rebase onto {{ conflict.targetBranch }}. Retry goes round the automatic rebase again, and a developer resolves a conflict that remains.
       </p>
       <InboxEpicDecision
         v-if="conflict.decision"

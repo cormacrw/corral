@@ -80,7 +80,7 @@ it('shows an up-to-date PR GitHub won\'t merge as an operational failure, and a 
   expect((await inbox()).needsYou.some(i => i.id === epic.id)).toBe(false)
 })
 
-it('sends a failed required check to a developer run on the epic, with no task and approval standing', async () => {
+it('sends a failed required check to a developer run on the parent, with no task and approval standing', async () => {
   const { epic, head } = await approved()
   const before = (await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epic.id))).length
   t.github.setChecks(head, [{ name: 'ci', conclusion: 'failure', url: 'http://ci' }])
@@ -114,10 +114,10 @@ it('counts a PR merged on GitHub, and leaves a closed one to the human', async (
   t.github.pulls.get(closed.pr.number)!.state = 'closed'
   await t.mergePass()
   expect(await reload(closed.epic.id)).toMatchObject({ reviewState: 'open', approvedHeadSha: null, approvedBaseSha: null })
-  expect((await inbox()).activity.find(a => a.type === 'epic_activity' && a.epicId === closed.epic.id)!.preview).toBe('Epic PR closed on GitHub')
+  expect((await inbox()).activity.find(a => a.type === 'epic_activity' && a.epicId === closed.epic.id)!.preview).toBe('Parent PR closed on GitHub')
 })
 
-it('holds tasks in a dependent epic until the epic PR merges, though every task is Merged', async () => {
+it('holds tasks in a dependent parent until the parent PR merges, though every task is Merged', async () => {
   const { project, epic, head } = await approved()
   const [dependent] = await t.db.insert(schema.epics).values({ projectId: project.id, createdBy: t.actor, title: 'Search sharing', reviewMode: 'direct' }).returning()
   await t.db.insert(schema.epicDependencies).values({ projectId: project.id, epicId: dependent!.id, dependsOnEpicId: epic.id })
@@ -142,7 +142,7 @@ it('holds tasks in a dependent epic until the epic PR merges, though every task 
   await capture('dependent-epic.json', { beforeEpicPrMerged: { epicTasks: 'all Merged', dependentTask: held }, afterEpicPrMerged: { epic: await reload(epic.id), dependentTask: claimed, assignedRun: { runId: job.runId, role: job.role, taskId: job.taskId } } })
 })
 
-it('shows no failed rebase on an epic merged by hand after one', async () => {
+it('shows no failed rebase on a parent task merged by hand after one', async () => {
   const { project, epic, head, pr } = await approved()
   await recordSyncFailure(t.db, (await t.db.select().from(schema.projects).where(eq(schema.projects.id, project.id)))[0]!, epic.id, 'Rebasing failed 3 times', new Date())
   expect((await t.request('GET', `/api/epics/${epic.id}`).then(r => r.json()) as { sync: unknown }).sync).toMatchObject({ state: 'failed' })

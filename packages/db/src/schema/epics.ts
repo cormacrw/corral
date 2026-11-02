@@ -1,12 +1,18 @@
 import { sql } from 'drizzle-orm'
-import { boolean, check, foreignKey, index, integer, jsonb, pgTable, primaryKey, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core'
+import { boolean, check, foreignKey, index, integer, jsonb, pgTable, primaryKey, text, timestamp, unique, uuid, type PgTableExtraConfigValue } from 'drizzle-orm/pg-core'
 import { actor, createdAt, updatedAt } from './columns.ts'
 import { epicReviewMode, epicReviewState, taskPriority } from './enums.ts'
 import { projects } from './projects.ts'
+// Import cycle with tasks.ts: a parent task and its delivery record point at
+// each other. See schema.ts.
+import { tasks } from './tasks.ts'
 
+// The delivery record of a parent task, whose sub-tasks point here through
+// tasks.epicId (D31). Null taskId: a collapsed one-task epic, whose task is top-level.
 export const epics = pgTable('epics', {
   id: uuid().primaryKey().defaultRandom(),
   projectId: uuid().notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  taskId: uuid(),
   title: text().notNull(),
   description: text().notNull().default(''),
   priority: taskPriority().notNull().default('medium'),
@@ -35,11 +41,15 @@ export const epics = pgTable('epics', {
   syncRetriedAt: timestamp({ withTimezone: true }),
   // Recorded when GitHub confirmed the epic PR merged
   mergeCommitSha: text(),
+  mergedAt: timestamp({ withTimezone: true }),
   createdBy: actor('created_by'),
   createdAt: createdAt(),
   updatedAt: updatedAt()
-}, t => [
+}, (t): PgTableExtraConfigValue[] => [
   index().on(t.projectId),
+  unique('epics_task_id_unique').on(t.taskId),
+  // Migration uses SET NULL (task_id) to preserve the required project.
+  foreignKey({ name: 'epics_task_same_project_fk', columns: [t.projectId, t.taskId], foreignColumns: [tasks.projectId, tasks.id] }).onDelete('set null'),
   // The target of the composite keys that keep tasks and edges in one project
   unique('epics_project_id_unique').on(t.projectId, t.id)
 ])

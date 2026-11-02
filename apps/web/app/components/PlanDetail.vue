@@ -99,7 +99,7 @@ watch(() => props.plan.id, () => {
       <section
         v-for="group in groups"
         :key="group.id"
-        :aria-label="`Epic ${group.title}`"
+        :aria-label="`Parent ${group.title}`"
         class="border-t border-default px-4 pt-3 pb-4"
       >
         <div class="flex items-start gap-2">
@@ -109,7 +109,7 @@ watch(() => props.plan.id, () => {
                 v-if="group.id"
                 type="button"
                 class="text-start hover:text-primary hover:underline"
-                :aria-label="`Open epic ${group.title}`"
+                :aria-label="`Open parent ${group.title}`"
                 @click="flyout.openEpic(group.id)"
               >
                 {{ group.title }}

@@ -95,7 +95,7 @@ const { project, tasks, loading, inboxLoading, runs, history, error, load, needs
                     :task-ref="run.taskRef"
                     class="relative z-10"
                   /><template v-else>
-                    {{ run.epicId ? 'epic' : '' }}
+                    {{ run.epicId ? 'parent' : '' }}
                   </template> {{ taskOf(run)?.title ?? run.epicTitle ?? '' }}
                 </p>
                 <p class="text-xs text-muted">
@@ -132,7 +132,7 @@ const { project, tasks, loading, inboxLoading, runs, history, error, load, needs
         class="mx-4 rounded-lg border border-default p-6 text-center"
       >
         <p class="mb-3 text-muted">
-          Plan your first epic with {{ pmName }}
+          Plan your first task with {{ pmName }}
         </p>
         <UButton
           :to="`/plan?project=${project.id}`"

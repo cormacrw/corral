@@ -1,4 +1,4 @@
-import { createAgentInput, pmActionTools, pmDirectTools, PM_PROJECT_LIST_MAX, PM_RUN_LIST_MAX, type ActionableInboxItem, type PmDirectTool, type RunEvent, type Run } from '@corral/contracts'
+import { createAgentInput, pmActionTools, pmDirectTools, PM_PROJECT_LIST_MAX, PM_RUN_LIST_MAX, storedProjectFields, type ActionableInboxItem, type PmDirectTool, type RunEvent, type Run } from '@corral/contracts'
 import { taskRef, type Actor } from '@corral/core'
 import { schema, type Database } from '@corral/db'
 import { and, eq, isNull } from 'drizzle-orm'
@@ -55,7 +55,7 @@ const TOOL_GOALS: Record<PmToolName, string> = {
   act_on_inbox: 'answer an Inbox item',
   create_task: 'create a task',
   update_task: 'change a task',
-  update_epic: 'change an epic'
+  update_parent: 'change a parent task'
 }
 
 interface Deps {
@@ -200,7 +200,8 @@ export class PmTools {
       }
 
       case 'update_project': {
-        const { project: slug, ...changes } = strict(pmDirectTools.update_project.input)
+        const { project: slug, ...neutral } = strict(pmDirectTools.update_project.input)
+        const changes = storedProjectFields(neutral)
         const fields = Object.entries(changes).filter(([, value]) => value !== undefined)
         if (fields.length === 0) throw new Error('Nothing to change: pass at least one setting')
         const project = await findProjectBySlug(db, slug)
@@ -212,7 +213,8 @@ export class PmTools {
       }
 
       case 'create_project': {
-        const { defaultBranch, ...parsed } = strict(pmDirectTools.create_project.input)
+        const { defaultBranch, ...neutral } = strict(pmDirectTools.create_project.input)
+        const parsed = storedProjectFields(neutral)
         const check = await checkRepository(db, runner, parsed.repository, CHECK_REPO_TIMEOUT_MS)
         if (!check.ready) throw new Error(`The project was not created: ${check.checks.filter(c => !c.ok).map(c => `${c.title}: ${c.detail}`).join(' ')}`)
         const branch = defaultBranch ?? check.defaultBranch
@@ -259,7 +261,7 @@ export class PmTools {
             ...(capped && { note: `The summary and error are cut to ${RUN_TEXT_MAX} characters.` })
           },
           ...(found.projectId && { projectId: found.projectId }),
-          summary: `Read run #${found.number}${found.taskRef ? ` on ${found.taskRef}` : found.epicTitle ? ` on epic ${found.epicTitle}` : ''}`
+          summary: `Read run #${found.number}${found.taskRef ? ` on ${found.taskRef}` : found.epicTitle ? ` on ${found.epicTitle}` : ''}`
         }
       }
       case 'message_run': {
@@ -318,7 +320,7 @@ export class PmTools {
 
       case 'create_task':
       case 'update_task':
-      case 'update_epic': {
+      case 'update_parent': {
         const edited = await this.#d.editEntity(context.sessionId, tool, input, actor)
         return { result: edited.result, projectId: edited.projectId, ...(edited.target && { target: edited.target }), summary: edited.summary }
       }
@@ -334,7 +336,7 @@ export class PmTools {
     const taskId = await this.#taskIdByRef(ref)
     const { comment, project, number } = await db.transaction(async (tx) => {
       const { task, project } = await lockTask(tx, taskId)
-      if (await waitingDecision(tx, task.id)) throw new Error('Epic rebase decisions must be answered by the human in the Inbox')
+      if (await waitingDecision(tx, task.id)) throw new Error('Rebase decisions must be answered by the human in the Inbox')
       const label = taskRef(project.prefix, task.number)
       if (idleStop(task)) throw new Error(`${label} stopped repeating and isn't asking a question. Propose retry or resolve; those need the human.`)
       if (task.status === 'blocked' && !await stuckQuestion(tx, task.id)) throw new Error(`${label} is blocked by a cap, repeated review feedback or a human decision, not a developer's question, so that's the human's: propose resolve on a confirm card.`)

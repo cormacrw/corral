@@ -66,7 +66,7 @@ import type { RunnerHub } from './runner-hub.ts'
 import { createAgent, getRun, listAgents, listEvidence, listReviews, listRuns, patchAgent } from './runs.ts'
 import type { Transcripts } from './transcripts.ts'
 import { checkRepository, detectClis, RepoCatalog, requireRuntimeCli } from './setup.ts'
-import { addComment, createTask, findTaskId, listComments, listHistory, listTasks, loadTask, patchTask, transitionTask } from './tasks.ts'
+import { addComment, addSubtask, createTask, findTaskId, listComments, listHistory, listTasks, loadTask, patchTask, transitionTask } from './tasks.ts'
 import { and, eq, isNull } from 'drizzle-orm'
 
 // The request path exactly as the client sent it, without the query. The
@@ -355,6 +355,14 @@ export function createApp({ db, events, actor, runner, orchestrator, github, blo
       return c.json(await readPullRequest(github, project, taskNumber(c.req.param('number'))))
     })
 
+    .post('/projects/:slug/tasks/:number/subtasks', validate('json', createTaskInput), async (c) => {
+      const project = await findProjectBySlug(db, c.req.param('slug'))
+      const taskId = await addSubtask(db, project, await findTaskId(db, project.id, taskNumber(c.req.param('number'))), c.req.valid('json'), actor)
+      const created = await loadTask(db, taskId)
+      events.publish({ type: 'task.created', task: created })
+      if (created.parentTask) events.publish({ type: 'task.updated', task: await loadTask(db, created.parentTask.id) })
+      return c.json(created, 201)
+    })
     .post('/projects/:slug/tasks', validate('json', createTaskInput), async (c) => {
       const project = await findProjectBySlug(db, c.req.param('slug'))
       const invalidatedEpics: InvalidatedEpics = new Map()

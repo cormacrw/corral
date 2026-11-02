@@ -15,11 +15,12 @@ describe('mobileSearch', () => {
 
   it('matches pages, epics, tasks and Plan sessions case-insensitively', () => {
     const project = projects[0]!
-    const epic = epics[0]!
+    const parent = tasks.find(t => t.status === 'parent')!
     const session = planSessions[0]!
     const someTask = tasks[0]!
     expect(mobileSearch(project.name.toUpperCase(), data).pages.some(p => p.to === `/projects/${project.slug}/board`)).toBe(true)
-    expect(mobileSearch(epic.title.toLowerCase(), data).epics).toContainEqual(epic)
+    expect(mobileSearch(parent.title.toLowerCase(), data).tasks).toContainEqual(parent)
+    expect(mobileSearch(parent.ref.toLowerCase(), data).tasks).toContainEqual(parent)
     expect(mobileSearch(session.title, data).sessions).toContainEqual(session)
     expect(mobileSearch(someTask.title, data).tasks).toContainEqual(someTask)
   })

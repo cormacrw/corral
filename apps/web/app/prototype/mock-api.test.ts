@@ -27,7 +27,7 @@ describe('prototype mock API', () => {
     }
   })
 
-  it('changes an epic\'s review mode until a task has opened a PR', async () => {
+  it('changes a parent task\'s review mode until a task has opened a PR', async () => {
     const changed = await mockCall<EpicDetail>('PATCH', '/epics/e-exports', { reviewMode: 'each_task' })
     expect(changed.reviewMode).toBe('each_task')
     expect(await mockCall<EpicDetail>('GET', '/epics/e-exports')).toMatchObject({ reviewMode: 'each_task', reviewModeLocked: false })
@@ -35,7 +35,7 @@ describe('prototype mock API', () => {
     await expect(mockCall('PATCH', '/epics/e-alerts', { title: 'Renamed' })).resolves.toMatchObject({ title: 'Renamed', reviewMode: 'epic' })
   })
 
-  it('serves an epic review in the server\'s shape', async () => {
+  it('serves a parent task review in the server\'s shape', async () => {
     const review = await mockCall<EpicReview>('GET', '/epics/e-alerts/review')
     expect(review).toMatchObject({ reviewMode: 'epic', state: 'human_review', targetBranch: 'main', targetMovedBy: 3, seenByHuman: 0, lastFeedback: null, pr: { number: 214 } })
     expect(review.rounds[0]!.findings[0]).toMatchObject({ level: 'non_blocking' })
@@ -45,10 +45,10 @@ describe('prototype mock API', () => {
     ])
     expect((await mockCall<EpicReview>('GET', '/epics/e-webhooks/review')).lastFeedback).toMatchObject({ fixTasks: [{ ref: 'COR-25' }], truncated: false })
     await expect(mockCall('GET', '/epics/nope/review')).rejects.toMatchObject({ status: 404 })
-    await expect(mockCall('GET', '/epics/e-mobile/review')).rejects.toMatchObject({ status: 409, message: expect.stringContaining('no epic review') })
+    await expect(mockCall('GET', '/epics/e-mobile/review')).rejects.toMatchObject({ status: 409, message: expect.stringContaining('no parent review') })
   })
 
-  it('has an epic in every epic PR review state, and an Inbox item for review and conflict', async () => {
+  it('has a parent task in every parent PR review state, and an Inbox item for review and conflict', async () => {
     const epics = await mockCall<Epic[]>('GET', '/projects/corral/epics')
     expect(new Set(epics.map(e => e.reviewState))).toEqual(new Set([null, ...EPIC_REVIEW_STATES]))
     for (const epic of epics.filter(e => e.prNumber)) expect(epic.prUrl).toContain(`/pull/${epic.prNumber}`)
@@ -108,7 +108,7 @@ describe('prototype mock API', () => {
     await expect(mockCall('GET', '/projects/corral/pull-requests/9999')).rejects.toMatchObject({ body: { code: 'pull_request_unavailable' } })
   })
 
-  it('serves a project, its tasks by view, a task and an epic', async () => {
+  it('serves a project, its tasks by view, a task and a parent task', async () => {
     const [project] = await mockCall<Project[]>('GET', '/projects')
     const all = await mockCall<Task[]>('GET', `/projects/${project!.slug}/tasks?view=all`)
     const backlog = await mockCall<Task[]>('GET', `/projects/${project!.slug}/tasks?view=backlog`)
@@ -220,7 +220,7 @@ describe('prototype mock API', () => {
     expect((await mockCall<Project>('GET', '/projects/corral')).paused).toBe(true)
   })
 
-  it('broadcasts updated epic progress including Approved designs and excluding Drafts', async () => {
+  it('broadcasts updated parent progress including Approved designs and excluding Drafts', async () => {
     const events: ServerEvent[] = []
     const stop = onMockEvent(event => events.push(event))
     try {

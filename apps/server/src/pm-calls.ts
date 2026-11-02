@@ -1,4 +1,4 @@
-import { humanTransitionInput, isPmGatedTool, pmActionTools, pmDirectTools, requiresPmConfirmation, type PmGatedTool } from '@corral/contracts'
+import { humanTransitionInput, isPmGatedTool, neutralPmCall, pmActionTools, pmDirectTools, requiresPmConfirmation, storedProjectFields, type PmGatedTool } from '@corral/contracts'
 import { canChangeType, isActiveRun, requiresHumanReview, taskRef, type Actor } from '@corral/core'
 import { schema } from '@corral/db'
 import { and, eq, isNull } from 'drizzle-orm'
@@ -26,7 +26,10 @@ const shown = (value: unknown) => {
   return text.length > VALUE_MAX ? `${text.slice(0, VALUE_MAX)}…` : text
 }
 
-export type PmEditTool = 'create_task' | 'update_task' | 'update_epic'
+// The stored mode `epic` is parent-level review
+const modeName = (mode: string | undefined) => mode === 'epic' ? 'parent' : mode
+
+export type PmEditTool = 'create_task' | 'update_task' | 'update_parent'
 
 export interface PmEdit {
   result: unknown
@@ -53,17 +56,20 @@ export class PmCalls {
     this.#o = orchestrator
   }
 
-  async execute(sessionId: string, tool: string, prepared: PreparedPmAction, actor: Actor): Promise<unknown> {
+  async execute(sessionId: string, storedTool: string, stored: PreparedPmAction, actor: Actor): Promise<unknown> {
+    // A card saved before D31 keeps its old names
+    const { tool, input: neutral } = neutralPmCall(storedTool, stored.input)
+    const prepared = { ...stored, input: neutral as PreparedPmAction['input'] }
     const { db, events } = this.#c.d
     const o = this.#o
     switch (tool) {
       case 'create_task':
       case 'update_task':
-      case 'update_epic':
+      case 'update_parent':
         return (await this.editEntity(sessionId, tool, prepared.input, actor)).summary
       case 'update_project': {
         const { project: slug, ...changes } = z.object(pmDirectTools.update_project.input).strict().parse(prepared.input)
-        const updated = await patchProject(db, await findProjectBySlug(db, slug), changes, actor)
+        const updated = await patchProject(db, await findProjectBySlug(db, slug), storedProjectFields(changes), actor)
         events.publish({ type: 'project.updated', project: updated })
         this.#c.scheduler.poke()
         return `Changed ${updated.name}.`
@@ -111,10 +117,10 @@ export class PmCalls {
     const project = await this.#c.plans.toolProject(sessionId, input)
     const scopedInput = z.record(z.string(), z.unknown()).parse(input)
     delete scopedInput.project
-    if (tool === 'update_epic') {
-      const { epicId, dependsOn, summary, ...fields } = z.object(pmActionTools.update_epic.input).strict().parse(scopedInput)
+    if (tool === 'update_parent') {
+      const { parentId: epicId, dependsOn, summary, ...fields } = z.object(pmActionTools.update_parent.input).strict().parse(scopedInput)
       const current = await getEpic(db, epicId)
-      if (current.projectId !== project.id) throw new ToolError('Use an epic from this conversation’s project')
+      if (current.projectId !== project.id) throw new ToolError('Use a parent task from this conversation’s project')
       await db.transaction(async (tx) => {
         await patchEpic(tx, epicId, { ...fields, ...(summary !== undefined && { description: summary }) }, actor)
         if (dependsOn !== undefined) await setEpicDependencies(tx, epicId, dependsOn, actor)
@@ -123,15 +129,16 @@ export class PmCalls {
       events.publish({ type: 'epic.updated', epic })
       for (const task of epic.tasks) events.publish({ type: 'task.updated', task })
       this.#c.scheduler.poke(epic.tasks.map(t => t.id))
-      return { result: epic, projectId: project.id, summary: `Updated epic ${epic.title}` }
+      return { result: epic, projectId: project.id, summary: `Updated parent ${epic.title}` }
     }
     if (tool === 'create_task') {
-      const parsed = z.object(pmActionTools.create_task.input).strict().parse(scopedInput)
-      const task = await loadTask(db, await createTask(db, project, parsed, actor))
+      const { parentId, ...parsed } = z.object(pmActionTools.create_task.input).strict().parse(scopedInput)
+      const task = await loadTask(db, await createTask(db, project, { ...parsed, epicId: parentId ?? null }, actor))
       events.publish({ type: 'task.created', task })
       return { result: task, projectId: project.id, target: { taskId: task.id, taskRef: task.ref }, summary: `Created ${task.ref}: ${task.title}` }
     }
-    const { taskRef: ref, paused, ...fields } = z.object(pmActionTools.update_task.input).strict().parse(scopedInput)
+    const { taskRef: ref, paused, parentId, ...edits } = z.object(pmActionTools.update_task.input).strict().parse(scopedInput)
+    const fields = { ...edits, ...parentId !== undefined && { epicId: parentId } }
     const match = /^([A-Za-z]+)-(\d+)$/.exec(ref)
     if (!match || match[1]!.toUpperCase() !== project.prefix.toUpperCase()) throw new ToolError('Use a task ref from this conversation’s project')
     const [row] = await db.select().from(tasks).where(and(eq(tasks.projectId, project.id), eq(tasks.number, Number(match[2])), isNull(tasks.deletedAt)))
@@ -177,13 +184,14 @@ export class PmCalls {
       : { input: input as Record<string, unknown>, summary: `Lower the gates on ${subject}: ${lowered.join('; ')}${also.length ? `. Also changes ${also.join(', ')}` : ''}`, targetId: target.id, taskId: target.taskId, projectId: target.projectId }
 
     if (tool === 'update_project') {
-      const { project: slug, ...changes } = z.object(pmDirectTools.update_project.input).strict().parse(input)
+      const { project: slug, ...neutral } = z.object(pmDirectTools.update_project.input).strict().parse(input)
+      const changes = storedProjectFields(neutral)
       const [project] = await db.select().from(projects).where(eq(projects.slug, slug))
       if (!project) return null
       const removed = changes.requiredChecks ? project.requiredChecks.filter(check => !changes.requiredChecks!.includes(check)) : []
       if (removed.length) lowered.push(`stop requiring ${removed.join(', ')}`)
       if (changes.humanReviewDefault === false && project.humanReviewDefault) lowered.push('turn off human review by default')
-      if (lowersMode(project.epicReviewModeDefault, changes.epicReviewModeDefault)) lowered.push(`change the default epic review mode from ${project.epicReviewModeDefault} to ${changes.epicReviewModeDefault}`)
+      if (lowersMode(project.epicReviewModeDefault, changes.epicReviewModeDefault)) lowered.push(`change the default parent review mode from ${modeName(project.epicReviewModeDefault)} to ${modeName(changes.epicReviewModeDefault)}`)
       if (changes.reviewRoundCap !== undefined && changes.reviewRoundCap > project.reviewRoundCap) lowered.push(`raise the review round cap from ${project.reviewRoundCap} to ${changes.reviewRoundCap}`)
       if (changes.failedRunCap !== undefined && changes.failedRunCap > project.failedRunCap) lowered.push(`raise the failed run cap from ${project.failedRunCap} to ${changes.failedRunCap}`)
       if (changes.paused === false && project.paused) lowered.push('resume the paused project, which restarts its runs and merges')
@@ -199,15 +207,16 @@ export class PmCalls {
       if (task.humanReview === false && project.humanReviewDefault && !requiresHumanReview(task.type, false)) lowered.push(`create it without human review, which ${project.name} has by default`)
       return card(`new task "${task.title}"`, [], { id: project.id, taskId: null, projectId: project.id })
     }
-    if (tool === 'update_epic') {
-      const { epicId, ...changes } = z.object(pmActionTools.update_epic.input).strict().parse(scoped)
+    if (tool === 'update_parent') {
+      const { parentId: epicId, ...changes } = z.object(pmActionTools.update_parent.input).strict().parse(scoped)
       const epic = await getEpic(db, epicId)
       if (epic.projectId !== project.id) return null
-      if (!epic.reviewModeLocked && lowersMode(epic.reviewMode, changes.reviewMode)) lowered.push(`change its review mode from ${epic.reviewMode} to ${changes.reviewMode}`)
-      return card(`epic ${epic.title}`, others(changes, ['reviewMode']), { id: epic.id, taskId: null, projectId: project.id })
+      if (!epic.reviewModeLocked && lowersMode(epic.reviewMode, changes.reviewMode)) lowered.push(`change its review mode from ${modeName(epic.reviewMode)} to ${modeName(changes.reviewMode)}`)
+      return card(`parent ${epic.title}`, others(changes, ['reviewMode']), { id: epic.id, taskId: null, projectId: project.id })
     }
 
-    const { taskRef: ref, paused, ...changes } = z.object(pmActionTools.update_task.input).strict().parse(scoped)
+    const { taskRef: ref, paused, parentId, ...edits } = z.object(pmActionTools.update_task.input).strict().parse(scoped)
+    const changes = { ...edits, ...parentId !== undefined && { epicId: parentId } }
     const match = /^([A-Za-z]+)-(\d+)$/.exec(ref)
     if (!match || match[1]!.toUpperCase() !== project.prefix.toUpperCase()) return null
     const [task] = await db.select().from(tasks).where(and(eq(tasks.projectId, project.id), eq(tasks.number, Number(match[2])), isNull(tasks.deletedAt)))
@@ -233,7 +242,8 @@ export class PmCalls {
     return card(`${taskRef(project.prefix, task.number)}: ${task.title}`, others({ ...changes, paused: paused || undefined }, ['humanReview']), { id: task.id, taskId: task.id, projectId: project.id })
   }
 
-  async prepare(sessionId: string, tool: string, input: unknown): Promise<PreparedPmAction> {
+  async prepare(sessionId: string, storedTool: string, storedInput: unknown): Promise<PreparedPmAction> {
+    const { tool, input } = neutralPmCall(storedTool, storedInput)
     if (isPmGatedTool(tool)) {
       const change = await this.#gateChange(sessionId, tool, input)
       if (!change) throw new ToolError('The target of this action has changed')

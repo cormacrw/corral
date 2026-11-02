@@ -20,7 +20,7 @@ const status = computed(() => epicReviewStatus(props.epic))
         target="_blank"
         rel="noopener"
         class="text-primary hover:underline"
-      >Epic PR #{{ epic.prNumber }}</a>
+      >Parent PR #{{ epic.prNumber }}</a>
     </div>
     <p
       v-if="status"
