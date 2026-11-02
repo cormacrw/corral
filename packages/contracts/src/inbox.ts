@@ -8,7 +8,7 @@ import type { Evidence, Task } from './tasks.ts'
 // ── Inbox (D11, design/inbox.md) ───────────────────────────────────────────
 
 export type TaskInboxItemType = 'human_review' | 'question' | 'blocked' | 'failed' | 'activity'
-export type InboxItemType = TaskInboxItemType | 'plan_thread' | 'epic_review' | 'release_notes' | 'epic_conflict'
+export type InboxItemType = TaskInboxItemType | 'plan_thread' | 'epic_review' | 'release_notes' | 'epic_conflict' | 'runner_update'
 
 interface InboxItemBase {
   project: { id: string, slug: string, name: string, thumbnailColor: string | null, thumbnailUrl: string | null }
@@ -173,7 +173,24 @@ export interface EpicConflictItem extends InboxItemBase, ReviewChanges {
   files: string[]
 }
 
-export type InboxItem = TaskInboxItem | PlanThreadItem | EpicReviewItem | ReleaseNotesItem | EpicConflictItem
+// A runner that can't update (COR-435). It belongs to no project: runners serve
+// them all, and it clears itself once the runner reports the server's build.
+export interface RunnerUpdateItem extends Omit<InboxItemBase, 'project'> {
+  id: string
+  type: 'runner_update'
+  project: null
+  runnerId: string
+  online: boolean
+  commit: string
+  serverCommit: string
+  body: string
+  taskId: null
+  taskRef: null
+  prUrl: null
+  resolution: null
+}
+
+export type InboxItem = TaskInboxItem | PlanThreadItem | EpicReviewItem | ReleaseNotesItem | EpicConflictItem | RunnerUpdateItem
 
 // What the human owes a decision on (D11). Everything here counts.
 export type ActionableInboxItem = Exclude<InboxItem, ReleaseNotesItem>

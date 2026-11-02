@@ -1,4 +1,5 @@
 import { RUNNER_PROTOCOL_VERSION, RUNNER_ROLES, type AgentTool, type RunnerCapacity, type RunnerMessage, type ServerMessage, type SetupJobResult } from '@corral/contracts'
+import { AGENT_TOOL_CONTRACT } from '@corral/contracts/agent-tools'
 import WebSocket from 'ws'
 
 export const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
@@ -44,11 +45,11 @@ export class FakeRunner {
   }
 
   // Takes every role and runtime with plenty of slots unless a test says otherwise
-  static async connect(url: string, activeRuns: { runId: string, leaseEpoch: number }[] = [], runnerId = 'r1', capacity: Partial<RunnerCapacity> & { taskIntegrationProtocols?: number[], taskIntegrationExecutor?: boolean, epicRebaseExecutor?: boolean, commit?: string, updateTarget?: string, updateState?: string, updateError?: string, autoUpdate?: boolean, draining?: boolean, updateRequested?: boolean } = {}): Promise<FakeRunner> {
+  static async connect(url: string, activeRuns: { runId: string, leaseEpoch: number }[] = [], runnerId = 'r1', capacity: Partial<RunnerCapacity> & { toolContract?: string | undefined, taskIntegrationProtocols?: number[], taskIntegrationExecutor?: boolean, epicRebaseExecutor?: boolean, commit?: string, updateTarget?: string, updateState?: string, updateError?: string, autoUpdate?: boolean, draining?: boolean, updateRequested?: boolean } = {}): Promise<FakeRunner> {
     const socket = new WebSocket(`${url.replace('http', 'ws')}/runner`)
     const runner = new FakeRunner(socket)
     await new Promise(resolve => socket.once('open', resolve))
-    runner.send({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, commit: 'development', runnerId, name: runnerId, activeRuns, slots: 10, runtimes: ['claude-code', 'codex'], roles: [...RUNNER_ROLES], ...capacity })
+    runner.send({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, commit: 'development', toolContract: AGENT_TOOL_CONTRACT, runnerId, name: runnerId, activeRuns, slots: 10, runtimes: ['claude-code', 'codex'], roles: [...RUNNER_ROLES], ...capacity })
     await runner.next('welcome')
     return runner
   }

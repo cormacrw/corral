@@ -21,7 +21,7 @@ describe('the actionable Inbox', () => {
   })
 
   const inbox = async () => t.request('GET', '/api/inbox').then(r => r.json()) as Promise<Inbox>
-  const mine = async (projectId: string) => (await inbox()).needsYou.filter(i => i.project.id === projectId)
+  const mine = async (projectId: string) => (await inbox()).needsYou.filter(i => i.project?.id === projectId)
   const act = async (id: string, input: InboxActionInput) => t.request('POST', `/api/inbox/${id}/actions`, input)
   async function failRun(id: string) {
     await t.db.transaction(async (tx) => {

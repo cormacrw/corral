@@ -1,7 +1,7 @@
 // What the web app needs at runtime, without zod: the schemas run when their
 // modules load, so importing one constant from the main entry bundles them all.
 // Keep this file free of schema imports.
-import type { CliId } from './runner.ts'
+import type { CliId, RunnerInfo } from './runner.ts'
 
 // The runtimes an agent can run on (D15), and the CLI each one needs on the
 // runner. Neutral names, never an auth method (agent-runtime-and-auth.md).
@@ -19,3 +19,21 @@ export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
 export const SSE_HEARTBEAT_MS = 25_000
 
 export const PULL_REQUEST_LINE_LIMIT = 1000
+
+// How long a runner kept from work may show no update attempt before a human
+// hears about it. The host updater's timer ticks every minute.
+export const RUNNER_UPDATE_GRACE_MS = 5 * 60_000
+
+// What a human has to look at for this runner, or null. A failed attempt says
+// why; a runner that needs an update and shows no attempt has nothing updating it.
+export function runnerUpdateProblem(runner: RunnerInfo, now = Date.now()): string | null {
+  if (!runner.behind && !runner.toolContractReason) return null
+  if (runner.updateState === 'failed') return runner.updateError || 'The host updater failed without saying why.'
+  if (runner.toolContractReason && runner.online && !runner.updateState && now - Date.parse(runner.connectedAt) > RUNNER_UPDATE_GRACE_MS) {
+    return `No update attempt since it connected. ${runner.toolContractReason} Check the host updater timer (corral-runner-update), or update it by hand.`
+  }
+  return null
+}
+
+// A runner's id in the Inbox, kept stable so the row survives reconnects
+export const runnerItemId = (runnerId: string) => `runner-${runnerId}`

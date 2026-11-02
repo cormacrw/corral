@@ -230,9 +230,9 @@ export class RunOutcomes {
   }
 
   // D24: a substantial change or a changed binding decision is the human's call.
-  async #blockedRebaseReview(ctx: RunContext, reason: string, decision?: EpicDecisionRequest) {
+  async #blockedRebaseReview(ctx: RunContext, reason: string, structured?: EpicDecisionRequest) {
     if (!reason.trim()) throw new ToolError('Explain the substantial change and the affected criteria for the human.')
-    this.#requireDecision(ctx, decision)
+    const decision = this.#decisionFor(ctx, reason, structured)
     await this.#c.d.db.transaction(async (tx) => {
       const { task, project } = await this.#c.runs.lockHeld(tx, ctx)
       await tx.insert(comments).values({ taskId: task.id, author: this.#c.runs.actor(ctx), body: `Rebase review blocked: ${reason.trim()}` })
@@ -244,14 +244,19 @@ export class RunOutcomes {
     return { ok: true, message: 'The task is Blocked for a human decision. You can stop now.' }
   }
 
-  // An epic rebase's question has to be one a human can answer in a click
-  #requireDecision(ctx: RunContext, decision?: EpicDecisionRequest) {
-    if (ctx.task && isEpicResolution(ctx.task) && !decision) throw new ToolError('Not reported. An epic rebase asks the human through `decision`: one focused question, at least two alternatives and the changes affected. Add it and report again.')
+  // An epic rebase holds its writer lock until the human answers on the
+  // operation, so a question always goes there. Refusing a report that lacks
+  // `decision` would lose the question: an agent with no way to supply one can
+  // only fail, and the task retries with nobody asked. Without alternatives the
+  // human answers in words, which counts as changing approved behaviour.
+  #decisionFor(ctx: RunContext, summary: string, decision?: EpicDecisionRequest): EpicDecisionRequest | undefined {
+    if (decision || !ctx.task || !isEpicResolution(ctx.task)) return decision
+    return { question: summary.trim(), alternatives: [], affectedChanges: [] }
   }
 
   // Asks a human: the task becomes Blocked with the question as its reason (D11)
-  async #stuck(ctx: RunContext, question: string, note: string, decision?: EpicDecisionRequest) {
-    this.#requireDecision(ctx, decision)
+  async #stuck(ctx: RunContext, question: string, note: string, structured?: EpicDecisionRequest) {
+    const decision = this.#decisionFor(ctx, question, structured)
     const comment = await this.#c.d.db.transaction(async (tx) => {
       const { task, project } = await this.#c.runs.lockHeld(tx, ctx)
       const comment = await this.#c.ending.postNote(tx, ctx, note)

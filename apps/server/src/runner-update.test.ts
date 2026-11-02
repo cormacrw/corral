@@ -1,7 +1,9 @@
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
-import { type RunnerInfo } from '@corral/contracts'
+import { RUNNER_UPDATE_GRACE_MS } from '@corral/contracts/client'
+import { type Inbox, type RunnerInfo } from '@corral/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { runnerUpdateItems } from './inbox.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner, sleep } from './test-runner.ts'
 
@@ -57,6 +59,73 @@ describe('runner updates', () => {
     await connect('A')
     expect(await status()).toContainEqual(expect.objectContaining({ id: 'A', online: true, behind: false, draining: false, updateRequested: false }))
     expect(t.runner.available().map(r => r.id)).toContain('A')
+  }, 60000)
+
+  async function readyTask() {
+    const project = await t.createProject({ repository: 'cormacrw/test-app' })
+    await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
+    const task = await t.createTask(project.slug)
+    await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'approve' })
+    await t.request('PATCH', `/api/projects/${project.slug}`, { paused: false })
+    return task
+  }
+  const needsYou = async () => (await (await t.request('GET', '/api/inbox')).json() as Inbox).needsYou.filter(i => i.type === 'runner_update')
+
+  it('gives no run to a runner whose agent tools differ, drains it for the host updater with auto-update off, and takes it back once updated', async () => {
+    t = await createTestApp('pglite', { listen: true })
+    const old = await connect('gaming-pc', { commit: 'old', toolContract: 'old-tools', autoUpdate: false })
+    expect(await status()).toContainEqual(expect.objectContaining({ id: 'gaming-pc', behind: true, draining: true, toolContractReason: expect.stringContaining('(old-tools)') }))
+    const task = await readyTask()
+    await t.orchestrator.schedule()
+    await sleep(100)
+    expect(old.received.some(m => m.type === 'run.assign')).toBe(false)
+
+    old.close()
+    await vi.waitFor(() => expect(t.runner.isOnline('gaming-pc')).toBe(false))
+    const updated = await connect('gaming-pc')
+    await t.orchestrator.schedule()
+    expect((await updated.next('run.assign')).job.taskId).toBe(task.id)
+    expect(await status()).toContainEqual(expect.objectContaining({ id: 'gaming-pc', behind: false, draining: false, toolContractReason: null }))
+  }, 60000)
+
+  it('treats a runner from before tool contracts as different', async () => {
+    t = await createTestApp('pglite', { listen: true })
+    await connect('legacy', { commit: 'old', toolContract: undefined })
+    expect(await status()).toContainEqual(expect.objectContaining({ id: 'legacy', draining: true, toolContractReason: expect.stringContaining('before tool contracts') }))
+  }, 60000)
+
+  it('keeps a failed update out of placement when its tools differ, and shows the error in Needs you until it updates', async () => {
+    t = await createTestApp('pglite', { listen: true })
+    const old = await connect('gaming-pc', { commit: 'old', toolContract: 'old-tools' })
+    await readyTask()
+    expect(await needsYou()).toEqual([])
+    old.send({ type: 'runner.update-status', draining: false, updateRequested: false, activeRunCount: 0, updateState: 'failed', updateError: 'Runner image build failed; inspect journalctl -u corral-runner-update' })
+    await vi.waitFor(async () => expect(await needsYou()).toMatchObject([{ id: 'runner-gaming-pc', subject: 'gaming-pc can\'t update', body: expect.stringContaining('image build failed'), commit: 'old', serverCommit: 'development', online: true, project: null }]))
+    const inbox = await (await t.request('GET', '/api/inbox')).json() as Inbox
+    expect(inbox.count).toBe(inbox.needsYou.length)
+    expect(await status()).toContainEqual(expect.objectContaining({ id: 'gaming-pc', draining: false }))
+    await t.orchestrator.schedule()
+    await sleep(100)
+    expect(old.received.some(m => m.type === 'run.assign')).toBe(false)
+
+    old.close()
+    await vi.waitFor(() => expect(t.runner.isOnline('gaming-pc')).toBe(false))
+    // Still behind while it's offline
+    expect(await needsYou()).toMatchObject([{ online: false }])
+    await connect('gaming-pc')
+    expect(await needsYou()).toEqual([])
+  }, 60000)
+
+  it('reports any behind runner whose update failed, and one with differing tools that nothing is updating', async () => {
+    t = await createTestApp('pglite', { listen: true })
+    await connect('behind', { commit: 'old', autoUpdate: true })
+    const failed = await connect('failed', { commit: 'old', autoUpdate: true })
+    await connect('stalled', { commit: 'old', toolContract: 'old-tools' })
+    failed.send({ type: 'runner.update-status', draining: false, updateRequested: false, activeRunCount: 0, updateState: 'failed', updateError: 'Build failed' })
+    await vi.waitFor(async () => expect((await needsYou()).map(i => i.id)).toEqual(['runner-failed']))
+    const later = Date.now() + RUNNER_UPDATE_GRACE_MS + 1000
+    expect(runnerUpdateItems(await status(), later).map(i => i.id).sort()).toEqual(['runner-failed', 'runner-stalled'])
+    expect(runnerUpdateItems(await status(), later).find(i => i.id === 'runner-stalled')!.body).toContain('No update attempt')
   }, 60000)
 
   it('returns a failed build runner to placement and keeps the failure visible across reconnect', async () => {

@@ -759,7 +759,6 @@ it('asks one focused question for a changed binding decision, and resumes the sa
   await t.orchestrator.schedule()
   const dev = (await runner.next('run.assign', m => m.job.role === 'developer' && m.job.taskId === fix.id)).job
 
-  expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'stuck', note: 'Stuck', summary: 'Which side?' })).toMatchObject({ ok: false, error: expect.stringContaining('decision') })
   expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'stuck', note: 'Needs a decision', summary: 'Which side?', decision })).toMatchObject({ ok: true })
 
   const items = (await inbox()).needsYou.filter(i => i.id === fix.id)
@@ -784,13 +783,42 @@ it('asks one focused question for a changed binding decision, and resumes the sa
   expect((await history(epic.id)).map(e => e.event)).toEqual(expect.arrayContaining(['decision_requested', 'decision_answered']))
 })
 
+it.each(['developer', 'reviewer'] as const)('asks a %s report with no structured decision from its summary, and starts no run until a written answer', async (role) => {
+  const epic = await humanApproved(await conflicted())
+  const { fix, resolved, operation } = await resolutionOf(epic)
+  if (role === 'reviewer') await developerSubmits(fix.id, resolved)
+  await t.orchestrator.schedule()
+  const job = (await runner.next('run.assign', m => m.job.role === role && m.job.taskId === fix.id)).job
+  const summary = 'The push guard and the typecheck want opposite things. Which should give way?'
+  const report = role === 'developer' ? { outcome: 'stuck', note: 'Asked which rule gives way', summary } : { outcome: 'blocked', summary }
+  expect(await runner.call(job.runId, job.leaseEpoch, 'report_outcome', report)).toMatchObject({ ok: true })
+  runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
+
+  const items = (await inbox()).needsYou.filter(i => i.id === fix.id)
+  expect(items).toMatchObject([{ type: 'question', body: summary, decision: { question: summary, alternatives: [], affectedChanges: [], answer: null } }])
+  expect(await taskRow(fix.id)).toMatchObject({ status: 'blocked', statusReason: summary })
+  expect((await epicApi(epic.id)).sync).toMatchObject({ state: 'deciding', question: summary, taskId: fix.id })
+  await capture(`summary-question-${role}.json`, { scenario: `A resolution ${role} reports with no structured decision.`, report, inboxItem: items[0], epicSync: (await epicApi(epic.id)).sync })
+
+  const assigned = () => t.db.select({ id: schema.runs.id }).from(schema.runs).where(eq(schema.runs.taskId, fix.id))
+  const before = await assigned()
+  await tick()
+  await t.orchestrator.schedule()
+  await tick()
+  expect(await assigned()).toHaveLength(before.length)
+
+  // A written answer resumes the same operation, and can't keep approval
+  expect((await t.request('POST', `/api/inbox/${fix.id}/actions`, { action: 'clarify', text: 'Change the guard' })).status).toBe(200)
+  expect(await taskRow(fix.id)).toMatchObject({ status: 'in_progress' })
+  expect((await ops(epic.id)).map(o => [o.id, o.decisions.at(-1)?.answer?.changesBehaviour])).toEqual([[operation.id, true]])
+})
+
 it('sends a behaviour-changing decision back through review and the human, on the same operation', async () => {
   const epic = await humanApproved(await conflicted())
   const { fix, resolved, operation } = await resolutionOf(epic, 'target version\n')
   const { criteria } = await developerSubmits(fix.id, resolved)
   await t.orchestrator.schedule()
   const review = (await runner.next('run.assign', m => m.job.role === 'reviewer' && m.job.taskId === fix.id)).job
-  expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', { outcome: 'blocked', summary: 'Which side?' })).toMatchObject({ ok: false, error: expect.stringContaining('decision') })
   expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', { outcome: 'blocked', summary: 'Which side?', decision })).toMatchObject({ ok: true })
   expect((await inbox()).needsYou.filter(i => i.id === fix.id)).toMatchObject([{ type: 'question' }])
 

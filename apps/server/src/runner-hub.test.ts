@@ -1,3 +1,4 @@
+import { AGENT_TOOL_CONTRACT } from '@corral/contracts/agent-tools'
 import { RUNNER_PROTOCOL_VERSION, type RunnerMessage, type ServerMessage } from '@corral/contracts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import WebSocket from 'ws'
@@ -34,7 +35,7 @@ describe('runner connection', () => {
     const closed = new Promise<number>(resolve => connection.once('close', resolve))
     const welcomed = new Promise<void>(resolve => connection.on('message', data => JSON.parse(String(data)).type === 'welcome' && resolve()))
     await new Promise(resolve => connection.once('open', resolve))
-    connection.send(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, commit: 'development', runnerId: 'silent', name: 'silent', activeRuns: [], slots: 1, runtimes: ['claude-code'], roles: ['developer'] }))
+    connection.send(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, commit: 'development', toolContract: AGENT_TOOL_CONTRACT, runnerId: 'silent', name: 'silent', activeRuns: [], slots: 1, runtimes: ['claude-code'], roles: ['developer'] }))
     await welcomed
     const job = hub.request({ kind: 'detect_clis' })
     const lastHeard = Date.parse(hub.status().runners[0]!.lastHeartbeatAt)
@@ -59,7 +60,7 @@ describe('runner connection', () => {
       })
     })
     await new Promise(resolve => connection.once('open', resolve))
-    connection.send(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, commit: 'development', runnerId: 'r1', name: 'test-runner', activeRuns: [], slots: 1, runtimes: ['claude-code'], roles: ['developer'] } satisfies RunnerMessage))
+    connection.send(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, commit: 'development', toolContract: AGENT_TOOL_CONTRACT, runnerId: 'r1', name: 'test-runner', activeRuns: [], slots: 1, runtimes: ['claude-code'], roles: ['developer'] } satisfies RunnerMessage))
     await welcomed
     return connection
   }

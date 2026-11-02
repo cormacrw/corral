@@ -2,6 +2,7 @@ import type { Query, QueryClient, QueryKey } from '@tanstack/vue-query'
 import { partialMatchKey } from '@tanstack/vue-query'
 import { ACTIVE_RUN_STATES } from '@corral/core'
 import type { Agent, Comment, Epic, EpicDetail, Inbox, PlanSession, PlanSessionDetail, Project, Run, RunEvent, ServerEvent, ServerEventType, Task } from '@corral/contracts'
+import { runnerItemId, runnerUpdateProblem } from '@corral/contracts/client'
 import { keys, type RunFilter } from './keys'
 
 // What depends on what: the single place that says which queries an event or
@@ -200,7 +201,12 @@ export const eventDependencies: EventDependencies = {
   },
   'runner.status': {
     write: ({ status }, cache) => cache.set(keys.runner(), () => status),
-    invalidates: () => [keys.status()]
+    // Heartbeats land here too, so only when the runners Needs you lists change
+    invalidates: ({ status }, cache) => {
+      const listed = cache.get<Inbox>(keys.inbox())?.needsYou.filter(i => i.type === 'runner_update').map(i => i.id).sort()
+      const wanted = status.runners.filter(r => runnerUpdateProblem(r)).map(r => runnerItemId(r.id)).sort()
+      return !listed || String(listed) === String(wanted) ? [keys.status()] : [keys.status(), keys.inbox()]
+    }
   },
   'global.status': {
     write: ({ status }, cache) => cache.set(keys.status(), merge(status)),

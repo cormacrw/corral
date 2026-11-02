@@ -85,7 +85,7 @@ const submitLabel = computed(() => action.value ? (actions.value.find(a => a.val
 
 // What the phone's screen shows, by kind
 const isEpicItem = (item: InboxItem | null): item is EpicReviewItem | EpicConflictItem => item?.type === 'epic_review' || item?.type === 'epic_conflict'
-const mobileItem = computed(() => selected.value?.type === 'plan_thread' || isEpicItem(selected.value) ? null : selected.value as TaskInboxItem | ReleaseNotesItem | null)
+const mobileItem = computed(() => selected.value?.type === 'plan_thread' || selected.value?.type === 'runner_update' || isEpicItem(selected.value) ? null : selected.value as TaskInboxItem | ReleaseNotesItem | null)
 
 // Resolves false when not sent, so the composer keeps its images
 async function submit(message: string): Promise<boolean> {
@@ -189,6 +189,7 @@ const panel = reactive({
     ref="panelView"
     :plan-thread="selected?.type === 'plan_thread' ? selected : null"
     :epic-item="isEpicItem(selected) ? selected : null"
+    :runner-item="selected?.type === 'runner_update' ? selected : null"
     :inbox="inbox"
     :error="error"
     :selected="mobileItem"
@@ -205,6 +206,10 @@ const panel = reactive({
     v-else-if="selected?.type === 'epic_conflict'"
     :item="selected"
     @resolved="moveToNext"
+  />
+  <InboxRunnerUpdate
+    v-else-if="selected?.type === 'runner_update'"
+    :item="selected"
   />
   <InboxReleaseNotes
     v-else-if="selected?.type === 'release_notes'"

@@ -30,7 +30,16 @@ async function choose(alternative: number) {
         Binding decision: {{ item.decision.bindingDecision }}
       </p>
     </div>
-    <ul class="flex flex-col gap-2">
+    <p
+      v-if="!item.decision.alternatives.length"
+      class="text-sm text-muted"
+    >
+      The agent gave no alternatives. Reply with your answer: the rebase carries on from it, and review starts again.
+    </p>
+    <ul
+      v-if="item.decision.alternatives.length"
+      class="flex flex-col gap-2"
+    >
       <li
         v-for="(alternative, index) in item.decision.alternatives"
         :key="alternative.label"
@@ -59,7 +68,7 @@ async function choose(alternative: number) {
         />
       </li>
     </ul>
-    <div>
+    <div v-if="item.decision.affectedChanges.length">
       <h3 class="text-xs font-medium text-muted">
         Affected changes
       </h3>

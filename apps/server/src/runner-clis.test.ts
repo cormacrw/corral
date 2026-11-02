@@ -1,3 +1,4 @@
+import { AGENT_TOOL_CONTRACT } from '@corral/contracts/agent-tools'
 import { RUNNER_PROTOCOL_VERSION, type ServerMessage } from '@corral/contracts'
 import { describe, expect, it } from 'vitest'
 import { EventBus } from './events.ts'
@@ -6,7 +7,7 @@ import { RunnerHub } from './runner-hub.ts'
 function connection(hub: RunnerHub, runnerId = 'r1') {
   const sent: ServerMessage[] = []
   const peer = hub.connect({ send: data => sent.push(JSON.parse(data)), close() {} })
-  const hello = () => peer.onMessage(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, commit: 'development', runnerId, name: 'test', activeRuns: [], slots: 1, runtimes: ['claude-code'], roles: ['developer'] }))
+  const hello = () => peer.onMessage(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, commit: 'development', toolContract: AGENT_TOOL_CONTRACT, runnerId, name: 'test', activeRuns: [], slots: 1, runtimes: ['claude-code'], roles: ['developer'] }))
   const detections = () => sent.filter((m): m is Extract<ServerMessage, { type: 'job.request' }> => m.type === 'job.request' && m.job.kind === 'detect_clis')
   const answer = async (version: string | null) => peer.onMessage(JSON.stringify({
     type: 'job.result', jobId: detections().at(-1)!.jobId, ok: true,

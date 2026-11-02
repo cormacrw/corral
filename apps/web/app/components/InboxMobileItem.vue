@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { EpicConflictItem, EpicReviewItem, Inbox, PlanThreadItem, TaskInboxItem, ReleaseNotesItem } from '@corral/contracts'
+import type { EpicConflictItem, EpicReviewItem, Inbox, PlanThreadItem, RunnerUpdateItem, TaskInboxItem, ReleaseNotesItem } from '@corral/contracts'
 import type { InboxPanelContext } from '~/composables/useInboxPanel'
 import { inboxItemLink } from '~/utils/labels'
 
@@ -9,6 +9,7 @@ import { inboxItemLink } from '~/utils/labels'
 const props = defineProps<{
   planThread: PlanThreadItem | null
   epicItem: EpicReviewItem | EpicConflictItem | null
+  runnerItem: RunnerUpdateItem | null
   inbox: Inbox | null
   error: string | null
   selected: TaskInboxItem | ReleaseNotesItem | null
@@ -41,6 +42,13 @@ const taskLink = computed(() => props.selected ? inboxItemLink(props.selected) :
       :item="epicItem"
       @resolved="onResolved"
     />
+  </div>
+  <div
+    v-else-if="runnerItem"
+    class="flex h-full min-h-0 flex-col"
+  >
+    <MobilePageHeader compact />
+    <InboxRunnerUpdate :item="runnerItem" />
   </div>
   <div
     v-else-if="selected?.type === 'release_notes'"

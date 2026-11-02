@@ -52,7 +52,7 @@ import { epicHistory } from './epic-prs.ts'
 import { answerDecision, waitingDecision } from './epic-rebase-approval.ts'
 import { getEpic, listEpics, patchEpic, setEpicDependencies } from './epics.ts'
 import type { EventBus } from './events.ts'
-import { loadInbox } from './inbox.ts'
+import { loadInbox, withRunnerItems } from './inbox.ts'
 import type { GitHubClient } from './github.ts'
 import { listPullRequests, readPullRequest } from './pull-requests.ts'
 import { createProject, findProjectBySlug, listProjects, patchProject, setProjectThumbnail, toProject } from './projects.ts'
@@ -633,7 +633,7 @@ export function createApp({ db, events, actor, runner, orchestrator, github, blo
     // Its Drafts are deleted; the session stays, so the PM can propose again
     .post('/plan/plans/:id/discard', async c => c.json(await plans.discard(c.req.param('id'), actor)))
 
-    .get('/inbox', async c => c.json(await loadInbox(db)))
+    .get('/inbox', async c => c.json(withRunnerItems(await loadInbox(db), runner.status().runners)))
 
     .post('/inbox/:taskId/actions', validate('json', inboxActionInput), async (c) => {
       const [row] = await db.select({ id: schema.tasks.id }).from(schema.tasks)

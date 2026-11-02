@@ -1,4 +1,4 @@
-import type { Inbox } from '@corral/contracts'
+import type { TaskInboxItem, Inbox } from '@corral/contracts'
 import { describe, expect, it } from 'vitest'
 import { releaseNotes } from '../prototype/fixtures.ts'
 import { projectCardSummary, projectNeedsYou } from './projects.ts'
@@ -14,7 +14,7 @@ const task = (ref: string, status: Status, lease: 'developer' | 'reviewer' | nul
 
 describe('projectNeedsYou', () => {
   const notes = releaseNotes[0]!
-  const blocked = { ...notes, id: 'task', type: 'blocked' } as unknown as Inbox['needsYou'][number]
+  const blocked = { ...notes, id: 'task', type: 'blocked' } as unknown as TaskInboxItem
   const other = { ...blocked, id: 'other', project: { ...notes.project, id: 'another-project' } }
   const inbox = (needsYou: Inbox['needsYou']): Inbox => ({ needsYou, activity: [], resolved: [], count: 0 })
 

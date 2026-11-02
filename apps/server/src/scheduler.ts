@@ -60,7 +60,7 @@ export class Scheduler {
   // signed-in CLI for the runtime and a free slot, the emptiest first. A run
   // with a previous runner that's still online waits for that one.
   async pickRunner(tx: Executor, role: RunnerRole, runtime: string, previous: string | null, integrationProtocol = 0): Promise<string | null> {
-    const fit = this.#c.d.runner.available().filter(r => r.roles.includes(role) && r.runtimes.includes(runtime) && !integrationCompatibilityReason(integrationProtocol, r.taskIntegrationProtocols))
+    const fit = this.#c.d.runner.available().filter(r => !r.toolContractReason && r.roles.includes(role) && r.runtimes.includes(runtime) && !integrationCompatibilityReason(integrationProtocol, r.taskIntegrationProtocols))
     if (!fit.length) return null
     const busy = await tx.select({ runnerId: runs.runnerId, n: count() }).from(runs)
       .where(and(inArray(runs.state, [...ACTIVE_RUN_STATES]), inArray(runs.runnerId, fit.map(r => r.id))))

@@ -95,7 +95,7 @@ describe.each(['pglite', 'postgres'] as const)('project thumbnails on %s', (driv
     const task = await t.createTask(project.slug)
     await t.db.update(schema.tasks).set({ status: 'blocked', statusReason: 'Waiting for a decision' }).where(eq(schema.tasks.id, task.id))
     const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
-    expect(inbox.needsYou.some(item => item.project.thumbnailUrl === saved.thumbnailUrl)).toBe(true)
+    expect(inbox.needsYou.some(item => item.project?.thumbnailUrl === saved.thumbnailUrl)).toBe(true)
     const removed = await t.request('DELETE', `/api/projects/${project.slug}/thumbnail`)
     expect(await removed.json()).toMatchObject({ thumbnailUrl: null, thumbnailColor: '#123456' })
     expect((await t.request('GET', saved.thumbnailUrl!)).status).toBe(404)
