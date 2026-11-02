@@ -138,8 +138,8 @@ const { project, tasks, loading, inboxLoading, runs, history, error, load, needs
                 </span>
                 <span class="mt-1 flex items-center gap-2">
                   <UBadge
-                    :label="inboxTypeBadge(item.type).label"
-                    :color="inboxTypeBadge(item.type).color"
+                    :label="inboxItemBadge(item).label"
+                    :color="inboxItemBadge(item).color"
                     variant="subtle"
                     size="sm"
                   />

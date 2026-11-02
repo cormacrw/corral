@@ -120,8 +120,8 @@ useSeoMeta({ title: () => `${project.value?.name ?? 'Project'} · Corral` })
                   class="flex items-center gap-2 px-3 py-2 text-sm hover:bg-elevated"
                 >
                   <UBadge
-                    :label="inboxTypeBadge(item.type).label"
-                    :color="inboxTypeBadge(item.type).color"
+                    :label="inboxItemBadge(item).label"
+                    :color="inboxItemBadge(item).color"
                     size="xs"
                     variant="subtle"
                     class="shrink-0"

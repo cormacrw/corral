@@ -185,6 +185,11 @@ export function inboxTypeBadge(type: InboxItem['type']): { label: string, color:
   })[type]
 }
 
+// An item's badge: a stopped epic shares the conflict's type, not its meaning
+export function inboxItemBadge(item: Pick<InboxItem, 'type'> & { stopped?: unknown }): { label: string, color: Color } {
+  return item.stopped ? { label: 'Epic stopped', color: 'error' } : inboxTypeBadge(item.type)
+}
+
 export const TASK_TYPE: Record<Task['type'], string> = {
   task: 'Task', bug: 'Bug', spike: 'Spike', design: 'Design'
 }

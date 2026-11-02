@@ -74,9 +74,10 @@ it('shows an up-to-date PR GitHub won\'t merge as an operational failure, and a 
   await t.mergePass()
   expect(await reload(epic.id)).toMatchObject({ reviewState: 'ready_to_merge', syncError: expect.stringContaining('can\'t merge') })
   expect(((await (await t.request('GET', `/api/epics/${epic.id}`)).json()) as { sync: unknown }).sync).toMatchObject({ state: 'failed' })
-  expect((await inbox()).needsYou.some(i => i.id === epic.id)).toBe(false)
+  expect((await inbox()).needsYou.some(i => i.id === epic.id)).toBe(true)
   expect((await t.request('POST', `/api/epics/${epic.id}/sync/retry`)).status).toBe(200)
   expect((await reload(epic.id)).syncError).toBeNull()
+  expect((await inbox()).needsYou.some(i => i.id === epic.id)).toBe(false)
 })
 
 it('sends a failed required check to a developer run on the epic, with no task and approval standing', async () => {
