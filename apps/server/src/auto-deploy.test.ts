@@ -167,7 +167,9 @@ describe('auto-deploy.sh deciding what to do', { timeout: 30_000 }, () => {
     await writeFile(join(checkout, path), `${main.length}\n`)
     git('add', path)
     git('commit', '--quiet', '-m', `Change ${path}`)
-    git('push', '--quiet', 'origin', 'HEAD:refs/heads/main')
+    // Push only to this fixture's bare repository, leaving the agent's origin
+    // push guard intact (including for subprocesses running deploy scripts).
+    git('push', '--quiet', join(dir, 'origin.git'), 'HEAD:refs/heads/main')
     const sha = git('rev-parse', 'HEAD')
     main.push(sha)
     return sha

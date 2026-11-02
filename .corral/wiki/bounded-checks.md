@@ -42,3 +42,11 @@ Plan queue tests wait for persisted `running` states with `vi.waitFor` after
 sending `run.started`. Assignment delivery does not mean the server has handled
 the runner's start messages; a fixed sleep can still observe queued rows on a
 busy CI worker.
+
+The check command removes inherited `NODE_ENV` before spawning gates, so a
+production runner cannot select production UI libraries in tests. Agent runtime
+environments also omit `NODE_ENV`, keeping dependency installs and direct test
+commands independent of the runner service mode. The Git origin push guard is
+still inherited: deployment tests push directly to their temporary bare repo's
+path, never by clearing the guard or changing the real origin's configuration.
+`agent.test.ts` proves named-origin pushes fail while a local fixture push works.
