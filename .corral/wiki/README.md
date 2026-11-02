@@ -21,6 +21,7 @@ Short implementation notes written while building. Not binding: `docs/README.md`
 - [Mobile launch destination](mobile-landing.md)
 - [Mobile PM conversations](mobile-pm-conversations.md)
 - [Starting a Plan thread](optimistic-plan-starts.md)
+- [Outcome retries](outcome-retries.md)
 - [Plan validation and revision equality](plan-validation.md)
 - [PM evidence attachments](pm-evidence.md)
 - [PM run diagnostics](pm-run-diagnostics.md)

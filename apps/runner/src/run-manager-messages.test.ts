@@ -17,13 +17,16 @@ import { createTestDataDir, pmJob, TEST_REPOSITORY } from './test-repo.ts'
 // answers it with "Got: …". The "hold" turn stays open until the release file
 // exists, like an agent busy with tool calls; a message that arrives then
 // joins that turn, which ends with one result, as the CLI does. It exits once
-// stdin closes and it has nothing left to answer.
+// stdin closes and it has nothing left to answer. With the orphaned file, a
+// --resume opens with the empty result the CLI prints for a background command
+// the last process left behind, and its turn holds too.
 const FAKE_CLAUDE = `#!/usr/bin/env node
 const { appendFileSync, existsSync } = require('node:fs')
 const { createInterface } = require('node:readline')
 const log = line => appendFileSync(__filename + '.log', JSON.stringify(line) + '\\n')
 const print = line => console.log(JSON.stringify(line))
 log({ args: process.argv.slice(2) })
+const orphaned = process.argv.includes('--resume') && existsSync(__filename + '.orphaned')
 let busy = false
 let closed = false
 function take(content) {
@@ -42,8 +45,9 @@ createInterface({ input: process.stdin })
     if (busy) return take(content)
     busy = true
     print({ type: 'system', subtype: 'init', session_id: 'dev-session' })
+    if (orphaned) print({ type: 'result', subtype: 'success', is_error: false, num_turns: 0, result: '', session_id: 'dev-session' })
     take(content)
-    if (content !== 'hold') return finish()
+    if (content !== 'hold' && !orphaned) return finish()
     const wait = setInterval(() => {
       if (!existsSync(__filename + '.release')) return
       clearInterval(wait)
@@ -51,6 +55,7 @@ createInterface({ input: process.stdin })
     }, 20)
   })
   .on('close', () => {
+    log({ closed: true })
     closed = true
     if (!busy) process.exit(0)
   })
@@ -102,9 +107,9 @@ describe('RunManager messages for live runs', () => {
     return sent.flatMap(m => m.type === 'run.events' ? m.events : [])
   }
 
-  async function log(): Promise<{ args?: string[], stdin?: string }[]> {
+  async function log(): Promise<{ args?: string[], stdin?: string, closed?: boolean }[]> {
     const text = await readFile(`${claudeBin}.log`, 'utf8').catch(() => '')
-    return text.trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as { args?: string[], stdin?: string })
+    return text.trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as { args?: string[], stdin?: string, closed?: boolean })
   }
 
   async function stdin(): Promise<string[]> {
@@ -168,6 +173,52 @@ describe('RunManager messages for live runs', () => {
     const calls = (await log()).flatMap(entry => entry.args ? [entry.args] : [])
     expect(calls).toHaveLength(2)
     expect(calls[1]).toEqual(expect.arrayContaining(['--resume', 'dev-session']))
+  })
+
+  describe('a retry resumed over a background command left behind', () => {
+    // The retry has answered the empty result and is working on its real turn
+    async function retrying(): Promise<RunManager> {
+      await writeFile(`${claudeBin}.orphaned`, '')
+      const manager = new RunManager(config, connection, tools)
+      manager.assign(devJob({ prompt: 'Build it' }))
+      await expect.poll(async () => (await stdin()).length, { timeout: 10_000 }).toBe(2)
+      await expect.poll(() => events()).toContainEqual({ type: 'system', text: 'The agent exited (code 0) without reporting an outcome; resuming it once to report' })
+      await new Promise(resolve => setTimeout(resolve, 300))
+      return manager
+    }
+
+    const closes = async () => (await log()).filter(entry => entry.closed).length
+
+    it('keeps stdin open through the empty result, so the turn runs and its report completes the run', async () => {
+      const manager = await retrying()
+      // Only the first process's stdin has closed: nothing is counting down
+      expect(await closes()).toBe(1)
+
+      await reportOutcome(manager, 'stuck')
+      await release()
+      const messages = await finish('r1')
+
+      expect(events()).toContainEqual({ type: 'system', text: 'The resumed agent reported its outcome' })
+      expect(messages.find(m => m.type === 'run.ended')).toMatchObject({ exit: { kind: 'exited', code: 0 } })
+      expect(manager.activeRuns()).toEqual([])
+    })
+
+    it('says so when the retry finishes its real turn and still reports nothing', async () => {
+      await retrying()
+      await release()
+      const messages = await finish('r1')
+
+      expect(events()).toContainEqual({ type: 'system', text: 'The resumed agent exited (code 0) without reporting an outcome' })
+      expect(messages.find(m => m.type === 'run.ended')).toMatchObject({ exit: { kind: 'exited', code: 0 } })
+    })
+  })
+
+  it('tells agents to wait for long commands inside their turn', async () => {
+    new RunManager(config, connection, tools).assign(devJob({ prompt: 'Build it' }))
+    await finish('r1')
+
+    const args = (await log())[0]!.args!
+    expect(args[args.indexOf('--append-system-prompt') + 1]).toContain('run them in the foreground')
   })
 
   it('ignores a message whose lease epoch is stale', async () => {
