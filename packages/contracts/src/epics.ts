@@ -6,8 +6,10 @@ import type { Task } from './tasks.ts'
 
 // Corral keeping the epic branch on top of its target branch (D27). Only
 // `failed` needs anyone: it's an operational stop that a retry clears.
+// `conflict_pending` is progress: resolved once, when the epic is about to land.
 export type EpicSync =
   | { state: 'rebasing' }
+  | { state: 'conflict_pending', files: string[] }
   | { state: 'resolving', files: string[], taskId: string | null, taskRef: string | null }
   | { state: 'fixing', fix: EpicFixKind, reason: string, files: string[], developer: EpicFixDeveloper | null, attempts: number }
   | { state: 'deciding', question: string, taskId: string | null, taskRef: string | null }

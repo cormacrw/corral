@@ -49,6 +49,10 @@ it('shows a stopped epic\'s failure on the board card', () => {
   expect(text).toContain('CI still failing after 3 fixes')
 })
 
+it('shows a pending conflict as progress on the board card', () => {
+  expect(card({ state: 'conflict_pending', files: ['a.ts'] }).find('[data-testid="epic-card-conflict-pending"]').text()).toContain('about to land')
+})
+
 it('lists past fixes with their reason and whether behaviour changed', () => {
   const run = (over: Partial<EpicFixRun>): EpicFixRun => ({ runId: 'r', runNumber: 7, fix: 'ci', developer: 'Atlas', reason: 'CI failed', state: 'completed', outcome: 'pr_updated', summary: 'Fixed the fixture', behaviourChanged: false, reReviewed: false, at: '2026-11-02T00:00:00.000Z', ...over })
   const rows = mount(EpicFixRuns, { props: { runs: [run({}), run({ runId: 'r2', fix: 'review', reason: 'Reviewer asked', behaviourChanged: true, reReviewed: true })] }, global }).findAll('li')

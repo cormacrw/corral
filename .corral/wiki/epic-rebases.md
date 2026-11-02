@@ -12,6 +12,25 @@ writes the epic branch or relies on its head checks `activeRebase` or takes a
 row in that table. That covers review claims, human actions, task PR merges and
 the epic merge.
 
+A conflict before the final checkpoint isn't resolved at all (COR-445). `#defer`
+ends the operation as `failed` with `CONFLICT_DEFERRED`, so the lock goes and
+nothing runs. Resolving one earlier costs a run each time the target moves, and
+the target usually moves again before the epic lands.
+
+Pending has no column: `deferredConflicts` reads the epic's newest `rebase` row, so
+any later rebase or fix ends it by being newer. A deferred row isn't a failure
+(`NOT_FAILURES`). `begin` skips a retry on the same head and target unless the
+epic has reached `finalCheckpoint`, since those commits would conflict the same
+way. Approval is refused during an active rebase, so the state `#prepare` reads
+can't go stale in the unsafe direction: an approval just after `#defer` is seen by
+the next `begin`.
+
+`startReview` normally waits for a head on top of the target. It lets one through
+when the deferred row's head is that head, or review would wait on a rebase that
+waits on review. `EpicMerger` keeps its behind check, which is what stops a
+conflicted epic merging. A checkpoint needs a waiting task or a complete epic, and
+`due()` goes through the `Backoff`, so a test expecting one uses `t.mergePass()`.
+
 While a conflict is being resolved the operation stays `running` with `fix` set
 to `conflict` and a developer run on the epic (D29, [epic fixes](epic-fix-tasks.md)).
 

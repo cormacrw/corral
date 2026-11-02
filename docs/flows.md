@@ -325,7 +325,7 @@ Before merging, the server compares the epic branch with the target branch throu
 The runner rebases the epic's commits onto the target commit on a throwaway candidate, touching no shared ref.
 
 - **Clean rebase:** the runner publishes with a compare-and-swap on the expected head. The approval stands. CI runs again on the new head, and when it passes the epic PR goes to step 7.
-- **Conflict (this example):** another task changed the same route file on the target branch. The epic branch and the target branch stay as they were. The server schedules a developer run on E7, tied to the operation, with no task, and "Epic rebase conflict sent to a developer" is posted to Activity. There's no Needs-you item: E7 shows the developer resolving the conflict, with the files.
+- **Conflict (this example):** another task changed the same route file on the target branch. The epic branch and the target branch stay as they were. At every earlier checkpoint a conflict only gets noted: E7 shows it as progress, nothing runs, and integration and review carry on (COR-445). This is the final checkpoint, because the human has approved, so the server schedules a developer run on E7, tied to the operation, with no task, and "Epic rebase conflict sent to a developer" is posted to Activity. There's no Needs-you item: E7 shows the developer resolving the conflict, with the files.
 
 The run's branch is a candidate, `corral/epic-rebase/<operation>`, cut from the epic head, with no PR. The operation holds the writer lock throughout, the run counts against developer concurrency, and it waits on pause, the kill switch or an update hold. The developer:
 

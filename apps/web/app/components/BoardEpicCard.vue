@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Agent, Epic } from '@corral/contracts'
-import { EPIC_FIX, epicStoppedLabel, runPath } from '~/utils/labels'
+import { EPIC_CONFLICT_PENDING, EPIC_FIX, epicStoppedLabel, runPath } from '~/utils/labels'
 
 // An epic on the Board: its title and progress, with a blocked icon while
 // prerequisite epics are unfinished (COR-154). The card is a div so the icon
@@ -135,6 +135,13 @@ function openPrerequisite(id: string) {
           {{ epic.sync.error }}
         </p>
       </div>
+      <p
+        v-else-if="epic.sync?.state === 'conflict_pending'"
+        class="min-w-0 break-words text-xs text-muted"
+        data-testid="epic-card-conflict-pending"
+      >
+        {{ EPIC_CONFLICT_PENDING }}
+      </p>
       <div class="flex items-center justify-between gap-2">
         <span class="text-xs text-muted">{{ epic.mergedCount }} of {{ epic.taskCount }} merged</span>
         <div

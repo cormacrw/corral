@@ -1,6 +1,6 @@
 import { TASK_INTEGRATION_PROTOCOL, type EpicHistoryEntry, type EpicReviewItem, type Inbox, type RunJob } from '@corral/contracts'
 import { schema } from '@corral/db'
-import { asc, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, sql } from 'drizzle-orm'
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -594,6 +594,177 @@ const decision = {
   ],
   affectedChanges: ['target: export everything', 'epic: filtered exports']
 }
+
+describe('a conflict before approval (COR-445)', () => {
+  const FIXES = { ...MODERN, epicFixExecutor: true }
+  const rebases = async (epicId: string) => (await ops(epicId)).filter(o => o.kind === 'rebase')
+  const fixRuns = (epicId: string) => t.db.select().from(schema.runs).where(and(eq(schema.runs.epicId, epicId), eq(schema.runs.role, 'developer')))
+
+  // An epic with a task on its branch and another held back, so no review
+  // starts until the test has moved the target
+  async function heldEpic(file: string, text: string) {
+    const epic = await createEpic()
+    const held = await createReadyTask(epic.id)
+    await t.db.update(schema.tasks).set({ paused: true }).where(eq(schema.tasks.id, held.id))
+    const task = await deliver(epic.id, file, text)
+    await passes(1)
+    expect(await taskRow(task.id)).toMatchObject({ status: 'merged' })
+    return { ...epic, branch: (await epicRow(epic.id)).branch!, held }
+  }
+
+  async function finishHeld({ held }: { held: Task }, file: string) {
+    await t.db.update(schema.tasks).set({ paused: false }).where(eq(schema.tasks.id, held.id))
+    const { head } = await develop(held, file, `${file}\n`)
+    await review(held, head)
+    await passes(2)
+    expect(await taskRow(held.id)).toMatchObject({ status: 'merged' })
+    await t.db.update(schema.projects).set({ requiredChecks: ['ci'] }).where(eq(schema.projects.id, project.id))
+  }
+
+  async function approveAtHead(epicId: string) {
+    const { prHeadSha, reviewState } = await epicRow(epicId)
+    expect(reviewState).toBe('human_review')
+    expect((await approveEpic(epicId, prHeadSha!)).status).toBe(200)
+  }
+
+  async function fixJob(epicId: string) {
+    await t.orchestrator.schedule()
+    return (await runner.next('run.assign', m => m.job.epicId === epicId && m.job.role === 'developer')).job
+  }
+
+  async function resolveOn(branch: string, onto: string, file: string, text: string) {
+    await git('checkout', '--quiet', branch)
+    await git('rebase', onto).catch(() => null)
+    await writeFile(join(origin, file), text)
+    await git('add', '.')
+    await git('rebase', '--continue')
+    const resolved = await git('rev-parse', 'HEAD')
+    await git('checkout', '--quiet', 'main')
+    return resolved
+  }
+
+  async function reportFix(job: RunJob, headSha: string, file: string, behaviourChanged = false) {
+    expect(await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'pr_updated', summary: 'Kept both sides', note: 'Resolved', headSha, behaviourChanged, conflictedFiles: [file] })).toMatchObject({ ok: true })
+    await mergePasses(1)
+  }
+
+  it('carries on through integration and review, and resolves once after approval across two target moves', async () => {
+    runner = await connectRunner('r1', FIXES)
+    const epic = await heldEpic('shared.txt', 'epic\n')
+    await commitOn('main', 'shared.txt', 'target\n')
+    // The rebase at this integration conflicts, and the task lands anyway
+    await finishHeld(epic, 'more.txt')
+
+    expect((await rebases(epic.id)).at(-1)).toMatchObject({ state: 'failed', conflictFiles: ['shared.txt'], fix: null })
+    expect(await sync(epic.id)).toEqual({ state: 'conflict_pending', files: ['shared.txt'] })
+    expect((await inbox()).needsYou).toEqual([])
+    expect(await events(epic.id)).toContain('conflict_deferred')
+    // The same commits aren't tried again
+    const tried = (await rebases(epic.id)).length
+    await passes(2)
+    expect(await rebases(epic.id)).toHaveLength(tried)
+
+    await integrationReview(epic.id)
+    const onto = await commitOn('main', 'other.txt', 'second move\n')
+    await mergePasses(2)
+    expect((await rebases(epic.id)).at(-1)).toMatchObject({ state: 'failed', ontoSha: onto })
+    expect(await epicRow(epic.id)).toMatchObject({ reviewState: 'human_review' })
+    expect(await fixRuns(epic.id)).toEqual([])
+
+    await approveAtHead(epic.id)
+    await mergePasses(2)
+    expect(await epicRow(epic.id)).toMatchObject({ reviewState: 'ready_to_merge' })
+    const active = (await rebases(epic.id)).at(-1)!
+    expect(active).toMatchObject({ state: 'running', fix: 'conflict', conflictFiles: ['shared.txt'] })
+    expect(await sync(epic.id)).toMatchObject({ state: 'fixing', fix: 'conflict' })
+
+    const job = await fixJob(epic.id)
+    const resolved = await resolveOn(job.branch!, active.ontoSha!, 'shared.txt', 'target\nepic\n')
+    await reportFix(job, resolved, 'shared.txt')
+    expect(await epicRow(epic.id)).toMatchObject({ reviewState: 'ready_to_merge', prHeadSha: resolved, mergeCommitSha: null })
+    expect(await sync(epic.id)).toBeNull()
+
+    passCi(resolved)
+    await t.mergePass()
+    expect((await epicRow(epic.id)).reviewState).toBe('merged')
+    expect(await git('show', 'main:shared.txt')).toBe('target\nepic')
+    expect(await fixRuns(epic.id)).toHaveLength(1)
+    expect((await events(epic.id)).filter(e => e === 'fix_started')).toHaveLength(1)
+    expect((await inbox()).needsYou).toEqual([])
+  })
+
+  it('clears the pending conflict when a later checkpoint rebases cleanly', async () => {
+    runner = await connectRunner('r1', FIXES)
+    const epic = await heldEpic('shared.txt', 'epic\n')
+    await commitOn('main', 'shared.txt', 'target\n')
+    await finishHeld(epic, 'more.txt')
+    expect(await sync(epic.id)).toMatchObject({ state: 'conflict_pending' })
+
+    await git('rm', '--quiet', 'shared.txt')
+    await git('commit', '--quiet', '-m', 'Target drops its version')
+    await integrationReview(epic.id)
+    await mergePasses(2)
+
+    expect((await rebases(epic.id)).at(-1)).toMatchObject({ state: 'succeeded' })
+    expect(await sync(epic.id)).toBeNull()
+    expect(await fixRuns(epic.id)).toEqual([])
+  })
+
+  it('sends a second conflict during final resolution the same way, and never merges it unresolved', async () => {
+    runner = await connectRunner('r1', FIXES)
+    const epic = await heldEpic('shared.txt', 'epic\n')
+    await commitOn('main', 'shared.txt', 'target\n')
+    await finishHeld(epic, 'more.txt')
+    await integrationReview(epic.id)
+    await approveAtHead(epic.id)
+    await mergePasses(2)
+
+    const job = await fixJob(epic.id)
+    const active = (await rebases(epic.id)).at(-1)!
+    const resolved = await resolveOn(job.branch!, active.ontoSha!, 'shared.txt', 'target\nepic\n')
+    await commitOn('main', 'shared.txt', 'target again\n')
+    await reportFix(job, resolved, 'shared.txt')
+    passCi(resolved)
+    await mergePasses(2)
+
+    expect((await epicRow(epic.id)).reviewState).toBe('ready_to_merge')
+    const second = (await rebases(epic.id)).at(-1)!
+    expect(second).toMatchObject({ state: 'running', fix: 'conflict', expectedTargetSha: resolved })
+
+    const again = await fixJob(epic.id)
+    const final = await resolveOn(again.branch!, second.ontoSha!, 'shared.txt', 'target again\nepic\n')
+    await reportFix(again, final, 'shared.txt')
+    expect((await epicRow(epic.id)).reviewState).toBe('ready_to_merge')
+    passCi(final)
+    await t.mergePass()
+    expect((await epicRow(epic.id)).reviewState).toBe('merged')
+    expect(await git('show', 'main:shared.txt')).toBe('target again\nepic')
+    expect(await fixRuns(epic.id)).toHaveLength(2)
+  })
+
+  it('returns the epic through review and the human when approval cannot carry', async () => {
+    runner = await connectRunner('r1', FIXES)
+    const epic = await heldEpic('shared.txt', 'epic\n')
+    await commitOn('main', 'shared.txt', 'target\n')
+    await finishHeld(epic, 'more.txt')
+    await integrationReview(epic.id)
+    await approveAtHead(epic.id)
+    await mergePasses(2)
+
+    const job = await fixJob(epic.id)
+    const resolved = await resolveOn(job.branch!, (await rebases(epic.id)).at(-1)!.ontoSha!, 'shared.txt', 'merged differently\n')
+    await reportFix(job, resolved, 'shared.txt', true)
+    expect(await epicRow(epic.id)).toMatchObject({ reviewState: 'open', approvedHeadSha: null })
+
+    await mergePasses(1)
+    await integrationReview(epic.id)
+    await approveAtHead(epic.id)
+    passCi(resolved)
+    await t.mergePass()
+    expect((await epicRow(epic.id)).reviewState).toBe('merged')
+    expect(await fixRuns(epic.id)).toHaveLength(1)
+  })
+})
 
 describe('a target update that conflicts', () => {
   it('finishes a routine conflict with no human, keeping the approval', async () => {

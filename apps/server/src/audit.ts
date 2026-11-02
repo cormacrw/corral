@@ -62,6 +62,7 @@ export type EpicPrDetail =
   | { event: 'merge_refused', summary: string }
   | { event: 'rebase_resolving', summary: string, files: string[] }
   | { event: 'rebase_failed', summary: string }
+  | { event: 'conflict_deferred', summary: string, files: string[] }
   // `fix` names the CI or review fix this stopped, when it wasn't a rebase
   | { event: 'sync_failed', summary: string, fix?: EpicFixKind }
   | { event: 'sync_retried', fix?: EpicFixKind }

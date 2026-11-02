@@ -10,7 +10,7 @@ import { actorLabel, type OrchestratorDeps } from './orchestrator.ts'
 import { answerEpicDecision, openEpicFix } from './epic-fixes.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import { loadEpic } from './epics.ts'
-import { ACTIVE_OPERATION, APPROVED_STATES, openDecision, shortSha } from './epic-rebase-approval.ts'
+import { ACTIVE_OPERATION, APPROVED_STATES, deferredConflicts, openDecision, shortSha } from './epic-rebase-approval.ts'
 import { activeRebase, rebasingEpics, retrySync } from './epic-sync.ts'
 import { requiredChecks, type PullRequest } from './github.ts'
 import { epicReviewCiSection, epicReviewPrompt, type EpicReviewCi } from './prompts.ts'
@@ -111,8 +111,9 @@ export class EpicPullRequests {
     // a CI fix is on top of the target, so the behind check below can't tell
     if (candidate.prHeadSha && candidate.prHeadSha !== pr.headSha && APPROVED_STATES.includes(candidate.reviewState) && await github.branchHead(project.repository, candidate.branch!) === candidate.prHeadSha) return
     // Review starts from a head on top of the target branch: the
-    // synchronizer's pass rebases it, and this one comes back
-    if (await github.behindBy(project.repository, project.defaultBranch, pr.headSha) > 0) return
+    // synchronizer's pass rebases it, and this one comes back. A conflict on
+    // this head is resolved once approved, so review doesn't wait for it.
+    if (await github.behindBy(project.repository, project.defaultBranch, pr.headSha) > 0 && (await deferredConflicts(db, [candidate.id])).get(candidate.id)?.expectedTargetSha !== pr.headSha) return
     await github.updatePullRequest(project.repository, pr.number, { body: await this.body(db, candidate, board, project) })
     const changed = await db.transaction(async (tx) => {
       const [epic] = await tx.select().from(epics).where(eq(epics.id, candidate.id)).for('update')
@@ -305,7 +306,7 @@ export class EpicPullRequests {
 }
 
 // How each epic PR event reads, in the Inbox and on the epic's history
-export const EPIC_EVENT_LABELS: Record<string, string> = { opened: 'Epic PR opened', review_started: 'Epic integration review started', approved: 'Epic PR approved by reviewer', changes_requested: 'Epic integration changes requested', human_approved: 'You approved the epic PR', human_changes_requested: 'You requested changes on the epic PR', rebase_requested: 'Rebasing the epic PR onto the target branch', rebased: 'Epic PR rebased; CI runs again', conflict: 'Epic PR conflict', rebase_handed_off: 'You handed the epic PR rebase to a developer', rebase_resolving: 'Epic rebase conflict sent to a developer', rebase_failed: 'Epic rebase attempt failed', sync_failed: 'Epic rebase stopped', sync_retried: 'You retried the epic rebase', ci_failed: 'CI failed on the epic PR', merge_refused: 'GitHub refused the epic PR merge', review_failed: 'Epic integration review stopped retrying', closed: 'Epic PR closed on GitHub', merged: 'Epic PR merged', approval_retained: 'Approval kept across the rebase', approval_invalidated: 'Approval no longer applies; review starts again', decision_requested: 'An epic rebase needs your decision', decision_answered: 'You decided on the epic rebase', fix_started: 'A developer was asked to fix the epic', fix_reported: 'The developer reported an epic fix', fix_refused: 'Corral refused the epic fix and sent it back', fix_published: 'The epic fix reached the epic branch; CI runs again' }
+export const EPIC_EVENT_LABELS: Record<string, string> = { opened: 'Epic PR opened', review_started: 'Epic integration review started', approved: 'Epic PR approved by reviewer', changes_requested: 'Epic integration changes requested', human_approved: 'You approved the epic PR', human_changes_requested: 'You requested changes on the epic PR', rebase_requested: 'Rebasing the epic PR onto the target branch', rebased: 'Epic PR rebased; CI runs again', conflict: 'Epic PR conflict', rebase_handed_off: 'You handed the epic PR rebase to a developer', rebase_resolving: 'Epic rebase conflict sent to a developer', rebase_failed: 'Epic rebase attempt failed', conflict_deferred: 'Rebase conflict left until the epic is about to land', sync_failed: 'Epic rebase stopped', sync_retried: 'You retried the epic rebase', ci_failed: 'CI failed on the epic PR', merge_refused: 'GitHub refused the epic PR merge', review_failed: 'Epic integration review stopped retrying', closed: 'Epic PR closed on GitHub', merged: 'Epic PR merged', approval_retained: 'Approval kept across the rebase', approval_invalidated: 'Approval no longer applies; review starts again', decision_requested: 'An epic rebase needs your decision', decision_answered: 'You decided on the epic rebase', fix_started: 'A developer was asked to fix the epic', fix_reported: 'The developer reported an epic fix', fix_refused: 'Corral refused the epic fix and sent it back', fix_published: 'The epic fix reached the epic branch; CI runs again' }
 
 // A CI or review fix stops and retries through the same events as a rebase
 const EPIC_FIX_EVENT_LABELS: Record<string, string> = { sync_failed: 'Epic fix stopped', sync_retried: 'You retried the epic fix' }

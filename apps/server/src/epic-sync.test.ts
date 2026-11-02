@@ -303,7 +303,7 @@ it('rebases before review, and keeps approval over a clean rebase before merge',
 })
 
 it('sends a conflict to a developer and a reviewer on a candidate, then publishes it with the epic showing progress', async () => {
-  const epic = await conflicted()
+  const epic = await humanApproved(await conflicted())
   await approved(epic, 'waiting.txt')
   await tick()
 
@@ -336,7 +336,7 @@ it('sends a conflict to a developer and a reviewer on a candidate, then publishe
 })
 
 it('keeps task integration off the epic branch while a resolution holds the lock', async () => {
-  const epic = await conflicted()
+  const epic = await humanApproved(await conflicted())
   await tick()
   const task = await approved(epic, 'late.txt')
   await tick()
@@ -371,7 +371,7 @@ it('never pushes over a write that beat the rebase to the branch', async () => {
 })
 
 it('starts one resolution for the same commits, however often it is polled or reported', async () => {
-  const epic = await conflicted()
+  const epic = await humanApproved(await conflicted())
   await Promise.all([tick(), tick(), tick()])
   await tick()
   await t.orchestrator.schedule()
@@ -444,7 +444,7 @@ it('holds a candidate when the project is paused while it was being prepared', a
 })
 
 it('starts no resolution when paused or stopped during the prepare that found the conflict', async () => {
-  const epic = await conflicted()
+  const epic = await humanApproved(await conflicted())
   for (const stop of [
     () => t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id)),
     async () => {
@@ -469,7 +469,7 @@ it('starts no resolution when paused or stopped during the prepare that found th
 
 it('holds a human-approved task PR while a rebase has the lock, then merges it', async () => {
   t.github.mergeResult = { merged: true, sha: 'merge-sha', message: 'merged' }
-  const epic = await conflicted()
+  const epic = await humanApproved(await conflicted())
   await tick()
   const branch = `task-pr-${++branches}`
   await git('branch', branch, epic.branch)
@@ -500,7 +500,7 @@ it('holds a human-approved task PR while a rebase has the lock, then merges it',
 })
 
 it('retires a resolution whose epic branch moved, and starts again without a human', async () => {
-  const epic = await conflicted()
+  const epic = await humanApproved(await conflicted())
   await tick()
   const [operation] = await ops(epic.id)
   const fix = await taskRow(operation!.resolutionTaskId!)
@@ -529,7 +529,7 @@ it('retires a resolution whose epic branch moved, and starts again without a hum
 })
 
 it('retires a live resolution when the epic PR merges first', async () => {
-  const epic = await conflicted()
+  const epic = await humanApproved(await conflicted())
   await tick()
   const [operation] = await ops(epic.id)
   await t.db.update(schema.epics).set({ reviewState: 'merged' }).where(eq(schema.epics.id, epic.id))
@@ -568,7 +568,7 @@ it('bounds infrastructure failures, then shows a recoverable failure and asks th
 })
 
 it('keeps a reviewed resolution through failed pushes, and pushes it again on retry', async () => {
-  const epic = await conflicted()
+  const epic = await humanApproved(await conflicted())
   await tick()
   const [operation] = await ops(epic.id)
   const fix = await taskRow(operation!.resolutionTaskId!)
@@ -592,7 +592,7 @@ it('keeps a reviewed resolution through failed pushes, and pushes it again on re
 })
 
 it('sends back a resolution no reviewer approved that changes target work, and leaves the epic branch alone', async () => {
-  const epic = await conflicted()
+  const epic = await humanApproved(await conflicted())
   const onto = await commitOn('main', 'landed.txt', 'landed\n')
   await tick()
   const [operation] = await ops(epic.id)
@@ -1239,7 +1239,7 @@ describe('developer runs on the epic', () => {
   })
 
   it('starts one developer run however often it is polled or the runner reconnects', async () => {
-    const epic = await conflicted()
+    const epic = await humanApproved(await conflicted())
     for (let n = 0; n < 3; n++) await pass()
     const job = await fixJob(epic.id)
     for (let n = 0; n < 3; n++) {
@@ -1254,7 +1254,7 @@ describe('developer runs on the epic', () => {
   })
 
   it('holds a human-stopped epic fix until Retry and preserves saving work through heartbeats and reconnects', async () => {
-    const epic = await conflicted()
+    const epic = await humanApproved(await conflicted())
     await pass()
     const job = await fixJob(epic.id)
     await t.orchestrator.onRunMessage({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'epic-saving' }, 'r1')
@@ -1282,7 +1282,7 @@ describe('developer runs on the epic', () => {
   })
 
   it('preserves saving work during the kill switch without spending an attempt', async () => {
-    const epic = await conflicted()
+    const epic = await humanApproved(await conflicted())
     await pass()
     const job = await fixJob(epic.id)
     await t.orchestrator.onRunMessage({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'epic-kill-saving' }, 'r1')
@@ -1299,7 +1299,7 @@ describe('developer runs on the epic', () => {
   })
 
   it.each(['lease expiry', 'runner shutdown', 'reconciled failure'] as const)('bounds epic fixes lost to %s, counting each run once', async (cause) => {
-    const epic = await conflicted()
+    const epic = await humanApproved(await conflicted())
     await pass()
     for (let n = 0; n < 3; n++) {
       const job = await fixJob(epic.id)
@@ -1376,7 +1376,7 @@ describe('developer runs on the epic', () => {
   })
 
   it('stops an epic after three failed developer runs, with the failure shown and a Retry that starts another', async () => {
-    const epic = await conflicted()
+    const epic = await humanApproved(await conflicted())
     await pass()
     for (let n = 0; n < 3; n++) {
       const job = await fixJob(epic.id)
