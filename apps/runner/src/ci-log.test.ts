@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { ciExcerpt } from '../../server/src/ci-output.ts'
 import { CiLogScanner, logLine } from './ci-log.ts'
 
 const stamp = '2026-10-30T12:00:00.1234567Z '
@@ -11,18 +12,19 @@ const scan = (log: string, chunk = 1024) => {
   return scanner.finish()
 }
 
-// The shape of a real CI log: turbo groups each package's output, the failing
-// package's long before the end, then tens of megabytes of the next package's
+// Shape reported from job 125066364374: passing groups, a bare failing
+// package header, ungrouped output, ELIFECYCLE, then the next passing group.
 const turboLog = lines(
   '##[group]Run pnpm run test', 'pnpm run test', '##[endgroup]',
-  '##[group]@corral/web:test',
+  '##[group]@corral/core:test', ' ✓ core.test.ts', '##[endgroup]',
+  '@corral/web:test',
   ...noise('web', 50),
   '\u001B[41m\u001B[1m FAIL \u001B[22m\u001B[49m  app/utils/labels.test.ts > labels > says which fix stopped',
   'AssertionError: expected \'Fix stopped\' to be \'Rebase stopped\'',
   ' - Expected', ' + Received', '',
   ...noise('web after', 20),
   ' Test Files  1 failed | 80 passed (81)',
-  '##[endgroup]',
+  '[ELIFECYCLE] Test failed',
   '##[group]@corral/server:test',
   ...noise('server', 2000),
   '##[endgroup]'
@@ -48,13 +50,75 @@ describe('CiLogScanner', () => {
     expect(failureLines.join('\n')).not.toContain('server ok')
   })
 
+  it('keeps an unmatched startup error before ELIFECYCLE despite a long exit stack', () => {
+    const log = lines(
+      '##[group]@corral/core:test', 'passed', '##[endgroup]',
+      '@corral/web:test', ...noise('web', 2000),
+      'Error: Cannot find module ./generated/routes',
+      '[ELIFECYCLE] Test failed',
+      ...noise('    at shutdown', 500),
+      '##[group]@corral/server:test', ...noise('server', 20_000),
+      '##[endgroup]', ' Failed:    @corral/web#test',
+      '##[error]Process completed with exit code 1.'
+    )
+    const { tail, failureLines } = scan(log, 31)
+    expect(tail).not.toContain('Cannot find module')
+    const excerpt = ciExcerpt(tail, failureLines)
+    expect(excerpt).toContain('Error: Cannot find module ./generated/routes')
+    expect(excerpt).toContain('Process completed with exit code 1.')
+    expect(excerpt.length).toBeLessThanOrEqual(8000)
+  })
+
+  it('reserves FAIL headers and assertions despite ten noisy progress failures', () => {
+    const log = lines(
+      '@corral/web:test',
+      ...Array.from({ length: 10 }, (_, i) => [
+        ` × app/test${i}.test.ts > fails 12ms`,
+        ...Array.from({ length: 8 }, () => `[Vue warn] ${'w'.repeat(170)}`),
+        ` ✓ app/passed${i}.test.ts 12ms`
+      ]).flat(),
+      ...Array.from({ length: 10 }, (_, i) => [
+        ` FAIL app/test${i}.test.ts > fails`,
+        `ReferenceError: missingValue${i} is not defined`,
+        ` ✓ app/contextPassed${i}.test.ts`,
+        '  at index.vue:28'
+      ]).flat(),
+      '[ELIFECYCLE] Test failed',
+      '##[group]@corral/server:test', ...noise('server', 20_000),
+      '##[endgroup]', ' Failed:    @corral/web#test',
+      '##[error]Process completed with exit code 1.'
+    )
+    const { tail, failureLines } = scan(log)
+    const excerpt = ciExcerpt(tail, failureLines)
+    for (let i = 0; i < 10; i++) {
+      expect(excerpt).toContain(`FAIL app/test${i}.test.ts > fails`)
+      expect(excerpt).toContain(`ReferenceError: missingValue${i} is not defined`)
+    }
+    const markersEnd = failureLines.indexOf('##[error]Process completed with exit code 1.')
+    expect(failureLines.slice(0, markersEnd).join('\n')).not.toMatch(/Vue warn|✓/)
+    expect(failureLines.join('\n')).not.toContain('✓')
+    expect(excerpt.length).toBeLessThanOrEqual(8000)
+  })
+
   it('leaves passing tests and the next group out of what it keeps', () => {
     const { failureLines } = scan(lines('##[group]a:test', ' ✓ passed 1ms', 'FAIL a.test.ts', '##[endgroup]', '##[group]b:test', 'unrelated', '##[endgroup]', ' Failed:    a:x#test', ' Failed:    a#test'))
     expect(failureLines.join('\n')).not.toMatch(/passed|unrelated/)
   })
 
+  it('keeps later FAIL headers when earlier assertion context fills its budget', () => {
+    const { failureLines } = scan(lines(
+      ...Array.from({ length: 10 }, (_, i) => [
+        `FAIL test${i}.test.ts`,
+        ...Array.from({ length: 8 }, () => `Assertion detail ${'x'.repeat(280)}`)
+      ]).flat()
+    ))
+    for (let i = 0; i < 10; i++) expect(failureLines).toContain(`FAIL test${i}.test.ts`)
+    expect(failureLines.join('\n').length).toBeLessThanOrEqual(3000)
+  })
+
   it('reads a line split across chunks', () => {
-    expect(scan(turboLog, 7).failureLines).toEqual(scan(turboLog).failureLines)
+    const log = lines('@corral/web:test', 'FAIL a.test.ts', 'AssertionError: wrong', '[ELIFECYCLE] Test failed', '##[group]server:test', 'passing', '##[endgroup]', ' Failed:    @corral/web#test')
+    expect(scan(log, 7).failureLines).toEqual(scan(log).failureLines)
   })
 
   it('takes the Failed: package from line prefixes when turbo doesn\'t group', () => {

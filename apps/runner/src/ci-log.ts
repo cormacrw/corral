@@ -2,9 +2,11 @@
 // normal) still gives both of the things worth keeping: its end, and the
 // failure lines that turbo printed long before its end.
 
-// Two runs of a bound: lines that look like failures, then the end of each
-// package `Failed:` names, whose assertion may match nothing
-const MAX_MATCHED_CHARS = 3000
+// Reserve room for verdicts, their context, and other markers independently.
+// Failed package sections cover errors that match none of those patterns.
+const MAX_FAIL_CHARS = 1200
+const MAX_CONTEXT_CHARS = 1200
+const MAX_OTHER_CHARS = 600
 const MAX_SECTION_CHARS = 3000
 const MAX_LINE_CHARS = 300
 const MAX_SECTIONS = 256
@@ -17,6 +19,8 @@ const ANSI = /\u001B\[[0-9;]*[A-Za-z]/g
 const TIMESTAMP = /^\d{4}-\d\d-\d\dT[\d:.]+Z ?/
 // `@corral/web:test: ` when turbo prefixes lines rather than grouping them
 const TURBO_PREFIX = /^([^\s:]+:[^\s:]+): ?/
+const BARE_PACKAGE = /^([^\s:]+:[^\s:]+)$/
+const LIFECYCLE = /^\s*\[?ELIFECYCLE\b/
 const GROUP = /^##\[group\](.+)$/
 const FAILED_PACKAGE = /^\s*Failed:\s+(\S+#\S+)\s*$/
 // Case matters: `FAIL` is vitest's and jest's verdict, `fail` is any old word
@@ -32,10 +36,14 @@ export class CiLogScanner {
   #tail = ''
   #partial = ''
   #matched: string[] = []
+  #fail: string[] = []
+  #failChars = 0
+  #contextChars = 0
   #matchedChars = 0
   #context = 0
   #group: string | null = null
   #sections = new Map<string, string>()
+  #beforeExit = new Map<string, string>()
   #failed = new Set<string>()
 
   constructor(tailChars: number) {
@@ -53,7 +61,7 @@ export class CiLogScanner {
   finish(): { tail: string, failureLines: string[] } {
     if (this.#partial) this.#line(logLine(this.#partial))
     this.#partial = ''
-    return { tail: this.#tail, failureLines: [...this.#matched, ...this.#failedSections()] }
+    return { tail: this.#tail, failureLines: [...this.#fail, ...this.#matched, ...this.#failedSections()] }
   }
 
   #line(line: string): void {
@@ -62,20 +70,29 @@ export class CiLogScanner {
     this.#section(line)
     const body = line.replace(TURBO_PREFIX, '')
     if (FAILURE.test(body) || failed) {
-      this.#context = /^\s*(?:FAIL|[×✗✖])\s/.test(body) ? CONTEXT_LINES : 0
-      this.#keep(line)
+      const verdict = /^\s*FAIL\s/.test(body)
+      this.#context = verdict ? CONTEXT_LINES : 0
+      this.#keep(line, verdict)
     } else if (body.startsWith('##[')) {
       this.#context = 0
     } else if (this.#context > 0) {
       this.#context--
-      if (body.trim()) this.#keep(line)
+      if (body.trim() && !PASSED.test(body)) this.#keep(line, true, true)
     }
   }
 
   // The first failures are kept over the last: the rest usually follow from them
-  #keep(line: string): void {
+  #keep(line: string, verdict = false, context = false): void {
     const text = line.slice(0, MAX_LINE_CHARS)
-    if (this.#matchedChars + text.length > MAX_MATCHED_CHARS) return
+    if (verdict) {
+      const used = context ? this.#contextChars : this.#failChars
+      if (used + text.length + 1 > (context ? MAX_CONTEXT_CHARS : MAX_FAIL_CHARS)) return
+      this.#fail.push(text)
+      if (context) this.#contextChars += text.length + 1
+      else this.#failChars += text.length + 1
+      return
+    }
+    if (this.#matchedChars + text.length + 1 > MAX_OTHER_CHARS) return
     this.#matched.push(text)
     this.#matchedChars += text.length + 1
   }
@@ -84,20 +101,32 @@ export class CiLogScanner {
     const group = GROUP.exec(line)?.[1]
     if (group) this.#group = group.trim().replace('#', ':')
     else if (line.startsWith('##[endgroup]')) this.#group = null
+    else if (!this.#group) this.#group = BARE_PACKAGE.exec(line)?.[1] ?? null
     const key = TURBO_PREFIX.exec(line)?.[1] ?? this.#group
     if (!key || group || PASSED.test(line.replace(TURBO_PREFIX, ''))) return
     if (!this.#sections.has(key) && this.#sections.size >= MAX_SECTIONS) return
+    if (LIFECYCLE.test(line.replace(TURBO_PREFIX, '')) && !this.#beforeExit.has(key)) {
+      this.#beforeExit.set(key, (this.#sections.get(key) ?? '').slice(-MAX_SECTION_CHARS / 2))
+    }
     const text = `${this.#sections.get(key) ?? ''}${line.slice(0, MAX_LINE_CHARS)}\n`
     this.#sections.set(key, text.slice(-MAX_SECTION_CHARS))
   }
 
   #failedSections(): string[] {
-    const kept = new Set(this.#matched)
+    const kept = new Set([...this.#fail, ...this.#matched])
     return [...this.#failed].flatMap((key) => {
-      const text = this.#sections.get(key)
-      if (!text) return []
-      const whole = text.length < MAX_SECTION_CHARS
-      return text.split('\n').slice(whole ? 0 : 1).filter(line => line.trim() && !kept.has(line))
+      const end = this.#sections.get(key)
+      if (!end) return []
+      const before = this.#beforeExit.get(key)
+      const chunks = before ? [before, end.slice(-MAX_SECTION_CHARS / 2)] : [end]
+      return chunks.flatMap((text) => {
+        const limit = before ? MAX_SECTION_CHARS / 2 : MAX_SECTION_CHARS
+        return text.split('\n').slice(text.length < limit ? 0 : 1).filter((line) => {
+          if (!line.trim() || kept.has(line)) return false
+          kept.add(line)
+          return true
+        })
+      })
     })
   }
 }
