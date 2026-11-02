@@ -1,0 +1,43 @@
+import type { EpicFixCheck } from '@corral/core'
+import type { GitHubClient } from './github.ts'
+
+// What a fix round is told about each failed check (D8, D29). Developers never
+// run `gh`, so the server reads this for them through the runner's.
+export interface CiFailure extends EpicFixCheck {
+  step: string | null
+  // Null when it couldn't be read: the round starts anyway, with the link
+  excerpt: string | null
+}
+
+// Enough for a stack trace and the assertion above it, in a prompt
+export const MAX_EXCERPT_CHARS = 8000
+// How much of a raw log leaves the runner, which is where the end can be found
+export const MAX_LOG_CHARS = 256_000
+// Each failure costs a few GitHub calls, and the first is usually the cause
+const MAX_CHECKS = 3
+
+// eslint-disable-next-line no-control-regex -- terminal colours are what this removes
+const ANSI = /\u001B\[[0-9;]*[A-Za-z]/g
+
+// The end of a log, ending at its last error: after that come the post-job
+// steps, which can run long enough to push the failing lines out of the tail.
+export function ciExcerpt(log: string): string {
+  const clean = log.replace(ANSI, '').trimEnd()
+  const error = clean.lastIndexOf('##[error]')
+  const lineEnd = error === -1 ? -1 : clean.indexOf('\n', error)
+  const failing = lineEnd === -1 ? clean : clean.slice(0, lineEnd)
+  if (failing.length <= MAX_EXCERPT_CHARS) return failing
+  const tail = failing.slice(-MAX_EXCERPT_CHARS)
+  return `… (${failing.length - tail.length} earlier characters cut)\n${tail.slice(tail.indexOf('\n') + 1)}`
+}
+
+// Never throws: output that can't be read says so in the prompt
+export async function readCiFailures(github: GitHubClient, repository: string, checks: readonly EpicFixCheck[]): Promise<CiFailure[]> {
+  return Promise.all(checks.slice(0, MAX_CHECKS).map(async (check) => {
+    const read = await github.ciFailure(repository, check).catch((error) => {
+      console.warn(`Could not read the CI output of ${check.name}`, error)
+      return null
+    })
+    return { ...check, step: read?.step ?? null, excerpt: read?.log ? ciExcerpt(read.log) : null }
+  }))
+}

@@ -3,6 +3,7 @@ import { taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, asc, desc, eq, gt, inArray, isNotNull, ne } from 'drizzle-orm'
 import { listTaskAttachments } from './attachments.ts'
+import { readCiFailures } from './ci-output.ts'
 import { resolutionContext } from './epic-rebase-approval.ts'
 import { slugify } from './projects.ts'
 import { designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
@@ -88,6 +89,8 @@ export class RunJobs {
     const stoppedRun = lastRun && (lastRun.state === 'interrupted' || (lastRun.state === 'failed' && lastRun.summary === null))
       ? { number: lastRun.number, reason: lastRun.error ?? 'Stopped', wipSha: lastRun.headSha }
       : null
+    // The server reads what developers can't (D8, D29). This never fails a job.
+    const ciFailures = task.ciFix ? await readCiFailures(this.#c.d.github, ctx.project.repository, task.ciFix) : null
     const promptTask = {
       ref,
       title: task.title,
@@ -107,7 +110,8 @@ export class RunJobs {
       criteria: criteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })),
       comments: notes,
       attachments: attached,
-      stoppedRun
+      stoppedRun,
+      ciFailures
     }
     const prompt = author.prompt(promptTask, ctx.agent.name)
     // A revision continues the author's own session with
