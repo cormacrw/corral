@@ -472,13 +472,16 @@ export class RunManager {
     // PRD §8.6: an agent that exits without an outcome gets one chance to report
     if (this.#needsAnotherTurn(run)) {
       run.resumed = true
-      this.#note(run, 'The agent exited without reporting an outcome; resuming it once to report')
+      this.#note(run, `The agent exited (code ${run.exitCode}) without reporting an outcome; resuming it once to report`)
       await this.#spawn(run, {
-        prompt: 'Your session ended without calling report_outcome. Check the state of your work and call report_outcome now with the right outcome. Do not start new work.',
+        prompt: 'Your session ended without calling report_outcome, and any background commands stopped with it. Check the state of your work. If your outcome depends on a command that did not finish, run it again in the foreground and wait for it. Then call report_outcome with the right outcome. Do not start new work.',
         systemPrompt,
         mcpConfigPath,
         resume: run.sessionId
       })
+      // A stop, a usage limit or an outside signal has its own note
+      if (run.outcomeAccepted) this.#note(run, 'The resumed agent reported its outcome')
+      else if (!run.stopping && !run.rateLimit && !run.killedBy) this.#note(run, `The resumed agent exited (code ${run.exitCode}) without reporting an outcome`)
     }
   }
 
@@ -563,6 +566,7 @@ export class RunManager {
     // A CLI that doesn't exit once stdin closes is stopped as usual
     const soft = setTimeout(() => {
       run.signalledByCorral = true
+      if (!run.outcomeAccepted && !run.stopping) this.#note(run, `The agent ended its turn but was still running ${OUTCOME_EXIT_GRACE_MS / 1000} s later, usually because of a background command, so Corral stopped it`)
       session.kill('SIGTERM')
     }, OUTCOME_EXIT_GRACE_MS)
     const hard = setTimeout(() => session.kill('SIGKILL'), OUTCOME_EXIT_GRACE_MS + STOP_GRACE_MS)
@@ -1018,6 +1022,7 @@ function runnerNotes(run: ActiveRun, job: RunJob, design: string | null = null):
     // A spike (D19): findings, not commits
     job.role === 'developer' && !job.branch ? '- You are in a detached checkout of the default branch for a spike. Don\'t commit or push; report your findings.' : '',
     design ?? '',
+    job.role === 'pm' ? '' : '- Wait for long commands, such as checks and CI, inside your turn: run them in the foreground. Your session ends with your turn and stops anything still in the background, so never end your turn to wait for one.',
     `- This run has a time limit of ${Math.round(job.timeoutSeconds / 60)} minutes.`
   ].filter(Boolean).join('\n')
 }
