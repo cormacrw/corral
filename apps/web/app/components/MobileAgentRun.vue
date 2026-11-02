@@ -55,6 +55,7 @@ const live = computed(() => !!selected.value && isLiveRun(selected.value))
       >
         <p class="flex items-center gap-2 text-xs text-muted">
           <UBadge
+            v-if="!live"
             :label="runBadge(selected).label"
             :color="runBadge(selected).color"
             variant="subtle"

@@ -342,10 +342,10 @@ const title = computed(() => shellTitle(route.path, shell.projects, shell.agents
                   class="min-w-0 truncate"
                 >{{ agent.name }} <span class="text-muted">· {{ ROLE[agent.role] }}</span></span>
                 <span
-                  v-if="!collapsed && agentStatus(agent, now)"
+                  v-if="!collapsed && agentStatus(agent, now, false)"
                   class="ms-auto min-w-0 truncate text-xs text-muted"
-                  :title="agentStatus(agent, now)?.label"
-                >{{ agentStatus(agent, now)?.label }}</span>
+                  :title="agentStatus(agent, now, false)?.label"
+                >{{ agentStatus(agent, now, false)?.label }}</span>
               </UButton>
             </UTooltip>
           </div>

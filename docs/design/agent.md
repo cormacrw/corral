@@ -13,8 +13,7 @@ See what an agent is doing right now, attach to its live run, and look back at p
 ### Header (bottom border)
 
 - the avatar, with a ping dot while working
-- the name and a status badge only for **Working** (`success`), **Paused** (neutral) or **Waiting on usage limit** (neutral). Idle agents have no marker. Explicit `paused` means Paused; only a future `pausedUntil` means Waiting on usage limit. Expired cooldowns are idle. All agent screens use `agentStatus` in `utils/labels.ts`
-- a role badge: PM, Developer, Designer or Reviewer (D23)
+- the name and a status badge only for **Paused** (neutral) or **Waiting on usage limit** (neutral). Idle agents have no marker. Explicit `paused` means Paused; only a future `pausedUntil` means Waiting on usage limit. Expired cooldowns are idle. All agent screens use `agentStatus` in `utils/labels.ts`
 - "{Role} · {runtime} · {summary}" (Claude Code or Codex, D18), e.g. "6 runs today"
 - **Resume now** (outline), only while Waiting on usage limit: clears the wait so the agent can run again. If the limit is real, its next run pauses it again
 - **Agent settings** (outline; goes to Settings › Agents)
@@ -38,10 +37,10 @@ See what an agent is doing right now, attach to its live run, and look back at p
 
 1. **Runs list** (320px):
    - **Current run:** pinned at the top, with the working pulse.
-   - **Previous runs:** each row shows the task ref ("Epic" for an epic's integration review, "Plan" for a PM turn), an outcome badge, when it ran, the title (the task's, or the epic's for an integration review), and "{project dot} {project} · Run #128 · 18m". A run that ended with an error shows it on a line below (`error` text, up to three lines).
-   - **Outcome badges:** Live (`primary`), PR opened / PR updated / Plan proposed (`primary`), Approved / Answered (`success`), Changes requested (`warning`), Stuck / Failed (`error`), Rate limited / Stopped / Interrupted (neutral).
+   - **Previous runs:** each row shows the task ref ("Epic" for an epic's integration review, "Plan" for a PM turn), when it ran, the title (the task's, or the epic's for an integration review), and "{project dot} {project} · Run #128 · 18m". A run that ended with an error shows it on a line below (`error` text, up to three lines).
+   - Run rows have no tags. Finished runs show their outcome only in the selected run header: PR opened / PR updated / Plan proposed (`primary`), Approved / Answered (`success`), Changes requested (`warning`), Stuck / Failed (`error`), Rate limited / Stopped / Interrupted (neutral).
 2. **Run transcript:**
-   - **Run header:** "{ref} {title}", the outcome badge, and "Run #128 · branch · 18:42 elapsed · 12k in · 1.3M cache read · 4k out · on {runner name}" (the runner the run was placed on, kept with the run) (cache reads are shown apart from fresh input, which includes cache writes, because they cost about a tenth as much). On the right: **Open task** (opens the flyout) and, for live runs only, **Interrupt / Resume** (outline) and **Stop run** (`error` subtle).
+   - **Run header:** "{ref} {title}", the outcome badge for finished runs only, and "Run #128 · branch · 18:42 elapsed · 12k in · 1.3M cache read · 4k out · on {runner name}" (the runner the run was placed on, kept with the run) (cache reads are shown apart from fresh input, which includes cache writes, because they cost about a tenth as much). On the right: **Open task** (opens the flyout) and, for live runs only, **Interrupt / Resume** (outline) and **Stop run** (`error` subtle).
    - **Run timing breakdown:** under the run header, for runs with recorded timings; older runs have none and show nothing. "Queue wait (queued to started, including preparation)", the same wording as the Flow section ([project-overview.md](project-overview.md#charts)), or Unavailable before the run starts. Then the total, a stacked bar and a table of run phases, slowest first with the largest highlighted, and a table of tools (count, total, max), slowest total first. Tool calls can overlap, so their totals are separate from run phases.
    - **Log** (`role="log"`, `aria-live="polite"`), up to 880px wide. Each entry is one of:
      - a **system divider**, e.g. "Run started in worktree …"

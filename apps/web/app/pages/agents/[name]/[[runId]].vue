@@ -30,6 +30,7 @@ const device = useDevice()
       <header class="flex h-14 shrink-0 items-center gap-2 border-b border-default px-4 text-sm">
         <span class="min-w-0 truncate font-medium">{{ runRef(selected) }} {{ selected.taskTitle ?? selected.epicTitle ?? '' }}</span>
         <UBadge
+          v-if="!isLive(selected)"
           class="shrink-0"
           :label="runBadge(selected).label"
           :color="runBadge(selected).color"

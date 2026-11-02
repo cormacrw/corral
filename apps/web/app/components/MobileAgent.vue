@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Run } from '@corral/contracts'
 import type { AgentRuns } from '~/composables/useAgentRuns'
-import { agentStatus, duration, isLiveRun, plural, projectColor, ROLE, runBadge, runRef, runTitle, runtimeLabel, timeAgo } from '~/utils/labels'
+import { agentStatus, duration, isLiveRun, plural, projectColor, ROLE, runRef, runTitle, runtimeLabel, timeAgo } from '~/utils/labels'
 
 // An agent's page on mobile (design/agent.md, design/mobile.md): the
 // header and stat tiles, then the current run and previous runs. Each run
@@ -10,7 +10,7 @@ const props = defineProps<{ view: AgentRuns }>()
 const { name, agent, missing, runs, pending, error, now, current, today, tiles, facts, load, project, resume } = props.view
 
 const previous = computed(() => runs.value.filter(r => !isLiveRun(r)))
-const status = computed(() => agent.value ? agentStatus(agent.value, now.value) : null)
+const status = computed(() => agent.value ? agentStatus(agent.value, now.value, false) : null)
 const to = (run: Run) => run.role === 'pm' && run.planSessionId
   ? { path: `/plan/${run.planSessionId}`, query: { project: run.projectId } }
   : `/agents/${name.value}/${run.id}`
@@ -41,11 +41,6 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
           <h2 class="min-w-0 truncate text-2xl font-semibold text-highlighted">
             {{ agent.name }}
           </h2>
-          <UBadge
-            :label="ROLE[agent.role]"
-            color="neutral"
-            variant="subtle"
-          />
           <UBadge
             v-if="status"
             v-bind="status"
@@ -124,12 +119,6 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
       >
         <span class="flex items-center gap-2">
           <span class="font-mono text-xs text-muted">{{ runRef(current) }}</span>
-          <UBadge
-            label="Live"
-            color="primary"
-            variant="subtle"
-            size="sm"
-          />
           <span class="ms-auto text-xs text-muted tabular-nums">{{ duration(current.startedAt, null, now) }}</span>
         </span>
         <span class="truncate font-medium text-highlighted">{{ runTitle(current) }}</span>
@@ -184,12 +173,6 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
           >
             <span class="flex items-center gap-2">
               <span class="font-mono text-xs text-muted">{{ runRef(run) }}</span>
-              <UBadge
-                :label="runBadge(run).label"
-                :color="runBadge(run).color"
-                variant="subtle"
-                size="sm"
-              />
               <span class="ms-auto text-xs text-muted">{{ timeAgo(run.queuedAt, now) }}</span>
             </span>
             <span class="truncate font-medium text-highlighted">{{ runTitle(run) }}</span>
