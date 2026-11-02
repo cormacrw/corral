@@ -124,7 +124,7 @@ useSeoMeta({ title: () => `${project.value?.name ?? 'Project'} · Corral` })
         class="rounded-lg border border-default p-8 text-center"
       >
         <p class="mb-3 text-muted">
-          Plan your first epic with {{ pmName }}
+          Plan your first task with {{ pmName }}
         </p>
         <UButton
           :to="`/plan?project=${project.id}`"

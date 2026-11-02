@@ -132,7 +132,7 @@ const { project, tasks, loading, inboxLoading, runs, history, error, load, needs
         class="mx-4 rounded-lg border border-default p-6 text-center"
       >
         <p class="mb-3 text-muted">
-          Plan your first epic with {{ pmName }}
+          Plan your first task with {{ pmName }}
         </p>
         <UButton
           :to="`/plan?project=${project.id}`"

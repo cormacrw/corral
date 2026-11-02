@@ -58,7 +58,7 @@ const planSheet = computed({
   </UDrawer>
   <UDrawer
     v-model:open="detailSheet"
-    :title="flyout.ref.value ? `Task ${flyout.ref.value}` : 'Epic'"
+    :title="flyout.ref.value ? `Task ${flyout.ref.value}` : 'Parent'"
     :ui="{ content: 'h-[94svh]' }"
   >
     <template #content>

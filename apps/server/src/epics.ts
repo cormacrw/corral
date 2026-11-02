@@ -28,7 +28,8 @@ export async function listEpics(db: Executor, project: ProjectRow): Promise<Epic
   const dependsOn = Map.groupBy(edges, e => e.epicId)
   const blocks = Map.groupBy(edges, e => e.dependsOnEpicId)
   const syncs = await epicSyncs(db, project, rows)
-  return rows.map(row => toEpic(row, project, tasksOf.get(row.id) ?? [], [...dependsOn.get(row.id) ?? [], ...blocks.get(row.id) ?? []], syncs.get(row.id) ?? null))
+  const parents = await parentRefs(db, project, rows)
+  return rows.map(row => toEpic(row, project, tasksOf.get(row.id) ?? [], [...dependsOn.get(row.id) ?? [], ...blocks.get(row.id) ?? []], syncs.get(row.id) ?? null, parents))
 }
 
 // An epic without its tasks: what `epic.updated` carries and PATCH returns
@@ -39,7 +40,7 @@ export async function loadEpic(db: Executor, epicId: string): Promise<Epic> {
     db.select().from(epicDependencies).where(or(eq(epicDependencies.epicId, epicId), eq(epicDependencies.dependsOnEpicId, epicId))),
     epicSyncs(db, project, [row])
   ])
-  return toEpic(row, project, taskRows, edges, syncs.get(row.id) ?? null)
+  return toEpic(row, project, taskRows, edges, syncs.get(row.id) ?? null, await parentRefs(db, project, [row]))
 }
 
 export async function getEpic(db: Executor, epicId: string): Promise<EpicDetail> {
@@ -48,7 +49,7 @@ export async function getEpic(db: Executor, epicId: string): Promise<EpicDetail>
   const edges = await db.select().from(epicDependencies)
     .where(or(eq(epicDependencies.epicId, epicId), eq(epicDependencies.dependsOnEpicId, epicId)))
   const syncs = await epicSyncs(db, project, [row])
-  return { ...toEpic(row, project, taskRows, edges, syncs.get(row.id) ?? null), tasks: await toTasks(db, project, taskRows.filter(t => !t.deletedAt)), fixes: await epicFixRuns(db, epicId) }
+  return { ...toEpic(row, project, taskRows, edges, syncs.get(row.id) ?? null, await parentRefs(db, project, [row])), tasks: await toTasks(db, project, taskRows.filter(t => !t.deletedAt)), fixes: await epicFixRuns(db, epicId) }
 }
 
 export async function patchEpic(db: Executor, epicId: string, input: PatchEpicInput, actor: Actor): Promise<Epic> {
@@ -117,11 +118,19 @@ export function reviewModeLocked(epic: { prNumber: number | null }, taskRows: { 
   return epic.prNumber !== null || taskRows.some(t => t.prNumber !== null || t.integrationProtocol > 0 || t.status === 'merged')
 }
 
-function toEpic(row: EpicRow, project: ProjectRow, taskRows: (CompletionState & { prNumber: number | null, integrationProtocol: number, deletedAt: Date | null })[], edges: { epicId: string, dependsOnEpicId: string }[], sync: EpicSync | null): Epic {
+async function parentRefs(db: Executor, project: ProjectRow, rows: EpicRow[]): Promise<Map<string, string>> {
+  const ids = rows.flatMap(r => r.taskId ? [r.taskId] : [])
+  if (ids.length === 0) return new Map()
+  const found = await db.select({ id: tasks.id, number: tasks.number }).from(tasks).where(inArray(tasks.id, ids))
+  return new Map(found.map(t => [t.id, taskRef(project.prefix, t.number)]))
+}
+
+function toEpic(row: EpicRow, project: ProjectRow, taskRows: (CompletionState & { prNumber: number | null, integrationProtocol: number, deletedAt: Date | null })[], edges: { epicId: string, dependsOnEpicId: string }[], sync: EpicSync | null, parents: Map<string, string>): Epic {
   const counted = taskRows.filter(t => !t.deletedAt && t.status !== 'draft' && t.status !== 'backlog')
   return {
     id: row.id,
     taskId: row.taskId,
+    taskRef: row.taskId ? parents.get(row.taskId) ?? null : null,
     dependsOn: edges.filter(e => e.epicId === row.id).map(e => e.dependsOnEpicId),
     blocks: edges.filter(e => e.dependsOnEpicId === row.id).map(e => e.epicId),
     projectId: row.projectId,

@@ -24,7 +24,7 @@ const item = computed(() => inbox.data.value?.needsYou.find(i => i.id === props.
         target="_blank"
         rel="noopener"
         class="font-medium text-primary hover:underline"
-      >Epic PR #{{ epic.prNumber }}</a>
+      >Parent PR #{{ epic.prNumber }}</a>
       <UBadge
         v-if="epic.reviewState"
         :label="EPIC_REVIEW_STATE[epic.reviewState].label"

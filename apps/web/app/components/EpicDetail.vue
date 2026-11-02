@@ -53,7 +53,7 @@ async function setDependencies(ids: string[]) {
 }
 const editingDescription = ref(false)
 const descriptionDraft = ref('')
-const tab = useLocalStorage<'tasks' | 'graph' | 'activity'>('corral.epic.tab', 'tasks')
+const tab = useLocalStorage<'tasks' | 'graph' | 'activity' | 'comments'>('corral.epic.tab', 'tasks')
 let savedTimer: ReturnType<typeof setTimeout> | null = null
 
 watch(() => props.epicId, () => {
@@ -115,13 +115,13 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
   <div class="flex h-full min-h-0 flex-col">
     <DetailHeader
       :mode="props.mode"
-      :path="`/epics/${props.epicId}`"
+      :path="parent?.taskRef ? `/tasks/${epic.taskRef}` : `/epics/${props.epicId}`"
       :saved="saved"
       @close="emit('close')"
     >
       <template v-if="props.mode === 'flyout'">
         <UBadge
-          label="Epic"
+          label="Parent"
           color="neutral"
           variant="subtle"
           size="sm"
@@ -131,7 +131,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
       <template v-else-if="props.mode === 'mobile'">
         <div class="flex items-center gap-1.5 text-xs text-muted">
           <UBadge
-            label="Epic"
+            label="Parent"
             color="neutral"
             variant="subtle"
             size="sm"
@@ -139,7 +139,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
           <span class="truncate">{{ project?.name }}</span>
         </div>
         <h1 class="flex items-center gap-2 text-base font-semibold text-highlighted">
-          <span class="min-w-0 truncate">{{ epic?.title ?? 'Epic' }}</span>
+          <span class="min-w-0 truncate">{{ epic?.title ?? 'Parent' }}</span>
           <span
             v-if="saved"
             class="shrink-0 text-xs font-normal text-success"
@@ -148,7 +148,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
       </template>
       <UBreadcrumb
         v-else
-        :items="[{ label: project?.name ?? 'Project', to: project ? `/projects/${project.slug}` : '/' }, { label: epic?.title ?? 'Epic' }]"
+        :items="[{ label: project?.name ?? 'Project', to: project ? `/projects/${project.slug}` : '/' }, { label: parent?.title ?? 'Parent' }]"
       />
     </DetailHeader>
 
@@ -187,7 +187,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
           color="info"
           variant="subtle"
           title="Resolving a rebase conflict"
-          :description="`${sync.taskRef ?? 'A developer'} is rebasing this epic in private${sync.files.length ? `: ${sync.files.join(', ')}` : ''}. The epic branch moves once a reviewer approves.`"
+          :description="`${sync.taskRef ?? 'A developer'} is rebasing this parent in private${sync.files.length ? `: ${sync.files.join(', ')}` : ''}. The parent branch moves once a reviewer approves.`"
         />
         <UAlert
           v-else-if="sync?.state === 'conflict_pending'"
@@ -195,7 +195,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
           color="neutral"
           variant="subtle"
           :title="EPIC_CONFLICT_PENDING"
-          :description="`Review carries on. A developer resolves it once, when the epic is approved${sync.files.length ? `: ${sync.files.join(', ')}` : ''}.`"
+          :description="`Review carries on. A developer resolves it once, when the parent is approved${sync.files.length ? `: ${sync.files.join(', ')}` : ''}.`"
         />
         <EpicFixAlert
           v-else-if="sync?.state === 'fixing'"
@@ -222,7 +222,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
         <input
           :value="epic.title"
           class="w-full rounded-md bg-transparent px-1 py-0.5 text-lg font-semibold text-highlighted hover:bg-elevated focus:ring-2 focus:ring-primary focus:outline-none"
-          aria-label="Epic title"
+          aria-label="Parent title"
           @change="patch({ title: ($event.target as HTMLInputElement).value })"
         >
 
@@ -262,7 +262,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
               autoresize
               autofocus
               :rows="5"
-              placeholder="What this epic is for, in markdown"
+              placeholder="What this parent is for, in markdown"
               class="w-full"
               @keydown.esc="editingDescription = false"
             />
@@ -315,7 +315,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
               :model-value="epic.reviewMode"
               :items="reviewModes"
               :disabled="epic.reviewModeLocked"
-              aria-label="Epic review mode"
+              aria-label="Parent review mode"
               :aria-describedby="epic.reviewModeLocked ? 'epic-review-mode-note' : undefined"
               class="w-full"
               @update:model-value="patch({ reviewMode: $event as EpicReviewMode })"
@@ -325,7 +325,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
               id="epic-review-mode-note"
               class="text-xs text-muted"
             >
-              Locked because a task in this epic has submitted work.
+              Locked because a task in this parent has submitted work.
             </p>
             <p
               v-else
@@ -337,7 +337,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
               v-if="epic.reviewMode !== 'direct'"
               class="text-xs text-muted"
             >
-              The epic PR opens once every task is complete. Human checks are confirmed there.
+              The parent PR opens once every task is complete. Human checks are confirmed there.
             </p>
           </template>
         </section>
@@ -376,8 +376,8 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
             <USelect
               v-model="selectedDependency"
               :items="choices"
-              placeholder="Choose an epic"
-              aria-label="Dependency epic"
+              placeholder="Choose a parent task"
+              aria-label="Dependency parent"
               class="min-w-0 flex-1"
               :disabled="savingDependencies"
             />
@@ -452,7 +452,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
       <section :class="['flex min-w-0 flex-col', props.mode === 'page' ? 'min-h-0 flex-1 max-[900px]:h-[560px]' : 'shrink-0 px-4 pb-4']">
         <UTabs
           v-model="tab"
-          :items="[{ label: `Tasks (${epic.tasks.length})`, value: 'tasks', icon: 'i-lucide-list' }, { label: 'Graph', value: 'graph', icon: 'i-lucide-network' }, { label: 'Activity', value: 'activity', icon: 'i-lucide-activity' }]"
+          :items="[{ label: `Sub-tasks (${epic.tasks.length})`, value: 'tasks', icon: 'i-lucide-list' }, { label: 'Graph', value: 'graph', icon: 'i-lucide-network' }, { label: 'Activity', value: 'activity', icon: 'i-lucide-activity' }, ...$slots.comments ? [{ label: 'Comments', value: 'comments', icon: 'i-lucide-message-square' }] : []]"
           :variant="props.mode === 'mobile' ? 'pill' : 'link'"
           :size="props.mode === 'mobile' ? 'md' : 'sm'"
           :content="false"
@@ -460,7 +460,13 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
           :class="props.mode === 'page' && 'px-4 pt-2'"
         />
         <div
-          v-if="tab === 'activity'"
+          v-if="tab === 'comments'"
+          class="min-h-0 overflow-y-auto"
+        >
+          <slot name="comments" />
+        </div>
+        <div
+          v-else-if="tab === 'activity'"
           class="flex min-h-0 flex-col gap-3 overflow-y-auto p-4"
         >
           <AuditActivity
@@ -492,7 +498,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
           v-else-if="epic.tasks.length === 0"
           class="p-6 text-center text-sm text-muted"
         >
-          No tasks in this epic yet.
+          No tasks in this parent yet.
         </p>
         <ul
           v-else-if="tab === 'tasks'"

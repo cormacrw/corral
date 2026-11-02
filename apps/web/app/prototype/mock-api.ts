@@ -107,12 +107,11 @@ route('GET', '/projects/:slug/tasks', ([slug], _, query) => {
   const p = project(slug!)
   const view = query.get('view') ?? 'all'
   return f.tasks.filter(t => t.projectId === p.id && t.status !== 'draft'
-    && (view === 'all' || (view === 'backlog') === (t.status === 'backlog')))
+    && (view === 'all' || (view === 'backlog') === (t.status === 'backlog' || (t.status === 'parent' && !t.rollup?.planned))))
 })
 // Backlog's New task action opens the created task on mobile.
-route('POST', '/projects/:slug/tasks', ([slug], body) => {
-  const p = project(slug!)
-  const input = body as CreateTaskInput
+function addTask(slug: string, input: CreateTaskInput): Task {
+  const p = project(slug)
   const number = Math.max(p.nextTaskNumber, ...f.tasks.filter(t => t.projectId === p.id).map(t => t.number + 1))
   const task = f.task(p, number, {
     title: input.title, type: input.type, description: input.description ?? null,
@@ -125,6 +124,16 @@ route('POST', '/projects/:slug/tasks', ([slug], body) => {
   f.tasks.push(task)
   emit({ type: 'task.created', task })
   return task
+}
+route('POST', '/projects/:slug/tasks', ([slug], body) => addTask(slug!, body as CreateTaskInput))
+route('POST', '/projects/:slug/tasks/:number/subtasks', ([slug, number], body) => {
+  const p = project(slug!)
+  const parent = taskIn(slug!, number!)
+  const delivery = parent.rollup ? f.epics.find(e => e.id === parent.rollup!.epicId) : f.addParent(p, parent)
+  const created = addTask(p.slug, { ...body as CreateTaskInput, epicId: delivery!.id })
+  created.parentTask = { id: parent.id, ref: parent.ref, title: parent.title }
+  parent.rollup!.total++
+  return created
 })
 route('GET', '/projects/:slug/tasks/:number/designs', ([slug, number]) => {
   const task = taskIn(slug!, number!)
@@ -208,7 +217,7 @@ route('GET', '/projects/:slug/epics', ([slug]) => f.epics.filter(e => e.projectI
 route('GET', '/epics/:id/review', ([id]) => {
   const review = f.epicReview(id!) ?? notFound()
   if (review.reviewMode === 'direct') {
-    const message = 'This epic merges its tasks straight to the target branch, so it has no epic review'
+    const message = 'This parent merges its tasks straight to the target branch, so it has no parent review'
     throw new ApiError(409, { code: 'invalid_input', issues: [{ message }] }, message)
   }
   return review
@@ -231,7 +240,7 @@ route('PATCH', '/epics/:id', ([id], body) => {
   const epic = f.epics.find(e => e.id === id) ?? notFound()
   const input = body as PatchEpicInput
   if (input.reviewMode && input.reviewMode !== epic.reviewMode && epic.reviewModeLocked) {
-    const message = 'The review mode can\'t change once a task in the epic has opened a PR'
+    const message = 'The review mode can\'t change once a task in the parent has opened a PR'
     throw new ApiError(409, { code: 'invalid_input', issues: [{ message }] }, message)
   }
   Object.assign(epic, input, { updatedAt: new Date().toISOString() })

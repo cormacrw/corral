@@ -54,6 +54,7 @@ export interface Epic {
   id: string
   // Its parent task (D31); null for a collapsed one-task epic
   taskId: string | null
+  taskRef: string | null
   projectId: string
   title: string
   description: string

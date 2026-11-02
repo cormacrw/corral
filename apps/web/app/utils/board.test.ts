@@ -277,14 +277,19 @@ describe('completed designs', () => {
 
 describe('boardView', () => {
   it('lets the URL win over the view last used', () => {
-    expect(boardView('epics', 'tasks')).toBe('epics')
-    expect(boardView('tasks', 'epics')).toBe('tasks')
-    expect(boardView(['epics', 'tasks'], 'tasks')).toBe('epics')
+    expect(boardView('top', 'all')).toBe('top')
+    expect(boardView('all', 'top')).toBe('all')
+    expect(boardView(['top', 'all'], 'all')).toBe('top')
+  })
+
+  it('reads saved links from before parent tasks', () => {
+    expect(boardView('epics', 'all')).toBe('top')
+    expect(boardView('tasks', 'top')).toBe('all')
   })
 
   it('falls back when the URL has no valid view', () => {
-    expect(boardView(undefined, 'epics')).toBe('epics')
-    expect(boardView('nonsense', 'tasks')).toBe('tasks')
+    expect(boardView(undefined, 'top')).toBe('top')
+    expect(boardView('nonsense', 'all')).toBe('all')
   })
 })
 

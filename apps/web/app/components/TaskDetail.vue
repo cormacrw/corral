@@ -50,7 +50,8 @@ let savedTimer: ReturnType<typeof setTimeout> | null = null
 
 const project = computed(() => shell.projects.find(p => p.id === task.value?.projectId) ?? null)
 const number = computed(() => task.value?.number ?? 0)
-const epic = computed(() => task.value?.epicId ? epicList.value.find(e => e.id === task.value!.epicId) ?? null : null)
+// A task in a collapsed one-task epic is top-level, so it shows no parent
+const epic = computed(() => task.value?.parentTask ? epicList.value.find(e => e.id === task.value!.epicId) ?? null : null)
 const slug = computed(() => project.value?.slug ?? '')
 const { tasks: projectTasks, epics: epicList } = useProjectLists(slug)
 const address = computed((): TaskAddress => ({ slug: slug.value, number: number.value, ref: props.taskRef }))
@@ -337,7 +338,47 @@ const workingAgent = computed(() => task.value?.lease ? shell.agents.find(a => a
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col">
+  <!-- A parent's page is its delivery page with its comments (D31) -->
+  <EpicDetail
+    v-if="task?.rollup"
+    :epic-id="task.rollup.epicId"
+    :mode="props.mode === 'flyout' ? 'flyout' : props.mode"
+    @close="emit('close')"
+  >
+    <template #comments>
+      <div class="flex flex-col gap-3 p-4">
+        <div
+          v-for="comment in comments"
+          :key="comment.id"
+          class="text-sm"
+        >
+          <p class="text-xs text-muted">
+            {{ authorLabel(comment.author) }}
+          </p>
+          <MarkdownText :text="comment.body" />
+        </div>
+        <p
+          v-if="comments.length === 0"
+          class="text-sm text-muted"
+        >
+          No comments yet.
+        </p>
+        <DraftComposer
+          :key="props.taskRef"
+          :draft="composerDraft"
+          placeholder="Comment…"
+          :hint="composerHint"
+          :project="slug || null"
+          :draft-key="`task:${props.taskRef}`"
+          @submit="sendComment"
+        />
+      </div>
+    </template>
+  </EpicDetail>
+  <div
+    v-else
+    class="flex h-full min-h-0 flex-col"
+  >
     <DetailHeader
       :mode="props.mode"
       :path="`/tasks/${props.taskRef}`"
@@ -392,7 +433,7 @@ const workingAgent = computed(() => task.value?.lease ? shell.agents.find(a => a
       </template>
       <UBreadcrumb
         v-else
-        :items="[{ label: 'Board', to: project ? `/projects/${project.slug}/board` : '/' }, ...(epic ? [{ label: epic.title, to: `/epics/${epic.id}` }] : []), { label: props.taskRef }]"
+        :items="[{ label: 'Board', to: project ? `/projects/${project.slug}/board` : '/' }, ...(parent ? [{ label: epic.title, to: `/epics/${epic.id}` }] : []), { label: props.taskRef }]"
       />
       <UBadge
         v-if="isDraft && props.mode === 'flyout'"
@@ -535,6 +576,12 @@ const workingAgent = computed(() => task.value?.lease ? shell.agents.find(a => a
           class="flex flex-wrap items-center gap-2 rounded-lg border border-default bg-muted px-3 py-2 text-sm"
         >
           <span class="me-auto text-muted">In the Backlog, so never scheduled until you move it.</span>
+          <AddSubtask
+            v-if="!task.parentTask && task.epicId === null && (task.type === 'task' || task.type === 'bug') && !task.design"
+            :slug="slug"
+            :number="task.number"
+            promotes
+          />
           <UButton
             label="Move to board"
             icon="i-lucide-kanban"
@@ -767,7 +814,7 @@ const workingAgent = computed(() => task.value?.lease ? shell.agents.find(a => a
           <p class="mt-1 text-xs text-muted">
             {{ task.acceptanceCriteria.some(c => c.checkedByHuman)
               ? epic?.reviewMode === 'epic' && !task.pr && ['task', 'bug'].includes(task.type)
-                ? 'The reviewer checks other criteria from evidence. Human checks are completed on the epic review, once the epic is ready.'
+                ? 'The reviewer checks other criteria from evidence. Human checks are completed on the parent review, once the parent is ready.'
                 : 'The reviewer checks other criteria from evidence. Human checks are completed in the Inbox.'
               : 'The reviewer marks criteria met from evidence.' }}
           </p>

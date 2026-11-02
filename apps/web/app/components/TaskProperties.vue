@@ -21,9 +21,6 @@ const props = withDefaults(defineProps<{
   readonly?: boolean
 }>(), { stacked: false, draft: false, readonly: false })
 const DRAFT_HIDDEN = ['status', 'branch', 'pr', 'round']
-const { epics } = useProjectLists(() => props.project?.slug ?? '')
-const flyout = useTaskFlyout()
-const epic = computed(() => props.task.epicId ? epics.value.find(e => e.id === props.task.epicId) ?? null : null)
 const emit = defineEmits<{ status: [value: string], patch: [input: PatchTaskInput] }>()
 
 const dotClass = (status: TaskStatus) => ({
@@ -37,8 +34,8 @@ const hasReason = computed(() => (props.task.status === 'blocked' || props.task.
   <template
     v-for="row in [
       { key: 'project', label: 'Project' },
-      { key: 'epic', label: 'Epic' },
-      { key: 'waitingEpics', label: 'Waiting on epic:' },
+      { key: 'epic', label: 'Parent' },
+      { key: 'waitingEpics', label: 'Waiting on:' },
       { key: 'design', label: 'Design' },
       { key: 'status', label: 'Status' },
       { key: 'reason', label: 'Reason' },
@@ -59,21 +56,12 @@ const hasReason = computed(() => (props.task.status === 'blocked' || props.task.
     <dd :class="['min-w-0', !props.stacked && 'flex min-h-8 items-center']">
       <span v-if="row.key === 'project'">{{ props.project?.name ?? '' }}</span>
 
-      <template v-else-if="row.key === 'epic'">
-        <!-- The task page has no flyout, so the epic opens as a page there -->
+      <template v-else-if="row.key === 'parent'">
         <NuxtLink
-          v-if="props.task.epicId && props.stacked"
-          :to="`/epics/${props.task.epicId}`"
+          v-if="props.task.parentTask"
+          :to="`/tasks/${props.task.parentTask.ref}`"
           class="block truncate text-primary hover:underline"
-        >{{ epic?.title ?? 'Epic' }}</NuxtLink>
-        <button
-          v-else-if="props.task.epicId"
-          type="button"
-          class="truncate text-start text-primary hover:underline"
-          @click="flyout.openEpic(props.task.epicId)"
-        >
-          {{ epic?.title ?? 'Epic' }}
-        </button>
+        >{{ props.task.parentTask.title }}</NuxtLink>
         <span
           v-else
           class="text-muted"

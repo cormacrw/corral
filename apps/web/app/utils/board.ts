@@ -1,6 +1,6 @@
 import type { Agent, Epic, HumanTransitionInput, Run, Task } from '@corral/contracts'
 import type { AgentRole, TaskPriority, TaskStatus } from '@corral/core'
-import { availableEvents, isTaskDone, TASK_PRIORITIES } from '@corral/core'
+import { availableEvents, isTaskDone, parentStage, TASK_PRIORITIES, type ParentStage } from '@corral/core'
 import { epicInProgress, isLiveRun } from './labels.ts'
 
 import { completedAt } from './completion.ts'
@@ -30,17 +30,25 @@ export const BOARD_COLUMNS: { key: string, label: string, statuses: TaskStatus[]
   { key: 'complete', label: 'Complete', statuses: ['merged', 'approved'], hint: `Last ${COMPLETE_WINDOW_DAYS} days` }
 ]
 
-// The Board's two views. Tasks is the default until one is chosen.
-export type BoardView = 'tasks' | 'epics'
+// The Board's two views: top-level tasks, the default until one is chosen, or
+// every sub-task (design/board.md)
+export type BoardView = 'top' | 'all'
 
-// The view from ?view=, falling back to the one last used
+// The view from ?view=, falling back to the one last used. Links from before
+// parent tasks say `epics` for cards per parent and `tasks` for every task.
 export function boardView(value: unknown, fallback: BoardView): BoardView {
   const first = Array.isArray(value) ? value[0] : value
-  return first === 'tasks' || first === 'epics' ? first : fallback
+  if (first === 'top' || first === 'epics') return 'top'
+  return first === 'all' || first === 'tasks' ? 'all' : fallback
 }
 
-// The Epics view's columns, in order (design/board.md). `status` picks the
-// colour of the column's dot.
+// The Board column a parent's stage puts it in
+export const parentColumn = (stage: ParentStage): string => stage === 'done' ? 'complete' : stage
+
+// A task on its own or a parent, not a sub-task
+export const isTopLevel = (task: Pick<Task, 'parentTask'>): boolean => task.parentTask === null
+
+// A parent's stages, in Board order. `status` picks the colour of its dot.
 export const EPIC_COLUMNS = [
   { key: 'ready', label: 'Ready', status: 'ready', hint: 'Scheduled next' },
   { key: 'in_progress', label: 'In progress', status: 'in_progress', hint: 'Developer' },
@@ -59,14 +67,7 @@ type StageEpic = Pick<Epic, 'reviewMode' | 'branch' | 'reviewState' | 'taskCount
 // its tasks. The checks are ordered. `direct` epics have no epic PR, so their
 // review state never counts and they go from In progress to Done.
 export function epicStage(epic: StageEpic, tasks: Pick<Task, 'status'>[]): EpicStage {
-  const review = epic.reviewMode === 'direct' ? null : epic.reviewState
-  if (review === 'conflict' || tasks.some(t => t.status === 'blocked' || t.status === 'failed')) return 'blocked'
-  if (epic.taskCount > 0 && !epicInProgress(epic)) return 'done'
-  if (review === 'ready_to_merge') return 'ready_to_merge'
-  if (review === 'human_review') return 'human_review'
-  if (epic.taskCount > 0 && epic.mergedCount === epic.taskCount && (review === null || review === 'open' || review === 'in_review')) return 'agent_review'
-  if (tasks.every(t => t.status === 'draft' || t.status === 'backlog' || t.status === 'ready')) return 'ready'
-  return 'in_progress'
+  return parentStage(epic, tasks)
 }
 
 // Overview filters overlap deliberately: started, unfinished epics are also Open.

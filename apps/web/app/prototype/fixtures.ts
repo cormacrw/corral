@@ -1,5 +1,5 @@
 import { RUNNER_PROTOCOL_VERSION } from '@corral/contracts'
-import type { EpicRebaseDecision } from '@corral/core'
+import { isTaskDone, parentStage, type EpicRebaseDecision } from '@corral/core'
 import corralThumbnail from '~/assets/images/corral-thumbnail.svg'
 import type {
   Agent,
@@ -136,7 +136,7 @@ export const agents: Agent[] = [
   { id: 'a-rev', name: 'Rita', role: 'reviewer', runtime: 'claude-code', concurrency: 1, paused: false, wakeIntervalSeconds: null, pausedUntil: null, activeRuns: 2, avatarUrl: null }
 ]
 
-export const epics: Epic[] = [
+const epicRows: Omit<Epic, 'taskId' | 'taskRef'>[] = [
   {
     id: 'e-searches',
     dependsOn: [],
@@ -243,24 +243,25 @@ export const epics: Epic[] = [
   epicInReview('e-capped', 'Bulk task moves', 'human_review', 226),
   // A developer on the epic, with no task (D29), and two that are stopped or waiting
   { ...epicInReview('e-search', 'Saved searches', 'ready_to_merge', 220), sync: { state: 'fixing', fix: 'conflict', reason: 'The rebase onto main conflicts in apps/server/src/search.ts.', files: ['apps/server/src/search.ts'], developer: { agentId: 'a-dev', name: 'Victor', runId: 'run-fix-1', runNumber: 3901 }, attempts: 0 } },
-  { ...epicInReview('e-feeds', 'Activity feeds', 'ready_to_merge', 221), sync: { state: 'fixing', fix: 'ci', reason: 'CI failed on the epic PR. ci: failed', files: [], developer: null, attempts: 1 } },
-  { ...epicInReview('e-exportpdf', 'PDF exports', 'ready_to_merge', 222), sync: { state: 'failed', fix: 'ci', error: '3 fixes for CI failure have been published and it\'s still failing. The last: CI failed on the epic PR. ci: failed' } }
+  { ...epicInReview('e-feeds', 'Activity feeds', 'ready_to_merge', 221), sync: { state: 'fixing', fix: 'ci', reason: 'CI failed on the parent PR. ci: failed', files: [], developer: null, attempts: 1 } },
+  { ...epicInReview('e-exportpdf', 'PDF exports', 'ready_to_merge', 222), sync: { state: 'failed', fix: 'ci', error: '3 fixes for CI failure have been published and it\'s still failing. The last: CI failed on the parent PR. ci: failed' } }
 ]
+export const epics: Epic[] = epicRows.map(epic => ({ ...epic, taskId: null, taskRef: null }))
 
 export const epicFixes: Record<string, EpicFixRun[]> = {
   'e-search': [
-    { runId: 'run-fix-0', runNumber: 3890, fix: 'ci', developer: 'Victor', reason: 'CI failed on the epic PR. ci: failed', state: 'completed', outcome: 'pr_updated', summary: 'Fixed the flaky search fixture.', behaviourChanged: false, reReviewed: false, at: ago(90) },
+    { runId: 'run-fix-0', runNumber: 3890, fix: 'ci', developer: 'Victor', reason: 'CI failed on the parent PR. ci: failed', state: 'completed', outcome: 'pr_updated', summary: 'Fixed the flaky search fixture.', behaviourChanged: false, reReviewed: false, at: ago(90) },
     { runId: 'run-fix-00', runNumber: 3872, fix: 'review', developer: 'Victor', reason: 'The filter panel and API disagree on the field name.', state: 'completed', outcome: 'pr_updated', summary: 'Renamed the field in the panel.', behaviourChanged: true, reReviewed: true, at: ago(200) }
   ],
   'e-exportpdf': [
-    { runId: 'run-fix-2', runNumber: 3880, fix: 'ci', developer: 'Victor', reason: 'CI failed on the epic PR. ci: failed', state: 'failed', outcome: 'failed', summary: 'The run ended with an error', behaviourChanged: null, reReviewed: null, at: ago(30) }
+    { runId: 'run-fix-2', runNumber: 3880, fix: 'ci', developer: 'Victor', reason: 'CI failed on the parent PR. ci: failed', state: 'failed', outcome: 'failed', summary: 'The run ended with an error', behaviourChanged: null, reReviewed: null, at: ago(30) }
   ]
 }
 
-function epicInReview(id: string, title: string, reviewState: Epic['reviewState'], prNumber: number): Epic {
+function epicInReview(id: string, title: string, reviewState: Epic['reviewState'], prNumber: number): Omit<Epic, 'taskId' | 'taskRef'> {
   const fixing = reviewState === 'changes_requested'
   return {
-    id, projectId: 'p-corral', title, description: `${title}, reviewed as one epic PR.`, dependsOn: [], blocks: [],
+    id, projectId: 'p-corral', title, description: `${title}, reviewed as one parent PR.`, dependsOn: [], blocks: [],
     reviewMode: 'epic', branch: `corral/epic-${id}`, prNumber, prUrl: `https://github.com/cormacrw/corral/pull/${prNumber}`,
     prHeadSha: `${prNumber}c2ab94d`, approvedHeadSha: null, approvedBaseSha: null, reviewState, sync: null, reviewModeLocked: true,
     taskCount: fixing ? 3 : 2, mergedCount: 2, createdAt: ago(60 * 24 * 2), updatedAt: ago(prNumber - 200)
@@ -284,6 +285,8 @@ export function task(project: Project, number: number, fields: Partial<Task> & P
     type: 'task',
     kind: 'normal',
     epicId: null,
+    parentTask: null,
+    rollup: null,
     humanReview: project.humanReviewDefault,
     reviewRounds: 0,
     failedRuns: 0,
@@ -374,7 +377,7 @@ export const tasks: Task[] = [
   task(corral, 9, { title: 'Offline board', status: 'failed', type: 'bug', priority: 'urgent', epicId: 'e-mobile', failedRuns: 3, statusReason: 'The runner lost its worktree three times in a row.' }),
   task(corral, 42, { title: 'Reuse the failed run\'s worktree on Retry', status: 'blocked', statusReason: 'Should Retry reuse the failed run\'s worktree, or start from a fresh checkout?' }),
   task(corral, 10, { title: 'Install sheet on iOS', status: 'merged', epicId: 'e-mobile', mergedAt: ago(60 * 30) }),
-  task(corral, 11, { title: 'Dark mode for the epic graph', status: 'backlog', priority: 'low' }),
+  task(corral, 11, { title: 'Dark mode for the parent graph', status: 'backlog', priority: 'low' }),
   task(corral, 12, { title: 'Spike: Codex reasoning effort', status: 'backlog', type: 'spike' }),
   // Drafts from the proposed plans in planSessions s-1 and s-3
   task(corral, 13, { title: 'Design review screen', status: 'draft', type: 'design', priority: 'high', epicId: 'e-design', draftSession: { id: 's-1', title: 'Design tasks' } }),
@@ -441,6 +444,38 @@ export const tasks: Task[] = [
     acceptanceCriteria: criteria('Footer links open in the same tab')
   })
 ]
+
+// A parent's row for its delivery record (D31), as the migration and plans
+// make one. Numbers run on from the project's own.
+function parentRow(project: Project, epic: Epic, from?: Task): Task {
+  project.nextTaskNumber = Math.max(project.nextTaskNumber, ...tasks.filter(t => t.projectId === project.id).map(t => t.number + 1))
+  const row = from ?? task(project, project.nextTaskNumber++, { title: epic.title, status: 'parent', statusReason: null, draftSession: null, description: doc(epic.description) })
+  const subs = tasks.filter(t => t.epicId === epic.id)
+  const counted = subs.filter(t => t.status !== 'draft' && t.status !== 'backlog')
+  const counts = { ...epic, taskCount: counted.length, mergedCount: counted.filter(isTaskDone).length }
+  Object.assign(row, {
+    status: 'parent', pr: epic.prNumber ? { number: epic.prNumber, url: epic.prUrl! } : null,
+    rollup: { epicId: epic.id, stage: parentStage(counts, counted), reviewMode: epic.reviewMode, done: subs.filter(isTaskDone).length, total: subs.length, planned: counted.length > 0, drafting: false }
+  })
+  epic.taskId = row.id
+  epic.taskRef = row.ref
+  for (const sub of subs) sub.parentTask = { id: row.id, ref: row.ref, title: row.title }
+  return row
+}
+
+// Makes a parent of a task, as adding its first sub-task does
+export function addParent(project: Project, from: Task): Epic {
+  const epic: Epic = { ...epicRows[0]!, id: `e-${from.ref.toLowerCase()}`, projectId: project.id, title: from.title, description: '', reviewMode: project.epicReviewModeDefault, branch: null, prNumber: null, prUrl: null, prHeadSha: null, reviewState: null, sync: null, reviewModeLocked: false, taskCount: 0, mergedCount: 0, dependsOn: [], blocks: [], taskId: null, taskRef: null }
+  epics.push(epic)
+  parentRow(project, epic, from)
+  return epic
+}
+
+for (const epic of epics) {
+  if (tasks.filter(t => t.epicId === epic.id).length < 2) continue
+  tasks.push(parentRow(projects.find(p => p.id === epic.projectId)!, epic))
+}
+
 
 function epicTasks(epicId: string, first: number, titles: string[], mergedMinutesAgo = 60 * 24 * 5): Task[] {
   return titles.map((title, i) => task(corral, first + i, {
@@ -1014,8 +1049,8 @@ const epicDecision: EpicRebaseDecision = {
 }
 
 export const epicHistory: EpicHistoryEntry[] = [
-  { id: '1', at: ago(120), actor: 'You', event: 'human_approved', text: 'You approved the epic PR', detail: {} },
-  { id: '2', at: ago(90), actor: 'Corral', event: 'rebased', text: 'Epic PR rebased; CI runs again', detail: {} },
+  { id: '1', at: ago(120), actor: 'You', event: 'human_approved', text: 'You approved the parent PR', detail: {} },
+  { id: '2', at: ago(90), actor: 'Corral', event: 'rebased', text: 'Parent PR rebased; CI runs again', detail: {} },
   { id: '3', at: ago(90), actor: 'Corral', event: 'approval_retained', text: 'Approval kept across the rebase: Approved 6f1c2ab94d, rebased 6f1c2ab94d to 2be07c11a3. The reviewer confirmed the resolution keeps the approved behaviour: both sides kept in export.ts.', detail: {} }
 ]
 
@@ -1075,7 +1110,7 @@ export function inbox(): Inbox {
   for (const review of epics.filter(e => e.reviewState === 'human_review')) {
     const project = projects.find(p => p.id === review.projectId)!
     const stopped = review.id === 'e-capped'
-    const body = stopped ? 'The integration review failed 3 times on this head. Review it yourself, or request changes.' : 'The combined diff matches the epic\'s goal. Failed runs and runner disconnects share one alert path, and the tasks agree on its payload.'
+    const body = stopped ? 'The integration review failed 3 times on this head. Review it yourself, or request changes.' : 'The combined diff matches the parent\'s goal. Failed runs and runner disconnects share one alert path, and the tasks agree on its payload.'
     needsYou.push({
       id: review.id, type: 'epic_review', findings: [], reviewRounds: [], epicId: review.id, taskId: null, taskRef: null, subject: review.title,
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
@@ -1090,7 +1125,7 @@ export function inbox(): Inbox {
   if (conflict) {
     const project = projects.find(p => p.id === conflict.projectId)!
     const files = ['apps/server/src/routes/search.ts', 'apps/web/app/pages/search.vue', 'apps/web/app/components/saved-searches/SavedSearchShareDialogWithExpiryOptions.vue']
-    const body = `The epic PR can't rebase onto main. Conflicting files: ${files.join(', ')}.`
+    const body = `The parent PR can't rebase onto main. Conflicting files: ${files.join(', ')}.`
     needsYou.push({
       id: conflict.id, type: 'epic_conflict', epicId: conflict.id, taskId: null, taskRef: null, subject: conflict.title,
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
@@ -1123,11 +1158,11 @@ export function inbox(): Inbox {
     }
   }
   activity.push(
-    epicMoment('audit-e-audit', 'e-audit', 'opened', 'Epic PR opened', null),
-    epicMoment('audit-e-themes', 'e-themes', 'conflict', 'Epic PR conflict: apps/web/app/pages/board.vue', null),
-    epicMoment('audit-e-tags', 'e-tags', 'merged', 'Epic PR merged', null)
+    epicMoment('audit-e-audit', 'e-audit', 'opened', 'Parent PR opened', null),
+    epicMoment('audit-e-themes', 'e-themes', 'conflict', 'Parent PR conflict: apps/web/app/pages/board.vue', null),
+    epicMoment('audit-e-tags', 'e-tags', 'merged', 'Parent PR merged', null)
   )
-  const approvedEpic = epicMoment('audit-e-digest', 'e-digest', 'human_approved', 'You approved the epic PR', 'You approved the epic PR')
+  const approvedEpic = epicMoment('audit-e-digest', 'e-digest', 'human_approved', 'You approved the parent PR', 'You approved the parent PR')
   return { needsYou, activity, resolved: [...resolvedInbox, approved, approvedEpic, ...releaseNotes.filter(r => r.resolution)], count: needsYou.length }
 }
 

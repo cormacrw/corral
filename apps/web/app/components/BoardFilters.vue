@@ -36,12 +36,12 @@ function set<K extends keyof BoardFilters>(key: K, value: BoardFilters[K]) {
   <BoardFilter
     :model-value="filters.epics"
     :items="epicItems"
-    name="Epic"
-    plural="epics"
+    name="Parent"
+    plural="parents"
     icon="i-lucide-network"
     :size="props.size"
     :class="props.itemClass"
-    @update:model-value="set('epics', $event)"
+    @update:model-value="set('parent tasks', $event)"
   />
   <template v-if="!props.epicsOnly">
     <BoardFilter

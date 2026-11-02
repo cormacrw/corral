@@ -51,7 +51,7 @@ function openPrerequisite(id: string) {
           >
             <button
               type="button"
-              :aria-label="`Waiting on ${waitingOn.length} ${waitingOn.length === 1 ? 'epic' : 'epics'}`"
+              :aria-label="`Waiting on ${waitingOn.length} ${waitingOn.length === 1 ? 'parent' : 'parent tasks'}`"
               class="flex size-5 cursor-pointer items-center justify-center rounded text-warning hover:bg-elevated focus-visible:outline-2 focus-visible:outline-primary"
             >
               <UIcon

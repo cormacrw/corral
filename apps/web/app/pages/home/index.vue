@@ -65,7 +65,7 @@ const runLines = (agent: Agent) => runs.value
     const session = run.taskId ? null : shell.planSessions.find(s => s.activeRunId === run.id)
     return {
       id: run.id,
-      ref: run.taskRef ?? (run.epicId ? 'Epic' : null),
+      ref: run.taskRef ?? (run.epicId ? 'Parent' : null),
       taskRef: run.taskRef,
       title: liveRunTitle(run, session?.title ?? null),
       project: projectOf(run.projectId),
@@ -304,14 +304,14 @@ const agents = computed(() => shell.agents
         data-testid="home-epics"
       >
         <h2 class="text-sm font-semibold text-highlighted">
-          Epics
+          Parents
         </h2>
         <ul
           v-if="epics.length"
           class="flex flex-col gap-3"
         >
           <li
-            v-for="{ epic, project } in epics"
+            v-for="{ parent, project } in parent tasks"
             :key="epic.id"
           >
             <p
@@ -338,7 +338,7 @@ const agents = computed(() => shell.agents
           v-else
           class="text-sm text-muted"
         >
-          No epics in progress.
+          No parent tasks in progress.
         </p>
       </section>
     </div>

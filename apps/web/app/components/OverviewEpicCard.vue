@@ -52,7 +52,7 @@ const expanded = ref(false)
         v-if="tasks.length === 0"
         class="text-sm text-muted"
       >
-        No tasks in this epic yet.
+        No tasks in this parent yet.
       </p>
     </div>
   </article>
