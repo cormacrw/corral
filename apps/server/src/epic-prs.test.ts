@@ -7,7 +7,7 @@ import { eq } from 'drizzle-orm'
 import { afterAll, expect, it, vi } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './test-runner.ts'
-import { complete } from './epic-prs.ts'
+import { complete, epicEventText } from './epic-prs.ts'
 
 let t: TestApp
 let runner: FakeRunner
@@ -317,4 +317,11 @@ it('completes epic boards with Approved designs and Merged implementation tasks'
   expect(complete([{ type: 'design', status: 'approved' }, { type: 'task', status: 'merged' }])).toBe(true)
   expect(complete([{ type: 'design', status: 'merged' }])).toBe(false)
   expect(complete([{ type: 'task', status: 'approved' }])).toBe(false)
+})
+
+it('keeps reading history from before epic fixes ran with no task (D29)', () => {
+  expect(epicEventText({ event: 'rebase_handed_off' } as Parameters<typeof epicEventText>[0])).toContain('You handed the epic PR rebase to a developer')
+  expect(epicEventText({ event: 'conflict', summary: 'a.ts' } as Parameters<typeof epicEventText>[0])).toContain('Epic PR conflict')
+  expect(epicEventText({ event: 'sync_failed' } as Parameters<typeof epicEventText>[0])).toContain('Epic rebase stopped')
+  expect(epicEventText({ event: 'sync_failed', fix: 'ci' } as Parameters<typeof epicEventText>[0])).toContain('Epic fix stopped')
 })
