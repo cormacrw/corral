@@ -88,7 +88,7 @@ describe('migrations', () => {
     await db.execute(sql`insert into acceptance_criteria (task_id, position, text) select id, 0, 'Criterion' from tasks where title = 'B'`)
     await db.execute(sql`insert into evidence (task_id, criterion_id, run_id, round, kind, note, size) select t.id, c.id, r.id, 0, 'note', 'Proof', 0 from tasks t, acceptance_criteria c, runs r where t.title = 'A'`)
     await db.execute(sql`insert into evidence (criterion_id, run_id, round, kind, note, size) select c.id, r.id, 0, 'note', 'Null owner', 0 from acceptance_criteria c, runs r`)
-    const snapshot = async () => (await db.execute(sql`select jsonb_build_object('runs', (select jsonb_agg(to_jsonb(r) - 'fix_kind' - 'operation_id' - 'behaviour_changed' - 're_reviewed') from runs r), 'plans', (select jsonb_agg(p) from plans p), 'evidence', (select jsonb_agg(e) from evidence e)) as records`)).rows
+    const snapshot = async () => (await db.execute(sql`select jsonb_build_object('runs', (select jsonb_agg(to_jsonb(r) - 'retry_context' - 'fix_kind' - 'operation_id' - 'behaviour_changed' - 're_reviewed') from runs r), 'plans', (select jsonb_agg(p) from plans p), 'evidence', (select jsonb_agg(e) from evidence e)) as records`)).rows
     const old = await snapshot()
     const error = await migrate(migrationsFolder).then(() => null, (e: unknown) => e)
     expect(error).not.toBeNull()
@@ -211,7 +211,7 @@ describe('migrations', () => {
     const runs = (await db.execute(sql`select * from runs order by id`)).rows
     await migrate(migrationsFolder)
     expect((await db.execute(sql`select * from agents order by name`)).rows).toEqual(agents)
-    expect((await db.execute(sql`select * from runs order by id`)).rows).toEqual(runs.map(run => ({ ...run, timings: null, review: null, conflicted_files: null, fix_kind: null, operation_id: null, behaviour_changed: null, re_reviewed: null })))
+    expect((await db.execute(sql`select * from runs order by id`)).rows).toEqual(runs.map(run => ({ ...run, timings: null, review: null, conflicted_files: null, retry_context: null, fix_kind: null, operation_id: null, behaviour_changed: null, re_reviewed: null })))
     await db.execute(sql`insert into agents (name, role) values ('Iris', 'designer')`)
     expect((await db.execute(sql`select role from agents where name = 'Iris'`)).rows).toEqual([{ role: 'designer' }])
   })

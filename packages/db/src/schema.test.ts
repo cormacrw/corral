@@ -316,7 +316,8 @@ describe.each([
 
     it('rejects a run outside its role\'s context', async () => {
       const { developerRun, reviewerRun, pmRun, epicId } = await context()
-      await expectViolation(db.insert(runs).values({ ...pmRun, taskId: developerRun.taskId }), 'runs_role_context')
+      // PM recovery turns are linked to the task for its run history.
+      await db.insert(runs).values({ ...pmRun, taskId: developerRun.taskId })
       await expectViolation(db.insert(runs).values({ ...pmRun, epicId }), 'runs_role_context')
       await expectViolation(db.insert(runs).values({ ...developerRun, epicId }), 'runs_role_context')
       await expectViolation(db.insert(runs).values({ ...reviewerRun, epicId }), 'runs_role_context')

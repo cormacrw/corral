@@ -44,6 +44,8 @@ export const tasks = pgTable('tasks', {
   ciFix: jsonb().$type<EpicFixCheck[]>(),
   reviewRounds: integer().notNull().default(0),
   failedRuns: integer().notNull().default(0),
+  // Durable stop episode; one PM session owns triage until fresh input arrives.
+  retryStop: jsonb().$type<{ runId: string, target: string | null, human: string, status: 'in_progress' | 'agent_review', capped: boolean, sessionId: string | null }>(),
   // Why the task is Blocked or Failed (D10, D11)
   statusReason: text(),
   // Set when the human stops a run, so the scheduler doesn't restart it (flows.md §3)
