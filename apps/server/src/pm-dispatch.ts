@@ -5,7 +5,7 @@ import { and, asc, desc, eq, inArray, isNotNull, ne } from 'drizzle-orm'
 import { ApiFailure } from './errors.ts'
 import { errorText, type PlanSessionRow, type RunCore } from './run-context.ts'
 
-const { agents, runs } = schema
+const { agents, planSessions, runs } = schema
 
 export class PmDispatch {
   #c: RunCore
@@ -35,14 +35,21 @@ export class PmDispatch {
   async startPmRun(session: PlanSessionRow, job: Omit<PmRunJob, 'runId' | 'runNumber' | 'leaseEpoch'>): Promise<string> {
     const { db } = this.#c.d
     const pm = await this.assertPmRunPossible()
-    const [run] = await db.insert(runs).values({
-      agentId: pm.id, projectId: job.projectId, taskId: null, role: 'pm', leaseEpoch: 1, planSessionId: session.id, pmJob: job, queuedAt: this.#c.now()
-    }).returning()
-    const ctx = await this.#c.runs.load(run!.id)
+    const run = await db.transaction(async (tx) => {
+      // A delayed initial turn must not start after close. Serialize its run
+      // insertion with the close transaction's session lock.
+      const [current] = await tx.select({ closedAt: planSessions.closedAt }).from(planSessions).where(eq(planSessions.id, session.id)).for('update')
+      if (!current || current.closedAt) throw new ApiFailure(409, { code: 'conflict', constraint: 'plan_session_closed' })
+      const [created] = await tx.insert(runs).values({
+        agentId: pm.id, projectId: job.projectId, taskId: null, role: 'pm', leaseEpoch: 1, planSessionId: session.id, pmJob: job, queuedAt: this.#c.now()
+      }).returning()
+      return created!
+    })
+    const ctx = await this.#c.runs.load(run.id)
     if (!ctx) throw new Error('PM run vanished')
     await this.#c.ending.publish(ctx)
     await this.startPmTurns()
-    return run!.id
+    return run.id
   }
 
   // Sends every waiting PM turn to the runner, oldest first. The PM has no

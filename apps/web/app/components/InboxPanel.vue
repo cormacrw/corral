@@ -32,7 +32,7 @@ const hasEvidence = computed(() => p.images.value.length > 0 || p.others.value.l
 const actionHelp = computed(() => props.ctx.actions.filter(a => !(a.value === 'approve' && props.ctx.taskLoadFailed)))
 const decisionItem = computed(() => {
   const { item } = props.ctx
-  return item.decision ? { ...item, decision: item.decision } : null
+  return 'decision' in item && item.decision ? { ...item, decision: item.decision } : null
 })
 const loading = computed(() => props.ctx.taskLoading || (p.isReview.value && props.ctx.evidenceLoading))
 </script>
@@ -51,7 +51,7 @@ const loading = computed(() => props.ctx.taskLoading || (p.isReview.value && pro
           </h1>
         </div>
         <UButton
-          v-if="!mobile"
+          v-if="!mobile && ctx.task"
           icon="i-lucide-panel-right"
           aria-label="Task details"
           title="Task details"

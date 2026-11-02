@@ -164,7 +164,7 @@ describe('plan threads in the inbox', () => {
       { sessionId: answered.id, role: 'human', kind: 'message', text: 'This one', createdAt: at(1) }
     ])
 
-    const threads = (await inbox()).needsYou.filter((item): item is PlanThreadItem => item.type === 'plan_thread' && item.project.id === project.id)
+    const threads = (await inbox()).needsYou.filter((item): item is PlanThreadItem => item.type === 'plan_thread' && item.project?.id === project.id)
     expect(threads.find(i => i.sessionId === question.id)).toMatchObject({ status: 'question', question: { text: 'Which one?', recommendation: null, options: null }, plan: null, planId: null, failure: null })
     expect(threads.find(i => i.sessionId === approval.id)).toMatchObject({ status: 'needs_approval', question: null, plan: { id: plan!.id, title: 'The plan' }, planId: plan!.id, failure: null })
     expect(threads.find(i => i.sessionId === unread.id)).toBeUndefined()

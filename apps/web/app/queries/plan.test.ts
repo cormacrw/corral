@@ -21,7 +21,7 @@ describe('Plan session cache', () => {
       resolve = r
     }))
     const fetching = client.fetchQuery(planSessionQuery(saved.id))
-    const message = { ...saved.messages[0]!, id: 'new-reply', role: 'pm' as const, text: 'A streamed reply' }
+    const message = { ...saved.messages[0]!, id: 'new-reply', role: 'pm' as const, kind: 'message' as const, text: 'A streamed reply', recommendation: null, options: null }
     const plan = { ...saved.plans[0]!, status: 'approved' as const }
     applyEvent(client, { type: 'plan.message', message })
     applyEvent(client, { type: 'plan.message', message })

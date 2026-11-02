@@ -32,9 +32,9 @@ export async function humanInput(db: Executor, taskId: string): Promise<string> 
 
 export async function retryContext(c: RunCore, ctx: RunContext) {
   if (!ctx.task) return null
-  const base = await taskBase(c.d.db, ctx.task, ctx.project)
-  const target = await c.d.github.branchHead(ctx.project.repository, base)
-  const head = ctx.task.branch ? (await c.d.github.branchHead(ctx.project.repository, ctx.task.branch) ?? target) : target
+  const base = await taskBase(c.d.db, ctx.task, ctx.project!)
+  const target = await c.d.github.branchHead(ctx.project!.repository, base)
+  const head = ctx.task.branch ? (await c.d.github.branchHead(ctx.project!.repository, ctx.task.branch) ?? target) : target
   return head && target ? { head, target, human: await humanInput(c.d.db, ctx.task.id) } : null
 }
 

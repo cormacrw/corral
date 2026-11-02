@@ -4,7 +4,7 @@ import { auditText, readAudit, type AuditView } from './audit.ts'
 import { epicEventText, epicInboxItems } from './epic-prs.ts'
 import { waitingDecisions } from './epic-rebase-approval.ts'
 import { fileArtifacts, isNew, workNotes } from './inbox-changes.ts'
-import type { ActionableInboxItem, Comment, Evidence, Inbox, PlanThreadAttention, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
+import type { ActionableInboxItem, Comment, Evidence, Inbox, PlanThreadAttention, PlanThreadItem, PmActivityItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
 import { arrivalKey, storedMessages, withMessages, type PreparedItem } from './inbox-message.ts'
 import { ACTIVE_RUN_STATES, designPreviewUrl, humanCheckTally, richTextToPlainText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
@@ -60,13 +60,13 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     .limit(limit * 3)
 
   // Undismissed release notes are informational: Activity, until dismissed
-  const activity: (TaskInboxItem | ReleaseNotesItem)[] = releases.filter(d => !d.resolution)
+  const activity: (TaskInboxItem | PmActivityItem | ReleaseNotesItem)[] = releases.filter(d => !d.resolution)
   const resolved: (TaskInboxItem | ReleaseNotesItem)[] = []
   for (const { entry, task, project } of entries) {
     const detail = readAudit(entry.detail)
     const { event } = detail
     const base = { id: String(entry.id), project: projectTag(project), taskId: task.id, taskRef: taskRef(project.prefix, task.number), subject: task.title, prUrl: task.prUrl, at: entry.createdAt.toISOString() }
-    if (entry.actor.kind === 'human' && (entry.action === 'task.deleted' || ['resolve', 'release_stop', 'human_approve', 'human_request_changes', 'send_back'].includes(event ?? ''))) {
+    if (entry.actor.kind === 'human' && !entry.actor.viaPm && (entry.action === 'task.deleted' || ['resolve', 'release_stop', 'human_approve', 'human_request_changes', 'send_back'].includes(event ?? ''))) {
       const resolution = resolutionText(entry.action, detail, task.type)
       resolved.push({ ...base, type: 'activity', preview: resolution, body: resolution, sender: { name: 'You', role: 'system' }, resolution })
     }
@@ -100,6 +100,23 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     if (entry.actor.kind === 'human') resolved.push(item)
     else activity.push(item)
   }
+  // Read PM calls independently of tasks: deleting a Backlog task removes its
+  // row, but its PM attribution and conversation must survive. Removing a
+  // project clears the entry's project, so that join is a left join.
+  const pmCalls = await db.select({ entry: auditLog, project: projects, session: planSessions, task: tasks }).from(auditLog)
+    .leftJoin(projects, eq(projects.id, auditLog.projectId))
+    .leftJoin(planSessions, sql`${planSessions.id}::text = ${auditLog.detail}->>'sessionId'`)
+    .leftJoin(tasks, and(sql`${tasks.id}::text = ${auditLog.detail}->>'targetId'`, eq(tasks.projectId, projects.id), isNull(tasks.deletedAt)))
+    .where(inArray(auditLog.action, [...PM_ACTIVITY]))
+    .orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(limit)
+  for (const { entry, project, session, task } of pmCalls) {
+    const detail = entry.detail as { targetId?: string | null, summary?: string, sessionId: string, input?: { taskRef?: string } }
+    const text = pmActivityText(entry.action, detail.summary ?? 'A PM action')
+    const base = { id: `pm-${entry.id}`, type: 'activity' as const, subject: text, preview: text, body: session ? `${text}. [PM conversation](/plan/${session.id})` : `${text}.`, sender: { name: 'PM', role: 'pm' as const }, at: entry.createdAt.toISOString(), prUrl: null, resolution: null }
+    const tag = project ? projectTag(project) : { id: '', slug: '', name: session && session.projectId === null ? 'Global' : 'Removed project', thumbnailColor: null, thumbnailUrl: null }
+    if (project && task && detail.input?.taskRef) activity.push({ ...base, project: tag, taskId: task.id, taskRef: taskRef(project.prefix, task.number) })
+    else activity.push({ ...base, project: tag, taskId: null, taskRef: null })
+  }
   resolved.push(...releases.filter(d => d.resolution))
   activity.sort((a, b) => b.at.localeCompare(a.at))
   resolved.sort((a, b) => b.at.localeCompare(a.at))
@@ -131,7 +148,7 @@ export function withRunnerItems(inbox: Inbox, runners: RunnerInfo[]): Inbox {
 // left to retry it. Unread replies are conversation (D11) and stay in Plan.
 async function waitingSessions(db: Executor) {
   const rows = await db.select({ session: planSessions, project: projects }).from(planSessions)
-    .innerJoin(projects, eq(projects.id, planSessions.projectId))
+    .leftJoin(projects, eq(projects.id, planSessions.projectId))
     .where(isNull(planSessions.closedAt))
   const states = await sessionStates(db, rows.map(r => r.session))
   return rows.flatMap(({ project }, i) => {
@@ -164,7 +181,7 @@ async function planThreads(db: Executor): Promise<PlanThreadItem[]> {
       ...state,
       id: session.id,
       type: 'plan_thread' as const,
-      project: projectTag(project),
+      project: project ? projectTag(project) : null,
       sessionId: session.id,
       runtime: session.runtime,
       subject: session.title,
@@ -398,6 +415,18 @@ function humanReviewNote(task: OpenTask, notes: Comment[], versions: DesignVersi
   return `Approved${met}. This task is marked for human review, so it needs your OK before it merges.`
 }
 
+const PM_ACTIVITY = ['pm.tool_called', 'pm.action_proposed', 'pm.action_confirmed', 'pm.action_cancelled', 'pm.action_failed'] as const
+
+function pmActivityText(action: string, summary: string): string {
+  switch (action) {
+    case 'pm.action_proposed': return `Proposed: ${summary}`
+    case 'pm.action_confirmed': return `${summary}, confirmed by you`
+    case 'pm.action_cancelled': return `${summary}, cancelled by you`
+    case 'pm.action_failed': return `Could not confirm: ${summary}`
+    default: return summary
+  }
+}
+
 const projectColumns = { id: projects.id, slug: projects.slug, name: projects.name, prefix: projects.prefix, thumbnailColor: projects.thumbnailColor, thumbnailBlob: projects.thumbnailBlob }
 
 function projectTag(project: Pick<typeof projects.$inferSelect, 'id' | 'slug' | 'name' | 'thumbnailColor' | 'thumbnailBlob'>) {
@@ -405,6 +434,7 @@ function projectTag(project: Pick<typeof projects.$inferSelect, 'id' | 'slug' | 
 }
 
 function senderOf(actor: Actor): TaskInboxItem['sender'] {
+  if (actor.kind === 'human' && actor.viaPm) return { name: 'PM', role: 'pm' }
   if (actor.kind === 'agent') return { name: actorLabel(actor), role: actor.role }
   return { name: actorLabel(actor), role: 'system' }
 }

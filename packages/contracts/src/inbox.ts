@@ -77,9 +77,23 @@ export interface TaskInboxItem extends InboxItemBase, Partial<ReviewChanges> {
   decision?: EpicRebaseDecision
 }
 
+// Something the PM did that isn't about one task, such as changing a project's
+// settings. Its body links to the PM conversation that did it.
+export interface PmActivityItem extends InboxItemBase {
+  id: string
+  type: 'activity'
+  epicId?: undefined
+  body: string
+  taskId: null
+  taskRef: null
+  prUrl: null
+  resolution: null
+}
+
 // An open Plan session waiting on a human decision (D11): a question, a plan
 // needing approval or a failed PM turn. Unread replies stay in Plan.
-interface PlanThreadBase extends InboxItemBase {
+interface PlanThreadBase extends Omit<InboxItemBase, 'project'> {
+  project: InboxItemBase['project'] | null
   // The session ID
   id: string
   type: 'plan_thread'
@@ -197,17 +211,17 @@ export interface RunnerUpdateItem extends Omit<InboxItemBase, 'project'> {
   resolution: null
 }
 
-export type InboxItem = TaskInboxItem | PlanThreadItem | EpicReviewItem | ReleaseNotesItem | EpicConflictItem | RunnerUpdateItem
+export type InboxItem = TaskInboxItem | PmActivityItem | PlanThreadItem | EpicReviewItem | ReleaseNotesItem | EpicConflictItem | RunnerUpdateItem
 
 // What the human owes a decision on (D11). Everything here counts.
-export type ActionableInboxItem = Exclude<InboxItem, ReleaseNotesItem>
+export type ActionableInboxItem = Exclude<InboxItem, ReleaseNotesItem | PmActivityItem>
 
 export interface Inbox {
   // Newest first by when each began waiting
   needsYou: ActionableInboxItem[]
-  // Informational, newest first: what agents did, and release notes until
-  // they're dismissed
-  activity: (TaskInboxItem | ReleaseNotesItem)[]
+  // Informational, newest first: what agents and the PM did, and release notes
+  // until they're dismissed
+  activity: (TaskInboxItem | PmActivityItem | ReleaseNotesItem)[]
   resolved: (TaskInboxItem | ReleaseNotesItem)[]
   // needsYou's length; every Inbox badge is this or its per-project share
   count: number

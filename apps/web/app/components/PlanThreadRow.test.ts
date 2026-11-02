@@ -33,7 +33,7 @@ it('shows the sender where other rows do, with the project as a tag', () => {
   expect(row.findAll('[data-thumbnail]')).toHaveLength(1)
   expect(row.text()).toContain('Renamed PM')
   expect(row.text()).toContain('Push notifications')
-  expect(row.text()).toContain(item.project.name)
+  expect(row.text()).toContain(item.project!.name)
   expect(row.text()).toContain('Question')
 })
 

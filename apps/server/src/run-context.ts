@@ -12,6 +12,9 @@ import type { HumanActions } from './human-actions.ts'
 import type { LeaseReconcile } from './lease-reconcile.ts'
 import type { MergeOrchestrator } from './merge.ts'
 import type { PlanService } from './plan.ts'
+import type { PmActions } from './pm-actions.ts'
+import type { PmCalls } from './pm-calls.ts'
+import type { PmDecisions } from './pm-decisions.ts'
 import type { PmDispatch } from './pm-dispatch.ts'
 import type { PmTools } from './pm-tools.ts'
 import type { RunEnding } from './run-ending.ts'
@@ -33,7 +36,8 @@ export type AgentRow = typeof agents.$inferSelect
 export interface RunContext {
   run: RunRow
   agent: AgentRow
-  project: ProjectRow
+  // Null only for a PM turn in a global session
+  project: ProjectRow | null
   task: TaskRow | null
 }
 
@@ -64,6 +68,8 @@ export interface RunCore {
   epicPrs: EpicPullRequests
   fixes: EpicFixes
   pmTools: PmTools
+  pmActions: PmActions
+  pmDecisions: PmDecisions
   merges: MergeOrchestrator
   sweep: WorktreeSweep
   runs: RunContexts
@@ -73,6 +79,7 @@ export interface RunCore {
   tools: AgentTools
   human: HumanActions
   pm: PmDispatch
+  pmCalls: PmCalls
   leases: LeaseReconcile
   exits: RunExits
   scheduler: Scheduler
@@ -110,9 +117,11 @@ export class RunContexts {
     const [row] = await this.#c.d.db.select({ run: runs, agent: agents, project: projects, task: tasks })
       .from(runs)
       .innerJoin(agents, eq(agents.id, runs.agentId))
-      .innerJoin(projects, eq(projects.id, runs.projectId))
+      .leftJoin(projects, eq(projects.id, runs.projectId))
       .leftJoin(tasks, eq(tasks.id, runs.taskId))
       .where(eq(runs.id, runId))
+    // Task and epic runs always have a project; only PM turns may be global.
+    if (row && row.run.role !== 'pm' && !row.project) return null
     return row ?? null
   }
 
@@ -134,6 +143,6 @@ export class RunContexts {
   }
 
   actor(ctx: RunContext): Actor {
-    return { kind: 'agent', role: ctx.run.role, runId: ctx.run.id }
+    return { kind: 'agent', role: ctx.run.role, runId: ctx.run.id, ...(ctx.run.planSessionId ? { sessionId: ctx.run.planSessionId } : {}) }
   }
 }

@@ -111,7 +111,7 @@ interface RunFields {
   agentName: string
   // The agent's runtime now; a run doesn't record its own
   agentRuntime: string
-  projectId: string
+  projectId: string | null
   planSessionId: string | null
   taskId: string | null
   taskRef: string | null

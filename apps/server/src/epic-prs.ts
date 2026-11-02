@@ -201,6 +201,7 @@ export class EpicPullRequests {
 
   async report(run: RunRow, report: EpicReviewReport): Promise<void> {
     const { outcome } = report
+    if (!run.projectId) throw new Error('Epic reviews require a project')
     // GitHub first, holding no lock. The verdict only moves the epic on: the
     // merge pass reads the head again, under the lock, before anything merges.
     const [found] = await this.d.db.select({ epic: epics, project: projects }).from(epics).innerJoin(projects, eq(projects.id, epics.projectId)).where(eq(epics.id, run.epicId!))
@@ -208,7 +209,7 @@ export class EpicPullRequests {
     const pr = await this.d.github.getPullRequest(found.project.repository, found.epic.prNumber!)
     if (pr.state !== 'open' || pr.merged || pr.headSha !== run.headSha) throw new Error('Epic PR head changed; this verdict is stale')
     await this.d.db.transaction(async (tx) => {
-      const [project] = await tx.select().from(projects).where(eq(projects.id, run.projectId)).for('update')
+      const [project] = await tx.select().from(projects).where(eq(projects.id, run.projectId!)).for('update')
       const [epic] = await tx.select().from(epics).where(eq(epics.id, run.epicId!)).for('update')
       const [current] = await tx.select().from(runs).where(eq(runs.id, run.id)).for('update')
       if (!project || !epic || !current || !isActiveRun(current.state) || epic.reviewState !== 'in_review' || epic.prHeadSha !== run.headSha || !complete(await epicBoard(tx, epic.id))) throw new Error('Epic changed during review; this verdict is stale')
@@ -231,7 +232,7 @@ export class EpicPullRequests {
   async reviewFailed(tx: Executor, run: RunRow, error: string): Promise<boolean> {
     const [epic] = await tx.select().from(epics).where(eq(epics.id, run.epicId!)).for('update')
     if (epic?.reviewState !== 'in_review' || epic.prHeadSha !== run.headSha) return false
-    const [project] = await tx.select({ failedRunCap: projects.failedRunCap }).from(projects).where(eq(projects.id, run.projectId))
+    const [project] = await tx.select({ failedRunCap: projects.failedRunCap }).from(projects).where(eq(projects.id, run.projectId!))
     const cap = project!.failedRunCap
     const recent = await tx.select({ state: runs.state }).from(runs)
       .where(and(eq(runs.epicId, epic.id), eq(runs.role, 'reviewer'), eq(runs.headSha, epic.prHeadSha!), ne(runs.id, run.id), inArray(runs.state, ['failed', 'completed'])))
