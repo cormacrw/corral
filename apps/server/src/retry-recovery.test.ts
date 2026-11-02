@@ -162,11 +162,23 @@ describe.each(['pglite', 'postgres'] as const)('no-progress recovery on %s', (dr
     expect((await t.db.select().from(runs).where(eq(runs.taskId, task.id))).filter(r => r.role === 'pm')).toHaveLength(1)
   })
 
-  it.each(['rate_limited', 'stopped', 'error', 'exited'] as const)('%s breaks the no-progress streak without bypassing recovery', async (kind) => {
+  it('also stops ordinary process failures when both unchanged heads are known', async () => {
+    const { task, job } = await assigned(6)
+    let current = job
+    for (let attempt = 0; attempt < 2; attempt++) {
+      runner.send({ type: 'run.ended', runId: current.runId, leaseEpoch: current.leaseEpoch, exit: { kind: 'exited', code: 1 }, headSha: 'target-tip' })
+      await expect.poll(async () => (await t.db.select().from(runs).where(eq(runs.id, current.runId)))[0]!.state).toBe('failed')
+      await t.orchestrator.schedule()
+      if (!attempt) current = (await runner.next('run.assign', m => m.job.taskId === task.id)).job
+    }
+    expect((await row(task.id)).retryStop).toMatchObject({ sessionId: expect.any(String), capped: false })
+  })
+
+  it.each(['rate_limited', 'stopped', 'error'] as const)('%s breaks the no-progress streak without bypassing recovery', async (kind) => {
     const { task, job } = await assigned(6)
     await fail(job)
     const next = (await runner.next('run.assign', m => m.job.taskId === task.id)).job
-    const exit = kind === 'rate_limited' ? { kind, resetsAt: new Date(t.clock.now.getTime() - 1000).toISOString() } : kind === 'error' ? { kind, message: 'Connection dropped' } : kind === 'exited' ? { kind, code: 1 } : { kind }
+    const exit = kind === 'rate_limited' ? { kind, resetsAt: new Date(t.clock.now.getTime() - 1000).toISOString() } : kind === 'error' ? { kind, message: 'Connection dropped' } : { kind }
     runner.send({ type: 'run.ended', runId: next.runId, leaseEpoch: next.leaseEpoch, exit, headSha: 'target-tip' })
     await expect.poll(async () => (await t.db.select().from(runs).where(eq(runs.id, next.runId)))[0]!.state).not.toBe('queued')
     await t.orchestrator.schedule()

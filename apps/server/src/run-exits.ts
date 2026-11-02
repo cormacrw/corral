@@ -202,13 +202,18 @@ export class RunExits {
       case 'runner_shutdown':
         await this.#c.ending.endRun(ctx, { state: 'interrupted', error: runExitError(exit, lastActivityAt), headSha })
         return
-      default:
-        // No accepted outcome means the attempt may have been cut off (even
-        // a CLI network failure can exit with code 1). Keep D10's failure
-        // count, but require a reported failure to establish repetition.
+      case 'error':
+      case 'signalled':
+      case 'timed_out':
+        // A runtime or infrastructure cut still respects the failed-run cap,
+        // but cannot establish a completed no-progress attempt.
         ctx.run.retryContext = null
         await this.#c.d.db.update(runs).set({ retryContext: null }).where(eq(runs.id, ctx.run.id))
-        // An epic review keeps the head it was claimed for: caps count per head.
+        await this.#c.ending.failRun(ctx, runExitError(exit, lastActivityAt), { headSha: headSha ?? ctx.run.headSha })
+        return
+      default:
+        // An ordinary exit without an outcome is still a failed attempt.
+        // Epic review caps continue to count against their claimed head.
         await this.#c.ending.failRun(ctx, runExitError(exit, lastActivityAt), { headSha: headSha ?? ctx.run.headSha })
     }
   }

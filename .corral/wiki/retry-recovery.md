@@ -12,10 +12,11 @@ Unknown heads never establish repetition. Input or target changes during a run
 also break the streak.
 
 Usage limits, stops, shutdowns and lost leases retain their existing recovery.
-Runs without an accepted outcome (including CLI errors, signals, timeouts
-and exits restored after a connection loss) still respect the failed-run cap
-but cannot establish repetition: a dropped CLI connection can also exit with
-code 1, which does not prove a substantive attempt completed. Nothing raises a
+CLI-reported errors, signals, timeouts and exits restored after a connection
+loss still respect the failed-run cap but cannot establish repetition. The
+runner preserves CLI error results as `error` exits, including connection cuts
+that would otherwise look like an ordinary exit code 1. Ordinary process exits
+without an outcome can establish repetition when both heads are known. Nothing raises a
 retry cap or carries approval across new work.
 
 A stop is durable in `tasks.retryStop`. The scheduler reconciles it before

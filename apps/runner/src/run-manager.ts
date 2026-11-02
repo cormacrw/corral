@@ -79,6 +79,7 @@ interface ActiveRun {
   runtime: AgentRuntime | null
   worktree: string | null
   initialHeadSha: string | null
+  runtimeError: string | null
   scratchDir: string
   process: AgentProcess | null
   sessionId: string | null
@@ -230,6 +231,7 @@ export class RunManager {
       runtime: this.#runtimes.get(job.runtime) ?? null,
       worktree: null,
       initialHeadSha: null,
+      runtimeError: null,
       // A warm process's system prompt names its scratch dir, so it can't be per run
       scratchDir: join(this.#config.dataDir, 'scratch', this.#keepsWarm(job) ? `pm-${job.projectId}-${job.planSessionId}` : job.runId),
       process: null,
@@ -428,6 +430,7 @@ export class RunManager {
     if (run.stopping) this.#end(run, this.#stopExit(run))
     else if (run.rateLimit) this.#end(run, { kind: 'rate_limited', resetsAt: run.rateLimit.resetsAt })
     else if (run.killedBy) this.#end(run, { kind: 'signalled', signal: run.killedBy })
+    else if (run.runtimeError) this.#end(run, { kind: 'error', message: run.runtimeError })
     else this.#end(run, { kind: 'exited', code: run.exitCode })
   }
 
@@ -692,6 +695,7 @@ export class RunManager {
     }
     if (parsed.sessionId && !run.started) this.#started(run)
     if (parsed.rateLimit) run.rateLimit = parsed.rateLimit
+    if (parsed.result) run.runtimeError = parsed.result.isError ? parsed.result.text || 'The agent runtime ended with an error' : null
     if (raw || parsed.events.length > 0) run.lastActivityAt = new Date().toISOString()
     run.timer.observe(parsed.events)
     this.#queue(run, parsed.events)
