@@ -1,14 +1,14 @@
 # Settings
 
 **Canvas frames:** `App shell · Settings`, `Settings (component)`
-**Route:** `/settings/:section` (`profile`, `agents`, `runner`, `appearance`)
+**Route:** `/settings/:section` (`profile`, `agents`, `runner`, `performance`, `appearance`)
 **Scope:** global. These settings apply to every project. Per-project settings are in [project-settings.md](project-settings.md).
 
 **Status: stub.** The structure is set. Most controls don't save yet in the design.
 
 ## Layout
 
-- **Section menu** (left, 200–240px): "Settings" as the title, then a vertical `UNavigationMenu` (Profile, Agents, Runner, Appearance), and the note "Settings here apply to every project. Each project has its own settings in the sidebar." The active item uses `bg-elevated` with `text-primary`.
+- **Section menu** (left, 200–240px): "Settings" as the title, then a vertical `UNavigationMenu` (Profile, Agents, Runner, Performance, Appearance), and the note "Settings here apply to every project. Each project has its own settings in the sidebar." The active item uses `bg-elevated` with `text-primary`.
 - **Content** (up to 880px): one bordered card per section. Rows use the same two-column pattern as project settings. Below about 800px the menu stacks on top.
 
 ## Sections
@@ -36,6 +36,15 @@ Pictures are optional; without one, an avatar shows initials. The browser crops 
 - **Reconnect** (mobile) reloads the live state and scans the logins again.
 - **Data directory:** where the runner keeps clones, worktrees and its spool. It's read-only here: it comes from the runner's configuration and is a Docker volume (D12), never a hard-coded `~/.corral`.
 - **Logins:** each CLI's version and whether `claude`, `codex` and `gh` are signed in inside the runner container, with the `docker exec -it` command to sign in (`codex login --device-auth` for Codex, shown next to it when signed out). Corral shows the state only and never reads the credentials (D2).
+
+### Performance
+
+- **Window:** a segmented control (1h / 24h / 7d, 24h by default) that reloads `GET /api/perf/summary?window=`.
+- **API routes:** a table of count, p50, p95, max, average DB time and average queries per request, slowest p95 first.
+- **Pages:** a table of count and p50 / p95 navigation time, slowest p95 first.
+- **Web Vitals:** LCP, INP and CLS p75, each with a Good / Needs improvement / Poor badge from Google's thresholds (LCP 2.5 s / 4 s, INP 200 ms / 500 ms, CLS 0.1 / 0.25).
+- **Slow rows:** a route or page whose p95 is above `CORRAL_SLOW_REQUEST_MS` has a tinted row and a "Slow" badge.
+- **Empty state:** "No samples yet", explaining that data appears as the app is used.
 
 ### Appearance
 

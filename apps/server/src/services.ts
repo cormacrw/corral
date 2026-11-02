@@ -7,6 +7,7 @@ import { ReleaseNotes } from './deployments.ts'
 import type { EventBus } from './events.ts'
 import { RunnerGitHub, type GitHubClient } from './github.ts'
 import { Orchestrator } from './orchestrator.ts'
+import { PerformanceSamples } from './performance.ts'
 import { PlanService } from './plan.ts'
 import { RunnerHub } from './runner-hub.ts'
 import { Transcripts } from './transcripts.ts'
@@ -51,5 +52,5 @@ export function createServices(options: ServiceOptions): Services {
   new InboxMessages(db, events, runner)
   const releaseNotes = new ReleaseNotes({ db, events, runner })
   orchestrator.releaseNotes = releaseNotes
-  return { runner, orchestrator, blobs, transcripts, github, plans, releaseNotes }
+  return { runner, orchestrator, blobs, transcripts, github, plans, releaseNotes, performance: new PerformanceSamples(db) }
 }

@@ -130,6 +130,7 @@ export async function createTestApp(driver: 'pglite' | 'postgres', options: { li
       return res.json() as Promise<Task>
     },
     async restart() {
+      await current.services.performance.stop()
       current.process.kill()
       current.services.orchestrator.stop()
       await current.server?.close()
@@ -139,6 +140,7 @@ export async function createTestApp(driver: 'pglite' | 'postgres', options: { li
     async close() {
       current.services.orchestrator.stop()
       await current.server?.close()
+      await current.services.performance.stop()
       await handle.close()
       await rm(spoolDir, { recursive: true, force: true })
     }
