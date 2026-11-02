@@ -134,7 +134,7 @@ async function submit(message: string): Promise<boolean> {
 }
 
 // One click: an action sent from the panel. If it wasn't, the composer goes
-// back to replying, with the draft kept.
+// back to how the item opened, with the draft kept.
 async function act(value: InboxActionInput['action']) {
   if (busy.value || quickActionPending) return false
   failedAction.value = null
@@ -160,6 +160,12 @@ const panel = reactive({
   submit, act, retryTask, toggleTask,
   setAction: (value: InboxActionInput['action'] | null) => {
     action.value = value
+    failedAction.value = null
+  },
+  // Back to how the item opened. An item that opens on an action can still be
+  // cancelled out of it, so a phone question's Cancel closes its composer.
+  cancelAction: () => {
+    action.value = action.value === defaultAction() ? null : defaultAction()
     failedAction.value = null
   },
   setText: (value: string) => {

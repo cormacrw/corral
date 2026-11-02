@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import type { InboxActionInput, InboxArtifact, ServerEvent } from '@corral/contracts'
 import { VueQueryPlugin } from '@tanstack/vue-query'
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import { api } from '~/composables/useApi'
@@ -156,6 +156,72 @@ describe.each([false, true])('Retry guidance with mobile=%s', (mobile) => {
       } finally {
         view.wrapper.unmount()
       }
+    }
+  })
+})
+
+describe('switching a failed item between its Retry note and a reply', () => {
+  const button = (wrapper: VueWrapper, label: string) => wrapper.findAll('button').find(b => b.text() === label)!
+  const expectRetryNote = (view: Awaited<ReturnType<typeof mountInbox>>) => {
+    expect(view.wrapper.get('label').text()).toBe('Note to send with Retry (optional)')
+    expect(view.composer().props('submitLabel')).toBe('Retry')
+  }
+
+  it('replies on desktop from Reply instead, without retrying, and Cancel returns to the note', async () => {
+    vi.mocked(api.tasks.comment).mockResolvedValue({ id: 'c1' } as never)
+    const view = await mountInbox('failed', 'COR-9')
+    try {
+      await button(view.wrapper, 'Reply instead').trigger('click')
+      expect(view.wrapper.find('label').exists()).toBe(false)
+      expect(view.composer().props('placeholder')).toMatch(/^Reply to/)
+      await button(view.wrapper, 'Cancel').trigger('click')
+      expectRetryNote(view)
+
+      await button(view.wrapper, 'Reply instead').trigger('click')
+      await (view.composer().props('onSubmit') as (message: string) => Promise<boolean>)('Any news?')
+      await flushPromises()
+      expect(api.tasks.comment).toHaveBeenCalledOnce()
+      expect(api.inbox.act).not.toHaveBeenCalled()
+      expectRetryNote(view)
+    } finally {
+      view.wrapper.unmount()
+    }
+  })
+
+  it.each([false, true])('restores the note after Delete then Cancel with mobile=%s', async (mobile) => {
+    const view = await mountInbox('failed', 'COR-9', null, true, task => task, false, mobile)
+    try {
+      await button(view.wrapper, mobile ? 'Delete' : 'Delete task').trigger('click')
+      expect(view.wrapper.find('label').exists()).toBe(false)
+      await button(view.wrapper, 'Cancel').trigger('click')
+      expectRetryNote(view)
+    } finally {
+      view.wrapper.unmount()
+    }
+  })
+
+  it('restores the note when Reply is toggled off on a phone', async () => {
+    const view = await mountInbox('failed', 'COR-9', null, true, task => task, false, true)
+    try {
+      expect(button(view.wrapper, 'Reply instead')).toBeUndefined()
+      await button(view.wrapper, 'Reply').trigger('click')
+      expect(view.composer().props('placeholder')).toMatch(/^Reply to/)
+      await button(view.wrapper, 'Reply').trigger('click')
+      expectRetryNote(view)
+      expect(button(view.wrapper, 'Reply').attributes('aria-pressed')).toBe('false')
+    } finally {
+      view.wrapper.unmount()
+    }
+  })
+
+  it('still closes a phone question\'s Answer with Cancel', async () => {
+    const view = await mountInbox('question', 'COR-8', null, true, task => task, false, true)
+    try {
+      expect(view.composer().props('submitLabel')).toBe('Answer')
+      await button(view.wrapper, 'Cancel').trigger('click')
+      expect(view.panel().action).toBeNull()
+    } finally {
+      view.wrapper.unmount()
     }
   })
 })
@@ -757,10 +823,12 @@ it('asks for a reason before deleting, and replies with no action chosen even if
     expect(api.inbox.act).not.toHaveBeenCalled()
     expect(composer().props('submitLabel')).toBe('Delete task')
     await wrapper.findAll('button').find(b => b.text() === 'Cancel')!.trigger('click')
+    await wrapper.findAll('button').find(b => b.text() === 'Reply instead')!.trigger('click')
     vi.mocked(api.tasks.comment).mockResolvedValue({ id: 'c1' } as never)
     await (composer().props('onSubmit') as (message: string) => Promise<boolean>)('Any news?')
     const failed = item as { project: { slug: string }, taskRef: string }
     expect(api.tasks.comment).toHaveBeenCalledWith(failed.project.slug, Number(failed.taskRef.split('-')[1]), 'Any news?')
+    expect(api.inbox.act).not.toHaveBeenCalled()
   } finally {
     wrapper.unmount()
   }

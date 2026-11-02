@@ -221,6 +221,7 @@ const loading = computed(() => props.ctx.taskLoading || (p.isReview.value && pro
       <InboxPanelTray
         ref="tray"
         :ctx="ctx"
+        offer-reply
       />
     </div>
     <EvidenceViewer v-model="viewing" />
