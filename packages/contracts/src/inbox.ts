@@ -1,4 +1,4 @@
-import type { AgentRole, EpicRebaseDecision } from '@corral/core'
+import type { AgentRole, EpicFixKind, EpicRebaseDecision } from '@corral/core'
 import { z } from 'zod'
 import type { AgentRuntime } from './agent-runtimes.ts'
 import type { Deployment } from './deployments.ts'
@@ -164,6 +164,8 @@ export interface ReleaseNotesItem extends InboxItemBase {
 export interface EpicConflictItem extends InboxItemBase, ReviewChanges {
   // An epic fix's question for the human (D29), which this item then is
   decision?: EpicRebaseDecision
+  // Recovery ran out (D11, D29): why it stopped, until Retry or the merge
+  stopped?: { error: string, fix: EpicFixKind | null }
   id: string
   type: 'epic_conflict'
   epicId: string

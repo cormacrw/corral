@@ -342,7 +342,7 @@ async function boardsWithEvidence(db: Executor, boards: { project: ProjectRow, r
 
 // The events an Inbox item for an epic can arrive by, and the one it compares
 // its changes against
-const ARRIVAL_EVENTS = { epic_review: ['approved', 'merge_refused', 'review_failed'], epic_conflict: ['conflict', 'decision_requested'] }
+const ARRIVAL_EVENTS = { epic_review: ['approved', 'merge_refused', 'review_failed'], epic_conflict: ['conflict', 'decision_requested', 'sync_failed'] }
 const CHANGES_EVENT = 'human_changes_requested'
 
 // Each epic's Inbox-relevant audit entries, newest first
@@ -383,9 +383,10 @@ async function waitingEpics(db: Executor, epicId?: string) {
     const decision = openDecision(o)
     return decision ? [[o.epicId, decision]] : []
   }))
+  const fixOf = new Map(asking.map(o => [o.epicId, o.fix]))
   const rows = await db.select({ epic: epics, project: projects }).from(epics).innerJoin(projects, eq(projects.id, epics.projectId))
-    .where(and(or(inArray(epics.reviewState, ['human_review', 'conflict']), decisionOf.size ? inArray(epics.id, [...decisionOf.keys()]) : undefined), epicId ? eq(epics.id, epicId) : undefined))
-  const open = rows.filter(({ epic }) => decisionOf.has(epic.id) || (epic.prNumber && epic.prHeadSha))
+    .where(and(or(inArray(epics.reviewState, ['human_review', 'conflict']), isNotNull(epics.syncError), decisionOf.size ? inArray(epics.id, [...decisionOf.keys()]) : undefined), epicId ? eq(epics.id, epicId) : undefined))
+  const open = rows.filter(({ epic }) => epic.reviewState !== 'merged' && (decisionOf.has(epic.id) || epic.syncError || (epic.prNumber && epic.prHeadSha)))
   if (open.length === 0) return []
   const ids = open.map(r => r.epic.id)
   const [boardRows, approvals, failures, rebasing] = await Promise.all([
@@ -401,16 +402,18 @@ async function waitingEpics(db: Executor, epicId?: string) {
   ])
   const boards = Map.groupBy(boardRows.filter(t => t.status !== 'draft' && t.status !== 'backlog'), t => t.epicId!)
   const approvalOf = new Map(approvals.map(a => [a.epicId, a]))
-  return open.flatMap(({ epic, project }): { epic: EpicRow, project: ProjectRow, board: TaskRow[], review: { epicId: string | null, summary: string | null, agent: string } | undefined, failure: string | null, decision: EpicRebaseDecision | null }[] => {
+  return open.flatMap(({ epic, project }): { epic: EpicRow, project: ProjectRow, board: TaskRow[], review: { epicId: string | null, summary: string | null, agent: string } | undefined, failure: string | null, decision: EpicRebaseDecision | null, stopped: EpicConflictItem['stopped'] | null }[] => {
     const board = boards.get(epic.id) ?? []
     const review = approvalOf.get(epic.id)
     const decision = decisionOf.get(epic.id)
-    if (decision) return [{ epic, project, board, review, failure: null, decision }]
-    if (epic.reviewState === 'conflict') return [{ epic, project, board, review, failure: null, decision: null }]
+    if (decision) return [{ epic, project, board, review, failure: null, decision, stopped: null }]
+    // Exhausted recovery stays in front of the human until Retry or the merge
+    if (epic.syncError) return [{ epic, project, board, review, failure: null, decision: null, stopped: { error: epic.syncError, fix: fixOf.get(epic.id) ?? null } }]
+    if (epic.reviewState === 'conflict') return [{ epic, project, board, review, failure: null, decision: null, stopped: null }]
     if (rebasing.has(epic.id)) return []
     const given = failures.find(f => f.epicId === epic.id && f.headSha === epic.prHeadSha)
     const failure = given ? readAudit(given.detail).summary ?? REVIEW_FAILED : null
-    return complete(board) && (review || failure) ? [{ epic, project, board, review, failure, decision: null }] : []
+    return complete(board) && (review || failure) ? [{ epic, project, board, review, failure, decision: null, stopped: null }] : []
   })
 }
 
@@ -420,8 +423,8 @@ async function prepareEpicItems(db: Executor, epicId?: string): Promise<Prepared
   const boards = await boardsWithEvidence(db, waiting.map(({ project, board }) => ({ project, rows: board })))
   const changed = waiting.flatMap(({ epic }, i) => entries.get(epic.id)?.some(e => e.event === CHANGES_EVENT) ? boards[i]!.map(b => b.task.id) : [])
   const comments = await listCommentsFor(db, changed)
-  const items = waiting.map(({ epic, project, review, failure, decision }, i): PreparedItem<EpicReviewItem | EpicConflictItem> => {
-    const type = decision || epic.reviewState === 'conflict' ? 'epic_conflict' : 'epic_review'
+  const items = waiting.map(({ epic, project, review, failure, decision, stopped }, i): PreparedItem<EpicReviewItem | EpicConflictItem> => {
+    const type = decision || stopped || epic.reviewState === 'conflict' ? 'epic_conflict' : 'epic_review'
     const all = entries.get(epic.id) ?? []
     const arrivals = all.filter(e => ARRIVAL_EVENTS[type].includes(e.event ?? ''))
     const at = (arrivals[0]?.createdAt ?? epic.updatedAt).toISOString()
@@ -438,6 +441,10 @@ async function prepareEpicItems(db: Executor, epicId?: string): Promise<Prepared
     const files = epic.conflictFiles ?? []
     if (decision) {
       return { item: { ...shared, type, preview: decision.question, body: decision.question, sender: { name: 'Corral', role: 'system' }, targetBranch: project.defaultBranch, files: epic.conflictFiles ?? [], decision }, arrival: arrivalKey({ id: epic.id, type, at }, arrivals) }
+    }
+    if (stopped) {
+      const body = `Automatic recovery on this epic has stopped. ${stopped.error} Retry starts it again; nothing moves until then.`
+      return { item: { ...shared, type, preview: stopped.error, body, sender: { name: 'Corral', role: 'system' }, targetBranch: project.defaultBranch, files, stopped }, arrival: arrivalKey({ id: epic.id, type, at }, arrivals) }
     }
     const body = `The epic PR can't rebase onto ${project.defaultBranch}. ${files.length ? `Conflicting files: ${files.join(', ')}.` : 'Corral couldn\'t work out which files conflict; the PR on GitHub shows them.'}`
     return { item: { ...shared, type, preview: body, body, sender: { name: 'Corral', role: 'system' }, targetBranch: project.defaultBranch, files }, arrival: arrivalKey({ id: epic.id, type, at }, arrivals) }

@@ -185,7 +185,7 @@ const reload = async (id: string) => (await t.db.select().from(schema.epics).whe
 const epicApi = async (id: string) => (await t.request('GET', `/api/epics/${id}`)).json() as Promise<{ sync: unknown, reviewState: string | null }>
 const taskRow = async (id: string) => (await t.db.select().from(schema.tasks).where(eq(schema.tasks.id, id)))[0]!
 const isAncestor = (a: string, b: string) => git('merge-base', '--is-ancestor', a, b).then(() => true, () => false)
-const needsYou = async (id: string) => ((await (await t.request('GET', '/api/inbox')).json()) as { needsYou: { id: string, epicId?: string }[] }).needsYou.filter(i => i.epicId === id || i.id === id)
+const needsYou = async (id: string) => ((await (await t.request('GET', '/api/inbox')).json()) as { needsYou: { id: string, epicId?: string, type?: string, stopped?: { error: string, fix: string | null } }[] }).needsYou.filter(i => i.epicId === id || i.id === id)
 
 // Target and epic both change `file`, so the rebase can only conflict
 async function conflicted() {
@@ -549,7 +549,8 @@ it('bounds infrastructure failures, then shows a recoverable failure and asks th
   const failed = (await ops(epic.id)).filter(o => o.kind === 'rebase')
   expect(failed).toHaveLength(3)
   expect((await epicApi(epic.id)).sync).toMatchObject({ state: 'failed', error: expect.stringContaining('network down') })
-  expect(await needsYou(epic.id)).toEqual([])
+  // Exhausted recovery is the human's to see (D11)
+  expect(await needsYou(epic.id)).toMatchObject([{ type: 'epic_conflict', stopped: { error: expect.stringContaining('network down'), fix: null } }])
   const stopped = { epicSync: (await epicApi(epic.id)).sync, inboxNeedsYou: await needsYou(epic.id), operationsAfterEightPasses: await journal(epic.id) }
 
   faults = null
@@ -1223,7 +1224,9 @@ describe('developer runs on the epic', () => {
     expect((await fixEpic(epic.id)).sync).toMatchObject({ state: 'failed', fix: 'conflict', error: expect.stringContaining('refused') })
     await t.orchestrator.schedule()
     expect((await t.db.select().from(schema.runs).where(eq(schema.runs.epicId, epic.id)))).toHaveLength(3)
-    expect(await needsYou(epic.id)).toEqual([])
+    const item = (await needsYou(epic.id))
+    expect(item).toMatchObject([{ id: epic.id, type: 'epic_conflict', stopped: { fix: 'conflict', error: expect.stringContaining('refused') } }])
+    await capture('stopped-needs-you.json', { request: { method: 'GET', url: '/api/inbox' }, needsYouItem: item[0] })
     await captureEpic('publish-refused-stopped.json', epic.id, { publishResults, expectedEpicHead: epic.head, actualEpicHead: await git('rev-parse', epic.branch) })
 
     faults = null
@@ -1231,6 +1234,7 @@ describe('developer runs on the epic', () => {
     const again = await fixJob(epic.id)
     expect(seen).not.toContain(again.runId)
     await git('branch', '-f', again.branch!, resolved)
+    expect(await needsYou(epic.id)).toEqual([])
     expect(await fixReport(again, { behaviourChanged: false, headSha: resolved, conflictedFiles: [epic.file] })).toMatchObject({ ok: true })
     await pass()
     expect(await git('rev-parse', epic.branch)).toBe(resolved)

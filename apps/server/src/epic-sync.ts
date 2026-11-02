@@ -61,8 +61,8 @@ export async function rebasingEpics(db: Executor, epicIds: string[]): Promise<Se
   return new Set(rows.map(r => r.epicId))
 }
 
-// Stops synchronizing until a human retries: an operational problem, not a
-// product question, so it's shown on the epic rather than asked in the Inbox
+// Stops synchronizing until a human retries. Recovery has run out, so it's on
+// the epic and a Needs you item until Retry or the merge (D11, D29).
 export async function recordSyncFailure(db: Executor, project: ProjectRow, epicId: string, error: string, now: Date): Promise<void> {
   await db.update(epics).set({ syncError: error, updatedAt: now }).where(eq(epics.id, epicId))
   await appendAudit(db, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId, event: 'sync_failed', summary: error }))

@@ -366,6 +366,7 @@ If the two sides can't both be kept, or the target changed a binding decision th
 - ${gates}
 - ${report}
 - Every report needs a \`note\`: one line of at most 200 characters saying what this run did. There is no task to comment on and no evidence to attach. \`get_task\` shows the epic.
+- ${HUMAN_DECISIONS_NOTE}
 - If you can't fix this, report \`failed\` with the reason. Always finish by calling \`report_outcome\`.`)
   ].join('\n')
 }

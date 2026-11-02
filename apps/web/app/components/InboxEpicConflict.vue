@@ -24,7 +24,7 @@ function handOff() {
     aria-label="Epic PR conflict"
   >
     <InboxEpicHeader
-      badge="Epic conflict · Needs you"
+      :badge="item.stopped ? `${item.stopped.fix === 'ci' || item.stopped.fix === 'review' ? 'Fix' : 'Rebase'} stopped · Needs you` : 'Epic conflict · Needs you'"
       color="error"
       :title="item.subject"
       :epic-id="item.epicId"
@@ -40,10 +40,16 @@ function handOff() {
         :item="item"
       />
       <p
-        v-else
+        v-else-if="!item.stopped"
         class="break-words"
       >
         The epic PR can't rebase onto {{ item.targetBranch }}.
+      </p>
+      <p
+        v-if="item.stopped"
+        class="break-words"
+      >
+        {{ item.stopped.error }}
       </p>
       <InboxEpicDecision
         v-if="item.decision"
@@ -72,7 +78,7 @@ function handOff() {
         </ul>
       </section>
       <p
-        v-else-if="!item.decision"
+        v-else-if="!item.decision && !item.stopped"
         class="text-muted"
       >
         Corral couldn't work out which files conflict; the PR on GitHub shows them.
@@ -99,6 +105,18 @@ function handOff() {
           :loading="busy"
           class="justify-center max-sm:min-h-11 max-sm:w-full"
           @click="send"
+        />
+      </template>
+      <template v-else-if="item.stopped">
+        <p class="text-xs text-muted">
+          Automatic recovery has stopped. Retry counts attempts afresh and starts it again.
+        </p>
+        <UButton
+          label="Retry"
+          icon="i-lucide-rotate-cw"
+          :loading="busy"
+          class="justify-center max-sm:min-h-11 max-sm:w-full"
+          @click="handOff"
         />
       </template>
       <template v-else>

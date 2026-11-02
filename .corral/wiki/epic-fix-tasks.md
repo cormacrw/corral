@@ -48,3 +48,5 @@ can't get stuck.
 
 Human approval requires `human_review`, so it returns 409 while changes are
 outstanding.
+
+A stopped epic is a Needs you item (D11): `waitingEpics` selects on `syncError`, so the Inbox and its count agree with the epic, and `sync_failed` is its arrival. It's an `epic_conflict` item with `stopped` set, and its Retry is the same `rebase` action as the epic page's.
