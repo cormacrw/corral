@@ -494,7 +494,7 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
     if (task.status === 'merged') throw new ApiFailure(409, { code: 'conflict', constraint: 'task_merged' })
     if (input.type && !canChangeType(task, input.type)) throw new ApiFailure(409, { code: 'conflict', constraint: 'task_type_locked' })
     // D27: PM metadata edits must not remove the work that locks epic review mode.
-    if (actor.kind === 'agent' && actor.role === 'pm' && input.epicId !== undefined && input.epicId !== task.epicId && (task.prNumber !== null || task.integrationProtocol > 0)) {
+    if (((actor.kind === 'agent' && actor.role === 'pm') || (actor.kind === 'human' && actor.viaPm)) && input.epicId !== undefined && input.epicId !== task.epicId && (task.prNumber !== null || task.integrationProtocol > 0)) {
       throw new ApiFailure(409, { code: 'conflict', constraint: 'task_epic_locked' })
     }
     const { acceptanceCriteria: criteriaInput, dependsOn, ...fields } = input

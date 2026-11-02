@@ -73,7 +73,7 @@ export const planMessages = pgTable('plan_messages', {
 // A versioned plan from propose_plan; its tasks live in Backlog until a
 // human approves the plan (D9, D10). A global session can plan for any project,
 // a project's session only for that project. A foreign key can't say that, so
-// migration 0055 enforces it with triggers on plans and plan_sessions.
+// migration 0060 enforces it with triggers on plans and plan_sessions.
 export const plans = pgTable('plans', {
   id: uuid().primaryKey().defaultRandom(),
   sessionId: uuid().notNull().references(() => planSessions.id, { onDelete: 'cascade' }),

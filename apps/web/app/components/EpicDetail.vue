@@ -24,7 +24,7 @@ const activityResult = useQuery(computed(() => epicActivityQuery(props.epicId)))
 const epic = computed(() => epicResult.data.value ?? null)
 const activity = computed(() => activityResult.data.value ?? [])
 // A failed background refetch leaves what's cached on screen
-const error = computed(() => [epicResult, activityResult].find(r => r.isLoadingError.value)?.error.value?.message ?? null)
+const error = computed(() => epicResult.isLoadingError.value ? epicResult.error.value?.message ?? null : null)
 const saved = ref(false)
 const project = computed(() => shell.projects.find(p => p.id === epic.value?.projectId) ?? null)
 const { tasks: projectTasks, epics: epicList } = useProjectLists(() => project.value?.slug ?? '')
@@ -158,7 +158,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
       variant="subtle"
       :title="error"
       class="m-4"
-      :actions="[{ label: 'Retry', onClick: () => { void epicResult.refetch(); void activityResult.refetch() } }]"
+      :actions="[{ label: 'Retry', onClick: () => { void epicResult.refetch() } }]"
     />
     <div
       v-else-if="!epic"
@@ -475,7 +475,19 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
             :text="epicHistoryText(entry)"
           />
           <p
-            v-if="!activity.length"
+            v-if="activityResult.isLoadingError.value"
+            class="text-sm text-error"
+          >
+            Couldn't load the activity.
+            <UButton
+              variant="link"
+              size="xs"
+              label="Retry"
+              @click="activityResult.refetch()"
+            />
+          </p>
+          <p
+            v-else-if="!activity.length"
             class="text-sm text-muted"
           >
             No activity yet.

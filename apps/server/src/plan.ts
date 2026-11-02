@@ -591,6 +591,7 @@ export class PlanService {
       case 'propose_plan': {
         const parsed = proposedPlanInput.safeParse(input)
         if (!parsed.success) throw new ToolError(`The plan was not saved: ${z.prettifyError(parsed.error)}`)
+        if (session.projectId && project!.id !== session.projectId) throw new ToolError(`The plan was not saved: this conversation belongs to another project, so it can't plan for ${project!.slug}. Start a thread in ${project!.slug} with start_thread and propose it there.`)
         return this.#propose(session, project!, runId, normalizeProposedPlan(parsed.data), actor)
       }
 

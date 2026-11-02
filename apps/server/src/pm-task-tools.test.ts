@@ -117,7 +117,7 @@ describe('PM task and epic tools', () => {
         expect(await request('PATCH', `/api/projects/${slug}/tasks/${task.number}`, { epicId: null })).toMatchObject({ status: 409, body: { error: { constraint: 'task_merged' } } })
       }
       for (const epicId of [null, other!.id]) {
-        expect(await call('update_task', { taskRef: task.ref, epicId })).toMatchObject({ ok: false, error: 'conflict' })
+        expect(await call('update_task', { taskRef: task.ref, epicId })).toMatchObject({ ok: false, error: expect.stringContaining('conflict') })
       }
       expect(await call('update_task', { taskRef: task.ref, epicId: epic!.id, title: 'Allowed metadata' })).toMatchObject({ ok: state.status !== 'merged' })
       expect((await get(task)).epicId).toBe(epic!.id)
@@ -181,16 +181,19 @@ describe('PM task and epic tools', () => {
     expect((await resolve(stop)).body).toMatchObject({ pendingAction: { status: 'confirmed' } })
     expect(await runner.next('run.stop', m => m.runId === developer.runId)).toMatchObject({ keepWork: true })
     expect(await call('update_task', { taskRef: task.ref, paused: true })).toMatchObject({ ok: true, result: { paused: true } })
-    expect(await call('update_task', { taskRef: task.ref, paused: false })).toMatchObject({ ok: true, result: { paused: false } })
+    const resume = await call('update_task', { taskRef: task.ref, paused: false }) as { result: { actionId: string } }
+    expect(resume).toMatchObject({ ok: true, result: { confirmationPending: true } })
+    expect((await resolve(resume.result.actionId)).body).toMatchObject({ pendingAction: { status: 'confirmed' } })
     await get(task)
     await history(task)
     const idle = await t.createTask(slug)
     const activity = async () => (await history(idle)).filter(e => e.action.startsWith('task.')).map(e => e.action)
     expect(await call('update_task', { taskRef: idle.ref, paused: true })).toMatchObject({ ok: true })
-    expect(await call('update_task', { taskRef: idle.ref, paused: false })).toMatchObject({ ok: true })
+    const resumeIdle = await call('update_task', { taskRef: idle.ref, paused: false }) as { result: { actionId: string } }
+    await resolve(resumeIdle.result.actionId)
     expect(await activity()).toEqual(['task.created', 'task.paused', 'task.resumed'])
     await t.db.update(schema.tasks).set({ status: 'merged' }).where(eq(schema.tasks.id, idle.id))
-    expect(await call('update_task', { taskRef: idle.ref, paused: true })).toMatchObject({ ok: false, error: 'conflict' })
+    expect(await call('update_task', { taskRef: idle.ref, paused: true })).toMatchObject({ ok: false, error: expect.stringContaining('task_merged') })
     expect(await get(idle)).toMatchObject({ paused: false })
   })
 

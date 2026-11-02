@@ -529,6 +529,7 @@ export class RunManager {
   async #spawnOnce(run: ActiveRun, options: SpawnOptions): Promise<AgentExit> {
     const runtimeOptions: RuntimeOptions = {
       cwd: run.worktree!,
+      noRepository: run.job.role === 'pm' && run.job.projectId === null,
       prompt: options.prompt,
       systemPrompt: options.systemPrompt,
       mcpConfigPath: options.mcpConfigPath,

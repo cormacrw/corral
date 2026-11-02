@@ -237,7 +237,7 @@ export const inboxActionInput = z.discriminatedUnion('action', [
   // Failed or Blocked: resolve to a status (D10). Also releases a no-progress stop
   z.object({ action: z.literal('resolve'), to: z.enum(['backlog', 'ready', 'in_progress']), text: z.string().trim().optional() }),
   // Stopped without progress: try again from the status it stopped in
-  z.object({ action: z.literal('retry') }),
+  z.object({ action: z.literal('retry'), text: z.string().trim().optional() }),
   // Human review
   z.object({ action: z.literal('approve'), text: z.string().trim().optional() }),
   z.object({ action: z.literal('request_changes'), text: z.string().trim().min(1) }),

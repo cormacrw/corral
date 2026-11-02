@@ -102,8 +102,8 @@ describe('PM tools for projects, runs and the factory', () => {
 
   it('update_project changes a setting and attributes it to the PM session in Activity', async () => {
     expect(await call('update_project', { project: project.slug })).toMatchObject({ ok: false, error: expect.stringContaining('Nothing to change') })
-    await result('update_project', { project: project.slug, reviewRoundCap: 9, requiredChecks: ['ci'] })
-    expect(await (await t.request('GET', `/api/projects/${project.slug}`)).json()).toMatchObject({ reviewRoundCap: 9, requiredChecks: ['ci'] })
+    await result('update_project', { project: project.slug, reviewRoundCap: 1, requiredChecks: ['ci'] })
+    expect(await (await t.request('GET', `/api/projects/${project.slug}`)).json()).toMatchObject({ reviewRoundCap: 1, requiredChecks: ['ci'] })
     const [updated] = await t.db.select().from(auditLog).where(eq(auditLog.action, 'project.updated'))
     expect(updated).toMatchObject({ actor: { kind: 'agent', role: 'pm', runId: job.runId, sessionId: session.id } })
     const item = (await inbox()).activity.find(a => a.preview.includes('reviewRoundCap'))

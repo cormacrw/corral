@@ -62,11 +62,11 @@ export class AgentTools {
       pm: ['attach_evidence', 'list_tasks', 'get_task', 'add_comment', 'get_run_outcomes', 'get_agent_activity', 'get_attachment', 'get_design', 'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs', ...Object.keys(pmActionTools), ...Object.keys(pmDirectTools)]
     }
     if (!allowed[role]?.includes(tool)) throw new ToolError(`The ${role} can’t use ${tool}`)
-    if (role === 'pm' && requiresPmConfirmation(tool, input)) {
+    if (role === 'pm' && (requiresPmConfirmation(tool, input) || (ctx.run.planSessionId && await this.#c.pmCalls.lowersGate(ctx.run.planSessionId, tool, input)))) {
       if (!this.#c.plans || !ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
       return this.#c.pmActions.propose(ctx.run.planSessionId, ctx.run.id, tool, input, this.#c.runs.actor(ctx))
     }
-    if (role === 'pm' && (isPmDirectTool(tool) || tool === 'act_on_inbox')) {
+    if (role === 'pm' && (isPmDirectTool(tool) || tool === 'act_on_inbox' || tool === 'create_task' || tool === 'update_task' || tool === 'update_epic')) {
       if (!ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
       return this.#c.pmTools.call(tool, input, this.#c.runs.actor(ctx), { sessionId: ctx.run.planSessionId, runId: ctx.run.id, projectId: ctx.project?.id ?? null })
     }
@@ -103,7 +103,6 @@ export class AgentTools {
     }
     if (role === 'pm') {
       if (!this.#c.plans || !ctx.run.planSessionId) throw new ToolError('Planning is unavailable')
-      if (tool === 'create_task' || tool === 'update_task' || tool === 'update_epic') return this.#c.pmCalls.editEntity(ctx, tool, input)
       return this.#c.plans.tool(ctx.run.planSessionId, ctx.run.id, tool, input, this.#c.runs.actor(ctx))
     }
 

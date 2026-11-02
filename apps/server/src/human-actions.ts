@@ -173,7 +173,7 @@ export class HumanActions {
         break
       }
       case 'retry':
-        if (!await releaseStop(db, taskId, actor, {})) throw new ApiFailure(409, { code: 'conflict', constraint: null })
+        if (!await releaseStop(db, taskId, actor, { comment: input.text })) throw new ApiFailure(409, { code: 'conflict', constraint: null })
         break
       case 'send_back': {
         if (await releaseStop(db, taskId, actor, { to: 'backlog' })) break

@@ -5,7 +5,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './test-runner.ts'
 
-const { auditLog, comments, designVersions, tasks } = schema
+const { acceptanceCriteria, auditLog, comments, designVersions, tasks } = schema
+
+const STOP = { runId: null, target: null, human: '', status: 'in_progress' as const, capped: false, sessionId: null }
 
 describe('PM tools for the Inbox, designs and agents', () => {
   let t: TestApp
@@ -40,6 +42,12 @@ describe('PM tools for the Inbox, designs and agents', () => {
     if (Object.keys(set).length > 0) await t.db.update(tasks).set(set).where(eq(tasks.id, created.id))
     return created
   }
+  // A Blocked task, as the transition that blocked it would have left it
+  async function blockedBy(event: string, input: Parameters<TestApp['createTask']>[1] = {}) {
+    const created = await task({ status: 'blocked', statusReason: 'Which provider?' }, input)
+    await t.db.insert(auditLog).values({ taskId: created.id, projectId: created.projectId, actor: { kind: 'system', component: 'server' }, action: 'task.transition', detail: { event, from: 'in_progress', to: 'blocked' } })
+    return created
+  }
   async function propose(tool: Parameters<FakeRunner['call']>[2], input: unknown) {
     const response = await call(tool, input)
     expect(response).toMatchObject({ ok: true, result: { confirmationPending: true } })
@@ -54,6 +62,7 @@ describe('PM tools for the Inbox, designs and agents', () => {
     const page = await inbox()
     expect(response.result.map(i => i.id)).toEqual(page.needsYou.map(i => i.id))
     expect(response.result.find(i => i.id === question.id)).toMatchObject({ type: 'question', taskRef: question.ref, asking: 'Which provider?' })
+    expect(response.result.map(i => i.id)).toEqual(page.needsYou.map(i => i.id))
   })
 
   it('keeps an epic rebase product decision waiting for the human', async () => {
@@ -73,7 +82,8 @@ describe('PM tools for the Inbox, designs and agents', () => {
   })
 
   it('answers a Blocked task straight away, attributed to the PM session', async () => {
-    const blocked = await task({ status: 'blocked', statusReason: 'Which provider?', reviewRounds: 2 })
+    const blocked = await blockedBy('stuck')
+    await t.db.update(tasks).set({ reviewRounds: 2 }).where(eq(tasks.id, blocked.id))
     expect(await call('act_on_inbox', { taskRef: blocked.ref, action: 'clarify' })).toMatchObject({ ok: false })
     expect(await statusOf(blocked.id)).toMatchObject({ status: 'blocked' })
     expect(await call('act_on_inbox', { taskRef: blocked.ref, action: 'clarify', text: 'Use Stripe' })).toMatchObject({ ok: true, result: { status: 'in_progress' } })
@@ -88,6 +98,120 @@ describe('PM tools for the Inbox, designs and agents', () => {
     expect(activity).toContainEqual(expect.objectContaining({ taskRef: blocked.ref, sender: { name: 'PM', role: 'pm' }, body: expect.stringContaining(session.id) }))
   })
 
+  it.each(['review_cap', 'blocked', 'block'])('leaves a %s block to the human, so an answer can\'t lift a cap', async (event) => {
+    const capped = await blockedBy(event)
+    const reply = await call('act_on_inbox', { taskRef: capped.ref, action: 'clarify', text: 'Keep going' }) as { ok: false, error: string }
+    expect(reply).toMatchObject({ ok: false })
+    expect(reply.error).toContain('the human')
+    expect(await statusOf(capped.id)).toMatchObject({ status: 'blocked' })
+    expect(await t.db.select().from(comments).where(eq(comments.taskId, capped.id))).toEqual([])
+  })
+
+  it('points clarify on a Stopped item at the actions that apply', async () => {
+    const stopped = await task({ status: 'in_progress', retryStop: STOP })
+    const reply = await call('act_on_inbox', { taskRef: stopped.ref, action: 'clarify', text: 'Try again' }) as { ok: false, error: string }
+    expect(reply.error).toContain('retry or resolve')
+    expect(await statusOf(stopped.id)).toMatchObject({ retryStop: STOP })
+  })
+
+  it('says on the card what a Stopped item really does, and keeps a retry\'s note', async () => {
+    const stopped = await task({ status: 'agent_review', retryStop: STOP })
+    const resolved = await propose('act_on_inbox', { taskRef: stopped.ref, action: 'resolve', to: 'ready' })
+    expect(resolved.summary).toContain(`Release the stop on ${stopped.ref}, which carries on in agent review`)
+    await resolve(resolved.actionId, 'cancel')
+    const retried = await propose('act_on_inbox', { taskRef: stopped.ref, action: 'retry', text: 'The fixture is back' })
+    expect(retried.summary).toContain('Note: The fixture is back')
+    await resolve(retried.actionId, 'confirm')
+    expect(await t.db.select().from(comments).where(eq(comments.taskId, stopped.id))).toMatchObject([{ body: 'The fixture is back', pinned: true }])
+  })
+
+  describe('gates', () => {
+    const lowered = async (tool: Parameters<FakeRunner['call']>[2], input: unknown, words: string) => {
+      const card = await propose(tool, input)
+      expect(card.summary).toContain(words)
+      return card
+    }
+
+    it('takes a card to turn off human review, and acts as the human on Confirm', async () => {
+      const gated = await task({ humanReview: true })
+      const card = await lowered('update_task', { taskRef: gated.ref, humanReview: false, title: 'Renamed' }, 'turn off human review')
+      expect(card.summary).toContain('Also changes title')
+      expect(await statusOf(gated.id)).toMatchObject({ humanReview: true })
+      await resolve(card.actionId, 'confirm')
+      expect(await statusOf(gated.id)).toMatchObject({ humanReview: false, title: 'Renamed' })
+      const [confirmed] = await t.db.select().from(auditLog).where(and(eq(auditLog.taskId, gated.id), eq(auditLog.action, 'pm.action_confirmed')))
+      expect(confirmed).toBeTruthy()
+    })
+
+    it('stays direct when it raises a gate or leaves it alone', async () => {
+      const open = await task({ humanReview: false })
+      expect(await call('update_task', { taskRef: open.ref, humanReview: true })).toMatchObject({ ok: true, result: { humanReview: true } })
+      expect(await statusOf(open.id)).toMatchObject({ humanReview: true })
+    })
+
+    it('takes a card to remove or clear a human check', async () => {
+      const checked = await t.createTask(slug, { acceptanceCriteria: [{ text: 'A person checks it', checkedByHuman: true }, 'Tests pass'] })
+      const [human, plain] = await t.db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, checked.id)).orderBy(acceptanceCriteria.position)
+      await lowered('update_task', { taskRef: checked.ref, acceptanceCriteria: [{ id: plain!.id, text: plain!.text }] }, 'remove the human check "A person checks it"')
+      await lowered('update_task', { taskRef: checked.ref, acceptanceCriteria: [{ id: human!.id, text: human!.text, checkedByHuman: false }] }, 'stop requiring a human for "A person checks it"')
+      expect(await call('update_task', { taskRef: checked.ref, acceptanceCriteria: [{ id: human!.id, text: human!.text }, { id: plain!.id, text: plain!.text, checkedByHuman: true }] })).toMatchObject({ ok: true, result: { ref: checked.ref } })
+    })
+
+    it('takes a card to resume a paused task', async () => {
+      const paused = await task({ paused: true })
+      const card = await lowered('update_task', { taskRef: paused.ref, paused: false }, 'resume the paused task')
+      expect(await statusOf(paused.id)).toMatchObject({ paused: true })
+      await resolve(card.actionId, 'confirm')
+      expect(await statusOf(paused.id)).toMatchObject({ paused: false })
+    })
+
+    it('takes a card for less review on an epic, not more', async () => {
+      const { id: projectId } = await (await t.request('GET', `/api/projects/${slug}`)).json() as { id: string }
+      const [epic] = await t.db.insert(schema.epics).values({ projectId, title: 'Gated', reviewMode: 'epic', createdBy: t.actor }).returning()
+      await lowered('update_epic', { epicId: epic!.id, reviewMode: 'direct' }, 'from epic to direct')
+      expect(await call('update_epic', { epicId: epic!.id, reviewMode: 'each_task' })).toMatchObject({ ok: true, result: { reviewMode: 'each_task' } })
+      await lowered('update_epic', { epicId: epic!.id, reviewMode: 'epic' }, 'from each_task to epic')
+    })
+
+    it('takes a card to lower a project\'s gates, and applies them on Confirm', async () => {
+      await t.request('PATCH', `/api/projects/${slug}`, { requiredChecks: ['ci', 'lint'], humanReviewDefault: true, reviewRoundCap: 3, failedRunCap: 3 })
+      await lowered('update_project', { project: slug, requiredChecks: ['ci'] }, 'stop requiring lint')
+      await lowered('update_project', { project: slug, humanReviewDefault: false }, 'turn off human review by default')
+      await lowered('update_project', { project: slug, failedRunCap: 9 }, 'raise the failed run cap from 3 to 9')
+      const card = await lowered('update_project', { project: slug, reviewRoundCap: 9 }, 'raise the review round cap from 3 to 9')
+      await resolve(card.actionId, 'confirm')
+      expect(await (await t.request('GET', `/api/projects/${slug}`)).json()).toMatchObject({ reviewRoundCap: 9, requiredChecks: ['ci', 'lint'] })
+      expect(await call('update_project', { project: slug, reviewRoundCap: 2, requiredChecks: ['ci', 'lint', 'test'] })).toMatchObject({ ok: true, result: { reviewRoundCap: 2 } })
+    })
+
+    it('fails a card whose gate was lowered meanwhile', async () => {
+      const gated = await task({ humanReview: true })
+      const card = await propose('update_task', { taskRef: gated.ref, humanReview: false })
+      await t.db.update(tasks).set({ humanReview: false }).where(eq(tasks.id, gated.id))
+      expect(await (await resolve(card.actionId, 'confirm')).json()).toMatchObject({ pendingAction: { status: 'failed' } })
+    })
+  })
+
+  it('shows the PM\'s direct edits in Activity, failed ones too', async () => {
+    const created = await call('create_task', { title: 'From the PM', type: 'task' }) as { ok: true, result: { id: string, ref: string } }
+    const edited = await call('update_task', { taskRef: created.result.ref, title: 'Retitled' })
+    expect(edited).toMatchObject({ ok: true })
+    expect(await call('update_task', { taskRef: 'NOPE-1', title: 'Lost' })).toMatchObject({ ok: false })
+    const audit = await t.db.select().from(auditLog).where(eq(auditLog.action, 'pm.tool_called'))
+    const details = audit.map(a => a.detail as { tool: string, ok: boolean })
+    expect(details.filter(d => d.tool === 'create_task' && d.ok)).not.toHaveLength(0)
+    expect(details.filter(d => d.tool === 'update_task' && d.ok)).not.toHaveLength(0)
+    expect(details.filter(d => d.tool === 'update_task' && !d.ok)).not.toHaveLength(0)
+    expect((await inbox()).activity).toContainEqual(expect.objectContaining({ taskRef: created.result.ref, sender: { name: 'PM', role: 'pm' } }))
+  })
+
+  it('refuses a plan for another project in a project conversation', async () => {
+    const other = await t.createProject()
+    const reply = await call('propose_plan', { project: other.slug, title: 'Elsewhere', summary: 'x', tasks: [{ key: 'a', title: 'A', description: 'd', type: 'task', acceptanceCriteria: ['c'] }] }) as { ok: false, error: string }
+    expect(reply).toMatchObject({ ok: false })
+    expect(reply.error).toContain(`Start a thread in ${other.slug}`)
+  })
+
   it('refuses to answer a task that is not Blocked', async () => {
     const failed = await task({ status: 'failed', statusReason: 'The run failed' })
     expect(await call('act_on_inbox', { taskRef: failed.ref, action: 'clarify', text: 'Try again' })).toMatchObject({ ok: false })
@@ -100,13 +224,14 @@ describe('PM tools for the Inbox, designs and agents', () => {
     await t.request('PATCH', `/api/projects/${other.slug}`, { paused: true })
     const elsewhere = await t.createTask(other.slug)
     await t.db.update(tasks).set({ status: 'blocked', statusReason: 'Which provider?' }).where(eq(tasks.id, elsewhere.id))
+    await t.db.insert(auditLog).values({ taskId: elsewhere.id, projectId: other.id, actor: { kind: 'system', component: 'server' }, action: 'task.transition', detail: { event: 'stuck', from: 'in_progress', to: 'blocked' } })
     expect(await call('act_on_inbox', { taskRef: elsewhere.ref, action: 'clarify', text: 'Yes' })).toMatchObject({ ok: true })
     const [entry] = await t.db.select().from(auditLog).where(and(eq(auditLog.taskId, elsewhere.id), eq(auditLog.action, 'pm.tool_called')))
     expect(entry!.projectId).toBe(other.id)
   })
 
   it('retries a stopped task only through a confirm card', async () => {
-    const stopped = await task({ status: 'agent_review', retryStop: { runId: null, target: null, human: '', status: 'agent_review', capped: false, sessionId: null } })
+    const stopped = await task({ status: 'agent_review', retryStop: { ...STOP, status: 'agent_review' } })
     const retried = await propose('act_on_inbox', { taskRef: stopped.ref, action: 'retry' })
     expect(retried.summary).toContain(`Retry ${stopped.ref}`)
     expect(await statusOf(stopped.id)).toMatchObject({ status: 'agent_review', retryStop: expect.anything() })

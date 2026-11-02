@@ -53,7 +53,7 @@ The PM can also call `attach_evidence` to attach a scratch file to the conversat
 | `get_status`, `set_update_hold`, `clear_update_hold` | Factory and runner state; setting a hold requires a confirm card. Clear is direct while PM turns can run; the human can always use Lift in the updating banner. |
 | `delete_project`, `stop_run`, `stop_all`, `resume_all` | Proposed on the same Confirm / Cancel card as `delete_task`. `stop_all` also ends PM turns, and no PM turn starts while Corral is stopped, so the human resumes it from the app unless a `resume_all` card was already waiting |
 | `list_inbox` | The Inbox's Needs you items across all projects, with type, task and what's being asked |
-| `act_on_inbox` | Act on a task item by ref. `clarify` acts directly: it pins the answer and moves a Blocked task In progress through the PM's own `answer` transition, which keeps the counters that a human `resolve` resets. Every other action is confirm-required |
+| `act_on_inbox` | Act on a task item by ref. `clarify` acts directly, on a developer's question only: it pins the answer and moves a Blocked task In progress through the PM's own `answer` transition, which keeps the counters that a human `resolve` resets. A block from a cap, repeated feedback or a human decision stays the human's. `retry` releases a Stopped item on a confirm card. Every other action is confirm-required |
 | `approve_design`, `request_design_changes` | Propose approving a design version, or sending it back with feedback, on a confirm card (D20, D30) |
 | `list_agents`, `update_agent`, `create_agent` | Read the agents, change their settings or add one, directly, under the same rules as the settings page |
 | `flag_stale_docs` | Create a documentation task (PRD §7.10) |

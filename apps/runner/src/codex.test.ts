@@ -20,6 +20,13 @@ describe('codexArgs', () => {
     expect(args).not.toContain('--model')
   })
 
+  it('skips the git check only with no repository, new and resumed', () => {
+    const base = { model: null, instructions: 'x', mcpServers: corral }
+    expect(codexArgs({ ...base, resumeSessionId: null })).not.toContain('--skip-git-repo-check')
+    expect(codexArgs({ ...base, resumeSessionId: null, noRepository: true })).toContain('--skip-git-repo-check')
+    expect(codexArgs({ ...base, resumeSessionId: 'thread-1', noRepository: true })).toContain('--skip-git-repo-check')
+  })
+
   it('passes the model when set', () => {
     const args = codexArgs({ model: 'gpt-5.5-codex', resumeSessionId: null, instructions: '', mcpServers: corral })
     expect(args.slice(args.indexOf('--model'), args.indexOf('--model') + 2)).toEqual(['--model', 'gpt-5.5-codex'])

@@ -180,6 +180,17 @@ it('keeps the description editor open when saving fails', async () => {
   wrapper.unmount()
 })
 
+it('keeps the epic page when only its activity can\'t load', async () => {
+  vi.spyOn(api.epics, 'activity').mockRejectedValue(new Error('Down'))
+  const wrapper = await mountEpic('page')
+  const view = wrapper.vm as unknown as { tab: string, error: string | null }
+  view.tab = 'activity'
+  await flushPromises()
+  expect(view.error).toBeNull()
+  expect(wrapper.text()).toContain('Couldn\'t load the activity.')
+  wrapper.unmount()
+})
+
 it.each(['flyout', 'mobile'] as const)('never squeezes the tasks in the %s\'s one scroll', async (mode) => {
   const wrapper = await mountEpic(mode)
   const tasks = wrapper.findAll('section').at(-1)!

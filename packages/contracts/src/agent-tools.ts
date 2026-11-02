@@ -148,7 +148,10 @@ const PM_PROJECT_TOOLS: readonly AgentTool[] = ['attach_evidence', 'add_comment'
 export function toolDefinition(role: AgentRole, tool: AgentTool): ToolDefinition {
   const definition = roleToolDefinitions[role][tool] ?? toolDefinitions[tool]
   if (role !== 'pm' || !PM_PROJECT_TOOLS.includes(tool)) return definition
-  return { ...definition, input: { ...definition.input, project: z.string().min(1).optional().describe('Project slug. Required in global sessions; defaults to the session project in project sessions. Name another project to act there.') } }
+  const project = tool === 'propose_plan'
+    ? 'Project slug. Required in global sessions. A project session plans only for its own project.'
+    : 'Project slug. Required in global sessions; defaults to the session project in project sessions. Name another project to act there.'
+  return { ...definition, input: { ...definition.input, project: z.string().min(1).optional().describe(project) } }
 }
 
 // Exactly what a role's agent sees: names, descriptions and input schemas, plus

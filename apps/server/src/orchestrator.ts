@@ -56,10 +56,10 @@ export class Orchestrator implements RunnerHandlers {
       db: deps.db,
       events: deps.events,
       prepare: (sessionId, tool, input) => this.#c.pmCalls.prepare(sessionId, tool, input),
-      execute: (_sessionId, tool, prepared, actor) => this.#c.pmCalls.execute(tool, prepared, actor),
+      execute: (sessionId, tool, prepared, actor) => this.#c.pmCalls.execute(sessionId, tool, prepared, actor),
       sessionChanged: async sessionId => this.plans?.actionSessionChanged(sessionId)
     })
-    this.pmTools = new PmTools({ db: deps.db, events: deps.events, runner: deps.runner, transcripts: deps.transcripts, orchestrator: this })
+    this.pmTools = new PmTools({ db: deps.db, events: deps.events, runner: deps.runner, transcripts: deps.transcripts, orchestrator: this, editEntity: (sessionId, tool, input, actor) => this.#c.pmCalls.editEntity(sessionId, tool, input, actor) })
     this.pmDecisions = new PmDecisions({
       db: deps.db,
       inboxAction: (taskId, input, actor) => this.inboxAction(taskId, input, actor),

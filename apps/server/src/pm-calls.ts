@@ -1,19 +1,34 @@
-import { humanTransitionInput, pmActionTools, requiresPmConfirmation } from '@corral/contracts'
-import { canChangeType, isActiveRun, taskRef, type Actor } from '@corral/core'
+import { humanTransitionInput, isPmGatedTool, pmActionTools, pmDirectTools, requiresPmConfirmation, type PmGatedTool } from '@corral/contracts'
+import { canChangeType, isActiveRun, taskRef, type Actor, type EpicReviewMode } from '@corral/core'
 import { schema } from '@corral/db'
 import { and, eq, isNull } from 'drizzle-orm'
 import { z } from 'zod'
 import { appendAudit, auditEvent } from './audit.ts'
+import { ApiFailure } from './errors.ts'
 import { publishInvalidatedEpics, type InvalidatedEpics } from './epic-review-state.ts'
 import { getEpic, patchEpic, setEpicDependencies } from './epics.ts'
 import type { Orchestrator } from './orchestrator.ts'
 import { humanApprovalSummary } from './pm-approval-summary.ts'
 import type { PreparedPmAction } from './pm-actions.ts'
 import type { PmDecisions } from './pm-decisions.ts'
-import { ToolError, type RunContext, type RunCore } from './run-context.ts'
+import { ToolError, type RunCore } from './run-context.ts'
+import { findProjectBySlug, patchProject } from './projects.ts'
 import { addComment, createTask, loadTask, lockTask, patchTask, transitionTask } from './tasks.ts'
 
-const { projects, tasks } = schema
+const { acceptanceCriteria, projects, tasks } = schema
+
+// Most human review first: each_task sends every task to the human, as well as the epic PR
+const REVIEW_MODE_RANK: Record<EpicReviewMode, number> = { each_task: 2, epic: 1, direct: 0 }
+const lowersMode = (from: EpicReviewMode, to: EpicReviewMode | undefined) => to !== undefined && REVIEW_MODE_RANK[to] < REVIEW_MODE_RANK[from]
+
+export type PmEditTool = 'create_task' | 'update_task' | 'update_epic'
+
+export interface PmEdit {
+  result: unknown
+  projectId: string
+  target?: { taskId: string, taskRef: string }
+  summary: string
+}
 
 // The PM's calls that change tasks, epics and the factory: what a confirm card
 // proposes and does once the human agrees, and the direct edits.
@@ -26,10 +41,20 @@ export class PmCalls {
     this.#o = orchestrator
   }
 
-  async execute(tool: string, prepared: PreparedPmAction, actor: Actor): Promise<unknown> {
+  async execute(sessionId: string, tool: string, prepared: PreparedPmAction, actor: Actor): Promise<unknown> {
     const { db, events } = this.#c.d
     const o = this.#o
     switch (tool) {
+      case 'update_task':
+      case 'update_epic':
+        return (await this.editEntity(sessionId, tool, prepared.input, actor)).summary
+      case 'update_project': {
+        const { project: slug, ...changes } = z.object(pmDirectTools.update_project.input).strict().parse(prepared.input)
+        const updated = await patchProject(db, await findProjectBySlug(db, slug), changes, actor)
+        events.publish({ type: 'project.updated', project: updated })
+        this.#c.scheduler.poke()
+        return `Changed ${updated.name}.`
+      }
       case 'delete_task':
         await o.deleteTask(prepared.targetId!, actor, prepared.input.reason as string | undefined ?? null)
         return `Deleted ${String(prepared.input.taskRef)}.`
@@ -67,10 +92,10 @@ export class PmCalls {
     return this.#c.pmDecisions.execute(tool as Parameters<PmDecisions['execute']>[0], prepared, actor)
   }
 
-  async editEntity(ctx: RunContext, tool: 'create_task' | 'update_task' | 'update_epic', input: unknown): Promise<unknown> {
+  async editEntity(sessionId: string, tool: PmEditTool, input: unknown, actor: Actor): Promise<PmEdit> {
     const { db, events } = this.#c.d
-    const actor = this.#c.runs.actor(ctx)
-    const project = await this.#c.plans!.toolProject(ctx.run.planSessionId!, input)
+    if (!this.#c.plans) throw new ToolError('Planning is unavailable')
+    const project = await this.#c.plans.toolProject(sessionId, input)
     const scopedInput = z.record(z.string(), z.unknown()).parse(input)
     delete scopedInput.project
     if (tool === 'update_epic') {
@@ -85,13 +110,13 @@ export class PmCalls {
       events.publish({ type: 'epic.updated', epic })
       for (const task of epic.tasks) events.publish({ type: 'task.updated', task })
       this.#c.scheduler.poke(epic.tasks.map(t => t.id))
-      return epic
+      return { result: epic, projectId: project.id, summary: `Updated epic ${epic.title}` }
     }
     if (tool === 'create_task') {
       const parsed = z.object(pmActionTools.create_task.input).strict().parse(scopedInput)
       const task = await loadTask(db, await createTask(db, project, parsed, actor))
       events.publish({ type: 'task.created', task })
-      return task
+      return { result: task, projectId: project.id, target: { taskId: task.id, taskRef: task.ref }, summary: `Created ${task.ref}: ${task.title}` }
     }
     const { taskRef: ref, paused, ...fields } = z.object(pmActionTools.update_task.input).strict().parse(scopedInput)
     const match = /^([A-Za-z]+)-(\d+)$/.exec(ref)
@@ -115,10 +140,78 @@ export class PmCalls {
     const task = await loadTask(db, row.id)
     events.publish({ type: 'task.updated', task })
     this.#c.scheduler.poke([row.id])
-    return task
+    return { result: task, projectId: project.id, target: { taskId: task.id, taskRef: task.ref }, summary: `Updated ${task.ref}: ${task.title}` }
+  }
+
+  // Whether this edit lowers a gate. Input the tool would refuse lowers
+  // nothing: the direct path reports it.
+  async lowersGate(sessionId: string, tool: string, input: unknown): Promise<boolean> {
+    if (!isPmGatedTool(tool)) return false
+    return await this.#gateChange(sessionId, tool, input).then(change => change !== null, (error: unknown) => {
+      if (error instanceof ToolError || error instanceof ApiFailure || error instanceof z.ZodError) return false
+      throw error
+    })
+  }
+
+  // D30: a tool never gets around a gate. What this edit lowers, in the words
+  // the card uses, or null when it only raises gates or leaves them alone.
+  async #gateChange(sessionId: string, tool: PmGatedTool, input: unknown): Promise<PreparedPmAction | null> {
+    const { db } = this.#c.d
+    const lowered: string[] = []
+    const others = (changes: Record<string, unknown>, gates: readonly string[]) => Object.entries(changes).filter(([key, value]) => value !== undefined && !gates.includes(key)).map(([key]) => key)
+    const card = (subject: string, also: string[], target: { id: string, taskId: string | null, projectId: string }): PreparedPmAction | null => lowered.length === 0
+      ? null
+      : { input: input as Record<string, unknown>, summary: `Lower the gates on ${subject}: ${lowered.join('; ')}${also.length ? `. Also changes ${also.join(', ')}` : ''}`, targetId: target.id, taskId: target.taskId, projectId: target.projectId }
+
+    if (tool === 'update_project') {
+      const { project: slug, ...changes } = z.object(pmDirectTools.update_project.input).strict().parse(input)
+      const [project] = await db.select().from(projects).where(eq(projects.slug, slug))
+      if (!project) return null
+      const removed = changes.requiredChecks ? project.requiredChecks.filter(check => !changes.requiredChecks!.includes(check)) : []
+      if (removed.length) lowered.push(`stop requiring ${removed.join(', ')}`)
+      if (changes.humanReviewDefault === false && project.humanReviewDefault) lowered.push('turn off human review by default')
+      if (lowersMode(project.epicReviewModeDefault, changes.epicReviewModeDefault)) lowered.push(`change the default epic review mode from ${project.epicReviewModeDefault} to ${changes.epicReviewModeDefault}`)
+      if (changes.reviewRoundCap !== undefined && changes.reviewRoundCap > project.reviewRoundCap) lowered.push(`raise the review round cap from ${project.reviewRoundCap} to ${changes.reviewRoundCap}`)
+      if (changes.failedRunCap !== undefined && changes.failedRunCap > project.failedRunCap) lowered.push(`raise the failed run cap from ${project.failedRunCap} to ${changes.failedRunCap}`)
+      return card(project.name, others(changes, ['requiredChecks', 'humanReviewDefault', 'epicReviewModeDefault', 'reviewRoundCap', 'failedRunCap']), { id: project.id, taskId: null, projectId: project.id })
+    }
+
+    if (!this.#c.plans) return null
+    const project = await this.#c.plans.toolProject(sessionId, input)
+    const scoped = z.record(z.string(), z.unknown()).parse(input)
+    delete scoped.project
+    if (tool === 'update_epic') {
+      const { epicId, ...changes } = z.object(pmActionTools.update_epic.input).strict().parse(scoped)
+      const epic = await getEpic(db, epicId)
+      if (epic.projectId !== project.id) return null
+      if (!epic.reviewModeLocked && lowersMode(epic.reviewMode, changes.reviewMode)) lowered.push(`change its review mode from ${epic.reviewMode} to ${changes.reviewMode}`)
+      return card(`epic ${epic.title}`, others(changes, ['reviewMode']), { id: epic.id, taskId: null, projectId: project.id })
+    }
+
+    const { taskRef: ref, paused, ...changes } = z.object(pmActionTools.update_task.input).strict().parse(scoped)
+    const match = /^([A-Za-z]+)-(\d+)$/.exec(ref)
+    if (!match || match[1]!.toUpperCase() !== project.prefix.toUpperCase()) return null
+    const [task] = await db.select().from(tasks).where(and(eq(tasks.projectId, project.id), eq(tasks.number, Number(match[2])), isNull(tasks.deletedAt)))
+    if (!task) return null
+    if (paused === false && task.paused) lowered.push('resume the paused task')
+    if (changes.humanReview === false && task.humanReview && (changes.type ?? task.type) !== 'design') lowered.push('turn off human review')
+    if (changes.acceptanceCriteria) {
+      const held = await db.select().from(acceptanceCriteria).where(and(eq(acceptanceCriteria.taskId, task.id), eq(acceptanceCriteria.checkedByHuman, true)))
+      for (const criterion of held) {
+        const next = changes.acceptanceCriteria.find(c => c.id === criterion.id)
+        if (!next) lowered.push(`remove the human check "${criterion.text}"`)
+        else if (next.checkedByHuman === false) lowered.push(`stop requiring a human for "${criterion.text}"`)
+      }
+    }
+    return card(`${taskRef(project.prefix, task.number)}: ${task.title}`, others(changes, ['humanReview']), { id: task.id, taskId: task.id, projectId: project.id })
   }
 
   async prepare(sessionId: string, tool: string, input: unknown): Promise<PreparedPmAction> {
+    if (isPmGatedTool(tool)) {
+      const change = await this.#gateChange(sessionId, tool, input)
+      if (!change) throw new ToolError('The target of this action has changed')
+      return change
+    }
     if (!requiresPmConfirmation(tool, input)) throw new ToolError(`Unknown confirm-required tool ${tool}`)
     if (tool === 'act_on_inbox' || tool === 'approve_design' || tool === 'request_design_changes') return this.#c.pmDecisions.prepare(tool, input)
     if (!this.#c.plans) throw new ToolError('Planning is unavailable')

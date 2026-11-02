@@ -949,7 +949,8 @@ Every agent action is attributed to the agent and session that made it, and show
 - **Setting an update hold**, which queues PM turns after work drains.
 - **Approving** tasks or designs.
 - **Moving a task** through a human board transition.
-- **Inbox decisions**, such as resolving a Needs-you item.
+- **Inbox decisions**, such as resolving a Needs-you item or retrying a Stopped one (`act_on_inbox` `retry`, `resolve`, `send_back`, `delete`).
+- **Lowering a gate:** turning off a task's human review, removing or clearing a human check, resuming a paused task, a review mode with less human review on an epic or a project's default, removing a required check, turning off a project's human review default, or raising its review round or failed run cap. These tools stay direct otherwise, and raising a gate stays direct. The card names exactly what's lowered and what else the call changes.
 
 This isn't a role restriction. The PM can propose any of these at any time, whether or not the human asked. The click is the human's own action, so it goes through the same endpoint and rules as the button elsewhere in the app, and is refused the same way if the state has moved on.
 
@@ -973,7 +974,7 @@ Sessions can be **global** as well as tied to a project. A global session has **
 - **D10:** the PM can create tasks in Backlog of any kind, not only documentation tasks. The **Human only** transitions stay human: the PM can propose them on a confirm card, and the transition runs on the human's click with the human as its actor.
 - **D10 (COR-240, reconciled with main):** Merged work stays immutable through both PM and human edits (`409 task_merged`). Epic membership is fixed for PM edits once a task has a PR (`409 task_epic_locked`), preserving D27’s review-mode lock. The task UI stays read-only after merge; follow-up work remains a new task.
 - **D10 (COR-298):** a task can't enter or leave the `spike` or `design` type once it has left Draft or Backlog; `PATCH` and `update_task` return `409 task_type_locked`. Those types have their own end states, so a retyped task could otherwise skip them. Changing between `task` and `bug` stays open until the task is approved or awaiting merge, when its type is fixed (also `409 task_type_locked`).
-- **D10 (COR-246):** the one exception is the PM's `answer` transition, Blocked → In progress, for answering a question or adding information. It keeps the review-round and failed-run counters, so it can't lift a cap, and `resolve` stays **Human only**.
+- **D10 (COR-246):** the one exception is the PM's `answer` transition, Blocked → In progress, for answering a developer's own `stuck` question. It's refused on a block from a cap, repeated feedback or a human decision (D24), and on a Stopped item, so it can't lift a cap. It keeps the review-round and failed-run counters, and clears the triage stop the question raised. `resolve` stays **Human only**.
 - **D11:** "the PM stays in Plan" no longer holds. The PM can read and act on the Inbox, with decisions on a confirm card, and its actions appear in Activity. **Unchanged:** it raises no Needs-you items of its own.
 - **D13:** "Plan sessions belong to one project" and "every PM session has a `projectId`" no longer hold, because global sessions have none. A project session's project is still locked once it has messages.
 - **D16 (COR-241, COR-323):** set_update_hold now requires human confirmation because it can queue every PM turn. The updating banner offers Lift through DELETE /api/update-hold, including after finishing has latched. clear_update_hold remains direct but cannot execute from a queued turn.

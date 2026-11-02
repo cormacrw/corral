@@ -1,4 +1,4 @@
-import { requiresPmConfirmation, type PlanMessage } from '@corral/contracts'
+import { isPmGatedTool, requiresPmConfirmation, type PlanMessage } from '@corral/contracts'
 import type { Actor, PmAction } from '@corral/core'
 import { schema, type Database } from '@corral/db'
 import { and, eq, sql } from 'drizzle-orm'
@@ -52,7 +52,7 @@ export class PmActions {
   }
 
   async propose(sessionId: string, runId: string, tool: string, input: unknown, actor: Actor) {
-    if (!requiresPmConfirmation(tool, input)) throw new Error(`Not a confirm-required tool: ${tool}`)
+    if (!requiresPmConfirmation(tool, input) && !isPmGatedTool(tool)) throw new Error(`Not a confirm-required tool: ${tool}`)
     const prepared = await this.#d.prepare(sessionId, tool, input)
     const action: PmAction = { tool, input: prepared.input, summary: oneLine(prepared.summary), status: 'pending', targetId: prepared.targetId, error: null, result: null }
     const message = await this.#d.db.transaction(async (tx) => {
@@ -96,7 +96,7 @@ export class PmActions {
     } else {
       try {
         if (session.closedAt) throw new Error('This conversation is closed')
-        if (!requiresPmConfirmation(action.tool, action.input)) throw new Error('This tool is no longer available for confirmation')
+        if (!requiresPmConfirmation(action.tool, action.input) && !isPmGatedTool(action.tool)) throw new Error('This tool is no longer available for confirmation')
         const prepared = await this.#d.prepare(sessionId, action.tool, action.input)
         actionProjectId = prepared.projectId
         // The summary is what the human agreed to, so it also catches a task

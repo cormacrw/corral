@@ -30,7 +30,7 @@ export const pmActionTools = {
   },
   update_task: {
     confirmRequired: false,
-    description: 'Edit task metadata before it is Merged. Epic membership is fixed once a PR opens or the task merges. Type is fixed once a task is approved or awaiting merge; a spike or design type is fixed once the task leaves Draft or Backlog. Criteria and dependencies replace the lists; preserve criterion IDs. paused pauses unleased tasks or resumes work; use stop_run with human confirmation for a leased task.',
+    description: 'Edit task metadata before it is Merged. A change that lowers a gate takes a confirm card instead of acting: turning off humanReview, removing or clearing a human check, or setting paused to false on a paused task. Epic membership is fixed once a PR opens or the task merges. Type is fixed once a task is approved or awaiting merge; a spike or design type is fixed once the task leaves Draft or Backlog. Criteria and dependencies replace the lists; preserve criterion IDs. paused pauses unleased tasks or resumes work; use stop_run with human confirmation for a leased task.',
     input: { taskRef: z.string().trim().min(1), ...patchTaskInput.shape, paused: z.boolean().optional() }
   },
   move_task: {
@@ -45,7 +45,7 @@ export const pmActionTools = {
   },
   update_epic: {
     confirmRequired: false,
-    description: 'Edit an epic in the selected project; dependsOn replaces its epic dependencies. Review mode is locked once the epic or any task has opened a PR, or any task has merged (including deleted tasks).',
+    description: 'Edit an epic in the selected project; dependsOn replaces its epic dependencies. A change that lowers a gate takes a confirm card instead of acting: a review mode with less human review. Review mode is locked once the epic or any task has opened a PR, or any task has merged (including deleted tasks).',
     input: { epicId: z.uuid(), ...patchEpicInput.omit({ description: true }).shape, summary: z.string().optional(), dependsOn: z.array(z.uuid()).optional() }
   },
   delete_task: {
@@ -80,7 +80,7 @@ export const pmActionTools = {
   },
   act_on_inbox: {
     confirmRequired: (input: unknown) => (input as { action?: unknown } | null)?.action !== 'clarify',
-    description: 'Act on a task item from list_inbox, by its taskRef. `clarify` answers a Blocked task\'s question or adds information, and acts straight away: the text is pinned for the developer and the task goes back In progress. Every other action is a decision: it posts a confirm card and nothing happens until the human clicks Confirm. `retry` releases a Stopped item, which `resolve`, `send_back` and `delete` also apply to. `approve` and `request_changes` (with text) are for Human review; `resolve` (with `to`) moves a Blocked or Failed task, as Retry does with in_progress; `send_back` returns it to the Backlog; `delete` deletes it. For a design, use approve_design to approve. Plan threads and epic reviews are not task items: this tool doesn\'t act on them.',
+    description: 'Act on a task item from list_inbox, by its taskRef. `clarify` answers a developer\'s question on a Blocked task, and acts straight away: the text is pinned for the developer and the task goes back In progress. Every other action is a decision: it posts a confirm card and nothing happens until the human clicks Confirm. `retry` releases a Stopped item, which `resolve`, `send_back` and `delete` also apply to. `approve` and `request_changes` (with text) are for Human review; `resolve` (with `to`) moves a Blocked or Failed task, as Retry does with in_progress; `send_back` returns it to the Backlog; `delete` deletes it. For a design, use approve_design to approve. Plan threads and epic reviews are not task items: this tool doesn\'t act on them.',
     input: {
       taskRef: z.string().trim().min(1),
       action: z.enum(['clarify', 'send_back', 'resolve', 'retry', 'approve', 'request_changes', 'delete']),
@@ -140,7 +140,7 @@ export const pmDirectTools = {
   },
   update_project: {
     confirmRequired: false,
-    description: 'Change a project\'s settings: defaultBranch is its target branch, humanReviewDefault and epicReviewModeDefault its default review modes, reviewRoundCap and failedRunCap its round caps, and paused stops new work starting. Pass only what changes.',
+    description: 'Change a project\'s settings. A change that lowers a gate takes a confirm card instead of acting: removing a required check, turning off humanReviewDefault, a default review mode with less human review, or raising reviewRoundCap or failedRunCap. defaultBranch is its target branch, humanReviewDefault and epicReviewModeDefault its default review modes, reviewRoundCap and failedRunCap its round caps, and paused stops new work starting. Pass only what changes.',
     input: { project: projectSlug, ...patchProjectInput.shape }
   },
   create_project: {
@@ -217,12 +217,21 @@ export function requiresPmConfirmation(tool: string, input: unknown): tool is ke
   return typeof confirmRequired === 'function' ? confirmRequired(input) : confirmRequired
 }
 
+// Direct unless the call lowers a gate, which only the server can tell from the
+// current state. Then it takes a confirm card like the tools above (D30).
+export const PM_GATED_TOOLS = ['update_task', 'update_epic', 'update_project'] as const
+export type PmGatedTool = typeof PM_GATED_TOOLS[number]
+
+export function isPmGatedTool(tool: string): tool is PmGatedTool {
+  return (PM_GATED_TOOLS as readonly string[]).includes(tool)
+}
+
 export function isPmDirectTool(tool: string): tool is PmDirectTool {
   return Object.hasOwn(pmDirectTools, tool)
 }
 
 // The PM role's complete tool registry, shared by MCP registration and API coverage.
-// Legacy planning/read tools have their definitions in apps/runner/src/mcp.ts.
+// Legacy planning/read tools have their definitions in agent-tools.ts.
 export const PM_TOOL_NAMES = [
   'attach_evidence', 'add_comment', 'get_agent_activity', 'list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design',
   'ask_question', 'propose_plan', 'approve_plan', 'flag_stale_docs',

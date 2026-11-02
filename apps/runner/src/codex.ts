@@ -32,7 +32,7 @@ export interface McpServerConfig {
 // What prepare read: systemPrompt is by then the full instructions
 type CodexOptions = RuntimeOptions & { mcpServers: Record<string, McpServerConfig> }
 
-type ArgOptions = Pick<RuntimeOptions, 'model' | 'resumeSessionId'> & {
+type ArgOptions = Pick<RuntimeOptions, 'model' | 'resumeSessionId' | 'noRepository'> & {
   instructions: string
   mcpServers: Record<string, McpServerConfig>
 }
@@ -50,6 +50,8 @@ export function codexArgs(options: ArgOptions): string[] {
   const args = ['exec']
   if (options.resumeSessionId) args.push('resume')
   args.push('--json', '--dangerously-bypass-approvals-and-sandbox')
+  // A global PM session runs in a plain folder, and Codex refuses that otherwise
+  if (options.noRepository) args.push('--skip-git-repo-check')
   for (const [name, server] of Object.entries(options.mcpServers)) {
     const key = `mcp_servers.${tomlKey(name)}`
     if (server.url) args.push('-c', `${key}.url=${toml(server.url)}`)
@@ -93,6 +95,7 @@ export function spawnCodex(codexBin: string, options: CodexOptions): AgentProces
   const args = codexArgs({
     model: options.model,
     resumeSessionId: options.resumeSessionId,
+    noRepository: options.noRepository,
     instructions: options.systemPrompt,
     mcpServers: options.mcpServers
   })

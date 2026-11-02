@@ -7,9 +7,11 @@ import { appendAudit, auditEvent } from './audit.ts'
 import { waitingDecision } from './epic-rebase-approval.ts'
 import { ApiFailure, failureReason, fromDatabaseError } from './errors.ts'
 import type { EventBus } from './events.ts'
-import { loadInbox } from './inbox.ts'
+import { loadInbox, withRunnerItems } from './inbox.ts'
 import type { Orchestrator } from './orchestrator.ts'
+import type { PmEdit, PmEditTool } from './pm-calls.ts'
 import { createProject, findProjectBySlug, listProjects, patchProject, toProject } from './projects.ts'
+import { idleStop, stuckQuestion } from './retry-recovery.ts'
 import type { RunnerHub } from './runner-hub.ts'
 import { createAgent, findRun, getRun, listAgents, listRuns, patchAgent } from './runs.ts'
 import { checkRepository, requireRuntimeCli } from './setup.ts'
@@ -28,7 +30,7 @@ const TOOL_OUTPUT_MAX = 500
 const ERROR_SUMMARY_MAX = 300
 
 // act_on_inbox is direct only for clarify; its other actions take a confirm card
-type PmToolName = PmDirectTool | 'act_on_inbox'
+type PmToolName = PmDirectTool | 'act_on_inbox' | PmEditTool
 
 // What each tool was trying to do, for the Activity line of a call that failed
 const TOOL_GOALS: Record<PmToolName, string> = {
@@ -50,7 +52,10 @@ const TOOL_GOALS: Record<PmToolName, string> = {
   list_agents: 'list agents',
   update_agent: 'change an agent',
   create_agent: 'create an agent',
-  act_on_inbox: 'answer an Inbox item'
+  act_on_inbox: 'answer an Inbox item',
+  create_task: 'create a task',
+  update_task: 'change a task',
+  update_epic: 'change an epic'
 }
 
 interface Deps {
@@ -59,6 +64,7 @@ interface Deps {
   runner: RunnerHub
   transcripts: Transcripts
   orchestrator: Pick<Orchestrator, 'status' | 'holdForUpdate' | 'releaseUpdate' | 'messageRun' | 'poke' | 'taskChanged' | 'plans'>
+  editEntity(sessionId: string, tool: PmEditTool, input: unknown, actor: Actor): Promise<PmEdit>
 }
 
 export interface PmToolContext {
@@ -277,7 +283,7 @@ export class PmTools {
 
       case 'list_inbox': {
         strict(pmDirectTools.list_inbox.input)
-        const items = (await loadInbox(db)).needsYou
+        const items = withRunnerItems(await loadInbox(db), runner.status().runners).needsYou
         return { result: items.map(toolItem), summary: `Read the Inbox: ${items.length} ${items.length === 1 ? 'item' : 'items'}` }
       }
 
@@ -309,6 +315,13 @@ export class PmTools {
 
       case 'act_on_inbox':
         return this.#answer(input, actor)
+
+      case 'create_task':
+      case 'update_task':
+      case 'update_epic': {
+        const edited = await this.#d.editEntity(context.sessionId, tool, input, actor)
+        return { result: edited.result, projectId: edited.projectId, ...(edited.target && { target: edited.target }), summary: edited.summary }
+      }
     }
   }
 
@@ -322,8 +335,13 @@ export class PmTools {
     const { comment, project, number } = await db.transaction(async (tx) => {
       const { task, project } = await lockTask(tx, taskId)
       if (await waitingDecision(tx, task.id)) throw new Error('Epic rebase decisions must be answered by the human in the Inbox')
+      const label = taskRef(project.prefix, task.number)
+      if (idleStop(task)) throw new Error(`${label} stopped repeating and isn't asking a question. Propose retry or resolve; those need the human.`)
+      if (task.status === 'blocked' && !await stuckQuestion(tx, task.id)) throw new Error(`${label} is blocked by a cap, repeated review feedback or a human decision, not a developer's question, so that's the human's: propose resolve on a confirm card.`)
       const added = await addComment(tx, task.id, { body: text, pinned: true }, actor)
       await applyTransition(tx, task, project, { type: 'answer' }, actor, { event: 'answer' })
+      // Answered, so the triage stop this question raised is over
+      await tx.update(tasks).set({ retryStop: null }).where(eq(tasks.id, task.id))
       return { comment: added, project, number: task.number }
     })
     events.publish({ type: 'comment.created', comment })

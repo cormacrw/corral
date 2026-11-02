@@ -111,9 +111,9 @@ function inboxSummary(input: Exclude<PmInboxAction, { action: 'clarify' }>, ref:
   switch (input.action) {
     case 'approve': return `Approve and merge ${ref}: ${task.title}${task.prNumber ? ` (PR #${task.prNumber} at ${task.headSha ?? 'its head'})` : ''}${input.text ? `. Note: ${input.text}` : ''}`
     case 'request_changes': return `Request changes on ${ref} (${task.title}): ${input.text}`
-    case 'resolve': return `Move ${ref} to ${input.to.replace('_', ' ')}: ${task.title}${input.text ? `. Note: ${input.text}` : ''}`
+    case 'resolve': return `${idleStop(task) && input.to !== 'backlog' ? `Release the stop on ${ref}, which carries on in ${task.status.replace('_', ' ')}` : `Move ${ref} to ${input.to.replace('_', ' ')}`}: ${task.title}${input.text ? `. Note: ${input.text}` : ''}`
     case 'send_back': return `Send ${ref} back to the Backlog: ${task.title}`
-    case 'retry': return `Retry ${ref}: ${task.title}`
+    case 'retry': return `Retry ${ref}: ${task.title}${input.text ? `. Note: ${input.text}` : ''}`
     case 'delete': return `Delete ${ref}: ${task.title}${input.text ? `. Reason: ${input.text}` : ''}`
   }
 }

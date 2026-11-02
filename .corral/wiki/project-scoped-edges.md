@@ -20,7 +20,7 @@ nothing, so the server won't start until a human has fixed those rows.
 Runs use the same paired-key pattern: `runs(project_id, task_id)` references
 tasks, keeping its cascade-on-delete behavior. PM runs in a global session have
 a null project (D30). Plans can't use a pair, because a global session has a
-null project and can plan for any project. Migration 0055 replaces the pair with
+null project and can plan for any project. Migration 0060 replaces the pair with
 a plain cascading `session_id` key and two triggers that report violations as
 `plans_session_same_project_fk`, so a project's session still holds only that
 project's plans, including when the session's project changes. PM runs may still have a
