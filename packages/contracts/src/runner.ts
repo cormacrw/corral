@@ -37,6 +37,12 @@ export type SetupJobResult = z.infer<typeof setupJobResultSchema>
 
 // Everything a runner needs to start a run. No machine paths and no auth
 // method (PRD §8.5, agent-runtime-and-auth.md rule 2).
+// What a developer run should check locally: `targeted` when required CI covers
+// the full gates, `none` for an epic rebase, and absent for the full check. The
+// runner hands it to the agent's process as CORRAL_CHECK_SCOPE.
+export const CHECK_SCOPES = ['targeted', 'none'] as const
+export type CheckScope = (typeof CHECK_SCOPES)[number]
+
 const runJobCommon = {
   runId: z.string(), runNumber: z.number(), leaseEpoch: z.number(),
   runtime: z.string(), projectId: z.string(), repository: z.string(),
@@ -53,7 +59,8 @@ const taskJobContext = {
   headSha: z.string().nullable(), planSessionId: z.null(),
   // Developer runs after a stopped one: the WIP commit it pushed, which the
   // worktree must contain. Absent from older servers.
-  continueFrom: z.string().nullish()
+  continueFrom: z.string().nullish(),
+  checkScope: z.enum(CHECK_SCOPES).nullish()
 }
 export const pmRunJobSchema = z.object({
   ...runJobCommon, projectId: z.string().nullable(), role: z.literal('pm'), planSessionId: z.string().min(1),
@@ -78,7 +85,8 @@ export const epicDeveloperRunJobSchema = z.object({
   ...runJobCommon, role: z.literal('developer'), taskId: z.null(), taskRef: z.null(),
   epicId: z.string().min(1), branch: z.string().min(1), headSha: z.string().min(1),
   baseBranch: z.string().optional(), planSessionId: z.null(),
-  taskType: z.never().optional(), designPinned: z.never().optional(), continueFrom: z.string().nullish()
+  taskType: z.never().optional(), designPinned: z.never().optional(), continueFrom: z.string().nullish(),
+  checkScope: z.enum(CHECK_SCOPES).nullish()
 })
 export const runJobSchema = z.union([
   z.discriminatedUnion('role', [pmRunJobSchema, developerRunJobSchema, designerRunJobSchema, reviewerRunJobSchema]),

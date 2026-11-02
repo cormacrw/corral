@@ -26,7 +26,7 @@ fs.appendFileSync('calls', JSON.stringify({ args: process.argv.slice(2), cpus: p
 if (process.argv.includes(process.env.FAIL_STAGE)) process.exit(7);
 `, { mode: 0o755 })
   const run = (args: string[] = [], extra = {}) => exec(process.execPath, [resolve(import.meta.dirname, '../../../scripts/check.ts'), ...args], {
-    cwd, env: { ...process.env, PATH: `${cwd}/bin:${process.env.PATH}`, ...extra }
+    cwd, env: { ...process.env, CORRAL_CHECK_SCOPE: undefined, PATH: `${cwd}/bin:${process.env.PATH}`, ...extra }
   })
   const calls = async () => (await readFile(join(cwd, 'calls'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
   return { cwd, run, calls }
@@ -46,6 +46,26 @@ test('runs all workspace gates at the shared cap and includes root checks', asyn
     expect.objectContaining({ args: ['exec', 'eslint', 'scripts'] }),
     expect.objectContaining({ args: ['exec', 'tsc'] })
   ])
+})
+
+test('runs nothing on an epic rebase run and says CI covers it', async () => {
+  const { cwd, run } = await fixture()
+  const { stdout } = await run([], { CORRAL_CHECK_SCOPE: 'none' })
+  expect(stdout).toContain('Required CI covers it')
+  await expect(readFile(join(cwd, 'calls'), 'utf8')).rejects.toThrow('ENOENT')
+})
+
+test('leaves the test suites to CI on a targeted run', async () => {
+  const { run, calls } = await fixture()
+  const { stdout } = await run([], { CORRAL_CHECK_SCOPE: 'targeted' })
+  expect(stdout).toContain('required CI runs them')
+  expect((await calls()).map(c => c.args.slice(0, 5))).toEqual([['exec', 'turbo', 'run', 'lint', 'typecheck'], ['exec', 'eslint', 'scripts'], ['exec', 'tsc']])
+})
+
+test('a review check ignores the scope', async () => {
+  const { run, calls } = await fixture()
+  await run(['--review'], { CORRAL_CHECK_SCOPE: 'none' })
+  expect((await calls())[0]!.args).toContain('test')
 })
 
 test.each(['lint', 'typecheck', 'test', 'eslint', 'tsc'])('propagates %s failure without saving a clean result', async (stage) => {

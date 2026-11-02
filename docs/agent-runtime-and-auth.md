@@ -68,6 +68,10 @@ These apply to **both** adapters, and to any later one. They keep the POC simple
 8. **Same tools for every runtime.** Both CLIs get the same per-run MCP server, so the agent tools and their fencing don't depend on the vendor (architecture.md).
 9. **Sessions don't cross vendors.** An agent session ID is stored with the runtime that made it. Never pass one adapter's session ID to the other.
 
+## What a check script can read
+
+The runner strips every `CORRAL_*` setting from an agent's environment, with one exception: `CORRAL_CHECK_SCOPE`, which tells any project's check script what a developer run should check. `targeted` means required CI covers the full gates, so only fast, relevant checks are expected. `none` means an epic rebase run, where no checks are expected. Unset means the full check. It follows the project's required CI checks (see `.corral/wiki/bounded-checks.md`).
+
 ## What changes later (not now)
 
 When Corral is packaged for other users, revisit:

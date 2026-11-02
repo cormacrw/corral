@@ -17,7 +17,7 @@ import { pmWorktreePath } from './workspace.ts'
 const FAKE_CLAUDE = `#!/usr/bin/env node
 const { appendFileSync } = require('node:fs')
 const args = process.argv.slice(2)
-appendFileSync(process.env.FAKE_CLAUDE_LOG || __filename + '.log', JSON.stringify({ args, cwd: process.cwd() }) + '\\n')
+appendFileSync(process.env.FAKE_CLAUDE_LOG || __filename + '.log', JSON.stringify({ args, cwd: process.cwd(), checkScope: process.env.CORRAL_CHECK_SCOPE }) + '\\n')
 const resume = args[args.indexOf('--resume') + 1]
 if (args.includes('--resume') && resume !== 'fresh-session') {
   console.error('No conversation found with session ID: ' + resume)
@@ -66,6 +66,11 @@ describe('RunManager PM turns', () => {
   function notes(messages: RunnerMessage[]): string[] {
     return messages.flatMap(m => m.type === 'run.events' ? m.events : []).flatMap(e => e.type === 'system' ? [e.text] : [])
   }
+
+  it('tells a developer run what to check through its environment', async () => {
+    manager.assign(pmJob({ runId: 'r1', role: 'developer', planSessionId: null, taskId: 'task-1', taskRef: 'APP-1', branch: 'corral/app-1', ...{ checkScope: 'targeted' } }))
+    await expect.poll(async () => (await calls().catch(() => []))[0]).toMatchObject({ checkScope: 'targeted' })
+  })
 
   it.each(['pm', 'developer'] as const)('checks scratch paths and size for %s evidence', async (role) => {
     await writeFile(claudeBin, '#!/bin/sh\nsleep 600\n')

@@ -47,9 +47,9 @@ describe('developer role defaults', () => {
     expect(DEFAULT_ROLE_INSTRUCTIONS.developer).not.toContain('if they exist')
   })
 
-  it('uses the shared check command without custom throttling', () => {
-    expect(DEFAULT_ROLE_INSTRUCTIONS.developer).toContain('pnpm run check')
-    expect(DEFAULT_ROLE_INSTRUCTIONS.developer).toContain('Do not add concurrency, worker or timeout flags')
+  it('leaves checks to the task prompt and names no repository\'s tools', () => {
+    expect(DEFAULT_ROLE_INSTRUCTIONS.developer).toContain('Your task prompt says which checks to run')
+    for (const instructions of Object.values(DEFAULT_ROLE_INSTRUCTIONS)) expect(instructions).not.toMatch(/pnpm|Turbo|Postgres/)
   })
 
   it('leaves the git identity to the runner', () => {
@@ -108,8 +108,6 @@ describe('reviewer role defaults', () => {
     expect(reviewer).toContain('specific, actionable feedback')
     expect(reviewer).toContain('so don\'t rerun them')
     expect(reviewer).toContain('When it has none, the prompt tells you to run them yourself without the cache')
-    expect(reviewer).toContain('pnpm run check --review')
-    expect(reviewer).toContain('Do not add concurrency, worker or timeout flags')
     expect(reviewer).toContain('You may run a targeted test or the app')
     expect(reviewer).toContain('A cached result never counts as verification')
     expect(reviewer).toContain('Give every criterion a concrete note explaining why it is met or not')

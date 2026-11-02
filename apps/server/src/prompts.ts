@@ -1,3 +1,4 @@
+import type { CheckScope } from '@corral/contracts'
 import { attachmentIdsInMarkdown, HUMAN_DECISIONS_NOTE, richTextToMarkdown } from '@corral/core'
 import type { EpicFixKind, TargetFileChange } from '@corral/core'
 import type { CiFailure } from './ci-output.ts'
@@ -25,6 +26,8 @@ export interface PromptTask {
   // An epic PR's rebase on a project whose required CI verifies it after the
   // push, so the developer squashes, resolves and reports
   squashRebase?: boolean
+  // What to check locally; absent means the full check
+  checkScope?: CheckScope | null
   approvedHeadSha?: string | null
   reviewRounds: number
   reviewRoundCap: number
@@ -279,7 +282,7 @@ function gatesSection(task: Pick<ReviewTask, 'requiredChecks' | 'prFree'>): stri
       : 'They run on every push and the merge gate won\'t merge without them'
     return section('Gates', `This project has required CI checks: ${checks}. ${gate}, so don't rerun the project's lint, typecheck, tests or build. Spend your time on the diff and the criteria.`)
   }
-  return section('Gates', `This project has no required CI checks, so nothing else verifies its gates. Run the project's lint, typecheck, tests and build yourself before reporting, without the cache: when available, use \`pnpm run check --review\` (bypasses the Turbo cache) and \`TURBO_FORCE=1 pnpm run build\`. Do not add concurrency, worker or timeout flags; use the repository's shared CPU setting. If check reports a reused clean review check for this exact head, skip the full check rerun and cite the earlier check run and commit in your summary. Otherwise run the gates without the cache using the repository's commands. Request changes if one fails. If you cannot run a check without the cache, explain which check and why in your outcome.`)
+  return section('Gates', `This project has no required CI checks, so nothing else verifies its gates. Run the project's lint, typecheck, tests and build yourself before reporting, without the cache, using the project's own commands. If its check reports a reused clean review check for this exact head, skip the full rerun and cite the earlier check run and commit in your summary. Request changes if one fails. If you cannot run a check without the cache, explain which check and why in your outcome.`)
 }
 
 // CI's own words, for a round that has no `gh` (D8). Whatever a build printed
@@ -385,11 +388,7 @@ export const REFUSED = 'Corral refused your last candidate'
 // A developer run on an epic, with no task (D29)
 export function epicFixPrompt(input: EpicFixInput): string {
   const { fix, branch, target, ontoSha, files } = input
-  const gates = input.requiredChecks.length === 0
-    ? 'This project has no required CI, so run its lint, typecheck, tests and build before reporting. Do not add concurrency, worker or timeout flags.'
-    : fix === 'conflict'
-      ? EPIC_REBASE_NO_GATES
-      : 'Required CI runs on your new head, so run only the checks relevant to this fix, with the project\'s own commands, starting from any test that failed.'
+  const gates = checksInstruction(epicFixCheckScope(fix, input.requiredChecks), fix === 'ci')
   const job = fix === 'conflict'
     ? section('The conflict', `Corral could not rebase this epic onto \`${target}\` cleanly. Run \`git fetch origin && git rebase ${ontoSha}\`. Never merge \`${target}\` in. Resolve the conflicts in ${files.length ? files.join(', ') : 'the files git reports'}.
 
@@ -590,7 +589,7 @@ export function developerPrompt(task: PromptTask, agentName: string): string {
   ? `This is an epic task with no task PR. Stay on this branch: only Corral writes to the shared epic branch. Do not push and do not use \`gh\`. Corral pushes your branch and starts review of your commit when you report your outcome.`
   : 'Do not push and do not use `gh`. Corral pushes the branch and opens the PR when you report your outcome.'}
 - Use the supplied project brief and open relevant pages from its wiki file list when needed. Update the wiki in the same branch when behaviour changes.
-- Run \`pnpm run check\` when available for lint, typecheck and tests before reporting. Do not add concurrency, worker or timeout flags; use the repository's shared CPU setting.
+- ${checksInstruction(scopeOf(task), !!task.ciFailures)}
 - Prove each acceptance criterion with what a human would look at, attached through \`attach_evidence\`: screenshots or video for anything visible, real requests and responses for APIs. Use kind \`note\` only when there is nothing to show; say concretely what changed and how it was checked, with file and line references. Lint, typecheck, tests and build are gates; never attach their output as criterion evidence.
 - Use \`get_task\` to re-read the task, comments and evidence at any time, and \`add_comment\` to leave notes for the human or reviewer.
 - When the work is committed and evidenced, call \`report_outcome\` with outcome "${task.prFree ? 'commit_submitted' : revision ? 'pr_updated' : 'pr_opened'}" and a summary. If anything is missing, the call fails and tells you what to fix.
@@ -684,7 +683,8 @@ export function developerRevisionPrompt(task: PromptTask, feedback: PromptTask['
     ciFixSection(task),
     section('New comments', feedback.length > 0 ? feedback.map(format).join('\n') : '(none: re-read the task with `get_task`)'),
     section('What to do', `
-- Address every point of the feedback, and finish whatever the task still needs.${task.squashRebase ? `\n- ${EPIC_REBASE_NO_GATES}` : ''}
+- Address every point of the feedback, and finish whatever the task still needs.
+- ${checksInstruction(scopeOf(task), !!task.ciFailures)}
 - Re-read the task with \`get_task\` if anything may have changed, and attach evidence for every acceptance criterion again if the review round has moved on.
 - Then call \`report_outcome\` with outcome "${outcome}" and a summary${task.spike ? ' of your findings' : ' of the change as a whole'}.`)
   ].join('\n')
@@ -747,7 +747,7 @@ function rebaseDeveloperPrompt(task: PromptTask, agentName: string): string {
     section('How to work', `
 - Fetch origin and rebase branch \`${task.branch}\` onto \`origin/${task.defaultBranch}\`.
 - Resolve conflicts keeping the base branch's (main's) changes and the approved branch's intent. Make no other changes; do not undo newly merged work.
-- Run \`pnpm run check\` when available for lint, typecheck and tests, then the project's build. Do not add concurrency, worker or timeout flags; use the repository's shared CPU setting.
+- ${checksInstruction(scopeOf(task))}${scopeOf(task) ? '' : ' Then run the project\'s build.'}
 - Check that \`git merge-tree --write-tree HEAD origin/${task.defaultBranch}\` is clean.
 - Do not push or use gh. Corral pushes with --force-with-lease.
 ${WORK_NOTE}
@@ -762,7 +762,32 @@ ${WORK_NOTE}
 
 // Said in the epic rebase task's text and in its prompt. The runner adds role
 // instructions that say to run the gates, so this has to overrule them.
-export const EPIC_REBASE_NO_GATES = 'Required CI runs on the epic PR and enforces the gates before merge, so run no lint, typecheck, tests, build, `pnpm run check` or Postgres suites, whatever your general instructions say. Report straight away, and don\'t fetch or rebase again once the conflicts are resolved, even if the target moved: Corral\'s epic merge pass handles a moved target, and anything CI finds comes back as an epic CI failure.'
+export const EPIC_REBASE_NO_GATES = 'Required CI runs on the epic PR and enforces the gates before merge, so run no lint, typecheck, tests, build or check scripts, whatever your general instructions say. Report straight away, and don\'t fetch or rebase again once the conflicts are resolved, even if the target moved: Corral\'s epic merge pass handles a moved target, and anything CI finds comes back as an epic CI failure.'
+
+// The project's required CI decides how much a developer checks locally: it
+// covers the full gates when there is any, and nothing else does when there's none
+export function developerCheckScope(requiredChecks: string[], epicRebase: boolean): CheckScope | null {
+  if (requiredChecks.length === 0) return null
+  return epicRebase ? 'none' : 'targeted'
+}
+
+export function epicFixCheckScope(fix: EpicFixInput['fix'], requiredChecks: string[]): CheckScope | null {
+  return developerCheckScope(requiredChecks, fix === 'conflict')
+}
+
+// An epic PR's squash and rebase always leaves the gates to CI
+const scopeOf = (task: PromptTask) => task.squashRebase ? 'none' : task.checkScope
+
+// `failing`: a CI failure brought this run, so it starts from what failed
+function checksInstruction(scope: CheckScope | null | undefined, failing = false): string {
+  if (scope === 'none') return EPIC_REBASE_NO_GATES
+  if (scope === 'targeted') {
+    const start = failing ? 'starting from any test or gate that failed' : 'with the project\'s own commands'
+    return `Required CI runs on every push and enforces the full gates, so run only the fast checks and tests relevant to this change, ${start}. Don't run the full suite.`
+  }
+  return 'This project has no required CI, so nothing else verifies this work. Run its lint, type checks and tests before reporting, with the project\'s own commands.'
+}
+
 export const EPIC_SQUASH_KEEPS_TRAILERS = 'Keep every `Corral-Submission:` trailer in the squashed commit\'s message: Corral finds them on the epic branch to integrate each submission exactly once.'
 export const EPIC_SQUASH_KEEPS_MIGRATIONS = 'This squash doesn\'t conflict with the rule against squashing migrations: it squashes commits, not migration files. Migration files stay exactly as they are, with new ones renumbered only as a rebase already requires.'
 

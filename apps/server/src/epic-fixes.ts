@@ -8,7 +8,7 @@ import { ACTIVE_OPERATION as ACTIVE, answerOn, openDecision } from './epic-rebas
 import { recordSyncFailure } from './epic-sync.ts'
 import { ApiFailure } from './errors.ts'
 import { loadEpic } from './epics.ts'
-import { epicFixPrompt } from './prompts.ts'
+import { epicFixCheckScope, epicFixPrompt } from './prompts.ts'
 import { RUN_TIMEOUT_SECONDS, runEndValues } from './run-lifecycle.ts'
 import { noteProblem } from './run-outcomes.ts'
 import { ToolError, server, type RunContext, type RunCore, type RunRow } from './run-context.ts'
@@ -126,6 +126,7 @@ export class EpicFixes {
       runId: run.id, runNumber: run.number, leaseEpoch: run.leaseEpoch!, role: 'developer', runtime: agent.runtime,
       projectId: project.id, repository: project.repository, defaultBranch: project.defaultBranch, baseBranch: project.defaultBranch,
       taskId: null, taskRef: null, epicId: epic.id, branch, headSha: operation.expectedTargetSha, continueFrom,
+      checkScope: epicFixCheckScope(operation.fix!, project.requiredChecks),
       planSessionId: null, agentSessionId: null, fallbackPrompt: null, model: null, timeoutSeconds: RUN_TIMEOUT_SECONDS,
       prompt: epicFixPrompt({
         agentName: agent.name, epicTitle: epic.title, goal: epic.description, fix: operation.fix!, brief: operation.fixBrief ?? '', branch, epicBranch: epic.branch!,

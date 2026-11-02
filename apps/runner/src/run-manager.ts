@@ -537,6 +537,7 @@ export class RunManager {
       resumeSessionId: options.resume,
       quietResume: run.job.role === 'pm',
       gitAuthor: this.#config.gitAuthor,
+      checkScope: run.job.role === 'developer' ? run.job.checkScope : null,
       onLine: (raw, parsed) => this.#onLine(run, raw, parsed)
     }
     const prepared = await run.runtime!.prepare?.(runtimeOptions) ?? runtimeOptions
@@ -561,6 +562,7 @@ export class RunManager {
       model: run.job.model,
       resumeSessionId: options.resume,
       gitAuthor: this.#config.gitAuthor,
+      checkScope: run.job.role === 'developer' ? run.job.checkScope : null,
       onLine: (raw, parsed) => this.#onLine(run, raw, parsed)
     })
     run.process = session
