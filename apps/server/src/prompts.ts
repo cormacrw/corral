@@ -54,11 +54,19 @@ function section(title: string, body: string): string {
   return `## ${title}\n\n${body.trim()}\n`
 }
 
+function humanInstructionsSection(task: PromptTask): string {
+  const instructions = task.comments.filter(c => c.pinned && c.author === 'Human')
+  return instructions.length > 0
+    ? section('Human instructions', `Follow these instructions from the human, including any guidance sent with Retry, as you continue the task. Address each point before reporting your outcome.\n\n${instructions.map(c => `- ${c.createdAt.toISOString()}: ${c.body}`).join('\n')}`)
+    : ''
+}
+
 function commentsSection(task: PromptTask): string {
-  const pinned = task.comments.filter(c => c.pinned)
+  const pinned = task.comments.filter(c => c.pinned && c.author !== 'Human')
   const recent = task.comments.filter(c => !c.pinned).slice(-10)
   const format = (c: PromptTask['comments'][number]) => `- ${c.author} (${c.createdAt.toISOString()}): ${c.body}`
   return [
+    humanInstructionsSection(task),
     pinned.length > 0 ? section('Pinned comments (read these first)', pinned.map(format).join('\n')) : '',
     recent.length > 0 ? section('Recent comments and feedback', recent.map(format).join('\n')) : ''
   ].join('\n')
@@ -489,6 +497,7 @@ export function developerRevisionPrompt(task: PromptTask, feedback: PromptTask['
       : `${task.ref} is back with you. This is the same session${task.branch ? ` and the same branch, \`${task.branch}\`` : ''}: continue from your earlier work.`,
     '',
     stoppedRunSection(task),
+    humanInstructionsSection(task),
     section('New comments', feedback.length > 0 ? feedback.map(format).join('\n') : '(none: re-read the task with `get_task`)'),
     section('What to do', `
 - Address every point of the feedback, and finish whatever the task still needs.${task.squashRebase ? `\n- ${EPIC_REBASE_NO_GATES}` : ''}
@@ -506,6 +515,7 @@ export function designerRevisionPrompt(task: PromptTask, feedback: PromptTask['c
     `Changes were requested on design v${version} of ${task.ref}. This is the same session and the same branch, \`${task.branch}\`: continue from your earlier work.`,
     '',
     stoppedRunSection(task),
+    humanInstructionsSection(task),
     section('Feedback', feedback.length > 0 ? feedback.map(format).join('\n') : '(no written feedback: re-read the task with get_task)'),
     section('What to do', `
 - Address every point of the feedback in the prototype and in \`design.md\`.

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useId } from 'vue'
 import type { InboxPanelContext } from '~/composables/useInboxPanel'
 
 // The panel's reply box. With no action chosen it replies to the sender; an
@@ -8,6 +9,8 @@ const props = defineProps<{
   // Sends in place of ctx.submit, for a host that follows what's sent
   onSubmit?: (text: string) => Promise<boolean>
 }>()
+const noteId = useId()
+const retryNote = computed(() => props.ctx.item.type === 'failed' && props.ctx.action === 'resolve')
 const composer = ref<{ focus: () => void, send: () => Promise<boolean>, uploading: boolean, hasImages: boolean } | null>(null)
 const chosen = computed(() => props.ctx.composerChosen ? props.ctx.actions.find(a => a.value === props.ctx.action) ?? null : null)
 // Choosing an action focuses it; an item that opens with one chosen doesn't
@@ -65,10 +68,24 @@ defineExpose({ send, hasImages: computed(() => composer.value?.hasImages ?? fals
       variant="subtle"
       :title="ctx.actionError"
     />
+    <label
+      v-if="retryNote"
+      :for="noteId"
+      class="text-sm font-medium text-highlighted"
+    >
+      Note to send with Retry (optional)
+    </label>
+    <p
+      v-if="retryNote"
+      class="text-xs text-muted"
+    >
+      Your note will guide the agent’s next run. Leave it empty to retry as is.
+    </p>
     <PromptComposer
       ref="composer"
       :model-value="ctx.text"
-      :placeholder="ctx.placeholder"
+      :input-id="retryNote ? noteId : undefined"
+      :placeholder="retryNote ? 'What should the agent do differently?' : ctx.placeholder"
       :submit-label="ctx.submitLabel"
       :submit-color="ctx.action === 'delete' ? 'error' : 'primary'"
       :allow-empty="ctx.action !== null && !ctx.needsText"

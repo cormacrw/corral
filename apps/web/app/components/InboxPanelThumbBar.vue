@@ -10,7 +10,7 @@ const tray = ref<{ focus: () => void, send: () => Promise<boolean>, hasImages: b
 defineExpose({ send: () => tray.value?.send() ?? Promise.resolve(false) })
 
 const replying = ref(false)
-const composing = computed(() => replying.value || props.ctx.composerChosen || !!props.ctx.text.trim() || !!tray.value?.hasImages)
+const composing = computed(() => props.ctx.item.type === 'failed' || replying.value || props.ctx.composerChosen || !!props.ctx.text.trim() || !!tray.value?.hasImages)
 const SHORT: Record<string, string> = { send_back: 'Send back', delete: 'Delete' }
 const label = (a: { value: string, label: string }) => a.value === 'approve' && props.approveLabel && !props.ctx.taskLoading && !props.ctx.taskLoadFailed ? props.approveLabel : SHORT[a.value] ?? a.label
 function tap(value: string) {

@@ -9,6 +9,8 @@ import { loadEpic } from './epics.ts'
 import { loadInbox, unclaimedTaskItems } from './inbox.ts'
 import { createAgent } from './runs.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
+import { developerPrompt, developerRevisionPrompt, designerPrompt, designerRevisionPrompt, type PromptTask } from './prompts.ts'
+import { actorLabel } from './run-jobs.ts'
 import { deleteTaskRows, loadTask, loadTasks } from './tasks.ts'
 
 const { agents, auditLog, comments, epics, inboxMessages, planMessages, planSessions, reviews, runs, tasks } = schema
@@ -64,6 +66,33 @@ describe.each(['pglite', 'postgres'] as const)('the data layer on %s', (driver) 
     expect(await pinned()).toEqual([])
     expect(await pinned('   ')).toEqual([])
     expect(await pinned('Use Postgres')).toEqual([['Use Postgres', true]])
+  })
+
+  it.each(['backlog', 'ready', 'in_progress'] as const)('retries a failed task into %s with optional human instructions', async (to) => {
+    for (const text of [undefined, '   ', 'Use the existing API; do not add a new service.']) {
+      const task = await t.createTask(project.slug)
+      await setStatus(task.id, 'failed', 'in_progress')
+      const response = await t.request('POST', `/api/inbox/${task.id}/actions`, { action: 'resolve', to, ...(text !== undefined && { text }) })
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({ task: { status: to } })
+      const notes = await t.db.select().from(comments).where(eq(comments.taskId, task.id))
+      if (!text?.trim()) {
+        expect(notes).toEqual([])
+        continue
+      }
+      expect(notes).toMatchObject([{ author: t.actor, body: text, pinned: true }])
+      const promptTask: PromptTask = {
+        ref: task.ref, title: task.title, description: task.description, branch: null, defaultBranch: 'main',
+        reviewRounds: 0, reviewRoundCap: 5, criteria: [], attachments: [],
+        comments: notes.map(c => ({ ...c, author: actorLabel(c.author) }))
+      }
+      // Resume prompts must carry the instructions even outside their new-comments window.
+      for (const prompt of [developerPrompt(promptTask, 'Tam'), developerRevisionPrompt(promptTask, []), designerPrompt(promptTask, 'Designer'), designerRevisionPrompt(promptTask, [])]) {
+        expect(prompt).toContain('## Human instructions')
+        expect(prompt).toContain('Follow these instructions from the human')
+        expect(prompt).toContain(text)
+      }
+    }
   })
 
   it('names the latest review and agents per task and role when loading many', async () => {

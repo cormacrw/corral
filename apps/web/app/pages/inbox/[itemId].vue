@@ -66,8 +66,8 @@ function retryTask() {
 
 const actions = computed(() => selected.value && selected.value.type !== 'plan_thread' ? inboxActions(selected.value.type, task.value, taskLoading.value ? 'loading' : taskLoadFailed.value ? 'failed' : null) : [])
 // Reset when the item or its type changes, including when its task loads. The
-// composer replies until an action is picked; on a phone a question opens on Answer.
-const defaultAction = () => device.isMobile.value && selected.value?.type === 'question' ? 'clarify' : null
+// composer replies until an action is picked; failures open on Retry and phone questions on Answer.
+const defaultAction = () => selected.value?.type === 'failed' ? 'resolve' : device.isMobile.value && selected.value?.type === 'question' ? 'clarify' : null
 watch([() => selected.value?.id, () => selected.value?.type, () => task.value?.type], () => {
   action.value = defaultAction()
 }, { immediate: true })
@@ -144,7 +144,7 @@ async function act(value: InboxActionInput['action']) {
   quickActionPending = true
   try {
     const sent = await panelView.value?.send() ?? false
-    if (!sent && selectedId.value === actedOn) action.value = null
+    if (!sent && selectedId.value === actedOn) action.value = defaultAction()
     return sent
   } finally {
     quickActionPending = false

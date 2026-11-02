@@ -139,6 +139,27 @@ async function mountInbox(type: 'human_review' | 'failed' | 'question', taskRef?
   return { wrapper, item, params, panel, primary, openTab, replace: router.replace, close: closeFlyout, composer, submit, alert, router, closeFlyout, openFlyout, emitLive: (event: unknown) => invalidateKeys(client, applyEvent(client, event as ServerEvent)), refresh: () => invalidateKeys(client, [keys.inbox()]) }
 }
 
+describe.each([false, true])('Retry guidance with mobile=%s', (mobile) => {
+  it.each(['backlog', 'ready', 'in_progress'] as const)('shows the optional note and sends it with the chosen %s status', async (to) => {
+    for (const note of ['', 'Use the existing API']) {
+      const view = await mountInbox('failed', undefined, null, true, task => task, false, mobile)
+      try {
+        expect(view.wrapper.get('label').text()).toBe('Note to send with Retry (optional)')
+        expect(view.composer().isVisible()).toBe(true)
+        expect(view.composer().props('submitLabel')).toBe('Retry')
+        expect(view.composer().props('allowEmpty')).toBe(true)
+        view.panel().setResolveTo(to)
+        await view.composer().vm.$emit('update:modelValue', note)
+        await view.primary().trigger('click')
+        await flushPromises()
+        expect(api.inbox.act).toHaveBeenCalledExactlyOnceWith(view.item.taskId, { action: 'resolve', to, ...(note && { text: note }) })
+      } finally {
+        view.wrapper.unmount()
+      }
+    }
+  })
+})
+
 it('moves on to the next task with the flyout closed, even if the item left the list first', async () => {
   const { wrapper, item, replace, close, submit, refresh } = await mountInbox('failed', undefined, 'COR-1')
   try {
