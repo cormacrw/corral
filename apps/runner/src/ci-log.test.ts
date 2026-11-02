@@ -65,7 +65,7 @@ describe('CiLogScanner', () => {
       '##[endgroup]', ' Failed:    @corral/web#test',
       '##[error]Process completed with exit code 1.'
     )
-    const { tail, failureLines } = scan(log, 31)
+    const { tail, failureLines } = scan(log, 4096)
     expect(tail).not.toContain('Cannot find module')
     const excerpt = ciExcerpt(tail, failureLines)
     expect(excerpt).toContain('Error: Cannot find module ./generated/routes')
