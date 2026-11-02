@@ -75,6 +75,9 @@ failing a run; no review means no approval, so nothing is skipped.
 The prompt says approving such a change means `preservesApproval: false`. If a
 reviewer says true anyway, `approvalFate` still drops approval, since the file is
 outside the conflicts.
+The mixed-workflow case "drops approval for a target-only edit even when the
+reviewer says it preserves approval" exercises that safety check through publish
+and asserts the recorded outside-conflicts reason.
 
 `step` works from the journal alone after a restart. `running` with a result and
 its runner online pushes again; `running` with neither was cut off, and that

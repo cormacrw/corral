@@ -734,6 +734,27 @@ describe('a target update that conflicts', () => {
     expect(await git('show', 'main:reader.test.txt')).toBe(ADAPTED.trim())
   })
 
+  it('drops approval for a target-only edit even when the reviewer says it preserves approval', async () => {
+    runner = await connectRunner()
+    const epic = await humanApprovedEpic('types.txt', 'project: Project | null\n')
+    await commitOn('main', 'reader.test.txt', READER)
+    const onto = await commitOn('main', 'types.txt', 'label: string\nproject: Project\n')
+    const { fix, criteria, adapted } = await adaptedResolution(epic, onto)
+    await resolutionSubmits(fix, criteria, adapted)
+    await resolutionApproved(fix, criteria, adapted, true)
+    await tick()
+
+    expect(await git('rev-parse', epic.branch)).toBe(adapted)
+    expect(await taskRow(fix.id)).toMatchObject({ status: 'merged' })
+    const operation = (await ops(epic.id)).find(o => o.kind === 'rebase')!
+    expect(operation.resolutionReview).toMatchObject({ headSha: adapted, preserved: true, outsideConflicts: ['reader.test.txt'] })
+    expect(await epicRow(epic.id)).toMatchObject({ approvedHeadSha: null, reviewState: expect.stringMatching(/open|in_review/) })
+    expect(await events(epic.id)).toContain('approval_invalidated')
+    const entries = await history(epic.id)
+    expect(entries.some(e => e.text.includes('The resolution changed files outside the conflicts: reader.test.txt.'))).toBe(true)
+    await capture('target-file-approval-invalidated.json', { scenario: 'The reviewer approves a target-only adaptation with preservesApproval true; the server independently drops the old approval.', journal: await journal(epic.id), epic: await epicRow(epic.id), history: entries })
+  })
+
   it('starts over on the current target when a resolution has failed and the target moved', async () => {
     runner = await connectRunner()
     const epic = await humanApprovedEpic('types.txt', 'project: Project | null\n')
