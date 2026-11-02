@@ -7,7 +7,7 @@ import BoardMobile from './BoardMobile.vue'
 
 afterEach(() => vi.unstubAllGlobals())
 
-function board(view: 'all' | 'epics', key: string) {
+function board(view: 'all' | 'top', key: string) {
   const route = reactive({ query: { column: key, view } })
   const replace = vi.fn(({ query }) => {
     route.query = query
@@ -54,9 +54,9 @@ describe('mobile Board stages', () => {
   it('falls back for unknown stage keys and keeps epic tab selection in the query', async () => {
     const { wrapper, route } = board('top', 'unknown')
     expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toBe('Ready 0')
-    await wrapper.get('#board-tab-done').trigger('click')
-    expect(route.query).toEqual({ view: 'top', column: 'done' })
-    expect(wrapper.get('[role="tabpanel"]').attributes('aria-label')).toBe('Done, 0')
+    await wrapper.get('#board-tab-complete').trigger('click')
+    expect(route.query).toEqual({ view: 'top', column: 'complete' })
+    expect(wrapper.get('[role="tabpanel"]').attributes('aria-label')).toBe('Complete, 0')
   })
 
   it('swipes through epic stages without treating a vertical scroll as a swipe', async () => {
@@ -64,10 +64,10 @@ describe('mobile Board stages', () => {
     const panel = wrapper.get('[role="tabpanel"]')
     await panel.trigger('touchstart', { touches: [{ clientX: 300, clientY: 100 }] })
     await panel.trigger('touchend', { changedTouches: [{ clientX: 200, clientY: 105 }] })
-    expect(route.query.column).toBe('done')
+    expect(route.query.column).toBe('complete')
     await panel.trigger('touchstart', { touches: [{ clientX: 100, clientY: 100 }] })
     await panel.trigger('touchend', { changedTouches: [{ clientX: 200, clientY: 300 }] })
-    expect(route.query.column).toBe('done')
+    expect(route.query.column).toBe('complete')
     await panel.trigger('touchstart', { touches: [{ clientX: 100, clientY: 100 }] })
     await panel.trigger('touchend', { changedTouches: [{ clientX: 200, clientY: 105 }] })
     expect(route.query.column).toBe('ready')

@@ -76,19 +76,19 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-it('keeps the sheet open on the epic opened from the attached task', async () => {
+it('keeps the sheet open on the parent opened from the attached task', async () => {
   const { wrapper, router } = await render('/plan?task=COR-1')
   expect(wrapper.get('[data-drawer]').attributes('data-drawer')).toBe('Task COR-1')
 
   await wrapper.get('[data-task="COR-1"]').trigger('click')
   await flushPromises()
   expect(router.currentRoute.value.fullPath).toBe('/plan?epic=epic-1')
-  expect(wrapper.get('[data-drawer]').attributes('data-drawer')).toBe('Epic')
+  expect(wrapper.get('[data-drawer]').attributes('data-drawer')).toBe('Parent')
   expect(wrapper.get('[data-epic="epic-1"]').attributes('data-mode')).toBe('flyout')
   expect(wrapper.find('[data-task]').exists()).toBe(false)
 })
 
-it('closes an epic with the sheet', async () => {
+it('closes a parent task with the sheet', async () => {
   const { wrapper, router } = await render('/plan?epic=epic-1')
   await wrapper.get('[data-close]').trigger('click')
   await flushPromises()

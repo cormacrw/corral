@@ -96,9 +96,9 @@ const EPIC_PR_HISTORY: Record<string, string> = {
 export function epicHistoryText(entry: Pick<AuditEntry, 'action' | 'detail'>): string {
   const d = entry.detail
   switch (entry.action) {
-    case 'epic.updated': return `edited ${(d.changed as string[] | undefined)?.join(', ') ?? 'the epic'}`
+    case 'epic.updated': return `edited ${(d.changed as string[] | undefined)?.join(', ') ?? 'the parent'}`
     case 'merge.refused': return `reported GitHub refused the merge: ${String(d.message)}`
-    case 'epic.pr': return [EPIC_PR_HISTORY[String(d.event)] ?? 'updated the epic PR', d.summary].filter(Boolean).join(': ')
+    case 'epic.pr': return [EPIC_PR_HISTORY[String(d.event)] ?? 'updated the parent PR', d.summary].filter(Boolean).join(': ')
     default: return 'updated the parent'
   }
 }

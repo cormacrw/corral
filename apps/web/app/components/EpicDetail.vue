@@ -115,7 +115,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
   <div class="flex h-full min-h-0 flex-col">
     <DetailHeader
       :mode="props.mode"
-      :path="parent?.taskRef ? `/tasks/${epic.taskRef}` : `/epics/${props.epicId}`"
+      :path="epic?.taskRef ? `/tasks/${epic.taskRef}` : `/epics/${props.epicId}`"
       :saved="saved"
       @close="emit('close')"
     >
@@ -148,7 +148,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
       </template>
       <UBreadcrumb
         v-else
-        :items="[{ label: project?.name ?? 'Project', to: project ? `/projects/${project.slug}` : '/' }, { label: parent?.title ?? 'Parent' }]"
+        :items="[{ label: project?.name ?? 'Project', to: project ? `/projects/${project.slug}` : '/' }, { label: epic?.title ?? 'Parent' }]"
       />
     </DetailHeader>
 

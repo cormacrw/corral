@@ -14,16 +14,16 @@ describe('statusCounts', () => {
 })
 
 describe('epicHistoryText', () => {
-  it('words every kind of entry the epic history returns', () => {
+  it('words every kind of entry the parent history returns', () => {
     expect(epicHistoryText({ action: 'epic.updated', detail: { epicId: 'e', changed: ['title', 'reviewMode'] } })).toBe('edited title, reviewMode')
-    expect(epicHistoryText({ action: 'epic.pr', detail: { epicId: 'e', event: 'opened', prNumber: 7 } })).toBe('opened the epic PR')
-    expect(epicHistoryText({ action: 'epic.pr', detail: { epicId: 'e', event: 'human_changes_requested', headSha: 'abc', summary: 'Fix the title' } })).toBe('requested changes on the epic PR: Fix the title')
+    expect(epicHistoryText({ action: 'epic.pr', detail: { epicId: 'e', event: 'opened', prNumber: 7 } })).toBe('opened the parent PR')
+    expect(epicHistoryText({ action: 'epic.pr', detail: { epicId: 'e', event: 'human_changes_requested', headSha: 'abc', summary: 'Fix the title' } })).toBe('requested changes on the parent PR: Fix the title')
     expect(epicHistoryText({ action: 'merge.refused', detail: { epicId: 'e', pr: 7, message: 'Required check failed', attempt: 1 } })).toBe('reported GitHub refused the merge: Required check failed')
   })
 
   it('never shows a raw code for an event or action it has no words for', () => {
-    expect(epicHistoryText({ action: 'epic.pr', detail: { epicId: 'e', event: 'something_new' } })).toBe('updated the epic PR')
-    expect(epicHistoryText({ action: 'epic.other', detail: { epicId: 'e' } })).toBe('updated the epic')
+    expect(epicHistoryText({ action: 'epic.pr', detail: { epicId: 'e', event: 'something_new' } })).toBe('updated the parent PR')
+    expect(epicHistoryText({ action: 'epic.other', detail: { epicId: 'e' } })).toBe('updated the parent')
   })
 })
 
@@ -137,7 +137,7 @@ it('labels completed rebase developer runs', () => {
 describe('epic review status', () => {
   const epic = { reviewMode: 'epic' as const, branch: 'corral/epic-1', reviewState: null, taskCount: 2, mergedCount: 2 }
 
-  it('says all tasks complete and awaiting review for an epic PR with the human', () => {
+  it('says all tasks complete and awaiting review for an parent PR with the human', () => {
     expect(epicReviewStatus({ ...epic, reviewState: 'human_review' })?.label).toBe('All tasks complete, awaiting your review')
   })
 
@@ -149,7 +149,7 @@ describe('epic review status', () => {
     expect(epicReviewStatus({ ...epic, reviewMode: 'direct' })).toBeNull()
   })
 
-  it('keeps an epic in progress until its PR merges, and a direct one until its tasks do', () => {
+  it('keeps a parent task in progress until its PR merges, and a direct one until its tasks do', () => {
     expect(epicInProgress({ ...epic, reviewState: 'human_review' })).toBe(true)
     expect(epicInProgress({ ...epic, reviewState: 'merged' })).toBe(false)
     expect(epicInProgress({ ...epic, reviewMode: 'direct' })).toBe(false)
@@ -175,9 +175,9 @@ describe('formatMs', () => {
 describe('runRef and runTitle', () => {
   const run = { taskRef: null, taskTitle: null, epicId: null, epicTitle: null, summary: null, role: 'pm' as const }
 
-  it('names an epic review after its epic, live or finished', () => {
+  it('names a parent task review after its parent, live or finished', () => {
     const live = { ...run, role: 'reviewer' as const, epicId: 'e-1', epicTitle: 'Saved searches' }
-    expect(runRef(live)).toBe('Epic')
+    expect(runRef(live)).toBe('Parent')
     expect(runTitle(live)).toBe('Saved searches')
     expect(runTitle({ ...live, summary: 'Works together.' })).toBe('Saved searches')
   })
@@ -196,8 +196,8 @@ describe('runRef and runTitle', () => {
 })
 
 describe('inboxItemLink', () => {
-  it('opens the epic for an epic\'s item, not the task the server named for it', () => {
-    expect(inboxItemLink({ taskRef: 'COR-3', epicId: 'e-1' })).toEqual({ to: '/epics/e-1', label: 'Epic' })
+  it('opens the parent for a parent task\'s item, not the task the server named for it', () => {
+    expect(inboxItemLink({ taskRef: 'COR-3', epicId: 'e-1' })).toEqual({ to: '/epics/e-1', label: 'Parent' })
   })
   it('opens the task otherwise, and nothing without one', () => {
     expect(inboxItemLink({ taskRef: 'COR-3' })).toEqual({ to: '/tasks/COR-3', label: 'Task' })
@@ -218,7 +218,7 @@ it('names a PR by number when its URL has one', () => {
 
 describe('epic fixes (D29)', () => {
   const epic = { reviewMode: 'epic', branch: 'b', reviewState: 'ready_to_merge', taskCount: 2, mergedCount: 2 } as const
-  it('says what the developer on the epic is doing, and what stopped', () => {
+  it('says what the developer on the parent is doing, and what stopped', () => {
     expect(epicReviewStatus({ ...epic, sync: { state: 'fixing', fix: 'ci', reason: '', files: [], developer: null, attempts: 0 } })?.label).toBe('Fixing a CI failure')
     expect(epicReviewStatus({ ...epic, sync: { state: 'fixing', fix: 'review', reason: '', files: [], developer: null, attempts: 0 } })?.label).toBe('Addressing integration review')
     expect(epicReviewStatus({ ...epic, sync: { state: 'failed', error: 'x', fix: 'ci' } })?.label).toBe('Fix stopped, retry to carry on')

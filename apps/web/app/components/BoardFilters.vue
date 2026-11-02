@@ -41,7 +41,7 @@ function set<K extends keyof BoardFilters>(key: K, value: BoardFilters[K]) {
     icon="i-lucide-network"
     :size="props.size"
     :class="props.itemClass"
-    @update:model-value="set('parent tasks', $event)"
+    @update:model-value="set('epics', $event)"
   />
   <template v-if="!props.epicsOnly">
     <BoardFilter

@@ -11,7 +11,7 @@ import InboxPanelEpicContext from './InboxPanelEpicContext.vue'
 vi.mock('~/composables/useApi', () => ({ api: { epics: { get: vi.fn() } } }))
 afterEach(() => vi.unstubAllGlobals())
 
-it('shows epic context and a working epic link for both grouped modes, with PR wording only for builds', async () => {
+it('shows parent context and a working parent link for both grouped modes, with PR wording only for builds', async () => {
   for (const reviewMode of ['epic', 'each_task', 'direct'] as const) {
     for (const type of ['task', 'spike', 'design'] as const) {
       const openEpic = vi.fn()
@@ -29,10 +29,10 @@ it('shows epic context and a working epic link for both grouped modes, with PR w
       if (reviewMode === 'direct') {
         expect(wrapper.text()).toBe('')
       } else {
-        expect(wrapper.text()).toContain('Part of Saved searches. You\'ll review it all together at the epic PR.')
+        expect(wrapper.text()).toContain('Part of Saved searches. You\'ll review it all together at the parent PR.')
         await wrapper.get('button').trigger('click')
         expect(openEpic).toHaveBeenCalledWith('epic-1')
-        expect(wrapper.text().includes('Approve and merge PR #64 into the epic branch, or request changes.')).toBe(type === 'task')
+        expect(wrapper.text().includes('Approve and merge PR #64 into the parent branch, or request changes.')).toBe(type === 'task')
         await wrapper.setProps({ canAct: false })
         expect(wrapper.text()).not.toContain('Approve and merge')
       }
@@ -41,7 +41,7 @@ it('shows epic context and a working epic link for both grouped modes, with PR w
   }
 })
 
-it('does not fetch an epic or add context for a standalone task', async () => {
+it('does not fetch a parent task or add context for a standalone task', async () => {
   vi.stubGlobal('computed', computed)
   vi.stubGlobal('useTaskFlyout', () => ({ openEpic: vi.fn() }))
   vi.mocked(api.epics.get).mockClear()

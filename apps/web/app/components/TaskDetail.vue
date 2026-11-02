@@ -433,7 +433,7 @@ const workingAgent = computed(() => task.value?.lease ? shell.agents.find(a => a
       </template>
       <UBreadcrumb
         v-else
-        :items="[{ label: 'Board', to: project ? `/projects/${project.slug}/board` : '/' }, ...(parent ? [{ label: epic.title, to: `/epics/${epic.id}` }] : []), { label: props.taskRef }]"
+        :items="[{ label: 'Board', to: project ? `/projects/${project.slug}/board` : '/' }, ...(task?.parentTask ? [{ label: task.parentTask.title, to: `/tasks/${task.parentTask.ref}` }] : []), { label: props.taskRef }]"
       />
       <UBadge
         v-if="isDraft && props.mode === 'flyout'"

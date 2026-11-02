@@ -171,10 +171,10 @@ it('keeps the figures when a live refresh fails', async () => {
 
 afterEach(() => client.clear())
 
-it('shows rework for the window: fixes, reviews per epic and tokens', async () => {
+it('shows rework for the window: fixes, reviews per parent and tokens', async () => {
   flow.mockReset().mockResolvedValue(sample(1))
   const wrapper = mountFlow()
   await flushPromises()
   const text = wrapper.get('[aria-label="Rework"]').text()
-  for (const part of ['2 reviewed again, 5 kept approval', 'Developer runs on epics', '1.5 (6 across 4)', '1.2M vs 300K']) expect(text).toContain(part)
+  for (const part of ['2 reviewed again, 5 kept approval', 'Developer runs on parent tasks', '1.5 (6 across 4)', '1.2M vs 300K']) expect(text).toContain(part)
 })

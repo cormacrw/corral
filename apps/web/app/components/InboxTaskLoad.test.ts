@@ -1018,14 +1018,14 @@ describe('on a phone', () => {
   })
 })
 
-it.each([false, true])('opens epic history with an epic link and no task load or actions (mobile=%s)', async (mobile) => {
+it.each([false, true])('opens parent history with a parent task link and no task load or actions (mobile=%s)', async (mobile) => {
   const { wrapper, params, refresh, closeFlyout } = await mountInbox('failed', undefined, 'COR-1', true, t => t, false, mobile)
   try {
     const epic: EpicActivityItem = {
       id: 'epic-100', type: 'epic_activity', event: 'human_changes_requested', epicId: 'epic-id',
-      project: projects[0]!, subject: 'Epic history', preview: 'You requested changes', body: 'You requested changes: Cover the empty epic',
+      project: projects[0]!, subject: 'Parent history', preview: 'You requested changes', body: 'You requested changes: Cover the empty parent',
       sender: { name: 'You', role: 'system' }, at: '2026-10-31T12:00:00.000Z',
-      taskId: null, taskRef: null, prUrl: null, resolution: 'You requested changes: Cover the empty epic'
+      taskId: null, taskRef: null, prUrl: null, resolution: 'You requested changes: Cover the empty parent'
     }
     vi.mocked(api.inbox.get).mockResolvedValue({ needsYou: [], activity: [], resolved: [epic], count: 0 })
     vi.mocked(api.tasks.byRef).mockClear()
@@ -1045,7 +1045,7 @@ it.each([false, true])('opens epic history with an epic link and no task load or
   }
 })
 
-it('stays on an epic item that leaves the Inbox while open, keeping what was typed', async () => {
+it('stays on a parent task item that leaves the Inbox while open, keeping what was typed', async () => {
   const { wrapper, params, refresh } = await mountInbox('failed', undefined, 'COR-1', true, t => t, false, false)
   try {
     const epic = inbox().needsYou.find(i => i.type === 'epic_review')!
@@ -1062,7 +1062,7 @@ it('stays on an epic item that leaves the Inbox while open, keeping what was typ
     const panel = wrapper.getComponent(InboxEpicPanel)
     expect(panel.props('item')).toMatchObject({ id: epic.id })
     expect(panel.props('gone')).toBe(true)
-    expect(panel.text()).toContain('This epic changed while you had it open')
+    expect(panel.text()).toContain('This parent changed while you had it open')
     expect(readDraft(`inbox:${epic.id}`)).toBe('Rename the sheet')
   } finally {
     wrapper.unmount()

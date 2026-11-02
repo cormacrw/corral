@@ -311,7 +311,7 @@ const agents = computed(() => shell.agents
           class="flex flex-col gap-3"
         >
           <li
-            v-for="{ parent, project } in parent tasks"
+            v-for="{ epic, project } in epics"
             :key="epic.id"
           >
             <p

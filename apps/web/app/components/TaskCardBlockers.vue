@@ -69,7 +69,7 @@ function openTask(ref: string) {
             </button>
           </li>
           <li
-            v-for="parent in blockers.epics"
+            v-for="epic in blockers.epics"
             :key="epic.id"
           >
             <NuxtLink

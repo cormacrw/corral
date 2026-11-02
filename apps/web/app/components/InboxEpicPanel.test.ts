@@ -100,12 +100,12 @@ describe('InboxEpicPanel', () => {
     }))
     const wrapper = render(waiting)
     expect(wrapper.get('h1').text()).toBe('Feature')
-    expect(button(wrapper, 'Approve epic')).toBeTruthy()
+    expect(button(wrapper, 'Approve parent')).toBeTruthy()
     expect(wrapper.find('[data-testid="inbox-epic-loading"]').exists()).toBe(true)
     arrive(details)
     await flushPromises()
     expect(wrapper.find('[data-testid="inbox-epic-loading"]').exists()).toBe(false)
-    expect(wrapper.get('[data-testid="inbox-epic-verdict"]').text().replace(/\s*·\s*/g, ' · ')).toBe('Rita approved the epic · lint passed · 2 of 2 tasks merged · You saw 1 of 2')
+    expect(wrapper.get('[data-testid="inbox-epic-verdict"]').text().replace(/\s*·\s*/g, ' · ')).toBe('Rita approved the parent · lint passed · 2 of 2 tasks merged · You saw 1 of 2')
   })
 
   it('names the target, how far it moved, and what approving does', async () => {
@@ -123,7 +123,7 @@ describe('InboxEpicPanel', () => {
     getReview.mockResolvedValue({ ...details, conflictPending: true, targetMovedBy: 2 })
     const wrapper = render(waiting)
     await flushPromises()
-    expect(wrapper.get('[data-testid="inbox-epic-approving"]').text()).toBe('This epic conflicts with main. Approving sends the conflict to a developer, then runs CI and squash-merges.')
+    expect(wrapper.get('[data-testid="inbox-epic-approving"]').text()).toBe('This parent conflicts with main. Approving sends the conflict to a developer, then runs CI and squash-merges.')
     expect(wrapper.text()).not.toContain('Needs you')
   })
 
@@ -132,7 +132,7 @@ describe('InboxEpicPanel', () => {
     await flushPromises()
     expect(wrapper.get('[data-testid="inbox-epic-notes"]').text()).toContain('Could share a title')
     expect(wrapper.get('[data-testid="inbox-epic-notes"]').text()).not.toContain('Fixed since')
-    await button(wrapper, 'Approve epic').trigger('click')
+    await button(wrapper, 'Approve parent').trigger('click')
     await flushPromises()
     expect(review).toHaveBeenCalledWith('e', { action: 'approve', headSha: 'head', confirmedCriteria: [], confirmedTasks: [] })
     expect(wrapper.emitted('resolved')).toHaveLength(1)
@@ -142,7 +142,7 @@ describe('InboxEpicPanel', () => {
     getReview.mockResolvedValue({ ...details, tasks: [row('t1', { humanReview: true }), row('t2', { humanChecks: ['c'], criteria: [{ id: 'c', position: 0, text: 'On a real iPhone', checkedByHuman: true, met: null }] })] })
     const wrapper = render(owing)
     await flushPromises()
-    await button(wrapper, 'Approve epic').trigger('click')
+    await button(wrapper, 'Approve parent').trigger('click')
     await flushPromises()
     expect(review).not.toHaveBeenCalled()
     expect(wrapper.get('[data-tab="tasks"]').attributes('aria-current')).toBe('true')
@@ -151,7 +151,7 @@ describe('InboxEpicPanel', () => {
     for (const box of wrapper.findAll('input[type="checkbox"]')) await box.setValue(true)
     await flushPromises()
     expect(wrapper.text()).not.toContain('checks left')
-    await button(wrapper, 'Approve epic').trigger('click')
+    await button(wrapper, 'Approve parent').trigger('click')
     await flushPromises()
     expect(review).toHaveBeenCalledWith('e', { action: 'approve', headSha: 'head', confirmedCriteria: ['c'], confirmedTasks: ['t1'] })
   })
@@ -175,10 +175,10 @@ describe('InboxEpicPanel', () => {
     await flushPromises()
     // Approval was kept across a rebase: the item has the new head, the review hasn't caught up
     await wrapper.setProps({ item: { ...waiting, headSha: 'rebased' } })
-    await button(wrapper, 'Approve epic').trigger('click')
+    await button(wrapper, 'Approve parent').trigger('click')
     await flushPromises()
     expect(review).toHaveBeenCalledWith('e', expect.objectContaining({ action: 'approve', headSha: 'head' }))
-    expect(wrapper.text()).toContain('This epic changed while you had it open')
+    expect(wrapper.text()).toContain('This parent changed while you had it open')
     expect(wrapper.emitted('resolved')).toBeUndefined()
   })
 
@@ -189,9 +189,9 @@ describe('InboxEpicPanel', () => {
     await flushPromises()
     await wrapper.get('textarea').setValue('Rename it')
     await wrapper.setProps({ gone: true })
-    expect(wrapper.text()).toContain('This epic changed while you had it open')
+    expect(wrapper.text()).toContain('This parent changed while you had it open')
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('Rename it')
-    expect(button(wrapper, 'Approve epic').attributes('disabled')).toBeDefined()
+    expect(button(wrapper, 'Approve parent').attributes('disabled')).toBeDefined()
     // Remounting reads the same draft
     wrapper.unmount()
     const again = render(waiting)
@@ -202,14 +202,14 @@ describe('InboxEpicPanel', () => {
   })
 
   it.each([
-    ['epic_pr_changed', 'The epic PR changed on GitHub'],
+    ['epic_pr_changed', 'The parent PR changed on GitHub'],
     ['human_checks_unconfirmed', 'The human checks changed'],
     ['epic_decision_changed', 'already been answered']
   ])('says what a %s refusal means', async (constraint, message) => {
     review.mockRejectedValueOnce(new ApiError(409, { code: 'conflict', constraint } as never, constraint))
     const wrapper = render(waiting)
     await flushPromises()
-    await button(wrapper, 'Approve epic').trigger('click')
+    await button(wrapper, 'Approve parent').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain(message)
     expect(wrapper.text()).not.toContain('changed while you had it open')
@@ -227,7 +227,7 @@ describe('InboxEpicPanel', () => {
     getReview.mockResolvedValue({ ...details, headSha: 'rebased', rounds: [{ ...round, headSha: 'old' }] })
     const wrapper = render({ ...waiting, headSha: 'rebased' } as EpicReviewItem)
     await flushPromises()
-    expect(wrapper.get('[data-testid="inbox-epic-reviewer"]').text()).toBe('Rita approved the epic')
+    expect(wrapper.get('[data-testid="inbox-epic-reviewer"]').text()).toBe('Rita approved the parent')
   })
 
   it('shows Review from the item when the review can\'t load, and its body with no rounds', async () => {
@@ -250,7 +250,7 @@ describe('InboxEpicPanel', () => {
     expect(wrapper.find('[data-tab="review"]').exists()).toBe(false)
   })
 
-  it('opens Code diff on the whole epic, and only See only these changes on the changes since', async () => {
+  it('opens Code diff on the whole parent, and only See only these changes on the changes since', async () => {
     getReview.mockResolvedValue(later)
     const wrapper = render(waiting)
     await flushPromises()
@@ -317,7 +317,7 @@ describe('InboxEpicPanel', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     // Said once, in the composer
-    expect(wrapper.text().match(/This epic changed while you had it open/g)).toHaveLength(1)
+    expect(wrapper.text().match(/This parent changed while you had it open/g)).toHaveLength(1)
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('Rename it')
     expect(wrapper.emitted('resolved')).toBeUndefined()
     expect(getReview.mock.calls.length).toBeGreaterThan(1)
@@ -364,15 +364,15 @@ describe('InboxEpicPanel', () => {
     expect(wrapper.get('[data-tab="diff"]').attributes('aria-current')).toBe('true')
     expect(wrapper.get('[data-diff]').text()).toBe('since.ts')
     expect(wrapper.get('[data-diff]').attributes('data-url')).toBe('https://github.com/o/r/compare/old...head')
-    await button(wrapper, 'Whole epic').trigger('click')
+    await button(wrapper, 'Whole parent').trigger('click')
     expect(wrapper.get('[data-diff]').text()).toBe('whole.ts')
   })
 
-  it('uses the thumb bar on a phone, labelled Approve epic and with no Reply', async () => {
+  it('uses the thumb bar on a phone, labelled Approve parent and with no Reply', async () => {
     const wrapper = render(waiting, true)
     await flushPromises()
     const bar = wrapper.get('[data-testid="inbox-thumb-bar"]')
-    expect(bar.text()).toContain('Approve epic')
+    expect(bar.text()).toContain('Approve parent')
     expect(bar.text()).toContain('Request changes')
     expect(bar.text()).not.toContain('Reply')
     expect(wrapper.find('[data-testid="inbox-actions"]').exists()).toBe(false)
@@ -386,15 +386,15 @@ describe('InboxEpicPanel', () => {
     expect(wrapper.find('[data-testid="inbox-thumb-bar"]').exists()).toBe(false)
   })
 
-  it('shows the resolution, and what happens next for an approved epic', async () => {
+  it('shows the resolution, and what happens next for an approved parent', async () => {
     getReview.mockResolvedValue({ ...details, state: 'ready_to_merge' })
-    const wrapper = render(moment('human_approved', { resolution: 'You approved the epic PR' }))
+    const wrapper = render(moment('human_approved', { resolution: 'You approved the parent PR' }))
     await flushPromises()
-    expect(wrapper.get('[data-testid="inbox-read-only"]').text()).toBe('You approved the epic PR')
+    expect(wrapper.get('[data-testid="inbox-read-only"]').text()).toBe('You approved the parent PR')
     expect(wrapper.get('[data-testid="inbox-epic-next"]').text()).toContain('squash-merges into main')
   })
 
-  it('shows a merged epic\'s squash commit', async () => {
+  it('shows a merged parent\'s squash commit', async () => {
     getReview.mockResolvedValue({ ...details, state: 'merged', mergeCommitSha: '5d4c3b2a1f0e' })
     const wrapper = render(moment('merged'))
     await flushPromises()
@@ -414,7 +414,7 @@ describe('InboxEpicPanel', () => {
 
   const conflict = (fields: object) => ({ ...base, type: 'epic_conflict', sender: { name: 'Corral', role: 'system' }, headSha: 'head', targetBranch: 'main', files: ['a.ts'], since: null, newArtifacts: [], ...fields }) as unknown as EpicConflictItem
 
-  it('retries a stopped epic, showing the failure', async () => {
+  it('retries a stopped parent, showing the failure', async () => {
     const wrapper = render(conflict({ stopped: { fix: 'ci', error: '3 fixes have failed' }, files: [] }))
     await flushPromises()
     expect(wrapper.text()).toContain('Fix stopped')
@@ -424,7 +424,7 @@ describe('InboxEpicPanel', () => {
     expect(review).toHaveBeenCalledWith('e', { action: 'rebase', headSha: 'head' })
   })
 
-  it('keeps a stopped epic\'s failure, files and question when the review can\'t load', async () => {
+  it('keeps a stopped parent\'s failure, files and question when the review can\'t load', async () => {
     getReview.mockRejectedValue(new Error('runner offline'))
     const wrapper = render(conflict({ stopped: { fix: 'ci', error: '3 fixes have failed' } }))
     await flushPromises()

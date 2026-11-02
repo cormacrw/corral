@@ -35,6 +35,8 @@ export function useAllProjectLists(projects: MaybeRefOrGetter<Project[]>) {
   }))), shallow: true })
   return {
     tasks: computed(() => withoutParents(projectMap(toValue(projects), tasks.value))),
+    // Parents too, for finding one by ref or title
+    searchable: computed(() => projectMap(toValue(projects), tasks.value)),
     epics: computed(() => projectMap(toValue(projects), epics.value)),
     pending: computed(() => Object.fromEntries(toValue(projects).map((p, i) => [p.id, tasks.value[i]?.isPending ?? true])))
   }

@@ -60,7 +60,7 @@ const searchGroups = computed(() => searchOpen.value
     }, {
       id: 'tasks',
       label: 'Tasks',
-      items: Object.values(lists.tasks.value).flatMap(tasks => tasks ?? []).map(t => ({ label: `${t.ref} ${t.title}`, icon: 'i-lucide-square-check', to: `/tasks/${t.ref}` }))
+      items: Object.values(lists.searchable.value).flatMap(tasks => tasks ?? []).map(t => ({ label: `${t.ref} ${t.title}`, icon: 'i-lucide-square-check', to: `/tasks/${t.ref}` }))
     }]
   : [])
 
