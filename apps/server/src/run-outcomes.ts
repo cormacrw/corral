@@ -1,13 +1,14 @@
 import type { Comment, OutcomeReport } from '@corral/contracts'
-import { feedbackSimilarity, nextDesignVersion, reviewFeedbackText, transition, humanCheckTally, taskRef, type ReviewVerdict } from '@corral/core'
+import { feedbackSimilarity, nextDesignVersion, reviewFeedbackText, transition, humanCheckTally, taskRef, type EpicDecisionRequest, type ReviewVerdict } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, asc, desc, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { appendAudit, auditEvent } from './audit.ts'
 import { bundleProblem } from './designs.ts'
+import { raiseDecision, recordResolutionReview } from './epic-rebase-approval.ts'
 import type { PullRequest } from './github.ts'
 import { carryOverApproval, checkTrivialRebase } from './rebase-review.ts'
-import { evidenceState, isEpicRebaseTask, taskBase } from './task-base.ts'
+import { evidenceState, isEpicRebaseTask, isEpicResolution, taskBase } from './task-base.ts'
 import { recordTaskSubmission } from './task-submissions.ts'
 import { addComment, applyTransition, toTaskState, type ProjectRow, type TaskRow } from './tasks.ts'
 import { ToolError, server, type RunContext, type RunCore } from './run-context.ts'
@@ -65,8 +66,8 @@ export class RunOutcomes {
         case 'changes_requested':
           return this.#review(ctx, report, report.outcome)
         case 'blocked':
-          if (!ctx.task?.rebaseOnly) throw new ToolError('Only a rebase review can report blocked.')
-          return this.#blockedRebaseReview(ctx, report.summary)
+          if (!ctx.task?.rebaseOnly && !(ctx.task && isEpicResolution(ctx.task))) throw new ToolError('Only a rebase review can report blocked.')
+          return this.#blockedRebaseReview(ctx, report.summary, report.decision)
         case 'failed':
           await this.#c.ending.failRun(ctx, report.summary, { summary: report.summary })
           this.#c.ending.finished(ctx, 'Reported failed')
@@ -105,7 +106,7 @@ export class RunOutcomes {
           if (!design) throw new ToolError(`Not submitted. Only a design task reports design_submitted; this task reports ${expected}.`)
           return this.#reportDesign(ctx, report)
         case 'stuck':
-          return this.#stuck(ctx, report.summary, report.note!)
+          return this.#stuck(ctx, report.summary, report.note!, report.decision)
         case 'failed':
           await this.#c.ending.failRun(ctx, report.summary, { summary: report.summary }, report.note)
           this.#c.ending.finished(ctx, 'Reported failed')
@@ -152,6 +153,7 @@ export class RunOutcomes {
       const locked = await this.#c.runs.lockHeld(tx, ctx)
       const headSha = locked.task.headSha!
       await this.#bindVerdict(tx, locked.task, report, verdict, branchHead)
+      if (verdict === 'approved' && isEpicResolution(locked.task)) await recordResolutionReview(tx, task.id, { runId: ctx.run.id, headSha, preserved: report.preservesApproval === true, summary: report.summary })
       // A change request is compared with the previous round's, if that
       // one requested changes too; near-identical feedback blocks the task
       const similarity = verdict === 'changes_requested' ? await this.#feedbackSimilarity(tx, task.id, locked.task.reviewRounds, report.summary, kept) : undefined
@@ -228,24 +230,33 @@ export class RunOutcomes {
   }
 
   // D24: a substantial change or a changed binding decision is the human's call.
-  async #blockedRebaseReview(ctx: RunContext, reason: string) {
+  async #blockedRebaseReview(ctx: RunContext, reason: string, decision?: EpicDecisionRequest) {
     if (!reason.trim()) throw new ToolError('Explain the substantial change and the affected criteria for the human.')
+    this.#requireDecision(ctx, decision)
     await this.#c.d.db.transaction(async (tx) => {
       const { task, project } = await this.#c.runs.lockHeld(tx, ctx)
       await tx.insert(comments).values({ taskId: task.id, author: this.#c.runs.actor(ctx), body: `Rebase review blocked: ${reason.trim()}` })
-      await applyTransition(tx, task, project, { type: 'block', reason }, server, { event: 'blocked', runId: ctx.run.id })
+      if (decision) await raiseDecision(tx, task, project, decision, ctx.run.id, this.#c.runs.actor(ctx))
+      await applyTransition(tx, task, project, { type: 'block', reason: decision?.question ?? reason }, server, { event: 'blocked', runId: ctx.run.id })
       await this.#c.ending.endRunIn(tx, ctx, { state: 'completed', outcome: 'blocked', summary: reason })
     })
     this.#c.ending.finished(ctx, 'Rebase review blocked: waiting on a human')
     return { ok: true, message: 'The task is Blocked for a human decision. You can stop now.' }
   }
 
+  // An epic rebase's question has to be one a human can answer in a click
+  #requireDecision(ctx: RunContext, decision?: EpicDecisionRequest) {
+    if (ctx.task && isEpicResolution(ctx.task) && !decision) throw new ToolError('Not reported. An epic rebase asks the human through `decision`: one focused question, at least two alternatives and the changes affected. Add it and report again.')
+  }
+
   // Asks a human: the task becomes Blocked with the question as its reason (D11)
-  async #stuck(ctx: RunContext, question: string, note: string) {
+  async #stuck(ctx: RunContext, question: string, note: string, decision?: EpicDecisionRequest) {
+    this.#requireDecision(ctx, decision)
     const comment = await this.#c.d.db.transaction(async (tx) => {
       const { task, project } = await this.#c.runs.lockHeld(tx, ctx)
       const comment = await this.#c.ending.postNote(tx, ctx, note)
-      await applyTransition(tx, task, project, { type: 'block', reason: question }, server, { event: 'stuck', runId: ctx.run.id })
+      if (decision) await raiseDecision(tx, task, project, decision, ctx.run.id, this.#c.runs.actor(ctx))
+      await applyTransition(tx, task, project, { type: 'block', reason: decision?.question ?? question }, server, { event: 'stuck', runId: ctx.run.id })
       await this.#c.ending.endRunIn(tx, ctx, { state: 'completed', outcome: 'stuck', summary: question })
       return comment
     })

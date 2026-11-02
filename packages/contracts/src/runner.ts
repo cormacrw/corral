@@ -116,6 +116,19 @@ const unknownOutcome = `must be one of ${REPORTED_OUTCOMES.options.join(', ')}`
 const criterionVerdict = z.object({ criterionId: z.string(), met: z.boolean(), note: z.string().default('') })
 const missingCriteria = 'Give a verdict for every acceptance criterion'
 
+// What an epic rebase's developer or reviewer asks the human when keeping both
+// sides would mean choosing product behaviour (COR-291)
+export const epicDecisionInput = z.object({
+  question: z.string().trim().min(1).describe('One focused question for the human'),
+  bindingDecision: z.string().trim().min(1).optional().describe('The binding decision that changed, if that is the cause, e.g. "D31 in docs/decisions.md"'),
+  alternatives: z.array(z.object({
+    label: z.string().trim().min(1).describe('A short name for this choice'),
+    effect: z.string().trim().min(1).describe('What the product does if this is chosen'),
+    changesBehaviour: z.boolean().describe('True when this changes the behaviour the human approved, so the epic goes back through review')
+  })).min(2, 'Give at least two alternatives').max(5),
+  affectedChanges: z.array(z.string().trim().min(1)).min(1, 'Name the changes affected').describe('The commits, files or tasks on each side this decision affects')
+})
+
 // The report_outcome tool's arguments. MCP clients need a plain object as a
 // tool's input, so this stays flat; the schemas below decide which fields each
 // outcome needs.
@@ -125,13 +138,15 @@ export const reportOutcomeInput = z.object({
   review: z.enum(REBASE_REVIEWS).optional().describe('Required for pr_rebased: trivial only for combining both sides with no new logic, renames or behaviour changes; otherwise needs_review'),
   conflictedFiles: z.array(z.string().trim().min(1)).min(1, 'conflictedFiles must contain at least one file').optional().describe('Required for pr_rebased: every file in which you resolved a conflict'),
   note: z.string().trim().optional().describe('Developer only, required: one line of at most 200 characters saying what this run did, posted as a comment on the task, e.g. "Addressed review: dropped idle-thread fixture"'),
-  criteria: z.array(criterionVerdict).optional().describe('Reviewer only: a verdict per acceptance criterion')
+  criteria: z.array(criterionVerdict).optional().describe('Reviewer only: a verdict per acceptance criterion'),
+  preservesApproval: z.boolean().optional().describe('Reviewer of an epic rebase resolution only, when approving: true only if the approved behaviour is unchanged; false restarts the epic\'s normal review'),
+  decision: epicDecisionInput.optional().describe('Epic rebase resolutions only, required with stuck or blocked: the question for the human, with alternatives and the changes affected')
 })
 
 // Set by the runner, never the agent. headSha: the commit a developer's run
 // pushed, or the one a reviewer's checkout is at. baseSha: where a submitted
 // commit forked from its epic branch.
-const reportFields = { summary: reportOutcomeInput.shape.summary, note: reportOutcomeInput.shape.note, review: reportOutcomeInput.shape.review, conflictedFiles: reportOutcomeInput.shape.conflictedFiles, headSha: z.string().optional(), baseSha: z.string().optional() }
+const reportFields = { summary: reportOutcomeInput.shape.summary, note: reportOutcomeInput.shape.note, review: reportOutcomeInput.shape.review, conflictedFiles: reportOutcomeInput.shape.conflictedFiles, preservesApproval: reportOutcomeInput.shape.preservesApproval, decision: reportOutcomeInput.shape.decision, headSha: z.string().optional(), baseSha: z.string().optional() }
 const taskReview = <Outcome extends z.ZodType<ReviewVerdict>>(outcome: Outcome) => z.object({ ...reportFields, outcome, criteria: z.array(criterionVerdict, { error: missingCriteria }) })
 const nonReview = z.object({ ...reportFields, outcome: NON_REVIEW_OUTCOMES })
 
@@ -198,6 +213,8 @@ export interface RunnerInfo extends RunnerCapacity {
   taskIntegrationProtocols?: number[]
   // Runs integration jobs; a runner that only submits and reviews doesn't
   taskIntegrationExecutor?: boolean
+  // Runs epic_rebase jobs
+  epicRebaseExecutor?: boolean
   integrationCompatibilityReason?: string | null
   activeRunCount?: number
   updateState?: string
@@ -241,8 +258,6 @@ export const setupJobSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('detect_clis') }),
   z.object({ kind: z.literal('github'), method: z.union([z.literal('GET'), z.literal('POST'), z.literal('PUT'), z.literal('PATCH'), z.literal('DELETE')]), path: z.string(), body: z.unknown().optional() }),
   z.object({ kind: z.literal('cleanup_worktrees'), repository: z.string(), taskId: z.string() }),
-  // The files that stop `branch` rebasing onto `onto`, read from a fresh fetch
-  z.object({ kind: z.literal('rebase_conflicts'), repository: z.string(), branch: z.string(), onto: z.string() }),
   // PR-free integration (D27). Prepare builds one commit from a reviewed
   // submission on top of the expected epic head, touching no shared ref; push
   // advances the epic branch only if it's still at that head; inspect reads the
@@ -252,6 +267,12 @@ export const setupJobSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('integration_prepare'), repository: z.string(), targetBranch: z.string(), expectedTargetSha: z.string(), submissionId: z.string(), headSha: z.string(), baseSha: z.string(), message: z.string(), committedAt: z.string(), candidateRef: z.string().nullable() }),
   z.object({ kind: z.literal('integration_push'), repository: z.string(), targetBranch: z.string(), expectedTargetSha: z.string(), candidateSha: z.string() }),
   z.object({ kind: z.literal('integration_inspect'), repository: z.string(), targetBranch: z.string(), submissionId: z.string() }),
+  // Epic synchronization (D27). Prepare rebases the expected epic head onto a
+  // target commit without touching a shared ref. Push checks the candidate
+  // keeps the target's work, then advances the epic branch only if it's still
+  // at the expected head.
+  z.object({ kind: z.literal('epic_rebase_prepare'), repository: z.string(), epicBranch: z.string(), expectedHeadSha: z.string(), ontoSha: z.string() }),
+  z.object({ kind: z.literal('epic_rebase_push'), repository: z.string(), epicBranch: z.string(), targetBranch: z.string(), expectedHeadSha: z.string(), ontoSha: z.string(), candidateSha: z.string() }),
   // Remove every worktree outside this keep set, which covers all projects.
   // Developer worktrees with uncommitted work stay (PRD §7.4), and so does the
   // checkout of a PM turn running on the runner.
@@ -270,10 +291,12 @@ export const setupJobResultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('detect_clis'), clis: z.array(z.object({ id: z.enum(['claude', 'codex']), version: z.string().nullable(), signedIn: z.boolean() })) }),
   z.object({ kind: z.literal('github'), status: z.number(), body: z.unknown() }),
   z.object({ kind: z.literal('cleanup_worktrees'), removed: z.array(z.string()), kept: z.array(z.string()) }),
-  z.object({ kind: z.literal('rebase_conflicts'), files: z.array(z.string()) }),
   z.object({ kind: z.literal('integration_prepare'), status: z.enum(['prepared', 'integrated', 'moved', 'conflict', 'empty', 'failed']), targetSha: z.string(), commitSha: z.string().nullable(), files: z.array(z.string()), error: z.string().nullable().optional() }),
   z.object({ kind: z.literal('integration_push'), pushed: z.boolean(), error: z.string().nullable() }),
   z.object({ kind: z.literal('integration_inspect'), targetSha: z.string().nullable(), integratedSha: z.string().nullable() }),
+  z.object({ kind: z.literal('epic_rebase_prepare'), status: z.enum(['rebased', 'up_to_date', 'moved', 'conflict', 'failed']), commitSha: z.string().nullable(), files: z.array(z.string()), error: z.string().optional() }),
+  // `rejected`: the candidate itself is wrong, and nothing was pushed
+  z.object({ kind: z.literal('epic_rebase_push'), pushed: z.boolean(), rejected: z.string().nullable(), error: z.string().nullable() }),
   // `kept` is only what stayed because it holds uncommitted changes
   z.object({ kind: z.literal('sweep_worktrees'), removed: z.array(z.string()), kept: z.array(z.string()) }),
   z.object({ kind: z.literal('session_title'), title: z.string() }),
@@ -313,7 +336,7 @@ export const slotSourceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('derived'), cpus: z.number(), memoryBytes: z.number(), slotCpus: z.number(), slotMemoryBytes: z.number() })
 ])
 
-export const runnerHelloSchema = z.object({ type: z.literal('hello'), protocol: z.number(), taskIntegrationProtocols: z.array(z.number().int().positive()).optional(), taskIntegrationExecutor: z.boolean().optional(), commit: z.string().default('unknown'), updateTarget: z.string().optional(), updateState: z.string().optional(), updateError: z.string().optional(), draining: z.boolean().optional(), updateRequested: z.boolean().optional(), autoUpdate: z.boolean().optional(), runnerId: z.string(), name: z.string(), activeRuns: z.array(z.object({ runId: z.string(), leaseEpoch: z.number() })), slotSource: slotSourceSchema.optional().catch(undefined), slots: z.number().optional(), runtimes: z.array(z.string()).optional(), roles: z.array(z.enum(RUNNER_ROLES)).optional() })
+export const runnerHelloSchema = z.object({ type: z.literal('hello'), protocol: z.number(), taskIntegrationProtocols: z.array(z.number().int().positive()).optional(), taskIntegrationExecutor: z.boolean().optional(), epicRebaseExecutor: z.boolean().optional(), commit: z.string().default('unknown'), updateTarget: z.string().optional(), updateState: z.string().optional(), updateError: z.string().optional(), draining: z.boolean().optional(), updateRequested: z.boolean().optional(), autoUpdate: z.boolean().optional(), runnerId: z.string(), name: z.string(), activeRuns: z.array(z.object({ runId: z.string(), leaseEpoch: z.number() })), slotSource: slotSourceSchema.optional().catch(undefined), slots: z.number().optional(), runtimes: z.array(z.string()).optional(), roles: z.array(z.enum(RUNNER_ROLES)).optional() })
 
 // Pre-capacity/build hello packets must still get the protocol-version refusal.
 // This schema is used only for rejecting a different version, never admission.

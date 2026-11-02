@@ -239,6 +239,7 @@ route('GET', '/epics/:id', ([id]) => {
   const epic = f.epics.find(e => e.id === id) ?? notFound()
   return { ...epic, tasks: f.tasks.filter(t => t.epicId === epic.id) }
 })
+route('GET', '/epics/:id/history', () => f.epicHistory)
 
 route('GET', '/agents', () => f.agents)
 route('POST', '/agents', (_, body) => {

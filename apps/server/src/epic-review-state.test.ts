@@ -155,12 +155,15 @@ it('publishes the interrupted review run after Plan approval commits', async () 
   expect(interrupted()).toEqual([{ id: run.id, state: 'interrupted' }])
 })
 
-it('publishes a review run the epic rebase hand-off interrupts', async () => {
+it('retries the rebase of a conflicted epic without touching its review', async () => {
   const { project, first } = await setup()
   await t.db.update(schema.epics).set({ reviewState: 'conflict', prHeadSha: 'abc123' }).where(eq(schema.epics.id, first.id))
   const run = await activeReview(first.id, project.id)
   const response = await t.request('POST', `/api/epics/${first.id}/review`, { action: 'rebase', headSha: 'abc123' })
   expect(response.status).toBe(200)
-  expect(t.events.filter(e => e.type === 'epic.updated')).toMatchObject([{ epic: { id: first.id, reviewState: 'open' } }])
-  expect(interrupted()).toEqual([{ id: run.id, state: 'interrupted' }])
+  expect(t.events.filter(e => e.type === 'epic.updated')).toMatchObject([{ epic: { id: first.id, reviewState: 'conflict' } }])
+  const [row] = await t.db.select().from(schema.epics).where(eq(schema.epics.id, first.id))
+  expect(row).toMatchObject({ reviewState: 'conflict', syncRetriedAt: expect.any(Date) })
+  expect(interrupted()).toEqual([])
+  expect((await t.db.select().from(schema.runs).where(eq(schema.runs.id, run.id)))[0]!.state).toBe('running')
 })

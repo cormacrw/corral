@@ -12,6 +12,7 @@ import type {
   DesignVersion,
   Epic,
   EpicDetail,
+  EpicHistoryEntry,
   EpicReviewActionInput,
   Evidence,
   GlobalStatus,
@@ -207,9 +208,11 @@ export const api = {
 
   epics: {
     review: (id: string, input: EpicReviewActionInput) => call<{ ok: boolean }>('POST', `/epics/${id}/review`, input),
+    retrySync: (id: string) => call<{ ok: boolean }>('POST', `/epics/${id}/sync/retry`),
     setDependencies: (id: string, dependsOn: string[]) => call<Epic>('PUT', `/epics/${id}/dependencies`, { dependsOn }),
     list: (slug: string) => call<Epic[]>('GET', `/projects/${slug}/epics`),
     get: (id: string) => call<EpicDetail>('GET', `/epics/${id}`),
+    history: (id: string) => call<EpicHistoryEntry[]>('GET', `/epics/${id}/history`),
     patch: (id: string, input: PatchEpicInput) => call<Epic>('PATCH', `/epics/${id}`, input)
   },
   plan: {

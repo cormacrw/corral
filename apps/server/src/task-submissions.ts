@@ -1,6 +1,7 @@
 import { TASK_INTEGRATION_PROTOCOL } from '@corral/contracts'
 import { schema, type Executor } from '@corral/db'
 import { asc, eq, max } from 'drizzle-orm'
+import { isEpicResolution } from './task-base.ts'
 
 const { epics, tasks, taskSubmissions } = schema
 
@@ -11,7 +12,7 @@ type EpicFacts = Pick<typeof epics.$inferSelect, 'reviewMode' | 'branch' | 'revi
 // after it take a PR to the target branch (taskBase).
 function prFreeEligible(task: TaskFacts, epic: EpicFacts | undefined): epic is EpicFacts & { branch: string } {
   return task.prNumber === null && epic?.reviewMode === 'epic' && epic.reviewState !== 'merged' && !!epic.branch
-    && !!task.branch && task.branch !== epic.branch && ['task', 'bug'].includes(task.type)
+    && !!task.branch && task.branch !== epic.branch && !isEpicResolution(task) && ['task', 'bug'].includes(task.type)
 }
 
 // Persists the PR-free path for a task whose developer run is going to a runner

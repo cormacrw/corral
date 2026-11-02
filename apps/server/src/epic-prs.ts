@@ -1,20 +1,20 @@
 import { arrivalKey, storedMessages, withMessages, type PreparedItem } from './inbox-message.ts'
-import type { EpicConflictItem, EpicReviewActionInput, EpicReviewItem, EpicReviewReport, EpicReviewTask, InboxSince, RunJob } from '@corral/contracts'
+import type { EpicConflictItem, EpicHistoryEntry, EpicReviewActionInput, EpicReviewItem, EpicReviewReport, EpicReviewTask, InboxSince, RunJob } from '@corral/contracts'
 import { ACTIVE_RUN_STATES, isActiveRun, feedbackFixTitle, FIX_TITLE_PREFIX, feedbackPoints, isTaskDone, LEASE_DURATION_MS, markdownToRichText, taskRef, type Actor, type CompletionState } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm'
-import { appendAudit, auditEvent, auditText, readAudit } from './audit.ts'
-import type { OrchestratorDeps } from './orchestrator.ts'
+import { appendAudit, auditEvent, auditText, readAudit, type AuditView } from './audit.ts'
+import { actorLabel, type OrchestratorDeps } from './orchestrator.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import { loadEpic } from './epics.ts'
+import { APPROVED_STATES, shortSha } from './epic-rebase-approval.ts'
+import { activeRebase, rebasingEpics, retrySync } from './epic-sync.ts'
 import type { PullRequest } from './github.ts'
 import { Backoff } from './retries.ts'
 import { fileArtifacts, workNotes } from './inbox-changes.ts'
-import { publishInvalidatedEpics, type InvalidatedEpics } from './epic-review-state.ts'
 import { runEndValues, RUN_TIMEOUT_SECONDS } from './run-lifecycle.ts'
 import { listEvidenceFor } from './runs.ts'
 import { thumbnailUrl } from './projects.ts'
-import { EPIC_REBASE_NO_GATES, EPIC_SQUASH_KEEPS_MIGRATIONS, EPIC_SQUASH_KEEPS_TRAILERS } from './prompts.ts'
 import { commitUrl, createTask, listCommentsFor, loadTask, toTasks, type ProjectRow, type TaskRow } from './tasks.ts'
 
 const { acceptanceCriteria, agents, auditLog, epics, projects, runs, tasks } = schema
@@ -32,9 +32,7 @@ export const complete = (board: readonly CompletionState[]) => board.length > 0 
 
 // Whether this PR needs integration review to start
 function reviewDue(epic: EpicRow, pr: PullRequest): boolean {
-  if (epic.prNumber && epic.prHeadSha === pr.headSha && epic.reviewState !== 'open' && epic.reviewState !== 'changes_requested') return false
-  // Corral asked for this new head; the merge pass keeps the approval
-  return !(epic.reviewState === 'ready_to_merge' && epic.rebaseRequested)
+  return !(epic.prNumber && epic.prHeadSha === pr.headSha && epic.reviewState !== 'open' && epic.reviewState !== 'changes_requested')
 }
 
 // How often a PR closed without merging is read, in case it's reopened
@@ -76,7 +74,7 @@ export class EpicPullRequests {
   private async startReview(candidate: EpicRow, project: ProjectRow): Promise<void> {
     const { db, github } = this.d
     const board = await epicBoard(db, candidate.id)
-    if (!complete(board)) return
+    if (!complete(board) || await activeRebase(db, candidate.id)) return
     // Safe to repeat if what follows fails: the next pass finds the open PR
     const pr = candidate.prNumber
       ? await github.getPullRequest(project.repository, candidate.prNumber)
@@ -88,16 +86,27 @@ export class EpicPullRequests {
     if (pr.state !== 'open' || pr.merged) return this.closedPoll.later(candidate.id)
     this.closedPoll.clear(candidate.id)
     if (!reviewDue(candidate, pr)) return
+    // Review starts from a head on top of the target branch: the
+    // synchronizer's pass rebases it, and this one comes back
+    if (await github.behindBy(project.repository, project.defaultBranch, pr.headSha) > 0) return
     await github.updatePullRequest(project.repository, pr.number, { body: await this.body(db, candidate, board, project) })
     const changed = await db.transaction(async (tx) => {
       const [epic] = await tx.select().from(epics).where(eq(epics.id, candidate.id)).for('update')
       if (!epic || epic.reviewState === 'merged' || (epic.prNumber && epic.prNumber !== pr.number)) return false
-      if (!reviewDue(epic, pr) || !complete(await epicBoard(tx, epic.id))) return false
+      if (!reviewDue(epic, pr) || await activeRebase(tx, epic.id) || !complete(await epicBoard(tx, epic.id))) return false
+      // Only the synchronizer moves an approved head and keeps approval, so
+      // any other new head loses it. After the behind check: a PR read just
+      // after Corral's own push can still show the old head, which is behind.
+      if (epic.prNumber && epic.prHeadSha !== pr.headSha && APPROVED_STATES.includes(epic.reviewState)) {
+        const reason = 'The epic head moved without a reviewed rebase.'
+        await tx.update(epics).set({ reviewState: 'open', approvedHeadSha: null, approvedBaseSha: null, updatedAt: this.now() }).where(eq(epics.id, epic.id))
+        await appendAudit(tx, { projectId: project.id, actor: system }, auditEvent('epic.pr', { epicId: epic.id, event: 'approval_invalidated', approvedHeadSha: epic.approvedHeadSha, from: epic.prHeadSha!, to: pr.headSha, ontoSha: null, operationId: null, resolutionTaskId: null, resolutionReview: null, reason, summary: `Approved ${shortSha(epic.approvedHeadSha)}, head moved ${shortSha(epic.prHeadSha)} to ${shortSha(pr.headSha)}. ${reason}` }))
+      }
       // A moved epic head invalidates approval, even if board membership
       // didn't change. Active runs on the old head are fenced by state.
       await tx.update(runs).set(runEndValues({ state: 'interrupted', error: 'Epic PR changed' }, this.now()))
         .where(and(eq(runs.epicId, epic.id), inArray(runs.state, [...ACTIVE_RUN_STATES])))
-      await tx.update(epics).set({ prNumber: pr.number, prHeadSha: pr.headSha, reviewState: 'in_review', rebaseRequested: false, conflictFiles: null, updatedAt: this.now() }).where(eq(epics.id, epic.id))
+      await tx.update(epics).set({ prNumber: pr.number, prHeadSha: pr.headSha, approvedHeadSha: null, approvedBaseSha: null, reviewState: 'in_review', conflictFiles: null, updatedAt: this.now() }).where(eq(epics.id, epic.id))
       await appendAudit(tx, { projectId: project.id, actor: system }, auditEvent('epic.pr', { epicId: epic.id, event: epic.prNumber ? 'review_started' : 'opened', prNumber: pr.number }))
       return true
     })
@@ -129,7 +138,7 @@ export class EpicPullRequests {
         .orderBy(asc(epics.updatedAt)).for('update', { of: epics, skipLocked: true })
       for (const { epic, project } of candidates) {
         const [live] = await tx.select({ id: runs.id }).from(runs).where(and(eq(runs.epicId, epic.id), inArray(runs.state, [...ACTIVE_RUN_STATES]))).limit(1)
-        if (live || !epic.prHeadSha || !epic.branch || !complete(await epicBoard(tx, epic.id))) continue
+        if (live || await activeRebase(tx, epic.id) || !epic.prHeadSha || !epic.branch || !complete(await epicBoard(tx, epic.id))) continue
         // No reviewer runner free: the epic stays in review for the next pass
         const runnerId = await place(tx)
         if (!runnerId) return null
@@ -163,7 +172,7 @@ export class EpicPullRequests {
       if (!project || !epic || !current || !isActiveRun(current.state) || epic.reviewState !== 'in_review' || epic.prHeadSha !== run.headSha || !complete(await epicBoard(tx, epic.id))) throw new Error('Epic changed during review; this verdict is stale')
       const actor: Actor = { kind: 'agent', role: 'reviewer', runId: run.id }
       await tx.update(runs).set(runEndValues({ state: 'completed', outcome, summary: report.summary }, this.now())).where(eq(runs.id, run.id))
-      await tx.update(epics).set({ reviewState: report.outcome === 'approved' ? 'human_review' : 'changes_requested', updatedAt: this.now() }).where(eq(epics.id, epic.id))
+      await tx.update(epics).set({ reviewState: report.outcome === 'approved' ? 'human_review' : 'changes_requested', ...report.outcome === 'approved' ? await this.snapshot(project, run.headSha!) : { approvedHeadSha: null, approvedBaseSha: null }, updatedAt: this.now() }).where(eq(epics.id, epic.id))
       if (report.outcome === 'changes_requested') fixId = await createEpicFixTask(tx, project, epic, report.summary, actor)
       await appendAudit(tx, { projectId: project.id, actor }, auditEvent('epic.pr', { epicId: epic.id, event: outcome, headSha: run.headSha, summary: report.summary }))
     })
@@ -193,7 +202,7 @@ export class EpicPullRequests {
   async humanAction(epicId: string, input: EpicReviewActionInput, actor: Actor) {
     if (!/^[0-9a-f-]{36}$/i.test(epicId)) throw notFound()
     if (actor.kind !== 'human') throw new ApiFailure(409, { code: 'conflict', constraint: 'human_only' })
-    if (input.action === 'rebase') return this.handOffRebase(epicId, input.headSha, actor)
+    if (input.action === 'rebase') return this.retrySync(epicId, actor)
     let fixId: string | null = null
     // GitHub first, holding no lock; approving only moves the epic on, and
     // the merge pass reads the head again under the lock
@@ -205,7 +214,7 @@ export class EpicPullRequests {
     await this.d.db.transaction(async (tx) => {
       const [project] = await tx.select().from(projects).where(eq(projects.id, found.project.id)).for('update')
       const [epic] = await tx.select().from(epics).where(eq(epics.id, epicId)).for('update')
-      if (!project || !epic || epic.reviewState !== 'human_review' || epic.prHeadSha !== input.headSha || !complete(await epicBoard(tx, epic.id))) throw new ApiFailure(409, { code: 'conflict', constraint: 'epic_review_changed' })
+      if (!project || !epic || epic.reviewState !== 'human_review' || epic.prHeadSha !== input.headSha || await activeRebase(tx, epic.id) || !complete(await epicBoard(tx, epic.id))) throw new ApiFailure(409, { code: 'conflict', constraint: 'epic_review_changed' })
       if (input.action === 'request_changes' && !input.text?.trim()) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ message: 'Describe the changes needed' }] })
       // D27: flagged tasks and human checks are obligations of this approval.
       // Read under the epic lock, so a later change to the board can't slip past.
@@ -215,7 +224,7 @@ export class EpicPullRequests {
       if (input.action === 'approve' && required.some(r => (r.humanReview && !confirmedTasks.includes(r.taskId)) || r.humanChecks.some(id => !confirmedCriteria.includes(id)))) {
         throw new ApiFailure(409, { code: 'conflict', constraint: 'human_checks_unconfirmed' })
       }
-      await tx.update(epics).set({ reviewState: input.action === 'approve' ? 'ready_to_merge' : 'changes_requested', updatedAt: this.now() }).where(eq(epics.id, epic.id))
+      await tx.update(epics).set({ reviewState: input.action === 'approve' ? 'ready_to_merge' : 'changes_requested', ...input.action === 'approve' ? await this.snapshot(project, input.headSha) : { approvedHeadSha: null, approvedBaseSha: null }, updatedAt: this.now() }).where(eq(epics.id, epic.id))
       if (input.action === 'request_changes') fixId = await createEpicFixTask(tx, project, epic, input.text!.trim(), actor)
       await appendAudit(tx, { projectId: project.id, actor }, auditEvent('epic.pr', { epicId, event: input.action === 'approve' ? 'human_approved' : 'human_changes_requested', headSha: input.headSha, summary: input.text ?? '', ...(input.action === 'approve' && { confirmedCriteria: required.flatMap(r => r.humanChecks), confirmedTasks: required.filter(r => r.humanReview).map(r => r.taskId) }) }))
     })
@@ -224,34 +233,20 @@ export class EpicPullRequests {
     return { ok: true }
   }
 
-  // D27: the human hands a conflict to a developer run. The task's branch is
-  // the epic branch, so its run rebases and force-pushes that branch. When
-  // the task is Merged, the head has moved and integration review starts over.
-  private async handOffRebase(epicId: string, headSha: string, actor: Actor) {
-    const invalidatedEpics: InvalidatedEpics = new Map()
-    const taskId = await this.d.db.transaction(async (tx) => {
-      const [found] = await tx.select().from(epics).where(eq(epics.id, epicId))
-      if (!found) throw notFound()
-      const [project] = await tx.select().from(projects).where(eq(projects.id, found.projectId)).for('update')
-      const [epic] = await tx.select().from(epics).where(eq(epics.id, epicId)).for('update')
-      if (!project || !epic || epic.reviewState !== 'conflict' || epic.prHeadSha !== headSha) throw new ApiFailure(409, { code: 'conflict', constraint: 'epic_review_changed' })
-      const target = project.defaultBranch
-      const files = epic.conflictFiles?.length ? epic.conflictFiles.join(', ') : 'the files git reports'
-      const resolve = `Resolve the conflicts in ${files}, keeping both sides' intent and never reverting what ${target} just merged. No feature changes.`
-      const pushed = 'Corral force-pushes the epic branch with --force-with-lease, and no separate PR is opened.'
-      // Without required CI nothing else would verify the gates
-      const squash = project.requiredChecks.length > 0
-      const text = squash
-        ? `Squash the epic branch ${epic.branch} into one commit on its merge base with origin/${target}, then rebase that commit onto origin/${target}, so each conflict is resolved once. Epic PRs always squash on merge, so the individual commits aren't kept anyway. ${EPIC_SQUASH_KEEPS_TRAILERS} ${EPIC_SQUASH_KEEPS_MIGRATIONS} Never merge ${target} in. ${resolve} ${EPIC_REBASE_NO_GATES} Report pr_updated; ${pushed}`
-        : `Rebase the epic branch ${epic.branch} onto origin/${target}: git fetch origin && git rebase origin/${target}. Never merge ${target} in. ${resolve} Run the project's gates, then report pr_updated; ${pushed}`
-      const criterion = `${epic.branch} is ${squash ? 'squashed to one commit keeping every Corral-Submission trailer and ' : ''}rebased onto origin/${target} with no merge commits, and the conflicts in ${files} are resolved keeping both sides' intent`
-      const id = await createTask(tx, project, { type: 'task', title: `Rebase epic: ${epic.title}`.slice(0, 200), description: paragraph(text), epicId: epic.id, acceptanceCriteria: [criterion] }, actor, { epicFix: true, invalidatedEpics })
-      await tx.update(tasks).set({ branch: epic.branch }).where(eq(tasks.id, id))
-      await appendAudit(tx, { projectId: project.id, actor }, auditEvent('epic.pr', { epicId, event: 'rebase_handed_off', headSha }))
-      return id
-    })
-    this.d.events.publish({ type: 'task.created', task: await loadTask(this.d.db, taskId) })
-    await publishInvalidatedEpics(this.d.db, this.d.events, invalidatedEpics)
+  // What was approved, and where it sat. The base only informs the history, so
+  // failing to read it doesn't refuse the approval.
+  private async snapshot(project: ProjectRow, headSha: string) {
+    const comparison = await this.d.github.compare(project.repository, project.defaultBranch, headSha).catch(() => null)
+    return { approvedHeadSha: headSha, approvedBaseSha: comparison?.mergeBase ?? null }
+  }
+
+  // A failed synchronization, or a conflict from before they were automatic,
+  // goes round the automatic path again
+  async retrySync(epicId: string, actor: Actor) {
+    if (!/^[0-9a-f-]{36}$/i.test(epicId)) throw notFound()
+    if (actor.kind !== 'human') throw new ApiFailure(409, { code: 'conflict', constraint: 'human_only' })
+    await retrySync(this.d.db, epicId, actor, this.now())
+    await this.publish(epicId)
     return { ok: true }
   }
 
@@ -260,7 +255,18 @@ export class EpicPullRequests {
   }
 }
 
-const paragraph = (text: string) => ({ type: 'doc' as const, content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
+// How each epic PR event reads, in the Inbox and on the epic's history
+export const EPIC_EVENT_LABELS: Record<string, string> = { opened: 'Epic PR opened', review_started: 'Epic integration review started', approved: 'Epic PR approved by reviewer', changes_requested: 'Epic integration changes requested', human_approved: 'You approved the epic PR', human_changes_requested: 'You requested changes on the epic PR', rebase_requested: 'Rebasing the epic PR onto the target branch', rebased: 'Epic PR rebased; CI runs again', conflict: 'Epic PR conflict', rebase_handed_off: 'You handed the epic PR rebase to a developer', rebase_resolving: 'Epic rebase conflict sent to a developer', rebase_failed: 'Epic rebase attempt failed', sync_failed: 'Epic rebase stopped', sync_retried: 'You retried the epic rebase', ci_failed: 'CI failed on the epic PR', merge_refused: 'GitHub refused the epic PR merge', review_failed: 'Epic integration review stopped retrying', closed: 'Epic PR closed on GitHub', merged: 'Epic PR merged', approval_retained: 'Approval kept across the rebase', approval_invalidated: 'Approval no longer applies; review starts again', decision_requested: 'An epic rebase needs your decision', decision_answered: 'You decided on the epic rebase' }
+
+export const epicEventText = (detail: AuditView) => [EPIC_EVENT_LABELS[detail.event ?? ''] ?? detail.event, detail.summary].filter(Boolean).join(': ')
+
+export async function epicHistory(db: Executor, epicId: string): Promise<EpicHistoryEntry[]> {
+  const rows = await db.select().from(auditLog).where(and(eq(auditLog.action, 'epic.pr'), sql`${auditText('epic.pr', 'epicId')} = ${epicId}`)).orderBy(asc(auditLog.createdAt), asc(auditLog.id))
+  return rows.map((row) => {
+    const detail = readAudit(row.detail)
+    return { id: String(row.id), at: row.createdAt.toISOString(), actor: actorLabel(row.actor), event: detail.event ?? '', text: epicEventText(detail), detail: row.detail as Record<string, unknown> }
+  })
+}
 
 export async function createEpicFixTask(tx: Executor, project: ProjectRow, epic: EpicRow, feedback: string, actor: Actor) {
   return createTask(tx, project, { type: 'task', title: feedbackFixTitle(feedback), description: markdownToRichText(feedback), epicId: epic.id, acceptanceCriteria: feedbackPoints(feedback) }, actor, { epicFix: true })
@@ -344,7 +350,7 @@ async function waitingEpics(db: Executor, epicId?: string) {
   const open = rows.filter(({ epic }) => epic.prNumber && epic.prHeadSha)
   if (open.length === 0) return []
   const ids = open.map(r => r.epic.id)
-  const [boardRows, approvals, failures] = await Promise.all([
+  const [boardRows, approvals, failures, rebasing] = await Promise.all([
     db.select().from(tasks).where(and(inArray(tasks.epicId, ids), isNull(tasks.deletedAt))).orderBy(asc(tasks.number)),
     // Not tied to the head: a merge GitHub refused comes back here after a clean rebase
     db.selectDistinctOn([runs.epicId], { epicId: runs.epicId, summary: runs.summary, agent: agents.name }).from(runs).innerJoin(agents, eq(agents.id, runs.agentId))
@@ -352,7 +358,8 @@ async function waitingEpics(db: Executor, epicId?: string) {
     // Why integration review gave up, if it did
     db.select({ epicId: auditText('epic.pr', 'epicId'), headSha: sql<string | null>`${auditLog.detail}->>'headSha'`, detail: auditLog.detail }).from(auditLog)
       .where(and(eq(auditLog.action, 'epic.pr'), inArray(auditText('epic.pr', 'epicId'), ids), sql`${auditText('epic.pr', 'event')} = 'review_failed'`))
-      .orderBy(desc(auditLog.createdAt), desc(auditLog.id))
+      .orderBy(desc(auditLog.createdAt), desc(auditLog.id)),
+    rebasingEpics(db, ids)
   ])
   const boards = Map.groupBy(boardRows.filter(t => t.status !== 'draft' && t.status !== 'backlog'), t => t.epicId!)
   const approvalOf = new Map(approvals.map(a => [a.epicId, a]))
@@ -360,6 +367,7 @@ async function waitingEpics(db: Executor, epicId?: string) {
     const board = boards.get(epic.id) ?? []
     const review = approvalOf.get(epic.id)
     if (epic.reviewState === 'conflict') return [{ epic, project, board, review, failure: null }]
+    if (rebasing.has(epic.id)) return []
     const given = failures.find(f => f.epicId === epic.id && f.headSha === epic.prHeadSha)
     const failure = given ? readAudit(given.detail).summary ?? REVIEW_FAILED : null
     return complete(board) && (review || failure) ? [{ epic, project, board, review, failure }] : []

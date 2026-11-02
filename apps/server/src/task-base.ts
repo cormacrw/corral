@@ -22,10 +22,18 @@ export async function evidenceState(db: Executor, task: { id: string, reviewRoun
   return { criteria, attached, missing: criteria.filter(c => !c.checkedByHuman && !attached.some(e => e.criterionId === c.id)) }
 }
 
-// A task handed an epic PR's rebase (D27): its branch is the epic branch, so
-// it opens no PR of its own
+// A conflict from an epic rebase is resolved on a candidate branch of its own,
+// which only reaches the epic branch once approved (D27)
+const RESOLUTION_PREFIX = 'corral/epic-rebase/'
+export const epicResolutionBranch = (operationId: string) => `${RESOLUTION_PREFIX}${operationId}`
+export const isEpicResolution = (task: { branch: string | null }) => task.branch?.startsWith(RESOLUTION_PREFIX) ?? false
+
+// Whether a task repairs the epic rather than adding to it: it opens no PR of
+// its own. Besides resolutions, that's a task handed an epic PR's rebase before
+// they existed, whose branch is the epic branch.
 export async function isEpicRebaseTask(db: Executor, task: TaskRow): Promise<boolean> {
   if (!task.epicId || !task.branch) return false
+  if (isEpicResolution(task)) return true
   const [epic] = await db.select({ branch: schema.epics.branch }).from(schema.epics).where(eq(schema.epics.id, task.epicId))
   return epic?.branch === task.branch
 }
@@ -36,8 +44,8 @@ export async function taskBase(db: Executor, task: TaskRow, project: ProjectRow,
   if (!task.epicId || task.type === 'spike' || task.type === 'design') return project.defaultBranch
   const [epic] = await db.select().from(schema.epics).where(eq(schema.epics.id, task.epicId))
   if (!epic || epic.reviewMode === 'direct' || epic.reviewState === 'merged') return project.defaultBranch
-  // A rebase task works on the epic branch itself, against the target branch
-  if (epic.branch && task.branch === epic.branch) return project.defaultBranch
+  // A rebase task works on the epic's commits, against the target branch
+  if (isEpicResolution(task) || (epic.branch && task.branch === epic.branch)) return project.defaultBranch
   const branch = epic.branch ?? `corral/epic-${epic.id}-${slugify(epic.title).slice(0, 40).replace(/-+$/, '')}`
   if (github) {
     try {

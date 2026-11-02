@@ -674,3 +674,11 @@ describe('run transcripts', () => {
     vi.restoreAllMocks()
   })
 })
+
+describe('epic.updated', () => {
+  it('marks the epic\'s history stale, which the event doesn\'t carry', () => {
+    const client = testQueryClient()
+    const epic = { id: 'e-1', projectId: 'p-1' } as Epic
+    expect(applyEvent(client, { type: 'epic.updated', epic } as ServerEvent)).toContainEqual(keys.epics.history('e-1'))
+  })
+})

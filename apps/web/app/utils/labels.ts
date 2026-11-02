@@ -65,7 +65,7 @@ export const EPIC_REVIEW_STATE: Record<EpicReviewState, { label: string, color: 
   human_review: { label: 'Awaiting your review', color: 'warning' },
   changes_requested: { label: 'Changes requested', color: 'warning' },
   ready_to_merge: { label: 'Ready to merge', color: 'success' },
-  conflict: { label: 'Rebase conflict', color: 'error' },
+  conflict: { label: 'Rebase conflict', color: 'warning' },
   merged: { label: 'Merged', color: 'success' }
 }
 
@@ -88,8 +88,12 @@ export function epicInProgress(epic: Pick<Epic, 'reviewMode' | 'branch' | 'revie
 
 // What the epic's review is waiting on, for its progress; null while its
 // tasks are still going in and in `direct` mode, which has no epic PR
-export function epicReviewStatus(epic: Pick<Epic, 'reviewMode' | 'branch' | 'reviewState' | 'taskCount' | 'mergedCount'>): { label: string, color: Color } | null {
+export function epicReviewStatus(epic: Pick<Epic, 'reviewMode' | 'branch' | 'reviewState' | 'taskCount' | 'mergedCount'> & Partial<Pick<Epic, 'sync'>>): { label: string, color: Color } | null {
   if (epic.reviewMode === 'direct') return null
+  if (epic.sync?.state === 'rebasing') return { label: 'Rebasing onto the target branch', color: 'info' }
+  if (epic.sync?.state === 'deciding') return { label: 'Rebase needs your decision', color: 'warning' }
+  if (epic.sync?.state === 'resolving') return { label: 'Resolving a rebase conflict', color: 'info' }
+  if (epic.sync?.state === 'failed') return { label: 'Rebase stopped, retry to carry on', color: 'error' }
   const allMerged = epic.taskCount > 0 && epic.mergedCount === epic.taskCount
   switch (epic.reviewState) {
     case null: return allMerged && epic.branch ? { label: 'All tasks complete, epic PR opening', color: 'neutral' } : null
@@ -98,7 +102,7 @@ export function epicReviewStatus(epic: Pick<Epic, 'reviewMode' | 'branch' | 'rev
     case 'human_review': return { label: 'All tasks complete, awaiting your review', color: 'warning' }
     case 'changes_requested': return { label: 'Changes requested, fixes in progress', color: 'warning' }
     case 'ready_to_merge': return { label: 'Approved, waiting to merge', color: 'success' }
-    case 'conflict': return { label: 'Rebase conflict, needs you', color: 'error' }
+    case 'conflict': return { label: 'Rebase conflict, rebasing again', color: 'info' }
     case 'merged': return { label: 'Epic PR merged', color: 'success' }
   }
 }

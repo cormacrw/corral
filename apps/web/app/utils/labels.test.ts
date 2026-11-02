@@ -125,6 +125,9 @@ describe('epic review status', () => {
 
   it('has nothing to say while tasks are going in, or in direct mode', () => {
     expect(epicReviewStatus({ ...epic, mergedCount: 1 })).toBeNull()
+    expect(epicReviewStatus({ ...epic, reviewState: 'ready_to_merge', sync: { state: 'deciding', question: 'Which?', taskId: 't', taskRef: 'COR-1' } })).toEqual({ label: 'Rebase needs your decision', color: 'warning' })
+    expect(epicReviewStatus({ ...epic, reviewState: 'open', sync: { state: 'resolving', files: ['a.ts'], taskId: 't', taskRef: 'COR-1' } })).toEqual({ label: 'Resolving a rebase conflict', color: 'info' })
+    expect(epicReviewStatus({ ...epic, reviewState: 'ready_to_merge', sync: { state: 'failed', error: 'Network down' } })).toEqual({ label: 'Rebase stopped, retry to carry on', color: 'error' })
     expect(epicReviewStatus({ ...epic, reviewMode: 'direct' })).toBeNull()
   })
 
