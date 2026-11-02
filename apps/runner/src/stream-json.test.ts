@@ -7,9 +7,10 @@ describe('StreamJsonParser', () => {
   it.each([
     { text: '', isError: false, emptyTurn: true },
     { text: 'Context usage', isError: false, emptyTurn: undefined },
-    { text: '', isError: true, emptyTurn: undefined }
-  ])('marks only successful empty zero-turn results as empty: %j', ({ text, isError, emptyTurn }) => {
-    const parsed = new StreamJsonParser().parse(line({ type: 'result', subtype: isError ? 'error' : 'success', num_turns: 0, result: text }))
+    { text: '', isError: true, emptyTurn: undefined },
+    { text: '', isError: false, emptyTurn: undefined, localCommand: 'clear' }
+  ])('marks only successful empty zero-turn results as empty: %j', ({ text, isError, emptyTurn, localCommand }) => {
+    const parsed = new StreamJsonParser().parse(line({ type: 'result', subtype: isError ? 'error' : 'success', num_turns: 0, local_command: localCommand, result: text }))
     expect(parsed.result).toEqual({ isError, text })
     expect(parsed.emptyTurn).toBe(emptyTurn)
   })

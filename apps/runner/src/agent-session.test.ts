@@ -17,8 +17,9 @@ let started = false
 let holding = false
 createInterface({ input: process.stdin }).on('line', (line) => {
   let content = JSON.parse(line).message.content
-  if (content === '/context') {
-    console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, num_turns: 0, result: 'Context usage', session_id: 'one-session' }))
+  if (content.startsWith('/')) {
+    const local_command = content.slice(1)
+    console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, num_turns: 0, local_command, result: local_command === 'context' ? 'Context usage' : '', session_id: 'one-session' }))
     return
   }
   if (content === 'orphaned') console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, num_turns: 0, result: '', session_id: 'one-session' }))
@@ -151,6 +152,16 @@ describe('spawnAgentSession', () => {
     agent.send('/context')
     expect(await agent.nextResult()).toEqual({ isError: false, text: 'Context usage' })
     expect(lines.some(line => line.replayed === '/context')).toBe(false)
+  })
+
+  it.each(['/clear', '/compact'])('returns the empty result of %s, which is never replayed', async (command) => {
+    const agent = start()
+    agent.send('first')
+    await agent.nextResult()
+
+    agent.send(command)
+    expect(await agent.nextResult()).toEqual({ isError: false, text: '' })
+    expect(lines.some(line => line.replayed === command)).toBe(false)
   })
 
   it('exits once stdin closes', async () => {
