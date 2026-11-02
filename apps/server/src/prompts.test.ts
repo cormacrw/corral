@@ -1,6 +1,6 @@
 import { HUMAN_DECISIONS_NOTE } from '@corral/core'
 import { describe, expect, it } from 'vitest'
-import { epicReviewCiSection, epicReviewPrompt, designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, isGrillRequest, pmFallbackPrompt, pmPrompt, questionText, reviewerPrompt, type PromptTask, developerCheckScope, epicFixCheckScope } from './prompts.ts'
+import { epicReviewCiSection, epicReviewPrompt, designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, epicFixPrompt, isGrillRequest, pmFallbackPrompt, pmPrompt, questionText, reviewerPrompt, type PromptTask, developerCheckScope, epicFixCheckScope } from './prompts.ts'
 
 const guidance = pmPrompt({ text: '', attachedTask: null, projectName: null, prefix: null, fresh: false })
 const turn = { text: 'hi', attachedTask: null, projectName: 'Test app', prefix: 'TA' }
@@ -474,7 +474,27 @@ describe('how much a developer checks locally', () => {
 
   it('starts a CI fix round from what failed', () => {
     const prompt = developerRevisionPrompt({ ...task, checkScope: 'targeted', reviewRounds: 1, ciFailures: failure }, [])
-    expect(prompt).toContain('starting from any test or gate that failed')
+    expect(prompt).toContain('with the project\'s own commands, starting from any test or gate that failed')
+  })
+
+  it('overrules a repository\'s own instructions, and doesn\'t promise when CI runs', () => {
+    const prompt = developerPrompt({ ...task, checkScope: 'targeted' }, 'Tam')
+    expect(prompt).toContain('whatever your general instructions say')
+    expect(prompt).not.toContain('every push')
+  })
+
+  it('tells a spike there\'s nothing to check, and adds no checks to its revisions', () => {
+    const spike = { ...task, spike: true, checkScope: 'targeted' as const }
+    expect(developerPrompt(spike, 'Tam')).toContain('nothing to lint, typecheck or test')
+    expect(developerPrompt(spike, 'Tam')).not.toContain('Don\'t run the full suite')
+    expect(developerRevisionPrompt({ ...spike, reviewRounds: 1 }, [])).not.toMatch(/full suite|type checks/)
+  })
+
+  it('keeps the build on an epic fix with no required CI', () => {
+    const input = { agentName: 'Tam', epicTitle: 'E', goal: '', brief: '', branch: 'c', epicBranch: 'e', target: 'main', ontoSha: 'abc', files: [], failures: [], decisions: [] }
+    expect(epicFixPrompt({ ...input, fix: 'conflict', requiredChecks: [] })).toContain('Then run the project\'s build')
+    expect(epicFixPrompt({ ...input, fix: 'ci', requiredChecks: [] })).toContain('Then run the project\'s build')
+    expect(epicFixPrompt({ ...input, fix: 'ci', requiredChecks: ['ci'] })).not.toContain('project\'s build')
   })
 
   it('asks a resolution task for no checks, on its revision rounds too', () => {

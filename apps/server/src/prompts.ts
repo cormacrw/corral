@@ -388,7 +388,8 @@ export const REFUSED = 'Corral refused your last candidate'
 // A developer run on an epic, with no task (D29)
 export function epicFixPrompt(input: EpicFixInput): string {
   const { fix, branch, target, ontoSha, files } = input
-  const gates = checksInstruction(epicFixCheckScope(fix, input.requiredChecks), fix === 'ci')
+  const scope = epicFixCheckScope(fix, input.requiredChecks)
+  const gates = `${checksInstruction(scope, fix === 'ci')}${scope ? '' : BUILD_TOO}`
   const job = fix === 'conflict'
     ? section('The conflict', `Corral could not rebase this epic onto \`${target}\` cleanly. Run \`git fetch origin && git rebase ${ontoSha}\`. Never merge \`${target}\` in. Resolve the conflicts in ${files.length ? files.join(', ') : 'the files git reports'}.
 
@@ -617,7 +618,7 @@ function spikeDeveloperPrompt(task: PromptTask, agentName: string): string {
     commentsSection(task, 'author'),
     attachmentsSection(task),
     section('How to work', `
-- Investigate; don't change code. You are in a checkout of \`${task.defaultBranch}\` with no branch: don't commit or push, and no PR is opened. Put experiments and notes in your scratch folder, outside the repository.
+- Investigate; don't change code, so there's nothing to lint, typecheck or test, whatever your general instructions say. You are in a checkout of \`${task.defaultBranch}\` with no branch: don't commit or push, and no PR is opened. Put experiments and notes in your scratch folder, outside the repository.
 - Use the supplied project brief and open relevant pages from its wiki file list when needed.
 - Back your answer with evidence: attach it for every acceptance criterion with \`attach_evidence\`, using the criterion ID in brackets above (measurements, screenshots, notes with file and line references). Findings may cite command output: attach it as a note with the relevant excerpt rather than a full log where possible.
 - Use \`get_task\` to re-read the task, comments and evidence at any time, and \`add_comment\` to leave notes for the human or reviewer.
@@ -683,8 +684,7 @@ export function developerRevisionPrompt(task: PromptTask, feedback: PromptTask['
     ciFixSection(task),
     section('New comments', feedback.length > 0 ? feedback.map(format).join('\n') : '(none: re-read the task with `get_task`)'),
     section('What to do', `
-- Address every point of the feedback, and finish whatever the task still needs.
-- ${checksInstruction(scopeOf(task), !!task.ciFailures)}
+- Address every point of the feedback, and finish whatever the task still needs.${task.spike ? '' : `\n- ${checksInstruction(scopeOf(task), !!task.ciFailures)}`}
 - Re-read the task with \`get_task\` if anything may have changed, and attach evidence for every acceptance criterion again if the review round has moved on.
 - Then call \`report_outcome\` with outcome "${outcome}" and a summary${task.spike ? ' of your findings' : ' of the change as a whole'}.`)
   ].join('\n')
@@ -747,7 +747,7 @@ function rebaseDeveloperPrompt(task: PromptTask, agentName: string): string {
     section('How to work', `
 - Fetch origin and rebase branch \`${task.branch}\` onto \`origin/${task.defaultBranch}\`.
 - Resolve conflicts keeping the base branch's (main's) changes and the approved branch's intent. Make no other changes; do not undo newly merged work.
-- ${checksInstruction(scopeOf(task))}${scopeOf(task) ? '' : ' Then run the project\'s build.'}
+- ${checksInstruction(scopeOf(task))}${scopeOf(task) ? '' : BUILD_TOO}
 - Check that \`git merge-tree --write-tree HEAD origin/${task.defaultBranch}\` is clean.
 - Do not push or use gh. Corral pushes with --force-with-lease.
 ${WORK_NOTE}
@@ -778,12 +778,15 @@ export function epicFixCheckScope(fix: EpicFixInput['fix'], requiredChecks: stri
 // An epic PR's squash and rebase always leaves the gates to CI
 const scopeOf = (task: PromptTask) => task.squashRebase ? 'none' : task.checkScope
 
+// For a round that replaces approved work and has no required CI behind it
+const BUILD_TOO = ' Then run the project\'s build.'
+
 // `failing`: a CI failure brought this run, so it starts from what failed
 function checksInstruction(scope: CheckScope | null | undefined, failing = false): string {
   if (scope === 'none') return EPIC_REBASE_NO_GATES
   if (scope === 'targeted') {
-    const start = failing ? 'starting from any test or gate that failed' : 'with the project\'s own commands'
-    return `Required CI runs on every push and enforces the full gates, so run only the fast checks and tests relevant to this change, ${start}. Don't run the full suite.`
+    const start = failing ? ', starting from any test or gate that failed' : ''
+    return `This project's required checks must pass before this work merges, so run only the fast checks and tests relevant to this change, with the project's own commands${start}. Don't run the full suite, whatever your general instructions say.`
   }
   return 'This project has no required CI, so nothing else verifies this work. Run its lint, type checks and tests before reporting, with the project\'s own commands.'
 }

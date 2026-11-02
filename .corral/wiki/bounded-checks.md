@@ -26,6 +26,15 @@ Any project's check script can honour the variable. `scripts/check.ts` returns
 at once on `none`, and runs lint and typecheck without the test suites on
 `targeted`. `--review` and an unset variable run everything. A published head
 still needs required CI to merge, and a failure returns as an epic CI failure.
+Spikes change no code, so their prompt asks for no checks and the variable stays
+unset.
+
+A runner too old to know `checkScope` drops it, so the variable is unset and
+`scripts/check.ts` runs in full. That's safe but slow, and nothing refuses it.
+
+Targeted checks trust required CI to report. A required check that never reports
+reads as pending: the merge pass keeps polling, with no agent run and no Inbox
+item, so the work waits in Ready to merge.
 
 Reviewers still follow D26: required CI owns the gates when configured. Without
 required CI, use `pnpm run check --review` and run the build without the cache.
