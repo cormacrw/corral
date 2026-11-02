@@ -731,7 +731,7 @@ describe('integration review prompts', () => {
 })
 
 describe('cappedBranchDiff', () => {
-  it('keeps whole files up to the cap and names the rest', () => {
+  it('keeps every file that fits and names those that do not', () => {
     const diff = cappedBranchDiff([
       { filename: 'small.ts', patch: '+small' },
       { filename: 'huge.ts', patch: '+'.repeat(40_000) },
@@ -739,7 +739,8 @@ describe('cappedBranchDiff', () => {
     ])
     expect(diff).toContain('+small')
     expect(diff).not.toContain('+++')
-    expect(diff).not.toContain('+after')
-    expect(diff).toContain('- huge.ts\n- after.ts')
+    expect(diff).toContain('+after')
+    expect(diff).toContain('Left out for size, so read these on the branch:\n- huge.ts')
+    expect(diff).not.toContain('\n- after.ts')
   })
 })

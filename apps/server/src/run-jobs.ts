@@ -131,20 +131,23 @@ export class RunJobs {
     const local = previous !== null && (previous.runnerId === null || previous.runnerId === ctx.run.runnerId)
     const lastActive = previous?.endedAt ?? previous?.startedAt ?? previous?.queuedAt
     const idleMinutes = lastActive ? Math.round((this.#c.now().getTime() - lastActive.getTime()) / 60_000) : 0
+    const idle = `${previous?.endedAt ? 'it ended' : 'it was last active'} ${idleMinutes} ${idleMinutes === 1 ? 'minute' : 'minutes'} ago`
     const warm = lastActive !== undefined && this.#c.now().getTime() - lastActive.getTime() < WARM_SESSION_MS
     // Resuming costs a full cache write once the cache has expired, so a
     // developer's revision starts fresh instead. Rebase rounds and designers
-    // keep their session whatever its age: it holds what they need.
-    const rebaseRound = task.rebaseOnly || promptTask.squashRebase
-    const expired = local && !warm && ctx.run.role === 'developer' && !rebaseRound
+    // keep their session whatever its age: it holds what they need. So does a
+    // run that never reported, whose uncommitted work only the session knows.
+    const rebaseRound = task.rebaseOnly || await isEpicRebaseTask(db, task)
+    const reported = previous?.state === 'completed' && previous.outcome !== null && previous.outcome !== 'rate_limited'
+    const expired = local && !warm && ctx.run.role === 'developer' && !rebaseRound && reported
     const resume = local && !expired ? previous.agentSessionId : null
     const fresh = expired ? author.prompt({ ...promptTask, coldRevision: { feedback, diff: spike ? null : await this.#branchDiff(ctx, task, baseBranch) } }, ctx.agent.name) : prompt
     if (resume) {
       await this.#c.ending.note(ctx.run.id, warm
-        ? `Resuming the agent session of run #${previous!.number} on ${this.runnerName(ctx.run.runnerId)}: it ended ${idleMinutes} minutes ago, so its prompt cache is still warm`
-        : `Resuming the agent session of run #${previous!.number} on ${this.runnerName(ctx.run.runnerId)}: it ended ${idleMinutes} minutes ago, so its prompt cache has expired, but this kind of round keeps its session`)
+        ? `Resuming the agent session of run #${previous!.number} on ${this.runnerName(ctx.run.runnerId)}: ${idle}, so its prompt cache is still warm`
+        : `Resuming the agent session of run #${previous!.number} on ${this.runnerName(ctx.run.runnerId)}: ${idle}, so its prompt cache has expired, but this kind of round keeps its session`)
     } else if (expired) {
-      await this.#c.ending.note(ctx.run.id, `Starting a fresh session on ${this.runnerName(ctx.run.runnerId)}: run #${previous!.number} ended ${idleMinutes} minutes ago, so resuming it would rewrite an expired prompt cache`)
+      await this.#c.ending.note(ctx.run.id, `Starting a fresh session on ${this.runnerName(ctx.run.runnerId)} after run #${previous!.number}: ${idle}, so resuming it would rewrite an expired prompt cache`)
     } else if (previous) {
       await this.#c.ending.note(ctx.run.id, `Run #${previous.number} ran on ${this.runnerName(previous.runnerId)}, which is offline: starting a fresh session on ${this.runnerName(ctx.run.runnerId)}${spike ? '' : ` from the pushed branch ${task.branch}`}`)
     }
@@ -214,7 +217,7 @@ export class RunJobs {
           .where(and(eq(runs.taskId, taskId), eq(runs.role, 'developer')))
           .orderBy(desc(runs.number)).limit(1)
       : []
-    const [previous] = await db.select({ number: runs.number, runnerId: runs.runnerId, agentSessionId: runs.agentSessionId, queuedAt: runs.queuedAt, startedAt: runs.startedAt, endedAt: runs.endedAt }).from(runs)
+    const [previous] = await db.select({ number: runs.number, runnerId: runs.runnerId, agentSessionId: runs.agentSessionId, queuedAt: runs.queuedAt, startedAt: runs.startedAt, endedAt: runs.endedAt, state: runs.state, outcome: runs.outcome }).from(runs)
       .where(and(eq(runs.taskId, taskId), eq(runs.role, role), eq(runs.agentId, agentId), legacy ? gt(runs.number, legacy.number) : undefined, exclude ? ne(runs.id, exclude) : undefined, isNotNull(runs.agentSessionId)))
       .orderBy(desc(runs.number)).limit(1)
     return previous ?? null

@@ -30,6 +30,7 @@ describe('todayStats', () => {
     const runs = [run('a', 'x', 'completed', '2026-10-29T12:00:00Z', 1200), run('b', 'x', 'completed', '2026-10-20T12:00:00Z', 500)]
     const tasks = [{ mergedAt: '2026-10-29T13:00:00Z' }, { mergedAt: null }, { mergedAt: '2026-10-01T13:00:00Z' }]
     expect(todayStats(runs, tasks, now)).toEqual({ runs: 1, merged: 1, tokens: 1200 })
+    expect(todayStats([{ ...runs[0]!, inputTokens: 10, cacheWriteTokens: 20, outputTokens: 5 }], [], now).tokens).toBe(35)
   })
 })
 

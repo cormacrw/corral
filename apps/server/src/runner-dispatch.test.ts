@@ -180,8 +180,9 @@ describe('runner capacity, runtimes and roles', () => {
 
   it.each([
     ['a developer revision starts fresh with the feedback and the diff', { rebaseOnly: false }],
-    ['a rebase-only round keeps its session', { rebaseOnly: true }]
-  ])('once the cache has expired, %s', async (_, round) => {
+    ['a rebase-only round keeps its session', { rebaseOnly: true }],
+    ['a run after a usage limit keeps its session and its uncommitted work', { rebaseOnly: false, limited: true }]
+  ])('once the cache has expired, %s', async (_, { limited, ...round }: { rebaseOnly: boolean, limited?: boolean }) => {
     t = await createTestApp('pglite', { listen: true })
     const a = await connect('A', { slots: 2 })
     const project = await t.createProject({ repository: 'cormacrw/test-app' })
@@ -196,12 +197,13 @@ describe('runner capacity, runtimes and roles', () => {
       await t.db.update(runs).set({ endedAt: new Date(t.clock.now.getTime() - 60 * 60 * 1000) }).where(eq(runs.id, first.runId))
     })
     await t.db.update(schema.tasks).set(round).where(eq(schema.tasks.id, task.id))
+    if (limited) await t.db.update(runs).set({ outcome: 'rate_limited' }).where(eq(runs.id, first.runId))
     await t.db.update(schema.agents).set({ paused: false }).where(developers)
     await t.orchestrator.schedule()
     const revision = (await developer.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
     compare.mockRestore()
     const lines = await transcript(revision.runId)
-    if (round.rebaseOnly) {
+    if (round.rebaseOnly || limited) {
       expect(revision.agentSessionId).toBe('session-1')
       expect(lines[0]).toMatchObject({ type: 'system', text: expect.stringContaining('its prompt cache has expired, but this kind of round keeps its session') })
       expect(await runRow(revision.runId)).toMatchObject({ sessionStart: 'resumed_cold' })
@@ -213,7 +215,7 @@ describe('runner capacity, runtimes and roles', () => {
     expect(revision.prompt).toContain('No message shown')
     expect(revision.prompt).toContain('## The branch so far')
     expect(revision.prompt).toContain('+const a = 1')
-    expect(lines[0]).toMatchObject({ type: 'system', text: expect.stringContaining(`Starting a fresh session on runner A: run #${first.runNumber} ended`) })
+    expect(lines[0]).toMatchObject({ type: 'system', text: expect.stringContaining(`Starting a fresh session on runner A after run #${first.runNumber}: it ended 60 minutes ago`) })
     expect(await runRow(revision.runId)).toMatchObject({ sessionStart: 'fresh' })
   }, 60000)
 

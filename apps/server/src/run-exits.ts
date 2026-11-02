@@ -51,7 +51,7 @@ export class RunExits {
         // Sent while the socket was down: the run really did start, and a
         // retry resumes its session
         if (reconciled(owner.run, message.leaseEpoch)) {
-          await db.update(runs).set({ startedAt: owner.run.startedAt ?? this.#c.now(), agentSessionId: message.agentSessionId, ...(message.resumeFailed ? { sessionStart: 'fresh' as const } : {}) }).where(eq(runs.id, owner.run.id))
+          await db.update(runs).set({ startedAt: owner.run.startedAt ?? this.#c.now(), agentSessionId: message.agentSessionId, ...(message.resumeFailed && owner.run.sessionStart ? { sessionStart: 'fresh' as const } : {}) }).where(eq(runs.id, owner.run.id))
           if (owner.run.role === 'pm' && owner.run.planSessionId) await this.#c.plans?.onRunStarted(owner.run.planSessionId, message.agentSessionId)
         }
         return
@@ -60,7 +60,8 @@ export class RunExits {
       // restart its clock. Still active: the server may have ended the run
       // since it was fenced.
       await db.update(runs).set({ state: 'running', startedAt: this.#c.now(), agentSessionId: message.agentSessionId,
-        ...(message.resumeFailed ? { sessionStart: 'fresh' as const } : {}),
+        // Only runs that record how their session began
+        ...(message.resumeFailed && ctx.run.sessionStart ? { sessionStart: 'fresh' as const } : {}),
         ...(message.initialHeadSha && ctx.run.retryContext ? { retryContext: { ...ctx.run.retryContext, head: message.initialHeadSha } } : {}) })
         .where(and(eq(runs.id, ctx.run.id), inArray(runs.state, ['queued', 'starting'])))
       this.#c.leases.confirmLease(ctx, message.sentAt)

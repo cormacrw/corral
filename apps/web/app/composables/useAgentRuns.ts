@@ -79,7 +79,7 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
     return `${Math.round(ms / 60_000)}m`
   })
   const today = computed(() => runs.value.filter(r => new Date(r.queuedAt).toDateString() === new Date(minute.value).toDateString()))
-  const usageToday = computed(() => tokens(today.value.reduce((n, r) => n + (r.inputTokens ?? 0) + (r.outputTokens ?? 0), 0)))
+  const usageToday = computed(() => tokens(today.value.reduce((n, r) => n + (r.inputTokens ?? 0) + (r.cacheWriteTokens ?? 0) + (r.outputTokens ?? 0), 0)))
   const tiles = computed(() => {
     if (!agent.value) return []
     const count = (outcome: string) => thisWeek.value.filter(r => r.outcome === outcome).length

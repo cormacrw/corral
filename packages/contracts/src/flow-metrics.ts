@@ -25,7 +25,8 @@ export interface FlowMetrics {
   epicReviews: { reviews: number, epics: number, perEpic: number }
   // Developer tokens in the window: up to a task's first submission, and after it
   tokens: { firstBuild: number, followUp: number }
-  // Developer runs in the window by how their session began. `weightedCost`
-  // covers only the `costedRuns` that reported cache writes.
-  sessions: { sessionStart: RunSessionStart, runs: number, inputTokens: number, cacheWriteTokens: number, cacheReadTokens: number, outputTokens: number, costedRuns: number, weightedCost: number }[]
+  // Developer runs in the window by round and how their session began. A
+  // revision follows the task's first submission; first builds and epic fixes
+  // are `other`. `weightedCost` covers only the `costedRuns` with a known cost.
+  sessions: { round: 'revision' | 'other', sessionStart: RunSessionStart, runs: number, inputTokens: number, cacheWriteTokens: number, cacheReadTokens: number, outputTokens: number, costedRuns: number, weightedCost: number }[]
 }

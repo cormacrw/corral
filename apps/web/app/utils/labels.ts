@@ -1,5 +1,5 @@
 import { isTaskDone } from '@corral/core'
-import { AGENT_RUNTIMES, weightedRunCost } from '@corral/contracts/client'
+import { AGENT_RUNTIMES, cacheWritesUnknown, weightedRunCost } from '@corral/contracts/client'
 import type { Agent, AgentRuntime, AuditEntry, CliStatus, Epic, EpicFixRun, RunnerInfo, RunnerRole, RunnerStatus, InboxItem, PlanStatus, Project, Run, RunSessionStart, Task } from '@corral/contracts'
 import type { AgentRole, DesignVersionStatus, EpicFixKind, EpicReviewMode, EpicReviewState, RunOutcome, RunState, TaskPriority, TaskStatus } from '@corral/core'
 
@@ -365,12 +365,10 @@ export function dollars(amount: number): string {
   return `$${amount.toFixed(2)}`
 }
 
-// Cache traffic is shown apart: it costs differently from fresh input. A run
-// with no cache writes of its own has none, or has them inside its input.
-export function runTokens(run: Pick<Run, 'inputTokens' | 'cacheWriteTokens' | 'cacheReadTokens' | 'outputTokens' | 'sessionStart'>): string {
-  const written = run.cacheWriteTokens !== null && run.cacheWriteTokens !== undefined
-  const parts = [`${tokens(run.inputTokens ?? 0)} in${written ? '' : ' (may include cache writes)'}`]
-  if (written) parts.push(`${tokens(run.cacheWriteTokens!)} cache write`)
+// Cache traffic is shown apart: it costs differently from fresh input
+export function runTokens(run: Pick<Run, 'agentRuntime' | 'inputTokens' | 'cacheWriteTokens' | 'cacheReadTokens' | 'outputTokens' | 'sessionStart'>): string {
+  const parts = [`${tokens(run.inputTokens ?? 0)} in${cacheWritesUnknown(run) ? ' (includes cache writes)' : ''}`]
+  if (run.cacheWriteTokens !== null && run.cacheWriteTokens !== undefined) parts.push(`${tokens(run.cacheWriteTokens)} cache write`)
   if (run.cacheReadTokens !== null) parts.push(`${tokens(run.cacheReadTokens)} cache read`)
   parts.push(`${tokens(run.outputTokens ?? 0)} out`)
   const cost = weightedRunCost(run)

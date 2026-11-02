@@ -46,6 +46,8 @@ The Ready tile’s waiting-on-dependency count includes each Ready task with an 
 
 The Flow section lives inside the Flow tab on desktop and mobile. It offers 7d / 30d / 90d windows (30d default), median and p90 lead/cycle times, median status bars with p90 labels, run duration and queue wait by role, and linked slowest tasks. Queue wait is labelled “Queue wait (queued to started, including preparation)”, the same wording as the run timing breakdown ([agent.md](agent.md)). Live task and run events for this project refresh the figures in place, without the loading skeleton; other projects' events are ignored. Changing project or window clears the figures while loading. Human review uses warning and the label “Human wait”; agent work uses primary and “Agent time”; other statuses use neutral and “Other wait”. Bars share a median scale and numbers use text tokens. An empty cohort shows “No tasks merged” for the selected window.
 
+Below the tokens line, a table compares developer runs by round (revisions, then other runs) and by how the session began (resumed warm, resumed cold, fresh): runs, input, cache write, cache read, output, and the average weighted cost per run. The cost leaves out fresh input and any run with unknown cache writes, and the table is hidden when no run has a session start.
+
 ## States
 
 - **New project with no tasks:** the tiles show 0, and an empty-state card reads "Plan your first epic with Juno" with a button.

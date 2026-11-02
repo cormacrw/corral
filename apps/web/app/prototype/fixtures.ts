@@ -1052,8 +1052,8 @@ export function flowMetrics(slug: string, window: FlowMetricsQuery['window']): F
     sessions: empty
       ? []
       : [
-          { sessionStart: 'resumed_warm' as const, runs: 6 * scale, inputTokens: 18_000 * scale, cacheWriteTokens: 40_000 * scale, cacheReadTokens: 900_000 * scale, outputTokens: 30_000 * scale, costedRuns: 6 * scale, weightedCost: 1.1 * scale },
-          { sessionStart: 'fresh' as const, runs: 4 * scale, inputTokens: 16_000 * scale, cacheWriteTokens: 240_000 * scale, cacheReadTokens: 400_000 * scale, outputTokens: 24_000 * scale, costedRuns: 4 * scale, weightedCost: 2.48 * scale }
+          { round: 'revision' as const, sessionStart: 'resumed_warm' as const, runs: 6 * scale, inputTokens: 18_000 * scale, cacheWriteTokens: 40_000 * scale, cacheReadTokens: 900_000 * scale, outputTokens: 30_000 * scale, costedRuns: 6 * scale, weightedCost: 1.1 * scale },
+          { round: 'revision' as const, sessionStart: 'fresh' as const, runs: 4 * scale, inputTokens: 16_000 * scale, cacheWriteTokens: 240_000 * scale, cacheReadTokens: 400_000 * scale, outputTokens: 24_000 * scale, costedRuns: 4 * scale, weightedCost: 2.48 * scale }
         ],
     fixes: { reReviewed: empty ? 0 : 2 * scale, skippedReview: empty ? 0 : 5 * scale, epicDeveloperRuns: empty ? 0 : 3 * scale },
     epicReviews: { reviews: empty ? 0 : 5 * scale, epics: empty ? 0 : 3 * scale, perEpic: empty ? 0 : 5 / 3 },

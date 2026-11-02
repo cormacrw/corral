@@ -93,7 +93,8 @@ export async function flowMetrics(db: Executor, project: Pick<typeof schema.proj
     if (queue.length || duration.length) byRole.push({ role, queueWait: percentiles(queue), duration: percentiles(duration) })
   }
   const period = and(eq(schema.runs.projectId, project.id), gte(schema.runs.endedAt, since), lte(schema.runs.endedAt, now))
-  const ended = await db.select({ taskId: schema.runs.taskId, epicId: schema.runs.epicId, number: schema.runs.number, role: schema.runs.role, outcome: schema.runs.outcome, reReviewed: schema.runs.reReviewed, sessionStart: schema.runs.sessionStart, cacheWriteTokens: schema.runs.cacheWriteTokens, inputTokens: schema.runs.inputTokens, cacheReadTokens: schema.runs.cacheReadTokens, outputTokens: schema.runs.outputTokens }).from(schema.runs)
+  const ended = await db.select({ taskId: schema.runs.taskId, epicId: schema.runs.epicId, number: schema.runs.number, role: schema.runs.role, outcome: schema.runs.outcome, reReviewed: schema.runs.reReviewed, sessionStart: schema.runs.sessionStart, agentRuntime: schema.agents.runtime, cacheWriteTokens: schema.runs.cacheWriteTokens, inputTokens: schema.runs.inputTokens, cacheReadTokens: schema.runs.cacheReadTokens, outputTokens: schema.runs.outputTokens }).from(schema.runs)
+    .innerJoin(schema.agents, eq(schema.agents.id, schema.runs.agentId))
     .where(and(period, inArray(schema.runs.role, ['developer', 'reviewer'])))
   const touched = [...new Set(ended.flatMap(run => run.role === 'developer' && run.taskId ? [run.taskId] : []))]
   // A task's first build ends at its first submission, which may be older
@@ -110,8 +111,9 @@ export async function flowMetrics(db: Executor, project: Pick<typeof schema.proj
     else tokens.followUp += used
   }
   const sessions: FlowMetrics['sessions'] = []
-  for (const sessionStart of ['resumed_warm', 'resumed_cold', 'fresh'] as const) {
-    const group = ended.filter(run => run.role === 'developer' && run.sessionStart === sessionStart)
+  const isRevision = (run: typeof ended[number]) => run.taskId !== null && firstSubmission.has(run.taskId) && run.number > firstSubmission.get(run.taskId)!
+  for (const [round, sessionStart] of [['revision', 'resumed_warm'], ['revision', 'resumed_cold'], ['revision', 'fresh'], ['other', 'resumed_warm'], ['other', 'resumed_cold'], ['other', 'fresh']] as const) {
+    const group = ended.filter(run => run.role === 'developer' && run.sessionStart === sessionStart && isRevision(run) === (round === 'revision'))
     if (group.length === 0) continue
     const sum = (read: (run: typeof group[number]) => number | null) => group.reduce((total, run) => total + (read(run) ?? 0), 0)
     const costs = group.flatMap((run) => {
@@ -119,7 +121,7 @@ export async function flowMetrics(db: Executor, project: Pick<typeof schema.proj
       return cost === null ? [] : [cost]
     })
     sessions.push({
-      sessionStart, runs: group.length, inputTokens: sum(run => run.inputTokens), cacheWriteTokens: sum(run => run.cacheWriteTokens),
+      round, sessionStart, runs: group.length, inputTokens: sum(run => run.inputTokens), cacheWriteTokens: sum(run => run.cacheWriteTokens),
       cacheReadTokens: sum(run => run.cacheReadTokens), outputTokens: sum(run => run.outputTokens), costedRuns: costs.length, weightedCost: costs.reduce((total, cost) => total + cost, 0)
     })
   }

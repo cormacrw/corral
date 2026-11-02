@@ -571,14 +571,14 @@ const WORK_NOTE = '- Every `report_outcome` needs a `note` as well: one line of 
 // Sized to orient a fresh session: the branch itself has the rest
 const MAX_BRANCH_DIFF = 30_000
 
-// The file diffs in full until the cap, then the names of the rest
+// Whole file diffs while they fit, then the names of those that didn't
 export function cappedBranchDiff(files: { filename: string, patch?: string }[]): string {
   const shown: string[] = []
   const left: string[] = []
   let size = 0
   for (const file of files) {
     const entry = `--- ${file.filename}\n${file.patch ?? '(no text diff)'}`
-    if (left.length === 0 && size + entry.length <= MAX_BRANCH_DIFF) {
+    if (size + entry.length <= MAX_BRANCH_DIFF) {
       shown.push(entry)
       size += entry.length
     } else left.push(file.filename)

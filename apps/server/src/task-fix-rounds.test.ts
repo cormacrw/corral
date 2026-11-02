@@ -282,8 +282,8 @@ describe('rework metrics', () => {
     const now = new Date()
     const ended = { state: 'completed' as const, endedAt: now, projectId: p.id }
     await t.db.insert(schema.runs).values([
-      { ...ended, agentId: dev!.id, role: 'developer', taskId: task.id, outcome: 'pr_opened', inputTokens: 100, cacheReadTokens: 0, outputTokens: 10 },
-      { ...ended, agentId: dev!.id, role: 'developer', taskId: task.id, outcome: 'pr_updated', fixKind: 'ci', behaviourChanged: false, reReviewed: false, inputTokens: 20, outputTokens: 5 },
+      { ...ended, agentId: dev!.id, role: 'developer', taskId: task.id, outcome: 'pr_opened', sessionStart: 'fresh', inputTokens: 100, cacheWriteTokens: 1_000_000, cacheReadTokens: 0, outputTokens: 10 },
+      { ...ended, agentId: dev!.id, role: 'developer', taskId: task.id, sessionStart: 'resumed_warm', outcome: 'pr_updated', fixKind: 'ci', behaviourChanged: false, reReviewed: false, inputTokens: 20, outputTokens: 5 },
       { ...ended, agentId: dev!.id, role: 'developer', epicId: epic!.id, outcome: 'pr_updated', fixKind: 'review', behaviourChanged: true, reReviewed: true, inputTokens: 30, outputTokens: 5 },
       { ...ended, agentId: reviewer!.id, role: 'reviewer', epicId: epic!.id, outcome: 'approved' },
       { ...ended, agentId: reviewer!.id, role: 'reviewer', epicId: epic!.id, outcome: 'changes_requested' },
@@ -292,7 +292,11 @@ describe('rework metrics', () => {
     const metrics = await flowMetrics(t.db, p, '30d', new Date(now.getTime() + 1000))
     expect(metrics.fixes).toEqual({ reReviewed: 1, skippedReview: 1, epicDeveloperRuns: 1 })
     expect(metrics.epicReviews).toEqual({ reviews: 2, epics: 1, perEpic: 2 })
-    expect(metrics.tokens).toEqual({ firstBuild: 110, followUp: 60 })
+    expect(metrics.tokens).toEqual({ firstBuild: 1_000_110, followUp: 60 })
+    expect(metrics.sessions).toEqual([
+      { round: 'revision', sessionStart: 'resumed_warm', runs: 1, inputTokens: 20, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 5, costedRuns: 0, weightedCost: 0 },
+      { round: 'other', sessionStart: 'fresh', runs: 1, inputTokens: 100, cacheWriteTokens: 1_000_000, cacheReadTokens: 0, outputTokens: 10, costedRuns: 1, weightedCost: 8.0002 }
+    ])
     expect((await flowMetrics(t.db, p, '90d', new Date(now.getTime() + 1000))).fixes.epicDeveloperRuns).toBe(2)
   })
 })

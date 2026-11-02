@@ -106,7 +106,7 @@ function category(status: string) {
           >
             <table class="w-full text-sm">
               <caption class="mb-1 text-left text-xs text-muted">
-                Developer runs by session start. Weighted cost leaves out fresh input and runs that didn't report cache writes.
+                Developer runs by session start. Revisions follow a task's first submission. Weighted cost leaves out fresh input and runs with unknown cache writes.
               </caption>
               <thead class="text-left text-xs text-muted">
                 <tr>
@@ -136,10 +136,10 @@ function category(status: string) {
               <tbody class="tabular-nums">
                 <tr
                   v-for="row in metrics.sessions"
-                  :key="row.sessionStart"
+                  :key="`${row.round}-${row.sessionStart}`"
                 >
                   <td class="pr-3">
-                    {{ RUN_SESSION_LABELS[row.sessionStart] }}
+                    {{ row.round === 'revision' ? 'Revision' : 'Other' }}: {{ RUN_SESSION_LABELS[row.sessionStart].toLowerCase() }}
                   </td>
                   <td class="pr-3">
                     {{ row.runs }}
